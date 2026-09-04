@@ -11,7 +11,7 @@ This log preserves compact, factual continuity across sessions. New entries are 
 - Changed areas: core time/generation contracts, runtime queue and worker lifecycle, seek/discard decode, WASAPI clock and endpoint notifications, typed graphics recovery, app pacing/controls/metrics, architecture, roadmap, and README.
 - Verification: `cargo fmt --all --check`, workspace all-target Clippy with warnings denied, and workspace all-target tests pass. Release hardware checks on adapter `00000000:0001311b`: H.264 D3D11VA and FFV1 software fallback both reached EOF; pause/resume returned from `Paused` to `Playing`; 100 local 1080p H.264 seeks completed with p95 37.750 ms and maximum 56.991 ms; 30-minute 4K60 H.264/AAC playback presented 107,768 frames, dropped 3 (0.0028%), and measured A/V drift p95 4.772 ms and maximum 35.759 ms.
 - Hardware limitation: changing the owner's default audio endpoint and deliberately removing or resetting the active D3D11 device were not forced because those operations alter external machine state. Notification filtering and generation retention have unit checks; the pipeline replacement and graphics construction primitives used by recovery were exercised separately by repeated seek and hardware playback.
-- Commit: pending.
+- Commit: `09b3761`.
 - Status: `m3_complete`.
 - Next action: begin M4 with the application shell and command model, then implement Shell-backed folder snapshots without parsing Explorer Bags.
 

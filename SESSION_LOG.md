@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-04 19:38 JST - implementation / complete M2 D3D11VA path
+
+- Intent: add the M2 zero-copy hardware path without changing M1 controls, timing, or scope.
+- Result: the renderer-owned D3D11 device is passed to FFmpeg through an owned `AVD3D11VADeviceContext` reference; runtime-only hardware frames are presented through `ID3D11VideoProcessor` on the same device, while the app sees only timestamps and typed events.
+- Fallback: codecs or adapters that fail D3D11VA before the first hardware frame reopen through the verified M1 software path. Failures after hardware output begins remain session errors instead of being hidden by fallback.
+- Evidence: adapter `00000000:0001311b` decoded and presented all 60 H.264 frames with `hardware_frames=60` and `cpu_transfers=0`. HEVC, VP9, and FFV1 were not hardware-capable on that adapter and each completed through software fallback with 60 CPU transfers.
+- Changed areas: FFmpeg hardware-context ownership, opaque graphics-device sharing, runtime-only presentation frames, D3D11 Video Processor output, fallback selection, adapter/counter diagnostics, app presentation boundary, architecture, roadmap, and README.
+- Verification: local format, workspace Clippy with warnings denied, all-target tests, software codec fixtures, hardware H.264 EOF smoke, and software fallback smokes passed; remote CI checkpoint is pending.
+- Status: `m2_validation_pending`.
+- Next action: inspect and push the M2 checkpoint, confirm Windows CI, then begin M3 only.
+
 ## 2026-09-04 19:18 JST - implementation / complete M1 software playback
 
 - Intent: implement only the M1 single-window, single-file software playback vertical slice after the verified M0 checkpoint.

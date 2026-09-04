@@ -7,9 +7,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use towavue_core::{MediaTime, PlaybackState};
-use towavue_runtime_windows::{
-    AudioOutputEvent, PlaybackEvent, PlaybackSession, SoftwareFrameRenderer, VideoFrame,
-};
+use towavue_runtime_windows::{AudioOutputEvent, FrameRenderer, PlaybackEvent, PlaybackSession};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -81,13 +79,14 @@ struct Application<N> {
     path: PathBuf,
     notify: Option<N>,
     window: Option<Window>,
-    renderer: Option<SoftwareFrameRenderer>,
+    renderer: Option<FrameRenderer>,
     session: Option<PlaybackSession>,
-    pending_frame: Option<VideoFrame>,
+    pending_time: Option<MediaTime>,
     clock: Option<PlaybackClock>,
     state: PlaybackState,
     decode_finished: bool,
     audio_drained: bool,
+    metrics_recorded: bool,
 }
 
 impl<N> Application<N>
@@ -101,11 +100,12 @@ where
             window: None,
             renderer: None,
             session: None,
-            pending_frame: None,
+            pending_time: None,
             clock: None,
             state: PlaybackState::Loading,
             decode_finished: false,
             audio_drained: false,
+            metrics_recorded: false,
         }
     }
 
@@ -115,12 +115,13 @@ where
             .with_title(title)
             .with_inner_size(LogicalSize::new(960, 576));
         let window = event_loop.create_window(attributes)?;
-        let renderer = SoftwareFrameRenderer::new(&window)?;
+        let renderer = FrameRenderer::new(&window)?;
+        let graphics_device = renderer.graphics_device();
         let notify = self
             .notify
             .take()
             .ok_or("playback notification callback is unavailable")?;
-        let session = PlaybackSession::open(&self.path, notify)?;
+        let session = PlaybackSession::open(&self.path, graphics_device, notify)?;
         self.audio_drained = !session.has_audio();
         self.state = PlaybackState::Playing;
         self.window = Some(window);
@@ -133,6 +134,9 @@ where
     fn handle_playback_event(&mut self, event: PlaybackEvent) {
         match event {
             PlaybackEvent::VideoReady => self.load_next_frame(),
+            PlaybackEvent::DecodePathSelected(path) => {
+                eprintln!("towavue: decode path selected: {path:?}");
+            }
             PlaybackEvent::DecodeFinished => {
                 self.decode_finished = true;
                 self.check_eof();
@@ -142,29 +146,29 @@ where
     }
 
     fn load_next_frame(&mut self) {
-        if self.pending_frame.is_some() {
+        if self.pending_time.is_some() {
             return;
         }
-        let Some(frame) = self
+        let Some(presentation_time) = self
             .session
-            .as_ref()
-            .and_then(PlaybackSession::try_video_frame)
+            .as_mut()
+            .and_then(PlaybackSession::pending_video_time)
         else {
             self.check_eof();
             return;
         };
         if self.clock.is_none() {
-            self.clock = Some(PlaybackClock::new(frame.presentation_time));
+            self.clock = Some(PlaybackClock::new(presentation_time));
         }
-        self.pending_frame = Some(frame);
+        self.pending_time = Some(presentation_time);
     }
 
     fn present_pending_frame(&mut self) {
-        let Some(frame) = self.pending_frame.take() else {
+        if self.pending_time.take().is_none() {
             return;
-        };
-        if let Some(renderer) = self.renderer.as_mut()
-            && let Err(error) = renderer.present(&frame)
+        }
+        if let (Some(session), Some(renderer)) = (self.session.as_mut(), self.renderer.as_mut())
+            && let Err(error) = session.present_pending(renderer)
         {
             self.fail(error.to_string());
             return;
@@ -213,8 +217,21 @@ where
     }
 
     fn check_eof(&mut self) {
-        if self.decode_finished && self.pending_frame.is_none() && self.audio_drained {
+        if self.decode_finished && self.pending_time.is_none() && self.audio_drained {
             self.state = PlaybackState::Ended;
+            if !self.metrics_recorded {
+                if let Some(session) = &self.session {
+                    let metrics = session.metrics();
+                    eprintln!(
+                        "towavue: adapter={:08x}:{:08x} hardware_frames={} cpu_transfers={}",
+                        metrics.adapter_luid.high_part,
+                        metrics.adapter_luid.low_part,
+                        metrics.hardware_frame_count,
+                        metrics.cpu_transfer_count
+                    );
+                }
+                self.metrics_recorded = true;
+            }
             self.refresh_title();
         }
     }
@@ -242,10 +259,10 @@ where
     fn schedule(&mut self, event_loop: &ActiveEventLoop) {
         self.poll_audio();
         if self.state == PlaybackState::Playing {
-            if let (Some(window), Some(frame), Some(clock)) =
-                (&self.window, &self.pending_frame, &self.clock)
+            if let (Some(window), Some(presentation_time), Some(clock)) =
+                (&self.window, self.pending_time, &self.clock)
             {
-                let due_at = clock.due_at(frame.presentation_time);
+                let due_at = clock.due_at(presentation_time);
                 if due_at <= Instant::now() {
                     window.request_redraw();
                     event_loop.set_control_flow(ControlFlow::Wait);

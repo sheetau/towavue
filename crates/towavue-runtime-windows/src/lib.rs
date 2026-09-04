@@ -7,8 +7,8 @@ mod renderer;
 
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};
 pub use decode::{AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, VideoFrame};
-pub use playback::{PlaybackError, PlaybackEvent, PlaybackSession};
-pub use renderer::{RenderError, SoftwareFrameRenderer};
+pub use playback::{DecodePath, PlaybackError, PlaybackEvent, PlaybackMetrics, PlaybackSession};
+pub use renderer::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError};
 
 use std::path::Path;
 

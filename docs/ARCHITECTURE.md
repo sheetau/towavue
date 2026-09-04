@@ -66,9 +66,17 @@ winit event loop、egui、tab、command dispatch、利用者向け状態を所�
 
 ### M1 software path
 
-M1ではFFmpegを動的リンクし、映像をsoftware decodeしてtightly packed RGBAへ変換する。runtimeの`SoftwareFrameRenderer`が単一D3D11 device、immediate context、2-buffer Flip Discard swap chainを所有し、CPU frameをback bufferへuploadしてpresentする。このCPU uploadはM1だけの基準経路であり、M2のhardware pathでは使用しない。
+M1ではFFmpegを動的リンクし、映像をsoftware decodeしてtightly packed RGBAへ変換する。runtimeの`FrameRenderer`が単一D3D11 device、immediate context、2-buffer Flip Discard swap chainを所有し、CPU frameをback bufferへuploadしてpresentする。このCPU uploadはM1だけの基準経路であり、M2のhardware pathでは使用しない。
 
 音声はsource sample rateのinterleaved stereo `f32`へ変換し、専用MTA thread上のevent-driven WASAPI Shared clientへ渡す。映像queueは2 frame、音声channelは32 chunk、WASAPI手前の蓄積は約2秒へ制限する。M1のdecode workerはdemuxとvideo/audio software decodeを直列実行するが、COM、FFmpeg型、native frame handleはruntime外へ出さない。M2以降で役割別workerへ分離しても、この安全なcommand/event境界は維持する。
+
+### M2 D3D11VA path
+
+`FrameRenderer`が作成したD3D11 deviceのopaqueな`GraphicsDevice`参照をdecode workerへ渡す。FFmpeg用`AVD3D11VADeviceContext`にはcloneしたCOM参照の所有権を移し、`AVCodecContext`が`AVBufferRef`とともに解放する。immediate contextにはmultithread protectionを有効にする。
+
+hardware frameはruntime内部のFFmpeg `AVFrame`がD3D11 texture arrayとsliceを保持し、bounded presentation queueを経て同じdeviceの`ID3D11VideoProcessor`へ渡す。appが受け取るのはpresentation timeとeventだけで、COM pointer、FFmpeg frame、texture handleは公開しない。hardware pathではmap、readback、software scaling、back-buffer uploadを行わない。
+
+codec metadata、device、driverのいずれかがD3D11VAを成立させられず、まだhardware frameを公開していない場合だけ入力を開き直してM1 software pathへfallbackする。最初のhardware frame後のdecode errorはfallbackで隠さずsession faultとする。終了時にadapter LUID、hardware frame count、CPU transfer countを記録する。
 
 ## 5. スレッド・同期契約
 

@@ -4,13 +4,13 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
-**M1: Software playback vertical sliceは完了しています。** 単一ウィンドウで単一ファイルを開き、software video decodeからD3D11 upload、event-driven WASAPI Shared音声、play/pause/EOFまでを実装しています。Shell連携、tab、編集、seek、厳密なA/V同期はまだ実装していません。
+**M2: D3D11VA zero-copyは完了しています。** 対応codecはFFmpegのD3D11VA surfaceを同一D3D11 deviceのVideo ProcessorからSwapChainへCPU転送なしで表示し、非対応時だけM1のsoftware pathへfallbackします。Shell連携、tab、編集、seek、厳密なA/V同期はまだ実装していません。
 
 - 対応予定OS: Windows 10 22H2以降
 - 対応予定アーキテクチャ: x86-64
 - Rust: 1.98.0 / Edition 2024 / MSVC ABI
 - ライセンス: MIT OR Apache-2.0
-- 次の工程: M2 D3D11VA zero-copy
+- 次の工程: M3 seek, synchronization, and resilience
 
 ## 文書
 
@@ -38,7 +38,7 @@ cargo test --workspace --all-targets
 cargo run -p towavue-app -- path\to\media.mp4
 ```
 
-再生中はSpaceでpause/resume、ウィンドウを閉じると終了します。M1のcodec fixtureはMP4/H.264/AAC、MKV/HEVC/AAC、WebM/VP9/Opusです。
+再生中はSpaceでpause/resume、ウィンドウを閉じると終了します。M1のcodec fixtureはMP4/H.264/AAC、MKV/HEVC/AAC、WebM/VP9/Opusです。再生終了時のdiagnosticにはadapter LUID、hardware frame数、CPU transfer数を記録します。
 
 ## ライセンス
 

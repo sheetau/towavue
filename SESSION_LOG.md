@@ -9,9 +9,10 @@ This log preserves compact, factual continuity across sessions. New entries are 
 - Fallback: codecs or adapters that fail D3D11VA before the first hardware frame reopen through the verified M1 software path. Failures after hardware output begins remain session errors instead of being hidden by fallback.
 - Evidence: adapter `00000000:0001311b` decoded and presented all 60 H.264 frames with `hardware_frames=60` and `cpu_transfers=0`. HEVC, VP9, and FFV1 were not hardware-capable on that adapter and each completed through software fallback with 60 CPU transfers.
 - Changed areas: FFmpeg hardware-context ownership, opaque graphics-device sharing, runtime-only presentation frames, D3D11 Video Processor output, fallback selection, adapter/counter diagnostics, app presentation boundary, architecture, roadmap, and README.
-- Verification: local format, workspace Clippy with warnings denied, all-target tests, software codec fixtures, hardware H.264 EOF smoke, and software fallback smokes passed; remote CI checkpoint is pending.
-- Status: `m2_validation_pending`.
-- Next action: inspect and push the M2 checkpoint, confirm Windows CI, then begin M3 only.
+- Checkpoint: pushed commit `aff9e34` to `origin/main`.
+- Verification: local format, workspace Clippy with warnings denied, all-target tests, software codec fixtures, hardware H.264 EOF smoke, and software fallback smokes passed. GitHub Actions run `33864384769` independently passed formatting, Clippy, linking, and all portable tests on `windows-2022`.
+- Status: `m2_complete_m3_not_started`.
+- Next action: begin M3 with generation-aware seek and clock contracts before adding resilience cases or performance validation.
 
 ## 2026-09-04 19:18 JST - implementation / complete M1 software playback
 

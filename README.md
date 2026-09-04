@@ -4,7 +4,7 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
-現在は **M0: Foundation** です。Git、Rust workspace、設計・運用文書、CIだけを構築しており、アプリのウィンドウ、再生、Shell連携はまだ実装していません。
+**M0: Foundationは完了しています。** Git、Rust workspace、設計・運用文書、CIまでを構築済みです。次のM1は未着手で、アプリのウィンドウ、再生、Shell連携はまだ実装していません。
 
 - 対応予定OS: Windows 10 22H2以降
 - 対応予定アーキテクチャ: x86-64
@@ -23,7 +23,7 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## M0の検証
 
-PowerShellから次を実行します。
+Visual StudioのDesktop development with C++ workloadとWindows SDKを導入し、Developer PowerShellから次を実行します。
 
 ```powershell
 cargo fmt --all --check

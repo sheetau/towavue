@@ -2,7 +2,7 @@
 
 各milestoneは前のゲートを満たしてから開始する。新機能の数ではなく、観測可能な正しさを完了条件とする。
 
-## M0 — Foundation（現在）
+## M0 — Foundation（完了）
 
 Git、Rust workspace、設計・運用文書、CIを構築する。再生、UI、Shell連携のruntime実装は行わない。
 
@@ -13,6 +13,8 @@ Git、Rust workspace、設計・運用文書、CIを構築する。再生、UI�
 - Windows CI定義が同じ検証を行う。
 - OS、ライセンス、crate境界、D3D11、FFmpeg、WASAPI、Explorer sortの契約が文書間で一致する。
 - verified checkpointが`origin/main`へpushされる。
+
+M0は2026-09-04にWindows CIを含めてゲートを通過した。現在の次工程はM1だが、まだ着手していない。
 
 ## M1 — Software playback vertical slice
 

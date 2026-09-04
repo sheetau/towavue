@@ -36,7 +36,15 @@ pub(crate) struct HardwareVideoFrame {
     pub(crate) presentation_time: MediaTime,
     pub(crate) width: u32,
     pub(crate) height: u32,
+    pub(crate) transfer: VideoTransfer,
     frame: frame::Video,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum VideoTransfer {
+    Sdr,
+    Pq,
+    Hlg,
 }
 
 impl HardwareVideoFrame {
@@ -149,6 +157,7 @@ struct VideoPipeline {
 struct HardwareVideoPipeline {
     time_base: Rational,
     decoder: codec::decoder::Video,
+    transfer: VideoTransfer,
 }
 
 impl HardwareVideoPipeline {
@@ -174,6 +183,7 @@ impl HardwareVideoPipeline {
                         ),
                         width: decoded.width(),
                         height: decoded.height(),
+                        transfer: video_transfer(&decoded).unwrap_or(self.transfer),
                         frame: decoded,
                     };
                     if !emit(RuntimeDecodeOutput::Video(output)) {
@@ -188,6 +198,21 @@ impl HardwareVideoPipeline {
                 Err(error) => return Err(error.into()),
             }
         }
+    }
+}
+
+fn video_transfer(frame: &frame::Video) -> Option<VideoTransfer> {
+    classify_transfer(frame.color_transfer_characteristic())
+}
+
+fn classify_transfer(
+    characteristic: ffmpeg::color::TransferCharacteristic,
+) -> Option<VideoTransfer> {
+    match characteristic {
+        ffmpeg::color::TransferCharacteristic::SMPTE2084 => Some(VideoTransfer::Pq),
+        ffmpeg::color::TransferCharacteristic::ARIB_STD_B67 => Some(VideoTransfer::Hlg),
+        ffmpeg::color::TransferCharacteristic::Unspecified => None,
+        _ => Some(VideoTransfer::Sdr),
     }
 }
 
@@ -752,9 +777,12 @@ fn create_hardware_video_pipeline_from(
     }
     configure_d3d11va(&mut context, device)?;
     let decoder = context.decoder().video()?;
+    let transfer =
+        classify_transfer(decoder.color_transfer_characteristic()).unwrap_or(VideoTransfer::Sdr);
     Ok(HardwareVideoPipeline {
         time_base: config.time_base,
         decoder,
+        transfer,
     })
 }
 
@@ -963,13 +991,13 @@ fn decoder_is_drained(error: ffmpeg::Error) -> bool {
 mod tests {
     use std::path::Path;
 
-    use ffmpeg_next::Rational;
     use ffmpeg_next::ffi::AVPixelFormat;
+    use ffmpeg_next::{Rational, color};
     use towavue_core::MediaTime;
 
     use super::{
-        DecodeOutput, ParallelSoftwareDecodeOutput, decode_file_from, select_d3d11_pixel_format,
-        timestamp_to_media_time,
+        DecodeOutput, ParallelSoftwareDecodeOutput, VideoTransfer, classify_transfer,
+        decode_file_from, select_d3d11_pixel_format, timestamp_to_media_time,
     };
 
     #[test]
@@ -997,6 +1025,22 @@ mod tests {
         let selected = unsafe { select_d3d11_pixel_format(std::ptr::null_mut(), formats.as_ptr()) };
 
         assert_eq!(selected, AVPixelFormat::AV_PIX_FMT_D3D11);
+    }
+
+    #[test]
+    fn classifies_hdr_transfer_metadata() {
+        assert_eq!(
+            classify_transfer(color::TransferCharacteristic::SMPTE2084),
+            Some(VideoTransfer::Pq)
+        );
+        assert_eq!(
+            classify_transfer(color::TransferCharacteristic::ARIB_STD_B67),
+            Some(VideoTransfer::Hlg)
+        );
+        assert_eq!(
+            classify_transfer(color::TransferCharacteristic::Unspecified),
+            None
+        );
     }
 
     #[test]

@@ -49,6 +49,9 @@ pub enum CommandId {
     ResetRate,
     Save,
     ExportAs,
+    ToggleTimeline,
+    ToggleGridMenu,
+    ToggleHardwareEncode,
 }
 
 impl CommandId {
@@ -97,6 +100,9 @@ impl CommandId {
             Self::ResetRate => "reset_rate",
             Self::Save => "save",
             Self::ExportAs => "export_as",
+            Self::ToggleTimeline => "toggle_timeline",
+            Self::ToggleGridMenu => "toggle_grid_menu",
+            Self::ToggleHardwareEncode => "toggle_hardware_encode",
         }
     }
 }
@@ -380,6 +386,13 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::ResetRate, "Reset playback rate", PLAYABLE_MEDIA),
     command(CommandId::Save, "Save exported media", ANY_MEDIA),
     command(CommandId::ExportAs, "Export as", ANY_MEDIA),
+    command(CommandId::ToggleTimeline, "Toggle timeline", PLAYABLE_MEDIA),
+    command(CommandId::ToggleGridMenu, "Toggle grid menu", ANY_MEDIA),
+    command(
+        CommandId::ToggleHardwareEncode,
+        "Prefer hardware encoding",
+        &[MediaKind::Video],
+    ),
 ];
 
 const fn command(

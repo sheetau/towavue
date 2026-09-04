@@ -109,6 +109,18 @@ reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降�
 
 exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/coreへFFmpeg型を公開しない。画像filterはoperation順のcrop / transpose / flip、動画filterはそれらとtrim / PTS rate、音声filterはatrim / PTS / atempo / volumeを適用し、metadataを入力からcopyする。2倍を超える、または0.5倍未満のrateは複数の`atempo`へ分解する。video/audio encodeは固定FFmpeg buildのsoftware codecを使い、hardware encodeはM7まで行わない。Save As後のSaveは同じexport先を更新できるが、sourceと同一pathへの出力は拒否してpartial overwriteによるsource破損を避ける。
 
+### M7 advanced presentation and interaction
+
+preview cacheはruntimeがFFmpeg / FFprobeの子processとdisk I/Oを所有し、appへowned RGBA画像とdurationだけを返す。cache keyは正規化path、file size、更新時刻、preview種別と寸法から作り、`%LOCALAPPDATA%\towavue\preview-cache`を64 MiB以内へ古い順に削減する。waveform、duration、hover thumbnailは専用workerで生成し、path付きeventをappへ返すため、古いtabの結果を現在のtabへ適用せずUI threadもblockしない。
+
+grid menuは既存のcommand registryだけをdispatchし、画像・動画・音声ごとの16 commandを`%APPDATA%\towavue\grid.conf`に保持する。cell順は物理keyの`1234/qwer/asdf/zxcv`と固定してclickとkey入力を一致させる。表示・非表示には短いopacity transitionだけを使い、media操作の意味を持つanimationは追加しない。
+
+window外へdropしたtabは、appが同じexecutableへ現在pathを引数として渡して別processを起動し、起動成功後だけ元tabを閉じる。edit historyをprocess間で暗黙移送せず、dirty tabは既存guardを通す。別windowへの再結合を行うprocess間protocolは設けない。
+
+hardware exportはruntimeがFFmpegのMedia Foundation H.264 encoderへ`hw_encoding=1`を要求し、成功時だけhardware利用として返す。encoderまたはcontainerが非対応なら、同じrequestをM6 software codecで再実行する。appは設定値ではなく`ExportOutcome`の実結果を表示する。
+
+hardware frameはFFmpegのPQ / HLG transfer metadataをruntime内で保持する。rendererは`ID3D11VideoProcessorEnumerator1::CheckVideoProcessorFormatConversion`でsource color spaceからSDR swap-chain color spaceへの変換を確認し、対応時だけ`ID3D11VideoContext1`へ入力・出力color spaceを設定する。未対応時はtyped errorとし、metadataを無視した表示やHDR対応の宣言をしない。10-bit HDR pass-throughは、HDR displayと10-bit UI合成を含む別のarchitecture decisionなしには有効化しない。
+
 ## 5. スレッド・同期契約
 
 - demux、video decode、audio decode、WASAPI outputを役割ごとのworkerに分ける。

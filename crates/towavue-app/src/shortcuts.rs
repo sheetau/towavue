@@ -69,6 +69,9 @@ fn defaults() -> ShortcutBindings {
         (CommandId::ResetRate, "/"),
         (CommandId::Save, "Ctrl+S"),
         (CommandId::ExportAs, "Ctrl+Shift+S"),
+        (CommandId::ToggleTimeline, "T"),
+        (CommandId::ToggleGridMenu, "G"),
+        (CommandId::ToggleHardwareEncode, "Ctrl+Shift+E"),
     ] {
         bindings.set(
             command,

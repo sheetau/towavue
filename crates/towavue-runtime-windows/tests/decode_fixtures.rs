@@ -81,6 +81,7 @@ fn exports_trimmed_rate_adjusted_video_with_audio() {
             EditOperation::SetRate(2.0),
             EditOperation::SetVolume(0.5),
         ],
+        hardware_encode: false,
     })
     .expect("export edited video");
 
@@ -89,4 +90,33 @@ fn exports_trimmed_rate_adjusted_video_with_audio() {
 
     assert!((10..=20).contains(&summary.video_frames));
     assert!((20_000..=30_000).contains(&summary.audio_frames));
+}
+
+#[test]
+fn uses_hardware_export_when_the_adapter_exposes_it() {
+    let source = fixture_directory().join("h264-aac.mp4");
+    assert!(source.is_file(), "missing M1 fixture {}", source.display());
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let target = std::env::temp_dir().join(format!("towavue-hardware-export-{unique}.mp4"));
+    let outcome = export_media(&ExportRequest {
+        source,
+        target: target.clone(),
+        kind: MediaKind::Video,
+        operations: Vec::new(),
+        hardware_encode: true,
+    })
+    .expect("export with hardware preference and software fallback");
+    let summary = decode_file(&target, |_| true).expect("decode hardware-preferred export");
+    fs::remove_file(target).expect("remove hardware export fixture");
+    assert!(summary.video_frames > 0);
+    if !outcome.used_hardware_encoder {
+        eprintln!(
+            "skipped hardware assertion: this adapter exposes no usable Media Foundation H.264 hardware encoder"
+        );
+        return;
+    }
+    assert!(outcome.used_hardware_encoder);
 }

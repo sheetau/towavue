@@ -60,6 +60,8 @@ crop、rotate、flip、trim、volume、rateを非破壊操作として保持し�
 
 M6は2026-09-05に完了した。tab単位のsaved cursor付きedit historyへcrop、時計回り・反時計回り90度回転、水平・垂直反転、trim端点、volume、rateを保持し、branch対応undo/redoと画像のoperation順previewを実装した。動画crop selectionと動画・音声の編集値もsourceを変更せず保持する。dirty状態はtab/window/statusへ表示し、media移動、tab close、process終了をExport / Discard / Cancel modalで保護する。Save Asと再SaveはmetadataをcopyするFFmpeg software exportを行い、source同一pathは拒否する。画像crop+rotateと音声付き動画trim+rate+volumeの実export・再decodeをfixtureで確認した。現在の次工程はM7である。
 
-## M7 — Advanced presentation and interaction
+## M7 — Advanced presentation and interaction（完了）
 
 HDR、waveform/thumbnail cache、multi-window tab drag、grid menu、hardware encode、詳細アニメーションを追加する。
+
+M7は2026-09-05に完了した。path・size・更新時刻keyと64 MiB上限を持つdisk cache、UI thread外で生成するwaveform / duration / hover thumbnail、click/drag Seek付きtimeline、メディア種別ごとに設定可能な`1234/qwer/asdf/zxcv` grid menu、window外tab dropによる別process window化、Media Foundation hardware encodeの強制要求とsoftware fallbackを実装した。gridは短いopacity transitionだけを使う。PQ/HLG metadataはhardware frameとともに保持し、D3D11 Video Processorが明示的にHDR→SDR変換を保証する場合だけcolor spaceを設定する。基準adapterは同変換を保証しなかったためHDR表示を成功とは扱わず、typed errorを確認した。HDR displayへの10-bit pass-throughとprocess間tab再結合は対象外である。

@@ -4,13 +4,13 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
-**M6: Non-destructive editing and exportまで完了しています。** M5までの閲覧・再生基盤に、tab単位のcrop、90度回転、反転、trim、volume、rate履歴、undo/redo、unsaved indicator、close guard、FFmpegによるSave As／再Saveを追加しました。source fileは直接変更せず、画像は即時preview、動画・音声の編集値はexportへ適用します。フォルダー内の移動順は、同じフォルダーを開いているExplorerの実際のSort By状態を優先し、Explorerが閉じている場合もShell viewが解決した保存状態またはfolder templateを利用します。
+**M7: Advanced presentation and interactionまで完了しています。** M6までの閲覧・再生・非破壊編集基盤に、非同期waveform／thumbnail cache、timeline、メディア別grid menu、window外tab detach、hardware encode優先とfallback、HDR color-space能力判定を追加しました。source fileは直接変更せず、フォルダー内の移動順は同じフォルダーを開いているExplorerの実際のSort By状態を優先し、Explorerが閉じている場合もShell viewが解決した保存状態またはfolder templateを利用します。
 
 - 対応予定OS: Windows 10 22H2以降
 - 対応予定アーキテクチャ: x86-64
 - Rust: 1.98.0 / Edition 2024 / MSVC ABI
 - ライセンス: MIT OR Apache-2.0
-- 次の工程: M7 advanced presentation and interaction
+- 次の工程: 配布するFFmpeg binaryとlicense条件を決めた後のpackaging
 
 ## 文書
 
@@ -40,11 +40,15 @@ cargo run -p towavue-app -- path\to\media.mp4
 
 標準shortcutはSpaceでpause/resume、左右矢印で5秒Seek、Ctrl+左右で同種media移動、Alt+左右で全種media移動、Fでfilmstrip、Ctrl+Shift+Pでcommand paletteです。設定は初回起動時に`%APPDATA%\towavue\shortcuts.conf`へ生成され、`Ctrl+K Ctrl+S`のようなprefix shortcutも指定できます。menuまたは同shortcutのReload commandで再読込します。
 
+Gはメディア種別ごとの4×4 grid menuを開き、`1234/qwer/asdf/zxcv`またはclickで選択します。配置は`%APPDATA%\towavue\grid.conf`で変更できます。動画・音声ではTでwaveform timelineを表示し、動画上のhover thumbnailとclick/drag Seekを利用できます。previewはUI thread外で生成され、path・size・更新時刻をkeyにした最大64 MiBのcacheを`%LOCALAPPDATA%\towavue\preview-cache`へ保存します。
+
 画像ではCtrl+wheelまたは+/-でzoom、Ctrl+Hでactual size、Shift+Wでfit、右dragでpanします。左dragでselectionを作り、辺dragでresize、Shift付き作成で正方形、Shift付きresizeで比率を保持します。選択範囲clickまたはCtrl+Shift+Yはcrop previewです。Bでreading mode、Rで縦横切替、Hで表示順反転、Ctrl+[ / Ctrl+]で表示数を2～10枚に変更できます。
 
 通常画像表示ではCtrl+Yでcropを履歴へ追加し、R/Lで90度回転、H/Vで反転します。動画・音声ではI/Oでtrimの開始・終了、上下矢印でvolume、Mでmute、`,` / `.` / `/`でrateを変更・resetします。Ctrl+Z / Ctrl+Shift+Zはundo/redo、Ctrl+Shift+SはSave As、Ctrl+Sは直近export先への再Saveです。dirtyなmediaの移動・close・終了時はExport / Discard / Cancelを選択できます。同一source pathへのexportは拒否されます。
 
 画像と動画はfileごとのtab、音声は同じfolderのplaylist tabとして開きます。filmstripはShell snapshotの全対応mediaをExplorer順で表示し、middle clickで明示的に新規tabを作れます。フォルダー変更は`ReadDirectoryChangesW`で検知してdebounce後にsnapshotを更新します。M1のcodec fixtureはMP4/H.264/AAC、MKV/HEVC/AAC、WebM/VP9/Opusです。再生終了時のdiagnosticにはadapter LUID、hardware frame数、CPU transfer数、表示・drop frame数、Seek latency、A/V driftを記録します。
+
+tabをwindow外へdragしてdropすると同じmediaを別processのwindowへ移し、dirtyなtabには既存のExport / Discard / Cancel guardを適用します。動画exportはCtrl+Shift+EでMedia Foundation hardware encode優先を切り替えられ、利用不能ならsoftwareへfallbackし、実際の経路をstatusへ表示します。PQ/HLG sourceはD3D11 Video Processorの色空間変換能力を確認してからSDRへtone mapし、adapterが変換を保証しない場合は不正な色で表示せず明示的なerrorにします。
 
 ## ライセンス
 

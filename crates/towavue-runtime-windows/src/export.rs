@@ -12,6 +12,12 @@ pub struct ExportRequest {
     pub target: PathBuf,
     pub kind: MediaKind,
     pub operations: Vec<EditOperation>,
+    pub hardware_encode: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExportOutcome {
+    pub used_hardware_encoder: bool,
 }
 
 #[derive(Debug, Error)]
@@ -26,7 +32,7 @@ pub enum ExportError {
     Failed(String),
 }
 
-pub fn export_media(request: &ExportRequest) -> Result<(), ExportError> {
+pub fn export_media(request: &ExportRequest) -> Result<ExportOutcome, ExportError> {
     if same_path(&request.source, &request.target) {
         return Err(ExportError::SameAsSource);
     }
@@ -39,13 +45,15 @@ pub fn export_media(request: &ExportRequest) -> Result<(), ExportError> {
         .map(|directory| directory.join("bin").join("ffmpeg.exe"))
         .filter(|path| path.is_file())
         .unwrap_or_else(|| PathBuf::from("ffmpeg.exe"));
-    let arguments = ffmpeg_arguments(request);
-    let output = <Command as std::os::windows::process::CommandExt>::creation_flags(
-        Command::new(executable).args(arguments),
-        CREATE_NO_WINDOW,
-    )
-    .output()
-    .map_err(ExportError::Start)?;
+    if request.hardware_encode && hardware_encode_supported_target(request) {
+        let hardware = run_ffmpeg(&executable, ffmpeg_arguments(request, true))?;
+        if hardware.status.success() {
+            return Ok(ExportOutcome {
+                used_hardware_encoder: true,
+            });
+        }
+    }
+    let output = run_ffmpeg(&executable, ffmpeg_arguments(request, false))?;
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         return Err(ExportError::Failed(if message.is_empty() {
@@ -54,10 +62,34 @@ pub fn export_media(request: &ExportRequest) -> Result<(), ExportError> {
             message
         }));
     }
-    Ok(())
+    Ok(ExportOutcome {
+        used_hardware_encoder: false,
+    })
 }
 
-fn ffmpeg_arguments(request: &ExportRequest) -> Vec<String> {
+fn hardware_encode_supported_target(request: &ExportRequest) -> bool {
+    request.kind == MediaKind::Video
+        && request
+            .target
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_none_or(|extension| !extension.eq_ignore_ascii_case("webm"))
+}
+
+fn run_ffmpeg(
+    executable: &Path,
+    arguments: Vec<String>,
+) -> Result<std::process::Output, ExportError> {
+    let output = <Command as std::os::windows::process::CommandExt>::creation_flags(
+        Command::new(executable).args(arguments),
+        CREATE_NO_WINDOW,
+    )
+    .output()
+    .map_err(ExportError::Start)?;
+    Ok(output)
+}
+
+fn ffmpeg_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
     let state = EditState::from_operations(&request.operations);
     let mut arguments = vec![
         "-hide_banner".into(),
@@ -94,36 +126,37 @@ fn ffmpeg_arguments(request: &ExportRequest) -> Vec<String> {
             }
         }
     }
-    arguments.extend(codec_arguments(request));
+    arguments.extend(codec_arguments(request, hardware));
     arguments.push(request.target.display().to_string());
     arguments
 }
 
-fn codec_arguments(request: &ExportRequest) -> Vec<String> {
+fn codec_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
     let extension = request
         .target
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let codecs: &[&str] = match (request.kind, extension.as_str()) {
-        (MediaKind::Video, "webm") => &["-c:v", "libvpx-vp9", "-c:a", "libopus"],
-        (MediaKind::Video, "avi") => &["-c:v", "mpeg4", "-c:a", "pcm_s16le"],
-        (MediaKind::Video, "wmv") => &["-c:v", "wmv2", "-c:a", "wmav2"],
-        (MediaKind::Video, _) => &["-c:v", "libopenh264", "-c:a", "aac"],
-        (MediaKind::Audio, "mp3") => &["-c:a", "libmp3lame"],
-        (MediaKind::Audio, "ogg" | "opus") => &["-c:a", "libopus"],
-        (MediaKind::Audio, "wav") => &["-c:a", "pcm_s16le"],
-        (MediaKind::Audio, "flac") => &["-c:a", "flac"],
-        (MediaKind::Audio, _) => &["-c:a", "aac"],
-        (MediaKind::Image, "avif") => &["-c:v", "libaom-av1", "-still-picture", "1"],
-        (MediaKind::Image, "webp") => &["-c:v", "libwebp"],
-        (MediaKind::Image, "jpg" | "jpeg") => &["-c:v", "mjpeg"],
-        (MediaKind::Image, "png") => &["-c:v", "png"],
-        (MediaKind::Image, "gif") => &["-c:v", "gif"],
-        (MediaKind::Image, "tif" | "tiff") => &["-c:v", "tiff"],
-        (MediaKind::Image, "bmp") => &["-c:v", "bmp"],
-        (MediaKind::Image, _) => &[],
+    let codecs: &[&str] = match (request.kind, extension.as_str(), hardware) {
+        (MediaKind::Video, _, true) => &["-c:v", "h264_mf", "-hw_encoding", "1", "-c:a", "aac"],
+        (MediaKind::Video, "webm", false) => &["-c:v", "libvpx-vp9", "-c:a", "libopus"],
+        (MediaKind::Video, "avi", false) => &["-c:v", "mpeg4", "-c:a", "pcm_s16le"],
+        (MediaKind::Video, "wmv", false) => &["-c:v", "wmv2", "-c:a", "wmav2"],
+        (MediaKind::Video, _, false) => &["-c:v", "libopenh264", "-c:a", "aac"],
+        (MediaKind::Audio, "mp3", _) => &["-c:a", "libmp3lame"],
+        (MediaKind::Audio, "ogg" | "opus", _) => &["-c:a", "libopus"],
+        (MediaKind::Audio, "wav", _) => &["-c:a", "pcm_s16le"],
+        (MediaKind::Audio, "flac", _) => &["-c:a", "flac"],
+        (MediaKind::Audio, _, _) => &["-c:a", "aac"],
+        (MediaKind::Image, "avif", _) => &["-c:v", "libaom-av1", "-still-picture", "1"],
+        (MediaKind::Image, "webp", _) => &["-c:v", "libwebp"],
+        (MediaKind::Image, "jpg" | "jpeg", _) => &["-c:v", "mjpeg"],
+        (MediaKind::Image, "png", _) => &["-c:v", "png"],
+        (MediaKind::Image, "gif", _) => &["-c:v", "gif"],
+        (MediaKind::Image, "tif" | "tiff", _) => &["-c:v", "tiff"],
+        (MediaKind::Image, "bmp", _) => &["-c:v", "bmp"],
+        (MediaKind::Image, _, _) => &[],
     };
     codecs.iter().map(|argument| (*argument).into()).collect()
 }
@@ -241,9 +274,10 @@ mod tests {
                 EditOperation::RotateClockwise,
                 EditOperation::FlipHorizontal,
             ],
+            hardware_encode: false,
         };
 
-        let arguments = ffmpeg_arguments(&request);
+        let arguments = ffmpeg_arguments(&request, false);
         let filter = arguments
             .windows(2)
             .find_map(|pair| (pair[0] == "-vf").then_some(pair[1].as_str()))
@@ -267,14 +301,30 @@ mod tests {
                 EditOperation::SetRate(4.0),
                 EditOperation::SetVolume(0.5),
             ],
+            hardware_encode: false,
         };
 
-        let arguments = ffmpeg_arguments(&request).join(" ");
+        let arguments = ffmpeg_arguments(&request, false).join(" ");
 
         assert!(
             arguments.contains("trim=start=2.000000:end=5.000000,setpts=(PTS-STARTPTS)/4.0000")
         );
         assert!(arguments.contains("atrim=start=2.000000:end=5.000000,asetpts=PTS-STARTPTS,atempo=2.0000,atempo=2.0000,volume=0.5000"));
+    }
+
+    #[test]
+    fn hardware_request_forces_media_foundation_hardware_mode() {
+        let request = ExportRequest {
+            source: "in.mp4".into(),
+            target: "out.mp4".into(),
+            kind: MediaKind::Video,
+            operations: Vec::new(),
+            hardware_encode: true,
+        };
+
+        let arguments = ffmpeg_arguments(&request, true).join(" ");
+
+        assert!(arguments.contains("-c:v h264_mf -hw_encoding 1"));
     }
 
     #[test]
@@ -284,6 +334,7 @@ mod tests {
             target: "same.wav".into(),
             kind: MediaKind::Audio,
             operations: Vec::new(),
+            hardware_encode: false,
         };
 
         assert!(matches!(
@@ -314,6 +365,7 @@ mod tests {
                 }),
                 EditOperation::RotateClockwise,
             ],
+            hardware_encode: false,
         };
 
         export_media(&request).expect("export edited image");

@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod grid;
 mod shortcuts;
 
 use std::collections::BTreeMap;
@@ -19,8 +20,8 @@ use towavue_core::{
 };
 use towavue_runtime_windows::{
     AudioOutputEvent, DecodedImage, ExportRequest, FolderOrderProvider, FolderWatcher,
-    FrameRenderer, PlaybackEvent, PlaybackSession, RenderError, decode_image, export_media,
-    pick_export_file, pick_folder, pick_media_file,
+    FrameRenderer, PlaybackEvent, PlaybackSession, PreviewCache, RenderError, decode_image,
+    export_media, pick_export_file, pick_folder, pick_media_file,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -39,7 +40,7 @@ const VIDEO_LATE_TOLERANCE: Duration = Duration::from_millis(40);
 
 fn main() -> Result<(), Box<dyn Error>> {
     let initial_path = parse_initial_path()?;
-    let event_loop = EventLoop::<PlaybackEvent>::with_user_event().build()?;
+    let event_loop = EventLoop::<AppEvent>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
     let mut application = Application::new(initial_path, move |event| {
         let _ = proxy.send_event(event);
@@ -107,13 +108,30 @@ enum UiAction {
     Command(CommandId),
     ActivateTab(TabId),
     CloseTab(TabId),
+    DetachTab(TabId),
     OpenMedia(PathBuf, bool),
+    Seek(MediaTime),
     ResolveGuard(GuardDecision),
+}
+
+enum AppEvent {
+    Playback(PlaybackEvent),
+    Duration(PathBuf, Result<Duration, String>),
+    Waveform(
+        PathBuf,
+        Result<towavue_runtime_windows::PreviewImage, String>,
+    ),
+    Thumbnail(
+        PathBuf,
+        u64,
+        Result<towavue_runtime_windows::PreviewImage, String>,
+    ),
 }
 
 #[derive(Clone)]
 enum GuardedAction {
     CloseTab(TabId),
+    DetachTab(TabId),
     Navigate(PathBuf),
     Exit,
 }
@@ -264,6 +282,8 @@ struct Application<N> {
     tabs: TabSet,
     edits: BTreeMap<TabId, EditHistory>,
     export_paths: BTreeMap<TabId, PathBuf>,
+    grid_layouts: grid::GridLayouts,
+    grid_path: PathBuf,
     path: Option<PathBuf>,
     media_kind: Option<MediaKind>,
     image: Option<ImagePresentation>,
@@ -272,6 +292,13 @@ struct Application<N> {
     reading_mode: bool,
     reading_settings: ReadingSettings,
     reading_pages: Vec<ImagePresentation>,
+    preview_cache: PreviewCache,
+    timeline_open: bool,
+    waveform: Option<TextureHandle>,
+    media_duration: Option<Duration>,
+    hover_thumbnail: Option<(u64, TextureHandle)>,
+    waveform_loading: bool,
+    thumbnail_loading: Option<u64>,
     session: Option<PlaybackSession>,
     pending_time: Option<MediaTime>,
     clock: Option<PlaybackClock>,
@@ -289,20 +316,26 @@ struct Application<N> {
     prefix_started: Option<Instant>,
     modifiers: ModifiersState,
     filmstrip_open: bool,
+    grid_open: bool,
     palette_open: bool,
     palette_query: String,
     status_message: Option<(String, Instant)>,
     pending_guard: Option<GuardedAction>,
     exit_requested: bool,
+    prefer_hardware_encode: bool,
 }
 
 impl<N> Application<N>
 where
-    N: Fn(PlaybackEvent) + Send + Sync + 'static,
+    N: Fn(AppEvent) + Send + Sync + 'static,
 {
     fn new(initial_path: Option<PathBuf>, notify: N) -> Result<Self, Box<dyn Error>> {
         let (shortcuts, shortcut_path) = shortcuts::load()
             .map_err(|error| format!("could not load keyboard shortcuts: {error}"))?;
+        let (grid_layouts, grid_path) =
+            grid::load().map_err(|error| format!("could not load grid menu: {error}"))?;
+        let preview_cache = PreviewCache::local()
+            .map_err(|error| format!("could not open preview cache: {error}"))?;
         Ok(Self {
             initial_path,
             notify: Arc::new(notify),
@@ -316,6 +349,8 @@ where
             tabs: TabSet::default(),
             edits: BTreeMap::new(),
             export_paths: BTreeMap::new(),
+            grid_layouts,
+            grid_path,
             path: None,
             media_kind: None,
             image: None,
@@ -324,6 +359,13 @@ where
             reading_mode: false,
             reading_settings: ReadingSettings::default(),
             reading_pages: Vec::new(),
+            preview_cache,
+            timeline_open: false,
+            waveform: None,
+            media_duration: None,
+            hover_thumbnail: None,
+            waveform_loading: false,
+            thumbnail_loading: None,
             session: None,
             pending_time: None,
             clock: None,
@@ -341,11 +383,13 @@ where
             prefix_started: None,
             modifiers: ModifiersState::default(),
             filmstrip_open: false,
+            grid_open: false,
             palette_open: false,
             palette_query: String::new(),
             status_message: None,
             pending_guard: None,
             exit_requested: false,
+            prefer_hardware_encode: false,
         })
     }
 
@@ -424,6 +468,12 @@ where
         self.session.take();
         self.image = None;
         self.reading_pages.clear();
+        self.timeline_open = kind == MediaKind::Audio;
+        self.waveform = None;
+        self.media_duration = None;
+        self.hover_thumbnail = None;
+        self.waveform_loading = false;
+        self.thumbnail_loading = None;
         self.image_view = ImageViewState::default();
         self.selection_drag = None;
         self.path = Some(path.clone());
@@ -469,7 +519,9 @@ where
         };
         let graphics_device = renderer.graphics_device();
         let notify = Arc::clone(&self.notify);
-        match PlaybackSession::open(&path, graphics_device, move |event| notify(event)) {
+        match PlaybackSession::open(&path, graphics_device, move |event| {
+            notify(AppEvent::Playback(event))
+        }) {
             Ok(session) => {
                 self.generation = session.generation();
                 self.audio_drained = !session.has_audio();
@@ -478,8 +530,74 @@ where
             }
             Err(error) => self.fail(error.to_string()),
         }
+        self.load_duration(path.clone());
+        if self.timeline_open {
+            self.load_waveform();
+        }
         self.refresh_title();
         self.request_redraw();
+    }
+
+    fn load_waveform(&mut self) {
+        if self.waveform_loading {
+            return;
+        }
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        let cache = self.preview_cache.clone();
+        let notify = Arc::clone(&self.notify);
+        self.waveform_loading = true;
+        if let Err(error) = std::thread::Builder::new()
+            .name("towavue-waveform".into())
+            .spawn(move || {
+                let result = cache
+                    .waveform(&path, 640, 96)
+                    .map_err(|error| error.to_string());
+                notify(AppEvent::Waveform(path, result));
+            })
+        {
+            self.waveform_loading = false;
+            self.set_status(format!("Could not start waveform worker: {error}"));
+        }
+    }
+
+    fn load_hover_thumbnail(&mut self, position: Duration, bucket: u64) {
+        if self.thumbnail_loading.is_some() {
+            return;
+        }
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        let cache = self.preview_cache.clone();
+        let notify = Arc::clone(&self.notify);
+        self.thumbnail_loading = Some(bucket);
+        if let Err(error) = std::thread::Builder::new()
+            .name("towavue-thumbnail".into())
+            .spawn(move || {
+                let result = cache
+                    .thumbnail(&path, position, 240)
+                    .map_err(|error| error.to_string());
+                notify(AppEvent::Thumbnail(path, bucket, result));
+            })
+        {
+            self.thumbnail_loading = None;
+            self.set_status(format!("Could not start thumbnail worker: {error}"));
+        }
+    }
+
+    fn load_duration(&mut self, path: PathBuf) {
+        let cache = self.preview_cache.clone();
+        let notify = Arc::clone(&self.notify);
+        if let Err(error) = std::thread::Builder::new()
+            .name("towavue-duration".into())
+            .spawn(move || {
+                let result = cache.duration(&path).map_err(|error| error.to_string());
+                notify(AppEvent::Duration(path, result));
+            })
+        {
+            self.set_status(format!("Could not start duration worker: {error}"));
+        }
     }
 
     fn refresh_folder_snapshot(&mut self) {
@@ -568,6 +686,63 @@ where
         match FolderWatcher::new(folder) {
             Ok(watcher) => self.folder_watcher = Some((folder.to_owned(), watcher)),
             Err(error) => self.set_status(error.to_string()),
+        }
+    }
+
+    fn handle_app_event(&mut self, event: AppEvent) {
+        match event {
+            AppEvent::Playback(event) => self.handle_playback_event(event),
+            AppEvent::Duration(path, result) if self.path.as_ref() == Some(&path) => match result {
+                Ok(duration) => {
+                    self.media_duration = Some(duration);
+                    self.request_redraw();
+                }
+                Err(error) => self.set_status(format!("Duration unavailable: {error}")),
+            },
+            AppEvent::Waveform(path, result) if self.path.as_ref() == Some(&path) => {
+                self.waveform_loading = false;
+                match result {
+                    Ok(preview) => {
+                        if let Some(context) = self.ui_context.as_ref() {
+                            let image = egui::ColorImage::from_rgba_unmultiplied(
+                                [preview.width as usize, preview.height as usize],
+                                &preview.rgba,
+                            );
+                            self.waveform = Some(context.load_texture(
+                                format!("waveform:{}", path.display()),
+                                image,
+                                TextureOptions::LINEAR,
+                            ));
+                            self.request_redraw();
+                        }
+                    }
+                    Err(error) => self.set_status(format!("Waveform unavailable: {error}")),
+                }
+            }
+            AppEvent::Thumbnail(path, bucket, result) if self.path.as_ref() == Some(&path) => {
+                if self.thumbnail_loading != Some(bucket) {
+                    return;
+                }
+                self.thumbnail_loading = None;
+                if let Ok(preview) = result
+                    && let Some(context) = self.ui_context.as_ref()
+                {
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [preview.width as usize, preview.height as usize],
+                        &preview.rgba,
+                    );
+                    self.hover_thumbnail = Some((
+                        bucket,
+                        context.load_texture(
+                            format!("thumbnail:{}:{bucket}", path.display()),
+                            image,
+                            TextureOptions::LINEAR,
+                        ),
+                    ));
+                    self.request_redraw();
+                }
+            }
+            AppEvent::Duration(_, _) | AppEvent::Waveform(_, _) | AppEvent::Thumbnail(_, _, _) => {}
         }
     }
 
@@ -715,6 +890,7 @@ where
         let context = root.ctx().clone();
         self.draw_top_bar(root, actions);
         self.draw_status_bar(root, actions);
+        self.draw_timeline(root, actions);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(root, |ui| {
@@ -746,6 +922,7 @@ where
         if self.palette_open {
             self.draw_command_palette(&context, actions);
         }
+        self.draw_grid_menu(&context, actions);
         if self.pending_guard.is_some() {
             self.draw_unsaved_guard(&context, actions);
         }
@@ -992,6 +1169,7 @@ where
     }
 
     fn draw_top_bar(&self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        let window_rect = root.max_rect();
         egui::Panel::top("tabs").exact_size(32.0).show(root, |ui| {
             ui.horizontal(|ui| {
                 ui.menu_button(RichText::new("towavue").strong(), |ui| {
@@ -1025,26 +1203,29 @@ where
                             for tab in self.tabs.tabs() {
                                 let active =
                                     self.tabs.active().is_some_and(|item| item.id == tab.id);
-                                if ui
-                                    .selectable_label(
-                                        active,
-                                        format!(
-                                            "{}{}",
-                                            display_name(tab.target.current_path()),
-                                            if self
-                                                .edits
-                                                .get(&tab.id)
-                                                .is_some_and(EditHistory::is_dirty)
-                                            {
-                                                " *"
-                                            } else {
-                                                ""
-                                            }
-                                        ),
-                                    )
-                                    .clicked()
-                                {
+                                let label = format!(
+                                    "{}{}",
+                                    display_name(tab.target.current_path()),
+                                    if self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty) {
+                                        " *"
+                                    } else {
+                                        ""
+                                    }
+                                );
+                                let response = ui.add(
+                                    egui::Button::new(label)
+                                        .selected(active)
+                                        .sense(egui::Sense::click_and_drag()),
+                                );
+                                if response.clicked() {
                                     actions.push(UiAction::ActivateTab(tab.id));
+                                }
+                                if response.drag_stopped()
+                                    && response
+                                        .interact_pointer_pos()
+                                        .is_some_and(|position| !window_rect.contains(position))
+                                {
+                                    actions.push(UiAction::DetachTab(tab.id));
                                 }
                                 if ui.small_button("×").clicked() {
                                     actions.push(UiAction::CloseTab(tab.id));
@@ -1054,6 +1235,55 @@ where
                     });
             });
         });
+    }
+
+    fn draw_grid_menu(&self, context: &egui::Context, actions: &mut Vec<UiAction>) {
+        let opacity =
+            context.animate_bool_with_time("grid-menu-animation".into(), self.grid_open, 0.12);
+        if opacity <= 0.0 {
+            return;
+        }
+        context.request_repaint();
+        let Some(kind) = self.media_kind else { return };
+        let commands = self.grid_layouts.get(kind);
+        egui::Area::new("grid-menu".into())
+            .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .order(egui::Order::Foreground)
+            .show(context, |ui| {
+                ui.set_opacity(opacity);
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    egui::Grid::new("command-grid")
+                        .spacing([6.0, 6.0])
+                        .show(ui, |ui| {
+                            for (index, command) in commands.iter().copied().enumerate() {
+                                let title = command_definitions()
+                                    .iter()
+                                    .find(|definition| definition.id == command)
+                                    .map_or(command.as_str(), |definition| definition.title);
+                                let enabled = command_definitions()
+                                    .iter()
+                                    .find(|definition| definition.id == command)
+                                    .is_some_and(|definition| {
+                                        definition.is_enabled(self.command_context())
+                                    });
+                                let label = format!("{}\n{}", grid::KEYS[index], title);
+                                if ui
+                                    .add_enabled(
+                                        enabled,
+                                        egui::Button::new(label).min_size([110.0, 52.0].into()),
+                                    )
+                                    .clicked()
+                                {
+                                    actions.push(UiAction::Command(command));
+                                }
+                                if index % 4 == 3 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+                    ui.weak(format!("Edit {}", self.grid_path.display()));
+                });
+            });
     }
 
     fn draw_status_bar(&self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
@@ -1071,6 +1301,20 @@ where
                             actions.push(UiAction::Command(CommandId::TogglePause));
                         }
                         ui.monospace(format_time(self.current_position()));
+                        if ui
+                            .selectable_label(self.timeline_open, "Timeline")
+                            .on_hover_text("Toggle waveform timeline (T)")
+                            .clicked()
+                        {
+                            actions.push(UiAction::Command(CommandId::ToggleTimeline));
+                        }
+                        if self.media_kind == Some(MediaKind::Video) {
+                            ui.weak(if self.prefer_hardware_encode {
+                                "HW export"
+                            } else {
+                                "SW export"
+                            });
+                        }
                     }
                     if self.media_kind == Some(MediaKind::Image) {
                         if ui
@@ -1154,6 +1398,69 @@ where
                         ui.weak(format!("Shortcuts: {}", self.shortcut_path.display()));
                     }
                 });
+            });
+    }
+
+    fn draw_timeline(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        if !self.timeline_open || self.media_kind == Some(MediaKind::Image) {
+            return;
+        }
+        egui::Panel::bottom("timeline")
+            .exact_size(96.0)
+            .show(root, |ui| {
+                let rect = ui.available_rect_before_wrap();
+                if let Some(waveform) = &self.waveform {
+                    ui.painter().image(
+                        waveform.id(),
+                        rect,
+                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                        Color32::from_white_alpha(150),
+                    );
+                } else {
+                    ui.painter().text(
+                        rect.center(),
+                        Align2::CENTER_CENTER,
+                        "No audio waveform",
+                        egui::TextStyle::Body.resolve(ui.style()),
+                        Color32::GRAY,
+                    );
+                }
+                let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+                let duration = self.media_duration.unwrap_or_default();
+                if duration.is_zero() {
+                    return;
+                }
+                let progress = (self.current_position().as_seconds_f64() / duration.as_secs_f64())
+                    .clamp(0.0, 1.0) as f32;
+                let x = egui::lerp(rect.x_range(), progress);
+                ui.painter()
+                    .vline(x, rect.y_range(), (2.0, Color32::LIGHT_BLUE));
+                let Some(position) = response.hover_pos() else {
+                    return;
+                };
+                let ratio = ((position.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                let target = duration.mul_f32(ratio);
+                if self.media_kind == Some(MediaKind::Video) {
+                    let bucket = (ratio * 20.0).floor() as u64;
+                    if self
+                        .hover_thumbnail
+                        .as_ref()
+                        .is_none_or(|(cached, _)| *cached != bucket)
+                    {
+                        let preview_position =
+                            duration.mul_f64(((bucket as f64 + 0.5) / 20.0).min(1.0));
+                        self.load_hover_thumbnail(preview_position, bucket);
+                    }
+                    if let Some((_, texture)) = &self.hover_thumbnail {
+                        response.clone().on_hover_ui(|ui| {
+                            ui.image((texture.id(), texture.size_vec2()));
+                            ui.monospace(format_time(media_time(target)));
+                        });
+                    }
+                }
+                if response.clicked() || response.dragged() {
+                    actions.push(UiAction::Seek(media_time(target)));
+                }
             });
     }
 
@@ -1257,6 +1564,7 @@ where
             UiAction::Command(command) => self.dispatch(command),
             UiAction::ActivateTab(id) => self.activate_tab(id),
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
+            UiAction::DetachTab(id) => self.request_guarded(GuardedAction::DetachTab(id)),
             UiAction::OpenMedia(path, force_new) => {
                 if force_new {
                     self.open_external(path, true);
@@ -1264,6 +1572,7 @@ where
                     self.request_guarded(GuardedAction::Navigate(path));
                 }
             }
+            UiAction::Seek(target) => self.seek_to(target),
             UiAction::ResolveGuard(decision) => self.resolve_guard(decision),
         }
     }
@@ -1307,11 +1616,22 @@ where
                 self.palette_query.clear();
                 self.request_redraw();
             }
+            CommandId::ToggleGridMenu => {
+                self.grid_open = !self.grid_open;
+                self.request_redraw();
+            }
             CommandId::ReloadShortcuts => match shortcuts::load() {
                 Ok((bindings, path)) => {
                     self.shortcuts = bindings;
                     self.shortcut_path = path;
-                    self.set_status("Keyboard shortcuts reloaded".into());
+                    match grid::load() {
+                        Ok((layouts, grid_path)) => {
+                            self.grid_layouts = layouts;
+                            self.grid_path = grid_path;
+                            self.set_status("Keyboard shortcuts and grid reloaded".into());
+                        }
+                        Err(error) => self.set_status(format!("Grid reload failed: {error}")),
+                    }
                 }
                 Err(error) => self.set_status(format!("Shortcut reload failed: {error}")),
             },
@@ -1422,6 +1742,21 @@ where
             CommandId::ExportAs => {
                 self.export_current(true);
             }
+            CommandId::ToggleTimeline => {
+                self.timeline_open = !self.timeline_open;
+                if self.timeline_open && self.waveform.is_none() {
+                    self.load_waveform();
+                }
+                self.request_redraw();
+            }
+            CommandId::ToggleHardwareEncode => {
+                self.prefer_hardware_encode = !self.prefer_hardware_encode;
+                self.set_status(if self.prefer_hardware_encode {
+                    "Hardware encode preferred; software remains the fallback".into()
+                } else {
+                    "Software encode selected".into()
+                });
+            }
         }
     }
 
@@ -1507,14 +1842,20 @@ where
             target: target.clone(),
             kind,
             operations,
+            hardware_encode: self.prefer_hardware_encode,
         };
         match export_media(&request) {
-            Ok(()) => {
+            Ok(outcome) => {
                 self.export_paths.insert(id, target.clone());
                 if let Some(history) = self.edits.get_mut(&id) {
                     history.mark_saved();
                 }
-                self.set_status(format!("Exported {}", target.display()));
+                let encoder = if outcome.used_hardware_encoder {
+                    "hardware"
+                } else {
+                    "software"
+                };
+                self.set_status(format!("Exported {} ({encoder} encode)", target.display()));
                 self.refresh_title();
                 self.request_redraw();
                 true
@@ -1549,6 +1890,11 @@ where
     fn request_guarded(&mut self, action: GuardedAction) {
         let dirty = match action {
             GuardedAction::CloseTab(id) => self
+                .edits
+                .get(&id)
+                .is_some_and(EditHistory::is_dirty)
+                .then_some(id),
+            GuardedAction::DetachTab(id) => self
                 .edits
                 .get(&id)
                 .is_some_and(EditHistory::is_dirty)
@@ -1595,11 +1941,31 @@ where
     fn perform_guarded(&mut self, action: GuardedAction) {
         match action {
             GuardedAction::CloseTab(id) => self.close_tab_unchecked(id),
+            GuardedAction::DetachTab(id) => self.detach_tab_unchecked(id),
             GuardedAction::Navigate(path) => self.navigate_to_unchecked(path),
             GuardedAction::Exit => {
                 self.exit_requested = true;
                 self.request_redraw();
             }
+        }
+    }
+
+    fn detach_tab_unchecked(&mut self, id: TabId) {
+        let Some(path) = self
+            .tabs
+            .tabs()
+            .iter()
+            .find(|tab| tab.id == id)
+            .map(|tab| tab.target.current_path().to_owned())
+        else {
+            return;
+        };
+        let result = std::env::current_exe()
+            .and_then(|executable| std::process::Command::new(executable).arg(&path).spawn())
+            .map(|_| ());
+        match result {
+            Ok(()) => self.close_tab_unchecked(id),
+            Err(error) => self.set_status(format!("Could not detach tab: {error}")),
         }
     }
 
@@ -1930,11 +2296,29 @@ where
             return;
         }
         if event.logical_key == WinitKey::Named(NamedKey::Escape)
-            && (self.palette_open || self.filmstrip_open)
+            && (self.palette_open || self.filmstrip_open || self.grid_open)
         {
             self.palette_open = false;
             self.filmstrip_open = false;
+            self.grid_open = false;
             self.request_redraw();
+            return;
+        }
+        if self.grid_open
+            && let WinitKey::Character(value) = &event.logical_key
+            && let Some(character) = value.chars().next().map(|value| value.to_ascii_lowercase())
+            && let Some(index) = grid::KEYS.iter().position(|key| *key == character)
+            && let Some(kind) = self.media_kind
+        {
+            let command = self.grid_layouts.get(kind)[index];
+            let enabled = command_definitions()
+                .iter()
+                .find(|definition| definition.id == command)
+                .is_some_and(|definition| definition.is_enabled(self.command_context()));
+            if enabled {
+                self.grid_open = false;
+                self.dispatch(command);
+            }
             return;
         }
         if self.filmstrip_open && event.logical_key == WinitKey::Named(NamedKey::Tab) {
@@ -2311,6 +2695,10 @@ fn format_time(time: MediaTime) -> String {
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
+fn media_time(duration: Duration) -> MediaTime {
+    MediaTime::from_nanoseconds(duration.as_nanos().min(i64::MAX as u128) as i64)
+}
+
 fn format_size(bytes: u64) -> String {
     if bytes >= 1_000_000_000 {
         format!("{:.1} GB", bytes as f64 / 1_000_000_000.0)
@@ -2331,9 +2719,9 @@ fn snapshot_source(source: FolderSnapshotSource) -> &'static str {
     }
 }
 
-impl<N> ApplicationHandler<PlaybackEvent> for Application<N>
+impl<N> ApplicationHandler<AppEvent> for Application<N>
 where
-    N: Fn(PlaybackEvent) + Send + Sync + 'static,
+    N: Fn(AppEvent) + Send + Sync + 'static,
 {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none()
@@ -2344,8 +2732,8 @@ where
         }
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: PlaybackEvent) {
-        self.handle_playback_event(event);
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
+        self.handle_app_event(event);
     }
 
     fn window_event(

@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 01:18 JST - implementation / complete M7 advanced presentation and interaction
+
+- Trigger: the M6 checkpoint completed and the owner requested implementation of the remaining plan.
+- Intent: complete M7 without weakening the single-D3D11-device boundary or claiming unsupported HDR behavior.
+- Result: added a path/size/modified-keyed 64 MiB disk cache for FFmpeg-generated waveform and hover thumbnails; asynchronous duration, waveform, and thumbnail workers with stale-path rejection; a waveform timeline with hover preview and click/drag seek; per-media configurable 4×4 grid dispatch matching `1234/qwer/asdf/zxcv`; a 120 ms grid opacity transition; dirty-aware tab detachment to a new process window; and hardware-preferred H.264 export with forced Media Foundation hardware mode, automatic software fallback, and actual-path reporting.
+- HDR boundary: PQ/HLG transfer metadata now remains attached to D3D11VA frames. The renderer queries the exact Video Processor input/output color-space conversion before setting `ID3D11VideoContext1` colorspaces. The reference adapter rejected PQ-to-SDR conversion, and the app produced the typed unsupported-conversion error instead of presenting unverified colors. Ten-bit HDR pass-through remains intentionally disabled.
+- Changed areas: core command registry; runtime decode metadata, D3D11 color conversion gate, preview cache, and export outcome; app worker events, timeline, grid configuration, tab detachment, export controls, shortcuts; architecture, roadmap, and README.
+- Verification: local format, workspace all-target Clippy with warnings denied, and workspace all-target tests pass (app 10, core 23, runtime 22 plus 1 ignored live-Explorer integration test, integrations 3). Runtime tests generate and reuse a thumbnail, generate a waveform and duration, validate HDR transfer classification, and inspect forced hardware-encoder arguments. The hardware export test explicitly skipped its hardware assertion because the reference adapter exposed no usable encoder, then verified the software fallback output. Real-window smokes showed the 4×4 grid, waveform timeline, cached hover thumbnail, and window-outside tab drop increasing the process/window count from one to two.
+- Status: `m7_complete`.
+- Next action: no roadmap milestone remains; package/distribution work requires a separate decision about FFmpeg binaries and licensing.
+
 ## 2026-09-05 00:41 JST - implementation / complete M6 non-destructive editing and export
 
 - Trigger: the independently verified M5 checkpoint completed and the owner requested continued milestone-by-milestone implementation.

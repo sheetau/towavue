@@ -20,10 +20,14 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_VPOV_DIMENSION_TEXTURE2D, D3D11CreateDeviceAndSwapChain, ID3D11DepthStencilView,
     ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout, ID3D11Multithread, ID3D11PixelShader,
     ID3D11RenderTargetView, ID3D11SamplerState, ID3D11Texture2D, ID3D11VertexShader,
-    ID3D11VideoContext, ID3D11VideoDevice, ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
+    ID3D11VideoContext, ID3D11VideoContext1, ID3D11VideoDevice, ID3D11VideoProcessor,
+    ID3D11VideoProcessorEnumerator, ID3D11VideoProcessorEnumerator1,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_MODE_DESC, DXGI_RATIONAL, DXGI_SAMPLE_DESC,
+    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
+    DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
+    DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_MODE_DESC,
+    DXGI_RATIONAL, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
     DXGI_PRESENT, DXGI_SWAP_CHAIN_DESC, DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_DISCARD,
@@ -32,7 +36,7 @@ use windows::Win32::Graphics::Dxgi::{
 use windows::core::{BOOL, Interface, PCSTR, s};
 
 use crate::VideoFrame;
-use crate::decode::HardwareVideoFrame;
+use crate::decode::{HardwareVideoFrame, VideoTransfer};
 
 /// A failure while creating or using the shared D3D11 renderer.
 #[derive(Debug, Error)]
@@ -51,6 +55,8 @@ pub enum RenderError {
     SurfaceNotSized,
     #[error("the hardware frame does not contain a D3D11 texture")]
     InvalidHardwareFrame,
+    #[error("the D3D11 Video Processor cannot tone-map this HDR frame to SDR")]
+    HdrConversionUnsupported,
 }
 
 /// Stable identifier of the DXGI adapter selected for the shared device.
@@ -164,6 +170,7 @@ pub struct FrameRenderer {
     software_texture: Option<(u32, u32, ID3D11Texture2D)>,
     software_blitter: SoftwareBlitter,
     ui_renderer: egui_directx11::Renderer,
+    hdr_tone_mapping_active: bool,
 }
 
 impl FrameRenderer {
@@ -247,6 +254,7 @@ impl FrameRenderer {
             software_texture: None,
             software_blitter,
             ui_renderer,
+            hdr_tone_mapping_active: false,
         })
     }
 
@@ -341,7 +349,20 @@ impl FrameRenderer {
         // The AVFrame owns this COM reference for the duration of the call.
         let texture = unsafe { ID3D11Texture2D::from_raw_borrowed(&texture_raw) }
             .ok_or(RenderError::InvalidHardwareFrame)?;
-        self.blit_texture(texture, array_slice, frame.width, frame.height)
+        self.blit_texture(
+            texture,
+            array_slice,
+            frame.width,
+            frame.height,
+            frame.transfer,
+        )?;
+        if frame.transfer != VideoTransfer::Sdr && !self.hdr_tone_mapping_active {
+            self.hdr_tone_mapping_active = true;
+            eprintln!(
+                "towavue: HDR source tone-mapped to the SDR swap chain by D3D11 Video Processor"
+            );
+        }
+        Ok(())
     }
 
     fn blit_texture(
@@ -350,6 +371,7 @@ impl FrameRenderer {
         array_slice: u32,
         width: u32,
         height: u32,
+        transfer: VideoTransfer,
     ) -> Result<(), RenderError> {
         let (output_width, output_height) = self.ensure_surface()?;
         self.prepare_video_processor(width, height, output_width, output_height)?;
@@ -392,6 +414,7 @@ impl FrameRenderer {
                 &output_description,
                 Some(&mut output_view),
             )?;
+            configure_hdr_to_sdr(state, texture, transfer)?;
             let mut stream = D3D11_VIDEO_PROCESSOR_STREAM {
                 Enable: BOOL(1),
                 pInputSurface: ManuallyDrop::new(input_view),
@@ -577,6 +600,48 @@ impl FrameRenderer {
         }
         Ok(())
     }
+}
+
+fn configure_hdr_to_sdr(
+    state: &VideoProcessorState,
+    texture: &ID3D11Texture2D,
+    transfer: VideoTransfer,
+) -> Result<(), RenderError> {
+    let input_color_space = match transfer {
+        VideoTransfer::Sdr => DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
+        VideoTransfer::Pq => DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
+        VideoTransfer::Hlg => DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020,
+    };
+    let context: ID3D11VideoContext1 = match state.context.cast() {
+        Ok(context) => context,
+        Err(_) if transfer == VideoTransfer::Sdr => return Ok(()),
+        Err(_) => return Err(RenderError::HdrConversionUnsupported),
+    };
+    let enumerator: ID3D11VideoProcessorEnumerator1 = state
+        .enumerator
+        .cast()
+        .map_err(|_| RenderError::HdrConversionUnsupported)?;
+    let mut description = D3D11_TEXTURE2D_DESC::default();
+    // The texture and processor interfaces remain owned by the current frame and
+    // renderer for every call; the conversion capability is checked before use.
+    unsafe {
+        texture.GetDesc(&mut description);
+        let supported = enumerator.CheckVideoProcessorFormatConversion(
+            description.Format,
+            input_color_space,
+            DXGI_FORMAT_R8G8B8A8_UNORM,
+            DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+        )?;
+        if !supported.as_bool() {
+            return Err(RenderError::HdrConversionUnsupported);
+        }
+        context.VideoProcessorSetStreamColorSpace1(&state.processor, 0, input_color_space);
+        context.VideoProcessorSetOutputColorSpace1(
+            &state.processor,
+            DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+        );
+    }
+    Ok(())
 }
 
 fn compile_shader(source: &[u8], target: PCSTR) -> Result<ID3DBlob, RenderError> {

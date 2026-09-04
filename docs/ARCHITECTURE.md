@@ -68,7 +68,7 @@ winit event loop、egui、tab、command dispatch、利用者向け状態を所�
 
 M1ではFFmpegを動的リンクし、映像をsoftware decodeしてtightly packed RGBAへ変換する。runtimeの`FrameRenderer`が単一D3D11 device、immediate context、2-buffer Flip Discard swap chainを所有し、CPU frameをback bufferへuploadしてpresentする。このCPU uploadはM1だけの基準経路であり、M2のhardware pathでは使用しない。
 
-音声はsource sample rateのinterleaved stereo `f32`へ変換し、専用MTA thread上のevent-driven WASAPI Shared clientへ渡す。映像queueは2 frame、音声channelは32 chunk、WASAPI手前の蓄積は約2秒へ制限する。M1のdecode workerはdemuxとvideo/audio software decodeを直列実行するが、COM、FFmpeg型、native frame handleはruntime外へ出さない。M2以降で役割別workerへ分離しても、この安全なcommand/event境界は維持する。
+音声はsource sample rateのinterleaved stereo `f32`へ変換し、専用MTA thread上のevent-driven WASAPI Shared clientへ渡す。映像queueは2 frame、音声channelは32 chunk、WASAPI手前の蓄積は約2秒へ制限する。M1のdecode workerはdemuxとvideo/audio software decodeを直列実行するが、COM、FFmpeg型、native frame handleはruntime外へ出さない。M3の役割別workerでも、この安全なcommand/event境界を維持する。
 
 ### M2 D3D11VA path
 
@@ -78,12 +78,18 @@ hardware frameはruntime内部のFFmpeg `AVFrame`がD3D11 texture arrayとslice�
 
 codec metadata、device、driverのいずれかがD3D11VAを成立させられず、まだhardware frameを公開していない場合だけ入力を開き直してM1 software pathへfallbackする。最初のhardware frame後のdecode errorはfallbackで隠さずsession faultとする。終了時にadapter LUID、hardware frame count、CPU transfer countを記録する。
 
+### M3 synchronization and recovery
+
+demux、video decode、audio decode、WASAPI outputは独立workerとし、stream別packet queue、decoded output queue、presentation queueをすべてboundedにする。demuxは満杯の一方のstreamだけで他方を直ちに停止させず、各streamに同じ上限のpending packetを持って空きqueueを先に進める。packetはdropせず、presentation時刻に遅れたdecoded video frameだけをdropする。audio workerの完了はvideo workerと独立してWASAPIへ通知し、末尾audio drain後はvideo-only clockへ切り替える。
+
+通常再生は`IAudioClock`をmasterとする。running中のdevice positionが供給停止で進まない場合に限り、audio clientのstart/stopとpauseを追跡した単調時計を下限にして永久停止を防ぐ。Seekはgeneration更新後に旧workerと全queueを破棄し、`avformat_seek_file`、decode/discard、audio/video primingを新しいpipelineで行う。default render endpoint変更とD3D11 device removalはtyped eventとしてappへ渡し、現在位置と新しいendpointまたはD3D11 deviceでpipeline全体を再構築する。
+
 ## 5. スレッド・同期契約
 
 - demux、video decode、audio decode、WASAPI outputを役割ごとのworkerに分ける。
 - packet queueはboundedかつblockingとし、packetを便宜的にdropしない。
 - audio sampleは通常再生中にdropしない。decoded video frameだけをpresentation時刻に基づいてdropできる。
-- 音声が存在して再生中なら`IAudioClock`をmasterとする。動画のみ、priming中、停止中は単調増加時計とanchorを使う。
+- 音声が存在して再生中なら`IAudioClock`をmasterとし、running中にdevice clockが停止した区間だけ単調時計を下限にする。動画のみ、priming中、audio drain後は単調時計とanchorを使う。
 - Seekはgeneration更新、demux停止、全queue破棄、`avformat_seek_file`、decoder flush、目標時刻までのdecode/discard、audio/video primingを一つのtransactionとして扱う。
 - すべてのworker結果へgenerationを付け、不一致のpacket、frame、eventを破棄する。
 - device removal、audio endpoint変更、decode failureはtyped session errorとして扱い、復旧可能な場合だけpipelineを再構築する。

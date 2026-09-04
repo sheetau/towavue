@@ -2,6 +2,28 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-04 22:19 JST - implementation / complete M3 seek, synchronization, and resilience
+
+- Trigger: M2 was complete and the owner requested milestone-by-milestone implementation under `AGENTS.md`.
+- Intent: complete M3 without beginning the M4 application shell.
+- Result: playback now uses generation-tagged transactional seek, audio-master and video-only pacing, continuous keyboard seek, pause/resume, late-video drop accounting, default-render-endpoint recovery, and typed D3D11 device-removal recovery. Runtime demux, video decode, audio decode, and WASAPI output run as separate workers behind bounded queues; independent audio drain and a running-clock monotonic floor prevent end-of-stream and underrun stalls.
+- Architecture evidence: a shared decoded queue larger than the D3D11VA surface pool exhausted hardware surfaces, so it was reduced to two items. A first 30-minute run exposed demux head-of-line pressure and an EOF clock stall; bounded per-stream pending packets, independent audio completion, post-drain video clock selection, and the running-clock floor resolved both cases.
+- Changed areas: core time/generation contracts, runtime queue and worker lifecycle, seek/discard decode, WASAPI clock and endpoint notifications, typed graphics recovery, app pacing/controls/metrics, architecture, roadmap, and README.
+- Verification: `cargo fmt --all --check`, workspace all-target Clippy with warnings denied, and workspace all-target tests pass. Release hardware checks on adapter `00000000:0001311b`: H.264 D3D11VA and FFV1 software fallback both reached EOF; pause/resume returned from `Paused` to `Playing`; 100 local 1080p H.264 seeks completed with p95 37.750 ms and maximum 56.991 ms; 30-minute 4K60 H.264/AAC playback presented 107,768 frames, dropped 3 (0.0028%), and measured A/V drift p95 4.772 ms and maximum 35.759 ms.
+- Hardware limitation: changing the owner's default audio endpoint and deliberately removing or resetting the active D3D11 device were not forced because those operations alter external machine state. Notification filtering and generation retention have unit checks; the pipeline replacement and graphics construction primitives used by recovery were exercised separately by repeated seek and hardware playback.
+- Commit: pending.
+- Status: `m3_complete`.
+- Next action: begin M4 with the application shell and command model, then implement Shell-backed folder snapshots without parsing Explorer Bags.
+
+## 2026-09-04 19:49 JST - implementation / begin M3 timing and seek substrate
+
+- Intent: establish the M3 clock and generation primitives before changing worker lifecycle or user controls.
+- Result: added saturating `MediaTime` arithmetic, `PlaybackGeneration`, source timestamps on decoded audio chunks, an `IAudioClock`-backed media position, audio-master video pacing, and decode entry points that seek in AV_TIME_BASE units and discard pre-target output.
+- Scope note: generation-tagged worker replacement, continuous seek controls, endpoint/device recovery, frame-drop metrics, and M3 performance gates remain incomplete.
+- Verification: workspace all-target `cargo check` passes; full M3 checks are pending.
+- Status: `m3_in_progress`.
+- Next action: make `PlaybackSession` restart its bounded decode/audio pipeline per generation, reject stale events, and expose transactional seek to the app.
+
 ## 2026-09-04 19:38 JST - implementation / complete M2 D3D11VA path
 
 - Intent: add the M2 zero-copy hardware path without changing M1 controls, timing, or scope.

@@ -1,4 +1,8 @@
+use std::collections::VecDeque;
 use std::path::Path;
+use std::sync::mpsc::{self, SyncSender, TrySendError};
+use std::thread;
+use std::time::Duration;
 
 use ffmpeg::codec;
 use ffmpeg::format::{self, Pixel, Sample};
@@ -15,6 +19,8 @@ use crate::GraphicsDevice;
 
 const OUTPUT_AUDIO_CHANNELS: usize = 2;
 const BYTES_PER_F32: usize = size_of::<f32>();
+const PACKET_QUEUE_CAPACITY: usize = 32;
+const DECODED_QUEUE_CAPACITY: usize = 2;
 
 /// One tightly packed RGBA frame produced by software decoding.
 #[derive(Debug)]
@@ -50,6 +56,11 @@ pub(crate) enum RuntimeDecodeOutput {
     Audio(AudioChunk),
 }
 
+pub(crate) enum ParallelRuntimeDecodeOutput {
+    Item(RuntimeDecodeOutput),
+    AudioFinished,
+}
+
 /// The fixed packed sample layout supplied to WASAPI for one stream.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AudioFormat {
@@ -60,6 +71,7 @@ pub struct AudioFormat {
 /// One packed interleaved f32 audio block.
 #[derive(Debug)]
 pub struct AudioChunk {
+    pub presentation_time: MediaTime,
     pub format: AudioFormat,
     pub frames: usize,
     pub bytes: Vec<u8>,
@@ -70,6 +82,11 @@ pub struct AudioChunk {
 pub enum DecodeOutput {
     Video(VideoFrame),
     Audio(AudioChunk),
+}
+
+pub(crate) enum ParallelSoftwareDecodeOutput {
+    Item(DecodeOutput),
+    AudioFinished,
 }
 
 /// Counters returned after the input reaches EOF and all decoders are drained.
@@ -92,6 +109,34 @@ pub enum DecodeError {
     ConsumerClosed,
     #[error("D3D11VA is unavailable: {0}")]
     HardwareUnavailable(String),
+    #[error("a decode worker could not start: {0}")]
+    WorkerStart(#[from] std::io::Error),
+    #[error("a decode worker panicked")]
+    WorkerPanicked,
+}
+
+enum ParallelDecodeOutput {
+    SoftwareVideo(VideoFrame),
+    HardwareVideo(HardwareVideoFrame),
+    Audio(AudioChunk),
+    AudioFinished,
+    Failed(DecodeError),
+}
+
+enum ParallelVideoPipeline {
+    Software(VideoPipeline),
+    Hardware(HardwareVideoPipeline),
+}
+
+struct StreamConfig {
+    index: usize,
+    time_base: Rational,
+    parameters: codec::Parameters,
+}
+
+enum ParallelVideoConfig {
+    Software(StreamConfig),
+    Hardware(StreamConfig, GraphicsDevice),
 }
 
 struct VideoPipeline {
@@ -102,7 +147,6 @@ struct VideoPipeline {
 }
 
 struct HardwareVideoPipeline {
-    stream_index: usize,
     time_base: Rational,
     decoder: codec::decoder::Video,
 }
@@ -174,9 +218,11 @@ impl VideoPipeline {
 
 struct AudioPipeline {
     stream_index: usize,
+    time_base: Rational,
     decoder: codec::decoder::Audio,
     resampler: resampling::Context,
     output_format: AudioFormat,
+    next_presentation_time: MediaTime,
 }
 
 impl AudioPipeline {
@@ -189,9 +235,24 @@ impl AudioPipeline {
             let mut decoded = frame::Audio::empty();
             match self.decoder.receive_frame(&mut decoded) {
                 Ok(()) => {
+                    let presentation_time = decoded
+                        .timestamp()
+                        .map_or(self.next_presentation_time, |timestamp| {
+                            timestamp_to_media_time(Some(timestamp), self.time_base)
+                        });
                     let mut converted = frame::Audio::empty();
                     self.resampler.run(&decoded, &mut converted)?;
-                    emit_audio_frame(&converted, self.output_format, emit, summary)?;
+                    self.next_presentation_time =
+                        presentation_time.saturating_add(Duration::from_secs_f64(
+                            converted.samples() as f64 / self.output_format.sample_rate as f64,
+                        ));
+                    emit_audio_frame(
+                        &converted,
+                        presentation_time,
+                        self.output_format,
+                        emit,
+                        summary,
+                    )?;
                 }
                 Err(error) if decoder_is_drained(error) => return Ok(()),
                 Err(error) => return Err(error.into()),
@@ -212,7 +273,18 @@ impl AudioPipeline {
             );
             converted.set_rate(self.output_format.sample_rate);
             let remaining = self.resampler.flush(&mut converted)?;
-            emit_audio_frame(&converted, self.output_format, emit, summary)?;
+            emit_audio_frame(
+                &converted,
+                self.next_presentation_time,
+                self.output_format,
+                emit,
+                summary,
+            )?;
+            self.next_presentation_time =
+                self.next_presentation_time
+                    .saturating_add(Duration::from_secs_f64(
+                        converted.samples() as f64 / self.output_format.sample_rate as f64,
+                    ));
             if remaining.is_none() {
                 break;
             }
@@ -223,6 +295,14 @@ impl AudioPipeline {
 
 pub fn decode_file(
     path: &Path,
+    emit: impl FnMut(DecodeOutput) -> bool,
+) -> Result<DecodeSummary, DecodeError> {
+    decode_file_from(path, MediaTime::ZERO, emit)
+}
+
+pub(crate) fn decode_file_from(
+    path: &Path,
+    minimum_time: MediaTime,
     mut emit: impl FnMut(DecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
     ffmpeg::init()?;
@@ -232,6 +312,14 @@ pub fn decode_file(
     if video.is_none() && audio.is_none() {
         return Err(DecodeError::NoMediaStream);
     }
+    seek_input(&mut input, minimum_time)?;
+    let mut filtered_emit = |output| {
+        let presentation_time = match &output {
+            DecodeOutput::Video(frame) => frame.presentation_time,
+            DecodeOutput::Audio(chunk) => chunk.presentation_time,
+        };
+        minimum_time > MediaTime::ZERO && presentation_time < minimum_time || emit(output)
+    };
 
     let mut summary = DecodeSummary::default();
     for (stream, packet) in input.packets() {
@@ -239,79 +327,382 @@ pub fn decode_file(
             && stream.index() == pipeline.stream_index
         {
             pipeline.decoder.send_packet(&packet)?;
-            pipeline.receive(&mut emit, &mut summary)?;
+            pipeline.receive(&mut filtered_emit, &mut summary)?;
         } else if let Some(pipeline) = audio.as_mut()
             && stream.index() == pipeline.stream_index
         {
             pipeline.decoder.send_packet(&packet)?;
-            pipeline.receive(&mut emit, &mut summary)?;
+            pipeline.receive(&mut filtered_emit, &mut summary)?;
         }
     }
 
     if let Some(pipeline) = video.as_mut() {
         pipeline.decoder.send_eof()?;
-        pipeline.receive(&mut emit, &mut summary)?;
+        pipeline.receive(&mut filtered_emit, &mut summary)?;
     }
     if let Some(pipeline) = audio.as_mut() {
         pipeline.decoder.send_eof()?;
-        pipeline.receive(&mut emit, &mut summary)?;
-        pipeline.flush_resampler(&mut emit, &mut summary)?;
+        pipeline.receive(&mut filtered_emit, &mut summary)?;
+        pipeline.flush_resampler(&mut filtered_emit, &mut summary)?;
     }
 
     Ok(summary)
 }
 
-pub(crate) fn decode_file_hardware(
+pub(crate) fn decode_file_parallel(
+    path: &Path,
+    minimum_time: MediaTime,
+    mut emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
+) -> Result<DecodeSummary, DecodeError> {
+    decode_file_parallel_inner(path, None, minimum_time, |output| match output {
+        ParallelDecodeOutput::SoftwareVideo(frame) => emit(ParallelSoftwareDecodeOutput::Item(
+            DecodeOutput::Video(frame),
+        )),
+        ParallelDecodeOutput::Audio(chunk) => emit(ParallelSoftwareDecodeOutput::Item(
+            DecodeOutput::Audio(chunk),
+        )),
+        ParallelDecodeOutput::AudioFinished => emit(ParallelSoftwareDecodeOutput::AudioFinished),
+        ParallelDecodeOutput::HardwareVideo(_) | ParallelDecodeOutput::Failed(_) => {
+            unreachable!("parallel decode output is handled internally")
+        }
+    })
+}
+
+pub(crate) fn decode_file_hardware_parallel(
     path: &Path,
     device: &GraphicsDevice,
-    mut emit: impl FnMut(RuntimeDecodeOutput) -> bool,
+    minimum_time: MediaTime,
+    mut emit: impl FnMut(ParallelRuntimeDecodeOutput) -> bool,
+) -> Result<DecodeSummary, DecodeError> {
+    decode_file_parallel_inner(path, Some(device), minimum_time, |output| match output {
+        ParallelDecodeOutput::HardwareVideo(frame) => emit(ParallelRuntimeDecodeOutput::Item(
+            RuntimeDecodeOutput::Video(frame),
+        )),
+        ParallelDecodeOutput::Audio(chunk) => emit(ParallelRuntimeDecodeOutput::Item(
+            RuntimeDecodeOutput::Audio(chunk),
+        )),
+        ParallelDecodeOutput::AudioFinished => emit(ParallelRuntimeDecodeOutput::AudioFinished),
+        ParallelDecodeOutput::SoftwareVideo(_) | ParallelDecodeOutput::Failed(_) => {
+            unreachable!("parallel decode output is handled internally")
+        }
+    })
+}
+
+fn decode_file_parallel_inner(
+    path: &Path,
+    hardware_device: Option<&GraphicsDevice>,
+    minimum_time: MediaTime,
+    mut emit: impl FnMut(ParallelDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
     ffmpeg::init()?;
     let mut input = format::input(path)?;
-    let mut video = create_hardware_video_pipeline(&input, device)?;
-    let mut audio = create_audio_pipeline(&input)?;
-    let mut summary = DecodeSummary::default();
+    let video_config = best_stream_config(&input, Type::Video);
+    let video = match (hardware_device, video_config) {
+        (Some(device), Some(config)) => Some(ParallelVideoConfig::Hardware(config, device.clone())),
+        (Some(_), None) => {
+            return Err(DecodeError::HardwareUnavailable(
+                "input has no video stream".to_owned(),
+            ));
+        }
+        (None, config) => config.map(ParallelVideoConfig::Software),
+    };
+    let audio = best_stream_config(&input, Type::Audio);
+    if video.is_none() && audio.is_none() {
+        return Err(DecodeError::NoMediaStream);
+    }
+    seek_input(&mut input, minimum_time)?;
+    run_parallel_workers(input, video, audio, minimum_time, &mut emit)
+}
 
-    for (stream, packet) in input.packets() {
-        if stream.index() == video.stream_index {
-            if let Err(error) = video.decoder.send_packet(&packet) {
+fn run_parallel_workers(
+    mut input: format::context::Input,
+    video: Option<ParallelVideoConfig>,
+    audio: Option<StreamConfig>,
+    minimum_time: MediaTime,
+    emit: &mut impl FnMut(ParallelDecodeOutput) -> bool,
+) -> Result<DecodeSummary, DecodeError> {
+    let video_stream_index = video.as_ref().map(|video| match video {
+        ParallelVideoConfig::Software(config) => config.index,
+        ParallelVideoConfig::Hardware(config, _) => config.index,
+    });
+    let audio_stream_index = audio.as_ref().map(|config| config.index);
+    let (video_packet_tx, video_packet_rx) = mpsc::sync_channel(PACKET_QUEUE_CAPACITY);
+    let (audio_packet_tx, audio_packet_rx) = mpsc::sync_channel(PACKET_QUEUE_CAPACITY);
+    let (output_tx, output_rx) = mpsc::sync_channel(DECODED_QUEUE_CAPACITY);
+
+    thread::scope(|scope| {
+        let demux_handle = thread::Builder::new()
+            .name("towavue-demux".to_owned())
+            .spawn_scoped(scope, move || {
+                let mut pending_video = VecDeque::new();
+                let mut pending_audio = VecDeque::new();
+                for (stream, packet) in input.packets() {
+                    if !flush_available_packets(&video_packet_tx, &mut pending_video)
+                        || !flush_available_packets(&audio_packet_tx, &mut pending_audio)
+                    {
+                        break;
+                    }
+                    let routed = if Some(stream.index()) == video_stream_index {
+                        queue_demux_packet(&video_packet_tx, &mut pending_video, packet)
+                    } else if Some(stream.index()) == audio_stream_index {
+                        queue_demux_packet(&audio_packet_tx, &mut pending_audio, packet)
+                    } else {
+                        true
+                    };
+                    if !routed {
+                        break;
+                    }
+                }
+                while !pending_video.is_empty() || !pending_audio.is_empty() {
+                    if !send_one_pending_packet(&video_packet_tx, &mut pending_video)
+                        || !send_one_pending_packet(&audio_packet_tx, &mut pending_audio)
+                    {
+                        break;
+                    }
+                }
+            })?;
+
+        let video_handle = video.map(|video| {
+            let video_output_tx = output_tx.clone();
+            thread::Builder::new()
+                .name("towavue-video-decode".to_owned())
+                .spawn_scoped(scope, move || {
+                    if let Err(error) =
+                        run_parallel_video_worker(video, video_packet_rx, &video_output_tx)
+                    {
+                        let _ = video_output_tx.send(ParallelDecodeOutput::Failed(error));
+                    }
+                })
+        });
+
+        let audio_handle = audio.map(|audio| {
+            let audio_output_tx = output_tx.clone();
+            thread::Builder::new()
+                .name("towavue-audio-decode".to_owned())
+                .spawn_scoped(scope, move || {
+                    if let Err(error) =
+                        run_parallel_audio_worker(audio, audio_packet_rx, &audio_output_tx)
+                    {
+                        let _ = audio_output_tx.send(ParallelDecodeOutput::Failed(error));
+                    }
+                })
+        });
+        drop(output_tx);
+
+        let mut summary = DecodeSummary::default();
+        let mut result = Ok(());
+        for output in output_rx {
+            if let ParallelDecodeOutput::Failed(error) = output {
+                result = Err(error);
+                break;
+            }
+            if matches!(output, ParallelDecodeOutput::AudioFinished) {
+                if !emit(output) {
+                    result = Err(DecodeError::ConsumerClosed);
+                    break;
+                }
+                continue;
+            }
+            let presentation_time = match &output {
+                ParallelDecodeOutput::SoftwareVideo(frame) => frame.presentation_time,
+                ParallelDecodeOutput::HardwareVideo(frame) => frame.presentation_time,
+                ParallelDecodeOutput::Audio(chunk) => chunk.presentation_time,
+                ParallelDecodeOutput::AudioFinished | ParallelDecodeOutput::Failed(_) => {
+                    unreachable!()
+                }
+            };
+            match &output {
+                ParallelDecodeOutput::SoftwareVideo(_) | ParallelDecodeOutput::HardwareVideo(_) => {
+                    summary.video_frames += 1
+                }
+                ParallelDecodeOutput::Audio(chunk) => summary.audio_frames += chunk.frames as u64,
+                ParallelDecodeOutput::AudioFinished | ParallelDecodeOutput::Failed(_) => {
+                    unreachable!()
+                }
+            }
+            let accepted =
+                minimum_time > MediaTime::ZERO && presentation_time < minimum_time || emit(output);
+            if !accepted {
+                result = Err(DecodeError::ConsumerClosed);
+                break;
+            }
+        }
+
+        let demux_joined = demux_handle.join().is_ok();
+        let video_joined = match video_handle {
+            Some(Ok(handle)) => handle.join().is_ok(),
+            Some(Err(error)) => return Err(error.into()),
+            None => true,
+        };
+        let audio_joined = match audio_handle {
+            Some(Ok(handle)) => handle.join().is_ok(),
+            Some(Err(error)) => return Err(error.into()),
+            None => true,
+        };
+        if !demux_joined || !video_joined || !audio_joined {
+            return Err(DecodeError::WorkerPanicked);
+        }
+        result.map(|()| summary)
+    })
+}
+
+fn queue_demux_packet(
+    sender: &SyncSender<ffmpeg::Packet>,
+    pending: &mut VecDeque<ffmpeg::Packet>,
+    packet: ffmpeg::Packet,
+) -> bool {
+    if pending.is_empty() {
+        match sender.try_send(packet) {
+            Ok(()) => return true,
+            Err(TrySendError::Full(packet)) => pending.push_back(packet),
+            Err(TrySendError::Disconnected(_)) => return false,
+        }
+    } else {
+        pending.push_back(packet);
+    }
+    if pending.len() >= PACKET_QUEUE_CAPACITY {
+        send_one_pending_packet(sender, pending)
+    } else {
+        true
+    }
+}
+
+fn flush_available_packets(
+    sender: &SyncSender<ffmpeg::Packet>,
+    pending: &mut VecDeque<ffmpeg::Packet>,
+) -> bool {
+    while let Some(packet) = pending.pop_front() {
+        match sender.try_send(packet) {
+            Ok(()) => {}
+            Err(TrySendError::Full(packet)) => {
+                pending.push_front(packet);
+                return true;
+            }
+            Err(TrySendError::Disconnected(_)) => return false,
+        }
+    }
+    true
+}
+
+fn send_one_pending_packet(
+    sender: &SyncSender<ffmpeg::Packet>,
+    pending: &mut VecDeque<ffmpeg::Packet>,
+) -> bool {
+    pending
+        .pop_front()
+        .is_none_or(|packet| sender.send(packet).is_ok())
+}
+
+fn run_parallel_video_worker(
+    config: ParallelVideoConfig,
+    packets: mpsc::Receiver<ffmpeg::Packet>,
+    output: &SyncSender<ParallelDecodeOutput>,
+) -> Result<(), DecodeError> {
+    let mut pipeline = match config {
+        ParallelVideoConfig::Software(config) => {
+            ParallelVideoPipeline::Software(create_video_pipeline_from(config)?)
+        }
+        ParallelVideoConfig::Hardware(config, device) => {
+            ParallelVideoPipeline::Hardware(create_hardware_video_pipeline_from(config, &device)?)
+        }
+    };
+    let mut summary = DecodeSummary::default();
+    for packet in packets {
+        match &mut pipeline {
+            ParallelVideoPipeline::Software(pipeline) => {
+                pipeline.decoder.send_packet(&packet)?;
+                pipeline.receive(
+                    &mut |output_frame| match output_frame {
+                        DecodeOutput::Video(frame) => output
+                            .send(ParallelDecodeOutput::SoftwareVideo(frame))
+                            .is_ok(),
+                        DecodeOutput::Audio(_) => unreachable!("video worker emitted audio"),
+                    },
+                    &mut summary,
+                )?;
+            }
+            ParallelVideoPipeline::Hardware(pipeline) => {
+                if let Err(error) = pipeline.decoder.send_packet(&packet) {
+                    if summary.video_frames == 0 {
+                        return Err(DecodeError::HardwareUnavailable(error.to_string()));
+                    }
+                    return Err(error.into());
+                }
+                pipeline.receive(
+                    &mut |output_frame| match output_frame {
+                        RuntimeDecodeOutput::Video(frame) => output
+                            .send(ParallelDecodeOutput::HardwareVideo(frame))
+                            .is_ok(),
+                        RuntimeDecodeOutput::Audio(_) => unreachable!("video worker emitted audio"),
+                    },
+                    &mut summary,
+                )?;
+            }
+        }
+    }
+    match &mut pipeline {
+        ParallelVideoPipeline::Software(pipeline) => {
+            pipeline.decoder.send_eof()?;
+            pipeline.receive(
+                &mut |output_frame| match output_frame {
+                    DecodeOutput::Video(frame) => output
+                        .send(ParallelDecodeOutput::SoftwareVideo(frame))
+                        .is_ok(),
+                    DecodeOutput::Audio(_) => unreachable!("video worker emitted audio"),
+                },
+                &mut summary,
+            )
+        }
+        ParallelVideoPipeline::Hardware(pipeline) => {
+            if let Err(error) = pipeline.decoder.send_eof() {
                 if summary.video_frames == 0 {
                     return Err(DecodeError::HardwareUnavailable(error.to_string()));
                 }
                 return Err(error.into());
             }
-            video.receive(&mut emit, &mut summary)?;
-        } else if let Some(pipeline) = audio.as_mut()
-            && stream.index() == pipeline.stream_index
-        {
-            pipeline.decoder.send_packet(&packet)?;
             pipeline.receive(
-                &mut |output| match output {
-                    DecodeOutput::Audio(chunk) => emit(RuntimeDecodeOutput::Audio(chunk)),
-                    DecodeOutput::Video(_) => unreachable!("audio pipeline emitted video"),
+                &mut |output_frame| match output_frame {
+                    RuntimeDecodeOutput::Video(frame) => output
+                        .send(ParallelDecodeOutput::HardwareVideo(frame))
+                        .is_ok(),
+                    RuntimeDecodeOutput::Audio(_) => unreachable!("video worker emitted audio"),
                 },
                 &mut summary,
-            )?;
+            )
         }
     }
+}
 
-    if let Err(error) = video.decoder.send_eof() {
-        if summary.video_frames == 0 {
-            return Err(DecodeError::HardwareUnavailable(error.to_string()));
-        }
-        return Err(error.into());
-    }
-    video.receive(&mut emit, &mut summary)?;
-    if let Some(pipeline) = audio.as_mut() {
-        pipeline.decoder.send_eof()?;
-        let mut emit_audio = |output| match output {
-            DecodeOutput::Audio(chunk) => emit(RuntimeDecodeOutput::Audio(chunk)),
-            DecodeOutput::Video(_) => unreachable!("audio pipeline emitted video"),
-        };
+fn run_parallel_audio_worker(
+    config: StreamConfig,
+    packets: mpsc::Receiver<ffmpeg::Packet>,
+    output: &SyncSender<ParallelDecodeOutput>,
+) -> Result<(), DecodeError> {
+    let mut pipeline = create_audio_pipeline_from(config)?;
+    let mut summary = DecodeSummary::default();
+    let mut emit_audio = |decoded| match decoded {
+        DecodeOutput::Audio(chunk) => output.send(ParallelDecodeOutput::Audio(chunk)).is_ok(),
+        DecodeOutput::Video(_) => unreachable!("audio worker emitted video"),
+    };
+    for packet in packets {
+        pipeline.decoder.send_packet(&packet)?;
         pipeline.receive(&mut emit_audio, &mut summary)?;
-        pipeline.flush_resampler(&mut emit_audio, &mut summary)?;
     }
-    Ok(summary)
+    pipeline.decoder.send_eof()?;
+    pipeline.receive(&mut emit_audio, &mut summary)?;
+    pipeline.flush_resampler(&mut emit_audio, &mut summary)?;
+    output
+        .send(ParallelDecodeOutput::AudioFinished)
+        .map_err(|_| DecodeError::ConsumerClosed)
+}
+
+fn seek_input(input: &mut format::context::Input, target: MediaTime) -> Result<(), DecodeError> {
+    if target <= MediaTime::ZERO {
+        return Ok(());
+    }
+    let timestamp_microseconds = target.as_nanoseconds() / 1_000;
+    input.seek(timestamp_microseconds, ..timestamp_microseconds)?;
+    Ok(())
 }
 
 pub(crate) fn probe_audio_format(path: &Path) -> Result<Option<AudioFormat>, DecodeError> {
@@ -323,12 +714,13 @@ pub(crate) fn probe_audio_format(path: &Path) -> Result<Option<AudioFormat>, Dec
 fn create_video_pipeline(
     input: &format::context::Input,
 ) -> Result<Option<VideoPipeline>, DecodeError> {
-    let Some(stream) = input.streams().best(Type::Video) else {
-        return Ok(None);
-    };
-    let stream_index = stream.index();
-    let time_base = stream.time_base();
-    let context = codec::context::Context::from_parameters(stream.parameters())?;
+    best_stream_config(input, Type::Video)
+        .map(create_video_pipeline_from)
+        .transpose()
+}
+
+fn create_video_pipeline_from(config: StreamConfig) -> Result<VideoPipeline, DecodeError> {
+    let context = codec::context::Context::from_parameters(config.parameters)?;
     let decoder = context.decoder().video()?;
     let scaler = scaling::Context::get(
         decoder.format(),
@@ -339,25 +731,19 @@ fn create_video_pipeline(
         decoder.height(),
         Flags::BILINEAR,
     )?;
-    Ok(Some(VideoPipeline {
-        stream_index,
-        time_base,
+    Ok(VideoPipeline {
+        stream_index: config.index,
+        time_base: config.time_base,
         decoder,
         scaler,
-    }))
+    })
 }
 
-fn create_hardware_video_pipeline(
-    input: &format::context::Input,
+fn create_hardware_video_pipeline_from(
+    config: StreamConfig,
     device: &GraphicsDevice,
 ) -> Result<HardwareVideoPipeline, DecodeError> {
-    let stream = input
-        .streams()
-        .best(Type::Video)
-        .ok_or_else(|| DecodeError::HardwareUnavailable("input has no video stream".to_owned()))?;
-    let stream_index = stream.index();
-    let time_base = stream.time_base();
-    let mut context = codec::context::Context::from_parameters(stream.parameters())?;
+    let mut context = codec::context::Context::from_parameters(config.parameters)?;
     if !codec_supports_d3d11va(&context) {
         return Err(DecodeError::HardwareUnavailable(format!(
             "codec {:?} does not expose a D3D11VA configuration",
@@ -367,8 +753,7 @@ fn create_hardware_video_pipeline(
     configure_d3d11va(&mut context, device)?;
     let decoder = context.decoder().video()?;
     Ok(HardwareVideoPipeline {
-        stream_index,
-        time_base,
+        time_base: config.time_base,
         decoder,
     })
 }
@@ -455,11 +840,13 @@ unsafe extern "C" fn select_d3d11_pixel_format(
 fn create_audio_pipeline(
     input: &format::context::Input,
 ) -> Result<Option<AudioPipeline>, DecodeError> {
-    let Some(stream) = input.streams().best(Type::Audio) else {
-        return Ok(None);
-    };
-    let stream_index = stream.index();
-    let context = codec::context::Context::from_parameters(stream.parameters())?;
+    best_stream_config(input, Type::Audio)
+        .map(create_audio_pipeline_from)
+        .transpose()
+}
+
+fn create_audio_pipeline_from(config: StreamConfig) -> Result<AudioPipeline, DecodeError> {
+    let context = codec::context::Context::from_parameters(config.parameters)?;
     let decoder = context.decoder().audio()?;
     let source_layout = if decoder.channel_layout().is_empty() {
         ChannelLayout::default(decoder.channels() as i32)
@@ -479,12 +866,23 @@ fn create_audio_pipeline(
         ChannelLayout::STEREO,
         sample_rate,
     )?;
-    Ok(Some(AudioPipeline {
-        stream_index,
+    Ok(AudioPipeline {
+        stream_index: config.index,
+        time_base: config.time_base,
         decoder,
         resampler,
         output_format,
-    }))
+        next_presentation_time: MediaTime::ZERO,
+    })
+}
+
+fn best_stream_config(input: &format::context::Input, media_type: Type) -> Option<StreamConfig> {
+    let stream = input.streams().best(media_type)?;
+    Some(StreamConfig {
+        index: stream.index(),
+        time_base: stream.time_base(),
+        parameters: stream.parameters(),
+    })
 }
 
 fn copy_video_frame(
@@ -518,6 +916,7 @@ fn copy_video_frame(
 
 fn emit_audio_frame(
     frame: &frame::Audio,
+    presentation_time: MediaTime,
     format: AudioFormat,
     emit: &mut impl FnMut(DecodeOutput) -> bool,
     summary: &mut DecodeSummary,
@@ -533,6 +932,7 @@ fn emit_audio_frame(
     let bytes = frame.data(0)[..byte_count].to_vec();
     let frames = frame.samples();
     if !emit(DecodeOutput::Audio(AudioChunk {
+        presentation_time,
         format,
         frames,
         bytes,
@@ -561,10 +961,16 @@ fn decoder_is_drained(error: ffmpeg::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use ffmpeg_next::Rational;
     use ffmpeg_next::ffi::AVPixelFormat;
+    use towavue_core::MediaTime;
 
-    use super::{select_d3d11_pixel_format, timestamp_to_media_time};
+    use super::{
+        DecodeOutput, ParallelSoftwareDecodeOutput, decode_file_from, select_d3d11_pixel_format,
+        timestamp_to_media_time,
+    };
 
     #[test]
     fn timestamp_conversion_uses_stream_time_base() {
@@ -591,5 +997,65 @@ mod tests {
         let selected = unsafe { select_d3d11_pixel_format(std::ptr::null_mut(), formats.as_ptr()) };
 
         assert_eq!(selected, AVPixelFormat::AV_PIX_FMT_D3D11);
+    }
+
+    #[test]
+    fn seek_discards_output_before_target() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("tests")
+            .join("generated")
+            .join("m1")
+            .join("h264-aac.mp4");
+        assert!(path.is_file(), "run scripts/generate-m1-fixtures.ps1");
+        let target = MediaTime::from_nanoseconds(1_000_000_000);
+        let mut output_count = 0;
+
+        decode_file_from(&path, target, |output| {
+            let presentation_time = match output {
+                DecodeOutput::Video(frame) => frame.presentation_time,
+                DecodeOutput::Audio(chunk) => chunk.presentation_time,
+            };
+            assert!(presentation_time >= target);
+            output_count += 1;
+            true
+        })
+        .expect("seek decode must succeed");
+
+        assert!(output_count > 0);
+    }
+
+    #[test]
+    fn parallel_workers_decode_both_streams() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("tests")
+            .join("generated")
+            .join("m1")
+            .join("h264-aac.mp4");
+        assert!(path.is_file(), "run scripts/generate-m1-fixtures.ps1");
+        let mut video_frames = 0;
+        let mut audio_frames = 0;
+        let mut audio_finished = 0;
+
+        let summary = super::decode_file_parallel(&path, MediaTime::ZERO, |output| {
+            match output {
+                ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(_)) => video_frames += 1,
+                ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
+                    audio_frames += chunk.frames as u64;
+                }
+                ParallelSoftwareDecodeOutput::AudioFinished => audio_finished += 1,
+            }
+            true
+        })
+        .expect("parallel decode must succeed");
+
+        assert_eq!(summary.video_frames, video_frames);
+        assert_eq!(summary.audio_frames, audio_frames);
+        assert_eq!(video_frames, 60);
+        assert_eq!(audio_frames, 96_000);
+        assert_eq!(audio_finished, 1);
     }
 }

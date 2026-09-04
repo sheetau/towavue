@@ -6,8 +6,10 @@ use std::error::Error;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use towavue_core::{MediaTime, PlaybackState};
-use towavue_runtime_windows::{AudioOutputEvent, FrameRenderer, PlaybackEvent, PlaybackSession};
+use towavue_core::{MediaTime, PlaybackGeneration, PlaybackState};
+use towavue_runtime_windows::{
+    AudioOutputEvent, FrameRenderer, PlaybackEvent, PlaybackSession, RenderError,
+};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -16,6 +18,9 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 const AUDIO_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const VIDEO_EARLY_TOLERANCE: Duration = Duration::from_millis(5);
+const KEYBOARD_SEEK_STEP: Duration = Duration::from_secs(5);
+const VIDEO_LATE_TOLERANCE: Duration = Duration::from_millis(40);
 
 fn main() -> Result<(), Box<dyn Error>> {
     let path = parse_media_path()?;
@@ -73,6 +78,12 @@ impl PlaybackClock {
             .saturating_sub(self.media_anchor.as_nanoseconds());
         self.wall_anchor + Duration::from_nanos(delta.max(0) as u64)
     }
+
+    fn position(&self) -> MediaTime {
+        let now = self.paused_at.unwrap_or_else(Instant::now);
+        self.media_anchor
+            .saturating_add(now.saturating_duration_since(self.wall_anchor))
+    }
 }
 
 struct Application<N> {
@@ -87,11 +98,15 @@ struct Application<N> {
     decode_finished: bool,
     audio_drained: bool,
     metrics_recorded: bool,
+    generation: PlaybackGeneration,
+    pending_seek_started: Option<Instant>,
+    seek_latencies: Vec<Duration>,
+    drift_samples: Vec<Duration>,
 }
 
 impl<N> Application<N>
 where
-    N: Fn(PlaybackEvent) + Send + 'static,
+    N: Fn(PlaybackEvent) + Send + Sync + 'static,
 {
     fn new(path: PathBuf, notify: N) -> Self {
         Self {
@@ -106,6 +121,10 @@ where
             decode_finished: false,
             audio_drained: false,
             metrics_recorded: false,
+            generation: PlaybackGeneration::INITIAL,
+            pending_seek_started: None,
+            seek_latencies: Vec::new(),
+            drift_samples: Vec::new(),
         }
     }
 
@@ -122,6 +141,7 @@ where
             .take()
             .ok_or("playback notification callback is unavailable")?;
         let session = PlaybackSession::open(&self.path, graphics_device, notify)?;
+        self.generation = session.generation();
         self.audio_drained = !session.has_audio();
         self.state = PlaybackState::Playing;
         self.window = Some(window);
@@ -132,16 +152,40 @@ where
     }
 
     fn handle_playback_event(&mut self, event: PlaybackEvent) {
+        if event.generation() != self.generation {
+            return;
+        }
         match event {
-            PlaybackEvent::VideoReady => self.load_next_frame(),
-            PlaybackEvent::DecodePathSelected(path) => {
+            PlaybackEvent::VideoReady(_) => {
+                if let Some(started) = self.pending_seek_started.take() {
+                    let latency = started.elapsed();
+                    self.seek_latencies.push(latency);
+                    eprintln!(
+                        "towavue: seek_latency_ms={:.3}",
+                        latency.as_secs_f64() * 1000.0
+                    );
+                }
+                self.load_next_frame();
+            }
+            PlaybackEvent::DecodePathSelected(_, path) => {
                 eprintln!("towavue: decode path selected: {path:?}");
             }
-            PlaybackEvent::DecodeFinished => {
+            PlaybackEvent::DecodeFinished(_) => {
                 self.decode_finished = true;
                 self.check_eof();
             }
-            PlaybackEvent::Failed(error) => self.fail(error),
+            PlaybackEvent::DeviceRemoved(_, reason) => {
+                eprintln!("towavue: recovering removed D3D11 device: {reason}");
+                let position = self
+                    .session
+                    .as_ref()
+                    .and_then(PlaybackSession::audio_position)
+                    .or(self.pending_time)
+                    .or_else(|| self.clock.as_ref().map(PlaybackClock::position))
+                    .unwrap_or(MediaTime::ZERO);
+                self.recover_graphics_device(position);
+            }
+            PlaybackEvent::Failed(_, error) => self.fail(error),
         }
     }
 
@@ -164,13 +208,26 @@ where
     }
 
     fn present_pending_frame(&mut self) {
-        if self.pending_time.take().is_none() {
+        let Some(video_time) = self.pending_time.take() else {
             return;
+        };
+        if let Some(audio_time) = self.audio_master_position() {
+            self.drift_samples.push(Duration::from_nanos(
+                video_time
+                    .as_nanoseconds()
+                    .abs_diff(audio_time.as_nanoseconds()),
+            ));
         }
         if let (Some(session), Some(renderer)) = (self.session.as_mut(), self.renderer.as_mut())
             && let Err(error) = session.present_pending(renderer)
         {
-            self.fail(error.to_string());
+            match error {
+                RenderError::DeviceRemoved(reason) => {
+                    eprintln!("towavue: recovering removed D3D11 device: {reason}");
+                    self.recover_graphics_device(video_time);
+                }
+                other => self.fail(other.to_string()),
+            }
             return;
         }
         self.load_next_frame();
@@ -183,7 +240,7 @@ where
             PlaybackState::Paused => false,
             _ => return,
         };
-        let Some(session) = self.session.as_ref() else {
+        let Some(session) = self.session.as_mut() else {
             return;
         };
         if let Err(error) = session.set_paused(paused) {
@@ -201,6 +258,80 @@ where
         self.refresh_title();
     }
 
+    fn seek_relative(&mut self, forward: bool) {
+        if !matches!(self.state, PlaybackState::Playing | PlaybackState::Paused) {
+            return;
+        }
+        let position = self
+            .session
+            .as_ref()
+            .and_then(PlaybackSession::audio_position)
+            .or_else(|| self.clock.as_ref().map(PlaybackClock::position))
+            .unwrap_or(MediaTime::ZERO);
+        let target = if forward {
+            position.saturating_add(KEYBOARD_SEEK_STEP)
+        } else {
+            position
+                .saturating_sub(KEYBOARD_SEEK_STEP)
+                .max(MediaTime::ZERO)
+        };
+        self.seek_to(target);
+    }
+
+    fn seek_to(&mut self, target: MediaTime) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        match session.seek(target) {
+            Ok(generation) => {
+                self.generation = generation;
+                self.pending_time = None;
+                self.clock = None;
+                self.decode_finished = false;
+                self.audio_drained = !session.has_audio();
+                self.metrics_recorded = false;
+                self.pending_seek_started = Some(Instant::now());
+            }
+            Err(error) => self.fail(error.to_string()),
+        }
+    }
+
+    fn recover_graphics_device(&mut self, fallback_position: MediaTime) {
+        let position = self
+            .session
+            .as_ref()
+            .and_then(PlaybackSession::audio_position)
+            .unwrap_or(fallback_position);
+        let Some(window) = &self.window else {
+            self.fail("window was unavailable during graphics recovery".to_owned());
+            return;
+        };
+        let renderer = match FrameRenderer::new(window) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                self.fail(format!("D3D11 device recovery failed: {error}"));
+                return;
+            }
+        };
+        let graphics_device = renderer.graphics_device();
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        match session.replace_graphics_device(graphics_device, position) {
+            Ok(generation) => {
+                self.renderer = Some(renderer);
+                self.generation = generation;
+                self.pending_time = None;
+                self.clock = None;
+                self.decode_finished = false;
+                self.audio_drained = !session.has_audio();
+                self.metrics_recorded = false;
+                self.pending_seek_started = Some(Instant::now());
+            }
+            Err(error) => self.fail(format!("D3D11 pipeline recovery failed: {error}")),
+        }
+    }
+
     fn poll_audio(&mut self) {
         let event = self
             .session
@@ -211,8 +342,26 @@ where
                 self.audio_drained = true;
                 self.check_eof();
             }
+            Some(AudioOutputEvent::EndpointChanged) => {
+                let position = self
+                    .session
+                    .as_ref()
+                    .and_then(PlaybackSession::audio_position)
+                    .unwrap_or(MediaTime::ZERO);
+                self.seek_to(position);
+            }
             Some(AudioOutputEvent::Failed(error)) => self.fail(error),
             None => {}
+        }
+    }
+
+    fn audio_master_position(&self) -> Option<MediaTime> {
+        if self.audio_drained {
+            None
+        } else {
+            self.session
+                .as_ref()
+                .and_then(PlaybackSession::audio_position)
         }
     }
 
@@ -223,13 +372,16 @@ where
                 if let Some(session) = &self.session {
                     let metrics = session.metrics();
                     eprintln!(
-                        "towavue: adapter={:08x}:{:08x} hardware_frames={} cpu_transfers={}",
+                        "towavue: adapter={:08x}:{:08x} hardware_frames={} cpu_transfers={} presented={} dropped={}",
                         metrics.adapter_luid.high_part,
                         metrics.adapter_luid.low_part,
                         metrics.hardware_frame_count,
-                        metrics.cpu_transfer_count
+                        metrics.cpu_transfer_count,
+                        metrics.presented_frame_count,
+                        metrics.dropped_frame_count
                     );
                 }
+                self.report_timing_metrics();
                 self.metrics_recorded = true;
             }
             self.refresh_title();
@@ -240,6 +392,28 @@ where
         eprintln!("towavue: {error}");
         self.state = PlaybackState::Faulted;
         self.refresh_title();
+    }
+
+    fn report_timing_metrics(&self) {
+        if !self.seek_latencies.is_empty() {
+            eprintln!(
+                "towavue: seek_p95_ms={:.3}",
+                percentile_95(&self.seek_latencies).as_secs_f64() * 1000.0
+            );
+        }
+        if !self.drift_samples.is_empty() {
+            eprintln!(
+                "towavue: av_drift_p95_ms={:.3} av_drift_max_ms={:.3}",
+                percentile_95(&self.drift_samples).as_secs_f64() * 1000.0,
+                self.drift_samples
+                    .iter()
+                    .max()
+                    .copied()
+                    .unwrap_or_default()
+                    .as_secs_f64()
+                    * 1000.0
+            );
+        }
     }
 
     fn refresh_title(&self) {
@@ -259,10 +433,28 @@ where
     fn schedule(&mut self, event_loop: &ActiveEventLoop) {
         self.poll_audio();
         if self.state == PlaybackState::Playing {
-            if let (Some(window), Some(presentation_time), Some(clock)) =
-                (&self.window, self.pending_time, &self.clock)
-            {
-                let due_at = clock.due_at(presentation_time);
+            if let Some(audio_position) = self.audio_master_position() {
+                let cutoff = audio_position.saturating_sub(VIDEO_LATE_TOLERANCE);
+                if let Some(session) = self.session.as_mut()
+                    && session.drop_video_before(cutoff) > 0
+                {
+                    self.pending_time = session.pending_video_time();
+                }
+            }
+            if let (Some(window), Some(presentation_time)) = (&self.window, self.pending_time) {
+                let due_at = if let Some(audio_position) = self.audio_master_position() {
+                    let threshold = audio_position.saturating_add(VIDEO_EARLY_TOLERANCE);
+                    let wait_nanoseconds = presentation_time
+                        .as_nanoseconds()
+                        .saturating_sub(threshold.as_nanoseconds())
+                        .max(0) as u64;
+                    Instant::now()
+                        + Duration::from_nanos(wait_nanoseconds).min(AUDIO_EVENT_POLL_INTERVAL)
+                } else if let Some(clock) = &self.clock {
+                    clock.due_at(presentation_time)
+                } else {
+                    Instant::now()
+                };
                 if due_at <= Instant::now() {
                     window.request_redraw();
                     event_loop.set_control_flow(ControlFlow::Wait);
@@ -282,9 +474,16 @@ where
     }
 }
 
+fn percentile_95(samples: &[Duration]) -> Duration {
+    let mut ordered = samples.to_vec();
+    ordered.sort_unstable();
+    let index = (ordered.len() * 95).div_ceil(100).saturating_sub(1);
+    ordered[index]
+}
+
 impl<N> ApplicationHandler<PlaybackEvent> for Application<N>
 where
-    N: Fn(PlaybackEvent) + Send + 'static,
+    N: Fn(PlaybackEvent) + Send + Sync + 'static,
 {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none()
@@ -320,6 +519,24 @@ where
                     },
                 ..
             } => self.toggle_pause(),
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(KeyCode::ArrowLeft),
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => self.seek_relative(false),
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(KeyCode::ArrowRight),
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => self.seek_relative(true),
             WindowEvent::RedrawRequested if self.state == PlaybackState::Playing => {
                 self.present_pending_frame();
             }

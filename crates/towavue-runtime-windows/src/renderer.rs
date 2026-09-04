@@ -36,6 +36,8 @@ pub enum RenderError {
     WindowHandle,
     #[error("D3D11 failed: {0}")]
     D3d11(#[from] windows::core::Error),
+    #[error("the D3D11 device was removed: {0}")]
+    DeviceRemoved(String),
     #[error("decoded video dimensions are invalid")]
     InvalidFrame,
     #[error("the hardware frame does not contain a D3D11 texture")]
@@ -63,6 +65,12 @@ impl GraphicsDevice {
 
     pub(crate) fn clone_raw(&self) -> *mut std::ffi::c_void {
         self.device.clone().into_raw()
+    }
+
+    pub(crate) fn device_removed_reason(&self) -> Option<String> {
+        // The device is retained by this safe handle; the call only reads its
+        // terminal removal status and does not retain native state.
+        unsafe { self.device.GetDeviceRemovedReason().err() }.map(|error| error.to_string())
     }
 }
 
@@ -164,6 +172,10 @@ impl FrameRenderer {
 
     pub fn graphics_device(&self) -> GraphicsDevice {
         self.graphics_device.clone()
+    }
+
+    pub(crate) fn device_removed_reason(&self) -> Option<String> {
+        self.graphics_device.device_removed_reason()
     }
 
     /// Uploads one tightly packed RGBA frame and presents it to the window.

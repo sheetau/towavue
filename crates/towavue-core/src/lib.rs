@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 use std::fmt;
+use std::time::Duration;
 
 /// A signed media timestamp stored as nanoseconds.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
@@ -26,6 +27,16 @@ impl MediaTime {
     pub fn as_seconds_f64(self) -> f64 {
         self.0 as f64 / 1_000_000_000.0
     }
+
+    pub fn saturating_add(self, duration: Duration) -> Self {
+        let nanoseconds = duration.as_nanos().min(i64::MAX as u128) as i64;
+        Self(self.0.saturating_add(nanoseconds))
+    }
+
+    pub fn saturating_sub(self, duration: Duration) -> Self {
+        let nanoseconds = duration.as_nanos().min(i64::MAX as u128) as i64;
+        Self(self.0.saturating_sub(nanoseconds))
+    }
 }
 
 impl fmt::Display for MediaTime {
@@ -45,9 +56,27 @@ pub enum PlaybackState {
     Faulted,
 }
 
+/// Identifies results belonging to one open or seek transaction.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct PlaybackGeneration(u64);
+
+impl PlaybackGeneration {
+    pub const INITIAL: Self = Self(0);
+
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+
+    pub const fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{MediaTime, PlaybackState};
+    use std::time::Duration;
+
+    use super::{MediaTime, PlaybackGeneration, PlaybackState};
 
     #[test]
     fn media_time_preserves_signed_nanoseconds() {
@@ -61,5 +90,29 @@ mod tests {
     #[test]
     fn playback_starts_in_loading_state() {
         assert_eq!(PlaybackState::default(), PlaybackState::Loading);
+    }
+
+    #[test]
+    fn media_time_arithmetic_saturates() {
+        assert_eq!(
+            MediaTime::from_nanoseconds(i64::MAX - 1)
+                .saturating_add(Duration::from_nanos(2))
+                .as_nanoseconds(),
+            i64::MAX
+        );
+        assert_eq!(
+            MediaTime::ZERO
+                .saturating_sub(Duration::from_secs(5))
+                .as_nanoseconds(),
+            -5_000_000_000
+        );
+    }
+
+    #[test]
+    fn playback_generation_advances_with_wrapping_identity() {
+        let generation = PlaybackGeneration::INITIAL.next();
+
+        assert_eq!(generation.value(), 1);
+        assert_ne!(generation, PlaybackGeneration::INITIAL);
     }
 }

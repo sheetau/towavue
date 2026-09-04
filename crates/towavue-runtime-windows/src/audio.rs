@@ -1,15 +1,18 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use thiserror::Error;
 use wasapi::{
-    AudioClient, AudioRenderClient, DeviceEnumerator, Direction, Handle, SampleType, StreamMode,
-    WaveFormat,
+    AudioClient, AudioClock, AudioRenderClient, DeviceEnumerator, DeviceEventCallbacks, Direction,
+    Handle, Role, SampleType, StreamMode, WaveFormat,
 };
 
 use crate::{AudioChunk, AudioFormat};
+use towavue_core::MediaTime;
 
 const AUDIO_CHANNEL_CAPACITY: usize = 32;
 const CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -20,6 +23,7 @@ const BUFFERED_AUDIO_SECONDS: usize = 2;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AudioOutputEvent {
     Drained,
+    EndpointChanged,
     Failed(String),
 }
 
@@ -32,6 +36,8 @@ pub enum AudioOutputError {
     Wasapi(String),
     #[error("the audio output thread stopped")]
     Closed,
+    #[error("the default audio endpoint changed")]
+    EndpointChanged,
 }
 
 enum AudioMessage {
@@ -50,6 +56,7 @@ pub struct AudioOutput {
     audio_tx: SyncSender<AudioMessage>,
     control_tx: mpsc::Sender<AudioControl>,
     event_rx: Receiver<AudioOutputEvent>,
+    position_nanoseconds: Arc<AtomicI64>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -82,6 +89,13 @@ impl AudioOutputSender {
 
 impl AudioOutput {
     pub fn start(format: AudioFormat) -> Result<Self, AudioOutputError> {
+        Self::start_at(format, MediaTime::ZERO)
+    }
+
+    pub fn start_at(
+        format: AudioFormat,
+        media_anchor: MediaTime,
+    ) -> Result<Self, AudioOutputError> {
         if format.sample_rate == 0 || format.channels != 2 {
             return Err(AudioOutputError::UnsupportedFormat(
                 format.sample_rate,
@@ -93,6 +107,8 @@ impl AudioOutput {
         let (control_tx, control_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let position_nanoseconds = Arc::new(AtomicI64::new(media_anchor.as_nanoseconds()));
+        let thread_position = Arc::clone(&position_nanoseconds);
         let thread = thread::Builder::new()
             .name("towavue-wasapi".to_owned())
             .spawn(move || {
@@ -104,11 +120,21 @@ impl AudioOutput {
                     return;
                 }
 
-                let result = run_audio_thread(format, audio_rx, control_rx, &ready_tx);
+                let result = run_audio_thread(
+                    format,
+                    media_anchor,
+                    &thread_position,
+                    audio_rx,
+                    control_rx,
+                    &ready_tx,
+                );
                 wasapi::deinitialize();
                 match result {
                     Ok(()) => {
                         let _ = event_tx.send(AudioOutputEvent::Drained);
+                    }
+                    Err(AudioOutputError::EndpointChanged) => {
+                        let _ = event_tx.send(AudioOutputEvent::EndpointChanged);
                     }
                     Err(error) => {
                         let _ = event_tx.send(AudioOutputEvent::Failed(error.to_string()));
@@ -123,6 +149,7 @@ impl AudioOutput {
                 audio_tx,
                 control_tx,
                 event_rx,
+                position_nanoseconds,
                 thread: Some(thread),
             }),
             Ok(Err(error)) => {
@@ -154,6 +181,10 @@ impl AudioOutput {
         self.event_rx.try_recv().ok()
     }
 
+    pub fn position(&self) -> MediaTime {
+        MediaTime::from_nanoseconds(self.position_nanoseconds.load(Ordering::Relaxed))
+    }
+
     pub(crate) fn sender(&self) -> AudioOutputSender {
         AudioOutputSender {
             format: self.format,
@@ -173,14 +204,34 @@ impl Drop for AudioOutput {
 
 fn run_audio_thread(
     format: AudioFormat,
+    media_anchor: MediaTime,
+    position_nanoseconds: &AtomicI64,
     audio_rx: Receiver<AudioMessage>,
     control_rx: Receiver<AudioControl>,
     ready_tx: &SyncSender<Result<(), String>>,
 ) -> Result<(), AudioOutputError> {
+    let (endpoint_tx, endpoint_rx) = mpsc::channel();
     let setup = (|| {
         let enumerator = DeviceEnumerator::new().map_err(wasapi_error)?;
         let device = enumerator
             .get_default_device(&Direction::Render)
+            .map_err(wasapi_error)?;
+        let device_id = device.get_id().map_err(wasapi_error)?;
+        let mut callbacks = DeviceEventCallbacks::new();
+        let default_endpoint_tx = endpoint_tx.clone();
+        callbacks.set_default_device_callback(move |direction, role, _| {
+            if is_default_render_endpoint(direction, role) {
+                let _ = default_endpoint_tx.send(());
+            }
+        });
+        let removed_endpoint_tx = endpoint_tx.clone();
+        callbacks.set_device_removed_callback(move |removed_id| {
+            if is_current_endpoint(&device_id, &removed_id) {
+                let _ = removed_endpoint_tx.send(());
+            }
+        });
+        let registration = enumerator
+            .register_notification_callback(callbacks)
             .map_err(wasapi_error)?;
         let mut client = device.get_iaudioclient().map_err(wasapi_error)?;
         let wave_format = WaveFormat::new(
@@ -201,9 +252,10 @@ fn run_audio_thread(
             .map_err(wasapi_error)?;
         let event = client.set_get_eventhandle().map_err(wasapi_error)?;
         let render_client = client.get_audiorenderclient().map_err(wasapi_error)?;
-        Ok::<_, AudioOutputError>((client, event, render_client))
+        let clock = client.get_audioclock().map_err(wasapi_error)?;
+        Ok::<_, AudioOutputError>((client, event, render_client, clock, registration))
     })();
-    let (client, event, render_client) = match setup {
+    let (client, event, render_client, clock, _registration) = match setup {
         Ok(resources) => resources,
         Err(error) => {
             let _ = ready_tx.send(Err(error.to_string()));
@@ -221,9 +273,14 @@ fn run_audio_thread(
         &client,
         &render_client,
         &event,
+        &clock,
+        media_anchor,
+        position_nanoseconds,
+        &endpoint_rx,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_audio_loop(
     format: AudioFormat,
     audio_rx: Receiver<AudioMessage>,
@@ -231,6 +288,10 @@ fn render_audio_loop(
     client: &AudioClient,
     render_client: &AudioRenderClient,
     event: &Handle,
+    clock: &AudioClock,
+    media_anchor: MediaTime,
+    position_nanoseconds: &AtomicI64,
+    endpoint_rx: &Receiver<()>,
 ) -> Result<(), AudioOutputError> {
     let bytes_per_frame = format.channels as usize * size_of::<f32>();
     let queue_limit = format.sample_rate as usize * bytes_per_frame * BUFFERED_AUDIO_SECONDS;
@@ -238,14 +299,29 @@ fn render_audio_loop(
     let mut input_ended = false;
     let mut paused = false;
     let mut running = false;
+    let mut wall_elapsed = Duration::ZERO;
+    let mut wall_started_at: Option<Instant> = None;
+    let clock_frequency = clock.get_frequency().map_err(wasapi_error)?;
+    if clock_frequency == 0 {
+        return Err(AudioOutputError::Wasapi(
+            "IAudioClock returned a zero frequency".to_owned(),
+        ));
+    }
+    let (clock_origin, _) = clock.get_position().map_err(wasapi_error)?;
 
     loop {
+        if endpoint_rx.try_recv().is_ok() {
+            return Err(AudioOutputError::EndpointChanged);
+        }
         while let Ok(control) = control_rx.try_recv() {
             match control {
                 AudioControl::SetPaused(value) => {
                     paused = value;
                     if paused && running {
                         client.stop_stream().map_err(wasapi_error)?;
+                        if let Some(started_at) = wall_started_at.take() {
+                            wall_elapsed += started_at.elapsed();
+                        }
                         running = false;
                     }
                 }
@@ -281,6 +357,7 @@ fn render_audio_loop(
                 && (write_frames > 0 || client.get_current_padding().map_err(wasapi_error)? > 0)
             {
                 client.start_stream().map_err(wasapi_error)?;
+                wall_started_at = Some(Instant::now());
                 running = true;
             }
 
@@ -290,6 +367,9 @@ fn render_audio_loop(
             {
                 if running {
                     client.stop_stream().map_err(wasapi_error)?;
+                    if let Some(started_at) = wall_started_at.take() {
+                        wall_elapsed += started_at.elapsed();
+                    }
                 }
                 return Ok(());
             }
@@ -297,6 +377,17 @@ fn render_audio_loop(
 
         if running {
             let _ = event.wait_for_event(EVENT_WAIT_MILLISECONDS);
+            let (device_position, _) = clock.get_position().map_err(wasapi_error)?;
+            let elapsed = device_position.saturating_sub(clock_origin) as u128 * 1_000_000_000u128
+                / u128::from(clock_frequency);
+            let wall_nanoseconds = wall_elapsed.as_nanos().saturating_add(
+                wall_started_at.map_or(0, |started_at| started_at.elapsed().as_nanos()),
+            );
+            let elapsed = elapsed.max(wall_nanoseconds).min(i64::MAX as u128) as i64;
+            position_nanoseconds.store(
+                media_anchor.as_nanoseconds().saturating_add(elapsed),
+                Ordering::Relaxed,
+            );
         } else {
             match control_rx.recv_timeout(CONTROL_POLL_INTERVAL) {
                 Ok(AudioControl::SetPaused(value)) => paused = value,
@@ -312,6 +403,14 @@ fn render_audio_loop(
 
 fn wasapi_error(error: wasapi::WasapiError) -> AudioOutputError {
     AudioOutputError::Wasapi(error.to_string())
+}
+
+fn is_default_render_endpoint(direction: Direction, role: Role) -> bool {
+    direction == Direction::Render && role == Role::Console
+}
+
+fn is_current_endpoint(current_id: &str, removed_id: &str) -> bool {
+    current_id == removed_id
 }
 
 #[cfg(test)]
@@ -331,5 +430,20 @@ mod tests {
             error,
             AudioOutputError::UnsupportedFormat(48_000, 1)
         ));
+    }
+
+    #[test]
+    fn filters_endpoint_notifications_to_the_active_console_renderer() {
+        assert!(is_default_render_endpoint(Direction::Render, Role::Console));
+        assert!(!is_default_render_endpoint(
+            Direction::Capture,
+            Role::Console
+        ));
+        assert!(!is_default_render_endpoint(
+            Direction::Render,
+            Role::Multimedia
+        ));
+        assert!(is_current_endpoint("active", "active"));
+        assert!(!is_current_endpoint("active", "other"));
     }
 }

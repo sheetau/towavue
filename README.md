@@ -4,13 +4,13 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
-**M2: D3D11VA zero-copyは完了しています。** 対応codecはFFmpegのD3D11VA surfaceを同一D3D11 deviceのVideo ProcessorからSwapChainへCPU転送なしで表示し、非対応時だけM1のsoftware pathへfallbackします。Shell連携、tab、編集、seek、厳密なA/V同期はまだ実装していません。
+**M3: Seek, synchronization, and resilienceまで完了しています。** 対応codecはFFmpegのD3D11VA surfaceを同一D3D11 deviceのVideo ProcessorからSwapChainへCPU転送なしで表示し、非対応時だけsoftware pathへfallbackします。audio-master同期、generation付き連続Seek、pause/resume、audio endpoint変更とD3D11 device removalからのpipeline再構築を実装済みです。Shell連携、tab、画像表示、編集はまだ実装していません。
 
 - 対応予定OS: Windows 10 22H2以降
 - 対応予定アーキテクチャ: x86-64
 - Rust: 1.98.0 / Edition 2024 / MSVC ABI
 - ライセンス: MIT OR Apache-2.0
-- 次の工程: M3 seek, synchronization, and resilience
+- 次の工程: M4 application shell and navigation
 
 ## 文書
 
@@ -38,7 +38,7 @@ cargo test --workspace --all-targets
 cargo run -p towavue-app -- path\to\media.mp4
 ```
 
-再生中はSpaceでpause/resume、ウィンドウを閉じると終了します。M1のcodec fixtureはMP4/H.264/AAC、MKV/HEVC/AAC、WebM/VP9/Opusです。再生終了時のdiagnosticにはadapter LUID、hardware frame数、CPU transfer数を記録します。
+再生中はSpaceでpause/resume、左右矢印で5秒単位の連続Seek、ウィンドウを閉じると終了します。M1のcodec fixtureはMP4/H.264/AAC、MKV/HEVC/AAC、WebM/VP9/Opusです。再生終了時のdiagnosticにはadapter LUID、hardware frame数、CPU transfer数、表示・drop frame数、Seek latency、A/V driftを記録します。
 
 ## ライセンス
 

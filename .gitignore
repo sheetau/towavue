@@ -2,6 +2,7 @@
 /target/
 /.cargo-vcpkg/
 /vendor/ffmpeg/
+/tests/generated/
 /dist/
 /logs/
 /.cache/

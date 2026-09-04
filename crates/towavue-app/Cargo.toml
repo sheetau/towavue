@@ -11,5 +11,10 @@ publish = false
 name = "towavue"
 path = "src/main.rs"
 
+[dependencies]
+towavue-core = { path = "../towavue-core" }
+towavue-runtime-windows = { path = "../towavue-runtime-windows" }
+winit = "=0.30.12"
+
 [lints]
 workspace = true

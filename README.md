@@ -4,13 +4,13 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
-**M0: Foundationは完了しています。** Git、Rust workspace、設計・運用文書、CIまでを構築済みです。次のM1は未着手で、アプリのウィンドウ、再生、Shell連携はまだ実装していません。
+**M1: Software playback vertical sliceは完了しています。** 単一ウィンドウで単一ファイルを開き、software video decodeからD3D11 upload、event-driven WASAPI Shared音声、play/pause/EOFまでを実装しています。Shell連携、tab、編集、seek、厳密なA/V同期はまだ実装していません。
 
 - 対応予定OS: Windows 10 22H2以降
 - 対応予定アーキテクチャ: x86-64
 - Rust: 1.98.0 / Edition 2024 / MSVC ABI
 - ライセンス: MIT OR Apache-2.0
-- 次の工程: M1 software playback vertical slice
+- 次の工程: M2 D3D11VA zero-copy
 
 ## 文書
 
@@ -21,17 +21,24 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 `concepts/`はUI草案を含むローカル参照資料であり、Gitには含めません。設計上の決定事項は上記の追跡対象文書へ転記します。
 
-## M0の検証
+## ビルドと実行
 
-Visual StudioのDesktop development with C++ workloadとWindows SDKを導入し、Developer PowerShellから次を実行します。
+Visual StudioのDesktop development with C++ workload、Windows SDK、LLVMを導入します。Developer PowerShellで、checksum固定済みのFFmpeg 9.0.1開発ファイルを準備してから実行します。ダウンロード先と生成fixtureはGit対象外です。
 
 ```powershell
+$ffmpegDir = .\scripts\setup-ffmpeg.ps1
+$env:FFMPEG_DIR = $ffmpegDir
+$env:LIBCLANG_PATH = Join-Path $env:ProgramFiles 'LLVM\bin'
+$env:PATH = "$(Join-Path $ffmpegDir 'bin');$env:PATH"
+
+.\scripts\generate-m1-fixtures.ps1
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
+cargo run -p towavue-app -- path\to\media.mp4
 ```
 
-FFmpeg、D3D11、WASAPIなどの外部依存はM1以降で追加します。M0のworkspaceは意図的に機能を持ちません。
+再生中はSpaceでpause/resume、ウィンドウを閉じると終了します。M1のcodec fixtureはMP4/H.264/AAC、MKV/HEVC/AAC、WebM/VP9/Opusです。
 
 ## ライセンス
 

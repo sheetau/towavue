@@ -56,13 +56,19 @@ winit event loop、egui、tab、command dispatch、利用者向け状態を所�
 
 ## 4. 再生・表示契約
 
-- アプリがD3D11 deviceを作成し、FFmpegの`AVD3D11VADeviceContext`へ正しいCOM参照寿命で渡す。
+- app event loopがruntimeの安全なfactoryを呼んでD3D11 deviceを作成し、M2ではFFmpegの`AVD3D11VADeviceContext`へ正しいCOM参照寿命で渡す。appへCOM pointerは公開しない。
 - decode、D3D11 Video Processor、DXGI presentation、eguiは同じadapter/deviceを使う。
 - immediate/video contextの利用箇所を限定し、FFmpegとの共有に必要なmultithread protectionを有効にする。
 - SwapChainはFlip Discard、2～3 buffers、frame-latency waitable objectを使う。
 - FFmpeg D3D11VA surfaceをVideo Processorへ直接渡す。hardware pathでCPU readbackや再uploadを行わない。
 - hardware decodeが成立しない場合だけsoftware decodeへfallbackする。CUDA/QSV decode fallbackは設けない。
 - HDR metadataは失わないが、正しいtone mapping/pass-throughが完成するまではHDR対応を宣言しない。
+
+### M1 software path
+
+M1ではFFmpegを動的リンクし、映像をsoftware decodeしてtightly packed RGBAへ変換する。runtimeの`SoftwareFrameRenderer`が単一D3D11 device、immediate context、2-buffer Flip Discard swap chainを所有し、CPU frameをback bufferへuploadしてpresentする。このCPU uploadはM1だけの基準経路であり、M2のhardware pathでは使用しない。
+
+音声はsource sample rateのinterleaved stereo `f32`へ変換し、専用MTA thread上のevent-driven WASAPI Shared clientへ渡す。映像queueは2 frame、音声channelは32 chunk、WASAPI手前の蓄積は約2秒へ制限する。M1のdecode workerはdemuxとvideo/audio software decodeを直列実行するが、COM、FFmpeg型、native frame handleはruntime外へ出さない。M2以降で役割別workerへ分離しても、この安全なcommand/event境界は維持する。
 
 ## 5. スレッド・同期契約
 

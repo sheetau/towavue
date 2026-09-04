@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-04 19:18 JST - implementation / complete M1 software playback
+
+- Intent: implement only the M1 single-window, single-file software playback vertical slice after the verified M0 checkpoint.
+- Result: added FFmpeg 9.0.1 software video/audio decoding, RGBA D3D11 Flip Discard presentation, event-driven WASAPI Shared output, bounded runtime queues, Space play/pause, and EOF state after the final video frame and audio sample drain.
+- Fixtures: generated and probed MP4/H.264/AAC, MKV/HEVC/AAC, and WebM/VP9/Opus from a checksum-pinned LGPL shared FFmpeg build; all three pass the decode integration test.
+- Runtime verification: a real Windows playback run reached `Ended` with a responsive window; a separate 30-second run remained `Paused` until a second Space event and then returned to `Playing`.
+- Changed areas: core media time/state values, runtime decode/audio/playback/renderer boundaries, app event loop, pinned dependencies, FFmpeg/fixture scripts, CI preparation, README, architecture, and roadmap.
+- Verification: local format, workspace Clippy with warnings denied, all-target tests, three-codec fixture decode, EOF smoke, and pause/resume smoke passed; the remote CI checkpoint is pending.
+- Status: `m1_validation_pending`.
+- Next action: run the complete M1 checks, inspect the diff and worktree, commit and push the verified M1 checkpoint, confirm CI, then begin M2 only.
+
 ## 2026-09-04 18:22 JST - test / complete M0 foundation
 
 - Result: completed the M0 repository foundation and stopped before M1; no playback, window, or Shell runtime behavior was implemented.

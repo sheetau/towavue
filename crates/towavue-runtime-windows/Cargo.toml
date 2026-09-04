@@ -7,5 +7,25 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+ffmpeg-next = { version = "=9.0.0", default-features = false, features = [
+    "codec",
+    "format",
+    "software-resampling",
+    "software-scaling",
+] }
+raw-window-handle = "=0.6.2"
+thiserror = "=2.0.17"
+towavue-core = { path = "../towavue-core" }
+wasapi = "=0.24.0"
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D_Fxc",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }
+
 [lints]
 workspace = true

@@ -14,13 +14,15 @@ Git、Rust workspace、設計・運用文書、CIを構築する。再生、UI�
 - OS、ライセンス、crate境界、D3D11、FFmpeg、WASAPI、Explorer sortの契約が文書間で一致する。
 - verified checkpointが`origin/main`へpushされる。
 
-M0は2026-09-04にWindows CIを含めてゲートを通過した。現在の次工程はM1だが、まだ着手していない。
+M0は2026-09-04にWindows CIを含めてゲートを通過した。
 
 ## M1 — Software playback vertical slice
 
 単一windowと単一fileに限定し、software video decode、D3D11 upload、event-driven WASAPI Sharedによる音声、play/pause/EOFを完成させる。
 
 fixtureは少なくともMP4/H.264/AAC、MKV/HEVC/AAC、WebM/VP9/Opusを含める。UIの再現、tab、folder navigation、編集は行わない。
+
+M1は2026-09-04に完了した。固定FFmpeg 9.0.1で3種類のfixtureを生成・検査し、software decode integration testを通過した。実機ではD3D11 Flip Discard swap chainへのupload、WASAPI Sharedの音声排出、Spaceによるpause/resume、最終frame/sample排出後のEOF遷移を確認した。現在の次工程はM2だが、まだ着手していない。
 
 ## M2 — D3D11VA zero-copy
 

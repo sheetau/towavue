@@ -22,6 +22,14 @@ jobs:
         shell: pwsh
         run: rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt --target x86_64-pc-windows-msvc
 
+      - name: Prepare pinned FFmpeg development files
+        shell: pwsh
+        run: .\scripts\setup-ffmpeg.ps1 -ExportGitHubEnvironment
+
+      - name: Generate M1 codec fixtures
+        shell: pwsh
+        run: .\scripts\generate-m1-fixtures.ps1
+
       - name: Check formatting
         run: cargo +1.98.0 fmt --all --check
 

@@ -16,6 +16,14 @@ ffmpeg-next = { version = "=9.0.0", default-features = false, features = [
     "software-resampling",
     "software-scaling",
 ] }
+image = { version = "=0.25.10", default-features = false, features = [
+    "bmp",
+    "gif",
+    "jpeg",
+    "png",
+    "tiff",
+    "webp",
+] }
 raw-window-handle = "=0.6.2"
 thiserror = "=2.0.20"
 towavue-core = { path = "../towavue-core" }

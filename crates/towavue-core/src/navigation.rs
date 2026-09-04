@@ -77,6 +77,27 @@ impl FolderSnapshot {
             .and_then(|identity| self.items.iter().find(|item| &item.identity == identity))
             .or_else(|| self.items.iter().find(|item| item.path == path))
     }
+
+    pub fn reading_items(
+        &self,
+        current_path: &Path,
+        count: usize,
+        reversed: bool,
+    ) -> Vec<&FolderMediaItem> {
+        let images = self.items_of_kind(MediaKind::Image).collect::<Vec<_>>();
+        let Some(current) = images.iter().position(|item| item.path == current_path) else {
+            return Vec::new();
+        };
+        let mut selected = images
+            .into_iter()
+            .skip(current)
+            .take(count)
+            .collect::<Vec<_>>();
+        if reversed {
+            selected.reverse();
+        }
+        selected
+    }
 }
 
 #[cfg(test)]
@@ -126,6 +147,32 @@ mod tests {
                 .map(|item| item.path.as_path()),
             Some(Path::new("renamed.jpg"))
         );
+    }
+
+    #[test]
+    fn reading_items_follow_shell_order_and_can_reverse_visual_order() {
+        let snapshot = FolderSnapshot {
+            folder_identity: ShellIdentity::new(vec![0]),
+            folder_path: PathBuf::from("media"),
+            items: vec![
+                item("one.jpg", MediaKind::Image),
+                item("clip.mp4", MediaKind::Video),
+                item("two.png", MediaKind::Image),
+                item("three.webp", MediaKind::Image),
+            ],
+            sort_columns: Vec::new(),
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: SystemTime::UNIX_EPOCH,
+        };
+
+        let paths = snapshot
+            .reading_items(Path::new("one.jpg"), 2, true)
+            .into_iter()
+            .map(|item| item.path.as_path())
+            .collect::<Vec<_>>();
+
+        assert_eq!(paths, [Path::new("two.png"), Path::new("one.jpg")]);
     }
 
     fn item(path: &str, kind: MediaKind) -> FolderMediaItem {

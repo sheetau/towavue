@@ -41,6 +41,17 @@ fn defaults() -> ShortcutBindings {
         (CommandId::ToggleFilmstrip, "F"),
         (CommandId::ToggleCommandPalette, "Ctrl+Shift+P"),
         (CommandId::ReloadShortcuts, "Ctrl+K Ctrl+S"),
+        (CommandId::ZoomIn, "Plus"),
+        (CommandId::ZoomOut, "Minus"),
+        (CommandId::ActualSize, "Ctrl+H"),
+        (CommandId::FitToWindow, "Shift+W"),
+        (CommandId::ClearSelection, "Escape"),
+        (CommandId::ToggleCropPreview, "Ctrl+Y"),
+        (CommandId::ToggleReadingMode, "B"),
+        (CommandId::IncreaseReadingPages, "Ctrl+]"),
+        (CommandId::DecreaseReadingPages, "Ctrl+["),
+        (CommandId::ToggleReadingAxis, "R"),
+        (CommandId::ReverseReadingOrder, "H"),
     ] {
         bindings.set(
             command,

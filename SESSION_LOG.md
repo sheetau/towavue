@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 00:14 JST - implementation / complete M5 images and reading mode
+
+- Trigger: M4 was complete and the owner requested continued milestone-by-milestone implementation while preserving the actual Explorer Sort By order.
+- Intent: complete M5 image presentation and reading mode without beginning M6 destructive or persisted editing.
+- Result: added safe RGBA decoding for BMP, JPEG, PNG, TIFF, static/animated GIF, WebP, APNG, and AVIF; EXIF orientation; deadline-driven animation; fit, actual-size, cursor-anchored zoom, right-drag pan; normalized selection with edge resize, square creation, ratio-preserving resize; and pixel-preserving crop preview. Reading mode displays 2–10 current-and-following images from the shared Shell-ordered `FolderSnapshot`, with horizontal/vertical layout and visual-order reversal. Menu, palette, shortcuts, and status controls share the new command identities.
+- Architecture evidence: the `image` crate's `avif` feature is encoder-only and its native decoder would add a system dav1d dependency. AVIF therefore uses the already pinned FFmpeg software boundary; other image formats use `image` 0.25.10. Runtime exports only owned dimensions, RGBA bytes, and frame durations, while app-owned egui textures use the existing D3D11 device/back buffer. Image frames do not enter the video decode queue or Video Processor path.
+- Changed areas: core image/reading geometry and commands; runtime image decoding; app image textures, animation scheduling, interaction, reading layout, status and shortcuts; pinned dependencies; architecture, roadmap, and README.
+- Verification: `cargo fmt --all --check`, workspace all-target Clippy with warnings denied, and workspace all-target tests pass (app 5, core 20, runtime 14 plus 1 ignored live-Explorer integration test, codec integration 1). Runtime tests decode every advertised non-AVIF static path and verify GIF frame pixels/timing. A locally generated AVIF decoded through FFmpeg and rendered correctly; real-window smokes confirmed fitted static image presentation, changing animated-GIF frames, and a two-page Explorer-ordered reading layout on the shared D3D11 surface.
+- Status: `m5_complete`.
+- Next action: begin M6 with platform-independent non-destructive edit history and close guards before implementing mutation or export.
+
 ## 2026-09-04 23:34 JST - implementation / complete M4 application shell and navigation
 
 - Trigger: M3 was complete and the owner requested continued milestone-by-milestone implementation under `AGENTS.md`, with Explorer ordering defined as the actual per-folder Sort By state.

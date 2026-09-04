@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod commands;
+mod image;
 mod media;
 mod navigation;
 mod tabs;
@@ -13,6 +14,9 @@ use std::time::Duration;
 pub use commands::{
     CommandContext, CommandDefinition, CommandId, Key, KeySequence, KeyStroke, Modifiers,
     ShortcutBindings, ShortcutMatch, command_definitions,
+};
+pub use image::{
+    ImageViewState, ReadingAxis, ReadingSettings, UnitPoint, UnitRect, ZoomMode, fit_scale,
 };
 pub use media::MediaKind;
 pub use navigation::{

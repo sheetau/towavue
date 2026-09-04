@@ -11,8 +11,9 @@ impl MediaKind {
     pub fn from_path(path: &Path) -> Option<Self> {
         let extension = path.extension()?.to_str()?.to_ascii_lowercase();
         match extension.as_str() {
-            "avif" | "bmp" | "gif" | "heic" | "heif" | "jpeg" | "jpg" | "jxl" | "png" | "tif"
-            | "tiff" | "webp" => Some(Self::Image),
+            "avif" | "bmp" | "gif" | "jpeg" | "jpg" | "png" | "tif" | "tiff" | "webp" => {
+                Some(Self::Image)
+            }
             "3gp" | "avi" | "m2ts" | "m4v" | "mkv" | "mov" | "mp4" | "mpeg" | "mpg" | "mts"
             | "ogv" | "ts" | "webm" | "wmv" => Some(Self::Video),
             "aac" | "aiff" | "alac" | "flac" | "m4a" | "mp3" | "oga" | "ogg" | "opus" | "wav"

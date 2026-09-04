@@ -21,6 +21,17 @@ pub enum CommandId {
     ToggleFilmstrip,
     ToggleCommandPalette,
     ReloadShortcuts,
+    ZoomIn,
+    ZoomOut,
+    ActualSize,
+    FitToWindow,
+    ClearSelection,
+    ToggleCropPreview,
+    ToggleReadingMode,
+    IncreaseReadingPages,
+    DecreaseReadingPages,
+    ToggleReadingAxis,
+    ReverseReadingOrder,
 }
 
 impl CommandId {
@@ -41,6 +52,17 @@ impl CommandId {
             Self::ToggleFilmstrip => "toggle_filmstrip",
             Self::ToggleCommandPalette => "toggle_command_palette",
             Self::ReloadShortcuts => "reload_shortcuts",
+            Self::ZoomIn => "zoom_in",
+            Self::ZoomOut => "zoom_out",
+            Self::ActualSize => "actual_size",
+            Self::FitToWindow => "fit_to_window",
+            Self::ClearSelection => "clear_selection",
+            Self::ToggleCropPreview => "toggle_crop_preview",
+            Self::ToggleReadingMode => "toggle_reading_mode",
+            Self::IncreaseReadingPages => "increase_reading_pages",
+            Self::DecreaseReadingPages => "decrease_reading_pages",
+            Self::ToggleReadingAxis => "toggle_reading_axis",
+            Self::ReverseReadingOrder => "reverse_reading_order",
         }
     }
 }
@@ -158,6 +180,8 @@ impl FromStr for KeyStroke {
                 "shift" => modifiers.shift = true,
                 "win" | "logo" => modifiers.logo = true,
                 "space" if key.is_none() => key = Some(Key::Space),
+                "plus" if key.is_none() => key = Some(Key::Character('+')),
+                "minus" if key.is_none() => key = Some(Key::Character('-')),
                 "left" if key.is_none() => key = Some(Key::ArrowLeft),
                 "right" if key.is_none() => key = Some(Key::ArrowRight),
                 "tab" if key.is_none() => key = Some(Key::Tab),
@@ -180,6 +204,7 @@ pub struct CommandContext {
     pub media_kind: Option<MediaKind>,
     pub palette_open: bool,
     pub filmstrip_open: bool,
+    pub reading_mode: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -187,14 +212,16 @@ pub struct CommandDefinition {
     pub id: CommandId,
     pub title: &'static str,
     pub media_kinds: &'static [MediaKind],
+    pub requires_reading_mode: bool,
 }
 
 impl CommandDefinition {
     pub fn is_enabled(self, context: CommandContext) -> bool {
-        self.media_kinds.is_empty()
-            || context
-                .media_kind
-                .is_some_and(|kind| self.media_kinds.contains(&kind))
+        (!self.requires_reading_mode || context.reading_mode)
+            && (self.media_kinds.is_empty()
+                || context
+                    .media_kind
+                    .is_some_and(|kind| self.media_kinds.contains(&kind)))
     }
 }
 
@@ -225,6 +252,53 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::ToggleFilmstrip, "Toggle filmstrip", ANY_MEDIA),
     command(CommandId::ToggleCommandPalette, "Show command palette", &[]),
     command(CommandId::ReloadShortcuts, "Reload keyboard shortcuts", &[]),
+    command(CommandId::ZoomIn, "Zoom in", &[MediaKind::Image]),
+    command(CommandId::ZoomOut, "Zoom out", &[MediaKind::Image]),
+    command(
+        CommandId::ActualSize,
+        "Zoom to actual size",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::FitToWindow,
+        "Fit image to window",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::ClearSelection,
+        "Clear image selection",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::ToggleCropPreview,
+        "Toggle crop preview",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::ToggleReadingMode,
+        "Toggle reading mode",
+        &[MediaKind::Image],
+    ),
+    reading_command(
+        CommandId::IncreaseReadingPages,
+        "Show more reading pages",
+        &[MediaKind::Image],
+    ),
+    reading_command(
+        CommandId::DecreaseReadingPages,
+        "Show fewer reading pages",
+        &[MediaKind::Image],
+    ),
+    reading_command(
+        CommandId::ToggleReadingAxis,
+        "Toggle reading direction",
+        &[MediaKind::Image],
+    ),
+    reading_command(
+        CommandId::ReverseReadingOrder,
+        "Reverse reading order",
+        &[MediaKind::Image],
+    ),
 ];
 
 const fn command(
@@ -236,6 +310,20 @@ const fn command(
         id,
         title,
         media_kinds,
+        requires_reading_mode: false,
+    }
+}
+
+const fn reading_command(
+    id: CommandId,
+    title: &'static str,
+    media_kinds: &'static [MediaKind],
+) -> CommandDefinition {
+    CommandDefinition {
+        id,
+        title,
+        media_kinds,
+        requires_reading_mode: true,
     }
 }
 
@@ -309,6 +397,25 @@ mod tests {
         }));
         assert!(!pause.is_enabled(CommandContext {
             media_kind: Some(MediaKind::Image),
+            ..CommandContext::default()
+        }));
+    }
+
+    #[test]
+    fn reading_commands_require_reading_mode() {
+        let increase = command_definitions()
+            .iter()
+            .find(|definition| definition.id == CommandId::IncreaseReadingPages)
+            .copied()
+            .expect("reading command exists");
+
+        assert!(!increase.is_enabled(CommandContext {
+            media_kind: Some(MediaKind::Image),
+            ..CommandContext::default()
+        }));
+        assert!(increase.is_enabled(CommandContext {
+            media_kind: Some(MediaKind::Image),
+            reading_mode: true,
             ..CommandContext::default()
         }));
     }

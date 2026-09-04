@@ -9,15 +9,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use egui::{Align2, Color32, RichText};
+use egui::{Align2, Color32, RichText, TextureHandle, TextureOptions};
 use towavue_core::{
-    CommandContext, CommandId, FolderSnapshot, FolderSnapshotSource, Key, KeyStroke, MediaKind,
-    MediaTime, Modifiers, PlaybackGeneration, PlaybackState, ShortcutBindings, ShortcutMatch,
-    TabId, TabSet, command_definitions,
+    CommandContext, CommandId, FolderSnapshot, FolderSnapshotSource, ImageViewState, Key,
+    KeyStroke, MediaKind, MediaTime, Modifiers, PlaybackGeneration, PlaybackState, ReadingAxis,
+    ReadingSettings, ShortcutBindings, ShortcutMatch, TabId, TabSet, UnitPoint, UnitRect, ZoomMode,
+    command_definitions,
 };
 use towavue_runtime_windows::{
-    AudioOutputEvent, FolderOrderProvider, FolderWatcher, FrameRenderer, PlaybackEvent,
-    PlaybackSession, RenderError, pick_folder, pick_media_file,
+    AudioOutputEvent, DecodedImage, FolderOrderProvider, FolderWatcher, FrameRenderer,
+    PlaybackEvent, PlaybackSession, RenderError, decode_image, pick_folder, pick_media_file,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -107,6 +108,74 @@ enum UiAction {
     OpenMedia(PathBuf, bool),
 }
 
+struct ImagePresentation {
+    decoded: DecodedImage,
+    texture: TextureHandle,
+    frame_index: usize,
+    next_frame_at: Option<Instant>,
+}
+
+impl ImagePresentation {
+    fn load(context: &egui::Context, path: &Path) -> Result<Self, String> {
+        let decoded = decode_image(path).map_err(|error| error.to_string())?;
+        let first = decoded
+            .frames
+            .first()
+            .ok_or_else(|| "decoded image contained no frames".to_owned())?;
+        let texture = context.load_texture(
+            format!("image:{}", path.display()),
+            color_image(first),
+            TextureOptions::LINEAR,
+        );
+        let next_frame_at = decoded.is_animated().then(|| Instant::now() + first.delay);
+        Ok(Self {
+            decoded,
+            texture,
+            frame_index: 0,
+            next_frame_at,
+        })
+    }
+
+    fn dimensions(&self) -> (u32, u32) {
+        self.decoded.dimensions()
+    }
+
+    fn advance_animation(&mut self, now: Instant) -> bool {
+        let Some(mut deadline) = self.next_frame_at else {
+            return false;
+        };
+        if now < deadline {
+            return false;
+        }
+        while deadline <= now {
+            self.frame_index = (self.frame_index + 1) % self.decoded.frames.len();
+            deadline += self.decoded.frames[self.frame_index].delay;
+        }
+        self.texture.set(
+            color_image(&self.decoded.frames[self.frame_index]),
+            TextureOptions::LINEAR,
+        );
+        self.next_frame_at = Some(deadline);
+        true
+    }
+}
+
+fn color_image(frame: &towavue_runtime_windows::DecodedImageFrame) -> egui::ColorImage {
+    egui::ColorImage::from_rgba_unmultiplied(
+        [frame.width as usize, frame.height as usize],
+        &frame.rgba,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum SelectionDrag {
+    New(UnitPoint),
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
 struct Application<N> {
     initial_path: Option<PathBuf>,
     notify: Arc<N>,
@@ -120,6 +189,12 @@ struct Application<N> {
     tabs: TabSet,
     path: Option<PathBuf>,
     media_kind: Option<MediaKind>,
+    image: Option<ImagePresentation>,
+    image_view: ImageViewState,
+    selection_drag: Option<SelectionDrag>,
+    reading_mode: bool,
+    reading_settings: ReadingSettings,
+    reading_pages: Vec<ImagePresentation>,
     session: Option<PlaybackSession>,
     pending_time: Option<MediaTime>,
     clock: Option<PlaybackClock>,
@@ -162,6 +237,12 @@ where
             tabs: TabSet::default(),
             path: None,
             media_kind: None,
+            image: None,
+            image_view: ImageViewState::default(),
+            selection_drag: None,
+            reading_mode: false,
+            reading_settings: ReadingSettings::default(),
+            reading_pages: Vec::new(),
             session: None,
             pending_time: None,
             clock: None,
@@ -251,6 +332,10 @@ where
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
         self.session.take();
+        self.image = None;
+        self.reading_pages.clear();
+        self.image_view = ImageViewState::default();
+        self.selection_drag = None;
         self.path = Some(path.clone());
         self.media_kind = Some(kind);
         self.pending_time = None;
@@ -263,9 +348,29 @@ where
         self.drift_samples.clear();
         self.refresh_folder_snapshot();
         if kind == MediaKind::Image {
-            self.state = PlaybackState::Paused;
-            self.set_status("Image rendering is scheduled for M5".to_owned());
+            let Some(context) = self.ui_context.as_ref() else {
+                self.fail("UI context is unavailable".to_owned());
+                return;
+            };
+            match ImagePresentation::load(context, &path) {
+                Ok(image) => {
+                    let (width, height) = image.dimensions();
+                    let format = image.decoded.format;
+                    let frames = image.decoded.frames.len();
+                    self.image = Some(image);
+                    self.state = PlaybackState::Paused;
+                    self.set_status(format!(
+                        "{format} · {width} × {height} · {frames} frame{}",
+                        if frames == 1 { "" } else { "s" }
+                    ));
+                    if self.reading_mode {
+                        self.rebuild_reading_pages();
+                    }
+                }
+                Err(error) => self.fail(error),
+            }
             self.refresh_title();
+            self.request_redraw();
             return;
         }
         let Some(renderer) = self.renderer.as_ref() else {
@@ -325,6 +430,39 @@ where
                 }
             }
             Err(error) => self.set_status(error.to_string()),
+        }
+        if self.reading_mode && self.image.is_some() {
+            self.rebuild_reading_pages();
+        }
+    }
+
+    fn rebuild_reading_pages(&mut self) {
+        self.reading_pages.clear();
+        let (Some(context), Some(snapshot), Some(path)) = (
+            self.ui_context.as_ref(),
+            self.folder_snapshot.as_ref(),
+            self.path.as_deref(),
+        ) else {
+            return;
+        };
+        let paths = snapshot
+            .reading_items(
+                path,
+                self.reading_settings.page_count,
+                self.reading_settings.reversed,
+            )
+            .into_iter()
+            .map(|item| item.path.clone())
+            .collect::<Vec<_>>();
+        let context = context.clone();
+        for path in paths {
+            match ImagePresentation::load(&context, &path) {
+                Ok(image) => self.reading_pages.push(image),
+                Err(error) => {
+                    self.set_status(format!("Could not load {}: {error}", path.display()));
+                    break;
+                }
+            }
         }
     }
 
@@ -507,7 +645,7 @@ where
                 } else if self.media_kind == Some(MediaKind::Audio) {
                     self.draw_audio_playlist(ui, actions);
                 } else if self.media_kind == Some(MediaKind::Image) {
-                    ui.centered_and_justified(|ui| ui.label("Image rendering begins in M5"));
+                    self.draw_image(ui);
                 }
             });
         if self.filmstrip_open {
@@ -515,6 +653,207 @@ where
         }
         if self.palette_open {
             self.draw_command_palette(&context, actions);
+        }
+    }
+
+    fn draw_image(&mut self, ui: &mut egui::Ui) {
+        if self.reading_mode {
+            self.draw_reading_pages(ui);
+            return;
+        }
+        let Some(image) = self.image.as_ref() else {
+            return;
+        };
+        let texture = image.texture.id();
+        let image_size = image.dimensions();
+        let viewport = ui.max_rect().shrink(8.0);
+        let region = self.image_view.preview_region();
+        let region_size = (
+            (image_size.0 as f32 * region.width()).max(1.0),
+            (image_size.1 as f32 * region.height()).max(1.0),
+        );
+        let scale = self.image_view.scale(
+            (region_size.0 as u32, region_size.1 as u32),
+            (viewport.width(), viewport.height()),
+        );
+        let displayed = egui::vec2(region_size.0 * scale, region_size.1 * scale);
+        let center = viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
+        let image_rect = egui::Rect::from_center_size(center, displayed);
+        let response = ui.interact(
+            viewport,
+            ui.id().with("image-surface"),
+            egui::Sense::click_and_drag(),
+        );
+
+        let (control, shift, scroll, pointer, pointer_delta) = ui.input(|input| {
+            (
+                input.modifiers.ctrl,
+                input.modifiers.shift,
+                input.smooth_scroll_delta.y,
+                input.pointer.hover_pos(),
+                input.pointer.delta(),
+            )
+        });
+        if control && scroll != 0.0 && pointer.is_some_and(|point| viewport.contains(point)) {
+            let old_scale = scale;
+            self.image_view.zoom_by(
+                if scroll > 0.0 { 1.1 } else { 1.0 / 1.1 },
+                (region_size.0 as u32, region_size.1 as u32),
+                (viewport.width(), viewport.height()),
+            );
+            let new_scale = self.image_view.scale(
+                (region_size.0 as u32, region_size.1 as u32),
+                (viewport.width(), viewport.height()),
+            );
+            if let Some(pointer) = pointer {
+                let from_center = pointer - center;
+                let correction = from_center * (1.0 - new_scale / old_scale);
+                self.image_view.pan.0 += correction.x;
+                self.image_view.pan.1 += correction.y;
+            }
+        }
+        if response.dragged_by(egui::PointerButton::Secondary) {
+            self.image_view.pan.0 += pointer_delta.x;
+            self.image_view.pan.1 += pointer_delta.y;
+        }
+
+        if !self.image_view.crop_preview {
+            self.update_selection(&response, image_rect, image_size, shift, pointer);
+        }
+
+        let painter = ui.painter_at(viewport);
+        painter.image(
+            texture,
+            image_rect,
+            egui::Rect::from_min_max(
+                egui::pos2(region.min.x, region.min.y),
+                egui::pos2(region.max.x, region.max.y),
+            ),
+            Color32::WHITE,
+        );
+        if !self.image_view.crop_preview
+            && let Some(selection) = self.image_view.selection
+        {
+            paint_selection(&painter, image_rect, selection);
+        }
+    }
+
+    fn update_selection(
+        &mut self,
+        response: &egui::Response,
+        image_rect: egui::Rect,
+        image_size: (u32, u32),
+        square: bool,
+        pointer: Option<egui::Pos2>,
+    ) {
+        let Some(pointer) = pointer else { return };
+        let point = unit_point(pointer, image_rect);
+        if response.drag_started_by(egui::PointerButton::Primary) && image_rect.contains(pointer) {
+            self.selection_drag = self
+                .image_view
+                .selection
+                .and_then(|selection| selection_edge(pointer, image_rect, selection))
+                .or_else(|| {
+                    self.image_view
+                        .selection
+                        .filter(|selection| selection.contains(point))
+                        .map(|_| SelectionDrag::New(point))
+                })
+                .or(Some(SelectionDrag::New(point)));
+        }
+        if response.dragged_by(egui::PointerButton::Primary) {
+            match self.selection_drag {
+                Some(SelectionDrag::New(start)) => {
+                    self.image_view.selection =
+                        Some(UnitRect::from_drag(start, point, image_size, square));
+                }
+                Some(edge) => self.resize_selection(edge, point, square, image_size),
+                None => {}
+            }
+        }
+        if response.drag_stopped_by(egui::PointerButton::Primary) {
+            self.selection_drag = None;
+            if self
+                .image_view
+                .selection
+                .is_some_and(|selection| !selection.is_visible())
+            {
+                self.image_view.selection = None;
+            }
+        }
+        if response.clicked_by(egui::PointerButton::Primary)
+            && self
+                .image_view
+                .selection
+                .is_some_and(|selection| selection.contains(point))
+        {
+            self.image_view.crop_preview = true;
+            self.image_view.fit();
+        }
+    }
+
+    fn resize_selection(
+        &mut self,
+        edge: SelectionDrag,
+        point: UnitPoint,
+        preserve_ratio: bool,
+        image_size: (u32, u32),
+    ) {
+        let Some(mut selection) = self.image_view.selection else {
+            return;
+        };
+        let pixel_ratio = selection.width() * image_size.0 as f32
+            / (selection.height() * image_size.1 as f32).max(1.0);
+        match edge {
+            SelectionDrag::Left => selection.min.x = point.x.min(selection.max.x),
+            SelectionDrag::Right => selection.max.x = point.x.max(selection.min.x),
+            SelectionDrag::Top => selection.min.y = point.y.min(selection.max.y),
+            SelectionDrag::Bottom => selection.max.y = point.y.max(selection.min.y),
+            SelectionDrag::New(_) => return,
+        }
+        if preserve_ratio && image_size.0 > 0 && image_size.1 > 0 {
+            match edge {
+                SelectionDrag::Left | SelectionDrag::Right => {
+                    let height = selection.width() * image_size.0 as f32
+                        / pixel_ratio.max(f32::EPSILON)
+                        / image_size.1 as f32;
+                    let center = (selection.min.y + selection.max.y) * 0.5;
+                    selection.min.y = (center - height * 0.5).max(0.0);
+                    selection.max.y = (center + height * 0.5).min(1.0);
+                }
+                SelectionDrag::Top | SelectionDrag::Bottom => {
+                    let width = selection.height() * image_size.1 as f32 * pixel_ratio
+                        / image_size.0 as f32;
+                    let center = (selection.min.x + selection.max.x) * 0.5;
+                    selection.min.x = (center - width * 0.5).max(0.0);
+                    selection.max.x = (center + width * 0.5).min(1.0);
+                }
+                SelectionDrag::New(_) => {}
+            }
+        }
+        self.image_view.selection = Some(selection);
+    }
+
+    fn draw_reading_pages(&self, ui: &mut egui::Ui) {
+        let viewport = ui.max_rect().shrink(8.0);
+        let count = self.reading_pages.len();
+        if count == 0 {
+            ui.centered_and_justified(|ui| ui.label("No image pages available"));
+            return;
+        }
+        let gap = 8.0;
+        let painter = ui.painter_at(viewport);
+        for (index, image) in self.reading_pages.iter().enumerate() {
+            let page = reading_page_rect(viewport, count, index, self.reading_settings.axis, gap);
+            let dimensions = image.dimensions();
+            let scale = towavue_core::fit_scale(dimensions, (page.width(), page.height()));
+            let size = egui::vec2(dimensions.0 as f32 * scale, dimensions.1 as f32 * scale);
+            painter.image(
+                image.texture.id(),
+                egui::Rect::from_center_size(page.center(), size),
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
         }
     }
 
@@ -587,6 +926,23 @@ where
                         }
                         ui.monospace(format_time(self.current_position()));
                     }
+                    if self.media_kind == Some(MediaKind::Image) {
+                        if ui
+                            .selectable_label(self.reading_mode, "Reading")
+                            .on_hover_text("Toggle reading mode (B)")
+                            .clicked()
+                        {
+                            actions.push(UiAction::Command(CommandId::ToggleReadingMode));
+                        }
+                        if self.image_view.selection.is_some()
+                            && ui
+                                .selectable_label(self.image_view.crop_preview, "Crop preview")
+                                .on_hover_text("Toggle crop preview (Ctrl+Y)")
+                                .clicked()
+                        {
+                            actions.push(UiAction::Command(CommandId::ToggleCropPreview));
+                        }
+                    }
                     if let Some((message, _)) = &self.status_message {
                         ui.colored_label(Color32::LIGHT_YELLOW, message);
                     } else if let Some(path) = &self.path {
@@ -610,6 +966,24 @@ where
                         }
                         if let Ok(metadata) = path.metadata() {
                             ui.monospace(format_size(metadata.len()));
+                        }
+                        if let Some(image) = &self.image {
+                            let (width, height) = image.dimensions();
+                            ui.monospace(format!("{width} × {height}"));
+                            match self.image_view.zoom {
+                                ZoomMode::Fit => ui.monospace("Fit"),
+                                ZoomMode::Actual => ui.monospace("100%"),
+                                ZoomMode::Custom(scale) => {
+                                    ui.monospace(format!("{:.0}%", scale * 100.0))
+                                }
+                            };
+                            if self.reading_mode {
+                                ui.weak(format!(
+                                    "Reading · {} pages · {:?}",
+                                    self.reading_pages.len(),
+                                    self.reading_settings.axis
+                                ));
+                            }
                         }
                         if let Some(snapshot) = &self.folder_snapshot {
                             ui.weak(snapshot_source(snapshot.source));
@@ -778,7 +1152,66 @@ where
                 }
                 Err(error) => self.set_status(format!("Shortcut reload failed: {error}")),
             },
+            CommandId::ZoomIn => self.zoom_image(1.25),
+            CommandId::ZoomOut => self.zoom_image(0.8),
+            CommandId::ActualSize => {
+                self.image_view.actual_size();
+                self.request_redraw();
+            }
+            CommandId::FitToWindow => {
+                self.image_view.fit();
+                self.request_redraw();
+            }
+            CommandId::ClearSelection => {
+                self.image_view.selection = None;
+                self.image_view.crop_preview = false;
+                self.request_redraw();
+            }
+            CommandId::ToggleCropPreview => {
+                if self.image_view.selection.is_some() {
+                    self.image_view.crop_preview = !self.image_view.crop_preview;
+                    self.image_view.fit();
+                    self.request_redraw();
+                } else {
+                    self.set_status("Drag on the image to create a crop selection".into());
+                }
+            }
+            CommandId::ToggleReadingMode => {
+                self.reading_mode = !self.reading_mode;
+                if self.reading_mode {
+                    self.rebuild_reading_pages();
+                } else {
+                    self.reading_pages.clear();
+                }
+                self.request_redraw();
+            }
+            CommandId::IncreaseReadingPages => {
+                self.reading_settings.increase_pages();
+                self.rebuild_reading_pages();
+                self.request_redraw();
+            }
+            CommandId::DecreaseReadingPages => {
+                self.reading_settings.decrease_pages();
+                self.rebuild_reading_pages();
+                self.request_redraw();
+            }
+            CommandId::ToggleReadingAxis => {
+                self.reading_settings.toggle_axis();
+                self.request_redraw();
+            }
+            CommandId::ReverseReadingOrder => {
+                self.reading_settings.reversed = !self.reading_settings.reversed;
+                self.rebuild_reading_pages();
+                self.request_redraw();
+            }
         }
+    }
+
+    fn zoom_image(&mut self, factor: f32) {
+        let Some(image) = &self.image else { return };
+        let size = image.dimensions();
+        self.image_view.zoom_by(factor, size, (960.0, 576.0));
+        self.request_redraw();
     }
 
     fn activate_tab(&mut self, id: TabId) {
@@ -807,6 +1240,8 @@ where
             self.load_path(path, kind);
         } else {
             self.session.take();
+            self.image = None;
+            self.reading_pages.clear();
             self.path = None;
             self.media_kind = None;
             self.folder_snapshot = None;
@@ -1097,6 +1532,7 @@ where
             media_kind: self.media_kind,
             palette_open: self.palette_open,
             filmstrip_open: self.filmstrip_open,
+            reading_mode: self.reading_mode,
         }
     }
 
@@ -1162,22 +1598,23 @@ where
     }
 
     fn key_stroke(&self, event: &KeyEvent) -> Option<KeyStroke> {
-        let key = match &event.logical_key {
+        let (key, shift_consumed) = match &event.logical_key {
             WinitKey::Character(value) if value.chars().count() == 1 => {
-                Key::Character(value.chars().next()?.to_ascii_lowercase())
+                let character = value.chars().next()?.to_ascii_lowercase();
+                (Key::Character(character), character == '+')
             }
-            WinitKey::Named(NamedKey::Space) => Key::Space,
-            WinitKey::Named(NamedKey::ArrowLeft) => Key::ArrowLeft,
-            WinitKey::Named(NamedKey::ArrowRight) => Key::ArrowRight,
-            WinitKey::Named(NamedKey::Tab) => Key::Tab,
-            WinitKey::Named(NamedKey::Escape) => Key::Escape,
+            WinitKey::Named(NamedKey::Space) => (Key::Space, false),
+            WinitKey::Named(NamedKey::ArrowLeft) => (Key::ArrowLeft, false),
+            WinitKey::Named(NamedKey::ArrowRight) => (Key::ArrowRight, false),
+            WinitKey::Named(NamedKey::Tab) => (Key::Tab, false),
+            WinitKey::Named(NamedKey::Escape) => (Key::Escape, false),
             _ => return None,
         };
         Some(KeyStroke {
             modifiers: Modifiers {
                 control: self.modifiers.control_key(),
                 alt: self.modifiers.alt_key(),
-                shift: self.modifiers.shift_key(),
+                shift: self.modifiers.shift_key() && !shift_consumed,
                 logo: self.modifiers.super_key(),
             },
             key,
@@ -1186,6 +1623,17 @@ where
 
     fn schedule(&mut self, event_loop: &ActiveEventLoop) {
         self.poll_audio();
+        let now = Instant::now();
+        let mut image_changed = self
+            .image
+            .as_mut()
+            .is_some_and(|image| image.advance_animation(now));
+        for image in &mut self.reading_pages {
+            image_changed |= image.advance_animation(now);
+        }
+        if image_changed {
+            self.request_redraw();
+        }
         if self
             .folder_watcher
             .as_mut()
@@ -1247,10 +1695,23 @@ where
                 return;
             }
         }
-        if self.folder_watcher.is_some() {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + FOLDER_EVENT_POLL_INTERVAL,
-            ));
+        let next_image_frame = self
+            .image
+            .iter()
+            .chain(self.reading_pages.iter())
+            .filter_map(|image| image.next_frame_at)
+            .min();
+        if self.folder_watcher.is_some() || next_image_frame.is_some() {
+            let folder_poll = self
+                .folder_watcher
+                .is_some()
+                .then(|| Instant::now() + FOLDER_EVENT_POLL_INTERVAL);
+            let deadline = [folder_poll, next_image_frame]
+                .into_iter()
+                .flatten()
+                .min()
+                .expect("at least one scheduled wakeup exists");
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         } else {
             event_loop.set_control_flow(ControlFlow::Wait);
         }
@@ -1268,6 +1729,122 @@ fn percentile_95(samples: &[Duration]) -> Duration {
     ordered.sort_unstable();
     let index = (ordered.len() * 95).div_ceil(100).saturating_sub(1);
     ordered[index]
+}
+
+fn unit_point(point: egui::Pos2, image_rect: egui::Rect) -> UnitPoint {
+    UnitPoint {
+        x: ((point.x - image_rect.left()) / image_rect.width()).clamp(0.0, 1.0),
+        y: ((point.y - image_rect.top()) / image_rect.height()).clamp(0.0, 1.0),
+    }
+}
+
+fn selection_rect(image_rect: egui::Rect, selection: UnitRect) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(
+            image_rect.left() + image_rect.width() * selection.min.x,
+            image_rect.top() + image_rect.height() * selection.min.y,
+        ),
+        egui::pos2(
+            image_rect.left() + image_rect.width() * selection.max.x,
+            image_rect.top() + image_rect.height() * selection.max.y,
+        ),
+    )
+}
+
+fn selection_edge(
+    pointer: egui::Pos2,
+    image_rect: egui::Rect,
+    selection: UnitRect,
+) -> Option<SelectionDrag> {
+    let rect = selection_rect(image_rect, selection);
+    let tolerance = 8.0;
+    let mut candidates = Vec::new();
+    if pointer.y >= rect.top() - tolerance && pointer.y <= rect.bottom() + tolerance {
+        candidates.push(((pointer.x - rect.left()).abs(), SelectionDrag::Left));
+        candidates.push(((pointer.x - rect.right()).abs(), SelectionDrag::Right));
+    }
+    if pointer.x >= rect.left() - tolerance && pointer.x <= rect.right() + tolerance {
+        candidates.push(((pointer.y - rect.top()).abs(), SelectionDrag::Top));
+        candidates.push(((pointer.y - rect.bottom()).abs(), SelectionDrag::Bottom));
+    }
+    candidates
+        .into_iter()
+        .filter(|(distance, _)| *distance <= tolerance)
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+        .map(|(_, edge)| edge)
+}
+
+fn paint_selection(painter: &egui::Painter, image_rect: egui::Rect, selection: UnitRect) {
+    let selected = selection_rect(image_rect, selection);
+    let shade = Color32::from_black_alpha(150);
+    for rect in [
+        egui::Rect::from_min_max(
+            image_rect.min,
+            egui::pos2(image_rect.right(), selected.top()),
+        ),
+        egui::Rect::from_min_max(
+            egui::pos2(image_rect.left(), selected.bottom()),
+            image_rect.max,
+        ),
+        egui::Rect::from_min_max(
+            egui::pos2(image_rect.left(), selected.top()),
+            egui::pos2(selected.left(), selected.bottom()),
+        ),
+        egui::Rect::from_min_max(
+            egui::pos2(selected.right(), selected.top()),
+            egui::pos2(image_rect.right(), selected.bottom()),
+        ),
+    ] {
+        if rect.is_positive() {
+            painter.rect_filled(rect, 0.0, shade);
+        }
+    }
+    painter.rect_stroke(
+        selected,
+        0.0,
+        egui::Stroke::new(1.5, Color32::WHITE),
+        egui::StrokeKind::Inside,
+    );
+    for center in [
+        selected.left_center(),
+        selected.right_center(),
+        selected.center_top(),
+        selected.center_bottom(),
+    ] {
+        painter.rect_filled(
+            egui::Rect::from_center_size(center, egui::vec2(7.0, 7.0)),
+            1.0,
+            Color32::WHITE,
+        );
+    }
+}
+
+fn reading_page_rect(
+    viewport: egui::Rect,
+    count: usize,
+    index: usize,
+    axis: ReadingAxis,
+    gap: f32,
+) -> egui::Rect {
+    let count = count.max(1) as f32;
+    match axis {
+        ReadingAxis::Horizontal => {
+            let width = (viewport.width() - gap * (count - 1.0)).max(1.0) / count;
+            let left = viewport.left() + index as f32 * (width + gap);
+            egui::Rect::from_min_size(
+                egui::pos2(left, viewport.top()),
+                egui::vec2(width, viewport.height()),
+            )
+        }
+        ReadingAxis::Vertical => {
+            let height = (viewport.height() - gap * (count - 1.0)).max(1.0) / count;
+            let top = viewport.top() + index as f32 * (height + gap);
+            egui::Rect::from_min_size(
+                egui::pos2(viewport.left(), top),
+                egui::vec2(viewport.width(), height),
+            )
+        }
+    }
 }
 
 fn display_name(path: &Path) -> String {
@@ -1328,10 +1905,16 @@ where
         if self.window.as_ref().map(Window::id) != Some(window_id) {
             return;
         }
-        let consumed = match (self.window.as_ref(), self.ui_state.as_mut()) {
-            (Some(window), Some(state)) => state.on_window_event(window, &event).consumed,
-            _ => false,
+        let event_response = match (self.window.as_ref(), self.ui_state.as_mut()) {
+            (Some(window), Some(state)) => Some(state.on_window_event(window, &event)),
+            _ => None,
         };
+        let (consumed, repaint) = event_response
+            .map(|response| (response.consumed, response.repaint))
+            .unwrap_or_default();
+        if repaint {
+            self.request_redraw();
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
@@ -1374,5 +1957,33 @@ mod tests {
             snapshot_source(FolderSnapshotSource::LiveExplorerView),
             snapshot_source(FolderSnapshotSource::NaturalNameFallback)
         );
+    }
+
+    #[test]
+    fn reading_page_geometry_follows_the_selected_axis() {
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0));
+
+        let horizontal = reading_page_rect(viewport, 2, 1, ReadingAxis::Horizontal, 8.0);
+        let vertical = reading_page_rect(viewport, 2, 1, ReadingAxis::Vertical, 8.0);
+
+        assert_eq!(horizontal.left(), 154.0);
+        assert_eq!(horizontal.width(), 146.0);
+        assert_eq!(vertical.top(), 104.0);
+        assert_eq!(vertical.height(), 96.0);
+    }
+
+    #[test]
+    fn selection_edge_hit_test_prefers_the_nearest_edge() {
+        let image = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
+        let selection = UnitRect {
+            min: UnitPoint { x: 0.2, y: 0.2 },
+            max: UnitPoint { x: 0.8, y: 0.8 },
+        };
+
+        assert!(matches!(
+            selection_edge(egui::pos2(21.0, 50.0), image, selection),
+            Some(SelectionDrag::Left)
+        ));
+        assert!(selection_edge(egui::pos2(50.0, 50.0), image, selection).is_none());
     }
 }

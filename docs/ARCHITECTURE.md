@@ -21,6 +21,7 @@ towavueはWindows向けの画像・動画・音声ビューア兼プレイヤー
 | UI renderer | egui-directx11 0.13.0 | wgpuを介さずD3D11 render targetへ描画できる |
 | Windows API | windows 0.62.2 | COM、D3D11、DXGI、WASAPI、Shell APIの公式Rust projection |
 | Media | FFmpeg 9.0.1 / ffmpeg-next 9.0.0 | demux・codec・resampleの広い対応範囲 |
+| Image | image 0.25.10 + FFmpeg AVIF decode | 静止画、アニメ画像、orientationを安全なRGBA frameへ統一 |
 | Graphics | D3D11 + DXGI Flip Model | decode surfaceからpresentationまで同じdeviceを維持できる |
 | Audio | event-driven WASAPI Shared | 他アプリと共存しつつ十分に低遅延 |
 
@@ -45,6 +46,7 @@ OS非依存の値、状態遷移、コマンド、編集履歴を置く。unsafe
 - `CommandId` / `CommandContext`: menu、palette、shortcutが共有するcommand identity。
 - `FolderSnapshot`: Shellが返したfolder identity、ordered media、sort columns、source、generation。
 - `TabSet` / `ShortcutBindings`: platform非依存のtab targetとprefix対応key sequence。
+- `ImageViewState` / `ReadingSettings`: 正規化selection、zoom・pan・crop preview、2～10 pageの表示軸と反転。
 
 ### towavue-runtime-windows
 
@@ -57,6 +59,8 @@ GPU frameはruntime内部のRAII `FrameLease`で保持する。FFmpegの`AVFrame
 winit event loop、egui、tab、command dispatch、利用者向け状態を所有する。runtimeへcommandを送り、eventと描画結果だけを受け取る。
 
 M4ではmenu、command palette、shortcutの全入口を同じ`CommandId`へdispatchする。画像・動画の外部openはfile単位の新規tab、音声は同じfolderの既存playlist tabを再利用し、明示的な新規openだけ別tabにする。filmstrip、playlist、全種移動、同種移動は一つの`FolderSnapshot`を共有する。
+
+M5ではruntimeがBMP、GIF、JPEG、PNG、TIFF、WebPを`image` crate、AVIFを既存FFmpeg software pathでdecodeし、native handleを含まないRGBA frame列とframe durationだけをappへ返す。appはegui texture、animation deadline、画像操作状態を所有する。画像と動画が共有するのは同じD3D11 device、visual surface、Presentだけであり、画像frameを動画decode queueやVideo Processorへ流さない。
 
 ## 4. 再生・表示契約
 
@@ -87,6 +91,14 @@ codec metadata、device、driverのいずれかがD3D11VAを成立させられ�
 demux、video decode、audio decode、WASAPI outputは独立workerとし、stream別packet queue、decoded output queue、presentation queueをすべてboundedにする。demuxは満杯の一方のstreamだけで他方を直ちに停止させず、各streamに同じ上限のpending packetを持って空きqueueを先に進める。packetはdropせず、presentation時刻に遅れたdecoded video frameだけをdropする。audio workerの完了はvideo workerと独立してWASAPIへ通知し、末尾audio drain後はvideo-only clockへ切り替える。
 
 通常再生は`IAudioClock`をmasterとする。running中のdevice positionが供給停止で進まない場合に限り、audio clientのstart/stopとpauseを追跡した単調時計を下限にして永久停止を防ぐ。Seekはgeneration更新後に旧workerと全queueを破棄し、`avformat_seek_file`、decode/discard、audio/video primingを新しいpipelineで行う。default render endpoint変更とD3D11 device removalはtyped eventとしてappへ渡し、現在位置と新しいendpointまたはD3D11 deviceでpipeline全体を再構築する。
+
+### M5 image presentation
+
+静止画はEXIF orientation適用後、アニメGIF、WebP、APNGは合成済みRGBA frameと10 ms以上のdeadlineへ変換する。app event loopは次frame時刻までsleepし、期限を過ぎたframeを追いつかせてからegui textureを更新する。画像textureも動画・UIと同じD3D11 deviceとback bufferへ描画し、Presentは一回に保つ。
+
+selectionは元画像に対する正規化矩形として保持し、表示scaleから独立させる。左dragで作成、辺dragで変形、Shift付き作成で画像pixel上の正方形、Shift付き辺dragで現在比率を保持する。右dragはpan、Ctrl+wheelはpointer anchorのzoom、選択範囲clickとCtrl+Yはpixelを変更しないcrop previewである。実crop、undo、save/exportはM6まで開始しない。
+
+reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降の画像だけをShell view順のまま2～10 page取得する。横・縦配置と表示順反転はpresentation状態だけを変更し、個別画像のselectionや編集状態を作らない。
 
 ## 5. スレッド・同期契約
 

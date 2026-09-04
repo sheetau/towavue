@@ -11,7 +11,7 @@ This log preserves compact, factual continuity across sessions. New entries are 
 - Rendering evidence: integrating egui exposed that the D3D11 Video Processor rejects the software fallback's RGBA texture on the reference adapter. Software frames now use a full-screen D3D11 shader on the same device/back buffer, while D3D11VA frames retain the zero-copy Video Processor path and UI is composed before the single Present.
 - Changed areas: core media/command/navigation/tab contracts; Shell order provider and dialogs; directory watcher; D3D11 UI/software rendering; application tabs, commands, palette, shortcuts, playlist, filmstrip, and status; pinned dependencies; architecture, roadmap, and README.
 - Verification: `cargo fmt --all --check`, workspace all-target Clippy with warnings denied, and workspace all-target tests pass (app 3, core 15, runtime 11 plus 1 ignored live-Explorer integration test, codec integration 1). The live Explorer fixture test was run explicitly and passed Name, Date modified, Date created, Size, and Type ascending/descending, ties, multiple columns, and repeated sort recapture; the hidden Explorer fixture and debounced directory watcher tests also pass. On adapter `00000000:0001311b`, the final H.264 smoke presented 60/60 D3D11VA frames with 0 CPU transfers, and FFV1 presented 60/60 software frames with 60 CPU transfers and no render error.
-- Commit: pending checkpoint.
+- Commit: `f8be5e4`.
 - Status: `m4_complete`.
 - Next action: begin M5 image decoding/rendering and reading-mode primitives; do not begin M6 editing while M5 is active.
 

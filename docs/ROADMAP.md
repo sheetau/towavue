@@ -40,11 +40,13 @@ audio master clock、video-only clock、frame pacing、generation付きSeek、�
 
 M3は2026-09-04に完了した。demux、video decode、audio decode、WASAPI outputをbounded queueで分離し、`IAudioClock`を通常のmaster、device clock停止時とvideo-only区間を単調時計で補う構成にした。Seekはpipelineをgeneration単位で破棄・再構築し、古いeventを無視する。default render endpoint変更とD3D11 device removalはtyped eventから現在位置でpipelineを再構築する。基準adapter `00000000:0001311b`の30分4K60 H.264/AAC実時間再生では107,768 framesを表示、3 framesをdropしてdrop率0.0028%、A/V drift p95 4.772ms・最大35.759msだった。ローカル1080p H.264の100回Seekはp95 37.750ms・最大56.991msだった。現在の次工程はM4である。
 
-## M4 — Application shell and navigation
+## M4 — Application shell and navigation（完了）
 
 tab、status bar、command registry、command palette、customizable shortcut、audio folder playlist、filmstrip、Explorer folder sort連携を実装する。
 
 Explorer sortは`docs/ARCHITECTURE.md`の`FolderSnapshot`契約と検証matrixを満たすこと。
+
+M4は2026-09-04に完了した。eguiを同一D3D11 back bufferへ統合し、tab、status bar、共有command registry、command palette、prefix対応カスタムshortcut、audio folder playlist、全media filmstripを実装した。`FolderOrderProvider`は専用STAでmatching live Explorer viewを優先し、閉じている場合は非表示`IExplorerBrowser`、失敗時だけWindows自然名前順を用いる。folder変更はoverlapped `ReadDirectoryChangesW`と150 ms debounceでsnapshotを再取得する。fixture付きExplorer integration testでName、Date modified、Date created、Size、Typeの昇順・降順、同値、複数列、およびsort変更後の再取得を確認した。現在の次工程はM5である。
 
 ## M5 — Images and reading mode
 

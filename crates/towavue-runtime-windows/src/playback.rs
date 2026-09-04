@@ -99,6 +99,7 @@ pub struct PlaybackSession {
     audio_format: Option<AudioFormat>,
     video_rx: Option<Receiver<PresentationFrame>>,
     pending_video: Option<PresentationFrame>,
+    current_video: Option<PresentationFrame>,
     audio: Option<AudioOutput>,
     decode_thread: Option<JoinHandle<()>>,
     adapter_luid: AdapterLuid,
@@ -129,6 +130,7 @@ impl PlaybackSession {
             audio_format,
             video_rx: None,
             pending_video: None,
+            current_video: None,
             audio: None,
             decode_thread: None,
             adapter_luid,
@@ -209,6 +211,7 @@ impl PlaybackSession {
 
     fn stop_pipeline(&mut self) {
         self.pending_video.take();
+        self.current_video.take();
         self.video_rx.take();
         self.audio.take();
         if let Some(thread) = self.decode_thread.take() {
@@ -229,10 +232,8 @@ impl PlaybackSession {
         let Some(frame) = self.pending_video.take() else {
             return Ok(false);
         };
-        let result = match frame {
-            PresentationFrame::Software(frame) => renderer.present(&frame),
-            PresentationFrame::Hardware(frame) => renderer.present_hardware(&frame),
-        };
+        self.current_video = Some(frame);
+        let result = self.draw_current(renderer);
         if let Err(error) = result {
             return match renderer.device_removed_reason() {
                 Some(reason) => Err(RenderError::DeviceRemoved(reason)),
@@ -242,6 +243,17 @@ impl PlaybackSession {
         self.metrics
             .presented_frame_count
             .fetch_add(1, Ordering::Relaxed);
+        Ok(true)
+    }
+
+    pub fn draw_current(&self, renderer: &mut FrameRenderer) -> Result<bool, RenderError> {
+        let Some(frame) = self.current_video.as_ref() else {
+            return Ok(false);
+        };
+        match frame {
+            PresentationFrame::Software(frame) => renderer.draw_software(frame)?,
+            PresentationFrame::Hardware(frame) => renderer.draw_hardware(frame)?,
+        }
         Ok(true)
     }
 

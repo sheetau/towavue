@@ -4,13 +4,13 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
-**M3: Seek, synchronization, and resilienceまで完了しています。** 対応codecはFFmpegのD3D11VA surfaceを同一D3D11 deviceのVideo ProcessorからSwapChainへCPU転送なしで表示し、非対応時だけsoftware pathへfallbackします。audio-master同期、generation付き連続Seek、pause/resume、audio endpoint変更とD3D11 device removalからのpipeline再構築を実装済みです。Shell連携、tab、画像表示、編集はまだ実装していません。
+**M4: Application shell and navigationまで完了しています。** M3までの再生基盤に、tab、status bar、command menu／palette、カスタムshortcut、audio folder playlist、filmstripを追加しました。フォルダー内の移動順は、同じフォルダーを開いているExplorerの実際のSort By状態を優先し、Explorerが閉じている場合もShell viewが解決した保存状態またはfolder templateを利用します。Shell取得失敗時だけWindows自然名前順へ縮退します。画像の表示と編集はまだ実装していません。
 
 - 対応予定OS: Windows 10 22H2以降
 - 対応予定アーキテクチャ: x86-64
 - Rust: 1.98.0 / Edition 2024 / MSVC ABI
 - ライセンス: MIT OR Apache-2.0
-- 次の工程: M4 application shell and navigation
+- 次の工程: M5 images and reading mode
 
 ## 文書
 
@@ -38,7 +38,9 @@ cargo test --workspace --all-targets
 cargo run -p towavue-app -- path\to\media.mp4
 ```
 
-再生中はSpaceでpause/resume、左右矢印で5秒単位の連続Seek、ウィンドウを閉じると終了します。M1のcodec fixtureはMP4/H.264/AAC、MKV/HEVC/AAC、WebM/VP9/Opusです。再生終了時のdiagnosticにはadapter LUID、hardware frame数、CPU transfer数、表示・drop frame数、Seek latency、A/V driftを記録します。
+標準shortcutはSpaceでpause/resume、左右矢印で5秒Seek、Ctrl+左右で同種media移動、Alt+左右で全種media移動、Fでfilmstrip、Ctrl+Shift+Pでcommand paletteです。設定は初回起動時に`%APPDATA%\towavue\shortcuts.conf`へ生成され、`Ctrl+K Ctrl+S`のようなprefix shortcutも指定できます。menuまたは同shortcutのReload commandで再読込します。
+
+画像と動画はfileごとのtab、音声は同じfolderのplaylist tabとして開きます。filmstripはShell snapshotの全対応mediaをExplorer順で表示し、middle clickで明示的に新規tabを作れます。フォルダー変更は`ReadDirectoryChangesW`で検知してdebounce後にsnapshotを更新します。M1のcodec fixtureはMP4/H.264/AAC、MKV/HEVC/AAC、WebM/VP9/Opusです。再生終了時のdiagnosticにはadapter LUID、hardware frame数、CPU transfer数、表示・drop frame数、Seek latency、A/V driftを記録します。
 
 ## ライセンス
 

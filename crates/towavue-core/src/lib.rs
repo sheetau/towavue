@@ -2,8 +2,24 @@
 
 #![forbid(unsafe_code)]
 
+mod commands;
+mod media;
+mod navigation;
+mod tabs;
+
 use std::fmt;
 use std::time::Duration;
+
+pub use commands::{
+    CommandContext, CommandDefinition, CommandId, Key, KeySequence, KeyStroke, Modifiers,
+    ShortcutBindings, ShortcutMatch, command_definitions,
+};
+pub use media::MediaKind;
+pub use navigation::{
+    FolderMediaItem, FolderSnapshot, FolderSnapshotSource, PropertyKey, ShellIdentity, SortColumn,
+    SortDirection,
+};
+pub use tabs::{Tab, TabId, TabSet, TabTarget};
 
 /// A signed media timestamp stored as nanoseconds.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]

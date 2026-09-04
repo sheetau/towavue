@@ -2,18 +2,25 @@ use std::mem::ManuallyDrop;
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use thiserror::Error;
-use windows::Win32::Foundation::{HMODULE, HWND};
-use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL};
+use windows::Win32::Foundation::{HMODULE, HWND, RECT};
+use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, ID3DBlob,
+    ID3DInclude,
+};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_SDK_VERSION,
-    D3D11_TEX2D_VPIV, D3D11_TEX2D_VPOV, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
+    D3D11_BIND_SHADER_RESOURCE, D3D11_COMPARISON_ALWAYS, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+    D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_SAMPLER_DESC,
+    D3D11_SDK_VERSION, D3D11_TEX2D_VPIV, D3D11_TEX2D_VPOV, D3D11_TEXTURE_ADDRESS_CLAMP,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
     D3D11_VIDEO_PROCESSOR_CONTENT_DESC, D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC,
     D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC,
     D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_STREAM,
-    D3D11_VIDEO_USAGE_PLAYBACK_NORMAL, D3D11_VPIV_DIMENSION_TEXTURE2D,
-    D3D11_VPOV_DIMENSION_TEXTURE2D, D3D11CreateDeviceAndSwapChain, ID3D11Device,
-    ID3D11DeviceContext, ID3D11Multithread, ID3D11Texture2D, ID3D11VideoContext, ID3D11VideoDevice,
-    ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
+    D3D11_VIDEO_USAGE_PLAYBACK_NORMAL, D3D11_VIEWPORT, D3D11_VPIV_DIMENSION_TEXTURE2D,
+    D3D11_VPOV_DIMENSION_TEXTURE2D, D3D11CreateDeviceAndSwapChain, ID3D11DepthStencilView,
+    ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout, ID3D11Multithread, ID3D11PixelShader,
+    ID3D11RenderTargetView, ID3D11SamplerState, ID3D11Texture2D, ID3D11VertexShader,
+    ID3D11VideoContext, ID3D11VideoDevice, ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_MODE_DESC, DXGI_RATIONAL, DXGI_SAMPLE_DESC,
@@ -22,7 +29,7 @@ use windows::Win32::Graphics::Dxgi::{
     DXGI_PRESENT, DXGI_SWAP_CHAIN_DESC, DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_DISCARD,
     DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice, IDXGISwapChain,
 };
-use windows::core::{BOOL, Interface};
+use windows::core::{BOOL, Interface, PCSTR, s};
 
 use crate::VideoFrame;
 use crate::decode::HardwareVideoFrame;
@@ -40,6 +47,8 @@ pub enum RenderError {
     DeviceRemoved(String),
     #[error("decoded video dimensions are invalid")]
     InvalidFrame,
+    #[error("the D3D11 presentation surface has not been sized")]
+    SurfaceNotSized,
     #[error("the hardware frame does not contain a D3D11 texture")]
     InvalidHardwareFrame,
 }
@@ -75,11 +84,74 @@ impl GraphicsDevice {
 }
 
 struct VideoProcessorState {
-    dimensions: (u32, u32),
+    dimensions: (u32, u32, u32, u32),
     device: ID3D11VideoDevice,
     context: ID3D11VideoContext,
     enumerator: ID3D11VideoProcessorEnumerator,
     processor: ID3D11VideoProcessor,
+}
+
+struct SoftwareBlitter {
+    vertex_shader: ID3D11VertexShader,
+    pixel_shader: ID3D11PixelShader,
+    sampler: ID3D11SamplerState,
+}
+
+impl SoftwareBlitter {
+    fn new(device: &ID3D11Device) -> Result<Self, RenderError> {
+        const VERTEX_SHADER: &[u8] = br#"
+struct VertexOutput {
+    float4 position : SV_POSITION;
+    float2 uv : TEXCOORD0;
+};
+
+VertexOutput main(uint vertex_id : SV_VertexID) {
+    VertexOutput output;
+    output.uv = float2((vertex_id << 1) & 2, vertex_id & 2);
+    output.position = float4(output.uv.x * 2.0 - 1.0, 1.0 - output.uv.y * 2.0, 0.0, 1.0);
+    return output;
+}
+"#;
+        const PIXEL_SHADER: &[u8] = br#"
+Texture2D source_texture : register(t0);
+SamplerState source_sampler : register(s0);
+
+float4 main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
+    return source_texture.Sample(source_sampler, uv);
+}
+"#;
+
+        let vertex_bytecode = compile_shader(VERTEX_SHADER, s!("vs_4_0"))?;
+        let pixel_bytecode = compile_shader(PIXEL_SHADER, s!("ps_4_0"))?;
+        let mut vertex_shader = None;
+        let mut pixel_shader = None;
+        let mut sampler = None;
+        let sampler_description = D3D11_SAMPLER_DESC {
+            Filter: D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+            AddressU: D3D11_TEXTURE_ADDRESS_CLAMP,
+            AddressV: D3D11_TEXTURE_ADDRESS_CLAMP,
+            AddressW: D3D11_TEXTURE_ADDRESS_CLAMP,
+            ComparisonFunc: D3D11_COMPARISON_ALWAYS,
+            MaxLOD: f32::MAX,
+            ..Default::default()
+        };
+        // The compiled bytecode is consumed during creation. The resulting
+        // immutable shader and sampler objects are retained by the renderer.
+        unsafe {
+            device.CreateVertexShader(
+                blob_bytes(&vertex_bytecode),
+                None,
+                Some(&mut vertex_shader),
+            )?;
+            device.CreatePixelShader(blob_bytes(&pixel_bytecode), None, Some(&mut pixel_shader))?;
+            device.CreateSamplerState(&sampler_description, Some(&mut sampler))?;
+        }
+        Ok(Self {
+            vertex_shader: vertex_shader.expect("D3D11 returned success without a vertex shader"),
+            pixel_shader: pixel_shader.expect("D3D11 returned success without a pixel shader"),
+            sampler: sampler.expect("D3D11 returned success without a sampler"),
+        })
+    }
 }
 
 /// Safe owner of the D3D11 device, immediate context, and window swap chain.
@@ -89,6 +161,9 @@ pub struct FrameRenderer {
     swap_chain: IDXGISwapChain,
     buffer_dimensions: Option<(u32, u32)>,
     video_processor: Option<VideoProcessorState>,
+    software_texture: Option<(u32, u32, ID3D11Texture2D)>,
+    software_blitter: SoftwareBlitter,
+    ui_renderer: egui_directx11::Renderer,
 }
 
 impl FrameRenderer {
@@ -155,6 +230,8 @@ impl FrameRenderer {
         // both temporary values are released before this constructor returns.
         let adapter_luid = unsafe { dxgi_device.GetAdapter()?.GetDesc()?.AdapterLuid };
 
+        let software_blitter = SoftwareBlitter::new(&device)?;
+        let ui_renderer = egui_directx11::Renderer::new(&device)?;
         Ok(Self {
             graphics_device: GraphicsDevice {
                 device,
@@ -167,6 +244,9 @@ impl FrameRenderer {
             swap_chain: swap_chain.expect("D3D11 returned success without a swap chain"),
             buffer_dimensions: None,
             video_processor: None,
+            software_texture: None,
+            software_blitter,
+            ui_renderer,
         })
     }
 
@@ -178,8 +258,8 @@ impl FrameRenderer {
         self.graphics_device.device_removed_reason()
     }
 
-    /// Uploads one tightly packed RGBA frame and presents it to the window.
-    pub fn present(&mut self, frame: &VideoFrame) -> Result<(), RenderError> {
+    /// Uploads one tightly packed RGBA frame and draws it to the shared surface.
+    pub(crate) fn draw_software(&mut self, frame: &VideoFrame) -> Result<(), RenderError> {
         if frame.width == 0 || frame.height == 0 {
             return Err(RenderError::InvalidFrame);
         }
@@ -194,34 +274,66 @@ impl FrameRenderer {
             return Err(RenderError::InvalidFrame);
         }
 
-        self.resize_buffers(frame.width, frame.height)?;
-
-        // The back buffer is borrowed only for this upload. D3D11 copies the CPU
-        // bytes before UpdateSubresource returns, so `frame` need not outlive it.
+        self.ensure_surface()?;
+        if self
+            .software_texture
+            .as_ref()
+            .is_none_or(|(width, height, _)| (*width, *height) != (frame.width, frame.height))
+        {
+            let description = D3D11_TEXTURE2D_DESC {
+                Width: frame.width,
+                Height: frame.height,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_DEFAULT,
+                BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+                ..Default::default()
+            };
+            let mut texture = None;
+            // The texture stays owned by the renderer and is replaced only when dimensions change.
+            unsafe {
+                self.graphics_device.device.CreateTexture2D(
+                    &description,
+                    None,
+                    Some(&mut texture),
+                )?;
+            }
+            self.software_texture = Some((
+                frame.width,
+                frame.height,
+                texture.expect("D3D11 returned success without a software texture"),
+            ));
+        }
+        let texture = self
+            .software_texture
+            .as_ref()
+            .expect("software texture was prepared")
+            .2
+            .clone();
+        // D3D11 copies the CPU bytes before UpdateSubresource returns.
         unsafe {
-            let back_buffer: ID3D11Texture2D = self.swap_chain.GetBuffer(0)?;
             self.context.UpdateSubresource(
-                &back_buffer,
+                &texture,
                 0,
                 None,
                 frame.rgba.as_ptr().cast(),
                 row_pitch,
                 0,
             );
-            self.swap_chain.Present(1, DXGI_PRESENT(0)).ok()?;
         }
-        Ok(())
+        self.draw_software_texture(&texture)
     }
 
-    pub(crate) fn present_hardware(
-        &mut self,
-        frame: &HardwareVideoFrame,
-    ) -> Result<(), RenderError> {
+    pub(crate) fn draw_hardware(&mut self, frame: &HardwareVideoFrame) -> Result<(), RenderError> {
         if frame.width == 0 || frame.height == 0 {
             return Err(RenderError::InvalidFrame);
         }
-        self.resize_buffers(frame.width, frame.height)?;
-        self.prepare_video_processor(frame.width, frame.height)?;
+        self.ensure_surface()?;
 
         let (texture_raw, array_slice) = frame
             .texture_and_slice()
@@ -229,6 +341,18 @@ impl FrameRenderer {
         // The AVFrame owns this COM reference for the duration of the call.
         let texture = unsafe { ID3D11Texture2D::from_raw_borrowed(&texture_raw) }
             .ok_or(RenderError::InvalidHardwareFrame)?;
+        self.blit_texture(texture, array_slice, frame.width, frame.height)
+    }
+
+    fn blit_texture(
+        &mut self,
+        texture: &ID3D11Texture2D,
+        array_slice: u32,
+        width: u32,
+        height: u32,
+    ) -> Result<(), RenderError> {
+        let (output_width, output_height) = self.ensure_surface()?;
+        self.prepare_video_processor(width, height, output_width, output_height)?;
         let state = self
             .video_processor
             .as_ref()
@@ -281,12 +405,54 @@ impl FrameRenderer {
             );
             ManuallyDrop::drop(&mut stream.pInputSurface);
             result?;
-            self.swap_chain.Present(1, DXGI_PRESENT(0)).ok()?;
         }
         Ok(())
     }
 
-    fn resize_buffers(&mut self, width: u32, height: u32) -> Result<(), RenderError> {
+    fn draw_software_texture(&self, texture: &ID3D11Texture2D) -> Result<(), RenderError> {
+        let (output_width, output_height) = self.ensure_surface()?;
+        let render_target = self.render_target()?;
+        let mut source_view = None;
+        // The resource view borrows the renderer-owned texture. All pipeline
+        // objects and the immediate context remain on the event-loop thread.
+        unsafe {
+            self.graphics_device.device.CreateShaderResourceView(
+                texture,
+                None,
+                Some(&mut source_view),
+            )?;
+            self.context.OMSetRenderTargets(
+                Some(&[Some(render_target)]),
+                None::<&ID3D11DepthStencilView>,
+            );
+            self.context.IASetInputLayout(None::<&ID3D11InputLayout>);
+            self.context
+                .IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            self.context
+                .VSSetShader(&self.software_blitter.vertex_shader, None);
+            self.context
+                .PSSetShader(&self.software_blitter.pixel_shader, None);
+            self.context
+                .PSSetSamplers(0, Some(&[Some(self.software_blitter.sampler.clone())]));
+            self.context.PSSetShaderResources(0, Some(&[source_view]));
+            self.context.RSSetViewports(Some(&[D3D11_VIEWPORT {
+                TopLeftX: 0.0,
+                TopLeftY: 0.0,
+                Width: output_width as f32,
+                Height: output_height as f32,
+                MinDepth: 0.0,
+                MaxDepth: 1.0,
+            }]));
+            self.context.Draw(3, 0);
+            self.context.PSSetShaderResources(0, Some(&[None]));
+        }
+        Ok(())
+    }
+
+    pub fn resize_surface(&mut self, width: u32, height: u32) -> Result<(), RenderError> {
+        if width == 0 || height == 0 {
+            return Ok(());
+        }
         if self.buffer_dimensions != Some((width, height)) {
             // No back-buffer views or references are retained across ResizeBuffers.
             unsafe {
@@ -304,11 +470,62 @@ impl FrameRenderer {
         Ok(())
     }
 
-    fn prepare_video_processor(&mut self, width: u32, height: u32) -> Result<(), RenderError> {
+    pub fn clear(&mut self, color: [f32; 4]) -> Result<(), RenderError> {
+        self.ensure_surface()?;
+        let render_target = self.render_target()?;
+        // The target is valid until the next ResizeBuffers call.
+        unsafe { self.context.ClearRenderTargetView(&render_target, &color) };
+        Ok(())
+    }
+
+    pub fn render_ui(
+        &mut self,
+        context: &egui::Context,
+        output: egui::FullOutput,
+    ) -> Result<egui::PlatformOutput, RenderError> {
+        self.ensure_surface()?;
+        let render_target = self.render_target()?;
+        let (renderer_output, platform_output, _) = egui_directx11::split_output(output);
+        self.ui_renderer
+            .render(&self.context, &render_target, context, renderer_output)?;
+        Ok(platform_output)
+    }
+
+    pub fn present_surface(&self) -> Result<(), RenderError> {
+        // The swap chain and device stay owned for the duration of presentation.
+        unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok()? };
+        Ok(())
+    }
+
+    fn ensure_surface(&self) -> Result<(u32, u32), RenderError> {
+        self.buffer_dimensions.ok_or(RenderError::SurfaceNotSized)
+    }
+
+    fn render_target(&self) -> Result<ID3D11RenderTargetView, RenderError> {
+        let back_buffer: ID3D11Texture2D = unsafe { self.swap_chain.GetBuffer(0)? };
+        let mut render_target = None;
+        // The returned view owns its reference to the current back buffer.
+        unsafe {
+            self.graphics_device.device.CreateRenderTargetView(
+                &back_buffer,
+                None,
+                Some(&mut render_target),
+            )?;
+        }
+        Ok(render_target.expect("D3D11 returned success without a render target view"))
+    }
+
+    fn prepare_video_processor(
+        &mut self,
+        width: u32,
+        height: u32,
+        output_width: u32,
+        output_height: u32,
+    ) -> Result<(), RenderError> {
         if self
             .video_processor
             .as_ref()
-            .is_some_and(|state| state.dimensions == (width, height))
+            .is_some_and(|state| state.dimensions == (width, height, output_width, output_height))
         {
             return Ok(());
         }
@@ -326,8 +543,8 @@ impl FrameRenderer {
                 Numerator: 1,
                 Denominator: 1,
             },
-            OutputWidth: width,
-            OutputHeight: height,
+            OutputWidth: output_width,
+            OutputHeight: output_height,
             Usage: D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
         };
         // These COM objects are retained by the renderer and used only on its
@@ -335,8 +552,23 @@ impl FrameRenderer {
         unsafe {
             let enumerator = device.CreateVideoProcessorEnumerator(&description)?;
             let processor = device.CreateVideoProcessor(&enumerator, 0)?;
+            let source = RECT {
+                left: 0,
+                top: 0,
+                right: width as i32,
+                bottom: height as i32,
+            };
+            let destination = RECT {
+                left: 0,
+                top: 0,
+                right: output_width as i32,
+                bottom: output_height as i32,
+            };
+            context.VideoProcessorSetStreamSourceRect(&processor, 0, true, Some(&source));
+            context.VideoProcessorSetStreamDestRect(&processor, 0, true, Some(&destination));
+            context.VideoProcessorSetOutputTargetRect(&processor, true, Some(&destination));
             self.video_processor = Some(VideoProcessorState {
-                dimensions: (width, height),
+                dimensions: (width, height, output_width, output_height),
                 device,
                 context,
                 enumerator,
@@ -345,4 +577,32 @@ impl FrameRenderer {
         }
         Ok(())
     }
+}
+
+fn compile_shader(source: &[u8], target: PCSTR) -> Result<ID3DBlob, RenderError> {
+    let mut bytecode = None;
+    // D3DCompile reads the static source for the duration of this call and
+    // returns an owned blob. No include handler or caller-owned pointers escape.
+    unsafe {
+        D3DCompile(
+            source.as_ptr().cast(),
+            source.len(),
+            PCSTR::null(),
+            None,
+            None::<&ID3DInclude>,
+            s!("main"),
+            target,
+            0,
+            0,
+            &mut bytecode,
+            None,
+        )?;
+    }
+    Ok(bytecode.expect("D3DCompile returned success without bytecode"))
+}
+
+unsafe fn blob_bytes(blob: &ID3DBlob) -> &[u8] {
+    // The returned slice cannot outlive the borrowed COM blob and is consumed
+    // synchronously by D3D11 shader creation.
+    unsafe { std::slice::from_raw_parts(blob.GetBufferPointer().cast(), blob.GetBufferSize()) }
 }

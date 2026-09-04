@@ -1,0 +1,917 @@
+use std::cmp::Ordering;
+use std::ffi::{OsStr, OsString};
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant, SystemTime};
+
+use thiserror::Error;
+use towavue_core::{
+    FolderMediaItem, FolderSnapshot, FolderSnapshotSource, MediaKind, PropertyKey, ShellIdentity,
+    SortColumn, SortDirection,
+};
+use windows::Win32::Foundation::{HWND, PROPERTYKEY, RECT};
+use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree, IServiceProvider};
+use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
+use windows::Win32::System::Variant::VARIANT;
+use windows::Win32::UI::Shell::Common::ITEMIDLIST;
+use windows::Win32::UI::Shell::{
+    EBO_NOBORDER, EBO_NOPERSISTVIEWSTATE, EBO_NOTRAVELLOG, ExplorerBrowser, IExplorerBrowser,
+    IFolderView2, IPersistFolder2, IShellBrowser, IShellItem, IShellItemArray, IShellWindows,
+    IWebBrowserApp, SBSP_ABSOLUTE, SHCreateItemFromIDList, SHGetIDListFromObject,
+    SHParseDisplayName, SID_STopLevelBrowser, SIGDN_FILESYSPATH, SORT_ASCENDING, SORT_DESCENDING,
+    SORTCOLUMN, SVGIO_ALLVIEW, SVGIO_FLAG_VIEWORDER, ShellWindows, StrCmpLogicalW,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE, PeekMessageW,
+    TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
+};
+use windows::core::{Interface, PCWSTR, w};
+
+#[derive(Debug, Error)]
+pub enum FolderOrderError {
+    #[error("the Shell worker stopped")]
+    WorkerStopped,
+    #[error("the Shell worker did not return a snapshot")]
+    ResponseLost,
+}
+
+enum Request {
+    Snapshot {
+        folder: PathBuf,
+        generation: u64,
+        reply: mpsc::Sender<FolderSnapshot>,
+    },
+    Shutdown,
+}
+
+pub struct FolderOrderProvider {
+    sender: mpsc::Sender<Request>,
+    worker: Option<JoinHandle<()>>,
+    next_generation: u64,
+}
+
+impl FolderOrderProvider {
+    pub fn new() -> Result<Self, FolderOrderError> {
+        let (sender, receiver) = mpsc::channel();
+        let worker = thread::Builder::new()
+            .name("towavue-shell-sta".into())
+            .spawn(move || shell_worker(receiver))
+            .map_err(|_| FolderOrderError::WorkerStopped)?;
+        Ok(Self {
+            sender,
+            worker: Some(worker),
+            next_generation: 0,
+        })
+    }
+
+    pub fn snapshot(&mut self, folder: &Path) -> Result<FolderSnapshot, FolderOrderError> {
+        self.next_generation = self.next_generation.wrapping_add(1);
+        let generation = self.next_generation;
+        let (reply, response) = mpsc::channel();
+        self.sender
+            .send(Request::Snapshot {
+                folder: folder.to_owned(),
+                generation,
+                reply,
+            })
+            .map_err(|_| FolderOrderError::WorkerStopped)?;
+        response.recv().map_err(|_| FolderOrderError::ResponseLost)
+    }
+}
+
+impl Drop for FolderOrderProvider {
+    fn drop(&mut self) {
+        let _ = self.sender.send(Request::Shutdown);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn shell_worker(receiver: mpsc::Receiver<Request>) {
+    // SAFETY: this worker owns every COM interface it creates and never moves one across threads.
+    // It initializes and uninitializes the apartment on this same thread.
+    let initialized = unsafe { OleInitialize(None).is_ok() };
+    let mut last_live_window = None;
+    while let Ok(request) = receiver.recv() {
+        match request {
+            Request::Snapshot {
+                folder,
+                generation,
+                reply,
+            } => {
+                let snapshot = if initialized {
+                    shell_snapshot(&folder, generation, &mut last_live_window).unwrap_or_else(
+                        || {
+                            eprintln!(
+                                "towavue: Shell view unavailable for {}; using natural-name order",
+                                folder.display()
+                            );
+                            fallback_snapshot(&folder, generation)
+                        },
+                    )
+                } else {
+                    eprintln!(
+                        "towavue: Shell STA initialization failed for {}; using natural-name order",
+                        folder.display()
+                    );
+                    fallback_snapshot(&folder, generation)
+                };
+                let _ = reply.send(snapshot);
+            }
+            Request::Shutdown => break,
+        }
+    }
+    if initialized {
+        // SAFETY: balances this thread's successful CoInitializeEx call after COM objects drop.
+        unsafe { OleUninitialize() };
+    }
+}
+
+fn shell_snapshot(
+    folder: &Path,
+    generation: u64,
+    last_live_window: &mut Option<HWND>,
+) -> Option<FolderSnapshot> {
+    let folder = canonical_shell_path(folder).ok()?;
+    let folder_pidl = parse_path(&folder)?;
+
+    // SAFETY: all COM and PIDL values remain on the initialized STA worker.
+    unsafe {
+        if let Some((view, window)) = matching_live_view(folder_pidl.as_ptr(), *last_live_window) {
+            *last_live_window = Some(window);
+            if let Some(snapshot) = capture_view(
+                &view,
+                &folder,
+                &folder_pidl,
+                FolderSnapshotSource::LiveExplorerView,
+                generation,
+            ) {
+                return Some(snapshot);
+            }
+        }
+
+        let browser = HiddenExplorerBrowser::new()?;
+        if let Err(error) = browser
+            .browser
+            .BrowseToIDList(folder_pidl.as_ptr(), SBSP_ABSOLUTE)
+        {
+            eprintln!("towavue: hidden Shell navigation failed: {error}");
+            return None;
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            pump_messages();
+            if let Ok(view) = browser.browser.GetCurrentView::<IFolderView2>()
+                && view_matches(&view, folder_pidl.as_ptr())
+                && let Some(snapshot) = capture_view(
+                    &view,
+                    &folder,
+                    &folder_pidl,
+                    FolderSnapshotSource::PersistedShellView,
+                    generation,
+                )
+            {
+                return Some(snapshot);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+unsafe fn matching_live_view(
+    folder_pidl: *const ITEMIDLIST,
+    last_live_window: Option<HWND>,
+) -> Option<(IFolderView2, HWND)> {
+    unsafe {
+        let windows: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_ALL).ok()?;
+        let foreground = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+        let mut recent = None;
+        let mut first = None;
+        for index in 0..windows.Count().ok()? {
+            let Ok(dispatch) = windows.Item(&VARIANT::from(index)) else {
+                continue;
+            };
+            let Ok(web) = dispatch.cast::<IWebBrowserApp>() else {
+                continue;
+            };
+            let Ok(native_window) = web.HWND() else {
+                continue;
+            };
+            let hwnd = HWND(native_window.0 as *mut _);
+            let Ok(services) = dispatch.cast::<IServiceProvider>() else {
+                continue;
+            };
+            let Ok(browser) = services.QueryService::<IShellBrowser>(&SID_STopLevelBrowser) else {
+                continue;
+            };
+            let Ok(shell_view) = browser.QueryActiveShellView() else {
+                continue;
+            };
+            let Ok(view) = shell_view.cast::<IFolderView2>() else {
+                continue;
+            };
+            if !view_matches(&view, folder_pidl) {
+                continue;
+            }
+            if hwnd == foreground {
+                return Some((view, hwnd));
+            }
+            if Some(hwnd) == last_live_window {
+                recent = Some((view.clone(), hwnd));
+            }
+            first.get_or_insert((view, hwnd));
+        }
+        recent.or(first)
+    }
+}
+
+unsafe fn view_matches(view: &IFolderView2, folder_pidl: *const ITEMIDLIST) -> bool {
+    unsafe {
+        let Ok(folder) = view.GetFolder::<IPersistFolder2>() else {
+            return false;
+        };
+        let Ok(current) = folder.GetCurFolder() else {
+            return false;
+        };
+        let current = OwnedPidl(current);
+        windows::Win32::UI::Shell::ILIsEqual(current.as_ptr(), folder_pidl).as_bool()
+            || pidl_path(current.as_ptr()).is_some_and(|current_path| {
+                pidl_path(folder_pidl).is_some_and(|folder_path| {
+                    canonical_shell_path(&current_path).ok()
+                        == canonical_shell_path(&folder_path).ok()
+                })
+            })
+    }
+}
+
+unsafe fn pidl_path(pidl: *const ITEMIDLIST) -> Option<PathBuf> {
+    unsafe {
+        let item: IShellItem = SHCreateItemFromIDList(pidl).ok()?;
+        shell_item_path(&item)
+    }
+}
+
+unsafe fn capture_view(
+    view: &IFolderView2,
+    folder: &Path,
+    folder_pidl: &OwnedPidl,
+    source: FolderSnapshotSource,
+    generation: u64,
+) -> Option<FolderSnapshot> {
+    unsafe {
+        let array: IShellItemArray = view.Items(SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER).ok()?;
+        let mut items = Vec::new();
+        for index in 0..array.GetCount().ok()? {
+            let item = array.GetItemAt(index).ok()?;
+            let Some(path) = shell_item_path(&item) else {
+                continue;
+            };
+            let Some(kind) = MediaKind::from_path(&path) else {
+                continue;
+            };
+            let absolute_pidl = OwnedPidl(SHGetIDListFromObject(&item).ok()?);
+            items.push(FolderMediaItem {
+                identity: absolute_pidl.identity(),
+                path,
+                kind,
+            });
+        }
+
+        let count = view.GetSortColumnCount().ok()?.max(0) as usize;
+        let mut native_columns = vec![SORTCOLUMN::default(); count];
+        view.GetSortColumns(&mut native_columns).ok()?;
+        let sort_columns = native_columns
+            .into_iter()
+            .map(sort_column)
+            .collect::<Option<Vec<_>>>()?;
+
+        Some(FolderSnapshot {
+            folder_identity: folder_pidl.identity(),
+            folder_path: folder.to_owned(),
+            items,
+            sort_columns,
+            source,
+            generation,
+            captured_at: SystemTime::now(),
+        })
+    }
+}
+
+fn sort_column(column: SORTCOLUMN) -> Option<SortColumn> {
+    let direction = match column.direction {
+        SORT_ASCENDING => SortDirection::Ascending,
+        SORT_DESCENDING => SortDirection::Descending,
+        _ => return None,
+    };
+    Some(SortColumn {
+        property: property_key(column.propkey),
+        direction,
+    })
+}
+
+fn property_key(key: PROPERTYKEY) -> PropertyKey {
+    PropertyKey {
+        format_id: key.fmtid.to_u128(),
+        property_id: key.pid,
+    }
+}
+
+fn fallback_snapshot(folder: &Path, generation: u64) -> FolderSnapshot {
+    let folder = canonical_shell_path(folder).unwrap_or_else(|_| folder.to_owned());
+    let mut items = std::fs::read_dir(&folder)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            let kind = MediaKind::from_path(&path)?;
+            let identity = parse_path(&path)
+                .map(|pidl| pidl.identity())
+                .unwrap_or_else(|| path_identity(&path));
+            Some(FolderMediaItem {
+                identity,
+                path,
+                kind,
+            })
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| natural_path_cmp(&left.path, &right.path));
+    let folder_identity = parse_path(&folder)
+        .map(|pidl| pidl.identity())
+        .unwrap_or_else(|| path_identity(&folder));
+    FolderSnapshot {
+        folder_identity,
+        folder_path: folder,
+        items,
+        sort_columns: Vec::new(),
+        source: FolderSnapshotSource::NaturalNameFallback,
+        generation,
+        captured_at: SystemTime::now(),
+    }
+}
+
+fn natural_path_cmp(left: &Path, right: &Path) -> Ordering {
+    let left = wide_null(left.file_name().unwrap_or_else(|| OsStr::new("")));
+    let right = wide_null(right.file_name().unwrap_or_else(|| OsStr::new("")));
+    // SAFETY: both arguments are valid, terminated UTF-16 strings for this call.
+    match unsafe { StrCmpLogicalW(PCWSTR(left.as_ptr()), PCWSTR(right.as_ptr())) } {
+        value if value < 0 => Ordering::Less,
+        0 => Ordering::Equal,
+        _ => Ordering::Greater,
+    }
+}
+
+fn parse_path(path: &Path) -> Option<OwnedPidl> {
+    let wide = wide_null(path.as_os_str());
+    let mut pidl = std::ptr::null_mut();
+    // SAFETY: output ownership is transferred to OwnedPidl; the input is terminated UTF-16.
+    unsafe {
+        SHParseDisplayName(PCWSTR(wide.as_ptr()), None, &mut pidl, 0, None).ok()?;
+    }
+    (!pidl.is_null()).then_some(OwnedPidl(pidl))
+}
+
+unsafe fn shell_item_path(item: &IShellItem) -> Option<PathBuf> {
+    unsafe {
+        let value = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = value.to_string().ok().map(PathBuf::from);
+        CoTaskMemFree(Some(value.0.cast()));
+        path
+    }
+}
+
+fn path_identity(path: &Path) -> ShellIdentity {
+    let bytes = path
+        .as_os_str()
+        .encode_wide()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    ShellIdentity::new(bytes)
+}
+
+fn wide_null(value: &OsStr) -> Vec<u16> {
+    value.encode_wide().chain(std::iter::once(0)).collect()
+}
+
+fn canonical_shell_path(path: &Path) -> std::io::Result<PathBuf> {
+    let canonical = std::fs::canonicalize(path)?;
+    let wide = canonical.as_os_str().encode_wide().collect::<Vec<_>>();
+    const EXTENDED: &[u16] = &[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+    const UNC: &[u16] = &[
+        b'\\' as u16,
+        b'\\' as u16,
+        b'?' as u16,
+        b'\\' as u16,
+        b'U' as u16,
+        b'N' as u16,
+        b'C' as u16,
+        b'\\' as u16,
+    ];
+    let normalized = if let Some(rest) = wide.strip_prefix(UNC) {
+        [b'\\' as u16, b'\\' as u16]
+            .into_iter()
+            .chain(rest.iter().copied())
+            .collect()
+    } else if let Some(rest) = wide.strip_prefix(EXTENDED) {
+        rest.to_vec()
+    } else {
+        wide
+    };
+    Ok(PathBuf::from(OsString::from_wide(&normalized)))
+}
+
+struct OwnedPidl(*mut ITEMIDLIST);
+
+impl OwnedPidl {
+    fn as_ptr(&self) -> *const ITEMIDLIST {
+        self.0.cast_const()
+    }
+
+    fn identity(&self) -> ShellIdentity {
+        // SAFETY: the PIDL is owned and valid for the lifetime of self.
+        unsafe {
+            let size = windows::Win32::UI::Shell::ILGetSize(Some(self.as_ptr())) as usize;
+            ShellIdentity::new(std::slice::from_raw_parts(self.0.cast::<u8>(), size).to_vec())
+        }
+    }
+}
+
+impl Drop for OwnedPidl {
+    fn drop(&mut self) {
+        // SAFETY: this allocation came from a Shell API using the COM allocator and is freed once.
+        unsafe { CoTaskMemFree(Some(self.0.cast())) };
+    }
+}
+
+struct HiddenExplorerBrowser {
+    browser: IExplorerBrowser,
+    host: HWND,
+}
+
+impl HiddenExplorerBrowser {
+    unsafe fn new() -> Option<Self> {
+        unsafe {
+            let host = match CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("STATIC"),
+                w!(""),
+                WINDOW_STYLE::default(),
+                0,
+                0,
+                1,
+                1,
+                None,
+                None,
+                None,
+                None,
+            ) {
+                Ok(host) => host,
+                Err(error) => {
+                    eprintln!("towavue: hidden Shell host creation failed: {error}");
+                    return None;
+                }
+            };
+            let browser: IExplorerBrowser =
+                match CoCreateInstance(&ExplorerBrowser, None, CLSCTX_ALL) {
+                    Ok(browser) => browser,
+                    Err(_) => {
+                        eprintln!("towavue: IExplorerBrowser creation failed");
+                        let _ = DestroyWindow(host);
+                        return None;
+                    }
+                };
+            if browser
+                .SetOptions(EBO_NOBORDER | EBO_NOPERSISTVIEWSTATE | EBO_NOTRAVELLOG)
+                .is_err()
+            {
+                eprintln!("towavue: IExplorerBrowser SetOptions failed");
+                let _ = DestroyWindow(host);
+                return None;
+            }
+            let rect = RECT {
+                left: 0,
+                top: 0,
+                right: 1,
+                bottom: 1,
+            };
+            if browser.Initialize(host, &rect, None).is_err() {
+                eprintln!("towavue: IExplorerBrowser initialization failed");
+                let _ = DestroyWindow(host);
+                return None;
+            }
+            Some(Self { browser, host })
+        }
+    }
+}
+
+impl Drop for HiddenExplorerBrowser {
+    fn drop(&mut self) {
+        // SAFETY: both objects were created and are destroyed on this STA thread.
+        unsafe {
+            let _ = self.browser.Destroy();
+            let _ = DestroyWindow(self.host);
+        }
+    }
+}
+
+unsafe fn pump_messages() {
+    unsafe {
+        let mut message = MSG::default();
+        while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+            let _ = TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::fs::OpenOptions;
+    use std::os::windows::io::AsRawHandle;
+    use std::process::Command;
+    use windows::Win32::Foundation::{FILETIME, HANDLE, LPARAM, WPARAM};
+    use windows::Win32::Storage::FileSystem::SetFileTime;
+    use windows::Win32::UI::Shell::{FWF_AUTOARRANGE, IShellView, SORTDIRECTION};
+    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+    use windows::core::GUID;
+
+    const STORAGE_PROPERTY_FORMAT: GUID = GUID::from_u128(0xb725f130_47ef_101a_a5f1_02608c9eebac);
+    const NAME: PROPERTYKEY = PROPERTYKEY {
+        fmtid: STORAGE_PROPERTY_FORMAT,
+        pid: 10,
+    };
+    const SIZE: PROPERTYKEY = PROPERTYKEY {
+        fmtid: STORAGE_PROPERTY_FORMAT,
+        pid: 12,
+    };
+    const DATE_MODIFIED: PROPERTYKEY = PROPERTYKEY {
+        fmtid: STORAGE_PROPERTY_FORMAT,
+        pid: 14,
+    };
+    const DATE_CREATED: PROPERTYKEY = PROPERTYKEY {
+        fmtid: STORAGE_PROPERTY_FORMAT,
+        pid: 15,
+    };
+    const TYPE: PROPERTYKEY = PROPERTYKEY {
+        fmtid: STORAGE_PROPERTY_FORMAT,
+        pid: 4,
+    };
+
+    #[test]
+    fn windows_natural_order_handles_numeric_names() {
+        assert_eq!(
+            natural_path_cmp(Path::new("item2.jpg"), Path::new("item10.jpg")),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn hidden_shell_view_returns_ordered_media() {
+        let root = test_directory("basic");
+        fs::create_dir(&root).expect("create fixture folder");
+        fs::write(root.join("item10.jpg"), []).expect("create fixture");
+        fs::write(root.join("item2.jpg"), []).expect("create fixture");
+
+        let mut provider = FolderOrderProvider::new().expect("start Shell worker");
+        let snapshot = provider.snapshot(&root).expect("capture folder order");
+
+        assert_eq!(snapshot.items.len(), 2);
+        assert_ne!(
+            snapshot.source,
+            FolderSnapshotSource::NaturalNameFallback,
+            "IExplorerBrowser must resolve the persisted/default Shell view"
+        );
+        assert_eq!(
+            snapshot.items[0].path.file_name(),
+            Some(OsStr::new("item2.jpg"))
+        );
+
+        drop(provider);
+        fs::remove_dir_all(root).expect("remove fixture folder");
+    }
+
+    #[test]
+    #[ignore = "opens and closes a real Explorer window"]
+    fn live_explorer_sort_matrix_matches_metadata_and_view_order() {
+        let root = test_directory("sort-matrix");
+        fs::create_dir(&root).expect("create fixture folder");
+        create_timed_file(&root.join("item10.jpg"), 100, 1, 4);
+        create_timed_file(&root.join("item2.jpg"), 200, 2, 3);
+        create_timed_file(&root.join("alpha.png"), 100, 3, 2);
+        create_timed_file(&root.join("beta.gif"), 300, 4, 1);
+
+        // SAFETY: this test owns the apartment, browser, PIDL, and all view
+        // interfaces on the current thread.
+        unsafe {
+            OleInitialize(None).expect("initialize Shell test STA");
+            let folder = canonical_shell_path(&root).expect("canonical fixture folder");
+            let folder_pidl = parse_path(&folder).expect("parse fixture folder");
+            let mut explorer_launcher = Command::new("explorer.exe")
+                .arg(&folder)
+                .spawn()
+                .expect("open fixture folder in Explorer");
+            let (view, explorer_window) = wait_for_live_view(folder_pidl.as_ptr());
+            view.SetCurrentFolderFlags(FWF_AUTOARRANGE.0 as u32, FWF_AUTOARRANGE.0 as u32)
+                .expect("enable automatic Shell view arrangement");
+
+            for direction in [SORT_ASCENDING, SORT_DESCENDING] {
+                let snapshot = set_sort_and_capture(
+                    &view,
+                    &folder,
+                    &folder_pidl,
+                    &[native_column(NAME, direction)],
+                );
+                for pair in snapshot.items.windows(2) {
+                    let ordering = natural_path_cmp(&pair[0].path, &pair[1].path);
+                    if direction == SORT_DESCENDING {
+                        assert!(ordering != Ordering::Less);
+                    } else {
+                        assert!(ordering != Ordering::Greater);
+                    }
+                }
+            }
+
+            for (property, value) in [
+                (DATE_MODIFIED, order_by_modified as fn(&Path) -> SortValue),
+                (DATE_CREATED, order_by_created),
+                (SIZE, order_by_size),
+            ] {
+                let ascending = set_sort_and_capture(
+                    &view,
+                    &folder,
+                    &folder_pidl,
+                    &[native_column(property, SORT_ASCENDING)],
+                );
+                assert_monotonic(&ascending, value, false);
+                let descending = set_sort_and_capture(
+                    &view,
+                    &folder,
+                    &folder_pidl,
+                    &[native_column(property, SORT_DESCENDING)],
+                );
+                assert_monotonic(&descending, value, true);
+            }
+
+            let type_ascending = set_sort_and_capture(
+                &view,
+                &folder,
+                &folder_pidl,
+                &[
+                    native_column(TYPE, SORT_ASCENDING),
+                    native_column(NAME, SORT_ASCENDING),
+                ],
+            );
+            let type_descending = set_sort_and_capture(
+                &view,
+                &folder,
+                &folder_pidl,
+                &[
+                    native_column(TYPE, SORT_DESCENDING),
+                    native_column(NAME, SORT_ASCENDING),
+                ],
+            );
+            let mut ascending_groups = extension_groups(&type_ascending);
+            let descending_groups = extension_groups(&type_descending);
+            ascending_groups.reverse();
+            assert_eq!(descending_groups, ascending_groups);
+
+            let multiple = set_sort_and_capture(
+                &view,
+                &folder,
+                &folder_pidl,
+                &[
+                    native_column(SIZE, SORT_ASCENDING),
+                    native_column(NAME, SORT_DESCENDING),
+                ],
+            );
+            assert_monotonic(&multiple, order_by_size, false);
+            let size_tie = multiple
+                .items
+                .windows(2)
+                .find(|pair| order_by_size(&pair[0].path) == order_by_size(&pair[1].path))
+                .expect("fixture contains a size tie");
+            assert_eq!(
+                natural_path_cmp(&size_tie[0].path, &size_tie[1].path),
+                Ordering::Greater
+            );
+            view.cast::<IShellView>()
+                .expect("query Shell view")
+                .SaveViewState()
+                .expect("save fixture view state");
+
+            drop(view);
+            PostMessageW(Some(explorer_window), WM_CLOSE, WPARAM(0), LPARAM(0))
+                .expect("close fixture Explorer window");
+            wait_for_live_close(folder_pidl.as_ptr());
+            explorer_launcher
+                .wait()
+                .expect("wait for Explorer launcher process");
+            drop(folder_pidl);
+            OleUninitialize();
+        }
+
+        fs::remove_dir_all(root).expect("remove fixture folder");
+    }
+
+    #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+    enum SortValue {
+        Time(SystemTime),
+        Size(u64),
+    }
+
+    fn test_directory(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "towavue-shell-{label}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock is after Unix epoch")
+                .as_nanos()
+        ))
+    }
+
+    fn create_timed_file(path: &Path, size: usize, created_days: u64, modified_days: u64) {
+        fs::write(path, vec![0_u8; size]).expect("create fixture file");
+        let file = OpenOptions::new()
+            .write(true)
+            .open(path)
+            .expect("open fixture file");
+        let created = filetime(created_days);
+        let modified = filetime(modified_days);
+        // SAFETY: the borrowed std file handle remains valid for this call.
+        unsafe {
+            SetFileTime(
+                HANDLE(file.as_raw_handle()),
+                Some(&created),
+                None,
+                Some(&modified),
+            )
+            .expect("set fixture timestamps");
+        }
+    }
+
+    fn filetime(days: u64) -> FILETIME {
+        let ticks = ((20_000 + days) * 24 * 60 * 60 + 11_644_473_600) * 10_000_000;
+        FILETIME {
+            dwLowDateTime: ticks as u32,
+            dwHighDateTime: (ticks >> 32) as u32,
+        }
+    }
+
+    unsafe fn wait_for_live_view(folder_pidl: *const ITEMIDLIST) -> (IFolderView2, HWND) {
+        unsafe {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                pump_messages();
+                if let Some(found) = matching_live_view(folder_pidl, None) {
+                    return found;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "Explorer window discovery timed out"
+                );
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+
+    unsafe fn wait_for_live_close(folder_pidl: *const ITEMIDLIST) {
+        unsafe {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while matching_live_view(folder_pidl, None).is_some() {
+                pump_messages();
+                assert!(
+                    Instant::now() < deadline,
+                    "Explorer fixture window did not close"
+                );
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+
+    fn native_column(property: PROPERTYKEY, direction: SORTDIRECTION) -> SORTCOLUMN {
+        SORTCOLUMN {
+            propkey: property,
+            direction,
+        }
+    }
+
+    unsafe fn set_sort_and_capture(
+        view: &IFolderView2,
+        folder: &Path,
+        folder_pidl: &OwnedPidl,
+        columns: &[SORTCOLUMN],
+    ) -> FolderSnapshot {
+        unsafe {
+            view.SetSortColumns(columns)
+                .expect("set Shell sort columns");
+            view.cast::<IShellView>()
+                .expect("query Shell view")
+                .Refresh()
+                .expect("refresh Shell view");
+            let settle = Instant::now() + Duration::from_millis(150);
+            while Instant::now() < settle {
+                pump_messages();
+                thread::sleep(Duration::from_millis(10));
+            }
+            let expected = columns
+                .iter()
+                .copied()
+                .map(sort_column)
+                .collect::<Option<Vec<_>>>()
+                .expect("valid test columns");
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                pump_messages();
+                if let Some(snapshot) = capture_view(
+                    view,
+                    folder,
+                    folder_pidl,
+                    FolderSnapshotSource::PersistedShellView,
+                    1,
+                ) && snapshot.items.len() == 4
+                    && snapshot.sort_columns == expected
+                {
+                    return snapshot;
+                }
+                assert!(Instant::now() < deadline, "Shell sort update timed out");
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+
+    fn order_by_modified(path: &Path) -> SortValue {
+        SortValue::Time(
+            fs::metadata(path)
+                .expect("read fixture metadata")
+                .modified()
+                .expect("read modified time"),
+        )
+    }
+
+    fn order_by_created(path: &Path) -> SortValue {
+        SortValue::Time(
+            fs::metadata(path)
+                .expect("read fixture metadata")
+                .created()
+                .expect("read creation time"),
+        )
+    }
+
+    fn order_by_size(path: &Path) -> SortValue {
+        SortValue::Size(fs::metadata(path).expect("read fixture metadata").len())
+    }
+
+    fn assert_monotonic(
+        snapshot: &FolderSnapshot,
+        value: fn(&Path) -> SortValue,
+        descending: bool,
+    ) {
+        for pair in snapshot.items.windows(2) {
+            let ordering = value(&pair[0].path).cmp(&value(&pair[1].path));
+            if descending {
+                assert!(
+                    ordering != Ordering::Less,
+                    "{} ({:?}) precedes {} ({:?}) in descending order",
+                    pair[0].path.display(),
+                    value(&pair[0].path),
+                    pair[1].path.display(),
+                    value(&pair[1].path)
+                );
+            } else {
+                assert!(
+                    ordering != Ordering::Greater,
+                    "{} ({:?}) precedes {} ({:?}) in ascending order",
+                    pair[0].path.display(),
+                    value(&pair[0].path),
+                    pair[1].path.display(),
+                    value(&pair[1].path)
+                );
+            }
+        }
+    }
+
+    fn extension_groups(snapshot: &FolderSnapshot) -> Vec<OsString> {
+        let mut groups = Vec::new();
+        for item in &snapshot.items {
+            let extension = item
+                .path
+                .extension()
+                .expect("fixture has an extension")
+                .to_os_string();
+            if groups.last() != Some(&extension) {
+                assert!(!groups.contains(&extension), "type group is not contiguous");
+                groups.push(extension);
+            }
+        }
+        groups
+    }
+}

@@ -16,7 +16,7 @@ towavueはWindows向けの画像・動画・音声ビューア兼プレイヤー
 
 | 領域 | 決定 | 理由 |
 |---|---|---|
-| Window/Event | winit 0.30.12 | Win32の詳細へ降りられる薄いイベント境界 |
+| Window/Event | winit 0.30.13 | Win32の詳細へ降りられる薄いイベント境界 |
 | UI | egui 0.35.0 | 最小UIとカスタム描画を少ないコードで構築できる |
 | UI renderer | egui-directx11 0.13.0 | wgpuを介さずD3D11 render targetへ描画できる |
 | Windows API | windows 0.62.2 | COM、D3D11、DXGI、WASAPI、Shell APIの公式Rust projection |
@@ -34,7 +34,7 @@ towavueはWindows向けの画像・動画・音声ビューア兼プレイヤー
 
 OS非依存の値、状態遷移、コマンド、編集履歴を置く。unsafe、COM、FFmpeg、native handleを禁止する。
 
-将来の中核型は次のとおり。
+主な中核型は次のとおり。
 
 - `MediaTime(i64)`: ナノ秒単位の時刻。
 - `SessionId`: 開いているmedia sessionの識別子。
@@ -43,6 +43,8 @@ OS非依存の値、状態遷移、コマンド、編集履歴を置く。unsafe
 - `MediaEvent`: opened、state、position、ended、fault。
 - `MediaInfo`: 種別、duration、stream、codec、解像度、sample rate、色空間。
 - `CommandId` / `CommandContext`: menu、palette、shortcutが共有するcommand identity。
+- `FolderSnapshot`: Shellが返したfolder identity、ordered media、sort columns、source、generation。
+- `TabSet` / `ShortcutBindings`: platform非依存のtab targetとprefix対応key sequence。
 
 ### towavue-runtime-windows
 
@@ -53,6 +55,8 @@ GPU frameはruntime内部のRAII `FrameLease`で保持する。FFmpegの`AVFrame
 ### towavue-app
 
 winit event loop、egui、tab、command dispatch、利用者向け状態を所有する。runtimeへcommandを送り、eventと描画結果だけを受け取る。
+
+M4ではmenu、command palette、shortcutの全入口を同じ`CommandId`へdispatchする。画像・動画の外部openはfile単位の新規tab、音声は同じfolderの既存playlist tabを再利用し、明示的な新規openだけ別tabにする。filmstrip、playlist、全種移動、同種移動は一つの`FolderSnapshot`を共有する。
 
 ## 4. 再生・表示契約
 
@@ -66,7 +70,7 @@ winit event loop、egui、tab、command dispatch、利用者向け状態を所�
 
 ### M1 software path
 
-M1ではFFmpegを動的リンクし、映像をsoftware decodeしてtightly packed RGBAへ変換する。runtimeの`FrameRenderer`が単一D3D11 device、immediate context、2-buffer Flip Discard swap chainを所有し、CPU frameをback bufferへuploadしてpresentする。このCPU uploadはM1だけの基準経路であり、M2のhardware pathでは使用しない。
+M1ではFFmpegを動的リンクし、映像をsoftware decodeしてtightly packed RGBAへ変換する。runtimeの`FrameRenderer`が単一D3D11 device、immediate context、2-buffer Flip Discard swap chainを所有し、CPU frameをRGBA textureへuploadしてfull-screen shaderでpresentする。このCPU uploadはsoftware fallbackだけの基準経路であり、M2のhardware pathでは使用しない。eguiは同じdeviceとback bufferへ続けて描画し、1回のPresentに合成する。
 
 音声はsource sample rateのinterleaved stereo `f32`へ変換し、専用MTA thread上のevent-driven WASAPI Shared clientへ渡す。映像queueは2 frame、音声channelは32 chunk、WASAPI手前の蓄積は約2秒へ制限する。M1のdecode workerはdemuxとvideo/audio software decodeを直列実行するが、COM、FFmpeg型、native frame handleはruntime外へ出さない。M3の役割別workerでも、この安全なcommand/event境界を維持する。
 
@@ -112,7 +116,7 @@ registryのExplorer Bagsを直接解析しない。これは非公開の保存�
 
 ### FolderSnapshot
 
-将来の`FolderOrderProvider`は、次の情報を持つimmutable `FolderSnapshot`を返す。
+`FolderOrderProvider`は専用STA worker上で次の情報を持つimmutable `FolderSnapshot`を返す。
 
 - canonical folder PIDLとfilesystem path
 - Shell item identityとfilesystem pathを持つordered media items
@@ -122,7 +126,7 @@ registryのExplorer Bagsを直接解析しない。これは非公開の保存�
 
 Shell viewの列挙順を取得してから、対応mediaだけをfilterする。filmstrip、全種移動、同種移動、audio playlistは同じsnapshotを共有し、個別に再sortしない。
 
-フォルダ変更は`ReadDirectoryChangesW`で検知し、debounce後に新しいsnapshotを作る。現在項目はShell identity、次にcanonical pathで再対応付けし、位置番号だけで保持しない。
+フォルダ変更はoverlapped `ReadDirectoryChangesW`で検知し、150 msのdebounce後に新しいsnapshotを作る。現在項目はShell identity、次にcanonical pathで再対応付けし、位置番号だけで保持しない。ExplorerのSort By変更はmedia load時とfilmstripを開く時の再取得へ反映する。
 
 Shell viewの作成・列挙に失敗してもmedia open自体は失敗させない。その場合だけWindows自然名前昇順へfallbackし、診断ログと一時status messageで縮退を明示する。
 

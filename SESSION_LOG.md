@@ -2,6 +2,19 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-04 23:34 JST - implementation / complete M4 application shell and navigation
+
+- Trigger: M3 was complete and the owner requested continued milestone-by-milestone implementation under `AGENTS.md`, with Explorer ordering defined as the actual per-folder Sort By state.
+- Intent: complete M4 without beginning M5 image rendering or later editing features.
+- Result: added an egui application shell with tabs, status bar, shared command registry, searchable command palette, reloadable and prefix-capable shortcuts, same-folder audio playlist tabs, and an all-media filmstrip with explicit middle-click new tabs. Menu, palette, and keyboard input dispatch the same context-aware command identities.
+- Explorer ordering: `FolderOrderProvider` runs on a dedicated Shell STA, prefers a matching live Explorer `IFolderView2` selected by foreground then recently observed window, and otherwise navigates a hidden `IExplorerBrowser` without a custom property bag. It captures view-order items, Shell identities, `PROPERTYKEY` sort columns, source, generation, and timestamp; only Shell failure uses logged Windows natural-name fallback. Overlapped `ReadDirectoryChangesW` with 150 ms debounce refreshes the shared snapshot, and the active item is remapped by Shell identity before canonical path.
+- Rendering evidence: integrating egui exposed that the D3D11 Video Processor rejects the software fallback's RGBA texture on the reference adapter. Software frames now use a full-screen D3D11 shader on the same device/back buffer, while D3D11VA frames retain the zero-copy Video Processor path and UI is composed before the single Present.
+- Changed areas: core media/command/navigation/tab contracts; Shell order provider and dialogs; directory watcher; D3D11 UI/software rendering; application tabs, commands, palette, shortcuts, playlist, filmstrip, and status; pinned dependencies; architecture, roadmap, and README.
+- Verification: `cargo fmt --all --check`, workspace all-target Clippy with warnings denied, and workspace all-target tests pass (app 3, core 15, runtime 11 plus 1 ignored live-Explorer integration test, codec integration 1). The live Explorer fixture test was run explicitly and passed Name, Date modified, Date created, Size, and Type ascending/descending, ties, multiple columns, and repeated sort recapture; the hidden Explorer fixture and debounced directory watcher tests also pass. On adapter `00000000:0001311b`, the final H.264 smoke presented 60/60 D3D11VA frames with 0 CPU transfers, and FFV1 presented 60/60 software frames with 60 CPU transfers and no render error.
+- Commit: pending checkpoint.
+- Status: `m4_complete`.
+- Next action: begin M5 image decoding/rendering and reading-mode primitives; do not begin M6 editing while M5 is active.
+
 ## 2026-09-04 22:19 JST - implementation / complete M3 seek, synchronization, and resilience
 
 - Trigger: M2 was complete and the owner requested milestone-by-milestone implementation under `AGENTS.md`.

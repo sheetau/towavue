@@ -26,6 +26,8 @@ pub enum FolderWatchError {
     Windows(#[from] windows::core::Error),
     #[error("folder monitoring thread could not start: {0}")]
     Thread(#[source] std::io::Error),
+    #[error("folder monitoring stopped before its first request was ready")]
+    Startup,
 }
 
 /// Debounced notification source for direct changes within one folder.
@@ -66,6 +68,7 @@ impl FolderWatcher {
             }
         };
         let (sender, changes) = mpsc::channel();
+        let (ready_sender, ready) = mpsc::channel();
         // HANDLE is process-global but intentionally not Send in the bindings.
         // The numeric values are copied to one worker while this owner keeps the
         // kernel objects alive until that worker joins.
@@ -78,6 +81,7 @@ impl FolderWatcher {
                     HANDLE(directory_value as *mut _),
                     HANDLE(stop_event_value as *mut _),
                     sender,
+                    ready_sender,
                 )
             }) {
             Ok(worker) => worker,
@@ -90,6 +94,17 @@ impl FolderWatcher {
                 return Err(FolderWatchError::Thread(error));
             }
         };
+        if ready.recv_timeout(Duration::from_secs(2)).is_err() {
+            // SAFETY: both handles remain valid until the worker observes the
+            // stop event and has returned.
+            let _ = unsafe { SetEvent(stop_event) };
+            let _ = worker.join();
+            unsafe {
+                let _ = CloseHandle(stop_event);
+                let _ = CloseHandle(directory);
+            }
+            return Err(FolderWatchError::Startup);
+        }
         Ok(Self {
             changes,
             directory,
@@ -132,7 +147,12 @@ impl Drop for FolderWatcher {
     }
 }
 
-fn watch_loop(directory: HANDLE, stop_event: HANDLE, sender: mpsc::Sender<Instant>) {
+fn watch_loop(
+    directory: HANDLE,
+    stop_event: HANDLE,
+    sender: mpsc::Sender<Instant>,
+    ready: mpsc::Sender<()>,
+) {
     let io_event = match unsafe { CreateEventW(None, true, false, None) } {
         Ok(event) => event,
         Err(error) => {
@@ -141,6 +161,7 @@ fn watch_loop(directory: HANDLE, stop_event: HANDLE, sender: mpsc::Sender<Instan
         }
     };
     let mut buffer = [0_u8; 16 * 1024];
+    let mut ready = Some(ready);
     loop {
         let _ = unsafe { ResetEvent(io_event) };
         let mut overlapped = OVERLAPPED {
@@ -168,6 +189,9 @@ fn watch_loop(directory: HANDLE, stop_event: HANDLE, sender: mpsc::Sender<Instan
         } {
             eprintln!("towavue: folder monitoring stopped: {error}");
             break;
+        }
+        if let Some(ready) = ready.take() {
+            let _ = ready.send(());
         }
 
         let wait = unsafe { WaitForMultipleObjects(&[stop_event, io_event], false, INFINITE) };

@@ -3,6 +3,7 @@
 mod audio;
 mod decode;
 mod dialog;
+mod export;
 mod image;
 mod playback;
 mod renderer;
@@ -11,7 +12,8 @@ mod watch;
 
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};
 pub use decode::{AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, VideoFrame};
-pub use dialog::{DialogError, pick_folder, pick_media_file};
+pub use dialog::{DialogError, pick_export_file, pick_folder, pick_media_file};
+pub use export::{ExportError, ExportRequest, export_media};
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use playback::{DecodePath, PlaybackError, PlaybackEvent, PlaybackMetrics, PlaybackSession};
 pub use renderer::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError};

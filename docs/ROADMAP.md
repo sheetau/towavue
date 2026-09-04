@@ -54,9 +54,11 @@ M4は2026-09-04に完了した。eguiを同一D3D11 back bufferへ統合し、ta
 
 M5は2026-09-05に完了した。BMP、JPEG、PNG、TIFF、WebPの静止画、GIF・WebP・APNGのanimation、FFmpegによるAVIFを安全なRGBA frameへdecodeし、同じD3D11 device上のegui textureとして表示する。EXIF orientation、deadline駆動animation、cursor anchor zoom、actual/fit、右drag pan、正方形・比率保持・辺resize対応selection、非破壊crop previewを実装した。reading modeは共有`FolderSnapshot`のExplorer Shell順から2～10枚を選び、横・縦配置と表示順反転を行う表示専用modeである。実cropや保存はまだ行わない。現在の次工程はM6である。
 
-## M6 — Non-destructive editing and export
+## M6 — Non-destructive editing and export（完了）
 
 crop、rotate、flip、trim、volume、rateを非破壊操作として保持し、undo/redo、unsaved indicator、close guard、FFmpeg exportを追加する。
+
+M6は2026-09-05に完了した。tab単位のsaved cursor付きedit historyへcrop、時計回り・反時計回り90度回転、水平・垂直反転、trim端点、volume、rateを保持し、branch対応undo/redoと画像のoperation順previewを実装した。動画crop selectionと動画・音声の編集値もsourceを変更せず保持する。dirty状態はtab/window/statusへ表示し、media移動、tab close、process終了をExport / Discard / Cancel modalで保護する。Save Asと再SaveはmetadataをcopyするFFmpeg software exportを行い、source同一pathは拒否する。画像crop+rotateと音声付き動画trim+rate+volumeの実export・再decodeをfixtureで確認した。現在の次工程はM7である。
 
 ## M7 — Advanced presentation and interaction
 

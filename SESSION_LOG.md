@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 00:41 JST - implementation / complete M6 non-destructive editing and export
+
+- Trigger: the independently verified M5 checkpoint completed and the owner requested continued milestone-by-milestone implementation.
+- Intent: complete M6 edit history, guards, and software export without starting M7 HDR, cache, multi-window, or hardware-encode work.
+- Result: added per-tab non-destructive crop, quarter-turn rotation, horizontal/vertical flip, trim endpoints, volume, and rate operations; branch-aware undo/redo and saved cursors; image UV-mesh preview; video crop selection; unsaved tab/window/status indicators; and blocking Export / Discard / Cancel guards for folder navigation, tab close, and process exit. Save As stores an export target and Save reuses it; neither mutates the source path.
+- Export boundary: runtime converts operations into ordered FFmpeg video/audio filters, copies input metadata, decomposes audio tempo outside 0.5–2.0, chooses software codecs by output family, and rejects source-equal targets or invalid trim ranges. No FFmpeg or native handles leave runtime, and hardware encoding remains unimplemented.
+- Changed areas: core edit operations/history and command contexts; runtime save dialog and FFmpeg export; app per-tab edit state, image preview, video selection, commands, indicators, guards, and shortcuts; architecture, roadmap, and README.
+- Verification: local format, workspace all-target Clippy with warnings denied, and workspace all-target tests pass (app 8, core 23, runtime 18 plus 1 ignored live-Explorer integration test, integrations 2). An FFmpeg fixture test preserved a 40×30 source while exporting crop+rotate as 30×20; another exported and re-decoded H.264/AAC with trim, 2× rate, and 50% volume. A real D3D11 window showed clockwise image preview with dirty indicators, and WM_CLOSE displayed the blocking unsaved-edit modal instead of exiting.
+- Status: `m6_complete`.
+- Next action: begin M7 with measured presentation features; do not claim HDR until the output path and metadata are verified.
+
 ## 2026-09-05 00:14 JST - implementation / complete M5 images and reading mode
 
 - Trigger: M4 was complete and the owner requested continued milestone-by-milestone implementation while preserving the actual Explorer Sort By order.

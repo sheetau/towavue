@@ -32,6 +32,23 @@ pub enum CommandId {
     DecreaseReadingPages,
     ToggleReadingAxis,
     ReverseReadingOrder,
+    Undo,
+    Redo,
+    ApplyCrop,
+    RotateClockwise,
+    RotateCounterclockwise,
+    FlipHorizontal,
+    FlipVertical,
+    SetTrimStart,
+    SetTrimEnd,
+    VolumeDown,
+    VolumeUp,
+    ToggleMute,
+    RateDown,
+    RateUp,
+    ResetRate,
+    Save,
+    ExportAs,
 }
 
 impl CommandId {
@@ -63,6 +80,23 @@ impl CommandId {
             Self::DecreaseReadingPages => "decrease_reading_pages",
             Self::ToggleReadingAxis => "toggle_reading_axis",
             Self::ReverseReadingOrder => "reverse_reading_order",
+            Self::Undo => "undo",
+            Self::Redo => "redo",
+            Self::ApplyCrop => "apply_crop",
+            Self::RotateClockwise => "rotate_clockwise",
+            Self::RotateCounterclockwise => "rotate_counterclockwise",
+            Self::FlipHorizontal => "flip_horizontal",
+            Self::FlipVertical => "flip_vertical",
+            Self::SetTrimStart => "set_trim_start",
+            Self::SetTrimEnd => "set_trim_end",
+            Self::VolumeDown => "volume_down",
+            Self::VolumeUp => "volume_up",
+            Self::ToggleMute => "toggle_mute",
+            Self::RateDown => "rate_down",
+            Self::RateUp => "rate_up",
+            Self::ResetRate => "reset_rate",
+            Self::Save => "save",
+            Self::ExportAs => "export_as",
         }
     }
 }
@@ -92,6 +126,8 @@ pub enum Key {
     Space,
     ArrowLeft,
     ArrowRight,
+    ArrowUp,
+    ArrowDown,
     Tab,
     Escape,
 }
@@ -161,6 +197,8 @@ impl fmt::Display for KeyStroke {
             Key::Space => formatter.write_str("Space"),
             Key::ArrowLeft => formatter.write_str("Left"),
             Key::ArrowRight => formatter.write_str("Right"),
+            Key::ArrowUp => formatter.write_str("Up"),
+            Key::ArrowDown => formatter.write_str("Down"),
             Key::Tab => formatter.write_str("Tab"),
             Key::Escape => formatter.write_str("Escape"),
         }
@@ -184,6 +222,8 @@ impl FromStr for KeyStroke {
                 "minus" if key.is_none() => key = Some(Key::Character('-')),
                 "left" if key.is_none() => key = Some(Key::ArrowLeft),
                 "right" if key.is_none() => key = Some(Key::ArrowRight),
+                "up" if key.is_none() => key = Some(Key::ArrowUp),
+                "down" if key.is_none() => key = Some(Key::ArrowDown),
                 "tab" if key.is_none() => key = Some(Key::Tab),
                 "escape" | "esc" if key.is_none() => key = Some(Key::Escape),
                 character if key.is_none() && character.chars().count() == 1 => {
@@ -266,8 +306,8 @@ const COMMANDS: &[CommandDefinition] = &[
     ),
     command(
         CommandId::ClearSelection,
-        "Clear image selection",
-        &[MediaKind::Image],
+        "Clear visual selection",
+        &[MediaKind::Image, MediaKind::Video],
     ),
     command(
         CommandId::ToggleCropPreview,
@@ -299,6 +339,47 @@ const COMMANDS: &[CommandDefinition] = &[
         "Reverse reading order",
         &[MediaKind::Image],
     ),
+    command(CommandId::Undo, "Undo edit", ANY_MEDIA),
+    command(CommandId::Redo, "Redo edit", ANY_MEDIA),
+    command(
+        CommandId::ApplyCrop,
+        "Apply crop selection",
+        &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::RotateClockwise,
+        "Rotate clockwise",
+        &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::RotateCounterclockwise,
+        "Rotate counterclockwise",
+        &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::FlipHorizontal,
+        "Flip horizontally",
+        &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::FlipVertical,
+        "Flip vertically",
+        &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(CommandId::SetTrimStart, "Set trim start", PLAYABLE_MEDIA),
+    command(CommandId::SetTrimEnd, "Set trim end", PLAYABLE_MEDIA),
+    command(CommandId::VolumeDown, "Decrease volume", PLAYABLE_MEDIA),
+    command(CommandId::VolumeUp, "Increase volume", PLAYABLE_MEDIA),
+    command(CommandId::ToggleMute, "Toggle mute", PLAYABLE_MEDIA),
+    command(
+        CommandId::RateDown,
+        "Decrease playback rate",
+        PLAYABLE_MEDIA,
+    ),
+    command(CommandId::RateUp, "Increase playback rate", PLAYABLE_MEDIA),
+    command(CommandId::ResetRate, "Reset playback rate", PLAYABLE_MEDIA),
+    command(CommandId::Save, "Save exported media", ANY_MEDIA),
+    command(CommandId::ExportAs, "Export as", ANY_MEDIA),
 ];
 
 const fn command(

@@ -47,6 +47,7 @@ OS非依存の値、状態遷移、コマンド、編集履歴を置く。unsafe
 - `FolderSnapshot`: Shellが返したfolder identity、ordered media、sort columns、source、generation。
 - `TabSet` / `ShortcutBindings`: platform非依存のtab targetとprefix対応key sequence。
 - `ImageViewState` / `ReadingSettings`: 正規化selection、zoom・pan・crop preview、2～10 pageの表示軸と反転。
+- `EditHistory` / `EditOperation`: source非破壊のcrop、90度回転、反転、trim端点、volume、rateとsaved cursor付きundo/redo。
 
 ### towavue-runtime-windows
 
@@ -61,6 +62,8 @@ winit event loop、egui、tab、command dispatch、利用者向け状態を所�
 M4ではmenu、command palette、shortcutの全入口を同じ`CommandId`へdispatchする。画像・動画の外部openはfile単位の新規tab、音声は同じfolderの既存playlist tabを再利用し、明示的な新規openだけ別tabにする。filmstrip、playlist、全種移動、同種移動は一つの`FolderSnapshot`を共有する。
 
 M5ではruntimeがBMP、GIF、JPEG、PNG、TIFF、WebPを`image` crate、AVIFを既存FFmpeg software pathでdecodeし、native handleを含まないRGBA frame列とframe durationだけをappへ返す。appはegui texture、animation deadline、画像操作状態を所有する。画像と動画が共有するのは同じD3D11 device、visual surface、Presentだけであり、画像frameを動画decode queueやVideo Processorへ流さない。
+
+M6では各tabが独立した`EditHistory`と直近export先を持つ。appは画像の履歴をUV meshへ順番どおり適用してpreviewし、動画上のcrop selectionを同じ正規化矩形で保持する。動画・音声のtrim、volume、rateを含む全operationはsource playbackを変更せずstatusへ反映し、runtimeのFFmpeg exportで初めて出力へ適用する。dirtyなtabの移動・closeとprocess終了は、入力を遮るExport / Discard / Cancel modalを必ず通る。
 
 ## 4. 再生・表示契約
 
@@ -99,6 +102,12 @@ demux、video decode、audio decode、WASAPI outputは独立workerとし、strea
 selectionは元画像に対する正規化矩形として保持し、表示scaleから独立させる。左dragで作成、辺dragで変形、Shift付き作成で画像pixel上の正方形、Shift付き辺dragで現在比率を保持する。右dragはpan、Ctrl+wheelはpointer anchorのzoom、選択範囲clickとCtrl+Yはpixelを変更しないcrop previewである。実crop、undo、save/exportはM6まで開始しない。
 
 reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降の画像だけをShell view順のまま2～10 page取得する。横・縦配置と表示順反転はpresentation状態だけを変更し、個別画像のselectionや編集状態を作らない。
+
+### M6 non-destructive editing and export
+
+`EditHistory`は適用済みcursorとsaved cursorを別に持つ。新しいoperationをundo位置から追加した場合はredo branchを破棄し、破棄されたbranchにsaved cursorがあれば保存済みidentityも失効する。tab titleとwindow titleの`*`およびstatusのUnsavedは、現在cursorとsaved cursorが一致するまで消えない。folder内移動は同じtabの履歴を破棄するためcloseと同じguard対象だが、tab切替は履歴を保持するためguardしない。
+
+exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/coreへFFmpeg型を公開しない。画像filterはoperation順のcrop / transpose / flip、動画filterはそれらとtrim / PTS rate、音声filterはatrim / PTS / atempo / volumeを適用し、metadataを入力からcopyする。2倍を超える、または0.5倍未満のrateは複数の`atempo`へ分解する。video/audio encodeは固定FFmpeg buildのsoftware codecを使い、hardware encodeはM7まで行わない。Save As後のSaveは同じexport先を更新できるが、sourceと同一pathへの出力は拒否してpartial overwriteによるsource破損を避ける。
 
 ## 5. スレッド・同期契約
 

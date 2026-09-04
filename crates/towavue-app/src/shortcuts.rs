@@ -46,12 +46,29 @@ fn defaults() -> ShortcutBindings {
         (CommandId::ActualSize, "Ctrl+H"),
         (CommandId::FitToWindow, "Shift+W"),
         (CommandId::ClearSelection, "Escape"),
-        (CommandId::ToggleCropPreview, "Ctrl+Y"),
+        (CommandId::ToggleCropPreview, "Ctrl+Shift+Y"),
         (CommandId::ToggleReadingMode, "B"),
         (CommandId::IncreaseReadingPages, "Ctrl+]"),
         (CommandId::DecreaseReadingPages, "Ctrl+["),
         (CommandId::ToggleReadingAxis, "R"),
         (CommandId::ReverseReadingOrder, "H"),
+        (CommandId::Undo, "Ctrl+Z"),
+        (CommandId::Redo, "Ctrl+Shift+Z"),
+        (CommandId::ApplyCrop, "Ctrl+Y"),
+        (CommandId::RotateClockwise, "R"),
+        (CommandId::RotateCounterclockwise, "L"),
+        (CommandId::FlipHorizontal, "H"),
+        (CommandId::FlipVertical, "V"),
+        (CommandId::SetTrimStart, "I"),
+        (CommandId::SetTrimEnd, "O"),
+        (CommandId::VolumeDown, "Down"),
+        (CommandId::VolumeUp, "Up"),
+        (CommandId::ToggleMute, "M"),
+        (CommandId::RateDown, ","),
+        (CommandId::RateUp, "."),
+        (CommandId::ResetRate, "/"),
+        (CommandId::Save, "Ctrl+S"),
+        (CommandId::ExportAs, "Ctrl+Shift+S"),
     ] {
         bindings.set(
             command,
@@ -62,6 +79,9 @@ fn defaults() -> ShortcutBindings {
 }
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
+    let has_apply_crop = text
+        .lines()
+        .any(|line| line.trim_start().starts_with("apply_crop"));
     for (index, line) in text.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -79,6 +99,20 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .parse::<KeySequence>()
             .map_err(|_| format!("invalid shortcut on shortcuts.conf line {}", index + 1))?;
         bindings.set(command, sequence);
+    }
+    if !has_apply_crop
+        && bindings
+            .get(CommandId::ToggleCropPreview)
+            .is_some_and(|sequence| sequence.to_string() == "Ctrl+Y")
+    {
+        bindings.set(
+            CommandId::ToggleCropPreview,
+            "Ctrl+Shift+Y".parse().expect("migration shortcut is valid"),
+        );
+        bindings.set(
+            CommandId::ApplyCrop,
+            "Ctrl+Y".parse().expect("migration shortcut is valid"),
+        );
     }
     Ok(bindings)
 }
@@ -121,6 +155,27 @@ mod tests {
                 .expect("reload binding")
                 .to_string(),
             "Ctrl+K Ctrl+R"
+        );
+    }
+
+    #[test]
+    fn migrates_m5_crop_preview_binding_to_m6_apply_crop() {
+        let bindings =
+            parse("toggle_crop_preview = Ctrl+Y\n", defaults()).expect("migrate shortcuts");
+
+        assert_eq!(
+            bindings
+                .get(CommandId::ApplyCrop)
+                .expect("apply crop binding")
+                .to_string(),
+            "Ctrl+Y"
+        );
+        assert_eq!(
+            bindings
+                .get(CommandId::ToggleCropPreview)
+                .expect("preview binding")
+                .to_string(),
+            "Ctrl+Shift+Y"
         );
     }
 }

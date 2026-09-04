@@ -4,6 +4,7 @@
 
 mod shortcuts;
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,14 +12,15 @@ use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, RichText, TextureHandle, TextureOptions};
 use towavue_core::{
-    CommandContext, CommandId, FolderSnapshot, FolderSnapshotSource, ImageViewState, Key,
-    KeyStroke, MediaKind, MediaTime, Modifiers, PlaybackGeneration, PlaybackState, ReadingAxis,
-    ReadingSettings, ShortcutBindings, ShortcutMatch, TabId, TabSet, UnitPoint, UnitRect, ZoomMode,
-    command_definitions,
+    CommandContext, CommandId, EditHistory, EditOperation, FolderSnapshot, FolderSnapshotSource,
+    ImageViewState, Key, KeyStroke, MediaKind, MediaTime, Modifiers, PlaybackGeneration,
+    PlaybackState, ReadingAxis, ReadingSettings, ShortcutBindings, ShortcutMatch, TabId, TabSet,
+    TabTarget, UnitPoint, UnitRect, ZoomMode, command_definitions,
 };
 use towavue_runtime_windows::{
-    AudioOutputEvent, DecodedImage, FolderOrderProvider, FolderWatcher, FrameRenderer,
-    PlaybackEvent, PlaybackSession, RenderError, decode_image, pick_folder, pick_media_file,
+    AudioOutputEvent, DecodedImage, ExportRequest, FolderOrderProvider, FolderWatcher,
+    FrameRenderer, PlaybackEvent, PlaybackSession, RenderError, decode_image, export_media,
+    pick_export_file, pick_folder, pick_media_file,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -106,6 +108,21 @@ enum UiAction {
     ActivateTab(TabId),
     CloseTab(TabId),
     OpenMedia(PathBuf, bool),
+    ResolveGuard(GuardDecision),
+}
+
+#[derive(Clone)]
+enum GuardedAction {
+    CloseTab(TabId),
+    Navigate(PathBuf),
+    Exit,
+}
+
+#[derive(Clone, Copy)]
+enum GuardDecision {
+    Save,
+    Discard,
+    Cancel,
 }
 
 struct ImagePresentation {
@@ -176,6 +193,64 @@ enum SelectionDrag {
     Bottom,
 }
 
+#[derive(Clone, Copy)]
+struct ImageTransform {
+    uv: [UnitPoint; 4],
+    size: (f32, f32),
+}
+
+impl ImageTransform {
+    fn new(size: (u32, u32), operations: &[EditOperation]) -> Self {
+        let mut transform = Self {
+            uv: [
+                UnitPoint { x: 0.0, y: 0.0 },
+                UnitPoint { x: 1.0, y: 0.0 },
+                UnitPoint { x: 1.0, y: 1.0 },
+                UnitPoint { x: 0.0, y: 1.0 },
+            ],
+            size: (size.0 as f32, size.1 as f32),
+        };
+        for operation in operations {
+            match *operation {
+                EditOperation::Crop(region) => transform.crop(region),
+                EditOperation::RotateClockwise => {
+                    transform.uv.rotate_right(1);
+                    transform.size = (transform.size.1, transform.size.0);
+                }
+                EditOperation::RotateCounterclockwise => {
+                    transform.uv.rotate_left(1);
+                    transform.size = (transform.size.1, transform.size.0);
+                }
+                EditOperation::FlipHorizontal => {
+                    transform.uv.swap(0, 1);
+                    transform.uv.swap(3, 2);
+                }
+                EditOperation::FlipVertical => {
+                    transform.uv.swap(0, 3);
+                    transform.uv.swap(1, 2);
+                }
+                EditOperation::SetTrimStart(_)
+                | EditOperation::SetTrimEnd(_)
+                | EditOperation::SetVolume(_)
+                | EditOperation::SetRate(_) => {}
+            }
+        }
+        transform
+    }
+
+    fn crop(&mut self, region: UnitRect) {
+        let previous = self.uv;
+        self.uv = [
+            bilinear_uv(previous, region.min.x, region.min.y),
+            bilinear_uv(previous, region.max.x, region.min.y),
+            bilinear_uv(previous, region.max.x, region.max.y),
+            bilinear_uv(previous, region.min.x, region.max.y),
+        ];
+        self.size.0 = (self.size.0 * region.width()).max(1.0);
+        self.size.1 = (self.size.1 * region.height()).max(1.0);
+    }
+}
+
 struct Application<N> {
     initial_path: Option<PathBuf>,
     notify: Arc<N>,
@@ -187,6 +262,8 @@ struct Application<N> {
     folder_snapshot: Option<FolderSnapshot>,
     folder_watcher: Option<(PathBuf, FolderWatcher)>,
     tabs: TabSet,
+    edits: BTreeMap<TabId, EditHistory>,
+    export_paths: BTreeMap<TabId, PathBuf>,
     path: Option<PathBuf>,
     media_kind: Option<MediaKind>,
     image: Option<ImagePresentation>,
@@ -215,6 +292,8 @@ struct Application<N> {
     palette_open: bool,
     palette_query: String,
     status_message: Option<(String, Instant)>,
+    pending_guard: Option<GuardedAction>,
+    exit_requested: bool,
 }
 
 impl<N> Application<N>
@@ -235,6 +314,8 @@ where
             folder_snapshot: None,
             folder_watcher: None,
             tabs: TabSet::default(),
+            edits: BTreeMap::new(),
+            export_paths: BTreeMap::new(),
             path: None,
             media_kind: None,
             image: None,
@@ -263,6 +344,8 @@ where
             palette_open: false,
             palette_query: String::new(),
             status_message: None,
+            pending_guard: None,
+            exit_requested: false,
         })
     }
 
@@ -307,11 +390,18 @@ where
             self.set_status(format!("Unsupported media: {}", path.display()));
             return;
         };
-        if force_new_tab {
-            self.tabs.open_new(path.clone(), kind);
+        let folder = path.parent().unwrap_or_else(|| Path::new(""));
+        let dirty_playlist = kind == MediaKind::Audio
+            && self.tabs.tabs().iter().any(|tab| {
+                matches!(&tab.target, TabTarget::AudioFolder { folder: open, .. } if open == folder)
+                    && self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty)
+            });
+        let id = if force_new_tab || dirty_playlist {
+            self.tabs.open_new(path.clone(), kind)
         } else {
-            self.tabs.open_external(path.clone(), kind);
-        }
+            self.tabs.open_external(path.clone(), kind)
+        };
+        self.edits.entry(id).or_default();
         self.load_path(path, kind);
     }
 
@@ -646,6 +736,8 @@ where
                     self.draw_audio_playlist(ui, actions);
                 } else if self.media_kind == Some(MediaKind::Image) {
                     self.draw_image(ui);
+                } else if self.media_kind == Some(MediaKind::Video) {
+                    self.draw_video_edit_overlay(ui);
                 }
             });
         if self.filmstrip_open {
@@ -654,6 +746,33 @@ where
         if self.palette_open {
             self.draw_command_palette(&context, actions);
         }
+        if self.pending_guard.is_some() {
+            self.draw_unsaved_guard(&context, actions);
+        }
+    }
+
+    fn draw_unsaved_guard(&self, context: &egui::Context, actions: &mut Vec<UiAction>) {
+        let name = self
+            .path
+            .as_deref()
+            .map_or_else(|| "this media".to_owned(), display_name);
+        egui::Modal::new("unsaved-edit-guard".into()).show(context, |ui| {
+            ui.heading("Unsaved edits");
+            ui.separator();
+            ui.label(format!("Export edits to {name} before continuing?"));
+            ui.label("The source file has not been changed.");
+            ui.horizontal(|ui| {
+                if ui.button("Export and continue").clicked() {
+                    actions.push(UiAction::ResolveGuard(GuardDecision::Save));
+                }
+                if ui.button("Discard edits").clicked() {
+                    actions.push(UiAction::ResolveGuard(GuardDecision::Discard));
+                }
+                if ui.button("Cancel").clicked() {
+                    actions.push(UiAction::ResolveGuard(GuardDecision::Cancel));
+                }
+            });
+        });
     }
 
     fn draw_image(&mut self, ui: &mut egui::Ui) {
@@ -665,18 +784,21 @@ where
             return;
         };
         let texture = image.texture.id();
-        let image_size = image.dimensions();
+        let operations = self
+            .tabs
+            .active()
+            .and_then(|tab| self.edits.get(&tab.id))
+            .map(|history| history.operations().to_vec())
+            .unwrap_or_default();
+        let mut transform = ImageTransform::new(image.dimensions(), &operations);
         let viewport = ui.max_rect().shrink(8.0);
         let region = self.image_view.preview_region();
-        let region_size = (
-            (image_size.0 as f32 * region.width()).max(1.0),
-            (image_size.1 as f32 * region.height()).max(1.0),
-        );
-        let scale = self.image_view.scale(
-            (region_size.0 as u32, region_size.1 as u32),
-            (viewport.width(), viewport.height()),
-        );
-        let displayed = egui::vec2(region_size.0 * scale, region_size.1 * scale);
+        transform.crop(region);
+        let image_size = (transform.size.0 as u32, transform.size.1 as u32);
+        let scale = self
+            .image_view
+            .scale(image_size, (viewport.width(), viewport.height()));
+        let displayed = egui::vec2(transform.size.0 * scale, transform.size.1 * scale);
         let center = viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
         let image_rect = egui::Rect::from_center_size(center, displayed);
         let response = ui.interact(
@@ -698,13 +820,12 @@ where
             let old_scale = scale;
             self.image_view.zoom_by(
                 if scroll > 0.0 { 1.1 } else { 1.0 / 1.1 },
-                (region_size.0 as u32, region_size.1 as u32),
+                image_size,
                 (viewport.width(), viewport.height()),
             );
-            let new_scale = self.image_view.scale(
-                (region_size.0 as u32, region_size.1 as u32),
-                (viewport.width(), viewport.height()),
-            );
+            let new_scale = self
+                .image_view
+                .scale(image_size, (viewport.width(), viewport.height()));
             if let Some(pointer) = pointer {
                 let from_center = pointer - center;
                 let correction = from_center * (1.0 - new_scale / old_scale);
@@ -722,19 +843,31 @@ where
         }
 
         let painter = ui.painter_at(viewport);
-        painter.image(
-            texture,
-            image_rect,
-            egui::Rect::from_min_max(
-                egui::pos2(region.min.x, region.min.y),
-                egui::pos2(region.max.x, region.max.y),
-            ),
-            Color32::WHITE,
-        );
+        paint_transformed_image(&painter, texture, image_rect, transform.uv);
         if !self.image_view.crop_preview
             && let Some(selection) = self.image_view.selection
         {
             paint_selection(&painter, image_rect, selection);
+        }
+    }
+
+    fn draw_video_edit_overlay(&mut self, ui: &mut egui::Ui) {
+        let viewport = ui.max_rect().shrink(8.0);
+        let response = ui.interact(
+            viewport,
+            ui.id().with("video-edit-surface"),
+            egui::Sense::click_and_drag(),
+        );
+        let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
+        self.update_selection(
+            &response,
+            viewport,
+            (viewport.width() as u32, viewport.height() as u32),
+            shift,
+            pointer,
+        );
+        if let Some(selection) = self.image_view.selection {
+            paint_selection(&ui.painter_at(viewport), viewport, selection);
         }
     }
 
@@ -781,7 +914,8 @@ where
                 self.image_view.selection = None;
             }
         }
-        if response.clicked_by(egui::PointerButton::Primary)
+        if self.media_kind == Some(MediaKind::Image)
+            && response.clicked_by(egui::PointerButton::Primary)
             && self
                 .image_view
                 .selection
@@ -894,7 +1028,19 @@ where
                                 if ui
                                     .selectable_label(
                                         active,
-                                        display_name(tab.target.current_path()),
+                                        format!(
+                                            "{}{}",
+                                            display_name(tab.target.current_path()),
+                                            if self
+                                                .edits
+                                                .get(&tab.id)
+                                                .is_some_and(EditHistory::is_dirty)
+                                            {
+                                                " *"
+                                            } else {
+                                                ""
+                                            }
+                                        ),
                                     )
                                     .clicked()
                                 {
@@ -987,6 +1133,22 @@ where
                         }
                         if let Some(snapshot) = &self.folder_snapshot {
                             ui.weak(snapshot_source(snapshot.source));
+                        }
+                        if self
+                            .tabs
+                            .active()
+                            .and_then(|tab| self.edits.get(&tab.id))
+                            .is_some_and(EditHistory::is_dirty)
+                        {
+                            let edit = self.edit_state();
+                            ui.colored_label(Color32::LIGHT_YELLOW, "Unsaved");
+                            if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
+                                ui.monospace(format!(
+                                    "Volume {:.0}% · Rate {:.2}×",
+                                    edit.volume * 100.0,
+                                    edit.rate
+                                ));
+                            }
                         }
                     } else {
                         ui.weak(format!("Shortcuts: {}", self.shortcut_path.display()));
@@ -1094,14 +1256,15 @@ where
         match action {
             UiAction::Command(command) => self.dispatch(command),
             UiAction::ActivateTab(id) => self.activate_tab(id),
-            UiAction::CloseTab(id) => self.close_tab(id),
+            UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
             UiAction::OpenMedia(path, force_new) => {
                 if force_new {
                     self.open_external(path, true);
                 } else {
-                    self.navigate_to(path);
+                    self.request_guarded(GuardedAction::Navigate(path));
                 }
             }
+            UiAction::ResolveGuard(decision) => self.resolve_guard(decision),
         }
     }
 
@@ -1120,7 +1283,7 @@ where
             },
             CommandId::CloseTab => {
                 if let Some(id) = self.tabs.active().map(|tab| tab.id) {
-                    self.close_tab(id);
+                    self.request_guarded(GuardedAction::CloseTab(id));
                 }
             }
             CommandId::NextTab => self.cycle_tab(true),
@@ -1204,6 +1367,162 @@ where
                 self.rebuild_reading_pages();
                 self.request_redraw();
             }
+            CommandId::Undo => self.undo_edit(false),
+            CommandId::Redo => self.undo_edit(true),
+            CommandId::ApplyCrop => {
+                if let Some(selection) = self.image_view.selection {
+                    self.push_edit(EditOperation::Crop(selection));
+                    self.image_view.selection = None;
+                    self.image_view.crop_preview = false;
+                    self.image_view.fit();
+                } else {
+                    self.set_status("Drag on the image to create a crop selection".into());
+                }
+            }
+            CommandId::RotateClockwise => self.push_visual_edit(EditOperation::RotateClockwise),
+            CommandId::RotateCounterclockwise => {
+                self.push_visual_edit(EditOperation::RotateCounterclockwise)
+            }
+            CommandId::FlipHorizontal => self.push_visual_edit(EditOperation::FlipHorizontal),
+            CommandId::FlipVertical => self.push_visual_edit(EditOperation::FlipVertical),
+            CommandId::SetTrimStart => {
+                self.push_edit(EditOperation::SetTrimStart(self.current_position()))
+            }
+            CommandId::SetTrimEnd => {
+                self.push_edit(EditOperation::SetTrimEnd(self.current_position()))
+            }
+            CommandId::VolumeDown => {
+                let volume = (self.edit_state().volume - 0.1).max(0.0);
+                self.push_edit(EditOperation::SetVolume(volume));
+            }
+            CommandId::VolumeUp => {
+                let volume = (self.edit_state().volume + 0.1).min(2.0);
+                self.push_edit(EditOperation::SetVolume(volume));
+            }
+            CommandId::ToggleMute => {
+                let volume = if self.edit_state().volume == 0.0 {
+                    1.0
+                } else {
+                    0.0
+                };
+                self.push_edit(EditOperation::SetVolume(volume));
+            }
+            CommandId::RateDown => {
+                let rate = (self.edit_state().rate - 0.25).max(0.25);
+                self.push_edit(EditOperation::SetRate(rate));
+            }
+            CommandId::RateUp => {
+                let rate = (self.edit_state().rate + 0.25).min(4.0);
+                self.push_edit(EditOperation::SetRate(rate));
+            }
+            CommandId::ResetRate => self.push_edit(EditOperation::SetRate(1.0)),
+            CommandId::Save => {
+                self.export_current(false);
+            }
+            CommandId::ExportAs => {
+                self.export_current(true);
+            }
+        }
+    }
+
+    fn push_visual_edit(&mut self, operation: EditOperation) {
+        self.push_edit(operation);
+        self.image_view.selection = None;
+        self.image_view.crop_preview = false;
+        self.image_view.fit();
+    }
+
+    fn push_edit(&mut self, operation: EditOperation) {
+        let (Some(tab), Some(kind)) = (self.tabs.active(), self.media_kind) else {
+            return;
+        };
+        if self.edits.entry(tab.id).or_default().push(operation, kind) {
+            self.set_status("Edit added (source unchanged)".into());
+            self.refresh_title();
+            self.request_redraw();
+        }
+    }
+
+    fn undo_edit(&mut self, redo: bool) {
+        let Some(id) = self.tabs.active().map(|tab| tab.id) else {
+            return;
+        };
+        let changed = self
+            .edits
+            .get_mut(&id)
+            .is_some_and(|history| if redo { history.redo() } else { history.undo() });
+        if changed {
+            self.image_view.selection = None;
+            self.image_view.crop_preview = false;
+            self.image_view.fit();
+            self.refresh_title();
+            self.request_redraw();
+        }
+    }
+
+    fn edit_state(&self) -> towavue_core::EditState {
+        self.tabs
+            .active()
+            .and_then(|tab| self.edits.get(&tab.id))
+            .map(EditHistory::state)
+            .unwrap_or_default()
+    }
+
+    fn export_current(&mut self, force_dialog: bool) -> bool {
+        let Some((id, source, kind)) = self.tabs.active().map(|tab| {
+            (
+                tab.id,
+                tab.target.current_path().to_owned(),
+                tab.target.media_kind(),
+            )
+        }) else {
+            return false;
+        };
+        let target = if !force_dialog {
+            self.export_paths.get(&id).cloned()
+        } else {
+            None
+        };
+        let target = match target {
+            Some(target) => target,
+            None => {
+                let suggested = export_name(&source);
+                match pick_export_file(&suggested) {
+                    Ok(Some(target)) => target,
+                    Ok(None) => return false,
+                    Err(error) => {
+                        self.set_status(error.to_string());
+                        return false;
+                    }
+                }
+            }
+        };
+        let operations = self
+            .edits
+            .get(&id)
+            .map(|history| history.operations().to_vec())
+            .unwrap_or_default();
+        let request = ExportRequest {
+            source,
+            target: target.clone(),
+            kind,
+            operations,
+        };
+        match export_media(&request) {
+            Ok(()) => {
+                self.export_paths.insert(id, target.clone());
+                if let Some(history) = self.edits.get_mut(&id) {
+                    history.mark_saved();
+                }
+                self.set_status(format!("Exported {}", target.display()));
+                self.refresh_title();
+                self.request_redraw();
+                true
+            }
+            Err(error) => {
+                self.set_status(error.to_string());
+                false
+            }
         }
     }
 
@@ -1227,10 +1546,69 @@ where
         }
     }
 
-    fn close_tab(&mut self, id: TabId) {
+    fn request_guarded(&mut self, action: GuardedAction) {
+        let dirty = match action {
+            GuardedAction::CloseTab(id) => self
+                .edits
+                .get(&id)
+                .is_some_and(EditHistory::is_dirty)
+                .then_some(id),
+            GuardedAction::Navigate(_) => self.tabs.active().and_then(|tab| {
+                self.edits
+                    .get(&tab.id)
+                    .is_some_and(EditHistory::is_dirty)
+                    .then_some(tab.id)
+            }),
+            GuardedAction::Exit => self
+                .edits
+                .iter()
+                .find_map(|(id, history)| history.is_dirty().then_some(*id)),
+        };
+        if let Some(id) = dirty {
+            if self.tabs.active().is_none_or(|tab| tab.id != id) {
+                self.activate_tab(id);
+            }
+            self.pending_guard = Some(action);
+            self.request_redraw();
+        } else {
+            self.perform_guarded(action);
+        }
+    }
+
+    fn resolve_guard(&mut self, decision: GuardDecision) {
+        let Some(action) = self.pending_guard.take() else {
+            return;
+        };
+        match decision {
+            GuardDecision::Save => {
+                if self.export_current(false) {
+                    self.request_guarded(action);
+                } else {
+                    self.pending_guard = Some(action);
+                }
+            }
+            GuardDecision::Discard => self.perform_guarded(action),
+            GuardDecision::Cancel => self.request_redraw(),
+        }
+    }
+
+    fn perform_guarded(&mut self, action: GuardedAction) {
+        match action {
+            GuardedAction::CloseTab(id) => self.close_tab_unchecked(id),
+            GuardedAction::Navigate(path) => self.navigate_to_unchecked(path),
+            GuardedAction::Exit => {
+                self.exit_requested = true;
+                self.request_redraw();
+            }
+        }
+    }
+
+    fn close_tab_unchecked(&mut self, id: TabId) {
         if self.tabs.close(id).is_none() {
             return;
         }
+        self.edits.remove(&id);
+        self.export_paths.remove(&id);
         if let Some((path, kind)) = self.tabs.active().map(|tab| {
             (
                 tab.target.current_path().to_owned(),
@@ -1296,15 +1674,18 @@ where
         } else {
             (current + paths.len() - 1) % paths.len()
         };
-        self.navigate_to(paths[index].clone());
+        self.request_guarded(GuardedAction::Navigate(paths[index].clone()));
     }
 
-    fn navigate_to(&mut self, path: PathBuf) {
+    fn navigate_to_unchecked(&mut self, path: PathBuf) {
         let Some(kind) = MediaKind::from_path(&path) else {
             return;
         };
         if let Some(tab) = self.tabs.active_mut() {
+            let id = tab.id;
             tab.target.set_current_path(path.clone(), kind);
+            self.edits.insert(id, EditHistory::default());
+            self.export_paths.remove(&id);
         }
         self.load_path(path, kind);
     }
@@ -1519,11 +1900,19 @@ where
     }
 
     fn title(&self) -> String {
-        let name = self
+        let mut name = self
             .path
             .as_deref()
             .map(display_name)
             .unwrap_or_else(|| "Welcome".to_owned());
+        if self
+            .tabs
+            .active()
+            .and_then(|tab| self.edits.get(&tab.id))
+            .is_some_and(EditHistory::is_dirty)
+        {
+            name.push_str(" *");
+        }
         format!("{name} — towavue ({:?})", self.state)
     }
 
@@ -1606,6 +1995,8 @@ where
             WinitKey::Named(NamedKey::Space) => (Key::Space, false),
             WinitKey::Named(NamedKey::ArrowLeft) => (Key::ArrowLeft, false),
             WinitKey::Named(NamedKey::ArrowRight) => (Key::ArrowRight, false),
+            WinitKey::Named(NamedKey::ArrowUp) => (Key::ArrowUp, false),
+            WinitKey::Named(NamedKey::ArrowDown) => (Key::ArrowDown, false),
             WinitKey::Named(NamedKey::Tab) => (Key::Tab, false),
             WinitKey::Named(NamedKey::Escape) => (Key::Escape, false),
             _ => return None,
@@ -1622,6 +2013,10 @@ where
     }
 
     fn schedule(&mut self, event_loop: &ActiveEventLoop) {
+        if self.exit_requested {
+            event_loop.exit();
+            return;
+        }
         self.poll_audio();
         let now = Instant::now();
         let mut image_changed = self
@@ -1736,6 +2131,47 @@ fn unit_point(point: egui::Pos2, image_rect: egui::Rect) -> UnitPoint {
         x: ((point.x - image_rect.left()) / image_rect.width()).clamp(0.0, 1.0),
         y: ((point.y - image_rect.top()) / image_rect.height()).clamp(0.0, 1.0),
     }
+}
+
+fn bilinear_uv(corners: [UnitPoint; 4], x: f32, y: f32) -> UnitPoint {
+    let top = UnitPoint {
+        x: corners[0].x + (corners[1].x - corners[0].x) * x,
+        y: corners[0].y + (corners[1].y - corners[0].y) * x,
+    };
+    let bottom = UnitPoint {
+        x: corners[3].x + (corners[2].x - corners[3].x) * x,
+        y: corners[3].y + (corners[2].y - corners[3].y) * x,
+    };
+    UnitPoint {
+        x: top.x + (bottom.x - top.x) * y,
+        y: top.y + (bottom.y - top.y) * y,
+    }
+}
+
+fn paint_transformed_image(
+    painter: &egui::Painter,
+    texture: egui::TextureId,
+    rect: egui::Rect,
+    uv: [UnitPoint; 4],
+) {
+    let mut mesh = egui::Mesh::with_texture(texture);
+    for (position, uv) in [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ]
+    .into_iter()
+    .zip(uv)
+    {
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: position,
+            uv: egui::pos2(uv.x, uv.y),
+            color: Color32::WHITE,
+        });
+    }
+    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 fn selection_rect(image_rect: egui::Rect, selection: UnitRect) -> egui::Rect {
@@ -1854,6 +2290,22 @@ fn display_name(path: &Path) -> String {
     )
 }
 
+fn export_name(path: &Path) -> String {
+    let stem = path
+        .file_stem()
+        .map(|value| value.to_string_lossy())
+        .unwrap_or_default();
+    let extension = path
+        .extension()
+        .map(|value| value.to_string_lossy())
+        .unwrap_or_default();
+    if extension.is_empty() {
+        format!("{stem}-export")
+    } else {
+        format!("{stem}-export.{extension}")
+    }
+}
+
 fn format_time(time: MediaTime) -> String {
     let seconds = time.as_nanoseconds().max(0) as u64 / 1_000_000_000;
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
@@ -1898,7 +2350,7 @@ where
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        _event_loop: &ActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent,
     ) {
@@ -1916,7 +2368,7 @@ where
             self.request_redraw();
         }
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => self.request_guarded(GuardedAction::Exit),
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = self.renderer.as_mut()
                     && let Err(error) = renderer.resize_surface(size.width, size.height)
@@ -1985,5 +2437,31 @@ mod tests {
             Some(SelectionDrag::Left)
         ));
         assert!(selection_edge(egui::pos2(50.0, 50.0), image, selection).is_none());
+    }
+
+    #[test]
+    fn image_transform_applies_crop_then_rotation_in_order() {
+        let transform = ImageTransform::new(
+            (40, 30),
+            &[
+                EditOperation::Crop(UnitRect {
+                    min: UnitPoint { x: 0.25, y: 0.0 },
+                    max: UnitPoint { x: 0.75, y: 1.0 },
+                }),
+                EditOperation::RotateClockwise,
+            ],
+        );
+
+        assert_eq!(transform.size, (30.0, 20.0));
+        assert_eq!(transform.uv[0], UnitPoint { x: 0.25, y: 1.0 });
+        assert_eq!(transform.uv[2], UnitPoint { x: 0.75, y: 0.0 });
+    }
+
+    #[test]
+    fn export_name_preserves_the_source_extension() {
+        assert_eq!(
+            export_name(Path::new("photo.final.png")),
+            "photo.final-export.png"
+        );
     }
 }

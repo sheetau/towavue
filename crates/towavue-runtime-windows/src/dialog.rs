@@ -5,9 +5,11 @@ use thiserror::Error;
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
 use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
 use windows::Win32::UI::Shell::{
-    FILEOPENDIALOGOPTIONS, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_PATHMUSTEXIST,
-    FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, SIGDN_FILESYSPATH,
+    FILEOPENDIALOGOPTIONS, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_OVERWRITEPROMPT,
+    FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, FileOpenDialog, FileSaveDialog, IFileOpenDialog,
+    IFileSaveDialog, SIGDN_FILESYSPATH,
 };
+use windows::core::PCWSTR;
 
 const ERROR_CANCELLED_HRESULT: u32 = 0x8007_04c7;
 
@@ -31,6 +33,15 @@ pub fn pick_folder() -> Result<Option<PathBuf>, DialogError> {
     show_dialog(true)
 }
 
+pub fn pick_export_file(suggested_name: &str) -> Result<Option<PathBuf>, DialogError> {
+    let suggested_name = suggested_name.to_owned();
+    thread::Builder::new()
+        .name("towavue-save-dialog-sta".into())
+        .spawn(move || save_dialog_thread(&suggested_name))?
+        .join()
+        .map_err(|_| DialogError::ThreadStopped)?
+}
+
 fn show_dialog(folder: bool) -> Result<Option<PathBuf>, DialogError> {
     thread::Builder::new()
         .name("towavue-file-dialog-sta".into())
@@ -49,6 +60,16 @@ fn dialog_thread(folder: bool) -> Result<Option<PathBuf>, DialogError> {
     }
 }
 
+fn save_dialog_thread(suggested_name: &str) -> Result<Option<PathBuf>, DialogError> {
+    // SAFETY: all dialog COM objects are created, used, and dropped on this thread.
+    unsafe {
+        OleInitialize(None)?;
+        let result = show_initialized_save_dialog(suggested_name);
+        OleUninitialize();
+        result
+    }
+}
+
 unsafe fn show_initialized_dialog(folder: bool) -> Result<Option<PathBuf>, DialogError> {
     unsafe {
         let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
@@ -58,6 +79,31 @@ unsafe fn show_initialized_dialog(folder: bool) -> Result<Option<PathBuf>, Dialo
             options |= FOS_PICKFOLDERS;
         }
         dialog.SetOptions(options)?;
+        if let Err(error) = dialog.Show(None) {
+            if error.code().0 as u32 == ERROR_CANCELLED_HRESULT {
+                return Ok(None);
+            }
+            return Err(error.into());
+        }
+        let item = dialog.GetResult()?;
+        let value = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+        let path = value.to_string().map(PathBuf::from);
+        CoTaskMemFree(Some(value.0.cast()));
+        Ok(Some(path?))
+    }
+}
+
+unsafe fn show_initialized_save_dialog(
+    suggested_name: &str,
+) -> Result<Option<PathBuf>, DialogError> {
+    unsafe {
+        let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_ALL)?;
+        dialog.SetOptions(FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_OVERWRITEPROMPT)?;
+        let wide = suggested_name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        dialog.SetFileName(PCWSTR(wide.as_ptr()))?;
         if let Err(error) = dialog.Show(None) {
             if error.code().0 as u32 == ERROR_CANCELLED_HRESULT {
                 return Ok(None);

@@ -1,0 +1,13 @@
+/concepts/
+/target/
+/.cargo-vcpkg/
+/vendor/ffmpeg/
+/dist/
+/logs/
+/.cache/
+/.idea/
+/.vscode/
+*.pdb
+*.ilk
+*.user
+*.suo

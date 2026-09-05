@@ -1017,14 +1017,6 @@ where
         }
         match event {
             PlaybackEvent::VideoReady(_) => {
-                if let Some(started) = self.pending_seek_started.take() {
-                    let latency = started.elapsed();
-                    self.seek_latencies.push(latency);
-                    eprintln!(
-                        "towavue: seek_latency_ms={:.3}",
-                        latency.as_secs_f64() * 1000.0
-                    );
-                }
                 self.load_next_frame();
             }
             PlaybackEvent::DecodePathSelected(_, path) => {
@@ -1134,15 +1126,18 @@ where
         let renderer = self.renderer.as_mut().expect("renderer exists");
         let media_result = renderer.clear([0.025, 0.025, 0.03, 1.0]).and_then(|()| {
             if let (Some(session), Some(rect)) = (&mut self.session, self.video_rect) {
-                session.draw_current(renderer, rect * context.pixels_per_point(), self.video_uv)?;
+                session.draw_current(renderer, rect * context.pixels_per_point(), self.video_uv)
+            } else {
+                Ok(false)
             }
-            Ok(())
         });
-        if let Err(error) = media_result {
-            self.handle_render_error(error);
-            return;
-        }
-        self.check_eof();
+        let media_drawn = match media_result {
+            Ok(drawn) => drawn,
+            Err(error) => {
+                self.handle_render_error(error);
+                return;
+            }
+        };
         let mut platform_output = match self
             .renderer
             .as_mut()
@@ -1175,6 +1170,8 @@ where
             self.handle_render_error(error);
             return;
         }
+        self.record_seek_presentation(media_drawn);
+        self.check_eof();
         // Consumed keys can emit actions only in an earlier, discarded layout pass.
         for (index, action) in actions.iter().enumerate() {
             if !actions[..index].contains(action) {
@@ -3133,6 +3130,8 @@ where
     }
 
     fn seek_to(&mut self, target: MediaTime) {
+        let started = Instant::now();
+        self.pending_seek_started = None;
         let edit = self.edit_state();
         let range = edit.playback_range();
         let Some(session) = self.session.as_mut() else {
@@ -3153,7 +3152,8 @@ where
                 self.decode_finished = false;
                 self.audio_drained = !session.has_audio();
                 self.metrics_recorded = false;
-                self.pending_seek_started = Some(Instant::now());
+                self.pending_seek_started =
+                    (self.media_kind == Some(MediaKind::Video)).then_some(started);
                 self.set_status(if range.contains(target) {
                     format!("Position {:.3}s", target.as_seconds_f64())
                 } else {
@@ -3166,6 +3166,7 @@ where
     }
 
     fn recover_graphics_device(&mut self, position: MediaTime) {
+        self.pending_seek_started = None;
         let Some(window) = &self.window else {
             self.fail("window was unavailable during graphics recovery".to_owned());
             return;
@@ -3203,7 +3204,6 @@ where
                 self.decode_finished = false;
                 self.audio_drained = !session.has_audio();
                 self.metrics_recorded = false;
-                self.pending_seek_started = Some(Instant::now());
             }
             Err(error) => self.fail(format!("D3D11 pipeline recovery failed: {error}")),
         }
@@ -3228,7 +3228,10 @@ where
                 self.audio_drained = true;
                 self.check_eof();
             }
-            Some(AudioOutputEvent::EndpointChanged) => self.seek_to(self.current_position()),
+            Some(AudioOutputEvent::EndpointChanged) => {
+                self.seek_to(self.current_position());
+                self.pending_seek_started = None;
+            }
             Some(AudioOutputEvent::Failed(error)) => self.fail(error),
             None => {}
         }
@@ -3319,6 +3322,7 @@ where
     }
 
     fn fail(&mut self, error: String) {
+        self.pending_seek_started = None;
         eprintln!("towavue: {error}");
         self.playback_error = Some(error.clone());
         self.set_status(error);
@@ -3329,6 +3333,17 @@ where
     fn set_status(&mut self, message: String) {
         self.status_message = Some((message, Instant::now()));
         self.request_redraw();
+    }
+
+    fn record_seek_presentation(&mut self, media_drawn: bool) {
+        if media_drawn && let Some(started) = self.pending_seek_started.take() {
+            let latency = started.elapsed();
+            self.seek_latencies.push(latency);
+            eprintln!(
+                "towavue: seek_latency_ms={:.3}",
+                latency.as_secs_f64() * 1000.0
+            );
+        }
     }
 
     fn report_timing_metrics(&self) {
@@ -5201,6 +5216,41 @@ mod tests {
         app.pending_dialog = Some(DialogIntent::OpenFolder);
         app.finish_dialog(Ok(None));
         assert_eq!(app.path.as_ref(), Some(&source));
+    }
+
+    #[test]
+    fn seek_latency_waits_for_video_presentation_and_records_the_original_start_once() {
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let started = Instant::now() - Duration::from_millis(300);
+        app.pending_seek_started = Some(started);
+        app.handle_playback_event(PlaybackEvent::VideoReady(app.generation.next()));
+        app.handle_playback_event(PlaybackEvent::VideoReady(app.generation));
+        app.record_seek_presentation(false);
+        assert_eq!(app.pending_seek_started, Some(started));
+        assert!(app.seek_latencies.is_empty());
+
+        app.record_seek_presentation(true);
+        assert!(app.pending_seek_started.is_none());
+        assert_eq!(app.seek_latencies.len(), 1);
+        assert!(app.seek_latencies[0] >= Duration::from_millis(300));
+        app.record_seek_presentation(true);
+        assert_eq!(app.seek_latencies.len(), 1);
+    }
+
+    #[test]
+    fn failed_or_unavailable_seek_does_not_report_a_later_presentation() {
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.pending_seek_started = Some(Instant::now());
+        app.fail("test playback failure".into());
+        app.record_seek_presentation(true);
+        assert!(app.pending_seek_started.is_none());
+        assert!(app.seek_latencies.is_empty());
+
+        app.pending_seek_started = Some(Instant::now());
+        app.seek_to(MediaTime::ZERO);
+        app.record_seek_presentation(true);
+        assert!(app.pending_seek_started.is_none());
+        assert!(app.seek_latencies.is_empty());
     }
 
     #[test]

@@ -92,6 +92,8 @@ codec metadata、device、driverのいずれかがD3D11VAを成立させられ�
 
 ### M3 synchronization and recovery
 
+動画の`seek_latency_ms`はappの`seek_to`開始から、新generationの映像を描画した最初のPresent成功までとする。同期的なworker停止・再構築、decode待機、UI描画とPresent待機を含め、VideoReady通知では完了しない。失敗・別mediaへの移動・device recoveryで中断した要求と、映像を持たない音声は標本にしない。連続要求では未表示の旧要求を置き換える。rate/trim編集など同じSeek経路を使う再構築も含むため、性能ゲートは操作を限定した試験で測る。物理入力の配送前やDWM/scanoutの実表示時刻はこの計測範囲外である。
+
 demux、video decode、audio decode、WASAPI outputは独立workerとし、stream別packet queue、decoded output queue、presentation queueをすべてboundedにする。demuxは満杯の一方のstreamだけで他方を直ちに停止させず、各streamに同じ上限のpending packetを持って空きqueueを先に進める。packetはdropせず、presentation時刻に遅れたdecoded video frameだけをdropする。audio workerの完了はvideo workerと独立してWASAPIへ通知し、末尾audio drain後はvideo-only clockへ切り替える。
 
 通常再生は`IAudioClock`をmasterとする。running中のdevice positionが供給停止で進まない場合に限り、audio clientのstart/stopとpauseを追跡した単調時計を下限にして永久停止を防ぐ。Seekはgeneration更新後に旧workerと全queueを破棄し、`avformat_seek_file`、decode/discard、audio/video primingを新しいpipelineで行う。default render endpoint変更とD3D11 device removalはtyped eventとしてappへ渡し、現在位置と新しいendpointまたはD3D11 deviceでpipeline全体を再構築する。

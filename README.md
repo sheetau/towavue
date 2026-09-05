@@ -80,6 +80,8 @@ Gはメディア種別ごとの4×4 grid menuを開き、`1234/qwer/asdf/zxcv`�
 
 timelineは上端をdragして高さを変えられます。高さの変更ではSeekや編集は行いません。windowを縮めると映像領域を残す高さへ制限し、狭い幅ではtrim表示の説明部分を省いて端点時刻を優先します。
 
+trimの開始は上側、終了は下側のgripを横dragして調整できます。drag中は候補を表示するだけで、離した時に一回だけ編集し、Undoで戻せます。Escapeやfocus喪失で取り消します。逆転・零長の候補は赤く示し、離しても元の範囲を保持します。I/Oでの指定も引き続き使えます。
+
 gridは小さいwindowでも4列を保ち、長い名前は省略・hoverで全文表示します。clickとkeyはどちらも一回実行して閉じます。
 
 gridのkeyはQWERTYの`1234/qwer/asdf/zxcv`に相当する物理位置です。Shiftで位置は変わらず、Ctrl/Alt/Windows key付きは通常shortcutとして扱います。paletteを開くとgridは閉じます。

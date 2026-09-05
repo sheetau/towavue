@@ -128,6 +128,7 @@ enum UiAction {
     Command(CommandId),
     ActivateTab(TabId),
     ReorderTab(TabId, usize),
+    TrimEndpoint(TabId, EditOperation),
     CloseTab(TabId),
     DetachTab(TabId),
     OpenMedia(PathBuf, bool),
@@ -2212,14 +2213,24 @@ where
                 ui.painter()
                     .vline(x, rect.y_range(), (2.0, Color32::LIGHT_BLUE));
                 let edit = self.edit_state();
-                trim::show(
+                let tab = self.tabs.active().map(|tab| tab.id);
+                let trim_operation = trim::timeline(
                     ui,
                     rect,
                     &edit,
                     media_time(duration),
                     self.state == PlaybackState::Paused
                         && !edit.playback_range().contains(self.current_position()),
+                    ui.id().with((
+                        tab,
+                        self.generation,
+                        edit.trim_start.map(MediaTime::as_nanoseconds),
+                        edit.trim_end.map(MediaTime::as_nanoseconds),
+                    )),
                 );
+                if let (Some(tab), Some(operation)) = (tab, trim_operation) {
+                    actions.push(UiAction::TrimEndpoint(tab, operation));
+                }
                 let Some(position) = response.interact_pointer_pos().or(response.hover_pos())
                 else {
                     return;
@@ -2295,6 +2306,12 @@ where
             UiAction::ReorderTab(id, gap) => {
                 self.tabs.reorder(id, gap);
                 self.request_redraw();
+            }
+            UiAction::TrimEndpoint(id, operation) => {
+                if !self.modal_input_blocked() && self.tabs.active().is_some_and(|tab| tab.id == id)
+                {
+                    self.push_edit(operation);
+                }
             }
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
             UiAction::DetachTab(id) => self.request_guarded(GuardedAction::DetachTab(id)),
@@ -4414,6 +4431,52 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_trim_uses_validation_undo_and_modal_tab_guards() {
+        let Some(root) =
+            isolated_test_root("tests::pointer_trim_uses_validation_undo_and_modal_tab_guards")
+        else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let previous_tab = app.tabs.open_new(root.join("other.wav"), MediaKind::Audio);
+        let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
+        app.media_kind = Some(MediaKind::Audio);
+        app.media_duration = Some(Duration::from_secs(10));
+        app.state = PlaybackState::Paused;
+        let start = EditOperation::SetTrimStart(MediaTime::from_nanoseconds(2_500_000_000));
+        let end = EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(7_500_000_000));
+        app.handle_ui_action(UiAction::TrimEndpoint(tab, start));
+        assert_eq!(
+            app.edit_state().trim_start,
+            Some(MediaTime::from_nanoseconds(2_500_000_000))
+        );
+        app.handle_ui_action(UiAction::TrimEndpoint(tab, end));
+        app.undo_edit(false);
+        let history = app.edits[&tab].clone();
+        for operation in [start, EditOperation::SetTrimEnd(MediaTime::ZERO)] {
+            app.handle_ui_action(UiAction::TrimEndpoint(tab, operation));
+            assert_eq!(
+                app.edits[&tab], history,
+                "duplicate/invalid edits preserve redo"
+            );
+        }
+        app.export_error = Some("fixture modal".into());
+        app.handle_ui_action(UiAction::TrimEndpoint(tab, end));
+        assert_eq!(app.edits[&tab], history);
+        app.export_error = None;
+        app.handle_ui_action(UiAction::TrimEndpoint(previous_tab, end));
+        assert_eq!(app.edits[&tab], history);
+        app.undo_edit(true);
+        assert_eq!(
+            app.edit_state().trim_end,
+            Some(MediaTime::from_nanoseconds(7_500_000_000))
+        );
+        app.undo_edit(false);
+        app.undo_edit(false);
+        assert!(!app.edits[&tab].is_dirty());
+    }
 
     #[test]
     fn timeline_resize_preserves_media_state_and_leaves_room_after_window_shrink() {

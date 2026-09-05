@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 07:39 JST - trim / release-only pointer endpoint editing
+
+- Intent/contract: adopted separate upper-start/lower-end grips before implementation, including implicit source edges, provisional valid-range display, invalid red grip, release-only edit, Escape/focus/target cancellation and existing validation/undo/export. No frame snap, range movement or multi-segment editing. Widget identity includes tab, playback generation and endpoint values; dispatch rejects stale tabs and modal input.
+- Implementation/evidence: same old-release drag (15,492) to (244,492) seeks to about 30 s; new debug retains the paused source frame and sets start 30.007 s. End grip sets 90.023 s. Held drag shows a candidate and release/cancel hint, Escape restores the original range, crossing is rejected, and Play returns to the trim start. No additional decode rebuild appears for held/cancelled/invalid gestures. Each successful endpoint release uses the existing rebuild path.
+- Regression: pointer sequences assert no Seek or early edit, one release result, Escape/focus/identity cancellation, independently reachable near-overlapping endpoints and red invalid feedback. App tests retain redo through invalid/duplicate requests, reject modal/stale-tab dispatch, and undo/redo both endpoint edits. Used f64 coordinate division after a test exposed extra f32 rounding in nanosecond targets. Existing pixel/sample export tests remain unchanged.
+- Native export/iteration: normal-release WAV grips select displayed 4.957–9.915 s; Save As produces a 4.957625 s WAV and clears dirty status. Source SHA-256 remains 0E0CD597CC65B8A0C05633352D0F8985D0F9FF02554C166771C72D6BDFF96020. Reserved the feedback row after observing grip/text overlap; final normal release at 960x576 and 480x300 verifies readable hint and both grips. Narrow shape test now also rejects grip/text intersections. Export/captures/logs remain ignored; native trials are 96 DPI, not a mixed-DPI matrix.
+- Verification/cleanup: format, all-target Clippy, 163 tests (app 73, core 35, runtime 51, integrations 4), debug/release builds pass; three live tests explicitly ignored. Prior f6080b4 CI 33995926177 succeeded. No runtime/unsafe/dependency changes or instrumentation. All owned processes 35736/43952/37116/40192 exit normally; trial edits undone where unsaved, saved WAV retained.
+- Status/next: h1_active. Audit fullscreen mouse controls/discoverability next. Physical recovery/IME/mixed-DPI, recent/session and distribution remain open; packaging question unanswered, no package/publication performed.
+
 ## 2026-09-06 07:25 JST - timeline / resize without seeking and retain a media viewport
 
 - Evidence/intent: draft asks for timeline height adjustment, but the current panel was fixed at 96 logical px. Native old-release drag from (500,452) to (500,340) leaves height unchanged and seeks to 62.558 s. The first attempt at y=450 did not hit the handle/content; repeated both versions at y=452 for the comparison. The new UI regression also fails against exact_size with an unexpected action.

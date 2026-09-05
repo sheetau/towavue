@@ -1,5 +1,115 @@
 use egui::{Align2, Color32, Rect, Ui};
-use towavue_core::{EditState, MediaTime};
+use towavue_core::{EditOperation, EditState, MediaTime};
+
+pub fn timeline(
+    ui: &Ui,
+    rect: Rect,
+    state: &EditState,
+    duration: MediaTime,
+    source_preview: bool,
+    identity: egui::Id,
+) -> Option<EditOperation> {
+    let mut preview = state.clone();
+    let mut chosen = None;
+    let mut dragging = false;
+    let mut grips = Vec::new();
+    let cancelled = ui.input(|input| !input.focused || input.key_pressed(egui::Key::Escape));
+    for start in [true, false] {
+        let time = if start {
+            state.trim_start.unwrap_or(MediaTime::ZERO)
+        } else {
+            state.trim_end.unwrap_or(duration)
+        };
+        let x = egui::lerp(
+            rect.x_range(),
+            (time.as_seconds_f64() / duration.as_seconds_f64()) as f32,
+        );
+        // Separate lanes keep both endpoints reachable when their x positions overlap.
+        let lane_height = ((rect.height() - 40.0) / 2.0).max(1.0);
+        let y = rect.top() + 20.0 + lane_height * if start { 0.5 } else { 1.5 };
+        let grip_rect = |x: f32| {
+            Rect::from_center_size(
+                egui::pos2(x.clamp(rect.left() + 7.0, rect.right() - 7.0), y),
+                egui::vec2(14.0, lane_height),
+            )
+        };
+        let response = ui
+            .interact(
+                grip_rect(x),
+                identity.with(start),
+                egui::Sense::click_and_drag(),
+            )
+            .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+            .on_hover_text(if start {
+                "Drag trim start · release to apply · Escape to cancel"
+            } else {
+                "Drag trim end · release to apply · Escape to cancel"
+            });
+        let mut grip_x = x;
+        let mut valid = true;
+        if response.dragged_by(egui::PointerButton::Primary)
+            || response.drag_stopped_by(egui::PointerButton::Primary)
+        {
+            if cancelled {
+                ui.ctx().stop_dragging();
+            } else if let Some(pointer) = response.interact_pointer_pos() {
+                dragging = true;
+                grip_x = pointer.x.clamp(rect.left(), rect.right());
+                let ratio = (f64::from(grip_x) - f64::from(rect.left())) / f64::from(rect.width());
+                let target = MediaTime::from_nanoseconds(
+                    (duration.as_nanoseconds() as f64 * ratio).round() as i64,
+                );
+                let operation = if start {
+                    EditOperation::SetTrimStart(target)
+                } else {
+                    EditOperation::SetTrimEnd(target)
+                };
+                let mut candidate = state.clone();
+                if start {
+                    candidate.trim_start = Some(target);
+                } else {
+                    candidate.trim_end = Some(target);
+                }
+                valid = candidate.trim_is_valid(Some(duration));
+                if valid {
+                    preview = candidate;
+                }
+                if response.drag_stopped_by(egui::PointerButton::Primary) {
+                    chosen = Some(operation);
+                }
+            }
+        }
+        grips.push((grip_rect(grip_x), valid, response.hovered()));
+    }
+    show(ui, rect, &preview, duration, source_preview && !dragging);
+    let painter = ui.painter().with_clip_rect(rect);
+    for (grip, valid, hovered) in grips {
+        painter.rect_filled(grip, 2.0, Color32::from_gray(if hovered { 65 } else { 38 }));
+        let padding = (grip.height() * 0.25).min(3.0);
+        painter.vline(
+            grip.center().x,
+            (grip.top() + padding)..=(grip.bottom() - padding),
+            (
+                2.0,
+                if valid {
+                    Color32::WHITE
+                } else {
+                    Color32::LIGHT_RED
+                },
+            ),
+        );
+    }
+    if dragging {
+        painter.text(
+            rect.left_bottom() + egui::vec2(20.0, -4.0),
+            Align2::LEFT_BOTTOM,
+            "Release to apply · Esc to cancel",
+            egui::FontId::proportional(12.0),
+            Color32::WHITE,
+        );
+    }
+    chosen
+}
 
 pub fn label(state: &EditState, duration: MediaTime) -> Option<String> {
     if state.trim_start.is_none() && state.trim_end.is_none() {
@@ -97,6 +207,167 @@ mod tests {
     use super::*;
 
     #[test]
+    fn overlapping_endpoint_positions_remain_reachable_and_crossing_is_marked_invalid() {
+        let state = EditState {
+            trim_start: Some(MediaTime::from_nanoseconds(4_999_000_000)),
+            trim_end: Some(MediaTime::from_nanoseconds(5_001_000_000)),
+            ..Default::default()
+        };
+        for (start, target_x, invalid) in [
+            (true, 140.0, false),
+            (false, 300.0, false),
+            (true, 300.0, true),
+        ] {
+            let context = egui::Context::default();
+            let rect = Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(400.0, 100.0));
+            let frame = |events| {
+                let mut chosen = Vec::new();
+                let output = context.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        if let Some(operation) = timeline(
+                            ui,
+                            rect,
+                            &state,
+                            MediaTime::from_nanoseconds(10_000_000_000),
+                            false,
+                            egui::Id::new("overlap"),
+                        ) {
+                            chosen.push(operation);
+                        }
+                    },
+                );
+                (output, chosen)
+            };
+            for _ in 0..3 {
+                frame(vec![]);
+            }
+            let y = if start { 55.0 } else { 85.0 };
+            let origin = egui::pos2(220.0, y);
+            let target = egui::pos2(target_x, y);
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(vec![egui::Event::PointerMoved(origin)]);
+            frame(vec![button(origin, true)]);
+            let (output, chosen) = frame(vec![egui::Event::PointerMoved(target)]);
+            assert!(chosen.is_empty());
+            let has_invalid_grip = output.shapes.iter().any(|shape| matches!(
+                &shape.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == Color32::LIGHT_RED
+            ));
+            assert_eq!(has_invalid_grip, invalid);
+            let (_, chosen) = frame(vec![button(target, false)]);
+            let target = MediaTime::from_nanoseconds(if target_x == 140.0 {
+                3_000_000_000
+            } else {
+                7_000_000_000
+            });
+            assert_eq!(
+                chosen,
+                [if start {
+                    EditOperation::SetTrimStart(target)
+                } else {
+                    EditOperation::SetTrimEnd(target)
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn trim_grips_commit_once_without_seek_and_cancel_on_escape_focus_or_identity_change() {
+        for (start, cancel) in [(true, 0), (false, 0), (true, 1), (true, 2), (true, 3)] {
+            let context = egui::Context::default();
+            let rect = Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(400.0, 100.0));
+            let state = EditState::default();
+            let duration = MediaTime::from_nanoseconds(10_000_000_000);
+            let frame = |events, focused, identity| {
+                let mut edits = Vec::new();
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 200.0),
+                        )),
+                        events,
+                        focused,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let seek = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+                        if let Some(operation) =
+                            timeline(ui, rect, &state, duration, false, egui::Id::new(identity))
+                        {
+                            edits.push(operation);
+                        }
+                        assert!(
+                            !seek.clicked() && !seek.drag_stopped(),
+                            "a trim gesture must not seek"
+                        );
+                    },
+                );
+                edits
+            };
+            for _ in 0..3 {
+                frame(vec![], true, 0);
+            }
+            let y = if start { 55.0 } else { 85.0 };
+            let origin = egui::pos2(if start { 27.0 } else { 413.0 }, y);
+            let target = egui::pos2(220.0, y);
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            for events in [
+                vec![egui::Event::PointerMoved(origin)],
+                vec![button(origin, true)],
+                vec![egui::Event::PointerMoved(
+                    origin + egui::vec2(if start { 20.0 } else { -20.0 }, 0.0),
+                )],
+                vec![egui::Event::PointerMoved(target)],
+            ] {
+                assert!(frame(events, true, 0).is_empty());
+            }
+            if cancel == 1 {
+                frame(
+                    vec![egui::Event::Key {
+                        key: egui::Key::Escape,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    true,
+                    0,
+                );
+            }
+            if cancel == 2 {
+                frame(vec![], false, 0);
+            }
+            let identity = usize::from(cancel == 3);
+            if cancel == 3 {
+                frame(vec![], true, identity);
+            }
+            let edits = frame(vec![button(target, false)], true, identity);
+            let expected = if start {
+                EditOperation::SetTrimStart(MediaTime::from_nanoseconds(5_000_000_000))
+            } else {
+                EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(5_000_000_000))
+            };
+            assert_eq!(edits, if cancel == 0 { vec![expected] } else { vec![] });
+            assert!(frame(vec![], true, identity).is_empty());
+            assert_eq!(state, EditState::default());
+        }
+    }
+
+    #[test]
     fn narrow_trim_feedback_keeps_both_source_endpoints_and_play_hint_visible() {
         let context = egui::Context::default();
         let rect = Rect::from_min_size(egui::pos2(8.0, 8.0), egui::vec2(224.0, 50.0));
@@ -106,12 +377,13 @@ mod tests {
             ..Default::default()
         };
         let output = context.run_ui(Default::default(), |ui| {
-            show(
+            timeline(
                 ui,
                 rect,
                 &state,
                 MediaTime::from_nanoseconds(120_000_000_000),
                 true,
+                egui::Id::new("narrow"),
             );
         });
         let texts = output
@@ -127,6 +399,16 @@ mod tests {
                     "{} is clipped: {bounds:?}",
                     text.galley.text()
                 );
+                for shape in &output.shapes {
+                    if let egui::Shape::Rect(grip) = &shape.shape
+                        && grip.fill == Color32::from_gray(38)
+                    {
+                        assert!(
+                            grip.rect.intersect(bounds).area() <= 0.0,
+                            "grip obscures feedback"
+                        );
+                    }
+                }
                 Some(text.galley.text())
             })
             .collect::<Vec<_>>();

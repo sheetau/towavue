@@ -170,3 +170,5 @@ tab barのrelease時並べ替えと挿入線を追加した。同じ3枚の画�
 Welcomeの説明と左端buttonが分離した配置を、草案に沿うwordmark・START・Open操作の中央columnへ変更した。空状態の見出し、current shortcut、hover/focus、狭い画面のscrollを追加。native Open File/FolderのCancelと、480×300で画像を開いて最後のtabを閉じる復帰を確認し、158 tests・Clippy・debug/release buildが通過した。recent履歴は未実装として残し、次はtimelineの狭いwindow操作とtrim範囲の調整を評価する。H1とlaunch全体は継続中。
 
 timeline上端のdragが高さを変えずSeekになることを旧版の実windowと回帰testで確認した。既存panelの可変高さと画面高に応じた上限を使い、高さだけを変更するようにした。停止動画の位置・trim保持、縮小windowの上限/下限、通常releaseの音声timelineを確認し、狭いtrim表示も端点優先へ変更した。160 tests・Clippy・debug/release buildが通過。次はtrim端点をpointerで調整する導線を評価する。H1全体と実機/配布gateは未完了。
+
+trimの開始/終了gripを追加し、releaseだけを既存の検証・履歴・live再生・保存へ接続した。同じdragが旧版ではSeek、新版では停止位置を保持したtrim編集になることを実windowで比較した。Escape取消・逆転拒否・Playの範囲復帰と、音声のpointer範囲を4.957625秒のWAVへ保存するflowを確認。元fileのhashは不変で、狭い表示のgrip/案内も非重複にした。163 tests・Clippy・debug/release buildが通過。次はfullscreen中のmouse操作と操作部の発見性を評価する。H1と実機/配布を含むlaunch全体は未完了。

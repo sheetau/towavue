@@ -9,7 +9,7 @@
 - 動画はH1でbar・timelineを除いた領域へsample aspect ratio込みでaspect-fitし、display matrixの90度単位回転・反転を自動適用する。8通りの向きと編集/保存後の再open、hardware/software表示を検証した。任意角度・scale・shear・射影は非対応として明示errorにする。全containerの動的metadata切替を含むmatrixは未検証。
 - 動画・音声のvolume・mute・rateはH1でlive playbackにも反映する。rate変更は現在位置からpipelineを再構築するため短い再primingを伴い、音声を無途切れで連続変速する方式ではない。
 - 動画のcrop、rotate、flipはH1でhardware/software両方のlive previewへ反映した。cropは整数pixel矩形をexportと共有し、画像1 pixel・動画偶数pixelに揃える。既定H.264 encoderのため動画は16×16未満を確定しない。PNGの1×1・奇数位置/寸法・回転後の再cropは画素一致を検証したが、動画の圧縮・chroma再構成や全codec/HDRの色一致を保証するものではない。
-- trimは`I` / `O`でsource端点を指定する。H1で入力検証・timeline範囲表示と単一区間のlive再生を追加した。終端で停止し、再Playは範囲開始へ戻る。範囲外Seekはpaused source previewになり、端点を選び直せる。range handleは未実装。exportの秒丸めを整数tick/sampleへ変更し、空出力を拒否した。ミリ秒PTSのFFV1/PCMでframe選択とsource sample列を検証済み。ただし途中Seek後のlive音声は元のsub-tick sample位相を復元できず差が残る。VFR、欠落/不連続PTS、codec paddingを含む全codec一致は未完了。
+- trimは`I` / `O`またはtimelineの開始/終了gripでsource端点を指定する。H1で入力検証・timeline範囲表示と単一区間のlive再生を追加した。gripはrelease時に一回だけ編集し、Escape/focus喪失/対象切替で取消。逆転・零長は保持せず、frame単位snapはない。終端で停止し、再Playは範囲開始へ戻る。範囲外Seekはpaused source previewになり、端点を選び直せる。exportの秒丸めを整数tick/sampleへ変更し、空出力を拒否した。ミリ秒PTSのFFV1/PCMでframe選択とsource sample列を検証済み。ただし途中Seek後のlive音声は元のsub-tick sample位相を復元できず差が残る。VFR、欠落/不連続PTS、codec paddingを含む全codec一致は未完了。
 
 UI上のcommand名は操作が即時反映される印象を与えるため、live playbackへの適用または表示上の区別が、最初のUX改善候補である。
 
@@ -78,7 +78,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | 動画/音声のwaveform timeline | 既定96pxの高さ変更可能panel、waveform、CTI、click/drag seekを実装。音声はdefault表示 |
 | 動画hover thumbnailと低負荷scrub | 20区間のcached thumbnail tooltipを実装。thumbnailを本画面へ出すscrub previewは未実装 |
 | 画像のfolder位置seekとthumbnail | Shell snapshotの画像順seekと位置・filename tooltipを実装。移動はdirty guardを通す。thumbnailは未実装 |
-| Range selection、範囲内再生、delete/cut | I/Oによる単一trim範囲の再生をH1で実装。pointerのrange selection、delete/cutは未実装 |
+| Range selection、範囲内再生、delete/cut | I/Oと開始/終了gripによる単一trim範囲をH1で実装。track上の任意範囲選択、複数区間、delete/cutは未実装 |
 | Rubber bandでtrack volume | 未実装 |
 | Range伸縮でrate編集 | 未実装 |
 | 上端dragでtimeline高さ変更 | H1で実装。既定96px・下限64px、上限はbarを除く残り高さの60%（小さいwindowは下限も縮小）。再生位置・編集は変えない |

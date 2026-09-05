@@ -13,6 +13,7 @@ egui-directx11 = "=0.13.0"
 ffmpeg-next = { version = "=9.0.0", default-features = false, features = [
     "codec",
     "format",
+    "filter",
     "software-resampling",
     "software-scaling",
 ] }

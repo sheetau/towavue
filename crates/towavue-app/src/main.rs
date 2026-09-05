@@ -69,14 +69,16 @@ struct PlaybackClock {
     media_anchor: MediaTime,
     wall_anchor: Instant,
     paused_at: Option<Instant>,
+    rate: f64,
 }
 
 impl PlaybackClock {
-    fn new(media_anchor: MediaTime) -> Self {
+    fn new(media_anchor: MediaTime, rate: f32) -> Self {
         Self {
             media_anchor,
             wall_anchor: Instant::now(),
             paused_at: None,
+            rate: f64::from(rate),
         }
     }
 
@@ -95,13 +97,15 @@ impl PlaybackClock {
         let delta = media_time
             .as_nanoseconds()
             .saturating_sub(self.media_anchor.as_nanoseconds());
-        self.wall_anchor + Duration::from_nanos(delta.max(0) as u64)
+        self.wall_anchor + Duration::from_nanos(delta.max(0) as u64).div_f64(self.rate)
     }
 
     fn position(&self) -> MediaTime {
         let now = self.paused_at.unwrap_or_else(Instant::now);
-        self.media_anchor
-            .saturating_add(now.saturating_duration_since(self.wall_anchor))
+        self.media_anchor.saturating_add(
+            now.saturating_duration_since(self.wall_anchor)
+                .mul_f64(self.rate),
+        )
     }
 }
 
@@ -561,6 +565,7 @@ where
             &path,
             graphics_device,
             self.edit_state().volume,
+            self.edit_state().rate,
             move |event| notify(AppEvent::Playback(event)),
         ) {
             Ok(session) => {
@@ -886,7 +891,9 @@ where
             return;
         };
         if self.clock.is_none() {
-            self.clock = Some(PlaybackClock::new(presentation_time));
+            let mut clock = PlaybackClock::new(presentation_time, self.playback_rate());
+            clock.set_paused(self.state == PlaybackState::Paused);
+            self.clock = Some(clock);
         }
         self.pending_time = Some(presentation_time);
     }
@@ -900,7 +907,7 @@ where
         } else {
             self.clock
                 .as_ref()
-                .is_none_or(|clock| clock.due_at(presentation_time) <= Instant::now())
+                .is_none_or(|clock| presentation_time <= clock.position())
         }
     }
 
@@ -1974,14 +1981,14 @@ where
             return;
         };
         if self.edits.entry(tab.id).or_default().push(operation, kind) {
-            self.sync_playback_volume();
+            self.sync_playback_edits();
             self.set_status(match operation {
                 EditOperation::SetVolume(_) => format!(
                     "Volume {:.0}% · playback and export (source unchanged)",
                     self.edit_state().volume * 100.0
                 ),
                 EditOperation::SetRate(_) => format!(
-                    "Export rate {:.2}× · live playback unchanged",
+                    "Rate {:.2}× · playback and export (source unchanged)",
                     self.edit_state().rate
                 ),
                 _ => "Edit added (source unchanged)".into(),
@@ -2000,7 +2007,7 @@ where
             .get_mut(&id)
             .is_some_and(|history| if redo { history.redo() } else { history.undo() });
         if changed {
-            self.sync_playback_volume();
+            self.sync_playback_edits();
             self.image_view.selection = None;
             self.image_view.crop_preview = false;
             self.image_view.fit();
@@ -2009,11 +2016,18 @@ where
         }
     }
 
-    fn sync_playback_volume(&mut self) {
-        let volume = self.edit_state().volume;
+    fn sync_playback_edits(&mut self) {
+        let state = self.edit_state();
         if let Some(session) = &mut self.session {
-            session.set_volume(volume);
+            session.set_volume(state.volume);
+            if session.rate() != state.rate {
+                self.seek_to(self.current_position());
+            }
         }
+    }
+
+    fn playback_rate(&self) -> f32 {
+        self.session.as_ref().map_or(1.0, PlaybackSession::rate)
     }
 
     fn edit_state(&self) -> towavue_core::EditState {
@@ -2401,10 +2415,11 @@ where
     }
 
     fn seek_to(&mut self, target: MediaTime) {
+        let rate = self.edit_state().rate;
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        match session.seek(target) {
+        match session.seek_at_rate(target, rate) {
             Ok(generation) => {
                 self.generation = generation;
                 self.pending_time = None;
@@ -2463,6 +2478,15 @@ where
             .and_then(PlaybackSession::try_audio_event)
         {
             Some(AudioOutputEvent::Drained) => {
+                if let Some(position) = self
+                    .session
+                    .as_ref()
+                    .and_then(PlaybackSession::audio_position)
+                {
+                    let mut clock = PlaybackClock::new(position, self.playback_rate());
+                    clock.set_paused(self.state == PlaybackState::Paused);
+                    self.clock = Some(clock);
+                }
                 self.audio_drained = true;
                 self.check_eof();
             }
@@ -2483,16 +2507,22 @@ where
     }
 
     fn current_position(&self) -> MediaTime {
-        self.session
-            .as_ref()
-            .and_then(PlaybackSession::audio_position)
-            .or(self.pending_time)
+        self.audio_master_position()
             .or_else(|| self.clock.as_ref().map(PlaybackClock::position))
+            .or_else(|| {
+                self.session
+                    .as_ref()
+                    .and_then(PlaybackSession::audio_position)
+            })
+            .or(self.pending_time)
             .unwrap_or(MediaTime::ZERO)
     }
 
     fn check_eof(&mut self) {
         if self.decode_finished && self.pending_time.is_none() && self.audio_drained {
+            if let Some(clock) = &mut self.clock {
+                clock.set_paused(true);
+            }
             self.state = PlaybackState::Ended;
             if !self.metrics_recorded {
                 if let Some(session) = &self.session {
@@ -2767,7 +2797,10 @@ where
                         .as_nanoseconds()
                         .saturating_sub(threshold.as_nanoseconds())
                         .max(0) as u64;
-                    Instant::now() + Duration::from_nanos(wait).min(AUDIO_EVENT_POLL_INTERVAL)
+                    Instant::now()
+                        + Duration::from_nanos(wait)
+                            .div_f64(f64::from(self.playback_rate()))
+                            .min(AUDIO_EVENT_POLL_INTERVAL)
                 } else if let Some(clock) = &self.clock {
                     clock.due_at(presentation_time)
                 } else {
@@ -3100,6 +3133,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playback_clock_scales_source_time_and_deadlines_while_pause_holds_position() {
+        for rate in [0.25, 0.5, 1.0, 2.0, 4.0] {
+            let mut clock = PlaybackClock::new(MediaTime::from_nanoseconds(10_000_000_000), rate);
+            let elapsed = Duration::from_secs(2);
+            clock.paused_at = Some(clock.wall_anchor + elapsed);
+            let position = clock.position();
+            assert_eq!(position.as_seconds_f64(), 10.0 + 2.0 * f64::from(rate));
+            assert_eq!(clock.position(), position);
+            assert_eq!(clock.due_at(position), clock.wall_anchor + elapsed);
+        }
+    }
 
     #[test]
     fn image_texture_creation_obeys_configured_device_limit_without_panicking() {

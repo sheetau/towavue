@@ -108,6 +108,7 @@ pub struct PlaybackSession {
     target: MediaTime,
     paused: bool,
     volume: f32,
+    rate: f32,
 }
 
 impl PlaybackSession {
@@ -115,6 +116,7 @@ impl PlaybackSession {
         path: &Path,
         graphics_device: GraphicsDevice,
         volume: f32,
+        rate: f32,
         notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlaybackError> {
         let audio_format = decode::probe_audio_format(path)?;
@@ -141,6 +143,7 @@ impl PlaybackSession {
             target: MediaTime::ZERO,
             paused: false,
             volume,
+            rate: rate.clamp(0.25, 4.0).max(0.25),
         };
         session.start_pipeline()?;
         Ok(session)
@@ -157,6 +160,19 @@ impl PlaybackSession {
         self.metrics.reset();
         self.start_pipeline()?;
         Ok(self.generation)
+    }
+
+    pub fn rate(&self) -> f32 {
+        self.rate
+    }
+
+    pub fn seek_at_rate(
+        &mut self,
+        target: MediaTime,
+        rate: f32,
+    ) -> Result<PlaybackGeneration, PlaybackError> {
+        self.rate = rate.clamp(0.25, 4.0).max(0.25);
+        self.seek(target)
     }
 
     pub fn replace_graphics_device(
@@ -177,7 +193,9 @@ impl PlaybackSession {
     fn start_pipeline(&mut self) -> Result<(), PlaybackError> {
         let audio = self
             .audio_format
-            .map(|format| AudioOutput::start_with_volume(format, self.target, self.volume))
+            .map(|format| {
+                AudioOutput::start_with_settings(format, self.target, self.volume, self.rate)
+            })
             .transpose()?;
         if self.paused
             && let Some(audio) = &audio

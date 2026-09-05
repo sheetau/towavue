@@ -71,7 +71,7 @@ cargo run -p towavue-app -- 'C:\path\to\media-folder'
 
 画像では`Ctrl+wheel`または`+` / `-`でzoom、右dragでpan、左dragでselectionを作る。`Shift`付きselectionは正方形になり、辺をdragしてresizeできる。`Ctrl+Y`でcrop、`R` / `L`で90度回転、`H` / `V`で反転する。`B`でreading mode、`Ctrl+[` / `Ctrl+]`で同時表示数を変える。
 
-動画・音声では`I` / `O`がexport用trim端点、`Up` / `Down`、`M`がvolume、`,` / `.` / `/`がexport用rateを編集する。volumeとmuteは現在の再生と最終exportの両方へ反映する。trimとrateは現在の再生には反映されない。source fileは変更されない。
+動画・音声では`I` / `O`がexport用trim端点、`Up` / `Down`、`M`がvolume、`,` / `.` / `/`がrateを編集する。volume・mute・rateは現在の再生と最終exportの両方へ反映する。rateはピッチ維持の0.25～4倍で、変更時は現在位置から短い再primingを行う。trimは現在の再生には反映されない。source fileは変更されない。
 
 ## 3. Explorer順を確認する
 
@@ -123,6 +123,19 @@ towavueの「Explorer順」はfilename順の別名ではなく、そのfolderで
 - 性能の問題なら、fileの解像度・frame rate・durationと、何秒後に重くなったか
 
 private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場合は権利上問題のない小さな生成fileを使う。
+
+### H1で確認したlive rate scenario
+
+- 4秒のstereo 440 Hz toneを1024 frameずつfilterし、0.25・0.5・1・1.5・2・4倍で長さと音程、左右の位相関係、EOF drainを検証する。1倍はbyte一致する。
+- 実endpointの時計は次の明示testで確認する（無音sampleを使う）。0.6秒のwall時間に対して0.25・0.5・2・4倍のsource位置は約0.15・0.30・1.20・2.40秒進み、pause中は不変だった。device不在によるskipは成功証拠にしない。
+
+```powershell
+cargo test -p towavue-runtime-windows live_rate_clock -- --ignored --nocapture
+```
+
+- 30秒H.264/AAC素材を2倍で再生 → D3D11VA、CPU transfer 0、変更後850 frameをdropなしでEOFまで表示し、source時刻基準のA/V driftはp95 9.019 ms・最大35.380 msだった。
+- 30秒video＋先頭5秒だけaudioの素材を4倍で再生 → 音声終了後も映像と位置が進みEOFへ到達した。変更後852 frame中2 frameをdrop、source時刻基準のdriftはp95 28.900 ms・最大68.240 msだった。これは短い実機trialであり、全codec・高解像度の速度別性能保証ではない。
+- 音声なし動画をpauseし、2倍へ変更して2秒待つ → 同じframeを保持する。pause中の5秒Seekとresume後の倍速進行も確認した。
 
 ### H1で確認したlive volume scenario
 
@@ -218,7 +231,7 @@ towavue/
 | Video/audio decode、seek、codec fallback | `crates/towavue-runtime-windows/src/decode.rs` | `playback.rs`、`audio.rs`、`renderer.rs` |
 | Worker、queue、generation、recovery | `crates/towavue-runtime-windows/src/playback.rs` | `decode.rs`、`audio.rs` |
 | D3D11/DXGI描画、HDR判定、resize | `crates/towavue-runtime-windows/src/renderer.rs` | `decode.rs`、appのrender loop |
-| WASAPI、endpoint変更 | `crates/towavue-runtime-windows/src/audio.rs` | `playback.rs` |
+| WASAPI、endpoint変更、live rate | `crates/towavue-runtime-windows/src/audio.rs` | `playback.rs`、`tempo.rs` |
 | Explorer Sort By取得 | `crates/towavue-runtime-windows/src/shell.rs` | `watch.rs`、coreの`navigation.rs` |
 | Waveform、duration、thumbnail cache | `crates/towavue-runtime-windows/src/preview.rs` | appのworker event/timeline |
 | Export filter/codec/fallback | `crates/towavue-runtime-windows/src/export.rs` | coreの`edit.rs`、appのSave flow |

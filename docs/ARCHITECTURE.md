@@ -111,7 +111,13 @@ exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/core�
 
 ### H1 live volume
 
-動画・音声のvolumeはedit historyの現在値をlive playbackとexportで共有する。runtimeはWASAPIへ渡す直前のstereo f32 sampleへgainを適用し、decode済みqueueは元の値を保持する。変更時は5 msのrampで不連続を抑え、mute後は正確なzero sampleにする。master endpointや他applicationの音量は変更しない。初期gainはpipeline開始前に設定し、Seek・endpoint復旧・tab再open・undo/redoにも現在値を反映する。rateとtrimはこの変更には含めず、引き続きexport用である。
+動画・音声のvolumeはedit historyの現在値をlive playbackとexportで共有する。runtimeはWASAPIへ渡す直前のstereo f32 sampleへgainを適用し、decode済みqueueは元の値を保持する。変更時は5 msのrampで不連続を抑え、mute後は正確なzero sampleにする。master endpointや他applicationの音量は変更しない。初期gainはpipeline開始前に設定し、Seek・endpoint復旧・tab再open・undo/redoにも現在値を反映する。trimは引き続きexport用である。
+
+### H1 live rate
+
+rateは0.25～4倍のedit値を再生・exportで共有する。音声は固定FFmpegのin-process `atempo`を使い、各段を0.5～2倍に保ってピッチを維持する。WASAPI workerはstereo f32 chunkを逐次filterし、出力queueの上限とvolumeの直前適用を維持する。1倍はfilterを通さない。EOFではfilterもdrainする。
+
+速度変更は現在のsource位置でSeekと同じgeneration更新・全queue再構築を行う。pipeline内のrateは不変とし、pause・volumeを保持する。WASAPI経過時間とvideo-only時計をrate倍してsource時刻へ変換し、frame deadlineはrateで割る。Seek、timeline、trim端点は常にsource時刻であり、rateで短縮されたexport時刻と混ぜない。
 
 ### H1 image loading
 

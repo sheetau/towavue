@@ -10,6 +10,7 @@ mod playback;
 mod preview;
 mod renderer;
 mod shell;
+mod tempo;
 mod watch;
 
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};

@@ -2,6 +2,19 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 15:38 JST - implementation / pitch-preserving live rate
+
+- Trigger: H1 rate commands still changed only export, unlike the newly live volume controls.
+- Intent: apply 0.25-4x rate to playback while preserving pitch, source-time Seek/timeline semantics, pause, and the single-device path.
+- Result: enabled the pinned FFmpeg filter feature and added a streaming in-process stereo-f32 tempo filter. Two 0.5-2x atempo stages implement the range; unity is byte-preserving bypass and EOF drains the filter. Rate changes rebuild the existing generation-scoped pipeline at the current source position with retained pause/volume. Audio and video-only clocks scale by rate; deadlines divide by rate. Audio drain now hands position to the video clock, paused video checks frozen media time, and EOF freezes the display position.
+- Changed areas: runtime tempo/audio/playback, app edit synchronization and clocks, dependency feature, README, architecture, roadmap, trial guide, and gap ledger. No native handles or new unsafe code were added to app/core.
+- Verification: format, workspace all-target Clippy with warnings denied, and workspace all-target tests pass (app 12, core 25, runtime 33 plus 2 explicitly ignored device/Explorer tests, integrations 3). Tone tests check duration, 440 Hz pitch, stereo phase, unity, and drain. The opt-in WASAPI clock test was separately executed without skipping: 0.6 seconds advanced source time by 0.15/0.30/1.20/2.40 seconds at 0.25/0.5/2/4x; pause held position and resume advanced it.
+- Real-window evidence: 30-second H.264/AAC at 2x reached EOF with D3D11VA, 0 CPU transfers, 850 frames and no drops after rate change; source-time drift p95/max was 9.019/35.380 ms. A 30-second video with only 5 seconds of audio continued through the silent tail at 4x to EOF (852 frames, 2 dropped, drift 28.900/68.240 ms). Silent-video pause held the same frame across a rate change and a two-second wait; paused Seek and resume worked. Trial windows closed; generated media/captures remain ignored under `target/tmp/`.
+- Boundary: rate changes re-prime playback rather than provide gapless continuous tempo automation. Short trials do not establish a rate-by-codec/resolution performance matrix. Trim and video transform previews remain incomplete.
+- Checkpoint evidence: volume `fcf499d` passed CI `33949631615`; PCM fix `86db48a` passed CI `33949749766`.
+- Status: `h1_active`; the overall launch objective remains open.
+- Next action: verify this checkpoint in CI, then implement the draft-aligned compact shell and daily interaction improvements, including the ineffective Play action at EOF, before the full launch audit.
+
 ## 2026-09-05 15:25 JST - fix / PCM WAV channel-layout compatibility
 
 - Trigger: the live-volume trial's generated mono PCM WAV faulted with FFmpeg `Input changed` before playback.

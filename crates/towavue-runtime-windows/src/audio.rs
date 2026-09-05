@@ -30,6 +30,8 @@ pub enum AudioOutputEvent {
 /// A failure while starting or controlling WASAPI output.
 #[derive(Debug, Error)]
 pub enum AudioOutputError {
+    #[error("audio tempo processing failed: {0}")]
+    Tempo(#[from] ffmpeg_next::Error),
     #[error("unsupported audio format: {0} Hz, {1} channels")]
     UnsupportedFormat(u32, u16),
     #[error("WASAPI output failed: {0}")]
@@ -97,13 +99,14 @@ impl AudioOutput {
         format: AudioFormat,
         media_anchor: MediaTime,
     ) -> Result<Self, AudioOutputError> {
-        Self::start_with_volume(format, media_anchor, 1.0)
+        Self::start_with_settings(format, media_anchor, 1.0, 1.0)
     }
 
-    pub(crate) fn start_with_volume(
+    pub(crate) fn start_with_settings(
         format: AudioFormat,
         media_anchor: MediaTime,
         volume: f32,
+        rate: f32,
     ) -> Result<Self, AudioOutputError> {
         if format.sample_rate == 0 || format.channels != 2 {
             return Err(AudioOutputError::UnsupportedFormat(
@@ -127,7 +130,7 @@ impl AudioOutput {
                     .ok()
                     .map_err(|error| error.to_string());
                 if let Err(error) = initialization {
-                    let _ = ready_tx.send(Err(error));
+                    let _ = ready_tx.send(Err(AudioOutputError::Wasapi(error)));
                     return;
                 }
 
@@ -136,6 +139,7 @@ impl AudioOutput {
                     media_anchor,
                     &thread_position,
                     &thread_volume,
+                    rate,
                     audio_rx,
                     control_rx,
                     &ready_tx,
@@ -167,7 +171,7 @@ impl AudioOutput {
             }),
             Ok(Err(error)) => {
                 let _ = thread.join();
-                Err(AudioOutputError::Wasapi(error))
+                Err(error)
             }
             Err(_) => {
                 let _ = thread.join();
@@ -220,14 +224,16 @@ impl Drop for AudioOutput {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_audio_thread(
     format: AudioFormat,
     media_anchor: MediaTime,
     position_nanoseconds: &AtomicI64,
     volume: &AtomicU32,
+    rate: f32,
     audio_rx: Receiver<AudioMessage>,
     control_rx: Receiver<AudioControl>,
-    ready_tx: &SyncSender<Result<(), String>>,
+    ready_tx: &SyncSender<Result<(), AudioOutputError>>,
 ) -> Result<(), AudioOutputError> {
     let (endpoint_tx, endpoint_rx) = mpsc::channel();
     let setup = (|| {
@@ -272,13 +278,14 @@ fn run_audio_thread(
         let event = client.set_get_eventhandle().map_err(wasapi_error)?;
         let render_client = client.get_audiorenderclient().map_err(wasapi_error)?;
         let clock = client.get_audioclock().map_err(wasapi_error)?;
-        Ok::<_, AudioOutputError>((client, event, render_client, clock, registration))
+        let tempo = crate::tempo::AudioTempo::new(format.sample_rate, rate)?;
+        Ok::<_, AudioOutputError>((client, event, render_client, clock, registration, tempo))
     })();
-    let (client, event, render_client, clock, _registration) = match setup {
+    let (client, event, render_client, clock, _registration, tempo) = match setup {
         Ok(resources) => resources,
         Err(error) => {
-            let _ = ready_tx.send(Err(error.to_string()));
-            return Err(error);
+            let _ = ready_tx.send(Err(error));
+            return Err(AudioOutputError::Closed);
         }
     };
     ready_tx
@@ -297,6 +304,8 @@ fn run_audio_thread(
         position_nanoseconds,
         &endpoint_rx,
         volume,
+        rate,
+        tempo,
     )
 }
 
@@ -313,6 +322,8 @@ fn render_audio_loop(
     position_nanoseconds: &AtomicI64,
     endpoint_rx: &Receiver<()>,
     volume: &AtomicU32,
+    rate: f32,
+    mut tempo: crate::tempo::AudioTempo,
 ) -> Result<(), AudioOutputError> {
     let bytes_per_frame = format.channels as usize * size_of::<f32>();
     let queue_limit = format.sample_rate as usize * bytes_per_frame * BUFFERED_AUDIO_SECONDS;
@@ -362,10 +373,12 @@ fn render_audio_loop(
 
         while !input_ended && queue.len() < queue_limit {
             match audio_rx.try_recv() {
-                Ok(AudioMessage::Chunk(chunk)) => queue.extend(chunk.bytes),
-                Ok(AudioMessage::End) => input_ended = true,
+                Ok(AudioMessage::Chunk(chunk)) => tempo.push(&chunk.bytes, &mut queue)?,
+                Ok(AudioMessage::End) | Err(TryRecvError::Disconnected) => {
+                    tempo.finish(&mut queue)?;
+                    input_ended = true;
+                }
                 Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => input_ended = true,
             }
         }
 
@@ -413,6 +426,7 @@ fn render_audio_loop(
                 wall_started_at.map_or(0, |started_at| started_at.elapsed().as_nanos()),
             );
             let elapsed = elapsed.max(wall_nanoseconds).min(i64::MAX as u128) as i64;
+            let elapsed = (elapsed as f64 * f64::from(rate)).min(i64::MAX as f64) as i64;
             position_nanoseconds.store(
                 media_anchor.as_nanoseconds().saturating_add(elapsed),
                 Ordering::Relaxed,
@@ -495,6 +509,58 @@ fn is_current_endpoint(current_id: &str, removed_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "opens the default WASAPI render endpoint for real-time clock checks"]
+    fn live_rate_clock_preserves_pause_and_scaled_progress() {
+        let format = AudioFormat {
+            sample_rate: 48_000,
+            channels: 2,
+        };
+        for rate in [0.25, 0.5, 2.0, 4.0] {
+            let output = match AudioOutput::start_with_settings(format, MediaTime::ZERO, 0.0, rate)
+            {
+                Ok(output) => output,
+                Err(AudioOutputError::Wasapi(error)) => {
+                    eprintln!("SKIP live rate clock: no usable default render endpoint: {error}");
+                    return;
+                }
+                Err(error) => panic!("live tempo setup failed: {error}"),
+            };
+            let sender = output.sender();
+            let producer = thread::spawn(move || {
+                for _ in 0..1000 {
+                    let chunk = AudioChunk {
+                        format,
+                        frames: 4800,
+                        bytes: vec![0; 4800 * 8],
+                        presentation_time: MediaTime::ZERO,
+                    };
+                    if sender.push(chunk).is_err() {
+                        return;
+                    }
+                }
+            });
+            thread::sleep(Duration::from_millis(500));
+            let before = output.position().as_seconds_f64();
+            let started = Instant::now();
+            thread::sleep(Duration::from_millis(600));
+            let elapsed = started.elapsed().as_secs_f64();
+            let progress = output.position().as_seconds_f64() - before;
+            eprintln!("rate={rate} source_progress={progress:.3} wall_elapsed={elapsed:.3}");
+            assert!((progress - elapsed * f64::from(rate)).abs() < 0.15);
+            output.set_paused(true).expect("pause");
+            thread::sleep(Duration::from_millis(100));
+            let paused = output.position();
+            thread::sleep(Duration::from_millis(150));
+            assert_eq!(output.position(), paused);
+            output.set_paused(false).expect("resume");
+            thread::sleep(Duration::from_millis(250));
+            assert!(output.position() > paused);
+            drop(output);
+            producer.join().expect("producer exits on close");
+        }
+    }
 
     #[test]
     fn volume_ramp_preserves_stereo_and_reaches_exact_mute_across_buffers() {

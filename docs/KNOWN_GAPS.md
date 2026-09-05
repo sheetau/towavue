@@ -6,7 +6,7 @@
 
 ### 操作とpreviewの不一致
 
-- 動画・音声のvolumeとmuteはH1でlive playbackにも反映する。rateは非破壊edit historyとexport filterだけに入り、現在再生中の速度を変えない。操作時にはExport rateと表示する。
+- 動画・音声のvolume・mute・rateはH1でlive playbackにも反映する。rate変更は現在位置からpipelineを再構築するため短い再primingを伴い、音声を無途切れで連続変速する方式ではない。
 - 動画のcrop、rotate、flipもedit historyとexportには入るが、再生映像へ最終形をlive previewしない。crop selection overlayだけが見える。
 - trimは`I` / `O`で現在位置を端点として記録する方式で、timeline上のrange handleや選択範囲はない。
 
@@ -97,8 +97,8 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Audio master、seek、pause、EOF、late frame drop | 実装済み。基準fixtureで測定済み |
 | WASAPI Sharedとdefault endpoint復旧 | 実装済み。hardware/driverの広いmatrixは未検証 |
 | Wheel volume、hold中2倍速 | 未実装 |
-| J/K/L、frame step | 未実装。`,` / `.`はframe stepではなくexport用rate変更 |
-| Live playback volume/rate | 未実装。現在はexport用edit |
+| J/K/L、frame step | 未実装。`,` / `.`はframe stepではなくrate変更 |
+| Live playback volume/rate | H1で実装。編集値を再生・exportで共有し、rateは0.25～4倍のピッチ維持 |
 | Track selection、delete、cut、range playback | 未実装 |
 | Repeat、shuffle | 未実装 |
 | Video zoom、fullscreen、resize/resample | 未実装 |
@@ -146,7 +146,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 最初の人手評価では、次の順序が費用対効果とriskの釣り合いがよい。
 
 1. Open、folder navigation、Explorer順、play/pause/seek、画像zoom/panという日常flowの摩擦を記録する。
-2. Volume/rate/trim/cropなど「見える結果」と「export結果」の不一致を解消する。
+2. Trim/cropなど「見える結果」と「export結果」の不一致を解消する。Volume/rateはH1でlive反映を検証済み。
 3. 大きい画像のtexture化・uploadやShell取得の応答を追加測定する。画像decodeのworker化・保持量上限と、長いexportのworker・進捗・cancel・既存target保護はH1で検証済み。
 4. Timeline、tab、filmstrip、menuを実際の利用頻度に基づいて磨く。
 5. DPI、keyboard-only、長いfile名、error/loading state、accessibilityを横断確認する。

@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 06:53 JST - shutdown / do not inherit an idle wait after requesting exit
+
+- Evidence: repeated owned recovery/pause/Undo flow closed in 712 ms. Internal trace locates about 0.62 s between the first schedule exit and the next event-loop cycle; audio/decode teardown afterward takes about 4 ms. Pinned winit 0.30.13 Windows wait_for_messages calls prepare_wait (dispatching AboutToWait), then waits using control_flow without first checking the exit flag.
+- Controlled comparison: leave a three-second WaitUntil at exit in a temporary native image trial. Before fix: Close-to-process-exit 3,112 ms, about three seconds between exit request and run_app return. Set ControlFlow::Poll immediately before event_loop.exit: same trial exits in 113 ms. Only confirmed Exit changes control flow; normal idle scheduling, dirty guards and worker joins remain unchanged. The original >5 s observation lacks this trace, so its exact cause is not proven.
+- Cleanup/verification: removed CLOSE_TRACE setup/notification/wait/logging code, its environment and trigger. All owned processes 31720/21264/40124 exited normally. Format, all-target Clippy, existing 153 tests and normal debug/release builds pass; three live tests explicitly ignored by the default suite. No dependencies/unsafe/runtime changes remain. Ignored trace logs preserve timing provenance.
+- Normal release: dirty rotated image shows the guard, Escape retains the dirty title, Undo clears it, and confirmed Close exits process 9760 in 64 ms. Source unchanged; no trial remains. Regression evidence is native before/after timing, not a new automated winit test. Prior 2ec52ec CI 33994070252 is in progress at last check.
+- Status/next: h1_active. Follow pending CI and consolidate remaining launch requirements rather than inferring completion from these narrow checks. Asked the owner asynchronously to choose portable ZIP, installer, or deferred distribution; no answer yet and no package/publication authorized by that pending question. Continue quality/fidelity audit while physical device/IME/mixed-DPI and distribution gates remain open.
+
 ## 2026-09-06 06:46 JST - audio / wake paused consumers and register session disconnection
 
 - Scope evidence: local D3D11 bindings and official docs do not provide the contemplated ID3D11Device5 RemoveDevice; that method belongs to D3D12. Microsoft's D3D11 dxcap -forcetdr affects all running Direct3D apps, so it was not executed. No GPU/OS setting was changed; direct recovery tests remain distinct from actual removal detection.

@@ -3828,6 +3828,8 @@ where
 
     fn schedule(&mut self, event_loop: &ActiveEventLoop) {
         if self.exit_requested {
+            // Windows winit waits once after AboutToWait, even when it requested exit.
+            event_loop.set_control_flow(ControlFlow::Poll);
             event_loop.exit();
             return;
         }

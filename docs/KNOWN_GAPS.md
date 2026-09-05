@@ -52,11 +52,11 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | 全機能を一つのlogo menuへ集約 | H1でlogo iconへ集約。全commandの単純な列挙でcategory整理は未完了 |
 | File/Edit/Viewの3方向drag gestureとSVG logo | logo形状をvector描画。方向gestureは未実装 |
 | 黒基調のcompactなwindow shell | 32px title/tab barと30px status、window操作、右寄せ情報をH1で実装。複数DPI/monitorのmatrixは未検証 |
-| Command palette | titleの部分一致検索を実装。ranking、category、keyboard selectionの磨き込みはない |
+| Command palette | titleの部分一致検索、上下選択、有効候補の巡回、Enter実行、Escape閉じを実装。ranking、categoryはない。物理keyboard・IMEのmatrixは未検証 |
 | Custom shortcutとprefix key | text設定として実装。GUI editor、競合表示、recording UIはない |
 | Media別4×4 grid | key/clickとtext設定を実装。配置編集UI、drag配置、詳細animationはない |
 | Statusへpath、位置、zoom、解像度、size、modified等 | filename、parent path、folder内位置、size、画像解像度・zoom、編集値などを部分実装。modified日時、詳細codec/stream情報はない |
-| 常時1px seek bar、hover時展開 | 未実装。timelineを閉じると動画位置をbarで直接操作できない |
+| 常時1px seek bar、hover時展開 | H1でstatus上端に実装。動画・音声はduration取得後、timeline非表示時に使える。drag終了時に一回だけSeekする |
 | Fullscreen時はUIを隠す | fullscreen自体が未実装 |
 
 ### Timeline
@@ -65,7 +65,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 |---|---|
 | 動画/音声のwaveform timeline | 96px固定panel、waveform、CTI、click/drag seekを実装。音声はdefault表示 |
 | 動画hover thumbnailと低負荷scrub | 20区間のcached thumbnail tooltipを実装。thumbnailを本画面へ出すscrub previewは未実装 |
-| 画像のfolder位置seekとthumbnail | 未実装 |
+| 画像のfolder位置seekとthumbnail | Shell snapshotの画像順seekと位置・filename tooltipを実装。移動はdirty guardを通す。thumbnailは未実装 |
 | Range selection、範囲内再生、delete/cut | 未実装 |
 | Rubber bandでtrack volume | 未実装 |
 | Range伸縮でrate編集 | 未実装 |

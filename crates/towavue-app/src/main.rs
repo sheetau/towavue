@@ -4,6 +4,8 @@
 
 mod chrome;
 mod grid;
+mod palette;
+mod seekbar;
 mod shortcuts;
 
 use std::collections::BTreeMap;
@@ -110,6 +112,7 @@ impl PlaybackClock {
     }
 }
 
+#[derive(Clone, PartialEq)]
 enum UiAction {
     Minimize,
     Maximize,
@@ -151,7 +154,7 @@ enum GuardedAction {
     Exit,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum GuardDecision {
     Save,
     Discard,
@@ -363,7 +366,7 @@ struct Application<N> {
     filmstrip_open: bool,
     grid_open: bool,
     palette_open: bool,
-    palette_query: String,
+    palette: palette::CommandPalette,
     status_message: Option<(String, Instant)>,
     pending_guard: Option<GuardedAction>,
     exit_requested: bool,
@@ -441,7 +444,7 @@ where
             filmstrip_open: false,
             grid_open: false,
             palette_open: false,
-            palette_query: String::new(),
+            palette: palette::CommandPalette::default(),
             status_message: None,
             pending_guard: None,
             exit_requested: false,
@@ -914,13 +917,16 @@ where
         let Some(presentation_time) = self.pending_time else {
             return false;
         };
-        if let Some(audio_position) = self.audio_master_position() {
-            presentation_time <= audio_position.saturating_add(VIDEO_EARLY_TOLERANCE)
-        } else {
-            self.clock
+        let deadline = self
+            .audio_master_position()
+            .map(|position| position.saturating_add(VIDEO_EARLY_TOLERANCE))
+            .or_else(|| self.clock.as_ref().map(PlaybackClock::position));
+        let paused_preview = self.state == PlaybackState::Paused
+            && self
+                .session
                 .as_ref()
-                .is_none_or(|clock| presentation_time <= clock.position())
-        }
+                .is_some_and(|session| session.video_geometry().is_none());
+        video_frame_due(presentation_time, deadline, paused_preview)
     }
 
     fn advance_media(&mut self) {
@@ -953,7 +959,6 @@ where
             .take_egui_input(window);
         let mut actions = Vec::new();
         let output = context.run_ui(input, |ui| {
-            actions.clear();
             self.draw_ui(ui, &mut actions);
         });
         self.ui_repaint_at = output
@@ -1000,8 +1005,11 @@ where
             self.handle_render_error(error);
             return;
         }
-        for action in actions {
-            self.handle_ui_action(action);
+        // Consumed keys can emit actions only in an earlier, discarded layout pass.
+        for (index, action) in actions.iter().enumerate() {
+            if !actions[..index].contains(action) {
+                self.handle_ui_action(action.clone());
+            }
         }
     }
 
@@ -1009,7 +1017,7 @@ where
         self.video_rect = None;
         let context = root.ctx().clone();
         self.draw_top_bar(root, actions);
-        self.draw_status_bar(root, actions);
+        let status_rect = self.draw_status_bar(root, actions);
         self.draw_timeline(root, actions);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
@@ -1046,6 +1054,7 @@ where
                     self.draw_video_edit_overlay(ui);
                 }
             });
+        self.draw_seek_bar(&context, status_rect, actions);
         if self.filmstrip_open {
             self.draw_filmstrip(&context, actions);
         }
@@ -1605,7 +1614,7 @@ where
             });
     }
 
-    fn draw_status_bar(&self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+    fn draw_status_bar(&self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) -> egui::Rect {
         egui::Panel::bottom("status")
             .exact_size(30.0)
             .frame(chrome::bar())
@@ -1750,7 +1759,89 @@ where
                         },
                     );
                 });
-            });
+            })
+            .response
+            .rect
+    }
+
+    fn draw_seek_bar(
+        &mut self,
+        context: &egui::Context,
+        status: egui::Rect,
+        actions: &mut Vec<UiAction>,
+    ) {
+        if self.media_kind == Some(MediaKind::Image) {
+            let Some(snapshot) = &self.folder_snapshot else {
+                return;
+            };
+            let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
+            let Some(index) = images
+                .iter()
+                .position(|item| Some(item.path.as_path()) == self.path.as_deref())
+            else {
+                return;
+            };
+            let progress = if images.len() > 1 {
+                index as f32 / (images.len() - 1) as f32
+            } else {
+                0.0
+            };
+            let response = seekbar::show(context, status, progress);
+            if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
+                let target =
+                    seekbar::item_index(seekbar::ratio(response.rect, pointer.x), images.len());
+                response.clone().on_hover_text(format!(
+                    "{} / {}  {}",
+                    target + 1,
+                    images.len(),
+                    display_name(&images[target].path)
+                ));
+                if (response.clicked() || response.drag_stopped()) && target != index {
+                    actions.push(UiAction::OpenMedia(images[target].path.clone(), false));
+                }
+            }
+            return;
+        }
+        if self.timeline_open
+            || self.session.is_none()
+            || matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted)
+        {
+            return;
+        }
+        let Some(duration) = self.media_duration.filter(|duration| !duration.is_zero()) else {
+            return;
+        };
+        let progress = (self.current_position().as_seconds_f64() / duration.as_secs_f64())
+            .clamp(0.0, 1.0) as f32;
+        let response = seekbar::show(context, status, progress);
+        if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
+            let ratio = seekbar::ratio(response.rect, pointer.x);
+            self.draw_seek_preview(&response, ratio, duration);
+            if response.clicked() || response.drag_stopped() {
+                actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
+            }
+        }
+    }
+
+    fn draw_seek_preview(&mut self, response: &egui::Response, ratio: f32, duration: Duration) {
+        let bucket = ((ratio * 20.0).floor() as u64).min(19);
+        if self.media_kind == Some(MediaKind::Video)
+            && self
+                .hover_thumbnail
+                .as_ref()
+                .is_none_or(|(cached, _)| *cached != bucket)
+        {
+            self.load_hover_thumbnail(duration.mul_f64((bucket as f64 + 0.5) / 20.0), bucket);
+        }
+        response.clone().on_hover_ui(|ui| {
+            if let Some((cached, texture)) = &self.hover_thumbnail
+                && self.media_kind == Some(MediaKind::Video)
+                && *cached == bucket
+            {
+                ui.image((texture.id(), texture.size_vec2()));
+            }
+            ui.monospace(format_time(media_time(duration.mul_f32(ratio))));
+        });
     }
 
     fn draw_timeline(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
@@ -1787,30 +1878,14 @@ where
                 let x = egui::lerp(rect.x_range(), progress);
                 ui.painter()
                     .vline(x, rect.y_range(), (2.0, Color32::LIGHT_BLUE));
-                let Some(position) = response.hover_pos() else {
+                let Some(position) = response.interact_pointer_pos().or(response.hover_pos())
+                else {
                     return;
                 };
                 let ratio = ((position.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                 let target = duration.mul_f32(ratio);
-                if self.media_kind == Some(MediaKind::Video) {
-                    let bucket = (ratio * 20.0).floor() as u64;
-                    if self
-                        .hover_thumbnail
-                        .as_ref()
-                        .is_none_or(|(cached, _)| *cached != bucket)
-                    {
-                        let preview_position =
-                            duration.mul_f64(((bucket as f64 + 0.5) / 20.0).min(1.0));
-                        self.load_hover_thumbnail(preview_position, bucket);
-                    }
-                    if let Some((_, texture)) = &self.hover_thumbnail {
-                        response.clone().on_hover_ui(|ui| {
-                            ui.image((texture.id(), texture.size_vec2()));
-                            ui.monospace(format_time(media_time(target)));
-                        });
-                    }
-                }
-                if response.clicked() || response.dragged() {
+                self.draw_seek_preview(&response, ratio, duration);
+                if response.clicked() || response.drag_stopped() {
                     actions.push(UiAction::Seek(media_time(target)));
                 }
             });
@@ -1870,45 +1945,14 @@ where
     }
 
     fn draw_command_palette(&mut self, context: &egui::Context, actions: &mut Vec<UiAction>) {
-        let command_context = self.command_context();
-        egui::Window::new("Command palette")
-            .id("command-palette".into())
-            .anchor(Align2::CENTER_TOP, [0.0, 48.0])
-            .collapsible(false)
-            .resizable(false)
-            .default_width(520.0)
-            .show(context, |ui| {
-                ui.text_edit_singleline(&mut self.palette_query)
-                    .request_focus();
-                let query = self.palette_query.to_ascii_lowercase();
-                egui::ScrollArea::vertical()
-                    .max_height(320.0)
-                    .show(ui, |ui| {
-                        for definition in command_definitions().iter().filter(|definition| {
-                            query.is_empty()
-                                || definition.title.to_ascii_lowercase().contains(&query)
-                        }) {
-                            let shortcut = self
-                                .shortcuts
-                                .get(definition.id)
-                                .map(ToString::to_string)
-                                .unwrap_or_default();
-                            if ui
-                                .add_enabled(
-                                    definition.is_enabled(command_context),
-                                    egui::Button::new(format!(
-                                        "{}    {}",
-                                        definition.title, shortcut
-                                    ))
-                                    .min_size(egui::vec2(ui.available_width(), 24.0)),
-                                )
-                                .clicked()
-                            {
-                                actions.push(UiAction::Command(definition.id));
-                            }
-                        }
-                    });
-            });
+        let commands = self.command_context();
+        let (chosen, close) = self.palette.show(context, commands, &self.shortcuts);
+        if let Some(command) = chosen {
+            actions.push(UiAction::Command(command));
+        }
+        if close {
+            self.palette_open = false;
+        }
     }
 
     fn handle_ui_action(&mut self, action: UiAction) {
@@ -1997,7 +2041,7 @@ where
             }
             CommandId::ToggleCommandPalette => {
                 self.palette_open = !self.palette_open;
-                self.palette_query.clear();
+                self.palette.reset();
                 self.request_redraw();
             }
             CommandId::ToggleGridMenu => {
@@ -2594,6 +2638,13 @@ where
         let Some(session) = self.session.as_mut() else {
             return;
         };
+        if self.state == PlaybackState::Ended {
+            if let Err(error) = session.set_paused(true) {
+                self.fail(error.to_string());
+                return;
+            }
+            self.state = PlaybackState::Paused;
+        }
         match session.seek_at_rate(target, rate) {
             Ok(generation) => {
                 self.generation = generation;
@@ -2604,6 +2655,7 @@ where
                 self.metrics_recorded = false;
                 self.pending_seek_started = Some(Instant::now());
                 self.set_status(format!("Position {:.0}s", target.as_seconds_f64()));
+                self.refresh_title();
             }
             Err(error) => self.fail(error.to_string()),
         }
@@ -3041,6 +3093,15 @@ where
     }
 }
 
+fn video_frame_due(
+    presentation_time: MediaTime,
+    deadline: Option<MediaTime>,
+    paused_preview: bool,
+) -> bool {
+    // A paused clock cannot reach the first frame after a non-frame-aligned seek.
+    paused_preview || deadline.is_none_or(|deadline| presentation_time <= deadline)
+}
+
 fn percentile_95(samples: &[Duration]) -> Duration {
     let mut ordered = samples.to_vec();
     ordered.sort_unstable();
@@ -3325,6 +3386,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paused_seek_presents_one_preview_even_when_the_first_frame_is_after_the_audio_clock() {
+        let target = media_time(Duration::from_millis(1508));
+        let frame = media_time(Duration::from_millis(1533));
+        assert!(video_frame_due(frame, Some(target), true));
+        assert!(!video_frame_due(frame, Some(target), false));
+        assert!(video_frame_due(frame, Some(frame), false));
+        assert!(video_frame_due(frame, None, false));
+    }
 
     #[test]
     fn video_fit_preserves_aspect_and_keeps_all_edges_inside_the_media_panel() {

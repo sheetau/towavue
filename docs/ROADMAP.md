@@ -94,3 +94,5 @@ compact shellの初回改善として、32px title/tab bar、30px status、logo 
 動画の表示矩形を同frameのUI layoutから求め、hardware/software共通のaspect-fitとsample aspect ratio、selection位置を対応させた。縦長H.264・非正方形pixelのFFV1で四辺の保持とtimeline追従を確認した。UIのrepaint deadlineも待機へ反映したが、操作後のUI一部欠落の原因確定は残っており、thin seek barより先に描画安定性を調べる。
 
 続くpixel照合で、直近captureに対するUI欠落の目視判定を訂正した。hardware/software各10回のtimeline開閉でもtabとcontrolsは一致した。音声drain後のpauseは実WASAPI testと実windowでFaultedを再現し、正常排出と異常終了を区別して修正した。次はthin seek barとkeyboard中心の日常操作を改善し、launch auditへ進める。
+
+thin seek bar、画像のShell順位置移動、paletteの上下選択・Enter・Escapeを追加した。dragはreleaseで一回だけ確定し、EOFからのSeekはPausedにする。停止中の非frame境界Seekで黒画面になる問題も再現・修正し、最初のframeを保持してから再開できることを確認した。H1は継続中で、次はOpen・folder移動・入力を通した日常flowと残る草案との差を監査する。画像thumbnail、本画面scrub、物理keyboard・IME・DPIのmatrixは今回の完了範囲ではない。

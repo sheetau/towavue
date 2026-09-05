@@ -2,6 +2,18 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 16:49 JST - UX / thin seek bar and keyboard palette
+
+- Trigger: continue H1's compact-shell daily interactions after the audio-drain checkpoint; its CI 33952364359 passed.
+- Result: status-edge seek bar is one physical pixel at rest and expands on hover/drag. Video/audio use source duration; images use image-only Shell snapshot order and the existing dirty navigation guard. Both compact bar and timeline commit one seek on release. EOF seek pauses at the selected position. Hover uses existing video thumbnails or image filename/position; main-surface scrub and image thumbnails remain deferred.
+- Palette: preserve query focus, cycle enabled matches with arrows, dispatch Enter once, close with Escape, and show empty results. Retain consumed keyboard actions across egui layout passes and deduplicate same-frame UI actions. No dependency, runtime, unsafe, or platform-boundary changes.
+- Regression found: a paused seek between frame timestamps could leave the video black indefinitely because the frozen audio clock preceded the first decoded frame. Reproduced at approximately 1.508 seconds, added a failing scheduling test, then allowed the first paused preview when no frame is retained. The same trial now holds frame 46 at 1.533 seconds and resumes to EOF.
+- Verification: focused tests, format, workspace all-target Clippy with warnings denied, and all-target tests pass (app 18, core 26, runtime 35, integrations 3; three explicitly ignored live tests in the default suite). Palette tests cover repeated layout passes, query/navigation/Enter, disabled/empty results, and Escape; seek tests cover clamping and folder endpoints.
+- Real-window evidence: paused 30-second H.264 seeks reached 15.000 and 22.500 seconds with one generation each (90.038/106.202 ms). Final short H.264 trial retained paused seek frames, hid the compact bar with timeline open, and resumed with 14 presented frames / 0 CPU transfers / 0 drops. Image navigation preserved dirty edits on Cancel and moved on Discard; 480x300 layout and one-pixel idle track were checked. Palette zoom search, Down, and Enter executed Zoom out through targeted window messages; global key injection was unreliable, so physical keyboard/IME behavior is not established by this trial.
+- Changed areas: app seek/palette/frame scheduling, README, architecture, roadmap, development guide, gap ledger, and this log. Temporary diagnostics removed; trial windows closed; generated media and captures remain ignored under target/tmp.
+- Status: h1_active; this is a verified interaction checkpoint, not launch completion.
+- Next action: verify checkpoint CI, audit Open/folder/input daily flows and the remaining draft differences, then continue launch stabilization. Physical keyboard/IME, multi-DPI/accessibility, main-surface scrub, and image thumbnails remain open.
+
 ## 2026-09-05 16:22 JST - fix / controls after audio drain and UI evidence correction
 
 - Trigger: investigate reported chrome disappearance and the earlier audio-worker-stopped diagnostic before adding more interactions.

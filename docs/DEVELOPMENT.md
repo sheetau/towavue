@@ -133,6 +133,14 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - Mで編集を作り右上closeを押す。Unsaved edits確認が出て、Cancelならwindowとdirty履歴が残る。
 - 基準機の実windowでは上記操作が通過した。複数DPI/monitor・大量tabのmatrixは未検証。直近captureのUI欠落という目視判定はpixel照合で否定され、hardware/software各10回のtimeline開閉でもtabとcontrolsのpixel数が一致した。古い途中buildの欠落captureとは区別する。
 
+### H1で確認したseek bar / palette scenario
+
+- 30秒H.264/AACをpauseし、status上端の中央をclick → 15.000秒。75%までdragして離す → 22.500秒。各操作につき一回だけpipelineが再構築される。
+- 2秒H.264/AACのEOF後にbar中央をclick → Paused / 1.000秒。timelineを開き、frame境界の間へdragする → 最初のdecode frameを表示したまま停止し、Playで残りを再生する。修正前は約1.508秒へのSeekで黒画面、修正後は1.533秒のframeを保持した。
+- 同じfolderの生成画像2枚でbar両端をclickする。2枚目をRで回転して1枚目へ移動するとUnsaved editsが出る。Cancelは画像とdirty履歴を保持し、Discardは移動する。480×300でも両端へ移動でき、pointerを離したbarはpixel照合で1行だった。
+- paletteでzoomを検索し、Down → EnterでZoom outを一回実行する。基準機ではwindow宛てkey/text messageで確認した。global key注入は安定しなかったため、物理keyboard・IMEの成功証拠にはしない。狭いwindowのpalette layoutも確認した。
+- 自動testは複数layout passにまたがる検索・上下選択・Enter、無効候補と空結果、Escape、folder位置の端点、停止中の非frame境界Seekを検証する。動画thumbnailはhover tooltipのみで、本画面のscrubと画像thumbnailは未実装。
+
 ### H1で確認したvideo viewport scenario
 
 - 白枠付き240×320 H.264と320×240 / SAR=2のFFV1を生成し、960×576で四辺と縦横比を確認する。
@@ -241,7 +249,7 @@ towavue/
 
 | 変更したいこと | 最初に見るfile | 関連file |
 |---|---|---|
-| Window、bar、tab、status、timeline、palette、modal、入力 | `crates/towavue-app/src/main.rs` | `commands.rs`、`shortcuts.rs`、`grid.rs` |
+| Window、bar、tab、status、timeline、palette、modal、入力 | `crates/towavue-app/src/main.rs` | `chrome.rs`、`seekbar.rs`、`palette.rs`、`commands.rs`、`shortcuts.rs`、`grid.rs` |
 | Command名、利用可能media、shortcut解決 | `crates/towavue-core/src/commands.rs` | appのdispatchとdefault設定 |
 | Shortcut設定形式/default | `crates/towavue-app/src/shortcuts.rs` | `commands.rs` |
 | Grid配置/default | `crates/towavue-app/src/grid.rs` | `commands.rs`、`main.rs` |

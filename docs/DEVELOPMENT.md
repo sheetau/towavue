@@ -141,6 +141,14 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - folder起動後のreading 2枚表示、watcher更新による2→3件のsnapshot反映、別folderをOpenした後のreading表示を確認した。runtimeの同期APIを使う実Explorer sort matrixも別途実行し、skipなしで通過した。
 - runtime testは中間要求の置換、古い結果・完了済みslotの失効、実行中のcloseと結果抑止を検証する。app testは背景refreshが明示Openを上書きしないこと、別mediaを開いた後や最後のtab close後の失効も検証する。
 
+### H1で確認したcategorized logo menu scenario
+
+- 画像を開いて左上logoをclickする。修正前は46 commandの縦列で、回転・exportへはscrollが必要だった。修正後はFile / Edit / Viewの3項目からsubmenuを開き、関連commandの区切りと現在のshortcut右揃えを確認できる。
+- EditのRotate clockwiseで画像が横向きになりdirty表示が付く。FileのClose tabで既存dirty guardが出る。Cancelで保持し、EditのUndo editで元の向きとclean状態へ戻ることを最終buildの実windowで確認した。
+- 480×300へ縮め、View内をwheelで末尾までscrollし、Show command paletteをclickする。最終項目まで画面内で選択でき、menuが閉じてpaletteが開くことを確認した。異なるDPI/monitorやkeyboard-only menu traversalは未検証。
+- 自動testでは全registry commandが一箇所だけにあること、custom prefix shortcutの表示、mediaなしでExport asがdispatchされないこと、Open fileの一回dispatchとmenu tree終了、480×300でView末尾へscrollしてpalette commandを選べることを確認する。disabled項目clickでもeguiがpopupを閉じる既存挙動は変更していない。
+- 静止画＋Edit submenuで5秒間CPU時間は0 ms（時計の分解能以下、仕事がないという意味ではない）。最初の複数captureではclick受信を確認できなかったため成功とは扱わず、診断を追加して受信とpopupを確認し、診断を除いた最終buildでも再試験した。menu整理によるruntime・commandの意味・dirty guardの変更はない。
+
 ### H1で確認したvisual filmstrip scenario
 
 - PNG 2枚・30秒H.264/AAC・180秒WAVを同folderへ置いて`F`を押す。修正前の下部filename button列から、中央の画像/動画thumbnail・音声waveform・duration、現在項目の白枠と名前、暗い背景へ変わることを確認した。portrait画像は枠内にaspect-fitする。最小480×300でも列と名前が見える。

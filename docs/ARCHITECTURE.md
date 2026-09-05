@@ -127,6 +127,8 @@ Explorerからのfile dropはwinitのowned path eventで受け、既存のextern
 
 上部は32 logical pxの単一title/tab bar、下部は30 logical pxのstatus barとし、暗いneutral色でmedia領域を優先する。appはdecorationsなしのwinit windowにlogo menu・tab・window controlsを描画し、移動・resize・minimize・maximizeはwinitのWindows操作へ委ねる。window closeは既存のdirty/export guardを必ず通す。tab幅は等分、最大160 px・最小72 pxとし、収まらない場合は横scrollする。path/名前は省略表示と全文tooltipを使い、右側の状態表示へ専用領域を確保する。menuの方向gestureとtab reorderはこの変更には含めない。
 
+logo menuはFile / Edit / Viewの3分類とし、app内の固定配置で関連commandを区切る。全registry commandを一箇所ずつ配置し、title・有効条件・現在のcustom shortcutは既存registry/bindingsから取得する。shortcutは右揃え、縦に収まらないsubmenuはwindow内でscrollする。commandのdispatch・dirty guardは変更せず、分類のために新commandやruntime処理は追加しない。方向drag gestureは引き続き対象外とする。
+
 ### H1 seek bar and command palette
 
 timeline非表示時はstatus上端に1 physical pxのseek barを重ね、hover/drag時だけ太くしhandleを表示する。動画・音声はsource時刻、画像は同じShell snapshotの画像だけの順序へ対応付ける。dragはhandle位置を更新し、releaseで一回だけ既存のgeneration付きSeek/guard付き画像移動を行う。動画hoverは既存の20区間thumbnail tooltip、画像hoverは位置とfilenameとし、本画面のscrub previewは含めない。EOFからの位置移動はPausedとし、その位置からPlayできる。停止中のSeekでは音声時計が次のframe時刻へ到達できないため、保持frameがない場合だけ最初のdecode frameを時計待ちせず表示する。

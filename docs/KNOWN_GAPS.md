@@ -55,7 +55,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 | 草案 | 現状 |
 |---|---|
-| 全機能を一つのlogo menuへ集約 | H1でlogo iconへ集約。全commandの単純な列挙でcategory整理は未完了 |
+| 全機能を一つのlogo menuへ集約 | H1でFile / Edit / Viewへ分類し、関連項目の区切り、現在shortcutの右揃え、window内scrollを実装。全registry commandの重複・欠落をtestする |
 | File/Edit/Viewの3方向drag gestureとSVG logo | logo形状をvector描画。方向gestureは未実装 |
 | 黒基調のcompactなwindow shell | 32px title/tab barと30px status、window操作、右寄せ情報をH1で実装。複数DPI/monitorのmatrixは未検証 |
 | Command palette | titleの部分一致検索、上下選択、有効候補の巡回、Enter実行、Escape閉じを実装。ranking、categoryはない。物理keyboard・IMEのmatrixは未検証 |

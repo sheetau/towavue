@@ -5,6 +5,7 @@
 mod chrome;
 mod filmstrip;
 mod grid;
+mod menu;
 mod palette;
 mod seekbar;
 mod shortcuts;
@@ -1548,28 +1549,11 @@ where
                     ui.spacing_mut().item_spacing.x = 2.0;
                     ui.visuals_mut().widgets.inactive.weak_bg_fill = chrome::BACKGROUND;
                     let menu = ui.menu_button("    ", |ui| {
-                        egui::ScrollArea::vertical()
-                            .max_height(500.0)
-                            .show(ui, |ui| {
-                                for definition in command_definitions() {
-                                    let shortcut = self
-                                        .shortcuts
-                                        .get(definition.id)
-                                        .map(ToString::to_string)
-                                        .unwrap_or_default();
-                                    let label = format!("{}    {}", definition.title, shortcut);
-                                    if ui
-                                        .add_enabled(
-                                            definition.is_enabled(self.command_context()),
-                                            egui::Button::new(label),
-                                        )
-                                        .clicked()
-                                    {
-                                        actions.push(UiAction::Command(definition.id));
-                                        ui.close();
-                                    }
-                                }
-                            });
+                        if let Some(command) =
+                            menu::show(ui, self.command_context(), &self.shortcuts)
+                        {
+                            actions.push(UiAction::Command(command));
+                        }
                     });
                     chrome::logo(ui, menu.response.rect);
                     menu.response.on_hover_text("towavue menu");

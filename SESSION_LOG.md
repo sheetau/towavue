@@ -2,6 +2,16 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 19:11 JST - discoverability / categorized logo menu
+
+- Trigger: the previous goal turn made concrete filmstrip progress; checkpoint 1cf3e55 passed CI 33959455495. The real menu still displayed all 46 commands in one vertical list, placing rotation and export below the initial visible portion.
+- Result: preserve the single logo entry and organize existing commands into File / Edit / View, with related groups separated and current custom shortcuts right-aligned. Keep registry titles, media/reading enablement, shared dispatch and dirty/export guards. Submenus scroll within the window. No new commands, dependency, runtime changes, unsafe code or directional gesture.
+- Verification: focused menu tests, format, workspace all-target Clippy with warnings denied, and workspace tests pass (app 29, core 26, runtime 41, integrations 3; three live tests explicitly ignored). New tests cover exact one-to-one registry placement, custom prefix display, disabled export without media, one Open action and popup-tree close, and scrolling to the last View command in a 480x300 window.
+- Real-window evidence: categorized root/File/Edit/View, rotation, Undo, dirty File > Close tab guard and Cancel passed. A minimum-size View submenu scrolled to Show command palette and opened it. Final-build image plus settled Edit submenu measured 0 ms process CPU over five seconds (below clock resolution, not zero work). Initial captures did not establish click receipt; temporary diagnostics established input/popup behavior, were removed, and the final build was retested. Disabled-click test initially assumed the popup stayed open; egui closes it without dispatch, so the test now reopens it before choosing the next command. All trial windows closed.
+- Changed areas: app menu module/top-bar delegation, README, architecture, roadmap, trial guide, gap ledger, and this log. Generated helpers/captures/logs remain ignored under target/tmp.
+- Status: h1_active; menu organization is verified for exercised flows, not keyboard-only, DPI/monitor, toggle-state-indicator or gesture completion.
+- Next action: verify checkpoint CI; inspect fullscreen and daily-viewing display/input gaps, define the next scenario and accepted boundary, then implement and verify it without broadening into packaging.
+
 ## 2026-09-05 18:59 JST - navigation / bounded visual filmstrip
 
 - Trigger: compare the filename-only bottom strip with the draft's centered previews after Explorer drop checkpoint 1522862 passed CI 33958271146. The previous goal turn made progress; H1 remains active.

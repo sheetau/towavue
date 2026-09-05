@@ -10,6 +10,7 @@ mod menu;
 mod palette;
 mod seekbar;
 mod shortcuts;
+mod trim;
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -1859,6 +1860,9 @@ where
                     } else if self.session.is_some() {
                         let edit = self.edit_state();
                         details.push(format!("{:.0}%  {:.2}×", edit.volume * 100.0, edit.rate));
+                        if edit.trim_start.is_some() || edit.trim_end.is_some() {
+                            details.push("Export trim (T)".into());
+                        }
                     }
                     if let Some(path) = &self.path {
                         if let Some(snapshot) = &self.folder_snapshot
@@ -2061,6 +2065,7 @@ where
                 let x = egui::lerp(rect.x_range(), progress);
                 ui.painter()
                     .vline(x, rect.y_range(), (2.0, Color32::LIGHT_BLUE));
+                trim::show(ui, rect, &self.edit_state(), media_time(duration));
                 let Some(position) = response.interact_pointer_pos().or(response.hover_pos())
                 else {
                     return;
@@ -2394,6 +2399,13 @@ where
     }
 
     fn push_edit(&mut self, operation: EditOperation) {
+        if matches!(
+            operation,
+            EditOperation::SetTrimStart(_) | EditOperation::SetTrimEnd(_)
+        ) && !self.prepare_trim_edit(operation)
+        {
+            return;
+        }
         let (Some(tab), Some(kind)) = (self.tabs.active(), self.media_kind) else {
             return;
         };
@@ -2408,6 +2420,11 @@ where
                     "Rate {:.2}× · playback and export (source unchanged)",
                     self.edit_state().rate
                 ),
+                EditOperation::SetTrimStart(_) | EditOperation::SetTrimEnd(_) => trim::label(
+                    &self.edit_state(),
+                    media_time(self.media_duration.unwrap_or_default()),
+                )
+                .unwrap_or_default(),
                 _ => "Edit added (source unchanged)".into(),
             });
             self.refresh_title();
@@ -2415,16 +2432,62 @@ where
         }
     }
 
+    fn prepare_trim_edit(&mut self, operation: EditOperation) -> bool {
+        if !self
+            .media_kind
+            .is_some_and(|kind| operation.applies_to(kind))
+        {
+            return false;
+        }
+        let Some(duration) = self
+            .media_duration
+            .filter(|duration| !duration.is_zero())
+            .map(media_time)
+        else {
+            self.set_status("Wait for the media duration before setting trim".into());
+            return false;
+        };
+        let previous = self.edit_state();
+        let mut next = previous.clone();
+        match operation {
+            EditOperation::SetTrimStart(time) => next.trim_start = Some(time),
+            EditOperation::SetTrimEnd(time) => next.trim_end = Some(time),
+            _ => return false,
+        }
+        if !next.trim_is_valid(Some(duration)) {
+            self.set_status("Trim unchanged: use 0 ≤ start < end ≤ source duration".into());
+            return false;
+        }
+        if previous.trim_start.unwrap_or(MediaTime::ZERO)
+            == next.trim_start.unwrap_or(MediaTime::ZERO)
+            && previous.trim_end.unwrap_or(duration) == next.trim_end.unwrap_or(duration)
+        {
+            self.set_status("Trim unchanged: this endpoint is already selected".into());
+            return false;
+        }
+        self.set_fullscreen(false);
+        self.timeline_open = true;
+        true
+    }
+
     fn undo_edit(&mut self, redo: bool) {
         let Some(id) = self.tabs.active().map(|tab| tab.id) else {
             return;
         };
+        let previous = self.edit_state();
         let changed = self
             .edits
             .get_mut(&id)
             .is_some_and(|history| if redo { history.redo() } else { history.undo() });
         if changed {
             self.sync_playback_edits();
+            let next = self.edit_state();
+            if (previous.trim_start, previous.trim_end) != (next.trim_start, next.trim_end) {
+                self.set_status(
+                    trim::label(&next, media_time(self.media_duration.unwrap_or_default()))
+                        .unwrap_or_else(|| "Trim cleared · source playback".into()),
+                );
+            }
             self.image_view.selection = None;
             self.image_view.crop_preview = false;
             self.image_view.fit();
@@ -4542,6 +4605,81 @@ mod tests {
             export_name(Path::new("photo.final.png")),
             "photo.final-export.png"
         );
+    }
+
+    #[test]
+    fn trim_endpoints_reject_invalid_and_duplicate_edits_without_losing_redo() {
+        let Some(root) = isolated_test_root(
+            "tests::trim_endpoints_reject_invalid_and_duplicate_edits_without_losing_redo",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let tab = app.tabs.open_new(root.join("trim.mp4"), MediaKind::Video);
+        app.media_kind = Some(MediaKind::Video);
+        app.state = PlaybackState::Paused;
+        let time = |seconds| media_time(Duration::from_secs(seconds));
+        app.pending_time = Some(time(2));
+        let start = EditOperation::SetTrimStart(time(2));
+        app.push_edit(start);
+        assert!(!app.edits.contains_key(&tab));
+        assert!(
+            app.status_message
+                .as_ref()
+                .expect("duration notice")
+                .0
+                .contains("duration")
+        );
+        app.media_duration = Some(Duration::from_secs(30));
+        app.push_edit(EditOperation::SetTrimStart(MediaTime::ZERO));
+        app.push_edit(EditOperation::SetTrimEnd(time(30)));
+        assert!(
+            !app.edits.contains_key(&tab),
+            "implicit full range is a no-op"
+        );
+        app.fullscreen = true;
+        app.push_edit(start);
+        assert!(!app.fullscreen);
+        assert!(app.timeline_open);
+        assert_eq!(app.state, PlaybackState::Paused);
+        assert_eq!(app.pending_time, Some(time(2)));
+        let end = EditOperation::SetTrimEnd(time(5));
+        app.push_edit(end);
+        app.edits.get_mut(&tab).expect("history").mark_saved();
+        app.undo_edit(false);
+        let history = app.edits[&tab].clone();
+        for operation in [
+            start,
+            EditOperation::SetTrimStart(MediaTime::from_nanoseconds(-1)),
+            EditOperation::SetTrimStart(time(30)),
+            EditOperation::SetTrimEnd(time(2)),
+            EditOperation::SetTrimEnd(time(1)),
+            EditOperation::SetTrimEnd(time(31)),
+        ] {
+            app.push_edit(operation);
+            assert_eq!(app.edits[&tab], history, "rejected {operation:?}");
+        }
+        app.undo_edit(true);
+        assert!(
+            !app.edits[&tab].is_dirty(),
+            "saved redo survived rejected inputs"
+        );
+        assert_eq!(app.edit_state().trim_end, Some(time(5)));
+        app.tabs.open_new(root.join("track.wav"), MediaKind::Audio);
+        app.media_kind = Some(MediaKind::Audio);
+        assert_eq!(app.edit_state().trim_start, None);
+        app.push_edit(end);
+        assert_eq!(
+            app.edit_state().trim_start,
+            None,
+            "end-first uses source zero"
+        );
+        app.undo_edit(false);
+        assert_eq!(
+            app.status_message.as_ref().expect("undo notice").0,
+            "Trim cleared · source playback"
+        );
+        assert_eq!(app.edits[&tab].state().trim_start, Some(time(2)));
     }
 
     #[test]

@@ -77,11 +77,14 @@ impl EditState {
         state
     }
 
-    pub fn valid_trim(&self) -> Option<(MediaTime, MediaTime)> {
-        match (self.trim_start, self.trim_end) {
-            (Some(start), Some(end)) if start < end => Some((start, end)),
-            _ => None,
-        }
+    pub fn trim_is_valid(&self, duration: Option<MediaTime>) -> bool {
+        let start = self.trim_start.unwrap_or(MediaTime::ZERO);
+        let end = self.trim_end.or(duration);
+        start >= MediaTime::ZERO
+            && end.is_none_or(|end| start < end)
+            && duration.is_none_or(|duration| {
+                start < duration && self.trim_end.is_none_or(|end| end <= duration)
+            })
     }
 }
 
@@ -161,6 +164,31 @@ impl EditHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trim_validation_includes_implicit_boundaries_and_source_duration() {
+        let time = |seconds: i64| MediaTime::from_nanoseconds(seconds * 1_000_000_000);
+        for (start, end, known, expected) in [
+            (None, None, None, true),
+            (Some(-1), None, None, false),
+            (None, Some(0), None, false),
+            (Some(2), Some(2), None, false),
+            (Some(3), Some(2), None, false),
+            (Some(2), Some(3), None, true),
+            (Some(10), None, Some(10), false),
+            (None, Some(11), Some(10), false),
+            (None, Some(10), Some(10), true),
+            (Some(2), None, Some(10), true),
+            (Some(2), Some(5), Some(10), true),
+        ] {
+            let state = EditState {
+                trim_start: start.map(time),
+                trim_end: end.map(time),
+                ..Default::default()
+            };
+            assert_eq!(state.trim_is_valid(known.map(time)), expected, "{state:?}");
+        }
+    }
 
     #[test]
     fn background_export_marks_only_the_exported_revision_saved() {

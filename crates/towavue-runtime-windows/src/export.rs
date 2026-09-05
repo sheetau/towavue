@@ -78,7 +78,7 @@ impl Drop for ExportJob {
 pub enum ExportError {
     #[error("export target must differ from the source path")]
     SameAsSource,
-    #[error("trim start must be earlier than trim end")]
+    #[error("trim times must be non-negative and start must be earlier than end")]
     InvalidTrim,
     #[error("could not start FFmpeg export: {0}")]
     Start(#[source] std::io::Error),
@@ -103,7 +103,7 @@ fn export_cancellable(
         return Err(ExportError::SameAsSource);
     }
     let state = EditState::from_operations(&request.operations);
-    if state.trim_start.is_some() && state.trim_end.is_some() && state.valid_trim().is_none() {
+    if !state.trim_is_valid(None) {
         return Err(ExportError::InvalidTrim);
     }
     check_cancelled(cancelled)?;
@@ -544,6 +544,30 @@ mod tests {
             export_media(&request),
             Err(ExportError::SameAsSource)
         ));
+    }
+
+    #[test]
+    fn invalid_trim_is_rejected_before_preparing_output_or_starting_ffmpeg() {
+        for operations in [
+            vec![EditOperation::SetTrimEnd(MediaTime::ZERO)],
+            vec![EditOperation::SetTrimStart(MediaTime::from_nanoseconds(-1))],
+            vec![
+                EditOperation::SetTrimStart(MediaTime::from_nanoseconds(2_000_000_000)),
+                EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(1_000_000_000)),
+            ],
+        ] {
+            let request = ExportRequest {
+                source: "missing-source.mp4".into(),
+                target: "missing-parent/output.mp4".into(),
+                kind: MediaKind::Video,
+                operations,
+                hardware_encode: false,
+            };
+            assert!(matches!(
+                export_media(&request),
+                Err(ExportError::InvalidTrim)
+            ));
+        }
     }
 
     #[test]

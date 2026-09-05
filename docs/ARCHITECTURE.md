@@ -112,6 +112,12 @@ reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降�
 
 exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/coreへFFmpeg型を公開しない。画像filterはoperation順のcrop / transpose / flip、動画filterはそれらとtrim / PTS rate、音声filterはatrim / PTS / atempo / volumeを適用し、metadataを入力からcopyする。2倍を超える、または0.5倍未満のrateは複数の`atempo`へ分解する。video/audio encodeは固定FFmpeg buildのsoftware codecを使い、hardware encodeはM7まで行わない。Save As後のSaveは同じexport先を更新できるが、sourceと同一pathへの出力は拒否してpartial overwriteによるsource破損を避ける。
 
+### H1 trim endpoint feedback
+
+I/Oの端点はsource時刻で保持する。未指定の開始は0、未指定の終了はsource末尾として扱い、duration取得前・負の時刻・範囲外・開始以上でない終了はUIで拒否する。既存の履歴・saved/redo位置・再生位置は変えず理由を表示する。同じ有効範囲の再指定は履歴を増やさない。export境界でも負の端点・零長・逆転を拒否する。
+
+有効な端点を指定したらtimelineを表示し、除外区間を暗く、保存区間をbracketとミリ秒付きsource端点で示す。fullscreenでは通常windowへ戻って表示する。Undo/Redo・tab復帰は履歴から表示を求める。timelineの全source Seekは維持し、今回の段階では「Export trim」と明示する。live範囲再生は次のscenarioで、範囲外の再選択・音声sample境界・Seek・EOFを一緒に検証してから接続する。range handle、cut/delete、時間軸伸縮は追加しない。
+
 ### H1 pixel-aligned crop
 
 selectionのdrag中は正規化座標を使い、releaseとcrop確定時に現在の編集後寸法へ丸める。画像は1 pixel、動画は偶数の位置・寸法を使う。各辺を近いgrid境界へ丸め、同じ境界へ潰れた場合は内側の最小1 grid領域とする。現行defaultのlibopenh264は2×2を実際にencodeできず16×16未満を拒否したため、動画cropの確定は16×16以上に限定する。小さすぎる選択は勝手に16×16へ広げず、案内とともにselection・履歴を保持する。非finite・逆転・範囲外の選択と寸法未取得も確定しない。

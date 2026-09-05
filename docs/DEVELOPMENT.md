@@ -51,6 +51,14 @@ cargo run -p towavue-app -- 'C:\path\to\media-folder'
 
 これはfolder navigationで認識する拡張子のlistであり、すべてのcodec、profile、bit depth、破損file、DRM付きfileの動作保証ではない。互換性は実fileで確認し、失敗した組み合わせを記録する。
 
+### H1で確認したtrim endpoint scenario
+
+- 30秒H.264をpauseし、同じ位置でI→O。変更前は両方を受理してSave Asで失敗した。変更後はOを即時拒否し、開始→source末尾の有効範囲を保持する。
+- timeline上で別の終了位置へSeekしてO。除外区間の暗転、白いbracket、ミリ秒付きsource端点が現れ、Save Asが成功する。実試用の2.954～7.690秒指定は約4.736秒のMP4になった。frame/sample境界や圧縮による全formatの厳密一致を保証する試験ではない。
+- WAVでOから指定し、暗黙の開始0を確認する。Undoで範囲・dirty印が消え、通知はTrim clearedへ更新される。Redoで戻る。480×300でも範囲labelが読める。
+- fullscreenの動画でIを指定すると通常windowのtimelineが開く。再生位置・pauseは保持する。
+- この段階はexport範囲の入力・表示で、live再生を制限しない。範囲外のSeekによる再選択、liveの音声sample境界・EOF・rate併用は次のscenarioである。試用は基準機への入力注入で、物理keyboard/IME/DPI matrixではない。
+
 ## 2. 現在試せる操作
 
 何も開かずに起動するとwelcome画面が出る。`Open file`または`Open folder`を使うか、上記の起動引数を使う。画像と動画はfileごとのtab、音声は同じfolderのplaylist tabになる。

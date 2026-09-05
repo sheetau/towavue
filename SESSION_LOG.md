@@ -2,6 +2,16 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 05:49 JST - recovery / release the old surface and restore retained UI textures
+
+- Trigger/intent: audit the real recovery path and preserve visible media, pause and edits when replacing graphics. Initial native trial called recover_graphics_device once at source 3.004 s on the owned 1080p H.264/AAC window; old code failed with Access denied 0x80070005 and Faulted while retaining the old flip swap chain.
+- Change: stop old playback workers, consume/release renderer resources and ClearState/Flush its owned context before making another swap chain for the same HWND. Publish the replacement before rebuilding playback so pipeline errors can still be drawn. Generic render failures also query the device removal reason. Native/unsafe operations stay in runtime; app/core remain safe and the new decode/presentation pipeline shares one device.
+- UI retention: after replacement, upload the full font atlas and current retained image/reading frames under their existing texture IDs. Keep animation indices/deadlines and editing/view state; invalidate regenerable filmstrip/waveform/hover textures. No permanent extra CPU mirror or video readback was added. A missing renderer now returns safely from redraw rather than panicking.
+- Native comparison: identical direct recovery call now continues D3D11VA playback with visible video and text at 5.200 s. Further owned trials preserve a rotated image and rotated/1.25x Paused video at target 29.7039815 s (visible first frame 29.733 s), including fullscreen/Escape and dirty state. Undo restored clean titles and all trial windows closed normally. This exercises real replacement resources through a temporary direct call, not actual driver removal or endpoint change; no OS/GPU settings changed.
+- Checks/cleanup: removed temporary RECOVERY_TRIAL code/environment/trigger file. Format, Clippy with warnings denied, all 146 tests and release build pass (app 59, core 33, runtime 50, integrations 4; three live tests explicitly ignored). New tests verify full font/current animation/reading uploads and safe faulted redraw. Clean release played 60/60 H.264 frames to EOF with no drops/CPU transfers, drift p95/max 3.890/17.182 ms, then closed normally. No live trial remains; ignored h1-recovery logs/captures retain provenance.
+- CI evidence: prior 046fefb run 33990773745 failed when the two new Seek tests raced first-run shortcuts.conf creation in a shared profile. Both Seek tests and the two new recovery tests now use the existing isolated subprocess/config helper; local full tests pass. Do not classify that old CI as successful or silently rerun it as proof of a fix.
+- Status/next: h1_active. Follow the next checkpoint CI. GPU recreation failure retains Faulted/diagnostics but cannot paint the existing dirty guard; audit native notification/save confirmation for that case next. Actual driver reset/adapter/endpoint matrix, IME/mixed-DPI and distribution remain incomplete.
+
 ## 2026-09-06 05:38 JST - measurement / full app Seek-to-Present gate passes
 
 - Trigger/intent: audit found Seek timing started after synchronous pipeline reconstruction and ended at VideoReady before drawing. Measure the full app-owned interval without changing decode/presentation policy.

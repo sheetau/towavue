@@ -212,6 +212,11 @@ impl PlaybackSession {
         Ok(self.generation)
     }
 
+    /// Quiesce the old device before its window surface is released.
+    pub fn suspend_for_graphics_recovery(&mut self) {
+        self.stop_pipeline();
+    }
+
     fn start_pipeline(&mut self) -> Result<(), PlaybackError> {
         let audio = self
             .audio_format

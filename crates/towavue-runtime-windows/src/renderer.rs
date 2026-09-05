@@ -297,8 +297,21 @@ impl FrameRenderer {
         self.max_texture_side
     }
 
-    pub(crate) fn device_removed_reason(&self) -> Option<String> {
+    pub fn device_removed_reason(&self) -> Option<String> {
         self.graphics_device.device_removed_reason()
+    }
+
+    /// Release the old HWND swap chain before creating its replacement.
+    pub fn release_surface(self) {
+        let context = self.context.clone();
+        drop(self);
+        // The event-loop owner has stopped playback workers. This owned context
+        // outlives the dropped renderer; unbind and flush deferred references so
+        // the old flip swap chain no longer occupies its HWND.
+        unsafe {
+            context.ClearState();
+            context.Flush();
+        }
     }
 
     /// Uploads one tightly packed RGBA frame and draws it to the shared surface.

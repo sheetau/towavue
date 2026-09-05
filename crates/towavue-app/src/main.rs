@@ -410,6 +410,7 @@ struct Application<N> {
     video_rect: Option<egui::Rect>,
     video_uv: [UnitPoint; 4],
     ui_repaint_at: Option<Instant>,
+    restore_ui_textures: bool,
     clock: Option<PlaybackClock>,
     state: PlaybackState,
     decode_finished: bool,
@@ -504,6 +505,7 @@ where
             video_rect: None,
             video_uv: ImageTransform::new((1, 1), &[]).uv,
             ui_repaint_at: None,
+            restore_ui_textures: false,
             clock: None,
             state: PlaybackState::Loading,
             decode_finished: false,
@@ -1100,6 +1102,9 @@ where
 
     fn render_frame(&mut self) {
         self.advance_media();
+        if self.renderer.is_none() {
+            return;
+        }
         let (Some(window), Some(context)) = (self.window.as_ref(), self.ui_context.clone()) else {
             return;
         };
@@ -1109,9 +1114,15 @@ where
             .expect("UI state exists")
             .take_egui_input(window);
         let mut actions = Vec::new();
-        let output = context.run_ui(input, |ui| {
+        let mut output = context.run_ui(input, |ui| {
             self.draw_ui(ui, &mut actions);
         });
+        if self.restore_ui_textures {
+            output
+                .textures_delta
+                .set
+                .extend(self.restored_ui_textures(&context));
+        }
         let repaint_delay = output
             .viewport_output
             .get(&egui::ViewportId::ROOT)
@@ -1171,6 +1182,7 @@ where
             return;
         }
         self.record_seek_presentation(media_drawn);
+        self.restore_ui_textures = false;
         self.check_eof();
         // Consumed keys can emit actions only in an earlier, discarded layout pass.
         for (index, action) in actions.iter().enumerate() {
@@ -3165,8 +3177,44 @@ where
         }
     }
 
+    fn restored_ui_textures(
+        &self,
+        context: &egui::Context,
+    ) -> Vec<(egui::TextureId, egui::epaint::ImageDelta)> {
+        let font_options = context
+            .tex_manager()
+            .read()
+            .meta(egui::TextureId::default())
+            .expect("font texture exists after UI layout")
+            .options;
+        let mut textures = vec![(
+            egui::TextureId::default(),
+            egui::epaint::ImageDelta::full(context.fonts(|fonts| fonts.image()), font_options),
+        )];
+        for image in self.image.iter().chain(
+            self.reading_pages
+                .iter()
+                .filter_map(|page| page.as_ref().ok()),
+        ) {
+            textures.push((
+                image.texture.id(),
+                egui::epaint::ImageDelta::full(
+                    color_image(&image.decoded.frames[image.frame_index]),
+                    TextureOptions::LINEAR,
+                ),
+            ));
+        }
+        textures
+    }
+
     fn recover_graphics_device(&mut self, position: MediaTime) {
         self.pending_seek_started = None;
+        if let Some(session) = &mut self.session {
+            session.suspend_for_graphics_recovery();
+        }
+        if let Some(renderer) = self.renderer.take() {
+            renderer.release_surface();
+        }
         let Some(window) = &self.window else {
             self.fail("window was unavailable during graphics recovery".to_owned());
             return;
@@ -3184,8 +3232,19 @@ where
             return;
         }
         let graphics_device = renderer.graphics_device();
+        if let Some(context) = &self.ui_context {
+            context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
+        }
+        self.renderer = Some(renderer);
+        self.restore_ui_textures = true;
+        self.filmstrip.clear();
+        self.waveform = None;
+        self.hover_thumbnail = None;
+        if self.timeline_open {
+            self.load_waveform();
+        }
+        self.request_redraw();
         let Some(session) = self.session.as_mut() else {
-            self.renderer = Some(renderer);
             return;
         };
         if self.state == PlaybackState::Ended || !session.range().contains(position) {
@@ -3197,7 +3256,6 @@ where
         }
         match session.replace_graphics_device(graphics_device, position) {
             Ok(generation) => {
-                self.renderer = Some(renderer);
                 self.generation = generation;
                 self.pending_time = None;
                 self.clock = None;
@@ -3309,6 +3367,11 @@ where
     }
 
     fn handle_render_error(&mut self, error: RenderError) {
+        let error = self
+            .renderer
+            .as_ref()
+            .and_then(FrameRenderer::device_removed_reason)
+            .map_or(error, RenderError::DeviceRemoved);
         match error {
             RenderError::DeviceRemoved(reason) => {
                 eprintln!("towavue: recovering removed D3D11 device: {reason}");
@@ -5219,7 +5282,96 @@ mod tests {
     }
 
     #[test]
+    fn graphics_recovery_uploads_full_font_and_current_image_frames_without_resetting_them() {
+        let Some(_root) = isolated_test_root(
+            "tests::graphics_recovery_uploads_full_font_and_current_image_frames_without_resetting_them",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let context = egui::Context::default();
+        let _ = context.run_ui(Default::default(), |ui| {
+            ui.label("Recovery glyphs");
+        });
+        let decoded = DecodedImage {
+            format: "GIF",
+            frames: vec![
+                towavue_runtime_windows::DecodedImageFrame {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![255, 0, 0, 255],
+                    delay: Duration::from_millis(100),
+                },
+                towavue_runtime_windows::DecodedImageFrame {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![0, 0, 255, 255],
+                    delay: Duration::from_millis(100),
+                },
+            ],
+        };
+        let mut image =
+            ImagePresentation::from_decoded(&context, Path::new("image.gif"), decoded.clone())
+                .expect("image");
+        image.frame_index = 1;
+        let deadline = image.next_frame_at;
+        let image_id = image.texture.id();
+        app.image = Some(image);
+        let page = ImagePresentation::from_decoded(&context, Path::new("page.gif"), decoded)
+            .expect("page");
+        let page_id = page.texture.id();
+        app.reading_pages = vec![Err("unreadable page".into()), Ok(page)];
+        let _ = context.tex_manager().write().take_delta();
+
+        for _ in 0..2 {
+            let textures = app.restored_ui_textures(&context);
+            assert_eq!(textures.len(), 3);
+            assert_eq!(textures[0].0, egui::TextureId::default());
+            assert_eq!(textures[1].0, image_id);
+            assert_eq!(textures[2].0, page_id);
+            assert!(textures.iter().all(|(_, delta)| delta.pos.is_none()));
+            let egui::ImageData::Color(font) = &textures[0].1.image;
+            assert_eq!(**font, context.fonts(|fonts| fonts.image()));
+            let egui::ImageData::Color(image) = &textures[1].1.image;
+            assert_eq!(image.pixels, vec![egui::Color32::BLUE]);
+            let egui::ImageData::Color(page) = &textures[2].1.image;
+            assert_eq!(page.pixels, vec![egui::Color32::RED]);
+        }
+        let image = app.image.as_ref().expect("image retained");
+        assert_eq!(image.frame_index, 1);
+        assert_eq!(image.next_frame_at, deadline);
+        assert!(app.reading_pages[0].is_err());
+    }
+
+    #[test]
+    fn unavailable_graphics_recovery_faults_without_panicking_on_redraw() {
+        let Some(_root) = isolated_test_root(
+            "tests::unavailable_graphics_recovery_faults_without_panicking_on_redraw",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.pending_seek_started = Some(Instant::now());
+        app.recover_graphics_device(MediaTime::ZERO);
+        assert_eq!(app.state, PlaybackState::Faulted);
+        assert!(app.pending_seek_started.is_none());
+        assert!(app.renderer.is_none());
+        app.render_frame();
+        assert!(
+            app.playback_error
+                .as_ref()
+                .expect("diagnostic")
+                .contains("window was unavailable")
+        );
+    }
+
+    #[test]
     fn seek_latency_waits_for_video_presentation_and_records_the_original_start_once() {
+        let Some(_root) = isolated_test_root(
+            "tests::seek_latency_waits_for_video_presentation_and_records_the_original_start_once",
+        ) else {
+            return;
+        };
         let mut app = Application::new(None, |_| {}).expect("headless application");
         let started = Instant::now() - Duration::from_millis(300);
         app.pending_seek_started = Some(started);
@@ -5239,6 +5391,11 @@ mod tests {
 
     #[test]
     fn failed_or_unavailable_seek_does_not_report_a_later_presentation() {
+        let Some(_root) = isolated_test_root(
+            "tests::failed_or_unavailable_seek_does_not_report_a_later_presentation",
+        ) else {
+            return;
+        };
         let mut app = Application::new(None, |_| {}).expect("headless application");
         app.pending_seek_started = Some(Instant::now());
         app.fail("test playback failure".into());

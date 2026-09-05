@@ -214,6 +214,8 @@ Escapeはmodal/paletteの入力を優先し、次にfilmstrip/gridを閉じ、ov
 
 ### H1 seek bar and command palette
 
+動画hoverのthumbnail失敗は現在mediaの20区間ごとに記憶し、同じ区間への描画・pointer往復でworkerを再起動しない。tooltipに取得不能を示し、理由は一度だけdiagnosticへ出す。別mediaへの移動・再openで失敗記録を解除して再試行を許す。要求にはmedia load世代を付け、同じpathを再openしても旧世代の成功/失敗は反映しない。失敗はdisk cacheへ保存せず、再生・Seek・保存の可否を変えない。
+
 timeline非表示時はstatus上端に1 physical pxのseek barを重ね、hover/drag時だけ太くしhandleを表示する。動画・音声はsource時刻、画像は同じShell snapshotの画像だけの順序へ対応付ける。dragはhandle位置を更新し、releaseで一回だけ既存のgeneration付きSeek/guard付き画像移動を行う。動画hoverは既存の20区間thumbnail tooltip、画像hoverは位置とfilenameとし、本画面のscrub previewは含めない。EOFからの位置移動はPausedとし、その位置からPlayできる。停止中のSeekでは音声時計が次のframe時刻へ到達できないため、保持frameがない場合だけ最初のdecode frameを時計待ちせず表示する。
 
 paletteは検索入力を保ち、上下keyで有効な候補を巡回し、Enterで共有commandへdispatch、Escapeで閉じる。eguiの破棄されたlayout passで消費したkeyのactionも保持し、同一frameの同じUI actionは一回だけ実行する。

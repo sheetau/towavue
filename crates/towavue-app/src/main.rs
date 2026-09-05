@@ -14,7 +14,7 @@ mod shortcuts;
 mod trim;
 mod welcome;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -153,6 +153,7 @@ enum AppEvent {
     ),
     Thumbnail(
         PathBuf,
+        u64,
         u64,
         Result<towavue_runtime_windows::PreviewImage, String>,
     ),
@@ -419,6 +420,8 @@ struct Application<N> {
     waveform: Option<TextureHandle>,
     media_duration: Option<Duration>,
     hover_thumbnail: Option<(u64, TextureHandle)>,
+    thumbnail_generation: u64,
+    failed_thumbnails: BTreeSet<u64>,
     waveform_loading: bool,
     thumbnail_loading: Option<u64>,
     session: Option<PlaybackSession>,
@@ -517,6 +520,8 @@ where
             waveform: None,
             media_duration: None,
             hover_thumbnail: None,
+            thumbnail_generation: 0,
+            failed_thumbnails: BTreeSet::new(),
             waveform_loading: false,
             thumbnail_loading: None,
             session: None,
@@ -667,6 +672,8 @@ where
         self.waveform = None;
         self.media_duration = None;
         self.hover_thumbnail = None;
+        self.thumbnail_generation = self.thumbnail_generation.wrapping_add(1);
+        self.failed_thumbnails.clear();
         self.waveform_loading = false;
         self.thumbnail_loading = None;
         self.image_view = ImageViewState::default();
@@ -744,12 +751,13 @@ where
     }
 
     fn load_hover_thumbnail(&mut self, position: Duration, bucket: u64) {
-        if self.thumbnail_loading.is_some() {
+        if self.thumbnail_loading.is_some() || self.failed_thumbnails.contains(&bucket) {
             return;
         }
         let Some(path) = self.path.clone() else {
             return;
         };
+        let generation = self.thumbnail_generation;
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
         self.thumbnail_loading = Some(bucket);
@@ -759,10 +767,11 @@ where
                 let result = cache
                     .thumbnail(&path, position, 240)
                     .map_err(|error| error.to_string());
-                notify(AppEvent::Thumbnail(path, bucket, result));
+                notify(AppEvent::Thumbnail(path, generation, bucket, result));
             })
         {
             self.thumbnail_loading = None;
+            self.failed_thumbnails.insert(bucket);
             self.set_status(format!("Could not start thumbnail worker: {error}"));
         }
     }
@@ -1008,11 +1017,18 @@ where
                     Err(error) => self.set_status(format!("Waveform unavailable: {error}")),
                 }
             }
-            AppEvent::Thumbnail(path, bucket, result) if self.path.as_ref() == Some(&path) => {
+            AppEvent::Thumbnail(path, generation, bucket, result)
+                if self.path.as_ref() == Some(&path) && generation == self.thumbnail_generation =>
+            {
                 if self.thumbnail_loading != Some(bucket) {
                     return;
                 }
                 self.thumbnail_loading = None;
+                if let Err(error) = &result {
+                    self.failed_thumbnails.insert(bucket);
+                    eprintln!("towavue: thumbnail unavailable at bucket {bucket}: {error}");
+                    self.request_redraw();
+                }
                 if let Ok(preview) = result
                     && let Some(context) = self.ui_context.as_ref()
                 {
@@ -1031,7 +1047,9 @@ where
                     self.request_redraw();
                 }
             }
-            AppEvent::Duration(_, _) | AppEvent::Waveform(_, _) | AppEvent::Thumbnail(_, _, _) => {}
+            AppEvent::Duration(_, _)
+            | AppEvent::Waveform(_, _)
+            | AppEvent::Thumbnail(_, _, _, _) => {}
         }
     }
 
@@ -2215,6 +2233,9 @@ where
                 && *cached == bucket
             {
                 ui.image((texture.id(), texture.size_vec2()));
+            }
+            if self.failed_thumbnails.contains(&bucket) {
+                ui.label("Thumbnail unavailable");
             }
             ui.monospace(format_time(media_time(duration.mul_f32(ratio))));
         });
@@ -5286,6 +5307,83 @@ mod tests {
                 assert!(image_rect.top() >= 32.0 && image_rect.bottom() <= 546.0);
             }
         }
+    }
+
+    #[test]
+    fn failed_hover_thumbnail_is_not_retried_until_media_reload() {
+        let Some(root) =
+            isolated_test_root("tests::failed_hover_thumbnail_is_not_retried_until_media_reload")
+        else {
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            let _ = tx.send(event);
+        })
+        .expect("headless application");
+        let path = root.join("missing.mp4");
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Video);
+        app.state = PlaybackState::Playing;
+        for bucket in [10, 11] {
+            app.load_hover_thumbnail(Duration::from_secs(15), bucket);
+            let event = rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("preview failure");
+            app.handle_app_event(event);
+            for _ in 0..100 {
+                app.load_hover_thumbnail(Duration::from_secs(15), bucket);
+                assert!(
+                    app.thumbnail_loading.is_none(),
+                    "failed bucket must stay idle"
+                );
+            }
+        }
+        assert_eq!(app.state, PlaybackState::Playing);
+        assert!(app.playback_error.is_none());
+        let previous_generation = app.thumbnail_generation;
+        app.load_path(path.clone(), MediaKind::Video);
+        app.load_hover_thumbnail(Duration::from_secs(15), 10);
+        assert_eq!(app.thumbnail_loading, Some(10), "reload permits retry");
+        let preview = towavue_runtime_windows::PreviewImage {
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4],
+        };
+        app.ui_context = Some(egui::Context::default());
+        for result in [Err("old failure".into()), Ok(preview.clone())] {
+            app.handle_app_event(AppEvent::Thumbnail(
+                path.clone(),
+                previous_generation,
+                10,
+                result,
+            ));
+            assert_eq!(app.thumbnail_loading, Some(10));
+            assert!(app.failed_thumbnails.is_empty());
+            assert!(app.hover_thumbnail.is_none());
+        }
+        loop {
+            let event = rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("reload preview failure");
+            if matches!(event, AppEvent::Thumbnail(_, _, _, _)) {
+                app.handle_app_event(event);
+                break;
+            }
+        }
+        assert!(app.failed_thumbnails.contains(&10));
+        app.thumbnail_loading = Some(11);
+        app.handle_app_event(AppEvent::Thumbnail(
+            path,
+            app.thumbnail_generation,
+            11,
+            Ok(preview),
+        ));
+        assert_eq!(
+            app.hover_thumbnail.as_ref().expect("successful neighbor").0,
+            11
+        );
+        assert!(!app.failed_thumbnails.contains(&11));
     }
 
     #[test]

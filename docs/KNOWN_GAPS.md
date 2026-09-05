@@ -142,6 +142,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - 対応拡張子、file dialog filter、実decoder能力、export codec選択の関係を一つのcapability modelへ統一していない。拡張子を増やすだけでは対応完了にならない。
 - Loading、empty、error、unsupported capabilityのstate表現が各所のstatus textへ分散している。UX改善時には表示だけでなくstate transitionをcoreでtest可能にする余地がある。
 - filmstrip以外のpreview workerはtask単位にthreadを起動する単純構成で、優先度、同時数、cancel、重複排除を持たない。filmstripは可視集合の最新要求を単一workerで処理する。
+- hover thumbnailは同一media内で一つだけ取得し、失敗した区間は再openまで再試行しない。media load世代で旧結果を拒否する。短い映像・長い音声のfixtureで、取得失敗とは別に本画面が黒いままのケースを観測しており、再生経路の追加監査が必要。
 - Exportは同じ保存先volumeの一時outputへ書き、成功後だけtargetを置換する。失敗・置換前cancelの既存target保護は回帰test済みだが、電源断時のdurabilityまでは保証していない。
 
 これらは一括refactorの指示ではない。実際のUX課題を直す際に、必要な範囲だけ同時に改善する。

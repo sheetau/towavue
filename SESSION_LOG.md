@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 08:01 JST - hover thumbnail / stop repeated failed work and reject stale results
+
+- Evidence: generated an ignored H.264 160x96 video-2-s/AAC-audio-30-s MP4. Hovering around 15 s for about four seconds starts 106 thumbnail requests in the old path; FFmpeg exits successfully with no image. The same instrumented debug scenario after the fix starts one request and shows Thumbnail unavailable. Request tracing was removed before final checks/builds.
+- Contract/change: retain failed buckets only for the current media load, avoid repeated worker/process attempts, and retry after reopen. Add a media-load generation to thumbnail results so stale success/failure from the same reopened path cannot satisfy its current request. Keep normal time display/Seek and disk cache behavior; no runtime, unsafe, dependency or source-file changes.
+- Regression: the new test fails before suppression. It checks 100 repeated requests at each of two failed buckets, unchanged playback state, reload retry, rejection of old-generation success/failure and a successful neighboring result. Format, all-target Clippy, 165 tests (app 75, core 35, runtime 51, integrations 4), debug/release builds pass; three live tests explicitly ignored.
+- Native/limits: normal release shows a valid 0.75-s thumbnail, retains one failure diagnostic after moving away and back, and accepts a 0.625-s Seek while paused. However, the fixture's main video surface stays black and no decode-path/Seek-present diagnostic arrives; do not count this as successful video playback. Investigate that separately next. Native tests are 96 DPI only. Owned processes 41872/41800/40700 exit normally; media/captures/logs remain ignored, no export or user-media edit performed.
+- Status/next: h1_active. Prior 0afd77b CI 33997189677 remains in progress at last check. Investigate missing video output on the unequal-stream fixture before further cosmetic work. Physical recovery/IME/mixed-DPI and distribution remain incomplete; packaging question unanswered, no package/publication performed.
+
 ## 2026-09-06 07:54 JST - fullscreen / bottom-edge mouse controls without viewport changes
 
 - Intent/contract: old release exposes no controls at the bottom edge. Adopted a 48 logical px reveal band for the existing status/Seek UI, an exit button, release-frame drag retention and hiding under selection gestures/modal/palette/grid/filmstrip. No viewport resize, new timer, runtime or dependency changes; timeline still returns to the normal window.

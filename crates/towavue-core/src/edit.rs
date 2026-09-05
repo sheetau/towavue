@@ -1,5 +1,26 @@
 use crate::{MediaKind, MediaTime, PixelCrop};
 
+/// A source-time half-open playback interval; no end means natural EOF.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PlaybackRange {
+    pub start: MediaTime,
+    pub end: Option<MediaTime>,
+}
+
+impl PlaybackRange {
+    pub fn contains(self, position: MediaTime) -> bool {
+        position >= self.start && self.end.is_none_or(|end| position < end)
+    }
+
+    pub fn play_target(self, position: MediaTime) -> MediaTime {
+        if self.contains(position) {
+            position
+        } else {
+            self.start
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EditOperation {
     Crop(PixelCrop),
@@ -55,6 +76,13 @@ impl Default for EditState {
 }
 
 impl EditState {
+    pub fn playback_range(&self) -> PlaybackRange {
+        PlaybackRange {
+            start: self.trim_start.unwrap_or(MediaTime::ZERO),
+            end: self.trim_end,
+        }
+    }
+
     pub fn from_operations(operations: &[EditOperation]) -> Self {
         let mut state = Self::default();
         for operation in operations {
@@ -164,6 +192,29 @@ impl EditHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trim_playback_keeps_source_time_and_restarts_outside_half_open_range() {
+        let range = PlaybackRange {
+            start: MediaTime::from_nanoseconds(2_000_000_000),
+            end: Some(MediaTime::from_nanoseconds(5_000_000_000)),
+        };
+        for (nanos, accepted) in [
+            (0, false),
+            (2_000_000_000, true),
+            (4_999_999_999, true),
+            (5_000_000_000, false),
+            (8_000_000_000, false),
+        ] {
+            let position = MediaTime::from_nanoseconds(nanos);
+            assert_eq!(range.contains(position), accepted);
+            assert_eq!(
+                range.play_target(position),
+                if accepted { position } else { range.start }
+            );
+        }
+        assert!(PlaybackRange::default().contains(MediaTime::from_nanoseconds(i64::MAX)));
+    }
 
     #[test]
     fn trim_validation_includes_implicit_boundaries_and_source_duration() {

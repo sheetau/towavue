@@ -51,13 +51,21 @@ cargo run -p towavue-app -- 'C:\path\to\media-folder'
 
 これはfolder navigationで認識する拡張子のlistであり、すべてのcodec、profile、bit depth、破損file、DRM付きfileの動作保証ではない。互換性は実fileで確認し、失敗した組み合わせを記録する。
 
+### H1で確認したlive trim scenario
+
+- 30秒H.264/AACをpauseしてOを指定しPlay。変更前は約2.946秒の終端を越えて7秒台も再生した。変更後は範囲開始から再生し、終端でEndedになる。約2.95秒で89 frames / 0 drops / 0 CPU transfersを確認した。
+- 範囲外の約10秒へtimeline SeekするとPausedのsource previewになる。Oで終了を広げ、約5秒へSeekしてI。2倍速で約5～10秒を再生して終端へ停止し、Playで再開する。151 frames / 0 drops / 0 CPU transfersを確認した。範囲内Seekはsource時刻とpause状態を保つ。
+- 音声なしFFV1/SAR 3:2は約2.874秒の範囲を約2.85秒で再生し、最後のframeを保持してEndedになった。87 frames / 0 drops / 87 software transfers。
+- WAVの約2.858秒範囲は0.25倍速で約11.4秒。Undoでtrimを消し、Redoで範囲を戻して再Playできる。終端idleの5秒CPU時間は15.625 msだった（単発debug計測）。
+- 自動testは部分音声chunkのsample値・個数、mono/stereo音声のみ、音声/映像の長さが異なるsourceでの両終端通知、caller cancel、半開区間と範囲外Play方針を検証する。基準機の注入入力試験であり、物理keyboard・DPI・全codecのexport境界一致や長時間性能gateとは別である。
+
 ### H1で確認したtrim endpoint scenario
 
 - 30秒H.264をpauseし、同じ位置でI→O。変更前は両方を受理してSave Asで失敗した。変更後はOを即時拒否し、開始→source末尾の有効範囲を保持する。
 - timeline上で別の終了位置へSeekしてO。除外区間の暗転、白いbracket、ミリ秒付きsource端点が現れ、Save Asが成功する。実試用の2.954～7.690秒指定は約4.736秒のMP4になった。frame/sample境界や圧縮による全formatの厳密一致を保証する試験ではない。
 - WAVでOから指定し、暗黙の開始0を確認する。Undoで範囲・dirty印が消え、通知はTrim clearedへ更新される。Redoで戻る。480×300でも範囲labelが読める。
 - fullscreenの動画でIを指定すると通常windowのtimelineが開く。再生位置・pauseは保持する。
-- この段階はexport範囲の入力・表示で、live再生を制限しない。範囲外のSeekによる再選択、liveの音声sample境界・EOF・rate併用は次のscenarioである。試用は基準機への入力注入で、物理keyboard/IME/DPI matrixではない。
+- 入力・表示の初回段階ではexport専用だった。現在は上記live trim scenarioへ接続している。試用は基準機への入力注入で、物理keyboard/IME/DPI matrixではない。
 
 ## 2. 現在試せる操作
 

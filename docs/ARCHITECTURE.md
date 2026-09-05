@@ -116,7 +116,15 @@ exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/core�
 
 I/Oの端点はsource時刻で保持する。未指定の開始は0、未指定の終了はsource末尾として扱い、duration取得前・負の時刻・範囲外・開始以上でない終了はUIで拒否する。既存の履歴・saved/redo位置・再生位置は変えず理由を表示する。同じ有効範囲の再指定は履歴を増やさない。export境界でも負の端点・零長・逆転を拒否する。
 
-有効な端点を指定したらtimelineを表示し、除外区間を暗く、保存区間をbracketとミリ秒付きsource端点で示す。fullscreenでは通常windowへ戻って表示する。Undo/Redo・tab復帰は履歴から表示を求める。timelineの全source Seekは維持し、今回の段階では「Export trim」と明示する。live範囲再生は次のscenarioで、範囲外の再選択・音声sample境界・Seek・EOFを一緒に検証してから接続する。range handle、cut/delete、時間軸伸縮は追加しない。
+有効な端点を指定したらtimelineを表示し、除外区間を暗く、保存区間をbracketとミリ秒付きsource端点で示す。fullscreenでは通常windowへ戻って表示する。Undo/Redo・tab復帰は履歴から表示を求める。入力検証の初回段階では「Export trim」と明示した。現在は後述のlive範囲再生へ接続し、範囲外の再選択・音声sample境界・Seek・EOFを扱う。range handle、cut/delete、時間軸伸縮は追加しない。
+
+### H1 live trim range
+
+trimを持つ動画・音声のPlayはsource基準の半開区間[start, end)を再生する。未指定端点は0/自然EOF。範囲終端でEndedになり、Playで範囲開始へ戻る。timeline/shortcutのSeekは全sourceを参照でき、範囲外へのSeekはPausedの素材確認とする。その状態でI/Oを再指定でき、Playは現在範囲の開始へ戻る。範囲内Seekは元のpause状態を保つ。端点変更・Undo/Redo・rate変更は現在source位置でgeneration付きpipeline再構築を行い、位置が範囲外なら素材確認としてpauseする。tab復帰は保存された範囲の開始から再生する。
+
+runtimeのparallel decode収集点で映像PTSを[start, end)へ制限し、音声は開始/終了と重なるchunkのsampleを整数計算で切り出してからtempo/WASAPIへ送る。ナノ秒変換で切り捨てられたchunk PTSを最も近いsample indexへ戻し、開始以上・終了未満になるよう端点をceilする。これによりsample境界上の終端が1 sample増える誤差を防ぐ。各streamの終端を独立通知し、両streamが範囲終端または自然EOFへ達した時点で既存channelを閉じ、workerを回収する。終端まで全fileを無制限にdecode/discardしない。自然EOFの短いstreamとhardware fallbackを維持し、GPU frameをCPUへ戻さない。
+
+終端判定はdecode完了だけでは行わず、最後の映像を表示し音声がdrainしてから行う。動画のみで終端まで残る時間は既存source時計と一回のdeadlineで待つ。位置表示は再生範囲の終了を超えない。素材確認中はこの上限を適用しない。これは単一区間のtrimで、cut/delete、repeat、range dragや新しい時刻軸は追加しない。
 
 ### H1 pixel-aligned crop
 
@@ -178,7 +186,7 @@ RedrawRequestedはそのevent内で描画し、egui-winitのrepaint応答を次f
 
 ### H1 live volume
 
-動画・音声のvolumeはedit historyの現在値をlive playbackとexportで共有する。runtimeはWASAPIへ渡す直前のstereo f32 sampleへgainを適用し、decode済みqueueは元の値を保持する。変更時は5 msのrampで不連続を抑え、mute後は正確なzero sampleにする。master endpointや他applicationの音量は変更しない。初期gainはpipeline開始前に設定し、Seek・endpoint復旧・tab再open・undo/redoにも現在値を反映する。trimは引き続きexport用である。
+動画・音声のvolumeはedit historyの現在値をlive playbackとexportで共有する。runtimeはWASAPIへ渡す直前のstereo f32 sampleへgainを適用し、decode済みqueueは元の値を保持する。変更時は5 msのrampで不連続を抑え、mute後は正確なzero sampleにする。master endpointや他applicationの音量は変更しない。初期gainはpipeline開始前に設定し、Seek・endpoint復旧・tab再open・undo/redoにも現在値を反映する。trimは別項のH1 live trim range契約に従う。
 
 ### H1 live rate
 

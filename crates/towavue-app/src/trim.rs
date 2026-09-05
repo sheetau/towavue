@@ -6,13 +6,13 @@ pub fn label(state: &EditState, duration: MediaTime) -> Option<String> {
         return None;
     }
     Some(format!(
-        "Export trim {} – {} · source playback",
+        "Trim {} – {} · playback and export",
         timestamp(state.trim_start.unwrap_or(MediaTime::ZERO)),
         timestamp(state.trim_end.unwrap_or(duration)),
     ))
 }
 
-pub fn show(ui: &Ui, rect: Rect, state: &EditState, duration: MediaTime) {
+pub fn show(ui: &Ui, rect: Rect, state: &EditState, duration: MediaTime, source_preview: bool) {
     let Some(label) = label(state, duration) else {
         return;
     };
@@ -51,6 +51,15 @@ pub fn show(ui: &Ui, rect: Rect, state: &EditState, duration: MediaTime) {
         egui::FontId::proportional(12.0),
         Color32::WHITE,
     );
+    if source_preview {
+        painter.text(
+            rect.left_bottom() + egui::vec2(6.0, -6.0),
+            Align2::LEFT_BOTTOM,
+            "Outside trim · Play returns to start",
+            egui::FontId::proportional(12.0),
+            Color32::WHITE,
+        );
+    }
 }
 
 fn timestamp(time: MediaTime) -> String {
@@ -82,6 +91,7 @@ mod tests {
                 rect,
                 &state,
                 MediaTime::from_nanoseconds(10_000_000_000),
+                false,
             );
         });
         let shaded: Vec<_> = output
@@ -112,12 +122,12 @@ mod tests {
         state.trim_end = Some(MediaTime::from_nanoseconds(2_833_333_333));
         assert_eq!(
             label(&state, duration).as_deref(),
-            Some("Export trim 00:00.000 – 00:02.833 · source playback")
+            Some("Trim 00:00.000 – 00:02.833 · playback and export")
         );
         state.trim_start = state.trim_end.take();
         assert_eq!(
             label(&state, duration).as_deref(),
-            Some("Export trim 00:02.833 – 00:30.000 · source playback")
+            Some("Trim 00:02.833 – 00:30.000 · playback and export")
         );
     }
 }

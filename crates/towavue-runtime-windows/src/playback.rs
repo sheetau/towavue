@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 
 use thiserror::Error;
-use towavue_core::{MediaTime, PlaybackGeneration};
+use towavue_core::{MediaTime, PlaybackGeneration, PlaybackRange};
 
 use crate::audio::{AudioOutput, AudioOutputError, AudioOutputEvent, AudioOutputSender};
 use crate::decode::{
@@ -110,6 +110,7 @@ pub struct PlaybackSession {
     paused: bool,
     volume: f32,
     rate: f32,
+    range: PlaybackRange,
 }
 
 impl PlaybackSession {
@@ -118,6 +119,7 @@ impl PlaybackSession {
         graphics_device: GraphicsDevice,
         volume: f32,
         rate: f32,
+        range: PlaybackRange,
         notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlaybackError> {
         let audio_format = decode::probe_audio_format(path)?;
@@ -142,10 +144,11 @@ impl PlaybackSession {
             adapter_luid,
             metrics,
             generation: PlaybackGeneration::INITIAL,
-            target: MediaTime::ZERO,
+            target: range.start,
             paused: false,
             volume,
             rate: rate.clamp(0.25, 4.0).max(0.25),
+            range,
         };
         session.start_pipeline()?;
         Ok(session)
@@ -168,12 +171,29 @@ impl PlaybackSession {
         self.rate
     }
 
-    pub fn seek_at_rate(
+    pub fn range(&self) -> PlaybackRange {
+        self.range
+    }
+
+    pub fn target(&self) -> MediaTime {
+        self.target
+    }
+
+    pub fn range_end(&self) -> Option<MediaTime> {
+        self.range
+            .contains(self.target)
+            .then_some(self.range.end)
+            .flatten()
+    }
+
+    pub fn seek_with_edits(
         &mut self,
         target: MediaTime,
         rate: f32,
+        range: PlaybackRange,
     ) -> Result<PlaybackGeneration, PlaybackError> {
         self.rate = rate.clamp(0.25, 4.0).max(0.25);
+        self.range = range;
         self.seek(target)
     }
 
@@ -212,6 +232,7 @@ impl PlaybackSession {
         let metrics = Arc::clone(&self.metrics);
         let generation = self.generation;
         let target = self.target;
+        let end = self.range_end();
         let decode_thread = thread::Builder::new()
             .name("towavue-decode".to_owned())
             .spawn(move || {
@@ -223,6 +244,7 @@ impl PlaybackSession {
                     &metrics,
                     generation,
                     target,
+                    end,
                     notify.as_ref(),
                 );
             })?;
@@ -363,60 +385,66 @@ fn run_decode_thread(
     metrics: &SharedMetrics,
     generation: PlaybackGeneration,
     target: MediaTime,
+    end: Option<MediaTime>,
     notify: &(impl Fn(PlaybackEvent) + ?Sized),
 ) {
     let mut hardware_output_seen = false;
     let mut pending_audio = Vec::new();
     let mut pending_audio_finished = false;
-    let hardware_result = decode::decode_file_hardware_parallel(
-        path,
-        graphics_device,
-        target,
-        |output| match output {
-            ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) => {
-                if !hardware_output_seen {
-                    if let Some(audio) = audio {
-                        for chunk in pending_audio.drain(..) {
-                            if audio.push(chunk).is_err() {
-                                return false;
-                            }
-                        }
-                        if pending_audio_finished && audio.finish().is_err() {
+    let hardware_result =
+        decode::decode_file_hardware_parallel(path, graphics_device, target, end, |output| {
+            if !hardware_output_seen
+                && matches!(
+                    output,
+                    ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(_))
+                        | ParallelRuntimeDecodeOutput::VideoFinished
+                )
+            {
+                if let Some(audio) = audio {
+                    for chunk in pending_audio.drain(..) {
+                        if audio.push(chunk).is_err() {
                             return false;
                         }
                     }
-                    hardware_output_seen = true;
-                    notify(PlaybackEvent::DecodePathSelected(
-                        generation,
-                        DecodePath::D3d11va,
-                    ));
+                    if pending_audio_finished && audio.finish().is_err() {
+                        return false;
+                    }
                 }
-                metrics.hardware_frame_count.fetch_add(1, Ordering::Relaxed);
-                send_video_frame(
-                    PresentationFrame::Hardware(frame),
-                    video_tx,
+                hardware_output_seen = true;
+                notify(PlaybackEvent::DecodePathSelected(
                     generation,
-                    notify,
-                )
+                    DecodePath::D3d11va,
+                ));
             }
-            ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Audio(chunk)) => {
-                if hardware_output_seen {
-                    audio.is_some_and(|sender| sender.push(chunk).is_ok())
-                } else {
-                    pending_audio.push(chunk);
-                    true
+            match output {
+                ParallelRuntimeDecodeOutput::VideoFinished => true,
+                ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) => {
+                    metrics.hardware_frame_count.fetch_add(1, Ordering::Relaxed);
+                    send_video_frame(
+                        PresentationFrame::Hardware(frame),
+                        video_tx,
+                        generation,
+                        notify,
+                    )
+                }
+                ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Audio(chunk)) => {
+                    if hardware_output_seen {
+                        audio.is_some_and(|sender| sender.push(chunk).is_ok())
+                    } else {
+                        pending_audio.push(chunk);
+                        true
+                    }
+                }
+                ParallelRuntimeDecodeOutput::AudioFinished => {
+                    if hardware_output_seen {
+                        audio.is_none_or(|sender| sender.finish().is_ok())
+                    } else {
+                        pending_audio_finished = true;
+                        true
+                    }
                 }
             }
-            ParallelRuntimeDecodeOutput::AudioFinished => {
-                if hardware_output_seen {
-                    audio.is_none_or(|sender| sender.finish().is_ok())
-                } else {
-                    pending_audio_finished = true;
-                    true
-                }
-            }
-        },
-    );
+        });
 
     let result = match hardware_result {
         Err(decode::DecodeError::HardwareUnavailable(_)) if !hardware_output_seen => {
@@ -425,7 +453,8 @@ fn run_decode_thread(
                 generation,
                 DecodePath::Software,
             ));
-            decode::decode_file_parallel(path, target, |output| match output {
+            decode::decode_file_parallel(path, target, end, |output| match output {
+                ParallelSoftwareDecodeOutput::VideoFinished => true,
                 ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) => {
                     metrics.cpu_transfer_count.fetch_add(1, Ordering::Relaxed);
                     send_video_frame(

@@ -120,3 +120,5 @@ fullscreenの画像・reading・動画へ2秒idleのcursor非表示を追加し�
 cropを整数pixel矩形へ変更し、previewとFFmpeg exportの独立した丸めをなくした。1×1 PNGの保存失敗と隣接色のにじみを再現・修正し、画像1 pixel・動画偶数pixelの選択、動画16×16未満の拒否、寸法案内と全領域no-opを追加した。PNGの奇数寸法・回転後再cropと最小H.264 exportを含む114 test、実windowの保存・選択保持が通過した。次はtrim範囲とlive playbackの不一致、入力・DPIなど残るlaunch gateを監査する。H1全体は継続中である。
 
 trim監査では、同じ位置のI/Oを受理しSave Asで初めて失敗する問題を再現した。端点の入力時検証、暗黙のsource先頭/末尾、no-op、timelineの保存範囲・ミリ秒表示、Undo通知を追加し、119 testと動画/音声の実windowを確認した。これはlive trim完了ではなく入力・確認の段階である。次は範囲外の再選択と両立する範囲内再生、音声sample端点・rate・Seek・EOFを検証する。H1とlaunch全体は継続中である。
+
+続いてtrimをlive playbackへ接続した。半開区間内の映像・音声sampleだけを送り、両streamの終端でworkerを回収する。終端で停止して再Playは開始へ戻り、範囲外Seekはpaused source previewとして端点の再選択を可能にする。123 testとhardware/software動画・0.25倍音声、2倍動画、Undo/Redo・tab復帰を確認した。音声sampleのナノ秒丸めで生じた1 sample差も修正した。次は極小範囲・低精度PTS・export境界を追加監査し、keyboard/IME・DPI・metadata orientationを含む残るlaunch gateへ進む。H1全体は未完了である。

@@ -68,6 +68,7 @@ pub(crate) enum RuntimeDecodeOutput {
 
 pub(crate) enum ParallelRuntimeDecodeOutput {
     Item(RuntimeDecodeOutput),
+    VideoFinished,
     AudioFinished,
 }
 
@@ -96,10 +97,11 @@ pub enum DecodeOutput {
 
 pub(crate) enum ParallelSoftwareDecodeOutput {
     Item(DecodeOutput),
+    VideoFinished,
     AudioFinished,
 }
 
-/// Counters returned after the input reaches EOF and all decoders are drained.
+/// Counters returned after natural EOF or the requested playback range ends.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DecodeSummary {
     pub video_frames: u64,
@@ -129,6 +131,7 @@ enum ParallelDecodeOutput {
     SoftwareVideo(VideoFrame),
     HardwareVideo(HardwareVideoFrame),
     Audio(AudioChunk),
+    VideoFinished,
     AudioFinished,
     Failed(DecodeError),
 }
@@ -387,46 +390,67 @@ pub(crate) fn decode_file_from(
 pub(crate) fn decode_file_parallel(
     path: &Path,
     minimum_time: MediaTime,
+    maximum_time: Option<MediaTime>,
     mut emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
-    decode_file_parallel_inner(path, None, minimum_time, |output| match output {
-        ParallelDecodeOutput::SoftwareVideo(frame) => emit(ParallelSoftwareDecodeOutput::Item(
-            DecodeOutput::Video(frame),
-        )),
-        ParallelDecodeOutput::Audio(chunk) => emit(ParallelSoftwareDecodeOutput::Item(
-            DecodeOutput::Audio(chunk),
-        )),
-        ParallelDecodeOutput::AudioFinished => emit(ParallelSoftwareDecodeOutput::AudioFinished),
-        ParallelDecodeOutput::HardwareVideo(_) | ParallelDecodeOutput::Failed(_) => {
-            unreachable!("parallel decode output is handled internally")
-        }
-    })
+    decode_file_parallel_inner(
+        path,
+        None,
+        minimum_time,
+        maximum_time,
+        |output| match output {
+            ParallelDecodeOutput::SoftwareVideo(frame) => emit(ParallelSoftwareDecodeOutput::Item(
+                DecodeOutput::Video(frame),
+            )),
+            ParallelDecodeOutput::Audio(chunk) => emit(ParallelSoftwareDecodeOutput::Item(
+                DecodeOutput::Audio(chunk),
+            )),
+            ParallelDecodeOutput::AudioFinished => {
+                emit(ParallelSoftwareDecodeOutput::AudioFinished)
+            }
+            ParallelDecodeOutput::VideoFinished => {
+                emit(ParallelSoftwareDecodeOutput::VideoFinished)
+            }
+            ParallelDecodeOutput::HardwareVideo(_) | ParallelDecodeOutput::Failed(_) => {
+                unreachable!("parallel decode output is handled internally")
+            }
+        },
+    )
 }
 
 pub(crate) fn decode_file_hardware_parallel(
     path: &Path,
     device: &GraphicsDevice,
     minimum_time: MediaTime,
+    maximum_time: Option<MediaTime>,
     mut emit: impl FnMut(ParallelRuntimeDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
-    decode_file_parallel_inner(path, Some(device), minimum_time, |output| match output {
-        ParallelDecodeOutput::HardwareVideo(frame) => emit(ParallelRuntimeDecodeOutput::Item(
-            RuntimeDecodeOutput::Video(frame),
-        )),
-        ParallelDecodeOutput::Audio(chunk) => emit(ParallelRuntimeDecodeOutput::Item(
-            RuntimeDecodeOutput::Audio(chunk),
-        )),
-        ParallelDecodeOutput::AudioFinished => emit(ParallelRuntimeDecodeOutput::AudioFinished),
-        ParallelDecodeOutput::SoftwareVideo(_) | ParallelDecodeOutput::Failed(_) => {
-            unreachable!("parallel decode output is handled internally")
-        }
-    })
+    decode_file_parallel_inner(
+        path,
+        Some(device),
+        minimum_time,
+        maximum_time,
+        |output| match output {
+            ParallelDecodeOutput::HardwareVideo(frame) => emit(ParallelRuntimeDecodeOutput::Item(
+                RuntimeDecodeOutput::Video(frame),
+            )),
+            ParallelDecodeOutput::Audio(chunk) => emit(ParallelRuntimeDecodeOutput::Item(
+                RuntimeDecodeOutput::Audio(chunk),
+            )),
+            ParallelDecodeOutput::AudioFinished => emit(ParallelRuntimeDecodeOutput::AudioFinished),
+            ParallelDecodeOutput::VideoFinished => emit(ParallelRuntimeDecodeOutput::VideoFinished),
+            ParallelDecodeOutput::SoftwareVideo(_) | ParallelDecodeOutput::Failed(_) => {
+                unreachable!("parallel decode output is handled internally")
+            }
+        },
+    )
 }
 
 fn decode_file_parallel_inner(
     path: &Path,
     hardware_device: Option<&GraphicsDevice>,
     minimum_time: MediaTime,
+    maximum_time: Option<MediaTime>,
     mut emit: impl FnMut(ParallelDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
     ffmpeg::init()?;
@@ -446,7 +470,7 @@ fn decode_file_parallel_inner(
         return Err(DecodeError::NoMediaStream);
     }
     seek_input(&mut input, minimum_time)?;
-    run_parallel_workers(input, video, audio, minimum_time, &mut emit)
+    run_parallel_workers(input, video, audio, minimum_time, maximum_time, &mut emit)
 }
 
 fn run_parallel_workers(
@@ -454,6 +478,7 @@ fn run_parallel_workers(
     video: Option<ParallelVideoConfig>,
     audio: Option<StreamConfig>,
     minimum_time: MediaTime,
+    maximum_time: Option<MediaTime>,
     emit: &mut impl FnMut(ParallelDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
     let video_stream_index = video.as_ref().map(|video| match video {
@@ -461,6 +486,8 @@ fn run_parallel_workers(
         ParallelVideoConfig::Hardware(config, _) => config.index,
     });
     let audio_stream_index = audio.as_ref().map(|config| config.index);
+    let mut video_finished = video.is_none();
+    let mut audio_finished = audio.is_none();
     let (video_packet_tx, video_packet_rx) = mpsc::sync_channel(PACKET_QUEUE_CAPACITY);
     let (audio_packet_tx, audio_packet_rx) = mpsc::sync_channel(PACKET_QUEUE_CAPACITY);
     let (output_tx, output_rx) = mpsc::sync_channel(DECODED_QUEUE_CAPACITY);
@@ -506,6 +533,8 @@ fn run_parallel_workers(
                         run_parallel_video_worker(video, video_packet_rx, &video_output_tx)
                     {
                         let _ = video_output_tx.send(ParallelDecodeOutput::Failed(error));
+                    } else {
+                        let _ = video_output_tx.send(ParallelDecodeOutput::VideoFinished);
                     }
                 })
         });
@@ -526,39 +555,69 @@ fn run_parallel_workers(
 
         let mut summary = DecodeSummary::default();
         let mut result = Ok(());
-        for output in output_rx {
+        for mut output in output_rx {
             if let ParallelDecodeOutput::Failed(error) = output {
                 result = Err(error);
                 break;
             }
-            if matches!(output, ParallelDecodeOutput::AudioFinished) {
-                if !emit(output) {
-                    result = Err(DecodeError::ConsumerClosed);
-                    break;
-                }
+            let is_video = matches!(
+                output,
+                ParallelDecodeOutput::SoftwareVideo(_)
+                    | ParallelDecodeOutput::HardwareVideo(_)
+                    | ParallelDecodeOutput::VideoFinished
+            );
+            if (is_video && video_finished) || (!is_video && audio_finished) {
                 continue;
             }
-            let presentation_time = match &output {
-                ParallelDecodeOutput::SoftwareVideo(frame) => frame.presentation_time,
-                ParallelDecodeOutput::HardwareVideo(frame) => frame.presentation_time,
-                ParallelDecodeOutput::Audio(chunk) => chunk.presentation_time,
-                ParallelDecodeOutput::AudioFinished | ParallelDecodeOutput::Failed(_) => {
-                    unreachable!()
-                }
-            };
             match &output {
                 ParallelDecodeOutput::SoftwareVideo(_) | ParallelDecodeOutput::HardwareVideo(_) => {
                     summary.video_frames += 1
                 }
                 ParallelDecodeOutput::Audio(chunk) => summary.audio_frames += chunk.frames as u64,
-                ParallelDecodeOutput::AudioFinished | ParallelDecodeOutput::Failed(_) => {
-                    unreachable!()
-                }
+                _ => {}
             }
-            let accepted =
-                minimum_time > MediaTime::ZERO && presentation_time < minimum_time || emit(output);
+            let time = match &output {
+                ParallelDecodeOutput::SoftwareVideo(frame) => Some(frame.presentation_time),
+                ParallelDecodeOutput::HardwareVideo(frame) => Some(frame.presentation_time),
+                ParallelDecodeOutput::Audio(chunk) => Some(chunk.presentation_time),
+                _ => None,
+            };
+            let at_end = time.is_some_and(|time| maximum_time.is_some_and(|end| time >= end));
+            let mut finished = time.is_none() || at_end;
+            let mut accepted = true;
+            if let ParallelDecodeOutput::Audio(chunk) = &mut output {
+                finished |= maximum_time.is_some_and(|end| {
+                    chunk
+                        .presentation_time
+                        .saturating_add(Duration::from_secs_f64(
+                            chunk.frames as f64 / chunk.format.sample_rate as f64,
+                        ))
+                        >= end
+                });
+                clip_audio_chunk(chunk, minimum_time, maximum_time);
+                if chunk.frames > 0 {
+                    accepted = emit(output);
+                }
+            } else if !finished && time.is_some_and(|time| time >= minimum_time) {
+                accepted = emit(output);
+            }
+            if finished && accepted {
+                if is_video {
+                    video_finished = true;
+                } else {
+                    audio_finished = true;
+                }
+                accepted = emit(if is_video {
+                    ParallelDecodeOutput::VideoFinished
+                } else {
+                    ParallelDecodeOutput::AudioFinished
+                });
+            }
             if !accepted {
                 result = Err(DecodeError::ConsumerClosed);
+                break;
+            }
+            if video_finished && audio_finished {
                 break;
             }
         }
@@ -579,6 +638,30 @@ fn run_parallel_workers(
         }
         result.map(|()| summary)
     })
+}
+
+fn clip_audio_chunk(chunk: &mut AudioChunk, start: MediaTime, end: Option<MediaTime>) {
+    let rate = i128::from(chunk.format.sample_rate);
+    // Recover the sample index before ceil-ing boundaries: FFmpeg PTS-to-nanosecond
+    // truncation must not add an extra sample at an exactly aligned trim end.
+    let chunk_sample = (i128::from(chunk.presentation_time.as_nanoseconds()) * rate + 500_000_000)
+        .div_euclid(1_000_000_000);
+    let sample_offset = |time: MediaTime| {
+        let sample =
+            (i128::from(time.as_nanoseconds()) * rate + 999_999_999).div_euclid(1_000_000_000);
+        (sample - chunk_sample).clamp(0, chunk.frames as i128) as usize
+    };
+    let first = sample_offset(start);
+    let last = end.map_or(chunk.frames, sample_offset).max(first);
+    let stride = usize::from(chunk.format.channels) * size_of::<f32>();
+    chunk.bytes.truncate(last * stride);
+    chunk.bytes.drain(..first * stride);
+    chunk.frames = last - first;
+    if first > 0 {
+        let nanos = ((chunk_sample + first as i128) * 1_000_000_000 + rate - 1).div_euclid(rate);
+        chunk.presentation_time =
+            MediaTime::from_nanoseconds(nanos.clamp(i64::MIN as i128, i64::MAX as i128) as i64);
+    }
 }
 
 fn queue_demux_packet(
@@ -1027,6 +1110,130 @@ mod tests {
     }
 
     #[test]
+    fn trim_audio_clips_partial_chunks_on_sample_boundaries_without_changing_samples() {
+        let mut chunk = super::AudioChunk {
+            presentation_time: MediaTime::from_nanoseconds(1_000_000_000),
+            format: super::AudioFormat {
+                sample_rate: 48_000,
+                channels: 2,
+            },
+            frames: 16,
+            bytes: (0..32)
+                .flat_map(|value| (value as f32).to_le_bytes())
+                .collect(),
+        };
+        let expected = chunk.bytes[16..48].to_vec();
+        super::clip_audio_chunk(
+            &mut chunk,
+            MediaTime::from_nanoseconds(1_000_031_250),
+            Some(MediaTime::from_nanoseconds(1_000_114_583)),
+        );
+        assert_eq!(chunk.frames, 4);
+        assert_eq!(chunk.bytes, expected);
+        assert_eq!(chunk.presentation_time.as_nanoseconds(), 1_000_041_667);
+        super::clip_audio_chunk(&mut chunk, MediaTime::from_nanoseconds(2_000_000_000), None);
+        assert_eq!(chunk.frames, 0);
+        assert!(chunk.bytes.is_empty());
+    }
+
+    #[test]
+    fn parallel_trim_stops_at_both_stream_boundaries_and_handles_unequal_lengths() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let executable = std::env::var_os("FFMPEG_DIR")
+            .map(std::path::PathBuf::from)
+            .map(|path| path.join("bin/ffmpeg.exe"))
+            .unwrap_or_else(|| "ffmpeg.exe".into());
+        for (video_seconds, audio_seconds) in [(4, 4), (1, 4), (4, 1)] {
+            let path = std::env::temp_dir().join(format!(
+                "towavue-trim-{unique}-{video_seconds}-{audio_seconds}.nut"
+            ));
+            let generated = std::process::Command::new(&executable)
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    &format!("color=size=160x96:rate=10:duration={video_seconds}"),
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    &format!("sine=sample_rate=48000:duration={audio_seconds}"),
+                    "-c:v",
+                    "ffv1",
+                    "-c:a",
+                    "pcm_f32le",
+                ])
+                .arg(&path)
+                .output()
+                .expect("generate trim fixture");
+            assert!(
+                generated.status.success(),
+                "{}",
+                String::from_utf8_lossy(&generated.stderr)
+            );
+            for (start_ns, end_ns, expected_video) in [
+                (205_000_000, 605_000_000, 4),
+                (
+                    2_000_000_000,
+                    2_500_000_000,
+                    if video_seconds == 1 { 0 } else { 5 },
+                ),
+            ] {
+                let start = MediaTime::from_nanoseconds(start_ns);
+                let end = MediaTime::from_nanoseconds(end_ns);
+                let (mut videos, mut samples, mut video_ends, mut audio_ends) = (0, 0, 0, 0);
+                super::decode_file_parallel(&path, start, Some(end), |output| {
+                    match output {
+                        ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) => {
+                            assert!(
+                                frame.presentation_time >= start && frame.presentation_time < end
+                            );
+                            assert_eq!(video_ends, 0);
+                            videos += 1;
+                        }
+                        ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
+                            assert!(
+                                chunk.presentation_time >= start && chunk.presentation_time < end
+                            );
+                            assert_eq!(audio_ends, 0);
+                            samples += chunk.frames;
+                        }
+                        ParallelSoftwareDecodeOutput::VideoFinished => video_ends += 1,
+                        ParallelSoftwareDecodeOutput::AudioFinished => audio_ends += 1,
+                    }
+                    true
+                })
+                .expect("bounded trim decode");
+                assert_eq!(videos, expected_video);
+                let expected_samples = if audio_seconds == 1 && start_ns == 2_000_000_000 {
+                    0
+                } else {
+                    ((end_ns - start_ns) * 48_000 / 1_000_000_000) as usize
+                };
+                assert_eq!(samples, expected_samples);
+                assert_eq!((video_ends, audio_ends), (1, 1));
+            }
+            assert!(
+                matches!(
+                    super::decode_file_parallel(
+                        &path,
+                        MediaTime::ZERO,
+                        Some(MediaTime::from_nanoseconds(500_000_000)),
+                        |_| false
+                    ),
+                    Err(super::DecodeError::ConsumerClosed)
+                ),
+                "caller cancellation must not become successful range EOF"
+            );
+            std::fs::remove_file(path).expect("remove owned trim fixture");
+        }
+    }
+
+    #[test]
     fn pixel_aspect_preserves_valid_ratios_and_defaults_unspecified_values() {
         assert_eq!(super::pixel_aspect(Rational::new(2, 1)), 2.0);
         assert_eq!(super::pixel_aspect(Rational::new(0, 1)), 1.0);
@@ -1082,12 +1289,32 @@ mod tests {
                 true
             };
             let serial = super::decode_file(&path, verify);
-            let parallel = super::decode_file_parallel(&path, MediaTime::ZERO, |output| {
+            let parallel = super::decode_file_parallel(&path, MediaTime::ZERO, None, |output| {
                 if let ParallelSoftwareDecodeOutput::Item(item) = output {
                     verify(item);
                 }
                 true
             });
+            let mut trimmed_samples = 0;
+            let mut trim_ends = 0;
+            super::decode_file_parallel(
+                &path,
+                MediaTime::from_nanoseconds(3_000_000),
+                Some(MediaTime::from_nanoseconds(7_000_000)),
+                |output| {
+                    match output {
+                        ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
+                            trimmed_samples += chunk.frames
+                        }
+                        ParallelSoftwareDecodeOutput::AudioFinished => trim_ends += 1,
+                        _ => panic!("audio-only trim emitted video"),
+                    }
+                    true
+                },
+            )
+            .expect("audio-only trim decode");
+            assert_eq!(trimmed_samples, 192);
+            assert_eq!(trim_ends, 1);
             std::fs::remove_file(path).expect("remove PCM fixture");
             assert_eq!(serial.expect("serial PCM decode").audio_frames, 480);
             assert_eq!(parallel.expect("parallel PCM decode").audio_frames, 480);
@@ -1171,13 +1398,14 @@ mod tests {
         let mut audio_frames = 0;
         let mut audio_finished = 0;
 
-        let summary = super::decode_file_parallel(&path, MediaTime::ZERO, |output| {
+        let summary = super::decode_file_parallel(&path, MediaTime::ZERO, None, |output| {
             match output {
                 ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(_)) => video_frames += 1,
                 ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
                     audio_frames += chunk.frames as u64;
                 }
                 ParallelSoftwareDecodeOutput::AudioFinished => audio_finished += 1,
+                ParallelSoftwareDecodeOutput::VideoFinished => {}
             }
             true
         })

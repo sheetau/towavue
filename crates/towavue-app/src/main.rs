@@ -660,6 +660,7 @@ where
             graphics_device,
             self.edit_state().volume,
             self.edit_state().rate,
+            self.edit_state().playback_range(),
             move |event| notify(AppEvent::Playback(event)),
         ) {
             Ok(session) => {
@@ -1861,7 +1862,7 @@ where
                         let edit = self.edit_state();
                         details.push(format!("{:.0}%  {:.2}×", edit.volume * 100.0, edit.rate));
                         if edit.trim_start.is_some() || edit.trim_end.is_some() {
-                            details.push("Export trim (T)".into());
+                            details.push("Trim (T)".into());
                         }
                     }
                     if let Some(path) = &self.path {
@@ -2065,7 +2066,15 @@ where
                 let x = egui::lerp(rect.x_range(), progress);
                 ui.painter()
                     .vline(x, rect.y_range(), (2.0, Color32::LIGHT_BLUE));
-                trim::show(ui, rect, &self.edit_state(), media_time(duration));
+                let edit = self.edit_state();
+                trim::show(
+                    ui,
+                    rect,
+                    &edit,
+                    media_time(duration),
+                    self.state == PlaybackState::Paused
+                        && !edit.playback_range().contains(self.current_position()),
+                );
                 let Some(position) = response.interact_pointer_pos().or(response.hover_pos())
                 else {
                     return;
@@ -2467,6 +2476,7 @@ where
         }
         self.set_fullscreen(false);
         self.timeline_open = true;
+        self.load_waveform();
         true
     }
 
@@ -2500,7 +2510,7 @@ where
         let state = self.edit_state();
         if let Some(session) = &mut self.session {
             session.set_volume(state.volume);
-            if session.rate() != state.rate {
+            if session.rate() != state.rate || session.range() != state.playback_range() {
                 self.seek_to(self.current_position());
             }
         }
@@ -2961,8 +2971,15 @@ where
         let Some(next) = self.state.after_play_pause() else {
             return;
         };
-        if self.state == PlaybackState::Ended {
-            self.seek_to(MediaTime::ZERO);
+        let range = self.edit_state().playback_range();
+        let position = self.current_position();
+        let target = if self.state == PlaybackState::Ended {
+            range.start
+        } else {
+            range.play_target(position)
+        };
+        if self.state == PlaybackState::Ended || target != position {
+            self.seek_to(target);
             if self.state == PlaybackState::Faulted {
                 return;
             }
@@ -3005,18 +3022,19 @@ where
     }
 
     fn seek_to(&mut self, target: MediaTime) {
-        let rate = self.edit_state().rate;
+        let edit = self.edit_state();
+        let range = edit.playback_range();
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        if self.state == PlaybackState::Ended {
+        if self.state == PlaybackState::Ended || !range.contains(target) {
             if let Err(error) = session.set_paused(true) {
                 self.fail(error.to_string());
                 return;
             }
             self.state = PlaybackState::Paused;
         }
-        match session.seek_at_rate(target, rate) {
+        match session.seek_with_edits(target, edit.rate, range) {
             Ok(generation) => {
                 self.generation = generation;
                 self.pending_time = None;
@@ -3025,7 +3043,11 @@ where
                 self.audio_drained = !session.has_audio();
                 self.metrics_recorded = false;
                 self.pending_seek_started = Some(Instant::now());
-                self.set_status(format!("Position {:.0}s", target.as_seconds_f64()));
+                self.set_status(if range.contains(target) {
+                    format!("Position {:.3}s", target.as_seconds_f64())
+                } else {
+                    "Outside trim · paused source preview; Play returns to trim start".into()
+                });
                 self.refresh_title();
             }
             Err(error) => self.fail(error.to_string()),
@@ -3054,6 +3076,13 @@ where
             self.renderer = Some(renderer);
             return;
         };
+        if self.state == PlaybackState::Ended || !session.range().contains(position) {
+            if let Err(error) = session.set_paused(true) {
+                self.fail(error.to_string());
+                return;
+            }
+            self.state = PlaybackState::Paused;
+        }
         match session.replace_graphics_device(graphics_device, position) {
             Ok(generation) => {
                 self.renderer = Some(renderer);
@@ -3105,7 +3134,8 @@ where
     }
 
     fn current_position(&self) -> MediaTime {
-        self.audio_master_position()
+        let position = self
+            .audio_master_position()
             .or_else(|| self.clock.as_ref().map(PlaybackClock::position))
             .or_else(|| {
                 self.session
@@ -3113,11 +3143,32 @@ where
                     .and_then(PlaybackSession::audio_position)
             })
             .or(self.pending_time)
-            .unwrap_or(MediaTime::ZERO)
+            .or_else(|| self.session.as_ref().map(PlaybackSession::target))
+            .unwrap_or(MediaTime::ZERO);
+        self.session
+            .as_ref()
+            .and_then(PlaybackSession::range_end)
+            .map_or(position, |end| position.min(end))
     }
 
     fn check_eof(&mut self) {
-        if self.decode_finished && self.pending_time.is_none() && self.audio_drained {
+        if matches!(self.state, PlaybackState::Playing | PlaybackState::Paused)
+            && self.decode_finished
+            && self.pending_time.is_none()
+            && self.audio_drained
+        {
+            if let Some(end) = self.session.as_ref().and_then(PlaybackSession::range_end) {
+                if self.clock.is_none() {
+                    let mut clock =
+                        PlaybackClock::new(self.current_position(), self.playback_rate());
+                    clock.set_paused(self.state == PlaybackState::Paused);
+                    self.clock = Some(clock);
+                }
+                if self.current_position() < end {
+                    return;
+                }
+                self.clock = Some(PlaybackClock::new(end, self.playback_rate()));
+            }
             if let Some(clock) = &mut self.clock {
                 clock.set_paused(true);
             }
@@ -3139,6 +3190,7 @@ where
                 self.metrics_recorded = true;
             }
             self.refresh_title();
+            self.request_redraw();
         }
     }
 
@@ -3388,6 +3440,7 @@ where
             return;
         }
         self.poll_audio();
+        self.check_eof();
         let now = Instant::now();
         let was_hidden = self.viewing_cursor.hidden;
         let pointer_ready = self
@@ -3522,6 +3575,17 @@ where
             status_expiry,
             prefix_expiry,
             self.viewing_cursor.deadline,
+            (self.state == PlaybackState::Playing
+                && self.decode_finished
+                && self.pending_time.is_none()
+                && self.audio_drained)
+                .then(|| {
+                    self.session
+                        .as_ref()
+                        .and_then(PlaybackSession::range_end)
+                        .and_then(|end| self.clock.as_ref().map(|clock| clock.due_at(end)))
+                })
+                .flatten(),
         ]
         .into_iter()
         .flatten()
@@ -4605,6 +4669,30 @@ mod tests {
             export_name(Path::new("photo.final.png")),
             "photo.final-export.png"
         );
+    }
+
+    #[test]
+    fn eof_poll_does_not_replace_faults_or_loading_with_a_successful_end() {
+        let Some(_root) = isolated_test_root(
+            "tests::eof_poll_does_not_replace_faults_or_loading_with_a_successful_end",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.decode_finished = true;
+        app.audio_drained = true;
+        for state in [
+            PlaybackState::Faulted,
+            PlaybackState::Loading,
+            PlaybackState::Ended,
+        ] {
+            app.state = state;
+            app.check_eof();
+            assert_eq!(app.state, state);
+        }
+        app.state = PlaybackState::Playing;
+        app.check_eof();
+        assert_eq!(app.state, PlaybackState::Ended);
     }
 
     #[test]

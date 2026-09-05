@@ -133,6 +133,12 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - Mで編集を作り右上closeを押す。Unsaved edits確認が出て、Cancelならwindowとdirty履歴が残る。
 - 基準機の実windowでは上記操作が通過した。複数DPI/monitor・大量tabのmatrixは未検証。直近captureのUI欠落という目視判定はpixel照合で否定され、hardware/software各10回のtimeline開閉でもtabとcontrolsのpixel数が一致した。古い途中buildの欠落captureとは区別する。
 
+### H1で確認したempty-folder Open scenario
+
+- 画像2枚のfolderから1枚目を開き、Ctrl+Shift+Oで空folderを選択する。修正前は元画像が残る一方でfolder位置とseek barが消え、navigationが効かなくなる。修正後は「No supported media」のstatusだけが変わり、bar右端で2枚目へ移動できる。
+- 自動testは別processの一時APPDATA/LOCALAPPDATAで起動設定を隔離し、空folderと非対応fileだけのfolderでpath、tab、snapshot、未保存編集が保持されることを確認する。修正前のsnapshot不一致を検出済み。
+- Shell snapshot取得の2秒待機と一時的な応答停止は別の未解決課題である。今回の修正を非同期Openの実装として扱わない。
+
 ### H1で確認したseek bar / palette scenario
 
 - 30秒H.264/AACをpauseし、status上端の中央をclick → 15.000秒。75%までdragして離す → 22.500秒。各操作につき一回だけpipelineが再構築される。

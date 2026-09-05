@@ -527,7 +527,6 @@ where
         match self.folder_order.snapshot(&folder) {
             Ok(snapshot) => {
                 let first = snapshot.items.first().map(|item| item.path.clone());
-                self.folder_snapshot = Some(snapshot);
                 if let Some(path) = first {
                     self.open_external(path, false);
                 } else {
@@ -3386,6 +3385,80 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_folder_open_preserves_current_navigation_and_edits() {
+        const TEST_ROOT: &str = "TOWAVUE_EMPTY_FOLDER_TEST_ROOT";
+        let Some(root) = std::env::var_os(TEST_ROOT) else {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time is after the epoch")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!("towavue-empty-folder-{unique}"));
+            std::fs::create_dir(&root).expect("create isolated test root");
+            // Isolate first-run configuration without changing this test process's environment.
+            let result =
+                std::process::Command::new(std::env::current_exe().expect("test executable"))
+                    .args([
+                        "--exact",
+                        "tests::empty_folder_open_preserves_current_navigation_and_edits",
+                        "--nocapture",
+                    ])
+                    .env(TEST_ROOT, &root)
+                    .env("APPDATA", root.join("config"))
+                    .env("LOCALAPPDATA", root.join("local"))
+                    .output()
+                    .expect("run isolated folder test");
+            std::fs::remove_dir_all(&root).expect("remove isolated test files");
+            assert!(
+                result.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            return;
+        };
+        let root = PathBuf::from(root);
+        let media = root.join("media");
+        let empty = root.join("empty");
+        let unsupported = root.join("unsupported");
+        for folder in [&media, &empty, &unsupported] {
+            std::fs::create_dir(folder).expect("create fixture folder");
+        }
+        // These placeholders exercise folder selection, not image decoding or GPU presentation.
+        for name in ["one.png", "two.png"] {
+            std::fs::write(media.join(name), []).expect("create media placeholder");
+        }
+        std::fs::write(unsupported.join("notes.txt"), b"not media").expect("create non-media file");
+        let mut app = Application::new(None, |_| {}).expect("create headless application");
+        app.open_external(media.join("one.png"), false);
+        app.dispatch(CommandId::RotateClockwise);
+        let path = app.path.clone();
+        let tabs = app.tabs.clone();
+        let snapshot = app
+            .folder_snapshot
+            .clone()
+            .expect("initial folder snapshot");
+        let edit = app.edit_state();
+        assert!(app.edits.values().any(EditHistory::is_dirty));
+        for rejected in [empty, unsupported] {
+            app.open_folder_path(rejected);
+            assert_eq!(app.path, path);
+            assert_eq!(app.tabs, tabs);
+            let current = app.folder_snapshot.as_ref().expect("retained snapshot");
+            assert_eq!(current.folder_path, snapshot.folder_path);
+            assert_eq!(current.items, snapshot.items);
+            assert_eq!(app.edit_state(), edit);
+            assert!(app.edits.values().any(EditHistory::is_dirty));
+            assert!(
+                app.status_message
+                    .as_ref()
+                    .expect("empty-folder status")
+                    .0
+                    .starts_with("No supported media")
+            );
+        }
+    }
 
     #[test]
     fn paused_seek_presents_one_preview_even_when_the_first_frame_is_after_the_audio_clock() {

@@ -201,6 +201,8 @@ registryのExplorer Bagsを直接解析しない。これは非公開の保存�
 
 Shell viewの列挙順を取得してから、対応mediaだけをfilterする。filmstrip、全種移動、同種移動、audio playlistは同じsnapshotを共有し、個別に再sortしない。
 
+Open Folderで対応mediaが見つからなかった場合はstatusだけを更新し、表示中mediaのsnapshot・tab・編集を保持する。別folderのsnapshotは実際のmedia load時にだけ現在のnavigationへ反映する。
+
 フォルダ変更はoverlapped `ReadDirectoryChangesW`で検知し、150 msのdebounce後に新しいsnapshotを作る。現在項目はShell identity、次にcanonical pathで再対応付けし、位置番号だけで保持しない。ExplorerのSort By変更はmedia load時とfilmstripを開く時の再取得へ反映する。
 
 Shell viewの作成・列挙に失敗してもmedia open自体は失敗させない。その場合だけWindows自然名前昇順へfallbackし、診断ログと一時status messageで縮退を明示する。

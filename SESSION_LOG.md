@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 17:00 JST - fix / preserve navigation after empty-folder Open
+
+- Trigger: audit Open/folder daily flows after seek/palette checkpoint 39c4331, whose CI 33953688218 passed.
+- Reproduction: open a.png from a two-image folder, then select an empty folder in Open Folder. The image remains, but folder position and the seek bar disappear because the empty snapshot replaces the active media's navigation state. The isolated application regression failed on the same snapshot mismatch.
+- Result: remove the premature snapshot assignment. A folder without supported media changes only status; the actual media load remains responsible for replacing the active snapshot. Existing tab, path, and unsaved edit history survive both empty and unsupported-only folder attempts.
+- Verification: native dialog before/after trial confirms retained 1/2 position and successful bar navigation to b.png after the fix. Format, all-target Clippy with warnings denied, and workspace tests pass (app 19, core 26, runtime 35, integrations 3; three existing live tests explicitly ignored). The new test runs in a child process with temporary configuration/cache roots, does not modify user settings, and removes its fixture files afterward.
+- Changed areas: one production line in app folder opening, an isolated regression test, architecture contract, roadmap, trial guide, gap ledger, and this log. Trial windows closed; local captures remain ignored under target/tmp.
+- Remaining evidence: empty-folder Shell resolution waited two seconds before fallback, temporarily leaving the window unresponsive. This patch does not fix that synchronous wait or establish a general navigation-latency bound.
+- Status: h1_active; launch objective remains open.
+- Next action: verify checkpoint CI, move Shell snapshot waiting off the UI thread with stale-result protection, and continue the Open/folder/input audit.
+
 ## 2026-09-05 16:49 JST - UX / thin seek bar and keyboard palette
 
 - Trigger: continue H1's compact-shell daily interactions after the audio-drain checkpoint; its CI 33952364359 passed.

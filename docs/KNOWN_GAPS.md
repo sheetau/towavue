@@ -16,6 +16,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 ### UI threadを止める処理
 
 - 画像decodeとreading modeの複数画像loadはH1で単一background workerへ移した。要求・結果は最新1件だけを保持し、古い結果は表示しない。texture化とGPU uploadはUI側に残り、大きい画像の表示切替が完全に無停止とは限らない。Shell snapshotの取得も同期である。
+- 空folderのOpen試験では、Shell snapshotが2秒の待機後にfallbackし、その間UIが応答しない現象を確認した。対応mediaがない場合に元のnavigationを壊す問題は修正済みだが、snapshot待機のbackground化は残る。
 - Save/Save AsはH1でbackground化済み。書き出した時間とcancelを表示し、完了までは一時outputだけを変更する。同時jobは1件でqueueはない。通常export中も再生・tab切替・追加編集ができるが、対象tabのclose・移動とprocess終了はjobの完了またはcancelを待つ。
 - waveform、duration、hover thumbnailはworker化済みだが、mediaを切り替えた後も開始済みFFmpeg process自体はcancelせず、返った古い結果を捨てる方式である。
 - animated imageはframe列を先に保持する。H1で1画像/reading要求のRGBA保持量を合計512 MiBに制限したが、decoder作業領域・GPU texture・切替前の旧画像は別である。超過時はerrorとし、部分animationや低解像度へは自動縮退しない。

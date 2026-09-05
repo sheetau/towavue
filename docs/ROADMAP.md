@@ -96,3 +96,5 @@ compact shellの初回改善として、32px title/tab bar、30px status、logo 
 続くpixel照合で、直近captureに対するUI欠落の目視判定を訂正した。hardware/software各10回のtimeline開閉でもtabとcontrolsは一致した。音声drain後のpauseは実WASAPI testと実windowでFaultedを再現し、正常排出と異常終了を区別して修正した。次はthin seek barとkeyboard中心の日常操作を改善し、launch auditへ進める。
 
 thin seek bar、画像のShell順位置移動、paletteの上下選択・Enter・Escapeを追加した。dragはreleaseで一回だけ確定し、EOFからのSeekはPausedにする。停止中の非frame境界Seekで黒画面になる問題も再現・修正し、最初のframeを保持してから再開できることを確認した。H1は継続中で、次はOpen・folder移動・入力を通した日常flowと残る草案との差を監査する。画像thumbnail、本画面scrub、物理keyboard・IME・DPIのmatrixは今回の完了範囲ではない。
+
+Open Folderの日常flowで、対応mediaがないfolderを選ぶと元のnavigationだけが壊れる問題を修正した。元のsnapshot・tab・編集を保持し、画像移動を続けられることを実windowと回帰testで確認した。同時にShell snapshot待機中の応答停止を確認したため、次は取得待ちをUI threadから外す改善を優先する。

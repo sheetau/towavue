@@ -126,11 +126,50 @@ impl TabSet {
         }
         Some(removed)
     }
+
+    /// Move a tab to a gap in the current ordering; identity and selection stay unchanged.
+    pub fn reorder(&mut self, id: TabId, gap: usize) -> bool {
+        let Some(from) = self.tabs.iter().position(|tab| tab.id == id) else {
+            return false;
+        };
+        if gap > self.tabs.len() {
+            return false;
+        }
+        let to = gap - usize::from(from < gap);
+        if from == to {
+            return false;
+        }
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        true
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reordering_preserves_identity_active_tab_and_targets() {
+        let mut tabs = TabSet::default();
+        let a = tabs.open_new("a.png".into(), MediaKind::Image);
+        let b = tabs.open_new("b.mp4".into(), MediaKind::Video);
+        let c = tabs.open_new("album/c.flac".into(), MediaKind::Audio);
+        let original = tabs.clone();
+        assert!(tabs.reorder(a, 3));
+        assert_eq!(
+            tabs.tabs().iter().map(|tab| tab.id).collect::<Vec<_>>(),
+            [b, c, a]
+        );
+        assert_eq!(tabs.active(), original.active());
+        assert!(tabs.reorder(a, 0));
+        assert_eq!(tabs, original);
+        assert!(!tabs.reorder(a, 0));
+        assert!(!tabs.reorder(a, 1));
+        assert!(!tabs.reorder(a, 4));
+        assert!(!tabs.reorder(TabId(99), 0));
+        assert_eq!(tabs, original);
+    }
 
     #[test]
     fn external_audio_in_the_same_folder_reuses_its_playlist_tab() {

@@ -66,6 +66,18 @@ pub fn tab_width(available: f32, count: usize) -> f32 {
     (available / count.max(1) as f32).clamp(72.0, 160.0)
 }
 
+pub fn tab_drop_gap(tabs: &[Rect], strip: Rect, pointer: Pos2) -> Option<(usize, f32)> {
+    if tabs.is_empty() || strip.width() < 2.0 || !strip.contains(pointer) {
+        return None;
+    }
+    let gap = tabs
+        .iter()
+        .position(|rect| pointer.x < rect.center().x)
+        .unwrap_or(tabs.len());
+    let x = tabs.get(gap).map_or(tabs.last()?.right(), Rect::left);
+    Some((gap, x.clamp(strip.left() + 1.0, strip.right() - 1.0)))
+}
+
 pub fn logo(ui: &Ui, rect: Rect) {
     let rect = Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0));
     let point = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (16.0 / 27.68);
@@ -130,6 +142,35 @@ pub fn resize_edge(rect: Rect, position: Pos2) -> Option<ResizeDirection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_gaps_follow_centers_and_clip_scrolled_indicators() {
+        let tabs = (0..3)
+            .map(|i| {
+                Rect::from_min_size(egui::pos2(i as f32 * 100.0, 0.0), egui::vec2(100.0, 26.0))
+            })
+            .collect::<Vec<_>>();
+        let strip = Rect::from_min_max(Pos2::ZERO, egui::pos2(300.0, 26.0));
+        assert_eq!(
+            tab_drop_gap(&tabs, strip, egui::pos2(20.0, 10.0)),
+            Some((0, 1.0))
+        );
+        assert_eq!(
+            tab_drop_gap(&tabs, strip, egui::pos2(150.0, 10.0)),
+            Some((2, 200.0))
+        );
+        assert_eq!(
+            tab_drop_gap(&tabs, strip, egui::pos2(280.0, 10.0)),
+            Some((3, 299.0))
+        );
+        assert!(tab_drop_gap(&tabs, strip, egui::pos2(20.0, 30.0)).is_none());
+        assert!(tab_drop_gap(&[], strip, egui::pos2(20.0, 10.0)).is_none());
+        let clipped = Rect::from_min_max(egui::pos2(120.0, 0.0), egui::pos2(280.0, 26.0));
+        assert_eq!(
+            tab_drop_gap(&tabs, clipped, egui::pos2(125.0, 10.0)),
+            Some((1, 121.0))
+        );
+    }
 
     #[test]
     fn tabs_share_width_and_resize_only_uses_the_window_edge() {

@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 07:06 JST - tabs / release-only reordering and launch audit
+
+- Intent/decision: draft comparison found missing tab ordering. Adopted a primary-drag insertion marker and a single TabSet reorder on release before implementation. Preserve TabId, active media, edits and export targets; Escape or an inside-window drop outside the strip cancels. Existing guarded outside-window detach remains; no cross-window merge or drag-edge auto-scroll.
+- Change/regression: core gap-based reorder plus UI dispatch/marker. Core test failed before the method existed, then passed. Added clipped-gap geometry and egui pointer sequences covering release-only commit, Escape, inside cancellation and outside detach. Dispatch retains the active edited image and saved path. No runtime, unsafe or dependency changes.
+- Native comparison: the same three generated PNGs on previous release 4fb2261 retained their order after dragging first-to-last; new debug build moved it. Reverse drag shows the marker before release, then commits while retaining the active rotated dirty image. Escape and inside-window drop leave order/edit unchanged; Undo clears the title and both owned processes 45252/44416 exit normally. Captures stay ignored. This is an image/96-DPI trial, not proof of every playback or mixed-DPI drag combination.
+- Verification: format, all-target Clippy, 156 tests (app 66, core 35, runtime 51, integrations 4), debug/release builds pass; three live tests explicitly ignored in the default suite. Prior 4fb2261 CI 33994397179 succeeded. No trial instrumentation was added.
+- Audit: corrected obsolete direct-target export/line-count text; documented the late-cancel boundary and grouped remaining launch evidence in KNOWN_GAPS. README explains drag/cancel. Status: h1_active; not launch-complete. Next: evaluate Welcome discovery and draft fidelity, then remaining daily-input matrix. Physical recovery/IME/mixed-DPI and distribution decisions remain open; no response yet to the packaging question and no package/publication performed.
+
 ## 2026-09-06 06:53 JST - shutdown / do not inherit an idle wait after requesting exit
 
 - Evidence: repeated owned recovery/pause/Undo flow closed in 712 ms. Internal trace locates about 0.62 s between the first schedule exit and the next event-loop cycle; audio/decode teardown afterward takes about 4 ms. Pinned winit 0.30.13 Windows wait_for_messages calls prepare_wait (dispatching AboutToWait), then waits using control_flow without first checking the exit flag.

@@ -126,6 +126,7 @@ enum UiAction {
     ResizeWindow(winit::window::ResizeDirection),
     Command(CommandId),
     ActivateTab(TabId),
+    ReorderTab(TabId, usize),
     CloseTab(TabId),
     DetachTab(TabId),
     OpenMedia(PathBuf, bool),
@@ -1703,6 +1704,8 @@ where
                         .max_width(strip_width)
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
+                                let mut tab_rects = Vec::new();
+                                let mut dragged = None;
                                 for tab in self.tabs.tabs() {
                                     let active =
                                         self.tabs.active().is_some_and(|item| item.id == tab.id);
@@ -1712,6 +1715,7 @@ where
                                         egui::vec2(width, 26.0),
                                         egui::Sense::hover(),
                                     );
+                                    tab_rects.push(rect);
                                     if active {
                                         ui.painter().rect_filled(rect, 3.0, Color32::from_gray(28));
                                     }
@@ -1747,12 +1751,10 @@ where
                                     if response.clicked_by(egui::PointerButton::Middle) {
                                         actions.push(UiAction::CloseTab(tab.id));
                                     }
-                                    if response.drag_stopped()
-                                        && response
-                                            .interact_pointer_pos()
-                                            .is_some_and(|position| !window_rect.contains(position))
+                                    if response.dragged_by(egui::PointerButton::Primary)
+                                        || response.drag_stopped_by(egui::PointerButton::Primary)
                                     {
-                                        actions.push(UiAction::DetachTab(tab.id));
+                                        dragged = Some((tab.id, response));
                                     }
                                     let close_rect = egui::Rect::from_min_max(
                                         egui::pos2(rect.right() - 24.0, rect.top()),
@@ -1764,6 +1766,34 @@ where
                                         .clicked()
                                     {
                                         actions.push(UiAction::CloseTab(tab.id));
+                                    }
+                                }
+                                if let Some((id, response)) = dragged {
+                                    if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                                        ui.ctx().stop_dragging();
+                                    } else if let Some(pointer) = response.interact_pointer_pos() {
+                                        let strip = ui.min_rect().intersect(ui.clip_rect());
+                                        if let Some((gap, x)) =
+                                            chrome::tab_drop_gap(&tab_rects, strip, pointer)
+                                        {
+                                            ui.painter_at(strip).line_segment(
+                                                [
+                                                    egui::pos2(x, strip.top()),
+                                                    egui::pos2(x, strip.bottom()),
+                                                ],
+                                                egui::Stroke::new(2.0, Color32::from_gray(225)),
+                                            );
+                                            if response
+                                                .drag_stopped_by(egui::PointerButton::Primary)
+                                            {
+                                                actions.push(UiAction::ReorderTab(id, gap));
+                                            }
+                                        } else if response
+                                            .drag_stopped_by(egui::PointerButton::Primary)
+                                            && !window_rect.contains(pointer)
+                                        {
+                                            actions.push(UiAction::DetachTab(id));
+                                        }
                                     }
                                 }
                             });
@@ -2262,6 +2292,10 @@ where
             }
             UiAction::Command(command) => self.dispatch(command),
             UiAction::ActivateTab(id) => self.activate_tab(id),
+            UiAction::ReorderTab(id, gap) => {
+                self.tabs.reorder(id, gap);
+                self.request_redraw();
+            }
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
             UiAction::DetachTab(id) => self.request_guarded(GuardedAction::DetachTab(id)),
             UiAction::OpenMedia(path, force_new) => {
@@ -4380,6 +4414,98 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_drag_commits_once_on_release_and_preserves_the_active_edit() {
+        let Some(root) = isolated_test_root(
+            "tests::tab_drag_commits_once_on_release_and_preserves_the_active_edit",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let a = app.tabs.open_new(root.join("a.png"), MediaKind::Image);
+        let b = app.tabs.open_new(root.join("b.png"), MediaKind::Image);
+        let c = app.tabs.open_new(root.join("c.png"), MediaKind::Image);
+        app.path = Some(root.join("c.png"));
+        app.media_kind = Some(MediaKind::Image);
+        app.edits
+            .entry(c)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        app.export_paths.insert(c, root.join("saved.png"));
+        let history = app.edits[&c].clone();
+        let original = app.tabs.clone();
+        for (target, cancel, expected) in [
+            (
+                egui::pos2(500.0, 14.0),
+                false,
+                Some(UiAction::ReorderTab(a, 3)),
+            ),
+            (egui::pos2(300.0, 90.0), false, None),
+            (egui::pos2(500.0, 14.0), true, None),
+            (egui::pos2(-20.0, 90.0), false, Some(UiAction::DetachTab(a))),
+        ] {
+            app.tabs = original.clone();
+            let context = egui::Context::default();
+            let button = |pressed, pos| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            };
+            let start = egui::pos2(70.0, 14.0);
+            let mut frames = vec![
+                vec![],
+                vec![egui::Event::PointerMoved(start)],
+                vec![button(true, start)],
+                vec![egui::Event::PointerMoved(egui::pos2(95.0, 14.0))],
+                vec![egui::Event::PointerMoved(target)],
+            ];
+            if cancel {
+                frames.push(vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                }]);
+            }
+            frames.push(vec![button(false, target)]);
+            let last = frames.len() - 1;
+            for (index, events) in frames.into_iter().enumerate() {
+                let mut actions = Vec::new();
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(960.0, 576.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| app.draw_top_bar(ui, &mut actions),
+                );
+                if index == last {
+                    assert!(
+                        actions == expected.clone().into_iter().collect::<Vec<_>>(),
+                        "release at {target:?}, cancelled={cancel}"
+                    );
+                } else {
+                    assert!(actions.is_empty(), "must not commit during drag");
+                }
+            }
+        }
+        app.handle_ui_action(UiAction::ReorderTab(a, 3));
+        assert_eq!(
+            app.tabs.tabs().iter().map(|tab| tab.id).collect::<Vec<_>>(),
+            [b, c, a]
+        );
+        assert_eq!(app.tabs.active().expect("active").id, c);
+        assert_eq!(app.path, Some(root.join("c.png")));
+        assert_eq!(app.edits[&c], history);
+        assert_eq!(app.export_paths[&c], root.join("saved.png"));
+        assert!(app.pending_guard.is_none());
+    }
 
     #[test]
     fn cursor_idle_is_limited_to_unobstructed_fullscreen_visual_media() {

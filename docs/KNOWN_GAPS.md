@@ -32,6 +32,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - Explorerからのfile/folder dropはH1で実装した。複数fileは既存Open契約で開き、folderはShell順の先頭mediaを開く。folder要求は最新1件で、複数folderを一括展開するimport queueではない。virtual file、URL、app間tab結合は対象外。
 - export errorは確認するまで残る詳細modal、画像load errorは画像領域（readingでは該当page）に表示する。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
 - end-to-end UI test、visual regression、accessibility検査、複数DPI/monitorの自動matrixはない。現在のUI完了判定には実window操作が必要である。
+- 画像100%とzoomはphysical pixel基準へ修正し、100/125/150/200%の描画入力、crop preview・編集後寸法・pointer anchorを自動testした。UI rendererの二重拡大も実windowのpixel照合で修正した。ただし接続中の2画面は両方96 DPIで、異なる実DPI間の移動・切断は未検証。
 
 ## 2. UI草案との対応
 

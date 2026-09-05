@@ -393,6 +393,7 @@ struct Application<N> {
     image_error: Option<String>,
     playback_error: Option<String>,
     image_view: ImageViewState,
+    image_viewport: egui::Vec2,
     selection_drag: Option<SelectionDrag>,
     reading_mode: bool,
     reading_settings: ReadingSettings,
@@ -486,6 +487,7 @@ where
             image_error: None,
             playback_error: None,
             image_view: ImageViewState::default(),
+            image_viewport: egui::Vec2::ZERO,
             selection_drag: None,
             reading_mode: false,
             reading_settings: ReadingSettings::default(),
@@ -1390,9 +1392,10 @@ where
         let region = self.image_view.preview_region();
         transform.crop(region);
         let image_size = (transform.size.0 as u32, transform.size.1 as u32);
-        let scale = self
-            .image_view
-            .scale(image_size, (viewport.width(), viewport.height()));
+        self.image_viewport = viewport.size();
+        let pixels_per_point = ui.ctx().pixels_per_point();
+        let physical_viewport = viewport.size() * pixels_per_point;
+        let scale = self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
         let displayed = egui::vec2(transform.size.0 * scale, transform.size.1 * scale);
         let center = viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
         let image_rect = egui::Rect::from_center_size(center, displayed);
@@ -1416,11 +1419,10 @@ where
             self.image_view.zoom_by(
                 if scroll > 0.0 { 1.1 } else { 1.0 / 1.1 },
                 image_size,
-                (viewport.width(), viewport.height()),
+                physical_viewport.into(),
             );
-            let new_scale = self
-                .image_view
-                .scale(image_size, (viewport.width(), viewport.height()));
+            let new_scale =
+                self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
             if let Some(pointer) = pointer {
                 let from_center = pointer - center;
                 let correction = from_center * (1.0 - new_scale / old_scale);
@@ -2785,8 +2787,19 @@ where
 
     fn zoom_image(&mut self, factor: f32) {
         let Some(image) = &self.image else { return };
-        let size = image.dimensions();
-        self.image_view.zoom_by(factor, size, (960.0, 576.0));
+        let Some(context) = &self.ui_context else {
+            return;
+        };
+        if self.image_viewport.min_elem() <= 0.0 {
+            return;
+        }
+        let mut transform = self.visual_transform(image.dimensions());
+        transform.crop(self.image_view.preview_region());
+        self.image_view.zoom_by(
+            factor,
+            (transform.size.0 as u32, transform.size.1 as u32),
+            (self.image_viewport * context.pixels_per_point()).into(),
+        );
         self.request_redraw();
     }
 
@@ -4188,6 +4201,131 @@ mod tests {
             assert!(!app.fullscreen);
             assert!(app.timeline_open);
         }
+    }
+
+    #[test]
+    fn image_zoom_uses_physical_pixels_and_the_current_preview_viewport() {
+        let Some(root) = isolated_test_root(
+            "tests::image_zoom_uses_physical_pixels_and_the_current_preview_viewport",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let context = egui::Context::default();
+        app.ui_context = Some(context.clone());
+        app.fullscreen = true;
+        app.media_kind = Some(MediaKind::Image);
+        app.path = Some(root.join("image.png"));
+        app.image = Some(
+            ImagePresentation::from_decoded(
+                &context,
+                &root.join("image.png"),
+                DecodedImage {
+                    format: "test",
+                    frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                        width: 400,
+                        height: 200,
+                        rgba: vec![255; 400 * 200 * 4],
+                        delay: Duration::ZERO,
+                    }],
+                },
+            )
+            .expect("image texture"),
+        );
+        let texture = app.image.as_ref().expect("image").texture.id();
+        let render = |app: &mut Application<_>, density: f32| {
+            let mut output = egui::FullOutput::default();
+            for _ in 0..3 {
+                let mut input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 600.0) / density,
+                    )),
+                    ..Default::default()
+                };
+                input
+                    .viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .expect("root viewport")
+                    .native_pixels_per_point = Some(density);
+                output = context.run_ui(input, |ui| app.draw_ui(ui, &mut Vec::new()));
+            }
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture => {
+                        Some(mesh.calc_bounds().size() * output.pixels_per_point)
+                    }
+                    _ => None,
+                })
+                .expect("image mesh")
+        };
+        for density in [1.0, 1.25, 1.5, 2.0, 1.0] {
+            for preview in [false, true] {
+                app.image_view.crop_preview = preview;
+                app.image_view.selection = Some(UnitRect {
+                    min: UnitPoint { x: 0.0, y: 0.0 },
+                    max: UnitPoint { x: 0.5, y: 0.5 },
+                });
+                app.image_view.actual_size();
+                let expected = egui::vec2(400.0, 200.0) / if preview { 2.0 } else { 1.0 };
+                assert!((render(&mut app, density) - expected).length() < 0.01);
+                app.image_view.fit();
+                let fitted = render(&mut app, density);
+                assert!(
+                    (fitted - egui::vec2(800.0, 400.0)).length() < 0.1,
+                    "density={density} preview={preview} fitted={fitted:?}"
+                );
+                app.zoom_image(1.25);
+                assert!((render(&mut app, density) - fitted * 1.25).length() < 0.1);
+            }
+        }
+        app.image_view.crop_preview = false;
+        app.image_view.selection = None;
+        app.image_view.actual_size();
+        render(&mut app, 2.0);
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 300.0),
+            )),
+            events: vec![egui::Event::PointerMoved(egui::pos2(230.0, 160.0))],
+            ..Default::default()
+        };
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .expect("root viewport")
+            .native_pixels_per_point = Some(2.0);
+        let mut scroll = 1.0;
+        let _ = context.run_ui(input, |ui| {
+            ui.input_mut(|input| {
+                input.modifiers.ctrl = true;
+                input.smooth_scroll_delta.y = scroll;
+            });
+            scroll = 0.0;
+            app.draw_ui(ui, &mut Vec::new());
+        });
+        assert!((app.image_view.pan.0 + 3.0).abs() < 0.01);
+        assert!((app.image_view.pan.1 + 1.0).abs() < 0.01);
+        assert!((render(&mut app, 2.0) - egui::vec2(440.0, 220.0)).length() < 0.1);
+
+        app.tabs.open_new(root.join("image.png"), MediaKind::Image);
+        app.push_edit(EditOperation::Crop(PixelCrop {
+            x: 0,
+            y: 0,
+            width: 200,
+            height: 100,
+        }));
+        app.push_edit(EditOperation::RotateClockwise);
+        app.image_view.actual_size();
+        assert!((render(&mut app, 1.5) - egui::vec2(100.0, 200.0)).length() < 0.1);
+        app.image_view.fit();
+        let fitted = render(&mut app, 1.5);
+        assert!((fitted - egui::vec2(300.0, 600.0)).length() < 0.1);
+        app.zoom_image(1.25);
+        assert!((render(&mut app, 1.5) - fitted * 1.25).length() < 0.1);
     }
 
     #[test]

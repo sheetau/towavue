@@ -4,6 +4,13 @@
 
 ## 1. 最初に試す
 
+### 画像zoomとDPIのH1確認
+
+- 480×300のwindowで8×8 PNGをfitし、paletteでZoom inを選ぶ。修正前は固定960×576から計算して6400%まで飛んだ。修正後は表示中の222px角に対して1.25倍の約278px角（3469%）となり、viewport外はclipする。
+- 自動描画testは100/125/150/200%と100%への復帰、100%実pixel寸法、fitからの1.25倍、crop preview、crop後回転、Ctrl+wheelのpointer anchorを確認する。fractional DPIのegui座標丸めには0.1 physical pixel未満の許容を使う。
+- native試験では既存egui keyboard zoomでUIだけを拡大した。最初は8×8 PNGの有色領域が12×11、画像計算だけの修正でも10×9だった。固定egui-directx11のzoom二重適用をadapterで除き、最終captureでは元と同じ8×8、同じ中心位置になった。タイトル・status・window controlsのはみ出しも解消し、拡大UIのclickで最大化→元の40,40,520,340へ復帰→closeを確認した。
+- H.264/AACの拡大UIもbar外へaspect-fitし、60 presented / 0 dropped / 0 CPU transfersでEOFに到達した。実monitorは2画面とも96 DPIで、異なるOS DPI間の移動・monitor切断は未検証。OS設定やdisplay modeは変更していない。capture・fixture・diagnosticはignoredのtarget/tmp内に保持する。
+
 ### 日本語表示とpalette入力のH1確認
 
 - 日本語filenameのPNGでtab/statusが欠字になるbaselineを確認した。WindowsのYu Gothic Medium（なければMeiryo、MS Gothic）を既定fontの後ろへ追加し、最終windowで日本語の名前が読めることを確認した。fontは起動時に一度読むだけで、同梱・downloadやOS設定変更はしない。未導入環境ではdiagnosticを確認し、glyph testの明示skipを成功証拠にしない。

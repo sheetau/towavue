@@ -96,6 +96,7 @@ impl Default for ImageViewState {
 }
 
 impl ImageViewState {
+    /// Returns physical display pixels per image pixel; viewport dimensions are physical pixels.
     pub fn scale(self, image_size: (u32, u32), viewport_size: (f32, f32)) -> f32 {
         match self.zoom {
             ZoomMode::Fit => fit_scale(image_size, viewport_size),

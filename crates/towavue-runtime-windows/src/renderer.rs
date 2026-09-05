@@ -674,7 +674,9 @@ impl FrameRenderer {
     ) -> Result<egui::PlatformOutput, RenderError> {
         self.ensure_surface()?;
         let render_target = self.render_target()?;
-        let (renderer_output, platform_output, _) = egui_directx11::split_output(output);
+        let (mut renderer_output, platform_output, _) = egui_directx11::split_output(output);
+        // Pinned egui-directx11 applies context zoom again to both vertices and clip rectangles.
+        renderer_output.pixels_per_point /= context.zoom_factor();
         self.ui_renderer
             .render(&self.context, &render_target, context, renderer_output)?;
         Ok(platform_output)

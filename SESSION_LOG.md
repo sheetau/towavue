@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 03:13 JST - viewing / physical-pixel zoom and UI scale correction
+
+- Trigger: f26540e passed CI 33982845121. Small-window Zoom in used a hard-coded 960x576 viewport and jumped from a 222-pixel fitted square to the 6400% cap. Actual/Custom image scales also treated source pixels as logical UI points.
+- Result: retain the rendered image viewport, use physical viewport dimensions for core scale/zoom and convert back for painting; command zoom uses the edited/crop-preview dimensions. Pan and pointer-anchor correction remain logical; image source, edit history and decode ownership are unchanged.
+- Renderer evidence: injected egui UI zoom produced clipped window controls and enlarged an 8x8 image's saturated-color bounds to 12x11. The image-only fix still measured 10x9. Pinned egui-directx11 multiplies both vertices and clips by context zoom after pixels-per-point already includes it. Runtime adapter now removes that extra factor before calling the renderer; final bounds are 8x8 at the original center. No dependency or unsafe additions.
+- Verification: new render regression covers native density 1/1.25/1.5/2/1, actual size, fit-to-command zoom, crop preview, crop then rotation and Ctrl+wheel anchor. Fractional egui coordinate rounding uses a sub-0.1-physical-pixel tolerance. Full format, Clippy with warnings denied, tests and app build pass: app 48, core 31, runtime 50, integrations 4; three live tests explicitly ignored.
+- Native verification: small-window Zoom in now yields about 278 pixels (3469%), the expected 1.25 step. Scaled controls maximize, restore the original 40,40,520,340 bounds and close via pointer hits. H.264/AAC scaled UI retains video/bar alignment and completes 60 presented / 0 dropped / 0 CPU transfers; drift p95/max 3.500/3.507 ms. All owned trial windows closed normally.
+- Limits: both connected monitors report 96 DPI; UI zoom and synthetic density tests do not prove mixed-OS-DPI monitor transitions or disconnects. Initial test setup failures (generic/path) were corrected before the behavioral baseline; Clippy's test unwrap was changed to a descriptive expect. Trial artifacts remain ignored.
+- Changed areas: app image geometry and regression, core unit contract comment, runtime UI adapter, README, architecture, roadmap, trial guide, gap ledger and this log. Status remains h1_active.
+- Next action: verify checkpoint CI; continue remaining input/layout audits, including actual IME and large-image fit boundaries, then launch-wide performance/stability gates. Distribution still requires its separate decision.
+
 ## 2026-09-06 03:04 JST - input / Japanese glyphs and palette IME ownership
 
 - Trigger: checkpoint 602835e passed CI 33982075592. Native Japanese-named PNG showed missing glyph boxes in tab/status; a synthetic preedit plus Enter also executed a palette command.

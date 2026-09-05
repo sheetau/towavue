@@ -66,6 +66,8 @@ Gはメディア種別ごとの4×4 grid menuを開き、`1234/qwer/asdf/zxcv`�
 
 画像ではCtrl+wheelまたは+/-でzoom、Ctrl+Hでactual size、Shift+Wでfit、右dragでpanします。左dragでselectionを作り、辺dragでresize、Shift付き作成で正方形、Shift付きresizeで比率を保持します。選択範囲clickまたはCtrl+Shift+Yはcrop previewです。Bでreading mode、Rで縦横切替、Hで表示順反転、Ctrl+[ / Ctrl+]で表示数を2～10枚に変更できます。
 
+画像の100%は画面の実pixel基準です。zoomは現在の表示領域とcrop・回転後の寸法を使うため、小さいwindowやcrop previewからの一段の拡大も現在の見た目を基準にします。
+
 通常画像表示ではCtrl+Yでcropを履歴へ追加し、R/Lで90度回転、H/Vで反転します。動画・音声ではI/Oでtrimの開始・終了、上下矢印でvolume、Mでmute、`,` / `.` / `/`でrateを変更・resetします。Ctrl+Z / Ctrl+Shift+Zはundo/redo、Ctrl+Shift+SはSave As、Ctrl+Sは直近export先への再Saveです。dirtyなmediaの移動・close・終了時はExport / Discard / Cancelを選択できます。同一source pathへのexportは拒否されます。
 
 画像と動画はfileごとのtab、音声は同じfolderのplaylist tabとして開きます。filmstripはShell snapshotの全対応mediaをExplorer順で表示し、middle clickで明示的に新規tabを作れます。H1では中央のthumbnail列へ変更し、画像・動画preview、音声waveformとdurationを表示します。現在項目を中央へ寄せ、wheelで横scroll、Tab / Shift+Tabで移動できます。previewは可視項目だけを単一workerで読み込みます。フォルダー変更は`ReadDirectoryChangesW`で検知してdebounce後にsnapshotを更新します。M1のcodec fixtureはMP4/H.264/AAC、MKV/HEVC/AAC、WebM/VP9/Opusです。再生終了時のdiagnosticにはadapter LUID、hardware frame数、CPU transfer数、表示・drop frame数、Seek latency、A/V driftを記録します。

@@ -137,7 +137,10 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 
 - 画像2枚のfolderから1枚目を開き、Ctrl+Shift+Oで空folderを選択する。修正前は元画像が残る一方でfolder位置とseek barが消え、navigationが効かなくなる。修正後は「No supported media」のstatusだけが変わり、bar右端で2枚目へ移動できる。
 - 自動testは別processの一時APPDATA/LOCALAPPDATAで起動設定を隔離し、空folderと非対応fileだけのfolderでpath、tab、snapshot、未保存編集が保持されることを確認する。修正前のsnapshot不一致を検出済み。
-- Shell snapshot取得の2秒待機と一時的な応答停止は別の未解決課題である。今回の修正を非同期Openの実装として扱わない。
+- その後のH1でShell snapshot待機も非同期化した。native folder pickerを閉じた直後の応答probeは修正前が1秒timeout、修正後が8 msだった。Opening folder中のbar移動は古いOpenを失効させ、待機中のwindow closeも63 msで完了した（いずれも基準機の単発観測）。
+- folder起動後のreading 2枚表示、watcher更新による2→3件のsnapshot反映、別folderをOpenした後のreading表示を確認した。runtimeの同期APIを使う実Explorer sort matrixも別途実行し、skipなしで通過した。
+- runtime testは中間要求の置換、古い結果・完了済みslotの失効、実行中のcloseと結果抑止を検証する。app testは背景refreshが明示Openを上書きしないこと、別mediaを開いた後や最後のtab close後の失効も検証する。
+- native picker自体はまだUI threadを止める。30秒H.264/AACの通常再生は900 frames / 0 CPU transfers / 0 drops / drift p95 3.975 msだったが、Open Folderを約2秒表示してCancelした再生は92 presented / 808 dropped、drift最大3123.274 msとなった。Cancelはsnapshotを要求しないため、Shell非同期化の成功をpicker中の再生保証へ拡張しない。
 
 ### H1で確認したseek bar / palette scenario
 

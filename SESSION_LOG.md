@@ -2,6 +2,18 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 17:20 JST - responsiveness / asynchronous Shell snapshots
+
+- Trigger: the empty-folder Open trial blocked the UI while Shell resolution waited two seconds; checkpoint 99b6fcb independently passed CI 33954133508.
+- Result: retain the dedicated STA and existing Shell ordering/fallback, but give it latest-only request/result slots and completion notification. UI paths no longer call blocking snapshot. Generation and active-path checks reject stale results; same-folder refresh retains existing navigation; background refresh does not override explicit Open. Media changes, guarded navigation, and last-tab close invalidate obsolete work. Successful folder Open reuses its resolved snapshot; reading and rename remapping update after completion.
+- Lifetime: drop closes the mailbox without joining a potentially blocked Shell call. The worker owns COM cleanup and suppresses late results; no native objects cross the boundary. The synchronous API remains for non-UI consumers and tests. No new dependency, extra worker, or app/core unsafe code.
+- Verification: focused mailbox/application tests, format, all-target Clippy with warnings denied, and workspace tests pass (app 19, core 26, runtime 37, integrations 3; three explicitly ignored live tests). The real Explorer sort matrix was also executed and passed without skips. Tests cover coalescing, stale/completed-result invalidation, close while blocked, Open/refresh precedence, empty/unsupported folders, edits, media switch, and last-tab close.
+- Real-window evidence: the same post-picker empty-folder probe changed from a 1008 ms timeout to an 8 ms response. During Opening folder, image navigation succeeded and the obsolete result did not restore the old path. Close during the wait completed in 63 ms. Folder startup, reading pages, 2-to-3-item watcher refresh, and Open into another folder preserved the expected presentation. Trial windows closed; captures/fixtures remain ignored under target/tmp.
+- Important remaining evidence: normal 30-second H.264/AAC playback presented 900/900 hardware frames with 0 CPU transfers / 0 drops and drift p95/max 3.975/4.191 ms. Opening the native folder picker and cancelling after approximately two seconds, with no snapshot request, instead produced 92 presented / 808 dropped and drift max 3123.274 ms. Native picker calls still block the UI thread; this checkpoint does not fix their playback disruption. A prior picker-plus-folder trial also failed; do not attribute its whole symptom to Shell snapshot waiting.
+- Changed areas: runtime Shell request lifecycle, app folder state/completion/status/tests, README, architecture, roadmap, development guide, gap ledger, and this log.
+- Status: h1_active; shell-wait responsiveness is improved, not a launch-complete or fully asynchronous Open claim.
+- Next action: verify CI, fix native picker waiting/playback recovery with the Cancel-only reproduction, then continue daily input and launch audits.
+
 ## 2026-09-05 17:00 JST - fix / preserve navigation after empty-folder Open
 
 - Trigger: audit Open/folder daily flows after seek/palette checkpoint 39c4331, whose CI 33953688218 passed.

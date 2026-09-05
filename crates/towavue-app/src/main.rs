@@ -132,6 +132,7 @@ enum UiAction {
 
 enum AppEvent {
     ImagesReady,
+    FolderReady,
     Export(ExportEvent),
     Playback(PlaybackEvent),
     Duration(PathBuf, Result<Duration, String>),
@@ -144,6 +145,11 @@ enum AppEvent {
         u64,
         Result<towavue_runtime_windows::PreviewImage, String>,
     ),
+}
+
+enum FolderIntent {
+    Open,
+    Refresh(PathBuf),
 }
 
 #[derive(Clone)]
@@ -317,6 +323,7 @@ struct Application<N> {
     ui_context: Option<egui::Context>,
     ui_state: Option<egui_winit::State>,
     folder_order: FolderOrderProvider,
+    pending_folder: Option<(u64, FolderIntent)>,
     folder_snapshot: Option<FolderSnapshot>,
     folder_watcher: Option<(PathBuf, FolderWatcher)>,
     tabs: TabSet,
@@ -387,6 +394,9 @@ where
         let notify = Arc::new(notify);
         let image_notify = Arc::clone(&notify);
         let image_loader = ImageLoader::new(move || image_notify(AppEvent::ImagesReady))?;
+        let folder_notify = Arc::clone(&notify);
+        let folder_order =
+            FolderOrderProvider::with_notify(move || folder_notify(AppEvent::FolderReady))?;
         Ok(Self {
             initial_path,
             notify,
@@ -394,7 +404,8 @@ where
             renderer: None,
             ui_context: None,
             ui_state: None,
-            folder_order: FolderOrderProvider::new()?,
+            folder_order,
+            pending_folder: None,
             folder_snapshot: None,
             folder_watcher: None,
             tabs: TabSet::default(),
@@ -524,20 +535,21 @@ where
     }
 
     fn open_folder_path(&mut self, folder: PathBuf) {
-        match self.folder_order.snapshot(&folder) {
-            Ok(snapshot) => {
-                let first = snapshot.items.first().map(|item| item.path.clone());
-                if let Some(path) = first {
-                    self.open_external(path, false);
-                } else {
-                    self.set_status(format!("No supported media in {}", folder.display()));
-                }
-            }
-            Err(error) => self.set_status(error.to_string()),
-        }
+        let generation = self.folder_order.request(Some(folder));
+        self.pending_folder = Some((generation, FolderIntent::Open));
+        self.request_redraw();
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.pending_folder = None;
+        self.folder_order.request(None);
+        if self
+            .folder_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| Some(snapshot.folder_path.as_path()) != path.parent())
+        {
+            self.folder_snapshot = None;
+        }
         self.image_generation = self.image_loader.request(Vec::new());
         self.image_loading = false;
         self.image_error = None;
@@ -662,45 +674,89 @@ where
     }
 
     fn refresh_folder_snapshot(&mut self) {
-        let folder = self
-            .path
-            .as_deref()
-            .and_then(Path::parent)
-            .map(Path::to_owned);
-        let Some(folder) = folder else { return };
-        self.watch_folder(&folder);
-        match self.folder_order.snapshot(&folder) {
-            Ok(snapshot) => {
-                let current_path = self.path.clone();
-                let current_identity = current_path.as_deref().and_then(|path| {
-                    self.folder_snapshot
-                        .as_ref()
-                        .and_then(|current| current.items.iter().find(|item| item.path == path))
-                        .map(|item| item.identity.clone())
-                });
-                let remapped = current_path.as_deref().and_then(|path| {
-                    snapshot
-                        .match_item(current_identity.as_ref(), path)
-                        .map(|item| (item.path.clone(), item.kind))
-                });
-                if snapshot.source == FolderSnapshotSource::NaturalNameFallback {
-                    self.set_status("Explorer order unavailable; using natural-name order".into());
-                }
-                self.folder_snapshot = Some(snapshot);
-                if let Some((path, kind)) = remapped
-                    && self.path.as_ref() != Some(&path)
-                {
-                    if let Some(tab) = self.tabs.active_mut() {
-                        tab.target.set_current_path(path.clone(), kind);
+        if matches!(self.pending_folder, Some((_, FolderIntent::Open))) {
+            return;
+        }
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        let Some(folder) = path.parent() else { return };
+        self.watch_folder(folder);
+        let generation = self.folder_order.request(Some(folder.to_owned()));
+        self.pending_folder = Some((generation, FolderIntent::Refresh(path)));
+        self.request_redraw();
+    }
+
+    fn finish_folder_load(&mut self) {
+        let Some(snapshot) = self.folder_order.take_completed() else {
+            return;
+        };
+        if self
+            .pending_folder
+            .as_ref()
+            .map(|(generation, _)| *generation)
+            != Some(snapshot.generation)
+        {
+            return;
+        }
+        let (_, intent) = self.pending_folder.take().expect("current folder request");
+        match intent {
+            FolderIntent::Open => {
+                if let Some(first) = snapshot.items.first() {
+                    let path = first.path.clone();
+                    self.open_external(path.clone(), false);
+                    if self.path.as_ref() == Some(&path) {
+                        self.folder_order.request(None);
+                        self.pending_folder = None;
+                        self.apply_folder_snapshot(snapshot);
                     }
-                    self.path = Some(path);
-                    self.media_kind = Some(kind);
-                    self.refresh_title();
+                } else {
+                    self.set_status(format!(
+                        "No supported media in {}",
+                        snapshot.folder_path.display()
+                    ));
+                    self.refresh_folder_snapshot();
                 }
             }
-            Err(error) => self.set_status(error.to_string()),
+            FolderIntent::Refresh(path) if self.path.as_ref() == Some(&path) => {
+                self.apply_folder_snapshot(snapshot);
+            }
+            FolderIntent::Refresh(_) => {}
         }
-        if self.reading_mode && self.image.is_some() {
+        self.request_redraw();
+    }
+
+    fn apply_folder_snapshot(&mut self, snapshot: FolderSnapshot) {
+        let current_path = self.path.clone();
+        let current_identity = current_path.as_deref().and_then(|path| {
+            self.folder_snapshot
+                .as_ref()
+                .and_then(|current| current.items.iter().find(|item| item.path == path))
+                .map(|item| item.identity.clone())
+        });
+        let remapped = current_path.as_deref().and_then(|path| {
+            snapshot
+                .match_item(current_identity.as_ref(), path)
+                .map(|item| (item.path.clone(), item.kind))
+        });
+        if snapshot.source == FolderSnapshotSource::NaturalNameFallback {
+            self.set_status("Explorer order unavailable; using natural-name order".into());
+        }
+        self.folder_snapshot = Some(snapshot);
+        if let Some((path, kind)) = remapped
+            && self.path.as_ref() != Some(&path)
+        {
+            if let Some(tab) = self.tabs.active_mut() {
+                tab.target.set_current_path(path.clone(), kind);
+            }
+            self.path = Some(path);
+            self.media_kind = Some(kind);
+            self.refresh_title();
+            if self.image_loading && !self.reading_mode {
+                self.rebuild_reading_pages();
+            }
+        }
+        if self.reading_mode && self.media_kind == Some(MediaKind::Image) {
             self.rebuild_reading_pages();
         }
     }
@@ -805,6 +861,7 @@ where
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::ImagesReady => self.finish_image_load(),
+            AppEvent::FolderReady => self.finish_folder_load(),
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(event) => self.handle_playback_event(event),
             AppEvent::Duration(path, result) if self.path.as_ref() == Some(&path) => match result {
@@ -1663,6 +1720,12 @@ where
                         }
                     }
                     let mut details = Vec::new();
+                    if let Some((_, intent)) = &self.pending_folder {
+                        details.push(match intent {
+                            FolderIntent::Open => "Opening folder".into(),
+                            FolderIntent::Refresh(_) => "Loading order".into(),
+                        });
+                    }
                     if let Some(image) = &self.image {
                         let (width, height) = image.dimensions();
                         let zoom = match self.image_view.zoom {
@@ -2395,6 +2458,10 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        if matches!(self.pending_folder, Some((_, FolderIntent::Open))) {
+            self.folder_order.request(None);
+            self.pending_folder = None;
+        }
         if let Some(export) = &self.active_export {
             let affects_export = match &action {
                 GuardedAction::CloseTab(id) | GuardedAction::DetachTab(id) => *id == export.tab,
@@ -2519,6 +2586,8 @@ where
             self.media_kind = None;
             self.folder_snapshot = None;
             self.folder_watcher = None;
+            self.folder_order.request(None);
+            self.pending_folder = None;
             self.pending_time = None;
             self.state = PlaybackState::Paused;
             self.refresh_title();
@@ -3431,7 +3500,16 @@ mod tests {
         }
         std::fs::write(unsupported.join("notes.txt"), b"not media").expect("create non-media file");
         let mut app = Application::new(None, |_| {}).expect("create headless application");
+        let wait_for_folder = |app: &mut Application<_>| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while app.pending_folder.is_some() && Instant::now() < deadline {
+                app.finish_folder_load();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(app.pending_folder.is_none(), "folder request completed");
+        };
         app.open_external(media.join("one.png"), false);
+        wait_for_folder(&mut app);
         app.dispatch(CommandId::RotateClockwise);
         let path = app.path.clone();
         let tabs = app.tabs.clone();
@@ -3443,6 +3521,7 @@ mod tests {
         assert!(app.edits.values().any(EditHistory::is_dirty));
         for rejected in [empty, unsupported] {
             app.open_folder_path(rejected);
+            wait_for_folder(&mut app);
             assert_eq!(app.path, path);
             assert_eq!(app.tabs, tabs);
             let current = app.folder_snapshot.as_ref().expect("retained snapshot");
@@ -3458,6 +3537,34 @@ mod tests {
                     .starts_with("No supported media")
             );
         }
+        app.open_folder_path(root.join("empty"));
+        let open_generation = app.pending_folder.as_ref().expect("pending Open").0;
+        app.refresh_folder_snapshot();
+        assert_eq!(
+            app.pending_folder
+                .as_ref()
+                .expect("Open survives background refresh")
+                .0,
+            open_generation
+        );
+        app.open_external(media.join("two.png"), false);
+        wait_for_folder(&mut app);
+        assert_eq!(app.path.as_deref(), Some(media.join("two.png").as_path()));
+        assert_eq!(
+            app.folder_snapshot
+                .as_ref()
+                .expect("current folder")
+                .folder_path,
+            media
+        );
+        app.open_folder_path(root.join("empty"));
+        let ids: Vec<_> = app.tabs.tabs().iter().map(|tab| tab.id).collect();
+        for id in ids {
+            app.close_tab_unchecked(id);
+        }
+        assert!(app.pending_folder.is_none());
+        assert!(app.folder_snapshot.is_none());
+        assert!(app.path.is_none());
     }
 
     #[test]

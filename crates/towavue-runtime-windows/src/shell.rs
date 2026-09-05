@@ -2,8 +2,8 @@ use std::cmp::Ordering;
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use std::thread::{self, JoinHandle};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use thiserror::Error;
@@ -37,95 +37,152 @@ pub enum FolderOrderError {
     ResponseLost,
 }
 
-enum Request {
-    Snapshot {
-        folder: PathBuf,
-        generation: u64,
-        reply: mpsc::Sender<FolderSnapshot>,
-    },
-    Shutdown,
+struct Request {
+    folder: PathBuf,
+    generation: u64,
+    reply: Option<mpsc::Sender<FolderSnapshot>>,
 }
 
+#[derive(Default)]
+struct Mailbox {
+    generation: u64,
+    pending: Option<Request>,
+    completed: Option<FolderSnapshot>,
+    closed: bool,
+}
+
+/// The STA owns all Shell objects; requests and results carry only owned domain values.
 pub struct FolderOrderProvider {
-    sender: mpsc::Sender<Request>,
-    worker: Option<JoinHandle<()>>,
-    next_generation: u64,
+    shared: Arc<(Mutex<Mailbox>, Condvar)>,
 }
 
 impl FolderOrderProvider {
     pub fn new() -> Result<Self, FolderOrderError> {
-        let (sender, receiver) = mpsc::channel();
-        let worker = thread::Builder::new()
-            .name("towavue-shell-sta".into())
-            .spawn(move || shell_worker(receiver))
-            .map_err(|_| FolderOrderError::WorkerStopped)?;
-        Ok(Self {
-            sender,
-            worker: Some(worker),
-            next_generation: 0,
-        })
+        Self::with_notify(|| {})
     }
 
-    pub fn snapshot(&mut self, folder: &Path) -> Result<FolderSnapshot, FolderOrderError> {
-        self.next_generation = self.next_generation.wrapping_add(1);
-        let generation = self.next_generation;
-        let (reply, response) = mpsc::channel();
-        self.sender
-            .send(Request::Snapshot {
-                folder: folder.to_owned(),
-                generation,
-                reply,
-            })
+    pub fn with_notify(notify: impl Fn() + Send + 'static) -> Result<Self, FolderOrderError> {
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let worker_shared = Arc::clone(&shared);
+        thread::Builder::new()
+            .name("towavue-shell-sta".into())
+            .spawn(move || shell_worker(worker_shared, notify))
             .map_err(|_| FolderOrderError::WorkerStopped)?;
+        Ok(Self { shared })
+    }
+
+    /// Blocking interface for callers outside the UI event loop.
+    pub fn snapshot(&mut self, folder: &Path) -> Result<FolderSnapshot, FolderOrderError> {
+        let (reply, response) = mpsc::channel();
+        self.enqueue(Some(folder.to_owned()), Some(reply));
         response.recv().map_err(|_| FolderOrderError::ResponseLost)
+    }
+
+    /// Replaces queued work. None invalidates pending and in-flight results.
+    pub fn request(&self, folder: Option<PathBuf>) -> u64 {
+        self.enqueue(folder, None)
+    }
+
+    fn enqueue(&self, folder: Option<PathBuf>, reply: Option<mpsc::Sender<FolderSnapshot>>) -> u64 {
+        let (mutex, ready) = &*self.shared;
+        let mut mailbox = mutex.lock().expect("Shell mailbox");
+        mailbox.generation = mailbox.generation.wrapping_add(1);
+        mailbox.pending = folder.map(|folder| Request {
+            folder,
+            generation: mailbox.generation,
+            reply,
+        });
+        mailbox.completed = None;
+        ready.notify_one();
+        mailbox.generation
+    }
+
+    pub fn take_completed(&self) -> Option<FolderSnapshot> {
+        self.shared
+            .0
+            .lock()
+            .expect("Shell mailbox")
+            .completed
+            .take()
     }
 }
 
 impl Drop for FolderOrderProvider {
     fn drop(&mut self) {
-        let _ = self.sender.send(Request::Shutdown);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+        let (mutex, ready) = &*self.shared;
+        let mut mailbox = mutex.lock().expect("Shell mailbox");
+        mailbox.closed = true;
+        mailbox.pending = None;
+        mailbox.completed = None;
+        ready.notify_one();
+        // A Shell extension can block inside COM. The STA finishes and releases its own objects.
+    }
+}
+
+fn run_requests(
+    shared: Arc<(Mutex<Mailbox>, Condvar)>,
+    notify: impl Fn(),
+    mut resolve: impl FnMut(&Path, u64) -> FolderSnapshot,
+) {
+    let (mutex, ready) = &*shared;
+    loop {
+        let request = {
+            let mut mailbox = ready
+                .wait_while(mutex.lock().expect("Shell mailbox"), |mailbox| {
+                    !mailbox.closed && mailbox.pending.is_none()
+                })
+                .expect("Shell mailbox");
+            if mailbox.closed {
+                return;
+            }
+            mailbox.pending.take().expect("pending Shell request")
+        };
+        let snapshot = resolve(&request.folder, request.generation);
+        let publish = {
+            let mut mailbox = mutex.lock().expect("Shell mailbox");
+            if mailbox.closed {
+                return;
+            }
+            if mailbox.generation != request.generation {
+                false
+            } else if let Some(reply) = request.reply {
+                let _ = reply.send(snapshot);
+                false
+            } else {
+                mailbox.completed = Some(snapshot);
+                true
+            }
+        };
+        if publish {
+            notify();
         }
     }
 }
 
-fn shell_worker(receiver: mpsc::Receiver<Request>) {
+fn shell_worker(shared: Arc<(Mutex<Mailbox>, Condvar)>, notify: impl Fn()) {
     // SAFETY: this worker owns every COM interface it creates and never moves one across threads.
     // It initializes and uninitializes the apartment on this same thread.
     let initialized = unsafe { OleInitialize(None).is_ok() };
     let mut last_live_window = None;
-    while let Ok(request) = receiver.recv() {
-        match request {
-            Request::Snapshot {
-                folder,
-                generation,
-                reply,
-            } => {
-                let snapshot = if initialized {
-                    shell_snapshot(&folder, generation, &mut last_live_window).unwrap_or_else(
-                        || {
-                            eprintln!(
-                                "towavue: Shell view unavailable for {}; using natural-name order",
-                                folder.display()
-                            );
-                            fallback_snapshot(&folder, generation)
-                        },
-                    )
-                } else {
-                    eprintln!(
-                        "towavue: Shell STA initialization failed for {}; using natural-name order",
-                        folder.display()
-                    );
-                    fallback_snapshot(&folder, generation)
-                };
-                let _ = reply.send(snapshot);
-            }
-            Request::Shutdown => break,
+    run_requests(shared, notify, |folder, generation| {
+        if initialized {
+            shell_snapshot(folder, generation, &mut last_live_window).unwrap_or_else(|| {
+                eprintln!(
+                    "towavue: Shell view unavailable for {}; using natural-name order",
+                    folder.display()
+                );
+                fallback_snapshot(folder, generation)
+            })
+        } else {
+            eprintln!(
+                "towavue: Shell STA initialization failed for {}; using natural-name order",
+                folder.display()
+            );
+            fallback_snapshot(folder, generation)
         }
-    }
+    });
     if initialized {
-        // SAFETY: balances this thread's successful CoInitializeEx call after COM objects drop.
+        // SAFETY: balances this thread's successful OleInitialize call after COM objects drop.
         unsafe { OleUninitialize() };
     }
 }
@@ -575,6 +632,119 @@ mod tests {
         fmtid: STORAGE_PROPERTY_FORMAT,
         pid: 4,
     };
+
+    #[test]
+    fn asynchronous_requests_replace_queued_work_and_reject_stale_results() {
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let provider = FolderOrderProvider {
+            shared: Arc::clone(&shared),
+        };
+        let (started_tx, started_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            run_requests(
+                shared,
+                || {
+                    ready_tx.send(()).expect("completion notification");
+                },
+                |path, generation| {
+                    started_tx.send(path.to_owned()).expect("started request");
+                    if path == Path::new("first") {
+                        resume_rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .expect("release first request");
+                    }
+                    FolderSnapshot {
+                        folder_identity: ShellIdentity::new(Vec::new()),
+                        folder_path: path.to_owned(),
+                        items: Vec::new(),
+                        sort_columns: Vec::new(),
+                        source: FolderSnapshotSource::PersistedShellView,
+                        generation,
+                        captured_at: SystemTime::now(),
+                    }
+                },
+            )
+        });
+        provider.request(Some("first".into()));
+        assert_eq!(
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("first starts"),
+            PathBuf::from("first")
+        );
+        provider.request(Some("middle".into()));
+        let generation = provider.request(Some("last".into()));
+        assert!(provider.take_completed().is_none());
+        resume_tx.send(()).expect("resume worker");
+        ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("latest result");
+        let result = provider.take_completed().expect("completed snapshot");
+        assert_eq!(result.generation, generation);
+        assert_eq!(result.folder_path, PathBuf::from("last"));
+        assert_eq!(
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("last starts"),
+            PathBuf::from("last")
+        );
+        assert!(started_rx.try_recv().is_err());
+        assert!(ready_rx.try_recv().is_err());
+        provider.request(Some("ready".into()));
+        ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("completed slot");
+        provider.request(None);
+        assert!(provider.take_completed().is_none());
+        drop(provider);
+        worker.join().expect("closed worker exits");
+    }
+
+    #[test]
+    fn closing_during_shell_work_does_not_wait_or_publish() {
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let provider = FolderOrderProvider {
+            shared: Arc::clone(&shared),
+        };
+        let (started_tx, started_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            run_requests(
+                shared,
+                || {
+                    ready_tx.send(()).expect("completion notification");
+                },
+                |path, generation| {
+                    started_tx.send(()).expect("started request");
+                    resume_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("release after close");
+                    FolderSnapshot {
+                        folder_identity: ShellIdentity::new(Vec::new()),
+                        folder_path: path.to_owned(),
+                        items: Vec::new(),
+                        sort_columns: Vec::new(),
+                        source: FolderSnapshotSource::PersistedShellView,
+                        generation,
+                        captured_at: SystemTime::now(),
+                    }
+                },
+            )
+        });
+        provider.request(Some("blocked".into()));
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("request starts");
+        drop(provider);
+        resume_tx
+            .send(())
+            .expect("close returned before worker completed");
+        worker.join().expect("worker exits without publishing");
+        assert!(ready_rx.try_recv().is_err());
+    }
 
     #[test]
     fn windows_natural_order_handles_numeric_names() {

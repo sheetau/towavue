@@ -42,6 +42,8 @@ cargo run -p towavue-app -- path\to\media.mp4
 
 標準shortcutはSpaceでpause/resume（再生終了後は先頭から再開）、左右矢印で5秒Seek、Ctrl+左右で同種media移動、Alt+左右で全種media移動、Fでfilmstrip、Ctrl+Shift+Pでcommand paletteです。設定は初回起動時に`%APPDATA%\towavue\shortcuts.conf`へ生成され、`Ctrl+K Ctrl+S`のようなprefix shortcutも指定できます。menuまたは同shortcutのReload commandで再読込します。
 
+prefixの続きは1秒以内に入力します。Escape、click、別commandやwindowへのfocus移動で待ちを解除し、途中から戻ったkeyを前のprefixへつなげません。
+
 H1ではtitle/tab barを黒基調の単一barへまとめ、左端logoにmenu、右端にwindow操作、下部に再生操作と省略path・状態情報を配置しました。上部の空白をdragして移動、double-clickで最大化・復元、window端をdragしてresizeできます。長い名前はhoverで全文を確認できます。
 
 日本語の名前はWindowsにある日本語fontを補助fontとして表示します。fontの同梱・downloadは行いません。日本語fontがない環境では欠字が残り、terminalへ診断を出します。paletteはIME変換・確定とcommand実行のEnterを分離していますが、実IMEの候補操作を含む入力matrixは未完了です。

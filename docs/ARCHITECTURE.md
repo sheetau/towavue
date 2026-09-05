@@ -180,6 +180,8 @@ timeline非表示時はstatus上端に1 physical pxのseek barを重ね、hover/
 
 paletteは検索入力を保ち、上下keyで有効な候補を巡回し、Enterで共有commandへdispatch、Escapeで閉じる。eguiの破棄されたlayout passで消費したkeyのactionも保持し、同一frameの同じUI actionは一回だけ実行する。
 
+shortcut prefixは一続きのkey入力だけに有効とし、1秒の期限切れ、Escape、focus喪失、mouse press、別command、file drop・離脱確認で解除する。Escapeはprefix取消をoverlay/fullscreen解除より先に扱う。prefix開始時刻と案内の時刻を共有して通知の所有を識別し、取消ではその案内だけを消して再描画する。後から出た別通知を消さず、正常な複数key shortcutは従来どおり一回dispatchする。
+
 IMEのpreedit中、および確定/取消などIME eventを含むframeでは、paletteの上下・Enter・Escapeのkey eventを消費し、IME eventだけをTextEditへ渡す。確定用Enterをcommand実行やTextEditのfocus解除、取消用Escapeをpalette closeへ二重使用しない。入力欄の固定idへ描画前にfocusを要求し、eguiの上下focus移動による確定文字の取りこぼしを防ぐ。composition状態はpalette resetで解除し、通常の操作は次の独立key入力から再開する。OSのIME状態・keyboard layoutや設定は書き換えない。
 
 ### H1 video viewport

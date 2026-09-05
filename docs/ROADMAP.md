@@ -136,3 +136,5 @@ trim監査では、同じ位置のI/Oを受理しSave Asで初めて失敗する
 最小windowでgridの両側が切れる問題を修正した。表示領域内の4×4寸法、名前とpathの省略・tooltipを使い、clickもkeyと同じく一回実行して閉じる。136 tests、実windowの列表示・拡大UI・Zoom in clickを確認した。次は入力/focusを含む残りの操作とlaunch gateを継続監査する。
 
 grid上のCtrl+Sが画像回転になる問題を実windowで再現・修正した。physical keyによる位置対応、Ctrl/Alt/Superの除外、palette・modal優先とpalette起動時のgrid closeを追加した。138 testsと保存dialogのCancel、Shift付きcell実行・Undo、palette検索を確認した。実keyboard layout/IMEと残るlaunch gateは引き続き未完了である。
+
+prefix入力の期限切れ案内とfocusをまたぐ継続を修正した。別操作・focus喪失・Escapeで待ちを解除し、prefix自身の案内だけを消す。139 tests、通常のCtrl+K Ctrl+S、402ms以内のfocus往復後にCtrl+Sが独立した保存操作になる実window試験が通過した。H1と残るlaunch gateの監査を継続する。

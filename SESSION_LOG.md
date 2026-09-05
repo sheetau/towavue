@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 03:50 JST - input / prefix lifetime and notice ownership
+
+- Trigger: fb4e6cd CI 33984653478 passed; documentation checkpoint CI 33985020143 remains running. Prefix state survived focus/mouse/action changes, and its four-second notice remained after the one-second sequence timeout. Native capture confirmed the stale Ctrl+K notice.
+- Result: cancel prefixes on focus loss, mouse press, Escape, dispatch, file drop and guarded navigation/exit; expiry uses the same cleanup. The prefix shares its start timestamp with its own notice so cancellation removes only that notice, preserves later diagnostics and requests repaint. Escape checks expiry first, then cancels an active prefix before overlay/fullscreen dismissal. No core/runtime, dependency or unsafe changes.
+- Verification: focused regression plus format, Clippy with warnings denied, full tests and build pass: app 52, core 33, runtime 50, integrations 4; three live tests explicitly ignored. Test covers pending-prefix retention, valid default sequence resolution, dispatch/guard cleanup, expiry and later-notice preservation.
+- Native evidence: normal Ctrl+K then Ctrl+S shows the shortcuts/grid reload notice. A separately verified focus transfer to another owned window and back, then Ctrl+S, completes in 402 ms yet opens Save rather than completing the old prefix. Cancel writes no file. Final timeout capture has no stale prefix notice. All owned windows closed normally; final expiry-before-Escape ordering was rechecked by the full suite and build afterward.
+- Changed areas: app prefix lifecycle/regression, README, architecture, roadmap, trial guide and this log. This is reference-machine injected input, not a physical IME/mixed-DPI matrix. Status remains h1_active.
+- Next action: verify checkpoint CI; continue remaining input/modal and launch-wide stability/performance audits. Physical IME, mixed-DPI and the distribution decision remain outstanding.
+
 ## 2026-09-06 03:43 JST - verification / injected text tail timing
 
 - Trigger: repeated captures showed sav/ zoo after sending save/zoom. CI 33984326962 (159e6f1) now passed; 33984653478 (fb4e6cd) remains in progress.

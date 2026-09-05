@@ -609,8 +609,7 @@ where
         }
         self.palette_open = false;
         self.grid_open = false;
-        self.entered_shortcut.clear();
-        self.prefix_started = None;
+        self.cancel_shortcut_prefix();
         if path.is_dir() {
             self.open_folder_path(path);
         } else {
@@ -2231,6 +2230,7 @@ where
     }
 
     fn dispatch(&mut self, command: CommandId) {
+        self.cancel_shortcut_prefix();
         if self.pending_dialog.is_some() {
             return;
         }
@@ -2851,6 +2851,7 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        self.cancel_shortcut_prefix();
         if self.pending_dialog.is_some() {
             self.set_status("Close the file dialog before leaving.".into());
             return;
@@ -3417,6 +3418,11 @@ where
         if event.state != ElementState::Pressed || event.repeat {
             return;
         }
+        self.expire_shortcut_prefix();
+        if event.logical_key == WinitKey::Named(NamedKey::Escape) && self.prefix_started.is_some() {
+            self.cancel_shortcut_prefix();
+            return;
+        }
         if event.logical_key == WinitKey::Named(NamedKey::Escape)
             && self.dismiss_overlay_or_fullscreen()
         {
@@ -3443,24 +3449,15 @@ where
         let Some(stroke) = self.key_stroke(event) else {
             return;
         };
-        if self
-            .prefix_started
-            .is_some_and(|started| started.elapsed() >= PREFIX_TIMEOUT)
-        {
-            self.entered_shortcut.clear();
-        }
         self.entered_shortcut.push(stroke.clone());
         match self
             .shortcuts
             .resolve(&self.entered_shortcut, self.command_context())
         {
             ShortcutMatch::Command(command) => {
-                self.entered_shortcut.clear();
-                self.prefix_started = None;
                 self.dispatch(command);
             }
             ShortcutMatch::Prefix => {
-                self.prefix_started = Some(Instant::now());
                 self.set_status(format!(
                     "{} …",
                     self.entered_shortcut
@@ -3469,6 +3466,7 @@ where
                         .collect::<Vec<_>>()
                         .join(" ")
                 ));
+                self.prefix_started = self.status_message.as_ref().map(|(_, shown)| *shown);
             }
             ShortcutMatch::None => {
                 self.entered_shortcut.clear();
@@ -3476,12 +3474,36 @@ where
                 let retry = self
                     .shortcuts
                     .resolve(&self.entered_shortcut, self.command_context());
-                self.entered_shortcut.clear();
-                self.prefix_started = None;
+                self.cancel_shortcut_prefix();
                 if let ShortcutMatch::Command(command) = retry {
                     self.dispatch(command);
                 }
             }
+        }
+    }
+
+    fn cancel_shortcut_prefix(&mut self) {
+        let started = self.prefix_started.take();
+        self.entered_shortcut.clear();
+        if started.is_some() {
+            // Only the notice created with this prefix belongs to the cancellation.
+            if self
+                .status_message
+                .as_ref()
+                .is_some_and(|(_, shown)| Some(*shown) == started)
+            {
+                self.status_message = None;
+            }
+            self.request_redraw();
+        }
+    }
+
+    fn expire_shortcut_prefix(&mut self) {
+        if self
+            .prefix_started
+            .is_some_and(|started| started.elapsed() >= PREFIX_TIMEOUT)
+        {
+            self.cancel_shortcut_prefix();
         }
     }
 
@@ -3581,13 +3603,7 @@ where
             self.status_message = None;
             self.request_redraw();
         }
-        if self
-            .prefix_started
-            .is_some_and(|started| started.elapsed() >= PREFIX_TIMEOUT)
-        {
-            self.entered_shortcut.clear();
-            self.prefix_started = None;
-        }
+        self.expire_shortcut_prefix();
         if self.state == PlaybackState::Playing {
             if let Some(audio_position) = self.audio_master_position() {
                 let cutoff = audio_position.saturating_sub(VIDEO_LATE_TOLERANCE);
@@ -3987,6 +4003,16 @@ where
     ) {
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
+        }
+        if matches!(
+            event,
+            WindowEvent::Focused(false)
+                | WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    ..
+                }
+        ) {
+            self.cancel_shortcut_prefix();
         }
         if matches!(
             event,
@@ -4448,6 +4474,54 @@ mod tests {
                 assert!(image_rect.top() >= 32.0 && image_rect.bottom() <= 546.0);
             }
         }
+    }
+
+    #[test]
+    fn shortcut_prefix_cancellation_removes_only_its_own_notice() {
+        let Some(_root) =
+            isolated_test_root("tests::shortcut_prefix_cancellation_removes_only_its_own_notice")
+        else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let prefix: KeyStroke = "Ctrl+K".parse().expect("prefix stroke");
+        let seed = |app: &mut Application<_>, started| {
+            app.entered_shortcut = vec![prefix.clone()];
+            app.prefix_started = Some(started);
+            app.status_message = Some(("Ctrl+K …".into(), started));
+        };
+        let now = Instant::now();
+        seed(&mut app, now);
+        app.expire_shortcut_prefix();
+        assert_eq!(app.entered_shortcut, vec![prefix.clone()]);
+        assert!(app.status_message.is_some());
+        let strokes = [prefix.clone(), "Ctrl+S".parse().expect("suffix stroke")];
+        assert_eq!(
+            app.shortcuts.resolve(&strokes, app.command_context()),
+            ShortcutMatch::Command(CommandId::ReloadShortcuts)
+        );
+        app.dispatch(CommandId::ToggleGridMenu);
+        assert!(app.entered_shortcut.is_empty());
+        assert!(app.prefix_started.is_none());
+        assert!(app.status_message.is_none());
+
+        seed(&mut app, now - PREFIX_TIMEOUT);
+        app.expire_shortcut_prefix();
+        assert!(app.entered_shortcut.is_empty());
+        assert!(app.prefix_started.is_none());
+        assert!(app.status_message.is_none());
+
+        seed(&mut app, now - PREFIX_TIMEOUT);
+        app.status_message = Some(("A later diagnostic".into(), now));
+        app.expire_shortcut_prefix();
+        assert_eq!(
+            app.status_message.as_ref().map(|(text, _)| text.as_str()),
+            Some("A later diagnostic")
+        );
+        seed(&mut app, now);
+        app.request_guarded(GuardedAction::Exit);
+        assert!(app.entered_shortcut.is_empty());
+        assert!(app.status_message.is_none());
     }
 
     #[test]

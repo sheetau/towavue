@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### Shortcut prefixの取消
+
+- Ctrl+Kの1秒待ちが切れた後も4秒のstatus通知が残るbaselineを確認した。修正後は入力状態とその案内を同時に解除する。後から出た別の通知は消さない。Escape、mouse press、focus喪失、別command、file drop・離脱確認でも待ちを解除する。
+- 自動testは期限前の保持、正しいCtrl+K Ctrl+S解決、別command・確認画面・期限切れでの解除、後から出た通知の保持を検証する。実windowでは通常sequenceで再読込通知を確認した。同じ注入方法でCtrl+K→別の所有windowへfocus→復帰→Ctrl+Sを402msで行うと、再読込ではなくnative Save dialogになった。Cancelし、fileを書いていない。
+- 期限後captureでprefix案内が消えることも確認した。基準機の注入入力試験であり、全keyboard/IMEの証拠ではない。各試用windowは通常closeし、生成物はignoredのtarget/tmpに残す。
+
 ### 入力注入とcaptureの完了確認
 
 - `SendKeys.SendWait`や送信helperの終了を、本体が全keyを処理した証拠にしない。まとめた「save」の直後captureが「sav」になる現象を、window event・query更新・Present完了の一時計測で切り分けた。capture完了18:41:16.235 UTCより後の16.337に最後のEが本体へ到着し、16.346にPresentが完了していた。本体queryから文字を落とした事例ではない。

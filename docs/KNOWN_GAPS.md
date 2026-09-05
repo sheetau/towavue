@@ -153,4 +153,3 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 6. その後にrecent/session復元、file association、packagingを決める。
 
 この順序は固定milestoneではない。試用で再現性の高いdata loss、crash、再生破綻が見つかった場合は、それを最優先する。
-

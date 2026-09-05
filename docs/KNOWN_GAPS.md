@@ -8,7 +8,7 @@
 
 - 動画はH1でbar・timelineを除いた領域へsample aspect ratio込みでaspect-fitするよう修正した。回転metadataによるportrait orientationの自動適用は未検証。
 - 動画・音声のvolume・mute・rateはH1でlive playbackにも反映する。rate変更は現在位置からpipelineを再構築するため短い再primingを伴い、音声を無途切れで連続変速する方式ではない。
-- 動画のcrop、rotate、flipもedit historyとexportには入るが、再生映像へ最終形をlive previewしない。crop selection overlayだけが見える。
+- 動画のcrop、rotate、flipはH1でhardware/software両方のlive previewへ反映した。selectionは編集後の表示基準で、Undo/Redo・tab復帰にも履歴を使う。pixel/chroma境界のcrop丸めはFFmpeg export側の制約もあり、全寸法・極小cropでのpixel単位の一致は未検証。
 - trimは`I` / `O`で現在位置を端点として記録する方式で、timeline上のrange handleや選択範囲はない。
 
 UI上のcommand名は操作が即時反映される印象を与えるため、live playbackへの適用または表示上の区別が、最初のUX改善候補である。
@@ -110,7 +110,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Track selection、delete、cut、range playback | 未実装 |
 | Repeat、shuffle | 未実装 |
 | Video zoom、fullscreen、resize/resample | fullscreenはH1でhardware/software共通のaspect-fitと復帰を確認。zoomとresize/resampleは未実装 |
-| Video crop/rotate/flipのlive preview | 未実装。selectionとexportはある |
+| Video crop/rotate/flipのlive preview | H1で同じdevice内のUV表示を実装。回転後のSAR・selection、Undo/Redoとexport照合を検証。trim live範囲再生とは別 |
 | Audio-only export、normalize、stereo/mono変換 | 未実装 |
 | Track/codec/subtitle selection | 未実装 |
 | Exclusive WASAPI | 意図的にdefaultへ採用しない。将来optionを検討可能 |

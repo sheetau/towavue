@@ -2,6 +2,7 @@ use std::mem::ManuallyDrop;
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use thiserror::Error;
+use towavue_core::UnitPoint;
 use windows::Win32::Foundation::{HMODULE, HWND, RECT};
 use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
 use windows::Win32::Graphics::Direct3D::{
@@ -9,7 +10,8 @@ use windows::Win32::Graphics::Direct3D::{
     D3D_FEATURE_LEVEL_11_0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, ID3DBlob, ID3DInclude,
 };
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_SHADER_RESOURCE, D3D11_COMPARISON_ALWAYS, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE,
+    D3D11_BUFFER_DESC, D3D11_COMPARISON_ALWAYS, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
     D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_SAMPLER_DESC,
     D3D11_SDK_VERSION, D3D11_TEX2D_VPIV, D3D11_TEX2D_VPOV, D3D11_TEXTURE_ADDRESS_CLAMP,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
@@ -17,11 +19,12 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC,
     D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_STREAM,
     D3D11_VIDEO_USAGE_PLAYBACK_NORMAL, D3D11_VIEWPORT, D3D11_VPIV_DIMENSION_TEXTURE2D,
-    D3D11_VPOV_DIMENSION_TEXTURE2D, D3D11CreateDeviceAndSwapChain, ID3D11DepthStencilView,
-    ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout, ID3D11Multithread, ID3D11PixelShader,
-    ID3D11RenderTargetView, ID3D11SamplerState, ID3D11Texture2D, ID3D11VertexShader,
-    ID3D11VideoContext, ID3D11VideoContext1, ID3D11VideoDevice, ID3D11VideoProcessor,
-    ID3D11VideoProcessorEnumerator, ID3D11VideoProcessorEnumerator1,
+    D3D11_VPOV_DIMENSION_TEXTURE2D, D3D11CreateDeviceAndSwapChain, ID3D11Buffer,
+    ID3D11DepthStencilView, ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout,
+    ID3D11Multithread, ID3D11PixelShader, ID3D11RenderTargetView, ID3D11SamplerState,
+    ID3D11Texture2D, ID3D11VertexShader, ID3D11VideoContext, ID3D11VideoContext1,
+    ID3D11VideoDevice, ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
+    ID3D11VideoProcessorEnumerator1,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
@@ -101,6 +104,7 @@ struct SoftwareBlitter {
     vertex_shader: ID3D11VertexShader,
     pixel_shader: ID3D11PixelShader,
     sampler: ID3D11SamplerState,
+    uv_constants: ID3D11Buffer,
 }
 
 impl SoftwareBlitter {
@@ -121,9 +125,14 @@ VertexOutput main(uint vertex_id : SV_VertexID) {
         const PIXEL_SHADER: &[u8] = br#"
 Texture2D source_texture : register(t0);
 SamplerState source_sampler : register(s0);
+cbuffer Transform : register(b0) {
+    float4 origin;
+    float4 x_axis;
+    float4 y_axis;
+};
 
 float4 main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
-    return source_texture.Sample(source_sampler, uv);
+    return source_texture.Sample(source_sampler, origin.xy + uv.x * x_axis.xy + uv.y * y_axis.xy);
 }
 "#;
 
@@ -132,6 +141,7 @@ float4 main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
         let mut vertex_shader = None;
         let mut pixel_shader = None;
         let mut sampler = None;
+        let mut uv_constants = None;
         let sampler_description = D3D11_SAMPLER_DESC {
             Filter: D3D11_FILTER_MIN_MAG_MIP_LINEAR,
             AddressU: D3D11_TEXTURE_ADDRESS_CLAMP,
@@ -141,8 +151,8 @@ float4 main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
             MaxLOD: f32::MAX,
             ..Default::default()
         };
-        // The compiled bytecode is consumed during creation. The resulting
-        // immutable shader and sampler objects are retained by the renderer.
+        // Creation consumes the borrowed bytecode/descriptors synchronously. The renderer owns
+        // the shaders, sampler and constant buffer; buffer updates stay on its event-loop thread.
         unsafe {
             device.CreateVertexShader(
                 blob_bytes(&vertex_bytecode),
@@ -151,11 +161,22 @@ float4 main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
             )?;
             device.CreatePixelShader(blob_bytes(&pixel_bytecode), None, Some(&mut pixel_shader))?;
             device.CreateSamplerState(&sampler_description, Some(&mut sampler))?;
+            device.CreateBuffer(
+                &D3D11_BUFFER_DESC {
+                    ByteWidth: 48,
+                    Usage: D3D11_USAGE_DEFAULT,
+                    BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
+                    ..Default::default()
+                },
+                None,
+                Some(&mut uv_constants),
+            )?;
         }
         Ok(Self {
             vertex_shader: vertex_shader.expect("D3D11 returned success without a vertex shader"),
             pixel_shader: pixel_shader.expect("D3D11 returned success without a pixel shader"),
             sampler: sampler.expect("D3D11 returned success without a sampler"),
+            uv_constants: uv_constants.expect("D3D11 returned success without a constant buffer"),
         })
     }
 }
@@ -169,6 +190,7 @@ pub struct FrameRenderer {
     buffer_dimensions: Option<(u32, u32)>,
     video_processor: Option<VideoProcessorState>,
     software_texture: Option<(u32, u32, ID3D11Texture2D)>,
+    edit_texture: Option<(u32, u32, ID3D11Texture2D)>,
     software_blitter: SoftwareBlitter,
     ui_renderer: egui_directx11::Renderer,
     hdr_tone_mapping_active: bool,
@@ -254,6 +276,7 @@ impl FrameRenderer {
             buffer_dimensions: None,
             video_processor: None,
             software_texture: None,
+            edit_texture: None,
             software_blitter,
             ui_renderer,
             hdr_tone_mapping_active: false,
@@ -277,6 +300,7 @@ impl FrameRenderer {
         &mut self,
         frame: &VideoFrame,
         destination: egui::Rect,
+        uv: [UnitPoint; 4],
     ) -> Result<(), RenderError> {
         if frame.width == 0 || frame.height == 0 {
             return Err(RenderError::InvalidFrame);
@@ -344,13 +368,14 @@ impl FrameRenderer {
                 0,
             );
         }
-        self.draw_software_texture(&texture, destination)
+        self.draw_software_texture(&texture, destination, uv)
     }
 
     pub(crate) fn draw_hardware(
         &mut self,
         frame: &HardwareVideoFrame,
         destination: egui::Rect,
+        uv: [UnitPoint; 4],
     ) -> Result<(), RenderError> {
         if frame.width == 0 || frame.height == 0 {
             return Err(RenderError::InvalidFrame);
@@ -363,14 +388,36 @@ impl FrameRenderer {
         // The AVFrame owns this COM reference for the duration of the call.
         let texture = unsafe { ID3D11Texture2D::from_raw_borrowed(&texture_raw) }
             .ok_or(RenderError::InvalidHardwareFrame)?;
+        let edited = uv
+            != [
+                UnitPoint { x: 0.0, y: 0.0 },
+                UnitPoint { x: 1.0, y: 0.0 },
+                UnitPoint { x: 1.0, y: 1.0 },
+                UnitPoint { x: 0.0, y: 1.0 },
+            ];
+        let output = if edited {
+            Some(self.prepare_edit_texture(frame.width, frame.height)?)
+        } else {
+            None
+        };
+        let processor_destination = if edited {
+            egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(frame.width as f32, frame.height as f32),
+            )
+        } else {
+            destination
+        };
         self.blit_texture(
             texture,
             array_slice,
-            frame.width,
-            frame.height,
-            frame.transfer,
-            destination,
+            frame,
+            processor_destination,
+            output.as_ref(),
         )?;
+        if let Some(output) = output {
+            self.draw_software_texture(&output, destination, uv)?;
+        }
         if frame.transfer != VideoTransfer::Sdr && !self.hdr_tone_mapping_active {
             self.hdr_tone_mapping_active = true;
             eprintln!(
@@ -380,17 +427,68 @@ impl FrameRenderer {
         Ok(())
     }
 
+    fn prepare_edit_texture(
+        &mut self,
+        width: u32,
+        height: u32,
+    ) -> Result<ID3D11Texture2D, RenderError> {
+        if self
+            .edit_texture
+            .as_ref()
+            .is_none_or(|(w, h, _)| (*w, *h) != (width, height))
+        {
+            let description = D3D11_TEXTURE2D_DESC {
+                Width: width,
+                Height: height,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_DEFAULT,
+                BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
+                ..Default::default()
+            };
+            let mut texture = None;
+            // The renderer owns one same-device GPU-only output texture. It is reused on the
+            // event-loop thread, whose immediate context is shared with FFmpeg under protection.
+            unsafe {
+                self.graphics_device.device.CreateTexture2D(
+                    &description,
+                    None,
+                    Some(&mut texture),
+                )?;
+            }
+            self.edit_texture = Some((
+                width,
+                height,
+                texture.expect("D3D11 returned success without an edit texture"),
+            ));
+        }
+        Ok(self
+            .edit_texture
+            .as_ref()
+            .expect("edit texture was prepared")
+            .2
+            .clone())
+    }
+
     fn blit_texture(
         &mut self,
         texture: &ID3D11Texture2D,
         array_slice: u32,
-        width: u32,
-        height: u32,
-        transfer: VideoTransfer,
+        frame: &HardwareVideoFrame,
         destination: egui::Rect,
+        output: Option<&ID3D11Texture2D>,
     ) -> Result<(), RenderError> {
-        let (output_width, output_height) = self.ensure_surface()?;
-        self.prepare_video_processor(width, height, output_width, output_height)?;
+        let (output_width, output_height) = if output.is_some() {
+            (frame.width, frame.height)
+        } else {
+            self.ensure_surface()?
+        };
+        self.prepare_video_processor(frame.width, frame.height, output_width, output_height)?;
         let state = self
             .video_processor
             .as_ref()
@@ -412,7 +510,7 @@ impl FrameRenderer {
             },
         };
 
-        // Views live only through this blit; the AVFrame and swap-chain buffer
+        // Views live only through this event-loop blit; the AVFrame and output owners
         // retain their resources for the entire operation.
         unsafe {
             let mut input_view = None;
@@ -422,7 +520,10 @@ impl FrameRenderer {
                 &input_description,
                 Some(&mut input_view),
             )?;
-            let back_buffer: ID3D11Texture2D = self.swap_chain.GetBuffer(0)?;
+            let back_buffer: ID3D11Texture2D = match output {
+                Some(texture) => texture.clone(),
+                None => self.swap_chain.GetBuffer(0)?,
+            };
             let mut output_view = None;
             state.device.CreateVideoProcessorOutputView(
                 &back_buffer,
@@ -447,7 +548,7 @@ impl FrameRenderer {
                 true,
                 Some(&destination),
             );
-            configure_hdr_to_sdr(state, texture, transfer)?;
+            configure_hdr_to_sdr(state, texture, frame.transfer)?;
             let mut stream = D3D11_VIDEO_PROCESSOR_STREAM {
                 Enable: BOOL(1),
                 pInputSurface: ManuallyDrop::new(input_view),
@@ -469,13 +570,30 @@ impl FrameRenderer {
         &self,
         texture: &ID3D11Texture2D,
         destination: egui::Rect,
+        uv: [UnitPoint; 4],
     ) -> Result<(), RenderError> {
         self.ensure_surface()?;
         let render_target = self.render_target()?;
         let mut source_view = None;
+        let constants = [
+            [uv[0].x, uv[0].y, 0.0, 0.0],
+            [uv[1].x - uv[0].x, uv[1].y - uv[0].y, 0.0, 0.0],
+            [uv[3].x - uv[0].x, uv[3].y - uv[0].y, 0.0, 0.0],
+        ];
         // The resource view borrows the renderer-owned texture. All pipeline
         // objects and the immediate context remain on the event-loop thread.
         unsafe {
+            // UpdateSubresource copies all 48 stack-owned bytes before returning.
+            self.context.UpdateSubresource(
+                &self.software_blitter.uv_constants,
+                0,
+                None,
+                constants.as_ptr().cast(),
+                0,
+                0,
+            );
+            self.context
+                .PSSetConstantBuffers(0, Some(&[Some(self.software_blitter.uv_constants.clone())]));
             self.graphics_device.device.CreateShaderResourceView(
                 texture,
                 None,

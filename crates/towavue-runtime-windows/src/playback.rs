@@ -271,13 +271,14 @@ impl PlaybackSession {
         &mut self,
         renderer: &mut FrameRenderer,
         destination: egui::Rect,
+        uv: [towavue_core::UnitPoint; 4],
     ) -> Result<bool, RenderError> {
         let Some(frame) = self.current_video.as_ref() else {
             return Ok(false);
         };
         let result = match frame {
-            PresentationFrame::Software(frame) => renderer.draw_software(frame, destination),
-            PresentationFrame::Hardware(frame) => renderer.draw_hardware(frame, destination),
+            PresentationFrame::Software(frame) => renderer.draw_software(frame, destination, uv),
+            PresentationFrame::Hardware(frame) => renderer.draw_hardware(frame, destination, uv),
         };
         if let Err(error) = result {
             return match renderer.device_removed_reason() {

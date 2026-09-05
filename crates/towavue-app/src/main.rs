@@ -329,6 +329,14 @@ impl ImageTransform {
         self.size.0 = (self.size.0 * region.width()).max(1.0);
         self.size.1 = (self.size.1 * region.height()).max(1.0);
     }
+
+    fn pixel_aspect(&self, source_aspect: f32) -> f32 {
+        if self.uv[0].x == self.uv[1].x {
+            1.0 / source_aspect
+        } else {
+            source_aspect
+        }
+    }
 }
 
 struct Application<N> {
@@ -375,6 +383,7 @@ struct Application<N> {
     session: Option<PlaybackSession>,
     pending_time: Option<MediaTime>,
     video_rect: Option<egui::Rect>,
+    video_uv: [UnitPoint; 4],
     ui_repaint_at: Option<Instant>,
     clock: Option<PlaybackClock>,
     state: PlaybackState,
@@ -466,6 +475,7 @@ where
             session: None,
             pending_time: None,
             video_rect: None,
+            video_uv: ImageTransform::new((1, 1), &[]).uv,
             ui_repaint_at: None,
             clock: None,
             state: PlaybackState::Loading,
@@ -1085,7 +1095,7 @@ where
         let renderer = self.renderer.as_mut().expect("renderer exists");
         let media_result = renderer.clear([0.025, 0.025, 0.03, 1.0]).and_then(|()| {
             if let (Some(session), Some(rect)) = (&mut self.session, self.video_rect) {
-                session.draw_current(renderer, rect * context.pixels_per_point())?;
+                session.draw_current(renderer, rect * context.pixels_per_point(), self.video_uv)?;
             }
             Ok(())
         });
@@ -1338,13 +1348,7 @@ where
             return;
         };
         let texture = image.texture.id();
-        let operations = self
-            .tabs
-            .active()
-            .and_then(|tab| self.edits.get(&tab.id))
-            .map(|history| history.operations().to_vec())
-            .unwrap_or_default();
-        let mut transform = ImageTransform::new(image.dimensions(), &operations);
+        let mut transform = self.visual_transform(image.dimensions());
         let viewport = ui
             .max_rect()
             .shrink(if self.fullscreen { 0.0 } else { 8.0 });
@@ -1415,15 +1419,19 @@ where
         else {
             return;
         };
-        let viewport = fitted_video_rect(ui.max_rect(), (width, height), pixel_aspect);
+        let transform = self.visual_transform((width, height));
+        let size = (transform.size.0 as u32, transform.size.1 as u32);
+        let pixel_aspect = transform.pixel_aspect(pixel_aspect);
+        let viewport = fitted_video_rect(ui.max_rect(), size, pixel_aspect);
         self.video_rect = Some(viewport);
+        self.video_uv = transform.uv;
         let response = ui.interact(
             viewport,
             ui.id().with("video-edit-surface"),
             egui::Sense::click_and_drag(),
         );
         let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
-        self.update_selection(&response, viewport, (width, height), shift, pointer);
+        self.update_selection(&response, viewport, size, shift, pointer);
         if let Some(selection) = self.image_view.selection {
             paint_selection(&ui.painter_at(viewport), viewport, selection);
         }
@@ -2322,6 +2330,15 @@ where
                 });
             }
         }
+    }
+
+    fn visual_transform(&self, size: (u32, u32)) -> ImageTransform {
+        let operations = self
+            .tabs
+            .active()
+            .and_then(|tab| self.edits.get(&tab.id))
+            .map_or(&[][..], EditHistory::operations);
+        ImageTransform::new(size, operations)
     }
 
     fn push_visual_edit(&mut self, operation: EditOperation) {
@@ -4466,5 +4483,132 @@ mod tests {
             export_name(Path::new("photo.final.png")),
             "photo.final-export.png"
         );
+    }
+
+    #[test]
+    fn video_visual_edits_match_export_and_follow_undo_redo_and_active_tab() {
+        let Some(root) = isolated_test_root(
+            "tests::video_visual_edits_match_export_and_follow_undo_redo_and_active_tab",
+        ) else {
+            return;
+        };
+        let source =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+        let first_frame = |path: &Path| {
+            let mut frame = None;
+            towavue_runtime_windows::decode_file(path, |output| {
+                if frame.is_none()
+                    && let towavue_runtime_windows::DecodeOutput::Video(video) = output
+                {
+                    frame = Some(video);
+                }
+                true
+            })
+            .expect("decode comparison frame");
+            frame.expect("fixture video frame")
+        };
+        let original = first_frame(&source);
+        let size = (original.width, original.height);
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let tab = app.tabs.open_new(source.clone(), MediaKind::Video);
+        app.media_kind = Some(MediaKind::Video);
+        app.state = PlaybackState::Paused;
+        let generation = app.generation;
+        app.dispatch(CommandId::RotateClockwise);
+        app.dispatch(CommandId::FlipHorizontal);
+        app.image_view.selection = Some(UnitRect {
+            min: UnitPoint { x: 0.25, y: 0.25 },
+            max: UnitPoint { x: 0.75, y: 0.75 },
+        });
+        app.dispatch(CommandId::ApplyCrop);
+        let transform = app.visual_transform(size);
+        assert_eq!(transform.size, (48.0, 80.0));
+        assert_eq!(transform.pixel_aspect(2.0), 0.5);
+        assert!(app.image_view.selection.is_none());
+        assert_eq!(app.state, PlaybackState::Paused);
+        assert_eq!(app.generation, generation);
+        app.dispatch(CommandId::Undo);
+        assert_eq!(app.visual_transform(size).size, (96.0, 160.0));
+        app.dispatch(CommandId::Redo);
+        assert_eq!(app.visual_transform(size).uv, transform.uv);
+        app.tabs
+            .open_new(root.join("another.mp4"), MediaKind::Video);
+        assert_eq!(
+            app.visual_transform(size).uv,
+            ImageTransform::new(size, &[]).uv
+        );
+        app.tabs.activate(tab);
+        assert_eq!(app.visual_transform(size).uv, transform.uv);
+
+        let target = root.join("edited.mp4");
+        towavue_runtime_windows::export_media(&ExportRequest {
+            source,
+            target: target.clone(),
+            kind: MediaKind::Video,
+            operations: app
+                .edits
+                .get(&tab)
+                .expect("edit history")
+                .operations()
+                .to_vec(),
+            hardware_encode: false,
+        })
+        .expect("export visual edits");
+        let exported = first_frame(&target);
+        assert_eq!((exported.width, exported.height), (48, 80));
+        let mut difference = 0_u64;
+        let mut samples = 0;
+        for y in 4..exported.height - 4 {
+            for x in 4..exported.width - 4 {
+                let uv = bilinear_uv(
+                    transform.uv,
+                    (x as f32 + 0.5) / exported.width as f32,
+                    (y as f32 + 0.5) / exported.height as f32,
+                );
+                let source_index = (((uv.y * original.height as f32) as u32 * original.width
+                    + (uv.x * original.width as f32) as u32)
+                    * 4) as usize;
+                let output_index = ((y * exported.width + x) * 4) as usize;
+                for channel in 0..3 {
+                    difference += u64::from(
+                        original.rgba[source_index + channel]
+                            .abs_diff(exported.rgba[output_index + channel]),
+                    );
+                    samples += 1;
+                }
+            }
+        }
+        let mean_error = difference as f64 / f64::from(samples);
+        assert!(
+            mean_error < 12.0,
+            "preview/export RGB mean error: {mean_error}"
+        );
+    }
+
+    #[test]
+    fn visual_uv_composition_preserves_flips_rotations_and_pixel_aspect() {
+        let full = ImageTransform::new((640, 360), &[]);
+        for operation in [
+            EditOperation::RotateClockwise,
+            EditOperation::RotateCounterclockwise,
+        ] {
+            let transform = ImageTransform::new((640, 360), &[operation; 4]);
+            assert_eq!(transform.uv, full.uv);
+            assert_eq!(transform.size, full.size);
+            assert_eq!(transform.pixel_aspect(2.0), 2.0);
+        }
+        for operation in [EditOperation::FlipHorizontal, EditOperation::FlipVertical] {
+            let transform = ImageTransform::new((640, 360), &[operation; 2]);
+            assert_eq!(transform.uv, full.uv);
+            assert_eq!(transform.size, full.size);
+        }
+        let transform = ImageTransform::new((640, 360), &[EditOperation::RotateCounterclockwise]);
+        assert_eq!(transform.uv[0], UnitPoint { x: 1.0, y: 0.0 });
+        let rect = fitted_video_rect(
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 540.0)),
+            (360, 640),
+            transform.pixel_aspect(1.5),
+        );
+        assert!((rect.width() / rect.height() - 0.375).abs() < 0.001);
     }
 }

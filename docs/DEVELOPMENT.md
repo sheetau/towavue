@@ -142,6 +142,14 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - folder起動後のreading 2枚表示、watcher更新による2→3件のsnapshot反映、別folderをOpenした後のreading表示を確認した。runtimeの同期APIを使う実Explorer sort matrixも別途実行し、skipなしで通過した。
 - runtime testは中間要求の置換、古い結果・完了済みslotの失効、実行中のcloseと結果抑止を検証する。app testは背景refreshが明示Openを上書きしないこと、別mediaを開いた後や最後のtab close後の失効も検証する。
 
+### H1で確認したvideo visual edit scenario
+
+- 四象限を赤・緑・青・黄、外周を白とした640×360 H.264を開き、EOF後にRを押す。変更前はdirty表示だけが変わり、色の位置と横長表示は変わらなかった。変更後は時計回りの色配置と縦長aspect-fitになり、H→中央領域のselection→Ctrl+Yで編集後の画面をcrop、Ctrl+Zでcrop前へ戻った。
+- 同じfixtureをFFV1・SAR 3:2に変換し、software経路でL→Vを確認した。90度回転後はSAR 2:3、display aspect 3:8となり、通常windowとfullscreenの両方で色配置・四辺・縦横比を保持した。各fixtureは90 presented / 0 dropped、hardwareは0 CPU transfers、softwareは90 transfersだった。
+- 約1分4K60 H.264/AACでは、約15秒からRの回転表示へ切り替え、3,594 presented / 0 dropped / 0 CPU transfers、drift p95/max 4.943/10.439 msでEOFに到達した。EOFの静止表示は5秒間CPU時間0 ms（時計分解能以下）。追加GPU textureはsource画素数×4 byteで4K約32 MiBだが、GPU allocationそのものの実測ではない。単発のdebug試験であり、10分・30分の再benchmarkや他device/HDRの証明ではない。
+- EOF後のUndoで未編集の直接表示へ戻り、Redoで編集表示へ戻ることを確認した。別の30秒動画をpause→R→seek bar中央clickすると、15秒frameを回転したまま保持し、ログにもpipeline再構築とSeek latency 195.525 msが出た。先のarrow key注入ではSeek受領を確定できなかったため、その操作をSeek成功の証拠にはしていない。入力試験は物理keyboard/IMEのmatrixとは別である。
+- 自動testはrotation/flipの合成とSAR、共有履歴のUndo/Redo・active tab・selection解除・pause/generation保持を検証する。160×96のfixtureへR→H→中央half cropを適用したUVと、同じ履歴の実export・再decodeの48×80 RGB画素を照合する（圧縮を許容して平均誤差12未満）。全pixel/chroma境界・極小cropの一致までは保証しない。trim範囲のlive再生、動画zoom、metadata orientationは別の未完項目である。
+
 ### H1で確認したfullscreen scenario
 
 - 通常位置40,40、960×576の画像windowでF11を押す。修正前は変化しなかった。修正後は1920×1080のborderless表示となり、上下bar・seek・外周余白がなくなり、案内が4秒で消える。Escape後のouter boundsは40,40,1000,616へ戻った。View menuからの起動と2画像readingの全高さ表示も確認した。

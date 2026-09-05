@@ -1079,6 +1079,7 @@ where
     }
 
     fn advance_media(&mut self) {
+        self.discard_late_video_frames();
         let due = self.frame_is_due();
         if due {
             let video_time = self.pending_time.take().expect("due frame exists");
@@ -1093,6 +1094,15 @@ where
                 session.advance_pending();
             }
             self.load_next_frame();
+        }
+    }
+
+    fn discard_late_video_frames(&mut self) {
+        if let Some(cutoff) = late_video_cutoff(self.state, self.audio_master_position())
+            && let Some(session) = self.session.as_mut()
+            && session.drop_video_before(cutoff) > 0
+        {
+            self.pending_time = session.pending_video_time();
         }
     }
 
@@ -3624,15 +3634,8 @@ where
             self.request_redraw();
         }
         self.expire_shortcut_prefix();
+        self.discard_late_video_frames();
         if self.state == PlaybackState::Playing {
-            if let Some(audio_position) = self.audio_master_position() {
-                let cutoff = audio_position.saturating_sub(VIDEO_LATE_TOLERANCE);
-                if let Some(session) = self.session.as_mut()
-                    && session.drop_video_before(cutoff) > 0
-                {
-                    self.pending_time = session.pending_video_time();
-                }
-            }
             if let (Some(window), Some(presentation_time)) = (&self.window, self.pending_time) {
                 let due_at = if let Some(audio_position) = self.audio_master_position() {
                     let threshold = audio_position.saturating_add(VIDEO_EARLY_TOLERANCE);
@@ -3753,6 +3756,13 @@ fn ui_repaint_deadline(now: Instant, egui_delay: Duration, playing_audio: bool) 
         egui_delay
     };
     now.checked_add(delay)
+}
+
+fn late_video_cutoff(state: PlaybackState, audio_position: Option<MediaTime>) -> Option<MediaTime> {
+    (state == PlaybackState::Playing)
+        .then_some(audio_position)
+        .flatten()
+        .map(|position| position.saturating_sub(VIDEO_LATE_TOLERANCE))
 }
 
 fn video_frame_due(
@@ -5191,6 +5201,41 @@ mod tests {
         app.pending_dialog = Some(DialogIntent::OpenFolder);
         app.finish_dialog(Ok(None));
         assert_eq!(app.path.as_ref(), Some(&source));
+    }
+
+    #[test]
+    fn late_video_cutoff_is_fresh_and_preserves_paused_and_video_only_frames() {
+        let frame = media_time(Duration::from_secs(2));
+        let before_stall = media_time(Duration::from_millis(1995));
+        let after_stall = media_time(Duration::from_millis(2295));
+        assert!(
+            frame
+                >= late_video_cutoff(PlaybackState::Playing, Some(before_stall))
+                    .expect("running audio cutoff")
+        );
+        assert!(
+            frame
+                < late_video_cutoff(PlaybackState::Playing, Some(after_stall))
+                    .expect("updated audio cutoff")
+        );
+        assert_eq!(
+            late_video_cutoff(PlaybackState::Playing, Some(after_stall)),
+            Some(media_time(Duration::from_millis(2255)))
+        );
+        assert_eq!(late_video_cutoff(PlaybackState::Playing, None), None);
+        for state in [
+            PlaybackState::Paused,
+            PlaybackState::Ended,
+            PlaybackState::Loading,
+            PlaybackState::Faulted,
+        ] {
+            assert_eq!(late_video_cutoff(state, Some(after_stall)), None);
+        }
+        assert!(
+            late_video_cutoff(PlaybackState::Playing, Some(MediaTime::ZERO))
+                .expect("startup cutoff")
+                < MediaTime::ZERO
+        );
     }
 
     #[test]

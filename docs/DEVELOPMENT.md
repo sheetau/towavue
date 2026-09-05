@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### Release長時間再生の再検証（2026-09-06）
+
+描画直前のlate discard再確認を入れた通常release版は、基準機の30分再試験で同期・dropゲートを満たした。以下は不合格だったbaselineからの比較であり、全codec/deviceや実DPI matrixまで完了したものではない。
+
+- dbf13b4のrelease版で既存の30分4K60 H.264/AAC素材を連続再生した。960×576、1倍、アプリ内muteのみ。再起動・Seek・OS設定変更・並行した重い試験は行っていない。adapterは00000000:000146b5。
+- 107,771 hardware frames、CPU transfer 0、107,754 presented＋17 droppedでsourceのframe数と一致した。全区間drop率は0.015774%。drift p95は4.725msだが、最大281.340msで100ms上限を超えた。**30分ゲートは未達**であり、旧M3の合格結果を現在のreleaseへ流用しない。集計logだけでは外れ値の位置・原因を特定できない。
+- Playing中の30秒間隔private memoryは224.07～309.07 MiB。15分付近のpeakは次のsampleで約237 MiBへ戻った。EOF idleの10.053秒間CPU時間は15.625ms、private memoryは176.98 MiBへ減った。GPU memoryや全codec/deviceでの保証ではない。
+- 既存Seek時間は同期pipeline再構築の後からVideoReadyまでで、操作受付から映像表示までを測っていない。この境界を修正してから100回Seekを再測定する。まずは最大driftの発生位置とlate frame処理を切り分ける。
+- 続く1分4K60の通常試験は最大9.739msだった。試験用にsource 2秒でUIを300ms止めると、待機時の判断のまま複数の古いframeをpromotionし、最大283.758msを再現した。描画直前にも既存queueのlate discardを行う修正後は27.039msとなった。両方とも3,578 presented＋16 dropped＝3,594、CPU transfer 0で整合する。元の30分runでUIが遅れた原因・時刻そのものを特定したわけではない。
+- 遅延・traceコードと環境変数を除去し、142 tests・Clippy・通常release build、pause中のSeek表示を確認した。その通常buildで30分再試験を完走し、107,750 presented＋21 dropped＝107,771、CPU transfer 0、drift p95 4.803ms・最大37.416msとなった。全区間drop率は0.019486%。先頭600秒の35,925 frameへ全21 dropsを割り当てても0.058455%以下で、10分の0.1%ゲートも満たす。これは先頭10分のdrop率の保守的上限であり、正確な区間drop数ではない。
+- 修正版のPlaying中private memoryは30秒間隔sampleで220.40～235.48 MiB、OSのpeak paged memoryは343.42 MiBだった。粗いsampleだけではpeakを捉えきれない。EOF idleは10.042秒でCPU 0ms（計測分解能以下）、private memory 174.41 MiB。muteのUndoを確認して通常終了し、source/OS設定は変更していない。次は別件のSeek計測境界を修正し、100回の再測定を行う。
+
 ### Shortcut prefixの取消
 
 - Ctrl+Kの1秒待ちが切れた後も4秒のstatus通知が残るbaselineを確認した。修正後は入力状態とその案内を同時に解除する。後から出た別の通知は消さない。Escape、mouse press、focus喪失、別command、file drop・離脱確認でも待ちを解除する。

@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -60,6 +60,7 @@ pub struct AudioOutput {
     event_rx: Receiver<AudioOutputEvent>,
     position_nanoseconds: Arc<AtomicI64>,
     volume: Arc<AtomicU32>,
+    drained: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -123,6 +124,8 @@ impl AudioOutput {
         let thread_position = Arc::clone(&position_nanoseconds);
         let volume = Arc::new(AtomicU32::new(normalized_volume(volume).to_bits()));
         let thread_volume = Arc::clone(&volume);
+        let drained = Arc::new(AtomicBool::new(false));
+        let thread_drained = Arc::clone(&drained);
         let thread = thread::Builder::new()
             .name("towavue-wasapi".to_owned())
             .spawn(move || {
@@ -141,12 +144,15 @@ impl AudioOutput {
                     &thread_volume,
                     rate,
                     audio_rx,
-                    control_rx,
+                    &control_rx,
                     &ready_tx,
                 );
                 wasapi::deinitialize();
                 match result {
                     Ok(()) => {
+                        // Publish normal completion before the retained control
+                        // receiver closes, so a racing pause cannot report failure.
+                        thread_drained.store(true, Ordering::Release);
                         let _ = event_tx.send(AudioOutputEvent::Drained);
                     }
                     Err(AudioOutputError::EndpointChanged) => {
@@ -167,6 +173,7 @@ impl AudioOutput {
                 event_rx,
                 position_nanoseconds,
                 volume,
+                drained,
                 thread: Some(thread),
             }),
             Ok(Err(error)) => {
@@ -187,7 +194,13 @@ impl AudioOutput {
     pub fn set_paused(&self, paused: bool) -> Result<(), AudioOutputError> {
         self.control_tx
             .send(AudioControl::SetPaused(paused))
-            .map_err(|_| AudioOutputError::Closed)
+            .or_else(|_| {
+                if self.drained.load(Ordering::Acquire) {
+                    Ok(())
+                } else {
+                    Err(AudioOutputError::Closed)
+                }
+            })
     }
 
     pub fn set_volume(&self, volume: f32) {
@@ -232,7 +245,7 @@ fn run_audio_thread(
     volume: &AtomicU32,
     rate: f32,
     audio_rx: Receiver<AudioMessage>,
-    control_rx: Receiver<AudioControl>,
+    control_rx: &Receiver<AudioControl>,
     ready_tx: &SyncSender<Result<(), AudioOutputError>>,
 ) -> Result<(), AudioOutputError> {
     let (endpoint_tx, endpoint_rx) = mpsc::channel();
@@ -313,7 +326,7 @@ fn run_audio_thread(
 fn render_audio_loop(
     format: AudioFormat,
     audio_rx: Receiver<AudioMessage>,
-    control_rx: Receiver<AudioControl>,
+    control_rx: &Receiver<AudioControl>,
     client: &AudioClient,
     render_client: &AudioRenderClient,
     event: &Handle,
@@ -509,6 +522,85 @@ fn is_current_endpoint(current_id: &str, removed_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closed_controls_are_valid_only_after_successful_audio_drain() {
+        let (audio_tx, _) = mpsc::sync_channel(1);
+        let (control_tx, control_rx) = mpsc::channel();
+        let (_, event_rx) = mpsc::channel();
+        let output = AudioOutput {
+            format: AudioFormat {
+                sample_rate: 48_000,
+                channels: 2,
+            },
+            audio_tx,
+            control_tx,
+            event_rx,
+            position_nanoseconds: Arc::new(AtomicI64::new(123)),
+            volume: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
+            drained: Arc::new(AtomicBool::new(false)),
+            thread: None,
+        };
+        output
+            .set_paused(true)
+            .expect("live receiver accepts controls");
+        assert!(matches!(
+            control_rx.try_recv(),
+            Ok(AudioControl::SetPaused(true))
+        ));
+        drop(control_rx);
+        assert!(matches!(
+            output.set_paused(true),
+            Err(AudioOutputError::Closed)
+        ));
+        output.drained.store(true, Ordering::Release);
+        output
+            .set_paused(true)
+            .expect("completed audio can be paused");
+        output
+            .set_paused(false)
+            .expect("completed audio can be resumed");
+        assert_eq!(output.position().as_nanoseconds(), 123);
+    }
+
+    #[test]
+    #[ignore = "opens the default WASAPI render endpoint to verify controls after drain"]
+    fn live_drain_keeps_pause_and_resume_valid() {
+        let format = AudioFormat {
+            sample_rate: 48_000,
+            channels: 2,
+        };
+        let output = match AudioOutput::start_with_settings(format, MediaTime::ZERO, 0.0, 1.0) {
+            Ok(output) => output,
+            Err(AudioOutputError::Wasapi(error)) => {
+                eprintln!("SKIP live drain: no usable default render endpoint: {error}");
+                return;
+            }
+            Err(error) => panic!("audio setup failed: {error}"),
+        };
+        output
+            .push(AudioChunk {
+                format,
+                frames: 4800,
+                bytes: vec![0; 4800 * 8],
+                presentation_time: MediaTime::ZERO,
+            })
+            .expect("queue silence");
+        output.finish().expect("finish audio");
+        let event = output
+            .event_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("audio drains");
+        assert_eq!(event, AudioOutputEvent::Drained);
+        let position = output.position();
+        output
+            .set_paused(true)
+            .expect("pause video tail after audio drain");
+        output
+            .set_paused(false)
+            .expect("resume video tail after audio drain");
+        assert_eq!(output.position(), position);
+    }
 
     #[test]
     #[ignore = "opens the default WASAPI render endpoint for real-time clock checks"]

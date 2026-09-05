@@ -131,7 +131,7 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - 長い名前の画像を開き、Ctrl+Oで2枚目を追加する。狭い幅で等分tab、省略名、active表示とclose buttonを確認する。
 - 動画EOF後に左下Playで先頭から再開し、通常再生中は同じbuttonでpause/resumeする。
 - Mで編集を作り右上closeを押す。Unsaved edits確認が出て、Cancelならwindowとdirty履歴が残る。
-- 基準機の実windowでは上記操作が通過した。複数DPI/monitor・大量tabのmatrixは未検証。操作後のUI一部欠落captureは引き続き調査対象である。
+- 基準機の実windowでは上記操作が通過した。複数DPI/monitor・大量tabのmatrixは未検証。直近captureのUI欠落という目視判定はpixel照合で否定され、hardware/software各10回のtimeline開閉でもtabとcontrolsのpixel数が一致した。古い途中buildの欠落captureとは区別する。
 
 ### H1で確認したvideo viewport scenario
 
@@ -139,7 +139,13 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - Tまたはwaveform buttonでtimelineを開閉し、同じframeが残りの中央領域へ収まることを確認する。480×300へのresizeと最大化・復元も確認する。
 - 縦長動画内をdragし、selectionが映像に重なり、letterboxを選択範囲へ含めないことを確認する。
 - 基準機ではH.264はD3D11VA / 60 frames / 0 CPU transfers / 0 drops、FFV1はsoftware / 60 transfers / 0 dropsでEOFへ到達した。再表示でframe数を加算せず、EOFからのH.264再開も60 framesだった。
-- UI repaint deadlineは停止中も処理する。タイムライン開閉後のUI一部欠落については、安定して表示できた試行だけで解消を宣言しない。
+- UI repaint deadlineは停止中も処理する。小さいiconの目視判定だけで欠落とせず、元captureのpixelとlayout矩形を照合する。
+
+### H1で確認したaudio drain後のpause scenario
+
+- 12秒・2 fpsのH.264と0.5秒の無音AACを組み合わせ、音声終了後に左下pauseを押す。修正前はFaultedと`the audio output thread stopped`、修正後はPausedとなる。
+- 2秒待って映像が動かないことを確認し、resumeしてEOFまで進める。基準機では停止中の映像sample差分0、再開後24 frames / 0 CPU transfers / 0 dropsだった。
+- `cargo test -p towavue-runtime-windows live_drain_keeps_pause_and_resume_valid -- --ignored --nocapture`で実WASAPIの排出完了後のcontrolを検証できる。device不在は明示skipであり、成功の証拠としない。
 
 ### H1で確認したlive rate scenario
 

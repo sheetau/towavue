@@ -92,3 +92,5 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 compact shellの初回改善として、32px title/tab bar、30px status、logo menu、等分tab、native window操作、名前省略・情報右寄せを実装した。EOF後のPlayも先頭から再開する。実windowで最小幅、移動・resize・最大化・最小化復帰、長い名前の複数tab、dirty close guardを確認した。次は動画をbarに隠れないmedia領域へ収める表示修正と、thin seek bar・日常操作の改善を進める。
 
 動画の表示矩形を同frameのUI layoutから求め、hardware/software共通のaspect-fitとsample aspect ratio、selection位置を対応させた。縦長H.264・非正方形pixelのFFV1で四辺の保持とtimeline追従を確認した。UIのrepaint deadlineも待機へ反映したが、操作後のUI一部欠落の原因確定は残っており、thin seek barより先に描画安定性を調べる。
+
+続くpixel照合で、直近captureに対するUI欠落の目視判定を訂正した。hardware/software各10回のtimeline開閉でもtabとcontrolsは一致した。音声drain後のpauseは実WASAPI testと実windowでFaultedを再現し、正常排出と異常終了を区別して修正した。次はthin seek barとkeyboard中心の日常操作を改善し、launch auditへ進める。

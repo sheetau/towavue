@@ -95,6 +95,8 @@ demux、video decode、audio decode、WASAPI outputは独立workerとし、strea
 
 通常再生は`IAudioClock`をmasterとする。running中のdevice positionが供給停止で進まない場合に限り、audio clientのstart/stopとpauseを追跡した単調時計を下限にして永久停止を防ぐ。Seekはgeneration更新後に旧workerと全queueを破棄し、`avformat_seek_file`、decode/discard、audio/video primingを新しいpipelineで行う。default render endpoint変更とD3D11 device removalはtyped eventとしてappへ渡し、現在位置と新しいendpointまたはD3D11 deviceでpipeline全体を再構築する。
 
+音声の正常排出後も残りの動画はpause/resumeできる。WASAPI workerはcontrol receiverを閉じる前に正常終了を公開し、その場合だけ閉じたcontrol channelへのpause/resumeを成功したno-opとして扱う。device変更・失敗・予期しない終了はこの扱いに含めず、既存のerror/recovery経路を維持する。
+
 ### M5 image presentation
 
 静止画はEXIF orientation適用後、アニメGIF、WebP、APNGは合成済みRGBA frameと10 ms以上のdeadlineへ変換する。app event loopは次frame時刻までsleepし、期限を過ぎたframeを追いつかせてからegui textureを更新する。画像textureも動画・UIと同じD3D11 deviceとback bufferへ描画し、Presentは一回に保つ。

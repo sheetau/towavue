@@ -27,7 +27,6 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - Explorerからwindowへのfile drag-and-dropはない。tabのwindow外dropだけが実装されている。
 - export errorは確認するまで残る詳細modal、画像load errorは画像領域（readingでは該当page）に表示する。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
 - end-to-end UI test、visual regression、accessibility検査、複数DPI/monitorの自動matrixはない。現在のUI完了判定には実window操作が必要である。
-- compact shell試用で、操作後にtab/window controlsの一部が一時的に表示されないcaptureがある。UIのrepaint deadline未処理は修正したが、症状全体の根本原因・解消はまだ確定していない。次のUI描画調査を優先する。
 
 ## 2. UI草案との対応
 

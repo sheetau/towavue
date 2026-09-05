@@ -2,6 +2,18 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 16:22 JST - fix / controls after audio drain and UI evidence correction
+
+- Trigger: investigate reported chrome disappearance and the earlier audio-worker-stopped diagnostic before adding more interactions.
+- Evidence correction: the recent viewport captures previously judged to omit controls actually contain the normal 68 bright control pixels, with their tabs present. Ten timeline-toggle captures each for hardware H.264 and software FFV1 retained tab counts and identical control-region pixel hashes. This corrects the prior visual interpretation; it is not evidence of a new renderer fix. The much older intermediate shell replay/maximize captures really lacked controls, but that is not reproduced on the current checkpoint. Removed the unsupported current-gap claim while retaining this historical correction.
+- Reproduction: a new opt-in real-WASAPI test failed with Closed when pausing after Drained. A 12-second, 2-fps H.264 video with only 0.5 seconds of silent AAC also entered Faulted on pause after audio completion in the old executable.
+- Result: audio output publishes successful drain before closing its retained control receiver. Pause/resume after that normal completion are harmless no-ops for audio, allowing the app's video clock to pause/resume. Unexpected closure and failures still return Closed. Only runtime audio code changed; no new dependency or unsafe code.
+- Verification: focused closed-control and live-drain regressions pass; the live-drain test demonstrably failed before the fix. Format, workspace all-target Clippy with warnings denied, and all-target tests pass (app 14, core 26, runtime 35, integrations 3; three explicitly ignored live tests in the default suite). Both opt-in WASAPI drain and rate-clock tests were then executed successfully without skips; four rates advanced source time by 0.150/0.300/1.200/2.400 seconds over 0.6 seconds.
+- Real-window result: the same short-audio fixture paused successfully, with zero changed video samples across two seconds, then resumed to EOF with 24 hardware frames, 0 CPU transfers, 0 drops, and source-time drift p95/max 0.004 ms. Trial windows closed; fixtures, captures, and pixel-audit helper remain ignored under target/tmp.
+- Changed areas: runtime audio and tests, architecture, development guide, gap ledger, roadmap, and this log. Viewport checkpoint 803e2a4 independently passed CI 33951926564.
+- Status: h1_active; UI pixel checks are limited to these scenarios, not a broad DPI/accessibility/driver matrix. The launch objective remains open.
+- Next action: verify checkpoint CI, implement the draft's thin always-available seek bar and polish keyboard command-palette operation, then continue the full daily-flow and launch audit.
+
 ## 2026-09-05 16:11 JST - fix / video viewport and repaint scheduling
 
 - Trigger: compact-shell trials showed video stretched against the whole window, with edges hidden under bars; selection used a different rectangle.

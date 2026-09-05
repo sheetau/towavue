@@ -154,3 +154,5 @@ graphics recovery開始時のAccess deniedを実windowで再現し、旧worker�
 renderer再作成不能時のnative確認を追加し、Retry、Cancelでの編集保持、描画なしのExport失敗・再保存・正常終了を実windowで確認した。停止動画は待機後も元の位置・1.25倍・停止を保ち、復旧後に残ったFaulted titleも修正した。保存PNGは回転後の64画素が一致し、148 tests・通常release buildが通った。前checkpointのCIも成功。次は複数dirty tabとexport中の故障/取消、実driver/endpoint経路を継続監査する。H1全体は未完了。
 
 native復旧確認中に保存が完了すると保存済みtabを再確認する問題を再現し、確認終了後に残るdirty tabを選び直すよう修正した。実windowで2枚とも保存してから終了し、出力画素も一致した。追加試験で、生成設定の`zoom_in = +`が次回起動時に読めない決定的な不具合も判明した。`Plus`による保存と旧形式の読込を対応し、隔離設定の初回起動・再起動・旧設定Reloadを確認した。以前のCI原因を「競合」とした説明は未証明で、この生成/読込不一致を訂正根拠とする。151 tests・Clippy・releaseが通過。次はexport取消を含む残る組合せとdevice/endpointの監査を続ける。H1全体は未完了。
+
+export完了と取消が重なると保留中の終了が実行される問題を回帰testで再現し、保存成功の記録と自動離脱を分離した。置換前の取消は既存出力・未保存編集を保持し、置換後は保存出力を残して自動離脱だけを止める。実windowの描画なし取消を両時点で確認し、完了PNGの64画素も一致した。試験用故障コード除去後の152 tests・Clippy・release buildが通過し、前checkpointのCIも成功。次は実device/endpoint経路と残る入力・日常flowの監査を続ける。物理IME・混在DPI・配布を含むH1全体は未完了。

@@ -2855,11 +2855,18 @@ where
                             "software"
                         };
                         self.set_status(format!(
-                            "Exported {} ({encoder} encode)",
+                            "{} {} ({encoder} encode)",
+                            if export.cancelling {
+                                "Export completed before cancellation; automatic leaving cancelled:"
+                            } else {
+                                "Exported"
+                            },
                             export.request.target.display()
                         ));
                         self.refresh_title();
-                        if let Some(action) = export.continuation {
+                        if !export.cancelling
+                            && let Some(action) = export.continuation
+                        {
                             if self.native_prompt.is_some() {
                                 self.pending_guard = Some(action);
                             } else {
@@ -3256,7 +3263,7 @@ where
                 PromptButtons::Ok,
             ),
             FallbackPrompt::ExportBusy => (
-                "Export is still running.\n\nYes: cancel export and keep edits.\nNo or Cancel: keep waiting.\n\nThe window title reports export progress.".into(),
+                "Export may finish while this dialog is open.\n\nYes: request cancellation and stop automatic leaving.\nNo or Cancel: keep waiting.\n\nIf already saved, the output is kept. Otherwise existing files and edits are retained.\nThe window title reports export progress.".into(),
                 PromptButtons::YesNoCancel,
             ),
         };
@@ -3296,11 +3303,16 @@ where
             }),
             FallbackPrompt::ExportError => self.export_error = None,
             FallbackPrompt::ExportBusy => {
-                if response == PromptResponse::Yes
-                    && let Some(export) = &mut self.active_export
-                {
-                    export.job.cancel();
-                    export.cancelling = true;
+                if response == PromptResponse::Yes {
+                    if let Some(export) = &mut self.active_export {
+                        export.job.cancel();
+                        export.cancelling = true;
+                    } else {
+                        self.pending_guard = None;
+                        self.set_status(
+                            "Export already finished; automatic leaving cancelled.".into(),
+                        );
+                    }
                 }
             }
         }
@@ -5439,6 +5451,103 @@ mod tests {
         app.pending_dialog = Some(DialogIntent::OpenFolder);
         app.finish_dialog(Ok(None));
         assert_eq!(app.path.as_ref(), Some(&source));
+    }
+
+    #[test]
+    fn export_cancellation_never_resumes_exit_even_when_publication_wins() {
+        let Some(root) = isolated_test_root(
+            "tests::export_cancellation_never_resumes_exit_even_when_publication_wins",
+        ) else {
+            return;
+        };
+        for phase in 0..3 {
+            let (notify, events) = std::sync::mpsc::channel();
+            let (release, gate) = std::sync::mpsc::channel();
+            let gate = std::sync::Mutex::new(gate);
+            let blocked = std::sync::atomic::AtomicBool::new(false);
+            let mut app = Application::new(None, move |event| {
+                let hold = phase == 0
+                    && matches!(event, AppEvent::Export(ExportEvent::Progress(_)))
+                    && !blocked.swap(true, std::sync::atomic::Ordering::Relaxed);
+                let _ = notify.send(event);
+                if hold {
+                    gate.lock()
+                        .expect("test gate")
+                        .recv_timeout(Duration::from_secs(10))
+                        .expect("release export");
+                }
+            })
+            .expect("headless application");
+            let source = root.join(format!("source-{phase}.ppm"));
+            let target = root.join(format!("output-{phase}.png"));
+            let source_bytes = b"P6\n2 1\n255\n\xff\x00\x00\x00\xff\x00";
+            std::fs::write(&source, source_bytes).expect("source");
+            std::fs::write(&target, b"existing output").expect("target");
+            let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+            app.path = Some(source.clone());
+            app.media_kind = Some(MediaKind::Image);
+            app.edits
+                .entry(tab)
+                .or_default()
+                .push(EditOperation::RotateClockwise, MediaKind::Image);
+            app.export_paths.insert(tab, target.clone());
+            assert!(app.export_current(false, Some(GuardedAction::Exit)));
+            app.native_prompt = Some(FallbackPrompt::ExportBusy);
+            let next_export = || loop {
+                if let AppEvent::Export(event) = events
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("export event")
+                {
+                    break event;
+                }
+            };
+            if phase == 0 {
+                assert!(matches!(next_export(), ExportEvent::Progress(_)));
+                app.finish_native_prompt(Ok(PromptResponse::Yes));
+                assert!(
+                    app.active_export
+                        .as_ref()
+                        .expect("export still running")
+                        .cancelling
+                );
+                release.send(()).expect("release worker after cancellation");
+            }
+            let finished = loop {
+                let event = next_export();
+                if matches!(event, ExportEvent::Finished(_)) {
+                    break event;
+                }
+            };
+            if phase == 1 {
+                app.native_prompt = None;
+                app.handle_ui_action(UiAction::CancelExport);
+            }
+            app.handle_export_event(finished);
+            if phase == 2 {
+                app.finish_native_prompt(Ok(PromptResponse::Yes));
+            }
+            assert!(
+                !app.exit_requested,
+                "cancel must stop the pending exit: phase {phase}"
+            );
+            assert!(app.export_error.is_none());
+            assert_eq!(
+                std::fs::read(source).expect("source retained"),
+                source_bytes
+            );
+            let output = std::fs::read(target).expect("output");
+            if phase == 0 {
+                assert_eq!(output, b"existing output");
+                assert!(app.edits[&tab].is_dirty());
+                assert!(matches!(app.pending_guard, Some(GuardedAction::Exit)));
+                app.native_prompt = Some(FallbackPrompt::Guard);
+                app.finish_native_prompt(Ok(PromptResponse::Cancel));
+            } else {
+                assert!(output.starts_with(b"\x89PNG"));
+                assert!(!app.edits[&tab].is_dirty());
+                assert!(app.pending_guard.is_none());
+            }
+        }
     }
 
     #[test]

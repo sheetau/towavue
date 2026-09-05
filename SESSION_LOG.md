@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 06:24 JST - export / cancellation stops automatic leaving after publication
+
+- Trigger/reproduction: a real background-export regression failed when Cancel export arrived after output publication but before the app consumed success: the pending Exit still ran. Native ExportBusy Yes after completion had the same continuation gap.
+- Fix: retain successful output and mark only its exported history saved, but suppress continuation when cancellation was requested. Native Yes after completion clears the deferred action. Prompt/status text distinguishes cancellation from already completed publication. Runtime atomic publication/cancellation is unchanged; no dependencies or unsafe code added.
+- Regression: deterministic pre-publication gate preserves existing sentinel output and dirty edits; UI cancellation before consuming success and native Yes after consuming success both retain the PNG/saved history without Exit. All cases retain source bytes. Existing multiple-dirty-tab continuation and runtime staging-cleanup tests also pass.
+- Native evidence: owned 4K60 export at 4.3 s progress, controlled app-only renderer failure, Recovery Cancel then ExportBusy Yes returned to the native dirty guard; Escape retained edits, no output/staging/child encoder remained. Explicit No then discarded only the trial mute edit and closed process 46160. Separate PNG trial opened ExportBusy at successful publication; Yes kept process 46432 alive without a dirty title, and the retained output matches all 64 clockwise-rotated pixels. A later explicit Close exited normally.
+- Cleanup/checks: removed temporary CANCEL_TRIAL injection/environment; normal debug and release rebuilt. Format, all-target Clippy with warnings denied and all 152 tests pass (app 64, core 34, runtime 50, integrations 4; three live WASAPI/Explorer tests explicitly ignored). Prior ee61ff8 CI 33992429122 succeeded. No trial process remains; ignored h1-export-cancel captures/logs/output retain evidence. Sources and OS settings unchanged; controlled renderer failure is not physical driver-reset evidence.
+- Status/next: h1_active. Follow the next checkpoint CI, then audit actual device/endpoint recovery paths and remaining input/daily flows. Physical IME, mixed-DPI and distribution decisions remain incomplete.
+
 ## 2026-09-06 06:12 JST - continuity / recheck dirty tabs and repair generated shortcut round trips
 
 - Trigger/reproduction: a real background-export regression test with two dirty tabs failed after export completed under the Recovery prompt. Closing that prompt left active TabId(0), already saved, instead of unsaved TabId(1). Only ExportBusy previously revalidated the delayed action.

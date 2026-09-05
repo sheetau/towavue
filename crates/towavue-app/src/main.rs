@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod chrome;
 mod grid;
 mod shortcuts;
 
@@ -110,6 +111,11 @@ impl PlaybackClock {
 }
 
 enum UiAction {
+    Minimize,
+    Maximize,
+    CloseWindow,
+    DragWindow,
+    ResizeWindow(winit::window::ResizeDirection),
     Command(CommandId),
     ActivateTab(TabId),
     CloseTab(TabId),
@@ -442,13 +448,16 @@ where
     fn start(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
         let attributes = Window::default_attributes()
             .with_title(self.title())
-            .with_inner_size(LogicalSize::new(960, 576));
+            .with_inner_size(LogicalSize::new(960, 576))
+            .with_min_inner_size(LogicalSize::new(480, 300))
+            .with_decorations(false);
         let window = event_loop.create_window(attributes)?;
         let mut renderer = FrameRenderer::new(&window)?;
         let size = window.inner_size();
         renderer.resize_surface(size.width, size.height)?;
         let context = egui::Context::default();
         context.set_visuals(egui::Visuals::dark());
+        context.style_mut_of(egui::Theme::Dark, chrome::style);
         context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
         let state = egui_winit::State::new(
             context.clone(),
@@ -1370,71 +1379,170 @@ where
 
     fn draw_top_bar(&self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         let window_rect = root.max_rect();
-        egui::Panel::top("tabs").exact_size(32.0).show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.menu_button(RichText::new("towavue").strong(), |ui| {
-                    for definition in command_definitions() {
-                        let shortcut = self
-                            .shortcuts
-                            .get(definition.id)
-                            .map(ToString::to_string)
-                            .unwrap_or_default();
-                        let label = if shortcut.is_empty() {
-                            definition.title.to_owned()
-                        } else {
-                            format!("{}    {}", definition.title, shortcut)
-                        };
-                        if ui
-                            .add_enabled(
-                                definition.is_enabled(self.command_context()),
-                                egui::Button::new(label),
-                            )
-                            .clicked()
-                        {
-                            actions.push(UiAction::Command(definition.id));
-                            ui.close();
-                        }
+        egui::Panel::top("tabs")
+            .exact_size(32.0)
+            .frame(chrome::bar())
+            .show(root, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    ui.visuals_mut().widgets.inactive.weak_bg_fill = chrome::BACKGROUND;
+                    let menu = ui.menu_button("    ", |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(500.0)
+                            .show(ui, |ui| {
+                                for definition in command_definitions() {
+                                    let shortcut = self
+                                        .shortcuts
+                                        .get(definition.id)
+                                        .map(ToString::to_string)
+                                        .unwrap_or_default();
+                                    let label = format!("{}    {}", definition.title, shortcut);
+                                    if ui
+                                        .add_enabled(
+                                            definition.is_enabled(self.command_context()),
+                                            egui::Button::new(label),
+                                        )
+                                        .clicked()
+                                    {
+                                        actions.push(UiAction::Command(definition.id));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                    });
+                    chrome::logo(ui, menu.response.rect);
+                    menu.response.on_hover_text("towavue menu");
+
+                    let controls_width = 98.0;
+                    let strip_width = (ui.available_width() - controls_width - 56.0).max(80.0);
+                    let width = chrome::tab_width(strip_width, self.tabs.tabs().len());
+                    egui::ScrollArea::horizontal()
+                        .id_salt("tab-strip")
+                        .max_width(strip_width)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                for tab in self.tabs.tabs() {
+                                    let active =
+                                        self.tabs.active().is_some_and(|item| item.id == tab.id);
+                                    let dirty =
+                                        self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty);
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(width, 26.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    if active {
+                                        ui.painter().rect_filled(rect, 3.0, Color32::from_gray(28));
+                                    }
+                                    let label_rect = egui::Rect::from_min_max(
+                                        rect.min,
+                                        rect.max - egui::vec2(24.0, 0.0),
+                                    );
+                                    let label = format!(
+                                        "{}{}",
+                                        display_name(tab.target.current_path()),
+                                        if dirty { " *" } else { "" }
+                                    );
+                                    let response = ui
+                                        .put(
+                                            label_rect,
+                                            egui::Button::new(RichText::new(label).color(
+                                                if active {
+                                                    Color32::from_gray(230)
+                                                } else {
+                                                    chrome::MUTED
+                                                },
+                                            ))
+                                            .frame(false)
+                                            .truncate()
+                                            .sense(egui::Sense::click_and_drag()),
+                                        )
+                                        .on_hover_text(
+                                            tab.target.current_path().display().to_string(),
+                                        );
+                                    if response.clicked() {
+                                        actions.push(UiAction::ActivateTab(tab.id));
+                                    }
+                                    if response.clicked_by(egui::PointerButton::Middle) {
+                                        actions.push(UiAction::CloseTab(tab.id));
+                                    }
+                                    if response.drag_stopped()
+                                        && response
+                                            .interact_pointer_pos()
+                                            .is_some_and(|position| !window_rect.contains(position))
+                                    {
+                                        actions.push(UiAction::DetachTab(tab.id));
+                                    }
+                                    let close_rect = egui::Rect::from_min_max(
+                                        egui::pos2(rect.right() - 24.0, rect.top()),
+                                        rect.max,
+                                    );
+                                    if ui
+                                        .put(close_rect, egui::Button::new("×").frame(false))
+                                        .on_hover_text("Close tab")
+                                        .clicked()
+                                    {
+                                        actions.push(UiAction::CloseTab(tab.id));
+                                    }
+                                }
+                            });
+                        });
+                    let (drag_rect, response) = ui.allocate_exact_size(
+                        egui::vec2((ui.available_width() - controls_width).max(20.0), 26.0),
+                        egui::Sense::click_and_drag(),
+                    );
+                    if self.tabs.tabs().is_empty() {
+                        ui.painter().text(
+                            drag_rect.left_center(),
+                            Align2::LEFT_CENTER,
+                            "towavue",
+                            egui::FontId::proportional(12.0),
+                            chrome::MUTED,
+                        );
+                    }
+                    if response.double_clicked() {
+                        actions.push(UiAction::Maximize);
+                    } else if response.drag_started() {
+                        actions.push(UiAction::DragWindow);
+                    }
+                    if chrome::button(ui, "−", "Minimize").clicked() {
+                        actions.push(UiAction::Minimize);
+                    }
+                    let maximized = self
+                        .window
+                        .as_ref()
+                        .is_some_and(|window| window.is_maximized());
+                    if chrome::button(ui, if maximized { "▣" } else { "□" }, "Maximize / restore")
+                        .clicked()
+                    {
+                        actions.push(UiAction::Maximize);
+                    }
+                    if chrome::button(ui, "×", "Close window").clicked() {
+                        actions.push(UiAction::CloseWindow);
                     }
                 });
-                egui::ScrollArea::horizontal()
-                    .id_salt("tab-strip")
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            for tab in self.tabs.tabs() {
-                                let active =
-                                    self.tabs.active().is_some_and(|item| item.id == tab.id);
-                                let label = format!(
-                                    "{}{}",
-                                    display_name(tab.target.current_path()),
-                                    if self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty) {
-                                        " *"
-                                    } else {
-                                        ""
-                                    }
-                                );
-                                let response = ui.add(
-                                    egui::Button::new(label)
-                                        .selected(active)
-                                        .sense(egui::Sense::click_and_drag()),
-                                );
-                                if response.clicked() {
-                                    actions.push(UiAction::ActivateTab(tab.id));
-                                }
-                                if response.drag_stopped()
-                                    && response
-                                        .interact_pointer_pos()
-                                        .is_some_and(|position| !window_rect.contains(position))
-                                {
-                                    actions.push(UiAction::DetachTab(tab.id));
-                                }
-                                if ui.small_button("×").clicked() {
-                                    actions.push(UiAction::CloseTab(tab.id));
-                                }
-                            }
-                        });
-                    });
             });
-        });
+        if !self
+            .window
+            .as_ref()
+            .is_some_and(|window| window.is_maximized())
+            && let Some(position) = root.input(|input| input.pointer.hover_pos())
+            && let Some(direction) = chrome::resize_edge(window_rect, position)
+        {
+            root.ctx().set_cursor_icon(match direction {
+                winit::window::ResizeDirection::North | winit::window::ResizeDirection::South => {
+                    egui::CursorIcon::ResizeVertical
+                }
+                winit::window::ResizeDirection::East | winit::window::ResizeDirection::West => {
+                    egui::CursorIcon::ResizeHorizontal
+                }
+                winit::window::ResizeDirection::NorthWest
+                | winit::window::ResizeDirection::SouthEast => egui::CursorIcon::ResizeNwSe,
+                _ => egui::CursorIcon::ResizeNeSw,
+            });
+            if root.input(|input| input.pointer.primary_pressed()) {
+                actions.push(UiAction::ResizeWindow(direction));
+            }
+        }
     }
 
     fn draw_grid_menu(&self, context: &egui::Context, actions: &mut Vec<UiAction>) {
@@ -1489,117 +1597,147 @@ where
     fn draw_status_bar(&self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         egui::Panel::bottom("status")
             .exact_size(30.0)
+            .frame(chrome::bar())
             .show(root, |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
                     if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
-                        let label = if self.state == PlaybackState::Playing {
-                            "Pause"
-                        } else {
-                            "Play"
-                        };
-                        if ui.small_button(label).clicked() {
+                        let playing = self.state == PlaybackState::Playing;
+                        if chrome::button(
+                            ui,
+                            if playing { "Ⅱ" } else { "▶" },
+                            if playing {
+                                "Pause (Space)"
+                            } else {
+                                "Play / replay (Space)"
+                            },
+                        )
+                        .clicked()
+                        {
                             actions.push(UiAction::Command(CommandId::TogglePause));
                         }
-                        ui.monospace(format_time(self.current_position()));
-                        if ui
-                            .selectable_label(self.timeline_open, "Timeline")
-                            .on_hover_text("Toggle waveform timeline (T)")
-                            .clicked()
-                        {
+                        let duration = self
+                            .media_duration
+                            .map(|duration| format_time(MediaTime::ZERO.saturating_add(duration)))
+                            .unwrap_or_else(|| "—".into());
+                        ui.label(
+                            RichText::new(format!(
+                                "{} / {duration}",
+                                format_time(self.current_position())
+                            ))
+                            .size(12.0)
+                            .color(chrome::MUTED),
+                        );
+                        if chrome::button(ui, "≋", "Waveform timeline (T)").clicked() {
                             actions.push(UiAction::Command(CommandId::ToggleTimeline));
                         }
-                        if self.media_kind == Some(MediaKind::Video) {
-                            ui.weak(if self.prefer_hardware_encode {
-                                "HW export"
-                            } else {
-                                "SW export"
-                            });
-                        }
-                    }
-                    if self.media_kind == Some(MediaKind::Image) {
-                        if ui
-                            .selectable_label(self.reading_mode, "Reading")
-                            .on_hover_text("Toggle reading mode (B)")
-                            .clicked()
-                        {
+                    } else if self.media_kind == Some(MediaKind::Image) {
+                        if chrome::button(ui, "◫", "Reading mode (B)").clicked() {
                             actions.push(UiAction::Command(CommandId::ToggleReadingMode));
                         }
                         if self.image_view.selection.is_some()
                             && ui
                                 .selectable_label(self.image_view.crop_preview, "Crop preview")
-                                .on_hover_text("Toggle crop preview (Ctrl+Y)")
                                 .clicked()
                         {
                             actions.push(UiAction::Command(CommandId::ToggleCropPreview));
                         }
                     }
-                    if let Some((message, _)) = &self.status_message {
-                        ui.colored_label(Color32::LIGHT_YELLOW, message);
-                    } else if let Some(path) = &self.path {
-                        ui.label(display_name(path));
-                        ui.weak(
-                            path.parent()
-                                .unwrap_or_else(|| Path::new(""))
-                                .display()
-                                .to_string(),
-                        );
-                        if let Some(index) = self
-                            .folder_snapshot
-                            .as_ref()
-                            .and_then(|snapshot| snapshot.item_index(path))
+                    let mut details = Vec::new();
+                    if let Some(image) = &self.image {
+                        let (width, height) = image.dimensions();
+                        let zoom = match self.image_view.zoom {
+                            ZoomMode::Fit => "Fit".into(),
+                            ZoomMode::Actual => "100%".into(),
+                            ZoomMode::Custom(scale) => format!("{:.0}%", scale * 100.0),
+                        };
+                        details.push(zoom);
+                        details.push(format!("{} {width}×{height}", image.decoded.format));
+                    } else if self.session.is_some() {
+                        let edit = self.edit_state();
+                        details.push(format!("{:.0}%  {:.2}×", edit.volume * 100.0, edit.rate));
+                    }
+                    if let Some(path) = &self.path {
+                        if let Some(snapshot) = &self.folder_snapshot
+                            && let Some(index) = snapshot.item_index(path)
                         {
-                            let count = self
-                                .folder_snapshot
-                                .as_ref()
-                                .map_or(0, |snapshot| snapshot.items.len());
-                            ui.monospace(format!("{} / {}", index + 1, count));
+                            details.push(format!("{} / {}", index + 1, snapshot.items.len()));
+                            if snapshot.source == FolderSnapshotSource::NaturalNameFallback {
+                                details.push("Name fallback".into());
+                            }
                         }
                         if let Ok(metadata) = path.metadata() {
-                            ui.monospace(format_size(metadata.len()));
+                            details.push(format_size(metadata.len()));
                         }
-                        if let Some(image) = &self.image {
-                            let (width, height) = image.dimensions();
-                            ui.monospace(format!("{width} × {height}"));
-                            match self.image_view.zoom {
-                                ZoomMode::Fit => ui.monospace("Fit"),
-                                ZoomMode::Actual => ui.monospace("100%"),
-                                ZoomMode::Custom(scale) => {
-                                    ui.monospace(format!("{:.0}%", scale * 100.0))
-                                }
-                            };
-                            if self.reading_mode {
-                                ui.weak(format!(
-                                    "Reading · {} pages · {:?}",
-                                    self.reading_pages.len()
-                                        + usize::from(
-                                            self.image.is_some() || self.image_error.is_some()
-                                        ),
-                                    self.reading_settings.axis
-                                ));
-                            }
-                        }
-                        if let Some(snapshot) = &self.folder_snapshot {
-                            ui.weak(snapshot_source(snapshot.source));
-                        }
-                        if self
-                            .tabs
-                            .active()
-                            .and_then(|tab| self.edits.get(&tab.id))
-                            .is_some_and(EditHistory::is_dirty)
-                        {
-                            let edit = self.edit_state();
-                            ui.colored_label(Color32::LIGHT_YELLOW, "Unsaved");
-                            if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
-                                ui.monospace(format!(
-                                    "Volume {:.0}% · Rate {:.2}×",
-                                    edit.volume * 100.0,
-                                    edit.rate
-                                ));
-                            }
-                        }
-                    } else {
-                        ui.weak(format!("Shortcuts: {}", self.shortcut_path.display()));
                     }
+                    if self.tabs.active().is_some_and(|tab| {
+                        self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty)
+                    }) {
+                        details.push("Unsaved".into());
+                    }
+                    let info = details.join("   ");
+                    let remaining = ui.available_width();
+                    let info_width = if info.is_empty() {
+                        0.0
+                    } else {
+                        (remaining * 0.52).min(410.0)
+                    };
+                    let path_width = (remaining - info_width - 6.0).max(0.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(path_width, 24.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.set_min_width(path_width);
+                            let (text, color, tooltip) =
+                                if let Some((message, _)) = &self.status_message {
+                                    (
+                                        message.clone(),
+                                        Color32::from_rgb(216, 205, 167),
+                                        message.clone(),
+                                    )
+                                } else if let Some(path) = &self.path {
+                                    let parent = path
+                                        .parent()
+                                        .and_then(Path::file_name)
+                                        .map(|name| name.to_string_lossy())
+                                        .unwrap_or_default();
+                                    (
+                                        format!("{parent}\\{}", display_name(path)),
+                                        chrome::MUTED,
+                                        path.display().to_string(),
+                                    )
+                                } else {
+                                    (
+                                        "Open a file or folder to begin".into(),
+                                        chrome::MUTED,
+                                        format!("Shortcuts: {}", self.shortcut_path.display()),
+                                    )
+                                };
+                            ui.add(
+                                egui::Label::new(RichText::new(text).size(12.0).color(color))
+                                    .truncate(),
+                            )
+                            .on_hover_text(tooltip);
+                        },
+                    );
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(info_width, 24.0),
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            ui.set_min_width(info_width);
+                            let source = self
+                                .folder_snapshot
+                                .as_ref()
+                                .map_or("", |snapshot| snapshot_source(snapshot.source));
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&info).size(12.0).color(chrome::MUTED),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(format!("{info}\n{source}"));
+                        },
+                    );
                 });
             });
     }
@@ -1764,6 +1902,27 @@ where
 
     fn handle_ui_action(&mut self, action: UiAction) {
         match action {
+            UiAction::Minimize => {
+                if let Some(window) = &self.window {
+                    window.set_minimized(true);
+                }
+            }
+            UiAction::Maximize => {
+                if let Some(window) = &self.window {
+                    window.set_maximized(!window.is_maximized());
+                }
+            }
+            UiAction::CloseWindow => self.request_guarded(GuardedAction::Exit),
+            UiAction::DragWindow => {
+                if let Some(window) = &self.window {
+                    let _ = window.drag_window();
+                }
+            }
+            UiAction::ResizeWindow(direction) => {
+                if let Some(window) = &self.window {
+                    let _ = window.drag_resize_window(direction);
+                }
+            }
             UiAction::Command(command) => self.dispatch(command),
             UiAction::ActivateTab(id) => self.activate_tab(id),
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
@@ -2373,11 +2532,16 @@ where
     }
 
     fn toggle_pause(&mut self) {
-        let paused = match self.state {
-            PlaybackState::Playing => true,
-            PlaybackState::Paused if self.session.is_some() => false,
-            _ => return,
+        let Some(next) = self.state.after_play_pause() else {
+            return;
         };
+        if self.state == PlaybackState::Ended {
+            self.seek_to(MediaTime::ZERO);
+            if self.state == PlaybackState::Faulted {
+                return;
+            }
+        }
+        let paused = next == PlaybackState::Paused;
         let Some(session) = self.session.as_mut() else {
             return;
         };

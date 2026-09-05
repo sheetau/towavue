@@ -1,0 +1,150 @@
+use egui::{Color32, Pos2, Rect, Stroke, Ui};
+use winit::window::ResizeDirection;
+
+pub const BACKGROUND: Color32 = Color32::from_rgb(8, 8, 8);
+pub const MUTED: Color32 = Color32::from_rgb(145, 145, 145);
+
+pub fn style(style: &mut egui::Style) {
+    style.visuals.panel_fill = BACKGROUND;
+    style.visuals.selection.bg_fill = Color32::from_gray(38);
+    style.visuals.selection.stroke = Stroke::new(1.0, Color32::from_gray(225));
+    style.spacing.button_padding = egui::vec2(6.0, 3.0);
+}
+
+pub fn bar() -> egui::Frame {
+    egui::Frame::NONE
+        .fill(BACKGROUND)
+        .inner_margin(egui::Margin::symmetric(6, 2))
+}
+
+pub fn button(ui: &mut Ui, glyph: &str, label: &str) -> egui::Response {
+    let painted = matches!(glyph, "≋" | "◫" | "Ⅱ");
+    let response = ui
+        .add_sized(
+            [28.0, 24.0],
+            egui::Button::new(egui::RichText::new(if painted { "" } else { glyph }).size(16.0))
+                .frame(false),
+        )
+        .on_hover_text(label);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    if painted {
+        let center = response.rect.center();
+        let stroke = Stroke::new(1.0, MUTED);
+        if glyph == "≋" {
+            for index in 0..7 {
+                let x = center.x - 6.0 + index as f32 * 2.0;
+                let height = [2.0, 4.0, 6.0, 3.0, 5.0, 4.0, 2.0][index];
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(x, center.y - height),
+                        egui::pos2(x, center.y + height),
+                    ],
+                    stroke,
+                );
+            }
+        } else if glyph == "Ⅱ" {
+            for x in [-3.0, 3.0] {
+                ui.painter().line_segment(
+                    [center + egui::vec2(x, -5.0), center + egui::vec2(x, 5.0)],
+                    Stroke::new(2.0, MUTED),
+                );
+            }
+        } else {
+            let rect = Rect::from_center_size(center, egui::vec2(14.0, 10.0));
+            ui.painter()
+                .rect_stroke(rect, 1.0, stroke, egui::StrokeKind::Inside);
+            ui.painter()
+                .line_segment([rect.center_top(), rect.center_bottom()], stroke);
+        }
+    }
+    response
+}
+
+pub fn tab_width(available: f32, count: usize) -> f32 {
+    (available / count.max(1) as f32).clamp(72.0, 160.0)
+}
+
+pub fn logo(ui: &Ui, rect: Rect) {
+    let rect = Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0));
+    let point = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (16.0 / 27.68);
+    let stroke = Stroke::new(1.1, Color32::from_gray(225));
+    for (a, b) in [
+        ((2.17, 2.17), (10.21, 10.21)),
+        ((2.17, 25.5), (10.21, 17.47)),
+        ((17.47, 10.21), (25.5, 2.17)),
+    ] {
+        ui.painter()
+            .line_segment([point(a.0, a.1), point(b.0, b.1)], stroke);
+    }
+    for coordinates in [
+        [(9.82, 1.0), (5.0, 1.0), (2.2, 2.2), (1.0, 5.0), (1.0, 9.82)],
+        [
+            (17.47, 1.0),
+            (22.68, 1.0),
+            (25.5, 2.2),
+            (26.68, 5.0),
+            (26.68, 10.21),
+        ],
+        [
+            (26.68, 17.47),
+            (26.68, 22.68),
+            (25.5, 25.5),
+            (22.68, 26.68),
+            (17.47, 26.68),
+        ],
+        [
+            (1.0, 17.86),
+            (1.0, 22.68),
+            (2.2, 25.5),
+            (5.0, 26.68),
+            (9.82, 26.68),
+        ],
+    ] {
+        ui.painter().add(egui::Shape::line(
+            coordinates.into_iter().map(|(x, y)| point(x, y)).collect(),
+            stroke,
+        ));
+    }
+}
+
+pub fn resize_edge(rect: Rect, position: Pos2) -> Option<ResizeDirection> {
+    let left = position.x < rect.left() + 5.0;
+    let right = position.x > rect.right() - 5.0;
+    let top = position.y < rect.top() + 5.0;
+    let bottom = position.y > rect.bottom() - 5.0;
+    match (left, right, top, bottom) {
+        (true, _, true, _) => Some(ResizeDirection::NorthWest),
+        (_, true, true, _) => Some(ResizeDirection::NorthEast),
+        (true, _, _, true) => Some(ResizeDirection::SouthWest),
+        (_, true, _, true) => Some(ResizeDirection::SouthEast),
+        (true, _, _, _) => Some(ResizeDirection::West),
+        (_, true, _, _) => Some(ResizeDirection::East),
+        (_, _, true, _) => Some(ResizeDirection::North),
+        (_, _, _, true) => Some(ResizeDirection::South),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tabs_share_width_and_resize_only_uses_the_window_edge() {
+        assert_eq!(tab_width(600.0, 4), 150.0);
+        assert_eq!(tab_width(600.0, 1), 160.0);
+        assert_eq!(tab_width(300.0, 10), 72.0);
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(960.0, 576.0));
+        assert_eq!(
+            resize_edge(rect, egui::pos2(1.0, 1.0)),
+            Some(ResizeDirection::NorthWest)
+        );
+        assert_eq!(
+            resize_edge(rect, egui::pos2(959.0, 575.0)),
+            Some(ResizeDirection::SouthEast)
+        );
+        assert_eq!(resize_edge(rect, egui::pos2(400.0, 15.0)), None);
+    }
+}

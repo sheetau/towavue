@@ -78,6 +78,16 @@ pub enum PlaybackState {
     Faulted,
 }
 
+impl PlaybackState {
+    pub fn after_play_pause(self) -> Option<Self> {
+        match self {
+            Self::Playing => Some(Self::Paused),
+            Self::Paused | Self::Ended => Some(Self::Playing),
+            Self::Loading | Self::Faulted => None,
+        }
+    }
+}
+
 /// Identifies results belonging to one open or seek transaction.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PlaybackGeneration(u64);
@@ -99,6 +109,24 @@ mod tests {
     use std::time::Duration;
 
     use super::{MediaTime, PlaybackGeneration, PlaybackState};
+
+    #[test]
+    fn play_restarts_ended_media_but_does_not_resume_a_fault() {
+        assert_eq!(
+            PlaybackState::Ended.after_play_pause(),
+            Some(PlaybackState::Playing)
+        );
+        assert_eq!(
+            PlaybackState::Paused.after_play_pause(),
+            Some(PlaybackState::Playing)
+        );
+        assert_eq!(
+            PlaybackState::Playing.after_play_pause(),
+            Some(PlaybackState::Paused)
+        );
+        assert_eq!(PlaybackState::Faulted.after_play_pause(), None);
+        assert_eq!(PlaybackState::Loading.after_play_pause(), None);
+    }
 
     #[test]
     fn media_time_preserves_signed_nanoseconds() {

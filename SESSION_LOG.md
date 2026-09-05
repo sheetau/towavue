@@ -2,6 +2,18 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 15:57 JST - implementation / compact shell and EOF replay
+
+- Trigger: H1 visual audit found duplicate native/custom title bars, crowded status text, and a Play action that did nothing after EOF.
+- Intent: establish the draft-aligned compact shell while retaining native window operations and existing edit/export guards.
+- Result: replaced native decorations with a 32-logical-pixel title/tab bar and 30-pixel status bar, neutral colors, vector logo, equal-width bounded tabs, truncated names with full-path tooltips, and right-aligned metadata. Added native move/edge-resize/minimize/maximize controls and guarded close. Timeline, reading, and pause symbols are painted to avoid missing font glyphs. Shell fallback remains explicit; full order source is in the metadata tooltip. Play from Ended seeks to zero before resuming; Loading/Faulted remain unchanged.
+- Changed areas: app main/chrome, core playback transition, architecture, README, roadmap, gap ledger, and trial guide. No new dependency, native handle exposure, or app/core unsafe code.
+- Verification: focused transition/geometry tests, format, all-target Clippy with warnings denied, and all-target tests pass (app 13, core 26, runtime 33, integrations 3; the existing opt-in WASAPI-clock and live-Explorer tests explicitly ignored). Previous rate checkpoint c960065 independently passed CI 33950412111.
+- Real-window evidence: image/video maximize and restore, title-area drag, edge resize to 480x300, minimize/recovery, two tabs with a long filename, tab activation, dirty close/Cancel/undo, and playback pause/resume passed. Two-second H.264/AAC replay reached EOF again with 60 hardware frames, 0 transfers, 0 drops, and 32.203 ms seek latency. Latest trial windows closed; media/captures/helper stay ignored under target/tmp.
+- Boundary: an earlier intermediate layout trial lost visible chrome and later logged an audio-worker-stopped error; latest rebuilt trials did not reproduce either, so no independently established root-cause claim is made. Repeat transition stress and pause after audio drain in the launch audit. Multiple DPI/monitor and large-tab-count coverage remain open; menu gestures and tab reorder are deferred.
+- Status: h1_active, not launch-complete. The audit also confirmed video still draws against the whole window and is covered at the edges by bars.
+- Next action: correct video aspect-fit inside the actual media viewport on both hardware/software paths, then thin seek-bar interaction and remaining daily flows. Verify this checkpoint CI after push.
+
 ## 2026-09-05 15:38 JST - implementation / pitch-preserving live rate
 
 - Trigger: H1 rate commands still changed only export, unlike the newly live volume controls.

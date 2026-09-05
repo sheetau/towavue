@@ -6,6 +6,7 @@
 
 ### 操作とpreviewの不一致
 
+- 動画はまだwindow全体へ描画するため、barの下にある端が隠れる。media領域へのaspect-fitとsoftware/hardware経路の一致を次のH1修正対象とする。
 - 動画・音声のvolume・mute・rateはH1でlive playbackにも反映する。rate変更は現在位置からpipelineを再構築するため短い再primingを伴い、音声を無途切れで連続変速する方式ではない。
 - 動画のcrop、rotate、flipもedit historyとexportには入るが、再生映像へ最終形をlive previewしない。crop selection overlayだけが見える。
 - trimは`I` / `O`で現在位置を端点として記録する方式で、timeline上のrange handleや選択範囲はない。
@@ -40,7 +41,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Tabをwindow外へdrag | 別process起動として実装。dirty editの移送はせずguardする |
 | 別windowへtabをdragして結合 | 未実装。process間protocolもない |
 | Filmstrip itemをwindow外へdrag | 未実装 |
-| Tabの並べ替え、drop indicator、等分幅 | 未実装。横scrollの単純なbutton列 |
+| Tabの並べ替え、drop indicator、等分幅 | 等分幅（72～160 logical px）と横scroll・名前省略をH1で実装。並べ替えとdrop indicatorは未実装 |
 | Welcomeのrecent files | Open file/folderだけ実装。recent listは未実装 |
 | Explorerから開く/新規window context menu | OS登録・配布処理が未実装 |
 
@@ -48,8 +49,9 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 | 草案 | 現状 |
 |---|---|
-| 全機能を一つのlogo menuへ集約 | 全commandを一つの`towavue` text menuへ列挙 |
-| File/Edit/Viewの3方向drag gestureとSVG logo | 未実装 |
+| 全機能を一つのlogo menuへ集約 | H1でlogo iconへ集約。全commandの単純な列挙でcategory整理は未完了 |
+| File/Edit/Viewの3方向drag gestureとSVG logo | logo形状をvector描画。方向gestureは未実装 |
+| 黒基調のcompactなwindow shell | 32px title/tab barと30px status、window操作、右寄せ情報をH1で実装。複数DPI/monitorのmatrixは未検証 |
 | Command palette | titleの部分一致検索を実装。ranking、category、keyboard selectionの磨き込みはない |
 | Custom shortcutとprefix key | text設定として実装。GUI editor、競合表示、recording UIはない |
 | Media別4×4 grid | key/clickとtext設定を実装。配置編集UI、drag配置、詳細animationはない |

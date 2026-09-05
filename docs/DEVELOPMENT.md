@@ -81,7 +81,7 @@ towavueの「Explorer順」はfilename順の別名ではなく、そのfolderで
 2. そのExplorer windowを開いたまま、folder内のmediaまたはfolder自体をtowavueで開く。
 3. `F`のfilmstrip、音声playlist、`Ctrl+Left/Right`、`Alt+Left/Right`の順序を確認する。
 4. Explorer側のsortを変更し、towavueで別mediaを読み込むかfilmstripを開き直して再取得させる。
-5. statusの末尾が`Explorer live order`、`Explorer saved order`、または`Natural-name fallback`を示すことを確認する。
+5. status右側の情報へhoverし、`Explorer live order`、`Explorer saved order`、または`Natural-name fallback`を確認する。fallback時は通常表示にも`Name fallback`が付く。
 
 同じfolderを表示するExplorerがある場合はそのlive viewを優先し、ない場合はShell viewが解決する保存済み状態またはfolder templateを使う。取得に失敗したときだけWindows自然名前順へ縮退し、statusに明示する。Explorerの非公開registry Bagsは解析しない。
 
@@ -123,6 +123,15 @@ towavueの「Explorer順」はfilename順の別名ではなく、そのfolderで
 - 性能の問題なら、fileの解像度・frame rate・durationと、何秒後に重くなったか
 
 private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場合は権利上問題のない小さな生成fileを使う。
+
+### H1で確認したcompact shell scenario
+
+- 960×576から480×300へ端dragでresizeし、logo・tab・window controls・下部操作が残ることを確認する。
+- 上部の空白をdragして移動、最大化・復元、最小化から復帰する。画像・動画の両方でbarが残ることを確認する。
+- 長い名前の画像を開き、Ctrl+Oで2枚目を追加する。狭い幅で等分tab、省略名、active表示とclose buttonを確認する。
+- 動画EOF後に左下Playで先頭から再開し、通常再生中は同じbuttonでpause/resumeする。
+- Mで編集を作り右上closeを押す。Unsaved edits確認が出て、Cancelならwindowとdirty履歴が残る。
+- 基準機の実windowでは上記操作が通過した。複数DPI/monitor・大量tabのmatrixは未検証。動画の表示領域はまだwindow全体基準で、barに重なる端が隠れる問題を次の修正対象とする。
 
 ### H1で確認したlive rate scenario
 

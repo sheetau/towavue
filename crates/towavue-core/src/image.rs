@@ -101,13 +101,14 @@ impl ImageViewState {
         match self.zoom {
             ZoomMode::Fit => fit_scale(image_size, viewport_size),
             ZoomMode::Actual => 1.0,
-            ZoomMode::Custom(scale) => scale.clamp(0.02, 64.0),
+            ZoomMode::Custom(scale) => scale.clamp(minimum_zoom(image_size), 64.0),
         }
     }
 
     pub fn zoom_by(&mut self, factor: f32, image_size: (u32, u32), viewport_size: (f32, f32)) {
-        self.zoom =
-            ZoomMode::Custom((self.scale(image_size, viewport_size) * factor).clamp(0.02, 64.0));
+        self.zoom = ZoomMode::Custom(
+            (self.scale(image_size, viewport_size) * factor).clamp(minimum_zoom(image_size), 64.0),
+        );
     }
 
     pub fn fit(&mut self) {
@@ -129,13 +130,17 @@ impl ImageViewState {
     }
 }
 
+fn minimum_zoom(image_size: (u32, u32)) -> f32 {
+    (1.0 / image_size.0.max(image_size.1).max(1) as f32).min(0.02)
+}
+
 pub fn fit_scale(image_size: (u32, u32), viewport_size: (f32, f32)) -> f32 {
     if image_size.0 == 0 || image_size.1 == 0 {
         return 1.0;
     }
     (viewport_size.0 / image_size.0 as f32)
         .min(viewport_size.1 / image_size.1 as f32)
-        .max(0.02)
+        .max(0.0)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -181,6 +186,40 @@ impl ReadingSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fit_keeps_large_images_inside_small_and_reading_viewports() {
+        for size in [(512, 16_384), (16_384, 512), (16_384, 16_384)] {
+            for viewport in [(464.0, 222.0), (40.0, 16.0), (0.0, 0.0)] {
+                let scale = fit_scale(size, viewport);
+                assert!(scale.is_finite() && scale >= 0.0);
+                assert!(size.0 as f32 * scale <= viewport.0 + 0.001);
+                assert!(size.1 as f32 * scale <= viewport.1 + 0.001);
+            }
+        }
+        assert_eq!(fit_scale((0, 10), (100.0, 100.0)), 1.0);
+    }
+
+    #[test]
+    fn zoom_steps_from_sub_two_percent_fit_without_jumping() {
+        let size = (512, 16_384);
+        let viewport = (464.0, 222.0);
+        let mut view = ImageViewState::default();
+        let fitted = view.scale(size, viewport);
+        view.zoom_by(1.25, size, viewport);
+        assert!((view.scale(size, viewport) - fitted * 1.25).abs() < 0.000001);
+        view.zoom_by(0.8, size, viewport);
+        assert!((view.scale(size, viewport) - fitted).abs() < 0.000001);
+        for _ in 0..200 {
+            view.zoom_by(0.8, size, viewport);
+        }
+        assert_eq!(view.scale(size, viewport) * size.1 as f32, 1.0);
+        assert_eq!(view.scale(size, (960.0, 576.0)), view.scale(size, viewport));
+        view.zoom_by(f32::MAX, size, viewport);
+        assert_eq!(view.scale(size, viewport), 64.0);
+        view.zoom_by(0.0, (8, 8), viewport);
+        assert_eq!(view.scale((8, 8), viewport), 0.02);
+    }
 
     #[test]
     fn square_drag_is_square_in_image_pixels() {

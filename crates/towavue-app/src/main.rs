@@ -1879,7 +1879,9 @@ where
                         let zoom = match self.image_view.zoom {
                             ZoomMode::Fit => "Fit".into(),
                             ZoomMode::Actual => "100%".into(),
-                            ZoomMode::Custom(scale) => format!("{:.0}%", scale * 100.0),
+                            ZoomMode::Custom(scale) => {
+                                format!("{:.*}%", if scale < 0.1 { 2 } else { 0 }, scale * 100.0)
+                            }
                         };
                         details.push(zoom);
                         details.push(format!("{} {width}×{height}", image.decoded.format));
@@ -4326,6 +4328,15 @@ mod tests {
         assert!((fitted - egui::vec2(300.0, 600.0)).length() < 0.1);
         app.zoom_image(1.25);
         assert!((render(&mut app, 1.5) - fitted * 1.25).length() < 0.1);
+        for (scale, label) in [(0.0025, "0.25%"), (0.01355, "1.36%"), (0.1, "10%")] {
+            app.image_view.zoom = ZoomMode::Custom(scale);
+            let output = context.run_ui(Default::default(), |ui| {
+                app.draw_status_bar(ui, &mut Vec::new());
+            });
+            assert!(output.shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains(label))
+            }));
+        }
     }
 
     #[test]

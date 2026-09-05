@@ -216,6 +216,8 @@ rateは0.25～4倍のedit値を再生・exportで共有する。音声は固定F
 
 ### H1 image loading
 
+Fitは通常画像・reading pageとも表示領域に入る比率をそのまま使い、2%などの縮小下限を課さない。手動zoomの下限は既存2%と長辺1 physical pixel相当の小さい方、上限は既存64倍を維持する。大きい画像のFitからzoomを始めても2%へ飛ばず、Custom倍率はwindow resizeで変わらない。これは表示倍率の変更で、decode寸法・texture上限・source pixelは変更しない。
+
 画像のActual/100%はsourceの1 pixelを画面の1 physical pixelへ対応させ、Customの倍率も同じ基準にする。appは現在のegui pixels-per-pointでviewportをphysical寸法へ変換してcoreのscale/zoomへ渡し、描画時にlogical寸法へ戻す。Fitは現在のmedia領域、keyboard/menuのzoomは直近表示viewportと編集・crop preview後の寸法を使い、固定window寸法や未編集source寸法を使わない。panとpointer補正はlogical座標のままとし、selection・履歴・source fileは変えない。OS DPI設定の変更や新しいUI scale設定は追加しない。
 
 固定egui-directx11 0.13.0は頂点・clipにcontextのzoom factorを別途掛ける。FullOutputのpixels-per-pointには既にzoomが含まれるため、runtime adapterは渡す値からzoomを一度除き二重拡大を防ぐ。appの入力・media座標・font生成は完全なpixels-per-pointを使い続ける。補正は固定rendererの契約に閉じ込め、依存更新時は実pixel寸法・clipとpointer hit位置を再検証する。

@@ -6,6 +6,9 @@
 
 ### 画像zoomとDPIのH1確認
 
+- 大画像境界: 512×16,384 PNGの上端1,024pxを赤、下端を緑にしたfixtureを480×300でFitする。旧2%下限では両方が切れ、修正後は222pxの表示高に両端が収まる。同じ2枚を横/縦readingにしても端を保持する。Zoom outは0.8倍、最終statusは1.08%になる。手動下限は2%と長辺1 physical pixel相当の小さい方、上限64倍。小さいFitからの操作が2%へ飛ばないことを回帰testする。
+- 基準機の静止2ページreadingは5秒CPU時間15.625 ms。画像は約32 MiBのRGBA一枚で、試験はdecode/GPU上限を緩めていない。注入入力による試験で、最初のpalette送信はEnterまで反映されず、独立送信後のcaptureと最後の直接shortcut送信を最終証拠にした。
+
 - 480×300のwindowで8×8 PNGをfitし、paletteでZoom inを選ぶ。修正前は固定960×576から計算して6400%まで飛んだ。修正後は表示中の222px角に対して1.25倍の約278px角（3469%）となり、viewport外はclipする。
 - 自動描画testは100/125/150/200%と100%への復帰、100%実pixel寸法、fitからの1.25倍、crop preview、crop後回転、Ctrl+wheelのpointer anchorを確認する。fractional DPIのegui座標丸めには0.1 physical pixel未満の許容を使う。
 - native試験では既存egui keyboard zoomでUIだけを拡大した。最初は8×8 PNGの有色領域が12×11、画像計算だけの修正でも10×9だった。固定egui-directx11のzoom二重適用をadapterで除き、最終captureでは元と同じ8×8、同じ中心位置になった。タイトル・status・window controlsのはみ出しも解消し、拡大UIのclickで最大化→元の40,40,520,340へ復帰→closeを確認した。

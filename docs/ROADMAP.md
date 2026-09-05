@@ -130,3 +130,5 @@ trim監査では、同じ位置のI/Oを受理しSave Asで初めて失敗する
 日本語filenameが欠字になる問題を実windowで再現し、OS日本語fontを既定fontの後ろへ追加した。paletteのIME確定Enterの誤実行と、上下focus移動による確定文字の取りこぼしもevent回帰testで修正した。132 tests、実windowの日本語tab/statusと通常palette操作、静止時の低CPUを確認した。実IME候補操作、物理keyboard、複数DPI/monitorと残るlaunch gateは未完了で、H1を継続する。
 
 小さいwindowのZoom inが固定960×576基準で飛ぶ問題と、画像100%がUI倍率に追従する問題を修正した。現在viewport・編集後寸法とphysical pixel基準を使い、pointer anchorを維持する。実windowで残った二重拡大は固定UI rendererのadapter補正で解消した。133 testsと8×8画像の実pixel照合、拡大UIのwindow controls、hardware動画を確認した。異なる実DPI間のmonitor移動・実IME候補操作と残るlaunch gateは引き続き未完了である。
+
+大きい画像のFitに残っていた2%下限を除いた。16,384px高の画像で隠れていた両端が、480×300と縦横reading modeでも表示される。Fitからの縮小も2%へ跳ねず、小さい倍率を小数表示する。135 testsと実windowの1.08%表示を確認した。H1とlaunch全体は継続中である。

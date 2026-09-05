@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 03:20 JST - viewing / large-image fit boundaries
+
+- Trigger: follow-up to eae102c. Its CI 33983479446 is still running the test step, not reported as passed. A 512x16384 PNG in a 480x300 window displayed Fit while both colored ends were clipped by the shared 2% minimum.
+- Result: Fit uses the actual ratio without the manual zoom floor. Custom zoom uses the smaller of 2% and one physical pixel on the long axis, retaining the 64x ceiling and resize-independent scale. App displays two decimal places below 10% so visible small images are not labeled 0%. No decode/texture limit, source, history, dependency or unsafe change.
+- Verification: both new core regressions failed before the fix and now pass. Coverage includes tall/wide/square large images, normal/reading/zero viewports, invalid empty image size, fit-to-zoom steps, repeated zoom-out, bounds and resize stability. Existing app render test now checks small-percentage labels. Format, Clippy with warnings denied, full tests and build pass: app 48, core 33, runtime 50, integrations 4; three live tests explicitly ignored.
+- Native evidence: final Fit retains both red/green ends within 222 pixels; Zoom out shrinks normally and final status is 1.08%. Two-page horizontal and vertical reading retain all ends. Reading idle CPU is 15.625 ms over five seconds on the reference debug build. Initial palette key injection stopped before Enter; separate confirmation and the final direct minus shortcut establish the successful action. Owned windows closed normally; fixtures/captures/logs remain ignored.
+- Changed areas: core image scale, app status and regression, README, architecture, roadmap, trial guide and this log. Status remains h1_active, not launch_complete.
+- Next action: poll the specific CI runs to terminal results, continue input/focus and remaining layout audits, then launch-wide stability/performance gates. Actual mixed-DPI transitions and physical IME remain unverified; distribution requires its separate decision.
+
 ## 2026-09-06 03:13 JST - viewing / physical-pixel zoom and UI scale correction
 
 - Trigger: f26540e passed CI 33982845121. Small-window Zoom in used a hard-coded 960x576 viewport and jumped from a 222-pixel fitted square to the 6400% cap. Actual/Custom image scales also treated source pixels as logical UI points.

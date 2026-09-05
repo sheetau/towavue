@@ -5,8 +5,8 @@ use thiserror::Error;
 use windows::Win32::Foundation::{HMODULE, HWND, RECT};
 use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
 use windows::Win32::Graphics::Direct3D::{
-    D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, ID3DBlob,
-    ID3DInclude,
+    D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_9_3, D3D_FEATURE_LEVEL_10_0,
+    D3D_FEATURE_LEVEL_11_0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, ID3DBlob, ID3DInclude,
 };
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_SHADER_RESOURCE, D3D11_COMPARISON_ALWAYS, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
@@ -163,6 +163,7 @@ float4 main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
 /// Safe owner of the D3D11 device, immediate context, and window swap chain.
 pub struct FrameRenderer {
     graphics_device: GraphicsDevice,
+    max_texture_side: usize,
     context: ID3D11DeviceContext,
     swap_chain: IDXGISwapChain,
     buffer_dimensions: Option<(u32, u32)>,
@@ -240,6 +241,7 @@ impl FrameRenderer {
         let software_blitter = SoftwareBlitter::new(&device)?;
         let ui_renderer = egui_directx11::Renderer::new(&device)?;
         Ok(Self {
+            max_texture_side: texture_side_limit(feature_level),
             graphics_device: GraphicsDevice {
                 device,
                 adapter_luid: AdapterLuid {
@@ -260,6 +262,10 @@ impl FrameRenderer {
 
     pub fn graphics_device(&self) -> GraphicsDevice {
         self.graphics_device.clone()
+    }
+
+    pub fn max_texture_side(&self) -> usize {
+        self.max_texture_side
     }
 
     pub(crate) fn device_removed_reason(&self) -> Option<String> {
@@ -599,6 +605,18 @@ impl FrameRenderer {
             });
         }
         Ok(())
+    }
+}
+
+fn texture_side_limit(level: D3D_FEATURE_LEVEL) -> usize {
+    if level.0 >= D3D_FEATURE_LEVEL_11_0.0 {
+        16_384
+    } else if level.0 >= D3D_FEATURE_LEVEL_10_0.0 {
+        8_192
+    } else if level.0 >= D3D_FEATURE_LEVEL_9_3.0 {
+        4_096
+    } else {
+        2_048
     }
 }
 

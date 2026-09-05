@@ -26,6 +26,10 @@ pub struct DecodedImage {
 }
 
 impl DecodedImage {
+    pub fn retained_bytes(&self) -> usize {
+        self.frames.iter().map(|frame| frame.rgba.len()).sum()
+    }
+
     pub fn dimensions(&self) -> (u32, u32) {
         self.frames
             .first()
@@ -49,35 +53,55 @@ pub enum ImageDecodeError {
     UnknownFormat,
     #[error("decoded image contained no frames")]
     Empty,
+    #[error("image exceeds the available decoded-image memory budget")]
+    TooLarge,
+    #[error("image request was superseded")]
+    Cancelled,
 }
 
 pub fn decode_image(path: &Path) -> Result<DecodedImage, ImageDecodeError> {
+    decode_image_cancellable(path, IMAGE_BYTE_LIMIT, &|| true)
+}
+
+pub(crate) const IMAGE_BYTE_LIMIT: usize = 512 * 1024 * 1024;
+
+pub(crate) fn decode_image_cancellable(
+    path: &Path,
+    byte_limit: usize,
+    is_current: &(impl Fn() -> bool + ?Sized),
+) -> Result<DecodedImage, ImageDecodeError> {
+    check_current(is_current)?;
     let reader = image::ImageReader::open(path)
         .map_err(ImageDecodeError::Open)?
         .with_guessed_format()
         .map_err(ImageDecodeError::Open)?;
     let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
     let frames = match format {
-        ImageFormat::Avif => ffmpeg_frames(path)?,
-        ImageFormat::Gif => animated_frames(GifDecoder::new(open(path)?)?)?,
+        ImageFormat::Avif => ffmpeg_frames(path, byte_limit, is_current)?,
+        ImageFormat::Gif => {
+            let mut decoder = GifDecoder::new(open(path)?)?;
+            decoder.set_limits(image::Limits::default())?;
+            animated_frames(decoder, byte_limit, is_current)?
+        }
         ImageFormat::WebP => {
             let decoder = WebPDecoder::new(open(path)?)?;
             if decoder.has_animation() {
-                animated_frames(decoder)?
+                animated_frames(decoder, byte_limit, is_current)?
             } else {
-                vec![static_frame(reader)?]
+                vec![static_frame(reader, byte_limit)?]
             }
         }
         ImageFormat::Png => {
             let decoder = PngDecoder::new(open(path)?)?;
             if decoder.is_apng()? {
-                animated_frames(decoder.apng()?)?
+                animated_frames(decoder.apng()?, byte_limit, is_current)?
             } else {
-                vec![static_frame(reader)?]
+                vec![static_frame(reader, byte_limit)?]
             }
         }
-        _ => vec![static_frame(reader)?],
+        _ => vec![static_frame(reader, byte_limit)?],
     };
+    check_current(is_current)?;
     if frames.is_empty() {
         return Err(ImageDecodeError::Empty);
     }
@@ -87,14 +111,32 @@ pub fn decode_image(path: &Path) -> Result<DecodedImage, ImageDecodeError> {
     })
 }
 
-fn ffmpeg_frames(path: &Path) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
+fn ffmpeg_frames(
+    path: &Path,
+    byte_limit: usize,
+    is_current: &(impl Fn() -> bool + ?Sized),
+) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
     let mut decoded = Vec::new();
+    let mut remaining = byte_limit;
+    let mut failure = None;
     decode::decode_file(path, |output| {
+        if !is_current() {
+            failure = Some(ImageDecodeError::Cancelled);
+            return false;
+        }
         if let DecodeOutput::Video(frame) = output {
+            let Some(bytes) = remaining.checked_sub(frame.rgba.len()) else {
+                failure = Some(ImageDecodeError::TooLarge);
+                return false;
+            };
+            remaining = bytes;
             decoded.push(frame);
         }
         true
     })?;
+    if let Some(error) = failure {
+        return Err(error);
+    }
     let presentation_times = decoded
         .iter()
         .map(|frame| frame.presentation_time)
@@ -130,8 +172,16 @@ fn open(path: &Path) -> Result<BufReader<File>, ImageDecodeError> {
 
 fn static_frame(
     reader: image::ImageReader<BufReader<File>>,
+    byte_limit: usize,
 ) -> Result<DecodedImageFrame, ImageDecodeError> {
     let mut decoder = reader.into_decoder()?;
+    let (width, height) = decoder.dimensions();
+    let bytes = (u64::from(width) * u64::from(height))
+        .checked_mul(4)
+        .ok_or(ImageDecodeError::TooLarge)?;
+    if bytes > byte_limit as u64 {
+        return Err(ImageDecodeError::TooLarge);
+    }
     let orientation = decoder.orientation()?;
     let mut image = DynamicImage::from_decoder(decoder)?;
     image.apply_orientation(orientation);
@@ -146,13 +196,30 @@ fn static_frame(
 
 fn animated_frames<'a>(
     decoder: impl AnimationDecoder<'a>,
+    byte_limit: usize,
+    is_current: &(impl Fn() -> bool + ?Sized),
 ) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
-    decoder
-        .into_frames()
-        .collect_frames()?
-        .into_iter()
-        .map(frame)
-        .collect()
+    let mut frames = Vec::new();
+    let mut remaining = byte_limit;
+    let mut source = decoder.into_frames();
+    loop {
+        check_current(is_current)?;
+        let Some(decoded) = source.next() else { break };
+        let frame = frame(decoded?)?;
+        remaining = remaining
+            .checked_sub(frame.rgba.len())
+            .ok_or(ImageDecodeError::TooLarge)?;
+        frames.push(frame);
+    }
+    Ok(frames)
+}
+
+fn check_current(is_current: &(impl Fn() -> bool + ?Sized)) -> Result<(), ImageDecodeError> {
+    if is_current() {
+        Ok(())
+    } else {
+        Err(ImageDecodeError::Cancelled)
+    }
 }
 
 fn frame(frame: Frame) -> Result<DecodedImageFrame, ImageDecodeError> {
@@ -192,6 +259,22 @@ mod tests {
     use image::{Delay, Rgb, RgbImage, Rgba, RgbaImage};
 
     use super::*;
+
+    #[test]
+    fn image_limit_rejects_rgba_expansion_and_cancelled_requests() {
+        let path = temporary_path("png");
+        RgbImage::from_pixel(4, 3, Rgb([10, 20, 30]))
+            .save(&path)
+            .expect("fixture");
+        let oversized = decode_image_cancellable(&path, 47, &|| true);
+        let cancelled = decode_image_cancellable(&path, 48, &|| false);
+        fs::remove_file(path).expect("remove fixture");
+        assert!(
+            oversized.is_err(),
+            "48 RGBA bytes must not fit a 47-byte budget"
+        );
+        assert!(cancelled.is_err(), "cancelled requests must not decode");
+    }
 
     fn temporary_path(extension: &str) -> std::path::PathBuf {
         let unique = SystemTime::now()
@@ -262,6 +345,13 @@ mod tests {
         drop(encoder);
 
         let decoded = decode_image(&path).expect("decode GIF fixture");
+        assert!(
+            matches!(
+                decode_image_cancellable(&path, 8, &|| true),
+                Err(ImageDecodeError::TooLarge)
+            ),
+            "two animation frames must share one budget"
+        );
         fs::remove_file(path).expect("remove GIF fixture");
 
         assert_eq!(decoded.frames.len(), 2);

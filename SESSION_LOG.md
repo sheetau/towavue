@@ -2,6 +2,18 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 15:12 JST - implementation / responsive and bounded image loading
+
+- Trigger: launch-quality H1 work continued with synchronous image and reading-page stalls.
+- Intent: move decode off the event loop, bound retained frames, and reject stale results without changing Shell ordering or the single-device boundary.
+- Result: one runtime image worker now keeps latest-only request/result slots with generation cancellation. A batch shares a 512 MiB retained-RGBA budget; over-budget animation fails instead of returning partial playback. Reading reuses the primary presentation, preserves failed-page positions, and reverses without decoding again. Loading and image errors remain visible. Renderer feature-level limits now initialize egui before the first texture; oversized textures return an error. External paths use the existing Shell-compatible canonicalization so relative CLI paths match folder snapshots.
+- Evidence: the old build timed out a 1-second window probe and panicked on a generated 6000x6000 PNG because egui still had its initial 2048px limit. The new build displayed that image and answered decode-time probes in 7-8 ms. Real-window trials showed four Shell-ordered pages with two valid colors, a 17000x2 texture-limit error, and a corrupt PNG error; reversal preserved all positions. An invalid primary image also remained a visible reading slot. Captures and generated fixtures remain ignored under `target/tmp/`.
+- Changed areas: runtime image decoder/worker, renderer limit, Shell path normalization, app image lifecycle and reading errors, README, architecture, roadmap, trial guide, and gap ledger.
+- Verification: focused budget/cancellation, latest-request, path, and texture-limit regressions pass. Workspace formatting, all-target Clippy with warnings denied, and all-target tests pass (app 11, core 25, runtime 29 plus 1 explicitly ignored live-Explorer test, integrations 3). The preceding log checkpoint `ccc1ce6` independently passed CI run `33948359898`.
+- Boundary: the budget does not cap total process memory, decoder scratch, old display buffers, or GPU textures. Codec work within a frame cannot always be interrupted; texture conversion/upload and Shell snapshot acquisition still run on the UI thread.
+- Status: `h1_active`; this completes the image-loading slice, not the overall launch objective.
+- Next action: verify the pushed checkpoint in CI, then address live volume/rate and compact visual interaction in separate H1 slices. Packaging still requires a distribution decision.
+
 ## 2026-09-05 14:43 JST - implementation / responsive and transactional export
 
 - Trigger: the owner requested launch-quality stability, speed, interaction, and fidelity to the visual draft, while deferring optional features.

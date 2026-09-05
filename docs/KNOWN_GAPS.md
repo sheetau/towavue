@@ -14,17 +14,17 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 ### UI threadを止める処理
 
-- 画像decodeとreading modeの複数画像loadは同期処理であり、大きい画像、animation、多数pageでwindowが応答しにくくなり得る。
+- 画像decodeとreading modeの複数画像loadはH1で単一background workerへ移した。要求・結果は最新1件だけを保持し、古い結果は表示しない。texture化とGPU uploadはUI側に残り、大きい画像の表示切替が完全に無停止とは限らない。Shell snapshotの取得も同期である。
 - Save/Save AsはH1でbackground化済み。書き出した時間とcancelを表示し、完了までは一時outputだけを変更する。同時jobは1件でqueueはない。通常export中も再生・tab切替・追加編集ができるが、対象tabのclose・移動とprocess終了はjobの完了またはcancelを待つ。
 - waveform、duration、hover thumbnailはworker化済みだが、mediaを切り替えた後も開始済みFFmpeg process自体はcancelせず、返った古い結果を捨てる方式である。
-- animated imageはframe列を先に保持するため、長い・大きいanimationのmemory上限を定義していない。
+- animated imageはframe列を先に保持する。H1で1画像/reading要求のRGBA保持量を合計512 MiBに制限したが、decoder作業領域・GPU texture・切替前の旧画像は別である。超過時はerrorとし、部分animationや低解像度へは自動縮退しない。
 
 ### 開発版としての不足
 
 - installer、uninstaller、portable package、automatic update、file association、Explorer context menuはない。
 - settings画面、recent files、session/tab復元、window位置・sizeの保存はない。
 - Explorerからwindowへのfile drag-and-dropはない。tabのwindow外dropだけが実装されている。
-- export errorは確認するまで残る詳細modalを表示する。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
+- export errorは確認するまで残る詳細modal、画像load errorは画像領域（readingでは該当page）に表示する。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
 - end-to-end UI test、visual regression、accessibility検査、複数DPI/monitorの自動matrixはない。現在のUI完了判定には実window操作が必要である。
 
 ## 2. UI草案との対応
@@ -147,7 +147,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 1. Open、folder navigation、Explorer順、play/pause/seek、画像zoom/panという日常flowの摩擦を記録する。
 2. Volume/rate/trim/cropなど「見える結果」と「export結果」の不一致を解消する。
-3. 大きい画像の応答停止を解消する。長いexportのworker、進捗表示、cancelと既存target保護はH1で検証済み。
+3. 大きい画像のtexture化・uploadやShell取得の応答を追加測定する。画像decodeのworker化・保持量上限と、長いexportのworker・進捗・cancel・既存target保護はH1で検証済み。
 4. Timeline、tab、filmstrip、menuを実際の利用頻度に基づいて磨く。
 5. DPI、keyboard-only、長いfile名、error/loading state、accessibilityを横断確認する。
 6. その後にrecent/session復元、file association、packagingを決める。

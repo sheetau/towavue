@@ -20,8 +20,9 @@ use towavue_core::{
 };
 use towavue_runtime_windows::{
     AudioOutputEvent, DecodedImage, ExportError, ExportEvent, ExportJob, ExportRequest,
-    FolderOrderProvider, FolderWatcher, FrameRenderer, PlaybackEvent, PlaybackSession,
-    PreviewCache, RenderError, decode_image, pick_export_file, pick_folder, pick_media_file,
+    FolderOrderProvider, FolderWatcher, FrameRenderer, ImageLoader, PlaybackEvent, PlaybackSession,
+    PreviewCache, RenderError, canonical_shell_path, pick_export_file, pick_folder,
+    pick_media_file,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -117,6 +118,7 @@ enum UiAction {
 }
 
 enum AppEvent {
+    ImagesReady,
     Export(ExportEvent),
     Playback(PlaybackEvent),
     Duration(PathBuf, Result<Duration, String>),
@@ -163,12 +165,25 @@ struct ImagePresentation {
 }
 
 impl ImagePresentation {
-    fn load(context: &egui::Context, path: &Path) -> Result<Self, String> {
-        let decoded = decode_image(path).map_err(|error| error.to_string())?;
+    fn from_decoded(
+        context: &egui::Context,
+        path: &Path,
+        decoded: DecodedImage,
+    ) -> Result<Self, String> {
         let first = decoded
             .frames
             .first()
             .ok_or_else(|| "decoded image contained no frames".to_owned())?;
+        let limit = context.input(|input| input.max_texture_side);
+        if decoded
+            .frames
+            .iter()
+            .any(|frame| frame.width as usize > limit || frame.height as usize > limit)
+        {
+            return Err(format!(
+                "Image dimensions exceed this graphics device's {limit}px texture limit"
+            ));
+        }
         let texture = context.load_texture(
             format!("image:{}", path.display()),
             color_image(first),
@@ -301,11 +316,15 @@ struct Application<N> {
     path: Option<PathBuf>,
     media_kind: Option<MediaKind>,
     image: Option<ImagePresentation>,
+    image_loader: ImageLoader,
+    image_generation: u64,
+    image_loading: bool,
+    image_error: Option<String>,
     image_view: ImageViewState,
     selection_drag: Option<SelectionDrag>,
     reading_mode: bool,
     reading_settings: ReadingSettings,
-    reading_pages: Vec<ImagePresentation>,
+    reading_pages: Vec<Result<ImagePresentation, String>>,
     preview_cache: PreviewCache,
     timeline_open: bool,
     waveform: Option<TextureHandle>,
@@ -350,9 +369,12 @@ where
             grid::load().map_err(|error| format!("could not load grid menu: {error}"))?;
         let preview_cache = PreviewCache::local()
             .map_err(|error| format!("could not open preview cache: {error}"))?;
+        let notify = Arc::new(notify);
+        let image_notify = Arc::clone(&notify);
+        let image_loader = ImageLoader::new(move || image_notify(AppEvent::ImagesReady))?;
         Ok(Self {
             initial_path,
-            notify: Arc::new(notify),
+            notify,
             window: None,
             renderer: None,
             ui_context: None,
@@ -370,6 +392,10 @@ where
             path: None,
             media_kind: None,
             image: None,
+            image_loader,
+            image_generation: 0,
+            image_loading: false,
+            image_error: None,
             image_view: ImageViewState::default(),
             selection_drag: None,
             reading_mode: false,
@@ -419,13 +445,14 @@ where
         renderer.resize_surface(size.width, size.height)?;
         let context = egui::Context::default();
         context.set_visuals(egui::Visuals::dark());
+        context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
         let state = egui_winit::State::new(
             context.clone(),
             egui::ViewportId::ROOT,
             &window,
             Some(window.scale_factor() as f32),
             window.theme(),
-            Some(4096),
+            Some(renderer.max_texture_side()),
         );
         self.window = Some(window);
         self.renderer = Some(renderer);
@@ -446,6 +473,13 @@ where
     }
 
     fn open_external(&mut self, path: PathBuf, force_new_tab: bool) {
+        let path = match canonical_shell_path(&path) {
+            Ok(path) => path,
+            Err(error) => {
+                self.set_status(format!("Could not open {}: {error}", path.display()));
+                return;
+            }
+        };
         let Some(kind) = MediaKind::from_path(&path) else {
             self.set_status(format!("Unsupported media: {}", path.display()));
             return;
@@ -485,6 +519,9 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.image_generation = self.image_loader.request(Vec::new());
+        self.image_loading = false;
+        self.image_error = None;
         self.session.take();
         self.image = None;
         self.reading_pages.clear();
@@ -508,27 +545,8 @@ where
         self.drift_samples.clear();
         self.refresh_folder_snapshot();
         if kind == MediaKind::Image {
-            let Some(context) = self.ui_context.as_ref() else {
-                self.fail("UI context is unavailable".to_owned());
-                return;
-            };
-            match ImagePresentation::load(context, &path) {
-                Ok(image) => {
-                    let (width, height) = image.dimensions();
-                    let format = image.decoded.format;
-                    let frames = image.decoded.frames.len();
-                    self.image = Some(image);
-                    self.state = PlaybackState::Paused;
-                    self.set_status(format!(
-                        "{format} · {width} × {height} · {frames} frame{}",
-                        if frames == 1 { "" } else { "s" }
-                    ));
-                    if self.reading_mode {
-                        self.rebuild_reading_pages();
-                    }
-                }
-                Err(error) => self.fail(error),
-            }
+            self.state = PlaybackState::Loading;
+            self.rebuild_reading_pages();
             self.refresh_title();
             self.request_redraw();
             return;
@@ -666,32 +684,84 @@ where
 
     fn rebuild_reading_pages(&mut self) {
         self.reading_pages.clear();
-        let (Some(context), Some(snapshot), Some(path)) = (
-            self.ui_context.as_ref(),
-            self.folder_snapshot.as_ref(),
-            self.path.as_deref(),
-        ) else {
+        self.image_generation = self.image_loader.request(Vec::new());
+        self.image_loading = false;
+        if self.media_kind != Some(MediaKind::Image) {
+            return;
+        }
+        if !self.reading_mode && self.image.is_some() {
+            return;
+        }
+        let Some(path) = self.path.as_ref() else {
             return;
         };
-        let paths = snapshot
-            .reading_items(
-                path,
-                self.reading_settings.page_count,
-                self.reading_settings.reversed,
-            )
-            .into_iter()
-            .map(|item| item.path.clone())
-            .collect::<Vec<_>>();
-        let context = context.clone();
-        for path in paths {
-            match ImagePresentation::load(&context, &path) {
-                Ok(image) => self.reading_pages.push(image),
-                Err(error) => {
-                    self.set_status(format!("Could not load {}: {error}", path.display()));
-                    break;
-                }
+        let mut paths = vec![path.clone()];
+        if self.reading_mode
+            && let Some(snapshot) = &self.folder_snapshot
+        {
+            paths.extend(
+                snapshot
+                    .reading_items(path, self.reading_settings.page_count, false)
+                    .into_iter()
+                    .filter(|item| &item.path != path)
+                    .map(|item| item.path.clone()),
+            );
+        }
+        self.image_error = None;
+        self.image_loading = true;
+        self.image_generation = self.image_loader.request(paths);
+        self.request_redraw();
+    }
+
+    fn finish_image_load(&mut self) {
+        let Some(result) = self.image_loader.take_completed() else {
+            return;
+        };
+        if result.generation != self.image_generation {
+            return;
+        }
+        let Some(context) = self.ui_context.clone() else {
+            return;
+        };
+        self.image_loading = false;
+        let mut images = result.images.into_iter();
+        let Some((path, decoded)) = images.next() else {
+            return;
+        };
+        if self.path.as_ref() != Some(&path) {
+            return;
+        }
+        match decoded
+            .map_err(|error| error.to_string())
+            .and_then(|decoded| ImagePresentation::from_decoded(&context, &path, decoded))
+        {
+            Ok(image) => {
+                let (width, height) = image.dimensions();
+                self.set_status(format!(
+                    "{} · {width} × {height} · {} frame(s)",
+                    image.decoded.format,
+                    image.decoded.frames.len()
+                ));
+                self.image = Some(image);
+                self.image_error = None;
+                self.state = PlaybackState::Paused;
+            }
+            Err(error) => {
+                self.image = None;
+                self.image_error = Some(error.clone());
+                self.fail(error);
             }
         }
+        self.reading_pages = images
+            .map(|(path, decoded)| {
+                decoded
+                    .map_err(|error| error.to_string())
+                    .and_then(|decoded| ImagePresentation::from_decoded(&context, &path, decoded))
+                    .map_err(|error| format!("{}: {error}", display_name(&path)))
+            })
+            .collect();
+        self.refresh_title();
+        self.request_redraw();
     }
 
     fn watch_folder(&mut self, folder: &Path) {
@@ -711,6 +781,7 @@ where
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::ImagesReady => self.finish_image_load(),
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(event) => self.handle_playback_event(event),
             AppEvent::Duration(path, result) if self.path.as_ref() == Some(&path) => match result {
@@ -933,6 +1004,16 @@ where
                     self.draw_audio_playlist(ui, actions);
                 } else if self.media_kind == Some(MediaKind::Image) {
                     self.draw_image(ui);
+                    if self.image_loading {
+                        egui::Area::new("image-loading".into())
+                            .fixed_pos(ui.max_rect().center_top() + egui::vec2(-65.0, 12.0))
+                            .interactable(false)
+                            .show(ui.ctx(), |ui| {
+                                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                    ui.label("Loading images…");
+                                });
+                            });
+                    }
                 } else if self.media_kind == Some(MediaKind::Video) {
                     self.draw_video_edit_overlay(ui);
                 }
@@ -1034,6 +1115,12 @@ where
     fn draw_image(&mut self, ui: &mut egui::Ui) {
         if self.reading_mode {
             self.draw_reading_pages(ui);
+            return;
+        }
+        if let Some(error) = &self.image_error {
+            ui.centered_and_justified(|ui| {
+                ui.label(format!("Could not load image\n{error}"));
+            });
             return;
         }
         let Some(image) = self.image.as_ref() else {
@@ -1226,15 +1313,39 @@ where
 
     fn draw_reading_pages(&self, ui: &mut egui::Ui) {
         let viewport = ui.max_rect().shrink(8.0);
-        let count = self.reading_pages.len();
+        let first = self
+            .image
+            .as_ref()
+            .map(Ok)
+            .or_else(|| self.image_error.as_ref().map(Err));
+        let count = self.reading_pages.len() + usize::from(first.is_some());
         if count == 0 {
             ui.centered_and_justified(|ui| ui.label("No image pages available"));
             return;
         }
         let gap = 8.0;
         let painter = ui.painter_at(viewport);
-        for (index, image) in self.reading_pages.iter().enumerate() {
+        for (index, image) in first
+            .into_iter()
+            .chain(self.reading_pages.iter().map(|page| page.as_ref()))
+            .enumerate()
+        {
+            let index = if self.reading_settings.reversed {
+                count - 1 - index
+            } else {
+                index
+            };
             let page = reading_page_rect(viewport, count, index, self.reading_settings.axis, gap);
+            let image = match image {
+                Ok(image) => image,
+                Err(error) => {
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(page), |ui| {
+                        ui.set_clip_rect(page);
+                        ui.centered_and_justified(|ui| ui.label(error));
+                    });
+                    continue;
+                }
+            };
             let dimensions = image.dimensions();
             let scale = towavue_core::fit_scale(dimensions, (page.width(), page.height()));
             let size = egui::vec2(dimensions.0 as f32 * scale, dimensions.1 as f32 * scale);
@@ -1449,7 +1560,10 @@ where
                             if self.reading_mode {
                                 ui.weak(format!(
                                     "Reading · {} pages · {:?}",
-                                    self.reading_pages.len(),
+                                    self.reading_pages.len()
+                                        + usize::from(
+                                            self.image.is_some() || self.image_error.is_some()
+                                        ),
                                     self.reading_settings.axis
                                 ));
                             }
@@ -1751,11 +1865,7 @@ where
             }
             CommandId::ToggleReadingMode => {
                 self.reading_mode = !self.reading_mode;
-                if self.reading_mode {
-                    self.rebuild_reading_pages();
-                } else {
-                    self.reading_pages.clear();
-                }
+                self.rebuild_reading_pages();
                 self.request_redraw();
             }
             CommandId::IncreaseReadingPages => {
@@ -1774,7 +1884,6 @@ where
             }
             CommandId::ReverseReadingOrder => {
                 self.reading_settings.reversed = !self.reading_settings.reversed;
-                self.rebuild_reading_pages();
                 self.request_redraw();
             }
             CommandId::Undo => self.undo_edit(false),
@@ -2152,6 +2261,9 @@ where
             self.load_path(path, kind);
         } else {
             self.session.take();
+            self.image_generation = self.image_loader.request(Vec::new());
+            self.image_loading = false;
+            self.image_error = None;
             self.image = None;
             self.reading_pages.clear();
             self.path = None;
@@ -2584,7 +2696,11 @@ where
             .image
             .as_mut()
             .is_some_and(|image| image.advance_animation(now));
-        for image in &mut self.reading_pages {
+        for image in self
+            .reading_pages
+            .iter_mut()
+            .filter_map(|page| page.as_mut().ok())
+        {
             image_changed |= image.advance_animation(now);
         }
         if image_changed {
@@ -2654,7 +2770,11 @@ where
         let next_image_frame = self
             .image
             .iter()
-            .chain(self.reading_pages.iter())
+            .chain(
+                self.reading_pages
+                    .iter()
+                    .filter_map(|page| page.as_ref().ok()),
+            )
             .filter_map(|image| image.next_frame_at)
             .min();
         if self.folder_watcher.is_some() || next_image_frame.is_some() {
@@ -2958,6 +3078,28 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_texture_creation_obeys_configured_device_limit_without_panicking() {
+        let context = egui::Context::default();
+        let decoded = DecodedImage {
+            format: "PNG",
+            frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                width: 4096,
+                height: 1,
+                rgba: vec![255; 4096 * 4],
+                delay: Duration::ZERO,
+            }],
+        };
+        assert!(
+            ImagePresentation::from_decoded(&context, Path::new("wide.png"), decoded.clone())
+                .is_err()
+        );
+        context.input_mut(|input| input.max_texture_side = 8192);
+        let image = ImagePresentation::from_decoded(&context, Path::new("wide.png"), decoded)
+            .expect("device supports 4096px image");
+        assert_eq!(image.dimensions(), (4096, 1));
+    }
 
     #[test]
     fn formats_compact_status_values() {

@@ -124,6 +124,15 @@ towavueの「Explorer順」はfilename順の別名ではなく、そのfolderで
 
 private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場合は権利上問題のない小さな生成fileを使う。
 
+### H1で確認したimage scenario
+
+- 生成した6000×6000 PNGを相対pathで起動 → 旧buildではeguiの初期2048px制限でpanic、新buildでは原寸textureをfit表示する。decode中のwindow応答probeは約8 msだった（upload全体のlatency保証ではない）。
+- 同じfolderの正常画像2枚・17000×2画像・破損PNGをreadingで4枚表示 → Shell順を保持し、失敗pageにも専用の位置を残す。Hで結果全体を反転し、再decodeしない。
+- GPU上限超過画像を単独で起動 → processは継続し、利用中deviceの寸法上限を画像領域に表示する。
+- 回帰testで連続要求の中間skip・古い結果の破棄・close後のworker終了・複数pageの共通budget・animationの超過拒否を確認する。
+
+1要求の保持RGBA上限は512 MiB。codec内部の1frame処理は即時中断できず、作業領域とGPU memoryはこの上限に含めない。生成画像とcaptureはignoredな`target/tmp/`へ置く。
+
 ### H1で確認したexport scenario
 
 2026-09-05、Windows上の1920×1080 H.264/AAC・120秒fixtureで比較した。旧版はSave中のwindow応答確認が1秒でtimeoutした。background化後はFFmpegの稼働中も約10 msで応答し、書き出し済み時間の更新と再生継続を実windowで確認した。
@@ -198,7 +207,7 @@ towavue/
 | Explorer順のmodel/navigation | `crates/towavue-core/src/navigation.rs` | runtimeの`shell.rs`と`watch.rs` |
 | Zoom、selection、reading state | `crates/towavue-core/src/image.rs` | appの描画とpointer処理、runtimeの`image.rs` |
 | Edit operation、dirty、undo/redo | `crates/towavue-core/src/edit.rs` | app preview、runtimeの`export.rs` |
-| Image decode | `crates/towavue-runtime-windows/src/image.rs` | coreの`media.rs`、appのtexture化 |
+| Image decode / latest-only worker | `crates/towavue-runtime-windows/src/image.rs` / `image_loader.rs` | coreの`media.rs`、appのtexture化 |
 | Video/audio decode、seek、codec fallback | `crates/towavue-runtime-windows/src/decode.rs` | `playback.rs`、`audio.rs`、`renderer.rs` |
 | Worker、queue、generation、recovery | `crates/towavue-runtime-windows/src/playback.rs` | `decode.rs`、`audio.rs` |
 | D3D11/DXGI描画、HDR判定、resize | `crates/towavue-runtime-windows/src/renderer.rs` | `decode.rs`、appのrender loop |

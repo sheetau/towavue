@@ -54,6 +54,8 @@ tabをwindow外へdragしてdropすると同じmediaを別processのwindowへ移
 
 H1ではSaveをbackground化しました。書き出し中も再生・tab切替・追加編集ができ、進捗windowからcancelできます。成功時だけ出力先を置換し、失敗・cancelでは既存fileと編集を保持します。書き出し開始後に追加した編集は未保存のまま残ります。
 
+画像とreading pageのdecodeもbackground化し、切替後の古い結果は表示しません。保持するRGBA frame列は1要求合計512 MiBまでです（decoderの作業領域やGPUを含むprocess全体の上限ではありません）。上限超過・破損画像・GPUの寸法上限は画面へerrorを表示します。
+
 ## ライセンス
 
 本リポジトリのコードは、利用者の選択により[MIT License](LICENSE-MIT)または[Apache License 2.0](LICENSE-APACHE)の下で利用できます。将来同梱するFFmpeg DLLとその他の第三者コンポーネントには、それぞれのライセンスが適用されます。

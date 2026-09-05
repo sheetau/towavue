@@ -109,6 +109,14 @@ reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降�
 
 exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/coreへFFmpeg型を公開しない。画像filterはoperation順のcrop / transpose / flip、動画filterはそれらとtrim / PTS rate、音声filterはatrim / PTS / atempo / volumeを適用し、metadataを入力からcopyする。2倍を超える、または0.5倍未満のrateは複数の`atempo`へ分解する。video/audio encodeは固定FFmpeg buildのsoftware codecを使い、hardware encodeはM7まで行わない。Save As後のSaveは同じexport先を更新できるが、sourceと同一pathへの出力は拒否してpartial overwriteによるsource破損を避ける。
 
+### H1 image loading
+
+画像decodeとreading pageの取得はruntimeの単一workerで行う。要求と完了結果はそれぞれ最新1件だけを保持し、新しい要求・media切替・closeでgenerationを更新する。workerはframe間と結果公開前にgenerationを確認し、appも現在generationに一致する結果だけをtexture化する。新しい要求は待機中の古い要求を置換し、UI threadでworkerの終了を待たない。codec内部の単一frame decodeは即座に中断できない場合があるが、workerはwindowやGPU objectを参照しない。
+
+一回の画像・reading要求で保持するRGBA frame列は合計512 MiBまでとし、animationを逐次収集しながら上限を確認する。decoderのscratch、GPU texture、表示切替時の旧画像は別であり、process全体の512 MiB上限を意味しない。超過時は画質を落としたりanimationを途中で切ったりせず明示errorにする。readingの先頭は現在画像を再利用し、失敗した後続pageには位置を保ったerrorを表示する。読み込み中もtab操作とwindow操作ができ、loading/errorを画面へ表示する。
+
+textureの一辺の上限はrendererが実際のD3D feature levelから返す。appはegui contextとwinit inputの両方へ起動時に設定し、texture登録前にも寸法を確認してpanicを防ぐ。外部から開くpathはruntimeのShell互換canonical pathへ統一し、相対pathでもsnapshotの現在項目と一致させる。
+
 ### H1 export lifecycle
 
 Saveはruntime所有の単一background export jobへimmutableなsource・target・operation snapshotを渡す。appは進捗と完了eventだけを受け取り、再生とUI event loopを継続する。追加exportは現在jobの完了またはcancelまで開始しない。export中の追加編集は保持し、完了時はexportしたoperation列に対応する履歴位置だけをsavedにする。対象tabのclose・detach・folder内移動とprocess終了は、job終了まで保留する。dirty guardからのexportは成功時だけ元の操作を再評価し、cancel・失敗時は編集とguardを保持する。

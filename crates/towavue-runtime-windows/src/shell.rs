@@ -399,7 +399,7 @@ fn wide_null(value: &OsStr) -> Vec<u16> {
     value.encode_wide().chain(std::iter::once(0)).collect()
 }
 
-fn canonical_shell_path(path: &Path) -> std::io::Result<PathBuf> {
+pub fn canonical_shell_path(path: &Path) -> std::io::Result<PathBuf> {
     let canonical = std::fs::canonicalize(path)?;
     let wide = canonical.as_os_str().encode_wide().collect::<Vec<_>>();
     const EXTENDED: &[u16] = &[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
@@ -542,6 +542,17 @@ mod tests {
     use windows::Win32::UI::Shell::{FWF_AUTOARRANGE, IShellView, SORTDIRECTION};
     use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
     use windows::core::GUID;
+
+    #[test]
+    fn relative_paths_match_shell_style_absolute_paths() {
+        let relative = canonical_shell_path(Path::new("Cargo.toml")).expect("relative manifest");
+        let directory = std::env::current_dir().expect("test directory");
+        let absolute =
+            canonical_shell_path(&directory.join("Cargo.toml")).expect("absolute manifest");
+        assert!(relative.is_absolute());
+        assert_eq!(relative, absolute);
+        assert!(!relative.to_string_lossy().starts_with(r"\\?\"));
+    }
 
     const STORAGE_PROPERTY_FORMAT: GUID = GUID::from_u128(0xb725f130_47ef_101a_a5f1_02608c9eebac);
     const NAME: PROPERTYKEY = PROPERTYKEY {

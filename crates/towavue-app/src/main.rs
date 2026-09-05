@@ -282,14 +282,25 @@ struct ImageTransform {
 
 impl ImageTransform {
     fn new(size: (u32, u32), operations: &[EditOperation]) -> Self {
+        Self::with_orientation(
+            size,
+            towavue_runtime_windows::VideoOrientation::default(),
+            operations,
+        )
+    }
+
+    fn with_orientation(
+        size: (u32, u32),
+        orientation: towavue_runtime_windows::VideoOrientation,
+        operations: &[EditOperation],
+    ) -> Self {
         let mut transform = Self {
-            uv: [
-                UnitPoint { x: 0.0, y: 0.0 },
-                UnitPoint { x: 1.0, y: 0.0 },
-                UnitPoint { x: 1.0, y: 1.0 },
-                UnitPoint { x: 0.0, y: 1.0 },
-            ],
-            size: (size.0 as f32, size.1 as f32),
+            uv: orientation.source_uv(),
+            size: if orientation.swaps_axes() {
+                (size.1 as f32, size.0 as f32)
+            } else {
+                (size.0 as f32, size.1 as f32)
+            },
         };
         for operation in operations {
             match *operation {
@@ -379,6 +390,7 @@ struct Application<N> {
     image_generation: u64,
     image_loading: bool,
     image_error: Option<String>,
+    playback_error: Option<String>,
     image_view: ImageViewState,
     selection_drag: Option<SelectionDrag>,
     reading_mode: bool,
@@ -471,6 +483,7 @@ where
             image_generation: 0,
             image_loading: false,
             image_error: None,
+            playback_error: None,
             image_view: ImageViewState::default(),
             selection_drag: None,
             reading_mode: false,
@@ -608,6 +621,7 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.playback_error = None;
         self.pending_folder = None;
         self.folder_order.request(None);
         if self
@@ -1183,6 +1197,13 @@ where
                                 actions.push(UiAction::Command(CommandId::OpenFolder));
                             }
                         });
+                    });
+                } else if self.state == PlaybackState::Faulted
+                    && self.media_kind != Some(MediaKind::Image)
+                    && let Some(error) = &self.playback_error
+                {
+                    ui.centered_and_justified(|ui| {
+                        ui.label(format!("Could not play media\n{error}"));
                     });
                 } else if self.media_kind == Some(MediaKind::Audio) {
                     self.draw_audio_playlist(ui, actions);
@@ -2397,7 +2418,16 @@ where
             .active()
             .and_then(|tab| self.edits.get(&tab.id))
             .map_or(&[][..], EditHistory::operations);
-        ImageTransform::new(size, operations)
+        if self.media_kind == Some(MediaKind::Video) {
+            let orientation = self
+                .session
+                .as_ref()
+                .and_then(PlaybackSession::video_orientation)
+                .unwrap_or_default();
+            ImageTransform::with_orientation(size, orientation, operations)
+        } else {
+            ImageTransform::new(size, operations)
+        }
     }
 
     fn push_visual_edit(&mut self, operation: EditOperation) {
@@ -2890,6 +2920,7 @@ where
             self.load_path(path, kind);
         } else {
             self.session.take();
+            self.playback_error = None;
             self.image_generation = self.image_loader.request(Vec::new());
             self.image_loading = false;
             self.image_error = None;
@@ -3209,6 +3240,7 @@ where
 
     fn fail(&mut self, error: String) {
         eprintln!("towavue: {error}");
+        self.playback_error = Some(error.clone());
         self.set_status(error);
         self.state = PlaybackState::Faulted;
         self.refresh_title();
@@ -4923,6 +4955,168 @@ mod tests {
         let crop = PixelCrop::from_selection(selection, (16_384, 16_384), MediaKind::Image)
             .expect("pixel crop");
         assert_eq!((crop.width, crop.height), (1, 1));
+    }
+
+    #[test]
+    fn playback_failure_remains_visible_after_status_expires_and_clears_on_close() {
+        let Some(root) = isolated_test_root(
+            "tests::playback_failure_remains_visible_after_status_expires_and_clears_on_close",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        let path = root.join("unsupported.mp4");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Video);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Video);
+        app.fail("Unsupported orientation fixture".into());
+        app.status_message = None;
+        let context = egui::Context::default();
+        for fullscreen in [false, true] {
+            app.fullscreen = fullscreen;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut Vec::new()),
+            );
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("Unsupported orientation fixture"))));
+            assert_eq!(app.state, PlaybackState::Faulted);
+        }
+        app.close_tab_unchecked(tab);
+        assert!(app.playback_error.is_none());
+        assert!(app.path.is_none());
+    }
+
+    #[test]
+    fn video_metadata_orientation_precedes_edits_and_matches_export() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("towavue-orientation-{unique}"));
+        std::fs::create_dir(&root).expect("orientation fixtures");
+        let source =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+        let ffmpeg = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+            .join("bin/ffmpeg.exe");
+        let first_frame = |path: &Path| {
+            let mut frame = None;
+            towavue_runtime_windows::decode_file(path, |output| {
+                if frame.is_none()
+                    && let towavue_runtime_windows::DecodeOutput::Video(video) = output
+                {
+                    frame = Some(video);
+                }
+                true
+            })
+            .expect("decode orientation fixture");
+            frame.expect("video frame")
+        };
+        for rotation in [0, 90, 180, 270] {
+            for mirror in [false, true] {
+                let input = root.join(format!("{rotation}-{mirror}.mp4"));
+                let mut command = std::process::Command::new(&ffmpeg);
+                command.args(["-v", "error", "-display_rotation", &rotation.to_string()]);
+                if mirror {
+                    command.arg("-display_hflip");
+                }
+                let remux = command
+                    .arg("-i")
+                    .arg(&source)
+                    .args(["-map", "0", "-c", "copy"])
+                    .arg(&input)
+                    .output()
+                    .expect("metadata remux");
+                assert!(
+                    remux.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&remux.stderr)
+                );
+                let original = first_frame(&input);
+                assert_eq!(original.orientation.swaps_axes(), rotation % 180 != 0);
+                for edited in [false, true] {
+                    let operations = if edited {
+                        vec![
+                            EditOperation::Crop(PixelCrop {
+                                x: 8,
+                                y: 12,
+                                width: 48,
+                                height: 64,
+                            }),
+                            EditOperation::RotateClockwise,
+                            EditOperation::FlipHorizontal,
+                        ]
+                    } else {
+                        vec![]
+                    };
+                    let transform = ImageTransform::with_orientation(
+                        (original.width, original.height),
+                        original.orientation,
+                        &operations,
+                    );
+                    assert_eq!(
+                        transform.pixel_aspect(1.5),
+                        if transform.uv[0].x == transform.uv[1].x {
+                            1.0 / 1.5
+                        } else {
+                            1.5
+                        }
+                    );
+                    let target = root.join(format!("out-{rotation}-{mirror}-{edited}.mp4"));
+                    towavue_runtime_windows::export_media(&ExportRequest {
+                        source: input.clone(),
+                        target: target.clone(),
+                        kind: MediaKind::Video,
+                        operations,
+                        hardware_encode: false,
+                    })
+                    .expect("orientation export");
+                    let exported = first_frame(&target);
+                    assert_eq!(
+                        (exported.width as f32, exported.height as f32),
+                        transform.size
+                    );
+                    assert_eq!(
+                        exported.orientation,
+                        towavue_runtime_windows::VideoOrientation::default(),
+                        "export must not rotate again on reopen"
+                    );
+                    let (mut error, mut count) = (0_u64, 0_u64);
+                    for y in 4..exported.height - 4 {
+                        for x in 4..exported.width - 4 {
+                            let uv = bilinear_uv(
+                                transform.uv,
+                                (x as f32 + 0.5) / exported.width as f32,
+                                (y as f32 + 0.5) / exported.height as f32,
+                            );
+                            let original_index = (((uv.y * original.height as f32) as u32
+                                * original.width
+                                + (uv.x * original.width as f32) as u32)
+                                * 4) as usize;
+                            let output_index = ((y * exported.width + x) * 4) as usize;
+                            for channel in 0..3 {
+                                error += u64::from(
+                                    original.rgba[original_index + channel]
+                                        .abs_diff(exported.rgba[output_index + channel]),
+                                );
+                                count += 1;
+                            }
+                        }
+                    }
+                    assert!(
+                        (error as f64 / count as f64) < 12.0,
+                        "orientation {rotation}/{mirror}, edits {edited}: RGB mean error {}",
+                        error as f64 / count as f64
+                    );
+                }
+            }
+        }
+        std::fs::remove_dir_all(root).expect("remove owned orientation fixtures");
     }
 
     #[test]

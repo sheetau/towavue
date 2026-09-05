@@ -124,3 +124,5 @@ trim監査では、同じ位置のI/Oを受理しSave Asで初めて失敗する
 続いてtrimをlive playbackへ接続した。半開区間内の映像・音声sampleだけを送り、両streamの終端でworkerを回収する。終端で停止して再Playは開始へ戻り、範囲外Seekはpaused source previewとして端点の再選択を可能にする。123 testとhardware/software動画・0.25倍音声、2倍動画、Undo/Redo・tab復帰を確認した。音声sampleのナノ秒丸めで生じた1 sample差も修正した。次は極小範囲・低精度PTS・export境界を追加監査し、keyboard/IME・DPI・metadata orientationを含む残るlaunch gateへ進む。H1全体は未完了である。
 
 境界監査では、exportが余分なframeを残す秒丸めと、低精度音声PTSの16 samples差を再現・修正した。整数tick/sample端点、source時刻維持とstream指定、空trim出力のpublish拒否を追加した。source offset、frame色、非圧縮sample列、既存保存先保護と実windowのH.264/AAC保存を確認した。ただし途中Seek後の音声sub-tick位相差は残る。次はこの差の影響を定量化し、残るmetadata orientation・keyboard/IME・DPIとlaunch gateを進める。H1全体は未完了である。
+
+途中Seekの音声差は対象fixtureで8 samples（約0.167 ms）と定量化した。続いて回転metadata付き動画が横向きになる問題を実windowで再現し、90度単位の回転・反転を編集より先に適用した。hardware/software、crop保存・再open・Undoと130 testsを確認した。上下反転を含むOpenH264保存失敗と、非対応matrixの理由が消える黒画面も修正した。任意行列は明示errorとし、全container・動的metadataの保証はしない。次はkeyboard/IME・DPI、日常操作と残るlaunch gateを進める。H1全体は継続中である。

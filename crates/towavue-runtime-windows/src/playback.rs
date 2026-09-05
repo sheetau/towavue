@@ -289,6 +289,13 @@ impl PlaybackSession {
         })
     }
 
+    pub fn video_orientation(&self) -> Option<crate::VideoOrientation> {
+        Some(match self.current_video.as_ref()? {
+            PresentationFrame::Software(frame) => frame.orientation,
+            PresentationFrame::Hardware(frame) => frame.orientation,
+        })
+    }
+
     pub fn draw_current(
         &mut self,
         renderer: &mut FrameRenderer,

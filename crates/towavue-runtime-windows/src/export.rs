@@ -389,6 +389,7 @@ fn ffmpeg_arguments(request: &ExportRequest, hardware: bool, streams: &TrimStrea
         }
     }
     let visual = visual_filters(&request.operations);
+    let codecs = codec_arguments(request, hardware);
     match request.kind {
         MediaKind::Image => {
             if !visual.is_empty() {
@@ -397,11 +398,15 @@ fn ffmpeg_arguments(request: &ExportRequest, hardware: bool, streams: &TrimStrea
             arguments.extend(["-frames:v".into(), "1".into()]);
         }
         MediaKind::Video => {
-            let video = video_filters(
+            let mut video = video_filters(
                 visual,
                 &state,
                 streams.video.map(|(_, time_base)| time_base),
             );
+            if codecs.iter().any(|codec| codec == "libopenh264") {
+                // Autorotate/vflip can expose negative strides rejected by OpenH264.
+                video.push("copy".into());
+            }
             if !video.is_empty() {
                 arguments.extend(["-vf".into(), video.join(",")]);
             }
@@ -417,7 +422,7 @@ fn ffmpeg_arguments(request: &ExportRequest, hardware: bool, streams: &TrimStrea
             }
         }
     }
-    arguments.extend(codec_arguments(request, hardware));
+    arguments.extend(codecs);
     arguments.push(request.target.display().to_string());
     arguments
 }
@@ -629,6 +634,22 @@ mod tests {
                 assert!(
                     live_audio == expected_audio,
                     "live source samples at {start_ns}..{end_ns}"
+                );
+            } else {
+                let probe = &live_audio[48 * 8..112 * 8];
+                let offset = expected_audio
+                    .windows(probe.len())
+                    .step_by(8)
+                    .position(|samples| samples == probe)
+                    .expect("matching source samples") as i64
+                    - 48;
+                assert!(
+                    offset.abs() <= 24,
+                    "seek phase exceeds half a millisecond: {offset} samples"
+                );
+                eprintln!(
+                    "coarse PTS seek at {start_ns} ns: source phase offset {offset} samples ({:.3} ms)",
+                    offset as f64 / 48.0
                 );
             }
             let target = directory.join(format!("{start_ns}.avi"));

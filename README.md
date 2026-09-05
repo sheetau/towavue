@@ -54,6 +54,8 @@ timelineを閉じているときはstatus上端の細いbarで動画・音声の
 
 動画はbar・timelineを除いた領域へ縦横比を保って表示し、非正方形pixelのsample aspect ratioも反映します。hardware/softwareとも同じ表示矩形を使い、crop selectionも映像に合わせます。
 
+動画の回転metadataも、90度単位の回転・反転として自動適用します。その向きを基準にcropや手動回転を行い、保存後も同じ向きになります。任意角度や変形を含む非対応のdisplay matrixは無視せず、理由を画面へ表示します。再生失敗の理由は、一時通知が消えた後も別mediaを開くまで残ります。
+
 動画のR/Lによる90度回転、H/Vによる反転、selectionとCtrl+Yによるcropも、現在の再生画面へ操作順に反映します。Undo/Redoとtab復帰でも編集結果を表示し、回転後の縦横比を保ちます。hardware decodeの編集表示も同じGPU内で処理し、CPUへ映像を戻しません。
 
 cropは確定したpixel矩形をpreviewと保存で共有します。画像は1 pixel、動画は偶数pixel単位へ選択を合わせ、確定時に出力寸法を表示します。動画は既定encoderの制約で16×16未満を確定せず、選択を残して案内します。画像の1×1 cropも保存でき、寸法が変わらない全領域cropでは未保存編集を増やしません。

@@ -51,7 +51,18 @@ cargo run -p towavue-app -- 'C:\path\to\media-folder'
 
 これはfolder navigationで認識する拡張子のlistであり、すべてのcodec、profile、bit depth、破損file、DRM付きfileの動作保証ではない。互換性は実fileで確認し、失敗した組み合わせを記録する。
 
+### H1で確認したvideo metadata orientation scenario
+
+- 固定FFmpegの`-display_rotation 90`付きH.264を開く。変更前は横640×360のまま、FFmpegのautorotate参照は縦360×640だった。変更後は同じ緑/黄/赤/青の四隅になり、90 frames / 0 drops / 0 CPU transfersで終了する。旧`-metadata:s:v rotate=90`では今回の固定buildに行列が付かなかったため、そのfixtureは再現証拠から除外した。
+- Rで手動回転、Undoでmetadataの向きへ戻る。縦画面上のselectionをcropすると214×392で表示され、native Save Asも同寸法で成功した。保存先を再openして二重回転しないこと、dirty解除を確認する。
+- FFV1/SAR 3:2の90度matrix付きMKVは、軸を交換した縦横比3:8で表示し、90 frames / 0 drops / 90 software transfersで終了する。
+- 45度matrixはFaultedにして理由を表示する。最初はstatus期限後に黒画面だけになったため、再生failure理由を永続表示へ変更した。6秒後の実windowと最小window/fullscreenのpaint test、別file Open時の解除を確認する。最初のerror captureは別trialに隠れており、foregroundを確認した再captureで判断した。
+- 自動testは回転4通り×反転有無の8 matricesを実MP4へ付け、無編集とcrop/回転/反転後の16出力をUV・寸法・RGB平均誤差12未満・再open時のidentity metadataで検証する。OpenH264が上下反転由来の負strideで失敗する問題も再現し、そのencoder直前だけcopy filterを追加した。これはexport内のcopyであり、再生のGPU-only経路は変更しない。
+- 任意角度・scale・shear・射影は対応外。streamとframeのmetadataは安全な値へ変換するが、全containerでの動的metadata・HDR・物理keyboard/DPI・長時間性能gateまで検証したものではない。
+
 ### H1で確認したlive trim scenario
+
+途中Seekのsample位相差は、今回の48 kHz/ミリ秒PTS fixtureの1.067秒開始で-8 samples（約-0.167 ms）だった。testはsource列中の一致位置を探索して差を記録し、このfixtureで0.5 msを越えないことを確認する。全file・全Seekの上限保証ではなく、先頭からの無制限prerollは追加していない。
 
 - 境界監査ではミリ秒PTS・30 fpsのFFV1/PCMから33.4–99.6 msを選び、変更前のexport 2 frames / live 1 frameを再現した。整数PTS trim後は1 frameになり、67,000,001–100,000,001 nsなどのframe色と非圧縮音声sample列もsourceからの切り出しに一致する。5秒のsource PTS offsetでも同じ結果を確認する。
 - 低精度音声PTSの丸めで生じた16 samples差はsample累積時刻の復元で修正した。44.1/48 kHzの3,000 chunks、missing PTS、前後の時刻飛びをtestする。ただし途中Seek後のsub-tick位相差は残るため、全source/Seekのbit一致とは扱わない。

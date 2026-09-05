@@ -15,7 +15,7 @@ use ffmpeg_next as ffmpeg;
 use thiserror::Error;
 use towavue_core::MediaTime;
 
-use crate::GraphicsDevice;
+use crate::{GraphicsDevice, VideoOrientation};
 
 const OUTPUT_AUDIO_CHANNELS: usize = 2;
 const BYTES_PER_F32: usize = size_of::<f32>();
@@ -29,6 +29,7 @@ pub struct VideoFrame {
     pub width: u32,
     pub height: u32,
     pub pixel_aspect: f32,
+    pub orientation: VideoOrientation,
     pub rgba: Vec<u8>,
 }
 
@@ -38,6 +39,7 @@ pub(crate) struct HardwareVideoFrame {
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) pixel_aspect: f32,
+    pub(crate) orientation: VideoOrientation,
     pub(crate) transfer: VideoTransfer,
     frame: frame::Video,
 }
@@ -111,6 +113,8 @@ pub struct DecodeSummary {
 /// A failure in the M1 software decode path.
 #[derive(Debug, Error)]
 pub enum DecodeError {
+    #[error("video display matrix is not a supported quarter-turn or reflection")]
+    UnsupportedOrientation,
     #[error("FFmpeg failed: {0}")]
     Ffmpeg(#[from] ffmpeg::Error),
     #[error("the input has no decodable audio or video stream")]
@@ -145,6 +149,7 @@ struct StreamConfig {
     index: usize,
     time_base: Rational,
     parameters: codec::Parameters,
+    display_matrix: Option<Vec<u8>>,
 }
 
 enum ParallelVideoConfig {
@@ -157,12 +162,14 @@ struct VideoPipeline {
     time_base: Rational,
     decoder: codec::decoder::Video,
     scaler: scaling::Context,
+    orientation: VideoOrientation,
 }
 
 struct HardwareVideoPipeline {
     time_base: Rational,
     decoder: codec::decoder::Video,
     transfer: VideoTransfer,
+    orientation: VideoOrientation,
 }
 
 impl HardwareVideoPipeline {
@@ -189,6 +196,7 @@ impl HardwareVideoPipeline {
                         width: decoded.width(),
                         height: decoded.height(),
                         pixel_aspect: pixel_aspect(decoded.aspect_ratio()),
+                        orientation: frame_orientation(&decoded, self.orientation)?,
                         transfer: video_transfer(&decoded).unwrap_or(self.transfer),
                         frame: decoded,
                     };
@@ -209,6 +217,17 @@ impl HardwareVideoPipeline {
 
 fn video_transfer(frame: &frame::Video) -> Option<VideoTransfer> {
     classify_transfer(frame.color_transfer_characteristic())
+}
+
+fn frame_orientation(
+    frame: &frame::Video,
+    fallback: VideoOrientation,
+) -> Result<VideoOrientation, DecodeError> {
+    frame
+        .side_data(ffmpeg::util::frame::side_data::Type::DisplayMatrix)
+        .map_or(Ok(fallback), |data| {
+            VideoOrientation::from_bytes(Some(data.data()))
+        })
 }
 
 fn classify_transfer(
@@ -234,7 +253,8 @@ impl VideoPipeline {
                 Ok(()) => {
                     let mut rgba = frame::Video::empty();
                     self.scaler.run(&decoded, &mut rgba)?;
-                    let output = copy_video_frame(&decoded, &rgba, self.time_base)?;
+                    let output =
+                        copy_video_frame(&decoded, &rgba, self.time_base, self.orientation)?;
                     if !emit(DecodeOutput::Video(output)) {
                         return Err(DecodeError::ConsumerClosed);
                     }
@@ -872,6 +892,7 @@ fn create_video_pipeline(
 }
 
 fn create_video_pipeline_from(config: StreamConfig) -> Result<VideoPipeline, DecodeError> {
+    let orientation = VideoOrientation::from_bytes(config.display_matrix.as_deref())?;
     let context = codec::context::Context::from_parameters(config.parameters)?;
     let decoder = context.decoder().video()?;
     let scaler = scaling::Context::get(
@@ -888,6 +909,7 @@ fn create_video_pipeline_from(config: StreamConfig) -> Result<VideoPipeline, Dec
         time_base: config.time_base,
         decoder,
         scaler,
+        orientation,
     })
 }
 
@@ -895,6 +917,7 @@ fn create_hardware_video_pipeline_from(
     config: StreamConfig,
     device: &GraphicsDevice,
 ) -> Result<HardwareVideoPipeline, DecodeError> {
+    let orientation = VideoOrientation::from_bytes(config.display_matrix.as_deref())?;
     let mut context = codec::context::Context::from_parameters(config.parameters)?;
     if !codec_supports_d3d11va(&context) {
         return Err(DecodeError::HardwareUnavailable(format!(
@@ -910,6 +933,7 @@ fn create_hardware_video_pipeline_from(
         time_base: config.time_base,
         decoder,
         transfer,
+        orientation,
     })
 }
 
@@ -1038,6 +1062,10 @@ fn best_stream_config(input: &format::context::Input, media_type: Type) -> Optio
         index: stream.index(),
         time_base: stream.time_base(),
         parameters: stream.parameters(),
+        display_matrix: stream
+            .side_data()
+            .find(|data| data.kind() == ffmpeg::codec::packet::side_data::Type::DisplayMatrix)
+            .map(|data| data.data().to_vec()),
     })
 }
 
@@ -1045,6 +1073,7 @@ fn copy_video_frame(
     decoded: &frame::Video,
     rgba: &frame::Video,
     time_base: Rational,
+    orientation: VideoOrientation,
 ) -> Result<VideoFrame, DecodeError> {
     let width = rgba.width() as usize;
     let height = rgba.height() as usize;
@@ -1067,6 +1096,7 @@ fn copy_video_frame(
         width: rgba.width(),
         height: rgba.height(),
         pixel_aspect: pixel_aspect(decoded.aspect_ratio()),
+        orientation: frame_orientation(decoded, orientation)?,
         rgba: pixels,
     })
 }

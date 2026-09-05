@@ -180,6 +180,14 @@ paletteは検索入力を保ち、上下keyで有効な候補を巡回し、Ente
 
 ### H1 video viewport
 
+動画のdisplay matrixはruntimeで読み、90度単位の回転・反転をownedな四隅の順序へ変換する。stream metadataを初期値とし、frame metadataがあれば優先する。appはsource orientationを編集履歴より先にUV・寸法へ適用し、SARも軸交換に合わせる。source orientation自体は編集でもdirty状態でもない。software/hardware共通で既存UV shaderを使い、hardware frameをCPUへ移さない。平行移動はaspect-fitで相殺するが、任意角度・scale・shear・射影など表現できない行列は明示的なdecode errorにする。画像の既存EXIF適用は変更しない。
+
+FFmpeg exportとthumbnailは既定autorotateがfilterより先にmetadataを適用するため、手動の二重回転を追加しない。編集cropはorientation適用後のpixel座標とする。回転metadata付きfixtureでpreview・保存後の寸法/四隅/再openとUndoを検証する。
+
+固定OpenH264はvflip由来の負のstrideを受け取るとencodeに失敗するため、そのsoftware encoderだけは最後にFFmpeg copy filterで通常のframe bufferへ整える。export worker内の一frame copyであり、再生のD3D11VA経路・CPU transfer契約は変更しない。
+
+動画・音声がFaultedになった場合、理由は期限付きstatusとは別に中央へ保持し、別mediaのload/closeで解除する。非対応matrixなどの理由が通知期限後に消えて黒画面だけにならないようにする。
+
 動画frameを選んでから同frameのUI layoutを確定し、bar・timelineを除いた中央領域にsample aspect ratio込みでaspect-fitする。appは画面上の同じ矩形をselectionと表示に使い、runtimeへphysical pixelのdestination rectと編集UVを渡す。software shaderのviewportと直接表示時のVideo Processorのdestination/output target rectを一致させ、余白はclear色で残す。decode frameのnative ownershipと単一device・1回Presentは維持する。
 
 H1のlive visual editでは、画像と同じ履歴順のcrop・90度回転・反転を動画にも適用する。appは編集後の寸法・sample aspect ratioでaspect-fitし、selectionをその編集後画像に対する正規化矩形として扱う。runtimeへdestination rectとsource UVの四隅だけを渡し、undo/redo・Seek・tab復帰にも現在の履歴を使う。表示変更ではdecode sessionや再生位置を再構築しない。

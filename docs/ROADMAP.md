@@ -110,3 +110,5 @@ Explorerからのfile/folder dropを既存のOpenへ接続した。実OLE drag/d
 filmstripを中央のthumbnail列へ変更し、画像/動画preview、音声waveform・duration、現在項目の枠と名前を追加した。可視項目だけを最大64件の単一workerで読み込み、古い結果を失効させる。実windowでclick・dirty guard・middle click・Tab前後移動・wheel横scroll・破損previewを確認し、cold cacheの30秒再生も900 frames / 0 dropsで完了した。次はlogo menuの整理・発見性と、日常閲覧に必要な残りの操作を監査する。H1とlaunch全体は未完了である。
 
 logo menuの全command縦列をFile / Edit / Viewへ分類し、関連項目の区切りとcustom shortcutの右揃えを追加した。全commandの一意配置、無効項目、dispatch、最小windowでの末尾到達をtestし、実windowで回転・Undo・dirty closeとpalette起動を確認した。方向gestureは後回しとし、次はfullscreenを含む日常閲覧の表示・入力不足を検証する。launch全体は引き続き未完了である。
+
+F11/View menuからのborderless fullscreenを追加し、persistent bar・timelineを隠してmedia領域を拡大した。Escapeはoverlay/modalを優先し、復帰時に位置・size・最大化を保持する。最大化から直接入る際の旧client領域残りを再現し、解除/復元順序を修正した。画像・reading・hardware/software動画とdirty guardを実windowで確認し、102 testが通過した。次はfullscreenのpointer/操作案内、keyboard・DPIを含む閲覧flowと残るlive-previewの差を監査する。H1とlaunch全体は未完了である。

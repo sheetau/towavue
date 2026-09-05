@@ -34,7 +34,7 @@ use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
-use winit::window::{Window, WindowId};
+use winit::window::{Fullscreen, Window, WindowId};
 
 const AUDIO_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const FOLDER_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -334,6 +334,8 @@ struct Application<N> {
     initial_path: Option<PathBuf>,
     notify: Arc<N>,
     window: Option<Arc<Window>>,
+    fullscreen: bool,
+    fullscreen_was_maximized: bool,
     pending_dialog: Option<DialogIntent>,
     renderer: Option<FrameRenderer>,
     ui_context: Option<egui::Context>,
@@ -422,6 +424,8 @@ where
             initial_path,
             notify,
             window: None,
+            fullscreen: false,
+            fullscreen_was_maximized: false,
             pending_dialog: None,
             renderer: None,
             ui_context: None,
@@ -1126,9 +1130,14 @@ where
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         self.video_rect = None;
         let context = root.ctx().clone();
-        self.draw_top_bar(root, actions);
-        let status_rect = self.draw_status_bar(root, actions);
-        self.draw_timeline(root, actions);
+        let status_rect = if self.fullscreen {
+            None
+        } else {
+            self.draw_top_bar(root, actions);
+            let rect = self.draw_status_bar(root, actions);
+            self.draw_timeline(root, actions);
+            Some(rect)
+        };
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(root, |ui| {
@@ -1164,7 +1173,23 @@ where
                     self.draw_video_edit_overlay(ui);
                 }
             });
-        self.draw_seek_bar(&context, status_rect, actions);
+        if let Some(rect) = status_rect {
+            self.draw_seek_bar(&context, rect, actions);
+        }
+        if self.fullscreen
+            && let Some((message, started)) = &self.status_message
+            && started.elapsed() < STATUS_MESSAGE_DURATION
+        {
+            egui::Area::new("fullscreen-status".into())
+                .anchor(Align2::CENTER_TOP, [0.0, 12.0])
+                .interactable(false)
+                .show(&context, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_max_width((context.content_rect().width() - 32.0).max(100.0));
+                        ui.label(message);
+                    });
+                });
+        }
         if self.filmstrip_open {
             self.filmstrip.show(
                 &context,
@@ -1313,7 +1338,9 @@ where
             .map(|history| history.operations().to_vec())
             .unwrap_or_default();
         let mut transform = ImageTransform::new(image.dimensions(), &operations);
-        let viewport = ui.max_rect().shrink(8.0);
+        let viewport = ui
+            .max_rect()
+            .shrink(if self.fullscreen { 0.0 } else { 8.0 });
         let region = self.image_view.preview_region();
         transform.crop(region);
         let image_size = (transform.size.0 as u32, transform.size.1 as u32);
@@ -1493,7 +1520,9 @@ where
     }
 
     fn draw_reading_pages(&self, ui: &mut egui::Ui) {
-        let viewport = ui.max_rect().shrink(8.0);
+        let viewport = ui
+            .max_rect()
+            .shrink(if self.fullscreen { 0.0 } else { 8.0 });
         let first = self
             .image
             .as_ref()
@@ -2111,6 +2140,7 @@ where
         }
         self.palette_open = false;
         match command {
+            CommandId::ToggleFullscreen => self.set_fullscreen(!self.fullscreen),
             CommandId::OpenFile => {
                 self.begin_dialog(FileDialogKind::OpenFile, DialogIntent::OpenFile);
             }
@@ -2265,7 +2295,12 @@ where
                 self.export_current(true, None);
             }
             CommandId::ToggleTimeline => {
-                self.timeline_open = !self.timeline_open;
+                if self.fullscreen {
+                    self.set_fullscreen(false);
+                    self.timeline_open = true;
+                } else {
+                    self.timeline_open = !self.timeline_open;
+                }
                 if self.timeline_open && self.waveform.is_none() {
                     self.load_waveform();
                 }
@@ -3060,6 +3095,51 @@ where
                 .is_some_and(|export| export.continuation.is_some())
     }
 
+    fn set_fullscreen(&mut self, enabled: bool) {
+        if enabled == self.fullscreen {
+            return;
+        }
+        self.fullscreen = enabled;
+        if let Some(window) = &self.window {
+            let monitor = window.current_monitor();
+            if enabled {
+                // A maximized Win32 client otherwise retains its work-area inset in fullscreen.
+                self.fullscreen_was_maximized = window.is_maximized();
+                if self.fullscreen_was_maximized {
+                    window.set_maximized(false);
+                }
+            }
+            window.set_fullscreen(enabled.then_some(Fullscreen::Borderless(monitor)));
+            if !enabled && self.fullscreen_was_maximized {
+                window.set_maximized(true);
+                self.fullscreen_was_maximized = false;
+            }
+        }
+        self.set_status(if enabled {
+            "Fullscreen — press Escape to return to windowed view".into()
+        } else {
+            "Windowed view".into()
+        });
+    }
+
+    fn dismiss_overlay_or_fullscreen(&mut self) -> bool {
+        if self.modal_input_blocked() {
+            return false;
+        }
+        if self.palette_open || self.filmstrip_open || self.grid_open {
+            self.palette_open = false;
+            self.filmstrip_open = false;
+            self.grid_open = false;
+            self.request_redraw();
+            true
+        } else if self.fullscreen {
+            self.set_fullscreen(false);
+            true
+        } else {
+            false
+        }
+    }
+
     fn process_key(&mut self, event: &KeyEvent) {
         if self.modal_input_blocked() {
             return;
@@ -3068,12 +3148,8 @@ where
             return;
         }
         if event.logical_key == WinitKey::Named(NamedKey::Escape)
-            && (self.palette_open || self.filmstrip_open || self.grid_open)
+            && self.dismiss_overlay_or_fullscreen()
         {
-            self.palette_open = false;
-            self.filmstrip_open = false;
-            self.grid_open = false;
-            self.request_redraw();
             return;
         }
         if self.grid_open
@@ -3155,6 +3231,7 @@ where
             WinitKey::Named(NamedKey::ArrowDown) => (Key::ArrowDown, false),
             WinitKey::Named(NamedKey::Tab) => (Key::Tab, false),
             WinitKey::Named(NamedKey::Escape) => (Key::Escape, false),
+            WinitKey::Named(NamedKey::F11) => (Key::F11, false),
             _ => return None,
         };
         Some(KeyStroke {
@@ -3572,6 +3649,16 @@ where
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
         }
+        if self.fullscreen
+            && !self.palette_open
+            && !self.modal_input_blocked()
+            && let WindowEvent::KeyboardInput { event, .. } = &event
+            && event.state == ElementState::Pressed
+            && event.logical_key == WinitKey::Named(NamedKey::Escape)
+        {
+            self.process_key(event);
+            return;
+        }
         // egui always consumes Tab for focus traversal; the open filmstrip owns navigation.
         if self.filmstrip_open
             && !self.palette_open
@@ -3650,6 +3737,122 @@ mod tests {
             return None;
         };
         Some(canonical_shell_path(&PathBuf::from(root)).expect("canonical test root"))
+    }
+
+    #[test]
+    fn fullscreen_preserves_media_state_and_prioritizes_modal_and_overlay_escape() {
+        let Some(root) = isolated_test_root(
+            "tests::fullscreen_preserves_media_state_and_prioritizes_modal_and_overlay_escape",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.path = Some(root.join("image.png"));
+        app.media_kind = Some(MediaKind::Image);
+        app.state = PlaybackState::Paused;
+        app.image_view.selection = Some(UnitRect::FULL);
+        app.timeline_open = true;
+        let generation = app.generation;
+        app.dispatch(CommandId::ToggleFullscreen);
+        assert!(app.fullscreen);
+        for blocked in 0..3 {
+            match blocked {
+                0 => app.pending_dialog = Some(DialogIntent::OpenFile),
+                1 => app.pending_guard = Some(GuardedAction::Exit),
+                _ => app.export_error = Some("fixture failure".into()),
+            }
+            assert!(!app.dismiss_overlay_or_fullscreen());
+            assert!(app.fullscreen);
+            app.pending_dialog = None;
+            app.pending_guard = None;
+            app.export_error = None;
+        }
+        for overlay in 0..3 {
+            app.palette_open = overlay == 0;
+            app.filmstrip_open = overlay == 1;
+            app.grid_open = overlay == 2;
+            assert!(app.dismiss_overlay_or_fullscreen());
+            assert!(app.fullscreen);
+            assert!(!app.palette_open && !app.filmstrip_open && !app.grid_open);
+        }
+        assert!(app.dismiss_overlay_or_fullscreen());
+        assert!(!app.fullscreen);
+        assert!(app.timeline_open);
+        assert_eq!(app.image_view.selection, Some(UnitRect::FULL));
+        assert_eq!(app.state, PlaybackState::Paused);
+        assert_eq!(app.generation, generation);
+        assert!(!app.dismiss_overlay_or_fullscreen());
+        app.media_kind = Some(MediaKind::Video);
+        for was_open in [false, true] {
+            app.timeline_open = was_open;
+            app.dispatch(CommandId::ToggleFullscreen);
+            app.dispatch(CommandId::ToggleTimeline);
+            assert!(!app.fullscreen);
+            assert!(app.timeline_open);
+        }
+    }
+
+    #[test]
+    fn fullscreen_layout_hides_chrome_and_fills_the_image_viewport() {
+        let Some(root) = isolated_test_root(
+            "tests::fullscreen_layout_hides_chrome_and_fills_the_image_viewport",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let context = egui::Context::default();
+        let path = root.join("image.png");
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.image = Some(
+            ImagePresentation::from_decoded(
+                &context,
+                &path,
+                DecodedImage {
+                    format: "test",
+                    frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                        width: 5,
+                        height: 3,
+                        rgba: vec![255; 60],
+                        delay: Duration::ZERO,
+                    }],
+                },
+            )
+            .expect("image texture"),
+        );
+        let texture = app.image.as_ref().expect("image").texture.id();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 576.0));
+        for fullscreen in [false, true, false] {
+            app.set_fullscreen(fullscreen);
+            app.status_message = None;
+            let mut output = egui::FullOutput::default();
+            for _ in 0..3 {
+                output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ui| app.draw_ui(ui, &mut Vec::new()),
+                );
+            }
+            let has_close = output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "×"));
+            assert_eq!(has_close, !fullscreen);
+            let image_rect = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture => {
+                        Some(mesh.calc_bounds())
+                    }
+                    _ => None,
+                })
+                .expect("image mesh");
+            if fullscreen {
+                assert_eq!(image_rect, screen);
+            } else {
+                assert!(image_rect.top() >= 32.0 && image_rect.bottom() <= 546.0);
+            }
+        }
     }
 
     #[test]

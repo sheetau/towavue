@@ -63,6 +63,7 @@ cargo run -p towavue-app -- 'C:\path\to\media-folder'
 | Play/pause、5秒seek | `Space`、`Left` / `Right` |
 | 同種media移動 / 全種media移動 | `Ctrl+Left` / `Ctrl+Right`、`Alt+Left` / `Alt+Right` |
 | Filmstrip | `F`（表示中は`Tab` / `Shift+Tab`でも移動） |
+| Fullscreen | `F11`（Escapeはoverlayを閉じた後にwindowへ復帰） |
 | Command palette / grid menu | `Ctrl+Shift+P` / `G` |
 | Tab移動 / close | `Ctrl+Tab`、`Ctrl+Shift+Tab` / `Ctrl+W` |
 | Timeline | `T`（音声では最初から表示） |
@@ -140,6 +141,15 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - その後のH1でShell snapshot待機も非同期化した。native folder pickerを閉じた直後の応答probeは修正前が1秒timeout、修正後が8 msだった。Opening folder中のbar移動は古いOpenを失効させ、待機中のwindow closeも63 msで完了した（いずれも基準機の単発観測）。
 - folder起動後のreading 2枚表示、watcher更新による2→3件のsnapshot反映、別folderをOpenした後のreading表示を確認した。runtimeの同期APIを使う実Explorer sort matrixも別途実行し、skipなしで通過した。
 - runtime testは中間要求の置換、古い結果・完了済みslotの失効、実行中のcloseと結果抑止を検証する。app testは背景refreshが明示Openを上書きしないこと、別mediaを開いた後や最後のtab close後の失効も検証する。
+
+### H1で確認したfullscreen scenario
+
+- 通常位置40,40、960×576の画像windowでF11を押す。修正前は変化しなかった。修正後は1920×1080のborderless表示となり、上下bar・seek・外周余白がなくなり、案内が4秒で消える。Escape後のouter boundsは40,40,1000,616へ戻った。View menuからの起動と2画像readingの全高さ表示も確認した。
+- 最大化から直接fullscreenへ入る初回実装では、下端に48pxの旧work-area由来の余白が残り、復帰後のouter boundsも元の-8,-8,1928,1040ではなく0,0,1920,1080となった。入る前の最大化解除と戻る際の再最大化を追加し、四辺の表示とbefore/after bounds一致、さらに通常sizeへの復帰を確認した。monitorは最大化解除前に取得して固定する。複数monitor/DPIやmonitor切断のmatrixは未検証。
+- fullscreen中のfilmstripとpaletteを表示し、Escapeでoverlayを閉じてもfullscreenを保つ。palette後の一回目Escapeのboundsは0,0,1920,1080、二回目は通常windowだった。画像を回転しwindow closeを要求すると中央にdirty guardが出て、Escapeで勝手に解除・discardされないことを確認した。key注入を含むため物理keyboard/IMEの証明ではない。
+- 30秒H.264/AACでfullscreen、pause/resume、F11往復、Tによる通常window＋timelineへの復帰を行い、900 presented / 0 dropped / 0 CPU transfers、drift p95/max 4.038/34.290 msでEOFへ到達した。非正方形pixelのFFV1はsoftware経路で全四辺とaspect-fitを保ち、60 presented / 60 transfers / 0 dropsだった。単発の基準機debug trialであり、全codec・HDR・DPI/monitorの保証ではない。
+- 静止したfullscreen readingの5秒間CPU時間は0 ms（時計の分解能以下）。自動testは画像meshが960×576全体へ達すること、barの非表示と復帰、modal/overlay優先、selection・pause・generationの保持、Tの復帰、古いshortcut設定へのF11補完とcustom prefixを検証する。native最大化/placementはheadless testではなく実windowで検証した。
+- cursor auto-hide、edge-hoverでのcontrols表示、double-click割当はこの変更に含まない。音声playlistとWelcomeは中央contentとして残し、通常timeline設定は復帰まで保持する。
 
 ### H1で確認したcategorized logo menu scenario
 

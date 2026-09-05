@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 19:31 JST - viewing / borderless fullscreen
+
+- Trigger: the previous goal turn made menu progress; checkpoint 6f12468 passed CI 33960012991. Fullscreen was absent from registry and UI; the baseline image window did not change when F11 was sent.
+- Result: shared Toggle fullscreen command, F11 parsing/default/custom binding, View menu/palette entry, and current-monitor winit Borderless mode. Hide persistent chrome/timeline/seek and image/reading outer padding while preserving explicit overlays, loading/errors and export/dirty modals. Timed status overlay explains Escape. Escape dismisses overlays before fullscreen, without clearing selection or changing playback; T exits fullscreen and shows the timeline. No Enter binding or new runtime/unsafe/device code.
+- Native evidence/fix: direct entry from maximized retained a 48px work-area inset and returned outer bounds 0,0,1920,1080 instead of -8,-8,1928,1040. Save the maximized flag, capture the current monitor, unmaximize before entry, and remaximize after exit. The exercised round trip now exactly preserves those maximized bounds and restores normal bounds 40,40,1000,616. Normal position/size remain winit-owned.
+- Real-window verification: image and two-page reading fill the available height; entry hint expires; F11/View entry, palette and filmstrip visibility, overlay-first Escape, dirty close guard surviving Escape, and timeline return passed. H.264/AAC with fullscreen/pause/resume/window transitions reached EOF at 900 presented / 0 dropped / 0 CPU transfers, drift p95/max 4.038/34.290 ms. Non-square-pixel FFV1 retained all four borders and aspect fit with 60 presented / 60 transfers / 0 drops. Settled fullscreen reading measured 0 ms CPU over five seconds (below timer resolution). These are reference-machine debug trials with injected input, not broad codec/device/DPI/IME guarantees. Trial windows closed.
+- Automated verification: focused fullscreen tests, format, workspace all-target Clippy with warnings denied, workspace tests and app build pass (app 32, core 26, runtime 41, integrations 3; three live tests explicitly ignored). Tests cover full-window image mesh/chrome restoration, modal/overlay priority, selection/pause/generation retention, timeline recovery, old config defaults and custom F11 prefixes. Native placement is verified by real-window evidence, not the headless tests.
+- Changed areas: core command/key contracts, app fullscreen/layout/input/shortcuts/menu/tests, README, architecture, roadmap, trial guide, gap ledger, and this log. Generated fixtures/captures/logs remain ignored under target/tmp.
+- Status: h1_active; fullscreen viewing verified for exercised paths. Cursor auto-hide, edge-hover controls, double-click, multiple-monitor/DPI and broader launch gates remain open.
+- Next action: verify checkpoint CI, audit fullscreen pointer/controls and keyboard viewing flow, then continue live-preview and launch-readiness gaps. Do not start packaging without its distribution decision.
+
 ## 2026-09-05 19:11 JST - discoverability / categorized logo menu
 
 - Trigger: the previous goal turn made concrete filmstrip progress; checkpoint 1cf3e55 passed CI 33959455495. The real menu still displayed all 46 commands in one vertical list, placing rotation and export below the initial visible portion.

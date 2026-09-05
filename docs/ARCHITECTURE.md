@@ -129,6 +129,16 @@ Explorerからのfile dropはwinitのowned path eventで受け、既存のextern
 
 logo menuはFile / Edit / Viewの3分類とし、app内の固定配置で関連commandを区切る。全registry commandを一箇所ずつ配置し、title・有効条件・現在のcustom shortcutは既存registry/bindingsから取得する。shortcutは右揃え、縦に収まらないsubmenuはwindow内でscrollする。commandのdispatch・dirty guardは変更せず、分類のために新commandやruntime処理は追加しない。方向drag gestureは引き続き対象外とする。
 
+### H1 fullscreen viewing
+
+F11をdefaultとする共有Toggle fullscreen commandをView menu・palette・custom shortcutへ登録する。winitのBorderless fullscreenを現在monitorへ適用し、復帰時のwindow位置・寸法・最大化状態もwinitの保存済みplacementに任せる。exclusive display modeやD3D deviceの再作成は行わず、通常のresizeと同じ単一device描画を使う。Enterは確定操作との競合を避けて割り当てない。
+
+最大化から直接入ると、固定winitのWindows経路では旧client領域が残り復帰時のouter boundsも一致しないことを実機で確認した。appは入る前の最大化状態だけを保持し、最大化解除→Borderless、解除→再最大化の順で呼ぶ。通常位置・寸法の保存をappで重複実装せず、display modeやnative placementへ直接触れない。
+
+fullscreenではtitle/tab bar、status、timeline、seek barとwindow resize操作を隠し、media領域をwindow全体へ広げる。画像/readingの外周余白も除く。音声playlistとWelcomeは中央contentとして残す。filmstrip・palette・grid、loading/error、export進捗・dirty guardは明示的な操作/通知として引き続き表示する。status通知とEscapeによる復帰案内は期限付きoverlayとする。timelineの表示設定は復帰まで保持し、fullscreen中にToggle timelineを実行した場合は通常windowへ戻ってtimelineを表示する。
+
+Escapeはmodal/paletteの入力を優先し、次にfilmstrip/gridを閉じ、overlayがなければfullscreenを解除する。解除時に画像selection・編集・再生状態は変えない。cursorの自動非表示、edge-hoverによるbar表示、double-click割当は別の操作監査とし、この変更へは含めない。
+
 ### H1 seek bar and command palette
 
 timeline非表示時はstatus上端に1 physical pxのseek barを重ね、hover/drag時だけ太くしhandleを表示する。動画・音声はsource時刻、画像は同じShell snapshotの画像だけの順序へ対応付ける。dragはhandle位置を更新し、releaseで一回だけ既存のgeneration付きSeek/guard付き画像移動を行う。動画hoverは既存の20区間thumbnail tooltip、画像hoverは位置とfilenameとし、本画面のscrub previewは含めない。EOFからの位置移動はPausedとし、その位置からPlayできる。停止中のSeekでは音声時計が次のframe時刻へ到達できないため、保持frameがない場合だけ最初のdecode frameを時計待ちせず表示する。

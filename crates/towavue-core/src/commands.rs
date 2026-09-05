@@ -52,6 +52,7 @@ pub enum CommandId {
     ToggleTimeline,
     ToggleGridMenu,
     ToggleHardwareEncode,
+    ToggleFullscreen,
 }
 
 impl CommandId {
@@ -103,6 +104,7 @@ impl CommandId {
             Self::ToggleTimeline => "toggle_timeline",
             Self::ToggleGridMenu => "toggle_grid_menu",
             Self::ToggleHardwareEncode => "toggle_hardware_encode",
+            Self::ToggleFullscreen => "toggle_fullscreen",
         }
     }
 }
@@ -136,6 +138,7 @@ pub enum Key {
     ArrowDown,
     Tab,
     Escape,
+    F11,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -207,6 +210,7 @@ impl fmt::Display for KeyStroke {
             Key::ArrowDown => formatter.write_str("Down"),
             Key::Tab => formatter.write_str("Tab"),
             Key::Escape => formatter.write_str("Escape"),
+            Key::F11 => formatter.write_str("F11"),
         }
     }
 }
@@ -232,6 +236,7 @@ impl FromStr for KeyStroke {
                 "down" if key.is_none() => key = Some(Key::ArrowDown),
                 "tab" if key.is_none() => key = Some(Key::Tab),
                 "escape" | "esc" if key.is_none() => key = Some(Key::Escape),
+                "f11" if key.is_none() => key = Some(Key::F11),
                 character if key.is_none() && character.chars().count() == 1 => {
                     key = character.chars().next().map(Key::Character)
                 }
@@ -276,6 +281,7 @@ const ANY_MEDIA: &[MediaKind] = &[MediaKind::Image, MediaKind::Video, MediaKind:
 
 const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::OpenFile, "Open file", &[]),
+    command(CommandId::ToggleFullscreen, "Toggle fullscreen", &[]),
     command(CommandId::OpenFolder, "Open folder", &[]),
     command(CommandId::CloseTab, "Close tab", &[]),
     command(CommandId::NextTab, "Next tab", &[]),
@@ -579,6 +585,12 @@ mod tests {
 
         assert_eq!(sequence.to_string(), "Ctrl+K Ctrl+S");
         assert_eq!("toggle_pause".parse(), Ok(CommandId::TogglePause));
+        let fullscreen = "Ctrl+K F11"
+            .parse::<KeySequence>()
+            .expect("fullscreen prefix");
+        assert_eq!(fullscreen.to_string(), "Ctrl+K F11");
+        assert_eq!(fullscreen.strokes()[1].key, Key::F11);
+        assert_eq!("toggle_fullscreen".parse(), Ok(CommandId::ToggleFullscreen));
     }
 
     fn sequence(character: char) -> KeySequence {

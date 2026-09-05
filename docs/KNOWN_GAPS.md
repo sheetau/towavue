@@ -63,7 +63,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Media別4×4 grid | key/clickとtext設定を実装。配置編集UI、drag配置、詳細animationはない |
 | Statusへpath、位置、zoom、解像度、size、modified等 | filename、parent path、folder内位置、size、画像解像度・zoom、編集値などを部分実装。modified日時、詳細codec/stream情報はない |
 | 常時1px seek bar、hover時展開 | H1でstatus上端に実装。動画・音声はduration取得後、timeline非表示時に使える。drag終了時に一回だけSeekする |
-| Fullscreen時はUIを隠す | fullscreen自体が未実装 |
+| Fullscreen時はUIを隠す | H1でF11/View menuのborderless fullscreenとbar/timeline/seek非表示を実装。明示overlayとmodalは保持。cursor auto-hide、edge-hover controls、double-clickは未実装 |
 
 ### Timeline
 
@@ -91,7 +91,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | 自由回転 | 未実装 |
 | Clipboard copy | 未実装 |
 | Resize/resampleとinterpolation選択 | 未実装 |
-| Fullscreen | 未実装 |
+| Fullscreen | H1で画像/readingの全領域表示、Escape復帰と最大化状態の保持を実装。複数DPI/monitor matrixは未検証 |
 | Home/End、Page、Backspace、A/D、数指定jump | 未実装。現在は共通navigation shortcutのみ |
 | Reading mode 2～10枚、縦横、反転 | 基本実装済み |
 | Reading表示数のbutton drag、offset調整、設定保持 | 未実装 |
@@ -109,7 +109,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Live playback volume/rate | H1で実装。編集値を再生・exportで共有し、rateは0.25～4倍のピッチ維持 |
 | Track selection、delete、cut、range playback | 未実装 |
 | Repeat、shuffle | 未実装 |
-| Video zoom、fullscreen、resize/resample | 未実装 |
+| Video zoom、fullscreen、resize/resample | fullscreenはH1でhardware/software共通のaspect-fitと復帰を確認。zoomとresize/resampleは未実装 |
 | Video crop/rotate/flipのlive preview | 未実装。selectionとexportはある |
 | Audio-only export、normalize、stereo/mono変換 | 未実装 |
 | Track/codec/subtitle selection | 未実装 |

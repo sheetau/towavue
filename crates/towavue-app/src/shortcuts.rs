@@ -27,6 +27,7 @@ fn defaults() -> ShortcutBindings {
     let mut bindings = ShortcutBindings::default();
     for (command, shortcut) in [
         (CommandId::OpenFile, "Ctrl+O"),
+        (CommandId::ToggleFullscreen, "F11"),
         (CommandId::OpenFolder, "Ctrl+Shift+O"),
         (CommandId::CloseTab, "Ctrl+W"),
         (CommandId::NextTab, "Ctrl+Tab"),
@@ -136,6 +137,28 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fullscreen_defaults_survive_old_configuration_and_can_be_overridden() {
+        let bindings = parse("toggle_pause = P\n", defaults()).expect("old configuration");
+        assert_eq!(
+            bindings
+                .get(CommandId::ToggleFullscreen)
+                .expect("new default")
+                .to_string(),
+            "F11"
+        );
+        let custom =
+            parse("toggle_fullscreen = Ctrl+K F11\n", defaults()).expect("fullscreen binding");
+        let sequence = custom
+            .get(CommandId::ToggleFullscreen)
+            .expect("custom binding");
+        assert_eq!(sequence.to_string(), "Ctrl+K F11");
+        assert_eq!(
+            custom.resolve(sequence.strokes(), towavue_core::CommandContext::default()),
+            towavue_core::ShortcutMatch::Command(CommandId::ToggleFullscreen)
+        );
+    }
 
     #[test]
     fn custom_file_overrides_defaults_and_accepts_prefixes() {

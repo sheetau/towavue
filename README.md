@@ -46,6 +46,8 @@ H1ではtitle/tab barを黒基調の単一barへまとめ、左端logoにmenu、
 
 logo menuはFile / Edit / Viewに分かれています。FileにOpen・Export・tab close・shortcut再読込、EditにUndo・crop・回転・trim・音量/速度、Viewに再生・移動・zoom・reading・各overlayをまとめています。現在のcustom shortcutを右側に表示し、使えない項目は無効表示、縦に収まらない場合はscrollできます。
 
+F11またはViewのToggle fullscreenで、現在monitorのborderless fullscreenへ切り替えられます。通常のbar・timeline・seek barは隠れ、画像・動画・readingを広く表示します。Escapeは開いたoverlayを先に閉じ、次に通常windowへ戻ります。paletteやfilmstrip、保存確認はfullscreenでも利用でき、Tでtimelineを呼ぶと通常windowへ戻って表示します。復帰時は元の位置・size・最大化状態を保ちます。Enterは割り当てていません。
+
 timelineを閉じているときはstatus上端の細いbarで動画・音声の位置を変更できます。画像では同じfolderの画像順へ移動します。dragは離した時に一回だけ確定し、再生終了後のSeekは一時停止状態になります。command paletteは検索後に上下keyで候補を選び、Enterで実行、Escapeで閉じられます。
 
 動画はbar・timelineを除いた領域へ縦横比を保って表示し、非正方形pixelのsample aspect ratioも反映します。hardware/softwareとも同じ表示矩形を使い、crop selectionも映像に合わせます。

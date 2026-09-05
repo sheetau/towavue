@@ -67,10 +67,6 @@ impl UnitRect {
             && point.y >= self.min.y
             && point.y <= self.max.y
     }
-
-    pub fn is_visible(self) -> bool {
-        self.width() > 0.002 && self.height() > 0.002
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

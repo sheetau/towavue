@@ -373,11 +373,8 @@ fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
         .iter()
         .filter_map(|operation| match *operation {
             EditOperation::Crop(region) => Some(format!(
-                "crop=iw*{:.8}:ih*{:.8}:iw*{:.8}:ih*{:.8}",
-                region.width(),
-                region.height(),
-                region.min.x,
-                region.min.y
+                "crop={}:{}:{}:{}:exact=1",
+                region.width, region.height, region.x, region.y
             )),
             EditOperation::RotateClockwise => Some("transpose=clock".into()),
             EditOperation::RotateCounterclockwise => Some("transpose=cclock".into()),
@@ -463,7 +460,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use image::{ImageFormat, Rgb, RgbImage};
-    use towavue_core::{MediaTime, UnitPoint, UnitRect};
+    use towavue_core::{MediaTime, PixelCrop};
 
     use super::*;
 
@@ -474,9 +471,11 @@ mod tests {
             target: "out.png".into(),
             kind: MediaKind::Image,
             operations: vec![
-                EditOperation::Crop(UnitRect {
-                    min: UnitPoint { x: 0.1, y: 0.2 },
-                    max: UnitPoint { x: 0.6, y: 0.8 },
+                EditOperation::Crop(PixelCrop {
+                    x: 4,
+                    y: 6,
+                    width: 20,
+                    height: 18,
                 }),
                 EditOperation::RotateClockwise,
                 EditOperation::FlipHorizontal,
@@ -490,10 +489,7 @@ mod tests {
             .find_map(|pair| (pair[0] == "-vf").then_some(pair[1].as_str()))
             .expect("video filter argument");
 
-        assert_eq!(
-            filter,
-            "crop=iw*0.50000000:ih*0.60000002:iw*0.10000000:ih*0.20000000,transpose=clock,hflip"
-        );
+        assert_eq!(filter, "crop=20:18:4:6:exact=1,transpose=clock,hflip");
     }
 
     #[test]
@@ -568,9 +564,11 @@ mod tests {
             source,
             target: target.clone(),
             kind: MediaKind::Image,
-            operations: vec![EditOperation::Crop(UnitRect {
-                min: UnitPoint { x: 0.0, y: 0.0 },
-                max: UnitPoint { x: 0.001, y: 0.001 },
+            operations: vec![EditOperation::Crop(PixelCrop {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
             })],
             hardware_encode: false,
         });
@@ -597,9 +595,11 @@ mod tests {
             target: target.clone(),
             kind: MediaKind::Image,
             operations: vec![
-                EditOperation::Crop(UnitRect {
-                    min: UnitPoint { x: 0.0, y: 0.0 },
-                    max: UnitPoint { x: 0.5, y: 1.0 },
+                EditOperation::Crop(PixelCrop {
+                    x: 0,
+                    y: 0,
+                    width: 20,
+                    height: 30,
                 }),
                 EditOperation::RotateClockwise,
             ],
@@ -614,6 +614,84 @@ mod tests {
 
         assert_eq!(original.dimensions(), (40, 30));
         assert_eq!(exported.dimensions(), (30, 20));
+    }
+
+    #[test]
+    fn pixel_crops_export_one_pixel_odd_bounds_and_nested_rotations_exactly() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("towavue-pixel-crop-{unique}"));
+        fs::create_dir(&directory).expect("fixture directory");
+        let source = directory.join("source.png");
+        let pixels = RgbImage::from_fn(8, 8, |x, y| Rgb([(x * 30) as u8, (y * 30) as u8, 70]));
+        pixels.save(&source).expect("source image");
+        let original = fs::read(&source).expect("source bytes");
+        for crop in [
+            PixelCrop {
+                x: 3,
+                y: 2,
+                width: 1,
+                height: 1,
+            },
+            PixelCrop {
+                x: 1,
+                y: 3,
+                width: 5,
+                height: 3,
+            },
+        ] {
+            let target = directory.join("crop.png");
+            export_media(&ExportRequest {
+                source: source.clone(),
+                target: target.clone(),
+                kind: MediaKind::Image,
+                operations: vec![EditOperation::Crop(crop)],
+                hardware_encode: false,
+            })
+            .expect("pixel crop export");
+            let exported = crate::decode_image(&target).expect("decode cropped image");
+            assert_eq!(exported.dimensions(), (crop.width, crop.height));
+            for y in 0..crop.height {
+                for x in 0..crop.width {
+                    let index = ((y * crop.width + x) * 4) as usize;
+                    assert_eq!(
+                        &exported.frames[0].rgba[index..index + 3],
+                        &pixels.get_pixel(crop.x + x, crop.y + y).0
+                    );
+                }
+            }
+        }
+        let target = directory.join("nested.png");
+        export_media(&ExportRequest {
+            source: source.clone(),
+            target: target.clone(),
+            kind: MediaKind::Image,
+            operations: vec![
+                EditOperation::Crop(PixelCrop {
+                    x: 1,
+                    y: 3,
+                    width: 5,
+                    height: 3,
+                }),
+                EditOperation::RotateClockwise,
+                EditOperation::Crop(PixelCrop {
+                    x: 1,
+                    y: 2,
+                    width: 1,
+                    height: 2,
+                }),
+            ],
+            hardware_encode: false,
+        })
+        .expect("nested crop export");
+        let exported = crate::decode_image(&target).expect("decode nested crop");
+        assert_eq!(exported.dimensions(), (1, 2));
+        assert_eq!(&exported.frames[0].rgba[..3], &pixels.get_pixel(3, 4).0);
+        assert_eq!(&exported.frames[0].rgba[4..7], &pixels.get_pixel(4, 4).0);
+        assert_eq!(fs::read(&source).expect("source remains"), original);
+        fs::remove_dir_all(directory).expect("remove crop fixtures");
     }
 
     #[test]

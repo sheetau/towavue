@@ -142,6 +142,15 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - folder起動後のreading 2枚表示、watcher更新による2→3件のsnapshot反映、別folderをOpenした後のreading表示を確認した。runtimeの同期APIを使う実Explorer sort matrixも別途実行し、skipなしで通過した。
 - runtime testは中間要求の置換、古い結果・完了済みslotの失効、実行中のcloseと結果抑止を検証する。app testは背景refreshが明示Openを上書きしないこと、別mediaを開いた後や最後のtab close後の失効も検証する。
 
+### H1で確認したpixel crop scenario
+
+- 8×8の四象限PNGを960×576 windowで開き、(400,180)から(420,200)へdrag→Ctrl+Y→Save As。変更前はpreviewを表示できたのにFFmpegが幅0・高さ0で失敗した。変更後はCrop 1×1 pxと表示し、同操作で保存後のPNGも1×1だった。sourceは変更しない。
+- 整数化の初回実装でも、1 pixelを拡大すると選択外の色がlinear samplingで右側へにじんだ。画像meshの半pixel帯と動画shaderのsample clampを追加し、最終1×1 previewが一色になることを実windowで確認した。動画の元のchroma再構成や再圧縮までbit一致させる処理ではない。
+- H.264の2×2 cropは固定libopenh264が16未満を拒否した。動画の小さなselection→Ctrl+Yでは最小16×16の案内を出し、selectionと非dirty状態を保持する。十分な範囲へ作り直した18×18 cropは同寸法で表示・保存された。16×16の最小出力は実export・全frame再decodeの自動testでも確認する。
+- 自動testは非finite・逆転・範囲外、奇数source端、zero寸法、grid往復、1×1 meshの一定UV、回転したcropのsample範囲、全領域no-opと動画最小寸法の拒否、寸法未取得時の保持を確認する。16,384 pixel画像を64倍zoomした1 pixel selectionもrelease後に保持する。PNGの1×1・奇数位置/寸法・回転後再cropはRGB画素を厳密照合し、不正な直接export要求で既存targetを守るtestも維持する。
+- これらは基準機の注入入力と固定fixtureによる試験で、全codec、EXIF/display orientation、HDR、DPI・物理keyboardのmatrixを完了したという意味ではない。trial outputはignoredのtarget/tmp内に置く。最初のSave Asは既存dialogの記憶したh1-seek-imagesへ保存されたため、最終試験では明示pathを指定した。
+- 再生中のH.264/AACをcropした30秒試験は900 presented / 0 dropped / 0 CPU transfers、drift p95/max 4.769/14.131 msで完了し、crop済みEOFの5秒間CPU時間は0 ms（計測分解能以下）だった。FFV1・SAR 3:2でも300×208 cropを表示し、90 presented / 0 dropped / 90 transfersを確認した。長時間performance gateの再実行ではない。
+
 ### H1で確認したvideo visual edit scenario
 
 - 四象限を赤・緑・青・黄、外周を白とした640×360 H.264を開き、EOF後にRを押す。変更前はdirty表示だけが変わり、色の位置と横長表示は変わらなかった。変更後は時計回りの色配置と縦長aspect-fitになり、H→中央領域のselection→Ctrl+Yで編集後の画面をcrop、Ctrl+Zでcrop前へ戻った。

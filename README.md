@@ -56,6 +56,8 @@ timelineを閉じているときはstatus上端の細いbarで動画・音声の
 
 動画のR/Lによる90度回転、H/Vによる反転、selectionとCtrl+Yによるcropも、現在の再生画面へ操作順に反映します。Undo/Redoとtab復帰でも編集結果を表示し、回転後の縦横比を保ちます。hardware decodeの編集表示も同じGPU内で処理し、CPUへ映像を戻しません。
 
+cropは確定したpixel矩形をpreviewと保存で共有します。画像は1 pixel、動画は偶数pixel単位へ選択を合わせ、確定時に出力寸法を表示します。動画は既定encoderの制約で16×16未満を確定せず、選択を残して案内します。画像の1×1 cropも保存でき、寸法が変わらない全領域cropでは未保存編集を増やしません。
+
 Gはメディア種別ごとの4×4 grid menuを開き、`1234/qwer/asdf/zxcv`またはclickで選択します。配置は`%APPDATA%\towavue\grid.conf`で変更できます。動画・音声ではTでwaveform timelineを表示し、動画上のhover thumbnailとclick/drag Seekを利用できます。previewはUI thread外で生成され、path・size・更新時刻をkeyにした最大64 MiBのcacheを`%LOCALAPPDATA%\towavue\preview-cache`へ保存します。
 
 画像ではCtrl+wheelまたは+/-でzoom、Ctrl+Hでactual size、Shift+Wでfit、右dragでpanします。左dragでselectionを作り、辺dragでresize、Shift付き作成で正方形、Shift付きresizeで比率を保持します。選択範囲clickまたはCtrl+Shift+Yはcrop previewです。Bでreading mode、Rで縦横切替、Hで表示順反転、Ctrl+[ / Ctrl+]で表示数を2～10枚に変更できます。

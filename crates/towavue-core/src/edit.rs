@@ -1,8 +1,8 @@
-use crate::{MediaKind, MediaTime, UnitRect};
+use crate::{MediaKind, MediaTime, PixelCrop};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EditOperation {
-    Crop(UnitRect),
+    Crop(PixelCrop),
     RotateClockwise,
     RotateCounterclockwise,
     FlipHorizontal,

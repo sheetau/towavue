@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use egui::{Align2, Color32, RichText, TextureHandle, TextureOptions};
 use towavue_core::{
     CommandContext, CommandId, EditHistory, EditOperation, FolderSnapshot, FolderSnapshotSource,
-    ImageViewState, Key, KeyStroke, MediaKind, MediaTime, Modifiers, PlaybackGeneration,
+    ImageViewState, Key, KeyStroke, MediaKind, MediaTime, Modifiers, PixelCrop, PlaybackGeneration,
     PlaybackState, ReadingAxis, ReadingSettings, ShortcutBindings, ShortcutMatch, TabId, TabSet,
     TabTarget, UnitPoint, UnitRect, ZoomMode, command_definitions,
 };
@@ -292,7 +292,7 @@ impl ImageTransform {
         };
         for operation in operations {
             match *operation {
-                EditOperation::Crop(region) => transform.crop(region),
+                EditOperation::Crop(region) => transform.crop_pixels(region),
                 EditOperation::RotateClockwise => {
                     transform.uv.rotate_right(1);
                     transform.size = (transform.size.1, transform.size.0);
@@ -319,6 +319,17 @@ impl ImageTransform {
     }
 
     fn crop(&mut self, region: UnitRect) {
+        if let Some(crop) = PixelCrop::from_selection(
+            region,
+            (self.size.0 as u32, self.size.1 as u32),
+            MediaKind::Image,
+        ) {
+            self.crop_pixels(crop);
+        }
+    }
+
+    fn crop_pixels(&mut self, crop: PixelCrop) {
+        let region = crop.unit_rect((self.size.0 as u32, self.size.1 as u32));
         let previous = self.uv;
         self.uv = [
             bilinear_uv(previous, region.min.x, region.min.y),
@@ -326,8 +337,7 @@ impl ImageTransform {
             bilinear_uv(previous, region.max.x, region.max.y),
             bilinear_uv(previous, region.min.x, region.max.y),
         ];
-        self.size.0 = (self.size.0 * region.width()).max(1.0);
-        self.size.1 = (self.size.1 * region.height()).max(1.0);
+        self.size = (crop.width as f32, crop.height as f32);
     }
 
     fn pixel_aspect(&self, source_aspect: f32) -> f32 {
@@ -1403,7 +1413,9 @@ where
         }
 
         let painter = ui.painter_at(viewport);
-        paint_transformed_image(&painter, texture, image_rect, transform.uv);
+        painter.add(egui::Shape::mesh(transformed_image_mesh(
+            texture, image_rect, transform,
+        )));
         if !self.image_view.crop_preview
             && let Some(selection) = self.image_view.selection
         {
@@ -1472,13 +1484,10 @@ where
         }
         if response.drag_stopped_by(egui::PointerButton::Primary) {
             self.selection_drag = None;
-            if self
-                .image_view
-                .selection
-                .is_some_and(|selection| !selection.is_visible())
-            {
-                self.image_view.selection = None;
-            }
+            self.image_view.selection = self.image_view.selection.and_then(|selection| {
+                PixelCrop::from_selection(selection, image_size, self.media_kind?)
+                    .map(|crop| crop.unit_rect(image_size))
+            });
         }
         if self.media_kind == Some(MediaKind::Image)
             && response.clicked_by(egui::PointerButton::Primary)
@@ -2257,13 +2266,21 @@ where
             CommandId::Undo => self.undo_edit(false),
             CommandId::Redo => self.undo_edit(true),
             CommandId::ApplyCrop => {
-                if let Some(selection) = self.image_view.selection {
-                    self.push_edit(EditOperation::Crop(selection));
-                    self.image_view.selection = None;
-                    self.image_view.crop_preview = false;
-                    self.image_view.fit();
+                let size = match self.media_kind {
+                    Some(MediaKind::Image) => {
+                        self.image.as_ref().map(ImagePresentation::dimensions)
+                    }
+                    Some(MediaKind::Video) => self
+                        .session
+                        .as_ref()
+                        .and_then(PlaybackSession::video_geometry)
+                        .map(|(w, h, _)| (w, h)),
+                    _ => None,
+                };
+                if let Some(size) = size {
+                    self.crop_selection(size);
                 } else {
-                    self.set_status("Drag on the image to create a crop selection".into());
+                    self.set_status("Wait for media to load before cropping".into());
                 }
             }
             CommandId::RotateClockwise => self.push_visual_edit(EditOperation::RotateClockwise),
@@ -2330,6 +2347,34 @@ where
                 });
             }
         }
+    }
+
+    fn crop_selection(&mut self, source_size: (u32, u32)) {
+        let (Some(selection), Some(kind)) = (self.image_view.selection, self.media_kind) else {
+            self.set_status("Drag on the media to create a crop selection".into());
+            return;
+        };
+        let transform = self.visual_transform(source_size);
+        let size = (transform.size.0 as u32, transform.size.1 as u32);
+        let Some(crop) = PixelCrop::from_selection(selection, size, kind) else {
+            self.set_status("Cannot crop this selection; video needs at least 16 × 16 px".into());
+            return;
+        };
+        // The pinned default H.264 encoder rejects dimensions smaller than one macroblock.
+        if kind == MediaKind::Video && (crop.width < 16 || crop.height < 16) {
+            self.set_status("Video crop needs at least 16 × 16 px; selection kept".into());
+            return;
+        }
+        if (crop.width, crop.height) != size {
+            self.push_edit(EditOperation::Crop(crop));
+        }
+        self.image_view.selection = None;
+        self.image_view.crop_preview = false;
+        self.image_view.fit();
+        self.set_status(format!(
+            "Crop {} × {} px (source unchanged)",
+            crop.width, crop.height
+        ));
     }
 
     fn visual_transform(&self, size: (u32, u32)) -> ImageTransform {
@@ -3494,30 +3539,42 @@ fn bilinear_uv(corners: [UnitPoint; 4], x: f32, y: f32) -> UnitPoint {
     }
 }
 
-fn paint_transformed_image(
-    painter: &egui::Painter,
+fn transformed_image_mesh(
     texture: egui::TextureId,
     rect: egui::Rect,
-    uv: [UnitPoint; 4],
-) {
+    transform: ImageTransform,
+) -> egui::Mesh {
     let mut mesh = egui::Mesh::with_texture(texture);
-    for (position, uv) in [
-        rect.left_top(),
-        rect.right_top(),
-        rect.right_bottom(),
-        rect.left_bottom(),
-    ]
-    .into_iter()
-    .zip(uv)
-    {
-        mesh.vertices.push(egui::epaint::Vertex {
-            pos: position,
-            uv: egui::pos2(uv.x, uv.y),
-            color: Color32::WHITE,
-        });
+    let half = egui::vec2(0.5 / transform.size.0, 0.5 / transform.size.1);
+    // Constant UVs in the outer half-pixel bands clamp sampling to the cropped image.
+    for y in [0.0, half.y, 1.0 - half.y, 1.0] {
+        for x in [0.0, half.x, 1.0 - half.x, 1.0] {
+            let uv = bilinear_uv(
+                transform.uv,
+                x.clamp(half.x, 1.0 - half.x),
+                y.clamp(half.y, 1.0 - half.y),
+            );
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: rect.min + rect.size() * egui::vec2(x, y),
+                uv: egui::pos2(uv.x, uv.y),
+                color: Color32::WHITE,
+            });
+        }
     }
-    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
-    painter.add(egui::Shape::mesh(mesh));
+    for row in 0..3 {
+        for column in 0..3 {
+            let index = row * 4 + column;
+            mesh.indices.extend_from_slice(&[
+                index,
+                index + 1,
+                index + 5,
+                index,
+                index + 5,
+                index + 4,
+            ]);
+        }
+    }
+    mesh
 }
 
 fn selection_rect(image_rect: egui::Rect, selection: UnitRect) -> egui::Rect {
@@ -4464,9 +4521,11 @@ mod tests {
         let transform = ImageTransform::new(
             (40, 30),
             &[
-                EditOperation::Crop(UnitRect {
-                    min: UnitPoint { x: 0.25, y: 0.0 },
-                    max: UnitPoint { x: 0.75, y: 1.0 },
+                EditOperation::Crop(PixelCrop {
+                    x: 10,
+                    y: 0,
+                    width: 20,
+                    height: 30,
                 }),
                 EditOperation::RotateClockwise,
             ],
@@ -4483,6 +4542,161 @@ mod tests {
             export_name(Path::new("photo.final.png")),
             "photo.final-export.png"
         );
+    }
+
+    #[test]
+    fn pixel_crop_preserves_rejected_video_selection_and_avoids_no_op_history() {
+        let Some(root) = isolated_test_root(
+            "tests::pixel_crop_preserves_rejected_video_selection_and_avoids_no_op_history",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let tab = app.tabs.open_new(root.join("tiny.png"), MediaKind::Image);
+        app.media_kind = Some(MediaKind::Image);
+        let selection = UnitRect {
+            min: UnitPoint { x: 0.4, y: 0.3 },
+            max: UnitPoint { x: 0.42, y: 0.32 },
+        };
+        app.image_view.selection = Some(selection);
+        app.crop_selection((8, 8));
+        assert_eq!(
+            app.edits[&tab].operations(),
+            &[EditOperation::Crop(PixelCrop {
+                x: 3,
+                y: 2,
+                width: 1,
+                height: 1
+            })]
+        );
+        assert_eq!(app.visual_transform((8, 8)).size, (1.0, 1.0));
+        app.edits.get_mut(&tab).expect("history").mark_saved();
+        app.image_view.selection = Some(UnitRect::FULL);
+        app.crop_selection((8, 8));
+        assert!(!app.edits[&tab].is_dirty());
+        assert_eq!(app.edits[&tab].operations().len(), 1);
+        let video = app.tabs.open_new(root.join("video.mp4"), MediaKind::Video);
+        app.media_kind = Some(MediaKind::Video);
+        app.image_view.selection = Some(selection);
+        app.crop_selection((160, 96));
+        assert!(!app.edits.contains_key(&video));
+        assert_eq!(app.image_view.selection, Some(selection));
+        assert!(
+            app.status_message
+                .as_ref()
+                .expect("status")
+                .0
+                .contains("16 × 16")
+        );
+        app.dispatch(CommandId::ApplyCrop);
+        assert_eq!(app.image_view.selection, Some(selection));
+        assert!(
+            app.status_message
+                .as_ref()
+                .expect("status")
+                .0
+                .contains("load")
+        );
+    }
+
+    #[test]
+    fn cropped_image_mesh_never_samples_neighbors_outside_its_pixel_bounds() {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0));
+        let mut transform = ImageTransform::new(
+            (8, 8),
+            &[EditOperation::Crop(PixelCrop {
+                x: 3,
+                y: 2,
+                width: 1,
+                height: 1,
+            })],
+        );
+        let mesh = transformed_image_mesh(egui::TextureId::Managed(0), rect, transform);
+        assert_eq!(mesh.calc_bounds(), rect);
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| vertex.uv == egui::pos2(3.5 / 8.0, 2.5 / 8.0))
+        );
+        transform = ImageTransform::new(
+            (8, 8),
+            &[
+                EditOperation::Crop(PixelCrop {
+                    x: 2,
+                    y: 3,
+                    width: 4,
+                    height: 2,
+                }),
+                EditOperation::RotateClockwise,
+            ],
+        );
+        let mesh = transformed_image_mesh(egui::TextureId::Managed(0), rect, transform);
+        assert_eq!(mesh.calc_bounds(), rect);
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| (2.5 / 8.0..=5.5 / 8.0).contains(&vertex.uv.x)
+                    && (3.5 / 8.0..=4.5 / 8.0).contains(&vertex.uv.y))
+        );
+    }
+
+    #[test]
+    fn zoomed_single_pixel_selection_survives_release_on_a_large_image() {
+        let Some(_root) = isolated_test_root(
+            "tests::zoomed_single_pixel_selection_survives_release_on_a_large_image",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.media_kind = Some(MediaKind::Image);
+        let context = egui::Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0));
+        let button = |pressed, at| egui::Event::PointerButton {
+            pos: egui::pos2(at, at),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        };
+        for events in [
+            vec![egui::Event::PointerMoved(egui::pos2(100.0, 100.0))],
+            vec![button(true, 100.0)],
+            vec![egui::Event::PointerMoved(egui::pos2(110.0, 110.0))],
+            vec![egui::Event::PointerMoved(egui::pos2(174.0, 174.0))],
+            vec![button(false, 174.0)],
+        ] {
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let response = ui.interact(
+                        screen,
+                        "selection-test".into(),
+                        egui::Sense::click_and_drag(),
+                    );
+                    let pointer = ui.input(|input| input.pointer.hover_pos());
+                    app.update_selection(
+                        &response,
+                        egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(16_384.0 * 64.0, 16_384.0 * 64.0),
+                        ),
+                        (16_384, 16_384),
+                        false,
+                        pointer,
+                    );
+                },
+            );
+        }
+        let selection = app
+            .image_view
+            .selection
+            .expect("one-pixel selection retained");
+        let crop = PixelCrop::from_selection(selection, (16_384, 16_384), MediaKind::Image)
+            .expect("pixel crop");
+        assert_eq!((crop.width, crop.height), (1, 1));
     }
 
     #[test]
@@ -4520,7 +4734,7 @@ mod tests {
             min: UnitPoint { x: 0.25, y: 0.25 },
             max: UnitPoint { x: 0.75, y: 0.75 },
         });
-        app.dispatch(CommandId::ApplyCrop);
+        app.crop_selection(size);
         let transform = app.visual_transform(size);
         assert_eq!(transform.size, (48.0, 80.0));
         assert_eq!(transform.pixel_aspect(2.0), 0.5);

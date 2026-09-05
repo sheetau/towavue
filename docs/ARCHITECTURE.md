@@ -48,6 +48,7 @@ OS非依存の値、状態遷移、コマンド、編集履歴を置く。unsafe
 - `TabSet` / `ShortcutBindings`: platform非依存のtab targetとprefix対応key sequence。
 - `ImageViewState` / `ReadingSettings`: 正規化selection、zoom・pan・crop preview、2～10 pageの表示軸と反転。
 - `EditHistory` / `EditOperation`: source非破壊のcrop、90度回転、反転、trim端点、volume、rateとsaved cursor付きundo/redo。
+- `PixelCrop`: preceding visual edit後の整数pixel crop矩形。UIの正規化selectionを確定し、previewとexportで共有する。
 
 ### towavue-runtime-windows
 
@@ -110,6 +111,14 @@ reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降�
 `EditHistory`は適用済みcursorとsaved cursorを別に持つ。新しいoperationをundo位置から追加した場合はredo branchを破棄し、破棄されたbranchにsaved cursorがあれば保存済みidentityも失効する。tab titleとwindow titleの`*`およびstatusのUnsavedは、現在cursorとsaved cursorが一致するまで消えない。folder内移動は同じtabの履歴を破棄するためcloseと同じguard対象だが、tab切替は履歴を保持するためguardしない。
 
 exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/coreへFFmpeg型を公開しない。画像filterはoperation順のcrop / transpose / flip、動画filterはそれらとtrim / PTS rate、音声filterはatrim / PTS / atempo / volumeを適用し、metadataを入力からcopyする。2倍を超える、または0.5倍未満のrateは複数の`atempo`へ分解する。video/audio encodeは固定FFmpeg buildのsoftware codecを使い、hardware encodeはM7まで行わない。Save As後のSaveは同じexport先を更新できるが、sourceと同一pathへの出力は拒否してpartial overwriteによるsource破損を避ける。
+
+### H1 pixel-aligned crop
+
+selectionのdrag中は正規化座標を使い、releaseとcrop確定時に現在の編集後寸法へ丸める。画像は1 pixel、動画は偶数の位置・寸法を使う。各辺を近いgrid境界へ丸め、同じ境界へ潰れた場合は内側の最小1 grid領域とする。現行defaultのlibopenh264は2×2を実際にencodeできず16×16未満を拒否したため、動画cropの確定は16×16以上に限定する。小さすぎる選択は勝手に16×16へ広げず、案内とともにselection・履歴を保持する。非finite・逆転・範囲外の選択と寸法未取得も確定しない。
+
+確定cropは正規化floatではなく、編集時点の整数pixel矩形を`EditOperation::Crop`へ保持する。previewはその矩形からUVと整数寸法を求め、FFmpegへ同じ整数と`exact=1`を渡す。回転/反転/cropの履歴順は変えず、既存の履歴はmemory内だけのため保存形式の移行は生じない。確定時に出力寸法をstatusへ表示し、全領域cropはdirty履歴を増やさない。選択の一時crop previewも同じimage pixel丸めを使う。動画の一般的なresize/paddingやencoder変更は行わない。
+
+crop境界でlinear samplingが選択外の隣接pixelを混ぜないよう、画像meshを端の半pixel帯で分割し、動画shaderでも選択領域内のpixel中心へsample座標をclampする。1×1画像は一色のまま拡大される。textureの再decodeやcrop用CPU copyは追加しない。
 
 ### H1 visual filmstrip
 

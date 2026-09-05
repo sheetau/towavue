@@ -116,3 +116,5 @@ F11/View menuからのborderless fullscreenを追加し、persistent bar・timel
 fullscreenの画像・reading・動画へ2秒idleのcursor非表示を追加した。入力で戻し、button保持・overlay・modal・loading/error中は表示を維持する。右button保持判定と最小化からのstationary pointer復帰で実機上の問題を再現・修正した。静止PNGの追加連続描画はなく、104 testが通過した。次は動画編集のlive previewとkeyboard・DPIを含む残りの閲覧flowを監査する。edge-hover controls、double-clickやlaunch全体の完了とは扱わない。
 
 動画のcrop・90度回転・反転を現在の再生へ反映した。画像と共有する履歴順UV、回転後のSAR・selection、hardware編集時だけの同device内RGBA合成を追加し、CPU readbackは行わない。hardware/softwareの実window、Undo/Redo、停止中Seekと実exportの画素照合を確認し、106 testが通過した。約1分4K60も途中から回転表示にしてdrop 0で完了した。次はcropのpixel丸め・極小範囲と、残るtrim/live表示の不一致を調べる。keyboard・DPI、配布を含むlaunch全体は未完了である。
+
+cropを整数pixel矩形へ変更し、previewとFFmpeg exportの独立した丸めをなくした。1×1 PNGの保存失敗と隣接色のにじみを再現・修正し、画像1 pixel・動画偶数pixelの選択、動画16×16未満の拒否、寸法案内と全領域no-opを追加した。PNGの奇数寸法・回転後再cropと最小H.264 exportを含む114 test、実windowの保存・選択保持が通過した。次はtrim範囲とlive playbackの不一致、入力・DPIなど残るlaunch gateを監査する。H1全体は継続中である。

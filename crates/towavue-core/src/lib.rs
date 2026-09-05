@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod commands;
+mod crop;
 mod edit;
 mod image;
 mod media;
@@ -16,6 +17,7 @@ pub use commands::{
     CommandContext, CommandDefinition, CommandId, Key, KeySequence, KeyStroke, Modifiers,
     ShortcutBindings, ShortcutMatch, command_definitions,
 };
+pub use crop::PixelCrop;
 pub use edit::{EditHistory, EditOperation, EditState};
 pub use image::{
     ImageViewState, ReadingAxis, ReadingSettings, UnitPoint, UnitRect, ZoomMode, fit_scale,

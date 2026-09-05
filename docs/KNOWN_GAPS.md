@@ -8,7 +8,7 @@
 
 - 動画はH1でbar・timelineを除いた領域へsample aspect ratio込みでaspect-fitするよう修正した。回転metadataによるportrait orientationの自動適用は未検証。
 - 動画・音声のvolume・mute・rateはH1でlive playbackにも反映する。rate変更は現在位置からpipelineを再構築するため短い再primingを伴い、音声を無途切れで連続変速する方式ではない。
-- 動画のcrop、rotate、flipはH1でhardware/software両方のlive previewへ反映した。selectionは編集後の表示基準で、Undo/Redo・tab復帰にも履歴を使う。pixel/chroma境界のcrop丸めはFFmpeg export側の制約もあり、全寸法・極小cropでのpixel単位の一致は未検証。
+- 動画のcrop、rotate、flipはH1でhardware/software両方のlive previewへ反映した。cropは整数pixel矩形をexportと共有し、画像1 pixel・動画偶数pixelに揃える。既定H.264 encoderのため動画は16×16未満を確定しない。PNGの1×1・奇数位置/寸法・回転後の再cropは画素一致を検証したが、動画の圧縮・chroma再構成や全codec/HDRの色一致を保証するものではない。
 - trimは`I` / `O`で現在位置を端点として記録する方式で、timeline上のrange handleや選択範囲はない。
 
 UI上のcommand名は操作が即時反映される印象を与えるため、live playbackへの適用または表示上の区別が、最初のUX改善候補である。

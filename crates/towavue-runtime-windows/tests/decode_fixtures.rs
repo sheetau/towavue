@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use towavue_core::{EditOperation, MediaKind, MediaTime};
+use towavue_core::{EditOperation, MediaKind, MediaTime, PixelCrop};
 use towavue_runtime_windows::{
     DecodeOutput, DecodeSummary, ExportRequest, decode_file, export_media,
 };
@@ -60,6 +60,39 @@ fn fixture_directory() -> PathBuf {
         .join("tests")
         .join("generated")
         .join("m1")
+}
+
+#[test]
+fn exports_minimum_h264_pixel_crop_without_changing_its_dimensions() {
+    let source = fixture_directory().join("h264-aac.mp4");
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let target = std::env::temp_dir().join(format!("towavue-minimum-crop-{unique}.mp4"));
+    export_media(&ExportRequest {
+        source,
+        target: target.clone(),
+        kind: MediaKind::Video,
+        operations: vec![EditOperation::Crop(PixelCrop {
+            x: 64,
+            y: 38,
+            width: 16,
+            height: 16,
+        })],
+        hardware_encode: false,
+    })
+    .expect("minimum default-encoder crop");
+    let summary = decode_file(&target, |output| {
+        if let DecodeOutput::Video(frame) = output {
+            assert_eq!((frame.width, frame.height), (16, 16));
+        }
+        true
+    })
+    .expect("decode minimum crop");
+    fs::remove_file(target).expect("remove cropped video");
+    assert_eq!(summary.video_frames, 60);
+    assert!(summary.audio_frames > 0);
 }
 
 #[test]

@@ -2,6 +2,18 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 16:11 JST - fix / video viewport and repaint scheduling
+
+- Trigger: compact-shell trials showed video stretched against the whole window, with edges hidden under bars; selection used a different rectangle.
+- Intent: preserve the full video image and sample aspect ratio in the actual media panel on both existing decode paths.
+- Result: select the due frame, lay out UI, then draw video and UI with one Present. Runtime exposes only owned geometry; app computes aspect-fit and uses that rectangle for selection and physical-pixel destination. D3D11 Video Processor destination/target and software shader viewport use the same bounds. Software rendering resets inherited UI scissor/blend/depth state. Frame metrics increment only on the first successful draw, not UI-only redraws. UI repaint deadlines now participate in event-loop waits; actions from discarded layout passes are cleared.
+- Changed areas: app render/layout/scheduling, runtime frame metadata/playback/renderer, README, architecture, roadmap, trial guide, and gap ledger. No new dependency or app/core unsafe code.
+- Verification: format, all-target Clippy with warnings denied, and all-target tests pass (app 14, core 26, runtime 34, integrations 3; two existing opt-in device/Explorer tests explicitly ignored). Added portrait/landscape/SAR layout and invalid-or-unspecified SAR regressions. Previous compact-shell checkpoint f014da2 passed CI 33951260390.
+- Real-window evidence: 240x320 white-bordered H.264 rendered all four edges with D3D11VA, 60 frames, 0 transfers, 0 drops. A 320x240 FFV1 with SAR=2 rendered at 8:3 with all borders, software path, 60 transfers, 0 drops. Timeline open/close, maximize/restore, narrow resize, and portrait selection were exercised. Latest H.264 EOF replay again reported 60 frames/0 transfers/0 drops and 13.734 ms Seek. Trial windows closed; generated media and captures remain ignored under target/tmp.
+- Boundary: some post-interaction captures still omitted tab/control content while later captures rendered it. Instrumented control rectangles and clipping were within the window; temporary diagnostics were removed. The missing repaint scheduling was real, but it does not independently establish the whole symptom's cause or resolution. Silent-video waveform generation also showed a temporary unavailable message before the no-audio state. These remain audit items, not successful full UI-stability claims. Multi-DPI and rotation-metadata coverage remain open.
+- Status: h1_active; the full launch objective is not complete.
+- Next action: verify checkpoint CI and isolate intermittent UI disappearance (layout shapes versus texture/render output), then pause after audio drain and thin seek-bar/daily interactions. Do not defer the reproduced visibility issue merely because a later screenshot looks correct.
+
 ## 2026-09-05 15:57 JST - implementation / compact shell and EOF replay
 
 - Trigger: H1 visual audit found duplicate native/custom title bars, crowded status text, and a Play action that did nothing after EOF.

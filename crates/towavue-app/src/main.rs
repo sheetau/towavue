@@ -344,6 +344,8 @@ struct Application<N> {
     thumbnail_loading: Option<u64>,
     session: Option<PlaybackSession>,
     pending_time: Option<MediaTime>,
+    video_rect: Option<egui::Rect>,
+    ui_repaint_at: Option<Instant>,
     clock: Option<PlaybackClock>,
     state: PlaybackState,
     decode_finished: bool,
@@ -420,6 +422,8 @@ where
             thumbnail_loading: None,
             session: None,
             pending_time: None,
+            video_rect: None,
+            ui_repaint_at: None,
             clock: None,
             state: PlaybackState::Loading,
             decode_finished: false,
@@ -896,7 +900,6 @@ where
             .as_mut()
             .and_then(PlaybackSession::pending_video_time)
         else {
-            self.check_eof();
             return;
         };
         if self.clock.is_none() {
@@ -920,12 +923,8 @@ where
         }
     }
 
-    fn draw_media(&mut self) -> Result<(), RenderError> {
+    fn advance_media(&mut self) {
         let due = self.frame_is_due();
-        self.renderer
-            .as_mut()
-            .ok_or(RenderError::SurfaceNotSized)?
-            .clear([0.025, 0.025, 0.03, 1.0])?;
         if due {
             let video_time = self.pending_time.take().expect("due frame exists");
             if let Some(audio_time) = self.audio_master_position() {
@@ -935,25 +934,15 @@ where
                         .abs_diff(audio_time.as_nanoseconds()),
                 ));
             }
-            if let (Some(session), Some(renderer)) = (self.session.as_mut(), self.renderer.as_mut())
-            {
-                session.present_pending(renderer)?;
+            if let Some(session) = self.session.as_mut() {
+                session.advance_pending();
             }
             self.load_next_frame();
-            self.check_eof();
-        } else if let (Some(session), Some(renderer)) =
-            (self.session.as_ref(), self.renderer.as_mut())
-        {
-            session.draw_current(renderer)?;
         }
-        Ok(())
     }
 
     fn render_frame(&mut self) {
-        if let Err(error) = self.draw_media() {
-            self.handle_render_error(error);
-            return;
-        }
+        self.advance_media();
         let (Some(window), Some(context)) = (self.window.as_ref(), self.ui_context.clone()) else {
             return;
         };
@@ -963,7 +952,26 @@ where
             .expect("UI state exists")
             .take_egui_input(window);
         let mut actions = Vec::new();
-        let output = context.run_ui(input, |ui| self.draw_ui(ui, &mut actions));
+        let output = context.run_ui(input, |ui| {
+            actions.clear();
+            self.draw_ui(ui, &mut actions);
+        });
+        self.ui_repaint_at = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .and_then(|viewport| Instant::now().checked_add(viewport.repaint_delay));
+        let renderer = self.renderer.as_mut().expect("renderer exists");
+        let media_result = renderer.clear([0.025, 0.025, 0.03, 1.0]).and_then(|()| {
+            if let (Some(session), Some(rect)) = (&mut self.session, self.video_rect) {
+                session.draw_current(renderer, rect * context.pixels_per_point())?;
+            }
+            Ok(())
+        });
+        if let Err(error) = media_result {
+            self.handle_render_error(error);
+            return;
+        }
+        self.check_eof();
         let platform_output = match self
             .renderer
             .as_mut()
@@ -998,6 +1006,7 @@ where
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        self.video_rect = None;
         let context = root.ctx().clone();
         self.draw_top_bar(root, actions);
         self.draw_status_bar(root, actions);
@@ -1214,20 +1223,22 @@ where
     }
 
     fn draw_video_edit_overlay(&mut self, ui: &mut egui::Ui) {
-        let viewport = ui.max_rect().shrink(8.0);
+        let Some((width, height, pixel_aspect)) = self
+            .session
+            .as_ref()
+            .and_then(PlaybackSession::video_geometry)
+        else {
+            return;
+        };
+        let viewport = fitted_video_rect(ui.max_rect(), (width, height), pixel_aspect);
+        self.video_rect = Some(viewport);
         let response = ui.interact(
             viewport,
             ui.id().with("video-edit-surface"),
             egui::Sense::click_and_drag(),
         );
         let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
-        self.update_selection(
-            &response,
-            viewport,
-            (viewport.width() as u32, viewport.height() as u32),
-            shift,
-            pointer,
-        );
+        self.update_selection(&response, viewport, (width, height), shift, pointer);
         if let Some(selection) = self.image_view.selection {
             paint_selection(&ui.painter_at(viewport), viewport, selection);
         }
@@ -2908,6 +2919,10 @@ where
         }
         self.poll_audio();
         let now = Instant::now();
+        if self.ui_repaint_at.is_some_and(|deadline| deadline <= now) {
+            self.ui_repaint_at = None;
+            self.request_redraw();
+        }
         let mut image_changed = self
             .image
             .as_mut()
@@ -2970,6 +2985,7 @@ where
                 } else {
                     Instant::now()
                 };
+                let due_at = self.ui_repaint_at.map_or(due_at, |ui| due_at.min(ui));
                 if due_at <= Instant::now() {
                     window.request_redraw();
                     event_loop.set_control_flow(ControlFlow::Wait);
@@ -2981,7 +2997,10 @@ where
             if !self.audio_drained {
                 self.request_redraw();
                 event_loop.set_control_flow(ControlFlow::WaitUntil(
-                    Instant::now() + AUDIO_EVENT_POLL_INTERVAL,
+                    self.ui_repaint_at
+                        .map_or(Instant::now() + AUDIO_EVENT_POLL_INTERVAL, |ui| {
+                            ui.min(Instant::now() + AUDIO_EVENT_POLL_INTERVAL)
+                        }),
                 ));
                 return;
             }
@@ -2996,12 +3015,15 @@ where
             )
             .filter_map(|image| image.next_frame_at)
             .min();
-        if self.folder_watcher.is_some() || next_image_frame.is_some() {
+        if self.folder_watcher.is_some()
+            || next_image_frame.is_some()
+            || self.ui_repaint_at.is_some()
+        {
             let folder_poll = self
                 .folder_watcher
                 .is_some()
                 .then(|| Instant::now() + FOLDER_EVENT_POLL_INTERVAL);
-            let deadline = [folder_poll, next_image_frame]
+            let deadline = [folder_poll, next_image_frame, self.ui_repaint_at]
                 .into_iter()
                 .flatten()
                 .min()
@@ -3155,6 +3177,12 @@ fn paint_selection(painter: &egui::Painter, image_rect: egui::Rect, selection: U
     }
 }
 
+fn fitted_video_rect(viewport: egui::Rect, size: (u32, u32), pixel_aspect: f32) -> egui::Rect {
+    let display = egui::vec2(size.0 as f32 * pixel_aspect, size.1 as f32);
+    let scale = (viewport.width() / display.x).min(viewport.height() / display.y);
+    egui::Rect::from_center_size(viewport.center(), display * scale)
+}
+
 fn reading_page_rect(
     viewport: egui::Rect,
     count: usize,
@@ -3297,6 +3325,23 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn video_fit_preserves_aspect_and_keeps_all_edges_inside_the_media_panel() {
+        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 32.0), egui::pos2(960.0, 546.0));
+        for (size, sar) in [
+            ((1920, 1080), 1.0),
+            ((1080, 1920), 1.0),
+            ((720, 576), 16.0 / 15.0),
+        ] {
+            let rect = fitted_video_rect(viewport, size, sar);
+            assert!(viewport.contains_rect(rect));
+            assert_eq!(rect.center(), viewport.center());
+            assert!((rect.aspect_ratio() - size.0 as f32 * sar / size.1 as f32).abs() < 0.0001);
+        }
+        let timeline = egui::Rect::from_min_max(viewport.min, viewport.max - egui::vec2(0.0, 96.0));
+        assert!(fitted_video_rect(timeline, (1920, 1080), 1.0).bottom() <= timeline.bottom());
+    }
 
     #[test]
     fn playback_clock_scales_source_time_and_deadlines_while_pause_holds_position() {

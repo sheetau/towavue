@@ -113,6 +113,12 @@ exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/core�
 
 上部は32 logical pxの単一title/tab bar、下部は30 logical pxのstatus barとし、暗いneutral色でmedia領域を優先する。appはdecorationsなしのwinit windowにlogo menu・tab・window controlsを描画し、移動・resize・minimize・maximizeはwinitのWindows操作へ委ねる。window closeは既存のdirty/export guardを必ず通す。tab幅は等分、最大160 px・最小72 pxとし、収まらない場合は横scrollする。path/名前は省略表示と全文tooltipを使い、右側の状態表示へ専用領域を確保する。menuの方向gestureとtab reorderはこの変更には含めない。
 
+### H1 video viewport
+
+動画frameを選んでから同frameのUI layoutを確定し、bar・timelineを除いた中央領域にsample aspect ratio込みでaspect-fitする。appは画面上の同じ矩形をselectionと表示に使い、runtimeへphysical pixelのdestination rectだけを渡す。software shaderのviewportとVideo Processorのdestination/output target rectを一致させ、余白はclear色で残す。decode frameのnative ownershipと単一device・1回Presentは維持する。
+
+software描画はUIから引き継ぐscissor・blend・depth stateを解除する。表示frame数は新frameの描画成功時だけ加算し、UIだけの再描画では加算しない。UIのrepaint deadlineは動画・画像・folderの待機期限と統合し、停止中のlayout・tooltip・animation要求も処理する。
+
 ### H1 live volume
 
 動画・音声のvolumeはedit historyの現在値をlive playbackとexportで共有する。runtimeはWASAPIへ渡す直前のstereo f32 sampleへgainを適用し、decode済みqueueは元の値を保持する。変更時は5 msのrampで不連続を抑え、mute後は正確なzero sampleにする。master endpointや他applicationの音量は変更しない。初期gainはpipeline開始前に設定し、Seek・endpoint復旧・tab再open・undo/redoにも現在値を反映する。trimは引き続きexport用である。

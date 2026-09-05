@@ -6,7 +6,7 @@
 
 ### 操作とpreviewの不一致
 
-- 動画はまだwindow全体へ描画するため、barの下にある端が隠れる。media領域へのaspect-fitとsoftware/hardware経路の一致を次のH1修正対象とする。
+- 動画はH1でbar・timelineを除いた領域へsample aspect ratio込みでaspect-fitするよう修正した。回転metadataによるportrait orientationの自動適用は未検証。
 - 動画・音声のvolume・mute・rateはH1でlive playbackにも反映する。rate変更は現在位置からpipelineを再構築するため短い再primingを伴い、音声を無途切れで連続変速する方式ではない。
 - 動画のcrop、rotate、flipもedit historyとexportには入るが、再生映像へ最終形をlive previewしない。crop selection overlayだけが見える。
 - trimは`I` / `O`で現在位置を端点として記録する方式で、timeline上のrange handleや選択範囲はない。
@@ -27,6 +27,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - Explorerからwindowへのfile drag-and-dropはない。tabのwindow外dropだけが実装されている。
 - export errorは確認するまで残る詳細modal、画像load errorは画像領域（readingでは該当page）に表示する。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
 - end-to-end UI test、visual regression、accessibility検査、複数DPI/monitorの自動matrixはない。現在のUI完了判定には実window操作が必要である。
+- compact shell試用で、操作後にtab/window controlsの一部が一時的に表示されないcaptureがある。UIのrepaint deadline未処理は修正したが、症状全体の根本原因・解消はまだ確定していない。次のUI描画調査を優先する。
 
 ## 2. UI草案との対応
 

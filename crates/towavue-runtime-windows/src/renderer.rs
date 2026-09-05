@@ -273,7 +273,11 @@ impl FrameRenderer {
     }
 
     /// Uploads one tightly packed RGBA frame and draws it to the shared surface.
-    pub(crate) fn draw_software(&mut self, frame: &VideoFrame) -> Result<(), RenderError> {
+    pub(crate) fn draw_software(
+        &mut self,
+        frame: &VideoFrame,
+        destination: egui::Rect,
+    ) -> Result<(), RenderError> {
         if frame.width == 0 || frame.height == 0 {
             return Err(RenderError::InvalidFrame);
         }
@@ -340,10 +344,14 @@ impl FrameRenderer {
                 0,
             );
         }
-        self.draw_software_texture(&texture)
+        self.draw_software_texture(&texture, destination)
     }
 
-    pub(crate) fn draw_hardware(&mut self, frame: &HardwareVideoFrame) -> Result<(), RenderError> {
+    pub(crate) fn draw_hardware(
+        &mut self,
+        frame: &HardwareVideoFrame,
+        destination: egui::Rect,
+    ) -> Result<(), RenderError> {
         if frame.width == 0 || frame.height == 0 {
             return Err(RenderError::InvalidFrame);
         }
@@ -361,6 +369,7 @@ impl FrameRenderer {
             frame.width,
             frame.height,
             frame.transfer,
+            destination,
         )?;
         if frame.transfer != VideoTransfer::Sdr && !self.hdr_tone_mapping_active {
             self.hdr_tone_mapping_active = true;
@@ -378,6 +387,7 @@ impl FrameRenderer {
         width: u32,
         height: u32,
         transfer: VideoTransfer,
+        destination: egui::Rect,
     ) -> Result<(), RenderError> {
         let (output_width, output_height) = self.ensure_surface()?;
         self.prepare_video_processor(width, height, output_width, output_height)?;
@@ -420,6 +430,23 @@ impl FrameRenderer {
                 &output_description,
                 Some(&mut output_view),
             )?;
+            let destination = RECT {
+                left: destination.left().round() as i32,
+                top: destination.top().round() as i32,
+                right: destination.right().round() as i32,
+                bottom: destination.bottom().round() as i32,
+            };
+            state.context.VideoProcessorSetStreamDestRect(
+                &state.processor,
+                0,
+                true,
+                Some(&destination),
+            );
+            state.context.VideoProcessorSetOutputTargetRect(
+                &state.processor,
+                true,
+                Some(&destination),
+            );
             configure_hdr_to_sdr(state, texture, transfer)?;
             let mut stream = D3D11_VIDEO_PROCESSOR_STREAM {
                 Enable: BOOL(1),
@@ -438,8 +465,12 @@ impl FrameRenderer {
         Ok(())
     }
 
-    fn draw_software_texture(&self, texture: &ID3D11Texture2D) -> Result<(), RenderError> {
-        let (output_width, output_height) = self.ensure_surface()?;
+    fn draw_software_texture(
+        &self,
+        texture: &ID3D11Texture2D,
+        destination: egui::Rect,
+    ) -> Result<(), RenderError> {
+        self.ensure_surface()?;
         let render_target = self.render_target()?;
         let mut source_view = None;
         // The resource view borrows the renderer-owned texture. All pipeline
@@ -454,6 +485,11 @@ impl FrameRenderer {
                 Some(&[Some(render_target)]),
                 None::<&ID3D11DepthStencilView>,
             );
+            // UI rendering leaves scissor and blending enabled; video must not
+            // inherit the last UI mesh's clipping rectangle or alpha state.
+            self.context.RSSetState(None);
+            self.context.OMSetBlendState(None, None, u32::MAX);
+            self.context.OMSetDepthStencilState(None, 0);
             self.context.IASetInputLayout(None::<&ID3D11InputLayout>);
             self.context
                 .IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -465,10 +501,10 @@ impl FrameRenderer {
                 .PSSetSamplers(0, Some(&[Some(self.software_blitter.sampler.clone())]));
             self.context.PSSetShaderResources(0, Some(&[source_view]));
             self.context.RSSetViewports(Some(&[D3D11_VIEWPORT {
-                TopLeftX: 0.0,
-                TopLeftY: 0.0,
-                Width: output_width as f32,
-                Height: output_height as f32,
+                TopLeftX: destination.left().round(),
+                TopLeftY: destination.top().round(),
+                Width: destination.right().round() - destination.left().round(),
+                Height: destination.bottom().round() - destination.top().round(),
                 MinDepth: 0.0,
                 MaxDepth: 1.0,
             }]));

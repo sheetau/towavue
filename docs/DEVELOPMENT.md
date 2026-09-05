@@ -131,7 +131,15 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - 長い名前の画像を開き、Ctrl+Oで2枚目を追加する。狭い幅で等分tab、省略名、active表示とclose buttonを確認する。
 - 動画EOF後に左下Playで先頭から再開し、通常再生中は同じbuttonでpause/resumeする。
 - Mで編集を作り右上closeを押す。Unsaved edits確認が出て、Cancelならwindowとdirty履歴が残る。
-- 基準機の実windowでは上記操作が通過した。複数DPI/monitor・大量tabのmatrixは未検証。動画の表示領域はまだwindow全体基準で、barに重なる端が隠れる問題を次の修正対象とする。
+- 基準機の実windowでは上記操作が通過した。複数DPI/monitor・大量tabのmatrixは未検証。操作後のUI一部欠落captureは引き続き調査対象である。
+
+### H1で確認したvideo viewport scenario
+
+- 白枠付き240×320 H.264と320×240 / SAR=2のFFV1を生成し、960×576で四辺と縦横比を確認する。
+- Tまたはwaveform buttonでtimelineを開閉し、同じframeが残りの中央領域へ収まることを確認する。480×300へのresizeと最大化・復元も確認する。
+- 縦長動画内をdragし、selectionが映像に重なり、letterboxを選択範囲へ含めないことを確認する。
+- 基準機ではH.264はD3D11VA / 60 frames / 0 CPU transfers / 0 drops、FFV1はsoftware / 60 transfers / 0 dropsでEOFへ到達した。再表示でframe数を加算せず、EOFからのH.264再開も60 framesだった。
+- UI repaint deadlineは停止中も処理する。タイムライン開閉後のUI一部欠落については、安定して表示できた試行だけで解消を宣言しない。
 
 ### H1で確認したlive rate scenario
 

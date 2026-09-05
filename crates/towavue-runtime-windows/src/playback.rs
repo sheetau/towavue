@@ -100,6 +100,7 @@ pub struct PlaybackSession {
     video_rx: Option<Receiver<PresentationFrame>>,
     pending_video: Option<PresentationFrame>,
     current_video: Option<PresentationFrame>,
+    current_video_unpresented: bool,
     audio: Option<AudioOutput>,
     decode_thread: Option<JoinHandle<()>>,
     adapter_luid: AdapterLuid,
@@ -135,6 +136,7 @@ impl PlaybackSession {
             video_rx: None,
             pending_video: None,
             current_video: None,
+            current_video_unpresented: false,
             audio: None,
             decode_thread: None,
             adapter_luid,
@@ -249,31 +251,45 @@ impl PlaybackSession {
             .map(PresentationFrame::presentation_time)
     }
 
-    pub fn present_pending(&mut self, renderer: &mut FrameRenderer) -> Result<bool, RenderError> {
+    pub fn advance_pending(&mut self) -> bool {
         let Some(frame) = self.pending_video.take() else {
-            return Ok(false);
+            return false;
         };
         self.current_video = Some(frame);
-        let result = self.draw_current(renderer);
+        self.current_video_unpresented = true;
+        true
+    }
+
+    pub fn video_geometry(&self) -> Option<(u32, u32, f32)> {
+        Some(match self.current_video.as_ref()? {
+            PresentationFrame::Software(frame) => (frame.width, frame.height, frame.pixel_aspect),
+            PresentationFrame::Hardware(frame) => (frame.width, frame.height, frame.pixel_aspect),
+        })
+    }
+
+    pub fn draw_current(
+        &mut self,
+        renderer: &mut FrameRenderer,
+        destination: egui::Rect,
+    ) -> Result<bool, RenderError> {
+        let Some(frame) = self.current_video.as_ref() else {
+            return Ok(false);
+        };
+        let result = match frame {
+            PresentationFrame::Software(frame) => renderer.draw_software(frame, destination),
+            PresentationFrame::Hardware(frame) => renderer.draw_hardware(frame, destination),
+        };
         if let Err(error) = result {
             return match renderer.device_removed_reason() {
                 Some(reason) => Err(RenderError::DeviceRemoved(reason)),
                 None => Err(error),
             };
         }
-        self.metrics
-            .presented_frame_count
-            .fetch_add(1, Ordering::Relaxed);
-        Ok(true)
-    }
-
-    pub fn draw_current(&self, renderer: &mut FrameRenderer) -> Result<bool, RenderError> {
-        let Some(frame) = self.current_video.as_ref() else {
-            return Ok(false);
-        };
-        match frame {
-            PresentationFrame::Software(frame) => renderer.draw_software(frame)?,
-            PresentationFrame::Hardware(frame) => renderer.draw_hardware(frame)?,
+        if self.current_video_unpresented {
+            self.metrics
+                .presented_frame_count
+                .fetch_add(1, Ordering::Relaxed);
+            self.current_video_unpresented = false;
         }
         Ok(true)
     }

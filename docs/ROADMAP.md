@@ -90,3 +90,5 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 その後、0.25～4倍のピッチ維持live rateを追加した。速度変更はsource位置を保つgeneration付き再構築とし、音声・映像時計、pause中のframe保持、音声drain後の時計引継ぎを対応させた。tone/clockの自動testと2倍・4倍の実動画trialが通過した。次は草案に沿ったcompact shellと日常操作の改善を進める。H1全体とlaunch auditは未完了である。
 
 compact shellの初回改善として、32px title/tab bar、30px status、logo menu、等分tab、native window操作、名前省略・情報右寄せを実装した。EOF後のPlayも先頭から再開する。実windowで最小幅、移動・resize・最大化・最小化復帰、長い名前の複数tab、dirty close guardを確認した。次は動画をbarに隠れないmedia領域へ収める表示修正と、thin seek bar・日常操作の改善を進める。
+
+動画の表示矩形を同frameのUI layoutから求め、hardware/software共通のaspect-fitとsample aspect ratio、selection位置を対応させた。縦長H.264・非正方形pixelのFFV1で四辺の保持とtimeline追従を確認した。UIのrepaint deadlineも待機へ反映したが、操作後のUI一部欠落の原因確定は残っており、thin seek barより先に描画安定性を調べる。

@@ -28,6 +28,7 @@ pub struct VideoFrame {
     pub presentation_time: MediaTime,
     pub width: u32,
     pub height: u32,
+    pub pixel_aspect: f32,
     pub rgba: Vec<u8>,
 }
 
@@ -36,6 +37,7 @@ pub(crate) struct HardwareVideoFrame {
     pub(crate) presentation_time: MediaTime,
     pub(crate) width: u32,
     pub(crate) height: u32,
+    pub(crate) pixel_aspect: f32,
     pub(crate) transfer: VideoTransfer,
     frame: frame::Video,
 }
@@ -183,6 +185,7 @@ impl HardwareVideoPipeline {
                         ),
                         width: decoded.width(),
                         height: decoded.height(),
+                        pixel_aspect: pixel_aspect(decoded.aspect_ratio()),
                         transfer: video_transfer(&decoded).unwrap_or(self.transfer),
                         frame: decoded,
                     };
@@ -945,8 +948,17 @@ fn copy_video_frame(
         presentation_time: timestamp_to_media_time(decoded.timestamp(), time_base),
         width: rgba.width(),
         height: rgba.height(),
+        pixel_aspect: pixel_aspect(decoded.aspect_ratio()),
         rgba: pixels,
     })
+}
+
+fn pixel_aspect(ratio: Rational) -> f32 {
+    if ratio.numerator() > 0 && ratio.denominator() > 0 {
+        ratio.numerator() as f32 / ratio.denominator() as f32
+    } else {
+        1.0
+    }
 }
 
 fn emit_audio_frame(
@@ -1012,6 +1024,14 @@ mod tests {
         let time = timestamp_to_media_time(Some(90_000), Rational::new(1, 90_000));
 
         assert_eq!(time.as_nanoseconds(), 1_000_000_000);
+    }
+
+    #[test]
+    fn pixel_aspect_preserves_valid_ratios_and_defaults_unspecified_values() {
+        assert_eq!(super::pixel_aspect(Rational::new(2, 1)), 2.0);
+        assert_eq!(super::pixel_aspect(Rational::new(0, 1)), 1.0);
+        assert_eq!(super::pixel_aspect(Rational::new(1, 0)), 1.0);
+        assert_eq!(super::pixel_aspect(Rational::new(-1, 2)), 1.0);
     }
 
     #[test]

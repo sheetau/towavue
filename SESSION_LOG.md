@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 13:43 JST - planning / begin human evaluation and UX stabilization
+
+- Trigger: the owner requested concrete instructions for trying and evolving the development build, a path-to-ownership map, and a complete account of current limitations and draft features not yet implemented.
+- Intent: make M7 usable as a human-evaluation baseline without treating the untracked concept draft as an implementation contract.
+- Result: added a trial and development guide covering setup, launch modes, supported extensions, Explorer Sort By verification, local data, a manual test matrix, the change loop, repository ownership, and UI/UX decision criteria; added a categorized gap ledger that distinguishes implemented, partial, unimplemented, unverified, and intentionally excluded behavior; and made H1 human evaluation and UX stabilization the active roadmap phase ahead of a separately authorized packaging decision.
+- Changed areas: README, roadmap, developer guide, known-gap ledger, and continuity log only.
+- Verification: UTF-8/BOM and whitespace checks passed; local format, workspace all-target Clippy with warnings denied, and workspace all-target tests pass (app 10, core 23, runtime 22 plus 1 ignored live-Explorer integration test, integrations 3).
+- Commit: pending.
+- Status: `h1_active`.
+- Next action: run the baseline trial matrix, record the first reproducible high-impact UX problem, and implement one verified slice at a time.
+
 ## 2026-09-05 01:18 JST - implementation / complete M7 advanced presentation and interaction
 
 - Trigger: the M6 checkpoint completed and the owner requested implementation of the remaining plan.

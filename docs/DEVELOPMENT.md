@@ -1,0 +1,212 @@
+# towavue 試用・開発ガイド
+
+この文書は、M7までの開発版を実際に触り、UI/UXの観察を次の小さな変更へつなげるための入口である。完成品向けの利用説明ではない。既知の制約は[KNOWN_GAPS.md](KNOWN_GAPS.md)、固定された技術境界は[ARCHITECTURE.md](ARCHITECTURE.md)、作業順は[ROADMAP.md](ROADMAP.md)を参照する。
+
+## 1. 最初に試す
+
+### 必要な環境
+
+- Windows 10 22H2以降のx86-64 PC
+- Visual Studioの`Desktop development with C++` workloadとWindows SDK
+- LLVM（標準インストール先の`%ProgramFiles%\LLVM\bin\libclang.dll`を使用）
+- PowerShellとGit
+
+Rust 1.98.0、rustfmt、Clippy、MSVC targetは`rust-toolchain.toml`に固定されている。FFmpegはリポジトリへ同梱せず、セットアップスクリプトがchecksumを検証したLGPL shared buildを`vendor\ffmpeg`へ展開する。
+
+### 初回セットアップと起動
+
+リポジトリのルートをDeveloper PowerShellで開き、同じPowerShell session内で実行する。
+
+```powershell
+$ffmpegDir = .\scripts\setup-ffmpeg.ps1
+$env:FFMPEG_DIR = $ffmpegDir
+$env:LIBCLANG_PATH = Join-Path $env:ProgramFiles 'LLVM\bin'
+$env:PATH = "$(Join-Path $ffmpegDir 'bin');$env:PATH"
+
+cargo run -p towavue-app
+```
+
+引数にfileまたはfolderを渡して直接起動することもできる。
+
+```powershell
+cargo run -p towavue-app -- 'C:\path\to\media.mp4'
+cargo run -p towavue-app -- 'C:\path\to\media-folder'
+```
+
+一度buildした後は、同じ環境変数を設定したsessionから次のように短時間で再試用できる。
+
+```powershell
+.\target\debug\towavue.exe 'C:\path\to\media.mp4'
+```
+
+現時点ではinstaller、portable package、file association、Explorerの「プログラムから開く」登録はない。`towavue.exe`だけを別の場所へ移してもFFmpeg DLLを発見できないため、この方法を配布手順として使わない。
+
+### 対応拡張子
+
+| 種類 | 認識する拡張子 |
+|---|---|
+| 画像 | avif, bmp, gif, jpeg, jpg, png, tif, tiff, webp |
+| 動画 | 3gp, avi, m2ts, m4v, mkv, mov, mp4, mpeg, mpg, mts, ogv, ts, webm, wmv |
+| 音声 | aac, aiff, alac, flac, m4a, mp3, oga, ogg, opus, wav, wma |
+
+これはfolder navigationで認識する拡張子のlistであり、すべてのcodec、profile、bit depth、破損file、DRM付きfileの動作保証ではない。互換性は実fileで確認し、失敗した組み合わせを記録する。
+
+## 2. 現在試せる操作
+
+何も開かずに起動するとwelcome画面が出る。`Open file`または`Open folder`を使うか、上記の起動引数を使う。画像と動画はfileごとのtab、音声は同じfolderのplaylist tabになる。
+
+代表的なdefault shortcutは次のとおり。
+
+| 操作 | Shortcut |
+|---|---|
+| Open file / folder | `Ctrl+O` / `Ctrl+Shift+O` |
+| Play/pause、5秒seek | `Space`、`Left` / `Right` |
+| 同種media移動 / 全種media移動 | `Ctrl+Left` / `Ctrl+Right`、`Alt+Left` / `Alt+Right` |
+| Filmstrip | `F`（表示中は`Tab` / `Shift+Tab`でも移動） |
+| Command palette / grid menu | `Ctrl+Shift+P` / `G` |
+| Tab移動 / close | `Ctrl+Tab`、`Ctrl+Shift+Tab` / `Ctrl+W` |
+| Timeline | `T`（音声では最初から表示） |
+| Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` |
+| Save As / 同じexport先へ再Save | `Ctrl+Shift+S` / `Ctrl+S` |
+
+画像では`Ctrl+wheel`または`+` / `-`でzoom、右dragでpan、左dragでselectionを作る。`Shift`付きselectionは正方形になり、辺をdragしてresizeできる。`Ctrl+Y`でcrop、`R` / `L`で90度回転、`H` / `V`で反転する。`B`でreading mode、`Ctrl+[` / `Ctrl+]`で同時表示数を変える。
+
+動画・音声では`I` / `O`がexport用trim端点、`Up` / `Down`、`M`がexport用volume、`,` / `.` / `/`がexport用rateを編集する。これらは現在の再生そのものには反映されず、statusの値と最終exportへ反映される点に注意する。source fileは変更されない。
+
+## 3. Explorer順を確認する
+
+towavueの「Explorer順」はfilename順の別名ではなく、そのfolderで利用者がExplorerの`Sort by`から選んだ実際の列・方向・複数列条件である。
+
+1. Explorerで試験folderを開き、`Sort by`をName、Date modified、Date created、Size、Typeなどへ変更する。
+2. そのExplorer windowを開いたまま、folder内のmediaまたはfolder自体をtowavueで開く。
+3. `F`のfilmstrip、音声playlist、`Ctrl+Left/Right`、`Alt+Left/Right`の順序を確認する。
+4. Explorer側のsortを変更し、towavueで別mediaを読み込むかfilmstripを開き直して再取得させる。
+5. statusの末尾が`Explorer live order`、`Explorer saved order`、または`Natural-name fallback`を示すことを確認する。
+
+同じfolderを表示するExplorerがある場合はそのlive viewを優先し、ない場合はShell viewが解決する保存済み状態またはfolder templateを使う。取得に失敗したときだけWindows自然名前順へ縮退し、statusに明示する。Explorerの非公開registry Bagsは解析しない。
+
+## 4. 設定と一時data
+
+| Path | 内容 | 扱い |
+|---|---|---|
+| `%APPDATA%\towavue\shortcuts.conf` | commandごとのshortcut | 初回起動時にdefaultを生成 |
+| `%APPDATA%\towavue\grid.conf` | image/video/audio別の4×4 grid | `1234/qwer/asdf/zxcv`順に16 commandを記述 |
+| `%LOCALAPPDATA%\towavue\preview-cache` | waveformとhover thumbnail | path・size・更新時刻key、最大64 MiB |
+| `tests\generated` | test用media fixture | Git対象外、scriptで再生成 |
+| `vendor\ffmpeg` | local FFmpeg development build | Git対象外、scriptで再取得 |
+| `target` | Rust build出力 | Git対象外 |
+
+設定fileを編集した後は、menuの`Reload keyboard shortcuts`または`Ctrl+K Ctrl+S`でshortcutsとgridを再読込する。設定UIはまだない。壊れた設定を初期化するときは、custom内容を退避してから対象`.conf`を削除し、アプリを再起動してdefaultを再生成する。
+
+## 5. 人が触るときの確認matrix
+
+一度に「全機能を試す」のではなく、次の単位で一周してから気付きをissue化する。
+
+| 観点 | 最低限のscenario |
+|---|---|
+| 起動 | 引数なし、file引数、folder引数、非対応拡張子、空folder |
+| Window | resize、最小化復帰、100%以外のDPI、複数monitor、tabをwindow外へdrop |
+| 画像 | 静止画、GIF/WebP/APNG、AVIF、EXIF回転、zoom/pan、selection、reading、export後の再open |
+| 動画 | H.264、HEVC、VP9、software fallback、pause、連続seek、EOF、timeline hover、音声あり/なし |
+| 音声 | playlist順、play/pause/seek/EOF、default output device変更、waveform |
+| Navigation | Explorerの各Sort By、filmstrip、同種/全種移動、folder内容の追加・rename・削除 |
+| 編集 | 各operation、順序、undo/redo、dirty indicator、media移動・close・終了guard、Save/Save As |
+| 入力 | mouse、wheel、default shortcut、prefix shortcut、command palette、gridのkey/click |
+| 異常系 | 読めないfile、書き出せない場所、FFmpegをPATHから外した状態、HDR source |
+
+報告には次を残す。
+
+- Windows version、GPU、driver、display scale、media種別とcodec/container
+- 再現手順、期待した結果、実際の結果、再現率
+- towavueを起動したterminalのdiagnosticと、必要なら画面capture
+- Explorer順の問題なら、対象folder、Sort By列・方向、Explorerを開いていたか、statusに出たsnapshot source
+- 性能の問題なら、fileの解像度・frame rate・durationと、何秒後に重くなったか
+
+private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場合は権利上問題のない小さな生成fileを使う。
+
+## 6. 開発の具体的な進め方
+
+今後は「人が触った一つのscenario」を最小の開発単位にする。UI全体の一括作り直しや、草案の項目を上から機械的に実装する進め方は取らない。
+
+1. 観察を一文の問題へする → verify: 再現手順と期待結果が一意である。
+2. 成功条件を決める → verify: before/afterを人が同じ手順で比較できる。
+3. 所有layerを選ぶ → verify: core/runtime/appの境界を越える理由が説明できる。
+4. stateや純粋logicの変更には先に回帰testを置く → verify: 修正前に失敗し、修正後に通る。
+5. 最小差分を実装する → verify: 対象scenario以外の挙動とarchitecture contractが変わらない。
+6. focused testと実windowで確認する → verify: 自動testと目視・操作の両方に結果がある。
+7. 完全checkを行う → verify: format、Clippy、全testが通る。
+8. `SESSION_LOG.md`と必要な文書を更新しcheckpointをpushする → verify: CIも通る。
+
+完全checkは次のとおり。
+
+```powershell
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets
+```
+
+fixtureがない初回だけ先に次を実行する。
+
+```powershell
+.\scripts\generate-m1-fixtures.ps1
+```
+
+UI変更では自動testだけを完了証拠にしない。実windowで対象DPI、入力方法、media種別を操作し、変更前後のcaptureまたは観察結果を残す。逆に、見た目の変更に再生workerやD3D11 lifetimeのrefactorを混ぜない。
+
+## 7. Path構造と編集先
+
+```text
+towavue/
+├─ crates/
+│  ├─ towavue-core/             OS非依存のdomain contractと純粋state
+│  ├─ towavue-runtime-windows/  Windows、FFmpeg、D3D11、WASAPI、Shell、worker
+│  └─ towavue-app/              executable、event loop、UI state、command dispatch
+├─ docs/                         architecture、roadmap、試用・既知制約
+├─ scripts/                      local/CI setupとfixture生成
+├─ concepts/                     Git対象外の草案。実装契約ではない
+├─ tests/generated/              生成fixture。Git対象外
+├─ vendor/ffmpeg/                local FFmpeg。Git対象外
+├─ target/                       build出力。Git対象外
+├─ AGENTS.md                     毎回守る実装規約
+├─ SESSION_LOG.md                新しい順のcheckpoint記録
+├─ Cargo.toml                    workspace設定
+├─ Cargo.lock                    固定dependency graph
+└─ rust-toolchain.toml           固定Rust toolchain
+```
+
+変更内容から編集先を選ぶ目安は次のとおり。
+
+| 変更したいこと | 最初に見るfile | 関連file |
+|---|---|---|
+| Window、bar、tab、status、timeline、palette、modal、入力 | `crates/towavue-app/src/main.rs` | `commands.rs`、`shortcuts.rs`、`grid.rs` |
+| Command名、利用可能media、shortcut解決 | `crates/towavue-core/src/commands.rs` | appのdispatchとdefault設定 |
+| Shortcut設定形式/default | `crates/towavue-app/src/shortcuts.rs` | `commands.rs` |
+| Grid配置/default | `crates/towavue-app/src/grid.rs` | `commands.rs`、`main.rs` |
+| Media拡張子の認識 | `crates/towavue-core/src/media.rs` | runtime decoderとfile dialogも実対応を確認 |
+| Tab/playlistの純粋な挙動 | `crates/towavue-core/src/tabs.rs` | appのopen/activate/close処理 |
+| Explorer順のmodel/navigation | `crates/towavue-core/src/navigation.rs` | runtimeの`shell.rs`と`watch.rs` |
+| Zoom、selection、reading state | `crates/towavue-core/src/image.rs` | appの描画とpointer処理、runtimeの`image.rs` |
+| Edit operation、dirty、undo/redo | `crates/towavue-core/src/edit.rs` | app preview、runtimeの`export.rs` |
+| Image decode | `crates/towavue-runtime-windows/src/image.rs` | coreの`media.rs`、appのtexture化 |
+| Video/audio decode、seek、codec fallback | `crates/towavue-runtime-windows/src/decode.rs` | `playback.rs`、`audio.rs`、`renderer.rs` |
+| Worker、queue、generation、recovery | `crates/towavue-runtime-windows/src/playback.rs` | `decode.rs`、`audio.rs` |
+| D3D11/DXGI描画、HDR判定、resize | `crates/towavue-runtime-windows/src/renderer.rs` | `decode.rs`、appのrender loop |
+| WASAPI、endpoint変更 | `crates/towavue-runtime-windows/src/audio.rs` | `playback.rs` |
+| Explorer Sort By取得 | `crates/towavue-runtime-windows/src/shell.rs` | `watch.rs`、coreの`navigation.rs` |
+| Waveform、duration、thumbnail cache | `crates/towavue-runtime-windows/src/preview.rs` | appのworker event/timeline |
+| Export filter/codec/fallback | `crates/towavue-runtime-windows/src/export.rs` | coreの`edit.rs`、appのSave flow |
+| Open/Save dialog | `crates/towavue-runtime-windows/src/dialog.rs` | app command dispatch |
+
+`towavue-core`へWindows型、FFmpeg型、native handle、unsafeを入れない。`towavue-runtime-windows`はそれらをsafeな値/eventへ閉じ込める。`towavue-app`はCOM pointerやFFmpeg frameを受け取らず、UIとorchestrationに集中する。
+
+現在の`crates/towavue-app/src/main.rs`は約2,800行あり、今後のUI反復で最も衝突しやすい場所である。ただし、先に大規模分割だけを行うのではなく、実際に変更するまとまりが明確になった時点で、例えばtop bar、timeline、image interactionのような単位を一つずつ移す。移動と挙動変更を同じ差分へ混ぜない。
+
+## 8. UI/UX変更の判断基準
+
+- 実装済みcommandの入口はmenu、palette、shortcut、gridで同じ`CommandId`を共有する。入口ごとに別logicを作らない。
+- mediaを覆う常設UIを増やす前に、status、hover、一時overlay、command paletteで解決できるか検討する。
+- shortcutだけに頼らず、初見で発見できる入口と現在状態のfeedbackを用意する。
+- 操作結果がlive previewへ反映されない場合は明示する。表示とexport結果が違う状態を黙って作らない。
+- animationは状態変化の理解を助ける短いものに限定し、再生・seek・入力応答を遅らせない。
+- DPI、keyboard focus、mouse hit target、長いpath/file名、empty/error/loading状態を通常状態と同時に設計する。
+- backend境界を変える必要が出たら、UI都合でnative objectをappへ漏らさず、先に`ARCHITECTURE.md`のcontractを更新する。

@@ -10,12 +10,14 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 - 対応予定アーキテクチャ: x86-64
 - Rust: 1.98.0 / Edition 2024 / MSVC ABI
 - ライセンス: MIT OR Apache-2.0
-- 次の工程: 配布するFFmpeg binaryとlicense条件を決めた後のpackaging
+- 次の工程: H1 human evaluation and UX stabilization。実際の利用flowを観察し、小さな検証可能な単位でUI/UXと機能の不一致を直す
 
 ## 文書
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md): 技術選定、境界、データフロー、不変条件
 - [ROADMAP.md](docs/ROADMAP.md): 段階的な実装順序と各ゲート
+- [DEVELOPMENT.md](docs/DEVELOPMENT.md): 開発版の試用方法、手動確認matrix、変更内容ごとの編集先
+- [KNOWN_GAPS.md](docs/KNOWN_GAPS.md): 現時点の制約、UI草案との差、次に検証する順序
 - [AGENTS.md](AGENTS.md): 実装者・エージェントが常に守るルール
 - [SESSION_LOG.md](SESSION_LOG.md): セッションをまたぐ事実ベースの進捗記録
 

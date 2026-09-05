@@ -65,3 +65,18 @@ M6は2026-09-05に完了した。tab単位のsaved cursor付きedit historyへcr
 HDR、waveform/thumbnail cache、multi-window tab drag、grid menu、hardware encode、詳細アニメーションを追加する。
 
 M7は2026-09-05に完了した。path・size・更新時刻keyと64 MiB上限を持つdisk cache、UI thread外で生成するwaveform / duration / hover thumbnail、click/drag Seek付きtimeline、メディア種別ごとに設定可能な`1234/qwer/asdf/zxcv` grid menu、window外tab dropによる別process window化、Media Foundation hardware encodeの強制要求とsoftware fallbackを実装した。gridは短いopacity transitionだけを使う。PQ/HLG metadataはhardware frameとともに保持し、D3D11 Video Processorが明示的にHDR→SDR変換を保証する場合だけcolor spaceを設定する。基準adapterは同変換を保証しなかったためHDR表示を成功とは扱わず、typed errorを確認した。HDR displayへの10-bit pass-throughとprocess間tab再結合は対象外である。
+
+## H1 — Human evaluation and UX stabilization（進行中）
+
+M0～M7で構築した技術sliceを開発版として人が操作し、日常flowの摩擦、表示と実際の動作の不一致、応答停止、発見性、DPI・入力・error stateの問題を収集して直す。これは草案の未実装項目を一括投入するfeature milestoneではなく、観察できる一つのscenarioを単位にする反復phaseである。
+
+各変更のgate:
+
+- 再現手順、期待結果、対象media・環境が記録されている。
+- 変更前後を同じ手順で比較し、実windowで結果を確認する。
+- stateやdomain logicの回帰には自動testがある。
+- UI差分へ無関係なruntime refactorや次のfeatureを混ぜない。
+- format、workspace全targetのClippy、workspace全targetのtestが通る。
+- architecture上の決定が変わる場合は実装前に`ARCHITECTURE.md`を更新する。
+
+最初の優先候補は、動画・音声edit値とlive playbackの不一致、同期画像loadと同期exportによるUI停止、timeline/tab/filmstrip/menuの発見性と操作感である。詳細な試用方法と現状差分は`docs/DEVELOPMENT.md`と`docs/KNOWN_GAPS.md`を正とする。PackagingはH1と並行して暗黙に開始せず、FFmpeg binaryとlicense条件を別途決定してから計画する。

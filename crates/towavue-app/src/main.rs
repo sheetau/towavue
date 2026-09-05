@@ -1260,11 +1260,12 @@ where
         self.draw_export_status(&context, actions);
         if let Some(error) = &self.export_error {
             let modal = egui::Modal::new("export-error".into()).show(&context, |ui| {
-                ui.set_max_width(520.0);
+                ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 520.0));
                 ui.heading("Export failed");
                 ui.label("Your edits and existing files have been kept.");
                 egui::ScrollArea::vertical()
-                    .max_height(220.0)
+                    .max_height((context.content_rect().height() - 130.0).clamp(20.0, 220.0))
+                    .min_scrolled_height(20.0)
                     .show(ui, |ui| {
                         ui.label(error);
                     });
@@ -1314,8 +1315,9 @@ where
             return;
         };
         let mut contents = |ui: &mut egui::Ui| {
-            ui.set_max_width(340.0);
-            ui.label(display_name(&export.request.target));
+            ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 340.0));
+            ui.add(egui::Label::new(display_name(&export.request.target)).truncate())
+                .on_hover_text(export.request.target.display().to_string());
             ui.label(if export.cancelling {
                 "Cancelling export…".to_owned()
             } else {
@@ -1330,6 +1332,7 @@ where
         };
         if export.continuation.is_some() {
             egui::Modal::new("export-before-continuing".into()).show(context, |ui| {
+                ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 340.0));
                 ui.heading("Exporting before continuing");
                 contents(ui);
             });
@@ -1349,11 +1352,14 @@ where
             .as_deref()
             .map_or_else(|| "this media".to_owned(), display_name);
         let modal = egui::Modal::new("unsaved-edit-guard".into()).show(context, |ui| {
+            ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 520.0));
             ui.heading("Unsaved edits");
             ui.separator();
-            ui.label(format!("Export edits to {name} before continuing?"));
-            ui.label("The source file has not been changed.");
-            ui.horizontal(|ui| {
+            ui.label("Export edits before continuing?");
+            ui.add(egui::Label::new(&name).truncate())
+                .on_hover_text(&name);
+            ui.label("Source file unchanged.");
+            ui.horizontal_wrapped(|ui| {
                 if ui
                     .add_enabled(
                         self.active_export.is_none(),
@@ -4238,6 +4244,130 @@ mod tests {
             return None;
         };
         Some(canonical_shell_path(&PathBuf::from(root)).expect("canonical test root"))
+    }
+
+    #[test]
+    fn confirmation_layout_keeps_actions_visible_after_resizing_with_long_text() {
+        let Some(_root) = isolated_test_root(
+            "tests::confirmation_layout_keeps_actions_visible_after_resizing_with_long_text",
+        ) else {
+            return;
+        };
+        let context = egui::Context::default();
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.path = Some(PathBuf::from(format!(
+            "{}.png",
+            "long-file-name-".repeat(17)
+        )));
+        let path = app.path.clone().expect("fixture path");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        for mode in 0..5 {
+            app.pending_guard = matches!(mode, 0 | 1 | 4).then_some(GuardedAction::Exit);
+            app.export_error = (mode == 1).then(|| "Long export error with details. ".repeat(200));
+            app.active_export = (mode >= 2).then(|| {
+                let request = ExportRequest {
+                    source: path.clone(),
+                    target: path.clone(),
+                    kind: MediaKind::Image,
+                    operations: Vec::new(),
+                    hardware_encode: false,
+                };
+                // Same-source rejection keeps this UI fixture free of file writes and FFmpeg.
+                ActiveExport {
+                    job: ExportJob::start(request.clone(), |_| {}).expect("fixture worker"),
+                    tab,
+                    request,
+                    encoded: Duration::ZERO,
+                    cancelling: false,
+                    continuation: (mode == 3).then_some(GuardedAction::Exit),
+                }
+            });
+            for size in [
+                egui::vec2(960.0, 576.0),
+                egui::vec2(480.0, 300.0),
+                egui::vec2(320.0, 200.0),
+                egui::vec2(240.0, 150.0),
+                egui::vec2(960.0, 576.0),
+            ] {
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                let mut output = egui::FullOutput::default();
+                for _ in 0..4 {
+                    output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            ..Default::default()
+                        },
+                        |ui| app.draw_ui(ui, &mut Vec::new()),
+                    );
+                }
+                let expected: &[&str] = match mode {
+                    1 => &["Export failed", "OK"],
+                    2 => &["Cancel export"],
+                    3 => &["Exporting before continuing", "Cancel export"],
+                    4 => &[
+                        "Unsaved edits",
+                        "Export and continue",
+                        "Discard edits",
+                        "Cancel",
+                        "Cancel current export",
+                    ],
+                    _ => &[
+                        "Unsaved edits",
+                        "Export and continue",
+                        "Discard edits",
+                        "Cancel",
+                    ],
+                };
+                let mut target = egui::Pos2::ZERO;
+                for label in expected {
+                    let shape = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.text() == *label => {
+                                Some((shape, text))
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| panic!("missing {label}"));
+                    let bounds = shape.1.galley.rect.translate(shape.1.pos.to_vec2());
+                    assert!(
+                        screen.contains_rect(bounds),
+                        "{label} outside {screen:?}: {bounds:?}"
+                    );
+                    assert!(shape.0.clip_rect.contains_rect(bounds), "{label} clipped");
+                    target = bounds.center();
+                }
+                let mut actions = Vec::new();
+                for pressed in [true, false] {
+                    let _ = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            events: vec![
+                                egui::Event::PointerMoved(target),
+                                egui::Event::PointerButton {
+                                    pos: target,
+                                    button: egui::PointerButton::Primary,
+                                    pressed,
+                                    modifiers: egui::Modifiers::NONE,
+                                },
+                            ],
+                            ..Default::default()
+                        },
+                        |ui| app.draw_ui(ui, &mut actions),
+                    );
+                }
+                let action = match mode {
+                    0 => UiAction::ResolveGuard(GuardDecision::Cancel),
+                    1 => UiAction::DismissExportError,
+                    _ => UiAction::CancelExport,
+                };
+                assert!(
+                    actions == [action],
+                    "one confirmation action for mode {mode}"
+                );
+            }
+        }
     }
 
     #[test]

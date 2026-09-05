@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 04:08 JST - layout / bounded confirmations and export notices
+
+- Trigger: native 480x300 dirty guard fits at default UI scale but clips its left edge and Export button after egui UI zoom. A headless resize regression independently failed at 480x300. 8fde7e6 CI 33985797814 was followed through its live test step and has now passed.
+- Result: bound confirmation/export widths to current logical content; truncate long names with full tooltips, wrap decision buttons and limit error scroll height while keeping OK outside. Shorten the unchanged-source notice to retain all four guard buttons at 240x150 logical size. No export state, keyboard, worker, dependency, runtime or unsafe changes.
+- Verification: one new regression covers five states (guard, error, ordinary export, export-before-continuing, guard during another export), long names/details and shrink/restore through 960x576, 480x300, 320x200 and 240x150. Heading/action bounds and clip regions contain the labels; clicking the final Cancel/OK action emits exactly one expected action. The UI-only export fixture rejects same-source requests without FFmpeg or file writes.
+- Checks: format, Clippy with warnings denied, all 141 tests and build pass: app 54, core 33, runtime 50, integrations 4; three live tests explicitly ignored. Native final 480x300 captures show all buttons at increased UI zoom, then wrapping at further zoom; Cancel click returns to the image. Undo and normal close completed for both owned windows; ignored captures remain local. This is not an OS mixed-DPI or native export-failure trial.
+- Changed areas: app confirmation/export layout and regression, architecture, roadmap, trial guide, UI coverage gap and this log. Status remains h1_active.
+- Next action: follow checkpoint CI and begin launch-wide stability/performance revalidation, including long playback on the current code. Physical IME, mixed-DPI and the distribution decision remain outstanding.
+
 ## 2026-09-06 04:01 JST - interaction / safe modal Escape cancellation
 
 - Trigger: 5f5a3b8 CI 33985020143 and 0a74a1a CI 33985391018 passed. Dirty confirmation ignored Escape in code and in a capture-confirmed native trial.

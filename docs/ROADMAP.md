@@ -140,3 +140,5 @@ grid上のCtrl+Sが画像回転になる問題を実windowで再現・修正し�
 prefix入力の期限切れ案内とfocusをまたぐ継続を修正した。別操作・focus喪失・Escapeで待ちを解除し、prefix自身の案内だけを消す。139 tests、通常のCtrl+K Ctrl+S、402ms以内のfocus往復後にCtrl+Sが独立した保存操作になる実window試験が通過した。H1と残るlaunch gateの監査を継続する。
 
 保存確認がEscapeで閉じない問題を実windowで再現し、編集を保持するCancelへ対応させた。export失敗では最前面の通知だけを閉じる。背景clickの非解除と、tab・dirty・fullscreen保持を含む140 testsが通過した。H1は継続中で、残るmodal操作・layoutとlaunch全体の安定性/性能を監査する。
+
+window縮小・UI拡大で保存確認の左端と操作buttonが切れる問題を修正した。確認・export通知の幅制限、file名の省略/tooltip、button折り返しとエラー詳細の高さ制限を追加した。141 testsと480×300の拡大UIでCancel clickを確認した。次は長時間再生を含むlaunch全体の検証を継続する。物理IME・混在DPIと配布方針は未確定である。

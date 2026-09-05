@@ -134,7 +134,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 ## 3. Codebase上の改善余地
 
 - `crates/towavue-app/src/main.rs`へevent loop、UI描画、input、tab orchestration、preview worker連携、export flowが約2,800行で集中している。UI反復が始まると競合と回帰範囲が広がるため、変更対象が固まった単位から挙動を変えずに分離する価値がある。
-- AppのUI logicに対するtestは純粋helper中心で、pointer gesture、focus、modal、tab drag、timelineを直接検証していない。
+- AppのUI testはH1でegui描画・pointer・palette focus・modalの回帰を追加した。確認画面は長文とwindow縮小/復元時の操作labelの非clip・Cancel/OK clickも検証する。実OSのIME・混在DPIやtab dragなどの操作matrix全体を自動testで保証してはいない。
 - 対応拡張子、file dialog filter、実decoder能力、export codec選択の関係を一つのcapability modelへ統一していない。拡張子を増やすだけでは対応完了にならない。
 - Loading、empty、error、unsupported capabilityのstate表現が各所のstatus textへ分散している。UX改善時には表示だけでなくstate transitionをcoreでtest可能にする余地がある。
 - filmstrip以外のpreview workerはtask単位にthreadを起動する単純構成で、優先度、同時数、cancel、重複排除を持たない。filmstripは可視集合の最新要求を単一workerで処理する。

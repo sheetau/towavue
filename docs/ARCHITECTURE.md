@@ -174,6 +174,8 @@ Escapeはmodal/paletteの入力を優先し、次にfilmstrip/gridを閉じ、ov
 
 保存確認のEscapeはCancelと同じく離脱要求だけを取り消し、編集を保持する。export失敗のEscapeは最前面のエラー通知だけを閉じ、保留中の保存確認は残す。背景クリックではどちらも閉じず、保存・破棄は明示的なbutton操作に限定する。
 
+保存確認・export通知は現在のegui表示領域に幅を制限する。長いfile名は一行で省略してtooltipに全文を残し、確認buttonは横幅に応じて折り返す。エラー詳細の縦scrollには画面高に応じた上限を設け、確認buttonを詳細の外に保つ。OSのDPIや設定は変更しない。
+
 画像・reading・動画のfullscreen閲覧中だけ、入力が2秒ないとcursorを隠す。windowがactiveでpointerが内側にあることを条件とし、button保持・selection drag、filmstrip/palette/grid、picker・dirty guard・export、loading/error・file hover中は表示する。pointer移動・button・wheel・key入力、focus/入退出の変化で期限をリセットし、fullscreen解除時も表示へ戻す。音声playlistとWelcomeでは隠さない。eguiのplatform outputでcursorを統一管理し、期限をevent loopの既存待機へ統合する。非表示中という理由だけで再描画やpollを追加しない。最小化からpointerを動かさず復帰するとCursorEnteredが届かない場合があるため、focus取得時も既存のpicker復帰と同じclient座標更新を行う。
 
 ### H1 seek bar and command palette

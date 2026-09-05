@@ -110,6 +110,8 @@ audio masterに対して40msを超えて遅れたdecoded frameは、待機スケ
 
 音声の正常排出後も残りの動画はpause/resumeできる。WASAPI workerはcontrol receiverを閉じる前に正常終了を公開し、その場合だけ閉じたcontrol channelへのpause/resumeを成功したno-opとして扱う。device変更・失敗・予期しない終了はこの扱いに含めず、既存のerror/recovery経路を維持する。
 
+WASAPI呼び出しが`AUDCLNT_E_DEVICE_INVALIDATED`を返した場合も、通知到着の有無によらず既存のEndpointChanged経路へ渡す。[Microsoftの既定device復旧手順](https://learn.microsoft.com/en-us/windows/win32/coreaudio/recovering-from-an-invalid-device-error)に従い、旧clientを解放して現在の既定endpointで再作成する。文字列照合は行わずHRESULTで分類し、それ以外のAPI失敗は従来どおり診断を残して停止する。再作成そのものの失敗は自動retry loopにしない。
+
 ### M5 image presentation
 
 静止画はEXIF orientation適用後、アニメGIF、WebP、APNGは合成済みRGBA frameと10 ms以上のdeadlineへ変換する。app event loopは次frame時刻までsleepし、期限を過ぎたframeを追いつかせてからegui textureを更新する。画像textureも動画・UIと同じD3D11 deviceとback bufferへ描画し、Presentは一回に保つ。

@@ -10,6 +10,7 @@ use wasapi::{
     AudioClient, AudioClock, AudioRenderClient, DeviceEnumerator, DeviceEventCallbacks, Direction,
     Handle, Role, SampleType, StreamMode, WaveFormat,
 };
+use windows::Win32::Media::Audio::AUDCLNT_E_DEVICE_INVALIDATED;
 
 use crate::{AudioChunk, AudioFormat};
 use towavue_core::MediaTime;
@@ -38,7 +39,7 @@ pub enum AudioOutputError {
     Wasapi(String),
     #[error("the audio output thread stopped")]
     Closed,
-    #[error("the default audio endpoint changed")]
+    #[error("the audio endpoint changed or became invalid")]
     EndpointChanged,
 }
 
@@ -508,6 +509,10 @@ impl VolumeRamp {
 }
 
 fn wasapi_error(error: wasapi::WasapiError) -> AudioOutputError {
+    if matches!(&error, wasapi::WasapiError::Windows(error) if error.code() == AUDCLNT_E_DEVICE_INVALIDATED)
+    {
+        return AudioOutputError::EndpointChanged;
+    }
     AudioOutputError::Wasapi(error.to_string())
 }
 
@@ -522,6 +527,29 @@ fn is_current_endpoint(current_id: &str, removed_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalidated_wasapi_device_uses_endpoint_recovery_without_hiding_other_errors() {
+        use windows::Win32::Foundation::E_FAIL;
+        use windows::Win32::Media::Audio::AUDCLNT_E_DEVICE_INVALIDATED;
+
+        let invalidated = wasapi::WasapiError::Windows(AUDCLNT_E_DEVICE_INVALIDATED.into());
+        assert!(matches!(
+            wasapi_error(invalidated),
+            AudioOutputError::EndpointChanged
+        ));
+        for error in [
+            wasapi::WasapiError::Windows(E_FAIL.into()),
+            wasapi::WasapiError::UnsupportedFormat,
+            wasapi::WasapiError::DeviceNotFound("test endpoint".into()),
+        ] {
+            let diagnostic = error.to_string();
+            assert!(matches!(
+                wasapi_error(error),
+                AudioOutputError::Wasapi(message) if message == diagnostic
+            ));
+        }
+    }
 
     #[test]
     fn closed_controls_are_valid_only_after_successful_audio_drain() {

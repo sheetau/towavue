@@ -3450,6 +3450,7 @@ where
                 self.check_eof();
             }
             Some(AudioOutputEvent::EndpointChanged) => {
+                eprintln!("towavue: recovering changed or invalidated audio endpoint");
                 self.seek_to(self.current_position());
                 self.pending_seek_started = None;
             }

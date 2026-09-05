@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 06:31 JST - audio / recover invalidated WASAPI clients without a device notification
+
+- Trigger/evidence: endpoint notification callbacks used typed recovery, but wasapi_error converted every API failure to a generic string. A regression with the real AUDCLNT_E_DEVICE_INVALIDATED HRESULT failed before the fix. Microsoft documents releasing the old client and reselecting the default endpoint for this error; architecture now records that boundary.
+- Change: classify only Windows DEVICE_INVALIDATED into the existing EndpointChanged path; preserve other errors/diagnostics and initialization failure behavior. Update the error wording and log app recovery. Explicitly enable the pinned Windows crate's Media_Audio feature for its named constant. No new versions, unsafe code, device configuration or retry loop.
+- Native evidence: temporary worker-local one-shot error injection while using a real WASAPI client. Playing invalidation at source 15.116362950 s rebuilt D3D11VA and continued at 1.25x/mute. Paused invalidation at 14.724157800 s retained paused state, 1.25x/mute, rotation and dirty edits; all 149,350 compared media pixels match before/after, and Play advances afterward. No physical endpoint removal/default switch or service shutdown was performed.
+- Cleanup/checks: Undo restored clean titles and owned processes 25800/3464 exited normally. Removed AUDIO_INVALIDATION_TRIAL code/environment and both ignored trigger files; retained ignored captures/logs. Normal debug/release builds, format, all-target Clippy and all 153 tests pass (app 64, core 34, runtime 51, integrations 4; three live tests explicitly ignored by the default suite). Separately ran both live WASAPI tests with silence: drain/control and 0.25/0.5/2/4x clocks pass without skips; measured source progress 0.150/0.300/1.200/2.400 s per 0.600 s wall interval. No source or OS settings changed.
+- Status/next: h1_active. Prior e57bce4 CI 33993007380 is still in progress at last check; retain that handle. Audit recovery outside the trim range and nonrunning-session notification, then D3D11 removal detection. Physical device/IME/mixed-DPI and distribution gates remain incomplete.
+
 ## 2026-09-06 06:24 JST - export / cancellation stops automatic leaving after publication
 
 - Trigger/reproduction: a real background-export regression failed when Cancel export arrived after output publication but before the app consumed success: the pending Exit still ran. Native ExportBusy Yes after completion had the same continuation gap.

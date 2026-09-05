@@ -156,3 +156,5 @@ renderer再作成不能時のnative確認を追加し、Retry、Cancelでの編�
 native復旧確認中に保存が完了すると保存済みtabを再確認する問題を再現し、確認終了後に残るdirty tabを選び直すよう修正した。実windowで2枚とも保存してから終了し、出力画素も一致した。追加試験で、生成設定の`zoom_in = +`が次回起動時に読めない決定的な不具合も判明した。`Plus`による保存と旧形式の読込を対応し、隔離設定の初回起動・再起動・旧設定Reloadを確認した。以前のCI原因を「競合」とした説明は未証明で、この生成/読込不一致を訂正根拠とする。151 tests・Clippy・releaseが通過。次はexport取消を含む残る組合せとdevice/endpointの監査を続ける。H1全体は未完了。
 
 export完了と取消が重なると保留中の終了が実行される問題を回帰testで再現し、保存成功の記録と自動離脱を分離した。置換前の取消は既存出力・未保存編集を保持し、置換後は保存出力を残して自動離脱だけを止める。実windowの描画なし取消を両時点で確認し、完了PNGの64画素も一致した。試験用故障コード除去後の152 tests・Clippy・release buildが通過し、前checkpointのCIも成功。次は実device/endpoint経路と残る入力・日常flowの監査を続ける。物理IME・混在DPI・配布を含むH1全体は未完了。
+
+音声device無効化のAPIエラーが一般Faultへ落ちる抜けを修正し、HRESULTで既存endpoint復旧へ分類した。実clientへの一回限りのエラー注入で再生/停止・rate・mute・回転を保持し、停止映像149,350画素が一致した。注入除去後の153 tests・Clippy・releaseと、無音の実WASAPI drain/rate 2 testsが通過した。OS設定や物理deviceは変更していないため、実切替matrixの完了とはしない。次はtrim範囲外・非稼働sessionの復旧とD3D11 removal経路を監査する。H1全体は継続中。

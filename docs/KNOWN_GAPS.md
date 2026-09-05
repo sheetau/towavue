@@ -25,7 +25,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 ### 開発版としての不足
 
-- WASAPI APIの`AUDCLNT_E_DEVICE_INVALIDATED`も既存endpoint再作成へ接続した。実clientのworkerへ同エラーを一度だけ与え、再生中/停止中の位置・rate・mute・回転保持と再Playを確認した。これはエラー配送/再作成の試験であり、物理抜き差し・default device変更・audio service停止を実行した証拠ではない。非稼働sessionの通知やtrim範囲外previewを含む復旧の組合せは引き続き監査する。
+- WASAPI APIの`AUDCLNT_E_DEVICE_INVALIDATED`も既存endpoint再作成へ接続した。実clientのworkerへ同エラーを一度だけ与え、再生中/停止中の位置・rate・mute・回転保持と再Playを確認した。trim開始前previewの復旧失敗も修正し、位置と表示画素の保持を確認した。これはエラー配送/再作成の試験であり、物理抜き差し・default device変更・audio service停止を実行した証拠ではない。非稼働sessionの通知を含む復旧の組合せは引き続き監査する。
 
 - graphics recoveryのswap chain解放順序とUI/image texture再送を修正した。再作成不能時はnativeのRetry/Cancelと終了時のExport/Discard/Cancelへ接続し、描画なしの保存失敗・再保存・終了、停止位置でのRetryを実windowで確認した。複数dirty tabの順次保存と、export中/保存完了後のnative取消も確認した。完了後の取消は保存出力を残し、自動終了・移動を止める。ただしこれは所有process内で故障状態を作る試験であり、実driver reset・adapter切替・endpoint切替のmatrixは未完了。
 

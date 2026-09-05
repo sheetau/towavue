@@ -191,9 +191,12 @@ impl PlaybackSession {
         target: MediaTime,
         rate: f32,
         range: PlaybackRange,
+        pause: bool,
     ) -> Result<PlaybackGeneration, PlaybackError> {
         self.rate = rate.clamp(0.25, 4.0).max(0.25);
         self.range = range;
+        // Seek may require pausing, but resuming remains an explicit control.
+        self.paused |= pause;
         self.seek(target)
     }
 

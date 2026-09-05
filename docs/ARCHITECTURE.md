@@ -112,6 +112,8 @@ audio masterに対して40msを超えて遅れたdecoded frameは、待機スケ
 
 WASAPI呼び出しが`AUDCLNT_E_DEVICE_INVALIDATED`を返した場合も、通知到着の有無によらず既存のEndpointChanged経路へ渡す。[Microsoftの既定device復旧手順](https://learn.microsoft.com/en-us/windows/win32/coreaudio/recovering-from-an-invalid-device-error)に従い、旧clientを解放して現在の既定endpointで再作成する。文字列照合は行わずHRESULTで分類し、それ以外のAPI失敗は従来どおり診断を残して停止する。再作成そのものの失敗は自動retry loopにしない。
 
+Seek再構築では必要なPaused状態も新pipelineへ渡し、破棄予定の旧WASAPI workerへのPause成功を前提にしない。endpoint無効化後でもtrim範囲外のsource previewを同じ位置・停止状態で復元する。通常のPause/Resumeは引き続き実行中workerを操作し、異常終了を成功扱いしない。
+
 ### M5 image presentation
 
 静止画はEXIF orientation適用後、アニメGIF、WebP、APNGは合成済みRGBA frameと10 ms以上のdeadlineへ変換する。app event loopは次frame時刻までsleepし、期限を過ぎたframeを追いつかせてからegui textureを更新する。画像textureも動画・UIと同じD3D11 deviceとback bufferへ描画し、Presentは一回に保つ。

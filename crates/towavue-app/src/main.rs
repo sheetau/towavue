@@ -3183,15 +3183,12 @@ where
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        if self.state == PlaybackState::Ended || !range.contains(target) {
-            if let Err(error) = session.set_paused(true) {
-                self.fail(error.to_string());
-                return;
-            }
-            self.state = PlaybackState::Paused;
-        }
-        match session.seek_with_edits(target, edit.rate, range) {
+        let pause = self.state == PlaybackState::Ended || !range.contains(target);
+        match session.seek_with_edits(target, edit.rate, range, pause) {
             Ok(generation) => {
+                if pause {
+                    self.state = PlaybackState::Paused;
+                }
                 self.generation = generation;
                 self.pending_time = None;
                 self.clock = None;

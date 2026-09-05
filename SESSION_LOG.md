@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 06:37 JST - recovery / rebuild paused Seek without commanding a dead audio worker
+
+- Reproduction: controlled WASAPI invalidation at source 11.583872300 s before trim start 16.583872300 s entered endpoint recovery, then failed with "the audio output thread stopped". seek_to sent Pause to the terminated worker before rebuilding. Native capture shows Faulted instead of the prior paused source preview.
+- Fix: pass the required Pause into seek_with_edits and initialize the replacement pipeline with it. Do not require a control command to a pipeline that Seek immediately destroys. Final review retains the previous runtime pause when Pause is not requested, so Seek cannot implicitly resume a previously paused session during faulted-edit Undo. Ordinary pause/resume still checks the active audio worker; no closed-channel success fallback, new unsafe code or dependencies.
+- Native comparison: same injection after the change at 9.543300200 s before trim start 14.543300200 s resumes D3D11VA in Paused, retains edits/mute and all 311,736 compared media pixels. Play returns to the trim start. A later ordinary Seek after trim end 52.008 s shows paused outside-range preview at 57.008 s. The regression is verified by before/after native trials, not by a new automated hardware test.
+- Cleanup/checks: Undo verified clean titles; owned faulted/fixed processes 21856/39184 closed normally. Removed AUDIO_TRIM_TRIAL injection/environment and both trigger files. Format, all-target Clippy, existing 153 tests and normal debug/release builds pass (three live tests explicitly ignored by the default suite). No source or OS settings changed; physical endpoint switching remains unverified.
+- Normal release: first short run confirms EOF and Space restart, each 60/60 frames without drops/transfers. Left at EOF is disabled by existing command eligibility and is not evidence of Seek. Separate seek-bar trial enters Paused with visible source frame 1.000 s (35.595 ms app Seek-to-Present), then Play reaches EOF with all remaining 30 frames and no drops/transfers. Both owned processes 30012/29812 closed normally. Ignored h1-audio-trim/h1-seek captures and logs retain evidence.
+- Status/next: h1_active. e57bce4 CI 33993007380 succeeded; 1a96822 CI 33993299635 was still in progress at last check. Follow pending CI, audit nonrunning-session notifications and D3D11 removal detection. Physical device/IME/mixed-DPI and distribution gates remain incomplete.
+
 ## 2026-09-06 06:31 JST - audio / recover invalidated WASAPI clients without a device notification
 
 - Trigger/evidence: endpoint notification callbacks used typed recovery, but wasapi_error converted every API failure to a generic string. A regression with the real AUDCLNT_E_DEVICE_INVALIDATED HRESULT failed before the fix. Microsoft documents releasing the old client and reselecting the default endpoint for this error; architecture now records that boundary.

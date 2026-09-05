@@ -2,6 +2,16 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 15:25 JST - fix / PCM WAV channel-layout compatibility
+
+- Trigger: the live-volume trial's generated mono PCM WAV faulted with FFmpeg `Input changed` before playback.
+- Intent: resolve the reproduced decode failure without hiding actual format changes or changing explicit speaker layouts.
+- Result: decoded frames with unspecified layouts now receive the same channel-count-based default used to configure the resampler. The production change is confined to audio frame conversion.
+- Verification: a new generated mono/stereo PCM regression failed before the fix and passes afterward for both serial and parallel decoding, checking 480 output frames, equal mono downmix channels, and exact stereo sample values. The original 48 kHz mono WAV now plays in the real app with a session peak of 0.088367; M reduces it to zero and the status identifies live volume. Format, all-target Clippy with warnings denied, and all-target tests pass (app 11, core 25, runtime 32 plus 1 explicitly ignored live-Explorer test, integrations 3).
+- Changed areas: runtime audio decode, regression test, roadmap, trial guide, and removal of the resolved gap. Generated fixtures/captures remain ignored; trial windows closed.
+- Status: `h1_active`. Volume checkpoint `fcf499d` is pushed; its CI run `33949631615` is still running.
+- Next action: check checkpoint CI, implement pitch-preserving live rate with clock/seek verification, then continue the compact visual shell and launch audit.
+
 ## 2026-09-05 15:22 JST - implementation / live playback volume
 
 - Trigger: H1's volume/mute commands changed edit history and export but not playback.

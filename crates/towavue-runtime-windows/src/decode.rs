@@ -266,6 +266,13 @@ impl AudioPipeline {
                             timestamp_to_media_time(Some(timestamp), self.time_base)
                         });
                     let mut converted = frame::Audio::empty();
+                    // Match the default layout used at resampler setup when PCM supplies
+                    // only a channel count. Preserve explicitly declared speaker layouts.
+                    if decoded.channel_layout().is_empty() {
+                        decoded.set_channel_layout(ChannelLayout::default(i32::from(
+                            decoded.channels(),
+                        )));
+                    }
                     self.resampler.run(&decoded, &mut converted)?;
                     self.next_presentation_time =
                         presentation_time.saturating_add(Duration::from_secs_f64(
@@ -1005,6 +1012,66 @@ mod tests {
         let time = timestamp_to_media_time(Some(90_000), Rational::new(1, 90_000));
 
         assert_eq!(time.as_nanoseconds(), 1_000_000_000);
+    }
+
+    #[test]
+    fn pcm_wav_without_channel_mask_decodes_mono_and_stereo() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        for channels in [1_u16, 2] {
+            let data_len = 480 * u32::from(channels) * 2;
+            let mut bytes = b"RIFF".to_vec();
+            bytes.extend((36 + data_len).to_le_bytes());
+            bytes.extend(b"WAVEfmt ");
+            bytes.extend(16_u32.to_le_bytes());
+            bytes.extend(1_u16.to_le_bytes());
+            bytes.extend(channels.to_le_bytes());
+            bytes.extend(48_000_u32.to_le_bytes());
+            bytes.extend((48_000 * u32::from(channels) * 2).to_le_bytes());
+            bytes.extend((channels * 2).to_le_bytes());
+            bytes.extend(16_u16.to_le_bytes());
+            bytes.extend(b"data");
+            bytes.extend(data_len.to_le_bytes());
+            for _ in 0..480 {
+                bytes.extend(8192_i16.to_le_bytes());
+                if channels == 2 {
+                    bytes.extend((-4096_i16).to_le_bytes());
+                }
+            }
+            let path = std::env::temp_dir().join(format!("towavue-pcm-{unique}-{channels}.wav"));
+            std::fs::write(&path, bytes).expect("write PCM fixture");
+            let verify = |output: DecodeOutput| {
+                if let DecodeOutput::Audio(chunk) = output {
+                    assert_eq!(chunk.format.sample_rate, 48_000);
+                    assert_eq!(chunk.format.channels, 2);
+                    for frame in chunk.bytes.as_chunks::<8>().0 {
+                        let left = f32::from_le_bytes(frame[..4].try_into().expect("left sample"));
+                        let right =
+                            f32::from_le_bytes(frame[4..].try_into().expect("right sample"));
+                        if channels == 1 {
+                            assert!(left > 0.0);
+                            assert_eq!(left, right);
+                        } else {
+                            assert_eq!(left, 0.25);
+                            assert_eq!(right, -0.125);
+                        }
+                    }
+                }
+                true
+            };
+            let serial = super::decode_file(&path, verify);
+            let parallel = super::decode_file_parallel(&path, MediaTime::ZERO, |output| {
+                if let ParallelSoftwareDecodeOutput::Item(item) = output {
+                    verify(item);
+                }
+                true
+            });
+            std::fs::remove_file(path).expect("remove PCM fixture");
+            assert_eq!(serial.expect("serial PCM decode").audio_frames, 480);
+            assert_eq!(parallel.expect("parallel PCM decode").audio_frames, 480);
+        }
     }
 
     #[test]

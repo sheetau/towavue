@@ -129,6 +129,7 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - 48 kHz stereo AACの440 Hz toneを再生し、対象towavue processだけのWASAPI session meterを読む。100%でpeak約0.0885、Down 5回の50%で約0.0442、Mのmuteで0になることを確認した。音声の録音とmaster endpointの音量変更は行わない。
 - Undoで50%へ戻し、Redoでmuteへ戻る。mute中のSeek後も0を保持する。pause中にmute解除し、resume後のpeakが元に戻る。
 - 純粋なsample testでstereo比率、bufferをまたぐ5 ms ramp、正確なzero、200% gain、初期mute時に100%の音が出ないことを確認する。
+- 生成したmono PCM WAVは旧buildで`Input changed`となったが、未指定channel layoutの補完後は再生・muteできた。mono/stereoのmaskなしPCM WAVをtest内で生成し、直列/並列decodeの480 frame保持とstereo sample値を検証する。
 
 ### H1で確認したimage scenario
 

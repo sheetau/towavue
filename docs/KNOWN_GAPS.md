@@ -21,8 +21,6 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 ### 開発版としての不足
 
-- H1試験で生成したmono PCM WAVがFFmpegの`Input changed`で停止した。AACでは再生できる。音声frameのchannel layout整合性を次に調べる。
-
 - installer、uninstaller、portable package、automatic update、file association、Explorer context menuはない。
 - settings画面、recent files、session/tab復元、window位置・sizeの保存はない。
 - Explorerからwindowへのfile drag-and-dropはない。tabのwindow外dropだけが実装されている。

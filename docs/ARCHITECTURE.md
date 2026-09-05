@@ -156,6 +156,8 @@ Explorerからのfile dropはwinitのowned path eventで受け、既存のextern
 
 ### H1 compact window shell
 
+日本語filename・入力の欠字を避けるため、runtimeはWindows Fonts内のYu Gothic Medium、Meiryo、MS Gothicの順で読める一つのfont fileを返す。appは起動時にegui既定fontの後ろへ補助fontとして登録し、英数字の見た目を維持する。fontはOSから読み、同梱・download・OS設定変更は行わない。日本語fontがない環境はdiagnosticで明示し、既定fontで継続する。これは全言語fallbackや配布fontの選定ではない。
+
 上部は32 logical pxの単一title/tab bar、下部は30 logical pxのstatus barとし、暗いneutral色でmedia領域を優先する。appはdecorationsなしのwinit windowにlogo menu・tab・window controlsを描画し、移動・resize・minimize・maximizeはwinitのWindows操作へ委ねる。window closeは既存のdirty/export guardを必ず通す。tab幅は等分、最大160 px・最小72 pxとし、収まらない場合は横scrollする。path/名前は省略表示と全文tooltipを使い、右側の状態表示へ専用領域を確保する。menuの方向gestureとtab reorderはこの変更には含めない。
 
 logo menuはFile / Edit / Viewの3分類とし、app内の固定配置で関連commandを区切る。全registry commandを一箇所ずつ配置し、title・有効条件・現在のcustom shortcutは既存registry/bindingsから取得する。shortcutは右揃え、縦に収まらないsubmenuはwindow内でscrollする。commandのdispatch・dirty guardは変更せず、分類のために新commandやruntime処理は追加しない。方向drag gestureは引き続き対象外とする。
@@ -177,6 +179,8 @@ Escapeはmodal/paletteの入力を優先し、次にfilmstrip/gridを閉じ、ov
 timeline非表示時はstatus上端に1 physical pxのseek barを重ね、hover/drag時だけ太くしhandleを表示する。動画・音声はsource時刻、画像は同じShell snapshotの画像だけの順序へ対応付ける。dragはhandle位置を更新し、releaseで一回だけ既存のgeneration付きSeek/guard付き画像移動を行う。動画hoverは既存の20区間thumbnail tooltip、画像hoverは位置とfilenameとし、本画面のscrub previewは含めない。EOFからの位置移動はPausedとし、その位置からPlayできる。停止中のSeekでは音声時計が次のframe時刻へ到達できないため、保持frameがない場合だけ最初のdecode frameを時計待ちせず表示する。
 
 paletteは検索入力を保ち、上下keyで有効な候補を巡回し、Enterで共有commandへdispatch、Escapeで閉じる。eguiの破棄されたlayout passで消費したkeyのactionも保持し、同一frameの同じUI actionは一回だけ実行する。
+
+IMEのpreedit中、および確定/取消などIME eventを含むframeでは、paletteの上下・Enter・Escapeのkey eventを消費し、IME eventだけをTextEditへ渡す。確定用Enterをcommand実行やTextEditのfocus解除、取消用Escapeをpalette closeへ二重使用しない。入力欄の固定idへ描画前にfocusを要求し、eguiの上下focus移動による確定文字の取りこぼしを防ぐ。composition状態はpalette resetで解除し、通常の操作は次の独立key入力から再開する。OSのIME状態・keyboard layoutや設定は書き換えない。
 
 ### H1 video viewport
 

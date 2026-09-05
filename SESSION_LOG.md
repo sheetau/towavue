@@ -2,6 +2,16 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 03:04 JST - input / Japanese glyphs and palette IME ownership
+
+- Trigger: checkpoint 602835e passed CI 33982075592. Native Japanese-named PNG showed missing glyph boxes in tab/status; a synthetic preedit plus Enter also executed a palette command.
+- Result: runtime reads one installed Windows Japanese font, and app appends it after the default proportional/monospace fonts once at window initialization. No font bundling/download, OS change, dependency or unsafe code. Missing installed fonts produce a diagnostic; coverage tests explicitly skip in that case.
+- Palette: retain composition state, consume duplicate navigation/confirmation/cancellation keys while preserving IME events, and establish stable query focus before TextEdit processes input. The initial action-only test missed a lost commit; exact query assertions exposed it. English/Japanese commits, both Enter event orderings, preedit navigation, cancellation, subsequent independent keys and reset now pass.
+- Verification: format, workspace all-target Clippy with warnings denied, workspace tests and app build pass: app 47, core 31, runtime 50, integrations 4; three live tests explicitly ignored. Japanese glyph coverage actually ran on the reference machine and preserves the Latin A metric. Native tab/status display is corrected; split foreground key injection selects Zoom out once and closes the palette, and reopen/Escape works. Static PNG idle CPU was 0 ms over five seconds (below timer resolution).
+- Limits: bulk key injection was incomplete; final ordinary-input evidence uses separate sends. WM_CHAR Japanese query injection did not appear and is excluded. Synthetic IME events do not prove physical Japanese candidate-window handling, all keyboard layouts or DPI/monitor coverage. All owned trial windows closed normally; ignored media/captures/logs remain local.
+- Changed areas: app fonts/palette/initialization, runtime font boundary, README, architecture, roadmap, trial guide, gap ledger and this log. Status remains h1_active, not launch_complete.
+- Next action: verify checkpoint CI; continue actual input/focus and DPI/monitor audits and remaining launch gates. Distribution/packaging still requires its separate decision.
+
 ## 2026-09-06 02:46 JST - viewing / video display orientation and durable errors
 
 - Trigger: checkpoint 796da14 passed CI 33981163741. The remaining coarse-PTS seek test was quantified by finding the matching source PCM segment: -8 samples (-0.167 ms) at 1.067 seconds; its fixture-specific half-millisecond bound is now checked. No unbounded preroll or universal precision claim was added. A 90-degree display-matrix H.264 then reproduced landscape playback versus portrait FFmpeg autorotation. The first legacy rotate-tag remux carried no matrix and is excluded from baseline evidence.

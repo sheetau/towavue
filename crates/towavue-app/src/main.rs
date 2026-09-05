@@ -5,6 +5,7 @@
 mod chrome;
 mod cursor;
 mod filmstrip;
+mod fonts;
 mod grid;
 mod menu;
 mod palette;
@@ -539,6 +540,7 @@ where
         renderer.resize_surface(size.width, size.height)?;
         let context = egui::Context::default();
         context.set_visuals(egui::Visuals::dark());
+        fonts::install(&context);
         context.style_mut_of(egui::Theme::Dark, chrome::style);
         context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
         let state = egui_winit::State::new(

@@ -4,6 +4,7 @@ use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definiti
 pub struct CommandPalette {
     query: String,
     selected: Option<usize>,
+    ime_composing: bool,
 }
 
 impl CommandPalette {
@@ -19,6 +20,30 @@ impl CommandPalette {
     ) -> (Option<CommandId>, bool) {
         let mut chosen = None;
         let (up, down, enter, close) = context.input_mut(|input| {
+            let mut ime_event = false;
+            for event in &input.events {
+                if let egui::Event::Ime(event) = event {
+                    ime_event = true;
+                    match event {
+                        egui::ImeEvent::Preedit { text, .. } => {
+                            self.ime_composing = !text.is_empty()
+                        }
+                        _ => self.ime_composing = false,
+                    }
+                }
+            }
+            // IME confirmation/cancellation and its accompanying key can share a frame.
+            if self.ime_composing || ime_event {
+                for key in [
+                    egui::Key::ArrowUp,
+                    egui::Key::ArrowDown,
+                    egui::Key::Enter,
+                    egui::Key::Escape,
+                ] {
+                    input.consume_key(egui::Modifiers::NONE, key);
+                }
+                return (false, false, false, false);
+            }
             (
                 input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
                 input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
@@ -34,8 +59,9 @@ impl CommandPalette {
             .show(context, |ui| {
                 ui.set_width((context.content_rect().width() - 48.0).clamp(200.0, 520.0));
                 let previous_query = self.query.clone();
-                let edit = ui.text_edit_singleline(&mut self.query);
-                edit.request_focus();
+                let query_id = egui::Id::new("command-palette-query");
+                ui.memory_mut(|memory| memory.request_focus(query_id));
+                ui.add(egui::TextEdit::singleline(&mut self.query).id(query_id));
                 let query_changed = previous_query != self.query;
                 if query_changed {
                     self.selected = None;
@@ -177,6 +203,136 @@ mod tests {
             },
         );
         assert!(closed);
+    }
+
+    #[test]
+    fn ime_confirmation_and_cancel_do_not_run_or_close_the_palette() {
+        let context = egui::Context::default();
+        let mut palette = CommandPalette::default();
+        let commands = CommandContext {
+            palette_open: true,
+            ..Default::default()
+        };
+        let shortcuts = ShortcutBindings::default();
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let run = |palette: &mut CommandPalette, events| {
+            let mut result = (None, false);
+            let _ = context.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |_| {
+                    let (chosen, close) = palette.show(&context, commands, &shortcuts);
+                    result.0 = result.0.or(chosen);
+                    result.1 |= close;
+                },
+            );
+            result
+        };
+        for _ in 0..3 {
+            run(&mut palette, vec![]);
+        }
+        run(
+            &mut palette,
+            vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "o".into(),
+                active_range_chars: None,
+            })],
+        );
+        assert_eq!(
+            run(
+                &mut palette,
+                vec![
+                    key(egui::Key::ArrowDown),
+                    key(egui::Key::ArrowUp),
+                    key(egui::Key::Enter)
+                ]
+            ),
+            (None, false)
+        );
+        assert_eq!(
+            run(
+                &mut palette,
+                vec![
+                    egui::Event::Ime(egui::ImeEvent::Commit("open file".into())),
+                    key(egui::Key::Enter)
+                ]
+            ),
+            (None, false)
+        );
+        assert_eq!(palette.query, "open file");
+        assert_eq!(
+            run(&mut palette, vec![key(egui::Key::Enter)]),
+            (Some(CommandId::OpenFile), false)
+        );
+        run(
+            &mut palette,
+            vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "a".into(),
+                active_range_chars: None,
+            })],
+        );
+        assert_eq!(
+            run(&mut palette, vec![key(egui::Key::Escape)]),
+            (None, false)
+        );
+        assert_eq!(
+            run(
+                &mut palette,
+                vec![
+                    egui::Event::Ime(egui::ImeEvent::Preedit {
+                        text: String::new(),
+                        active_range_chars: None
+                    }),
+                    key(egui::Key::Escape)
+                ]
+            ),
+            (None, false)
+        );
+        assert_eq!(
+            run(&mut palette, vec![key(egui::Key::Escape)]),
+            (None, true)
+        );
+        palette.reset();
+        assert!(!palette.ime_composing);
+        run(&mut palette, vec![]);
+        run(
+            &mut palette,
+            vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "にほんご".into(),
+                active_range_chars: Some(0..4),
+            })],
+        );
+        assert_eq!(palette.query, "にほんご");
+        assert_eq!(
+            run(
+                &mut palette,
+                vec![
+                    key(egui::Key::Enter),
+                    egui::Event::Ime(egui::ImeEvent::Commit("日本語".into()))
+                ]
+            ),
+            (None, false)
+        );
+        assert_eq!(palette.query, "日本語");
+        run(
+            &mut palette,
+            vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "a".into(),
+                active_range_chars: None,
+            })],
+        );
+        assert!(palette.ime_composing);
+        palette.reset();
+        assert!(!palette.ime_composing);
+        assert!(palette.query.is_empty());
     }
 
     #[test]

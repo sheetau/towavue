@@ -4,6 +4,13 @@
 
 ## 1. 最初に試す
 
+### 日本語表示とpalette入力のH1確認
+
+- 日本語filenameのPNGでtab/statusが欠字になるbaselineを確認した。WindowsのYu Gothic Medium（なければMeiryo、MS Gothic）を既定fontの後ろへ追加し、最終windowで日本語の名前が読めることを確認した。fontは起動時に一度読むだけで、同梱・downloadやOS設定変更はしない。未導入環境ではdiagnosticを確認し、glyph testの明示skipを成功証拠にしない。
+- 回帰testはpreedit中の上下/Enter、Commitと同frameのEnter、取消とEscape、次の独立key、英語・日本語の確定文字を確認する。最初のaction-only検査では確定文字欠落を見逃したため、queryの完全一致を追加した。TextEdit描画前のfocus固定と重複key消費で通過した。
+- 実windowでは通常のzoom検索→Down→Enterで一回Zoom outしpaletteが閉じ、再open→Escapeも通過した。まとめたkey送信は不完全だったため、foreground確認後の分割送信を最終証拠とした。WM_CHARによる日本語query注入は反映を確認できず、IME成功の証拠には含めない。
+- paletteを閉じた静止PNGの5秒CPU時間は0 ms（計測分解能以下）。基準機debug buildの単発観測で、起動時間・release性能・実IME候補window・物理keyboard・複数DPI/monitorのmatrixを完了したものではない。
+
 ### 必要な環境
 
 - Windows 10 22H2以降のx86-64 PC

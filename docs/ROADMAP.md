@@ -126,3 +126,5 @@ trim監査では、同じ位置のI/Oを受理しSave Asで初めて失敗する
 境界監査では、exportが余分なframeを残す秒丸めと、低精度音声PTSの16 samples差を再現・修正した。整数tick/sample端点、source時刻維持とstream指定、空trim出力のpublish拒否を追加した。source offset、frame色、非圧縮sample列、既存保存先保護と実windowのH.264/AAC保存を確認した。ただし途中Seek後の音声sub-tick位相差は残る。次はこの差の影響を定量化し、残るmetadata orientation・keyboard/IME・DPIとlaunch gateを進める。H1全体は未完了である。
 
 途中Seekの音声差は対象fixtureで8 samples（約0.167 ms）と定量化した。続いて回転metadata付き動画が横向きになる問題を実windowで再現し、90度単位の回転・反転を編集より先に適用した。hardware/software、crop保存・再open・Undoと130 testsを確認した。上下反転を含むOpenH264保存失敗と、非対応matrixの理由が消える黒画面も修正した。任意行列は明示errorとし、全container・動的metadataの保証はしない。次はkeyboard/IME・DPI、日常操作と残るlaunch gateを進める。H1全体は継続中である。
+
+日本語filenameが欠字になる問題を実windowで再現し、OS日本語fontを既定fontの後ろへ追加した。paletteのIME確定Enterの誤実行と、上下focus移動による確定文字の取りこぼしもevent回帰testで修正した。132 tests、実windowの日本語tab/statusと通常palette操作、静止時の低CPUを確認した。実IME候補操作、物理keyboard、複数DPI/monitorと残るlaunch gateは未完了で、H1を継続する。

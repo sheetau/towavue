@@ -44,6 +44,8 @@ cargo run -p towavue-app -- path\to\media.mp4
 
 H1ではtitle/tab barを黒基調の単一barへまとめ、左端logoにmenu、右端にwindow操作、下部に再生操作と省略path・状態情報を配置しました。上部の空白をdragして移動、double-clickで最大化・復元、window端をdragしてresizeできます。長い名前はhoverで全文を確認できます。
 
+日本語の名前はWindowsにある日本語fontを補助fontとして表示します。fontの同梱・downloadは行いません。日本語fontがない環境では欠字が残り、terminalへ診断を出します。paletteはIME変換・確定とcommand実行のEnterを分離していますが、実IMEの候補操作を含む入力matrixは未完了です。
+
 logo menuはFile / Edit / Viewに分かれています。FileにOpen・Export・tab close・shortcut再読込、EditにUndo・crop・回転・trim・音量/速度、Viewに再生・移動・zoom・reading・各overlayをまとめています。現在のcustom shortcutを右側に表示し、使えない項目は無効表示、縦に収まらない場合はscrollできます。
 
 F11またはViewのToggle fullscreenで、現在monitorのborderless fullscreenへ切り替えられます。通常のbar・timeline・seek barは隠れ、画像・動画・readingを広く表示します。Escapeは開いたoverlayを先に閉じ、次に通常windowへ戻ります。paletteやfilmstrip、保存確認はfullscreenでも利用でき、Tでtimelineを呼ぶと通常windowへ戻って表示します。復帰時は元の位置・size・最大化状態を保ちます。Enterは割り当てていません。

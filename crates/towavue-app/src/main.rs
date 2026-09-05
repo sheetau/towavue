@@ -557,9 +557,12 @@ where
         };
         let graphics_device = renderer.graphics_device();
         let notify = Arc::clone(&self.notify);
-        match PlaybackSession::open(&path, graphics_device, move |event| {
-            notify(AppEvent::Playback(event))
-        }) {
+        match PlaybackSession::open(
+            &path,
+            graphics_device,
+            self.edit_state().volume,
+            move |event| notify(AppEvent::Playback(event)),
+        ) {
             Ok(session) => {
                 self.generation = session.generation();
                 self.audio_drained = !session.has_audio();
@@ -1971,7 +1974,18 @@ where
             return;
         };
         if self.edits.entry(tab.id).or_default().push(operation, kind) {
-            self.set_status("Edit added (source unchanged)".into());
+            self.sync_playback_volume();
+            self.set_status(match operation {
+                EditOperation::SetVolume(_) => format!(
+                    "Volume {:.0}% · playback and export (source unchanged)",
+                    self.edit_state().volume * 100.0
+                ),
+                EditOperation::SetRate(_) => format!(
+                    "Export rate {:.2}× · live playback unchanged",
+                    self.edit_state().rate
+                ),
+                _ => "Edit added (source unchanged)".into(),
+            });
             self.refresh_title();
             self.request_redraw();
         }
@@ -1986,11 +2000,19 @@ where
             .get_mut(&id)
             .is_some_and(|history| if redo { history.redo() } else { history.undo() });
         if changed {
+            self.sync_playback_volume();
             self.image_view.selection = None;
             self.image_view.crop_preview = false;
             self.image_view.fit();
             self.refresh_title();
             self.request_redraw();
+        }
+    }
+
+    fn sync_playback_volume(&mut self) {
+        let volume = self.edit_state().volume;
+        if let Some(session) = &mut self.session {
+            session.set_volume(volume);
         }
     }
 

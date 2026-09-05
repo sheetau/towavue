@@ -71,7 +71,7 @@ cargo run -p towavue-app -- 'C:\path\to\media-folder'
 
 画像では`Ctrl+wheel`または`+` / `-`でzoom、右dragでpan、左dragでselectionを作る。`Shift`付きselectionは正方形になり、辺をdragしてresizeできる。`Ctrl+Y`でcrop、`R` / `L`で90度回転、`H` / `V`で反転する。`B`でreading mode、`Ctrl+[` / `Ctrl+]`で同時表示数を変える。
 
-動画・音声では`I` / `O`がexport用trim端点、`Up` / `Down`、`M`がexport用volume、`,` / `.` / `/`がexport用rateを編集する。これらは現在の再生そのものには反映されず、statusの値と最終exportへ反映される点に注意する。source fileは変更されない。
+動画・音声では`I` / `O`がexport用trim端点、`Up` / `Down`、`M`がvolume、`,` / `.` / `/`がexport用rateを編集する。volumeとmuteは現在の再生と最終exportの両方へ反映する。trimとrateは現在の再生には反映されない。source fileは変更されない。
 
 ## 3. Explorer順を確認する
 
@@ -123,6 +123,12 @@ towavueの「Explorer順」はfilename順の別名ではなく、そのfolderで
 - 性能の問題なら、fileの解像度・frame rate・durationと、何秒後に重くなったか
 
 private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場合は権利上問題のない小さな生成fileを使う。
+
+### H1で確認したlive volume scenario
+
+- 48 kHz stereo AACの440 Hz toneを再生し、対象towavue processだけのWASAPI session meterを読む。100%でpeak約0.0885、Down 5回の50%で約0.0442、Mのmuteで0になることを確認した。音声の録音とmaster endpointの音量変更は行わない。
+- Undoで50%へ戻し、Redoでmuteへ戻る。mute中のSeek後も0を保持する。pause中にmute解除し、resume後のpeakが元に戻る。
+- 純粋なsample testでstereo比率、bufferをまたぐ5 ms ramp、正確なzero、200% gain、初期mute時に100%の音が出ないことを確認する。
 
 ### H1で確認したimage scenario
 

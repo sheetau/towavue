@@ -6,7 +6,7 @@
 
 ### 操作とpreviewの不一致
 
-- 動画・音声のvolume、mute、rateは非破壊edit historyとexport filterには入るが、現在再生中の音量・速度を変えない。
+- 動画・音声のvolumeとmuteはH1でlive playbackにも反映する。rateは非破壊edit historyとexport filterだけに入り、現在再生中の速度を変えない。操作時にはExport rateと表示する。
 - 動画のcrop、rotate、flipもedit historyとexportには入るが、再生映像へ最終形をlive previewしない。crop selection overlayだけが見える。
 - trimは`I` / `O`で現在位置を端点として記録する方式で、timeline上のrange handleや選択範囲はない。
 
@@ -20,6 +20,8 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - animated imageはframe列を先に保持する。H1で1画像/reading要求のRGBA保持量を合計512 MiBに制限したが、decoder作業領域・GPU texture・切替前の旧画像は別である。超過時はerrorとし、部分animationや低解像度へは自動縮退しない。
 
 ### 開発版としての不足
+
+- H1試験で生成したmono PCM WAVがFFmpegの`Input changed`で停止した。AACでは再生できる。音声frameのchannel layout整合性を次に調べる。
 
 - installer、uninstaller、portable package、automatic update、file association、Explorer context menuはない。
 - settings画面、recent files、session/tab復元、window位置・sizeの保存はない。

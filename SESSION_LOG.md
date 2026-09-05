@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 15:22 JST - implementation / live playback volume
+
+- Trigger: H1's volume/mute commands changed edit history and export but not playback.
+- Intent: make current volume audible without waiting for the decoded-audio queue, while preserving clocks and source data.
+- Result: runtime applies stereo f32 gain immediately before each WASAPI write, with a 5 ms ramp and latest-only atomic target. Playback sessions retain volume through Seek/recovery; app supplies tab history before pipeline startup and synchronizes undo/redo. Volume feedback now distinguishes playback/export from the still-export-only rate command.
+- Verification: sample regressions cover unity, stereo balance, split-buffer ramps, exact mute, 200% gain, and initially muted output. The real AAC trial's own WASAPI session meter measured approximately 0.0885 at 100%, 0.0442 at 50%, and zero after mute, including undo/redo, muted Seek, and pause/resume. No recording or endpoint/master-volume changes were used. Format, all-target Clippy with warnings denied, and all-target tests pass (app 11, core 25, runtime 31 plus 1 explicitly ignored live-Explorer test, integrations 3).
+- Changed areas: audio output gain, playback lifecycle, app edit synchronization/feedback, architecture, README, roadmap, trial guide, and gap ledger. Trial windows closed; generated media and meter helper remain under ignored `target/tmp/`.
+- Evidence: image checkpoint `f634c1d` independently passed CI run `33949287014`. A generated mono PCM WAV failed with FFmpeg `Input changed` before volume editing; stereo AAC played normally. This is a newly reproduced compatibility issue, not a successful WAV trial.
+- Status: `h1_active`; rate, visual polish, and the launch audit remain incomplete.
+- Next action: fix and regress the mono PCM channel-layout failure, then continue live rate and the compact visual shell.
+
 ## 2026-09-05 15:12 JST - implementation / responsive and bounded image loading
 
 - Trigger: launch-quality H1 work continued with synchronous image and reading-page stalls.

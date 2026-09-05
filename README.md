@@ -54,6 +54,8 @@ tabをwindow外へdragしてdropすると同じmediaを別processのwindowへ移
 
 H1ではSaveをbackground化しました。書き出し中も再生・tab切替・追加編集ができ、進捗windowからcancelできます。成功時だけ出力先を置換し、失敗・cancelでは既存fileと編集を保持します。書き出し開始後に追加した編集は未保存のまま残ります。
 
+volumeとmuteは現在の再生にも反映します。undo/redo・Seek・tab復帰でも編集値を使い、他アプリやWindowsのmaster volumeは変更しません。rateは現段階ではexport用で、再生速度は変更しません。
+
 画像とreading pageのdecodeもbackground化し、切替後の古い結果は表示しません。保持するRGBA frame列は1要求合計512 MiBまでです（decoderの作業領域やGPUを含むprocess全体の上限ではありません）。上限超過・破損画像・GPUの寸法上限は画面へerrorを表示します。
 
 ## ライセンス

@@ -107,12 +107,14 @@ pub struct PlaybackSession {
     generation: PlaybackGeneration,
     target: MediaTime,
     paused: bool,
+    volume: f32,
 }
 
 impl PlaybackSession {
     pub fn open(
         path: &Path,
         graphics_device: GraphicsDevice,
+        volume: f32,
         notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlaybackError> {
         let audio_format = decode::probe_audio_format(path)?;
@@ -138,6 +140,7 @@ impl PlaybackSession {
             generation: PlaybackGeneration::INITIAL,
             target: MediaTime::ZERO,
             paused: false,
+            volume,
         };
         session.start_pipeline()?;
         Ok(session)
@@ -174,7 +177,7 @@ impl PlaybackSession {
     fn start_pipeline(&mut self) -> Result<(), PlaybackError> {
         let audio = self
             .audio_format
-            .map(|format| AudioOutput::start_at(format, self.target))
+            .map(|format| AudioOutput::start_with_volume(format, self.target, self.volume))
             .transpose()?;
         if self.paused
             && let Some(audio) = &audio
@@ -290,6 +293,13 @@ impl PlaybackSession {
         }
         self.paused = paused;
         Ok(())
+    }
+
+    pub fn set_volume(&mut self, volume: f32) {
+        self.volume = volume;
+        if let Some(audio) = &self.audio {
+            audio.set_volume(volume);
+        }
     }
 
     pub fn metrics(&self) -> PlaybackMetrics {

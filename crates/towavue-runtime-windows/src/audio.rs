@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -57,6 +57,7 @@ pub struct AudioOutput {
     control_tx: mpsc::Sender<AudioControl>,
     event_rx: Receiver<AudioOutputEvent>,
     position_nanoseconds: Arc<AtomicI64>,
+    volume: Arc<AtomicU32>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -96,6 +97,14 @@ impl AudioOutput {
         format: AudioFormat,
         media_anchor: MediaTime,
     ) -> Result<Self, AudioOutputError> {
+        Self::start_with_volume(format, media_anchor, 1.0)
+    }
+
+    pub(crate) fn start_with_volume(
+        format: AudioFormat,
+        media_anchor: MediaTime,
+        volume: f32,
+    ) -> Result<Self, AudioOutputError> {
         if format.sample_rate == 0 || format.channels != 2 {
             return Err(AudioOutputError::UnsupportedFormat(
                 format.sample_rate,
@@ -109,6 +118,8 @@ impl AudioOutput {
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let position_nanoseconds = Arc::new(AtomicI64::new(media_anchor.as_nanoseconds()));
         let thread_position = Arc::clone(&position_nanoseconds);
+        let volume = Arc::new(AtomicU32::new(normalized_volume(volume).to_bits()));
+        let thread_volume = Arc::clone(&volume);
         let thread = thread::Builder::new()
             .name("towavue-wasapi".to_owned())
             .spawn(move || {
@@ -124,6 +135,7 @@ impl AudioOutput {
                     format,
                     media_anchor,
                     &thread_position,
+                    &thread_volume,
                     audio_rx,
                     control_rx,
                     &ready_tx,
@@ -150,6 +162,7 @@ impl AudioOutput {
                 control_tx,
                 event_rx,
                 position_nanoseconds,
+                volume,
                 thread: Some(thread),
             }),
             Ok(Err(error)) => {
@@ -171,6 +184,11 @@ impl AudioOutput {
         self.control_tx
             .send(AudioControl::SetPaused(paused))
             .map_err(|_| AudioOutputError::Closed)
+    }
+
+    pub fn set_volume(&self, volume: f32) {
+        self.volume
+            .store(normalized_volume(volume).to_bits(), Ordering::Relaxed);
     }
 
     pub fn finish(&self) -> Result<(), AudioOutputError> {
@@ -206,6 +224,7 @@ fn run_audio_thread(
     format: AudioFormat,
     media_anchor: MediaTime,
     position_nanoseconds: &AtomicI64,
+    volume: &AtomicU32,
     audio_rx: Receiver<AudioMessage>,
     control_rx: Receiver<AudioControl>,
     ready_tx: &SyncSender<Result<(), String>>,
@@ -277,6 +296,7 @@ fn run_audio_thread(
         media_anchor,
         position_nanoseconds,
         &endpoint_rx,
+        volume,
     )
 }
 
@@ -292,10 +312,16 @@ fn render_audio_loop(
     media_anchor: MediaTime,
     position_nanoseconds: &AtomicI64,
     endpoint_rx: &Receiver<()>,
+    volume: &AtomicU32,
 ) -> Result<(), AudioOutputError> {
     let bytes_per_frame = format.channels as usize * size_of::<f32>();
     let queue_limit = format.sample_rate as usize * bytes_per_frame * BUFFERED_AUDIO_SECONDS;
     let mut queue = VecDeque::new();
+    let mut output = Vec::new();
+    let mut gain = VolumeRamp::new(
+        f32::from_bits(volume.load(Ordering::Relaxed)),
+        format.sample_rate,
+    );
     let mut input_ended = false;
     let mut paused = false;
     let mut running = false;
@@ -349,8 +375,11 @@ fn render_audio_loop(
                 .map_err(wasapi_error)? as usize;
             let queued_frames = queue.len() / bytes_per_frame;
             let write_frames = available.min(queued_frames);
+            output.clear();
+            output.extend(queue.drain(..write_frames * bytes_per_frame));
+            gain.apply(&mut output, f32::from_bits(volume.load(Ordering::Relaxed)));
             render_client
-                .write_to_device_from_deque(write_frames, &mut queue, None)
+                .write_to_device(write_frames, &output, None)
                 .map_err(wasapi_error)?;
 
             if !running
@@ -401,6 +430,56 @@ fn render_audio_loop(
     }
 }
 
+fn normalized_volume(volume: f32) -> f32 {
+    volume.clamp(0.0, 2.0).max(0.0)
+}
+
+struct VolumeRamp {
+    current: f32,
+    target: f32,
+    remaining: u32,
+    ramp_frames: u32,
+}
+
+impl VolumeRamp {
+    fn new(volume: f32, sample_rate: u32) -> Self {
+        Self {
+            current: volume,
+            target: volume,
+            remaining: 0,
+            ramp_frames: (sample_rate / 200).max(1),
+        }
+    }
+
+    fn apply(&mut self, bytes: &mut [u8], target: f32) {
+        if target != self.target {
+            self.target = target;
+            self.remaining = self.ramp_frames;
+        }
+        if self.current == 1.0 && self.remaining == 0 {
+            return;
+        }
+        for frame in bytes.as_chunks_mut::<8>().0 {
+            if self.remaining > 0 {
+                self.current += (self.target - self.current) / self.remaining as f32;
+                self.remaining -= 1;
+                if self.remaining == 0 {
+                    self.current = self.target;
+                }
+            }
+            for sample in frame.as_chunks_mut::<4>().0 {
+                let value = f32::from_le_bytes(*sample);
+                let scaled = if self.current == 0.0 {
+                    0.0
+                } else {
+                    value * self.current
+                };
+                sample.copy_from_slice(&scaled.to_le_bytes());
+            }
+        }
+    }
+}
+
 fn wasapi_error(error: wasapi::WasapiError) -> AudioOutputError {
     AudioOutputError::Wasapi(error.to_string())
 }
@@ -416,6 +495,65 @@ fn is_current_endpoint(current_id: &str, removed_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn volume_ramp_preserves_stereo_and_reaches_exact_mute_across_buffers() {
+        let samples = [0.5_f32, -0.25].repeat(4);
+        let source = samples
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect::<Vec<_>>();
+        let mut gain = VolumeRamp::new(1.0, 800);
+        let mut unity = source.clone();
+        gain.apply(&mut unity, 1.0);
+        assert_eq!(unity, source);
+        let mut first = source[..16].to_vec();
+        let mut second = source[16..].to_vec();
+        gain.apply(&mut first, 0.0);
+        gain.apply(&mut second, 0.0);
+        let actual = first.iter().chain(&second).copied().collect::<Vec<_>>();
+        let expected = [0.375_f32, -0.1875, 0.25, -0.125, 0.125, -0.0625, 0.0, 0.0];
+        assert_eq!(
+            actual,
+            expected
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>()
+        );
+        let mut muted = source.clone();
+        gain.apply(&mut muted, 0.0);
+        assert!(muted.iter().all(|byte| *byte == 0));
+        let mut louder = source.clone();
+        gain.apply(&mut louder, 2.0);
+        assert_eq!(
+            &louder[louder.len() - 8..],
+            [1.0_f32, -0.5]
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            source,
+            samples
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn initial_volume_is_applied_without_a_full_volume_startup() {
+        let mut gain = VolumeRamp::new(0.0, 48_000);
+        let mut output = [0.5_f32, -0.5]
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect::<Vec<_>>();
+        gain.apply(&mut output, 0.0);
+        assert_eq!(output, vec![0; 8]);
+        assert_eq!(normalized_volume(f32::NAN), 0.0);
+        assert_eq!(normalized_volume(-1.0), 0.0);
+        assert_eq!(normalized_volume(3.0), 2.0);
+    }
 
     #[test]
     fn rejects_non_stereo_format_before_opening_device() {

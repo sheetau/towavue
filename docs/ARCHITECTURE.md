@@ -109,6 +109,10 @@ reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降�
 
 exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/coreへFFmpeg型を公開しない。画像filterはoperation順のcrop / transpose / flip、動画filterはそれらとtrim / PTS rate、音声filterはatrim / PTS / atempo / volumeを適用し、metadataを入力からcopyする。2倍を超える、または0.5倍未満のrateは複数の`atempo`へ分解する。video/audio encodeは固定FFmpeg buildのsoftware codecを使い、hardware encodeはM7まで行わない。Save As後のSaveは同じexport先を更新できるが、sourceと同一pathへの出力は拒否してpartial overwriteによるsource破損を避ける。
 
+### H1 live volume
+
+動画・音声のvolumeはedit historyの現在値をlive playbackとexportで共有する。runtimeはWASAPIへ渡す直前のstereo f32 sampleへgainを適用し、decode済みqueueは元の値を保持する。変更時は5 msのrampで不連続を抑え、mute後は正確なzero sampleにする。master endpointや他applicationの音量は変更しない。初期gainはpipeline開始前に設定し、Seek・endpoint復旧・tab再open・undo/redoにも現在値を反映する。rateとtrimはこの変更には含めず、引き続きexport用である。
+
 ### H1 image loading
 
 画像decodeとreading pageの取得はruntimeの単一workerで行う。要求と完了結果はそれぞれ最新1件だけを保持し、新しい要求・media切替・closeでgenerationを更新する。workerはframe間と結果公開前にgenerationを確認し、appも現在generationに一致する結果だけをtexture化する。新しい要求は待機中の古い要求を置換し、UI threadでworkerの終了を待たない。codec内部の単一frame decodeは即座に中断できない場合があるが、workerはwindowやGPU objectを参照しない。

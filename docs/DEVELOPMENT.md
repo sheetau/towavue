@@ -124,6 +124,17 @@ towavueの「Explorer順」はfilename順の別名ではなく、そのfolderで
 
 private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場合は権利上問題のない小さな生成fileを使う。
 
+### H1で確認したexport scenario
+
+2026-09-05、Windows上の1920×1080 H.264/AAC・120秒fixtureで比較した。旧版はSave中のwindow応答確認が1秒でtimeoutした。background化後はFFmpegの稼働中も約10 msで応答し、書き出し済み時間の更新と再生継続を実windowで確認した。
+
+- Save後にCancel exportをclick → 既存targetのSHA-256が一致し、FFmpeg子processと一時directoryが残らない。
+- 編集後にCtrl+W → Export and continue → Cancel export → tabとdirty表示が残り、元の確認画面へ戻る。成功時はtabが閉じる。
+- 書き出し中にさらに回転 → 成功後もdirty。Undoで書き出した履歴位置へ戻るとsavedになる。
+- 既存targetを別processで排他openしたままexport → error詳細が残り、targetのSHA-256は一致。確認後も編集とclose guardを保持する。
+
+同時exportは1件。対象tabのclose・detach・folder内移動とprocess終了は、進行中jobの完了またはcancel後に再操作する。native Save As dialogでの出力先選択は従来どおりmodalである。
+
 ## 6. 開発の具体的な進め方
 
 今後は「人が触った一つのscenario」を最小の開発単位にする。UI全体の一括作り直しや、草案の項目を上から機械的に実装する進め方は取らない。

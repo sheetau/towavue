@@ -1,5 +1,11 @@
+use std::fs;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use thiserror::Error;
 use towavue_core::{EditOperation, EditState, MediaKind};
@@ -20,6 +26,54 @@ pub struct ExportOutcome {
     pub used_hardware_encoder: bool,
 }
 
+#[derive(Debug)]
+pub enum ExportEvent {
+    Progress(Duration),
+    Finished(Result<ExportOutcome, ExportError>),
+}
+
+/// Owns one export worker; dropping it cancels and reaps its FFmpeg process.
+pub struct ExportJob {
+    cancelled: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl ExportJob {
+    pub fn start(
+        request: ExportRequest,
+        notify: impl Fn(ExportEvent) + Send + Sync + 'static,
+    ) -> Result<Self, ExportError> {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = Arc::clone(&cancelled);
+        let thread = thread::Builder::new()
+            .name("towavue-export".into())
+            .spawn(move || {
+                let result = export_cancellable(&request, &worker_cancelled, &|time| {
+                    notify(ExportEvent::Progress(time));
+                });
+                notify(ExportEvent::Finished(result));
+            })
+            .map_err(ExportError::Start)?;
+        Ok(Self {
+            cancelled,
+            thread: Some(thread),
+        })
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+}
+
+impl Drop for ExportJob {
+    fn drop(&mut self) {
+        self.cancel();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ExportError {
     #[error("export target must differ from the source path")]
@@ -30,9 +84,21 @@ pub enum ExportError {
     Start(#[source] std::io::Error),
     #[error("FFmpeg export failed: {0}")]
     Failed(String),
+    #[error("export cancelled; existing files were not changed")]
+    Cancelled,
+    #[error("could not prepare or publish export: {0}")]
+    Output(#[source] std::io::Error),
 }
 
 pub fn export_media(request: &ExportRequest) -> Result<ExportOutcome, ExportError> {
+    export_cancellable(request, &AtomicBool::new(false), &|_| {})
+}
+
+fn export_cancellable(
+    request: &ExportRequest,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+) -> Result<ExportOutcome, ExportError> {
     if same_path(&request.source, &request.target) {
         return Err(ExportError::SameAsSource);
     }
@@ -40,20 +106,37 @@ pub fn export_media(request: &ExportRequest) -> Result<ExportOutcome, ExportErro
     if state.trim_start.is_some() && state.trim_end.is_some() && state.valid_trim().is_none() {
         return Err(ExportError::InvalidTrim);
     }
+    check_cancelled(cancelled)?;
+    let staging = StagedExport::new(&request.target)?;
+    let staged_request = ExportRequest {
+        target: staging.output.clone(),
+        ..request.clone()
+    };
     let executable = std::env::var_os("FFMPEG_DIR")
         .map(PathBuf::from)
         .map(|directory| directory.join("bin").join("ffmpeg.exe"))
         .filter(|path| path.is_file())
         .unwrap_or_else(|| PathBuf::from("ffmpeg.exe"));
     if request.hardware_encode && hardware_encode_supported_target(request) {
-        let hardware = run_ffmpeg(&executable, ffmpeg_arguments(request, true))?;
+        let hardware = run_ffmpeg(
+            &executable,
+            ffmpeg_arguments(&staged_request, true),
+            cancelled,
+            progress,
+        )?;
         if hardware.status.success() {
+            staging.publish(&request.target, cancelled)?;
             return Ok(ExportOutcome {
                 used_hardware_encoder: true,
             });
         }
     }
-    let output = run_ffmpeg(&executable, ffmpeg_arguments(request, false))?;
+    let output = run_ffmpeg(
+        &executable,
+        ffmpeg_arguments(&staged_request, false),
+        cancelled,
+        progress,
+    )?;
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         return Err(ExportError::Failed(if message.is_empty() {
@@ -62,9 +145,73 @@ pub fn export_media(request: &ExportRequest) -> Result<ExportOutcome, ExportErro
             message
         }));
     }
+    staging.publish(&request.target, cancelled)?;
     Ok(ExportOutcome {
         used_hardware_encoder: false,
     })
+}
+
+fn check_cancelled(cancelled: &AtomicBool) -> Result<(), ExportError> {
+    if cancelled.load(Ordering::Relaxed) {
+        Err(ExportError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
+struct StagedExport {
+    directory: PathBuf,
+    output: PathBuf,
+}
+
+impl StagedExport {
+    fn new(target: &Path) -> Result<Self, ExportError> {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        let target = std::path::absolute(target).map_err(ExportError::Output)?;
+        let parent = target
+            .parent()
+            .ok_or_else(|| ExportError::Failed("export target has no parent directory".into()))?;
+        loop {
+            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            let directory = parent.join(format!(".towavue-export-{}-{id}", std::process::id()));
+            match fs::create_dir(&directory) {
+                Ok(()) => {
+                    // A fixed basename prevents image-sequence expansion in user filenames.
+                    let mut output = directory.join("output");
+                    if let Some(extension) = target.extension() {
+                        output.set_extension(extension);
+                    }
+                    return Ok(Self { directory, output });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(ExportError::Output(error)),
+            }
+        }
+    }
+
+    fn publish(&self, target: &Path, cancelled: &AtomicBool) -> Result<(), ExportError> {
+        check_cancelled(cancelled)?;
+        let output = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.output)
+            .map_err(ExportError::Output)?;
+        if output.metadata().map_err(ExportError::Output)?.len() == 0 {
+            return Err(ExportError::Failed("encoder produced an empty file".into()));
+        }
+        output.sync_all().map_err(ExportError::Output)?;
+        drop(output);
+        check_cancelled(cancelled)?;
+        // Both paths are on the same filesystem; replacement happens only after encoding succeeds.
+        fs::rename(&self.output, target).map_err(ExportError::Output)
+    }
+}
+
+impl Drop for StagedExport {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.output);
+        let _ = fs::remove_dir(&self.directory);
+    }
 }
 
 fn hardware_encode_supported_target(request: &ExportRequest) -> bool {
@@ -79,14 +226,70 @@ fn hardware_encode_supported_target(request: &ExportRequest) -> bool {
 fn run_ffmpeg(
     executable: &Path,
     arguments: Vec<String>,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
 ) -> Result<std::process::Output, ExportError> {
-    let output = <Command as std::os::windows::process::CommandExt>::creation_flags(
+    check_cancelled(cancelled)?;
+    progress(Duration::ZERO);
+    let mut child = <Command as std::os::windows::process::CommandExt>::creation_flags(
         Command::new(executable).args(arguments),
         CREATE_NO_WINDOW,
     )
-    .output()
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()
     .map_err(ExportError::Start)?;
-    Ok(output)
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
+    thread::scope(|scope| {
+        scope.spawn(|| {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if let Some(time) = line
+                    .strip_prefix("out_time_us=")
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    progress(Duration::from_micros(time));
+                }
+            }
+        });
+        let diagnostics = scope.spawn(|| {
+            let mut stderr = stderr;
+            let mut tail = Vec::new();
+            let mut buffer = [0; 4096];
+            while let Ok(count) = stderr.read(&mut buffer) {
+                if count == 0 {
+                    break;
+                }
+                tail.extend_from_slice(&buffer[..count]);
+                if tail.len() > 16_384 {
+                    tail.drain(..tail.len() - 16_384);
+                }
+            }
+            tail
+        });
+        let status = loop {
+            if let Err(error) = check_cancelled(cancelled) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => thread::sleep(Duration::from_millis(20)),
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(ExportError::Start(error));
+                }
+            }
+        };
+        Ok(std::process::Output {
+            status,
+            stdout: Vec::new(),
+            stderr: diagnostics.join().expect("diagnostic reader completed"),
+        })
+    })
 }
 
 fn ffmpeg_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
@@ -96,6 +299,10 @@ fn ffmpeg_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
         "-loglevel".into(),
         "error".into(),
         "-y".into(),
+        "-nostdin".into(),
+        "-nostats".into(),
+        "-progress".into(),
+        "pipe:1".into(),
         "-i".into(),
         request.source.display().to_string(),
         "-map_metadata".into(),
@@ -344,6 +551,36 @@ mod tests {
     }
 
     #[test]
+    fn failed_encode_preserves_existing_target() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("towavue-failed-export-{unique}"));
+        fs::create_dir(&directory).expect("create fixture directory");
+        let source = directory.join("source.png");
+        let target = directory.join("target.png");
+        RgbImage::from_pixel(40, 30, Rgb([20, 40, 60]))
+            .save(&source)
+            .expect("source");
+        fs::write(&target, b"previous export").expect("existing target");
+        let result = export_media(&ExportRequest {
+            source,
+            target: target.clone(),
+            kind: MediaKind::Image,
+            operations: vec![EditOperation::Crop(UnitRect {
+                min: UnitPoint { x: 0.0, y: 0.0 },
+                max: UnitPoint { x: 0.001, y: 0.001 },
+            })],
+            hardware_encode: false,
+        });
+        assert!(result.is_err(), "zero-pixel crop must fail");
+        let contents = fs::read(&target).expect("target remains");
+        fs::remove_dir_all(&directory).expect("remove fixture directory");
+        assert_eq!(contents, b"previous export");
+    }
+
+    #[test]
     fn ffmpeg_exports_image_edits_without_changing_source() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -354,6 +591,7 @@ mod tests {
         RgbImage::from_pixel(40, 30, Rgb([20, 40, 60]))
             .save_with_format(&source, ImageFormat::Png)
             .expect("write export fixture");
+        fs::write(&target, b"previous export").expect("existing target");
         let request = ExportRequest {
             source: source.clone(),
             target: target.clone(),
@@ -376,5 +614,106 @@ mod tests {
 
         assert_eq!(original.dimensions(), (40, 30));
         assert_eq!(exported.dimensions(), (30, 20));
+    }
+
+    #[test]
+    fn cancelling_background_export_keeps_files_and_cleans_staging() {
+        use std::sync::{Mutex, mpsc};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("towavue-cancel-export-{unique}"));
+        fs::create_dir(&directory).expect("fixture directory");
+        let source = directory.join("source.png");
+        let target = directory.join("target.png");
+        RgbImage::from_pixel(40, 30, Rgb([20, 40, 60]))
+            .save(&source)
+            .expect("source");
+        let original = fs::read(&source).expect("source bytes");
+        fs::write(&target, b"previous export").expect("target");
+        let (tx, rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let resume_rx = Mutex::new(resume_rx);
+        let observed = AtomicBool::new(false);
+        let job = ExportJob::start(
+            ExportRequest {
+                source: source.clone(),
+                target: target.clone(),
+                kind: MediaKind::Image,
+                operations: vec![EditOperation::RotateClockwise],
+                hardware_encode: false,
+            },
+            move |event| match event {
+                ExportEvent::Progress(time)
+                    if !time.is_zero() && !observed.swap(true, Ordering::Relaxed) =>
+                {
+                    tx.send(ExportEvent::Progress(time))
+                        .expect("progress receiver");
+                    resume_rx
+                        .lock()
+                        .expect("resume receiver")
+                        .recv_timeout(Duration::from_secs(10))
+                        .expect("resume progress callback");
+                }
+                ExportEvent::Finished(_) => {
+                    tx.send(event).expect("completion receiver");
+                }
+                _ => {}
+            },
+        )
+        .expect("start background export");
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(10)),
+            Ok(ExportEvent::Progress(_))
+        ));
+        job.cancel();
+        resume_tx.send(()).expect("resume progress callback");
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(10)),
+            Ok(ExportEvent::Finished(Err(ExportError::Cancelled)))
+        ));
+        drop(job);
+        assert_eq!(fs::read(&target).expect("target bytes"), b"previous export");
+        assert_eq!(fs::read(&source).expect("source bytes"), original);
+        assert_eq!(
+            fs::read_dir(&directory).expect("fixture entries").count(),
+            2
+        );
+        fs::remove_dir_all(directory).expect("remove fixture directory");
+    }
+
+    #[test]
+    fn failed_publish_preserves_existing_target_and_removes_staging() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("towavue-locked-export-{unique}"));
+        fs::create_dir(&directory).expect("fixture directory");
+        let target = directory.join("target.png");
+        fs::write(&target, b"previous export").expect("target");
+        let staging = StagedExport::new(&target).expect("stage output");
+        fs::write(&staging.output, b"completed encode").expect("encoded file");
+        let locked = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&target)
+            .expect("lock target");
+        assert!(matches!(
+            staging.publish(&target, &AtomicBool::new(false)),
+            Err(ExportError::Output(_))
+        ));
+        drop(staging);
+        drop(locked);
+        assert_eq!(fs::read(&target).expect("target bytes"), b"previous export");
+        assert_eq!(
+            fs::read_dir(&directory).expect("fixture entries").count(),
+            1
+        );
+        fs::remove_dir_all(directory).expect("remove fixture directory");
     }
 }

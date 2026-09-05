@@ -149,11 +149,45 @@ impl EditHistory {
     pub fn mark_saved(&mut self) {
         self.saved_cursor = Some(self.cursor);
     }
+
+    pub fn mark_exported(&mut self, operations: &[EditOperation]) {
+        self.saved_cursor = self
+            .operations
+            .starts_with(operations)
+            .then_some(operations.len());
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn background_export_marks_only_the_exported_revision_saved() {
+        let mut history = EditHistory::default();
+        history.push(EditOperation::RotateClockwise, MediaKind::Image);
+        let exported = history.operations().to_vec();
+        history.push(EditOperation::FlipHorizontal, MediaKind::Image);
+        history.mark_exported(&exported);
+        assert!(history.is_dirty());
+        history.undo();
+        assert!(!history.is_dirty());
+        history.redo();
+        assert!(history.is_dirty());
+    }
+
+    #[test]
+    fn background_export_does_not_mark_a_replaced_branch_saved() {
+        let mut history = EditHistory::default();
+        history.push(EditOperation::RotateClockwise, MediaKind::Image);
+        let exported = history.operations().to_vec();
+        history.undo();
+        history.push(EditOperation::FlipVertical, MediaKind::Image);
+        history.mark_exported(&exported);
+        assert!(history.is_dirty());
+        history.undo();
+        assert!(history.is_dirty());
+    }
 
     #[test]
     fn undo_redo_and_saved_cursor_track_dirty_state() {

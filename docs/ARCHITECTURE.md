@@ -109,6 +109,12 @@ reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降�
 
 exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/coreへFFmpeg型を公開しない。画像filterはoperation順のcrop / transpose / flip、動画filterはそれらとtrim / PTS rate、音声filterはatrim / PTS / atempo / volumeを適用し、metadataを入力からcopyする。2倍を超える、または0.5倍未満のrateは複数の`atempo`へ分解する。video/audio encodeは固定FFmpeg buildのsoftware codecを使い、hardware encodeはM7まで行わない。Save As後のSaveは同じexport先を更新できるが、sourceと同一pathへの出力は拒否してpartial overwriteによるsource破損を避ける。
 
+### H1 export lifecycle
+
+Saveはruntime所有の単一background export jobへimmutableなsource・target・operation snapshotを渡す。appは進捗と完了eventだけを受け取り、再生とUI event loopを継続する。追加exportは現在jobの完了またはcancelまで開始しない。export中の追加編集は保持し、完了時はexportしたoperation列に対応する履歴位置だけをsavedにする。対象tabのclose・detach・folder内移動とprocess終了は、job終了まで保留する。dirty guardからのexportは成功時だけ元の操作を再評価し、cancel・失敗時は編集とguardを保持する。
+
+FFmpegはtargetと同じfilesystemの専用一時directoryへ出力する。成功・非空output・cancel未要求を確認してからrenameでtargetを置換し、失敗・cancelでは既存targetを変更しない。runtimeはFFmpegの進捗pipeとdiagnostic pipeをdrainし、cancel時には子processを終了・回収して一時outputを片付ける。hardware fallbackも同じ一時output内で行う。sourceと同一pathの拒否は維持する。
+
 ### M7 advanced presentation and interaction
 
 preview cacheはruntimeがFFmpeg / FFprobeの子processとdisk I/Oを所有し、appへowned RGBA画像とdurationだけを返す。cache keyは正規化path、file size、更新時刻、preview種別と寸法から作り、`%LOCALAPPDATA%\towavue\preview-cache`を64 MiB以内へ古い順に削減する。waveform、duration、hover thumbnailは専用workerで生成し、path付きeventをappへ返すため、古いtabの結果を現在のtabへ適用せずUI threadもblockしない。

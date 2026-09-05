@@ -19,9 +19,9 @@ use towavue_core::{
     TabTarget, UnitPoint, UnitRect, ZoomMode, command_definitions,
 };
 use towavue_runtime_windows::{
-    AudioOutputEvent, DecodedImage, ExportRequest, FolderOrderProvider, FolderWatcher,
-    FrameRenderer, PlaybackEvent, PlaybackSession, PreviewCache, RenderError, decode_image,
-    export_media, pick_export_file, pick_folder, pick_media_file,
+    AudioOutputEvent, DecodedImage, ExportError, ExportEvent, ExportJob, ExportRequest,
+    FolderOrderProvider, FolderWatcher, FrameRenderer, PlaybackEvent, PlaybackSession,
+    PreviewCache, RenderError, decode_image, pick_export_file, pick_folder, pick_media_file,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -112,9 +112,12 @@ enum UiAction {
     OpenMedia(PathBuf, bool),
     Seek(MediaTime),
     ResolveGuard(GuardDecision),
+    CancelExport,
+    DismissExportError,
 }
 
 enum AppEvent {
+    Export(ExportEvent),
     Playback(PlaybackEvent),
     Duration(PathBuf, Result<Duration, String>),
     Waveform(
@@ -141,6 +144,15 @@ enum GuardDecision {
     Save,
     Discard,
     Cancel,
+}
+
+struct ActiveExport {
+    job: ExportJob,
+    tab: TabId,
+    request: ExportRequest,
+    encoded: Duration,
+    cancelling: bool,
+    continuation: Option<GuardedAction>,
 }
 
 struct ImagePresentation {
@@ -282,6 +294,8 @@ struct Application<N> {
     tabs: TabSet,
     edits: BTreeMap<TabId, EditHistory>,
     export_paths: BTreeMap<TabId, PathBuf>,
+    active_export: Option<ActiveExport>,
+    export_error: Option<String>,
     grid_layouts: grid::GridLayouts,
     grid_path: PathBuf,
     path: Option<PathBuf>,
@@ -349,6 +363,8 @@ where
             tabs: TabSet::default(),
             edits: BTreeMap::new(),
             export_paths: BTreeMap::new(),
+            active_export: None,
+            export_error: None,
             grid_layouts,
             grid_path,
             path: None,
@@ -438,7 +454,11 @@ where
         let dirty_playlist = kind == MediaKind::Audio
             && self.tabs.tabs().iter().any(|tab| {
                 matches!(&tab.target, TabTarget::AudioFolder { folder: open, .. } if open == folder)
-                    && self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty)
+                    && (self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty)
+                        || self
+                            .active_export
+                            .as_ref()
+                            .is_some_and(|export| export.tab == tab.id))
             });
         let id = if force_new_tab || dirty_playlist {
             self.tabs.open_new(path.clone(), kind)
@@ -691,6 +711,7 @@ where
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(event) => self.handle_playback_event(event),
             AppEvent::Duration(path, result) if self.path.as_ref() == Some(&path) => match result {
                 Ok(duration) => {
@@ -923,8 +944,57 @@ where
             self.draw_command_palette(&context, actions);
         }
         self.draw_grid_menu(&context, actions);
-        if self.pending_guard.is_some() {
+        self.draw_export_status(&context, actions);
+        if let Some(error) = &self.export_error {
+            egui::Modal::new("export-error".into()).show(&context, |ui| {
+                ui.set_max_width(520.0);
+                ui.heading("Export failed");
+                ui.label("Your edits and existing files have been kept.");
+                egui::ScrollArea::vertical()
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        ui.label(error);
+                    });
+                if ui.button("OK").clicked() {
+                    actions.push(UiAction::DismissExportError);
+                }
+            });
+        } else if self.pending_guard.is_some() {
             self.draw_unsaved_guard(&context, actions);
+        }
+    }
+
+    fn draw_export_status(&self, context: &egui::Context, actions: &mut Vec<UiAction>) {
+        let Some(export) = &self.active_export else {
+            return;
+        };
+        let mut contents = |ui: &mut egui::Ui| {
+            ui.set_max_width(340.0);
+            ui.label(display_name(&export.request.target));
+            ui.label(if export.cancelling {
+                "Cancelling export…".to_owned()
+            } else {
+                format!("Encoded {}", format_time(media_time(export.encoded)))
+            });
+            if ui
+                .add_enabled(!export.cancelling, egui::Button::new("Cancel export"))
+                .clicked()
+            {
+                actions.push(UiAction::CancelExport);
+            }
+        };
+        if export.continuation.is_some() {
+            egui::Modal::new("export-before-continuing".into()).show(context, |ui| {
+                ui.heading("Exporting before continuing");
+                contents(ui);
+            });
+        } else {
+            egui::Window::new("Exporting")
+                .id("export-progress".into())
+                .anchor(Align2::RIGHT_BOTTOM, [-12.0, -44.0])
+                .resizable(false)
+                .collapsible(false)
+                .show(context, contents);
         }
     }
 
@@ -939,7 +1009,13 @@ where
             ui.label(format!("Export edits to {name} before continuing?"));
             ui.label("The source file has not been changed.");
             ui.horizontal(|ui| {
-                if ui.button("Export and continue").clicked() {
+                if ui
+                    .add_enabled(
+                        self.active_export.is_none(),
+                        egui::Button::new("Export and continue"),
+                    )
+                    .clicked()
+                {
                     actions.push(UiAction::ResolveGuard(GuardDecision::Save));
                 }
                 if ui.button("Discard edits").clicked() {
@@ -947,6 +1023,9 @@ where
                 }
                 if ui.button("Cancel").clicked() {
                     actions.push(UiAction::ResolveGuard(GuardDecision::Cancel));
+                }
+                if self.active_export.is_some() && ui.button("Cancel current export").clicked() {
+                    actions.push(UiAction::CancelExport);
                 }
             });
         });
@@ -1574,6 +1653,17 @@ where
             }
             UiAction::Seek(target) => self.seek_to(target),
             UiAction::ResolveGuard(decision) => self.resolve_guard(decision),
+            UiAction::CancelExport => {
+                if let Some(export) = &mut self.active_export {
+                    export.cancelling = true;
+                    export.job.cancel();
+                }
+                self.request_redraw();
+            }
+            UiAction::DismissExportError => {
+                self.export_error = None;
+                self.request_redraw();
+            }
         }
     }
 
@@ -1804,6 +1894,12 @@ where
     }
 
     fn export_current(&mut self, force_dialog: bool) -> bool {
+        if self.active_export.is_some() {
+            self.set_status(
+                "An export is already running. Wait for it or choose Cancel export.".into(),
+            );
+            return false;
+        }
         let Some((id, source, kind)) = self.tabs.active().map(|tab| {
             (
                 tab.id,
@@ -1844,27 +1940,80 @@ where
             operations,
             hardware_encode: self.prefer_hardware_encode,
         };
-        match export_media(&request) {
-            Ok(outcome) => {
-                self.export_paths.insert(id, target.clone());
-                if let Some(history) = self.edits.get_mut(&id) {
-                    history.mark_saved();
-                }
-                let encoder = if outcome.used_hardware_encoder {
-                    "hardware"
-                } else {
-                    "software"
-                };
-                self.set_status(format!("Exported {} ({encoder} encode)", target.display()));
-                self.refresh_title();
+        let notify = Arc::clone(&self.notify);
+        match ExportJob::start(request.clone(), move |event| {
+            notify(AppEvent::Export(event))
+        }) {
+            Ok(job) => {
+                self.active_export = Some(ActiveExport {
+                    job,
+                    tab: id,
+                    request,
+                    encoded: Duration::ZERO,
+                    cancelling: false,
+                    continuation: None,
+                });
                 self.request_redraw();
                 true
             }
             Err(error) => {
-                self.set_status(error.to_string());
+                self.export_error = Some(error.to_string());
+                self.request_redraw();
                 false
             }
         }
+    }
+
+    fn handle_export_event(&mut self, event: ExportEvent) {
+        match event {
+            ExportEvent::Progress(time) => {
+                if let Some(export) = &mut self.active_export {
+                    export.encoded = time;
+                }
+            }
+            ExportEvent::Finished(result) => {
+                let Some(export) = self.active_export.take() else {
+                    return;
+                };
+                match result {
+                    Ok(outcome) => {
+                        if self.tabs.tabs().iter().any(|tab| {
+                            tab.id == export.tab
+                                && tab.target.current_path() == export.request.source
+                        }) {
+                            self.export_paths
+                                .insert(export.tab, export.request.target.clone());
+                            self.edits
+                                .entry(export.tab)
+                                .or_default()
+                                .mark_exported(&export.request.operations);
+                        }
+                        let encoder = if outcome.used_hardware_encoder {
+                            "hardware"
+                        } else {
+                            "software"
+                        };
+                        self.set_status(format!(
+                            "Exported {} ({encoder} encode)",
+                            export.request.target.display()
+                        ));
+                        self.refresh_title();
+                        if let Some(action) = export.continuation {
+                            self.request_guarded(action);
+                        }
+                    }
+                    Err(error) => {
+                        if matches!(error, ExportError::Cancelled) {
+                            self.set_status(error.to_string());
+                        } else {
+                            self.export_error = Some(error.to_string());
+                        }
+                        self.pending_guard = export.continuation.or(self.pending_guard.take());
+                    }
+                }
+            }
+        }
+        self.request_redraw();
     }
 
     fn zoom_image(&mut self, factor: f32) {
@@ -1888,6 +2037,22 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        if let Some(export) = &self.active_export {
+            let affects_export = match &action {
+                GuardedAction::CloseTab(id) | GuardedAction::DetachTab(id) => *id == export.tab,
+                GuardedAction::Navigate(_) => {
+                    self.tabs.active().is_some_and(|tab| tab.id == export.tab)
+                }
+                GuardedAction::Exit => true,
+            };
+            if affects_export {
+                self.set_status(
+                    "Export is in progress. Wait for it or choose Cancel export before leaving."
+                        .into(),
+                );
+                return;
+            }
+        }
         let dirty = match action {
             GuardedAction::CloseTab(id) => self
                 .edits
@@ -1928,7 +2093,10 @@ where
         match decision {
             GuardDecision::Save => {
                 if self.export_current(false) {
-                    self.request_guarded(action);
+                    self.active_export
+                        .as_mut()
+                        .expect("export just started")
+                        .continuation = Some(action);
                 } else {
                     self.pending_guard = Some(action);
                 }
@@ -2292,6 +2460,15 @@ where
     }
 
     fn process_key(&mut self, event: &KeyEvent) {
+        if self.pending_guard.is_some()
+            || self.export_error.is_some()
+            || self
+                .active_export
+                .as_ref()
+                .is_some_and(|export| export.continuation.is_some())
+        {
+            return;
+        }
         if event.state != ElementState::Pressed || event.repeat {
             return;
         }

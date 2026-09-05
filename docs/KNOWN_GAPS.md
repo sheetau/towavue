@@ -1,6 +1,6 @@
 # towavue 既知の不足と草案との差
 
-この文書はM7 checkpoint時点の実装を、これから人が触って改善するための基準として整理する。`concepts/concept.txt`は発想の参照元であり、ここに載っている項目も採用決定ではない。優先順位は実際の試用結果、再現性、利用頻度、architecture riskで更新する。
+この文書はM7 checkpointとH1での改善を、これから人が触って改善するための基準として整理する。`concepts/concept.txt`は発想の参照元であり、ここに載っている項目も採用決定ではない。優先順位は実際の試用結果、再現性、利用頻度、architecture riskで更新する。
 
 ## 1. 試用前に知るべき制約
 
@@ -15,7 +15,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 ### UI threadを止める処理
 
 - 画像decodeとreading modeの複数画像loadは同期処理であり、大きい画像、animation、多数pageでwindowが応答しにくくなり得る。
-- Save/Save AsはFFmpeg processの完了をUI threadで待つ。progress、cancel、background export queueはない。
+- Save/Save AsはH1でbackground化済み。書き出した時間とcancelを表示し、完了までは一時outputだけを変更する。同時jobは1件でqueueはない。通常export中も再生・tab切替・追加編集ができるが、対象tabのclose・移動とprocess終了はjobの完了またはcancelを待つ。
 - waveform、duration、hover thumbnailはworker化済みだが、mediaを切り替えた後も開始済みFFmpeg process自体はcancelせず、返った古い結果を捨てる方式である。
 - animated imageはframe列を先に保持するため、長い・大きいanimationのmemory上限を定義していない。
 
@@ -24,7 +24,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - installer、uninstaller、portable package、automatic update、file association、Explorer context menuはない。
 - settings画面、recent files、session/tab復元、window位置・sizeの保存はない。
 - Explorerからwindowへのfile drag-and-dropはない。tabのwindow外dropだけが実装されている。
-- errorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
+- export errorは確認するまで残る詳細modalを表示する。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
 - end-to-end UI test、visual regression、accessibility検査、複数DPI/monitorの自動matrixはない。現在のUI完了判定には実window操作が必要である。
 
 ## 2. UI草案との対応
@@ -116,7 +116,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Hardware encode | H.264 Media Foundationを強制要求し、失敗時software fallback。基準adapterではhardware成功を確認できていない |
 | NVENC/AMF/QSV encode選択 | 未実装 |
 | Codec、quality、bitrate、containerの選択UI | 未実装。拡張子別の固定codec |
-| Export progress/cancel/失敗後のpartial target処理 | 未実装 |
+| Export progress/cancel/失敗後のpartial target処理 | 書き出し済み時間とcancelを表示。成功後だけ一時outputをtargetへ置換し、失敗・cancelで既存targetと編集を保持。残り時間予測とqueueはない |
 | PQ/HLGのHDR→SDR | D3D11 Video Processorが変換を保証したhardware frameだけ許可。基準adapterは非対応error |
 | HDR displayへの10-bit pass-through | 未実装、対応を宣言しない |
 | Waveform/thumbnail disk cache | 実装済み。64 MiB固定で管理UIや手動clear commandはない |
@@ -147,7 +147,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 1. Open、folder navigation、Explorer順、play/pause/seek、画像zoom/panという日常flowの摩擦を記録する。
 2. Volume/rate/trim/cropなど「見える結果」と「export結果」の不一致を解消する。
-3. 大きい画像と長いexportの応答停止をworker、progress、cancelで解消する。
+3. 大きい画像の応答停止を解消する。長いexportのworker、進捗表示、cancelと既存target保護はH1で検証済み。
 4. Timeline、tab、filmstrip、menuを実際の利用頻度に基づいて磨く。
 5. DPI、keyboard-only、長いfile名、error/loading state、accessibilityを横断確認する。
 6. その後にrecent/session復元、file association、packagingを決める。

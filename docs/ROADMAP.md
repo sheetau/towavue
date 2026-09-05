@@ -152,3 +152,5 @@ Seek計測を同期再構築の前から最初の映像Present成功までへ修
 graphics recovery開始時のAccess deniedを実windowで再現し、旧worker・swap chainの解放順序を修正した。交換後のfont/画像再送とpreview失効も追加し、再生動画・編集済み停止動画・回転画像で復旧と編集保持を確認した。試験用呼び出し除去後の146 tests・通常release再生も通過した。前checkpointのCIは新規Seek testsの設定共有で失敗しており、既存のprocess/config分離方式を適用した。次はこのCI修正の確認と、renderer再作成不能時の未保存編集の救済・通知経路を検証する。実driver reset、endpoint切替、IME/DPIとH1全体は未完了。
 
 renderer再作成不能時のnative確認を追加し、Retry、Cancelでの編集保持、描画なしのExport失敗・再保存・正常終了を実windowで確認した。停止動画は待機後も元の位置・1.25倍・停止を保ち、復旧後に残ったFaulted titleも修正した。保存PNGは回転後の64画素が一致し、148 tests・通常release buildが通った。前checkpointのCIも成功。次は複数dirty tabとexport中の故障/取消、実driver/endpoint経路を継続監査する。H1全体は未完了。
+
+native復旧確認中に保存が完了すると保存済みtabを再確認する問題を再現し、確認終了後に残るdirty tabを選び直すよう修正した。実windowで2枚とも保存してから終了し、出力画素も一致した。追加試験で、生成設定の`zoom_in = +`が次回起動時に読めない決定的な不具合も判明した。`Plus`による保存と旧形式の読込を対応し、隔離設定の初回起動・再起動・旧設定Reloadを確認した。以前のCI原因を「競合」とした説明は未証明で、この生成/読込不一致を訂正根拠とする。151 tests・Clippy・releaseが通過。次はexport取消を含む残る組合せとdevice/endpointの監査を続ける。H1全体は未完了。

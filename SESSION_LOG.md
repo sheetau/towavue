@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 06:12 JST - continuity / recheck dirty tabs and repair generated shortcut round trips
+
+- Trigger/reproduction: a real background-export regression test with two dirty tabs failed after export completed under the Recovery prompt. Closing that prompt left active TabId(0), already saved, instead of unsaved TabId(1). Only ExportBusy previously revalidated the delayed action.
+- Fix: revalidate pending continuation after any native response, but only without a running export, file dialog or unacknowledged export error. Cancelled guards remain cancelled. Both Recovery/ExportBusy cases now export the two files in order, retain both sources, and request Exit only after both histories are saved.
+- Native evidence: two edited 8x8 PNG tabs, initial egui Export-and-continue, then temporary app-only graphics failure at the first successful completion. Recovery Cancel now opens the native guard naming the second dirty file. Saving it closes the process; both output PNGs match all 64 expected rotated source pixels. No source files or OS settings were changed. Temporary export-recovery injection/environment removed and owned process 41100 exited; ignored h1-multitab evidence remains.
+- IMPORTANT correction to earlier CI diagnosis: 33990773745's line-18 shortcut error was previously attributed to first-run config contention without proof. A single-thread serialize(defaults)->parse test now deterministically reproduces it: generated zoom_in = + was rejected by the plus-delimited parser. Sequential Application creation in one isolated profile exposed the same issue. Test isolation was appropriate, but did not fix this product startup/reload defect; concurrent-write involvement in the old run remains unproven.
+- Shortcut fix/evidence: serialize plus as Plus; accept the legacy standalone + and modifier ++ forms without rewriting existing files. Tests cover every default binding, canonical/legacy plus prefix sequences and malformed inputs. Normal release native launches in a fresh isolated profile succeed on first and second launch; a third launch with legacy + and Ctrl+K Ctrl+S reload also succeeds, with unchanged config hash. Current user profile was not modified. Ignored h1-shortcuts-reopen retains that profile and captures; all three owned windows closed normally.
+- Verification/status: format, all-target Clippy with warnings denied, all 151 tests and release build pass (app 63, core 34, runtime 50, integrations 4; three live tests explicitly ignored for WASAPI/Explorer). Prior cf0afe7 CI 33991965336 succeeded. h1_active; follow new CI, then continue in-flight cancellation/other recovery combinations and actual device/endpoint evidence. Physical IME/mixed-DPI and distribution remain incomplete.
+
 ## 2026-09-06 06:04 JST - recovery / GPU-independent prompts protect unsaved edits
 
 - Trigger/intent: after renderer recreation fails, the egui dirty guard cannot be painted. Add an owned native prompt path without changing normal UI/export behavior or OS graphics settings.

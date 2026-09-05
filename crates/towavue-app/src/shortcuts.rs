@@ -139,6 +139,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn generated_defaults_can_be_loaded_again_without_changing_any_binding() {
+        let bindings = defaults();
+        let reloaded = parse(&serialize(&bindings), defaults()).expect("reload generated defaults");
+        for (command, sequence) in bindings.iter() {
+            assert_eq!(reloaded.get(command), Some(sequence));
+        }
+        let legacy = serialize(&bindings).replace("zoom_in = Plus", "zoom_in = +");
+        let reloaded = parse(&legacy, defaults()).expect("reload old generated configuration");
+        assert_eq!(
+            reloaded.get(CommandId::ZoomIn),
+            bindings.get(CommandId::ZoomIn)
+        );
+    }
+
+    #[test]
     fn fullscreen_defaults_survive_old_configuration_and_can_be_overridden() {
         let bindings = parse("toggle_pause = P\n", defaults()).expect("old configuration");
         assert_eq!(

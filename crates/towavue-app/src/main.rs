@@ -3302,12 +3302,14 @@ where
                     export.job.cancel();
                     export.cancelling = true;
                 }
-                if self.active_export.is_none()
-                    && let Some(action) = self.pending_guard.take()
-                {
-                    self.request_guarded(action);
-                }
             }
+        }
+        if self.active_export.is_none()
+            && self.pending_dialog.is_none()
+            && self.export_error.is_none()
+            && let Some(action) = self.pending_guard.take()
+        {
+            self.request_guarded(action);
         }
         self.request_redraw();
     }
@@ -5437,6 +5439,101 @@ mod tests {
         app.pending_dialog = Some(DialogIntent::OpenFolder);
         app.finish_dialog(Ok(None));
         assert_eq!(app.path.as_ref(), Some(&source));
+    }
+
+    #[test]
+    fn export_finishing_during_native_prompt_rechecks_remaining_dirty_tabs() {
+        let Some(root) = isolated_test_root(
+            "tests::export_finishing_during_native_prompt_rechecks_remaining_dirty_tabs",
+        ) else {
+            return;
+        };
+        for recovery in [true, false] {
+            let (notify, events) = std::sync::mpsc::channel();
+            let mut app = Application::new(None, move |event| {
+                let _ = notify.send(event);
+            })
+            .expect("headless application");
+            let source_bytes = b"P6\n2 1\n255\n\xff\x00\x00\x00\xff\x00";
+            let mut tabs = Vec::new();
+            let mut outputs = Vec::new();
+            for index in 0..2 {
+                let source = root.join(format!("{recovery}-{index}.ppm"));
+                let output = root.join(format!("{recovery}-{index}.png"));
+                std::fs::write(&source, source_bytes).expect("tiny export source");
+                std::fs::write(&output, b"existing output").expect("existing target");
+                let tab = app.tabs.open_new(source, MediaKind::Image);
+                app.edits
+                    .entry(tab)
+                    .or_default()
+                    .push(EditOperation::RotateClockwise, MediaKind::Image);
+                app.export_paths.insert(tab, output.clone());
+                tabs.push(tab);
+                outputs.push(output);
+            }
+            app.tabs.activate(tabs[0]);
+            app.path = Some(
+                app.tabs
+                    .active()
+                    .expect("first tab")
+                    .target
+                    .current_path()
+                    .to_owned(),
+            );
+            app.media_kind = Some(MediaKind::Image);
+            assert!(app.export_current(false, Some(GuardedAction::Exit)));
+            app.native_prompt = Some(if recovery {
+                FallbackPrompt::Recovery {
+                    position: MediaTime::ZERO,
+                    state: PlaybackState::Paused,
+                    error: "test graphics failure".into(),
+                }
+            } else {
+                FallbackPrompt::ExportBusy
+            });
+            let finish_export = |app: &mut Application<_>| {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while app.active_export.is_some() {
+                    let event = events
+                        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        .expect("export event");
+                    if let AppEvent::Export(event) = event {
+                        app.handle_export_event(event);
+                    }
+                }
+                assert!(app.export_error.is_none(), "{:?}", app.export_error);
+            };
+            finish_export(&mut app);
+            assert!(!app.edits[&tabs[0]].is_dirty());
+            assert!(app.edits[&tabs[1]].is_dirty());
+            assert!(!app.exit_requested);
+            assert_eq!(
+                app.tabs.active().expect("still owned by prompt").id,
+                tabs[0]
+            );
+            app.finish_native_prompt(Ok(PromptResponse::Cancel));
+            assert_eq!(app.tabs.active().expect("next unsaved tab").id, tabs[1]);
+            assert!(matches!(app.pending_guard, Some(GuardedAction::Exit)));
+            assert!(!app.exit_requested);
+            app.native_prompt = Some(FallbackPrompt::Guard);
+            app.finish_native_prompt(Ok(PromptResponse::Yes));
+            finish_export(&mut app);
+            assert!(app.edits.values().all(|history| !history.is_dirty()));
+            assert!(app.exit_requested);
+            for output in outputs {
+                assert!(
+                    std::fs::read(output)
+                        .expect("published PNG")
+                        .starts_with(b"\x89PNG")
+                );
+            }
+            for tab in app.tabs.tabs() {
+                assert_eq!(
+                    std::fs::read(tab.target.current_path()).expect("source retained"),
+                    source_bytes
+                );
+            }
+        }
     }
 
     #[test]

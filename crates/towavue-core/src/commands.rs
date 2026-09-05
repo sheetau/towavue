@@ -202,6 +202,7 @@ impl fmt::Display for KeyStroke {
             formatter.write_str("Win+")?;
         }
         match self.key {
+            Key::Character('+') => formatter.write_str("Plus"),
             Key::Character(character) => write!(formatter, "{}", character.to_ascii_uppercase()),
             Key::Space => formatter.write_str("Space"),
             Key::ArrowLeft => formatter.write_str("Left"),
@@ -219,6 +220,12 @@ impl FromStr for KeyStroke {
     type Err = ();
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value == "+" {
+            return "Plus".parse();
+        }
+        if let Some(prefix) = value.strip_suffix("++") {
+            return format!("{prefix}+Plus").parse();
+        }
         let mut modifiers = Modifiers::default();
         let mut key = None;
         for part in value.split('+') {
@@ -575,6 +582,28 @@ mod tests {
             bindings.resolve(std::slice::from_ref(&prefix), CommandContext::default()),
             ShortcutMatch::None
         );
+    }
+
+    #[test]
+    fn plus_shortcuts_round_trip_and_accept_legacy_serialized_spelling() {
+        for (legacy, canonical) in [
+            ("+", "Plus"),
+            ("Ctrl++", "Ctrl+Plus"),
+            ("Ctrl+Shift++", "Ctrl+Shift+Plus"),
+            ("Ctrl+K Alt++", "Ctrl+K Alt+Plus"),
+        ] {
+            let sequence = legacy.parse::<KeySequence>().expect("legacy plus binding");
+            assert_eq!(sequence.to_string(), canonical);
+            assert_eq!(
+                canonical
+                    .parse::<KeySequence>()
+                    .expect("canonical plus binding"),
+                sequence
+            );
+        }
+        for malformed in ["++", "Ctrl+", "Ctrl+++", "Ctrl++A"] {
+            assert!(malformed.parse::<KeySequence>().is_err(), "{malformed}");
+        }
     }
 
     #[test]

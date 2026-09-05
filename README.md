@@ -44,6 +44,8 @@ cargo run -p towavue-app -- path\to\media.mp4
 
 prefixの続きは1秒以内に入力します。Escape、click、別commandやwindowへのfocus移動で待ちを解除し、途中から戻ったkeyを前のprefixへつなげません。
 
+設定ファイルでは`+` keyを`Plus`（例: `Ctrl+Plus`）と書けます。旧版が生成した`+`や`Ctrl++`も読み込めるため、既存設定の書き直しは不要です。
+
 保存確認のEscapeは編集を保持してCancelします。export失敗ではエラー通知だけを閉じ、保留中の保存確認は残ります。背景クリックで保存・破棄・確認解除は行いません。
 
 graphicsの再作成に失敗した場合はWindows標準のRetry/Cancelを表示します。Cancelは編集を保持し、Alt+F4で終了を要求すると、描画なしでもYes（現在fileをExport）／No（終了時は全未保存編集を破棄）／Cancel（保持）の確認から保存できます。保存失敗もnative通知で案内し、編集は残します。export中はwindow titleへ進捗を表示します。

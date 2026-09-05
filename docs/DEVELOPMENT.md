@@ -141,6 +141,14 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - folder起動後のreading 2枚表示、watcher更新による2→3件のsnapshot反映、別folderをOpenした後のreading表示を確認した。runtimeの同期APIを使う実Explorer sort matrixも別途実行し、skipなしで通過した。
 - runtime testは中間要求の置換、古い結果・完了済みslotの失効、実行中のcloseと結果抑止を検証する。app testは背景refreshが明示Openを上書きしないこと、別mediaを開いた後や最後のtab close後の失効も検証する。
 
+### H1で確認したExplorer drop scenario
+
+- Explorerで生成PNGをつかみ、Welcome画面の中央へdropする。修正前は何も開かなかった。修正後はhover案内が表示され、drop後に新規tabと画像が出る。ドラッグ中にEscapeで取り消すと案内が消え、現在tabは変わらない。
+- 画像を回転して未保存にし、別画像をdropする。元tabの`*`と回転結果を保持したまま新規tabが開く。未保存tabをcloseして確認中に別画像をdropすると、tab数・確認対象・編集を変えず拒否statusを表示する。
+- 実Explorerの2画像同時選択からのdropで2つのtab追加、folder dropで配下の先頭画像、MP4/H.264/AACとWAVのdropで再生開始を確認した。Windowsの実OLE drag/dropであり、path eventを直接注入した試験ではない。回転用keyは対象windowへ送信しており、物理keyboard/IME matrixの証拠ではない。
+- headless testは画像のdirty保持、native picker/dirty guard/export error中のfile・folder拒否、unsupported/missing fileの非破壊な失敗、音声playlist再利用とdirty playlistの保持、非同期folder Openを検証する。
+- 複数folder要求は既存Open Folderと同じlatest-onlyで、全folderを展開するimport機能ではない。virtual file・URL・異なる権限レベルからのdropや複数DPI/monitorは未検証。
+
 ### H1で確認したnative picker scenario
 
 - 30秒H.264/AACの再生中にOpen Folderを開き、約2秒待ってCancelする。Shell非同期化だけのbuildでは92 presented / 808 dropped、drift最大3123.274 msだった。pickerを専用STAへ移したbuildでは900 presented / 0 CPU transfers / 0 drops、drift p95/max 3.862/3.977 msとなった。picker表示中にも動画内のframe counterが進むことをcaptureで確認した。

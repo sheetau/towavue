@@ -28,7 +28,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 - installer、uninstaller、portable package、automatic update、file association、Explorer context menuはない。
 - settings画面、recent files、session/tab復元、window位置・sizeの保存はない。
-- Explorerからwindowへのfile drag-and-dropはない。tabのwindow外dropだけが実装されている。
+- Explorerからのfile/folder dropはH1で実装した。複数fileは既存Open契約で開き、folderはShell順の先頭mediaを開く。folder要求は最新1件で、複数folderを一括展開するimport queueではない。virtual file、URL、app間tab結合は対象外。
 - export errorは確認するまで残る詳細modal、画像load errorは画像領域（readingでは該当page）に表示する。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
 - end-to-end UI test、visual regression、accessibility検査、複数DPI/monitorの自動matrixはない。現在のUI完了判定には実window操作が必要である。
 
@@ -42,6 +42,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | 全media filmstripと同種/全種移動 | 基本実装済み。filmstripはfilenameのtext listでthumbnailはない |
 | 画像/動画はfile tab、音声はfolder playlist tab | 実装済み |
 | Filmstrip middle-clickで新規tab | 実装済み |
+| Explorerからfile/folderをdropして開く | H1で実装。hover案内、複数file、dirty編集保持、modal中の拒否を確認 |
 | Tabをwindow外へdrag | 別process起動として実装。dirty editの移送はせずguardする |
 | 別windowへtabをdragして結合 | 未実装。process間protocolもない |
 | Filmstrip itemをwindow外へdrag | 未実装 |

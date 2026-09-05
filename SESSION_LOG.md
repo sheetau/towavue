@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 18:32 JST - UX / Explorer file and folder drop
+
+- Trigger: previous goal turn made concrete idle-performance progress; cad6608 passed CI 33957694019. A real Explorer image drop into Welcome did nothing because app ignored winit's DroppedFile event.
+- Result: route owned dropped paths through existing external Open or asynchronous Open Folder. Show a non-interactive hover hint and clear it on drop/cancel via egui-winit's existing input state. Share the existing modal-input predicate with keyboard handling so native picker, dirty guard, export error and guarded export cannot have their target changed by drop. No filesystem copy/move, new dependency, native handle or unsafe code.
+- Behavior: visual media opens new tabs; clean audio playlists reuse the same-folder tab, while dirty/exporting playlists remain intact. Unsupported/missing files retain current tabs. Folder requests remain latest-only Shell Open, not multi-folder import or recursive expansion.
+- Real-window verification: Explorer OLE drag/drop opened PNG, MP4/H.264/AAC and WAV, opened two selected images as two tabs, and opened a folder's first image. Hover cancellation kept the current tab. A rotated dirty image remained in its original tab after another drop; dropping during its close guard retained the guard/tab/edit and showed a rejection status. Rotation setup used targeted key messages; this does not prove physical-keyboard/IME coverage.
+- Automated verification: focused drop tests, format, workspace all-target Clippy with warnings denied, and workspace tests pass (app 25, core 26, runtime 39, integrations 3; three live tests explicitly ignored). Tests cover dirty retention, modal rejection, unsupported/missing files, audio reuse/dirty separation, and asynchronous folder completion.
+- Changed areas: app drop entry/hover/modal predicate/tests, README, architecture, roadmap, trial guide, gap ledger, and this log. Trial media, helper and captures remain ignored under target/tmp. The trial app and only the Explorer window created for this fixture were closed; no source files were changed by drop.
+- Status: h1_active; local file/folder drop works for the exercised flows, not virtual-file, URL, multi-folder import or DPI/permission matrix completion.
+- Next action: verify checkpoint CI, inspect filmstrip thumbnail and menu discoverability gaps against the accepted UI direction, then continue launch audits.
+
 ## 2026-09-05 18:20 JST - performance / stop idle repaint loops
 
 - Trigger: the native-dialog trial suggested excessive redraw events even with no animation. Previous goal turn was progress; checkpoint fb42ed0 independently passed CI 33956914171.

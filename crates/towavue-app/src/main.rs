@@ -548,6 +548,22 @@ where
         self.load_path(path, kind);
     }
 
+    fn open_dropped_path(&mut self, path: PathBuf) {
+        if self.modal_input_blocked() {
+            self.set_status("Close the dialog before dropping files.".into());
+            return;
+        }
+        self.palette_open = false;
+        self.grid_open = false;
+        self.entered_shortcut.clear();
+        self.prefix_started = None;
+        if path.is_dir() {
+            self.open_folder_path(path);
+        } else {
+            self.open_external(path, false);
+        }
+    }
+
     fn open_folder_path(&mut self, folder: PathBuf) {
         let generation = self.folder_order.request(Some(folder));
         self.pending_folder = Some((generation, FolderIntent::Open));
@@ -1104,7 +1120,7 @@ where
                     ui.vertical_centered(|ui| {
                         ui.add_space((ui.available_height() * 0.35).max(20.0));
                         ui.heading("towavue");
-                        ui.label("Open a media file or a folder to begin.");
+                        ui.label("Open or drop media files or a folder to begin.");
                         ui.horizontal(|ui| {
                             if ui.button("Open file").clicked() {
                                 actions.push(UiAction::Command(CommandId::OpenFile));
@@ -1157,6 +1173,31 @@ where
             });
         } else if self.pending_guard.is_some() {
             self.draw_unsaved_guard(&context, actions);
+        }
+        if context.input(|input| !input.raw.hovered_files.is_empty()) {
+            let painter = context.layer_painter(egui::LayerId::new(
+                egui::Order::Tooltip,
+                egui::Id::new("external-file-drop"),
+            ));
+            let rect = context.content_rect().shrink(8.0);
+            painter.rect_filled(rect, 6.0, egui::Color32::from_black_alpha(190));
+            painter.rect_stroke(
+                rect,
+                6.0,
+                egui::Stroke::new(1.0, chrome::MUTED),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                if self.modal_input_blocked() {
+                    "Close the dialog before dropping files"
+                } else {
+                    "Drop to open media files or a folder"
+                },
+                egui::FontId::proportional(18.0),
+                egui::Color32::WHITE,
+            );
         }
     }
 
@@ -3036,15 +3077,18 @@ where
         }
     }
 
-    fn process_key(&mut self, event: &KeyEvent) {
-        if self.pending_dialog.is_some()
+    fn modal_input_blocked(&self) -> bool {
+        self.pending_dialog.is_some()
             || self.pending_guard.is_some()
             || self.export_error.is_some()
             || self
                 .active_export
                 .as_ref()
                 .is_some_and(|export| export.continuation.is_some())
-        {
+    }
+
+    fn process_key(&mut self, event: &KeyEvent) {
+        if self.modal_input_blocked() {
             return;
         }
         if event.state != ElementState::Pressed || event.repeat {
@@ -3568,6 +3612,7 @@ where
         }
         match event {
             WindowEvent::CloseRequested => self.request_guarded(GuardedAction::Exit),
+            WindowEvent::DroppedFile(path) => self.open_dropped_path(path),
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = self.renderer.as_mut()
                     && let Err(error) = renderer.resize_surface(size.width, size.height)
@@ -3701,6 +3746,82 @@ mod tests {
         assert_eq!(app.idle_wakeup(now), Some(now + PREFIX_TIMEOUT));
         app.prefix_started = None;
         assert_eq!(app.idle_wakeup(now), None);
+    }
+
+    #[test]
+    fn file_drops_preserve_edits_and_obey_modal_guards() {
+        let Some(root) =
+            isolated_test_root("tests::file_drops_preserve_edits_and_obey_modal_guards")
+        else {
+            return;
+        };
+        for name in ["one.png", "two.png", "one.wav", "two.wav", "notes.txt"] {
+            std::fs::write(root.join(name), []).expect("media placeholder");
+        }
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.open_dropped_path(root.join("one.png"));
+        let image_tab = app.tabs.active().expect("image tab").id;
+        app.dispatch(CommandId::RotateClockwise);
+        app.open_dropped_path(root.join("two.png"));
+        assert_eq!(app.tabs.tabs().len(), 2);
+        assert!(app.edits[&image_tab].is_dirty());
+        let tabs = app.tabs.clone();
+        for blocked in 0..3 {
+            match blocked {
+                0 => app.pending_guard = Some(GuardedAction::CloseTab(image_tab)),
+                1 => app.pending_dialog = Some(DialogIntent::OpenFile),
+                _ => app.export_error = Some("export failure".into()),
+            }
+            app.open_dropped_path(root.join("one.png"));
+            app.open_dropped_path(root.clone());
+            assert_eq!(app.tabs, tabs);
+            assert!(!matches!(app.pending_folder, Some((_, FolderIntent::Open))));
+            assert!(app.edits[&image_tab].is_dirty());
+            app.pending_guard = None;
+            app.pending_dialog = None;
+            app.export_error = None;
+        }
+        for rejected in ["notes.txt", "missing.png"] {
+            app.open_dropped_path(root.join(rejected));
+            assert_eq!(app.tabs, tabs);
+            assert!(app.edits[&image_tab].is_dirty());
+        }
+        app.open_dropped_path(root.join("one.wav"));
+        let audio_tab = app.tabs.active().expect("audio tab").id;
+        app.open_dropped_path(root.join("two.wav"));
+        assert_eq!(app.tabs.active().expect("reused playlist").id, audio_tab);
+        app.push_edit(EditOperation::SetVolume(0.5));
+        app.open_dropped_path(root.join("one.wav"));
+        assert_ne!(app.tabs.active().expect("new playlist").id, audio_tab);
+        assert!(app.edits[&audio_tab].is_dirty());
+        assert_eq!(app.tabs.tabs().len(), 4);
+    }
+
+    #[test]
+    fn folder_drop_uses_asynchronous_shell_open() {
+        let Some(root) = isolated_test_root("tests::folder_drop_uses_asynchronous_shell_open")
+        else {
+            return;
+        };
+        let folder = root.join("folder");
+        std::fs::create_dir(&folder).expect("fixture folder");
+        let source = folder.join("one.png");
+        std::fs::write(&source, []).expect("media placeholder");
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.open_dropped_path(folder.clone());
+        assert!(matches!(app.pending_folder, Some((_, FolderIntent::Open))));
+        assert!(app.tabs.tabs().is_empty());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.pending_folder.is_some() && Instant::now() < deadline {
+            app.finish_folder_load();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(app.pending_folder.is_none());
+        assert_eq!(app.path, Some(source));
+        assert_eq!(
+            app.folder_snapshot.expect("Shell snapshot").folder_path,
+            folder
+        );
     }
 
     #[test]

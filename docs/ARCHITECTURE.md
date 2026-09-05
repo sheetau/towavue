@@ -111,6 +111,10 @@ reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降�
 
 exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/coreへFFmpeg型を公開しない。画像filterはoperation順のcrop / transpose / flip、動画filterはそれらとtrim / PTS rate、音声filterはatrim / PTS / atempo / volumeを適用し、metadataを入力からcopyする。2倍を超える、または0.5倍未満のrateは複数の`atempo`へ分解する。video/audio encodeは固定FFmpeg buildのsoftware codecを使い、hardware encodeはM7まで行わない。Save As後のSaveは同じexport先を更新できるが、sourceと同一pathへの出力は拒否してpartial overwriteによるsource破損を避ける。
 
+### H1 external file drop
+
+Explorerからのfile dropはwinitのowned path eventで受け、既存のexternal Openへ渡す。画像・動画は新規tab、音声は同folderの非dirty playlistを再利用し、dirty/書き出し中のplaylistは別tabとして保持する。folder dropは非同期のOpen Folderへ渡し、Shell順の最初の対応mediaを開く。folder要求は従来どおり最新1件で、複数folderを展開・importするqueueは設けない。hover中は描画だけの案内を出し、外へ戻すかdropしたら消す。native picker、dirty guard、export error、guardからのexportの最中はdropを拒否し、確認対象を切り替えない。fileの移動・copy・source変更は行わない。
+
 ### H1 compact window shell
 
 上部は32 logical pxの単一title/tab bar、下部は30 logical pxのstatus barとし、暗いneutral色でmedia領域を優先する。appはdecorationsなしのwinit windowにlogo menu・tab・window controlsを描画し、移動・resize・minimize・maximizeはwinitのWindows操作へ委ねる。window closeは既存のdirty/export guardを必ず通す。tab幅は等分、最大160 px・最小72 pxとし、収まらない場合は横scrollする。path/名前は省略表示と全文tooltipを使い、右側の状態表示へ専用領域を確保する。menuの方向gestureとtab reorderはこの変更には含めない。

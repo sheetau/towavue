@@ -58,6 +58,8 @@ Gはメディア種別ごとの4×4 grid menuを開き、`1234/qwer/asdf/zxcv`�
 
 Shellのフォルダー情報はH1で非同期取得に変更しました。取得中はstatusにOpening folder / Loading orderを表示し、切替後の古い結果は適用しません。native Open file/folder・Save Asも専用threadで表示し、選択中の描画・再生を継続します。本体への入力は従来どおりmodal制限され、選択画面を閉じると復帰します。
 
+Explorerから画像・動画・音声file、またはfolderをwindowへdropして開けます。複数fileにも対応し、画像・動画は新規tab、音声は同folderのplaylistへ入ります。folderはShell順の先頭mediaを開く方式です。未保存編集は元tabに保持し、確認dialogの最中はdropを受け付けません。sourceの移動やcopyは行いません。
+
 tabをwindow外へdragしてdropすると同じmediaを別processのwindowへ移し、dirtyなtabには既存のExport / Discard / Cancel guardを適用します。動画exportはCtrl+Shift+EでMedia Foundation hardware encode優先を切り替えられ、利用不能ならsoftwareへfallbackし、実際の経路をstatusへ表示します。PQ/HLG sourceはD3D11 Video Processorの色空間変換能力を確認してからSDRへtone mapし、adapterが変換を保証しない場合は不正な色で表示せず明示的なerrorにします。
 
 H1ではSaveをbackground化しました。書き出し中も再生・tab切替・追加編集ができ、進捗windowからcancelできます。成功時だけ出力先を置換し、失敗・cancelでは既存fileと編集を保持します。書き出し開始後に追加した編集は未保存のまま残ります。

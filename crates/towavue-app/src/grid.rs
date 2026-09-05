@@ -2,10 +2,37 @@ use std::fs;
 use std::path::PathBuf;
 
 use towavue_core::{CommandId, MediaKind};
+use winit::keyboard::{KeyCode, PhysicalKey};
 
 pub const KEYS: [char; 16] = [
     '1', '2', '3', '4', 'q', 'w', 'e', 'r', 'a', 's', 'd', 'f', 'z', 'x', 'c', 'v',
 ];
+
+pub fn key_index(key: PhysicalKey) -> Option<usize> {
+    let PhysicalKey::Code(key) = key else {
+        return None;
+    };
+    [
+        KeyCode::Digit1,
+        KeyCode::Digit2,
+        KeyCode::Digit3,
+        KeyCode::Digit4,
+        KeyCode::KeyQ,
+        KeyCode::KeyW,
+        KeyCode::KeyE,
+        KeyCode::KeyR,
+        KeyCode::KeyA,
+        KeyCode::KeyS,
+        KeyCode::KeyD,
+        KeyCode::KeyF,
+        KeyCode::KeyZ,
+        KeyCode::KeyX,
+        KeyCode::KeyC,
+        KeyCode::KeyV,
+    ]
+    .iter()
+    .position(|candidate| *candidate == key)
+}
 
 #[derive(Clone, Debug)]
 pub struct GridLayouts {
@@ -167,6 +194,38 @@ fn serialize(layouts: &GridLayouts) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn physical_positions_match_all_sixteen_cells_without_numpad_aliases() {
+        let rows = [
+            [
+                KeyCode::Digit1,
+                KeyCode::Digit2,
+                KeyCode::Digit3,
+                KeyCode::Digit4,
+            ],
+            [KeyCode::KeyQ, KeyCode::KeyW, KeyCode::KeyE, KeyCode::KeyR],
+            [KeyCode::KeyA, KeyCode::KeyS, KeyCode::KeyD, KeyCode::KeyF],
+            [KeyCode::KeyZ, KeyCode::KeyX, KeyCode::KeyC, KeyCode::KeyV],
+        ];
+        for (index, key) in rows.into_iter().flatten().enumerate() {
+            assert_eq!(key_index(PhysicalKey::Code(key)), Some(index));
+        }
+        for key in [
+            KeyCode::Numpad1,
+            KeyCode::Digit5,
+            KeyCode::KeyG,
+            KeyCode::Space,
+        ] {
+            assert_eq!(key_index(PhysicalKey::Code(key)), None);
+        }
+        assert_eq!(
+            key_index(PhysicalKey::Unidentified(
+                winit::keyboard::NativeKeyCode::Unidentified
+            )),
+            None
+        );
+    }
 
     #[test]
     fn parses_per_media_physical_grid() {

@@ -36,7 +36,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
+use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey, PhysicalKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
 const AUDIO_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -2265,6 +2265,7 @@ where
                 self.request_redraw();
             }
             CommandId::ToggleCommandPalette => {
+                self.grid_open = false;
                 self.palette_open = !self.palette_open;
                 self.palette.reset();
                 self.request_redraw();
@@ -3421,10 +3422,7 @@ where
         {
             return;
         }
-        if self.grid_open
-            && let WinitKey::Character(value) = &event.logical_key
-            && let Some(character) = value.chars().next().map(|value| value.to_ascii_lowercase())
-            && let Some(index) = grid::KEYS.iter().position(|key| *key == character)
+        if let Some(index) = self.grid_key_index(event.physical_key)
             && let Some(kind) = self.media_kind
         {
             let command = self.grid_layouts.get(kind)[index];
@@ -3485,6 +3483,19 @@ where
                 }
             }
         }
+    }
+
+    fn grid_key_index(&self, physical_key: PhysicalKey) -> Option<usize> {
+        if !self.grid_open
+            || self.palette_open
+            || self.modal_input_blocked()
+            || self
+                .modifiers
+                .intersects(ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER)
+        {
+            return None;
+        }
+        grid::key_index(physical_key)
     }
 
     fn key_stroke(&self, event: &KeyEvent) -> Option<KeyStroke> {
@@ -4014,6 +4025,12 @@ where
             self.process_key(event);
             return;
         }
+        if let WindowEvent::KeyboardInput { event, .. } = &event
+            && self.grid_key_index(event.physical_key).is_some()
+        {
+            self.process_key(event);
+            return;
+        }
         let event_response = match (self.window.as_ref(), self.ui_state.as_mut()) {
             (Some(window), Some(state)) => Some(state.on_window_event(window, &event)),
             _ => None,
@@ -4431,6 +4448,47 @@ mod tests {
                 assert!(image_rect.top() >= 32.0 && image_rect.bottom() <= 546.0);
             }
         }
+    }
+
+    #[test]
+    fn grid_keys_yield_to_shortcut_modifiers_palette_and_modal_input() {
+        let Some(_root) = isolated_test_root(
+            "tests::grid_keys_yield_to_shortcut_modifiers_palette_and_modal_input",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let key = PhysicalKey::Code(winit::keyboard::KeyCode::KeyS);
+        assert_eq!(app.grid_key_index(key), None);
+        app.grid_open = true;
+        for modifiers in [ModifiersState::empty(), ModifiersState::SHIFT] {
+            app.modifiers = modifiers;
+            assert_eq!(app.grid_key_index(key), Some(9));
+        }
+        for modifier in [
+            ModifiersState::CONTROL,
+            ModifiersState::ALT,
+            ModifiersState::SUPER,
+        ] {
+            for modifiers in [modifier, modifier | ModifiersState::SHIFT] {
+                app.modifiers = modifiers;
+                assert_eq!(app.grid_key_index(key), None);
+            }
+        }
+        app.modifiers = ModifiersState::empty();
+        app.palette_open = true;
+        assert_eq!(app.grid_key_index(key), None);
+        app.palette_open = false;
+        app.pending_guard = Some(GuardedAction::Exit);
+        assert_eq!(app.grid_key_index(key), None);
+        app.pending_guard = None;
+        app.pending_dialog = Some(DialogIntent::OpenFile);
+        assert_eq!(app.grid_key_index(key), None);
+        app.pending_dialog = None;
+        assert_eq!(app.grid_key_index(key), Some(9));
+        app.dispatch(CommandId::ToggleCommandPalette);
+        assert!(app.palette_open);
+        assert!(!app.grid_open);
     }
 
     #[test]

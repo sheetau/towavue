@@ -66,6 +66,8 @@ Gはメディア種別ごとの4×4 grid menuを開き、`1234/qwer/asdf/zxcv`�
 
 gridは小さいwindowでも4列を保ち、長い名前は省略・hoverで全文表示します。clickとkeyはどちらも一回実行して閉じます。
 
+gridのkeyはQWERTYの`1234/qwer/asdf/zxcv`に相当する物理位置です。Shiftで位置は変わらず、Ctrl/Alt/Windows key付きは通常shortcutとして扱います。paletteを開くとgridは閉じます。
+
 画像ではCtrl+wheelまたは+/-でzoom、Ctrl+Hでactual size、Shift+Wでfit、右dragでpanします。左dragでselectionを作り、辺dragでresize、Shift付き作成で正方形、Shift付きresizeで比率を保持します。選択範囲clickまたはCtrl+Shift+Yはcrop previewです。Bでreading mode、Rで縦横切替、Hで表示順反転、Ctrl+[ / Ctrl+]で表示数を2～10枚に変更できます。
 
 画像の100%は画面の実pixel基準です。zoomは現在の表示領域とcrop・回転後の寸法を使うため、小さいwindowやcrop previewからの一段の拡大も現在の見た目を基準にします。

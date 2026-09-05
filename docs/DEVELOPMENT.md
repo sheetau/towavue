@@ -6,6 +6,9 @@
 
 ### 小さいwindowのgrid menu
 
+- 入力監査: grid上のCtrl+SがSaveでなく時計回り回転となりdirtyになるbaselineを確認した。修正後はnative Save dialogを開き、Cancel後も向き・clean状態を保つ。Shift+Sは物理cellを一回実行して閉じ、Undoでcleanへ戻る。Ctrl+Shift+Pではgridが閉じ、検索文字はpaletteへ入る。
+- 全16物理codeのindex、numpad/未知codeの除外、Shift保持、Ctrl/Alt/Superと組合せ、palette・guard・pickerの優先を自動testする。対象keyはegui focus処理前へ渡す。OS layoutやIME設定は変更しないため、非QWERTYの実keyboard/candidate操作の成功を主張しない。送信文字列の末尾がcaptureへ反映されない試行もあり、最終palette captureは「sav」での検索・無編集を確認した証拠に限る。
+
 - 480×300でPNGを開きGを押す。旧実装は長い名前が列幅を広げ、左右列と設定pathが画面外へ切れた。修正後は全16 cellを固定4×4で表示し、名前は折返し・省略、設定pathは省略し、hoverで全文を示す。
 - 960×576、480×300、320×200 logical pointsを画像・動画・音声で自動検査する。長い設定pathでも全16のkey/nameが2行以上で画面内に収まり、同じ位置のpointer clickで期待commandを一回だけ返して閉じ、fade-out中は追加実行しない。最初のLayoutJobだけではButtonが行数を再設定してはみ出したため、bounded galleyを渡す方式へ修正した。
 - 実windowでZoom inのcellをclickし、一段拡大してgridが閉じることを確認した。既存eguiのUI倍率を上げた状態でも4列とkeyを保持し、省略名を表示する。これは注入入力・基準機での確認で、極端なUI倍率や全OS keyboard layoutのmatrixではない。最終word-wrap/disabled-tooltip buildも同じ480×300で再確認した。

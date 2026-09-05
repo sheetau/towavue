@@ -244,6 +244,8 @@ preview cacheはruntimeがFFmpeg / FFprobeの子processとdisk I/Oを所有し�
 
 grid menuは既存のcommand registryだけをdispatchし、画像・動画・音声ごとの16 commandを`%APPDATA%\towavue\grid.conf`に保持する。cell順は物理keyの`1234/qwer/asdf/zxcv`と固定してclickとkey入力を一致させる。表示・非表示には短いopacity transitionだけを使い、media操作の意味を持つanimationは追加しない。
 
+grid入力はwinit PhysicalKeyのDigit1～4とKeyQ/W/E/R/A/S/D/F/Z/X/C/Vへ対応させ、logical文字やIME確定文字を位置として使わない。Shift/Capsによる文字変化は位置を変えず、Ctrl/Alt/Super付きは通常shortcut側へ渡す。gridの対象keyはeguiのfocus処理より先に扱うが、palette・modal中は横取りしない。paletteを開いたらgridを閉じ、入力欄へ集中させる。keyboard layout・OS IME設定は変更しない。
+
 gridの4列・4行は表示領域から求めた同じcell寸法に固定し、長いcommand名で列を拡張しない。keyと名称はcell内の行数で折返し・省略し、無効項目もhoverで全文を示す。高さが小さいcellではfontを11pxにしてkeyと名称の2行を保つ。設定pathも幅制限付き省略と全文tooltipを使う。通常cellの110×52 logical pxを上限とし、小さいwindowやUI拡大時は縮める。clickもkeyと同様に一回実行して閉じ、fade-out中のcell入力は無効にする。command配置・shortcut・有効条件は変更しない。
 
 window外へdropしたtabは、appが同じexecutableへ現在pathを引数として渡して別processを起動し、起動成功後だけ元tabを閉じる。edit historyをprocess間で暗黙移送せず、dirty tabは既存guardを通す。別windowへの再結合を行うprocess間protocolは設けない。

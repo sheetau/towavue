@@ -134,3 +134,5 @@ trim監査では、同じ位置のI/Oを受理しSave Asで初めて失敗する
 大きい画像のFitに残っていた2%下限を除いた。16,384px高の画像で隠れていた両端が、480×300と縦横reading modeでも表示される。Fitからの縮小も2%へ跳ねず、小さい倍率を小数表示する。135 testsと実windowの1.08%表示を確認した。H1とlaunch全体は継続中である。
 
 最小windowでgridの両側が切れる問題を修正した。表示領域内の4×4寸法、名前とpathの省略・tooltipを使い、clickもkeyと同じく一回実行して閉じる。136 tests、実windowの列表示・拡大UI・Zoom in clickを確認した。次は入力/focusを含む残りの操作とlaunch gateを継続監査する。
+
+grid上のCtrl+Sが画像回転になる問題を実windowで再現・修正した。physical keyによる位置対応、Ctrl/Alt/Superの除外、palette・modal優先とpalette起動時のgrid closeを追加した。138 testsと保存dialogのCancel、Shift付きcell実行・Undo、palette検索を確認した。実keyboard layout/IMEと残るlaunch gateは引き続き未完了である。

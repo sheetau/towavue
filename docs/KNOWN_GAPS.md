@@ -62,7 +62,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Command palette | titleの部分一致検索、上下選択、有効候補の巡回、Enter実行、Escape閉じを実装。IME eventと重複keyを分離し、確定文字の保持を回帰testした。ranking、categoryはない。物理keyboard・実IME候補操作のmatrixは未検証 |
 | 日本語filename・文字表示 | Windowsの日本語fontを既定fontの後ろへ追加し、tab/statusの欠字を修正。日本語fontがない環境や全言語のfallbackは未対応 |
 | Custom shortcutとprefix key | text設定として実装。GUI editor、競合表示、recording UIはない |
-| Media別4×4 grid | key/clickとtext設定を実装。H1で小さいwindowの列はみ出しを修正し、名前/path省略とtooltip、click後のcloseを追加。配置編集UI、drag配置、詳細animationはない |
+| Media別4×4 grid | key/clickとtext設定を実装。H1で列はみ出し、名前/path省略、click後のclose、物理位置対応と修飾key競合を修正。paletteとは同時表示しない。配置編集UI、drag配置、詳細animationはない |
 | Statusへpath、位置、zoom、解像度、size、modified等 | filename、parent path、folder内位置、size、画像解像度・zoom、編集値などを部分実装。modified日時、詳細codec/stream情報はない |
 | 常時1px seek bar、hover時展開 | H1でstatus上端に実装。動画・音声はduration取得後、timeline非表示時に使える。drag終了時に一回だけSeekする |
 | Fullscreen時はUIを隠す | H1でF11/View menuのborderless fullscreenとbar/timeline/seek非表示を実装。画像・動画・readingでは2秒idleでcursorを隠し、入力・overlay・modal時は表示。edge-hover controls、double-clickは未実装 |

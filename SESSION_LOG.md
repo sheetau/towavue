@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 03:36 JST - input / physical grid keys and shortcut ownership
+
+- Trigger: 159e6f1 CI 33984326962 remains in progress. Code used logical characters despite the physical-grid contract and ignored modifiers. Native grid Ctrl+S reproduced a clockwise rotation and dirty state instead of Save. The first key injection did not establish an open grid and is excluded; capture-confirmed grid plus Ctrl+S is the baseline.
+- Result: map the sixteen winit physical codes, preserve Shift/Caps position, and exclude Ctrl/Alt/Super from grid handling. Qualifying grid keys go before egui focus consumption; palette and modal guards prevent interception. Opening the palette closes the grid. No OS layout/IME changes, core/runtime changes, dependencies or unsafe code.
+- Verification: focused grid tests, format, all-target Clippy with warnings denied, workspace tests and app build pass: app 51, core 33, runtime 50, integrations 4; three live tests explicitly ignored. Regressions cover all sixteen positions, unmapped/numpad/unknown codes, modifier combinations, closed grid, palette, dirty guard, picker and palette transition.
+- Native evidence: fixed Ctrl+S opens a real Save dialog; Cancel preserves orientation and clean state without writing a file. Shift+S rotates once and closes; Undo restores clean state. Grid-to-palette transition leaves only the palette and accepts the observed sav search without editing. Full injected text completion and non-QWERTY/physical IME are not proven. Baseline edits were undone and all owned windows closed normally; captures/logs remain ignored.
+- Changed areas: app grid input mapping/routing/tests, README, architecture, roadmap, trial guide, gap ledger and this log. Status remains h1_active.
+- Next action: verify checkpoint CI; investigate repeated injected-text tail behavior and remaining focus/prefix flows, then launch-wide stability/performance gates. Mixed-DPI/physical IME and the distribution decision remain outstanding.
+
 ## 2026-09-06 03:30 JST - interaction / bounded grid layout and click lifecycle
 
 - Trigger: CI 33983479446 (eae102c) completed successfully after about seven minutes, not a hang; CI 33983856342 (ba9a109) also passed. Native 480x300 grid then reproduced clipped left/right columns and a path extending beyond the window.

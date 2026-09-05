@@ -149,6 +149,15 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - runtime testは呼出元が待機しないこと、選択・Cancel・失敗・worker panicの結果通知を検証する。app testはpicker中のcommand/exit抑止、Cancel・失敗のguard復元、選択中にsourceが変わった場合のexport拒否を検証する。native ownerとpointer復帰は実window試験であり、headless testだけでは証明しない。
 - 上記数値は基準機の単発観測。複数DPI/monitorやcodecのmatrix、静止画・pause中のidle redraw負荷は引き続き監査する。
 
+### H1で確認したidle / periodic repaint scenario
+
+- 同じdebug build条件、960×576の基準window、起動後3秒の待ちを挟み、対象processのTotalProcessorTimeを5秒差分で測る。修正前は静止PNGが5906.25 ms、Welcomeが5953.125 msだった。RedrawRequestedの処理で次のRedrawRequestedを無条件予約していたため、入力なしでも描画が連鎖していた。
+- 修正後のPNG・Welcome・表示したままのgridは各0 ms、一時停止したH.264/AACは15.625 msだった。0はprocess CPU時計の分解能以下という意味であり、folder watcherの定期pollまでなくしたという意味ではない。
+- 音声だけの再生にもscheduleごとの無条件再描画があった。180秒WAVの5秒間CPU時間は5890.625 msから468.75 msへ減少した。音声出力pollは残し、位置表示の更新をUIの20 ms deadlineと統合する。最終buildのpauseでは31.25 ms。eguiのpredicted frame時間によるdelay短縮を避け、この周期はapp側のdeadlineとして計算する。
+- 実windowでgridの開閉、pause中のtimeline開閉、動画再開、8-frame GIFの時間更新、音声のpause/resume・末尾Seek・EOFを確認した。headless testはgridが開閉animation後にrepaintを止めることと、音声周期・より早いUI期限・pause時の周期解除を検証する。grid testは修正前の無条件requestを戻すと失敗した。
+- 最終の30秒H.264/AAC再生は900 presented / 0 dropped / 0 CPU transfers、drift p95/max 3.725/3.993 msだった。WelcomeでCtrl+K Ctrl+Sを押した通知は、idle化直後のbuildでは6秒後も残ったため、statusとprefixの失効を待機期限へ追加した。修正後は入力なしで6秒待ったcaptureで通知が消えた。4秒の期限選択はmediaなしのtestでも確認した。
+- CPU数値はprocessの全threadの合算で、全CPUに対する百分率ではない。debug buildの単発観測。release、GPU負荷、複数monitor/DPI、長時間稼働の評価は別途必要である。
+
 ### H1で確認したseek bar / palette scenario
 
 - 30秒H.264/AACをpauseし、status上端の中央をclick → 15.000秒。75%までdragして離す → 22.500秒。各操作につき一回だけpipelineが再構築される。

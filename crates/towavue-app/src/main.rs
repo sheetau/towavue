@@ -1032,10 +1032,17 @@ where
         let output = context.run_ui(input, |ui| {
             self.draw_ui(ui, &mut actions);
         });
-        self.ui_repaint_at = output
+        let repaint_delay = output
             .viewport_output
             .get(&egui::ViewportId::ROOT)
-            .and_then(|viewport| Instant::now().checked_add(viewport.repaint_delay));
+            .map_or(Duration::MAX, |viewport| viewport.repaint_delay);
+        self.ui_repaint_at = ui_repaint_deadline(
+            Instant::now(),
+            repaint_delay,
+            self.state == PlaybackState::Playing
+                && self.pending_time.is_none()
+                && !self.audio_drained,
+        );
         let renderer = self.renderer.as_mut().expect("renderer exists");
         let media_result = renderer.clear([0.025, 0.025, 0.03, 1.0]).and_then(|()| {
             if let (Some(session), Some(rect)) = (&mut self.session, self.video_rect) {
@@ -1642,7 +1649,6 @@ where
         if opacity <= 0.0 {
             return;
         }
-        context.request_repaint();
         let Some(kind) = self.media_kind else { return };
         let commands = self.grid_layouts.get(kind);
         egui::Area::new("grid-menu".into())
@@ -3228,7 +3234,6 @@ where
                 return;
             }
             if !self.audio_drained {
-                self.request_redraw();
                 event_loop.set_control_flow(ControlFlow::WaitUntil(
                     self.ui_repaint_at
                         .map_or(Instant::now() + AUDIO_EVENT_POLL_INTERVAL, |ui| {
@@ -3238,6 +3243,14 @@ where
                 return;
             }
         }
+        if let Some(deadline) = self.idle_wakeup(now) {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+    }
+
+    fn idle_wakeup(&self, now: Instant) -> Option<Instant> {
         let next_image_frame = self
             .image
             .iter()
@@ -3248,23 +3261,25 @@ where
             )
             .filter_map(|image| image.next_frame_at)
             .min();
-        if self.folder_watcher.is_some()
-            || next_image_frame.is_some()
-            || self.ui_repaint_at.is_some()
-        {
-            let folder_poll = self
-                .folder_watcher
-                .is_some()
-                .then(|| Instant::now() + FOLDER_EVENT_POLL_INTERVAL);
-            let deadline = [folder_poll, next_image_frame, self.ui_repaint_at]
-                .into_iter()
-                .flatten()
-                .min()
-                .expect("at least one scheduled wakeup exists");
-            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        } else {
-            event_loop.set_control_flow(ControlFlow::Wait);
-        }
+        let folder_poll = self
+            .folder_watcher
+            .is_some()
+            .then_some(now + FOLDER_EVENT_POLL_INTERVAL);
+        let status_expiry = self
+            .status_message
+            .as_ref()
+            .map(|(_, shown)| *shown + STATUS_MESSAGE_DURATION);
+        let prefix_expiry = self.prefix_started.map(|started| started + PREFIX_TIMEOUT);
+        [
+            folder_poll,
+            next_image_frame,
+            self.ui_repaint_at,
+            status_expiry,
+            prefix_expiry,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     fn request_redraw(&self) {
@@ -3272,6 +3287,15 @@ where
             window.request_redraw();
         }
     }
+}
+
+fn ui_repaint_deadline(now: Instant, egui_delay: Duration, playing_audio: bool) -> Option<Instant> {
+    let delay = if playing_audio {
+        egui_delay.min(AUDIO_EVENT_POLL_INTERVAL)
+    } else {
+        egui_delay
+    };
+    now.checked_add(delay)
 }
 
 fn video_frame_due(
@@ -3538,7 +3562,8 @@ where
         let (consumed, repaint) = event_response
             .map(|response| (response.consumed, response.repaint))
             .unwrap_or_default();
-        if repaint {
+        // This event already renders below; re-queuing it would keep an idle window spinning.
+        if repaint && !matches!(event, WindowEvent::RedrawRequested) {
             self.request_redraw();
         }
         match event {
@@ -3596,6 +3621,86 @@ mod tests {
             return None;
         };
         Some(canonical_shell_path(&PathBuf::from(root)).expect("canonical test root"))
+    }
+
+    #[test]
+    fn grid_repaint_stops_after_open_and_close_animations_settle() {
+        let Some(_root) =
+            isolated_test_root("tests::grid_repaint_stops_after_open_and_close_animations_settle")
+        else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.media_kind = Some(MediaKind::Image);
+        let context = egui::Context::default();
+        let mut time = 0.0;
+        for open in [false, true, false] {
+            app.grid_open = open;
+            let mut repaint_delay = Duration::ZERO;
+            for _ in 0..20 {
+                let output = context.run_ui(
+                    egui::RawInput {
+                        time: Some(time),
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(960.0, 576.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |_| app.draw_grid_menu(&context, &mut Vec::new()),
+                );
+                repaint_delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+                time += 0.1;
+            }
+            assert!(
+                repaint_delay > Duration::from_secs(1),
+                "settled grid (open={open}) still requests continuous repaint"
+            );
+        }
+    }
+
+    #[test]
+    fn audio_ui_uses_a_deadline_while_playing_and_settles_when_paused() {
+        let now = Instant::now();
+        assert_eq!(
+            ui_repaint_deadline(now, Duration::MAX, true),
+            Some(now + AUDIO_EVENT_POLL_INTERVAL)
+        );
+        assert_eq!(ui_repaint_deadline(now, Duration::MAX, false), None);
+        for playing_audio in [false, true] {
+            assert_eq!(
+                ui_repaint_deadline(now, Duration::ZERO, playing_audio),
+                Some(now)
+            );
+            let tooltip = Duration::from_millis(5);
+            assert_eq!(
+                ui_repaint_deadline(now, tooltip, playing_audio),
+                Some(now + tooltip)
+            );
+        }
+    }
+
+    #[test]
+    fn idle_wakeup_includes_status_and_shortcut_expiry_without_media() {
+        let Some(_root) = isolated_test_root(
+            "tests::idle_wakeup_includes_status_and_shortcut_expiry_without_media",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let now = Instant::now();
+        assert_eq!(app.idle_wakeup(now), None);
+        app.status_message = Some(("Reloaded".into(), now));
+        assert_eq!(app.idle_wakeup(now), Some(now + STATUS_MESSAGE_DURATION));
+        app.prefix_started = Some(now);
+        assert_eq!(app.idle_wakeup(now), Some(now + PREFIX_TIMEOUT));
+        app.ui_repaint_at = Some(now);
+        assert_eq!(app.idle_wakeup(now), Some(now));
+        app.ui_repaint_at = None;
+        app.status_message = None;
+        assert_eq!(app.idle_wakeup(now), Some(now + PREFIX_TIMEOUT));
+        app.prefix_started = None;
+        assert_eq!(app.idle_wakeup(now), None);
     }
 
     #[test]

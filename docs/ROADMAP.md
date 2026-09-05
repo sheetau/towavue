@@ -102,3 +102,5 @@ Open Folderの日常flowで、対応mediaがないfolderを選ぶと元のnaviga
 Shell snapshot取得を最新1件の非同期要求へ移し、generationによる失効、同folderの旧snapshot保持、reading更新、待機中のwindow closeを実装・検証した。実Explorer sort matrixも通過した。一方でnative pickerをCancelするだけでも再生遅延が再現したため、次はpicker自体のUI thread待機と復帰時の再生を修正する。H1とlaunch auditは継続中である。
 
 native Open file/folder・Save Asも専用STAへ移し、本体入力のmodal制限とowner寿命を保ったまま描画・再生を継続するようにした。30秒H.264/AACでOpen Folder→Cancelした際のdropは808から0になった。Save AsのCancel時のdirty guard復元、pointerを動かさない再click、書き出し成功後のtab終了も実windowで確認した。次は静止画・pause時のidle負荷と日常入力を監査し、草案との残る表示・操作差を詰める。H1全体は未完了である。
+
+idle監査では再描画eventの自己再予約、静止grid、音声のみの再生に無条件描画を発見し、入力・animation・位置更新deadlineへ限定した。5秒間のCPU時間は静止画/Welcomeで約5.9秒から計測分解能以下、音声再生で約5.9秒から0.47秒へ下がった。必要な動画/GIF更新とmenu操作は実windowで維持を確認した。次はExplorerからのfile dropを含む日常Open操作と、草案のfilmstrip/menuとの差を監査する。launch全体は未完了である。

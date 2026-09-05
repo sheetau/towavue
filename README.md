@@ -66,6 +66,8 @@ volume・mute・rateは現在の再生にも反映します。rateはピッチ�
 
 画像とreading pageのdecodeもbackground化し、切替後の古い結果は表示しません。保持するRGBA frame列は1要求合計512 MiBまでです（decoderの作業領域やGPUを含むprocess全体の上限ではありません）。上限超過・破損画像・GPUの寸法上限は画面へerrorを表示します。
 
+静止画・一時停止・静止したmenuでは不要な連続描画を止め、入力・読み込み完了・animationの期限に応じて更新します。音声再生の位置表示も期限付きで更新し、音声出力のpollから無条件に再描画しません。
+
 ## ライセンス
 
 本リポジトリのコードは、利用者の選択により[MIT License](LICENSE-MIT)または[Apache License 2.0](LICENSE-APACHE)の下で利用できます。将来同梱するFFmpeg DLLとその他の第三者コンポーネントには、それぞれのライセンスが適用されます。

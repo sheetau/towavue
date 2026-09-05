@@ -127,6 +127,10 @@ paletteは検索入力を保ち、上下keyで有効な候補を巡回し、Ente
 
 software描画はUIから引き継ぐscissor・blend・depth stateを解除する。表示frame数は新frameの描画成功時だけ加算し、UIだけの再描画では加算しない。UIのrepaint deadlineは動画・画像・folderの待機期限と統合し、停止中のlayout・tooltip・animation要求も処理する。
 
+RedrawRequestedはそのevent内で描画し、egui-winitのrepaint応答を次frameの無条件要求へ変換しない。静止したUIは入力・worker完了・必要なdeadlineでのみ描画する。gridのopacity transitionもeguiのanimation期限に従い、表示中という理由だけで連続描画しない。status通知とshortcut prefixの失効も待機期限へ含め、mediaやwatcherがないWelcome画面でも時間どおり処理する。
+
+音声だけ、または動画frameを待たない音声末尾の再生中は、位置表示へ20 ms後のUI repaintを要求する。audio eventのpoll自体は次の描画を無条件予約しない。pause後はこの周期描画を止める。WASAPIとdecodeのthread・clock契約は変更しない。
+
 ### H1 live volume
 
 動画・音声のvolumeはedit historyの現在値をlive playbackとexportで共有する。runtimeはWASAPIへ渡す直前のstereo f32 sampleへgainを適用し、decode済みqueueは元の値を保持する。変更時は5 msのrampで不連続を抑え、mute後は正確なzero sampleにする。master endpointや他applicationの音量は変更しない。初期gainはpipeline開始前に設定し、Seek・endpoint復旧・tab再open・undo/redoにも現在値を反映する。trimは引き続きexport用である。

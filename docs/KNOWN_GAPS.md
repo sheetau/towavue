@@ -24,6 +24,8 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 ### 開発版としての不足
 
+- H1でRedrawRequestedの自己再予約と静止gridの連続描画を除いた。基準機の5秒間CPU時間は静止画・Welcomeで約5.9秒から計測分解能以下へ、音声再生で約5.9秒から0.47秒へ減少した。debug buildの単発process計測であり、GPU消費電力・release性能・長時間負荷を保証する値ではない。
+
 - installer、uninstaller、portable package、automatic update、file association、Explorer context menuはない。
 - settings画面、recent files、session/tab復元、window位置・sizeの保存はない。
 - Explorerからwindowへのfile drag-and-dropはない。tabのwindow外dropだけが実装されている。

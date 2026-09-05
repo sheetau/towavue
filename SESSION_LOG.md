@@ -2,6 +2,18 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 18:20 JST - performance / stop idle repaint loops
+
+- Trigger: the native-dialog trial suggested excessive redraw events even with no animation. Previous goal turn was progress; checkpoint fb42ed0 independently passed CI 33956914171.
+- Evidence: an unchanged PNG and Welcome screen consumed 5906.25 and 5953.125 ms of process CPU over separate five-second samples. The pinned egui-winit marks RedrawRequested as repaint=true; app forwarded that into another request before rendering, creating a loop. Grid also requested repaint unconditionally while visible. Audio-only scheduling had its own unconditional redraw loop (5890.625 ms / five seconds).
+- Result: do not requeue the redraw event already being rendered; let grid's egui animation schedule its transition. Merge a 20 ms audio-position refresh with earlier UI deadlines instead of requesting redraw on every audio poll. App owns this deadline so egui's predicted-frame subtraction cannot shorten it. Explicitly schedule status and shortcut-prefix expiry: removing the redraw loop exposed a Welcome notification that otherwise remained beyond its four-second lifetime. No thread, media clock, rendering backend, dependency, or unsafe changes.
+- Real-window verification: PNG, Welcome, and settled grid each measured 0 ms / five seconds (below clock resolution, not zero work); paused video measured 15.625 ms. Final audio playback measured 468.75 ms and paused audio 31.25 ms. Grid open/close, paused timeline toggles, video resume, GIF frame progression, audio pause/resume, near-end Seek and EOF remain functional. Measurements are single reference-machine debug trials, not release/GPU/power or device-matrix claims.
+- Playback evidence: the final 30-second H.264/AAC trial presented 900 frames with 0 drops / 0 CPU transfers and drift p95/max 3.725/3.993 ms. Welcome's reload notification disappeared without further input after the expiry fix; title-bar close also exited without further input. All trial windows closed.
+- Automated verification: format, workspace all-target Clippy with warnings denied, and workspace tests pass (app 23, core 26, runtime 39, integrations 3; three live tests explicitly ignored). New grid settling test fails with the previous unconditional request restored; deadline tests cover playing audio, paused idle, immediate input, earlier UI deadlines, and status/prefix expiry without media. Native event-loop behavior is verified by real-window measurements, not the headless tests alone.
+- Changed areas: app repaint scheduling and regression tests, README, architecture, roadmap, trial guide, gap ledger, and this log. Generated media/captures/logs remain ignored under target/tmp.
+- Status: h1_active; severe idle CPU regression fixed, broader launch objective remains open.
+- Next action: verify checkpoint CI, audit Explorer file drop and daily Open flows, then continue filmstrip/menu fidelity and device/input matrix.
+
 ## 2026-09-05 18:01 JST - responsiveness / asynchronous native dialogs
 
 - Trigger: Open Folder followed by Cancel disrupted playback even without a Shell request. CI 33955031008 for 1750c86 also failed an application test because the runner's short temporary path was compared with a canonical long path.

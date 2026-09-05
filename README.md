@@ -25,6 +25,8 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## ビルドと実行
 
+fileを指定せず起動するとWelcomeのSTART欄からOpen File / Open Folderを選べます。現在のshortcutも表示し、幅が狭い場合はhoverで確認できます。Explorerからのdropでも開けます。最後のmedia tabを閉じるとWelcomeへ戻ります。recent一覧とsession復元はまだありません。
+
 Visual StudioのDesktop development with C++ workload、Windows SDK、LLVMを導入します。Developer PowerShellで、checksum固定済みのFFmpeg 9.0.1開発ファイルを準備してから実行します。ダウンロード先と生成fixtureはGit対象外です。
 
 ```powershell

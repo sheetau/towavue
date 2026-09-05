@@ -12,6 +12,7 @@ mod palette;
 mod seekbar;
 mod shortcuts;
 mod trim;
+mod welcome;
 
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -1227,19 +1228,9 @@ where
             .frame(egui::Frame::NONE)
             .show(root, |ui| {
                 if self.path.is_none() {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space((ui.available_height() * 0.35).max(20.0));
-                        ui.heading("towavue");
-                        ui.label("Open or drop media files or a folder to begin.");
-                        ui.horizontal(|ui| {
-                            if ui.button("Open file").clicked() {
-                                actions.push(UiAction::Command(CommandId::OpenFile));
-                            }
-                            if ui.button("Open folder").clicked() {
-                                actions.push(UiAction::Command(CommandId::OpenFolder));
-                            }
-                        });
-                    });
+                    if let Some(command) = welcome::show(ui, &self.shortcuts) {
+                        actions.push(UiAction::Command(command));
+                    }
                 } else if self.state == PlaybackState::Faulted
                     && self.media_kind != Some(MediaKind::Image)
                     && let Some(error) = &self.playback_error
@@ -1803,10 +1794,16 @@ where
                         egui::Sense::click_and_drag(),
                     );
                     if self.tabs.tabs().is_empty() {
+                        let welcome_rect = egui::Rect::from_min_size(
+                            drag_rect.min,
+                            egui::vec2(drag_rect.width().min(150.0), drag_rect.height()),
+                        );
+                        ui.painter()
+                            .rect_filled(welcome_rect, 3.0, Color32::from_gray(28));
                         ui.painter().text(
-                            drag_rect.left_center(),
+                            welcome_rect.left_center() + egui::vec2(10.0, 0.0),
                             Align2::LEFT_CENTER,
-                            "towavue",
+                            "Welcome",
                             egui::FontId::proportional(12.0),
                             chrome::MUTED,
                         );

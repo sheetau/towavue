@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 07:17 JST - Welcome / align empty-state entry with the draft
+
+- Evidence/intent: native 25829ee Welcome placed its heading/help at the center but Open buttons at the far left. The draft groups the wordmark and START actions in one centered, left-aligned column. Adopted that empty-state layout before implementing; recent persistence/preview remains a separate missing capability, not a fabricated list or completed draft match.
+- Change: a small app-only Welcome module uses the existing Open CommandIds, current shortcut bindings, code-painted file/folder icons and standard focusable buttons. Column max width is 660 logical px; small views scroll vertically and hide inline shortcuts below 300 px while retaining them in hover text. Empty title strip says Welcome without adding a media TabId/close action. No runtime, dependency, unsafe, persistent-setting or source-file changes.
+- Iteration/tests: native inspection caught icon/text overlap; replaced text-space padding with a sized icon atom. Kept hover/focus frames and moved the scrollbar to the viewport edge. Two UI regressions cover aligned labels, current custom shortcut, both pointer actions once, 960/480/240 logical-width layouts including scroll at 119 px height, and Tab/Enter activation. The small-height test initially scrolled past the first action; corrected the test's scroll distance, not a claimed product failure.
+- Native: Open File and Open Folder both reach native pickers and Cancel returns to Welcome. Release at 480x300 opens the generated PNG, then Ctrl+W returns to Welcome. Final normal release layout was inspected at 480x300 and 960x576 after the scrollbar correction. All owned trial processes exit normally; captures/logs remain ignored. Native monitor is 96 DPI; logical-size tests do not prove a mixed-DPI or screen-reader matrix.
+- Verification: format, all-target Clippy, 158 tests (app 68, core 35, runtime 51, integrations 4), normal debug/release builds pass; three live tests explicitly ignored. Prior 25829ee CI 33995049323 succeeded. Status: h1_active. Next: inspect narrow-window timeline and trim-range interaction. Recent/session restoration, physical recovery/IME/mixed-DPI and distribution remain open; packaging question still unanswered, no package/publication created.
+
 ## 2026-09-06 07:06 JST - tabs / release-only reordering and launch audit
 
 - Intent/decision: draft comparison found missing tab ordering. Adopted a primary-drag insertion marker and a single TabSet reorder on release before implementation. Preserve TabId, active media, edits and export targets; Escape or an inside-window drop outside the strip cancels. Existing guarded outside-window detach remains; no cross-window merge or drag-edge auto-scroll.

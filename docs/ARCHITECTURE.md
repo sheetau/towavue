@@ -122,6 +122,10 @@ Seek再構築では必要なPaused状態も新pipelineへ渡し、破棄予定�
 
 tab bar内のprimary dragは挿入位置だけを表示し、release時に一度だけTabSetの順序を変更する。TabId、active tab、編集履歴、export先、再生sessionは保持し、activate/reloadや保存確認は行わない。bar外・window内へのdropとEscapeは並べ替えを取り消す。window外へのdropは既存のguard付きdetachを使い、window間結合は追加しない。長いbarは既存の横scrollを使う。
 
+### H1 Welcome entry
+
+mediaがない時は中央の最大660 logical pxの左揃えcolumnへwordmark、START、Open file/folder、drop案内をまとめる。狭いwindowでは余白を縮め、縦scrollで操作を残す。Openは既存CommandIdとnative pickerを使い、shortcut表示は現在のbindingsから求める。上部のWelcome表示は空状態の見出しであり、mediaのTabIdや独立したclose動作を追加しない。recent履歴・preview・session復元はこの空状態layoutとは分けて扱う。
+
 ### M5 image presentation
 
 静止画はEXIF orientation適用後、アニメGIF、WebP、APNGは合成済みRGBA frameと10 ms以上のdeadlineへ変換する。app event loopは次frame時刻までsleepし、期限を過ぎたframeを追いつかせてからegui textureを更新する。画像textureも動画・UIと同じD3D11 deviceとback bufferへ描画し、Presentは一回に保つ。

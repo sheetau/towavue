@@ -53,7 +53,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | 別windowへtabをdragして結合 | 未実装。process間protocolもない |
 | Filmstrip itemをwindow外へdrag | 未実装 |
 | Tabの並べ替え、drop indicator、等分幅 | 等分幅（72～160 logical px）と横scroll・名前省略、release時の並べ替え・挿入線をH1で実装。Escapeとbar外・window内dropは取消。drag中の端での自動scrollはない |
-| Welcomeのrecent files | Open file/folderだけ実装。recent listは未実装 |
+| Welcomeのrecent files | H1でwordmark・START・Open file/folder・drop案内を中央columnへ整理。現在のshortcut、狭い画面のscroll、hover/focus表示を追加。recent listは未実装 |
 | Explorerから開く/新規window context menu | OS登録・配布処理が未実装 |
 
 ### Menu、command、status
@@ -176,6 +176,6 @@ H1の個別修正が通ったことと、配布可能な品質の判定を分け
 | --- | --- |
 | 編集・保存・終了の安全性 | dirty guard、複数tabの順次保存、export失敗/取消、描画不能時の保存を自動testと所有windowで確認。今後のUI変更でも同じflowを維持する |
 | 再生性能・復旧 | 基準機の30分4K60と100回Seek測定は通過。制御故障による復旧と、実driver/endpoint変更の証拠は別であり、後者は未完了 |
-| 日常操作と草案の外観 | compact shell、filmstrip、menu、tab並べ替えまで確認。Welcomeの導線・見た目、timeline操作、狭いwindowでの発見性を次に評価する。recent/session復元や別window結合は未実装だが一括追加しない |
+| 日常操作と草案の外観 | compact shell、filmstrip、menu、tab並べ替え、空のWelcomeからのOpen/Cancel/復帰を確認。timeline操作と狭いwindowでの発見性を引き続き評価する。Welcomeのrecent/session復元や別window結合は未実装だが一括追加しない |
 | 環境・入力 | 日本語fontとscale入力の回帰はあるが、実IME、異なる実DPI間の移動、keyboard-only/accessibilityの横断matrixは未完了 |
 | 配布 | portable ZIPかinstallerかはownerへ確認中。FFmpeg binary/licenseの配布決定、clean machine起動確認、package作成・公開は未実施。H1と分けて計画する |

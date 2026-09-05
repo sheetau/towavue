@@ -149,7 +149,15 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - fullscreen中のfilmstripとpaletteを表示し、Escapeでoverlayを閉じてもfullscreenを保つ。palette後の一回目Escapeのboundsは0,0,1920,1080、二回目は通常windowだった。画像を回転しwindow closeを要求すると中央にdirty guardが出て、Escapeで勝手に解除・discardされないことを確認した。key注入を含むため物理keyboard/IMEの証明ではない。
 - 30秒H.264/AACでfullscreen、pause/resume、F11往復、Tによる通常window＋timelineへの復帰を行い、900 presented / 0 dropped / 0 CPU transfers、drift p95/max 4.038/34.290 msでEOFへ到達した。非正方形pixelのFFV1はsoftware経路で全四辺とaspect-fitを保ち、60 presented / 60 transfers / 0 dropsだった。単発の基準機debug trialであり、全codec・HDR・DPI/monitorの保証ではない。
 - 静止したfullscreen readingの5秒間CPU時間は0 ms（時計の分解能以下）。自動testは画像meshが960×576全体へ達すること、barの非表示と復帰、modal/overlay優先、selection・pause・generationの保持、Tの復帰、古いshortcut設定へのF11補完とcustom prefixを検証する。native最大化/placementはheadless testではなく実windowで検証した。
-- cursor auto-hide、edge-hoverでのcontrols表示、double-click割当はこの変更に含まない。音声playlistとWelcomeは中央contentとして残し、通常timeline設定は復帰まで保持する。
+- このfullscreen初回変更にはcursor auto-hideを含めず、続く試験で下記を追加した。edge-hoverでのcontrols表示とdouble-click割当は未実装。音声playlistとWelcomeは中央contentとして残し、通常timeline設定は復帰まで保持する。
+
+### H1で確認したfullscreen cursor scenario
+
+- 変更前のPNG fullscreenでpointerを内部へ移し4秒待つと、Windows `GetCursorInfo`の表示flagは1のままだった。変更後は2秒の入力idleで0、移動・wheel・key入力で1になることを実windowで確認した。通常のscreen captureはcursorを含まないため、画像から非表示を推測していない。
+- 左button保持中は表示されたが、初回実装では右buttonを3秒保持すると消えた。固定egui-winitの公開button状態はtouch模擬時だけ更新されるため、egui本体のpointer状態へ切り替えた。左右button保持→release後のidle、palette→Escape、F11でのwindow復帰を再試験し通過した。自動testはprimary/secondary/middleの保持・releaseも確認する。
+- filmstrip/grid、native Open picker、dirty close guardの表示中は3秒待ってもcursorを維持し、Cancel後は再び隠れる。最小化中は表示へ戻る。pointerを動かさない復帰ではCursorEnteredが届かず表示のままとなるケースを再現したため、既存picker復帰の座標更新をfocus取得時にも再利用した。同手順の復帰後idleで非表示になることを確認した。
+- 最終buildの静止PNG fullscreenは5秒間CPU時間0 ms（時計の分解能以下）。期限の到達時だけ表示状態を変え、非表示後は追加deadlineを残さない。自動testはmedia種別、normal/fullscreen、操作overlay・modal・loading/error・reading error・selection drag・file hoverの抑止と待機期限を確認する。基準機での注入入力試験であり、物理keyboard・touch・複数monitor/DPIのmatrixは未検証。
+- 30秒H.264/AACでも再生中・pause中・EOFのidle非表示、Spaceでの表示復帰とpause/resume、Escapeでの通常window復帰を確認した。900 presented / 0 dropped / 0 CPU transfers、drift p95/max 3.744/4.044 msで完了した。単発のdebug trialであり、codec/device全体の保証ではない。
 
 ### H1で確認したcategorized logo menu scenario
 

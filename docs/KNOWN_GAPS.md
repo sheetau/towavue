@@ -63,7 +63,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Media別4×4 grid | key/clickとtext設定を実装。配置編集UI、drag配置、詳細animationはない |
 | Statusへpath、位置、zoom、解像度、size、modified等 | filename、parent path、folder内位置、size、画像解像度・zoom、編集値などを部分実装。modified日時、詳細codec/stream情報はない |
 | 常時1px seek bar、hover時展開 | H1でstatus上端に実装。動画・音声はduration取得後、timeline非表示時に使える。drag終了時に一回だけSeekする |
-| Fullscreen時はUIを隠す | H1でF11/View menuのborderless fullscreenとbar/timeline/seek非表示を実装。明示overlayとmodalは保持。cursor auto-hide、edge-hover controls、double-clickは未実装 |
+| Fullscreen時はUIを隠す | H1でF11/View menuのborderless fullscreenとbar/timeline/seek非表示を実装。画像・動画・readingでは2秒idleでcursorを隠し、入力・overlay・modal時は表示。edge-hover controls、double-clickは未実装 |
 
 ### Timeline
 

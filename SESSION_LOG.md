@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 19:52 JST - viewing / fullscreen cursor idle
+
+- Trigger: previous fullscreen checkpoint 9143408 passed CI 33960991737. In a foreground PNG fullscreen baseline, GetCursorInfo still reported visible after four idle seconds. The first launch attempt used the wrong executable name; a subsequent attempt did not acquire foreground, so neither was counted as baseline evidence.
+- Result: hide the cursor after two idle seconds only for active, unobstructed fullscreen image/reading/video content. Restore on pointer/button/wheel/key/focus input and fullscreen exit. Keep it visible during held buttons, selection drag, explicit overlays, picker/dirty/export states, loading/errors and file hover; exclude audio/Welcome. Use egui platform output and one deadline in existing scheduling, without new threads, unsafe code, dependencies or a repaint loop.
+- Native evidence/fixes: initial right-button hold hid the cursor because fixed egui-winit's public button state only updates in touch simulation. Use egui pointer.any_down and verify both left/right holds and release. Minimize/restore with a stationary pointer omitted CursorEntered and left it permanently visible; reuse the existing dialog-return position refresh on focus gain. Repeated modal/focus trial passed after this fix.
+- Real-window verification: GetCursorInfo flags, not cursor-free screenshots, confirmed idle hide, move/wheel/key restore, held buttons, palette/filmstrip/grid, native Open Cancel, dirty guard Cancel, minimize/restore and windowed return. Final PNG idle CPU was 0 ms over five seconds (below clock resolution). H.264/AAC with pause/resume reached EOF at 900 presented / 0 dropped / 0 CPU transfers, drift p95/max 3.744/4.044 ms; paused/playing/EOF idle hide and Escape restoration passed. All trial windows closed. Injected reference-machine debug trials do not prove physical keyboard, touch, monitor/DPI or broad codec coverage.
+- Automated verification: focused cursor tests, format, workspace all-target Clippy with warnings denied, workspace tests and app build pass (app 34, core 26, runtime 41, integrations 3; three live tests explicitly ignored). Tests cover one-shot deadline/reset, media and UI guards, loading/reading errors, file hover, primary/secondary/middle button state and fullscreen exit. Native focus refresh is verified by real-window trials.
+- Changed areas: app cursor state/scheduling/platform output/input/focus/tests, README, architecture, roadmap, trial guide, gap ledger and this log. Fixtures/helpers/logs remain ignored under target/tmp.
+- Status: h1_active; cursor idle scenario verified. No edge-hover controls, double-click assignment or launch-complete claim.
+- Next action: verify checkpoint CI, inspect video crop/rotate/flip live-preview mismatch, then continue keyboard/DPI and launch-readiness audits. Packaging still requires its separate distribution decision.
+
 ## 2026-09-05 19:31 JST - viewing / borderless fullscreen
 
 - Trigger: the previous goal turn made menu progress; checkpoint 6f12468 passed CI 33960012991. Fullscreen was absent from registry and UI; the baseline image window did not change when F11 was sent.

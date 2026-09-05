@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod chrome;
+mod cursor;
 mod filmstrip;
 mod grid;
 mod menu;
@@ -336,6 +337,7 @@ struct Application<N> {
     window: Option<Arc<Window>>,
     fullscreen: bool,
     fullscreen_was_maximized: bool,
+    viewing_cursor: cursor::ViewingCursor,
     pending_dialog: Option<DialogIntent>,
     renderer: Option<FrameRenderer>,
     ui_context: Option<egui::Context>,
@@ -426,6 +428,7 @@ where
             window: None,
             fullscreen: false,
             fullscreen_was_maximized: false,
+            viewing_cursor: cursor::ViewingCursor::default(),
             pending_dialog: None,
             renderer: None,
             ui_context: None,
@@ -1091,7 +1094,7 @@ where
             return;
         }
         self.check_eof();
-        let platform_output = match self
+        let mut platform_output = match self
             .renderer
             .as_mut()
             .expect("renderer exists")
@@ -1103,6 +1106,10 @@ where
                 return;
             }
         };
+        if self.viewing_cursor.hidden {
+            platform_output.cursor_icon = egui::CursorIcon::None;
+            platform_output.cursor_image = None;
+        }
         self.ui_state
             .as_mut()
             .expect("UI state exists")
@@ -2414,11 +2421,11 @@ where
         }
     }
 
-    fn finish_dialog(&mut self, result: Result<Option<PathBuf>, DialogError>) {
+    fn refresh_pointer_position(&mut self) {
         if let (Some(window), Some(state)) = (&self.window, &mut self.ui_state)
             && let Some((x, y)) = cursor_position_in_window(window)
         {
-            // The native dialog can consume CursorEntered; a stationary click still needs a position.
+            // Native dialog/focus transitions can omit CursorEntered for a stationary pointer.
             let _ = state.on_window_event(
                 window,
                 &WindowEvent::CursorMoved {
@@ -2427,6 +2434,10 @@ where
                 },
             );
         }
+    }
+
+    fn finish_dialog(&mut self, result: Result<Option<PathBuf>, DialogError>) {
+        self.refresh_pointer_position();
         let Some(intent) = self.pending_dialog.take() else {
             return;
         };
@@ -3100,6 +3111,7 @@ where
             return;
         }
         self.fullscreen = enabled;
+        self.viewing_cursor.activity();
         if let Some(window) = &self.window {
             let monitor = window.current_monitor();
             if enabled {
@@ -3252,6 +3264,20 @@ where
         }
         self.poll_audio();
         let now = Instant::now();
+        let was_hidden = self.viewing_cursor.hidden;
+        let pointer_ready = self
+            .window
+            .as_ref()
+            .is_some_and(|window| window.has_focus())
+            && self
+                .ui_state
+                .as_ref()
+                .is_some_and(|state| state.is_pointer_in_window());
+        self.viewing_cursor
+            .update(now, self.cursor_can_hide(pointer_ready));
+        if was_hidden != self.viewing_cursor.hidden {
+            self.request_redraw();
+        }
         if self.ui_repaint_at.is_some_and(|deadline| deadline <= now) {
             self.ui_repaint_at = None;
             self.request_redraw();
@@ -3370,6 +3396,7 @@ where
             self.ui_repaint_at,
             status_expiry,
             prefix_expiry,
+            self.viewing_cursor.deadline,
         ]
         .into_iter()
         .flatten()
@@ -3380,6 +3407,26 @@ where
         if let Some(window) = &self.window {
             window.request_redraw();
         }
+    }
+
+    fn cursor_can_hide(&self, pointer_ready: bool) -> bool {
+        pointer_ready
+            && self.fullscreen
+            && matches!(self.media_kind, Some(MediaKind::Image | MediaKind::Video))
+            && !self.image_loading
+            && self.image_error.is_none()
+            && !self.reading_pages.iter().any(Result::is_err)
+            && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted)
+            && self.selection_drag.is_none()
+            && !self.filmstrip_open
+            && !self.palette_open
+            && !self.grid_open
+            && self.active_export.is_none()
+            && !self.modal_input_blocked()
+            && self.ui_context.as_ref().is_some_and(|context| {
+                context
+                    .input(|input| !input.pointer.any_down() && input.raw.hovered_files.is_empty())
+            })
     }
 }
 
@@ -3649,6 +3696,22 @@ where
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
         }
+        if matches!(
+            event,
+            WindowEvent::CursorMoved { .. }
+                | WindowEvent::CursorEntered { .. }
+                | WindowEvent::CursorLeft { .. }
+                | WindowEvent::MouseInput { .. }
+                | WindowEvent::MouseWheel { .. }
+                | WindowEvent::KeyboardInput { .. }
+                | WindowEvent::Focused(_)
+                | WindowEvent::Touch(_)
+        ) {
+            if self.viewing_cursor.hidden {
+                self.request_redraw();
+            }
+            self.viewing_cursor.activity();
+        }
         if self.fullscreen
             && !self.palette_open
             && !self.modal_input_blocked()
@@ -3683,6 +3746,10 @@ where
         }
         match event {
             WindowEvent::CloseRequested => self.request_guarded(GuardedAction::Exit),
+            WindowEvent::Focused(true) => {
+                self.refresh_pointer_position();
+                self.request_redraw();
+            }
             WindowEvent::DroppedFile(path) => self.open_dropped_path(path),
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = self.renderer.as_mut()
@@ -3708,6 +3775,102 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_idle_is_limited_to_unobstructed_fullscreen_visual_media() {
+        let Some(_root) = isolated_test_root(
+            "tests::cursor_idle_is_limited_to_unobstructed_fullscreen_visual_media",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.ui_context = Some(egui::Context::default());
+        app.fullscreen = true;
+        app.state = PlaybackState::Paused;
+        for kind in [
+            None,
+            Some(MediaKind::Audio),
+            Some(MediaKind::Image),
+            Some(MediaKind::Video),
+        ] {
+            app.media_kind = kind;
+            assert_eq!(
+                app.cursor_can_hide(true),
+                matches!(kind, Some(MediaKind::Image | MediaKind::Video))
+            );
+        }
+        assert!(!app.cursor_can_hide(false));
+        for blocked in 0..13 {
+            match blocked {
+                0 => app.fullscreen = false,
+                1 => app.image_loading = true,
+                2 => app.image_error = Some("fixture failure".into()),
+                3 => app.state = PlaybackState::Faulted,
+                4 => app.filmstrip_open = true,
+                5 => app.palette_open = true,
+                6 => app.grid_open = true,
+                7 => app.pending_dialog = Some(DialogIntent::OpenFile),
+                8 => app.pending_guard = Some(GuardedAction::Exit),
+                9 => app.export_error = Some("fixture failure".into()),
+                10 => app.selection_drag = Some(SelectionDrag::Left),
+                11 => app.state = PlaybackState::Loading,
+                _ => app.reading_pages.push(Err("fixture failure".into())),
+            }
+            assert!(!app.cursor_can_hide(true));
+            app.fullscreen = true;
+            app.image_loading = false;
+            app.image_error = None;
+            app.state = PlaybackState::Paused;
+            app.filmstrip_open = false;
+            app.palette_open = false;
+            app.grid_open = false;
+            app.pending_dialog = None;
+            app.pending_guard = None;
+            app.export_error = None;
+            app.selection_drag = None;
+            app.reading_pages.clear();
+            assert!(app.cursor_can_hide(true));
+        }
+        for button in [
+            egui::PointerButton::Primary,
+            egui::PointerButton::Secondary,
+            egui::PointerButton::Middle,
+        ] {
+            for pressed in [true, false] {
+                let _ = app.ui_context.as_ref().expect("UI context").run_ui(
+                    egui::RawInput {
+                        events: vec![egui::Event::PointerButton {
+                            pos: egui::pos2(20.0, 20.0),
+                            button,
+                            pressed,
+                            modifiers: egui::Modifiers::default(),
+                        }],
+                        ..Default::default()
+                    },
+                    |_| {},
+                );
+                assert_eq!(app.cursor_can_hide(true), !pressed);
+            }
+        }
+        let _ = app.ui_context.as_ref().expect("UI context").run_ui(
+            egui::RawInput {
+                hovered_files: vec![egui::HoveredFile::default()],
+                ..Default::default()
+            },
+            |_| {},
+        );
+        assert!(!app.cursor_can_hide(true));
+        let now = Instant::now();
+        app.viewing_cursor.update(now, true);
+        assert_eq!(app.idle_wakeup(now), app.viewing_cursor.deadline);
+        app.viewing_cursor
+            .update(now + Duration::from_secs(2), true);
+        assert!(app.viewing_cursor.hidden);
+        assert_eq!(app.idle_wakeup(now), None);
+        app.set_fullscreen(false);
+        assert!(!app.viewing_cursor.hidden);
+        assert_eq!(app.viewing_cursor.deadline, None);
+    }
 
     fn isolated_test_root(test_name: &str) -> Option<PathBuf> {
         const TEST_ROOT: &str = "TOWAVUE_APP_TEST_ROOT";

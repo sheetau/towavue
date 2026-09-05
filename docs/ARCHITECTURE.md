@@ -137,7 +137,9 @@ F11をdefaultとする共有Toggle fullscreen commandをView menu・palette・cu
 
 fullscreenではtitle/tab bar、status、timeline、seek barとwindow resize操作を隠し、media領域をwindow全体へ広げる。画像/readingの外周余白も除く。音声playlistとWelcomeは中央contentとして残す。filmstrip・palette・grid、loading/error、export進捗・dirty guardは明示的な操作/通知として引き続き表示する。status通知とEscapeによる復帰案内は期限付きoverlayとする。timelineの表示設定は復帰まで保持し、fullscreen中にToggle timelineを実行した場合は通常windowへ戻ってtimelineを表示する。
 
-Escapeはmodal/paletteの入力を優先し、次にfilmstrip/gridを閉じ、overlayがなければfullscreenを解除する。解除時に画像selection・編集・再生状態は変えない。cursorの自動非表示、edge-hoverによるbar表示、double-click割当は別の操作監査とし、この変更へは含めない。
+Escapeはmodal/paletteの入力を優先し、次にfilmstrip/gridを閉じ、overlayがなければfullscreenを解除する。解除時に画像selection・編集・再生状態は変えない。edge-hoverによるbar表示とdouble-click割当は別の操作監査とする。
+
+画像・reading・動画のfullscreen閲覧中だけ、入力が2秒ないとcursorを隠す。windowがactiveでpointerが内側にあることを条件とし、button保持・selection drag、filmstrip/palette/grid、picker・dirty guard・export、loading/error・file hover中は表示する。pointer移動・button・wheel・key入力、focus/入退出の変化で期限をリセットし、fullscreen解除時も表示へ戻す。音声playlistとWelcomeでは隠さない。eguiのplatform outputでcursorを統一管理し、期限をevent loopの既存待機へ統合する。非表示中という理由だけで再描画やpollを追加しない。最小化からpointerを動かさず復帰するとCursorEnteredが届かない場合があるため、focus取得時も既存のpicker復帰と同じclient座標更新を行う。
 
 ### H1 seek bar and command palette
 

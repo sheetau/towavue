@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 03:43 JST - verification / injected text tail timing
+
+- Trigger: repeated captures showed sav/ zoo after sending save/zoom. CI 33984326962 (159e6f1) now passed; 33984653478 (fb4e6cd) remains in progress.
+- Evidence: temporarily trace owned fixture-window keyboard events, query changes and Present return. Separate letters all arrived; batch letters also reached the full query. In the timed case capture completed at 18:41:16.235 UTC, but E arrived at 16.337 and Present returned at 16.346. The capture preceded the final input, not an observed dropped query character. Arrival-to-Present for S/A/V/E was 7.829/7.335/15.045/8.502 ms.
+- Scope: SendWait/helper return did not establish that the receiver had drained the sequence. This does not identify the delaying Windows/input-backend layer, measure DWM display completion, or prove physical keyboard/IME latency. Future trials must verify foreground and the full expected text before advancing, using separate short ASCII key sends where useful; a fixed sleep alone is not a completion assertion.
+- Cleanup and verification: removed every temporary trace and its opt-in environment variable; production-source diff is empty. Rebuilt normal app and captured full save without instrumentation. Format, Clippy with warnings denied, all 138 tests and build pass (app 51, core 33, runtime 50, integrations 4; three live tests explicitly ignored). All owned windows closed normally; ignored fixture-only logs/captures remain local.
+- Result/changed areas: corrected the trial guide and recorded evidence rather than adding an unsupported input/repaint workaround. No application behavior, dependency, source media or persistent settings change. Status remains h1_active.
+- Next action: follow CI 33984653478 to a terminal result; continue focus/prefix and remaining launch input/stability audits. Physical IME, mixed-DPI and distribution decisions remain outstanding.
+
 ## 2026-09-06 03:36 JST - input / physical grid keys and shortcut ownership
 
 - Trigger: 159e6f1 CI 33984326962 remains in progress. Code used logical characters despite the physical-grid contract and ignored modifiers. Native grid Ctrl+S reproduced a clockwise rotation and dirty state instead of Save. The first key injection did not establish an open grid and is excluded; capture-confirmed grid plus Ctrl+S is the baseline.

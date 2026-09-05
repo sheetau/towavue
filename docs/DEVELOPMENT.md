@@ -4,6 +4,13 @@
 
 ## 1. 最初に試す
 
+### 入力注入とcaptureの完了確認
+
+- `SendKeys.SendWait`や送信helperの終了を、本体が全keyを処理した証拠にしない。まとめた「save」の直後captureが「sav」になる現象を、window event・query更新・Present完了の一時計測で切り分けた。capture完了18:41:16.235 UTCより後の16.337に最後のEが本体へ到着し、16.346にPresentが完了していた。本体queryから文字を落とした事例ではない。
+- 同じ4文字のWindowEvent到着→Present完了は7.829/7.335/15.045/8.502 ms。注入前の待ちやDWM表示完了を含まない基準機debug buildの単発値で、物理keyboard・IMEの遅延保証ではない。Windows/input backendのどの層が到着を遅らせるかまでは特定していない。
+- 短いASCII試用labelはkeyを分割して送り、対象windowがforegroundであることと、期待文字列が全文表示されたことを確認してから次の操作へ進む。長いsequenceは各stepの到着を確認する。一定秒数のsleepだけで成功と判断しない。過去の不完全captureをcommandや文字欠落の成功/失敗証拠へ流用しない。
+- 調査用入力logは所有するfixture windowだけで一時的に有効化し、計測後はコードも環境変数も除去した。最終通常buildでも「save」全文を確認し、format・Clippy・138 tests・buildを再実行した。製品へkey loggingや再描画の回避策は追加していない。試験log/captureはignoredのtarget/tmpに限る。
+
 ### 小さいwindowのgrid menu
 
 - 入力監査: grid上のCtrl+SがSaveでなく時計回り回転となりdirtyになるbaselineを確認した。修正後はnative Save dialogを開き、Cancel後も向き・clean状態を保つ。Shift+Sは物理cellを一回実行して閉じ、Undoでcleanへ戻る。Ctrl+Shift+Pではgridが閉じ、検索文字はpaletteへ入る。

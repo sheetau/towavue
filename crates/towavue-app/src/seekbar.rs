@@ -1,8 +1,16 @@
 use egui::{Color32, Context, Rect, Response};
 
-pub fn show(context: &Context, status: Rect, progress: f32) -> Response {
-    egui::Area::new("compact-seek-bar".into())
-        .order(egui::Order::Middle)
+pub fn show(
+    context: &Context,
+    status: Rect,
+    progress: f32,
+    parent: Option<egui::LayerId>,
+) -> Response {
+    let area = egui::Area::new("compact-seek-bar".into());
+    if let Some(parent) = parent {
+        context.set_sublayer(parent, area.layer());
+    }
+    area.order(egui::Order::Middle)
         .movable(false)
         .fixed_pos(status.left_top() - egui::vec2(0.0, 6.0))
         .constrain(false)

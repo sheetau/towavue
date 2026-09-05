@@ -382,6 +382,7 @@ struct Application<N> {
     notify: Arc<N>,
     window: Option<Arc<Window>>,
     fullscreen: bool,
+    fullscreen_controls_visible: bool,
     fullscreen_was_maximized: bool,
     viewing_cursor: cursor::ViewingCursor,
     pending_dialog: Option<DialogIntent>,
@@ -479,6 +480,7 @@ where
             notify,
             window: None,
             fullscreen: false,
+            fullscreen_controls_visible: false,
             fullscreen_was_maximized: false,
             viewing_cursor: cursor::ViewingCursor::default(),
             pending_dialog: None,
@@ -1258,8 +1260,9 @@ where
                 }
             });
         if let Some(rect) = status_rect {
-            self.draw_seek_bar(&context, rect, actions);
+            self.draw_seek_bar(&context, rect, None, actions);
         }
+        self.draw_fullscreen_controls(&context, actions);
         if self.fullscreen
             && let Some((message, started)) = &self.status_message
             && started.elapsed() < STATUS_MESSAGE_DURATION
@@ -1934,6 +1937,43 @@ where
             });
     }
 
+    fn draw_fullscreen_controls(&mut self, context: &egui::Context, actions: &mut Vec<UiAction>) {
+        let screen = context.content_rect();
+        let eligible = self.fullscreen
+            && !self.modal_input_blocked()
+            && !self.palette_open
+            && !self.grid_open
+            && !self.filmstrip_open
+            && self.selection_drag.is_none();
+        self.fullscreen_controls_visible = eligible
+            && context.input(|input| {
+                let held = input.pointer.any_down() || input.pointer.any_released();
+                let at_edge = input.pointer.hover_pos().is_some_and(|pointer| {
+                    screen.contains(pointer) && pointer.y >= screen.bottom() - 48.0
+                });
+                input.focused && ((self.fullscreen_controls_visible && held) || (at_edge && !held))
+            });
+        if !self.fullscreen_controls_visible {
+            return;
+        }
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(screen.left(), screen.bottom() - 30.0),
+            screen.max,
+        );
+        egui::Area::new("fullscreen-controls".into())
+            .order(egui::Order::Middle)
+            .fixed_pos(rect.min)
+            .default_size(rect.size())
+            .movable(false)
+            .constrain(false)
+            .show(context, |ui| {
+                ui.set_width(rect.width());
+                ui.set_height(rect.height());
+                let status = self.draw_status_bar(ui, actions);
+                self.draw_seek_bar(context, status, Some(ui.layer_id()), actions);
+            });
+    }
+
     fn draw_status_bar(&self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) -> egui::Rect {
         egui::Panel::bottom("status")
             .exact_size(30.0)
@@ -1941,6 +1981,10 @@ where
             .show(root, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
+                    if self.fullscreen && chrome::button(ui, "▣", "Exit fullscreen (F11)").clicked()
+                    {
+                        actions.push(UiAction::Command(CommandId::ToggleFullscreen));
+                    }
                     if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
                         let playing = self.state == PlaybackState::Playing;
                         if chrome::button(
@@ -2099,6 +2143,7 @@ where
         &mut self,
         context: &egui::Context,
         status: egui::Rect,
+        parent: Option<egui::LayerId>,
         actions: &mut Vec<UiAction>,
     ) {
         if self.media_kind == Some(MediaKind::Image) {
@@ -2117,7 +2162,7 @@ where
             } else {
                 0.0
             };
-            let response = seekbar::show(context, status, progress);
+            let response = seekbar::show(context, status, progress, parent);
             if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
                 let target =
                     seekbar::item_index(seekbar::ratio(response.rect, pointer.x), images.len());
@@ -2133,7 +2178,7 @@ where
             }
             return;
         }
-        if self.timeline_open
+        if (self.timeline_open && !self.fullscreen)
             || self.session.is_none()
             || matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted)
         {
@@ -2144,7 +2189,7 @@ where
         };
         let progress = (self.current_position().as_seconds_f64() / duration.as_secs_f64())
             .clamp(0.0, 1.0) as f32;
-        let response = seekbar::show(context, status, progress);
+        let response = seekbar::show(context, status, progress, parent);
         if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
             let ratio = seekbar::ratio(response.rect, pointer.x);
             self.draw_seek_preview(&response, ratio, duration);
@@ -3700,6 +3745,7 @@ where
             return;
         }
         self.fullscreen = enabled;
+        self.fullscreen_controls_visible = false;
         self.viewing_cursor.activity();
         if let Some(window) = &self.window {
             let monitor = window.current_monitor();
@@ -3717,7 +3763,7 @@ where
             }
         }
         self.set_status(if enabled {
-            "Fullscreen — press Escape to return to windowed view".into()
+            "Fullscreen — move to the bottom for controls · Escape to return".into()
         } else {
             "Windowed view".into()
         });
@@ -4033,6 +4079,7 @@ where
     fn cursor_can_hide(&self, pointer_ready: bool) -> bool {
         pointer_ready
             && self.fullscreen
+            && !self.fullscreen_controls_visible
             && matches!(self.media_kind, Some(MediaKind::Image | MediaKind::Video))
             && !self.image_loading
             && self.image_error.is_none()
@@ -4671,7 +4718,7 @@ mod tests {
             );
         }
         assert!(!app.cursor_can_hide(false));
-        for blocked in 0..13 {
+        for blocked in 0..14 {
             match blocked {
                 0 => app.fullscreen = false,
                 1 => app.image_loading = true,
@@ -4685,10 +4732,12 @@ mod tests {
                 9 => app.export_error = Some("fixture failure".into()),
                 10 => app.selection_drag = Some(SelectionDrag::Left),
                 11 => app.state = PlaybackState::Loading,
+                12 => app.fullscreen_controls_visible = true,
                 _ => app.reading_pages.push(Err("fixture failure".into())),
             }
             assert!(!app.cursor_can_hide(true));
             app.fullscreen = true;
+            app.fullscreen_controls_visible = false;
             app.image_loading = false;
             app.image_error = None;
             app.state = PlaybackState::Paused;
@@ -5199,7 +5248,8 @@ mod tests {
         );
         let texture = app.image.as_ref().expect("image").texture.id();
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 576.0));
-        for fullscreen in [false, true, false] {
+        for (fullscreen, controls) in [(false, false), (true, false), (true, true), (false, false)]
+        {
             app.set_fullscreen(fullscreen);
             app.status_message = None;
             let mut output = egui::FullOutput::default();
@@ -5207,6 +5257,11 @@ mod tests {
                 output = context.run_ui(
                     egui::RawInput {
                         screen_rect: Some(screen),
+                        events: vec![egui::Event::PointerMoved(if controls {
+                            screen.center_bottom() - egui::vec2(0.0, 15.0)
+                        } else {
+                            screen.center()
+                        })],
                         ..Default::default()
                     },
                     |ui| app.draw_ui(ui, &mut Vec::new()),
@@ -5214,6 +5269,7 @@ mod tests {
             }
             let has_close = output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "×"));
             assert_eq!(has_close, !fullscreen);
+            assert_eq!(app.fullscreen_controls_visible, controls);
             let image_rect = output
                 .shapes
                 .iter()
@@ -5229,6 +5285,116 @@ mod tests {
             } else {
                 assert!(image_rect.top() >= 32.0 && image_rect.bottom() <= 546.0);
             }
+        }
+    }
+
+    #[test]
+    fn fullscreen_controls_hold_through_release_and_keep_seek_above_status() {
+        let Some(root) = isolated_test_root(
+            "tests::fullscreen_controls_hold_through_release_and_keep_seek_above_status",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.fullscreen = true;
+        app.media_kind = Some(MediaKind::Image);
+        app.path = Some(root.join("0.png"));
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: (0..5)
+                .map(|index| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![index]),
+                    path: root.join(format!("{index}.png")),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        let context = egui::Context::default();
+        let frame = |app: &mut Application<_>, events, focused| {
+            let mut actions = Vec::new();
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    focused,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            actions
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let edge = egui::pos2(20.0, 561.0);
+        let center = egui::pos2(720.0, 300.0);
+        for _ in 0..3 {
+            assert!(frame(&mut app, vec![egui::Event::PointerMoved(center)], true).is_empty());
+        }
+        assert!(!app.fullscreen_controls_visible);
+        frame(&mut app, vec![button(center, true)], true);
+        frame(&mut app, vec![egui::Event::PointerMoved(edge)], true);
+        assert!(
+            !app.fullscreen_controls_visible,
+            "do not reveal during a content gesture"
+        );
+        frame(&mut app, vec![button(edge, false)], true);
+        for _ in 0..3 {
+            frame(&mut app, vec![], true);
+        }
+        assert!(app.fullscreen_controls_visible);
+        frame(&mut app, vec![button(edge, true)], true);
+        let actions = frame(&mut app, vec![button(edge, false)], true);
+        assert!(matches!(
+            actions.as_slice(),
+            [UiAction::Command(CommandId::ToggleFullscreen)]
+        ));
+        // The status Area has just been raised by its button. Both halves of Seek must still work.
+        for y in [549.0, 543.0] {
+            let seek = egui::pos2(480.0, y);
+            frame(&mut app, vec![egui::Event::PointerMoved(seek)], true);
+            assert!(frame(&mut app, vec![button(seek, true)], true).is_empty());
+            let actions = frame(&mut app, vec![button(seek, false)], true);
+            assert!(
+                matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if *path == root.join("2.png")),
+                "seek y={y}"
+            );
+        }
+        let seek = egui::pos2(480.0, 543.0);
+        frame(&mut app, vec![egui::Event::PointerMoved(seek)], true);
+        frame(&mut app, vec![button(seek, true)], true);
+        assert!(frame(&mut app, vec![egui::Event::PointerMoved(center)], true).is_empty());
+        assert!(app.fullscreen_controls_visible);
+        let actions = frame(&mut app, vec![button(center, false)], true);
+        assert!(
+            matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if *path == root.join("3.png"))
+        );
+        assert!(app.fullscreen_controls_visible, "retain the release frame");
+        frame(&mut app, vec![], true);
+        assert!(!app.fullscreen_controls_visible);
+        for blocked in 0..6 {
+            app.palette_open = blocked == 0;
+            app.grid_open = blocked == 1;
+            app.filmstrip_open = blocked == 2;
+            app.pending_guard = (blocked == 3).then_some(GuardedAction::Exit);
+            app.selection_drag = (blocked == 4).then_some(SelectionDrag::Left);
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(edge)],
+                blocked != 5,
+            );
+            assert!(!app.fullscreen_controls_visible);
         }
     }
 

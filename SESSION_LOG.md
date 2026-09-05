@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 07:54 JST - fullscreen / bottom-edge mouse controls without viewport changes
+
+- Intent/contract: old release exposes no controls at the bottom edge. Adopted a 48 logical px reveal band for the existing status/Seek UI, an exit button, release-frame drag retention and hiding under selection gestures/modal/palette/grid/filmstrip. No viewport resize, new timer, runtime or dependency changes; timeline still returns to the normal window.
+- Implementation/regression: app latches visibility and suppresses cursor hiding while controls are visible. Native playback-button clicks exposed the status Area covering the lower half of Seek. A lower-half-first pointer regression fails before the fix; Seek is now a sublayer of the status Area. Tests also cover image-index release-only navigation, outside-band drag/release, no mid-gesture reveal, focus/overlay guards and unchanged fullscreen image mesh bounds.
+- Native evidence: debug video with timeline already open supports play/pause, lower-half Seek to 60.015 s, a held drag outside the band without an early seek, release to 90.023 s and subsequent hiding. Exit restores 960x576 and its timeline. Normal release WAV supports play/pause, lower-half Seek to 90 s and exit. Trials are 1920x1080 at 96 DPI, not a mixed-DPI matrix. A trial launch omitted FFmpeg environment setup and exited before a window; the configured repeat passed.
+- Verification/cleanup: format, all-target Clippy, 164 tests (app 74, core 35, runtime 51, integrations 4), debug/release builds pass; three live tests explicitly ignored. Prior 99864ac CI 33996603946 succeeded. All owned visible trial processes 43092/21644/19992/40692 exit normally; no media edits or exports in this task, captures/logs stay ignored.
+- Status/next: h1_active. Audit remaining daily-viewing and environment-dependent launch gates. Top-edge tab/menu, double-click, recent/session, physical recovery/IME/mixed-DPI and distribution remain open; packaging question unanswered, no package/publication performed.
+
 ## 2026-09-06 07:39 JST - trim / release-only pointer endpoint editing
 
 - Intent/contract: adopted separate upper-start/lower-end grips before implementation, including implicit source edges, provisional valid-range display, invalid red grip, release-only edit, Escape/focus/target cancellation and existing validation/undo/export. No frame snap, range movement or multi-segment editing. Widget identity includes tab, playback generation and endpoint values; dispatch rejects stale tabs and modal input.

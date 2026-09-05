@@ -53,6 +53,10 @@ cargo run -p towavue-app -- 'C:\path\to\media-folder'
 
 ### H1で確認したlive trim scenario
 
+- 境界監査ではミリ秒PTS・30 fpsのFFV1/PCMから33.4–99.6 msを選び、変更前のexport 2 frames / live 1 frameを再現した。整数PTS trim後は1 frameになり、67,000,001–100,000,001 nsなどのframe色と非圧縮音声sample列もsourceからの切り出しに一致する。5秒のsource PTS offsetでも同じ結果を確認する。
+- 低精度音声PTSの丸めで生じた16 samples差はsample累積時刻の復元で修正した。44.1/48 kHzの3,000 chunks、missing PTS、前後の時刻飛びをtestする。ただし途中Seek後のsub-tick位相差は残るため、全source/Seekのbit一致とは扱わない。
+- 1–2 nsの動画/音声trimと、音声だけが残る動画trimは失敗し、既存保存先を保持する。実windowの約2.984秒H.264/AACは90 frames / 0 drops / 0 transfersでEnded、Save As成功・dirty解除を確認した。出力videoは90 frames / 3秒、audio durationは約2.984秒。最後のframe長・codec paddingと端点選択を区別する。
+
 - 30秒H.264/AACをpauseしてOを指定しPlay。変更前は約2.946秒の終端を越えて7秒台も再生した。変更後は範囲開始から再生し、終端でEndedになる。約2.95秒で89 frames / 0 drops / 0 CPU transfersを確認した。
 - 範囲外の約10秒へtimeline SeekするとPausedのsource previewになる。Oで終了を広げ、約5秒へSeekしてI。2倍速で約5～10秒を再生して終端へ停止し、Playで再開する。151 frames / 0 drops / 0 CPU transfersを確認した。範囲内Seekはsource時刻とpause状態を保つ。
 - 音声なしFFV1/SAR 3:2は約2.874秒の範囲を約2.85秒で再生し、最後のframeを保持してEndedになった。87 frames / 0 drops / 87 software transfers。
@@ -88,7 +92,7 @@ cargo run -p towavue-app -- 'C:\path\to\media-folder'
 
 画像では`Ctrl+wheel`または`+` / `-`でzoom、右dragでpan、左dragでselectionを作る。`Shift`付きselectionは正方形になり、辺をdragしてresizeできる。`Ctrl+Y`でcrop、`R` / `L`で90度回転、`H` / `V`で反転する。`B`でreading mode、`Ctrl+[` / `Ctrl+]`で同時表示数を変える。
 
-動画・音声では`I` / `O`がexport用trim端点、`Up` / `Down`、`M`がvolume、`,` / `.` / `/`がrateを編集する。volume・mute・rateは現在の再生と最終exportの両方へ反映する。rateはピッチ維持の0.25～4倍で、変更時は現在位置から短い再primingを行う。trimは現在の再生には反映されない。source fileは変更されない。
+動画・音声では`I` / `O`がtrim端点、`Up` / `Down`、`M`がvolume、`,` / `.` / `/`がrateを編集する。trim・volume・mute・rateは現在の再生と最終exportの両方へ反映する。rateはピッチ維持の0.25～4倍で、変更時は現在位置から短い再primingを行う。範囲外Seekはpaused source previewになり、Playはtrim開始へ戻る。source fileは変更されない。
 
 ## 3. Explorer順を確認する
 

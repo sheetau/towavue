@@ -10,7 +10,7 @@ use ffmpeg::frame;
 use ffmpeg::media::Type;
 use ffmpeg::software::resampling;
 use ffmpeg::software::scaling::{self, flag::Flags};
-use ffmpeg::{ChannelLayout, Rational};
+use ffmpeg::{ChannelLayout, Rational, Rescale, Rounding};
 use ffmpeg_next as ffmpeg;
 use thiserror::Error;
 use towavue_core::MediaTime;
@@ -254,9 +254,46 @@ struct AudioPipeline {
     resampler: resampling::Context,
     output_format: AudioFormat,
     next_presentation_time: MediaTime,
+    next_sample: i64,
 }
 
 impl AudioPipeline {
+    fn sample_presentation_time(&mut self, timestamp: Option<i64>, samples: usize) -> MediaTime {
+        let sample_base = Rational(1, self.output_format.sample_rate as i32);
+        let sample = if let Some(timestamp) = timestamp {
+            if self.next_sample != ffmpeg::ffi::AV_NOPTS_VALUE
+                && timestamp
+                    > self
+                        .next_sample
+                        .rescale_with(sample_base, self.time_base, Rounding::Up)
+            {
+                self.next_sample = ffmpeg::ffi::AV_NOPTS_VALUE;
+            }
+            // The worker exclusively owns next_sample for this pipeline. FFmpeg borrows
+            // its valid mutable pointer only for this call and retains nothing. Decoded
+            // timestamps exclude AV_NOPTS_VALUE; sample counts are non-negative i32 values.
+            unsafe {
+                ffmpeg::ffi::av_rescale_delta(
+                    self.time_base.into(),
+                    timestamp,
+                    sample_base.into(),
+                    samples as i32,
+                    &mut self.next_sample,
+                    sample_base.into(),
+                )
+            }
+        } else {
+            let sample = if self.next_sample == ffmpeg::ffi::AV_NOPTS_VALUE {
+                0
+            } else {
+                self.next_sample
+            };
+            self.next_sample = sample.saturating_add(samples as i64);
+            sample
+        };
+        timestamp_to_media_time(Some(sample), sample_base)
+    }
+
     fn receive(
         &mut self,
         emit: &mut impl FnMut(DecodeOutput) -> bool,
@@ -266,11 +303,8 @@ impl AudioPipeline {
             let mut decoded = frame::Audio::empty();
             match self.decoder.receive_frame(&mut decoded) {
                 Ok(()) => {
-                    let presentation_time = decoded
-                        .timestamp()
-                        .map_or(self.next_presentation_time, |timestamp| {
-                            timestamp_to_media_time(Some(timestamp), self.time_base)
-                        });
+                    let presentation_time =
+                        self.sample_presentation_time(decoded.timestamp(), decoded.samples());
                     let mut converted = frame::Audio::empty();
                     // Match the default layout used at resampler setup when PCM supplies
                     // only a channel count. Preserve explicitly declared speaker layouts.
@@ -640,7 +674,7 @@ fn run_parallel_workers(
     })
 }
 
-fn clip_audio_chunk(chunk: &mut AudioChunk, start: MediaTime, end: Option<MediaTime>) {
+pub(crate) fn clip_audio_chunk(chunk: &mut AudioChunk, start: MediaTime, end: Option<MediaTime>) {
     let rate = i128::from(chunk.format.sample_rate);
     // Recover the sample index before ceil-ing boundaries: FFmpeg PTS-to-nanosecond
     // truncation must not add an extra sample at an exactly aligned trim end.
@@ -994,6 +1028,7 @@ fn create_audio_pipeline_from(config: StreamConfig) -> Result<AudioPipeline, Dec
         resampler,
         output_format,
         next_presentation_time: MediaTime::ZERO,
+        next_sample: ffmpeg::ffi::AV_NOPTS_VALUE,
     })
 }
 
@@ -1134,6 +1169,48 @@ mod tests {
         super::clip_audio_chunk(&mut chunk, MediaTime::from_nanoseconds(2_000_000_000), None);
         assert_eq!(chunk.frames, 0);
         assert!(chunk.bytes.is_empty());
+    }
+
+    #[test]
+    fn coarse_audio_timestamps_follow_samples_but_preserve_gaps() {
+        ffmpeg_next::init().expect("initialize FFmpeg");
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+        let input = ffmpeg_next::format::input(&path).expect("generated fixture");
+        let mut pipeline = super::create_audio_pipeline(&input)
+            .expect("audio pipeline")
+            .expect("audio stream");
+        pipeline.time_base = Rational(1, 1000);
+        for rate in [44_100, 48_000] {
+            pipeline.output_format.sample_rate = rate;
+            pipeline.next_sample = ffmpeg_next::ffi::AV_NOPTS_VALUE;
+            for index in 0..3000_i64 {
+                let sample = index * 1024;
+                let timestamp = (sample * 1000 + i64::from(rate) / 2) / i64::from(rate);
+                let actual = pipeline.sample_presentation_time(Some(timestamp), 1024);
+                assert_eq!(
+                    actual.as_nanoseconds(),
+                    sample * 1_000_000_000 / i64::from(rate)
+                );
+            }
+            let predicted = pipeline.next_sample;
+            assert_eq!(
+                pipeline
+                    .sample_presentation_time(None, 1024)
+                    .as_nanoseconds(),
+                predicted * 1_000_000_000 / i64::from(rate)
+            );
+            assert_eq!(
+                pipeline
+                    .sample_presentation_time(Some(100_000), 1024)
+                    .as_nanoseconds(),
+                100_000_000_000
+            );
+            assert_eq!(
+                pipeline.sample_presentation_time(Some(0), 1024),
+                MediaTime::ZERO
+            );
+        }
     }
 
     #[test]

@@ -82,6 +82,8 @@ volume・mute・rateは現在の再生にも反映します。rateはピッチ�
 
 I/Oでtrim端点を指定するとtimelineが開き、再生・保存するsource範囲をミリ秒付きで表示します。未指定の開始/終了は先頭/末尾です。逆転・零長・範囲外はその場で拒否し、同じ端点の再指定は履歴を増やしません。Playは範囲内を再生して終端で停止し、再Playで範囲の開始へ戻ります。範囲外へSeekすると一時停止のsource previewになり、I/Oで端点を選び直せます。その状態のPlayも範囲の開始へ戻ります。Undo/Redo・rate変更・tab復帰でも現在のtrimを使います。
 
+trim保存は開始以上・終了未満のframe／sampleを選びます。短すぎて動画frameや音声sampleが残らない場合は保存を失敗にし、既存の出力先を保護します。動画の最後のframe長や圧縮音声のpaddingにより、出力containerのdurationは指定区間と同一とは限りません。低精度PTSの途中Seek後に残る音声sample位相差は監査中です。
+
 ## ライセンス
 
 本リポジトリのコードは、利用者の選択により[MIT License](LICENSE-MIT)または[Apache License 2.0](LICENSE-APACHE)の下で利用できます。将来同梱するFFmpeg DLLとその他の第三者コンポーネントには、それぞれのライセンスが適用されます。

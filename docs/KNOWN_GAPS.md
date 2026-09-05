@@ -9,7 +9,7 @@
 - 動画はH1でbar・timelineを除いた領域へsample aspect ratio込みでaspect-fitするよう修正した。回転metadataによるportrait orientationの自動適用は未検証。
 - 動画・音声のvolume・mute・rateはH1でlive playbackにも反映する。rate変更は現在位置からpipelineを再構築するため短い再primingを伴い、音声を無途切れで連続変速する方式ではない。
 - 動画のcrop、rotate、flipはH1でhardware/software両方のlive previewへ反映した。cropは整数pixel矩形をexportと共有し、画像1 pixel・動画偶数pixelに揃える。既定H.264 encoderのため動画は16×16未満を確定しない。PNGの1×1・奇数位置/寸法・回転後の再cropは画素一致を検証したが、動画の圧縮・chroma再構成や全codec/HDRの色一致を保証するものではない。
-- trimは`I` / `O`でsource端点を指定する。H1で入力検証・timeline範囲表示と単一区間のlive再生を追加した。終端で停止し、再Playは範囲開始へ戻る。範囲外Seekはpaused source previewになり、端点を選び直せる。range handleは未実装。低精度container PTS、極小区間、export時刻のmicrosecond丸めを含む全codecの境界一致は未検証。
+- trimは`I` / `O`でsource端点を指定する。H1で入力検証・timeline範囲表示と単一区間のlive再生を追加した。終端で停止し、再Playは範囲開始へ戻る。範囲外Seekはpaused source previewになり、端点を選び直せる。range handleは未実装。exportの秒丸めを整数tick/sampleへ変更し、空出力を拒否した。ミリ秒PTSのFFV1/PCMでframe選択とsource sample列を検証済み。ただし途中Seek後のlive音声は元のsub-tick sample位相を復元できず差が残る。VFR、欠落/不連続PTS、codec paddingを含む全codec一致は未完了。
 
 UI上のcommand名は操作が即時反映される印象を与えるため、live playbackへの適用または表示上の区別が、最初のUX改善候補である。
 

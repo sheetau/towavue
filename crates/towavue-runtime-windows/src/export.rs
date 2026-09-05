@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use ffmpeg_next as ffmpeg;
 use thiserror::Error;
 use towavue_core::{EditOperation, EditState, MediaKind};
 
@@ -107,6 +108,9 @@ fn export_cancellable(
         return Err(ExportError::InvalidTrim);
     }
     check_cancelled(cancelled)?;
+    let trim_streams = TrimStreams::probe(request, &state)?;
+    let trimmed_kind =
+        (state.trim_start.is_some() || state.trim_end.is_some()).then_some(request.kind);
     let staging = StagedExport::new(&request.target)?;
     let staged_request = ExportRequest {
         target: staging.output.clone(),
@@ -120,12 +124,12 @@ fn export_cancellable(
     if request.hardware_encode && hardware_encode_supported_target(request) {
         let hardware = run_ffmpeg(
             &executable,
-            ffmpeg_arguments(&staged_request, true),
+            ffmpeg_arguments(&staged_request, true, &trim_streams),
             cancelled,
             progress,
         )?;
         if hardware.status.success() {
-            staging.publish(&request.target, cancelled)?;
+            staging.publish(&request.target, cancelled, trimmed_kind)?;
             return Ok(ExportOutcome {
                 used_hardware_encoder: true,
             });
@@ -133,7 +137,7 @@ fn export_cancellable(
     }
     let output = run_ffmpeg(
         &executable,
-        ffmpeg_arguments(&staged_request, false),
+        ffmpeg_arguments(&staged_request, false, &trim_streams),
         cancelled,
         progress,
     )?;
@@ -145,7 +149,7 @@ fn export_cancellable(
             message
         }));
     }
-    staging.publish(&request.target, cancelled)?;
+    staging.publish(&request.target, cancelled, trimmed_kind)?;
     Ok(ExportOutcome {
         used_hardware_encoder: false,
     })
@@ -189,8 +193,36 @@ impl StagedExport {
         }
     }
 
-    fn publish(&self, target: &Path, cancelled: &AtomicBool) -> Result<(), ExportError> {
+    fn publish(
+        &self,
+        target: &Path,
+        cancelled: &AtomicBool,
+        trimmed_kind: Option<MediaKind>,
+    ) -> Result<(), ExportError> {
         check_cancelled(cancelled)?;
+        if let Some(kind) = trimmed_kind {
+            let mut input = ffmpeg::format::input(&self.output).map_err(|error| {
+                ExportError::Failed(format!("trim output contains no readable media: {error}"))
+            })?;
+            let expected = if kind == MediaKind::Audio {
+                ffmpeg::media::Type::Audio
+            } else {
+                ffmpeg::media::Type::Video
+            };
+            let mut found = false;
+            for (stream, packet) in input.packets() {
+                check_cancelled(cancelled)?;
+                if stream.parameters().medium() == expected && packet.size() > 0 {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return Err(ExportError::Failed(format!(
+                    "trim contains no {expected:?} frames; choose a wider range"
+                )));
+            }
+        }
         let output = fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -292,7 +324,49 @@ fn run_ffmpeg(
     })
 }
 
-fn ffmpeg_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
+#[derive(Default)]
+struct TrimStreams {
+    video: Option<(usize, ffmpeg::Rational)>,
+    audio: Option<(usize, ffmpeg::Rational)>,
+}
+
+impl TrimStreams {
+    fn probe(request: &ExportRequest, state: &EditState) -> Result<Self, ExportError> {
+        if request.kind == MediaKind::Image
+            || (state.trim_start.is_none() && state.trim_end.is_none())
+        {
+            return Ok(Self::default());
+        }
+        let probe = || -> Result<Self, ffmpeg::Error> {
+            ffmpeg::init()?;
+            let input = ffmpeg::format::input(&request.source)?;
+            let video = (request.kind == MediaKind::Video)
+                .then(|| input.streams().best(ffmpeg::media::Type::Video))
+                .flatten()
+                .map(|stream| (stream.index(), stream.time_base()));
+            let audio = input
+                .streams()
+                .best(ffmpeg::media::Type::Audio)
+                .map(|stream| {
+                    let decoder =
+                        ffmpeg::codec::context::Context::from_parameters(stream.parameters())?
+                            .decoder()
+                            .audio()?;
+                    Ok::<_, ffmpeg::Error>((
+                        stream.index(),
+                        ffmpeg::Rational(1, decoder.rate() as i32),
+                    ))
+                })
+                .transpose()?;
+            Ok(Self { video, audio })
+        };
+        probe().map_err(|error| {
+            ExportError::Failed(format!("could not inspect trim streams: {error}"))
+        })
+    }
+}
+
+fn ffmpeg_arguments(request: &ExportRequest, hardware: bool, streams: &TrimStreams) -> Vec<String> {
     let state = EditState::from_operations(&request.operations);
     let mut arguments = vec![
         "-hide_banner".into(),
@@ -308,6 +382,12 @@ fn ffmpeg_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
         "-map_metadata".into(),
         "0".into(),
     ];
+    if streams.video.is_some() || streams.audio.is_some() {
+        arguments.push("-copyts".into());
+        for (index, _) in streams.video.iter().chain(streams.audio.iter()) {
+            arguments.extend(["-map".into(), format!("0:{index}")]);
+        }
+    }
     let visual = visual_filters(&request.operations);
     match request.kind {
         MediaKind::Image => {
@@ -317,17 +397,21 @@ fn ffmpeg_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
             arguments.extend(["-frames:v".into(), "1".into()]);
         }
         MediaKind::Video => {
-            let video = video_filters(visual, &state);
+            let video = video_filters(
+                visual,
+                &state,
+                streams.video.map(|(_, time_base)| time_base),
+            );
             if !video.is_empty() {
                 arguments.extend(["-vf".into(), video.join(",")]);
             }
-            let audio = audio_filters(&state);
+            let audio = audio_filters(&state, streams.audio.map(|(_, time_base)| time_base));
             if !audio.is_empty() {
                 arguments.extend(["-af".into(), audio.join(",")]);
             }
         }
         MediaKind::Audio => {
-            let audio = audio_filters(&state);
+            let audio = audio_filters(&state, streams.audio.map(|(_, time_base)| time_base));
             if !audio.is_empty() {
                 arguments.extend(["-af".into(), audio.join(",")]);
             }
@@ -388,8 +472,12 @@ fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
         .collect()
 }
 
-fn video_filters(mut filters: Vec<String>, state: &EditState) -> Vec<String> {
-    if let Some(trim) = trim_filter("trim", state) {
+fn video_filters(
+    mut filters: Vec<String>,
+    state: &EditState,
+    time_base: Option<ffmpeg::Rational>,
+) -> Vec<String> {
+    if let Some(trim) = time_base.and_then(|time_base| trim_filter("trim", state, time_base)) {
         filters.push(trim);
     }
     if state.trim_start.is_some() || state.trim_end.is_some() || state.rate != 1.0 {
@@ -402,9 +490,9 @@ fn video_filters(mut filters: Vec<String>, state: &EditState) -> Vec<String> {
     filters
 }
 
-fn audio_filters(state: &EditState) -> Vec<String> {
+fn audio_filters(state: &EditState, time_base: Option<ffmpeg::Rational>) -> Vec<String> {
     let mut filters = Vec::new();
-    if let Some(trim) = trim_filter("atrim", state) {
+    if let Some(trim) = time_base.and_then(|time_base| trim_filter("atrim", state, time_base)) {
         filters.push(trim);
         filters.push("asetpts=PTS-STARTPTS".into());
     }
@@ -417,15 +505,21 @@ fn audio_filters(state: &EditState) -> Vec<String> {
     filters
 }
 
-fn trim_filter(name: &str, state: &EditState) -> Option<String> {
+fn trim_filter(name: &str, state: &EditState, time_base: ffmpeg::Rational) -> Option<String> {
+    // A half-open source interval keeps the first tick/sample at or after each boundary.
+    let ticks = |time: towavue_core::MediaTime| {
+        let numerator = i128::from(time.as_nanoseconds()) * i128::from(time_base.denominator());
+        let denominator = 1_000_000_000_i128 * i128::from(time_base.numerator());
+        (numerator + denominator - 1) / denominator
+    };
     match (state.trim_start, state.trim_end) {
         (Some(start), Some(end)) if start < end => Some(format!(
-            "{name}=start={:.6}:end={:.6}",
-            start.as_seconds_f64(),
-            end.as_seconds_f64()
+            "{name}=start_pts={}:end_pts={}",
+            ticks(start),
+            ticks(end)
         )),
-        (Some(start), None) => Some(format!("{name}=start={:.6}", start.as_seconds_f64())),
-        (None, Some(end)) => Some(format!("{name}=end={:.6}", end.as_seconds_f64())),
+        (Some(start), None) => Some(format!("{name}=start_pts={}", ticks(start))),
+        (None, Some(end)) => Some(format!("{name}=start_pts=0:end_pts={}", ticks(end))),
         _ => None,
     }
 }
@@ -459,10 +553,203 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use crate::DecodeOutput;
     use image::{ImageFormat, Rgb, RgbImage};
     use towavue_core::{MediaTime, PixelCrop};
 
     use super::*;
+
+    #[test]
+    fn trim_export_preserves_source_boundaries_and_rejects_empty_media() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("towavue-trim-boundary-{unique}"));
+        fs::create_dir(&directory).expect("fixture directory");
+        let source = directory.join("source.mkv");
+        let executable =
+            PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg directory"))
+                .join("bin/ffmpeg.exe");
+        let generated = Command::new(&executable).args([
+            "-v", "error", "-f", "lavfi", "-i",
+            "nullsrc=size=160x96:rate=30:duration=2,geq=r='mod(N*37,256)':g='mod(N*67,256)':b='mod(N*97,256)'",
+            "-f", "lavfi", "-i", "sine=sample_rate=48000:duration=2", "-c:v", "ffv1", "-c:a", "pcm_s16le",
+        ]).arg(&source).output().expect("generate boundary fixture");
+        assert!(
+            generated.status.success(),
+            "{}",
+            String::from_utf8_lossy(&generated.stderr)
+        );
+        for (start_ns, end_ns) in [
+            (33_400_000, 99_600_000),
+            (67_000_001, 100_000_001),
+            (1_067_000_001, 1_100_000_001),
+        ] {
+            let start = MediaTime::from_nanoseconds(start_ns);
+            let end = MediaTime::from_nanoseconds(end_ns);
+            let (mut expected_pixels, mut expected_samples) = (Vec::new(), 0);
+            let mut expected_audio = Vec::new();
+            crate::decode::decode_file(&source, |output| {
+                match output {
+                    DecodeOutput::Video(frame)
+                        if frame.presentation_time >= start && frame.presentation_time < end =>
+                    {
+                        expected_pixels.push(frame.rgba[..3].to_vec())
+                    }
+                    DecodeOutput::Audio(mut chunk) => {
+                        crate::decode::clip_audio_chunk(&mut chunk, start, Some(end));
+                        expected_samples += chunk.frames;
+                        expected_audio.extend(chunk.bytes);
+                    }
+                    _ => {}
+                }
+                true
+            })
+            .expect("source interval");
+            let (mut live_frames, mut live_audio) = (0, Vec::new());
+            crate::decode::decode_file_parallel(&source, start, Some(end), |output| {
+                match output {
+                    crate::decode::ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(_)) => {
+                        live_frames += 1
+                    }
+                    crate::decode::ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(
+                        chunk,
+                    )) => live_audio.extend(chunk.bytes),
+                    _ => {}
+                }
+                true
+            })
+            .expect("live interval");
+            assert_eq!(live_frames, expected_pixels.len());
+            assert_eq!(live_audio.len(), expected_audio.len());
+            // Seeking into coarse PTS can lose the original sub-tick sample phase.
+            // Compare exact live samples only when demux preroll still starts at zero.
+            if start_ns < 100_000_000 {
+                assert!(
+                    live_audio == expected_audio,
+                    "live source samples at {start_ns}..{end_ns}"
+                );
+            }
+            let target = directory.join(format!("{start_ns}.avi"));
+            export_media(&ExportRequest {
+                source: source.clone(),
+                target: target.clone(),
+                kind: MediaKind::Video,
+                operations: vec![
+                    EditOperation::SetTrimStart(start),
+                    EditOperation::SetTrimEnd(end),
+                ],
+                hardware_encode: false,
+            })
+            .expect("trim export");
+            let (mut actual_pixels, mut actual_samples) = (Vec::new(), 0);
+            let mut actual_audio = Vec::new();
+            crate::decode::decode_file(&target, |output| {
+                match output {
+                    DecodeOutput::Video(frame) => actual_pixels.push(frame.rgba[..3].to_vec()),
+                    DecodeOutput::Audio(chunk) => {
+                        actual_samples += chunk.frames;
+                        actual_audio.extend(chunk.bytes);
+                    }
+                }
+                true
+            })
+            .expect("decode trimmed output");
+            assert_eq!(
+                actual_pixels.len(),
+                expected_pixels.len(),
+                "frame count at {start_ns}..{end_ns}"
+            );
+            for (actual, expected) in actual_pixels.iter().zip(&expected_pixels) {
+                assert!(
+                    actual
+                        .iter()
+                        .zip(expected)
+                        .all(|(actual, expected)| actual.abs_diff(*expected) <= 4),
+                    "wrong source frame: {actual:?} != {expected:?}"
+                );
+            }
+            assert_eq!(
+                actual_samples, expected_samples,
+                "sample count at {start_ns}..{end_ns}"
+            );
+            assert!(
+                actual_audio == expected_audio,
+                "export source samples at {start_ns}..{end_ns}"
+            );
+        }
+        let shifted = directory.join("shifted.mkv");
+        let remux = Command::new(&executable)
+            .args(["-v", "error", "-i"])
+            .arg(&source)
+            .args(["-map", "0", "-c", "copy", "-output_ts_offset", "5"])
+            .arg(&shifted)
+            .output()
+            .expect("offset fixture");
+        assert!(
+            remux.status.success(),
+            "{}",
+            String::from_utf8_lossy(&remux.stderr)
+        );
+        let shifted_target = directory.join("shifted.avi");
+        export_media(&ExportRequest {
+            source: shifted,
+            target: shifted_target.clone(),
+            kind: MediaKind::Video,
+            operations: vec![
+                EditOperation::SetTrimStart(MediaTime::from_nanoseconds(5_067_000_001)),
+                EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(5_100_000_001)),
+            ],
+            hardware_encode: false,
+        })
+        .expect("source-offset trim export");
+        let mut decoded_outputs = Vec::new();
+        for path in [directory.join("67000001.avi"), shifted_target] {
+            let (mut pixels, mut audio) = (Vec::new(), Vec::new());
+            crate::decode::decode_file(&path, |output| {
+                match output {
+                    DecodeOutput::Video(frame) => pixels.extend(frame.rgba),
+                    DecodeOutput::Audio(chunk) => audio.extend(chunk.bytes),
+                }
+                true
+            })
+            .expect("decode offset comparison");
+            decoded_outputs.push((pixels, audio));
+        }
+        assert!(
+            decoded_outputs[0] == decoded_outputs[1],
+            "source offset changed selected media"
+        );
+        for (kind, end_ns) in [
+            (MediaKind::Video, 2),
+            (MediaKind::Video, 100_000),
+            (MediaKind::Audio, 2),
+        ] {
+            let target = directory.join(if kind == MediaKind::Video {
+                "empty.avi"
+            } else {
+                "empty.wav"
+            });
+            fs::write(&target, b"previous export").expect("existing target");
+            let result = export_media(&ExportRequest {
+                source: source.clone(),
+                target: target.clone(),
+                kind,
+                operations: vec![
+                    EditOperation::SetTrimStart(MediaTime::from_nanoseconds(1)),
+                    EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(end_ns)),
+                ],
+                hardware_encode: false,
+            });
+            assert!(result.is_err(), "empty {kind:?} must fail: {result:?}");
+            assert_eq!(
+                fs::read(target).expect("target remains"),
+                b"previous export"
+            );
+        }
+        fs::remove_dir_all(directory).expect("remove owned boundary fixtures");
+    }
 
     #[test]
     fn image_export_preserves_operation_order() {
@@ -483,13 +770,35 @@ mod tests {
             hardware_encode: false,
         };
 
-        let arguments = ffmpeg_arguments(&request, false);
+        let arguments = ffmpeg_arguments(&request, false, &TrimStreams::default());
         let filter = arguments
             .windows(2)
             .find_map(|pair| (pair[0] == "-vf").then_some(pair[1].as_str()))
             .expect("video filter argument");
 
         assert_eq!(filter, "crop=20:18:4:6:exact=1,transpose=clock,hflip");
+    }
+
+    #[test]
+    fn trim_ticks_round_up_and_keep_implicit_source_start() {
+        let mut state = EditState {
+            trim_end: Some(MediaTime::from_nanoseconds(1)),
+            ..EditState::default()
+        };
+        assert_eq!(
+            trim_filter("trim", &state, ffmpeg::Rational(1, 1000)).as_deref(),
+            Some("trim=start_pts=0:end_pts=1")
+        );
+        state.trim_start = Some(MediaTime::from_nanoseconds(33_333_334));
+        state.trim_end = None;
+        assert_eq!(
+            trim_filter("trim", &state, ffmpeg::Rational(1, 30)).as_deref(),
+            Some("trim=start_pts=2")
+        );
+        assert_eq!(
+            trim_filter("atrim", &state, ffmpeg::Rational(1, 48000)).as_deref(),
+            Some("atrim=start_pts=1601")
+        );
     }
 
     #[test]
@@ -507,12 +816,17 @@ mod tests {
             hardware_encode: false,
         };
 
-        let arguments = ffmpeg_arguments(&request, false).join(" ");
+        let streams = TrimStreams {
+            video: Some((0, ffmpeg::Rational(1, 1000))),
+            audio: Some((1, ffmpeg::Rational(1, 48000))),
+        };
+        let arguments = ffmpeg_arguments(&request, false, &streams).join(" ");
 
         assert!(
-            arguments.contains("trim=start=2.000000:end=5.000000,setpts=(PTS-STARTPTS)/4.0000")
+            arguments.contains("trim=start_pts=2000:end_pts=5000,setpts=(PTS-STARTPTS)/4.0000")
         );
-        assert!(arguments.contains("atrim=start=2.000000:end=5.000000,asetpts=PTS-STARTPTS,atempo=2.0000,atempo=2.0000,volume=0.5000"));
+        assert!(arguments.contains("atrim=start_pts=96000:end_pts=240000,asetpts=PTS-STARTPTS,atempo=2.0000,atempo=2.0000,volume=0.5000"));
+        assert!(arguments.contains("-copyts -map 0:0 -map 0:1"));
     }
 
     #[test]
@@ -525,7 +839,7 @@ mod tests {
             hardware_encode: true,
         };
 
-        let arguments = ffmpeg_arguments(&request, true).join(" ");
+        let arguments = ffmpeg_arguments(&request, true, &TrimStreams::default()).join(" ");
 
         assert!(arguments.contains("-c:v h264_mf -hw_encoding 1"));
     }
@@ -806,7 +1120,7 @@ mod tests {
             .open(&target)
             .expect("lock target");
         assert!(matches!(
-            staging.publish(&target, &AtomicBool::new(false)),
+            staging.publish(&target, &AtomicBool::new(false), None),
             Err(ExportError::Output(_))
         ));
         drop(staging);

@@ -19,6 +19,7 @@ const VIDEO_QUEUE_CAPACITY: usize = 2;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PlaybackEvent {
     VideoReady(PlaybackGeneration),
+    AudioReady(PlaybackGeneration),
     DecodePathSelected(PlaybackGeneration, DecodePath),
     DecodeFinished(PlaybackGeneration),
     DeviceRemoved(PlaybackGeneration, String),
@@ -29,6 +30,7 @@ impl PlaybackEvent {
     pub fn generation(&self) -> PlaybackGeneration {
         match self {
             Self::VideoReady(generation)
+            | Self::AudioReady(generation)
             | Self::DecodePathSelected(generation, _)
             | Self::DecodeFinished(generation)
             | Self::DeviceRemoved(generation, _)
@@ -224,7 +226,17 @@ impl PlaybackSession {
         let audio = self
             .audio_format
             .map(|format| {
-                AudioOutput::start_with_settings(format, self.target, self.volume, self.rate)
+                let notify = Arc::clone(&self.notify);
+                let generation = self.generation;
+                AudioOutput::start_with_settings(
+                    format,
+                    self.target,
+                    self.volume,
+                    self.rate,
+                    move || {
+                        notify(PlaybackEvent::AudioReady(generation));
+                    },
+                )
             })
             .transpose()?;
         if self.paused
@@ -521,6 +533,10 @@ mod tests {
     fn recovery_events_retain_their_playback_generation() {
         let generation = PlaybackGeneration::INITIAL.next();
 
+        assert_eq!(
+            PlaybackEvent::AudioReady(generation).generation(),
+            generation
+        );
         assert_eq!(
             PlaybackEvent::DeviceRemoved(generation, "removed".to_owned()).generation(),
             generation

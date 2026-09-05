@@ -114,6 +114,8 @@ WASAPI呼び出しが`AUDCLNT_E_DEVICE_INVALIDATED`を返した場合も、通�
 
 Seek再構築では必要なPaused状態も新pipelineへ渡し、破棄予定の旧WASAPI workerへのPause成功を前提にしない。endpoint無効化後でもtrim範囲外のsource previewを同じ位置・停止状態で復元する。通常のPause/Resumeは引き続き実行中workerを操作し、異常終了を成功扱いしない。
 
+停止中のWASAPI session切断も、`IAudioSessionEvents::OnSessionDisconnected`の登録をclient寿命中保持して既存endpoint復旧へ渡す。callbackでは通知をqueueへ置くだけにし、COM解放・再作成はcallback外の既存worker/app経路で行う。音声workerは結果を公開した後にgeneration付きAudioReadyを送り、UIのfolder pollや次の入力を待たず受信させる。旧generationのwakeは既存のevent失効条件で拒否する。
+
 ### M5 image presentation
 
 静止画はEXIF orientation適用後、アニメGIF、WebP、APNGは合成済みRGBA frameと10 ms以上のdeadlineへ変換する。app event loopは次frame時刻までsleepし、期限を過ぎたframeを追いつかせてからegui textureを更新する。画像textureも動画・UIと同じD3D11 deviceとback bufferへ描画し、Presentは一回に保つ。

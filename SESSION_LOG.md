@@ -2,6 +2,16 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 06:46 JST - audio / wake paused consumers and register session disconnection
+
+- Scope evidence: local D3D11 bindings and official docs do not provide the contemplated ID3D11Device5 RemoveDevice; that method belongs to D3D12. Microsoft's D3D11 dxcap -forcetdr affects all running Direct3D apps, so it was not executed. No GPU/OS setting was changed; direct recovery tests remain distinct from actual removal detection.
+- Change: retain WASAPI session-disconnection registration alongside endpoint registration for the client lifetime. Callback only enqueues the existing endpoint signal; release/rebuild stays outside it. After publishing each audio result, wake the app through generation-tagged AudioReady. The app consumes current audio events without depending on folder polling or another input. Existing stale-generation filtering remains in force; no unsafe/dependency changes.
+- Regression/checks: changed live drain test to wait for wake before reading the result without polling; it failed when notify was not called and now passes. Generation test includes AudioReady. Both real silent-WASAPI tests pass without skips, including 0.25/0.5/2/4x clock/pause/resume. Default suite remains 153 passing tests (app 64, core 34, runtime 51, integrations 4; three live tests explicitly ignored). Format, all-target Clippy, normal debug/release builds pass.
+- Native evidence: one controlled worker EndpointChanged result at paused source 22.344633000 s, with app folder/status polling disabled. Before further input/capture, logs show AudioReady with folder_poll=false, endpoint recovery and replacement D3D11VA. Paused/rotation/mute/dirty edits remain and Play advances. This exercises result delivery/rebuild, not an OS-generated OnSessionDisconnected callback. New registration itself succeeds on the real client and unregisters via the dependency's retained guard.
+- Cleanup/close observation: Undo cleared edits, owned process 19420 accepted Close but outlived the 5 s wait. Subsequent read-only process checks confirm it exited; it was not terminated/restarted on timeout. Cause/duration beyond that bound is unknown. Four separate normal-release paused-close controls (32340/23596/25832/3900) exit in 66/62/84/56 ms. Do not claim the isolated delay is fixed or a general close-time guarantee.
+- Removed SESSION_WAKE_TRIAL/SETUP injection, environment and trigger; normal builds contain none. Ignored captures/logs retain evidence; no trial remains. Both 1a96822 CI 33993299635 and e98e952 CI 33993672260 succeeded.
+- Status/next: h1_active. Follow pending CI and inspect the isolated delayed-close observation, then consolidate the remaining launch gates. Physical device/IME/mixed-DPI and distribution evidence remain incomplete.
+
 ## 2026-09-06 06:37 JST - recovery / rebuild paused Seek without commanding a dead audio worker
 
 - Reproduction: controlled WASAPI invalidation at source 11.583872300 s before trim start 16.583872300 s entered endpoint recovery, then failed with "the audio output thread stopped". seek_to sent Pause to the terminated worker before rebuilding. Native capture shows Faulted instead of the prior paused source preview.

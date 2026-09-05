@@ -1038,6 +1038,7 @@ where
             PlaybackEvent::VideoReady(_) => {
                 self.load_next_frame();
             }
+            PlaybackEvent::AudioReady(_) => self.poll_audio(),
             PlaybackEvent::DecodePathSelected(_, path) => {
                 eprintln!("towavue: decode path selected: {path:?}");
             }

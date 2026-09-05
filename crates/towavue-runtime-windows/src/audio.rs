@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use wasapi::{
     AudioClient, AudioClock, AudioRenderClient, DeviceEnumerator, DeviceEventCallbacks, Direction,
-    Handle, Role, SampleType, StreamMode, WaveFormat,
+    EventCallbacks, Handle, Role, SampleType, StreamMode, WaveFormat,
 };
 use windows::Win32::Media::Audio::AUDCLNT_E_DEVICE_INVALIDATED;
 
@@ -101,7 +101,7 @@ impl AudioOutput {
         format: AudioFormat,
         media_anchor: MediaTime,
     ) -> Result<Self, AudioOutputError> {
-        Self::start_with_settings(format, media_anchor, 1.0, 1.0)
+        Self::start_with_settings(format, media_anchor, 1.0, 1.0, || {})
     }
 
     pub(crate) fn start_with_settings(
@@ -109,6 +109,7 @@ impl AudioOutput {
         media_anchor: MediaTime,
         volume: f32,
         rate: f32,
+        notify: impl Fn() + Send + 'static,
     ) -> Result<Self, AudioOutputError> {
         if format.sample_rate == 0 || format.channels != 2 {
             return Err(AudioOutputError::UnsupportedFormat(
@@ -163,6 +164,7 @@ impl AudioOutput {
                         let _ = event_tx.send(AudioOutputEvent::Failed(error.to_string()));
                     }
                 }
+                notify();
             })
             .map_err(|error| AudioOutputError::Wasapi(error.to_string()))?;
 
@@ -289,19 +291,36 @@ fn run_audio_thread(
         client
             .initialize_client(&wave_format, &Direction::Render, &mode)
             .map_err(wasapi_error)?;
+        let session = client.get_audiosessioncontrol().map_err(wasapi_error)?;
+        let mut session_callbacks = EventCallbacks::new();
+        session_callbacks.set_disconnected_callback(move |_| {
+            let _ = endpoint_tx.send(());
+        });
+        let session_registration = session
+            .register_session_notification(session_callbacks)
+            .map_err(wasapi_error)?;
         let event = client.set_get_eventhandle().map_err(wasapi_error)?;
         let render_client = client.get_audiorenderclient().map_err(wasapi_error)?;
         let clock = client.get_audioclock().map_err(wasapi_error)?;
         let tempo = crate::tempo::AudioTempo::new(format.sample_rate, rate)?;
-        Ok::<_, AudioOutputError>((client, event, render_client, clock, registration, tempo))
+        Ok::<_, AudioOutputError>((
+            client,
+            event,
+            render_client,
+            clock,
+            registration,
+            session_registration,
+            tempo,
+        ))
     })();
-    let (client, event, render_client, clock, _registration, tempo) = match setup {
-        Ok(resources) => resources,
-        Err(error) => {
-            let _ = ready_tx.send(Err(error));
-            return Err(AudioOutputError::Closed);
-        }
-    };
+    let (client, event, render_client, clock, _registration, _session_registration, tempo) =
+        match setup {
+            Ok(resources) => resources,
+            Err(error) => {
+                let _ = ready_tx.send(Err(error));
+                return Err(AudioOutputError::Closed);
+            }
+        };
     ready_tx
         .send(Ok(()))
         .map_err(|_| AudioOutputError::Closed)?;
@@ -598,14 +617,18 @@ mod tests {
             sample_rate: 48_000,
             channels: 2,
         };
-        let output = match AudioOutput::start_with_settings(format, MediaTime::ZERO, 0.0, 1.0) {
-            Ok(output) => output,
-            Err(AudioOutputError::Wasapi(error)) => {
-                eprintln!("SKIP live drain: no usable default render endpoint: {error}");
-                return;
-            }
-            Err(error) => panic!("audio setup failed: {error}"),
-        };
+        let (wake_tx, wake_rx) = mpsc::channel();
+        let output =
+            match AudioOutput::start_with_settings(format, MediaTime::ZERO, 0.0, 1.0, move || {
+                let _ = wake_tx.send(());
+            }) {
+                Ok(output) => output,
+                Err(AudioOutputError::Wasapi(error)) => {
+                    eprintln!("SKIP live drain: no usable default render endpoint: {error}");
+                    return;
+                }
+                Err(error) => panic!("audio setup failed: {error}"),
+            };
         output
             .push(AudioChunk {
                 format,
@@ -615,10 +638,10 @@ mod tests {
             })
             .expect("queue silence");
         output.finish().expect("finish audio");
-        let event = output
-            .event_rx
+        wake_rx
             .recv_timeout(Duration::from_secs(3))
-            .expect("audio drains");
+            .expect("audio wakes its consumer without polling");
+        let event = output.event_rx.try_recv().expect("result precedes wake");
         assert_eq!(event, AudioOutputEvent::Drained);
         let position = output.position();
         output
@@ -638,15 +661,17 @@ mod tests {
             channels: 2,
         };
         for rate in [0.25, 0.5, 2.0, 4.0] {
-            let output = match AudioOutput::start_with_settings(format, MediaTime::ZERO, 0.0, rate)
-            {
-                Ok(output) => output,
-                Err(AudioOutputError::Wasapi(error)) => {
-                    eprintln!("SKIP live rate clock: no usable default render endpoint: {error}");
-                    return;
-                }
-                Err(error) => panic!("live tempo setup failed: {error}"),
-            };
+            let output =
+                match AudioOutput::start_with_settings(format, MediaTime::ZERO, 0.0, rate, || {}) {
+                    Ok(output) => output,
+                    Err(AudioOutputError::Wasapi(error)) => {
+                        eprintln!(
+                            "SKIP live rate clock: no usable default render endpoint: {error}"
+                        );
+                        return;
+                    }
+                    Err(error) => panic!("live tempo setup failed: {error}"),
+                };
             let sender = output.sender();
             let producer = thread::spawn(move || {
                 for _ in 0..1000 {

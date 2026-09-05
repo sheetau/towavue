@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 08:12 JST - playback investigation / preconfirmation audio backlog blocks video
+
+- Trigger/result: followed the unequal-stream black-screen finding to EOF on the existing 160x96 H.264-2-s/AAC-30-s fixture. A temporary trace at the first video callback reports 1,377 pending audio chunks. The callback drains all of them through blocking AudioOutputSender::push before notifying video. Final metrics are 60 hardware frames, zero CPU transfers, zero presented and 60 dropped. This is a real playback failure, not a thumbnail/display-capture issue or hardware decode failure.
+- Rejected experiment: a same-device video-only confirmation pass before the regular pipeline removes the provisional audio Vec and shows a normal 0.767-s frame. Paused Seek to 0.625 s still remains black after two seconds with no Present-latency event. The shared decoded-output callback still synchronously pushes audio; preconfirmation alone does not remove that backpressure. No stack trace of this second wait was collected. Do not adopt or describe the prototype as a fix.
+- Cleanup: removed both the trace and prototype, restoring application/runtime source exactly to fb0a051. No new architecture contract was adopted. Owned processes 31116 and 43248 reached normal close; 31116 also reached Ended before close. Captures/logs remain under ignored target/tmp/h1-hover-failure. No source-media or OS setting changes.
+- Verification: restored source passes format, all-target Clippy, 165 tests and debug/release builds; three live tests explicitly ignored. These existing tests do not cover the newly observed playback failure. CI fb0a051/33997578895 and 0afd77b/33997189677 succeeded. This checkpoint records evidence only, not a runtime fix.
+- Status/next: h1_active, launch-blocking playback defect remains. Implement bounded audio/video delivery that lets paused video priming complete without waiting for audio consumption, while retaining pre-hardware fallback without duplicate audio. Test unequal streams, delayed hardware startup, paused Seek, cancellation and post-confirmation faults; remeasure Seek latency if startup work changes. Do not substitute a first-frame-only or larger-buffer workaround.
+
 ## 2026-09-06 08:01 JST - hover thumbnail / stop repeated failed work and reject stale results
 
 - Evidence: generated an ignored H.264 160x96 video-2-s/AAC-audio-30-s MP4. Hovering around 15 s for about four seconds starts 106 thumbnail requests in the old path; FFmpeg exits successfully with no image. The same instrumented debug scenario after the fix starts one request and shows Thumbnail unavailable. Request tracing was removed before final checks/builds.

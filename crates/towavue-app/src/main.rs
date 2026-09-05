@@ -1770,22 +1770,31 @@ where
         }
     }
 
-    fn draw_grid_menu(&self, context: &egui::Context, actions: &mut Vec<UiAction>) {
+    fn draw_grid_menu(&mut self, context: &egui::Context, actions: &mut Vec<UiAction>) {
         let opacity =
             context.animate_bool_with_time("grid-menu-animation".into(), self.grid_open, 0.12);
         if opacity <= 0.0 {
             return;
         }
         let Some(kind) = self.media_kind else { return };
-        let commands = self.grid_layouts.get(kind);
+        let commands = *self.grid_layouts.get(kind);
+        let available = context.content_rect().size() - egui::vec2(28.0, 50.0);
+        let cell = ((available - egui::vec2(18.0, 18.0)) / 4.0)
+            .clamp(egui::Vec2::splat(1.0), egui::vec2(110.0, 52.0));
         egui::Area::new("grid-menu".into())
             .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .order(egui::Order::Foreground)
             .show(context, |ui| {
                 ui.set_opacity(opacity);
+                if !self.grid_open {
+                    ui.disable();
+                }
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width(cell.x * 4.0 + 18.0);
                     egui::Grid::new("command-grid")
                         .spacing([6.0, 6.0])
+                        .min_col_width(cell.x)
+                        .max_col_width(cell.x)
                         .show(ui, |ui| {
                             for (index, command) in commands.iter().copied().enumerate() {
                                 let title = command_definitions()
@@ -1799,13 +1808,28 @@ where
                                         definition.is_enabled(self.command_context())
                                     });
                                 let label = format!("{}\n{}", grid::KEYS[index], title);
+                                let mut font = egui::TextStyle::Button.resolve(ui.style());
+                                if cell.y < 44.0 {
+                                    font.size = 11.0;
+                                }
+                                let row_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
+                                let padding = ui.spacing().button_padding * 2.0;
+                                let mut text = egui::text::LayoutJob::simple(
+                                    label,
+                                    font,
+                                    ui.visuals().text_color(),
+                                    (cell.x - padding.x).max(1.0),
+                                );
+                                text.wrap.max_rows =
+                                    (((cell.y - padding.y) / row_height) as usize).max(1);
+                                let text = ui.fonts_mut(|fonts| fonts.layout_job(text));
                                 if ui
-                                    .add_enabled(
-                                        enabled,
-                                        egui::Button::new(label).min_size([110.0, 52.0].into()),
-                                    )
+                                    .add_enabled(enabled, egui::Button::new(text).min_size(cell))
+                                    .on_hover_text(title)
+                                    .on_disabled_hover_text(title)
                                     .clicked()
                                 {
+                                    self.grid_open = false;
                                     actions.push(UiAction::Command(command));
                                 }
                                 if index % 4 == 3 {
@@ -1813,7 +1837,14 @@ where
                                 }
                             }
                         });
-                    ui.weak(format!("Edit {}", self.grid_path.display()));
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!("Edit {}", self.grid_path.display()))
+                                .weak(),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(self.grid_path.display().to_string());
                 });
             });
     }
@@ -4398,6 +4429,88 @@ mod tests {
                 assert_eq!(image_rect, screen);
             } else {
                 assert!(image_rect.top() >= 32.0 && image_rect.bottom() <= 546.0);
+            }
+        }
+    }
+
+    #[test]
+    fn grid_cells_remain_inside_small_windows_with_long_labels_and_paths() {
+        let Some(_root) = isolated_test_root(
+            "tests::grid_cells_remain_inside_small_windows_with_long_labels_and_paths",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.grid_open = true;
+        app.grid_path = PathBuf::from("long-directory-name/".repeat(30)).join("grid.conf");
+        for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
+            app.media_kind = Some(kind);
+            for size in [
+                egui::vec2(960.0, 576.0),
+                egui::vec2(480.0, 300.0),
+                egui::vec2(320.0, 200.0),
+            ] {
+                app.grid_open = true;
+                let context = egui::Context::default();
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                let mut output = egui::FullOutput::default();
+                for frame in 0..5 {
+                    output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            time: Some(frame as f64 * 0.1),
+                            ..Default::default()
+                        },
+                        |_| app.draw_grid_menu(&context, &mut Vec::new()),
+                    );
+                }
+                let mut labels = 0;
+                let mut target = None;
+                for shape in &output.shapes {
+                    if let egui::Shape::Text(text) = &shape.shape {
+                        let bounds = egui::Rect::from_min_size(text.pos, text.galley.size());
+                        assert!(
+                            screen.contains_rect(bounds),
+                            "{kind:?}, {size:?}: {bounds:?}"
+                        );
+                        if grid::KEYS
+                            .iter()
+                            .any(|key| text.galley.text().starts_with(&format!("{key}\n")))
+                        {
+                            assert!(text.galley.rows.len() >= 2);
+                            labels += 1;
+                        }
+                        if text.galley.text().starts_with("w\n") {
+                            target = Some(bounds.center());
+                        }
+                    }
+                }
+                assert_eq!(labels, 16);
+                let target = target.expect("second row second cell");
+                let mut actions = Vec::new();
+                for (frame, pressed) in [true, false, true, false].into_iter().enumerate() {
+                    let _ = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            time: Some(0.5 + frame as f64 * 0.01),
+                            events: vec![
+                                egui::Event::PointerMoved(target),
+                                egui::Event::PointerButton {
+                                    pos: target,
+                                    button: egui::PointerButton::Primary,
+                                    pressed,
+                                    modifiers: egui::Modifiers::NONE,
+                                },
+                            ],
+                            ..Default::default()
+                        },
+                        |_| app.draw_grid_menu(&context, &mut actions),
+                    );
+                }
+                assert!(!app.grid_open);
+                assert!(
+                    matches!(actions.as_slice(), [UiAction::Command(command)] if *command == app.grid_layouts.get(kind)[5])
+                );
             }
         }
     }

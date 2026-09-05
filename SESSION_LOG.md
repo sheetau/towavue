@@ -2,6 +2,16 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 03:30 JST - interaction / bounded grid layout and click lifecycle
+
+- Trigger: CI 33983479446 (eae102c) completed successfully after about seven minutes, not a hang; CI 33983856342 (ba9a109) also passed. Native 480x300 grid then reproduced clipped left/right columns and a path extending beyond the window.
+- Result: bound four equal rows/columns to available space with the existing 110x52 maximum; cap label rows, use smaller text for short cells, and truncate with full-name/path tooltips including disabled items. Pre-layout a bounded galley because Button's normal LayoutJob processing overrides the row limit. No registry/config/dependency or runtime changes.
+- Interaction: pointer selection now closes the grid like keyboard selection; fading closed cells are disabled to prevent repeated dispatch. Existing command enablement is preserved.
+- Verification: focused grid tests, format, Clippy with warnings denied, all workspace tests and app build pass: app 49, core 33, runtime 50, integrations 4; three live tests explicitly ignored. New regression covers image/video/audio at 960x576, 480x300 and 320x200 logical sizes with a long path, all sixteen in-bounds two-line-or-more labels, one expected click action, close and ignored fade-out clicks. Existing idle-animation test still passes.
+- Native evidence: final small-window capture contains all four columns; Zoom in click gives one step (3469%) and closes. Increased egui UI zoom keeps all keys/columns with abbreviated names. Final word wrapping and disabled-name tooltip build was rerun at 480x300. Owned windows closed normally and artifacts remain ignored. This is injected reference-machine input, not a physical-keyboard or extreme UI-scale matrix.
+- Changed areas: app grid layout/lifecycle and regression, README, architecture, roadmap, trial guide, gap ledger and this log. Status remains h1_active.
+- Next action: verify checkpoint CI; continue grid physical-key mapping, palette/focus and daily input audits, then remaining launch-wide stability/performance gates. Mixed-DPI and actual IME trials remain unverified; distribution needs its separate decision.
+
 ## 2026-09-06 03:20 JST - viewing / large-image fit boundaries
 
 - Trigger: follow-up to eae102c. Its CI 33983479446 is still running the test step, not reported as passed. A 512x16384 PNG in a 480x300 window displayed Fit while both colored ends were clipped by the shared 2% minimum.

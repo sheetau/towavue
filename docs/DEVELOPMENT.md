@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### 小さいwindowのgrid menu
+
+- 480×300でPNGを開きGを押す。旧実装は長い名前が列幅を広げ、左右列と設定pathが画面外へ切れた。修正後は全16 cellを固定4×4で表示し、名前は折返し・省略、設定pathは省略し、hoverで全文を示す。
+- 960×576、480×300、320×200 logical pointsを画像・動画・音声で自動検査する。長い設定pathでも全16のkey/nameが2行以上で画面内に収まり、同じ位置のpointer clickで期待commandを一回だけ返して閉じ、fade-out中は追加実行しない。最初のLayoutJobだけではButtonが行数を再設定してはみ出したため、bounded galleyを渡す方式へ修正した。
+- 実windowでZoom inのcellをclickし、一段拡大してgridが閉じることを確認した。既存eguiのUI倍率を上げた状態でも4列とkeyを保持し、省略名を表示する。これは注入入力・基準機での確認で、極端なUI倍率や全OS keyboard layoutのmatrixではない。最終word-wrap/disabled-tooltip buildも同じ480×300で再確認した。
+
 ### 画像zoomとDPIのH1確認
 
 - 大画像境界: 512×16,384 PNGの上端1,024pxを赤、下端を緑にしたfixtureを480×300でFitする。旧2%下限では両方が切れ、修正後は222pxの表示高に両端が収まる。同じ2枚を横/縦readingにしても端を保持する。Zoom outは0.8倍、最終statusは1.08%になる。手動下限は2%と長辺1 physical pixel相当の小さい方、上限64倍。小さいFitからの操作が2%へ飛ばないことを回帰testする。

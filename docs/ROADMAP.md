@@ -132,3 +132,5 @@ trim監査では、同じ位置のI/Oを受理しSave Asで初めて失敗する
 小さいwindowのZoom inが固定960×576基準で飛ぶ問題と、画像100%がUI倍率に追従する問題を修正した。現在viewport・編集後寸法とphysical pixel基準を使い、pointer anchorを維持する。実windowで残った二重拡大は固定UI rendererのadapter補正で解消した。133 testsと8×8画像の実pixel照合、拡大UIのwindow controls、hardware動画を確認した。異なる実DPI間のmonitor移動・実IME候補操作と残るlaunch gateは引き続き未完了である。
 
 大きい画像のFitに残っていた2%下限を除いた。16,384px高の画像で隠れていた両端が、480×300と縦横reading modeでも表示される。Fitからの縮小も2%へ跳ねず、小さい倍率を小数表示する。135 testsと実windowの1.08%表示を確認した。H1とlaunch全体は継続中である。
+
+最小windowでgridの両側が切れる問題を修正した。表示領域内の4×4寸法、名前とpathの省略・tooltipを使い、clickもkeyと同じく一回実行して閉じる。136 tests、実windowの列表示・拡大UI・Zoom in clickを確認した。次は入力/focusを含む残りの操作とlaunch gateを継続監査する。

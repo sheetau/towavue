@@ -1259,7 +1259,7 @@ where
         self.draw_grid_menu(&context, actions);
         self.draw_export_status(&context, actions);
         if let Some(error) = &self.export_error {
-            egui::Modal::new("export-error".into()).show(&context, |ui| {
+            let modal = egui::Modal::new("export-error".into()).show(&context, |ui| {
                 ui.set_max_width(520.0);
                 ui.heading("Export failed");
                 ui.label("Your edits and existing files have been kept.");
@@ -1272,6 +1272,13 @@ where
                     actions.push(UiAction::DismissExportError);
                 }
             });
+            if modal.is_top_modal
+                && !modal.any_popup_open
+                && context
+                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            {
+                actions.push(UiAction::DismissExportError);
+            }
         } else if self.pending_guard.is_some() {
             self.draw_unsaved_guard(&context, actions);
         }
@@ -1341,7 +1348,7 @@ where
             .path
             .as_deref()
             .map_or_else(|| "this media".to_owned(), display_name);
-        egui::Modal::new("unsaved-edit-guard".into()).show(context, |ui| {
+        let modal = egui::Modal::new("unsaved-edit-guard".into()).show(context, |ui| {
             ui.heading("Unsaved edits");
             ui.separator();
             ui.label(format!("Export edits to {name} before continuing?"));
@@ -1367,6 +1374,13 @@ where
                 }
             });
         });
+        if modal.is_top_modal
+            && !modal.any_popup_open
+            && context
+                .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            actions.push(UiAction::ResolveGuard(GuardDecision::Cancel));
+        }
     }
 
     fn draw_image(&mut self, ui: &mut egui::Ui) {
@@ -4224,6 +4238,91 @@ mod tests {
             return None;
         };
         Some(canonical_shell_path(&PathBuf::from(root)).expect("canonical test root"))
+    }
+
+    #[test]
+    fn modal_escape_preserves_edits_and_dismisses_only_the_top_confirmation() {
+        let Some(root) = isolated_test_root(
+            "tests::modal_escape_preserves_edits_and_dismisses_only_the_top_confirmation",
+        ) else {
+            return;
+        };
+        let context = egui::Context::default();
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        std::fs::write(root.join("image.png"), []).expect("media placeholder");
+        app.open_external(root.join("image.png"), false);
+        app.dispatch(CommandId::RotateClockwise);
+        let tab = app.tabs.active().expect("active tab").id;
+        app.fullscreen = true;
+        app.request_guarded(GuardedAction::CloseTab(tab));
+        app.export_error = Some("fixture export failure".into());
+        let render = |app: &mut Application<_>, events| {
+            let mut actions = Vec::new();
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            actions
+        };
+        let escape = || {
+            [true, false]
+                .into_iter()
+                .map(|pressed| egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: Some(egui::Key::Escape),
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect()
+        };
+        for error_visible in [true, false] {
+            for _ in 0..3 {
+                assert!(render(&mut app, Vec::new()).is_empty());
+            }
+            for pressed in [true, false] {
+                assert!(
+                    render(
+                        &mut app,
+                        vec![
+                            egui::Event::PointerMoved(egui::pos2(10.0, 100.0)),
+                            egui::Event::PointerButton {
+                                pos: egui::pos2(10.0, 100.0),
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ],
+                    )
+                    .is_empty()
+                );
+            }
+            let actions = render(&mut app, escape());
+            if error_visible {
+                assert!(matches!(actions.as_slice(), [UiAction::DismissExportError]));
+            } else {
+                assert!(matches!(
+                    actions.as_slice(),
+                    [UiAction::ResolveGuard(GuardDecision::Cancel)]
+                ));
+            }
+            for action in actions {
+                app.handle_ui_action(action);
+            }
+            assert!(app.export_error.is_none());
+            assert_eq!(app.pending_guard.is_some(), error_visible);
+            assert!(app.pending_dialog.is_none() && app.active_export.is_none());
+            assert!(app.fullscreen && !app.exit_requested);
+            assert_eq!(app.tabs.active().expect("retained tab").id, tab);
+            assert!(app.edits.get(&tab).expect("retained edits").is_dirty());
+        }
     }
 
     #[test]

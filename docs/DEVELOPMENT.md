@@ -233,7 +233,8 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 
 - 通常位置40,40、960×576の画像windowでF11を押す。修正前は変化しなかった。修正後は1920×1080のborderless表示となり、上下bar・seek・外周余白がなくなり、案内が4秒で消える。Escape後のouter boundsは40,40,1000,616へ戻った。View menuからの起動と2画像readingの全高さ表示も確認した。
 - 最大化から直接fullscreenへ入る初回実装では、下端に48pxの旧work-area由来の余白が残り、復帰後のouter boundsも元の-8,-8,1928,1040ではなく0,0,1920,1080となった。入る前の最大化解除と戻る際の再最大化を追加し、四辺の表示とbefore/after bounds一致、さらに通常sizeへの復帰を確認した。monitorは最大化解除前に取得して固定する。複数monitor/DPIやmonitor切断のmatrixは未検証。
-- fullscreen中のfilmstripとpaletteを表示し、Escapeでoverlayを閉じてもfullscreenを保つ。palette後の一回目Escapeのboundsは0,0,1920,1080、二回目は通常windowだった。画像を回転しwindow closeを要求すると中央にdirty guardが出て、Escapeで勝手に解除・discardされないことを確認した。key注入を含むため物理keyboard/IMEの証明ではない。
+- fullscreen中のfilmstripとpaletteを表示し、Escapeでoverlayを閉じてもfullscreenを保つ。palette後の一回目Escapeのboundsは0,0,1920,1080、二回目は通常windowだった。画像を回転しwindow closeを要求すると中央にdirty guardが出た。当時Escapeは無反応だったが、後続のmodal監査で編集を保持するCancelへ変更した。key注入を含むため物理keyboard/IMEの証明ではない。
+- modal監査では生成PNGを回転しCtrl+Wで保存確認を出す。確認画面の表示をcaptureで確かめてからEscapeを送ると、修正前は残り、修正後は閉じて回転・未保存状態・tabが残った。自動testではexport失敗→保留保存確認をEscapeで一枚ずつ閉じ、背景clickが解除を起こさず、fullscreen・編集・tabを保持してexportも開始しないことを確認する。
 - 30秒H.264/AACでfullscreen、pause/resume、F11往復、Tによる通常window＋timelineへの復帰を行い、900 presented / 0 dropped / 0 CPU transfers、drift p95/max 4.038/34.290 msでEOFへ到達した。非正方形pixelのFFV1はsoftware経路で全四辺とaspect-fitを保ち、60 presented / 60 transfers / 0 dropsだった。単発の基準機debug trialであり、全codec・HDR・DPI/monitorの保証ではない。
 - 静止したfullscreen readingの5秒間CPU時間は0 ms（時計の分解能以下）。自動testは画像meshが960×576全体へ達すること、barの非表示と復帰、modal/overlay優先、selection・pause・generationの保持、Tの復帰、古いshortcut設定へのF11補完とcustom prefixを検証する。native最大化/placementはheadless testではなく実windowで検証した。
 - このfullscreen初回変更にはcursor auto-hideを含めず、続く試験で下記を追加した。edge-hoverでのcontrols表示とdouble-click割当は未実装。音声playlistとWelcomeは中央contentとして残し、通常timeline設定は復帰まで保持する。

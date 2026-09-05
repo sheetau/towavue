@@ -172,6 +172,8 @@ fullscreenではtitle/tab bar、status、timeline、seek barとwindow resize操�
 
 Escapeはmodal/paletteの入力を優先し、次にfilmstrip/gridを閉じ、overlayがなければfullscreenを解除する。解除時に画像selection・編集・再生状態は変えない。edge-hoverによるbar表示とdouble-click割当は別の操作監査とする。
 
+保存確認のEscapeはCancelと同じく離脱要求だけを取り消し、編集を保持する。export失敗のEscapeは最前面のエラー通知だけを閉じ、保留中の保存確認は残す。背景クリックではどちらも閉じず、保存・破棄は明示的なbutton操作に限定する。
+
 画像・reading・動画のfullscreen閲覧中だけ、入力が2秒ないとcursorを隠す。windowがactiveでpointerが内側にあることを条件とし、button保持・selection drag、filmstrip/palette/grid、picker・dirty guard・export、loading/error・file hover中は表示する。pointer移動・button・wheel・key入力、focus/入退出の変化で期限をリセットし、fullscreen解除時も表示へ戻す。音声playlistとWelcomeでは隠さない。eguiのplatform outputでcursorを統一管理し、期限をevent loopの既存待機へ統合する。非表示中という理由だけで再描画やpollを追加しない。最小化からpointerを動かさず復帰するとCursorEnteredが届かない場合があるため、focus取得時も既存のpicker復帰と同じclient座標更新を行う。
 
 ### H1 seek bar and command palette

@@ -138,3 +138,5 @@ trim監査では、同じ位置のI/Oを受理しSave Asで初めて失敗する
 grid上のCtrl+Sが画像回転になる問題を実windowで再現・修正した。physical keyによる位置対応、Ctrl/Alt/Superの除外、palette・modal優先とpalette起動時のgrid closeを追加した。138 testsと保存dialogのCancel、Shift付きcell実行・Undo、palette検索を確認した。実keyboard layout/IMEと残るlaunch gateは引き続き未完了である。
 
 prefix入力の期限切れ案内とfocusをまたぐ継続を修正した。別操作・focus喪失・Escapeで待ちを解除し、prefix自身の案内だけを消す。139 tests、通常のCtrl+K Ctrl+S、402ms以内のfocus往復後にCtrl+Sが独立した保存操作になる実window試験が通過した。H1と残るlaunch gateの監査を継続する。
+
+保存確認がEscapeで閉じない問題を実windowで再現し、編集を保持するCancelへ対応させた。export失敗では最前面の通知だけを閉じる。背景clickの非解除と、tab・dirty・fullscreen保持を含む140 testsが通過した。H1は継続中で、残るmodal操作・layoutとlaunch全体の安定性/性能を監査する。

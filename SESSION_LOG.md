@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 04:01 JST - interaction / safe modal Escape cancellation
+
+- Trigger: 5f5a3b8 CI 33985020143 and 0a74a1a CI 33985391018 passed. Dirty confirmation ignored Escape in code and in a capture-confirmed native trial.
+- Result: the topmost unsaved guard maps Escape to Cancel, retaining edits; the export error maps it to acknowledgement only, leaving the pending guard for a subsequent action. Ignore backdrop clicks and respect any popup above the modal. No new Enter default, focus override, dependency, runtime or unsafe changes.
+- Verification: new regression failed before the fix and passes afterward; checks error/guard priority, backdrop non-dismissal, retained tab/dirty/fullscreen and no export/dialog/exit. Format, Clippy with warnings denied, all 140 tests and build pass: app 53, core 33, runtime 50, integrations 4; three live tests explicitly ignored.
+- Native evidence: owned PNG rotated, close confirmation visibly established, then Escape dismisses it while rotation and Unsaved remain. An earlier precondition capture preceded confirmation rendering and was not used as the decisive trial. Undo restored clean state and both baseline/final windows closed normally. No source/output writes; ignored captures remain local. Export-error stacking is headless coverage, not a new native export-failure trial.
+- Changed areas: app modal Escape routing/regression, README, architecture, roadmap and trial guide. Status remains h1_active.
+- Next action: follow checkpoint CI; continue modal keyboard/layout and launch-wide stability/performance audits. Physical IME, mixed-DPI and the distribution decision remain outstanding.
+
 ## 2026-09-06 03:50 JST - input / prefix lifetime and notice ownership
 
 - Trigger: fb4e6cd CI 33984653478 passed; documentation checkpoint CI 33985020143 remains running. Prefix state survived focus/mouse/action changes, and its four-second notice remained after the one-second sequence timeout. Native capture confirmed the stale Ctrl+K notice.

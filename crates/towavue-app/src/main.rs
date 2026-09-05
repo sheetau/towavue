@@ -22,10 +22,10 @@ use towavue_core::{
     TabTarget, UnitPoint, UnitRect, ZoomMode, command_definitions,
 };
 use towavue_runtime_windows::{
-    AudioOutputEvent, DecodedImage, ExportError, ExportEvent, ExportJob, ExportRequest,
-    FolderOrderProvider, FolderWatcher, FrameRenderer, ImageLoader, PlaybackEvent, PlaybackSession,
-    PreviewCache, RenderError, canonical_shell_path, pick_export_file, pick_folder,
-    pick_media_file,
+    AudioOutputEvent, DecodedImage, DialogError, ExportError, ExportEvent, ExportJob,
+    ExportRequest, FileDialogKind, FolderOrderProvider, FolderWatcher, FrameRenderer, ImageLoader,
+    PlaybackEvent, PlaybackSession, PreviewCache, RenderError, canonical_shell_path,
+    cursor_position_in_window, pick_path,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -133,6 +133,7 @@ enum UiAction {
 enum AppEvent {
     ImagesReady,
     FolderReady,
+    DialogFinished(Result<Option<PathBuf>, DialogError>),
     Export(ExportEvent),
     Playback(PlaybackEvent),
     Duration(PathBuf, Result<Duration, String>),
@@ -150,6 +151,17 @@ enum AppEvent {
 enum FolderIntent {
     Open,
     Refresh(PathBuf),
+}
+
+enum DialogIntent {
+    OpenFile,
+    OpenFolder,
+    Export {
+        tab: TabId,
+        source: PathBuf,
+        kind: MediaKind,
+        continuation: Option<GuardedAction>,
+    },
 }
 
 #[derive(Clone)]
@@ -318,7 +330,8 @@ impl ImageTransform {
 struct Application<N> {
     initial_path: Option<PathBuf>,
     notify: Arc<N>,
-    window: Option<Window>,
+    window: Option<Arc<Window>>,
+    pending_dialog: Option<DialogIntent>,
     renderer: Option<FrameRenderer>,
     ui_context: Option<egui::Context>,
     ui_state: Option<egui_winit::State>,
@@ -401,6 +414,7 @@ where
             initial_path,
             notify,
             window: None,
+            pending_dialog: None,
             renderer: None,
             ui_context: None,
             ui_state: None,
@@ -469,7 +483,7 @@ where
             .with_inner_size(LogicalSize::new(960, 576))
             .with_min_inner_size(LogicalSize::new(480, 300))
             .with_decorations(false);
-        let window = event_loop.create_window(attributes)?;
+        let window = Arc::new(event_loop.create_window(attributes)?);
         let mut renderer = FrameRenderer::new(&window)?;
         let size = window.inner_size();
         renderer.resize_surface(size.width, size.height)?;
@@ -862,6 +876,7 @@ where
         match event {
             AppEvent::ImagesReady => self.finish_image_load(),
             AppEvent::FolderReady => self.finish_folder_load(),
+            AppEvent::DialogFinished(result) => self.finish_dialog(result),
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(event) => self.handle_playback_event(event),
             AppEvent::Duration(path, result) if self.path.as_ref() == Some(&path) => match result {
@@ -2018,6 +2033,9 @@ where
     }
 
     fn handle_ui_action(&mut self, action: UiAction) {
+        if self.pending_dialog.is_some() {
+            return;
+        }
         match action {
             UiAction::Minimize => {
                 if let Some(window) = &self.window {
@@ -2068,18 +2086,17 @@ where
     }
 
     fn dispatch(&mut self, command: CommandId) {
+        if self.pending_dialog.is_some() {
+            return;
+        }
         self.palette_open = false;
         match command {
-            CommandId::OpenFile => match pick_media_file() {
-                Ok(Some(path)) => self.open_external(path, false),
-                Ok(None) => {}
-                Err(error) => self.set_status(error.to_string()),
-            },
-            CommandId::OpenFolder => match pick_folder() {
-                Ok(Some(path)) => self.open_folder_path(path),
-                Ok(None) => {}
-                Err(error) => self.set_status(error.to_string()),
-            },
+            CommandId::OpenFile => {
+                self.begin_dialog(FileDialogKind::OpenFile, DialogIntent::OpenFile);
+            }
+            CommandId::OpenFolder => {
+                self.begin_dialog(FileDialogKind::OpenFolder, DialogIntent::OpenFolder);
+            }
             CommandId::CloseTab => {
                 if let Some(id) = self.tabs.active().map(|tab| tab.id) {
                     self.request_guarded(GuardedAction::CloseTab(id));
@@ -2222,10 +2239,10 @@ where
             }
             CommandId::ResetRate => self.push_edit(EditOperation::SetRate(1.0)),
             CommandId::Save => {
-                self.export_current(false);
+                self.export_current(false, None);
             }
             CommandId::ExportAs => {
-                self.export_current(true);
+                self.export_current(true, None);
             }
             CommandId::ToggleTimeline => {
                 self.timeline_open = !self.timeline_open;
@@ -2314,8 +2331,92 @@ where
             .unwrap_or_default()
     }
 
-    fn export_current(&mut self, force_dialog: bool) -> bool {
-        if self.active_export.is_some() {
+    fn begin_dialog(&mut self, kind: FileDialogKind, intent: DialogIntent) -> bool {
+        if self.pending_dialog.is_some() {
+            return false;
+        }
+        let Some(window) = self.window.clone() else {
+            self.set_status("The file dialog's owner window is unavailable.".into());
+            return false;
+        };
+        if matches!(self.pending_folder, Some((_, FolderIntent::Open))) {
+            self.folder_order.request(None);
+            self.pending_folder = None;
+        }
+        let notify = Arc::clone(&self.notify);
+        match pick_path(window, kind, move |result| {
+            notify(AppEvent::DialogFinished(result))
+        }) {
+            Ok(()) => {
+                self.pending_dialog = Some(intent);
+                self.request_redraw();
+                true
+            }
+            Err(error) => {
+                self.set_status(error.to_string());
+                false
+            }
+        }
+    }
+
+    fn finish_dialog(&mut self, result: Result<Option<PathBuf>, DialogError>) {
+        if let (Some(window), Some(state)) = (&self.window, &mut self.ui_state)
+            && let Some((x, y)) = cursor_position_in_window(window)
+        {
+            // The native dialog can consume CursorEntered; a stationary click still needs a position.
+            let _ = state.on_window_event(
+                window,
+                &WindowEvent::CursorMoved {
+                    device_id: winit::event::DeviceId::dummy(),
+                    position: winit::dpi::PhysicalPosition::new(f64::from(x), f64::from(y)),
+                },
+            );
+        }
+        let Some(intent) = self.pending_dialog.take() else {
+            return;
+        };
+        match intent {
+            DialogIntent::OpenFile => match result {
+                Ok(Some(path)) => self.open_external(path, false),
+                Ok(None) => {}
+                Err(error) => self.set_status(error.to_string()),
+            },
+            DialogIntent::OpenFolder => match result {
+                Ok(Some(path)) => self.open_folder_path(path),
+                Ok(None) => {}
+                Err(error) => self.set_status(error.to_string()),
+            },
+            DialogIntent::Export {
+                tab,
+                source,
+                kind,
+                continuation,
+            } => match result {
+                Ok(Some(target))
+                    if self.tabs.active().is_some_and(|active| {
+                        active.id == tab && active.target.current_path() == source
+                    }) =>
+                {
+                    self.start_export(tab, source, kind, target, continuation);
+                }
+                other => {
+                    self.pending_guard = continuation;
+                    match other {
+                        Err(error) => self.set_status(error.to_string()),
+                        Ok(Some(_)) => self.set_status(
+                            "The source changed while choosing an export path; nothing was exported."
+                                .into(),
+                        ),
+                        Ok(None) => {}
+                    }
+                }
+            },
+        }
+        self.request_redraw();
+    }
+
+    fn export_current(&mut self, force_dialog: bool, continuation: Option<GuardedAction>) -> bool {
+        if self.active_export.is_some() || self.pending_dialog.is_some() {
             self.set_status(
                 "An export is already running. Wait for it or choose Cancel export.".into(),
             );
@@ -2335,20 +2436,31 @@ where
         } else {
             None
         };
-        let target = match target {
-            Some(target) => target,
+        match target {
+            Some(target) => self.start_export(id, source, kind, target, continuation),
             None => {
-                let suggested = export_name(&source);
-                match pick_export_file(&suggested) {
-                    Ok(Some(target)) => target,
-                    Ok(None) => return false,
-                    Err(error) => {
-                        self.set_status(error.to_string());
-                        return false;
-                    }
-                }
+                let suggested_name = export_name(&source);
+                self.begin_dialog(
+                    FileDialogKind::SaveFile { suggested_name },
+                    DialogIntent::Export {
+                        tab: id,
+                        source,
+                        kind,
+                        continuation,
+                    },
+                )
             }
-        };
+        }
+    }
+
+    fn start_export(
+        &mut self,
+        id: TabId,
+        source: PathBuf,
+        kind: MediaKind,
+        target: PathBuf,
+        continuation: Option<GuardedAction>,
+    ) -> bool {
         let operations = self
             .edits
             .get(&id)
@@ -2372,13 +2484,14 @@ where
                     request,
                     encoded: Duration::ZERO,
                     cancelling: false,
-                    continuation: None,
+                    continuation,
                 });
                 self.request_redraw();
                 true
             }
             Err(error) => {
                 self.export_error = Some(error.to_string());
+                self.pending_guard = continuation;
                 self.request_redraw();
                 false
             }
@@ -2458,6 +2571,10 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        if self.pending_dialog.is_some() {
+            self.set_status("Close the file dialog before leaving.".into());
+            return;
+        }
         if matches!(self.pending_folder, Some((_, FolderIntent::Open))) {
             self.folder_order.request(None);
             self.pending_folder = None;
@@ -2517,12 +2634,7 @@ where
         };
         match decision {
             GuardDecision::Save => {
-                if self.export_current(false) {
-                    self.active_export
-                        .as_mut()
-                        .expect("export just started")
-                        .continuation = Some(action);
-                } else {
+                if !self.export_current(false, Some(action.clone())) {
                     self.pending_guard = Some(action);
                 }
             }
@@ -2919,7 +3031,8 @@ where
     }
 
     fn process_key(&mut self, event: &KeyEvent) {
-        if self.pending_guard.is_some()
+        if self.pending_dialog.is_some()
+            || self.pending_guard.is_some()
             || self.export_error.is_some()
             || self
                 .active_export
@@ -3415,7 +3528,7 @@ where
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        if self.window.as_ref().map(Window::id) != Some(window_id) {
+        if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
         }
         let event_response = match (self.window.as_ref(), self.ui_state.as_mut()) {
@@ -3455,29 +3568,24 @@ where
 mod tests {
     use super::*;
 
-    #[test]
-    fn empty_folder_open_preserves_current_navigation_and_edits() {
-        const TEST_ROOT: &str = "TOWAVUE_EMPTY_FOLDER_TEST_ROOT";
+    fn isolated_test_root(test_name: &str) -> Option<PathBuf> {
+        const TEST_ROOT: &str = "TOWAVUE_APP_TEST_ROOT";
         let Some(root) = std::env::var_os(TEST_ROOT) else {
             let unique = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("system time is after the epoch")
                 .as_nanos();
-            let root = std::env::temp_dir().join(format!("towavue-empty-folder-{unique}"));
+            let root = std::env::temp_dir().join(format!("towavue-app-test-{unique}"));
             std::fs::create_dir(&root).expect("create isolated test root");
             // Isolate first-run configuration without changing this test process's environment.
             let result =
                 std::process::Command::new(std::env::current_exe().expect("test executable"))
-                    .args([
-                        "--exact",
-                        "tests::empty_folder_open_preserves_current_navigation_and_edits",
-                        "--nocapture",
-                    ])
+                    .args(["--exact", test_name, "--nocapture"])
                     .env(TEST_ROOT, &root)
                     .env("APPDATA", root.join("config"))
                     .env("LOCALAPPDATA", root.join("local"))
                     .output()
-                    .expect("run isolated folder test");
+                    .expect("run isolated application test");
             std::fs::remove_dir_all(&root).expect("remove isolated test files");
             assert!(
                 result.status.success(),
@@ -3485,9 +3593,18 @@ mod tests {
                 String::from_utf8_lossy(&result.stdout),
                 String::from_utf8_lossy(&result.stderr)
             );
+            return None;
+        };
+        Some(canonical_shell_path(&PathBuf::from(root)).expect("canonical test root"))
+    }
+
+    #[test]
+    fn empty_folder_open_preserves_current_navigation_and_edits() {
+        let Some(root) =
+            isolated_test_root("tests::empty_folder_open_preserves_current_navigation_and_edits")
+        else {
             return;
         };
-        let root = PathBuf::from(root);
         let media = root.join("media");
         let empty = root.join("empty");
         let unsupported = root.join("unsupported");
@@ -3526,7 +3643,15 @@ mod tests {
             assert_eq!(app.tabs, tabs);
             let current = app.folder_snapshot.as_ref().expect("retained snapshot");
             assert_eq!(current.folder_path, snapshot.folder_path);
-            assert_eq!(current.items, snapshot.items);
+            // The follow-up refresh may change PIDL metadata without changing navigation.
+            let navigation = |snapshot: &FolderSnapshot| {
+                snapshot
+                    .items
+                    .iter()
+                    .map(|item| (item.path.clone(), item.kind))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(navigation(current), navigation(&snapshot));
             assert_eq!(app.edit_state(), edit);
             assert!(app.edits.values().any(EditHistory::is_dirty));
             assert!(
@@ -3565,6 +3690,73 @@ mod tests {
         assert!(app.pending_folder.is_none());
         assert!(app.folder_snapshot.is_none());
         assert!(app.path.is_none());
+    }
+
+    #[test]
+    fn asynchronous_dialogs_preserve_guards_and_reject_changed_export_sources() {
+        let Some(root) = isolated_test_root(
+            "tests::asynchronous_dialogs_preserve_guards_and_reject_changed_export_sources",
+        ) else {
+            return;
+        };
+        let media = root.join("media");
+        std::fs::create_dir(&media).expect("fixture folder");
+        for name in ["one.png", "two.png"] {
+            std::fs::write(media.join(name), []).expect("media placeholder");
+        }
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.open_external(media.join("one.png"), false);
+        app.dispatch(CommandId::RotateClockwise);
+        let tab = app.tabs.active().expect("active tab").id;
+        let source = app.path.clone().expect("source path");
+        let intent = || DialogIntent::Export {
+            tab,
+            source: source.clone(),
+            kind: MediaKind::Image,
+            continuation: Some(GuardedAction::CloseTab(tab)),
+        };
+        for result in [Ok(None), Err(DialogError::OwnerUnavailable)] {
+            app.pending_dialog = Some(intent());
+            app.dispatch(CommandId::RotateClockwise);
+            app.request_guarded(GuardedAction::Exit);
+            assert!(!app.exit_requested);
+            assert_eq!(
+                app.edits
+                    .get(&tab)
+                    .expect("edit history")
+                    .operations()
+                    .len(),
+                1
+            );
+            app.finish_dialog(result);
+            assert!(app.pending_dialog.is_none());
+            assert!(app.active_export.is_none());
+            assert!(
+                matches!(app.pending_guard.take(), Some(GuardedAction::CloseTab(id)) if id == tab)
+            );
+            assert!(app.edits.get(&tab).expect("retained edits").is_dirty());
+        }
+        app.pending_dialog = Some(intent());
+        app.navigate_to_unchecked(media.join("two.png"));
+        let output = root.join("must-not-be-written.png");
+        app.finish_dialog(Ok(Some(output.clone())));
+        assert!(!output.exists());
+        assert!(app.active_export.is_none());
+        assert!(matches!(app.pending_guard.take(), Some(GuardedAction::CloseTab(id)) if id == tab));
+        assert!(
+            app.status_message
+                .as_ref()
+                .expect("source-change status")
+                .0
+                .contains("source changed")
+        );
+        app.pending_dialog = Some(DialogIntent::OpenFile);
+        app.finish_dialog(Ok(Some(media.join("one.png"))));
+        assert_eq!(app.tabs.tabs().len(), 2);
+        assert_eq!(app.path.as_ref(), Some(&source));
+        app.pending_dialog = Some(DialogIntent::OpenFolder);
+        app.finish_dialog(Ok(None));
+        assert_eq!(app.path.as_ref(), Some(&source));
     }
 
     #[test]

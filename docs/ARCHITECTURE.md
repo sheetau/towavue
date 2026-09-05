@@ -147,6 +147,10 @@ textureの一辺の上限はrendererが実際のD3D feature levelから返す。
 
 ### H1 export lifecycle
 
+Open file/folderとSave Asは専用STAでnative dialogを表示し、UIはthreadをjoinせず結果eventを受ける。本体windowをownerに指定して通常のmodal入力制限を保ち、workerがwindowの共有所有権を保持してnative handleの寿命を保証する（[IModalWindow::Show](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-imodalwindow-show)）。同時pickerは1件、picker中も描画・再生を継続し、選択前の保留Open Folderは失効させる。Save As結果は開始時のtab/pathと照合し、Cancel・失敗では書き出さずdirty guardを復元する。native dialogを閉じるまで本体の終了操作は受け付けない。
+
+owner handleはUI threadで取得し、COM objectとSTA cleanupはworker内へ閉じ込める。復帰時はruntimeが現在のclient座標を読み取り、appがeguiのpointer位置を更新する。native dialogがcursor eventを消費しても、pointerを動かさずに次のbuttonをclickできるようにする。
+
 Saveはruntime所有の単一background export jobへimmutableなsource・target・operation snapshotを渡す。appは進捗と完了eventだけを受け取り、再生とUI event loopを継続する。追加exportは現在jobの完了またはcancelまで開始しない。export中の追加編集は保持し、完了時はexportしたoperation列に対応する履歴位置だけをsavedにする。対象tabのclose・detach・folder内移動とprocess終了は、job終了まで保留する。dirty guardからのexportは成功時だけ元の操作を再評価し、cancel・失敗時は編集とguardを保持する。
 
 FFmpegはtargetと同じfilesystemの専用一時directoryへ出力する。成功・非空output・cancel未要求を確認してからrenameでtargetを置換し、失敗・cancelでは既存targetを変更しない。runtimeはFFmpegの進捗pipeとdiagnostic pipeをdrainし、cancel時には子processを終了・回収して一時outputを片付ける。hardware fallbackも同じ一時output内で行う。sourceと同一pathの拒否は維持する。

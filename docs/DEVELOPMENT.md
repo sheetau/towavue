@@ -140,7 +140,14 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - その後のH1でShell snapshot待機も非同期化した。native folder pickerを閉じた直後の応答probeは修正前が1秒timeout、修正後が8 msだった。Opening folder中のbar移動は古いOpenを失効させ、待機中のwindow closeも63 msで完了した（いずれも基準機の単発観測）。
 - folder起動後のreading 2枚表示、watcher更新による2→3件のsnapshot反映、別folderをOpenした後のreading表示を確認した。runtimeの同期APIを使う実Explorer sort matrixも別途実行し、skipなしで通過した。
 - runtime testは中間要求の置換、古い結果・完了済みslotの失効、実行中のcloseと結果抑止を検証する。app testは背景refreshが明示Openを上書きしないこと、別mediaを開いた後や最後のtab close後の失効も検証する。
-- native picker自体はまだUI threadを止める。30秒H.264/AACの通常再生は900 frames / 0 CPU transfers / 0 drops / drift p95 3.975 msだったが、Open Folderを約2秒表示してCancelした再生は92 presented / 808 dropped、drift最大3123.274 msとなった。Cancelはsnapshotを要求しないため、Shell非同期化の成功をpicker中の再生保証へ拡張しない。
+
+### H1で確認したnative picker scenario
+
+- 30秒H.264/AACの再生中にOpen Folderを開き、約2秒待ってCancelする。Shell非同期化だけのbuildでは92 presented / 808 dropped、drift最大3123.274 msだった。pickerを専用STAへ移したbuildでは900 presented / 0 CPU transfers / 0 drops、drift p95/max 3.862/3.977 msとなった。picker表示中にも動画内のframe counterが進むことをcaptureで確認した。
+- picker中は本体windowへの入力をnative modalで制限する。本体を閉じるには先にpickerを閉じる。Open fileで画像選択、Open Folderで画像folder選択、Cancel後の本体入力復帰を実windowで確認した。
+- 画像をRで回転してtabを閉じ、Unsaved editsのExport and continueからSave Asを開く。EscapeでCancelしたら同じguardと未保存編集が戻る。pointerを動かさず同じExport buttonを押しても再度Save Asが開く。新しい出力先へ保存すると800×600の回転画像ができ、成功後にtabが閉じることを確認した。
+- runtime testは呼出元が待機しないこと、選択・Cancel・失敗・worker panicの結果通知を検証する。app testはpicker中のcommand/exit抑止、Cancel・失敗のguard復元、選択中にsourceが変わった場合のexport拒否を検証する。native ownerとpointer復帰は実window試験であり、headless testだけでは証明しない。
+- 上記数値は基準機の単発観測。複数DPI/monitorやcodecのmatrix、静止画・pause中のidle redraw負荷は引き続き監査する。
 
 ### H1で確認したseek bar / palette scenario
 
@@ -202,7 +209,7 @@ cargo test -p towavue-runtime-windows live_rate_clock -- --ignored --nocapture
 - 書き出し中にさらに回転 → 成功後もdirty。Undoで書き出した履歴位置へ戻るとsavedになる。
 - 既存targetを別processで排他openしたままexport → error詳細が残り、targetのSHA-256は一致。確認後も編集とclose guardを保持する。
 
-同時exportは1件。対象tabのclose・detach・folder内移動とprocess終了は、進行中jobの完了またはcancel後に再操作する。native Save As dialogでの出力先選択は従来どおりmodalである。
+同時exportは1件。対象tabのclose・detach・folder内移動とprocess終了は、進行中jobの完了またはcancel後に再操作する。native Save Asの出力先選択は専用STAで行い、本体入力へのmodal制限を保ちながら描画・再生を継続する。
 
 ## 6. 開発の具体的な進め方
 

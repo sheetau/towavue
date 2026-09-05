@@ -2,6 +2,17 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 18:01 JST - responsiveness / asynchronous native dialogs
+
+- Trigger: Open Folder followed by Cancel disrupted playback even without a Shell request. CI 33955031008 for 1750c86 also failed an application test because the runner's short temporary path was compared with a canonical long path.
+- Result: Open file/folder and Save As now run on a dedicated STA without UI join. Acquire the owner handle on the UI thread and retain shared window ownership through Show; COM interfaces and apartment cleanup remain on the worker. Native modal input restrictions remain, while media/render events continue. Only one picker is admitted; queued commands and exit are suppressed until it closes.
+- Save lifecycle: capture tab/source/continuation, reject changed sources, restore dirty guards on Cancel/failure, and pass successful selection to the existing background export. Read client pointer coordinates after completion so the next stationary click works even when native cursor events were consumed. No new dependency or app/core unsafe code; runtime adds the Windows GDI feature for ScreenToClient.
+- Verification: format, all-target Clippy with warnings denied, and workspace tests pass (app 20, core 26, runtime 39, integrations 3; three live tests explicitly ignored). Added worker notification and application guard/source regression tests. Shared isolated test setup canonicalizes its temporary root to address the CI path mismatch. A repeat exposed a second test-only assumption: a background refresh can change PIDL metadata while preserving folder/path/kind order. The empty-folder regression now compares navigation semantics instead of raw PIDL bytes. It passed five consecutive focused runs and a separate run using an actual 8.3 temporary-path alias; independent CI confirmation remains pending.
+- Real-window evidence: the 30-second H.264/AAC Open Folder/Cancel trial improved from 92 presented / 808 dropped / drift max 3123.274 ms to 900 presented / 0 dropped / 0 CPU transfers / drift p95/max 3.862/3.977 ms. Captures show video advancing while its owner is disabled. Open file/folder selections, Save As Cancel with dirty guard restored, a stationary re-click, and rotated 800x600 export followed by guarded tab close passed. These are single reference-machine trials, not a device/codec/DPI matrix.
+- Changed areas: runtime dialog and exports, app window ownership/dialog intent/export continuation/tests, README, architecture, roadmap, trial guide, gap ledger, and this log. Temporary diagnostics removed; generated fixtures and captures remain ignored under target/tmp.
+- Status: h1_active; native-dialog waiting is fixed for the exercised flows, not a fully asynchronous Open or launch-complete claim.
+- Next action: verify checkpoint CI, quantify idle redraw/CPU while viewing a still image or paused media, then continue input and draft-fidelity audits.
+
 ## 2026-09-05 17:20 JST - responsiveness / asynchronous Shell snapshots
 
 - Trigger: the empty-folder Open trial blocked the UI while Shell resolution waited two seconds; checkpoint 99b6fcb independently passed CI 33954133508.

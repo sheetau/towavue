@@ -15,7 +15,7 @@ mod watch;
 
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};
 pub use decode::{AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, VideoFrame};
-pub use dialog::{DialogError, pick_export_file, pick_folder, pick_media_file};
+pub use dialog::{DialogError, FileDialogKind, cursor_position_in_window, pick_path};
 pub use export::{ExportError, ExportEvent, ExportJob, ExportOutcome, ExportRequest, export_media};
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_loader::{ImageLoader, LoadedImages};

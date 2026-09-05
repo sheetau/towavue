@@ -56,7 +56,7 @@ Gはメディア種別ごとの4×4 grid menuを開き、`1234/qwer/asdf/zxcv`�
 
 画像と動画はfileごとのtab、音声は同じfolderのplaylist tabとして開きます。filmstripはShell snapshotの全対応mediaをExplorer順で表示し、middle clickで明示的に新規tabを作れます。フォルダー変更は`ReadDirectoryChangesW`で検知してdebounce後にsnapshotを更新します。M1のcodec fixtureはMP4/H.264/AAC、MKV/HEVC/AAC、WebM/VP9/Opusです。再生終了時のdiagnosticにはadapter LUID、hardware frame数、CPU transfer数、表示・drop frame数、Seek latency、A/V driftを記録します。
 
-Shellのフォルダー情報はH1で非同期取得に変更しました。取得中はstatusにOpening folder / Loading orderを表示し、切替後の古い結果は適用しません。これはfolder情報の待機対策であり、native file picker自体のmodal待機はまだ残っています。
+Shellのフォルダー情報はH1で非同期取得に変更しました。取得中はstatusにOpening folder / Loading orderを表示し、切替後の古い結果は適用しません。native Open file/folder・Save Asも専用threadで表示し、選択中の描画・再生を継続します。本体への入力は従来どおりmodal制限され、選択画面を閉じると復帰します。
 
 tabをwindow外へdragしてdropすると同じmediaを別processのwindowへ移し、dirtyなtabには既存のExport / Discard / Cancel guardを適用します。動画exportはCtrl+Shift+EでMedia Foundation hardware encode優先を切り替えられ、利用不能ならsoftwareへfallbackし、実際の経路をstatusへ表示します。PQ/HLG sourceはD3D11 Video Processorの色空間変換能力を確認してからSDRへtone mapし、adapterが変換を保証しない場合は不正な色で表示せず明示的なerrorにします。
 

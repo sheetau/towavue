@@ -8,6 +8,7 @@ mod image;
 mod image_loader;
 mod playback;
 mod preview;
+mod preview_loader;
 mod renderer;
 mod shell;
 mod tempo;
@@ -20,7 +21,8 @@ pub use export::{ExportError, ExportEvent, ExportJob, ExportOutcome, ExportReque
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_loader::{ImageLoader, LoadedImages};
 pub use playback::{DecodePath, PlaybackError, PlaybackEvent, PlaybackMetrics, PlaybackSession};
-pub use preview::{PreviewCache, PreviewError, PreviewImage};
+pub use preview::{MediaPreview, PreviewCache, PreviewError, PreviewImage};
+pub use preview_loader::{PreviewLoader, VISIBLE_PREVIEW_LIMIT};
 pub use renderer::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError};
 pub use shell::{FolderOrderError, FolderOrderProvider, canonical_shell_path};
 pub use watch::{FolderWatchError, FolderWatcher};

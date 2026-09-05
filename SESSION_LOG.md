@@ -2,6 +2,18 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-05 18:59 JST - navigation / bounded visual filmstrip
+
+- Trigger: compare the filename-only bottom strip with the draft's centered previews after Explorer drop checkpoint 1522862 passed CI 33958271146. The previous goal turn made progress; H1 remains active.
+- Result: centered dimmed overlay with image/video previews, audio waveform, duration, current/hover border and filename. Preserve Shell order, guarded primary navigation, explicit middle-click new tab, and current-item recentering. Real trials exposed egui consuming Tab and vertical wheel not scrolling horizontally; route filmstrip Tab before focus traversal except during palette/grid/modal input, and enable horizontal wheel mapping only inside the strip.
+- Bounds/lifetime: one runtime worker, latest request with at most 64 paths, progressive generation/path-checked results, fixed 240x160 preview RGBA, and textures retained only for the visible set. Snapshot updates/close invalidate requests. Reuse the existing metadata-keyed 64 MiB disk cache. In-flight FFmpeg/FFprobe is not forcibly cancelled, and close does not join it. No new dependency, unsafe block, or media-device change.
+- Real-window verification: PNG/video/waveform cards, portrait fit, primary navigation, dirty guard/Cancel, middle-click preserving the dirty original tab, corrected Tab/Shift+Tab and wheel, 480x300 layout, and watcher-added broken PNG with No preview passed. Key injection was used; this is not a physical-keyboard/IME/DPI matrix. Trial windows closed; generated media/helpers/captures remain ignored under target/tmp.
+- Performance evidence: settled image plus strip consumed 15.625 ms process CPU over five seconds. Cold-cache strip opening during 30-second H.264/AAC playback reached EOF with 900 presented / 0 dropped / 0 CPU transfers, drift p95/max 4.138/4.557 ms. Single reference-machine debug observations, not broad performance guarantees.
+- Automated verification: focused tests, format, workspace all-target Clippy with warnings denied, and workspace tests pass (app 27, core 26, runtime 41, integrations 3; three live tests explicitly ignored). Tests cover 50,000-item virtual layout with at most nine visible requests at 960x576, recenter/click/wheel/texture eviction, bounded progressive worker results, stale/close rejection, portrait letterboxing, cache invalidation and audio duration/waveform. The first Clippy pass rejected test unwrap calls; contextual expect messages fixed them before the passing run.
+- Changed areas: app filmstrip and input routing, runtime preview/cache loader, README, architecture, roadmap, trial guide, gap ledger, and this log.
+- Status: h1_active; visual filmstrip works for exercised flows. Process cancellation, broader media/device/input matrices and launch readiness remain open.
+- Next action: verify checkpoint CI, inspect logo menu categorization/discoverability against accepted UI direction, then continue daily-viewing and launch audits.
+
 ## 2026-09-05 18:32 JST - UX / Explorer file and folder drop
 
 - Trigger: previous goal turn made concrete idle-performance progress; cad6608 passed CI 33957694019. A real Explorer image drop into Welcome did nothing because app ignored winit's DroppedFile event.

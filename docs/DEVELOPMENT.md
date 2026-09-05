@@ -141,6 +141,14 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - folder起動後のreading 2枚表示、watcher更新による2→3件のsnapshot反映、別folderをOpenした後のreading表示を確認した。runtimeの同期APIを使う実Explorer sort matrixも別途実行し、skipなしで通過した。
 - runtime testは中間要求の置換、古い結果・完了済みslotの失効、実行中のcloseと結果抑止を検証する。app testは背景refreshが明示Openを上書きしないこと、別mediaを開いた後や最後のtab close後の失効も検証する。
 
+### H1で確認したvisual filmstrip scenario
+
+- PNG 2枚・30秒H.264/AAC・180秒WAVを同folderへ置いて`F`を押す。修正前の下部filename button列から、中央の画像/動画thumbnail・音声waveform・duration、現在項目の白枠と名前、暗い背景へ変わることを確認した。portrait画像は枠内にaspect-fitする。最小480×300でも列と名前が見える。
+- 通常clickで同tab移動、middle clickで新規tab、未保存回転後の別項目clickでdirty guard、Cancelで編集保持を確認した。Tab / Shift+Tabは当初eguiのfocus移動に消費され、通常wheelも横移動しなかった。filmstripの入力優先と局所scroll設定を修正後、実windowで前後移動・wheel横移動を確認した。key送信を含む試験であり、物理keyboard/IME matrixではない。
+- 開いているfolderへ壊れたPNGを追加するとwatcherが列を更新し、該当項目だけNo previewとなった。可視項目以外は要求しない。5万件の仮想snapshot testで960×576の要求数は9件以内となり、現在項目変更、primary/middle click、wheel、範囲外texture破棄を確認した。worker testは最大64件、段階的通知、古い未開始項目の省略、実行中結果の失効、close時の非待機を確認する。5万fileの実Explorer測定ではない。
+- 表示が落ち着いた静止画＋filmstripの5秒間CPU時間は15.625 ms。別pathのcold preview cacheで30秒H.264/AAC再生中に開くと、900 presented / 0 dropped / 0 CPU transfers、drift p95/max 4.138/4.557 msでEOFに到達した。いずれも基準機の単発debug trialで、全codec・大規模folder・DPI/monitorの性能保証ではない。
+- 開始済みFFmpeg/FFprobeは強制cancelしない。遅い/破損mediaのprocessが終了するまでは同workerの後続項目が待つが、古い結果は適用せずwindow closeもjoinしない。既存64 MiB disk cacheを共有し、表示用RGBAは各240×160、UI textureは可視集合のみ保持する。
+
 ### H1で確認したExplorer drop scenario
 
 - Explorerで生成PNGをつかみ、Welcome画面の中央へdropする。修正前は何も開かなかった。修正後はhover案内が表示され、drop後に新規tabと画像が出る。ドラッグ中にEscapeで取り消すと案内が消え、現在tabは変わらない。

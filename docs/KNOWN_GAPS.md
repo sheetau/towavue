@@ -20,6 +20,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - native Open file/folder/Save AsはH1で専用STAへ移した。本体入力はmodal制限するが描画・再生を続け、Cancel後は入力とdirty guardを復元する。同じ30秒H.264/AACのOpen Folder→Cancel試験は、修正前の808/900 dropsから修正後0/900 dropsになった。基準機の単発試験であり、複数DPI/monitorや全codecでの保証ではない。
 - Save/Save AsはH1でbackground化済み。書き出した時間とcancelを表示し、完了までは一時outputだけを変更する。同時jobは1件でqueueはない。通常export中も再生・tab切替・追加編集ができるが、対象tabのclose・移動とprocess終了はjobの完了またはcancelを待つ。
 - waveform、duration、hover thumbnailはworker化済みだが、mediaを切り替えた後も開始済みFFmpeg process自体はcancelせず、返った古い結果を捨てる方式である。
+- filmstripは可視項目だけを単一workerで順次読み込み、待機要求・結果・UI textureを最大64項目、各RGBAを240×160に制限する。開始済みprocessの強制cancelやdecoder作業領域の制限ではなく、遅い素材は後続previewを待たせる。失敗項目はNo previewと詳細tooltipで表示する。
 - animated imageはframe列を先に保持する。H1で1画像/reading要求のRGBA保持量を合計512 MiBに制限したが、decoder作業領域・GPU texture・切替前の旧画像は別である。超過時はerrorとし、部分animationや低解像度へは自動縮退しない。
 
 ### 開発版としての不足
@@ -39,7 +40,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | 草案 | 現状 |
 |---|---|
 | Explorerの実際のSort By順を全navigationで使う | 実装済み。live Explorer view、保存済みShell view、明示fallbackの順で取得 |
-| 全media filmstripと同種/全種移動 | 基本実装済み。filmstripはfilenameのtext listでthumbnailはない |
+| 全media filmstripと同種/全種移動 | H1で中央のthumbnail列、音声waveform・duration、現在項目の枠・名前、wheel横scrollを実装。Tab / Shift+Tabのfocus競合も修正 |
 | 画像/動画はfile tab、音声はfolder playlist tab | 実装済み |
 | Filmstrip middle-clickで新規tab | 実装済み |
 | Explorerからfile/folderをdropして開く | H1で実装。hover案内、複数file、dirty編集保持、modal中の拒否を確認 |
@@ -134,7 +135,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - AppのUI logicに対するtestは純粋helper中心で、pointer gesture、focus、modal、tab drag、timelineを直接検証していない。
 - 対応拡張子、file dialog filter、実decoder能力、export codec選択の関係を一つのcapability modelへ統一していない。拡張子を増やすだけでは対応完了にならない。
 - Loading、empty、error、unsupported capabilityのstate表現が各所のstatus textへ分散している。UX改善時には表示だけでなくstate transitionをcoreでtest可能にする余地がある。
-- Preview workerはtask単位にthreadを起動する単純構成で、優先度、同時数、cancel、重複排除を持たない。
+- filmstrip以外のpreview workerはtask単位にthreadを起動する単純構成で、優先度、同時数、cancel、重複排除を持たない。filmstripは可視集合の最新要求を単一workerで処理する。
 - Exportはtargetへ直接`-y`で書き込む。sourceは保護されるが、失敗・cancelを含むtarget側のatomicityは定義されていない。
 
 これらは一括refactorの指示ではない。実際のUX課題を直す際に、必要な範囲だけ同時に改善する。

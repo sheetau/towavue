@@ -106,3 +106,5 @@ native Open file/folder・Save Asも専用STAへ移し、本体入力のmodal制
 idle監査では再描画eventの自己再予約、静止grid、音声のみの再生に無条件描画を発見し、入力・animation・位置更新deadlineへ限定した。5秒間のCPU時間は静止画/Welcomeで約5.9秒から計測分解能以下、音声再生で約5.9秒から0.47秒へ下がった。必要な動画/GIF更新とmenu操作は実windowで維持を確認した。次はExplorerからのfile dropを含む日常Open操作と、草案のfilmstrip/menuとの差を監査する。launch全体は未完了である。
 
 Explorerからのfile/folder dropを既存のOpenへ接続した。実OLE drag/dropで画像・動画・音声、複数画像、folder、hover取消、dirty編集保持、確認dialog中の拒否を確認した。folderは従来のlatest-only Openで、複数folderのimport機能は追加しない。次はfilmstripのthumbnailとmenuの操作・発見性を、日常flowと草案の両面から改善する。H1は継続中である。
+
+filmstripを中央のthumbnail列へ変更し、画像/動画preview、音声waveform・duration、現在項目の枠と名前を追加した。可視項目だけを最大64件の単一workerで読み込み、古い結果を失効させる。実windowでclick・dirty guard・middle click・Tab前後移動・wheel横scroll・破損previewを確認し、cold cacheの30秒再生も900 frames / 0 dropsで完了した。次はlogo menuの整理・発見性と、日常閲覧に必要な残りの操作を監査する。H1とlaunch全体は未完了である。

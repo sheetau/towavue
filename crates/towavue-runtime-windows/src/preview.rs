@@ -6,6 +6,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use thiserror::Error;
+use towavue_core::MediaKind;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CACHE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
@@ -15,6 +16,11 @@ pub struct PreviewImage {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+}
+
+pub struct MediaPreview {
+    pub image: PreviewImage,
+    pub duration: Option<Duration>,
 }
 
 #[derive(Debug, Error)]
@@ -80,6 +86,33 @@ impl PreviewCache {
                 "1".into(),
             ])
         })
+    }
+
+    pub fn filmstrip(&self, source: &Path, kind: MediaKind) -> Result<MediaPreview, PreviewError> {
+        let duration = (kind != MediaKind::Image)
+            .then(|| self.duration(source).ok())
+            .flatten();
+        let image = if kind == MediaKind::Audio {
+            self.waveform(source, 240, 160)?
+        } else {
+            let key = cache_key(source, "filmstrip-v1")?;
+            self.load_or_generate(key, || {
+                let position = duration.unwrap_or_default().mul_f64(0.1);
+                run_ffmpeg(&[
+                    "-ss".into(),
+                    format!("{:.6}", position.as_secs_f64()),
+                    "-i".into(),
+                    source.display().to_string(),
+                    "-map".into(),
+                    "0:v:0".into(),
+                    "-vf".into(),
+                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2".into(),
+                    "-frames:v".into(),
+                    "1".into(),
+                ])
+            })?
+        };
+        Ok(MediaPreview { image, duration })
     }
 
     pub fn waveform(
@@ -300,6 +333,23 @@ mod tests {
 
         assert_eq!(generated, cached);
         assert_eq!((generated.width, generated.height), (16, 8));
+        let card = cache
+            .filmstrip(&source, MediaKind::Image)
+            .expect("landscape card");
+        assert_eq!((card.image.width, card.image.height), (240, 160));
+        assert!(card.duration.is_none());
+        RgbImage::from_pixel(16, 1024, Rgb([200, 30, 10]))
+            .save_with_format(&source, ImageFormat::Png)
+            .expect("replace with portrait");
+        let portrait = cache
+            .filmstrip(&source, MediaKind::Image)
+            .expect("portrait card");
+        assert_eq!((portrait.image.width, portrait.image.height), (240, 160));
+        assert_ne!(
+            card.image, portrait.image,
+            "changed metadata invalidates disk preview"
+        );
+        assert_eq!(&portrait.image.rgba[..4], &[0, 0, 0, 255]);
         fs::remove_dir_all(root).expect("remove preview fixture");
     }
 
@@ -336,6 +386,11 @@ mod tests {
 
         assert_eq!((waveform.width, waveform.height), (128, 32));
         assert!(duration >= Duration::from_millis(200));
+        let card = cache
+            .filmstrip(&source, MediaKind::Audio)
+            .expect("audio card");
+        assert_eq!((card.image.width, card.image.height), (240, 160));
+        assert_eq!(card.duration, Some(duration));
         fs::remove_dir_all(root).expect("remove waveform fixture");
     }
 }

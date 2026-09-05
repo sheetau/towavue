@@ -111,6 +111,14 @@ reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降�
 
 exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/coreへFFmpeg型を公開しない。画像filterはoperation順のcrop / transpose / flip、動画filterはそれらとtrim / PTS rate、音声filterはatrim / PTS / atempo / volumeを適用し、metadataを入力からcopyする。2倍を超える、または0.5倍未満のrateは複数の`atempo`へ分解する。video/audio encodeは固定FFmpeg buildのsoftware codecを使い、hardware encodeはM7まで行わない。Save As後のSaveは同じexport先を更新できるが、sourceと同一pathへの出力は拒否してpartial overwriteによるsource破損を避ける。
 
+### H1 visual filmstrip
+
+filmstripは中央の横scroll overlayとし、背景を暗くして現在項目の白枠・名前、画像/動画thumbnail、音声waveform、取得できたdurationを表示する。Shell snapshot順を維持し、clickは既存のguard付き移動、middle clickは新規tab、Tab/Shift+Tabは既存の全種移動へ渡す。開いた時と現在media変更時は現在項目を中央へ寄せ、wheelは横scrollに使う。
+
+Tabはeguiのfocus traversalより前にfilmstripへ渡す。ただしpalette、grid、modal確認の最中は横取りしない。縦wheelの横変換はfilmstripのscroll領域だけに設定し、他のUIのscroll方向は変えない。
+
+画面内の項目だけを単一runtime workerへ要求する。待機要求は最新1件、最大64項目、RGBAは各240×160以下とし、結果はpath/generationで照合する。UI textureは現在の可視集合だけ保持し、folder snapshot更新・closeでは失効する。diskは既存のmetadata付き64 MiB preview cacheを共有する。古い要求の未開始項目は処理せず、開始済みFFmpeg/FFprobeは完了後の結果を捨てる。window closeでそのprocess完了をjoinしない。これはpreview processの強制cancelやdecoder作業領域の上限を保証する変更ではない。
+
 ### H1 external file drop
 
 Explorerからのfile dropはwinitのowned path eventで受け、既存のexternal Openへ渡す。画像・動画は新規tab、音声は同folderの非dirty playlistを再利用し、dirty/書き出し中のplaylistは別tabとして保持する。folder dropは非同期のOpen Folderへ渡し、Shell順の最初の対応mediaを開く。folder要求は従来どおり最新1件で、複数folderを展開・importするqueueは設けない。hover中は描画だけの案内を出し、外へ戻すかdropしたら消す。native picker、dirty guard、export error、guardからのexportの最中はdropを拒否し、確認対象を切り替えない。fileの移動・copy・source変更は行わない。

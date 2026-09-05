@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod chrome;
+mod filmstrip;
 mod grid;
 mod palette;
 mod seekbar;
@@ -133,6 +134,7 @@ enum UiAction {
 enum AppEvent {
     ImagesReady,
     FolderReady,
+    FilmstripReady,
     DialogFinished(Result<Option<PathBuf>, DialogError>),
     Export(ExportEvent),
     Playback(PlaybackEvent),
@@ -384,6 +386,7 @@ struct Application<N> {
     prefix_started: Option<Instant>,
     modifiers: ModifiersState,
     filmstrip_open: bool,
+    filmstrip: filmstrip::Filmstrip,
     grid_open: bool,
     palette_open: bool,
     palette: palette::CommandPalette,
@@ -410,6 +413,10 @@ where
         let folder_notify = Arc::clone(&notify);
         let folder_order =
             FolderOrderProvider::with_notify(move || folder_notify(AppEvent::FolderReady))?;
+        let filmstrip_notify = Arc::clone(&notify);
+        let filmstrip = filmstrip::Filmstrip::new(preview_cache.clone(), move || {
+            filmstrip_notify(AppEvent::FilmstripReady)
+        })?;
         Ok(Self {
             initial_path,
             notify,
@@ -467,6 +474,7 @@ where
             prefix_started: None,
             modifiers: ModifiersState::default(),
             filmstrip_open: false,
+            filmstrip,
             grid_open: false,
             palette_open: false,
             palette: palette::CommandPalette::default(),
@@ -757,6 +765,7 @@ where
     }
 
     fn apply_folder_snapshot(&mut self, snapshot: FolderSnapshot) {
+        self.filmstrip.clear();
         let current_path = self.path.clone();
         let current_identity = current_path.as_deref().and_then(|path| {
             self.folder_snapshot
@@ -892,6 +901,12 @@ where
         match event {
             AppEvent::ImagesReady => self.finish_image_load(),
             AppEvent::FolderReady => self.finish_folder_load(),
+            AppEvent::FilmstripReady => {
+                if let Some(context) = &self.ui_context {
+                    self.filmstrip.finish(context);
+                    self.request_redraw();
+                }
+            }
             AppEvent::DialogFinished(result) => self.finish_dialog(result),
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(event) => self.handle_playback_event(event),
@@ -1150,7 +1165,14 @@ where
             });
         self.draw_seek_bar(&context, status_rect, actions);
         if self.filmstrip_open {
-            self.draw_filmstrip(&context, actions);
+            self.filmstrip.show(
+                &context,
+                self.folder_snapshot.as_ref(),
+                self.path.as_deref(),
+                actions,
+            );
+        } else {
+            self.filmstrip.clear();
         }
         if self.palette_open {
             self.draw_command_palette(&context, actions);
@@ -2033,39 +2055,6 @@ where
                 }
             }
         });
-    }
-
-    fn draw_filmstrip(&self, context: &egui::Context, actions: &mut Vec<UiAction>) {
-        egui::Area::new("filmstrip".into())
-            .anchor(Align2::CENTER_BOTTOM, [0.0, -36.0])
-            .show(context, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    egui::ScrollArea::horizontal()
-                        .max_width((context.content_rect().width() - 32.0).max(120.0))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                if let Some(snapshot) = &self.folder_snapshot {
-                                    for item in &snapshot.items {
-                                        let response = ui.selectable_label(
-                                            self.path.as_deref() == Some(item.path.as_path()),
-                                            display_name(&item.path),
-                                        );
-                                        if response.clicked() {
-                                            actions.push(UiAction::OpenMedia(
-                                                item.path.clone(),
-                                                false,
-                                            ));
-                                        }
-                                        if response.middle_clicked() {
-                                            actions
-                                                .push(UiAction::OpenMedia(item.path.clone(), true));
-                                        }
-                                    }
-                                }
-                            });
-                        });
-                });
-            });
     }
 
     fn draw_command_palette(&mut self, context: &egui::Context, actions: &mut Vec<UiAction>) {
@@ -3597,6 +3586,17 @@ where
         event: WindowEvent,
     ) {
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
+            return;
+        }
+        // egui always consumes Tab for focus traversal; the open filmstrip owns navigation.
+        if self.filmstrip_open
+            && !self.palette_open
+            && !self.grid_open
+            && !self.modal_input_blocked()
+            && let WindowEvent::KeyboardInput { event, .. } = &event
+            && event.logical_key == WinitKey::Named(NamedKey::Tab)
+        {
+            self.process_key(event);
             return;
         }
         let event_response = match (self.window.as_ref(), self.ui_state.as_mut()) {

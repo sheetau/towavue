@@ -150,3 +150,5 @@ UI遅延後に古いframeをpromotionする問題を300msの試験用遅延で�
 Seek計測を同期再構築の前から最初の映像Present成功までへ修正した。旧M3の数値は再構築後からVideoReady通知までの部分計測であり、新しい値とは直接比較しない。通常release・ローカル1080p H.264/AACの中断なし100回で、再生中p95 100.004ms（最大105.746ms）、停止中p95 43.291ms（最大74.149ms）となり、300msゲートを満たした。各要求の完了後に次を送る5秒前後移動で、物理入力/DWM走査表示までの遅延や連打の保証ではない。144 testsと実windowの停止中映像保持・正常終了を確認した。次は残る入力・device recovery・日常flowのlaunch監査を進める。物理IME・混在DPIと配布方針を含むH1全体は未完了。
 
 graphics recovery開始時のAccess deniedを実windowで再現し、旧worker・swap chainの解放順序を修正した。交換後のfont/画像再送とpreview失効も追加し、再生動画・編集済み停止動画・回転画像で復旧と編集保持を確認した。試験用呼び出し除去後の146 tests・通常release再生も通過した。前checkpointのCIは新規Seek testsの設定共有で失敗しており、既存のprocess/config分離方式を適用した。次はこのCI修正の確認と、renderer再作成不能時の未保存編集の救済・通知経路を検証する。実driver reset、endpoint切替、IME/DPIとH1全体は未完了。
+
+renderer再作成不能時のnative確認を追加し、Retry、Cancelでの編集保持、描画なしのExport失敗・再保存・正常終了を実windowで確認した。停止動画は待機後も元の位置・1.25倍・停止を保ち、復旧後に残ったFaulted titleも修正した。保存PNGは回転後の64画素が一致し、148 tests・通常release buildが通った。前checkpointのCIも成功。次は複数dirty tabとexport中の故障/取消、実driver/endpoint経路を継続監査する。H1全体は未完了。

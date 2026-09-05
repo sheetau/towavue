@@ -25,7 +25,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 ### 開発版としての不足
 
-- graphics recoveryのswap chain解放順序とUI/image texture再送を修正し、実windowで復旧関数を直接呼ぶ比較試験を通した。実driver reset・adapter切替・endpoint切替のmatrixは未完了。GPU/rendererの再作成そのものが失敗した場合はFaultedと診断を保持してpanicを避けるが、未保存編集を守るdirty guardも描画できなくなるため、GPUを使わない通知・保存確認経路の追加監査が必要。
+- graphics recoveryのswap chain解放順序とUI/image texture再送を修正した。再作成不能時はnativeのRetry/Cancelと終了時のExport/Discard/Cancelへ接続し、描画なしの保存失敗・再保存・終了、停止位置でのRetryを実windowで確認した。ただしこれは所有process内で故障状態を作る試験であり、実driver reset・adapter切替・endpoint切替のmatrixは未完了。複数dirty tabとexport中の故障・取消の組合せも追加監査が必要。
 
 - H1でRedrawRequestedの自己再予約と静止gridの連続描画を除いた。基準機の5秒間CPU時間は静止画・Welcomeで約5.9秒から計測分解能以下へ、音声再生で約5.9秒から0.47秒へ減少した。debug buildの単発process計測であり、GPU消費電力・release性能・長時間負荷を保証する値ではない。
 

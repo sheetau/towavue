@@ -29,8 +29,8 @@ use towavue_core::{
 use towavue_runtime_windows::{
     AudioOutputEvent, DecodedImage, DialogError, ExportError, ExportEvent, ExportJob,
     ExportRequest, FileDialogKind, FolderOrderProvider, FolderWatcher, FrameRenderer, ImageLoader,
-    PlaybackEvent, PlaybackSession, PreviewCache, RenderError, canonical_shell_path,
-    cursor_position_in_window, pick_path,
+    PlaybackEvent, PlaybackSession, PreviewCache, PromptButtons, PromptResponse, RenderError,
+    canonical_shell_path, cursor_position_in_window, pick_path, show_prompt,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -140,6 +140,7 @@ enum AppEvent {
     FolderReady,
     FilmstripReady,
     DialogFinished(Result<Option<PathBuf>, DialogError>),
+    PromptFinished(Result<PromptResponse, DialogError>),
     Export(ExportEvent),
     Playback(PlaybackEvent),
     Duration(PathBuf, Result<Duration, String>),
@@ -183,6 +184,17 @@ enum GuardDecision {
     Save,
     Discard,
     Cancel,
+}
+
+enum FallbackPrompt {
+    Recovery {
+        position: MediaTime,
+        state: PlaybackState,
+        error: String,
+    },
+    Guard,
+    ExportError,
+    ExportBusy,
 }
 
 struct ActiveExport {
@@ -411,6 +423,8 @@ struct Application<N> {
     video_uv: [UnitPoint; 4],
     ui_repaint_at: Option<Instant>,
     restore_ui_textures: bool,
+    queued_recovery: Option<FallbackPrompt>,
+    native_prompt: Option<FallbackPrompt>,
     clock: Option<PlaybackClock>,
     state: PlaybackState,
     decode_finished: bool,
@@ -506,6 +520,8 @@ where
             video_uv: ImageTransform::new((1, 1), &[]).uv,
             ui_repaint_at: None,
             restore_ui_textures: false,
+            queued_recovery: None,
+            native_prompt: None,
             clock: None,
             state: PlaybackState::Loading,
             decode_finished: false,
@@ -957,6 +973,7 @@ where
                 }
             }
             AppEvent::DialogFinished(result) => self.finish_dialog(result),
+            AppEvent::PromptFinished(result) => self.finish_native_prompt(result),
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(event) => self.handle_playback_event(event),
             AppEvent::Duration(path, result) if self.path.as_ref() == Some(&path) => match result {
@@ -1103,6 +1120,7 @@ where
     fn render_frame(&mut self) {
         self.advance_media();
         if self.renderer.is_none() {
+            self.show_native_fallback();
             return;
         }
         let (Some(window), Some(context)) = (self.window.as_ref(), self.ui_context.clone()) else {
@@ -2216,7 +2234,7 @@ where
     }
 
     fn handle_ui_action(&mut self, action: UiAction) {
-        if self.pending_dialog.is_some() {
+        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             return;
         }
         match action {
@@ -2270,7 +2288,7 @@ where
 
     fn dispatch(&mut self, command: CommandId) {
         self.cancel_shortcut_prefix();
-        if self.pending_dialog.is_some() {
+        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             return;
         }
         self.palette_open = false;
@@ -2636,7 +2654,7 @@ where
     }
 
     fn begin_dialog(&mut self, kind: FileDialogKind, intent: DialogIntent) -> bool {
-        if self.pending_dialog.is_some() {
+        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             return false;
         }
         let Some(window) = self.window.clone() else {
@@ -2794,6 +2812,7 @@ where
                     cancelling: false,
                     continuation,
                 });
+                self.refresh_title();
                 self.request_redraw();
                 true
             }
@@ -2841,7 +2860,11 @@ where
                         ));
                         self.refresh_title();
                         if let Some(action) = export.continuation {
-                            self.request_guarded(action);
+                            if self.native_prompt.is_some() {
+                                self.pending_guard = Some(action);
+                            } else {
+                                self.request_guarded(action);
+                            }
                         }
                     }
                     Err(error) => {
@@ -2855,6 +2878,7 @@ where
                 }
             }
         }
+        self.refresh_title();
         self.request_redraw();
     }
 
@@ -2891,7 +2915,7 @@ where
 
     fn request_guarded(&mut self, action: GuardedAction) {
         self.cancel_shortcut_prefix();
-        if self.pending_dialog.is_some() {
+        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             self.set_status("Close the file dialog before leaving.".into());
             return;
         }
@@ -2908,6 +2932,9 @@ where
                 GuardedAction::Exit => true,
             };
             if affects_export {
+                if self.renderer.is_none() {
+                    self.open_native_prompt(FallbackPrompt::ExportBusy);
+                }
                 self.set_status(
                     "Export is in progress. Wait for it or choose Cancel export before leaving."
                         .into(),
@@ -3177,6 +3204,114 @@ where
         }
     }
 
+    fn fail_graphics_recovery(&mut self, position: MediaTime, state: PlaybackState, error: String) {
+        let mut clock = PlaybackClock::new(position, self.playback_rate());
+        clock.paused_at = Some(clock.wall_anchor);
+        self.clock = Some(clock);
+        self.queued_recovery = Some(FallbackPrompt::Recovery {
+            position,
+            state,
+            error: error.clone(),
+        });
+        self.fail(error);
+    }
+
+    fn show_native_fallback(&mut self) {
+        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
+            return;
+        }
+        let prompt = if let Some(recovery) = self.queued_recovery.take() {
+            recovery
+        } else if self.export_error.is_some() {
+            FallbackPrompt::ExportError
+        } else if self.pending_guard.is_some() {
+            FallbackPrompt::Guard
+        } else {
+            return;
+        };
+        self.open_native_prompt(prompt);
+    }
+
+    fn open_native_prompt(&mut self, prompt: FallbackPrompt) {
+        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
+            return;
+        }
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        let (message, buttons) = match &prompt {
+            FallbackPrompt::Recovery { error, .. } => (
+                format!("Graphics could not be restored.\n\n{error}\n\nRetry: restore graphics at the saved playback position.\nCancel: keep all edits. Press Alt+F4 afterward to export or close."),
+                PromptButtons::RetryCancel,
+            ),
+            FallbackPrompt::Guard => {
+                let name = self.path.as_deref().map(display_name).unwrap_or_default();
+                let discard = if matches!(self.pending_guard, Some(GuardedAction::Exit)) {
+                    "discard ALL unsaved edits and exit"
+                } else { "discard this file's edits and continue" };
+                (format!("Graphics are unavailable. Unsaved edits: {name}\n\nYes: export this file before continuing.\nNo: {discard}.\nCancel: keep edits and stop this action.\n\nExport never overwrites the source."), PromptButtons::YesNoCancel)
+            }
+            FallbackPrompt::ExportError => (
+                format!("Export failed. Your edits are retained.\n\n{}", self.export_error.as_deref().unwrap_or_default()),
+                PromptButtons::Ok,
+            ),
+            FallbackPrompt::ExportBusy => (
+                "Export is still running.\n\nYes: cancel export and keep edits.\nNo or Cancel: keep waiting.\n\nThe window title reports export progress.".into(),
+                PromptButtons::YesNoCancel,
+            ),
+        };
+        let notify = Arc::clone(&self.notify);
+        match show_prompt(window, message, buttons, move |result| {
+            notify(AppEvent::PromptFinished(result))
+        }) {
+            Ok(()) => self.native_prompt = Some(prompt),
+            Err(error) => eprintln!("towavue: native graphics fallback failed: {error}"),
+        }
+    }
+
+    fn finish_native_prompt(&mut self, result: Result<PromptResponse, DialogError>) {
+        self.refresh_pointer_position();
+        let Some(prompt) = self.native_prompt.take() else {
+            return;
+        };
+        let response = match result {
+            Ok(response) => response,
+            Err(error) => {
+                eprintln!("towavue: native graphics fallback failed: {error}");
+                return;
+            }
+        };
+        match prompt {
+            FallbackPrompt::Recovery {
+                position, state, ..
+            } if response == PromptResponse::Retry => {
+                self.state = state;
+                self.recover_graphics_device(position);
+            }
+            FallbackPrompt::Recovery { .. } => {}
+            FallbackPrompt::Guard => self.resolve_guard(match response {
+                PromptResponse::Yes => GuardDecision::Save,
+                PromptResponse::No => GuardDecision::Discard,
+                _ => GuardDecision::Cancel,
+            }),
+            FallbackPrompt::ExportError => self.export_error = None,
+            FallbackPrompt::ExportBusy => {
+                if response == PromptResponse::Yes
+                    && let Some(export) = &mut self.active_export
+                {
+                    export.job.cancel();
+                    export.cancelling = true;
+                }
+                if self.active_export.is_none()
+                    && let Some(action) = self.pending_guard.take()
+                {
+                    self.request_guarded(action);
+                }
+            }
+        }
+        self.request_redraw();
+    }
+
     fn restored_ui_textures(
         &self,
         context: &egui::Context,
@@ -3208,6 +3343,8 @@ where
     }
 
     fn recover_graphics_device(&mut self, position: MediaTime) {
+        let state = self.state;
+        self.queued_recovery = None;
         self.pending_seek_started = None;
         if let Some(session) = &mut self.session {
             session.suspend_for_graphics_recovery();
@@ -3222,13 +3359,22 @@ where
         let mut renderer = match FrameRenderer::new(window) {
             Ok(renderer) => renderer,
             Err(error) => {
-                self.fail(format!("D3D11 device recovery failed: {error}"));
+                self.fail_graphics_recovery(
+                    position,
+                    state,
+                    format!("D3D11 device recovery failed: {error}"),
+                );
                 return;
             }
         };
         let size = window.inner_size();
         if let Err(error) = renderer.resize_surface(size.width, size.height) {
-            self.fail(format!("D3D11 surface recovery failed: {error}"));
+            renderer.release_surface();
+            self.fail_graphics_recovery(
+                position,
+                state,
+                format!("D3D11 surface recovery failed: {error}"),
+            );
             return;
         }
         let graphics_device = renderer.graphics_device();
@@ -3237,6 +3383,8 @@ where
         }
         self.renderer = Some(renderer);
         self.restore_ui_textures = true;
+        self.playback_error = None;
+        self.refresh_title();
         self.filmstrip.clear();
         self.waveform = None;
         self.hover_thumbnail = None;
@@ -3265,6 +3413,7 @@ where
             }
             Err(error) => self.fail(format!("D3D11 pipeline recovery failed: {error}")),
         }
+        self.refresh_title();
     }
 
     fn poll_audio(&mut self) {
@@ -3451,6 +3600,14 @@ where
         {
             name.push_str(" *");
         }
+        if self.renderer.is_none()
+            && let Some(export) = &self.active_export
+        {
+            return format!(
+                "{name} — towavue (Exporting {:.1}s)",
+                export.encoded.as_secs_f64()
+            );
+        }
         format!("{name} — towavue ({:?})", self.state)
     }
 
@@ -3465,6 +3622,7 @@ where
 
     fn modal_input_blocked(&self) -> bool {
         self.pending_dialog.is_some()
+            || self.native_prompt.is_some()
             || self.pending_guard.is_some()
             || self.export_error.is_some()
             || self
@@ -5279,6 +5437,118 @@ mod tests {
         app.pending_dialog = Some(DialogIntent::OpenFolder);
         app.finish_dialog(Ok(None));
         assert_eq!(app.path.as_ref(), Some(&source));
+    }
+
+    #[test]
+    fn native_export_failure_keeps_guard_edits_and_existing_output() {
+        let Some(root) = isolated_test_root(
+            "tests::native_export_failure_keeps_guard_edits_and_existing_output",
+        ) else {
+            return;
+        };
+        let (notify, events) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            let _ = notify.send(event);
+        })
+        .expect("headless application");
+        let source = root.join("missing.png");
+        let target = root.join("existing.png");
+        std::fs::write(&target, b"existing output").expect("existing target");
+        let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+        app.path = Some(source);
+        app.media_kind = Some(MediaKind::Image);
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        app.export_paths.insert(tab, target.clone());
+        app.pending_guard = Some(GuardedAction::Exit);
+        app.native_prompt = Some(FallbackPrompt::Guard);
+        app.finish_native_prompt(Ok(PromptResponse::Yes));
+        assert!(app.active_export.is_some());
+        assert!(app.title().contains("Exporting"));
+        assert!(!app.exit_requested);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.active_export.is_some() {
+            let event = events
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("export completion");
+            if let AppEvent::Export(event) = event {
+                app.handle_export_event(event);
+            }
+        }
+        assert!(app.export_error.is_some());
+        assert!(matches!(app.pending_guard, Some(GuardedAction::Exit)));
+        assert!(app.edits[&tab].is_dirty());
+        assert!(!app.exit_requested);
+        assert_eq!(
+            std::fs::read(target).expect("retained target"),
+            b"existing output"
+        );
+        app.native_prompt = Some(FallbackPrompt::ExportError);
+        app.finish_native_prompt(Ok(PromptResponse::Ok));
+        assert!(matches!(app.pending_guard, Some(GuardedAction::Exit)));
+        app.native_prompt = Some(FallbackPrompt::Guard);
+        app.finish_native_prompt(Ok(PromptResponse::No));
+        assert!(
+            app.exit_requested,
+            "only explicit discard permits leaving after failure"
+        );
+    }
+
+    #[test]
+    fn native_graphics_failure_cancel_preserves_position_edits_and_guard() {
+        let Some(_root) = isolated_test_root(
+            "tests::native_graphics_failure_cancel_preserves_position_edits_and_guard",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let position = media_time(Duration::from_secs(17));
+        let tab = app
+            .tabs
+            .open_new(PathBuf::from("edited.png"), MediaKind::Image);
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let edits = app.edits.clone();
+        app.fail_graphics_recovery(
+            position,
+            PlaybackState::Paused,
+            "test graphics failure".into(),
+        );
+        assert_eq!(app.current_position(), position);
+        assert!(
+            app.clock
+                .as_ref()
+                .expect("frozen clock")
+                .paused_at
+                .is_some()
+        );
+        assert_eq!(app.state, PlaybackState::Faulted);
+        app.pending_guard = Some(GuardedAction::Exit);
+        app.native_prompt = app.queued_recovery.take();
+        assert!(app.modal_input_blocked());
+        app.request_guarded(GuardedAction::Navigate(PathBuf::from("other.png")));
+        assert!(matches!(app.pending_guard, Some(GuardedAction::Exit)));
+        app.finish_native_prompt(Ok(PromptResponse::Cancel));
+        assert!(!app.exit_requested);
+        assert_eq!(app.current_position(), position);
+        assert!(matches!(app.pending_guard, Some(GuardedAction::Exit)));
+        app.native_prompt = Some(FallbackPrompt::Guard);
+        app.finish_native_prompt(Ok(PromptResponse::Cancel));
+        assert!(app.pending_guard.is_none());
+        assert!(!app.exit_requested);
+
+        app.pending_guard = Some(GuardedAction::Exit);
+        app.export_error = Some("test export failure".into());
+        app.native_prompt = Some(FallbackPrompt::ExportError);
+        app.finish_native_prompt(Ok(PromptResponse::Ok));
+        assert!(app.export_error.is_none());
+        assert!(matches!(app.pending_guard, Some(GuardedAction::Exit)));
+        assert!(!app.exit_requested);
+        assert_eq!(app.edits, edits);
     }
 
     #[test]

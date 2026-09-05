@@ -46,6 +46,8 @@ prefixの続きは1秒以内に入力します。Escape、click、別commandやw
 
 保存確認のEscapeは編集を保持してCancelします。export失敗ではエラー通知だけを閉じ、保留中の保存確認は残ります。背景クリックで保存・破棄・確認解除は行いません。
 
+graphicsの再作成に失敗した場合はWindows標準のRetry/Cancelを表示します。Cancelは編集を保持し、Alt+F4で終了を要求すると、描画なしでもYes（現在fileをExport）／No（終了時は全未保存編集を破棄）／Cancel（保持）の確認から保存できます。保存失敗もnative通知で案内し、編集は残します。export中はwindow titleへ進捗を表示します。
+
 H1ではtitle/tab barを黒基調の単一barへまとめ、左端logoにmenu、右端にwindow操作、下部に再生操作と省略path・状態情報を配置しました。上部の空白をdragして移動、double-clickで最大化・復元、window端をdragしてresizeできます。長い名前はhoverで全文を確認できます。
 
 日本語の名前はWindowsにある日本語fontを補助fontとして表示します。fontの同梱・downloadは行いません。日本語fontがない環境では欠字が残り、terminalへ診断を出します。paletteはIME変換・確定とcommand実行のEnterを分離していますが、実IMEの候補操作を含む入力matrixは未完了です。

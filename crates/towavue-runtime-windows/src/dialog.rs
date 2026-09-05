@@ -13,7 +13,10 @@ use windows::Win32::UI::Shell::{
     FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, FileOpenDialog, FileSaveDialog, IFileOpenDialog,
     IFileSaveDialog, SIGDN_FILESYSPATH,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetCursorPos};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetClientRect, GetCursorPos, IDNO, IDOK, IDRETRY, IDYES, MB_DEFBUTTON2, MB_DEFBUTTON3,
+    MB_ICONWARNING, MB_OK, MB_RETRYCANCEL, MB_YESNOCANCEL, MessageBoxW,
+};
 use windows::core::PCWSTR;
 
 const ERROR_CANCELLED_HRESULT: u32 = 0x8007_04c7;
@@ -61,9 +64,73 @@ pub fn pick_path(
     )
 }
 
-fn start_dialog_worker(
-    choose: impl FnOnce() -> Result<Option<PathBuf>, DialogError> + Send + 'static,
-    notify: impl FnOnce(Result<Option<PathBuf>, DialogError>) + Send + 'static,
+#[derive(Clone, Copy)]
+pub enum PromptButtons {
+    Ok,
+    RetryCancel,
+    YesNoCancel,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PromptResponse {
+    Ok,
+    Retry,
+    Yes,
+    No,
+    Cancel,
+}
+
+/// Shows a GPU-independent modal prompt while retaining its owner on the worker.
+pub fn show_prompt(
+    owner: Arc<impl HasWindowHandle + Send + Sync + 'static>,
+    message: String,
+    buttons: PromptButtons,
+    notify: impl FnOnce(Result<PromptResponse, DialogError>) + Send + 'static,
+) -> Result<(), DialogError> {
+    let handle = owner
+        .window_handle()
+        .map_err(|_| DialogError::OwnerUnavailable)?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return Err(DialogError::OwnerUnavailable);
+    };
+    let native_owner = handle.hwnd.get();
+    start_dialog_worker(
+        move || {
+            let _owner = owner;
+            let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
+            let flags = match buttons {
+                PromptButtons::Ok => MB_OK,
+                PromptButtons::RetryCancel => MB_RETRYCANCEL | MB_DEFBUTTON2,
+                PromptButtons::YesNoCancel => MB_YESNOCANCEL | MB_DEFBUTTON3,
+            } | MB_ICONWARNING;
+            // The worker retains the HWND owner and UTF-16 buffer for the modal call.
+            // MessageBox owns its native UI; no COM or graphics resources cross threads.
+            let result = unsafe {
+                MessageBoxW(
+                    Some(HWND(native_owner as *mut _)),
+                    PCWSTR(message.as_ptr()),
+                    windows::core::w!("towavue"),
+                    flags,
+                )
+            };
+            if result.0 == 0 {
+                return Err(windows::core::Error::from_thread().into());
+            }
+            Ok(match result {
+                IDOK => PromptResponse::Ok,
+                IDRETRY => PromptResponse::Retry,
+                IDYES => PromptResponse::Yes,
+                IDNO => PromptResponse::No,
+                _ => PromptResponse::Cancel,
+            })
+        },
+        notify,
+    )
+}
+
+fn start_dialog_worker<T: Send + 'static>(
+    choose: impl FnOnce() -> Result<T, DialogError> + Send + 'static,
+    notify: impl FnOnce(Result<T, DialogError>) + Send + 'static,
 ) -> Result<(), DialogError> {
     thread::Builder::new()
         .name("towavue-file-dialog-sta".into())
@@ -226,7 +293,7 @@ mod tests {
             start_dialog_worker(
                 move || {
                     assert!(!panic, "simulated dialog worker panic");
-                    Err(DialogError::OwnerUnavailable)
+                    Err::<Option<PathBuf>, _>(DialogError::OwnerUnavailable)
                 },
                 move |result| result_tx.send(result).expect("deliver error"),
             )

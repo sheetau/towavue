@@ -92,7 +92,9 @@ codec metadata、device、driverのいずれかがD3D11VAを成立させられ�
 
 ### M3 synchronization and recovery
 
-graphics recoveryでは旧decode/output workerを停止し、旧rendererの参照を解放してから同じwindowへ新しいflip swap chainを作る。[D3D11の遅延破棄契約](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-flush)に従い、runtime内でClearState/Flushを行う。PresentやUI描画からのerrorもdevice removal理由を確認して同じ復旧経路へ渡す。新rendererにはfont atlasと保持中の画像/reading frameを再送し、再生成できるfilmstrip・waveform・hover previewだけを失効させる。tab・編集・選択・zoom・再生設定は保持する。GPU全体が再作成不能ならpanicや自動再試行loopにせず、Faultedのtitleと診断を残す。renderer不在でも描画要求は安全に戻るが、描画を要するdirty guardの代替UIは未完了である。
+renderer再作成不能時は、GPUを使わない所有window付きnative確認を専用workerで表示する。Retryは失敗前のsource位置と再生/停止状態を使い、Cancelは編集を保持する。以後の終了要求はnativeのExport/Discard/Cancel確認から既存のSave As・background exportへ接続する。export失敗もnative通知にし、未保存編集を消さない。native確認とfile dialogは同時に一つだけとし、確認中の別操作を受け付けない。通常rendererがある場合のegui UIは変更しない。
+
+graphics recoveryでは旧decode/output workerを停止し、旧rendererの参照を解放してから同じwindowへ新しいflip swap chainを作る。[D3D11の遅延破棄契約](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-flush)に従い、runtime内でClearState/Flushを行う。PresentやUI描画からのerrorもdevice removal理由を確認して同じ復旧経路へ渡す。新rendererにはfont atlasと保持中の画像/reading frameを再送し、再生成できるfilmstrip・waveform・hover previewだけを失効させる。tab・編集・選択・zoom・再生設定は保持する。GPU全体が再作成不能ならpanicや自動再試行loopにせず、Faultedのtitleと診断を残し、上記native確認へ移る。renderer不在でも描画要求は安全に戻る。
 
 動画の`seek_latency_ms`はappの`seek_to`開始から、新generationの映像を描画した最初のPresent成功までとする。同期的なworker停止・再構築、decode待機、UI描画とPresent待機を含め、VideoReady通知では完了しない。失敗・別mediaへの移動・device recoveryで中断した要求と、映像を持たない音声は標本にしない。連続要求では未表示の旧要求を置き換える。rate/trim編集など同じSeek経路を使う再構築も含むため、性能ゲートは操作を限定した試験で測る。物理入力の配送前やDWM/scanoutの実表示時刻はこの計測範囲外である。
 

@@ -18,7 +18,10 @@ mod watch;
 
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};
 pub use decode::{AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, VideoFrame};
-pub use dialog::{DialogError, FileDialogKind, cursor_position_in_window, pick_path};
+pub use dialog::{
+    DialogError, FileDialogKind, PromptButtons, PromptResponse, cursor_position_in_window,
+    pick_path, show_prompt,
+};
 pub use export::{ExportError, ExportEvent, ExportJob, ExportOutcome, ExportRequest, export_media};
 pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};

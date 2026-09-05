@@ -75,13 +75,13 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 | 草案 | 現状 |
 |---|---|
-| 動画/音声のwaveform timeline | 96px固定panel、waveform、CTI、click/drag seekを実装。音声はdefault表示 |
+| 動画/音声のwaveform timeline | 既定96pxの高さ変更可能panel、waveform、CTI、click/drag seekを実装。音声はdefault表示 |
 | 動画hover thumbnailと低負荷scrub | 20区間のcached thumbnail tooltipを実装。thumbnailを本画面へ出すscrub previewは未実装 |
 | 画像のfolder位置seekとthumbnail | Shell snapshotの画像順seekと位置・filename tooltipを実装。移動はdirty guardを通す。thumbnailは未実装 |
 | Range selection、範囲内再生、delete/cut | I/Oによる単一trim範囲の再生をH1で実装。pointerのrange selection、delete/cutは未実装 |
 | Rubber bandでtrack volume | 未実装 |
 | Range伸縮でrate編集 | 未実装 |
-| 上端dragでtimeline高さ変更 | 未実装。高さは固定 |
+| 上端dragでtimeline高さ変更 | H1で実装。既定96px・下限64px、上限はbarを除く残り高さの60%（小さいwindowは下限も縮小）。再生位置・編集は変えない |
 | Trim handleと編集mode | I/O端点検証、bracket・ミリ秒表示、範囲内live再生をH1で実装。drag handleは未実装 |
 
 ### 画像

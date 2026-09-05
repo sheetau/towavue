@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 07:25 JST - timeline / resize without seeking and retain a media viewport
+
+- Evidence/intent: draft asks for timeline height adjustment, but the current panel was fixed at 96 logical px. Native old-release drag from (500,452) to (500,340) leaves height unchanged and seeks to 62.558 s. The first attempt at y=450 did not hit the handle/content; repeated both versions at y=452 for the comparison. The new UI regression also fails against exact_size with an unexpected action.
+- Change: use existing egui panel resizing, default 96, minimum 64 and maximum 60% of the remaining viewport; reduce the minimum when the viewport is smaller. No new persistent setting or playback/edit action. Narrow trim captions omit explanatory text while retaining millisecond source endpoints; the outside-range Play hint also has a compact form. Range-handle editing is still separate and unimplemented.
+- Tests: resize pointer sequence emits no Seek/edit, grows the panel, then constrains it after a 240x150 logical window shrink. Active edit history, generation, paused state and position stay unchanged. Additional shape test checks both trim endpoint strings and the Play hint without clipping at 224x50. Existing trim/export tests remain green.
+- Native: new debug video drag grows the panel by about 110 px, preserving source preview and trim start 0.693 s; 480x300 clamps it, then downward drag reduces it to the 64 px minimum and restores more video area. Final normal release also resizes the paused WAV timeline without moving its CTI or restarting decode. Native trials use 96 DPI; no mixed-DPI claim. Undo clears only trial trim edits; owned processes 43788/22028/22724/26372 exit normally and captures/logs stay ignored.
+- Verification: format, all-target Clippy, 160 tests (app 70, core 35, runtime 51, integrations 4), debug/release builds pass; three live tests explicitly ignored. No runtime, unsafe, dependency or source media changes. Prior 27ff9e1 CI 33995519486 is in progress at last check.
+- Status/next: h1_active. Evaluate direct pointer trim-endpoint adjustment next. Physical recovery/IME/mixed-DPI, recent/session and distribution remain open; no answer to packaging question and no package/publication created.
+
 ## 2026-09-06 07:17 JST - Welcome / align empty-state entry with the draft
 
 - Evidence/intent: native 25829ee Welcome placed its heading/help at the center but Open buttons at the far left. The draft groups the wordmark and START actions in one centered, left-aligned column. Adopted that empty-state layout before implementing; recent persistence/preview remains a separate missing capability, not a fabricated list or completed draft match.

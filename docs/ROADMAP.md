@@ -168,3 +168,5 @@ trim開始前の停止previewでは、復旧Seekが終了済み音声workerへPa
 tab barのrelease時並べ替えと挿入線を追加した。同じ3枚の画像で変更前の順序不変と変更後の左右移動を比較し、dirty画像・active tabの保持、Escape/bar外dropの取消を実windowで確認した。identity・saved targetとpointer操作の回帰を含む156 tests、Clippy、debug/release buildが通過。KNOWN_GAPSの古いexport記述を訂正し、launch条件を安全性・性能/復旧・操作/外観・環境/入力・配布に分けた。次はWelcomeの導線と草案の見た目を評価する。H1全体と実機/配布gateは未完了。
 
 Welcomeの説明と左端buttonが分離した配置を、草案に沿うwordmark・START・Open操作の中央columnへ変更した。空状態の見出し、current shortcut、hover/focus、狭い画面のscrollを追加。native Open File/FolderのCancelと、480×300で画像を開いて最後のtabを閉じる復帰を確認し、158 tests・Clippy・debug/release buildが通過した。recent履歴は未実装として残し、次はtimelineの狭いwindow操作とtrim範囲の調整を評価する。H1とlaunch全体は継続中。
+
+timeline上端のdragが高さを変えずSeekになることを旧版の実windowと回帰testで確認した。既存panelの可変高さと画面高に応じた上限を使い、高さだけを変更するようにした。停止動画の位置・trim保持、縮小windowの上限/下限、通常releaseの音声timelineを確認し、狭いtrim表示も端点優先へ変更した。160 tests・Clippy・debug/release buildが通過。次はtrim端点をpointerで調整する導線を評価する。H1全体と実機/配布gateは未完了。

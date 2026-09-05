@@ -2178,8 +2178,11 @@ where
         if !self.timeline_open || self.media_kind == Some(MediaKind::Image) {
             return;
         }
+        let max_height = root.available_height() * 0.6;
         egui::Panel::bottom("timeline")
-            .exact_size(96.0)
+            .default_size(96.0)
+            .size_range(64.0_f32.min(max_height)..=max_height)
+            .resizable(true)
             .show(root, |ui| {
                 let rect = ui.available_rect_before_wrap();
                 if let Some(waveform) = &self.waveform {
@@ -4411,6 +4414,83 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timeline_resize_preserves_media_state_and_leaves_room_after_window_shrink() {
+        let Some(root) = isolated_test_root(
+            "tests::timeline_resize_preserves_media_state_and_leaves_room_after_window_shrink",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let path = root.join("video.mp4");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Video);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Video);
+        app.media_duration = Some(Duration::from_secs(120));
+        app.timeline_open = true;
+        app.state = PlaybackState::Paused;
+        app.edits.entry(tab).or_default().push(
+            EditOperation::SetTrimStart(MediaTime::from_nanoseconds(10_000_000_000)),
+            MediaKind::Video,
+        );
+        let history = app.edits[&tab].clone();
+        let position = app.current_position();
+        let generation = app.generation;
+        let context = egui::Context::default();
+        let mut frame = |size, events| {
+            let mut actions = Vec::new();
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            assert!(actions.is_empty(), "resize must not seek or edit");
+            egui::containers::panel::PanelState::load(&context, egui::Id::new("timeline"))
+                .expect("timeline panel")
+                .outer_rect
+        };
+        let size = egui::vec2(960.0, 576.0);
+        for _ in 0..3 {
+            frame(size, vec![]);
+        }
+        let before = frame(size, vec![]);
+        let start = before.center_top();
+        let end = start - egui::vec2(0.0, 90.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in [
+            vec![egui::Event::PointerMoved(start)],
+            vec![button(start, true)],
+            vec![egui::Event::PointerMoved(start - egui::vec2(0.0, 10.0))],
+            vec![egui::Event::PointerMoved(end)],
+            vec![button(end, false)],
+        ] {
+            frame(size, events);
+        }
+        let after = frame(size, vec![]);
+        assert!(
+            after.height() > before.height() + 70.0,
+            "{before:?} -> {after:?}"
+        );
+        for _ in 0..3 {
+            frame(egui::vec2(240.0, 150.0), vec![]);
+        }
+        let small = frame(egui::vec2(240.0, 150.0), vec![]);
+        assert!(small.height() <= 54.0, "small panel: {small:?}");
+        assert!(small.top() >= 64.0, "keep a media viewport: {small:?}");
+        assert_eq!(app.edits[&tab], history);
+        assert_eq!(app.current_position(), position);
+        assert_eq!(app.generation, generation);
+        assert_eq!(app.state, PlaybackState::Paused);
+    }
 
     #[test]
     fn tab_drag_commits_once_on_release_and_preserves_the_active_edit() {

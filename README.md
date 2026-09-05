@@ -78,6 +78,8 @@ cropは確定したpixel矩形をpreviewと保存で共有します。画像は1
 
 Gはメディア種別ごとの4×4 grid menuを開き、`1234/qwer/asdf/zxcv`またはclickで選択します。配置は`%APPDATA%\towavue\grid.conf`で変更できます。動画・音声ではTでwaveform timelineを表示し、動画上のhover thumbnailとclick/drag Seekを利用できます。previewはUI thread外で生成され、path・size・更新時刻をkeyにした最大64 MiBのcacheを`%LOCALAPPDATA%\towavue\preview-cache`へ保存します。
 
+timelineは上端をdragして高さを変えられます。高さの変更ではSeekや編集は行いません。windowを縮めると映像領域を残す高さへ制限し、狭い幅ではtrim表示の説明部分を省いて端点時刻を優先します。
+
 gridは小さいwindowでも4列を保ち、長い名前は省略・hoverで全文表示します。clickとkeyはどちらも一回実行して閉じます。
 
 gridのkeyはQWERTYの`1234/qwer/asdf/zxcv`に相当する物理位置です。Shiftで位置は変わらず、Ctrl/Alt/Windows key付きは通常shortcutとして扱います。paletteを開くとgridは閉じます。

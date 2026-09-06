@@ -9,7 +9,7 @@ use towavue_core::{MediaTime, PlaybackGeneration, PlaybackRange};
 
 use crate::audio::{AudioOutput, AudioOutputError, AudioOutputEvent, AudioOutputSender};
 use crate::decode::{
-    self, AudioFormat, DecodeOutput, HardwareVideoFrame, ParallelRuntimeDecodeOutput,
+    self, AudioFormat, DecodeOutput, DecodeStream, HardwareVideoFrame, ParallelRuntimeDecodeOutput,
     ParallelSoftwareDecodeOutput, RuntimeDecodeOutput, VideoFrame,
 };
 use crate::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError};
@@ -413,103 +413,139 @@ fn run_decode_thread(
     generation: PlaybackGeneration,
     target: MediaTime,
     end: Option<MediaTime>,
-    notify: &(impl Fn(PlaybackEvent) + ?Sized),
+    notify: &(impl Fn(PlaybackEvent) + Sync + ?Sized),
 ) {
-    let mut hardware_output_seen = false;
-    let mut pending_audio = Vec::new();
-    let mut pending_audio_finished = false;
-    let hardware_result =
-        decode::decode_file_hardware_parallel(path, graphics_device, target, end, |output| {
-            if !hardware_output_seen
-                && matches!(
-                    output,
-                    ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(_))
-                        | ParallelRuntimeDecodeOutput::VideoFinished
-                )
-            {
-                if let Some(audio) = audio {
-                    for chunk in pending_audio.drain(..) {
-                        if audio.push(chunk).is_err() {
-                            return false;
+    thread::scope(|scope| {
+        let (start_tx, start_rx) = mpsc::sync_channel(1);
+        let audio_thread = audio
+            .map(|audio| {
+                thread::Builder::new()
+                    .name("towavue-audio-feed".into())
+                    .spawn_scoped(scope, move || {
+                        if start_rx.recv().is_err() {
+                            return Err(decode::DecodeError::ConsumerClosed);
                         }
-                    }
-                    if pending_audio_finished && audio.finish().is_err() {
-                        return false;
+                        let result = decode::decode_file_parallel(
+                            path,
+                            target,
+                            end,
+                            Some(DecodeStream::Audio),
+                            |output| match output {
+                                ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
+                                    audio.push(chunk).is_ok()
+                                }
+                                ParallelSoftwareDecodeOutput::AudioFinished => {
+                                    audio.finish().is_ok()
+                                }
+                                _ => unreachable!("audio-only decoder emitted video"),
+                            },
+                        );
+                        if let Err(error) = &result
+                            && !matches!(error, decode::DecodeError::ConsumerClosed)
+                        {
+                            notify(PlaybackEvent::Failed(generation, error.to_string()));
+                        }
+                        result
+                    })
+            })
+            .transpose();
+        let audio_thread = match audio_thread {
+            Ok(handle) => handle,
+            Err(error) => {
+                notify(PlaybackEvent::Failed(generation, error.to_string()));
+                return;
+            }
+        };
+        let mut start_audio = Some(start_tx);
+        let mut ready = || {
+            if let Some(sender) = start_audio.take() {
+                let _ = sender.send(());
+            }
+        };
+        let mut hardware_output_seen = false;
+        let hardware_result =
+            decode::decode_file_hardware_parallel(path, graphics_device, target, end, |output| {
+                if !hardware_output_seen {
+                    hardware_output_seen = true;
+                    notify(PlaybackEvent::DecodePathSelected(
+                        generation,
+                        DecodePath::D3d11va,
+                    ));
+                    ready();
+                }
+                match output {
+                    ParallelRuntimeDecodeOutput::VideoFinished => true,
+                    ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) => {
+                        metrics.hardware_frame_count.fetch_add(1, Ordering::Relaxed);
+                        send_video_frame(
+                            PresentationFrame::Hardware(frame),
+                            video_tx,
+                            generation,
+                            notify,
+                        )
                     }
                 }
-                hardware_output_seen = true;
+            });
+
+        let result = match hardware_result {
+            Err(decode::DecodeError::HardwareUnavailable(_)) if !hardware_output_seen => {
                 notify(PlaybackEvent::DecodePathSelected(
                     generation,
-                    DecodePath::D3d11va,
+                    DecodePath::Software,
                 ));
+                decode::decode_file_parallel(
+                    path,
+                    target,
+                    end,
+                    Some(DecodeStream::Video),
+                    |output| match output {
+                        ParallelSoftwareDecodeOutput::VideoFinished => {
+                            ready();
+                            true
+                        }
+                        ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) => {
+                            ready();
+                            metrics.cpu_transfer_count.fetch_add(1, Ordering::Relaxed);
+                            send_video_frame(
+                                PresentationFrame::Software(frame),
+                                video_tx,
+                                generation,
+                                notify,
+                            )
+                        }
+                        _ => unreachable!("video-only decoder emitted audio"),
+                    },
+                )
             }
-            match output {
-                ParallelRuntimeDecodeOutput::VideoFinished => true,
-                ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) => {
-                    metrics.hardware_frame_count.fetch_add(1, Ordering::Relaxed);
-                    send_video_frame(
-                        PresentationFrame::Hardware(frame),
-                        video_tx,
-                        generation,
-                        notify,
-                    )
-                }
-                ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Audio(chunk)) => {
-                    if hardware_output_seen {
-                        audio.is_some_and(|sender| sender.push(chunk).is_ok())
-                    } else {
-                        pending_audio.push(chunk);
-                        true
-                    }
-                }
-                ParallelRuntimeDecodeOutput::AudioFinished => {
-                    if hardware_output_seen {
-                        audio.is_none_or(|sender| sender.finish().is_ok())
-                    } else {
-                        pending_audio_finished = true;
-                        true
-                    }
-                }
-            }
-        });
+            other => other,
+        };
 
-    let result = match hardware_result {
-        Err(decode::DecodeError::HardwareUnavailable(_)) if !hardware_output_seen => {
-            pending_audio.clear();
-            notify(PlaybackEvent::DecodePathSelected(
-                generation,
-                DecodePath::Software,
-            ));
-            decode::decode_file_parallel(path, target, end, |output| match output {
-                ParallelSoftwareDecodeOutput::VideoFinished => true,
-                ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) => {
-                    metrics.cpu_transfer_count.fetch_add(1, Ordering::Relaxed);
-                    send_video_frame(
-                        PresentationFrame::Software(frame),
-                        video_tx,
-                        generation,
-                        notify,
-                    )
-                }
-                ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
-                    audio.is_some_and(|sender| sender.push(chunk).is_ok())
-                }
-                ParallelSoftwareDecodeOutput::AudioFinished => {
-                    audio.is_none_or(|sender| sender.finish().is_ok())
-                }
-            })
+        drop(start_audio);
+        match &result {
+            Ok(_) => {}
+            Err(decode::DecodeError::ConsumerClosed) => {}
+            Err(error) => match graphics_device.device_removed_reason() {
+                Some(reason) => notify(PlaybackEvent::DeviceRemoved(generation, reason)),
+                None => notify(PlaybackEvent::Failed(generation, error.to_string())),
+            },
         }
-        other => other,
-    };
-
-    match result {
-        Ok(_) => notify(PlaybackEvent::DecodeFinished(generation)),
-        Err(decode::DecodeError::ConsumerClosed) => {}
-        Err(error) => match graphics_device.device_removed_reason() {
-            Some(reason) => notify(PlaybackEvent::DeviceRemoved(generation, reason)),
-            None => notify(PlaybackEvent::Failed(generation, error.to_string())),
-        },
-    }
+        let audio_ok = match audio_thread {
+            Some(handle) => match handle.join() {
+                Ok(result) => result.is_ok(),
+                Err(_) => {
+                    notify(PlaybackEvent::Failed(
+                        generation,
+                        decode::DecodeError::WorkerPanicked.to_string(),
+                    ));
+                    false
+                }
+            },
+            None => true,
+        };
+        if result.is_ok() && audio_ok {
+            notify(PlaybackEvent::DecodeFinished(generation));
+        }
+    });
 }
 
 fn send_video_frame(

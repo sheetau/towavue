@@ -143,7 +143,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - Loading、empty、error、unsupported capabilityのstate表現が各所のstatus textへ分散している。UX改善時には表示だけでなくstate transitionをcoreでtest可能にする余地がある。
 - filmstrip以外のpreview workerはtask単位にthreadを起動する単純構成で、優先度、同時数、cancel、重複排除を持たない。filmstripは可視集合の最新要求を単一workerで処理する。
 - hover thumbnailは同一media内で一つだけ取得し、失敗した区間は再openまで再試行しない。media load世代で旧結果を拒否する。
-- 映像2秒・音声30秒のH.264/AACでは、hardware確認前の`pending_audio`へ1,377 chunksが蓄積され、その同期排出が最初の映像通知を塞ぐ。最後まで再生すると60 hardware frames / 0 CPU transfersだが、表示0・drop 60になる。ここはbounded queue契約の未達箇所であり、ローンチ阻害として修正を優先する。hardware事前確認だけの試作は通常再生を改善したが停止Seekの黒画面を直せず、採用せず除去した。音声backpressureで映像供給を塞がない構成と、hardware未成立時に音声を二重再生しないfallbackの両方を満たす必要がある。
+- 映像2秒・音声30秒のH.264/AACで判明した音声先行蓄積/黒画面は、独立input/demuxと、映像確認後に一度だけ音声を開始する構成へ変更した。同じfileの通常releaseで表示60・drop 0・CPU transfers 0、停止Seekと300msの制御開始遅延、hardware成立前のsoftware fallback/成立後のfaultを確認した。二系統読取の通常releaseによる30分4K60再試験も107,746枚表示・25枚drop・CPU transfers 0で完走し、drift p95 4.806ms・最大37.785msだった。先頭10分のdrop率は保守的上限でも0.069589%で基準内。ただし基準機とこのfixtureの測定であり、低速storageや全codecの保証ではない。
 - Exportは同じ保存先volumeの一時outputへ書き、成功後だけtargetを置換する。失敗・置換前cancelの既存target保護は回帰test済みだが、電源断時のdurabilityまでは保証していない。
 
 これらは一括refactorの指示ではない。実際のUX課題を直す際に、必要な範囲だけ同時に改善する。

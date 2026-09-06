@@ -613,7 +613,7 @@ mod tests {
             })
             .expect("source interval");
             let (mut live_frames, mut live_audio) = (0, Vec::new());
-            crate::decode::decode_file_parallel(&source, start, Some(end), |output| {
+            crate::decode::decode_file_parallel(&source, start, Some(end), None, |output| {
                 match output {
                     crate::decode::ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(_)) => {
                         live_frames += 1

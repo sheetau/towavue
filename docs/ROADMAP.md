@@ -242,3 +242,5 @@ Seek previewがhover位置ではなく左端に現れる問題を通常release�
 音声の途中曲を直接開いても現在行が見えない問題を通常releaseで再現し、open/選曲/tab再表示/順序変更時だけの最小scrollを追加した。同一曲の手動scrollとguard Cancelを維持する。1万曲の表示回帰を含む214 tests、Clippy、両buildと通常windowの選曲・Cancel・tab復帰が通過。次は残る日常の再生操作を監査する。a356646 CIは進行中で、H1と実機/配布gateは未完了。
 
 消音解除で50%から100%へ上がる問題を通常releaseで再現し、active tabの適用済み履歴から直前の非zero音量を復元するよう修正した。音声/動画・Undo/Redo・tab分離の回帰を含む215 tests、Clippy、両buildと通常windowの50%復帰が通過。a356646 CIは成功、eeb8e0b CIは進行中。次は残る再生操作と入力の不一致を監査する。H1と実機/配布gateは未完了。
+
+動画面と動画/音声status barの音量表示へwheel操作を追加し、raw入力だけを既存編集へ渡す。playlistのscrollとmodal/overlay等は分離した。217 tests、Clippy、両build、通常windowの動画90%・Undoと音声一覧/音量の使い分けを確認。pointer移動直後のwheel不達が一度あり、次はその入力境界を監査する。eeb8e0b CIは成功。H1と実機/配布gateは未完了。

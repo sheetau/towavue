@@ -4,6 +4,13 @@
 
 ## 1. 最初に試す
 
+### Wheel音量操作（2026-09-06）
+
+- 旧通常release PID 37152では動画面のwheel後も100%だった。修正版PID 7712では下1ノッチで90%となり、Undoで元へ戻る。音量表示をstatus barの再生controlsの隣へ分離した。
+- 同じwindowで24曲の音声folderを開き480×300へ縮小。一覧上のwheelは曲一覧だけをscrollし100%を維持した。音量表示へpointerを移した直後のwheelは音量を変えず、同じwindowでhoverを確立して再送すると90%になった。最初の試行は成功の証拠に含めず、入力境界の未解明点として残す。
+- 回帰はLine/Page/Point、30/120fps、raw eventの合算とsmooth tailの非発火、Undo、0/200%端点、target tabの照合、修飾key・横wheel・focus・button保持・modal/menu/overlayの遮断を確認。240/480/960pxの実draw_uiで音量labelだけが変更を発行することも確認した。
+- 両windowは通常終了、試用の音量編集はUndo、source保存・OS音量設定変更なし。live gain経路は既存実装を使用し、今回のnative観測はUI状態の確認でloopback測定ではない。
+
 ### 消音解除時の音量（2026-09-06）
 
 - 旧通常release PID 40604で30秒音声を50%へ下げ、M→Mを実行すると100%へ戻った。修正版PID 34076では50%→0%→50%を表示し、再生を継続する。停止後のUndo/Redoは18秒の位置を保ったまま0%/50%となった。

@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 15:18 JST - add scoped wheel volume input
+
+- Trigger/evidence: previous turn pushed 881340b (progress); eeb8e0b CI succeeds. Draft requests wheel volume; baseline normal release PID 37152 stays at 100% after wheel over video.
+- Contract/change: video surface and a dedicated AV status-volume label accept unmodified raw vertical wheel (Line/Page 0.1 per unit, Point 0.1 per 50 logical px). Sum events once per frame, clamp 0..2 and emit a tab-checked volume edit only on change. Preserve playlist/timeline scroll, modifiers, drag, focus and modal/menu/overlay boundaries; no smooth-tail edits, runtime/core/dependency/unsafe changes or OS volume changes.
+- Verification: two regressions cover units, 30/120fps, batched events, no smoothing tail, Undo, endpoints, stale tabs, modifiers/horizontal/focus/held button and overlays/popups. Actual draw_ui at 240/480/960 widths limits audio input to the label. Format, Clippy, 217 tests (app 108/core 35/runtime 70/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: fixed PID 7712 video wheel changes 100% to 90%, Undo restores. Open audio in the same window, shrink to 480x300: playlist wheel scrolls without volume edits. Initial immediate move-to-label/wheel does not change volume; a later wheel after settled hover changes to 90%. First attempt excluded from success evidence and retained for investigation. Initial cleanup Undo did not reach the app; close remained at its dirty guard. Reassert foreground on the same PID, Cancel/Undo, verify 100% and no dirty mark, then close normally. Both owned windows closed; no source save, trial logs/captures ignored, no loopback measurement.
+- Status/next: h1_active. Investigate wheel targeting immediately after pointer movement in the same owned-window workflow. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 15:09 JST - restore the previous volume when unmuting
 
 - Trigger/evidence: previous turn pushed eeb8e0b (progress). a356646 CI succeeds; eeb8e0b CI 34015576061 remains in progress. Everyday playback audit finds ToggleMute always restores 1.0. Baseline normal release PID 40604 goes from 50% through mute to 100%.

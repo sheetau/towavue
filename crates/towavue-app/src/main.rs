@@ -134,6 +134,7 @@ enum UiAction {
     ActivateTab(TabId),
     ReorderTab(TabId, usize),
     TrimEndpoint(TabId, EditOperation),
+    Volume(TabId, f32),
     CloseTab(TabId),
     DetachTab(TabId),
     OpenMedia(PathBuf, bool),
@@ -1304,7 +1305,7 @@ where
                             });
                     }
                 } else if self.media_kind == Some(MediaKind::Video) {
-                    self.draw_video_edit_overlay(ui);
+                    self.draw_video_edit_overlay(ui, actions);
                 }
             });
         if let Some(rect) = status_rect {
@@ -1550,7 +1551,7 @@ where
         }
     }
 
-    fn draw_video_edit_overlay(&mut self, ui: &mut egui::Ui) {
+    fn draw_video_edit_overlay(&mut self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         let Some((width, height, pixel_aspect)) = self
             .session
             .as_ref()
@@ -1570,9 +1571,56 @@ where
             egui::Sense::click_and_drag(),
         );
         let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
+        self.volume_wheel(&response, actions);
         self.update_selection(&response, viewport, size, shift, pointer);
         if let Some(selection) = self.image_view.selection {
             paint_selection(&ui.painter_at(viewport), viewport, selection);
+        }
+    }
+
+    fn volume_wheel(&self, response: &egui::Response, actions: &mut Vec<UiAction>) {
+        let Some(tab) = self.tabs.active() else {
+            return;
+        };
+        if !response.hovered()
+            || !matches!(self.media_kind, Some(MediaKind::Video | MediaKind::Audio))
+            || self.modal_input_blocked()
+            || self.palette_open
+            || self.grid_open
+            || self.filmstrip_open
+            || egui::Popup::is_any_open(&response.ctx)
+        {
+            return;
+        }
+        let delta = response.ctx.input(|input| {
+            if !input.focused || input.pointer.any_down() || !input.modifiers.is_none() {
+                return 0.0;
+            }
+            input
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::MouseWheel {
+                        unit,
+                        delta,
+                        modifiers,
+                        ..
+                    } if modifiers.is_none() => Some(
+                        delta.y
+                            / if *unit == egui::MouseWheelUnit::Point {
+                                50.0
+                            } else {
+                                1.0
+                            },
+                    ),
+                    _ => None,
+                })
+                .sum::<f32>()
+        });
+        let before = self.edit_state().volume;
+        let volume = (before + delta * 0.1).clamp(0.0, 2.0);
+        if volume != before {
+            actions.push(UiAction::Volume(tab.id, volume));
         }
     }
 
@@ -2154,6 +2202,20 @@ where
                         if chrome::button(ui, "≋", "Waveform timeline (T)").clicked() {
                             actions.push(UiAction::Command(CommandId::ToggleTimeline));
                         }
+                        let volume = ui
+                            .add_sized(
+                                [40.0, 24.0],
+                                egui::Label::new(
+                                    RichText::new(format!(
+                                        "{:.0}%",
+                                        self.edit_state().volume * 100.0
+                                    ))
+                                    .size(12.0)
+                                    .color(chrome::MUTED),
+                                ),
+                            )
+                            .on_hover_text("Volume · wheel to adjust (playback and export)");
+                        self.volume_wheel(&volume, actions);
                     } else if self.media_kind == Some(MediaKind::Image) {
                         if chrome::button(ui, "◫", "Reading mode (B)").clicked() {
                             actions.push(UiAction::Command(CommandId::ToggleReadingMode));
@@ -2186,7 +2248,7 @@ where
                         details.push(format!("{} {width}×{height}", image.decoded.format));
                     } else if self.session.is_some() {
                         let edit = self.edit_state();
-                        details.push(format!("{:.0}%  {:.2}×", edit.volume * 100.0, edit.rate));
+                        details.push(format!("{:.2}×", edit.rate));
                         if edit.trim_start.is_some() || edit.trim_end.is_some() {
                             details.push("Trim (T)".into());
                         }
@@ -2542,6 +2604,11 @@ where
                 }
             }
             UiAction::Seek(target) => self.seek_to(target),
+            UiAction::Volume(id, volume) => {
+                if self.tabs.active().is_some_and(|tab| tab.id == id) {
+                    self.push_edit(EditOperation::SetVolume(volume));
+                }
+            }
             UiAction::ResolveGuard(decision) => self.resolve_guard(decision),
             UiAction::CancelExport => {
                 if let Some(export) = &mut self.active_export {
@@ -6275,6 +6342,280 @@ mod tests {
         assert!(app.pending_guard.is_some());
         assert_eq!(app.path.as_ref(), Some(&source));
         assert_eq!(app.edits, edits);
+    }
+
+    #[test]
+    fn audio_volume_wheel_is_limited_to_its_status_label() {
+        let Some(root) =
+            isolated_test_root("tests::audio_volume_wheel_is_limited_to_its_status_label")
+        else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
+        app.path = Some(root.join("audio.wav"));
+        app.media_kind = Some(MediaKind::Audio);
+        for width in [240.0, 480.0, 960.0] {
+            let context = egui::Context::default();
+            let mut frame = |events| {
+                let mut actions = Vec::new();
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 300.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| app.draw_ui(ui, &mut actions),
+                );
+                (output, actions)
+            };
+            for _ in 0..4 {
+                frame(vec![]);
+            }
+            let output = frame(vec![]).0;
+            let label = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.job.text == "100%" => {
+                        Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                    }
+                    _ => None,
+                })
+                .expect("dedicated volume label");
+            assert!(label.left() >= 0.0 && label.right() <= width);
+            for (pos, expected) in [(label.center(), true), (egui::pos2(100.0, 100.0), false)] {
+                frame(vec![egui::Event::PointerMoved(pos)]);
+                let actions = frame(vec![egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: egui::vec2(0.0, -1.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                }])
+                .1;
+                assert_eq!(
+                    actions
+                        .iter()
+                        .filter(|action| matches!(action, UiAction::Volume(..)))
+                        .count(),
+                    usize::from(expected)
+                );
+                if expected {
+                    assert!(actions == [UiAction::Volume(tab, 0.9)]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn volume_wheel_uses_raw_events_and_respects_input_ownership() {
+        let Some(root) =
+            isolated_test_root("tests::volume_wheel_uses_raw_events_and_respects_input_ownership")
+        else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
+        app.path = Some(root.join("audio.wav"));
+        app.media_kind = Some(MediaKind::Audio);
+        let context = egui::Context::default();
+        let point = egui::pos2(100.0, 100.0);
+        let wheel = |unit, delta, modifiers| egui::Event::MouseWheel {
+            unit,
+            delta,
+            modifiers,
+            phase: egui::TouchPhase::Move,
+        };
+        let mut time = 0.0;
+        let mut frame = |app: &mut Application<_>, events, focused, dt| {
+            time += dt;
+            let mut actions = Vec::new();
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 300.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    focused,
+                    ..Default::default()
+                },
+                |ui| {
+                    let response = ui.allocate_rect(
+                        egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(200.0, 160.0)),
+                        egui::Sense::hover(),
+                    );
+                    app.volume_wheel(&response, &mut actions);
+                },
+            );
+            actions
+        };
+        for _ in 0..3 {
+            frame(&mut app, vec![egui::Event::PointerMoved(point)], true, 0.1);
+        }
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            app.media_kind = Some(kind);
+            for (unit, delta, expected) in [
+                (egui::MouseWheelUnit::Line, 1.0, 1.1),
+                (egui::MouseWheelUnit::Page, -2.0, 0.8),
+                (egui::MouseWheelUnit::Point, 5.0, 1.01),
+                (egui::MouseWheelUnit::Point, -50.0, 0.9),
+            ] {
+                for dt in [1.0 / 30.0, 1.0 / 120.0] {
+                    let actions = frame(
+                        &mut app,
+                        vec![wheel(unit, egui::vec2(0.0, delta), egui::Modifiers::NONE)],
+                        true,
+                        dt,
+                    );
+                    assert_eq!(actions.len(), 1);
+                    assert!(
+                        matches!(actions[0], UiAction::Volume(id, volume) if id == tab && (volume - expected).abs() < 0.0001)
+                    );
+                    for _ in 0..30 {
+                        assert!(
+                            frame(&mut app, vec![], true, dt).is_empty(),
+                            "no smooth-scroll tail edits"
+                        );
+                    }
+                }
+            }
+        }
+        let actions = frame(
+            &mut app,
+            vec![
+                wheel(
+                    egui::MouseWheelUnit::Line,
+                    egui::vec2(0.0, -1.0),
+                    egui::Modifiers::NONE,
+                ),
+                wheel(
+                    egui::MouseWheelUnit::Line,
+                    egui::vec2(0.0, -2.0),
+                    egui::Modifiers::NONE,
+                ),
+            ],
+            true,
+            0.1,
+        );
+        assert_eq!(actions.len(), 1, "one edit for batched wheel events");
+        app.handle_ui_action(actions[0].clone());
+        assert!((app.edit_state().volume - 0.7).abs() < 0.0001);
+        app.dispatch(CommandId::Undo);
+        assert_eq!(app.edit_state().volume, 1.0);
+        for blocked in 0..11 {
+            if blocked == 10 {
+                egui::Popup::open_id(&context, egui::Id::new("volume-test-menu"));
+            }
+            app.media_kind = Some(if blocked == 0 {
+                MediaKind::Image
+            } else {
+                MediaKind::Audio
+            });
+            app.filmstrip_open = blocked == 1;
+            app.palette_open = blocked == 2;
+            app.grid_open = blocked == 3;
+            app.pending_guard = (blocked == 4).then_some(GuardedAction::Exit);
+            app.pending_dialog = (blocked == 5).then_some(DialogIntent::OpenFile);
+            let pos = if blocked == 7 {
+                egui::pos2(350.0, 250.0)
+            } else {
+                point
+            };
+            frame(&mut app, vec![egui::Event::PointerMoved(pos)], true, 0.1);
+            let modifiers = if blocked == 8 {
+                egui::Modifiers::CTRL
+            } else {
+                egui::Modifiers::NONE
+            };
+            let mut events = vec![wheel(
+                egui::MouseWheelUnit::Line,
+                egui::vec2(0.0, 1.0),
+                modifiers,
+            )];
+            if blocked == 9 {
+                events.insert(
+                    0,
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers,
+                    },
+                );
+            }
+            assert!(
+                frame(&mut app, events, blocked != 6, 0.1).is_empty(),
+                "blocked input {blocked}"
+            );
+            frame(
+                &mut app,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true,
+                0.1,
+            );
+        }
+        app.pending_dialog = None;
+        app.pending_guard = None;
+        egui::Popup::close_all(&context);
+        for modifiers in [egui::Modifiers::SHIFT, egui::Modifiers::ALT] {
+            assert!(
+                frame(
+                    &mut app,
+                    vec![wheel(
+                        egui::MouseWheelUnit::Line,
+                        egui::vec2(0.0, 1.0),
+                        modifiers
+                    )],
+                    true,
+                    0.1
+                )
+                .is_empty()
+            );
+        }
+        assert!(
+            frame(
+                &mut app,
+                vec![wheel(
+                    egui::MouseWheelUnit::Line,
+                    egui::vec2(1.0, 0.0),
+                    egui::Modifiers::NONE
+                )],
+                true,
+                0.1
+            )
+            .is_empty()
+        );
+        for volume in [0.0, 2.0] {
+            app.push_edit(EditOperation::SetVolume(volume));
+            let delta = if volume == 0.0 { -100.0 } else { 100.0 };
+            assert!(
+                frame(
+                    &mut app,
+                    vec![wheel(
+                        egui::MouseWheelUnit::Line,
+                        egui::vec2(0.0, delta),
+                        egui::Modifiers::NONE
+                    )],
+                    true,
+                    0.1
+                )
+                .is_empty(),
+                "no edits at volume limits"
+            );
+        }
+        app.tabs.open_new(root.join("other.wav"), MediaKind::Audio);
+        app.handle_ui_action(UiAction::Volume(tab, 0.4));
+        assert_eq!(app.edit_state().volume, 1.0, "ignore stale target tab");
     }
 
     #[test]

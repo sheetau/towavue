@@ -22,6 +22,8 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 
 Mキーの消音解除は、100%へ固定で戻さず、そのtabの直前の非zero音量を復元します。音量は既存の編集履歴に含まれ、Undo/Redoと保存にも反映されます。
 
+動画面、または動画/音声のstatus barの音量表示上ではwheelで音量を調整できます。音声playlist上では一覧scrollを優先します。Ctrl/Shiftなどの修飾key、drag中、menuや確認画面の表示中は音量を変更しません。
+
 ## 文書
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md): 技術選定、境界、データフロー、不変条件

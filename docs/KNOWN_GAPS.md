@@ -6,6 +6,8 @@
 
 ### 操作とpreviewの不一致
 
+- 動画面と動画/音声status barの音量表示にwheel音量を追加した。raw縦入力だけを使い、playlist/timelineのscroll・修飾key・drag・modal/menu/overlayとは分離する。通常windowの動画と音声で確認したが、pointerを移動した直後のwheelが音量へ届かない試行があり、同じwindowでhover確立後には成功した。この短い入力境界の原因は監査中。
+
 - Mキーの消音解除が必ず100%へ戻る問題を修正した。active tabの適用済み履歴から直前の非zero音量を復元し、未適用redoや別tabの値は使わない。音量をlive/export共通の編集として扱う設計は維持する。
 
 - 単一項目のfolder前後移動でzoomがFitへ戻り、未保存編集があると同じ画像への移動でも保存確認が出る問題を修正した。同じpathへのNavigateは共通入口でno-opとし、現在playlist項目の再clickも再生位置/pauseを保つ。別pathへのguard、明示的なOpen、新規tabは維持する。

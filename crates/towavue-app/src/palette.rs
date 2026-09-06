@@ -20,7 +20,35 @@ impl CommandPalette {
         shortcuts: &ShortcutBindings,
     ) -> (Option<CommandId>, bool) {
         let mut chosen = None;
+        let query_id = egui::Id::new("command-palette-query");
         let (up, down, enter, close) = context.input_mut(|input| {
+            // The pinned TextEdit exposes UIA ValuePattern but does not handle SetValue.
+            if input.has_accesskit_action_request(query_id, egui::accesskit::Action::SetValue) {
+                for event in std::mem::take(&mut input.events) {
+                    if let egui::Event::AccessKitActionRequest(request) = &event
+                        && request.target_tree == egui::accesskit::TreeId::ROOT
+                        && request.target_node == query_id.accesskit_id()
+                        && request.action == egui::accesskit::Action::SetValue
+                        && let Some(egui::accesskit::ActionData::Value(value)) = &request.data
+                    {
+                        for (key, modifiers) in [
+                            (egui::Key::A, egui::Modifiers::COMMAND),
+                            (egui::Key::Backspace, egui::Modifiers::NONE),
+                        ] {
+                            input.events.push(egui::Event::Key {
+                                key,
+                                physical_key: None,
+                                pressed: true,
+                                repeat: false,
+                                modifiers,
+                            });
+                        }
+                        input.events.push(egui::Event::Paste(value.to_string()));
+                    } else {
+                        input.events.push(event);
+                    }
+                }
+            }
             let mut ime_event = false;
             for event in &input.events {
                 if let egui::Event::Ime(event) = event {
@@ -67,7 +95,6 @@ impl CommandPalette {
             .show(context, |ui| {
                 ui.set_width((context.content_rect().width() - 48.0).clamp(120.0, 588.0));
                 let previous_query = self.query.clone();
-                let query_id = egui::Id::new("command-palette-query");
                 ui.memory_mut(|memory| {
                     if !memory.has_focus(query_id) {
                         memory.request_focus(query_id);
@@ -81,6 +108,10 @@ impl CommandPalette {
                         .hint_text("> Search commands"),
                 )
                 .on_hover_text("Up / Down: select   Enter: run   Esc: close");
+                context.accesskit_node_builder(query_id, |node| {
+                    node.set_label("Search commands");
+                    node.add_action(egui::accesskit::Action::SetValue);
+                });
                 let query_changed = previous_query != self.query;
                 if query_changed {
                     self.selected = None;
@@ -146,6 +177,10 @@ impl CommandPalette {
                                         .wrap(),
                                     );
                                 });
+                            // Selection is a visual command cursor, not an on/off setting.
+                            context.accesskit_node_builder(response.id, |node| {
+                                node.clear_toggled();
+                            });
                             if (up || down || query_changed) && self.selected == Some(index) {
                                 response.scroll_to_me(Some(egui::Align::Center));
                             }
@@ -176,6 +211,92 @@ fn next_enabled(current: Option<usize>, enabled: &[bool], forward: bool) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accessibility_names_and_replaces_the_query_without_running_commands() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut palette = CommandPalette::default();
+        let frame = |palette: &mut CommandPalette, events| {
+            context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |_| {
+                    assert_eq!(
+                        palette.show(
+                            &context,
+                            CommandContext {
+                                palette_open: true,
+                                ..Default::default()
+                            },
+                            &ShortcutBindings::default(),
+                        ),
+                        (None, false),
+                    );
+                },
+            )
+        };
+        for _ in 0..3 {
+            frame(&mut palette, vec![]);
+        }
+        let query_id = egui::Id::new("command-palette-query").accesskit_id();
+        let request = |target_node, value: &str| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::SetValue,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node,
+                data: Some(egui::accesskit::ActionData::Value(value.into())),
+            })
+        };
+        for (value, expected) in [
+            ("Open", "Open"),
+            ("日本語 café 🎞️", "日本語 café 🎞️"),
+            ("", ""),
+            ("Open\nfile", "Open file"),
+        ] {
+            let output = frame(&mut palette, vec![request(query_id, value)]);
+            assert_eq!(palette.query, expected);
+            let tree = output.platform_output.accesskit_update.expect("tree");
+            let (_, node) = tree
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == query_id)
+                .expect("accessible query field");
+            assert_eq!(node.label(), Some("Search commands"));
+            assert_eq!(node.role(), egui::accesskit::Role::TextInput);
+            assert!(node.supports_action(egui::accesskit::Action::SetValue));
+            assert_eq!(node.value(), Some(expected));
+            for (_, node) in &tree.nodes {
+                if node.role() == egui::accesskit::Role::Button {
+                    assert!(node.toggled().is_none(), "commands are not toggle switches");
+                }
+            }
+            assert!(output.platform_output.commands.is_empty());
+        }
+        frame(
+            &mut palette,
+            vec![request(
+                egui::Id::new("other").accesskit_id(),
+                "wrong target",
+            )],
+        );
+        assert_eq!(palette.query, "Open file");
+        frame(
+            &mut palette,
+            vec![
+                request(query_id, "first"),
+                request(query_id, "Open"),
+                egui::Event::Text(" folder".into()),
+            ],
+        );
+        assert_eq!(palette.query, "Open folder");
+    }
 
     #[test]
     fn palette_pastes_copies_and_cuts_unicode_without_running_commands() {

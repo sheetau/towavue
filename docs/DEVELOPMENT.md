@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### Windows UI Automation連携（2026-09-06 20:44 JST）
+
+- c59fa73の通常release（PID 19532、開始UTC 2026-09-06T11:28:08.0491227Z）で所有windowのUI Automation descendantsは0だった。固定egui-winitのaccesskit featureを有効化し、windowの初回表示前にadapterを作成、初期tree要求・action・無効化を既存event loopへ接続した。非Windows用の推移依存もlockされるが、Windows dependency treeにasync-executorはなく、app独自のworker/poll/COM providerは追加しない。
+- 先行buildのUIA検査でWelcomeの12要素とOpen File…のInvoke→native dialog→取消、Close windowのInvokeを確認。一方、logo/queryが空白名、検索のSetValueが成功を返しても空欄のまま、palette候補がInvokeではなくTogglePatternとして公開される不足を発見した。検索宛ての文字列SetValueだけを既存egui編集eventへ変換し、名前とcommand semanticsを修正した。標準widget一般の独自実装や描画変更はしていない。
+- 最終通常release（PID 37848、開始UTC 2026-09-06T11:43:47.3724958Z）、960×576、Windows build 26200で再確認。UIAから`towavue menu`→View→Show command paletteをInvokeし、Search commandsのValuePatternで`Open`、日本語・アクセント文字・絵文字、空文字が完全一致した。再度Openに設定し、候補のOpen fileをInvokeすると所有native dialogが開く。fileを選ばず取消後、Close windowのInvokeで正常終了した。WelcomeのPlay or pauseがdisabledであることも確認した。
+- 最終binary SHA-256: `39642B0314D1BADBAB000CEDC6BCA985AA5C0DE4C48A44CDD2BB7A637039209B`。基準binary: `394617AF866B14D89006F64FF576326C7D0A59F21818CC65077DA6E114628087`。最終のUIA操作後、通知期限を過ぎた5秒idle CPU増分は0ms。全5試験windowは正常終了、stderrは空。最終query captureは960×576で、ignoredの`target/tmp/h1-accessibility-*`へ保存。clipboard・元素材・OS設定は変更せず、screen readerは起動していない。
+- 3回帰を追加し、tree生成の要求/無効化/再要求、Welcome commandの一回実行、logo名、検索のUnicode/空/単一行化/誤node/連続SetValueと後続文字eventの順序、command非Toggleを検証。243 tests（app 128/core 36/runtime 75/integration 4）・format・Clippy・両buildが通過、既存live ignore 3件あり。native tree全体の読上げ・focus順・modal隔離、timeline/selection/playlist等のcustom semantics、実DPI/入力matrixは未完了である。
+
 ### OS text clipboard連携（2026-09-06 20:24 JST）
 
 - ownerがOS clipboardへの試験書込みを明示許可した後に実施。既存内容は読み取らず、試験文字列`towavue clipboard 日本語 café 🎞️`で置換した。PowerShellから書込み、通常releaseのWelcomeでCtrl+Shift+P→Ctrl+Vを行い、検索欄の文字表示をcaptureで確認した。

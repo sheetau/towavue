@@ -88,6 +88,8 @@ command paletteはtitle bar直下の暗いpanelへまとめ、全幅の検索欄
 
 検索欄のCtrl+C／Ctrl+X／Ctrl+VはWindowsのテキストクリップボードを使い、外部アプリと文字列をやり取りできます。画像や選択範囲をクリップボードへコピーする機能ではありません。
 
+Windows UI AutomationへUI情報と操作を接続し、Welcome・メニュー・command paletteのボタン操作と検索文字列の設定を確認しました。スクリーンリーダーでの全画面操作や、timelineなど独自描画部品の意味情報の確認は未完了です。
+
 F11またはViewのToggle fullscreenで、現在monitorのborderless fullscreenへ切り替えられます。通常のbar・timelineは隠れ、画像・動画・readingを広く表示します。pointerを下端へ移すと、映像のサイズを変えずにstatus／seek barとfullscreen解除buttonが現れます。操作部から離れると隠れますが、Seekのdrag中はreleaseまで保持します。Escapeは開いたoverlayを先に閉じ、次に通常windowへ戻ります。paletteやfilmstrip、保存確認はfullscreenでも利用でき、Tまたはstatus barのtimeline buttonで通常windowへ戻ってtimelineを表示します。復帰時は元の位置・size・最大化状態を保ちます。Enterは割り当てていません。
 
 fullscreenの画像・動画・readingでは、操作が2秒ないとcursorも隠れます。pointer移動・click・wheel・key入力で戻り、button保持中や操作overlay・保存確認・読み込み中は表示を維持します。音声playlistとWelcomeでは隠しません。

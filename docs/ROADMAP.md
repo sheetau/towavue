@@ -292,3 +292,5 @@ reading modeの固定8pxの隙間と等分枠による中心ずれを確認し�
 20:04のlaunch再監査で、現行build/回帰、過去binaryの性能記録、未実装と実環境未検証をKNOWN_GAPS §6へ分離した。固定egui-winitのOS text clipboard連携が無効で内部fallbackのみ、Windows accessibility bridgeも未接続と確認し、次の実装候補とする。Windows 10 22H2での確認、最終候補の性能/保存確認、実device/input/DPI、配布判断は残る。239 tests・format・Clippyを再実行して通過したが、launch完了とは扱わない。
 
 続いてOS text clipboard用の固定egui-winit featureとlockを変更し、検索欄のUnicode paste/copy/cut回帰を追加した。ownerの書込み許可後、通常releaseでOSからのpaste、copy/cut後の完全一致、外部変更後の再pasteを確認。変更前の同じpasteは空欄のままで、最終feature buildでは通過した。240 tests・format・Clippy・両buildも通過。clipboard競合、accessibility経路と既存launch gateは残る。
+
+Windows accessibility bridgeを初回表示前に接続し、初期tree要求/action/無効化を既存event loopへ統合した。UI AutomationでWelcome子要素0→12、menu→palette→検索文字列設定→Open file実行/取消→終了が通過。空白名、固定TextEditのSetValue不処理、候補行のToggle扱いを修正し、headless tree/action回帰を追加した。243 tests・format・Clippy・両buildが通過。5秒idle CPU増分0msはこの通常windowだけの観測で、screen reader・custom widget・実環境/配布gateは残る。

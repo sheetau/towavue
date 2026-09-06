@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 20:44 JST - connect and validate Windows accessibility events
+
+- Trigger/intent: previous turn pushed c59fa73 (progress); CI 34030274550 succeeds. Baseline native UI Automation exposes zero descendants. Connect the pinned egui-winit AccessKit adapter before first window display, request tree generation on activation and route matching-window actions through existing input/output without new polling or native pointers in app.
+- Findings/fixes: bridge exposes 12 Welcome descendants and native button actions. Further UIA trials find unnamed logo/query, ineffective TextEdit SetValue and command candidates exposed as toggles. Add semantic names, translate only query-targeted string SetValue into existing editing events, and expose command Invoke rather than Toggle without changing visual selection or command dispatch.
+- Verification: three new regressions cover activation/deactivation/reactivation, one-shot Welcome actions, names and query value/ordering/command semantics. Format, Clippy, 243 tests (app 128/core 36/runtime 75/integrations 4) and both builds pass; three existing live ignores remain. Windows dependency tree has no async-executor; other-platform transitive additions are locked, not a new app runtime.
+- Native evidence/cleanup: final PID 37848 starts 11:43:47.3724958Z. UIA invokes menu/View/palette, sets exact ASCII/Unicode/empty values, invokes Open file, cancels the owned dialog and closes normally. Disabled playback state is exposed; 5s post-interaction idle CPU delta is zero. All five trial windows close normally, no clipboard/source/OS-setting changes. DEVELOPMENT records hashes, captures and limits.
+- Status/next: h1_active. Prepare a coherent accessibility checkpoint for push. Audit remaining custom-widget names/actions, modal focus/read order and practical screen-reader use; keep physical input/DPI/device, final-candidate performance and distribution gates open. This is a verified UIA route, not full accessibility or launch completion.
+
 ## 2026-09-06 20:24 JST - validate approved native text clipboard round trips
 
 - Trigger/intent: previous turn completed non-writing implementation/checks (progress). Owner now explicitly permits OS clipboard writes; validate the pending native gate without reading prior contents or expanding into image copy.

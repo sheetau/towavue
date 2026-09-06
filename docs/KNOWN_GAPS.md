@@ -54,7 +54,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - settings画面、recent files、session/tab復元、window位置・sizeの保存はない。
 - Explorerからのfile/folder dropはH1で実装した。複数fileは既存Open契約で開き、folderはShell順の先頭mediaを開く。folder要求は最新1件で、複数folderを一括展開するimport queueではない。virtual file、URL、app間tab結合は対象外。
 - export errorは確認するまで残る詳細modal、画像load errorは画像領域（readingでは該当page）、動画・音声のplayback errorはFaulted中の中央領域に表示する。壊れたMP4から正常動画をOpenし、元のerror tab、最後にWelcomeへ戻るflowを通常releaseで確認した。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
-- end-to-end UI test、visual regression、accessibility検査、複数DPI/monitorの自動matrixはない。現在のUI完了判定には実window操作が必要である。
+- OS-level end-to-end UI test、visual regression、複数DPI/monitorの自動matrixはない。accessibilityはheadlessのtree/action回帰とWindows UI AutomationによるWelcome/menu/paletteの手動確認を追加したが、screen readerや全custom widgetの横断matrixではない。現在のUI完了判定には実window操作が必要である。
 - 画像100%とzoomはphysical pixel基準へ修正し、100/125/150/200%の描画入力、crop preview・編集後寸法・pointer anchorを自動testした。UI rendererの二重拡大も実windowのpixel照合で修正した。ただし接続中の2画面は両方96 DPIで、異なる実DPI間の移動・切断は未検証。
 
 ## 2. UI草案との対応
@@ -210,10 +210,10 @@ H1の個別修正が通ったことと、配布可能な品質の判定を分け
 | device復旧 | 制御faultによる再構築/保存保護とheadless回帰はある | 物理endpoint変更、unplug、実driver/adapter変更は未検証。OSや他appへ影響する試験を暗黙に実行しない |
 | 日常操作・草案の外観 | compact shell、palette、menu、filmstrip、tab、reading連結、selection、Welcomeの記録あり。今回Welcome/reading/audioの草案画像も再確認 | pixel完全一致やownerの外観受入は未証明。recent一覧、曲ごとの長さ、見開き送り等の差が残るが一括で必須扱いしない。読書の区切り方はowner回答待ち |
 | OS clipboard | egui-winitのclipboard feature、arboard 3.6.1/clipboard-win 5.4.1を既存入力/platform outputへ接続。ownerの書込み許可後、通常releaseでUnicode往復・cut後の空欄・外部変更後の再pasteを確認。変更前は同じpasteが空欄のままだった | clipboardを他processが占有する場合、全形式/IMEのmatrixは未検証。画像copy機能と混同せず、以後の試験でもclipboard内容への影響を明示する |
-| accessibility | accesskit crateがdependency graphにあるだけではWindows連携を示さない。egui-winitのaccesskit featureとinit_accesskit/action経路がappにない | Windows accessibility bridgeとcustom widgetの意味情報が不足。現状を「未検証だが対応済み」と呼ばず、導入・支援技術での操作確認が必要 |
+| accessibility | AccessKit adapterを初回表示前に接続し、要求時のtree生成/action配送を実装。Windows UI AutomationでWelcomeの子要素0→12、menu→palette→Unicode/空文字SetValue→Open file実行/取消→終了を確認。logo/query名とcommandのInvoke semanticsも修正 | screen readerの実操作、modalの読み順/focus、timeline・selection・playlist等のcustom widgetの意味情報を横断確認する。UIAの狭い経路で全accessibility対応を宣言しない |
 | 対象OS・入力 | 現在の機械はWindows build 26200。日本語IME、注入pointer/key、scale入力の回帰/記録はある | Windows 10 22H2実機/VM、物理keyboard/pointer、他IME、実mixed-DPI、keyboard-onlyの横断確認は未完了 |
 | 配布 | versionは0.0.0の開発workspace。setup scriptは開発用FFmpegを準備するだけで製品packageではない | portable/installer、FFmpeg配布条件と同梱物、clean-machine起動、package/publicationは未決定・未実施。H1と分けて承認された計画で進める |
 
-根拠の詳細は[DEVELOPMENT](DEVELOPMENT.md)の各日付付きscenario、[ROADMAP](ROADMAP.md)のM3/H1 gate、appの`Cargo.toml`と固定dependency source、`.github/workflows/ci.yml`を参照する。20:04監査時のrelease出力SHA-256は`660F60A453A8C8473A2B591B3866AAC64BBE68A80F7FA6000555686EEE5615FE`で、上表の過去30分測定binaryとも、その後のclipboard検証binaryとも異なる。全体のlaunch可否は引き続き未証明である。OS text clipboardの通常往復を確認した後も、accessibility経路の不足と実環境gateは残り、小さな性能改善だけでこれらを完了扱いにはしない。
+根拠の詳細は[DEVELOPMENT](DEVELOPMENT.md)の各日付付きscenario、[ROADMAP](ROADMAP.md)のM3/H1 gate、appの`Cargo.toml`と固定dependency source、`.github/workflows/ci.yml`を参照する。20:04監査時のrelease出力SHA-256は`660F60A453A8C8473A2B591B3866AAC64BBE68A80F7FA6000555686EEE5615FE`で、上表の過去30分測定binaryとも、その後のclipboard/accessibility検証binaryとも異なる。全体のlaunch可否は引き続き未証明である。OS text clipboardの通常往復とaccessibility bridgeを確認した後も、custom widget・支援技術・実環境gateは残り、小さな性能改善だけでこれらを完了扱いにはしない。
 
 同一frameの選択/panは固定egui event列で確認し、native traceでも押下～release～後続hoverが同frameに入り正しい選択を保持した。前回の「選択なし」はPNGの読み取り誤りで、実pixelに白い境界と内外の明暗が残ることを再確認した。続く細い選択は同じ左辺を右端へ再dragした結果であり、配送不整合の証拠ではない。別に再現した描画前のEscape取消漏れは保留押下の破棄で修正済み。物理入力・混在DPIのmatrixは引き続き未完了。

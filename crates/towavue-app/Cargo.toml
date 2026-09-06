@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 egui = "=0.35.0"
-egui-winit = { version = "=0.35.0", default-features = false, features = ["clipboard"] }
+egui-winit = { version = "=0.35.0", default-features = false, features = ["accesskit", "clipboard"] }
 towavue-core = { path = "../towavue-core" }
 towavue-runtime-windows = { path = "../towavue-runtime-windows" }
 winit = "=0.30.13"

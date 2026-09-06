@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, RichText, TextureHandle, TextureOptions};
+use egui_winit::accesskit_winit;
 use towavue_core::{
     CommandContext, CommandId, EditHistory, EditOperation, FolderSnapshot, FolderSnapshotSource,
     ImageViewState, Key, KeyStroke, MediaKind, MediaTime, Modifiers, PixelCrop, PlaybackGeneration,
@@ -40,7 +41,7 @@ use towavue_runtime_windows::{
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey, PhysicalKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
@@ -58,9 +59,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     configure_mouse_input(&mut event_loop);
     let event_loop = event_loop.build()?;
     let proxy = event_loop.create_proxy();
+    let accessibility_proxy = proxy.clone();
     let mut application = Application::new(initial_path, move |event| {
         let _ = proxy.send_event(event);
     })?;
+    application.event_loop_proxy = Some(accessibility_proxy);
     event_loop.run_app(&mut application)?;
     Ok(())
 }
@@ -146,6 +149,7 @@ enum UiAction {
 }
 
 enum AppEvent {
+    Accessibility(accesskit_winit::Event),
     ImagesReady,
     FolderReady,
     FilmstripReady,
@@ -165,6 +169,27 @@ enum AppEvent {
         u64,
         Result<towavue_runtime_windows::PreviewImage, String>,
     ),
+}
+
+impl From<accesskit_winit::Event> for AppEvent {
+    fn from(event: accesskit_winit::Event) -> Self {
+        Self::Accessibility(event)
+    }
+}
+
+fn handle_accesskit_window_event(
+    state: &mut egui_winit::State,
+    event: accesskit_winit::WindowEvent,
+) {
+    match event {
+        accesskit_winit::WindowEvent::InitialTreeRequested => state.egui_ctx().enable_accesskit(),
+        accesskit_winit::WindowEvent::ActionRequested(request) => {
+            state.on_accesskit_action_request(request);
+        }
+        accesskit_winit::WindowEvent::AccessibilityDeactivated => {
+            state.egui_ctx().disable_accesskit()
+        }
+    }
 }
 
 enum FolderIntent {
@@ -480,6 +505,7 @@ impl ImageTransform {
 struct Application<N> {
     initial_path: Option<PathBuf>,
     notify: Arc<N>,
+    event_loop_proxy: Option<EventLoopProxy<AppEvent>>,
     window: Option<Arc<Window>>,
     fullscreen: bool,
     fullscreen_controls_visible: bool,
@@ -586,6 +612,7 @@ where
         Ok(Self {
             initial_path,
             notify,
+            event_loop_proxy: None,
             window: None,
             fullscreen: false,
             fullscreen_controls_visible: false,
@@ -674,6 +701,7 @@ where
             .with_title(self.title())
             .with_inner_size(LogicalSize::new(960, 576))
             .with_min_inner_size(LogicalSize::new(480, 300))
+            .with_visible(false)
             .with_decorations(false);
         let window = Arc::new(event_loop.create_window(attributes)?);
         let mut renderer = FrameRenderer::new(&window)?;
@@ -684,7 +712,7 @@ where
         fonts::install(&context);
         context.style_mut_of(egui::Theme::Dark, chrome::style);
         context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
-        let state = egui_winit::State::new(
+        let mut state = egui_winit::State::new(
             context.clone(),
             egui::ViewportId::ROOT,
             &window,
@@ -692,6 +720,15 @@ where
             window.theme(),
             Some(renderer.max_texture_side()),
         );
+        state.init_accesskit(
+            event_loop,
+            &window,
+            self.event_loop_proxy
+                .as_ref()
+                .expect("native application event loop proxy")
+                .clone(),
+        );
+        window.set_visible(true);
         self.window = Some(window);
         self.renderer = Some(renderer);
         self.ui_context = Some(context);
@@ -1081,6 +1118,14 @@ where
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::Accessibility(event) => {
+                if self.window.as_ref().map(|window| window.id()) == Some(event.window_id)
+                    && let Some(state) = self.ui_state.as_mut()
+                {
+                    handle_accesskit_window_event(state, event.window_event);
+                    self.request_redraw();
+                }
+            }
             AppEvent::ImagesReady => self.finish_image_load(),
             AppEvent::FolderReady => self.finish_folder_load(),
             AppEvent::FilmstripReady => {
@@ -1990,6 +2035,13 @@ where
                         }
                     });
                     chrome::logo(ui, menu.response.rect);
+                    menu.response.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            ui.is_enabled(),
+                            "towavue menu",
+                        )
+                    });
                     menu.response.on_hover_text("towavue menu");
 
                     let controls_width = 98.0;
@@ -5072,6 +5124,92 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accessibility_activation_and_actions_reach_existing_welcome_commands() {
+        let context = egui::Context::default();
+        let mut state = egui_winit::State::new(
+            context.clone(),
+            egui::ViewportId::ROOT,
+            &winit::raw_window_handle::DisplayHandle::windows(),
+            Some(1.0),
+            None,
+            None,
+        );
+        let frame = |state: &mut egui_winit::State| {
+            let mut chosen = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    events: std::mem::take(&mut state.egui_input_mut().events),
+                    ..Default::default()
+                },
+                |ui| {
+                    if let Some(command) = welcome::show(ui, &ShortcutBindings::default()) {
+                        chosen.push(command);
+                    }
+                },
+            );
+            (output.platform_output.accesskit_update, chosen)
+        };
+        assert!(frame(&mut state).0.is_none());
+        for _ in 0..2 {
+            handle_accesskit_window_event(
+                &mut state,
+                accesskit_winit::WindowEvent::InitialTreeRequested,
+            );
+            let (tree, chosen) = frame(&mut state);
+            assert!(chosen.is_empty());
+            let tree = tree.expect("requested accessibility tree");
+            for (label, command) in [
+                ("Open File…", CommandId::OpenFile),
+                ("Open Folder…", CommandId::OpenFolder),
+            ] {
+                let (target, node) = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(label))
+                    .expect("named Welcome button");
+                assert_eq!(node.role(), egui::accesskit::Role::Button);
+                assert!(node.supports_action(egui::accesskit::Action::Click));
+                handle_accesskit_window_event(
+                    &mut state,
+                    accesskit_winit::WindowEvent::ActionRequested(egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Click,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: *target,
+                        data: None,
+                    }),
+                );
+                assert_eq!(frame(&mut state).1, [command]);
+                assert!(frame(&mut state).1.is_empty());
+            }
+            handle_accesskit_window_event(
+                &mut state,
+                accesskit_winit::WindowEvent::AccessibilityDeactivated,
+            );
+            assert!(frame(&mut state).0.is_none());
+        }
+    }
+
+    #[test]
+    fn accessibility_names_the_painted_menu_button() {
+        let app = Application::new(None, |_| {}).expect("headless application");
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let output = context.run_ui(egui::RawInput::default(), |ui| {
+            app.draw_top_bar(ui, &mut Vec::new());
+        });
+        let tree = output.platform_output.accesskit_update.expect("tree");
+        assert!(tree.nodes.iter().any(|(_, node)| {
+            node.label() == Some("towavue menu")
+                && node.role() == egui::accesskit::Role::Button
+                && node.supports_action(egui::accesskit::Action::Click)
+        }));
+    }
 
     #[test]
     fn pointer_trim_uses_validation_undo_and_modal_tab_guards() {

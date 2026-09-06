@@ -4,6 +4,29 @@
 
 ## 1. 最初に試す
 
+### 現行releaseの性能再確認（2026-09-06 17:05 JST）
+
+4b7721bの通常releaseを再buildし、同じ基準機・960×576・1倍・アプリ内muteで測定した。preview/末尾Seek変更後の短時間確認であり、30分ゲートの再証明ではない。4b7721bと9fe13a5のCIは成功している。
+
+| 1080p H.264/AAC、5秒Seek | 完了数 | p50 | p95 | 最大 |
+| --- | ---: | ---: | ---: | ---: |
+| 再生中 | 100/100 | 84.094ms | 102.204ms | 109.049ms |
+| 停止中 | 100/100 | 28.255ms | 42.260ms | 55.786ms |
+
+- 120.030729秒、1920×1080/30fpsの同一素材・PID 8668で前進10回/後退10回を5往復した。各操作の完了を待ち、PID/start time/foregroundと完了数を確認。計測はアプリのSeek受付からPresent成功までで、key注入やOS配送・物理display遅延は含まない。p95は昇順95番目。両modeとも300ms基準内。
+- 60.006771秒の3840×2160/60fpsをPID 31228で無Seek連続再生。sourceの3,594 framesと表示3,594が一致し、drop 0・CPU transfer 0、drift p95 4.682ms・最大4.979ms。adapterは00000000:000146b5。並行したbuildや重い試験は行っていない。
+- private memoryは開始1.3秒で266.83MiB、31.4秒で206.11MiB、EOF後61.4秒で184.02MiB。OS peak paged memoryは283.79MiB。30秒間隔の粗いsampleであり、GPU memoryや長期保持量の証明ではない。
+- EOF後5.052秒でCPUが468.75ms増加した。別の同解像度10秒素材・PID 24784ではEOF後の5秒sampleが156.25→78.125→0ms、後の5.060秒も0msとなった。private memoryは184.26→171.01MiBへ減少。持続的busy loopは再現しないが、最初のCPU増加の原因を特定したものではない。
+- 三つの試用windowはmuteをUndoしてclean状態で通常終了。sourceのSHA-256は前後一致。source保存・OS変更なし。raw log/sample/captureはignoredの`target/tmp/h1-current-*`にある。
+
+測定対象のSHA-256:
+
+```text
+towavue.exe: BCC1B1D4438F8F0EB409DF07F80DEE331291526D7C13EF4F509B8A1C32870F97
+m3-1080p-h264-120s.mp4: DC645595A1165506BF5C3E685B14D7EA3B0116BBDFE74839E7DA5834CF60DA0C
+m3-4k60-60s.mp4: 455BDB1844E4ACDE00DB792BACBF099CC528038DF38313729BAD2DA95D99C0DA
+```
+
 ### Frame内のwheel音量配送（2026-09-06）
 
 - 旧コードのdraw_ui回帰は「一覧上でwheel→音量表示へ移動」で音量変更を発行して失敗する。逆順、一覧と音量の両方でwheelを含む列も、各eventの位置へ割り当てる修正後に通過する。

@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 17:05 JST - revalidate release seek and short 4K playback performance
+
+- Trigger/intent: previous turn pushed 4b7721b (progress); its CI 34019325547 and 9fe13a5 CI succeed. Recheck current release after terminal decode/preview changes instead of reusing older performance claims. Documentation-only checkpoint; no application behavior changes.
+- Seek: owned PID 8668 completes 100 playing and 100 paused five-second seeks on the same 120-second 1080p30 H.264/AAC source. Verify PID/start time/foreground, unique indices and exactly one completion per input. App acceptance-to-Present p50/p95/max: playing 84.094/102.204/109.049ms, paused 28.255/42.260/55.786ms. Both meet p95 300ms; physical display/input latency excluded.
+- Playback: owned PID 31228 completes the 60-second 4K60 fixture, source/display count 3594, drops 0, CPU transfers 0, drift p95/max 4.682/4.979ms. Private memory 266.83MiB at 1.3s, 206.11MiB at 31.4s, 184.02MiB after EOF; peak paged 283.79MiB. No concurrent heavy work. This is not a new 30-minute gate.
+- Follow-up evidence: EOF's five-second CPU increment is 468.75ms. Separate 10-second 4K trial PID 24784 gives successive five-second increments 156.25/78.125/0ms and a later 0ms sample, with private memory falling to 171.01MiB. No sustained busy loop reproduced; transient cause unproven.
+- Verification/cleanup: release rebuild, format, Clippy and 224 tests pass; three preexisting live tests explicitly ignored. All three owned windows undo mute and close normally; source hashes unchanged, no saves/OS settings. Conditions, full hashes and results added to DEVELOPMENT/ROADMAP; ignored raw captures/logs/samples remain under target/tmp/h1-current-*.
+- Status/next: h1_active. Continue larger-media responsiveness and draft/keyboard-only UX audit; retain 30-minute, physical DPI/device/input and distribution gaps. Packaging remains unanswered; no publication. Prior SendKeys anomaly is still unattributed.
+
 ## 2026-09-06 16:29 JST - generate tail thumbnails from the final selected video frame
 
 - Trigger/evidence: previous turn pushed 9fe13a5 (progress); 09537c6 CI succeeds, 9fe13a5 CI remains in progress. Baseline PID 4740 shows Thumbnail unavailable at seven-second hover; FFmpeg exits successfully with no PNG after the one-second video ends.

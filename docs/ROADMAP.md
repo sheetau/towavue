@@ -258,3 +258,5 @@ foreground確認後もwheelの古い座標参照を通常releaseで再現した�
 映像1秒・音声8秒の素材で、再生中に約6秒へSeekすると末尾previewがlate-frame dropされる問題を通常releaseで再現した。このframeだけをdrop/同期誤差計測から除外し、通常frameの遅延処理は維持。MP4/MKVの長短stream・VFR末尾画像/PTS照合を含む223 tests、Clippy、両buildが通過。通常D3D11VAで最終映像を保持して音声EOFに達し、Seek後の表示1/drop 0/CPU transfer 0を確認した。音声尾区間のhover thumbnailは別経路として残る。H1と実環境/配布gateは未完了。
 
 音声尾区間のhoverでFFmpegが成功終了してもPNGが空になる問題を再現した。thumbnail/filmstrip共通でこの場合だけ選択videoの最後のPTSを既存worker内で調べ、一度だけ再生成する。複数streamの最終画像/cache、TS短長GOP/B-frameと取消を含む224 tests、Clippy、両buildが通過。通常windowの7秒hoverで再生と同じ0.9秒の最終frameを確認した。09537c6 CIは成功。H1と実環境/配布gateは未完了。
+
+4b7721b通常releaseで再生中/停止中各100回Seekを再測定し、p95 102.204/42.260msで300ms基準を満たした。1分4K60は3,594表示/drop 0/CPU transfer 0、drift最大4.979ms。EOF直後のCPU増加を観測したため追加試験し、落ち着いた後の5秒sampleは二回とも0msだった。224 testsと必須checkも再通過。測定条件・hash・制限をDEVELOPMENTへ記録。これは30分性能・実DPI/device・配布gateの代替ではなく、H1は継続中。

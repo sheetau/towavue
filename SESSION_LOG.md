@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 23:42 JST - preserve tab accessibility targets across layout changes
+
+- Trigger/intent: previous turn is progress; 99eca60 CI 34039457094 succeeds. Audit ambiguous close buttons and whether cached actions still address the intended tab.
+- Evidence/change: headless reorder sends a cached activation to the wrong tab. Normal PID 33880 confirms cached 02.png changes to 03.png with the same RuntimeId after closing 01. Use explicit TabId-scoped UI IDs for activate/close, name close targets and expose the full path as description. Preserve appearance, pointer geometry/drag and existing guards.
+- Verification: new regression covers cached actions/focus across reorder, adjacent removal, dirty close/disabled rejection/Cancel, and stale actions after target removal. Eight focused tab tests, 249 workspace tests, format, Clippy and both builds pass; three existing live ignores remain. A parallel-test directory collision exposed equal clock ticks; add process ID and atomic sequence to the test-only root name.
+- Native/cleanup: final PID 40980 keeps both cached 02 references/RuntimeIds after 01 closes; cached close removes only 02. Named 03 close reaches the modal guard, Cancel retains edits, Undo and normal close pass. Native IUIAutomationElement6 confirms full-path description (not managed HelpText). Both trial windows close normally, stderr empty and fixture hashes unchanged; no Save/clipboard/OS-setting changes. DEVELOPMENT records hashes and owned evidence.
+- Status/next: h1_active, prepare this coherent checkpoint for push. Continue remaining selection/trim semantics and practical focus/screen-reader workflows, with physical-input/DPI/device, final-candidate and distribution gates still open.
+
 ## 2026-09-06 23:30 JST - expose seek values and preserve focused shortcuts
 
 - Trigger/intent: 3356d0d CI 34037660292 succeeds. Continue the custom-widget audit: normal compact/timeline controls expose no Slider. Clipboard-write permission remains scoped; no writes are needed here.

@@ -306,3 +306,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 22:55、UIA反復停止をShell STAの仕事待ちへ絞り、Windows messageも処理できるevent待機へ修正した。通常buildの30往復、同じprocessでexport失敗のOK→保存確認Cancel、続く10往復が通過。message待機の回帰は変更前と負の比較で失敗し、修正後は通過する。UIやShell順を変えず、次は残るcustom widget・screen reader/focusと既存launch gateを監査する。
 
 23:30、compact seek/timelineへUIA Sliderの名前・値・範囲・値操作とfocus keyを追加した。source秒/画像Shell順を維持し、直接値変更はpointer gestureを取消、未保存画像の移動は既存guardで保護する。focus中のSpace/R/Undoなども既存shortcutへ接続。248 tests・必須check・両buildと通常releaseの値変更/再生切替/編集保持/disabled拒否が通過した。trim grip・selection・全screen reader/focus順と実環境/配布gateは残り、H1は継続中。
+
+23:42、先頭tab終了後に取得済み02.pngのUIA参照が03.pngへ変わる問題を通常buildで再現した。TabId由来の明示UI IDでactivate/closeの対象とfocusを維持し、close名へ対象fileを追加。通常buildの同じ参照による正しいtab終了と未保存Cancel、249 tests・必須check・両buildが通過した。外観・dragや保存処理を変えず、残るcustom widget・実環境/配布gateへ継続する。

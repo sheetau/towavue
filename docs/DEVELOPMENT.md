@@ -4,6 +4,13 @@
 
 ## 1. 最初に試す
 
+### タブ操作対象の同一性とclose名（2026-09-06 23:42 JST）
+
+- 99eca60 CI 34039457094は成功。既存tab closeはUIA名が全て「×」であり、並べ替え後の取得済みtab actionも別tabへ渡ることをheadlessで再現した。通常release `C470B847FD6EEA642D4F79A1AA189845FC8AF30F389F23F64776EA91300DBC95`、PID 33880（開始UTC 14:35:59.4577430Z）へ所有01/02/03.pngを開き、02のUIA参照を保持して01を閉じると、同じRuntimeIdのNameが03.pngへ変わった。参照先を再取得して隠さず、同じ参照で比較した。
+- TabIdを使う明示child UI IDへactivate/closeをまとめ、close名を`Close tab: filename`、descriptionをfull pathにした。外観・pointerのhit領域・drag・既存CloseTab guardは変更しない。回帰は取得済みactivate/close、並べ替え後のfocus、隣接tab終了、未保存確認とdisabled拒否/Cancel、削除済みtabへの古いaction不実行を検査する。
+- 最終通常release `D4F8D64C46FC573D9CCC3F0CE27505B0111A2D147F13064412BEB02A9BE3F409`、PID 40980（14:40:26.6190708Z）で同じ01/02/03手順を実行。01終了後も02の取得済みactivate/close参照とRuntimeIdを保持し、取得済みcloseで02だけを閉じ03を残した。03のR編集→名前付きclose→Unsaved edits/IsModal→Cancelで編集保持、Undo/正常終了も通過。managed clientのHelpTextは空だが、固定adapterはdescriptionをFullDescriptionへ公開しており、独立native IUIAutomationElement6 clientで03の正確なfull pathを確認した。
+- 8件のtab関連test、249 tests（app 133/core 36/runtime 76/integration 4）、format、Clippy、debug/release buildが通過。並列testが同じWindows時刻を取得して一時directory作成に衝突したため、test helperだけにprocess IDとatomic連番を追加した。既存live ignore 3件は成功証拠に含めない。両windowは正常終了、stderrは空、3素材のhash不変。所有capture `target/tmp/h1-tab-identity-after.png`を目視確認し、UIA補助script/logもignored target/tmpに保持。Save/clipboard/OS設定変更なし。全screen reader/focus、selection/trimと既存launch gateの完了とは扱わない。
+
 ### 再生・画像位置のUIA値操作とfocus（2026-09-06 23:30 JST）
 
 - 3356d0dの通常release、PID 40456（開始UTC 14:02:02.2054712Z）ではcompact bar/timelineともSliderがなかった。既存widgetへ名前、現在値、範囲、stepと値操作を追加し、再生はsource秒、画像はShell snapshotの画像だけを数えた1始まりの位置を使う。範囲外の有限値はclampし、画像は整数へ丸める。既存Seek/未保存guardへ接続し、直接値変更は進行中pointer gestureを取り消す。

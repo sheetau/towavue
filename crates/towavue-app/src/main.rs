@@ -2101,7 +2101,13 @@ where
                                         display_name(tab.target.current_path()),
                                         if dirty { " *" } else { "" }
                                     );
-                                    let response = ui
+                                    // Cached actions and keyboard focus must follow the tab, not its slot.
+                                    let mut tab_ui = ui.new_child(
+                                        egui::UiBuilder::new()
+                                            .id(ui.id().with(("media-tab", tab.id)))
+                                            .max_rect(rect),
+                                    );
+                                    let response = tab_ui
                                         .put(
                                             label_rect,
                                             egui::Button::new(RichText::new(label).color(
@@ -2133,11 +2139,25 @@ where
                                         egui::pos2(rect.right() - 24.0, rect.top()),
                                         rect.max,
                                     );
-                                    if ui
+                                    let close = tab_ui
                                         .put(close_rect, egui::Button::new("×").frame(false))
-                                        .on_hover_text("Close tab")
-                                        .clicked()
-                                    {
+                                        .on_hover_text("Close tab");
+                                    close.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::WidgetType::Button,
+                                            tab_ui.is_enabled(),
+                                            format!(
+                                                "Close tab: {}",
+                                                display_name(tab.target.current_path())
+                                            ),
+                                        )
+                                    });
+                                    tab_ui.ctx().accesskit_node_builder(close.id, |node| {
+                                        node.set_description(
+                                            tab.target.current_path().display().to_string(),
+                                        );
+                                    });
+                                    if close.clicked() {
                                         actions.push(UiAction::CloseTab(tab.id));
                                     }
                                 }
@@ -6091,6 +6111,115 @@ mod tests {
     }
 
     #[test]
+    fn accessible_tab_targets_survive_reordering_and_keep_close_guard() {
+        let Some(root) = isolated_test_root(
+            "tests::accessible_tab_targets_survive_reordering_and_keep_close_guard",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let a = app.tabs.open_new(root.join("a.png"), MediaKind::Image);
+        let b = app.tabs.open_new(root.join("b.png"), MediaKind::Image);
+        let c = app.tabs.open_new(root.join("c.png"), MediaKind::Image);
+        app.path = Some(root.join("c.png"));
+        app.media_kind = Some(MediaKind::Image);
+        app.state = PlaybackState::Paused;
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = |app: &mut Application<_>, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            (
+                output.platform_output.accesskit_update.expect("tree"),
+                actions,
+            )
+        };
+        let click = |target_node| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node,
+                data: None,
+            })
+        };
+        frame(&mut app, vec![]);
+        let (tree, _) = frame(&mut app, vec![]);
+        let activate_b = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("b.png"))
+            .expect("tab button")
+            .0;
+        let (close_b, node) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Close tab: b.png"))
+            .expect("named close button");
+        assert_eq!(
+            node.description(),
+            Some(root.join("b.png").to_string_lossy().as_ref())
+        );
+        let close_b = *close_b;
+        let mut focus = click(activate_b);
+        if let egui::Event::AccessKitActionRequest(request) = &mut focus {
+            request.action = egui::accesskit::Action::Focus;
+        }
+        frame(&mut app, vec![focus]);
+        app.handle_ui_action(UiAction::ReorderTab(a, 3));
+        let (tree, _) = frame(&mut app, vec![]);
+        assert_eq!(tree.focus, activate_b);
+        let (_, actions) = frame(&mut app, vec![click(activate_b)]);
+        assert!(
+            actions == [UiAction::ActivateTab(b)],
+            "cached target must follow the tab, not its old slot"
+        );
+        app.close_tab_unchecked(c);
+        app.edits
+            .entry(b)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let history = app.edits[&b].clone();
+        frame(&mut app, vec![]);
+        let (_, actions) = frame(&mut app, vec![click(close_b)]);
+        assert!(actions == [UiAction::CloseTab(b)]);
+        app.handle_ui_action(actions[0].clone());
+        assert!(matches!(app.pending_guard, Some(GuardedAction::CloseTab(id)) if id == b));
+        frame(&mut app, vec![]);
+        let (tree, actions) = frame(&mut app, vec![click(close_b)]);
+        assert!(actions.is_empty());
+        assert!(
+            tree.nodes
+                .iter()
+                .find(|(id, _)| *id == close_b)
+                .expect("disabled close button")
+                .1
+                .is_disabled()
+        );
+        app.handle_ui_action(UiAction::ResolveGuard(GuardDecision::Cancel));
+        assert_eq!(app.edits[&b], history);
+        assert!(app.tabs.tabs().iter().any(|tab| tab.id == b));
+        app.close_tab_unchecked(b);
+        frame(&mut app, vec![]);
+        assert!(
+            frame(&mut app, vec![click(close_b), click(activate_b)])
+                .1
+                .is_empty()
+        );
+        assert_eq!(app.tabs.tabs().len(), 1);
+        assert_eq!(app.tabs.tabs()[0].id, a);
+    }
+
+    #[test]
     fn tab_drag_commits_once_on_release_and_preserves_the_active_edit() {
         let Some(root) = isolated_test_root(
             "tests::tab_drag_commits_once_on_release_and_preserves_the_active_edit",
@@ -6394,11 +6523,17 @@ mod tests {
     fn isolated_test_root(test_name: &str) -> Option<PathBuf> {
         const TEST_ROOT: &str = "TOWAVUE_APP_TEST_ROOT";
         let Some(root) = std::env::var_os(TEST_ROOT) else {
+            static NEXT_ROOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let unique = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("system time is after the epoch")
                 .as_nanos();
-            let root = std::env::temp_dir().join(format!("towavue-app-test-{unique}"));
+            // Parallel tests can observe the same Windows clock tick.
+            let sequence = NEXT_ROOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let root = std::env::temp_dir().join(format!(
+                "towavue-app-test-{}-{unique}-{sequence}",
+                std::process::id()
+            ));
             std::fs::create_dir(&root).expect("create isolated test root");
             // Isolate first-run configuration without changing this test process's environment.
             let result =

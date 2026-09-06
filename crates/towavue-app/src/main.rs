@@ -1590,18 +1590,9 @@ where
         if !self.view_drag_allowed(&response.ctx) {
             return;
         }
-        let (pressed, released, origin) = response.ctx.input(|input| {
-            (
-                input.pointer.button_pressed(egui::PointerButton::Secondary),
-                input
-                    .pointer
-                    .button_released(egui::PointerButton::Secondary),
-                input.pointer.press_origin(),
-            )
-        });
-        if pressed
-            && self.view_drag.is_none()
-            && response.is_pointer_button_down_on()
+        let (origin, release) =
+            view_drag_button_positions(response, egui::PointerButton::Secondary);
+        if self.view_drag.is_none()
             && let Some(origin) = origin
         {
             self.view_drag = Some(ViewDrag::Pan {
@@ -1610,13 +1601,13 @@ where
             });
         }
         if let Some(ViewDrag::Pan { origin, before }) = self.view_drag {
-            if (response.dragged_by(egui::PointerButton::Secondary) || released)
-                && let Some(pointer) = pointer
+            if (response.dragged_by(egui::PointerButton::Secondary) || release.is_some())
+                && let Some(pointer) = release.or(pointer)
             {
                 let delta = pointer - origin;
                 self.image_view.pan = (before.0 + delta.x, before.1 + delta.y);
             }
-            if released {
+            if release.is_some() {
                 self.view_drag = None;
             }
         }
@@ -1633,23 +1624,13 @@ where
         if !self.view_drag_allowed(&response.ctx) {
             return;
         }
-        let (pressed, released, origin) = response.ctx.input(|input| {
-            (
-                input.pointer.button_pressed(egui::PointerButton::Primary),
-                input.pointer.button_released(egui::PointerButton::Primary),
-                input.pointer.press_origin(),
-            )
-        });
-        let Some(pointer) = pointer else {
-            if released && matches!(self.view_drag, Some(ViewDrag::Selection { .. })) {
-                self.view_drag = None;
-            }
+        let (origin, release) = view_drag_button_positions(response, egui::PointerButton::Primary);
+        let released = release.is_some();
+        let Some(pointer) = release.or(pointer) else {
             return;
         };
         let point = unit_point(pointer, image_rect);
-        if pressed
-            && self.view_drag.is_none()
-            && response.is_pointer_button_down_on()
+        if self.view_drag.is_none()
             && let Some(origin) = origin.filter(|origin| image_rect.contains(*origin))
         {
             let mode = self
@@ -4258,6 +4239,41 @@ fn percentile_95(samples: &[Duration]) -> Duration {
     ordered.sort_unstable();
     let index = (ordered.len() * 95).div_ceil(100).saturating_sub(1);
     ordered[index]
+}
+
+fn view_drag_button_positions(
+    response: &egui::Response,
+    button: egui::PointerButton,
+) -> (Option<egui::Pos2>, Option<egui::Pos2>) {
+    let (origin, release) = response.ctx.input(|input| {
+        let mut origin = None;
+        let mut release = None;
+        for event in &input.events {
+            if let egui::Event::PointerButton {
+                pos,
+                button: event_button,
+                pressed,
+                ..
+            } = event
+                && *event_button == button
+            {
+                if *pressed {
+                    origin.get_or_insert(*pos);
+                } else {
+                    release = Some(*pos);
+                }
+            }
+        }
+        (origin, release)
+    });
+    // A complete gesture in one frame no longer has egui's held-button ownership.
+    let origin = origin.filter(|origin| {
+        response.enabled()
+            && response.interact_rect.contains(*origin)
+            && response.ctx.layer_id_at(*origin) == Some(response.layer_id)
+            && response.ctx.dragged_id().is_none_or(|id| id == response.id)
+    });
+    (origin, release)
 }
 
 fn unit_point(point: egui::Pos2, image_rect: egui::Rect) -> UnitPoint {
@@ -7133,6 +7149,112 @@ mod tests {
     }
 
     #[test]
+    fn batched_view_drags_respect_press_ownership_and_release_position() {
+        let Some(_root) = isolated_test_root(
+            "tests::batched_view_drags_respect_press_ownership_and_release_position",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.media_kind = Some(MediaKind::Image);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0));
+        let start = egui::pos2(100.0, 100.0);
+        let end = egui::pos2(300.0, 300.0);
+        for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary] {
+            for blocked in 0..5 {
+                let context = egui::Context::default();
+                app.image_view.selection = None;
+                app.image_view.pan = (10.0, 20.0);
+                let event = |pressed, pos| egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                for events in [
+                    vec![egui::Event::PointerMoved(start)],
+                    vec![
+                        event(true, start),
+                        egui::Event::PointerMoved(end),
+                        event(false, end),
+                        egui::Event::PointerMoved(egui::pos2(440.0, 440.0)),
+                    ],
+                ] {
+                    let mut passes = 0;
+                    let _ = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            if blocked == 3 {
+                                egui::Area::new("drag-cover".into())
+                                    .order(egui::Order::Foreground)
+                                    .fixed_pos(egui::pos2(50.0, 50.0))
+                                    .show(ui.ctx(), |ui| {
+                                        ui.allocate_exact_size(
+                                            egui::vec2(100.0, 100.0),
+                                            egui::Sense::click_and_drag(),
+                                        );
+                                    });
+                            }
+                            if blocked == 1 {
+                                ui.disable();
+                            }
+                            if blocked == 2 {
+                                ui.set_clip_rect(egui::Rect::from_min_max(
+                                    egui::pos2(150.0, 150.0),
+                                    screen.max,
+                                ));
+                            }
+                            let response = ui.interact(
+                                screen,
+                                "batched-surface".into(),
+                                egui::Sense::click_and_drag(),
+                            );
+                            let pointer = ui.input(|input| input.pointer.hover_pos());
+                            if blocked == 4 {
+                                ui.ctx().set_dragged_id("another-widget".into());
+                            }
+                            if button == egui::PointerButton::Primary {
+                                app.update_selection(&response, screen, (500, 500), false, pointer);
+                            } else {
+                                app.update_pan(&response, pointer);
+                            }
+                            passes += 1;
+                            if passes == 1 {
+                                ui.ctx()
+                                    .request_discard("verify gesture is applied only once");
+                            }
+                        },
+                    );
+                    assert!(passes >= 2);
+                }
+                let accepted = blocked == 0;
+                assert_eq!(
+                    app.image_view.pan,
+                    if accepted && button == egui::PointerButton::Secondary {
+                        (210.0, 220.0)
+                    } else {
+                        (10.0, 20.0)
+                    },
+                    "{button:?}, blocked={blocked}"
+                );
+                assert_eq!(
+                    app.image_view.selection,
+                    (accepted && button == egui::PointerButton::Primary).then_some(UnitRect {
+                        min: UnitPoint { x: 0.2, y: 0.2 },
+                        max: UnitPoint { x: 0.6, y: 0.6 },
+                    }),
+                    "{button:?}, blocked={blocked}"
+                );
+                assert!(app.view_drag.is_none());
+            }
+        }
+    }
+
+    #[test]
     fn pan_commits_the_release_position_and_cancel_requires_a_new_press() {
         let Some(_root) = isolated_test_root(
             "tests::pan_commits_the_release_position_and_cancel_requires_a_new_press",
@@ -7328,7 +7450,7 @@ mod tests {
             height,
         };
         for kind in [MediaKind::Image, MediaKind::Video] {
-            for coalesced_release in [false, true] {
+            for delivery in 0..4 {
                 for (start, end, initial, expected) in [
                     (
                         egui::pos2(100.0, 100.0),
@@ -7367,14 +7489,22 @@ mod tests {
                         pressed,
                         modifiers: egui::Modifiers::NONE,
                     };
-                    let mut frames = vec![
-                        vec![egui::Event::PointerMoved(start)],
-                        vec![button(true, start)],
-                    ];
-                    if !coalesced_release {
+                    let mut frames = vec![vec![egui::Event::PointerMoved(start)]];
+                    if delivery < 2 {
+                        frames.push(vec![button(true, start)]);
+                    }
+                    if delivery == 0 {
                         frames.push(vec![egui::Event::PointerMoved(start.lerp(end, 0.5))]);
                     }
-                    frames.push(vec![egui::Event::PointerMoved(end), button(false, end)]);
+                    let mut completion = Vec::new();
+                    if delivery >= 2 {
+                        completion.push(button(true, start));
+                    }
+                    completion.extend([egui::Event::PointerMoved(end), button(false, end)]);
+                    if delivery == 3 {
+                        completion.push(egui::Event::PointerMoved(egui::pos2(440.0, 440.0)));
+                    }
+                    frames.push(completion);
                     for events in frames {
                         let _ = context.run_ui(
                             egui::RawInput {
@@ -7398,7 +7528,7 @@ mod tests {
                     });
                     assert_eq!(
                         actual, expected,
-                        "{kind:?}, coalesced={coalesced_release}, {start:?} -> {end:?}"
+                        "{kind:?}, delivery={delivery}, {start:?} -> {end:?}"
                     );
                     assert!(app.view_drag.is_none());
                     assert_eq!(

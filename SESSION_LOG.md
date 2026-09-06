@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 10:43 JST - complete view gestures within one frame
+
+- Trigger/evidence: continue input audit after be93e5f; its CI 34004036810 succeeded. Expanded sparse-selection regression fails on original code when press/move/release all arrive in one frame: press_origin and held-response ownership have already cleared, so no selection is created.
+- Contract/change: document event-coordinate ownership first. Shared selection/pan helper reads button press/release coordinates; accept origins only on enabled, clipped, top-layer surfaces without another widget's active drag. Prefer release position over subsequent hover. Preserve cancellation, edge modes, pixel snapping and image-only click preview. No runtime, dependency, unsafe or source-media changes.
+- Regression: image/video cases cover forward/reverse, edge resize, outside-image origin and click preview across sparse and batched delivery, including post-release hover. New shared test covers both buttons, disabled/clipped/covered/other-widget ownership and forced second layout passes without duplicate application. Existing focus/modal/Escape cancellation tests pass.
+- Native evidence/limit: baseline PID 37768's directly posted button/move sequence succeeds, so it does not reproduce the headless defect. Final normal release PID 38920's posted trials produce inconsistent selection results (initially absent, then narrow); no trace establishes their actual frame/event grouping. Keep native batched delivery unresolved. In the same process, ordinary mouse injection produces the expected selection, inside-click crop preview, and right pan of +100/+50 pixels. Do not count either injection method as physical-device or mixed-DPI proof.
+- Verification/cleanup: format, all-target Clippy, 179 tests (app 85, core 35, runtime 55, integrations 4), debug/release builds pass; three live tests explicitly ignored, not hardware proof. Both owned processes close normally. Source hash remains 636C096506CFD9FBFEAC2A1BD44EF7DAD07BBC13F76EF2474A896E06C5D0D406; no edit/export. Trial captures/logs ignored. README, architecture, roadmap and gap inventory updated.
+- Status/next: h1_active. Trace the unresolved native posted-input delivery before claiming its correctness; continue daily-viewing and environment gates. Actual driver/endpoint recovery and distribution remain incomplete; packaging choice unanswered, no package/publication performed.
+
 ## 2026-09-06 10:29 JST - view drag cancellation / restore before-state
 
 - Trigger/evidence: continue after 58f6024 (CI 34003452760 succeeded). In normal release PID 31284, Escape during selection drag is followed by further movement/release and the selection reappears. New regression also fails on original code when focus loss leaves a partially resized selection.

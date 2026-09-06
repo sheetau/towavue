@@ -42,7 +42,7 @@ cargo test --workspace --all-targets
 cargo run -p towavue-app -- path\to\media.mp4
 ```
 
-標準shortcutはSpaceでpause/resume（再生終了後は先頭から再開）、左右矢印で5秒Seek、Ctrl+左右で同種media移動、Alt+左右で全種media移動、Fでfilmstrip、Ctrl+Shift+Pでcommand paletteです。設定は初回起動時に`%APPDATA%\towavue\shortcuts.conf`へ生成され、`Ctrl+K Ctrl+S`のようなprefix shortcutも指定できます。menuまたは同shortcutのReload commandで再読込します。
+標準shortcutはSpaceでpause/resume（再生終了後は先頭から再開）、左右矢印で前/次の画像へ移動（動画・音声では5秒Seek）、Ctrl+左右で同種media移動、Alt+左右で全種media移動、Fでfilmstrip、Ctrl+Shift+Pでcommand paletteです。画像移動はreading modeでも一枚ずつ進み、未保存編集があれば確認します。設定は初回起動時に`%APPDATA%\towavue\shortcuts.conf`へ生成され、`Ctrl+K Ctrl+S`のようなprefix shortcutも指定できます。画像用キーは`previous_image` / `next_image`で変更でき、既存設定fileへ追記しなくても新しい既定値を利用します。menuまたは同shortcutのReload commandで再読込します。
 
 prefixの続きは1秒以内に入力します。Escape、click、別commandやwindowへのfocus移動で待ちを解除し、途中から戻ったkeyを前のprefixへつなげません。
 

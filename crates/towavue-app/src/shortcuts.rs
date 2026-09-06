@@ -35,6 +35,8 @@ fn defaults() -> ShortcutBindings {
         (CommandId::TogglePause, "Space"),
         (CommandId::SeekBackward, "Left"),
         (CommandId::SeekForward, "Right"),
+        (CommandId::PreviousImage, "Left"),
+        (CommandId::NextImage, "Right"),
         (CommandId::PreviousSameKind, "Ctrl+Left"),
         (CommandId::NextSameKind, "Ctrl+Right"),
         (CommandId::PreviousMedia, "Alt+Left"),
@@ -137,6 +139,86 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn arrow_defaults_navigate_images_and_seek_playable_media() {
+        let bindings = parse("toggle_pause = P\n", defaults()).expect("old configuration");
+        for reading_mode in [false, true] {
+            for (media_kind, commands) in [
+                (None, [None, None]),
+                (
+                    Some(MediaKind::Image),
+                    [Some(CommandId::PreviousImage), Some(CommandId::NextImage)],
+                ),
+                (
+                    Some(MediaKind::Video),
+                    [Some(CommandId::SeekBackward), Some(CommandId::SeekForward)],
+                ),
+                (
+                    Some(MediaKind::Audio),
+                    [Some(CommandId::SeekBackward), Some(CommandId::SeekForward)],
+                ),
+            ] {
+                let context = CommandContext {
+                    media_kind,
+                    reading_mode,
+                    ..CommandContext::default()
+                };
+                for (key, command) in ["Left", "Right"].into_iter().zip(commands) {
+                    let sequence: KeySequence = key.parse().expect("arrow key");
+                    assert_eq!(
+                        bindings.resolve(sequence.strokes(), context),
+                        command.map_or(ShortcutMatch::None, ShortcutMatch::Command),
+                        "{key} in {context:?}"
+                    );
+                }
+                if media_kind.is_some() {
+                    for (key, command) in [
+                        ("Ctrl+Left", CommandId::PreviousSameKind),
+                        ("Ctrl+Right", CommandId::NextSameKind),
+                    ] {
+                        let sequence: KeySequence = key.parse().expect("modified arrow");
+                        assert_eq!(
+                            bindings.resolve(sequence.strokes(), context),
+                            ShortcutMatch::Command(command)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn image_arrows_are_configurable_and_preserve_existing_custom_bindings() {
+        let context = CommandContext {
+            media_kind: Some(MediaKind::Image),
+            ..CommandContext::default()
+        };
+        let custom = parse("previous_image = Ctrl+K A\nnext_image = D\n", defaults())
+            .expect("custom image bindings");
+        for key in ["Left", "Right"] {
+            let sequence: KeySequence = key.parse().expect("arrow key");
+            assert_eq!(
+                custom.resolve(sequence.strokes(), context),
+                ShortcutMatch::None
+            );
+        }
+        for (key, expected) in [
+            ("Ctrl+K", ShortcutMatch::Prefix),
+            ("Ctrl+K A", ShortcutMatch::Command(CommandId::PreviousImage)),
+            ("D", ShortcutMatch::Command(CommandId::NextImage)),
+        ] {
+            let sequence: KeySequence = key.parse().expect("custom key");
+            assert_eq!(custom.resolve(sequence.strokes(), context), expected);
+        }
+        let existing = parse("flip_vertical = Right\n", defaults()).expect("existing custom key");
+        let right: KeySequence = "Right".parse().expect("right key");
+        assert_eq!(
+            existing.resolve(right.strokes(), context),
+            ShortcutMatch::Command(CommandId::FlipVertical)
+        );
+    }
 
     #[test]
     fn generated_defaults_can_be_loaded_again_without_changing_any_binding() {

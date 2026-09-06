@@ -226,6 +226,8 @@ shortcut prefixは一続きのkey入力だけに有効とし、1秒の期限切�
 
 shortcut設定の生成と読込は往復可能にする。`+` keyはmodifier区切りと曖昧にならない`Plus`として保存し、旧版が出力した`+`・`Ctrl++`等も同じkeyとして受け付ける。既存の利用者設定を移行のために上書きしない。
 
+画像の標準Left/Rightは画像専用Previous image / Next image commandへ解決し、共有Shell snapshotの画像順を一枚ずつ移動する。既存の同種移動と同じdirty/export guardを通し、reading modeでも現在画像を一枚進める。動画・音声では従来の5秒Seekを維持し、Ctrl+左右の同種移動も変更しない。新commandはmenu・palette・shortcuts.confから利用でき、設定で変更したキーとは別の固定aliasを設けない。新しい既定bindingと既存commandのcustom bindingが同じキーの場合は、従来のregistry順による既存command優先を維持する。Home/End・Page等の追加aliasや数指定jumpはこの変更に含めない。
+
 IMEのpreedit中、および確定/取消などIME eventを含むframeでは、paletteの上下・Enter・Escapeのkey eventを消費し、IME eventだけをTextEditへ渡す。確定用Enterをcommand実行やTextEditのfocus解除、取消用Escapeをpalette closeへ二重使用しない。入力欄の固定idにfocusがない時だけ描画前に要求し、eguiの上下focus移動による確定文字の取りこぼしを防ぐ。固定版eguiのrequest_focusはIME中断も要求するため、focus保持中は再要求しない。composition状態はpalette resetで解除し、通常の操作は次の独立key入力から再開する。OSのIME状態・keyboard layoutや設定は書き換えない。
 
 ### H1 video viewport

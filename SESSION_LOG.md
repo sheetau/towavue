@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 09:47 JST - image arrow navigation / shared commands
+
+- Trigger/intent: continue H1 daily-viewing audit after 839137f (CI 34001788773 succeeded). Normal release ignores plain Right on page-01.png, despite the draft's basic image navigation. Accept the scoped contract in ARCHITECTURE before implementation; no additional aliases or numeric jumps.
+- Change: image-only PreviousImage/NextImage commands default to Left/Right and use existing same-kind navigation/dirty/export guards. Registry, menu, palette and configurable bindings share the commands; playable-media Seek and Ctrl+arrows are unchanged. Append definitions to retain existing command precedence for overlapping custom keys; no configuration-file rewrite, runtime change, dependencies or unsafe code.
+- Regression: arrow-context test fails without the new defaults and passes afterward. Covers image/reading, video/audio, Welcome and Ctrl+arrows; custom prefixes/rebinding remove fixed arrow aliases, old custom bindings retain priority, serialization round-trips. App test preserves supplied nonalphabetical snapshot order, skips audio, wraps backward and retains source/edit history on both guarded directions and Cancel.
+- Native: normal release PID 40812 moves page-01.png to page-02.jpg and back, shows dirty guard after rotation, retains rotation on Escape, then after Undo moves one image in reading mode. Ctrl+Left returns and View menu displays both image commands with current shortcuts; Next image click navigates. Source SHA-256 remains 636C096506CFD9FBFEAC2A1BD44EF7DAD07BBC13F76EF2474A896E06C5D0D406. Windows-injected input at 96 DPI, not a physical-keyboard matrix. No export or source modification.
+- Verification/cleanup: format, all-target Clippy, 173 tests (app 81, core 35, runtime 53, integrations 4) and debug/release builds pass; three live tests explicitly ignored, not evidence of hardware success. Owned baseline PID 30396 and final PID 40812 close normally; ignored h1-image-arrows captures/logs only. README, architecture, gap inventory and roadmap match the scoped behavior.
+- Status/next: h1_active. Continue daily-viewing and environment-dependent launch checks; physical keyboards/other IMEs, mixed-DPI and actual driver/endpoint recovery remain incomplete. Distribution question unanswered; no package/publication performed.
+
 ## 2026-09-06 09:36 JST - menu / keep keyboard navigation inside the open tree
 
 - Trigger/evidence: original release opens the logo menu with Tab/Enter but Down/Right moves focus to the underlying Welcome Open File button; another Down/Enter opens Select Folder while the menu was still visible. Captures h1-entry-menu-right.png and h1-entry-unintended-dialog.png document the unexpected background action. Picker cancelled, no files selected.

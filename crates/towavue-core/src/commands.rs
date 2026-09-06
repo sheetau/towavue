@@ -53,6 +53,8 @@ pub enum CommandId {
     ToggleGridMenu,
     ToggleHardwareEncode,
     ToggleFullscreen,
+    PreviousImage,
+    NextImage,
 }
 
 impl CommandId {
@@ -105,6 +107,8 @@ impl CommandId {
             Self::ToggleGridMenu => "toggle_grid_menu",
             Self::ToggleHardwareEncode => "toggle_hardware_encode",
             Self::ToggleFullscreen => "toggle_fullscreen",
+            Self::PreviousImage => "previous_image",
+            Self::NextImage => "next_image",
         }
     }
 }
@@ -406,6 +410,12 @@ const COMMANDS: &[CommandDefinition] = &[
         "Prefer hardware encoding",
         &[MediaKind::Video],
     ),
+    command(
+        CommandId::PreviousImage,
+        "Previous image",
+        &[MediaKind::Image],
+    ),
+    command(CommandId::NextImage, "Next image", &[MediaKind::Image]),
 ];
 
 const fn command(

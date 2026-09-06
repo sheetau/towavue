@@ -186,3 +186,5 @@ Windows日本語IMEの実入力で、各文字のpreedit直後に空の確定が
 通常releaseでIME候補中のfocus離脱・復帰後の文字保持とEscapeを確認した。未保存確認もTab/Shift+TabとEnterでCancel、Save As取消からの編集保持、明示DiscardによるWelcome復帰を確認し、source hashは不変。keyboard focusと全3 decisionのwidget出力を回帰testへ追加し、169 tests・Clippy/buildが通過した。今回はproduction動作の変更なし。次はmenu/Welcomeを含む残りのkeyboard-only操作を監査する。環境・配布を含むH1全体は継続中。
 
 logo menuの矢印操作が背後のWelcomeへfocusを移し、意図しないfolder pickerを開くことを通常releaseで再現した。既存popupの最深menuにfocus移動を限定し、上下/Tabの有効項目循環、左右の階層移動、focus時だけのscrollと再open時の先頭復帰を追加した。旧コードで失敗する回帰、pointer操作、通常releaseの末尾到達・再open・Welcomeから両pickerの起動/取消を確認し、170 tests・Clippy/buildが通過。直前の16454a6と5f5a612のCIも成功した。次は残る日常閲覧と環境依存gateを監査する。H1/launch全体は未完了。
+
+画像のLeft/Rightが無反応だった基本閲覧操作を補い、画像専用Previous/Next commandと既定bindingを追加した。動画・音声のSeek、Ctrl+左右、既存custom binding優先は維持。追加前に失敗するキー解決回帰、Shell順とdirty Cancel、通常releaseの画像往復・reading移動・menu dispatchを確認し、173 tests・Clippy・debug/release buildが通過した。839137fのCIも成功。Home/End等の追加aliasは含めず、残る日常閲覧と環境依存gateの監査を続ける。H1/launch全体は未完了。

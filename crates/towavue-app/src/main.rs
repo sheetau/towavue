@@ -2430,8 +2430,8 @@ where
             CommandId::SeekForward => self.seek_relative(true),
             CommandId::PreviousMedia => self.navigate(false, false),
             CommandId::NextMedia => self.navigate(true, false),
-            CommandId::PreviousSameKind => self.navigate(false, true),
-            CommandId::NextSameKind => self.navigate(true, true),
+            CommandId::PreviousSameKind | CommandId::PreviousImage => self.navigate(false, true),
+            CommandId::NextSameKind | CommandId::NextImage => self.navigate(true, true),
             CommandId::ToggleFilmstrip => {
                 if !self.filmstrip_open {
                     self.refresh_folder_snapshot();
@@ -5451,6 +5451,57 @@ mod tests {
             11
         );
         assert!(!app.failed_thumbnails.contains(&11));
+    }
+
+    #[test]
+    fn image_commands_preserve_snapshot_order_and_dirty_edits() {
+        let Some(root) =
+            isolated_test_root("tests::image_commands_preserve_snapshot_order_and_dirty_edits")
+        else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let source = root.join("middle.png");
+        let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+        app.path = Some(source.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let edits = app.edits.clone();
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: ["middle.png", "other.wav", "first.png", "last.png"]
+                .into_iter()
+                .map(|name| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![]),
+                    path: root.join(name),
+                    kind: MediaKind::from_path(Path::new(name)).expect("media kind"),
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        for (command, target) in [
+            (CommandId::NextImage, "first.png"),
+            (CommandId::PreviousImage, "last.png"),
+        ] {
+            app.dispatch(command);
+            assert!(matches!(
+                &app.pending_guard,
+                Some(GuardedAction::Navigate(path)) if *path == root.join(target)
+            ));
+            assert_eq!(app.path.as_ref(), Some(&source));
+            assert_eq!(app.edits, edits);
+            app.resolve_guard(GuardDecision::Cancel);
+            assert!(app.pending_guard.is_none());
+            assert_eq!(app.path.as_ref(), Some(&source));
+            assert_eq!(app.edits, edits);
+        }
     }
 
     #[test]

@@ -1899,7 +1899,7 @@ where
                             ui.horizontal(|ui| {
                                 let mut tab_rects = Vec::new();
                                 let mut dragged = None;
-                                for tab in self.tabs.tabs() {
+                                for (index, tab) in self.tabs.tabs().iter().enumerate() {
                                     let active =
                                         self.tabs.active().is_some_and(|item| item.id == tab.id);
                                     let dirty =
@@ -1910,6 +1910,18 @@ where
                                     );
                                     tab_rects.push(rect);
                                     if active {
+                                        let focus = (tab.id, index, width, strip_width);
+                                        let focus_id = ui.id().with("visible-active-tab");
+                                        let changed = ui.data_mut(|data| {
+                                            let changed = data
+                                                .get_temp::<(TabId, usize, f32, f32)>(focus_id)
+                                                != Some(focus);
+                                            data.insert_temp(focus_id, focus);
+                                            changed
+                                        });
+                                        if changed {
+                                            ui.scroll_to_rect(rect, None);
+                                        }
                                         ui.painter().rect_filled(rect, 3.0, Color32::from_gray(28));
                                     }
                                     let label_rect = egui::Rect::from_min_max(
@@ -5384,6 +5396,112 @@ mod tests {
         assert_eq!(app.path, Some(root.join("c.png")));
         assert_eq!(app.edits[&c], history);
         assert_eq!(app.export_paths[&c], root.join("saved.png"));
+        assert!(app.pending_guard.is_none());
+    }
+
+    #[test]
+    fn overflowing_tab_bar_reveals_active_changes_but_preserves_manual_scroll() {
+        let Some(root) = isolated_test_root(
+            "tests::overflowing_tab_bar_reveals_active_changes_but_preserves_manual_scroll",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        let tabs: Vec<_> = (0..12)
+            .map(|index| {
+                app.tabs
+                    .open_new(root.join(format!("tab-{index:02}.png")), MediaKind::Image)
+            })
+            .collect();
+        let generation = app.media_generation;
+        let context = egui::Context::default();
+        context.global_style_mut(crate::chrome::style);
+        let time = std::cell::Cell::new(0.0);
+        let frame = |app: &Application<_>, width, events| {
+            time.set(time.get() + 1.0 / 60.0);
+            let output = context.run_ui(
+                egui::RawInput {
+                    time: Some(time.get()),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut actions = Vec::new();
+                    app.draw_top_bar(ui, &mut actions);
+                    assert!(
+                        actions.is_empty(),
+                        "scrolling must not dispatch media actions"
+                    );
+                },
+            );
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect)
+                        if rect.fill == Color32::from_gray(28)
+                            && rect.rect.width() >= 70.0
+                            && rect.rect.top() < 32.0 =>
+                    {
+                        Some((rect.rect, shape.clip_rect))
+                    }
+                    _ => None,
+                })
+                .expect("active tab rectangle")
+        };
+        let settle = |app: &Application<_>, width| {
+            for _ in 0..90 {
+                frame(app, width, vec![]);
+            }
+            frame(app, width, vec![])
+        };
+        let visible = |(rect, clip): (egui::Rect, egui::Rect)| {
+            assert!(
+                rect.left() >= clip.left() && rect.right() <= clip.right(),
+                "active {rect:?} outside {clip:?}"
+            );
+        };
+        visible(settle(&app, 480.0));
+        app.tabs.activate(tabs[0]);
+        visible(settle(&app, 480.0));
+        frame(
+            &app,
+            480.0,
+            vec![
+                egui::Event::PointerMoved(egui::pos2(80.0, 14.0)),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(-300.0, 0.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let manual = settle(&app, 480.0);
+        assert!(
+            manual.0.right() < manual.1.left(),
+            "manual scroll can leave the current tab offscreen"
+        );
+        assert_eq!(
+            settle(&app, 480.0),
+            manual,
+            "idle frames retain the user's position"
+        );
+        app.tabs.activate(tabs[11]);
+        visible(settle(&app, 480.0));
+        visible(settle(&app, 960.0));
+        visible(settle(&app, 480.0));
+        app.tabs.reorder(tabs[11], 0);
+        visible(settle(&app, 480.0));
+        let last = app.tabs.open_new(root.join("new.png"), MediaKind::Image);
+        visible(settle(&app, 480.0));
+        assert_eq!(app.tabs.active().expect("active tab").id, last);
+        assert_eq!(app.media_generation, generation);
+        assert!(app.edits.is_empty());
         assert!(app.pending_guard.is_none());
     }
 

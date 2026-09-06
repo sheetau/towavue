@@ -124,6 +124,8 @@ Seek再構築では必要なPaused状態も新pipelineへ渡し、破棄予定�
 
 tab bar内のprimary dragは挿入位置だけを表示し、release時に一度だけTabSetの順序を変更する。TabId、active tab、編集履歴、export先、再生sessionは保持し、activate/reloadや保存確認は行わない。bar外・window内へのdropとEscapeは並べ替えを取り消す。window外へのdropは既存のguard付きdetachを使い、window間結合は追加しない。長いbarは既存の横scrollを使う。
 
+active tabのidentity・bar内index・tab幅または表示幅が変わった場合は、そのtab全体が見えるまで必要最小限の横scrollを行う。同じ状態の描画では手動scrollを保持する。追従はUIのscroll状態だけを変え、media load・選択・編集・並べ替えを発生させない。
+
 ### H1 Welcome entry
 
 mediaがない時は中央の最大660 logical pxの左揃えcolumnへwordmark、START、Open file/folder、drop案内をまとめる。狭いwindowでは余白を縮め、縦scrollで操作を残す。Openは既存CommandIdとnative pickerを使い、shortcut表示は現在のbindingsから求める。上部のWelcome表示は空状態の見出しであり、mediaのTabIdや独立したclose動作を追加しない。recent履歴・preview・session復元はこの空状態layoutとは分けて扱う。

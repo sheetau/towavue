@@ -76,6 +76,8 @@ H1ではtitle/tab barを黒基調の単一barへまとめ、左端logoにmenu、
 
 tabはbar内でdragして並べ替えられます。挿入線の位置で離すと順序だけを変更し、表示中のmedia・未保存編集は保持します。Escapeまたはbar外・window内へのdropで取り消します。window外へのdropは既存の別windowへ移す操作になり、未保存時は確認します。
 
+tabが横幅に収まらない場合、開く・切り替える・並べ替える・window幅を変えると、現在tabが見える位置まで必要な分だけscrollします。通常の再描画では手動scroll位置を保持します。
+
 日本語の名前はWindowsにある日本語fontを補助fontとして表示します。fontの同梱・downloadは行いません。日本語fontがない環境では欠字が残り、terminalへ診断を出します。paletteはIME変換・確定とcommand実行のEnterを分離します。毎frameのfocus再要求による変換取消を修正し、Windows日本語IMEの候補表示・上下選択・確定・Escape取消を実windowで確認しました。物理keyboard・他IME・混在DPIを含む入力matrixは未完了です。
 
 logo menuはFile / Edit / Viewに分かれています。FileにOpen・Export・tab close・shortcut再読込、EditにUndo・crop・回転・trim・音量/速度、Viewに再生・移動・zoom・reading・各overlayをまとめています。現在のcustom shortcutを右側に表示し、使えない項目は無効表示、縦に収まらない場合はscrollできます。

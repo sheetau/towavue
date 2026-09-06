@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 17:51 JST - keep the active tab visible in an overflowing bar
+
+- Trigger/evidence: previous turn pushed afe7469 (progress); CI 34022748175 remains in progress. Baseline release PID 24540 opens five images in a 480x300 window: the final blue image is displayed but its active tab is outside the strip, including after cycling first/last.
+- Change: track rendered active TabId/index/tab width/strip width in egui temporary UI data. On changes, scroll the complete tab rectangle into view using existing minimal ScrollArea alignment; leave unchanged frames and manual scrolling alone. No extra activation/load/edit actions, runtime/core/dependency/unsafe changes. Contract recorded in ARCHITECTURE before implementation.
+- Verification: new actual top-bar regression fails with the active rectangle outside the clip; fixed 12-tab initial/open/cycle/reorder/width-change cases fit, manual horizontal scroll survives idle redraws, and rendering emits no actions or media/history changes. All 11 focused tab tests pass, followed by format, Clippy, 229 tests (app 117/core 35/runtime 73/integrations 4), debug/release builds and diff check. Three preexisting live tests explicitly ignored, not hardware proof.
+- Native/cleanup: fixed PID 46764 shows the new last tab and both ends after Ctrl+Tab/Ctrl+Shift+Tab. Manual horizontal wheel leaves the active tab partly clipped and remains there across idle captures; 960-to-480 resize reveals it again, then Ctrl+W reveals the neighboring green tab. Both owned windows close normally; no source save, user configuration or OS settings changed. Captures/logs ignored under target/tmp/h1-active-tab*.
+- Status/next: h1_active. Recheck native IME positioning/focus with the compact palette, then continue draft/day-to-day interaction audit. Physical input/DPI/device/long-duration/distribution gates remain incomplete. L-default and packaging choices unanswered; no implicit defaults/publication.
+
 ## 2026-09-06 17:44 JST - align command palette with the compact dark draft
 
 - Trigger/evidence: previous turn pushed f21154e (progress); its CI 34022250177 and 81cfdc9 CI succeed. Reinspect local draft screenshots and compare baseline release PID 14784: large gray title frame, half-width search and filled buttons diverge from the compact palette. Record the accepted visual contract in ARCHITECTURE before implementation.

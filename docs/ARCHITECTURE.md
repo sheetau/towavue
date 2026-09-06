@@ -146,6 +146,8 @@ timelineには開始・終了のdrag gripを設け、未指定端点はsource先
 
 trim gripの確定にはprimary release eventの座標を使い、同frameの後続hoverやPointerGoneで端点を変更・消失させない。同frameにfocus喪失・復帰が揃っていても取消し、Escapeとreleaseが同時のframeでも履歴へ渡さない。
 
+短い入力列でもtimeline操作は押下eventの座標で所有widgetを決める。開始/終了gripを背景Seekより先に判定し、同frameで完了した押下を背景が再利用しない。primaryの押下・移動・releaseを順に処理し、release後の移動はdrag距離へ含めない。drag閾値は固定eguiのinput設定に合わせ、gripの単なるclickは編集しない。共有の一件の所有状態でSeek・trimの取消とmedia/trim identity切替を扱う。
+
 timelineの高さは既定96 logical pxとし、上端dragで変更できる。上限はtitle/statusを除く残り領域の60%、下限は64 px（上限がそれ未満なら上限）として、縮小時も映像領域を残す。高さは既存egui panel state内だけで保持し、source位置・trim履歴・再生sessionを変更しない。範囲表示は幅が足りなければ説明部分を省き、source端点を優先する。pointerでtrim端点を動かすrange handleとは別の操作である。
 
 I/Oの端点はsource時刻で保持する。未指定の開始は0、未指定の終了はsource末尾として扱い、duration取得前・負の時刻・範囲外・開始以上でない終了はUIで拒否する。既存の履歴・saved/redo位置・再生位置は変えず理由を表示する。同じ有効範囲の再指定は履歴を増やさない。export境界でも負の端点・零長・逆転を拒否する。

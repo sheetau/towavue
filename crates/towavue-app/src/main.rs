@@ -11,6 +11,7 @@ mod menu;
 mod palette;
 mod seekbar;
 mod shortcuts;
+mod timeline_input;
 mod trim;
 mod welcome;
 
@@ -1561,7 +1562,7 @@ where
     }
 
     fn cancel_view_drag(&mut self) -> bool {
-        let mut canceled_press = self.ui_context.as_ref().is_some_and(seekbar::cancel);
+        let mut canceled_press = self.ui_context.as_ref().is_some_and(timeline_input::cancel);
         if let Some(state) = &mut self.ui_state {
             // Commands and focus changes can precede the frame that would start the drag.
             state.egui_input_mut().events.retain(|event| {
@@ -2407,7 +2408,7 @@ where
                 if let (Some(tab), Some(operation)) = (tab, trim_operation) {
                     actions.push(UiAction::TrimEndpoint(tab, operation));
                 }
-                if let Some(position) = seekbar::commit_position(&response) {
+                if let Some(position) = timeline_input::seek_commit(&response) {
                     let ratio = seekbar::ratio(rect, position.x);
                     actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
                 }
@@ -4584,7 +4585,10 @@ where
         }
         if (self.fullscreen
             || self.view_drag.is_some()
-            || self.ui_context.as_ref().is_some_and(seekbar::is_active))
+            || self
+                .ui_context
+                .as_ref()
+                .is_some_and(timeline_input::is_active))
             && !self.palette_open
             && !self.modal_input_blocked()
             && let WindowEvent::KeyboardInput { event, .. } = &event
@@ -4762,7 +4766,7 @@ mod tests {
             );
             assert!(frame(&mut app, vec![button(start, true)], true, false).is_empty());
             assert!(frame(&mut app, vec![egui::Event::PointerMoved(end)], true, false).is_empty());
-            assert!(seekbar::is_active(&context));
+            assert!(timeline_input::is_active(&context));
             let mut release = vec![button(end, false)];
             match interruption {
                 0 => {
@@ -4799,7 +4803,7 @@ mod tests {
                 frame(&mut app, release, true, false).is_empty(),
                 "interruption={interruption}"
             );
-            assert!(!seekbar::is_active(&context));
+            assert!(!timeline_input::is_active(&context));
             frame(&mut app, vec![button(start, true)], true, false);
             frame(&mut app, vec![egui::Event::PointerMoved(end)], true, false);
             let actions = frame(&mut app, vec![button(end, false)], true, false);
@@ -4807,7 +4811,7 @@ mod tests {
                 matches!(actions.as_slice(), [UiAction::Seek(_)]),
                 "new press after interruption={interruption}"
             );
-            assert!(!seekbar::is_active(&context));
+            assert!(!timeline_input::is_active(&context));
         }
     }
 

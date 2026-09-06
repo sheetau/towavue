@@ -92,6 +92,8 @@ trimの開始は上側、終了は下側のgripを横dragして調整できま�
 
 trim端点もbuttonを離した位置で確定します。同frameの後続cursor移動は端点へ混ぜず、focus離脱・復帰やEscapeがreleaseと同じframeに届いても編集を取り消します。
 
+短いdragでも押したgripを保持し、背景のSeekへ切り替わらないようにしました。gripの単なるclickは編集せず、Seekは押下からreleaseまでが同frameに届く場合も扱います。
+
 gridは小さいwindowでも4列を保ち、長い名前は省略・hoverで全文表示します。clickとkeyはどちらも一回実行して閉じます。
 
 gridのkeyはQWERTYの`1234/qwer/asdf/zxcv`に相当する物理位置です。Shiftで位置は変わらず、Ctrl/Alt/Windows key付きは通常shortcutとして扱います。paletteを開くとgridは閉じます。

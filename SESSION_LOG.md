@@ -2,6 +2,16 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 11:38 JST - short timeline gestures / preserve press ownership
+
+- Trigger/evidence: continue short-input audit after 85b70e3; CI 34006354464 succeeded (7fa28a4/34006093440 also succeeded). New grip regression fails original code when press/move share a frame and release follows: no expected trim operation. Normal release PID 25832 receives the start-grip press and move together, then release; it instead seeks to 18.834s with a clean title and no trim.
+- Contract/change: document press-coordinate ownership, grip priority and one claim per frame before implementation. Replace separate Seek ownership/release handling and trim drag-notification reliance with a bounded shared timeline_input state: one owner/origin/drag flag and claimed frame. Process primary events only through release, use egui's click-distance setting, and keep post-release hover out of drag detection. Grip click is not an edit; background cannot reuse a grip's completed press. Existing keyboard/accessibility Seek fallback remains.
+- Integration: compact bar uses shared candidate position in the current frame; trim grips use shared preview/release and retain identity cancellation. Existing command/focus/media cancellation and early Escape now cover either timeline gesture. No runtime, dependency, unsafe, edit-history or export changes; no new workers, polling or persistent configuration.
+- Regression: both endpoints cover press+move/release split and complete same-frame delivery, post-release hover, plain click, exactly one edit and no background Seek. New batched Seek test covers clip/disabled/foreground-layer/outside-origin rejection and forced layout passes without repeated commit. All existing button, trim cancellation/identity, fullscreen and release tests pass.
+- Native: trace-free release PID 30764 repeats the baseline and sets trim start 18.833s without moving the source preview position. Undo our sole edit. Posted complete short background Seek reports 22.015s; a later trim drag canceled with Escape leaves the clean title and that position unchanged. Injected Windows input at 96 DPI, not a physical-device/mixed-DPI matrix.
+- Verification/cleanup: format, all-target Clippy, 184 tests (app 90, core 35, runtime 55, integrations 4) and debug/release builds pass; three live tests explicitly ignored, not hardware proof. Both owned processes close normally; no export. Source SHA-256 stays F929E6FA18AA010BEBFBB3400539A4F090F7864887F4044E20B4E0C95C5B2F54. Captures/logs ignored; README, architecture and roadmap updated.
+- Status/next: h1_active. Revisit remaining daily-viewing and launch-gate evidence after the timeline input fixes. Physical-input/mixed-DPI, actual driver/endpoint and distribution gates remain incomplete; packaging choice unanswered, no package/publication performed.
+
 ## 2026-09-06 11:22 JST - trim grip release coordinates and same-frame cancellation
 
 - Trigger/evidence: extend 7fa28a4's release audit to trim grips. Regression fails on original code with SetTrimStart(9s) instead of release target 5s. Normal release PID 44196 presses the start grip, releases at x=600 then receives hover x=800; UI stores 25.196s, matching hover rather than release. Undo that sole trial edit before normal close.

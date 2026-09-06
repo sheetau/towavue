@@ -1,3 +1,4 @@
+use crate::timeline_input;
 use egui::{Align2, Color32, Rect, Ui};
 use towavue_core::{EditOperation, EditState, MediaTime};
 
@@ -13,22 +14,7 @@ pub fn timeline(
     let mut chosen = None;
     let mut dragging = false;
     let mut grips = Vec::new();
-    let (cancelled, release) = ui.input(|input| {
-        (
-            !input.focused
-                || input.key_pressed(egui::Key::Escape)
-                || input.events.contains(&egui::Event::WindowFocused(false)),
-            input.events.iter().rev().find_map(|event| match event {
-                egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    ..
-                } => Some(*pos),
-                _ => None,
-            }),
-        )
-    });
+    timeline_input::retain_trim(ui.ctx(), identity);
     for start in [true, false] {
         let time = if start {
             state.trim_start.unwrap_or(MediaTime::ZERO)
@@ -62,12 +48,10 @@ pub fn timeline(
             });
         let mut grip_x = x;
         let mut valid = true;
-        if response.dragged_by(egui::PointerButton::Primary)
-            || response.drag_stopped_by(egui::PointerButton::Primary)
-        {
-            if cancelled {
-                ui.ctx().stop_dragging();
-            } else if let Some(pointer) = release.or(response.interact_pointer_pos()) {
+        let drag = timeline_input::trim_drag(&response);
+        if drag.dragging {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            if let Some(pointer) = drag.position {
                 dragging = true;
                 grip_x = pointer.x.clamp(rect.left(), rect.right());
                 let ratio = (f64::from(grip_x) - f64::from(rect.left())) / f64::from(rect.width());
@@ -89,7 +73,7 @@ pub fn timeline(
                 if valid {
                     preview = candidate;
                 }
-                if response.drag_stopped_by(egui::PointerButton::Primary) {
+                if drag.released {
                     chosen = Some(operation);
                 }
             }
@@ -291,6 +275,83 @@ mod tests {
                     EditOperation::SetTrimEnd(target)
                 }]
             );
+        }
+    }
+
+    #[test]
+    fn short_trim_drags_keep_the_press_grip_and_never_seek() {
+        for start in [true, false] {
+            for (split_release, move_pointer) in
+                [(true, true), (false, true), (true, false), (false, false)]
+            {
+                let context = egui::Context::default();
+                let rect = Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(400.0, 100.0));
+                let state = EditState::default();
+                let frame = |events| {
+                    let mut edits = Vec::new();
+                    let _ = context.run_ui(
+                        egui::RawInput {
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let seek = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+                            if let Some(edit) = timeline(
+                                ui,
+                                rect,
+                                &state,
+                                MediaTime::from_nanoseconds(10_000_000_000),
+                                false,
+                                "short-trim".into(),
+                            ) {
+                                edits.push(edit);
+                            }
+                            assert!(
+                                timeline_input::seek_commit(&seek).is_none(),
+                                "trim must not seek"
+                            );
+                        },
+                    );
+                    edits
+                };
+                for _ in 0..3 {
+                    frame(vec![]);
+                }
+                let y = if start { 55.0 } else { 85.0 };
+                let origin = egui::pos2(if start { 27.0 } else { 413.0 }, y);
+                let target = if move_pointer {
+                    egui::pos2(220.0, y)
+                } else {
+                    origin
+                };
+                let button = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                frame(vec![egui::Event::PointerMoved(origin)]);
+                let mut events = vec![button(origin, true), egui::Event::PointerMoved(target)];
+                if split_release {
+                    assert!(frame(events).is_empty());
+                    events = vec![];
+                }
+                events.extend([
+                    button(target, false),
+                    egui::Event::PointerMoved(egui::pos2(380.0, y)),
+                ]);
+                let expected = if start {
+                    EditOperation::SetTrimStart(MediaTime::from_nanoseconds(5_000_000_000))
+                } else {
+                    EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(5_000_000_000))
+                };
+                assert_eq!(
+                    frame(events),
+                    if move_pointer { vec![expected] } else { vec![] },
+                    "start={start}, split_release={split_release}"
+                );
+                assert!(frame(vec![]).is_empty());
+            }
         }
     }
 

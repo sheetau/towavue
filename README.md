@@ -16,6 +16,8 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 
 複数の映像・音声streamを含む素材では、thumbnail・filmstrip・waveformと保存も再生と同じstreamを自動選択します。手動でstreamを切り替えるUIはありません。
 
+音声playlistはShell順の番号付き一覧です。行全体をclickして選曲でき、現在曲を明るく表示します。長い名前は一行に省略し、hoverで全文を確認できます。多数の曲も可視行だけを描画します。各曲の長さの列はまだありません。
+
 ## 文書
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md): 技術選定、境界、データフロー、不変条件

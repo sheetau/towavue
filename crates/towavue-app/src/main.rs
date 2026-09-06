@@ -9,6 +9,7 @@ mod fonts;
 mod grid;
 mod menu;
 mod palette;
+mod playlist;
 mod seekbar;
 mod shortcuts;
 mod timeline_input;
@@ -2471,23 +2472,10 @@ where
     }
 
     fn draw_audio_playlist(&self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
-        ui.heading("Folder playlist");
-        ui.separator();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            if let Some(snapshot) = &self.folder_snapshot {
-                for item in snapshot.items_of_kind(MediaKind::Audio) {
-                    if ui
-                        .selectable_label(
-                            self.path.as_deref() == Some(item.path.as_path()),
-                            display_name(&item.path),
-                        )
-                        .clicked()
-                    {
-                        actions.push(UiAction::OpenMedia(item.path.clone(), false));
-                    }
-                }
-            }
-        });
+        if let Some(path) = playlist::show(ui, self.folder_snapshot.as_ref(), self.path.as_deref())
+        {
+            actions.push(UiAction::OpenMedia(path, false));
+        }
     }
 
     fn draw_command_palette(&mut self, context: &egui::Context, actions: &mut Vec<UiAction>) {

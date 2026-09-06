@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 14:55 JST - improve audio playlist row layout and targets
+
+- Trigger/evidence: previous turn pushed 12322d5 (progress); its CI and 7064420 CI now succeed. Existing playlist labels only accepted clicks within text width. Draft shows numbered, spacious rows and a brighter current item.
+- Contract/change: document and implement 32 logical-pixel full-width numbered audio rows in Shell order, current-item emphasis, single-line truncation, width-bounded full-name tooltip and visible-row rendering. Small app-only playlist module returns the chosen path to existing Navigate guard. No duration probes, new workers, dependencies, unsafe code or playback changes; per-frame filtering still scans snapshot references.
+- Verification: two headless regressions cover 240/960 widths, 10,000 audio items mixed with an image, order/colors/spacing, truncation/tooltip bounds, right-side click, scrolled selection and empty snapshots. Narrowing targets to 64px fails the click regression. Format, Clippy, 213 tests (app 104/core 35/runtime 70/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: release PID 16488 selects row 2 from x=900. At 480x300 the default tooltip clips; close normally, bound its width and rebuild. PID 7288 shows full Japanese filename inside the small window, selects row 2 at x=440, scrolls to rows 16 onward and selects/plays row 18 from its right edge. Both windows close normally; trial audio/captures/logs ignored, no source save or OS changes.
+- Status/next: h1_active. Audit current-item visibility when playlist navigation moves beyond the viewport. Per-track duration and automatic scroll remain absent. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 14:41 JST - ignore navigation to the current media
 
 - Trigger/evidence: previous turn pushed 7064420 (progress); 46ebb86 CI succeeded, 7064420 remains in progress. Baseline normal release PID 40588: only image in folder changes from 100% to Fit after Right; rotating then Right opens unsaved guard despite identical destination.

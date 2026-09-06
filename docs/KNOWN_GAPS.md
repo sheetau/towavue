@@ -54,6 +54,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Explorerの実際のSort By順を全navigationで使う | 実装済み。live Explorer view、保存済みShell view、明示fallbackの順で取得 |
 | 全media filmstripと同種/全種移動 | H1で中央のthumbnail列、音声waveform・duration、現在項目の枠・名前、wheel横scrollを実装。Tab / Shift+Tabのfocus競合も修正 |
 | 画像/動画はfile tab、音声はfolder playlist tab | 実装済み |
+| 音声playlistの番号付き一覧・現在曲・曲長 | H1で32pxの全幅行、現在曲の明るい表示、名前省略とwindow幅内の全文tooltip、可視行描画を追加。曲長の列と現在曲への自動scrollは未実装 |
 | Filmstrip middle-clickで新規tab | 実装済み |
 | Explorerからfile/folderをdropして開く | H1で実装。hover案内、複数file、dirty編集保持、modal中の拒否を確認 |
 | Tabをwindow外へdrag | 別process起動として実装。dirty editの移送はせずguardする |

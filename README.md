@@ -94,6 +94,8 @@ gridのkeyはQWERTYの`1234/qwer/asdf/zxcv`に相当する物理位置です。S
 
 画像の100%は画面の実pixel基準です。zoomは現在の表示領域とcrop・回転後の寸法を使うため、小さいwindowやcrop previewからの一段の拡大も現在の見た目を基準にします。
 
+Ctrl+wheelはcursor位置を基点に拡大・縮小します。wheelがzoom倍率へ変換された後の入力を使うよう修正し、実windowでの動作を確認しました。palette・grid・保存確認中やmenu上のwheelでは背景画像を拡大しません。
+
 大きい画像もFitでは2%未満まで縮小して全体を収めます。reading modeにも同じ計算を使い、手動zoomの10%未満は小数2桁で表示します。
 
 通常画像表示ではCtrl+Yでcropを履歴へ追加し、R/Lで90度回転、H/Vで反転します。動画・音声ではI/Oでtrimの開始・終了、上下矢印でvolume、Mでmute、`,` / `.` / `/`でrateを変更・resetします。Ctrl+Z / Ctrl+Shift+Zはundo/redo、Ctrl+Shift+SはSave As、Ctrl+Sは直近export先への再Saveです。dirtyなmediaの移動・close・終了時はExport / Discard / Cancelを選択できます。同一source pathへのexportは拒否されます。

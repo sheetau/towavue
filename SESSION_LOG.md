@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 09:55 JST - image wheel / consume native zoom input
+
+- Trigger/evidence: continue daily-viewing audit after ca80d35. Normal release PID 5272 ignores Ctrl+wheel on page-01.png. Fixed egui 0.35 converts modified wheel input into zoom_delta and leaves smooth_scroll_delta empty; the app read the latter. Existing geometry test manually overwrote processed scroll state and missed the real input path.
+- Contract/change: record wheel ownership in ARCHITECTURE before implementation. Use egui's zoom factor on the hovered image surface, block palette/grid/modal input and honor covering widgets. Preserve cursor-relative pan and compute the displayed rectangle after input, so zoom/pan reaches the current frame. No new gesture mapping, settings, dependencies, unsafe code or runtime change.
+- Regression: replace artificial scroll mutation with MouseWheel events; original production code fails the cursor-anchor assertion, fixed code passes. Verify immediate mesh size/anchor, no duplicate application on layout passes, positive/negative smoothed wheel, equal final factors at 30/120-fps-equivalent intervals, unmodified/outside wheel and palette/grid/guard/native-dialog/foreground-cover blocking. Existing physical-pixel, crop and rotation cases remain.
+- Native: final normal release PID 38844 expands from Fit (~83%) to 101% with one Ctrl+wheel notch, then returns to 83% with the inverse notch at the same cursor. Palette and View-menu wheel preserve background zoom; dirty guard after rotation also remains Fit and retains edits on Cancel. Undo our rotation, close normally. Source SHA-256 remains 636C096506CFD9FBFEAC2A1BD44EF7DAD07BBC13F76EF2474A896E06C5D0D406. Windows-injected mouse input at 96 DPI, not physical mouse/trackpad or mixed-DPI proof.
+- Verification/cleanup: format, all-target Clippy, 173 tests (app 81, core 35, runtime 53, integrations 4) and debug/release builds pass; three live tests explicitly ignored, not hardware proof. Owned baseline/final processes close normally, no export/source/config/OS changes, ignored h1-image-wheel captures/logs only. README, architecture, gap inventory and roadmap updated.
+- Status/next: h1_active. Continue image interaction and remaining daily-viewing/environment launch checks. Prior ca80d35 CI 34002238129 still in progress at inspection; do not treat an observation interval as termination. Distribution choice remains unanswered; no package/publication performed.
+
 ## 2026-09-06 09:47 JST - image arrow navigation / shared commands
 
 - Trigger/intent: continue H1 daily-viewing audit after 839137f (CI 34001788773 succeeded). Normal release ignores plain Right on page-01.png, despite the draft's basic image navigation. Accept the scoped contract in ARCHITECTURE before implementation; no additional aliases or numeric jumps.

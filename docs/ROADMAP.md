@@ -188,3 +188,5 @@ Windows日本語IMEの実入力で、各文字のpreedit直後に空の確定が
 logo menuの矢印操作が背後のWelcomeへfocusを移し、意図しないfolder pickerを開くことを通常releaseで再現した。既存popupの最深menuにfocus移動を限定し、上下/Tabの有効項目循環、左右の階層移動、focus時だけのscrollと再open時の先頭復帰を追加した。旧コードで失敗する回帰、pointer操作、通常releaseの末尾到達・再open・Welcomeから両pickerの起動/取消を確認し、170 tests・Clippy/buildが通過。直前の16454a6と5f5a612のCIも成功した。次は残る日常閲覧と環境依存gateを監査する。H1/launch全体は未完了。
 
 画像のLeft/Rightが無反応だった基本閲覧操作を補い、画像専用Previous/Next commandと既定bindingを追加した。動画・音声のSeek、Ctrl+左右、既存custom binding優先は維持。追加前に失敗するキー解決回帰、Shell順とdirty Cancel、通常releaseの画像往復・reading移動・menu dispatchを確認し、173 tests・Clippy・debug/release buildが通過した。839137fのCIも成功。Home/End等の追加aliasは含めず、残る日常閲覧と環境依存gateの監査を続ける。H1/launch全体は未完了。
+
+Ctrl+wheelの画像zoomが無反応になる不具合を通常releaseで再現した。固定eguiが変換済みのzoom倍率を使い、cursor基点と同frame描画を保つよう修正。旧testの処理済みscroll値の直接変更を実wheel eventへ置き換えると旧コードで失敗し、修正後は倍率・30/120fps相当・overlay遮断も通過した。通常releaseの往復zoom、palette/menu/dirty guardでの背景保持、173 tests・Clippy・debug/release buildを確認。物理mouse/trackpadとDPIのmatrixを含むH1全体は継続中。

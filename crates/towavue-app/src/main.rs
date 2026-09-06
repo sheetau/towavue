@@ -1466,37 +1466,36 @@ where
         self.image_viewport = viewport.size();
         let pixels_per_point = ui.ctx().pixels_per_point();
         let physical_viewport = viewport.size() * pixels_per_point;
-        let scale = self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
-        let displayed = egui::vec2(transform.size.0 * scale, transform.size.1 * scale);
+        let mut scale =
+            self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
         let center = viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
-        let image_rect = egui::Rect::from_center_size(center, displayed);
         let response = ui.interact(
             viewport,
             ui.id().with("image-surface"),
             egui::Sense::click_and_drag(),
         );
 
-        let (control, shift, scroll, pointer, pointer_delta) = ui.input(|input| {
+        let (shift, zoom, pointer, pointer_delta) = ui.input(|input| {
             (
-                input.modifiers.ctrl,
                 input.modifiers.shift,
-                input.smooth_scroll_delta.y,
+                input.zoom_delta(),
                 input.pointer.hover_pos(),
                 input.pointer.delta(),
             )
         });
-        if control && scroll != 0.0 && pointer.is_some_and(|point| viewport.contains(point)) {
+        if zoom != 1.0
+            && response.hovered()
+            && !self.modal_input_blocked()
+            && !self.palette_open
+            && !self.grid_open
+        {
             let old_scale = scale;
-            self.image_view.zoom_by(
-                if scroll > 0.0 { 1.1 } else { 1.0 / 1.1 },
-                image_size,
-                physical_viewport.into(),
-            );
-            let new_scale =
-                self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
+            self.image_view
+                .zoom_by(zoom, image_size, physical_viewport.into());
+            scale = self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
             if let Some(pointer) = pointer {
                 let from_center = pointer - center;
-                let correction = from_center * (1.0 - new_scale / old_scale);
+                let correction = from_center * (1.0 - scale / old_scale);
                 self.image_view.pan.0 += correction.x;
                 self.image_view.pan.1 += correction.y;
             }
@@ -1505,6 +1504,10 @@ where
             self.image_view.pan.0 += pointer_delta.x;
             self.image_view.pan.1 += pointer_delta.y;
         }
+
+        let displayed = egui::vec2(transform.size.0 * scale, transform.size.1 * scale);
+        let center = viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
+        let image_rect = egui::Rect::from_center_size(center, displayed);
 
         if !self.image_view.crop_preview {
             self.update_selection(&response, image_rect, image_size, shift, pointer);
@@ -5259,7 +5262,15 @@ mod tests {
                 egui::Pos2::ZERO,
                 egui::vec2(400.0, 300.0),
             )),
-            events: vec![egui::Event::PointerMoved(egui::pos2(230.0, 160.0))],
+            events: vec![
+                egui::Event::PointerMoved(egui::pos2(230.0, 160.0)),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, 1.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::CTRL,
+                },
+            ],
             ..Default::default()
         };
         input
@@ -5267,18 +5278,122 @@ mod tests {
             .get_mut(&egui::ViewportId::ROOT)
             .expect("root viewport")
             .native_pixels_per_point = Some(2.0);
-        let mut scroll = 1.0;
-        let _ = context.run_ui(input, |ui| {
-            ui.input_mut(|input| {
-                input.modifiers.ctrl = true;
-                input.smooth_scroll_delta.y = scroll;
-            });
-            scroll = 0.0;
+        let output = context.run_ui(input, |ui| {
             app.draw_ui(ui, &mut Vec::new());
         });
-        assert!((app.image_view.pan.0 + 3.0).abs() < 0.01);
-        assert!((app.image_view.pan.1 + 1.0).abs() < 0.01);
-        assert!((render(&mut app, 2.0) - egui::vec2(440.0, 220.0)).length() < 0.1);
+        let factor = (1.0_f32 / 200.0).exp();
+        assert!((app.image_view.pan.0 - 30.0 * (1.0 - factor)).abs() < 0.001);
+        assert!((app.image_view.pan.1 - 10.0 * (1.0 - factor)).abs() < 0.001);
+        let bounds = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id == texture => Some(mesh.calc_bounds()),
+                _ => None,
+            })
+            .expect("image mesh in wheel frame");
+        assert!((bounds.size() * 2.0 - egui::vec2(400.0, 200.0) * factor).length() < 0.01);
+        let anchored = bounds.center() + egui::vec2(30.0, 10.0) * factor;
+        assert!((anchored - egui::pos2(230.0, 160.0)).length() < 0.001);
+        assert!((render(&mut app, 2.0) - egui::vec2(400.0, 200.0) * factor).length() < 0.01);
+
+        let wheel = |delta, modifiers| egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, delta),
+            phase: egui::TouchPhase::Move,
+            modifiers,
+        };
+        let mut time = 100.0;
+        let mut wheel_frame = |app: &mut Application<_>, dt, events, covered| {
+            time += dt;
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 300.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    app.draw_ui(ui, &mut Vec::new());
+                    if covered {
+                        egui::Area::new("wheel-cover".into())
+                            .order(egui::Order::Foreground)
+                            .fixed_pos(egui::pos2(200.0, 120.0))
+                            .show(ui.ctx(), |ui| {
+                                ui.allocate_exact_size(
+                                    egui::vec2(80.0, 80.0),
+                                    egui::Sense::hover(),
+                                );
+                            });
+                    }
+                },
+            );
+        };
+        for (dt, delta) in [(1.0 / 30.0, 60.0), (1.0 / 120.0, 60.0), (1.0 / 60.0, -60.0)] {
+            app.image_view.actual_size();
+            wheel_frame(
+                &mut app,
+                dt,
+                vec![wheel(delta, egui::Modifiers::CTRL)],
+                false,
+            );
+            for _ in 0..90 {
+                wheel_frame(&mut app, dt, vec![], false);
+            }
+            let expected = (delta / 200.0).exp();
+            assert!(
+                matches!(app.image_view.zoom, ZoomMode::Custom(scale) if (scale - expected).abs() < 0.0001)
+            );
+        }
+        for blocked in 0..7 {
+            app.image_view.actual_size();
+            app.palette_open = blocked == 2;
+            app.grid_open = blocked == 3;
+            app.pending_guard = (blocked == 4).then_some(GuardedAction::Exit);
+            app.pending_dialog = (blocked == 5).then_some(DialogIntent::OpenFile);
+            let point = if blocked == 1 {
+                egui::pos2(-10.0, -10.0)
+            } else {
+                egui::pos2(230.0, 160.0)
+            };
+            for _ in 0..3 {
+                wheel_frame(
+                    &mut app,
+                    0.1,
+                    vec![egui::Event::PointerMoved(point)],
+                    blocked == 6,
+                );
+            }
+            let before = (app.image_view.zoom, app.image_view.pan);
+            wheel_frame(
+                &mut app,
+                0.1,
+                vec![wheel(
+                    60.0,
+                    if blocked == 0 {
+                        egui::Modifiers::NONE
+                    } else {
+                        egui::Modifiers::CTRL
+                    },
+                )],
+                blocked == 6,
+            );
+            for _ in 0..10 {
+                wheel_frame(&mut app, 0.1, vec![], blocked == 6);
+            }
+            assert_eq!(
+                (app.image_view.zoom, app.image_view.pan),
+                before,
+                "wheel input case {blocked}"
+            );
+            app.palette_open = false;
+            app.grid_open = false;
+            app.pending_guard = None;
+            app.pending_dialog = None;
+        }
 
         app.tabs.open_new(root.join("image.png"), MediaKind::Image);
         app.push_edit(EditOperation::Crop(PixelCrop {

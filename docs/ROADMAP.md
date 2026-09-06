@@ -304,3 +304,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 22:43の比較では独立Rust UIA clientでも通常buildの3回目timeoutを再現した。一方、本体の依存関係・window設定・renderer初期化・常駐workerを使う最小providerは15往復通過。Focus→Clickとfocus IDのheadless検査を強化し、244 testsと必須checkは通過したが、production修正は未採用。次はmedia読込み後の本体state/event処理との差を絞り、通常buildの反復試験で修復を確認する。
 
 22:55、UIA反復停止をShell STAの仕事待ちへ絞り、Windows messageも処理できるevent待機へ修正した。通常buildの30往復、同じprocessでexport失敗のOK→保存確認Cancel、続く10往復が通過。message待機の回帰は変更前と負の比較で失敗し、修正後は通過する。UIやShell順を変えず、次は残るcustom widget・screen reader/focusと既存launch gateを監査する。
+
+23:30、compact seek/timelineへUIA Sliderの名前・値・範囲・値操作とfocus keyを追加した。source秒/画像Shell順を維持し、直接値変更はpointer gestureを取消、未保存画像の移動は既存guardで保護する。focus中のSpace/R/Undoなども既存shortcutへ接続。248 tests・必須check・両buildと通常releaseの値変更/再生切替/編集保持/disabled拒否が通過した。trim grip・selection・全screen reader/focus順と実環境/配布gateは残り、H1は継続中。

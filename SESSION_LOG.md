@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 23:30 JST - expose seek values and preserve focused shortcuts
+
+- Trigger/intent: 3356d0d CI 34037660292 succeeds. Continue the custom-widget audit: normal compact/timeline controls expose no Slider. Clipboard-write permission remains scoped; no writes are needed here.
+- Change: name source-second playback and one-based Shell image positions, expose ranges/steps and finite numeric actions, and route them through existing Seek/navigation guards. Consume events in order once across layout passes; cancel pending pointer releases. Add focused arrows/Home/End and visible focus, preserving other shortcuts/prefixes without dispatching synthetic focus keys through the new path.
+- Verification: three new regressions cover values/invalid targets/disabled/modal state, Shell order and edit retention, and gesture cancellation. The named-slider test fails before implementation. Format, Clippy, 248 tests and both builds pass; three existing live ignores remain explicit.
+- Native: final video PID 43868 is rechecked in the same process after lost output; exact timeline values, Right and Space toggles pass. Final image PID 31432 passes value navigation, focused R, named/modal unsaved guard, disabled SetValue rejection, Cancel with edits retained, Undo and End. Both close normally. DEVELOPMENT records binary/process identities and excludes Alt-activation misses, a wrong oversized fixture and a DLL-PATH-omitted launch from success evidence.
+- Cleanup/status: no source originals, Save, clipboard or OS settings changed; owned captures/logs stay ignored. Correct the earlier UIA HRESULT name against pinned Windows constants. Prepare this coherent checkpoint for push; h1_active, not launch completion.
+- Next: continue remaining selection/trim/close-control semantics and practical focus/screen-reader coverage, retaining physical-input/DPI/device, final-candidate and distribution gates.
+
 ## 2026-09-06 22:57 JST - keep the idle Shell STA responsive to Windows messages
 
 - Trigger/intent: 5f13a18 is progress and CI 34036970810 succeeds. Continue the normal-build UIA guard failure, separating actual image loading from folder discovery.

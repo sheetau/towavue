@@ -210,7 +210,7 @@ H1の個別修正が通ったことと、配布可能な品質の判定を分け
 | device復旧 | 制御faultによる再構築/保存保護とheadless回帰はある | 物理endpoint変更、unplug、実driver/adapter変更は未検証。OSや他appへ影響する試験を暗黙に実行しない |
 | 日常操作・草案の外観 | compact shell、palette、menu、filmstrip、tab、reading連結、selection、Welcomeの記録あり。今回Welcome/reading/audioの草案画像も再確認 | pixel完全一致やownerの外観受入は未証明。recent一覧、曲ごとの長さ、見開き送り等の差が残るが一括で必須扱いしない。読書の区切り方はowner回答待ち |
 | OS clipboard | egui-winitのclipboard feature、arboard 3.6.1/clipboard-win 5.4.1を既存入力/platform outputへ接続。ownerの書込み許可後、通常releaseでUnicode往復・cut後の空欄・外部変更後の再pasteを確認。変更前は同じpasteが空欄のままだった | clipboardを他processが占有する場合、全形式/IMEのmatrixは未検証。画像copy機能と混同せず、以後の試験でもclipboard内容への影響を明示する |
-| accessibility | AccessKit adapterの要求時tree/action配送、Welcome/menu/paletteの操作、保存確認中の背景Invoke拒否を確認。反復時のUIA停止はShell STAのmessageを処理しない待機を修正し、通常buildの30往復→export失敗通知/確認への復帰→10往復が同一processで通過 | screen reader、読み順/focus、timeline・selection・playlist等の全custom widget対応は未完了。今回のnative反復成功を支援技術・実環境の横断matrixの代替にはしない |
+| accessibility | AccessKitのtree/action配送、Welcome/menu/paletteの操作、保存確認中の背景操作拒否を確認。Shell STA待機の反復停止を修正。再生・画像位置のSlider/RangeValueとfocusキーを既存Seek/guardへ接続し、通常windowで値指定・キー操作・確認中の拒否を検証 | screen reader、全体の読み順/focus、trim handle・selection・playlist等の残るcustom widget対応は未完了。native試験を支援技術・実環境の横断matrixの代替にはしない |
 | 対象OS・入力 | 現在の機械はWindows build 26200。日本語IME、注入pointer/key、scale入力の回帰/記録はある | Windows 10 22H2実機/VM、物理keyboard/pointer、他IME、実mixed-DPI、keyboard-onlyの横断確認は未完了 |
 | 配布 | versionは0.0.0の開発workspace。setup scriptは開発用FFmpegを準備するだけで製品packageではない | portable/installer、FFmpeg配布条件と同梱物、clean-machine起動、package/publicationは未決定・未実施。H1と分けて承認された計画で進める |
 

@@ -2581,7 +2581,16 @@ where
             } else {
                 0.0
             };
-            let (response, commit) = seekbar::show(context, status, progress, parent);
+            let enabled = !self.modal_input_blocked();
+            let (response, commit) = seekbar::show(context, status, progress, parent, enabled);
+            let value = seekbar::value_input(
+                &response,
+                "Image position",
+                (index + 1) as f64,
+                1.0..=images.len() as f64,
+                1.0,
+                enabled,
+            );
             if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
                 let target =
                     seekbar::item_index(seekbar::ratio(response.rect, pointer.x), images.len());
@@ -2622,12 +2631,13 @@ where
                     );
                 }
             }
-            if let Some(pointer) = commit {
-                let target =
-                    seekbar::item_index(seekbar::ratio(response.rect, pointer.x), images.len());
-                if target != index {
-                    actions.push(UiAction::OpenMedia(images[target].path.clone(), false));
-                }
+            if let Some(target) = value.map(|value| value.round() as usize - 1).or_else(|| {
+                commit.map(|pointer| {
+                    seekbar::item_index(seekbar::ratio(response.rect, pointer.x), images.len())
+                })
+            }) && target != index
+            {
+                actions.push(UiAction::OpenMedia(images[target].path.clone(), false));
             }
             return;
         }
@@ -2642,12 +2652,23 @@ where
         };
         let progress = (self.current_position().as_seconds_f64() / duration.as_secs_f64())
             .clamp(0.0, 1.0) as f32;
-        let (response, commit) = seekbar::show(context, status, progress, parent);
+        let enabled = !self.modal_input_blocked();
+        let (response, commit) = seekbar::show(context, status, progress, parent, enabled);
+        let value = seekbar::value_input(
+            &response,
+            "Playback position (seconds)",
+            self.current_position().as_seconds_f64(),
+            0.0..=duration.as_secs_f64(),
+            KEYBOARD_SEEK_STEP.as_secs_f64(),
+            enabled,
+        );
         if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
             let ratio = seekbar::ratio(response.rect, pointer.x);
             self.draw_seek_preview(&response, ratio, duration);
         }
-        if let Some(pointer) = commit {
+        if let Some(value) = value {
+            actions.push(UiAction::Seek(media_time(Duration::from_secs_f64(value))));
+        } else if let Some(pointer) = commit {
             let ratio = seekbar::ratio(response.rect, pointer.x);
             actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
         }
@@ -2741,7 +2762,27 @@ where
                 if let (Some(tab), Some(operation)) = (tab, trim_operation) {
                     actions.push(UiAction::TrimEndpoint(tab, operation));
                 }
-                if let Some(position) = timeline_input::seek_commit(&response) {
+                let enabled = !self.modal_input_blocked()
+                    && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted);
+                let value = seekbar::value_input(
+                    &response,
+                    "Playback position (seconds)",
+                    self.current_position().as_seconds_f64(),
+                    0.0..=duration.as_secs_f64(),
+                    KEYBOARD_SEEK_STEP.as_secs_f64(),
+                    enabled,
+                );
+                if response.has_focus() && enabled {
+                    ui.painter().rect_stroke(
+                        rect.shrink(1.0),
+                        0.0,
+                        ui.visuals().selection.stroke,
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if let Some(value) = value {
+                    actions.push(UiAction::Seek(media_time(Duration::from_secs_f64(value))));
+                } else if let Some(position) = timeline_input::seek_commit(&response) {
                     let ratio = seekbar::ratio(rect, position.x);
                     actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
                 }
@@ -4401,6 +4442,23 @@ where
                 != ShortcutMatch::None
     }
 
+    fn owns_seek_shortcut(&self, stroke: &KeyStroke) -> bool {
+        !self.palette_open
+            && !self.grid_open
+            && !self.filmstrip_open
+            && !self.modal_input_blocked()
+            && self.ui_context.as_ref().is_some_and(|context| {
+                seekbar::has_value_focus(context) && !egui::Popup::is_any_open(context)
+            })
+            && stroke.key != Key::Tab
+            && !(self.prefix_started.is_none()
+                && stroke.modifiers == Modifiers::default()
+                && matches!(
+                    stroke.key,
+                    Key::ArrowLeft | Key::ArrowRight | Key::Home | Key::End
+                ))
+    }
+
     fn process_key(&mut self, event: &KeyEvent) {
         if self.modal_input_blocked() {
             return;
@@ -5092,13 +5150,17 @@ where
             self.process_key(event);
             return;
         }
-        // egui consumes even modified Tab; reserve only filmstrip navigation and bound chords.
-        if let WindowEvent::KeyboardInput { event, .. } = &event {
+        // Keep bound Tab chords and non-value shortcuts out of egui's focus-wide key capture.
+        if let WindowEvent::KeyboardInput {
+            event,
+            is_synthetic,
+            ..
+        } = &event
+        {
             self.expire_shortcut_prefix();
-            if self
-                .key_stroke(event)
-                .is_some_and(|stroke| self.owns_tab_key(&stroke))
-            {
+            if self.key_stroke(event).is_some_and(|stroke| {
+                self.owns_tab_key(&stroke) || (!is_synthetic && self.owns_seek_shortcut(&stroke))
+            }) {
                 self.process_key(event);
                 return;
             }
@@ -5421,6 +5483,308 @@ mod tests {
         app.undo_edit(false);
         app.undo_edit(false);
         assert!(!app.edits[&tab].is_dirty());
+    }
+
+    #[test]
+    fn accessible_timeline_values_use_source_time_and_respect_disabled_state() {
+        let Some(_root) = isolated_test_root(
+            "tests::accessible_timeline_values_use_source_time_and_respect_disabled_state",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.media_kind = Some(MediaKind::Audio);
+        app.media_duration = Some(Duration::from_secs(10));
+        app.timeline_open = true;
+        app.state = PlaybackState::Paused;
+        let mut clock = PlaybackClock::new(MediaTime::from_nanoseconds(2_000_000_000), 1.0);
+        clock.paused_at = Some(clock.wall_anchor);
+        app.clock = Some(clock);
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        app.ui_context = Some(context.clone());
+        let frame = |app: &mut Application<_>, events, disabled| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(500.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    if disabled {
+                        ui.disable();
+                    }
+                    app.draw_timeline(ui, &mut actions);
+                    if context.current_pass_index() == 0 {
+                        context.request_discard("accessibility input test");
+                    }
+                },
+            );
+            (
+                output.platform_output.accesskit_update.expect("tree"),
+                actions,
+            )
+        };
+        frame(&mut app, vec![], false);
+        let (tree, _) = frame(&mut app, vec![], false);
+        let (id, node) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Playback position (seconds)"))
+            .expect("named seek slider");
+        assert_eq!(node.role(), egui::accesskit::Role::Slider);
+        assert_eq!(node.min_numeric_value(), Some(0.0));
+        assert_eq!(node.max_numeric_value(), Some(10.0));
+        assert_eq!(node.numeric_value(), Some(2.0));
+        assert_eq!(node.numeric_value_step(), Some(5.0));
+        let request = |value| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::SetValue,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: *id,
+                data: Some(egui::accesskit::ActionData::NumericValue(value)),
+            })
+        };
+        for (value, expected) in [
+            (4.25, Some(4.25)),
+            (-5.0, Some(0.0)),
+            (50.0, Some(10.0)),
+            (2.0, None),
+            (f64::NAN, None),
+            (f64::INFINITY, None),
+        ] {
+            let (_, actions) = frame(&mut app, vec![request(value)], false);
+            if let Some(expected) = expected {
+                assert!(
+                    matches!(actions.as_slice(), [UiAction::Seek(time)] if time.as_seconds_f64() == expected)
+                );
+            } else {
+                assert!(actions.is_empty());
+            }
+            assert!(frame(&mut app, vec![], false).1.is_empty());
+        }
+        let (tree, actions) = frame(&mut app, vec![request(5.0)], true);
+        assert!(actions.is_empty());
+        assert!(
+            tree.nodes
+                .iter()
+                .find(|(candidate, _)| candidate == id)
+                .expect("disabled slider")
+                .1
+                .is_disabled()
+        );
+        let action = |action| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: *id,
+                data: None,
+            })
+        };
+        for (kind, expected) in [
+            (egui::accesskit::Action::Increment, 7.0),
+            (egui::accesskit::Action::Decrement, 0.0),
+        ] {
+            let (_, actions) = frame(&mut app, vec![action(kind)], false);
+            assert!(
+                matches!(actions.as_slice(), [UiAction::Seek(time)] if time.as_seconds_f64() == expected)
+            );
+        }
+        let (_, actions) = frame(
+            &mut app,
+            vec![request(1.5), action(egui::accesskit::Action::Increment)],
+            false,
+        );
+        assert!(
+            matches!(actions.as_slice(), [UiAction::Seek(time)] if time.as_seconds_f64() == 6.5)
+        );
+        let mut wrong_target = request(5.0);
+        if let egui::Event::AccessKitActionRequest(request) = &mut wrong_target {
+            request.target_node = egui::Id::new("other seek").accesskit_id();
+        }
+        assert!(frame(&mut app, vec![wrong_target], false).1.is_empty());
+        for wrong_tree in [false, true] {
+            let mut invalid = request(5.0);
+            if let egui::Event::AccessKitActionRequest(request) = &mut invalid {
+                if wrong_tree {
+                    request.target_tree.0 = "00000000-0000-0000-0000-000000000001"
+                        .parse()
+                        .expect("test tree ID");
+                } else {
+                    request.data = Some(egui::accesskit::ActionData::Value("5".into()));
+                }
+            }
+            assert!(frame(&mut app, vec![invalid], false).1.is_empty());
+        }
+        frame(
+            &mut app,
+            vec![action(egui::accesskit::Action::Focus)],
+            false,
+        );
+        let stroke = |key| KeyStroke {
+            key,
+            modifiers: Modifiers::default(),
+        };
+        assert!(app.owns_seek_shortcut(&stroke(Key::Character('r'))));
+        assert!(app.owns_seek_shortcut(&stroke(Key::Space)));
+        assert!(!app.owns_seek_shortcut(&stroke(Key::Tab)));
+        assert!(!app.owns_seek_shortcut(&stroke(Key::ArrowRight)));
+        assert!(app.owns_seek_shortcut(&KeyStroke {
+            key: Key::ArrowRight,
+            modifiers: Modifiers {
+                control: true,
+                ..Default::default()
+            }
+        }));
+        app.prefix_started = Some(Instant::now());
+        assert!(app.owns_seek_shortcut(&stroke(Key::ArrowRight)));
+        app.prefix_started = None;
+        app.palette_open = true;
+        assert!(!app.owns_seek_shortcut(&stroke(Key::Character('r'))));
+        app.palette_open = false;
+        for (key, expected) in [
+            (egui::Key::ArrowRight, 7.0),
+            (egui::Key::ArrowLeft, 0.0),
+            (egui::Key::Home, 0.0),
+            (egui::Key::End, 10.0),
+        ] {
+            let key = egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let (_, actions) = frame(&mut app, vec![key], false);
+            assert!(
+                matches!(actions.as_slice(), [UiAction::Seek(time)] if time.as_seconds_f64() == expected)
+            );
+        }
+        app.state = PlaybackState::Faulted;
+        assert!(frame(&mut app, vec![request(5.0)], false).1.is_empty());
+    }
+
+    #[test]
+    fn accessible_image_position_keeps_shell_order_and_dirty_guard() {
+        let Some(root) = isolated_test_root(
+            "tests::accessible_image_position_keeps_shell_order_and_dirty_guard",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let paths = [root.join("z.png"), root.join("a.png"), root.join("m.png")];
+        let tab = app.tabs.open_new(paths[0].clone(), MediaKind::Image);
+        app.path = Some(paths[0].clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.state = PlaybackState::Paused;
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let history = app.edits[&tab].clone();
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: paths
+                .iter()
+                .enumerate()
+                .map(|(index, path)| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![index as u8]),
+                    path: path.clone(),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        app.folder_snapshot
+            .as_mut()
+            .expect("snapshot")
+            .items
+            .insert(
+                1,
+                towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![4]),
+                    path: root.join("ignored.wav"),
+                    kind: MediaKind::Audio,
+                },
+            );
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        app.ui_context = Some(context.clone());
+        let frame = |app: &mut Application<_>, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(500.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |_| {
+                    app.draw_seek_bar(
+                        &context,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 270.0), egui::pos2(500.0, 300.0)),
+                        None,
+                        &mut actions,
+                    )
+                },
+            );
+            (
+                output.platform_output.accesskit_update.expect("tree"),
+                actions,
+            )
+        };
+        frame(&mut app, vec![]);
+        let (tree, _) = frame(&mut app, vec![]);
+        let (id, node) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Image position"))
+            .expect("image slider");
+        assert_eq!(node.numeric_value(), Some(1.0));
+        assert_eq!(node.min_numeric_value(), Some(1.0));
+        assert_eq!(node.max_numeric_value(), Some(3.0));
+        let request = |value| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::SetValue,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: *id,
+                data: Some(egui::accesskit::ActionData::NumericValue(value)),
+            })
+        };
+        for (value, index) in [(2.0, 1), (50.0, 2), (1.5, 1)] {
+            let (_, actions) = frame(&mut app, vec![request(value)]);
+            assert!(
+                matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if path == &paths[index])
+            );
+        }
+        assert!(frame(&mut app, vec![request(1.0)]).1.is_empty());
+        let (_, actions) = frame(&mut app, vec![request(3.0)]);
+        app.handle_ui_action(actions[0].clone());
+        assert!(
+            matches!(app.pending_guard, Some(GuardedAction::Navigate(ref path)) if path == &paths[2])
+        );
+        assert_eq!(app.path.as_ref(), Some(&paths[0]));
+        assert_eq!(app.edits[&tab], history);
+        let (tree, actions) = frame(&mut app, vec![request(2.0)]);
+        assert!(actions.is_empty());
+        assert!(
+            tree.nodes
+                .iter()
+                .find(|(candidate, _)| candidate == id)
+                .expect("disabled image slider")
+                .1
+                .is_disabled()
+        );
     }
 
     #[test]

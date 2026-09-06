@@ -90,7 +90,7 @@ command paletteはtitle bar直下の暗いpanelへまとめ、全幅の検索欄
 
 検索欄のCtrl+C／Ctrl+X／Ctrl+VはWindowsのテキストクリップボードを使い、外部アプリと文字列をやり取りできます。画像や選択範囲をクリップボードへコピーする機能ではありません。
 
-Windows UI AutomationへUI情報と操作を接続し、Welcome・メニュー・command paletteのボタン操作と検索文字列の設定を確認しました。スクリーンリーダーでの全画面操作や、timelineなど独自描画部品の意味情報の確認は未完了です。
+Windows UI AutomationへUI情報と操作を接続し、Welcome・メニュー・command paletteの操作に加え、再生位置とフォルダー内の画像位置を値として変更できます。スクリーンリーダーでの全画面操作や、trim handle・selectionなど残る独自描画部品の対応は未完了です。
 
 F11またはViewのToggle fullscreenで、現在monitorのborderless fullscreenへ切り替えられます。通常のbar・timelineは隠れ、画像・動画・readingを広く表示します。pointerを下端へ移すと、映像のサイズを変えずにstatus／seek barとfullscreen解除buttonが現れます。操作部から離れると隠れますが、Seekのdrag中はreleaseまで保持します。Escapeは開いたoverlayを先に閉じ、次に通常windowへ戻ります。paletteやfilmstrip、保存確認はfullscreenでも利用でき、Tまたはstatus barのtimeline buttonで通常windowへ戻ってtimelineを表示します。復帰時は元の位置・size・最大化状態を保ちます。Enterは割り当てていません。
 
@@ -99,6 +99,8 @@ fullscreenの画像・動画・readingでは、操作が2秒ないとcursorも�
 timelineを閉じているときはstatus上端の細いbarで動画・音声の位置を変更できます。画像では同じfolderの画像順へ移動します。dragは離した時に一回だけ確定し、再生終了後のSeekは一時停止状態になります。command paletteは検索後に上下keyで候補を選び、Enterで実行、Escapeで閉じられます。
 
 timelineと細いbarのSeek／folder移動は左buttonのclick・dragで行います。右・中・追加buttonのdragでは位置を変更しません。
+
+シーク部にfocusがある時は、左右キーで5秒（画像では1枚）ずつ、Home／Endで先頭／末尾へ移動します。Tabで別の部品へ移り、回転・再生・Undoなど他の操作は現在のshortcut設定を使います。画像の未保存確認と、動画・音声のsource時刻基準は変わりません。
 
 Seekの確定にはbuttonを離した位置を使い、その後のcursor移動を混ぜません。Escape・focus喪失・別commandで取消し、押し直すまで再開しません。fullscreen中の最初のEscapeもSeekの取消だけを行います。
 

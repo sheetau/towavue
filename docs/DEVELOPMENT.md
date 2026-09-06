@@ -4,6 +4,15 @@
 
 ## 1. 最初に試す
 
+### 再生・画像位置のUIA値操作とfocus（2026-09-06 23:30 JST）
+
+- 3356d0dの通常release、PID 40456（開始UTC 14:02:02.2054712Z）ではcompact bar/timelineともSliderがなかった。既存widgetへ名前、現在値、範囲、stepと値操作を追加し、再生はsource秒、画像はShell snapshotの画像だけを数えた1始まりの位置を使う。範囲外の有限値はclampし、画像は整数へ丸める。既存Seek/未保存guardへ接続し、直接値変更は進行中pointer gestureを取り消す。
+- headless回帰は変更前にnamed slider欠落で失敗。値の上下限・NaN/無限・別tree/node・文字列の拒否、連続event順、discard passを跨ぐ一回実行、disabled/modal、Shell順・非画像除外・編集保持、pointer release取消を検査する。focus中のLeft/Rightは5秒または1枚、Home/Endは端点へ移動する。他のshortcut/prefixは既存dispatcherへ渡し、synthetic focus keyは新しい経路で実行しない。
+- 中間video PID 3144（14:10:15.8284440Z）はcompact SetValue 30/5.25、timeline 12.5、Home/Endが通過。helperによるAlt付きforeground取得直後の最初のRightは未反映で、同じprocessを実foreground確認し、Altを送らないRightで10.25を確認した。画像試行でも同じ補助入力の初回未反映は成功に数えない。固定egui-winitのfocus-wide key captureにはseek focus限定のshortcut経路を追加した。
+- 画像中間PID 43640（14:12:37.0796278Z）の3枚目は誤って既存の16385px上限制約fixtureを選び、期待通りdimension errorとなった。新しい画像不具合とは扱わず、所有する03.pngだけを正常red素材へ変更。PID 47700（14:16:36.8496656Z）ではSetValue、R、移動guard、disabled値拒否、Cancel後の編集保持、Ctrl+Z、Endが通過した。
+- 最終通常release SHA-256 `C470B847FD6EEA642D4F79A1AA189845FC8AF30F389F23F64776EA91300DBC95`、video PID 43868（14:23:24.2557298Z）のまとめた試験出力は欠落したため判定から除外。同じ生存processを照合し直し、timeline 7.25→Rightで12.25、SpaceのPlaying/Paused、SetValue 14.5とfocus枠を再確認して正常終了した。画像PID 31432（14:29:21.8801458Z）では1→2、focus中R、SetValue 3によるUnsaved edits/IsModal、値2保持・disabled、追加SetValueのElementNotEnabledException、Cancel/編集保持、Ctrl+Z、Endで3、正常終了が通過。直前の起動PID 35680はFFmpeg DLLのPATH設定を省いた環境で既に終了しており、UI試験には含めない。
+- 248 tests（app 132/core 36/runtime 76/integration 4）、format、Clippy、debug/release buildが通過し、既存live ignore 3件は残る。画像stderrは空。動画stderrにはD3d11va選択、seek latencyと既存AAC末尾timestamp警告があり、性能gate計測ではない。capture `target/tmp/h1-uia-timeline-focus.png`と`h1-uia-image-range-focus.png`は所有windowに限定して目視確認した。Save/clipboard/OS設定/原本変更なし。trim grip・selection・全screen reader/focus順や既存実環境/配布gateは未完了。
+
 ### Shell STA待機によるUIA反復停止の修正（2026-09-06 22:55 JST）
 
 - 5f13a18 CI 34036970810は成功。素材を読まずdirtyなtabだけを作る一時比較PID 48072（開始UTC 13:45:19.1643086Z）は10往復成功。画像読込みだけを加えた42532（13:46:28.5349412Z）も10往復成功し、folder情報取得だけを加えた45108（13:46:28.5455480Z）は3往復後、4回目のClose window検索で`0x80131505`となった。画像rendererやAccessKitの名前処理ではなく、Shell処理を含む経路へ絞れた。
@@ -19,7 +28,7 @@
 - 3edc5b8 CI 34033827557は成功。所有PNGのClose window/Cancel反復を継続調査した。独立Rust clientはMTAのCUIAutomation8を使い、connection/transaction timeoutを各2秒に設定する。本体releaseのPID 19604（開始UTC 12:46:30.9088737Z）は2往復後、3回目のCancel検索で`0x80131505`。managed UIA wrapperや短命clientだけの問題ではない。
 - 一時コピーの固定accesskit_windows 0.32.1へWM_GETOBJECT・GetPropertyValue・Navigateの入口/出口を記録した。PID 39184（12:57:53.1525908Z）でも同じ失敗が出るが、記録したproperty/navigation呼出しは戻り、本体のtree更新も継続する。追加の親edge観測に明白な循環は見つからない。未計測のCOM呼出しやWindows内部待ちまでは除外できず、「providerは正常」とは判定しない。root COM参照cacheとWM_GETOBJECT対象制限の比較も失敗し、採用しない。
 - 本体のUI縮小比較では通常buttonだけが5往復成功、top barだけは4回目、chrome buttonだけと通常のサイズ指定buttonだけは7回目の検索で失敗した。通常buttonの5回成功を長期安定の証拠にしない。tooltip削除、直接の名前設定、glyphの別描画も改善しない。最終比較PID 35976（13:39:20.1422166Z）はサイズ指定buttonと実保存確認だけを残し、frameの描画/presentを省略しても6往復後、7回目のClose window検索で失敗。描画装置は初期化したままである。
-- ignored `target/tmp/uia-native-probe/`に独立clientと小さなwinit/egui providerを作成。最初のproviderのCancel無効は試験側のrepaint deadline処理不足で、修正後は通過した。`0x80040200`はUIA_E_NOTSUPPORTEDであり、本体のtimeoutとは区別する。最小providerのサイズ指定button/同等guardはdebugで10往復、release PID 11040（13:28:08.7755953Z）で15往復成功。20ms周期の更新を加えたrelease PID 40340（13:33:48.6561625Z）も20往復成功した。
+- ignored `target/tmp/uia-native-probe/`に独立clientと小さなwinit/egui providerを作成。最初のproviderのCancel無効は試験側のrepaint deadline処理不足で、修正後は通過した。`0x80040200`はUIA_E_ELEMENTNOTENABLEDであり、本体のtimeoutとは区別する（後続の固定Windows定数との照合で旧名称誤記を訂正）。最小providerのサイズ指定button/同等guardはdebugで10往復、release PID 11040（13:28:08.7755953Z）で15往復成功。20ms周期の更新を加えたrelease PID 40340（13:33:48.6561625Z）も20往復成功した。
 - 本体binaryへ一時組込みして同じ依存解決で比較すると、PID 34164（13:35:03.1186771Z）は15往復成功。guardのID/Export button構造を合わせた43796（13:35:57.0205806Z）、本体のwindow設定/font/style/mouse hookを加えた36908（13:36:45.1889470Z）、renderer初期化を加えた41556（13:37:34.9077465Z）、Applicationの常駐workerも作成した41788（13:38:21.6232113Z）も各15往復成功。実media読込みや本体のevent/state処理全部を再現した試験ではなく、原因は依然未確定。
 - 既存headless 5往復を、nativeで観測したFocus→Clickの順へ合わせ、返されたfocus IDがtree内に存在することも検査する。全一時production変更、依存override、traceを除去し、通常buildへ戻す。依存更新やUI縮小は修正として残さない。次は本体のmedia読込み後の状態・event処理と、この通過providerの差を比較する。
 - 復元後の通常release SHA-256は`6BF0D9EC65BA79BC6EC392631D79AAA561622ECF6A5BBD3742E42D8E883AC3D8`。PID 13884（13:42:03.3737141Z）でも2往復後の3回目Cancel検索が同じtimeoutで失敗した。WM_NULLは応答し、Escape/Undo後に正常終了、stderrは空。244 tests（app 129/core 36/runtime 75/integration 4）、format、Clippy、両buildの通過と、native問題が未解決であることを分けて記録する。既存live ignore 3件は実機成功の証拠に含めない。

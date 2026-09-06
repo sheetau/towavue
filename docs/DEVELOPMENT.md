@@ -4,6 +4,21 @@
 
 ## 1. 最初に試す
 
+### 初回画像の画面用変換（2026-09-06 19:27 JST）
+
+- 6000×6000 PNGのRGBA→egui変換を一時exampleで比較した。全画像のalpha事前走査は末尾だけ半透明の条件で約31→37msへ悪化したため不採用。行単位のopaque判定では、6回の計測が不透明31.427～32.069→19.261～20.341ms、末尾だけ半透明31.677～33.725→19.409～20.634ms、全体半透明46.548～48.214→39.486～40.456msで、全画素が従来変換と一致した。このexampleは削除し、最終コードは固定Rustのlintに合わせて4-byte配列sliceを使う。
+- alpha=255だけの行はbyte値をそのままColor32へ渡し、混在行は既存eguiの変換を使う。独自premultiply/丸め、画質変更、decode/thread/cache変更はない。alpha全256値、複数RGB値、幅1/3/256/257、全opaque・行末の半透明・先頭の透明を従来ColorImage全体へ照合し、変更前後とも一致。現在animation frameとreading pageのgraphics復旧testも通過した。
+- native比較は基準機・960×576・通常release。既存6000×6000 PNGを異なる5 pathへコピーし、小画像から一方向に初めて開く。対象HWNDへRightのkeydown/upを一回ずつ送り、2ms間隔でfile名とPaused titleを確認し、各完了後500ms空ける。appのdecode/texture cacheにはないがOS file cacheはwarmであり、cold-storage・初回process起動・GPU Present/物理表示の測定ではない。
+
+| 初訪問の大画像5枚 | 最小 | 中央値 | 最大 |
+| --- | ---: | ---: | ---: |
+| 5d1d529、PID 372 | 222.005ms | 233.814ms | 235.034ms |
+| 最終行単位変換、PID 29536 | 217.178ms | 219.187ms | 219.640ms |
+
+- foreground確認済みの最終画像captureは表示領域498×498＝248,004 pixelsが完全一致。lint調整前の中間PID 24964も一致したが、表は最終binaryの測定だけを使う。private memoryの5点は最終674.33～1136.78MiBで、allocator/texture lifecycleを含む瞬間値。cache上限やメモリ削減、全codec・透明度配置での速度保証ではない。decodeとGPU uploadは依然必要で、初回切替を無停止にする変更ではない。
+- 全3所有windowはclean titleで通常終了し、Save・source変更・OS設定変更なし。helper/captures/空のstderr logはignoredの`target/tmp/h1-image-first*`。234 tests（app 120/core 35/runtime 75/integration 4）・format・Clippy・両buildが通過。既存live test 3件はignoreのままで実deviceの証明ではない。
+- 最終PID開始UTC: 2026-09-06T10:26:52.4330466Z。最終binary SHA-256: `1336B3EEF661A5DAC75754C4BBCCFEABC84C82D2AD30BC690B5DF2ADB2D6A922`、baseline: `4BDD4B90BC94AEC6B5C11D14E85C5B6F69C577D8384F95E021B5BB001DCEDCA1`。大画像5枚はすべてSHA-256 `7456E01DB2237E3D4F120F9EE9A9B50DCC0019CB87AA31C37C1636FAD6538243`。
+
 ### 静止画の再訪texture再利用（2026-09-06 19:18 JST）
 
 下記decode cache試験と同じ素材・通常release・960×576・5往復・title判定で、app側のtexture再利用を比較した。file名とPaused titleの更新はGPU Presentより先に起こりうるため、物理表示完了時間ではない。

@@ -333,10 +333,25 @@ impl ImagePresentation {
 }
 
 fn color_image(frame: &towavue_runtime_windows::DecodedImageFrame) -> egui::ColorImage {
-    egui::ColorImage::from_rgba_unmultiplied(
-        [frame.width as usize, frame.height as usize],
-        &frame.rgba,
-    )
+    let size = [frame.width as usize, frame.height as usize];
+    assert_eq!(size[0] * size[1] * 4, frame.rgba.len());
+    let mut pixels = Vec::with_capacity(size[0] * size[1]);
+    for row in frame.rgba.chunks_exact(size[0].max(1) * 4) {
+        let row = row.as_chunks::<4>().0;
+        // Opaque rows need no alpha conversion; mixed rows keep egui's exact rounding.
+        if row.iter().all(|pixel| pixel[3] == 255) {
+            pixels.extend(
+                row.iter()
+                    .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3])),
+            );
+        } else {
+            pixels.extend(
+                row.iter()
+                    .map(|p| Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3])),
+            );
+        }
+    }
+    egui::ColorImage::new(size, pixels)
 }
 
 #[derive(Clone, Copy)]
@@ -8658,6 +8673,43 @@ mod tests {
             assert_eq!(position.as_seconds_f64(), 10.0 + 2.0 * f64::from(rate));
             assert_eq!(clock.position(), position);
             assert_eq!(clock.due_at(position), clock.wall_anchor + elapsed);
+        }
+    }
+
+    #[test]
+    fn image_color_conversion_matches_egui_for_opaque_and_transparent_rows() {
+        for width in [1, 3, 256, 257] {
+            let mut rgba = Vec::new();
+            for alpha in 0..=255 {
+                for x in 0..width {
+                    let value = x as u8;
+                    rgba.extend_from_slice(&[value, 255 - value, value / 2, alpha]);
+                }
+            }
+            let mut frame = towavue_runtime_windows::DecodedImageFrame {
+                width,
+                height: 256,
+                rgba,
+                delay: Duration::ZERO,
+            };
+            let compare = |frame: &towavue_runtime_windows::DecodedImageFrame| {
+                assert_eq!(
+                    color_image(frame),
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [frame.width as usize, frame.height as usize],
+                        &frame.rgba,
+                    )
+                );
+            };
+            compare(&frame);
+            for pixel in frame.rgba.as_chunks_mut::<4>().0 {
+                pixel[3] = 255;
+            }
+            compare(&frame);
+            *frame.rgba.last_mut().expect("last alpha") = 128;
+            compare(&frame);
+            frame.rgba[3] = 0;
+            compare(&frame);
         }
     }
 

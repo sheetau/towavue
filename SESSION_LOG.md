@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 19:27 JST - reduce initial image color-conversion work
+
+- Trigger/evidence: previous turn pushed 5d1d529 (progress); CI 34027138464 remains in progress at inspection. Audit initial image work after bounded revisit caching. Temporary component profiling finds about 31-32ms of opaque RGBA conversion; a whole-image opacity scan regresses late-transparency cases and is rejected.
+- Change: record the contract in ARCHITECTURE, then convert opaque rows directly to Color32 while preserving egui's exact unmultiplied conversion for mixed rows. Row-wise prototype takes about 19-20ms for the same opaque image and retains exact pixels for opaque, last-pixel translucent and fully translucent cases. No decoder, quality, worker, cache, dependency or unsafe changes.
+- Verification: equivalence regression passes before and after for all alpha values, varied colors, widths 1/3/256/257, opaque and mixed rows. Graphics restoration regressions, format, Clippy, 234 tests (app 120/core 35/runtime 75/integrations 4) and debug/release builds pass; three existing live ignores are not hardware proof. Resolve fixed-toolchain chunk lint using array slices and remove the temporary profile example before final build.
+- Native: baseline PID 372 and final PID 29536 each open five distinct, uncached copies of the same 6000x6000 PNG in a normal 960x576 window. Title-ready median changes 233.814 to 219.187ms, not physical presentation latency or cold-storage time. Foreground-verified final image captures match all 248004 image pixels. Intermediate pre-lint PID 24964 is excluded from final timing table. DEVELOPMENT records hashes, method and coarse memory limits.
+- Cleanup/status: all three owned windows close normally with clean titles, no Save or source/OS changes; copies/helpers/captures/logs remain ignored under target/tmp/h1-image-first*. h1_active. Next audit first-visit/rapid-navigation behavior and remaining launch-critical draft/UX gaps; physical input/DPI/device/distribution and unanswered owner choices remain incomplete.
+
 ## 2026-09-06 19:18 JST - reuse bounded static-image textures
 
 - Trigger/evidence: continue H1 after 9be0d14 (progress), CI 34026112273 succeeds. Repeated 6000x6000 image upload/render/Present takes 30.626-71.356ms in a temporary instrumented baseline, beyond the already-cached decode. Record the scoped texture contract before implementation.

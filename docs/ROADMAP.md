@@ -280,3 +280,5 @@ reading modeの固定8pxの隙間と等分枠による中心ずれを確認し�
 6000×6000 PNGへ戻るたび約185msの再decodeを確認し、既存worker内に静止画8件・256 MiBのLRU cacheを追加した。RGBAをArc共有し、file size/更新時刻の失効、cache hitの要求予算、animation/大容量の除外を検証。通常windowの5往復でtitle完了までの中央値は220.651→49.705ms、初回/cached表示の248,004 pixelsは一致し、所有fixture差替えも新画像を表示した。232 tests、Clippy、両buildと3fddd7a CIが通過。初回decode・GPU upload・先読み・実環境/配布を含むH1全体は継続中。
 
 続く再訪計測で反復texture変換/uploadを確認し、同じdecode identityの静止画textureを最大8件・RGBA相当256 MiBで再利用するようにした。graphics復旧開始で破棄し、古いfile内容をpathだけで再利用しない。同条件5往復のtitle完了中央値は49.705→16.500ms。連続31入力とscratch差替え後の正しい画像、upload deltaのないhit、上限/除外/復旧を確認し、233 tests・Clippy・両buildと9be0d14 CIが通過。初回表示・実device/配布などのlaunch gateは残り、H1は継続する。
+
+初回画像の画面用変換も測定し、行内が全opaqueの場合だけalpha変換を省くようにした。透明/半透明の既存egui変換とsource RGBAを維持する。通常releaseで未cacheの6000×6000 PNGを5枚開くtitle中央値は233.814→219.187ms、表示248,004 pixelsは一致。全alpha値と混在行の回帰、234 tests・Clippy・両buildが通過。OS file cacheはwarmであり、cold-storage、decode/uploadの無停止化やlaunch全体の完了ではない。

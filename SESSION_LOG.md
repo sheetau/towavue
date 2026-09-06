@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 16:20 JST - retain terminal video while seeking into an audio tail
+
+- Trigger/evidence: previous turn pushed 09537c6 (progress); CI 34018643905 remains in progress. New VFR/unequal-stream decode matrix passes, but baseline normal release PID 35920 turns black after one posted Right into an eight-second audio tail beyond one-second video. Runtime reports one hardware frame, zero presented and one dropped.
+- Contract/change: the first pending frame with PTS before the session target is the decoder's terminal source preview, not a late playback frame. Exempt it from late drop and from app A/V drift sampling; preserve ordinary frame dropping, original timestamps and the continuing audio clock. No new state, worker/device/dependency/unsafe code or CPU transfers.
+- Verification: expand real-session app regression: old drop returns one instead of zero; fixed terminal retention and ordinary late-frame drop pass. New software test generates MP4/H.264 and MKV/FFV1 with 1/4 and 4/1 second video/audio, verifies nonuniform frame gaps and final pixels/PTS for both combined and video-only decode. Format, Clippy, 223 tests (app 112/core 35/runtime 72/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: fixed PID 46196 retains final 0.9-second frame at approximately six seconds, continues playing and reaches audio EOF. Seek generation reports hardware 1/presented 1/dropped 0/CPU transfers 0; seek 25.279ms, retained app drift sample max 7.561ms. This is not a new long-duration performance proof. Both owned windows close normally, no source save or OS settings; generated media/captures/logs ignored.
+- Status/next: h1_active. Investigate separate FFmpeg hover-thumbnail failure beyond the video's end, observed in baseline bucket 19. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication. Prior extra SendKeys input cause remains unproven.
+
 ## 2026-09-06 16:14 JST - bound source seeks and preserve terminal video preview
 
 - Trigger/evidence: previous turn pushed 8f9081e (progress); CI 34018200368 succeeds. Baseline release PID 27820 receives one posted Right at a two-second EOF, shows Position 6.993s and loses the video.

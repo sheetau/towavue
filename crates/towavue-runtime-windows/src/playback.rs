@@ -353,7 +353,8 @@ impl PlaybackSession {
     pub fn drop_video_before(&mut self, cutoff: MediaTime) -> u64 {
         let mut dropped = 0;
         while let Some(time) = self.pending_video_time() {
-            if time >= cutoff {
+            // Only terminal source preview may precede the seek target.
+            if time >= cutoff || (time < self.target && self.current_video.is_none()) {
                 break;
             }
             self.pending_video.take();

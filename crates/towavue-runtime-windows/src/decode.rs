@@ -2105,6 +2105,92 @@ mod tests {
     }
 
     #[test]
+    fn terminal_seek_matches_full_decode_with_unequal_streams_and_vfr() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let ffmpeg =
+            std::path::PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+                .join("bin/ffmpeg.exe");
+        for (extension, codec) in [("mkv", "ffv1"), ("mp4", "libopenh264")] {
+            for (video_seconds, audio_seconds) in [(1, 4), (4, 1)] {
+                let path = std::env::temp_dir().join(format!(
+                    "towavue-terminal-{unique}-{video_seconds}-{audio_seconds}.{extension}"
+                ));
+                let generated = std::process::Command::new(&ffmpeg)
+                    .args(["-v", "error", "-f", "lavfi", "-i"])
+                    .arg(format!(
+                        "testsrc2=size=160x96:rate=10:duration={video_seconds}"
+                    ))
+                    .args(["-f", "lavfi", "-i"])
+                    .arg(format!("sine=sample_rate=48000:duration={audio_seconds}"))
+                    .args([
+                        "-vf",
+                        "select='not(eq(mod(n,3),1))'",
+                        "-fps_mode",
+                        "vfr",
+                        "-c:v",
+                        codec,
+                        "-c:a",
+                        "aac",
+                    ])
+                    .arg(&path)
+                    .output()
+                    .expect("generate unequal VFR fixture");
+                assert!(
+                    generated.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&generated.stderr)
+                );
+                let mut reference = None;
+                let mut times = Vec::new();
+                decode_file_from(&path, MediaTime::ZERO, |output| {
+                    if let DecodeOutput::Video(frame) = output {
+                        times.push(frame.presentation_time.as_nanoseconds());
+                        reference = Some(frame);
+                    }
+                    true
+                })
+                .expect("reference decode");
+                assert!(
+                    times.windows(3).any(|t| t[1] - t[0] != t[2] - t[1]),
+                    "fixture must be VFR"
+                );
+                let reference = reference.expect("final source frame");
+                for selected in [None, Some(super::DecodeStream::Video)] {
+                    let mut frames = Vec::new();
+                    super::decode_file_parallel(
+                        &path,
+                        MediaTime::from_nanoseconds(4_100_000_000),
+                        None,
+                        selected,
+                        |output| {
+                            if let super::ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(
+                                frame,
+                            )) = output
+                            {
+                                frames.push(frame);
+                            }
+                            true
+                        },
+                    )
+                    .expect("terminal VFR seek");
+                    assert_eq!(
+                        frames.len(),
+                        1,
+                        "{path:?}, video-only: {}",
+                        selected.is_some()
+                    );
+                    assert_eq!(frames[0].presentation_time, reference.presentation_time);
+                    assert_eq!(frames[0].rgba, reference.rgba);
+                }
+                std::fs::remove_file(path).expect("remove generated terminal fixture");
+            }
+        }
+    }
+
+    #[test]
     fn seek_discards_output_before_target() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")

@@ -254,3 +254,5 @@ foreground確認後もwheelの古い座標参照を通常releaseで再現した�
 再生終了後に左右矢印のSeekだけが無効になる問題を通常releaseで再現し、Endedを既存の停止preview経路へ通した。trim外previewからのPlay復帰・Loading/Faultedの拒否を含む221 tests、Clippy、両buildが通過。通常動画の末尾→先頭frame停止と、30秒音声の末尾→約24.9秒停止を確認。試用中のSendKeysによる余分な操作は原因未確定として記録し、単一のkeydown/up messageによる試験と分けた。H1と実機/配布gateは未完了。
 
 2秒動画の末尾からRightで6秒へ進み黒画面になる問題を通常releaseで再現した。既知durationへSeek/表示を制限し、末尾停止・Play時の先頭/trim開始復帰を追加。parallel decodeは対象以降のframeがないEOFに限り最後の一枚を返し、bounded trimの選別は維持する。222 tests、Clippy、両buildと通常D3D11VA末尾frame/再開、音声Right連打の30秒上限・Leftで25秒復帰が通過。8f9081e CIも成功。追加の長時間性能・実環境matrixを含むH1全体は未完了。
+
+映像1秒・音声8秒の素材で、再生中に約6秒へSeekすると末尾previewがlate-frame dropされる問題を通常releaseで再現した。このframeだけをdrop/同期誤差計測から除外し、通常frameの遅延処理は維持。MP4/MKVの長短stream・VFR末尾画像/PTS照合を含む223 tests、Clippy、両buildが通過。通常D3D11VAで最終映像を保持して音声EOFに達し、Seek後の表示1/drop 0/CPU transfer 0を確認した。音声尾区間のhover thumbnailは別経路として残る。H1と実環境/配布gateは未完了。

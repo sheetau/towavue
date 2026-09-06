@@ -300,6 +300,8 @@ appの絶対/相対Seekは負の時刻を0へ、取得済みの非zero duration�
 
 parallel video decodeは対象時刻より前の最後のowned frameを一枚だけ保持し、対象以降のframeが出れば破棄する。trim上限のないsource previewで対象以降のframeがないままEOFへ達した場合だけ、その最後のframeをVideoFinishedより先に渡す。PTSは書き換えず、appの初期clockはSeek先より前へ戻さない。hardware/software共通で、追加のCPU transfer・device・workerは使わない。bounded trimの選別、取消とconsumer closeの契約は維持する。
 
+再生側へ渡るframeでSeek先より前のPTSを持つのはこの末尾previewだけである。current frameがない時のその一枚はlate-frame dropから除外し、音声だけが続く区間でも表示を保つ。同期すべき動画frameではないためA/V drift sampleにも加えない。対象時刻以降の通常frameの遅延drop・計測は変更しない。
+
 ### H1 live volume
 
 動画面と動画/音声status barの独立したvolume表示では、修飾keyなしの縦wheelで音量を調整する。Line/Pageの1単位またはPointの50 logical pxで10 percentage pointsとし、同一frameのraw eventを合算して0～2倍の既存SetVolume編集へ一度だけ渡す。音声playlist・timeline・filmstrip・tab上のscrollは奪わない。focus喪失、button保持、modal/menu/palette/grid/filmstrip中は受け付けない。smooth scrollの余韻では編集しない。

@@ -1153,7 +1153,12 @@ where
         let due = self.frame_is_due();
         if due {
             let video_time = self.pending_time.take().expect("due frame exists");
-            if let Some(audio_time) = self.audio_master_position() {
+            if let Some(audio_time) = self.audio_master_position()
+                && self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| video_time >= session.target())
+            {
                 self.drift_samples.push(Duration::from_nanos(
                     video_time
                         .as_nanoseconds()
@@ -8296,6 +8301,14 @@ mod tests {
                 }
                 assert!(app.pending_time.is_some(), "terminal video preview");
                 assert_eq!(app.current_position(), time(2));
+                assert_eq!(
+                    app.session
+                        .as_mut()
+                        .expect("session")
+                        .drop_video_before(time(3)),
+                    0,
+                    "the terminal preview is not a late playback frame"
+                );
                 app.advance_media();
                 assert!(
                     app.session
@@ -8309,6 +8322,20 @@ mod tests {
                 assert_eq!(app.current_position(), MediaTime::ZERO);
                 app.seek_to(MediaTime::from_nanoseconds(-1));
                 assert_eq!(app.current_position(), MediaTime::ZERO);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while app.pending_time.is_none() && Instant::now() < deadline {
+                    app.load_next_frame();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                assert!(app.pending_time.is_some(), "ordinary playback frame");
+                assert!(
+                    app.session
+                        .as_mut()
+                        .expect("session")
+                        .drop_video_before(time(1))
+                        > 0,
+                    "ordinary late frames must still be discarded"
+                );
                 app.edits
                     .entry(tab)
                     .or_default()

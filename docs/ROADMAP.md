@@ -230,3 +230,5 @@ preview要求ごとのthread生成を、duration/波形/hover画像それぞれ�
 既定指定のない複数stream素材では、青い本画面からSave Asすると赤い別映像が保存される問題を通常releaseで再現した。trim時だけだったbest-stream指定を全動画/音声exportへ適用し、trimなしのtimestamp処理は維持。無編集・crop・trim・音声のみのdecode照合を含む205 tests・Clippy・両buildが通過し、同じ素材のSave As→再openでも青160×96/monoを確認した。次は残る日常edit/error flowと外観・操作感の監査を続ける。H1全体・実機/配布gateは未完了。
 
 Seek previewがhover位置ではなく左端に現れる問題を通常releaseで確認し、指している位置の上へ中央揃えにした。160×108 logical px以内のaspect-fitと空き高さ制限で縦長・小windowのtrack重なりも防ぐ。描画48組を含む206 tests・Clippy・両build、通常windowの横長/縦長・右端・320×240 timelineが通過。94f97cbのCIも成功。次は画像folderのseek previewなど日常閲覧の外観・操作感を監査する。H1と実機/配布gateは未完了。
+
+画像folderのSeek hoverへ移動先画像とreading page群のpreviewを追加した。Shell順・枚数・縦横・反転を使い、filmstripの単一worker/cacheを共用する。hoverでは移動せず、離脱/overlayで要求を取消し、確定は既存dirty guardを通す。実PNGの非同期完了・描画配置・失敗再要求抑制を含む208 tests、Clippy、両buildが通過。通常windowで単画像/reading/反転・filmstrip・破損page・保存確認と移動を確認し、03e2bd8/90c2021 CIも成功。次はfolder端点へのkeyboard移動など残る日常閲覧を監査する。H1と実機/配布gateは未完了。

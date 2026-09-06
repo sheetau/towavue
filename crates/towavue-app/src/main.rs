@@ -468,6 +468,7 @@ struct Application<N> {
     modifiers: ModifiersState,
     filmstrip_open: bool,
     filmstrip: filmstrip::Filmstrip,
+    image_seek_preview_active: bool,
     grid_open: bool,
     palette_open: bool,
     palette: palette::CommandPalette,
@@ -571,6 +572,7 @@ where
             modifiers: ModifiersState::default(),
             filmstrip_open: false,
             filmstrip,
+            image_seek_preview_active: false,
             grid_open: false,
             palette_open: false,
             palette: palette::CommandPalette::default(),
@@ -1258,6 +1260,7 @@ where
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        self.image_seek_preview_active = false;
         self.video_rect = None;
         let context = root.ctx().clone();
         let status_rect = if self.fullscreen {
@@ -1325,7 +1328,7 @@ where
                 self.path.as_deref(),
                 actions,
             );
-        } else {
+        } else if !self.image_seek_preview_active {
             self.filmstrip.clear();
         }
         if self.palette_open {
@@ -2298,12 +2301,42 @@ where
             if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
                 let target =
                     seekbar::item_index(seekbar::ratio(response.rect, pointer.x), images.len());
-                response.clone().on_hover_text(format!(
-                    "{} / {}  {}",
-                    target + 1,
-                    images.len(),
-                    display_name(&images[target].path)
-                ));
+                if !self.filmstrip_open
+                    && !self.palette_open
+                    && !self.grid_open
+                    && !self.modal_input_blocked()
+                {
+                    let paths: Vec<_> = if self.reading_mode {
+                        snapshot
+                            .reading_items(
+                                &images[target].path,
+                                self.reading_settings.page_count,
+                                self.reading_settings.reversed,
+                            )
+                            .into_iter()
+                            .map(|item| item.path.clone())
+                            .collect()
+                    } else {
+                        vec![images[target].path.clone()]
+                    };
+                    let position = if paths.len() > 1 {
+                        format!("{}–{}", target + 1, target + paths.len())
+                    } else {
+                        (target + 1).to_string()
+                    };
+                    self.image_seek_preview_active = true;
+                    self.filmstrip.show_seek_preview(
+                        &response,
+                        seekbar::ratio(response.rect, pointer.x),
+                        &paths,
+                        &format!(
+                            "{position} / {}  {}",
+                            images.len(),
+                            display_name(&images[target].path)
+                        ),
+                        self.reading_settings.axis,
+                    );
+                }
             }
             if let Some(pointer) = commit {
                 let target =
@@ -2346,26 +2379,14 @@ where
         {
             self.load_hover_thumbnail(duration.mul_f64((bucket as f64 + 0.5) / 20.0), bucket);
         }
-        let anchor = egui::pos2(
-            egui::lerp(response.rect.x_range(), ratio),
-            response.rect.top(),
-        );
-        let mut tooltip = egui::Tooltip::for_enabled(response)
-            .width(160.0)
-            .layout(egui::Layout::top_down(egui::Align::Center));
-        tooltip.popup = tooltip
-            .popup
-            .at_position(anchor)
-            .align(egui::RectAlign::TOP)
-            .align_alternatives(&[]);
-        tooltip.show(|ui| {
+        seekbar::preview_tooltip(response, ratio).show(|ui| {
             if let Some((cached, texture)) = &self.hover_thumbnail
                 && self.media_kind == Some(MediaKind::Video)
                 && *cached == bucket
             {
                 // Reserve space above the track for the caption, frame and tooltip gap.
-                let height =
-                    (anchor.y - response.ctx.viewport_rect().top() - 40.0).clamp(1.0, 108.0);
+                let height = (response.rect.top() - response.ctx.viewport_rect().top() - 40.0)
+                    .clamp(1.0, 108.0);
                 ui.add(
                     egui::Image::new((texture.id(), texture.size_vec2()))
                         .max_size(egui::vec2(160.0, height)),
@@ -6097,6 +6118,126 @@ mod tests {
             11
         );
         assert!(!app.failed_thumbnails.contains(&11));
+    }
+
+    #[test]
+    fn image_seek_previews_follow_shell_order_without_navigating_on_hover() {
+        let Some(root) = isolated_test_root(
+            "tests::image_seek_previews_follow_shell_order_without_navigating_on_hover",
+        ) else {
+            return;
+        };
+        let source = root.join("z-current.png");
+        towavue_runtime_windows::export_media(&towavue_runtime_windows::ExportRequest {
+            source: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/generated/m1/h264-aac.mp4"),
+            target: source.clone(),
+            kind: MediaKind::Image,
+            operations: vec![],
+            hardware_encode: false,
+        })
+        .expect("image fixture");
+        for name in ["a-next.png", "b-last.png"] {
+            std::fs::copy(&source, root.join(name)).expect("page fixture");
+        }
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+        app.path = Some(source.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let edits = app.edits.clone();
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: ["z-current.png", "skip.wav", "a-next.png", "b-last.png"]
+                .into_iter()
+                .map(|name| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![]),
+                    path: root.join(name),
+                    kind: MediaKind::from_path(Path::new(name)).expect("kind"),
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        let context = egui::Context::default();
+        context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let mut time = 0.0;
+        let mut draw = |app: &mut Application<_>, events| {
+            app.filmstrip.finish(&context);
+            time += 0.1;
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            (output, actions)
+        };
+        for reading in [false, true] {
+            app.reading_mode = reading;
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                let (output, actions) = draw(
+                    &mut app,
+                    vec![egui::Event::PointerMoved(egui::pos2(480.0, 548.0))],
+                );
+                assert!(actions.is_empty());
+                assert_eq!(app.path.as_ref(), Some(&source));
+                assert_eq!(app.edits, edits);
+                let images = output
+                    .shapes
+                    .iter()
+                    .filter(|shape| {
+                        matches!(&shape.shape,
+                    egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::Managed(0))
+                    })
+                    .count();
+                if images == if reading { 2 } else { 1 } {
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Text(text) if text.galley.text().contains(if reading { "2–3 / 3  a-next.png" } else { "2 / 3  a-next.png" }))));
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "image seek preview did not complete"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        draw(
+            &mut app,
+            vec![egui::Event::PointerMoved(egui::pos2(480.0, 300.0))],
+        );
+        assert!(!app.image_seek_preview_active);
+        for overlay in 0..4 {
+            app.palette_open = overlay == 0;
+            app.grid_open = overlay == 1;
+            app.filmstrip_open = overlay == 2;
+            app.pending_guard = (overlay == 3).then_some(GuardedAction::Exit);
+            draw(
+                &mut app,
+                vec![egui::Event::PointerMoved(egui::pos2(480.0, 548.0))],
+            );
+            assert!(!app.image_seek_preview_active);
+        }
+        app.pending_guard = None;
+        app.handle_ui_action(UiAction::OpenMedia(root.join("a-next.png"), false));
+        assert!(app.pending_guard.is_some());
+        assert_eq!(app.path.as_ref(), Some(&source));
+        assert_eq!(app.edits, edits);
     }
 
     #[test]

@@ -61,6 +61,22 @@ pub fn ratio(rect: Rect, x: f32) -> f32 {
     ((x - rect.left()) / rect.width().max(1.0)).clamp(0.0, 1.0)
 }
 
+pub fn preview_tooltip(response: &Response, ratio: f32) -> egui::Tooltip<'static> {
+    let anchor = egui::pos2(
+        egui::lerp(response.rect.x_range(), ratio),
+        response.rect.top(),
+    );
+    let mut tooltip = egui::Tooltip::for_enabled(response)
+        .width(160.0)
+        .layout(egui::Layout::top_down(egui::Align::Center));
+    tooltip.popup = tooltip
+        .popup
+        .at_position(anchor)
+        .align(egui::RectAlign::TOP)
+        .align_alternatives(&[]);
+    tooltip
+}
+
 pub fn item_index(ratio: f32, count: usize) -> usize {
     (ratio.clamp(0.0, 1.0) * count.saturating_sub(1) as f32).round() as usize
 }

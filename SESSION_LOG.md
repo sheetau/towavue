@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 14:27 JST - preview image-folder seek destinations
+
+- Trigger/evidence: previous turn pushed 90c2021 (progress); 03e2bd8 and 90c2021 CI succeeded. Normal release PID 40772 shows only position/filename for image seek hover, unlike the draft's destination image/group preview.
+- Contract/change: document destination image and reading-page previews using current Shell snapshot and reading count/axis/reversal. Reuse Filmstrip's existing PreviewLoader, cache, visible-path/generation checks and bounded results; no added worker. Extract shared visible-request update and seek-tooltip placement for both media kinds. Per-frame image-preview usage prevents clearing the shared loader while hovered, but leave/overlay/media/snapshot transitions still clear/cancel. Display up to ten cached 240x160 cards in a 160x108-bounded group; preserve source, active image and dirty-guard commit behavior. No runtime/core/dependency/unsafe changes.
+- Verification: real-PNG app regression covers non-filename Shell order, skipping audio, async single/reading preview completion, unchanged active path/edits on hover, leave/overlay suppression and guarded navigation. Disabling the preview branch makes the completion assertion fail, then restore. Filmstrip drawing test covers horizontal/vertical/reversed placement, existing-result reuse, failed-page no-retry and clear. Format, Clippy, 208 tests (app 99/core 35/runtime 70/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: PID 44740 shows destination thumbnail on the same source and x=720 hover, then two-page reading, vertical/reversed previews and filmstrip handoff. Rotate in single-image mode then click another destination triggers unsaved guard; Escape/Undo keep source and allow subsequent normal navigation to the previewed image. Broken JPEG shows No preview without changing current image. Both owned windows close normally. No source save or OS change; captures/logs remain ignored.
+- Status/next: h1_active. Continue viewing/interaction audit, including keyboard access to folder boundaries and remaining draft priorities. Full-image scrub, physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 14:14 JST - anchor and bound seek previews
 
 - Trigger/evidence: previous turn pushed 03e2bd8 (progress); 94f97cb CI succeeded, 03e2bd8 CI remains in progress. Compare local draft seek-hover screenshots with current release: PID 2932 hovers at x=720 but thumbnail appears at the track's left edge. Existing on_hover_ui anchors the whole response and displays raw texture size without a height bound.

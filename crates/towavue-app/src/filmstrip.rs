@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use egui::{Align2, Color32, Context, FontId, Rect, TextureHandle, Vec2};
-use towavue_core::FolderSnapshot;
+use towavue_core::{FolderSnapshot, MediaKind, ReadingAxis};
 use towavue_runtime_windows::{PreviewCache, PreviewLoader, VISIBLE_PREVIEW_LIMIT};
 
 use crate::{UiAction, display_name, format_time, media_time};
@@ -61,6 +61,56 @@ impl Filmstrip {
             });
             self.previews.insert(preview.path, result);
         }
+    }
+
+    pub fn show_seek_preview(
+        &mut self,
+        response: &egui::Response,
+        ratio: f32,
+        paths: &[PathBuf],
+        caption: &str,
+        axis: ReadingAxis,
+    ) {
+        self.set_visible(
+            paths
+                .iter()
+                .map(|path| (path.clone(), MediaKind::Image))
+                .collect(),
+        );
+        crate::seekbar::preview_tooltip(response, ratio).show(|ui| {
+            let height =
+                (response.rect.top() - response.ctx.viewport_rect().top() - 40.0).clamp(1.0, 108.0);
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(160.0, height), egui::Sense::hover());
+            for (index, path) in paths.iter().enumerate() {
+                let cell = crate::reading_page_rect(rect, paths.len(), index, axis, 2.0);
+                match self.previews.get(path) {
+                    Some(Ok((texture, _))) => {
+                        let scale = (cell.width() / texture.size_vec2().x)
+                            .min(cell.height() / texture.size_vec2().y);
+                        ui.painter().image(
+                            texture.id(),
+                            Rect::from_center_size(cell.center(), texture.size_vec2() * scale),
+                            Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
+                    }
+                    preview => {
+                        ui.painter().with_clip_rect(cell).text(
+                            cell.center(),
+                            Align2::CENTER_CENTER,
+                            if preview.is_some() {
+                                "No preview"
+                            } else {
+                                "…"
+                            },
+                            FontId::proportional(11.0),
+                            Color32::GRAY,
+                        );
+                    }
+                }
+            }
+            ui.add(egui::Label::new(caption).truncate());
+        });
     }
 
     pub fn show(
@@ -202,6 +252,10 @@ impl Filmstrip {
                     }
                 });
             });
+        self.set_visible(wanted);
+    }
+
+    fn set_visible(&mut self, mut wanted: Vec<(PathBuf, MediaKind)>) {
         let visible: Vec<_> = wanted.iter().map(|(path, _)| path.clone()).collect();
         if visible != self.visible {
             self.previews.retain(|path, _| visible.contains(path));
@@ -225,6 +279,109 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, MediaKind, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn seek_preview_reuses_visible_results_and_preserves_page_layout() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-seek-preview-{}", std::process::id()));
+        let cache = PreviewCache::new(root.join("cache")).expect("cache");
+        let mut strip = Filmstrip::new(cache, || {}).expect("worker");
+        let context = Context::default();
+        context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let first = root.join("first.png");
+        let second = root.join("second.png");
+        let textures = [Color32::RED, Color32::BLUE].map(|color| {
+            context.load_texture(
+                format!("{color:?}"),
+                egui::ColorImage::filled([240, 160], color),
+                Default::default(),
+            )
+        });
+        for (path, texture) in [(&first, &textures[0]), (&second, &textures[1])] {
+            strip
+                .previews
+                .insert(path.clone(), Ok((texture.clone(), None)));
+        }
+        let track = Rect::from_min_max(egui::pos2(8.0, 260.0), egui::pos2(472.0, 272.0));
+        let mut time = 0.0;
+        let mut draw = |strip: &mut Filmstrip, paths: &[PathBuf], axis| {
+            let mut output = egui::FullOutput::default();
+            for _ in 0..5 {
+                time += 1.0;
+                output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 300.0),
+                        )),
+                        time: Some(time),
+                        events: vec![egui::Event::PointerMoved(track.center())],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let response = ui.allocate_rect(track, egui::Sense::hover());
+                        strip.show_seek_preview(&response, 0.5, paths, "2–3 / 4  first.png", axis);
+                    },
+                );
+            }
+            output
+        };
+        for axis in [ReadingAxis::Horizontal, ReadingAxis::Vertical] {
+            for reversed in [false, true] {
+                let paths = if reversed {
+                    [second.clone(), first.clone()]
+                } else {
+                    [first.clone(), second.clone()]
+                };
+                let output = draw(&mut strip, &paths, axis);
+                assert_eq!(strip.visible, paths);
+                let bounds = textures.each_ref().map(|texture| {
+                    output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => {
+                                Some(mesh.calc_bounds())
+                            }
+                            _ => None,
+                        })
+                        .expect("page preview")
+                });
+                assert!(!bounds[0].intersects(bounds[1]));
+                assert!(bounds.iter().all(|rect| rect.bottom() < track.top()
+                    && rect.width() <= 160.0
+                    && rect.height() <= 108.0));
+                let coordinate = |rect: Rect| match axis {
+                    ReadingAxis::Horizontal => rect.center().x,
+                    ReadingAxis::Vertical => rect.center().y,
+                };
+                assert_eq!(coordinate(bounds[0]) > coordinate(bounds[1]), reversed);
+                let generation = strip.generation;
+                draw(&mut strip, &paths, axis);
+                assert_eq!(
+                    strip.generation, generation,
+                    "unchanged hover must not request again"
+                );
+            }
+        }
+        strip
+            .previews
+            .insert(first.clone(), Err("broken page".into()));
+        let output = draw(
+            &mut strip,
+            &[first.clone(), second],
+            ReadingAxis::Horizontal,
+        );
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "No preview")));
+        let generation = strip.generation;
+        let paths = strip.visible.clone();
+        draw(&mut strip, &paths, ReadingAxis::Horizontal);
+        assert_eq!(strip.generation, generation, "failed page must not loop");
+        strip.clear();
+        assert!(strip.visible.is_empty() && strip.previews.is_empty());
+        drop(strip);
+        std::fs::remove_dir_all(root).expect("remove owned preview cache");
+    }
 
     #[test]
     fn visible_range_clamps_empty_edges_and_large_viewports() {

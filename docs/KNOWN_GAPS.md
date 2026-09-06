@@ -82,7 +82,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 |---|---|
 | 動画/音声のwaveform timeline | 既定96pxの高さ変更可能panel、waveform、CTI、click/drag seekを実装。音声はdefault表示 |
 | 動画hover thumbnailと低負荷scrub | 20区間のcached thumbnail tooltipを実装。H1でhover位置の上へ中央揃え・画面端制約、最大160×108 logical pxと空き高さへのaspect-fitを追加。縦長・小windowでtrackを覆わない。thumbnailを本画面へ出すscrub previewは未実装 |
-| 画像のfolder位置seekとthumbnail | Shell snapshotの画像順seekと位置・filename tooltipを実装。移動はdirty guardを通す。thumbnailは未実装 |
+| 画像のfolder位置seekとthumbnail | Shell snapshotの画像順seekと移動先preview・位置・filenameを実装。readingは現在の枚数・縦横・反転でpage群を縮小表示する。filmstripのworker/cacheを共用し、離脱・overlay・snapshot更新で失効。移動はdirty guardを通し、hoverだけでは現在画像を変更しない |
 | Range selection、範囲内再生、delete/cut | I/Oと開始/終了gripによる単一trim範囲をH1で実装。track上の任意範囲選択、複数区間、delete/cutは未実装 |
 | Rubber bandでtrack volume | 未実装 |
 | Range伸縮でrate編集 | 未実装 |

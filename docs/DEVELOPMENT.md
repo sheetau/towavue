@@ -4,6 +4,13 @@
 
 ## 1. 最初に試す
 
+### 画像folderのSeek preview（2026-09-06）
+
+- 旧通常release PID 40772で既存PNGを開き、bar hoverは`15 / 20 towavue.png`だけで画像が出ないことを確認。修正版PID 44740では同じhover位置に移動先の画像を表示し、本画面は現在画像のままになる。
+- Bでreadingへ切替後は移動先の2 pageと`15–16 / 20`、R/Hでは本画面と同じ縦並び・反転をpreviewにも確認した。Fでfilmstripへ移るとSeek previewを隠し、中央の一覧を表示。workerは共用で、追加threadを作らない。
+- readingを解除して回転編集を加え、別画像へのbar clickで保存確認が出ることを確認。Escapeで取消、Undo後に移動するとpreviewで見た画像が本画面に出た。破損した既存JPEGのhoverはNo previewとなり、現在画像は保持する。両windowは通常終了、sourceは保存・変更せず、capture/logはignoredの`target/tmp`内。
+- 自動回帰は実FFmpegで生成したPNGを用い、filename順と異なるShell snapshot、音声項目の除外、単画像/readingの非同期完了、hover中のpath/編集保持、離脱/overlay、dirty guardを検証。preview経路を一時的に無効化すると3秒の完了assertが失敗した。別の描画testは縦横・反転順、取得済み/失敗の再要求抑制とclearを確認する。
+
 ### Seek previewの位置と縦長素材（2026-09-06）
 
 - 旧通常release PID 2932で30秒動画の薄いseek barのx=720をhoverすると、thumbnailが左端に出ることを確認した。修正版PID 13952では同じ位置の上へ160×96で表示し、captionも中央になる。草案のhover地点とpreviewの対応を優先した変更で、本画面scrubではない。

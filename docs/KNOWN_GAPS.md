@@ -21,7 +21,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - Shell snapshotはH1で非同期化した。最新1件だけを待機・保持し、古い結果をgenerationで拒否する。実行中のShell APIは強制中断しないため、次の取得がすぐ完了する保証はない。path正規化、file metadata、watcher作成、media probeにはUI側の同期処理が残る。
 - native Open file/folder/Save AsはH1で専用STAへ移した。本体入力はmodal制限するが描画・再生を続け、Cancel後は入力とdirty guardを復元する。同じ30秒H.264/AACのOpen Folder→Cancel試験は、修正前の808/900 dropsから修正後0/900 dropsになった。基準機の単発試験であり、複数DPI/monitorや全codecでの保証ではない。
 - Save/Save AsはH1でbackground化済み。書き出した時間とcancelを表示し、完了までは一時outputだけを変更する。同時jobは1件でqueueはない。通常export中も再生・tab切替・追加編集ができるが、対象tabのclose・移動とprocess終了はjobの完了またはcancelを待つ。
-- waveform、duration、hover thumbnailはworker化済みだが、mediaを切り替えた後も開始済みFFmpeg process自体はcancelせず、返った古い結果を捨てる方式である。H1でopen単位の番号を再生通知とpreviewへ共通に付け、同じpathへの再openでも旧結果を拒否する。Seek/recoveryはさらにsession内の世代を照合する。
+- waveform、duration、hover thumbnailはH1で各種類1 worker、実行中1件＋最新の待機1件へ制限した。media切替/最後のtab closeで未開始要求を捨てるが、開始済みFFmpeg process自体はcancelしないため、同じ種類の新しいpreviewは古い実行中1件の完了を待つ場合がある。個別decoderのメモリ上限ではない。open単位の番号で同じpathへの再openでも旧結果を拒否し、再生のSeek/recoveryはさらにsession内の世代を照合する。
 - filmstripは可視項目だけを単一workerで順次読み込み、待機要求・結果・UI textureを最大64項目、各RGBAを240×160に制限する。開始済みprocessの強制cancelやdecoder作業領域の制限ではなく、遅い素材は後続previewを待たせる。失敗項目はNo previewと詳細tooltipで表示する。
 - animated imageはframe列を先に保持する。H1で1画像/reading要求のRGBA保持量を合計512 MiBに制限したが、decoder作業領域・GPU texture・切替前の旧画像は別である。超過時はerrorとし、部分animationや低解像度へは自動縮退しない。
 

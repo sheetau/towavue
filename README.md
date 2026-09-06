@@ -78,6 +78,8 @@ Seekの確定にはbuttonを離した位置を使い、その後のcursor移動�
 
 動画のhover thumbnailを取得できない区間では「Thumbnail unavailable」と表示し、同じfileを開いている間はその区間を繰り返し取得しません。再openで再試行できます。thumbnailの失敗だけで再生・Seek・保存を無効にはしません。
 
+duration・波形・hover thumbnailの生成は、それぞれ実行中1件と最新の待機1件に制限します。連続したfile切替で処理を増やし続けませんが、開始済みの古い処理の完了を待つ場合はあります。
+
 動画はbar・timelineを除いた領域へ縦横比を保って表示し、非正方形pixelのsample aspect ratioも反映します。hardware/softwareとも同じ表示矩形を使い、crop selectionも映像に合わせます。
 
 動画の回転metadataも、90度単位の回転・反転として自動適用します。その向きを基準にcropや手動回転を行い、保存後も同じ向きになります。任意角度や変形を含む非対応のdisplay matrixは無視せず、理由を画面へ表示します。再生失敗の理由は、一時通知が消えた後も別mediaを開くまで残ります。

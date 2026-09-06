@@ -322,6 +322,8 @@ FFmpegはtargetと同じfilesystemの専用一時directoryへ出力する。成�
 
 preview cacheはruntimeがFFmpeg / FFprobeの子processとdisk I/Oを所有し、appへowned RGBA画像とdurationだけを返す。cache keyは正規化path、file size、更新時刻、preview種別と寸法から作り、`%LOCALAPPDATA%\towavue\preview-cache`を64 MiB以内へ古い順に削減する。waveform、duration、hover thumbnailは専用workerで生成し、path付きeventをappへ返すため、古いtabの結果を現在のtabへ適用せずUI threadもblockしない。
 
+H1ではduration・waveform・hover thumbnailごとにruntime所有の常設workerを1本だけ使い、実行中1件＋最新の待機1件へ制限する。新しい要求は未開始の旧要求を置き換え、media load/最後のtab closeでは待機を消す。3種類は互いに待たせず、別のfilmstrip workerは従来どおり独立する。window closeは未開始要求を破棄してworkerへ終了を伝え、window/GPUを所有しない実行中previewをjoinしない。開始済みprocessの強制cancel・個別decoderのメモリ上限ではなく、windowあたりの同時処理件数の上限である。
+
 grid menuは既存のcommand registryだけをdispatchし、画像・動画・音声ごとの16 commandを`%APPDATA%\towavue\grid.conf`に保持する。cell順は物理keyの`1234/qwer/asdf/zxcv`と固定してclickとkey入力を一致させる。表示・非表示には短いopacity transitionだけを使い、media操作の意味を持つanimationは追加しない。
 
 grid入力はwinit PhysicalKeyのDigit1～4とKeyQ/W/E/R/A/S/D/F/Z/X/C/Vへ対応させ、logical文字やIME確定文字を位置として使わない。Shift/Capsによる文字変化は位置を変えず、Ctrl/Alt/Super付きは通常shortcut側へ渡す。gridの対象keyはeguiのfocus処理より先に扱うが、palette・modal中は横取りしない。paletteを開いたらgridを閉じ、入力欄へ集中させる。keyboard layout・OS IME設定は変更しない。

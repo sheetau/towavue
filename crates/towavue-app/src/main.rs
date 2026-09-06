@@ -31,8 +31,9 @@ use towavue_core::{
 use towavue_runtime_windows::{
     AudioOutputEvent, DecodedImage, DialogError, ExportError, ExportEvent, ExportJob,
     ExportRequest, FileDialogKind, FolderOrderProvider, FolderWatcher, FrameRenderer, ImageLoader,
-    PlaybackEvent, PlaybackSession, PreviewCache, PromptButtons, PromptResponse, RenderError,
-    canonical_shell_path, configure_mouse_input, cursor_position_in_window, pick_path, show_prompt,
+    LatestTask, PlaybackEvent, PlaybackSession, PreviewCache, PromptButtons, PromptResponse,
+    RenderError, canonical_shell_path, configure_mouse_input, cursor_position_in_window, pick_path,
+    show_prompt,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -432,6 +433,9 @@ struct Application<N> {
     reading_settings: ReadingSettings,
     reading_pages: Vec<Result<ImagePresentation, String>>,
     preview_cache: PreviewCache,
+    duration_worker: LatestTask,
+    waveform_worker: LatestTask,
+    thumbnail_worker: LatestTask,
     timeline_open: bool,
     waveform: Option<TextureHandle>,
     media_duration: Option<Duration>,
@@ -532,6 +536,9 @@ where
             reading_settings: ReadingSettings::default(),
             reading_pages: Vec::new(),
             preview_cache,
+            duration_worker: LatestTask::new("towavue-duration")?,
+            waveform_worker: LatestTask::new("towavue-waveform")?,
+            thumbnail_worker: LatestTask::new("towavue-thumbnail")?,
             timeline_open: false,
             waveform: None,
             media_duration: None,
@@ -690,6 +697,9 @@ where
         self.media_duration = None;
         self.hover_thumbnail = None;
         self.media_generation = self.media_generation.wrapping_add(1);
+        self.duration_worker.clear();
+        self.waveform_worker.clear();
+        self.thumbnail_worker.clear();
         self.failed_thumbnails.clear();
         self.waveform_loading = false;
         self.thumbnail_loading = None;
@@ -754,18 +764,12 @@ where
         let notify = Arc::clone(&self.notify);
         let generation = self.media_generation;
         self.waveform_loading = true;
-        if let Err(error) = std::thread::Builder::new()
-            .name("towavue-waveform".into())
-            .spawn(move || {
-                let result = cache
-                    .waveform(&path, 640, 96)
-                    .map_err(|error| error.to_string());
-                notify(AppEvent::Waveform(path, generation, result));
-            })
-        {
-            self.waveform_loading = false;
-            self.set_status(format!("Could not start waveform worker: {error}"));
-        }
+        self.waveform_worker.submit(move || {
+            let result = cache
+                .waveform(&path, 640, 96)
+                .map_err(|error| error.to_string());
+            notify(AppEvent::Waveform(path, generation, result));
+        });
     }
 
     fn load_hover_thumbnail(&mut self, position: Duration, bucket: u64) {
@@ -779,34 +783,22 @@ where
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
         self.thumbnail_loading = Some(bucket);
-        if let Err(error) = std::thread::Builder::new()
-            .name("towavue-thumbnail".into())
-            .spawn(move || {
-                let result = cache
-                    .thumbnail(&path, position, 240)
-                    .map_err(|error| error.to_string());
-                notify(AppEvent::Thumbnail(path, generation, bucket, result));
-            })
-        {
-            self.thumbnail_loading = None;
-            self.failed_thumbnails.insert(bucket);
-            self.set_status(format!("Could not start thumbnail worker: {error}"));
-        }
+        self.thumbnail_worker.submit(move || {
+            let result = cache
+                .thumbnail(&path, position, 240)
+                .map_err(|error| error.to_string());
+            notify(AppEvent::Thumbnail(path, generation, bucket, result));
+        });
     }
 
     fn load_duration(&mut self, path: PathBuf) {
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
         let generation = self.media_generation;
-        if let Err(error) = std::thread::Builder::new()
-            .name("towavue-duration".into())
-            .spawn(move || {
-                let result = cache.duration(&path).map_err(|error| error.to_string());
-                notify(AppEvent::Duration(path, generation, result));
-            })
-        {
-            self.set_status(format!("Could not start duration worker: {error}"));
-        }
+        self.duration_worker.submit(move || {
+            let result = cache.duration(&path).map_err(|error| error.to_string());
+            notify(AppEvent::Duration(path, generation, result));
+        });
     }
 
     fn refresh_folder_snapshot(&mut self) {
@@ -3310,6 +3302,9 @@ where
             self.media_duration = None;
             self.hover_thumbnail = None;
             self.media_generation = self.media_generation.wrapping_add(1);
+            self.duration_worker.clear();
+            self.waveform_worker.clear();
+            self.thumbnail_worker.clear();
             self.failed_thumbnails.clear();
             self.waveform_loading = false;
             self.thumbnail_loading = None;
@@ -8175,6 +8170,51 @@ mod tests {
                 assert_eq!(ui.available_rect_before_wrap(), available);
             });
         }
+    }
+
+    #[test]
+    fn duration_requests_do_not_start_more_workers_while_one_is_busy() {
+        let Some(_root) = isolated_test_root(
+            "tests::duration_requests_do_not_start_more_workers_while_one_is_busy",
+        ) else {
+            return;
+        };
+        let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let worker_gate = Arc::clone(&gate);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            if let AppEvent::Duration(_, _, result) = event {
+                let _ = tx.send(result.is_ok());
+                let (mutex, ready) = &*worker_gate;
+                drop(
+                    ready
+                        .wait_while(mutex.lock().expect("gate"), |released| !*released)
+                        .expect("released"),
+                );
+            }
+        })
+        .expect("headless app");
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+        app.load_duration(path.clone());
+        assert!(
+            rx.recv_timeout(Duration::from_secs(5))
+                .expect("first duration")
+        );
+        for _ in 0..8 {
+            app.load_duration(path.clone());
+        }
+        let additional = rx.recv_timeout(Duration::from_secs(2));
+        *gate.0.lock().expect("release gate") = true;
+        gate.1.notify_all();
+        assert!(
+            additional.is_err(),
+            "another duration worker ran while the first was busy"
+        );
+        assert!(
+            rx.recv_timeout(Duration::from_secs(5))
+                .expect("latest duration")
+        );
     }
 
     #[test]

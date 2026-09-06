@@ -224,3 +224,5 @@ preview要求ごとのthread生成を、duration/波形/hover画像それぞれ�
 2時間音声のwaveform生成中に通常releaseを終了すると、本体終了40 ms後もFFmpeg子processが残り、500 ms後にCPU・メモリ増加を確認した。要求単位の取消tokenへowned Childを登録し、置換・clear・dropで停止、worker側でpipe排出と終了回収を行う。spawnとの競合と取消後の再起動を防ぎ、filmstripとTS preview準備にも接続。停止を外すと失敗する回帰を含む199 tests・Clippy・両buildが通過。修正後の同じ素材では本体終了86 ms、直後/500 ms後の子process残存なし。tab closeから別音声の波形・再生復帰も確認。次は長時間素材の個別waveformメモリ使用量を評価する。filesystem/native probeの強制中断、実機/配布gateとH1全体は未完了。
 
 2時間AACのwaveform完了までを測ると、旧showwavespic子processが約1.36 GBを保持した。PCMの逐次集計・隣接bin併合へ変更し、集計を最大width×1024個のu64、入力を64 KiBに限定。短い素材の画素一致、長い素材/急変のbar差1 pixel以内、奇数byte分割・末尾不正、診断pipe上限を確認した。203 tests・Clippy・両buildが通過。通常releaseで子process約42 MB、本体合計約191 MB、生成観測3.3→2.4秒、波形本体41,078画素一致、生成中終了65 msと子process残存なしを確認。7660b7eのCIも成功。次は残る日常media/error flowを監査する。H1全体・環境/配布gateは継続中。
+
+複数streamの通常release試験で、本体は既定の青い映像を再生するのにthumbnailは先頭の赤い映像、waveformは先頭の無音になった。previewの選択を再生と同じFFmpeg best-streamへ揃え、cache keyをv3に更新した。旧コードで失敗する回帰、204 tests・Clippy・両buildが通過し、同じ素材の通常windowでthumbnail・waveform一致と120 frames/drop 0を確認。a7274b4のCIも成功。次はexportのstream選択一致を監査する。H1全体・実機/配布gateは未完了。

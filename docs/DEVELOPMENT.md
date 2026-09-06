@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### 複数streamのpreview（2026-09-06）
+
+- 赤320×240の先頭映像、青160×96の既定映像、無音の先頭音声、880 Hzの既定音声を持つ4秒MKVをignoredの`target/tmp`へ生成する。旧通常release PID 39968では青い本画面に赤いhover thumbnail、空のwaveformとなった。起動直後の注入keyは未反映だったため、同じwindowを再確認・前面化してtimelineを表示した。再起動で試験を取り直していない。
+- 修正release PID 28992は同じpathのv3 cacheで青い本画面・thumbnailと非空waveformが一致。D3d11va、120 hardware/presented frames、drop/CPU transfer 0、drift p95 3.899 ms/最大4.203 ms。両windowは通常終了した。
+- 自動回帰は同構成の1秒素材で再生の映像寸法・音声sampleを確認し、thumbnail・filmstripの青色と波形を照合する。旧コードでthumbnailのassertが失敗し、修正後は通過した。全container/stream配置やexportの選択一致を保証する試験ではない。
+
 ### 破損mediaからのOpen回復（2026-09-06）
 
 - aedb74bの通常releaseを、mediaではない短いtextを入れたローカル`.mp4`で起動する。中央に`Could not play media`とprobeの原因が残り、短時間statusのduration失敗とは区別できた。

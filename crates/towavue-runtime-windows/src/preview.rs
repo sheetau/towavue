@@ -40,7 +40,7 @@ pub enum PreviewError {
     },
     #[error("FFmpeg preview generation failed: {0}")]
     Generate(String),
-    #[error("preview seek preparation failed: {0}")]
+    #[error("preview input preparation failed: {0}")]
     Seek(#[from] crate::DecodeError),
     #[error("FFprobe returned an invalid duration")]
     InvalidDuration,
@@ -92,14 +92,12 @@ impl PreviewCache {
         self.check_cancelled()?;
         let key = cache_key(
             source,
-            &format!("thumbnail-v2-{}-{width}", position.as_millis()),
+            &format!("thumbnail-v3-{}-{width}", position.as_millis()),
         )?;
         self.load_or_generate(key, || {
             let mut arguments =
                 preview_input_arguments(source, position, self.cancellation.as_ref())?;
             arguments.extend([
-                "-map".into(),
-                "0:v:0".into(),
                 "-vf".into(),
                 format!("scale={width}:-2:force_original_aspect_ratio=decrease"),
                 "-frames:v".into(),
@@ -117,13 +115,11 @@ impl PreviewCache {
         let image = if kind == MediaKind::Audio {
             self.waveform(source, 240, 160)?
         } else {
-            let key = cache_key(source, "filmstrip-v2")?;
+            let key = cache_key(source, "filmstrip-v3")?;
             self.load_or_generate(key, || {
                 let position = duration.unwrap_or_default().mul_f64(0.1);
                 let mut arguments = preview_input_arguments(source, position, self.cancellation.as_ref())?;
                 arguments.extend([
-                    "-map".into(),
-                    "0:v:0".into(),
                     "-vf".into(),
                     "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2".into(),
                     "-frames:v".into(),
@@ -145,8 +141,18 @@ impl PreviewCache {
         if width == 0 || height == 0 {
             return Err(PreviewError::Generate("invalid waveform dimensions".into()));
         }
-        let key = cache_key(source, &format!("waveform-v2-{width}-{height}"))?;
+        let key = cache_key(source, &format!("waveform-v3-{width}-{height}"))?;
         self.load_or_generate(key, || {
+            let (_, stream) = crate::decode::preview_input(
+                source,
+                ffmpeg_next::media::Type::Audio,
+                Duration::ZERO,
+                &|| {
+                    self.cancellation
+                        .as_ref()
+                        .is_some_and(Cancellation::is_cancelled)
+                },
+            )?;
             let command = hidden_command(
                 &tool_path("ffmpeg.exe"),
                 [
@@ -156,7 +162,7 @@ impl PreviewCache {
                     "-i",
                     &source.display().to_string(),
                     "-map",
-                    "0:a:0",
+                    &format!("0:{stream}"),
                     "-ac",
                     "1",
                     "-c:a",
@@ -342,10 +348,10 @@ fn preview_input_arguments(
     cancellation: Option<&Cancellation>,
 ) -> Result<Vec<String>, PreviewError> {
     check_cancelled(cancellation)?;
-    let start = if position.is_zero() || MediaKind::from_path(source) == Some(MediaKind::Image) {
-        position
+    let (start, stream) = if MediaKind::from_path(source) == Some(MediaKind::Image) {
+        (position, 0)
     } else {
-        crate::decode::preview_seek_start(source, position, &|| {
+        crate::decode::preview_input(source, ffmpeg_next::media::Type::Video, position, &|| {
             cancellation.is_some_and(Cancellation::is_cancelled)
         })?
     };
@@ -354,6 +360,8 @@ fn preview_input_arguments(
         format!("{:.6}", start.as_secs_f64()),
         "-i".into(),
         source.display().to_string(),
+        "-map".into(),
+        format!("0:{stream}"),
     ];
     if start < position {
         arguments.extend([
@@ -421,6 +429,115 @@ mod tests {
     use image::{ImageFormat, Rgb, RgbImage};
 
     use super::*;
+
+    #[test]
+    fn previews_use_the_playback_streams_not_the_first_streams() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("towavue-preview-streams-{unique}"));
+        let cache = PreviewCache::new(root.join("cache")).expect("cache");
+        let source = root.join("streams.mkv");
+        let status = hidden_command(
+            &tool_path("ffmpeg.exe"),
+            [
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=red:s=320x240:r=10:d=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=blue:s=160x96:r=10:d=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "anullsrc=r=48000:cl=stereo:d=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=880:sample_rate=48000:duration=1",
+                "-map",
+                "0:v",
+                "-map",
+                "1:v",
+                "-map",
+                "2:a",
+                "-map",
+                "3:a",
+                "-c:v",
+                "libopenh264",
+                "-c:a",
+                "aac",
+                "-disposition:v:0",
+                "0",
+                "-disposition:v:1",
+                "default",
+                "-disposition:a:0",
+                "0",
+                "-disposition:a:1",
+                "default",
+            ],
+        )
+        .arg(&source)
+        .status()
+        .expect("multistream fixture");
+        assert!(status.success());
+        let mut video_seen = false;
+        let mut audible = false;
+        crate::decode_file(&source, |output| {
+            match output {
+                crate::DecodeOutput::Video(frame) => {
+                    assert_eq!((frame.width, frame.height), (160, 96));
+                    video_seen = true;
+                }
+                crate::DecodeOutput::Audio(chunk) => {
+                    audible |= chunk
+                        .bytes
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .any(|bytes| f32::from_le_bytes(*bytes).abs() > 0.01);
+                }
+            }
+            true
+        })
+        .expect("playback streams");
+        assert!(video_seen && audible);
+        let thumbnail = cache
+            .thumbnail(&source, Duration::ZERO, 160)
+            .expect("thumbnail");
+        let card = cache
+            .filmstrip(&source, MediaKind::Video)
+            .expect("filmstrip");
+        let waveform = cache.waveform(&source, 160, 96).expect("waveform");
+        let blue = |image: &PreviewImage| {
+            let center = ((image.height / 2 * image.width + image.width / 2) * 4) as usize;
+            image.rgba[center] < 10 && image.rgba[center + 2] > 240
+        };
+        assert!(
+            blue(&thumbnail),
+            "thumbnail must match the blue playback stream"
+        );
+        assert_eq!((thumbnail.width, thumbnail.height), (160, 96));
+        assert!(
+            blue(&card.image),
+            "filmstrip must match the blue playback stream"
+        );
+        assert!(
+            waveform
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel[3] != 0),
+            "waveform must match the audible playback stream"
+        );
+        fs::remove_dir_all(root).expect("remove owned multistream fixture");
+    }
 
     #[test]
     fn streaming_waveform_matches_showwavespic_with_bounded_column_error() {

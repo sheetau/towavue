@@ -1041,18 +1041,29 @@ fn transport_seek_point(
     }
 }
 
-pub(crate) fn preview_seek_start(
+pub(crate) fn preview_input(
     path: &Path,
+    media_type: Type,
     target: Duration,
     cancelled: &(dyn Fn() -> bool + Sync),
-) -> Result<Duration, DecodeError> {
+) -> Result<(Duration, usize), DecodeError> {
     check_cancelled(cancelled)?;
     ffmpeg::init()?;
     let mut input = format::input(path)?;
+    check_cancelled(cancelled)?;
+    let stream = input
+        .streams()
+        .best(media_type)
+        .ok_or(DecodeError::NoMediaStream)?
+        .index();
+    if media_type != Type::Video || target.is_zero() {
+        return Ok((target, stream));
+    }
     let target_time = MediaTime::from_nanoseconds(target.as_nanos().min(i64::MAX as u128) as i64);
-    Ok(transport_seek_point(&mut input, target_time, cancelled)?
+    let start = transport_seek_point(&mut input, target_time, cancelled)?
         .map(|point| Duration::from_micros(point.start_microseconds as u64))
-        .unwrap_or(target))
+        .unwrap_or(target);
+    Ok((start, stream))
 }
 
 fn check_cancelled(cancelled: &(dyn Fn() -> bool + Sync)) -> Result<(), DecodeError> {

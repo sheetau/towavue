@@ -308,6 +308,10 @@ Ctrl+wheelの画像zoomはeguiがwheel eventから変換したzoom倍率を使�
 
 textureの一辺の上限はrendererが実際のD3D feature levelから返す。appはegui contextとwinit inputの両方へ起動時に設定し、texture登録前にも寸法を確認してpanicを防ぐ。外部から開くpathはruntimeのShell互換canonical pathへ統一し、相対pathでもsnapshotの現在項目と一致させる。
 
+### H1 preview stream selection
+
+動画thumbnail・filmstripと音声waveformは、再生と同じFFmpeg best-stream選択を使う。先頭streamの固定指定やCLIの自動選択には依存しない。native probeで選んだindexを子processへ明示し、既存のTS Seek準備と取消確認を維持する。誤った旧previewを残さないよう各cache keyをv3へ更新する。手動のstream選択UIは追加しない。
+
 ### H1 export lifecycle
 
 Open file/folderとSave Asは専用STAでnative dialogを表示し、UIはthreadをjoinせず結果eventを受ける。本体windowをownerに指定して通常のmodal入力制限を保ち、workerがwindowの共有所有権を保持してnative handleの寿命を保証する（[IModalWindow::Show](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-imodalwindow-show)）。同時pickerは1件、picker中も描画・再生を継続し、選択前の保留Open Folderは失効させる。Save As結果は開始時のtab/pathと照合し、Cancel・失敗では書き出さずdirty guardを復元する。native dialogを閉じるまで本体の終了操作は受け付けない。
@@ -326,7 +330,7 @@ H1ではduration・waveform・hover thumbnailごとにruntime所有の常設work
 
 preview取消では要求単位のtokenに実行中のowned Childを登録する。要求置換・clear・worker dropはtokenを失効し、その子processだけをkillする。spawn/登録と取消を同じ短いlockで直列化し、取消済み要求から子processを後発させない。worker側でstdout/stderrを並行排出して終了を回収し、次の要求は新しいtokenを使う。[Rust Childの寿命契約](https://doc.rust-lang.org/std/process/struct.Child.html)に従い、handleのdropだけに終了を任せない。filmstripも同じ取消を使う。cache/TS Seek準備は処理境界で失効を確認するが、実行中のfilesystem I/Oやnative FFmpeg probeを強制中断する保証はない。UIはprocessの完了やreader threadをjoinしない。
 
-waveformはFFmpegからmono S16 PCMを逐次受け取り、runtimeで平均絶対振幅を集計して中央揃えの白いbarへ描く。全frameを終端まで保持するshowwavespicを使わない。64 KiB入力bufferと最大width×1024個のu64和を保持し、満杯になったら隣接binを併合して時間粒度を倍にする。終端の実sample数で従来と同じ列範囲を求め、集計binの部分重なりだけ平均値で近似する。640列の和は最大5 MiBで、音声の長さには比例しない。短い素材・silence・pulse・rampで従来平均振幅との誤差を検証し、duration metadata欠落には依存しない。PNG寸法・白色・透明背景・cache上限を維持し、waveform cache keyはv2へ更新する。子process診断も末尾16 KiBへ限定する。FFmpeg自身のdecoder/demuxer作業領域を含むprocess全体の厳密なメモリ上限ではない。
+waveformはFFmpegからmono S16 PCMを逐次受け取り、runtimeで平均絶対振幅を集計して中央揃えの白いbarへ描く。全frameを終端まで保持するshowwavespicを使わない。64 KiB入力bufferと最大width×1024個のu64和を保持し、満杯になったら隣接binを併合して時間粒度を倍にする。終端の実sample数で従来と同じ列範囲を求め、集計binの部分重なりだけ平均値で近似する。640列の和は最大5 MiBで、音声の長さには比例しない。短い素材・silence・pulse・rampで従来平均振幅との誤差を検証し、duration metadata欠落には依存しない。PNG寸法・白色・透明背景・cache上限を維持する。子process診断も末尾16 KiBへ限定する。FFmpeg自身のdecoder/demuxer作業領域を含むprocess全体の厳密なメモリ上限ではない。
 
 grid menuは既存のcommand registryだけをdispatchし、画像・動画・音声ごとの16 commandを`%APPDATA%\towavue\grid.conf`に保持する。cell順は物理keyの`1234/qwer/asdf/zxcv`と固定してclickとkey入力を一致させる。表示・非表示には短いopacity transitionだけを使い、media操作の意味を持つanimationは追加しない。
 

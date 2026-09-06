@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 13:58 JST - align previews with playback stream selection
+
+- Trigger/evidence: previous checkpoint a7274b4 CI succeeded. A four-stream MKV has first red video/silent audio and default second blue video/880 Hz audio. Baseline normal release PID 39968 plays blue but shows red hover thumbnail and empty waveform. Initial injected startup keys were not applied; inspect/front the same window before confirming timeline evidence, without restarting.
+- Contract/change: document playback-consistent FFmpeg best-stream selection for video thumbnails/filmstrip and audio waveform. Extend existing native preview input/TS seek preparation to return selected index, explicitly map that index in owned FFmpeg, retain cancellation and still-image fast path. Version all three preview keys to v3. No stream selector UI, playback/export behavior, dependencies or unsafe changes.
+- Verification: generated multistream regression confirms playback video dimensions/nonzero audio samples, blue thumbnail/card and nonempty waveform. Old code fails thumbnail assertion; fixed passes. Existing image, source-origin/TS preview and waveform reference tests pass. Format, Clippy, 204 tests (app 96/core 35/runtime 69/integrations 4), debug/release builds pass; three preexisting live tests explicitly ignored.
+- Native: fixed PID 28992 opens identical fixture path and shows blue main/hover images plus nonempty waveform. D3d11va, 120 hardware/presented, zero drops/CPU transfers, drift p95 3.899 ms/max 4.203 ms. Both owned windows close normally; media/captures/logs remain ignored and source untouched.
+- Status/next: h1_active. Audit whether export's automatic selection without trim matches playback for multistream media; not yet proven. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 13:44 JST - stream long waveforms with bounded aggregation
 
 - Trigger/evidence: previous turn pushed 7660b7e; CI succeeded. Normal release PID 36116 completes waveform for the same two-hour AAC fixture. Child 28436 has sampled peak private bytes 1,360,474,112 and working set 1,319,837,696; observation lasts 3,315 ms with 29 samples. Pinned FFmpeg showwavespic source retains all audio frames until final mean-amplitude rendering. Close baseline window normally after capture.

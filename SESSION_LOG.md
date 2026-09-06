@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 11:04 JST - restrict pointer Seek to the primary button
+
+- Trigger/evidence: resume timeline audit after 2912cba. Normal release PID 36400 pauses around 10 seconds; secondary drag across the waveform moves to 22 seconds and adds a seek-latency record. All three app Seek/folder-bar branches accepted generic drag_stopped, including non-primary buttons.
+- Contract/change: document primary-only pointer commit before implementation. Use drag_stopped_by(Primary) in timeline, compact media Seek and image folder navigation; retain clicked() for existing primary/keyboard/accessibility semantics. Compact bar candidate motion also follows primary drag only. No trim, runtime, dependency, unsafe, edit-history or pipeline changes.
+- Regression: new app test fails on original code for secondary timeline drag. Covers all five buttons, both click/drag, timeline Seek and supplied image-folder order, no action before release, one primary action, no repeated idle-frame action, and no media/history mutation from drawing. Existing five trim tests and fullscreen controls remain green.
+- Native: trace-free release PID 38048 tests both timeline and compact Seek. Seek records stay 0→0 after timeline secondary drag, then primary adds one; compact secondary stays 1→1, then primary adds a second. Playback remains paused. Injected mouse at 96 DPI, not a physical-device/mixed-DPI matrix.
+- Verification/cleanup: format, all-target Clippy, 181 tests (app 87, core 35, runtime 55, integrations 4), debug/release builds pass; three live tests explicitly ignored, not hardware proof. Both owned processes close normally; no edits or exports. Fixture SHA-256 is F929E6FA18AA010BEBFBB3400539A4F090F7864887F4044E20B4E0C95C5B2F54. Captures/logs remain ignored; README, architecture and roadmap updated.
+- Status/next: h1_active. Continue timeline/compact Seek cancellation and release-coordinate audit, then remaining daily-viewing/environment gates. Prior CI 2912cba/34005287785 remains in progress at last inspection; do not infer failure from duration. Distribution choice unanswered; no package/publication performed.
+
 ## 2026-09-06 10:57 JST - cancel undrawn presses / correct native evidence
 
 - Trigger: continue 041019e's native posted-input audit; CI 34004701321 succeeded. Debug PID 35148 trace shows press/move/release/post-release hover in one frame and correct selection. Repetition also observes a split before release without losing its endpoint.

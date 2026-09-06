@@ -19,8 +19,9 @@ pub fn show(
                 egui::vec2(status.width(), 12.0),
                 egui::Sense::click_and_drag(),
             );
-            let active = response.hovered() || response.dragged();
-            let progress = if response.dragged() {
+            let dragging = response.dragged_by(egui::PointerButton::Primary);
+            let active = response.hovered() || dragging;
+            let progress = if dragging {
                 response
                     .interact_pointer_pos()
                     .map_or(progress, |p| ratio(rect, p.x))

@@ -2295,7 +2295,9 @@ where
                     images.len(),
                     display_name(&images[target].path)
                 ));
-                if (response.clicked() || response.drag_stopped()) && target != index {
+                if (response.clicked() || response.drag_stopped_by(egui::PointerButton::Primary))
+                    && target != index
+                {
                     actions.push(UiAction::OpenMedia(images[target].path.clone(), false));
                 }
             }
@@ -2316,7 +2318,7 @@ where
         if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
             let ratio = seekbar::ratio(response.rect, pointer.x);
             self.draw_seek_preview(&response, ratio, duration);
-            if response.clicked() || response.drag_stopped() {
+            if response.clicked() || response.drag_stopped_by(egui::PointerButton::Primary) {
                 actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
             }
         }
@@ -2409,7 +2411,7 @@ where
                 let ratio = ((position.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                 let target = duration.mul_f32(ratio);
                 self.draw_seek_preview(&response, ratio, duration);
-                if response.clicked() || response.drag_stopped() {
+                if response.clicked() || response.drag_stopped_by(egui::PointerButton::Primary) {
                     actions.push(UiAction::Seek(media_time(target)));
                 }
             });
@@ -4691,6 +4693,118 @@ mod tests {
         app.undo_edit(false);
         app.undo_edit(false);
         assert!(!app.edits[&tab].is_dirty());
+    }
+
+    #[test]
+    fn timeline_and_folder_seek_only_commit_primary_pointer_gestures() {
+        let Some(root) = isolated_test_root(
+            "tests::timeline_and_folder_seek_only_commit_primary_pointer_gestures",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.path = Some(root.join("0.png"));
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: (0..3)
+                .map(|index| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![index]),
+                    path: root.join(format!("{index}.png")),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        app.timeline_open = true;
+        app.media_duration = Some(Duration::from_secs(10));
+        app.state = PlaybackState::Paused;
+        for timeline in [true, false] {
+            app.media_kind = Some(if timeline {
+                MediaKind::Audio
+            } else {
+                MediaKind::Image
+            });
+            for button in [
+                egui::PointerButton::Primary,
+                egui::PointerButton::Secondary,
+                egui::PointerButton::Middle,
+                egui::PointerButton::Extra1,
+                egui::PointerButton::Extra2,
+            ] {
+                for drag in [false, true] {
+                    let context = egui::Context::default();
+                    let mut frame = |events| {
+                        let mut actions = Vec::new();
+                        let _ = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(500.0, 300.0),
+                                )),
+                                events,
+                                ..Default::default()
+                            },
+                            |ui| {
+                                if timeline {
+                                    app.draw_timeline(ui, &mut actions);
+                                } else {
+                                    app.draw_seek_bar(
+                                        ui.ctx(),
+                                        egui::Rect::from_min_size(
+                                            egui::pos2(0.0, 260.0),
+                                            egui::vec2(500.0, 40.0),
+                                        ),
+                                        None,
+                                        &mut actions,
+                                    );
+                                }
+                            },
+                        );
+                        actions
+                    };
+                    let end = egui::pos2(400.0, if timeline { 250.0 } else { 260.0 });
+                    let start = if drag {
+                        end - egui::vec2(300.0, 0.0)
+                    } else {
+                        end
+                    };
+                    let event = |pos, pressed| egui::Event::PointerButton {
+                        pos,
+                        button,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    };
+                    for _ in 0..3 {
+                        assert!(frame(vec![]).is_empty());
+                    }
+                    assert!(frame(vec![egui::Event::PointerMoved(start)]).is_empty());
+                    assert!(frame(vec![event(start, true)]).is_empty());
+                    assert!(frame(vec![egui::Event::PointerMoved(end)]).is_empty());
+                    let actions = frame(vec![event(end, false)]);
+                    if button != egui::PointerButton::Primary {
+                        assert!(
+                            actions.is_empty(),
+                            "timeline={timeline}, {button:?}, drag={drag}"
+                        );
+                    } else if timeline {
+                        assert!(
+                            matches!(actions.as_slice(), [UiAction::Seek(time)] if time.as_seconds_f64() > 7.0 && time.as_seconds_f64() < 9.0)
+                        );
+                    } else {
+                        assert!(
+                            matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if *path == root.join("2.png"))
+                        );
+                    }
+                    assert!(frame(vec![]).is_empty(), "do not repeat the commit");
+                }
+            }
+        }
+        assert_eq!(app.path, Some(root.join("0.png")));
+        assert!(app.edits.is_empty());
     }
 
     #[test]

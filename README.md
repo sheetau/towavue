@@ -70,6 +70,8 @@ fullscreenの画像・動画・readingでは、操作が2秒ないとcursorも�
 
 timelineを閉じているときはstatus上端の細いbarで動画・音声の位置を変更できます。画像では同じfolderの画像順へ移動します。dragは離した時に一回だけ確定し、再生終了後のSeekは一時停止状態になります。command paletteは検索後に上下keyで候補を選び、Enterで実行、Escapeで閉じられます。
 
+timelineと細いbarのSeek／folder移動は左buttonのclick・dragで行います。右・中・追加buttonのdragでは位置を変更しません。
+
 動画のhover thumbnailを取得できない区間では「Thumbnail unavailable」と表示し、同じfileを開いている間はその区間を繰り返し取得しません。再openで再試行できます。thumbnailの失敗だけで再生・Seek・保存を無効にはしません。
 
 動画はbar・timelineを除いた領域へ縦横比を保って表示し、非正方形pixelのsample aspect ratioも反映します。hardware/softwareとも同じ表示矩形を使い、crop selectionも映像に合わせます。

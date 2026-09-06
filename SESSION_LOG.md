@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 11:46 JST - launch-gate review / corrupt Open recovery
+
+- Trigger/intent: step back from timeline input fixes and prioritize daily viewing, first-run and remaining launch evidence. Read current gaps and inspect synchronous media Open/error handling. No new feature or architecture change selected without a reproduced failure.
+- Native evidence: normal release aedb74b, owned PID 43708, short invalid local MP4 shows persistent central probe error. Ctrl+O opens the existing 30-second H.264/AAC in another tab; Playing, rendered video and D3d11va confirmed. Pause/close that tab returns to the original Faulted tab/error; closing the last tab returns to Welcome. Responsive probes are 6–8 ms after transitions, not Open latency. No failure reproduced in this flow.
+- Change: DEVELOPMENT records repeatable trial and limitations; KNOWN_GAPS corrects the missing persistent playback-error description and separates synchronous Open measurement, real-input/device gates and unresolved distribution decisions. No production code, dependencies, runtime contracts or settings changed.
+- Verification/cleanup: format, all-target Clippy and 184 tests pass (app 90, core 35, runtime 55, integrations 4; three live tests explicitly ignored). Source SHA-256 remains F929E6FA18AA010BEBFBB3400539A4F090F7864887F4044E20B4E0C95C5B2F54. Owned process closes normally; no edits/export. Invalid fixture, captures and logs remain ignored. Prior CI 34007037741 is still running at this checkpoint, not claimed passed.
+- Status/next: h1_active. Measure Open responsiveness with a reproducible slow-probe scenario before considering worker changes. Physical-input/mixed-DPI and actual device-change evidence remain incomplete. Packaging choice unanswered; no package or publication performed.
+
 ## 2026-09-06 11:38 JST - short timeline gestures / preserve press ownership
 
 - Trigger/evidence: continue short-input audit after 85b70e3; CI 34006354464 succeeded (7fa28a4/34006093440 also succeeded). New grip regression fails original code when press/move share a frame and release follows: no expected trim operation. Normal release PID 25832 receives the start-grip press and move together, then release; it instead seeks to 18.834s with a clean title and no trim.

@@ -34,7 +34,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - installer、uninstaller、portable package、automatic update、file association、Explorer context menuはない。
 - settings画面、recent files、session/tab復元、window位置・sizeの保存はない。
 - Explorerからのfile/folder dropはH1で実装した。複数fileは既存Open契約で開き、folderはShell順の先頭mediaを開く。folder要求は最新1件で、複数folderを一括展開するimport queueではない。virtual file、URL、app間tab結合は対象外。
-- export errorは確認するまで残る詳細modal、画像load errorは画像領域（readingでは該当page）に表示する。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
+- export errorは確認するまで残る詳細modal、画像load errorは画像領域（readingでは該当page）、動画・音声のplayback errorはFaulted中の中央領域に表示する。壊れたMP4から正常動画をOpenし、元のerror tab、最後にWelcomeへ戻るflowを通常releaseで確認した。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
 - end-to-end UI test、visual regression、accessibility検査、複数DPI/monitorの自動matrixはない。現在のUI完了判定には実window操作が必要である。
 - 画像100%とzoomはphysical pixel基準へ修正し、100/125/150/200%の描画入力、crop preview・編集後寸法・pointer anchorを自動testした。UI rendererの二重拡大も実windowのpixel照合で修正した。ただし接続中の2画面は両方96 DPIで、異なる実DPI間の移動・切断は未検証。
 
@@ -168,6 +168,12 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 4. Timeline、tab、filmstrip、menuを実際の利用頻度に基づいて磨く。
 5. DPI、keyboard-only、長いfile名、error/loading state、accessibilityを横断確認する。
 6. その後にrecent/session復元、file association、packagingを決める。
+
+### 2026-09-06のlaunch監査整理
+
+- 次のコード監査対象は同期media probeを含むOpenの応答。小さい破損MP4のerror表示と回復は通過したが、大きい素材・遅いstorageでのUI停止時間は未測定であり、worker化の完了とは扱わない。まず再現素材と入力受付から表示までの測定境界を決める。
+- 物理keyboard/pointer、混在DPI、実endpoint切替・driver resetは、注入入力や所有process内の制御faultとは別の未完了gate。ユーザーのOS設定や他applicationへ影響する操作を暗黙に実施しない。
+- 配布方式、FFmpeg同梱・license条件、clean-machine起動は未決定・未検証。portable/installerの選択前にpackageや公開を始めない。recent/session、方向gesture、複数区間編集などの追加機能は、これらのgateを満たす代替にはならない。
 
 この順序は固定milestoneではない。試用で再現性の高いdata loss、crash、再生破綻が見つかった場合は、それを最優先する。
 

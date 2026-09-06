@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### 破損mediaからのOpen回復（2026-09-06）
+
+- aedb74bの通常releaseを、mediaではない短いtextを入れたローカル`.mp4`で起動する。中央に`Could not play media`とprobeの原因が残り、短時間statusのduration失敗とは区別できた。
+- 同じprocessでCtrl+Oから既存30秒H.264/AACを選択し、別tabでPlaying、D3d11va、映像表示を確認する。pause後にCtrl+Wで正常tabを閉じると元のFaulted tabと原因へ戻り、さらにCtrl+WでWelcomeへ戻る。各段階のwindow応答probeは6～8 msだったが、これはOpen latencyの測定ではない。
+- 所有PID 43708は通常終了し、正常sourceのSHA-256は試験前の基準値と一致した。編集・export・OS設定変更なし。capture/log/破損fixtureはignoredの`target/tmp`内。96 DPIの注入入力による単発試験で、遅いstorage・全codec・物理入力のmatrixを保証しない。
+
 ### Release長時間再生の再検証（2026-09-06）
 
 描画直前のlate discard再確認を入れた通常release版は、基準機の30分再試験で同期・dropゲートを満たした。以下は不合格だったbaselineからの比較であり、全codec/deviceや実DPI matrixまで完了したものではない。

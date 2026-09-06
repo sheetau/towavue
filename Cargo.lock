@@ -2016,6 +2016,7 @@ dependencies = [
  "towavue-core",
  "wasapi",
  "windows",
+ "winit",
 ]
 
 [[package]]

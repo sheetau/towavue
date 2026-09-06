@@ -7,6 +7,7 @@ mod export;
 mod fonts;
 mod image;
 mod image_loader;
+mod input;
 mod orientation;
 mod playback;
 mod preview;
@@ -26,6 +27,7 @@ pub use export::{ExportError, ExportEvent, ExportJob, ExportOutcome, ExportReque
 pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_loader::{ImageLoader, LoadedImages};
+pub use input::configure_mouse_input;
 pub use orientation::VideoOrientation;
 pub use playback::{DecodePath, PlaybackError, PlaybackEvent, PlaybackMetrics, PlaybackSession};
 pub use preview::{MediaPreview, PreviewCache, PreviewError, PreviewImage};

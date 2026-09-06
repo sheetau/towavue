@@ -31,7 +31,7 @@ use towavue_runtime_windows::{
     AudioOutputEvent, DecodedImage, DialogError, ExportError, ExportEvent, ExportJob,
     ExportRequest, FileDialogKind, FolderOrderProvider, FolderWatcher, FrameRenderer, ImageLoader,
     PlaybackEvent, PlaybackSession, PreviewCache, PromptButtons, PromptResponse, RenderError,
-    canonical_shell_path, cursor_position_in_window, pick_path, show_prompt,
+    canonical_shell_path, configure_mouse_input, cursor_position_in_window, pick_path, show_prompt,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -50,7 +50,9 @@ const VIDEO_LATE_TOLERANCE: Duration = Duration::from_millis(40);
 
 fn main() -> Result<(), Box<dyn Error>> {
     let initial_path = parse_initial_path()?;
-    let event_loop = EventLoop::<AppEvent>::with_user_event().build()?;
+    let mut event_loop = EventLoop::<AppEvent>::with_user_event();
+    configure_mouse_input(&mut event_loop);
+    let event_loop = event_loop.build()?;
     let proxy = event_loop.create_proxy();
     let mut application = Application::new(initial_path, move |event| {
         let _ = proxy.send_event(event);

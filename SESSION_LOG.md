@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 14:34 JST - add image-folder boundary navigation
+
+- Trigger/evidence: previous turn pushed 46ebb86 (progress); its CI remains in progress at this checkpoint. Draft explicitly calls for Home/End to first/last image. Baseline normal release PID 43708 stays on middle green image after both keys in an owned three-image folder.
+- Contract/change: add FirstImage/LastImage registry commands, Home/End key parsing/display and winit mapping, default/custom bindings, View menu/palette integration. Navigate current Shell snapshot's image-only endpoints without sorting; require current image membership, preserve reading settings, no-op at current endpoint, and route different targets through existing dirty/export guard. No new worker/runtime/unsafe/dependency or source mutation.
+- Verification: shortcut regression covers old configuration defaults, image-only enablement in single/reading modes, command/key round trips and custom prefix/modifier overrides. App regression checks non-filename Shell order, audio/video exclusion, first/middle/last/missing/empty states, dirty Cancel, unchanged path/media generation/edits and reading mode. Format, Clippy, 210 tests (app 101/core 35/runtime 70/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: fixed PID 43980 Home reaches red 1/3, reading End reaches blue 3/3. Rotate after leaving reading; repeated End preserves dirty endpoint without prompt, Home opens unsaved guard. Cancel/Undo then palette Home/End edit text without leaving blue; Enter on First image in folder reaches red. Both owned windows close normally; generated images/captures/logs ignored, no source save or OS changes.
+- Status/next: h1_active. Continue daily image/playback interaction audit and remaining draft priorities. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 14:27 JST - preview image-folder seek destinations
 
 - Trigger/evidence: previous turn pushed 90c2021 (progress); 03e2bd8 and 90c2021 CI succeeded. Normal release PID 40772 shows only position/filename for image seek hover, unlike the draft's destination image/group preview.

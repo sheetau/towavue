@@ -55,6 +55,8 @@ pub enum CommandId {
     ToggleFullscreen,
     PreviousImage,
     NextImage,
+    FirstImage,
+    LastImage,
 }
 
 impl CommandId {
@@ -109,6 +111,8 @@ impl CommandId {
             Self::ToggleFullscreen => "toggle_fullscreen",
             Self::PreviousImage => "previous_image",
             Self::NextImage => "next_image",
+            Self::FirstImage => "first_image",
+            Self::LastImage => "last_image",
         }
     }
 }
@@ -143,6 +147,8 @@ pub enum Key {
     Tab,
     Escape,
     F11,
+    Home,
+    End,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -216,6 +222,8 @@ impl fmt::Display for KeyStroke {
             Key::Tab => formatter.write_str("Tab"),
             Key::Escape => formatter.write_str("Escape"),
             Key::F11 => formatter.write_str("F11"),
+            Key::Home => formatter.write_str("Home"),
+            Key::End => formatter.write_str("End"),
         }
     }
 }
@@ -248,6 +256,8 @@ impl FromStr for KeyStroke {
                 "tab" if key.is_none() => key = Some(Key::Tab),
                 "escape" | "esc" if key.is_none() => key = Some(Key::Escape),
                 "f11" if key.is_none() => key = Some(Key::F11),
+                "home" if key.is_none() => key = Some(Key::Home),
+                "end" if key.is_none() => key = Some(Key::End),
                 character if key.is_none() && character.chars().count() == 1 => {
                     key = character.chars().next().map(Key::Character)
                 }
@@ -416,6 +426,16 @@ const COMMANDS: &[CommandDefinition] = &[
         &[MediaKind::Image],
     ),
     command(CommandId::NextImage, "Next image", &[MediaKind::Image]),
+    command(
+        CommandId::FirstImage,
+        "First image in folder",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::LastImage,
+        "Last image in folder",
+        &[MediaKind::Image],
+    ),
 ];
 
 const fn command(

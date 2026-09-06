@@ -34,7 +34,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             &[ToggleFullscreen],
             &[TogglePause, SeekBackward, SeekForward],
             &[PreviousMedia, NextMedia, PreviousSameKind, NextSameKind],
-            &[PreviousImage, NextImage],
+            &[PreviousImage, NextImage, FirstImage, LastImage],
             &[PreviousTab, NextTab],
             &[ZoomIn, ZoomOut, ActualSize, FitToWindow, ToggleCropPreview],
             &[

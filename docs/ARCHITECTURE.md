@@ -242,6 +242,8 @@ Escapeはmodal/paletteの入力を優先し、次にfilmstrip/gridを閉じ、ov
 
 ### H1 seek bar and command palette
 
+画像folderのHome/Endは現在のShell snapshot内の最初/最後の画像へ移動する共有commandとする。非画像を除き、filenameで並べ替えず、reading modeでも同じ端点画像を起点にする。現在画像がsnapshotにない間は移動せず、すでに端点なら再load・保存確認を行わない。別画像への移動は既存dirty/export guardを通す。menu・palette・custom shortcutへ同じcommandを公開し、既定Home/Endは画像だけに割り当てる。text入力のHome/Endや動画・音声の操作は変更しない。
+
 画像folderのSeek hoverは移動先のpreviewと位置・filenameを表示する。reading modeでは既存reading_itemsで求めた移動後のpage群を、現在の枚数・縦横・反転に合わせる。filmstripが閉じている間だけ同じPreviewLoader・path/generation照合・240×160 cacheを共用し、新しいworkerを増やさない。hover離脱・overlay・media切替・snapshot更新では要求とtextureを失効させる。対象は最大10 page、hoverだけではsource・現在画像・編集を変更せず、release時は既存dirty guardへ渡す。失敗pageは位置を保ってNo previewとし、表示中に再試行loopを作らない。
 
 動画・音声のSeek tooltipはtrack全体の左端ではなく、hover地点の上へ中央揃えで置き、画面端では表示領域内へ収める。動画previewは縦横比を保って最大160×108 logical pxに収め、時刻を中央に添える。縦長素材でもtrackを覆う巨大な画像にしない。既存の20区間cache・非同期取得・失敗表示・Seek確定経路を維持し、本画面scrubは追加しない。

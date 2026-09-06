@@ -232,3 +232,5 @@ preview要求ごとのthread生成を、duration/波形/hover画像それぞれ�
 Seek previewがhover位置ではなく左端に現れる問題を通常releaseで確認し、指している位置の上へ中央揃えにした。160×108 logical px以内のaspect-fitと空き高さ制限で縦長・小windowのtrack重なりも防ぐ。描画48組を含む206 tests・Clippy・両build、通常windowの横長/縦長・右端・320×240 timelineが通過。94f97cbのCIも成功。次は画像folderのseek previewなど日常閲覧の外観・操作感を監査する。H1と実機/配布gateは未完了。
 
 画像folderのSeek hoverへ移動先画像とreading page群のpreviewを追加した。Shell順・枚数・縦横・反転を使い、filmstripの単一worker/cacheを共用する。hoverでは移動せず、離脱/overlayで要求を取消し、確定は既存dirty guardを通す。実PNGの非同期完了・描画配置・失敗再要求抑制を含む208 tests、Clippy、両buildが通過。通常windowで単画像/reading/反転・filmstrip・破損page・保存確認と移動を確認し、03e2bd8/90c2021 CIも成功。次はfolder端点へのkeyboard移動など残る日常閲覧を監査する。H1と実機/配布gateは未完了。
+
+画像folderのHome/Endを共有commandとして追加し、現在のShell順の最初/最後の画像へ移動できるようにした。reading modeと保存確認を維持し、現在端点・対象消失・未取得時は再loadしない。menu/palette/custom shortcutへ接続し、210 tests・Clippy・両buildが通過。通常windowで先頭/末尾、dirty端点のno-opと別端点の保存確認、paletteの文字編集とcommand実行を確認した。次は残る画像/再生の日常操作を監査する。H1と実機/配布gateは未完了。

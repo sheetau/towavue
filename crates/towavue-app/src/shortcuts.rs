@@ -37,6 +37,8 @@ fn defaults() -> ShortcutBindings {
         (CommandId::SeekForward, "Right"),
         (CommandId::PreviousImage, "Left"),
         (CommandId::NextImage, "Right"),
+        (CommandId::FirstImage, "Home"),
+        (CommandId::LastImage, "End"),
         (CommandId::PreviousSameKind, "Ctrl+Left"),
         (CommandId::NextSameKind, "Ctrl+Right"),
         (CommandId::PreviousMedia, "Alt+Left"),
@@ -140,6 +142,60 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 mod tests {
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn image_boundary_shortcuts_round_trip_and_preserve_custom_bindings() {
+        let bindings = parse("toggle_pause = P\n", defaults()).expect("old configuration");
+        for (key, command) in [
+            ("Home", CommandId::FirstImage),
+            ("End", CommandId::LastImage),
+        ] {
+            let sequence: KeySequence = key.parse().expect("boundary key");
+            assert_eq!(sequence.to_string(), key);
+            assert_eq!(command.as_str().parse(), Ok(command));
+            for reading_mode in [false, true] {
+                for media_kind in [
+                    None,
+                    Some(MediaKind::Image),
+                    Some(MediaKind::Video),
+                    Some(MediaKind::Audio),
+                ] {
+                    let context = CommandContext {
+                        media_kind,
+                        reading_mode,
+                        ..Default::default()
+                    };
+                    assert_eq!(
+                        bindings.resolve(sequence.strokes(), context),
+                        if media_kind == Some(MediaKind::Image) {
+                            ShortcutMatch::Command(command)
+                        } else {
+                            ShortcutMatch::None
+                        }
+                    );
+                }
+            }
+        }
+        let bindings = parse(
+            "first_image = Ctrl+K Home\nlast_image = Ctrl+End\n",
+            defaults(),
+        )
+        .expect("custom boundaries");
+        let restored = parse(&serialize(&bindings), defaults()).expect("round trip");
+        let context = CommandContext {
+            media_kind: Some(MediaKind::Image),
+            ..Default::default()
+        };
+        for (key, expected) in [
+            ("Home", ShortcutMatch::None),
+            ("End", ShortcutMatch::None),
+            ("Ctrl+K Home", ShortcutMatch::Command(CommandId::FirstImage)),
+            ("Ctrl+End", ShortcutMatch::Command(CommandId::LastImage)),
+        ] {
+            let sequence: KeySequence = key.parse().expect("custom key");
+            assert_eq!(restored.resolve(sequence.strokes(), context), expected);
+        }
+    }
 
     #[test]
     fn arrow_defaults_navigate_images_and_seek_playable_media() {

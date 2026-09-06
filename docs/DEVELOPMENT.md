@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### 画像folderのHome/End（2026-09-06）
+
+- 3枚の赤・緑・青PNGをignoredの`target/tmp/h1-boundary-folder`へ生成し、中央の緑を開く。旧通常release PID 43708でHome/End後も2/3の緑に留まることを確認した。
+- 修正版PID 43980ではHomeで1/3の赤、reading modeのEndで3/3の青へ移動する。reading解除・回転編集後のEndは青と未保存状態を保ち、Homeだけが保存確認を出す。Escape/Undo後にpaletteを開き、`image`の前後へHome/Endで文字を挿入して`first image in folder`にでき、編集中は青のままだった。Enterで共有commandを実行すると赤へ移動した。
+- 両windowは通常終了し、sourceは保存・変更していない。自動回帰は非filenameのShell順、画像以外の除外、端点/missing/空snapshot、reading、取消時の編集・世代保持、設定の往復・旧設定への既定値追加・custom chordを確認する。物理keyboard/IMEの全matrixではない。
+
 ### 画像folderのSeek preview（2026-09-06）
 
 - 旧通常release PID 40772で既存PNGを開き、bar hoverは`15 / 20 towavue.png`だけで画像が出ないことを確認。修正版PID 44740では同じhover位置に移動先の画像を表示し、本画面は現在画像のままになる。

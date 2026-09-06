@@ -2593,6 +2593,8 @@ where
             CommandId::NextMedia => self.navigate(true, false),
             CommandId::PreviousSameKind | CommandId::PreviousImage => self.navigate(false, true),
             CommandId::NextSameKind | CommandId::NextImage => self.navigate(true, true),
+            CommandId::FirstImage => self.navigate_image_boundary(false),
+            CommandId::LastImage => self.navigate_image_boundary(true),
             CommandId::ToggleFilmstrip => {
                 if !self.filmstrip_open {
                     self.refresh_folder_snapshot();
@@ -3416,6 +3418,28 @@ where
         self.request_guarded(GuardedAction::Navigate(paths[index].clone()));
     }
 
+    fn navigate_image_boundary(&mut self, last: bool) {
+        let (Some(snapshot), Some(path)) = (&self.folder_snapshot, &self.path) else {
+            return;
+        };
+        if !snapshot
+            .items_of_kind(MediaKind::Image)
+            .any(|item| &item.path == path)
+        {
+            return;
+        }
+        let target = if last {
+            snapshot.items_of_kind(MediaKind::Image).last()
+        } else {
+            snapshot.items_of_kind(MediaKind::Image).next()
+        };
+        if let Some(target) = target
+            && &target.path != path
+        {
+            self.request_guarded(GuardedAction::Navigate(target.path.clone()));
+        }
+    }
+
     fn navigate_to_unchecked(&mut self, path: PathBuf) {
         let Some(kind) = MediaKind::from_path(&path) else {
             return;
@@ -4123,6 +4147,8 @@ where
             WinitKey::Named(NamedKey::Tab) => (Key::Tab, false),
             WinitKey::Named(NamedKey::Escape) => (Key::Escape, false),
             WinitKey::Named(NamedKey::F11) => (Key::F11, false),
+            WinitKey::Named(NamedKey::Home) => (Key::Home, false),
+            WinitKey::Named(NamedKey::End) => (Key::End, false),
             _ => return None,
         };
         Some(KeyStroke {
@@ -6238,6 +6264,87 @@ mod tests {
         assert!(app.pending_guard.is_some());
         assert_eq!(app.path.as_ref(), Some(&source));
         assert_eq!(app.edits, edits);
+    }
+
+    #[test]
+    fn image_boundaries_preserve_shell_order_guards_and_current_endpoint() {
+        let Some(root) = isolated_test_root(
+            "tests::image_boundaries_preserve_shell_order_guards_and_current_endpoint",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let tab = app.tabs.open_new(root.join("middle.png"), MediaKind::Image);
+        app.media_kind = Some(MediaKind::Image);
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let edits = app.edits.clone();
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: [
+                "skip.wav",
+                "z-first.png",
+                "middle.png",
+                "a-last.png",
+                "skip.mp4",
+            ]
+            .into_iter()
+            .map(|name| towavue_core::FolderMediaItem {
+                identity: towavue_core::ShellIdentity::new(vec![]),
+                path: root.join(name),
+                kind: MediaKind::from_path(Path::new(name)).expect("kind"),
+            })
+            .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        for reading in [false, true] {
+            app.reading_mode = reading;
+            for current in ["z-first.png", "middle.png", "a-last.png", "missing.png"] {
+                app.path = Some(root.join(current));
+                app.tabs
+                    .active_mut()
+                    .expect("active tab")
+                    .target
+                    .set_current_path(root.join(current), MediaKind::Image);
+                for (command, target) in [
+                    (CommandId::FirstImage, "z-first.png"),
+                    (CommandId::LastImage, "a-last.png"),
+                ] {
+                    let generation = app.media_generation;
+                    app.dispatch(command);
+                    if current == target || current == "missing.png" {
+                        assert!(
+                            app.pending_guard.is_none(),
+                            "current/missing endpoint must not reload or prompt"
+                        );
+                    } else {
+                        assert!(
+                            matches!(&app.pending_guard, Some(GuardedAction::Navigate(path)) if *path == root.join(target))
+                        );
+                        app.resolve_guard(GuardDecision::Cancel);
+                    }
+                    assert_eq!(app.path.as_ref(), Some(&root.join(current)));
+                    assert_eq!(app.media_generation, generation);
+                    assert_eq!(app.edits, edits);
+                    assert_eq!(app.reading_mode, reading);
+                }
+            }
+        }
+        app.folder_snapshot
+            .as_mut()
+            .expect("snapshot")
+            .items
+            .clear();
+        for command in [CommandId::FirstImage, CommandId::LastImage] {
+            app.dispatch(command);
+            assert!(app.pending_guard.is_none());
+        }
     }
 
     #[test]

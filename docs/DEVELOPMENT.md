@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### OS text clipboard連携（2026-09-06 20:24 JST）
+
+- ownerがOS clipboardへの試験書込みを明示許可した後に実施。既存内容は読み取らず、試験文字列`towavue clipboard 日本語 café 🎞️`で置換した。PowerShellから書込み、通常releaseのWelcomeでCtrl+Shift+P→Ctrl+Vを行い、検索欄の文字表示をcaptureで確認した。
+- Ctrl+A後、OS clipboardを別のsentinelへ置き換えてからCtrl+Cを入力し、外部processの読取りで元のUnicode文字列と完全一致した。再度sentinelへ置き換えてCtrl+Xを入力すると、OS側は同じ文字列、検索欄は空になる。外部から`Open`を書いてCtrl+Vすると候補がOpen file/Open folderへ絞られ、commandは実行せずWelcomeを保持した。最後にclipboardには`Open`を残した。
+- featureなしの比較build（所有PID 38864、開始UTC 2026-09-06T11:23:10.6270873Z）では同じUnicode paste後も検索欄が空のままだった。比較後はfeatureを戻してoffline再buildし、Cargo.lockのSHA-256が比較前と同一であることを確認。最終release（PID 29364、開始UTC 2026-09-06T11:24:05.0666986Z）で上記全手順を再実施して通過した。先行feature試験PID 8172を含め、3 windowsとも所有権/foregroundを確認し、正常終了・stderr空、Save/元素材/OS設定の変更なし。
+- 最終binary SHA-256: `394617AF866B14D89006F64FF576326C7D0A59F21818CC65077DA6E114628087`。比較binary: `4A243E42168F027EB192429CAA7B16E708B127B51BFC76BEA7A824F3BBC28868`。960×576、現在機のWindows build 26200、注入keyによる試験。captured PNGとlogはignoredの`target/tmp/h1-clipboard-*`。物理keyboard、他IME、clipboard占有時の競合、画像copyの証明ではない。
+- 回帰testは同じASCII/Unicodeのpaste・select-all・copy・cut・再pasteをegui入力/outputで検査し、OS clipboardには触れない。240 tests（app 125/core 36/runtime 75/integration 4）とformat・Clippy・両buildが通過。既存live ignore 3件とその他のH1 gateは残る。
+
 ### 画像エラーからの継続操作（2026-09-06 19:56 JST）
 
 - 8796ad8の通常release、所有PID 43832（開始UTC 2026-09-06T10:51:42.3549463Z）、960×576で実施。所有folder内に不正なPNG signatureの`01-broken.png`と正常な赤600×800の`02-good.png`を置き、前者から起動した。

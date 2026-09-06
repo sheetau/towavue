@@ -86,7 +86,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Command palette | titleの部分一致検索、上下選択、有効候補の巡回、Enter実行、Escape閉じを実装。IME eventと重複keyを分離し、focus再要求で毎文字の変換が取り消される不具合も修正。Windows日本語IMEの候補表示・上下選択・確定・取消と確定後のcommand実行を実windowで確認した。ranking、categoryはない。物理keyboard・他IME・focus/DPIを含む横断matrixは未完了 |
 | 日本語filename・文字表示 | Windowsの日本語fontを既定fontの後ろへ追加し、tab/statusの欠字を修正。日本語fontがない環境や全言語のfallbackは未対応 |
 | Custom shortcutとprefix key | text設定として実装。GUI editor、競合表示、recording UIはない |
-| 検索欄などのOS clipboard連携 | 未実装。固定egui-winitのclipboard featureを無効にしており、同じUI状態内のfallback文字列だけを使用する。外部applicationとのtext copy/pasteは現状対応済みと扱わない。画像のclipboard copyとは別の不足 |
+| 検索欄などのOS clipboard連携 | 固定egui-winitのclipboard featureを有効化。日本語・アクセント文字・絵文字のpaste/copy/cut回帰と、通常releaseからOS clipboardへの正確な往復を確認。画像のclipboard copy機能はない。clipboard競合・他IME・全入力matrixは未検証 |
 | Media別4×4 grid | key/clickとtext設定を実装。H1で列はみ出し、名前/path省略、click後のclose、物理位置対応と修飾key競合を修正。paletteとは同時表示しない。配置編集UI、drag配置、詳細animationはない |
 | Statusへpath、位置、zoom、解像度、size、modified等 | filename、parent path、folder内位置、size、画像解像度・zoom、編集値などを部分実装。modified日時、詳細codec/stream情報はない |
 | 常時1px seek bar、hover時展開 | H1でstatus上端に実装。動画・音声はduration取得後、timeline非表示時に使える。drag終了時に一回だけSeekする |
@@ -209,11 +209,11 @@ H1の個別修正が通ったことと、配布可能な品質の判定を分け
 | 再生性能 | 51b43bfの30分logは107771 presented、drop/CPU transfer 0、drift p95/max 4.808/32.055ms。4b7721bの100回Seekは再生/停止時p95 102.204/42.260ms | 記録は各binary/基準機限定。最終候補でM3の10分drop<0.1%、30分drift p95≤40/max≤100ms、1080p 100回Seek p95≤300msを確認し、古い測定へ新binaryのlabelを付けない |
 | device復旧 | 制御faultによる再構築/保存保護とheadless回帰はある | 物理endpoint変更、unplug、実driver/adapter変更は未検証。OSや他appへ影響する試験を暗黙に実行しない |
 | 日常操作・草案の外観 | compact shell、palette、menu、filmstrip、tab、reading連結、selection、Welcomeの記録あり。今回Welcome/reading/audioの草案画像も再確認 | pixel完全一致やownerの外観受入は未証明。recent一覧、曲ごとの長さ、見開き送り等の差が残るが一括で必須扱いしない。読書の区切り方はowner回答待ち |
-| OS clipboard | appのegui-winitはdefault-features=false。feature treeにclipboard/arboardがなく、固定依存の実装は内部文字列へfallbackする。app独自のOS連携もない | 外部text copy/pasteを先に実装・検証する。画像copy機能と混同しない。検証でユーザーのclipboardを勝手に上書きしない |
+| OS clipboard | egui-winitのclipboard feature、arboard 3.6.1/clipboard-win 5.4.1を既存入力/platform outputへ接続。ownerの書込み許可後、通常releaseでUnicode往復・cut後の空欄・外部変更後の再pasteを確認。変更前は同じpasteが空欄のままだった | clipboardを他processが占有する場合、全形式/IMEのmatrixは未検証。画像copy機能と混同せず、以後の試験でもclipboard内容への影響を明示する |
 | accessibility | accesskit crateがdependency graphにあるだけではWindows連携を示さない。egui-winitのaccesskit featureとinit_accesskit/action経路がappにない | Windows accessibility bridgeとcustom widgetの意味情報が不足。現状を「未検証だが対応済み」と呼ばず、導入・支援技術での操作確認が必要 |
 | 対象OS・入力 | 現在の機械はWindows build 26200。日本語IME、注入pointer/key、scale入力の回帰/記録はある | Windows 10 22H2実機/VM、物理keyboard/pointer、他IME、実mixed-DPI、keyboard-onlyの横断確認は未完了 |
 | 配布 | versionは0.0.0の開発workspace。setup scriptは開発用FFmpegを準備するだけで製品packageではない | portable/installer、FFmpeg配布条件と同梱物、clean-machine起動、package/publicationは未決定・未実施。H1と分けて承認された計画で進める |
 
-根拠の詳細は[DEVELOPMENT](DEVELOPMENT.md)の各日付付きscenario、[ROADMAP](ROADMAP.md)のM3/H1 gate、appの`Cargo.toml`と固定dependency source、`.github/workflows/ci.yml`を参照する。今回のrelease出力SHA-256は`660F60A453A8C8473A2B591B3866AAC64BBE68A80F7FA6000555686EEE5615FE`で、上表の過去30分測定binaryとは異なる。全体のlaunch可否は引き続き未証明である。次の実装候補はOS text clipboard連携とaccessibility経路の不足であり、小さな性能改善を続けるだけでこれらを完了扱いにはしない。
+根拠の詳細は[DEVELOPMENT](DEVELOPMENT.md)の各日付付きscenario、[ROADMAP](ROADMAP.md)のM3/H1 gate、appの`Cargo.toml`と固定dependency source、`.github/workflows/ci.yml`を参照する。20:04監査時のrelease出力SHA-256は`660F60A453A8C8473A2B591B3866AAC64BBE68A80F7FA6000555686EEE5615FE`で、上表の過去30分測定binaryとも、その後のclipboard検証binaryとも異なる。全体のlaunch可否は引き続き未証明である。OS text clipboardの通常往復を確認した後も、accessibility経路の不足と実環境gateは残り、小さな性能改善だけでこれらを完了扱いにはしない。
 
 同一frameの選択/panは固定egui event列で確認し、native traceでも押下～release～後続hoverが同frameに入り正しい選択を保持した。前回の「選択なし」はPNGの読み取り誤りで、実pixelに白い境界と内外の明暗が残ることを再確認した。続く細い選択は同じ左辺を右端へ再dragした結果であり、配送不整合の証拠ではない。別に再現した描画前のEscape取消漏れは保留押下の破棄で修正済み。物理入力・混在DPIのmatrixは引き続き未完了。

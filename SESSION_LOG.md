@@ -2,6 +2,22 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 20:24 JST - validate approved native text clipboard round trips
+
+- Trigger/intent: previous turn completed non-writing implementation/checks (progress). Owner now explicitly permits OS clipboard writes; validate the pending native gate without reading prior contents or expanding into image copy.
+- Evidence: normal release pastes owned Japanese/accented/emoji text from PowerShell into the palette. Replace OS contents with sentinels before copy and cut; external reads exactly match the original text, cut empties the field. A fresh external `Open` replacement pastes and filters commands without execution. Feature-disabled comparison build leaves the same paste empty; restore the feature and identical lock, then repeat the whole flow on final binary.
+- Scope/cleanup: three owned windows close normally with empty stderr. Final PID 29364 starts 11:24:05.0666986Z; DEVELOPMENT records hashes, conditions and ignored captures/logs. Clipboard now contains test text `Open`; prior contents were not read/backed up. No Save, source-media or OS-setting changes. Contention/physical input/other IMEs remain unverified.
+- Changes/verification: retain the minimal manifest feature and Unicode palette regression; update README, architecture, gaps, roadmap and native evidence. Format, Clippy, 240 tests and both builds pass, with three existing live ignores. Prepare this coherent clipboard checkpoint for push; no accessibility implementation mixed in.
+- Status/next: h1_active. Continue the missing Windows accessibility bridge and remaining launch-critical interaction/fidelity gates; do not infer overall launch readiness from this native text round trip.
+
+## 2026-09-06 20:20 JST - wire text clipboard with native verification pending
+
+- Trigger/intent: 2e6adc0 audit identified the disabled OS clipboard backend; its CI 34029256147 succeeds. Enable the pinned egui-winit clipboard feature using existing input/platform-output routes, without a custom bridge, monitor, history or image-copy command.
+- Changes: record the architecture boundary; lock arboard 3.6.1/clipboard-win 5.4.1 and feature dependencies without upgrading existing packages. Add a palette regression for ASCII and Japanese/accented/emoji paste, select-all, copy, cut and paste again, asserting no command execution or close. Inspect CopyText output only; the test never forwards it to the OS.
+- Verification: format, Clippy, 240 tests (app 125/core 36/runtime 75/integrations 4), debug and release builds pass; three existing live ignores remain. Feature tree confirms the native backend. This proves neither cross-application clipboard round trips nor contention handling.
+- Safety/result: named private window-station creation fails with access denied; create-only session station probe reports already exists, so do not open or use it. Neither probe accesses clipboard contents. Request explicit permission for ordinary clipboard test writes; no reply received, no clipboard reads/writes or OS settings changed.
+- Status/next: h1_active, current changes remain uncommitted/unpushed pending native verification or owner direction. Validate approved disposable text through the actual app before claiming completion. Accessibility and existing launch gates remain open; do not mark the overall goal complete or blocked.
+
 ## 2026-09-06 20:04 JST - distinguish launch evidence from missing platform integration
 
 - Trigger/intent: previous turn pushed 9fe5a3a (progress); CI 34028868218 remains in progress at inspection. Re-audit the full launch objective instead of treating accumulated small fixes as completion. Read current manifests, CI, architecture/gates, fixed dependency code, historical trial manifest/log and draft Welcome/reading/audio images.

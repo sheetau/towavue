@@ -178,6 +178,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn palette_pastes_copies_and_cuts_unicode_without_running_commands() {
+        for text in ["open", "日本語 café 🎞️"] {
+            let context = egui::Context::default();
+            let mut palette = CommandPalette::default();
+            let commands = CommandContext {
+                palette_open: true,
+                ..Default::default()
+            };
+            let shortcuts = ShortcutBindings::default();
+            let frame = |palette: &mut CommandPalette, events| {
+                context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 300.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |_| {
+                        assert_eq!(palette.show(&context, commands, &shortcuts), (None, false));
+                    },
+                )
+            };
+            for _ in 0..3 {
+                frame(&mut palette, vec![]);
+            }
+            frame(&mut palette, vec![egui::Event::Paste(text.into())]);
+            assert_eq!(palette.query, text);
+            frame(
+                &mut palette,
+                vec![egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                }],
+            );
+            let copied = frame(&mut palette, vec![egui::Event::Copy]);
+            assert!(matches!(copied.platform_output.commands.as_slice(),
+                [egui::OutputCommand::CopyText(value)] if value == text));
+            assert_eq!(palette.query, text);
+            let cut = frame(&mut palette, vec![egui::Event::Cut]);
+            assert!(matches!(cut.platform_output.commands.as_slice(),
+                [egui::OutputCommand::CopyText(value)] if value == text));
+            assert!(palette.query.is_empty());
+            frame(&mut palette, vec![egui::Event::Paste(text.into())]);
+            assert_eq!(palette.query, text);
+        }
+    }
+
+    #[test]
     fn compact_palette_keeps_search_and_shortcut_columns_inside_the_window() {
         for size in [
             egui::vec2(960.0, 576.0),

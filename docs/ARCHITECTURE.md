@@ -254,6 +254,8 @@ Escapeはmodal/paletteの入力を優先し、次にfilmstrip/gridを閉じ、ov
 
 ### H1 seek bar and command palette
 
+H1のtext入力は、固定egui-winitのclipboard featureを明示的に有効にしてWindowsのOS clipboardへ接続する。検索欄等のcopy/cut/pasteは既存egui入力とplatform outputを使い、app独自のclipboard、監視thread、履歴保持は追加しない。native clipboardへの接続/アクセス失敗時は固定backendの既存fallback/error処理に従い、画像/選択範囲をcopyする新commandとは分ける。テストでユーザーのclipboard内容を暗黙に置換せず、隔離環境または明示許可された内容でnative往復を確認する。
+
 画像folderのHome/Endは現在のShell snapshot内の最初/最後の画像へ移動する共有commandとする。非画像を除き、filenameで並べ替えず、reading modeでも同じ端点画像を起点にする。現在画像がsnapshotにない間は移動せず、すでに端点なら再load・保存確認を行わない。別画像への移動は既存dirty/export guardを通す。menu・palette・custom shortcutへ同じcommandを公開し、既定Home/Endは画像だけに割り当てる。text入力のHome/Endや動画・音声の操作は変更しない。
 
 画像folderのSeek hoverは移動先のpreviewと位置・filenameを表示する。reading modeでは既存reading_itemsで求めた移動後のpage群を、現在の枚数・縦横・反転に合わせる。filmstripが閉じている間だけ同じPreviewLoader・path/generation照合・240×160 cacheを共用し、新しいworkerを増やさない。hover離脱・overlay・media切替・snapshot更新では要求とtextureを失効させる。対象は最大10 page、hoverだけではsource・現在画像・編集を変更せず、release時は既存dirty guardへ渡す。失敗pageは位置を保ってNo previewとし、表示中に再試行loopを作らない。

@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### フォルダー更新後の一覧操作対象とfilmstrip意味情報（2026-09-06 23:54 JST）
+
+- 9984456 CI 34040095093は成功。playlistのcached row actionがShell順更新後に別曲を選ぶ回帰を再現し、filmstripは名前付きButton欠落で回帰が失敗した。通常release `D4F8D64C46FC573D9CCC3F0CE27505B0111A2D147F13064412BEB02A9BE3F409`、PID 47568（開始UTC 14:47:42.7912434Z）でも、所有01/02/03.wavの02行を保持して01の拡張子を一時的に対象外へ変えると、同じRuntimeIdが03を指した。filmstripには可視3項目の名前付きButtonがなく、現在曲のTextだけがあった。
+- playlist/filmstripのwidget IDを移動先pathへ固定し、playlistのToggle扱いを解除。可視filmstripを名前付きButton、両方のFullDescriptionをpathと現在項目の説明にした。filmstripのfocusにも既存hover枠/名前を表示する。順序・行幅・click/middle click・可視範囲限定の描画/previewと既存guardは維持した。
+- 最終通常release `720F9EC306949240271B342B6A597290F1250606063F1EF1049567F36AF1C749`、PID 43568（14:51:05.0853466Z）では、同じ更新後にcached 02行が`1. 02.wav`となりRuntimeIdを保持、Invokeで02を開いた。続いてfilmstripのcached 03もフォルダー更新後に保持され、Invokeで03を開いた。native IUIAutomationElement6でfull path/current track/current itemの説明を確認。01へのUIA Focusと所有capture `target/tmp/h1-filmstrip-accessibility-focus.png`で枠/名前を目視確認した。
+- 同じprocessでToggle muteを編集として追加し、filmstripの01をInvokeするとUnsaved edits/IsModalへ進み、背景02行のInvokeはElementNotEnabledExceptionとなった。Cancel後は03とdirty編集を保持し、Undo/正常終了した。両試験windowは正常終了し、stderrはSoftware decode選択のみ。所有01の一時renameは毎回復元し、3コピーと既存tone.wavのSHA-256は全て`0E0CD597CC65B8A0C05633352D0F8985D0F9FF02554C166771C72D6BDFF96020`。Save/clipboard/OS設定変更なし。
+- 新規2回帰を含むplaylist/filmstrip 9 testsと251 workspace tests（app 135/core 36/runtime 76/integration 4）、format、Clippy、debug/release buildが通過。既存live ignore 3件は残る。native比較とhelper/logはignored target/tmpに限定。画面外項目の全UIA navigation、全screen reader/focus、selection/trimと実環境/配布gateは未完了である。
+
 ### タブ操作対象の同一性とclose名（2026-09-06 23:42 JST）
 
 - 99eca60 CI 34039457094は成功。既存tab closeはUIA名が全て「×」であり、並べ替え後の取得済みtab actionも別tabへ渡ることをheadlessで再現した。通常release `C470B847FD6EEA642D4F79A1AA189845FC8AF30F389F23F64776EA91300DBC95`、PID 33880（開始UTC 14:35:59.4577430Z）へ所有01/02/03.pngを開き、02のUIA参照を保持して01を閉じると、同じRuntimeIdのNameが03.pngへ変わった。参照先を再取得して隠さず、同じ参照で比較した。

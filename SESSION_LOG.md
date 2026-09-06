@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 23:54 JST - keep folder item actions tied to media paths
+
+- Trigger/intent: previous turn is progress; 9984456 CI 34040095093 succeeds. Audit playlist/filmstrip for the same slot-identity problem without changing Shell order or virtualization.
+- Evidence/change: playlist regression opens the wrong track after reorder; native PID 47568 confirms cached 02 changes to 03 after the owned first WAV is temporarily excluded. Filmstrip lacks named buttons. Key both controls by target path, expose playlist Invoke instead of Toggle and named filmstrip buttons, add path/current-item descriptions and reuse the filmstrip focus outline/name.
+- Verification: two regressions cover cached actions after reorder/removal, a same-basename different path, disabled rows, filmstrip focus and current-item no-op. Nine focused tests, 251 workspace tests, format, Clippy and both builds pass; three existing live ignores remain. Existing large-folder virtualization, pointer and scroll tests pass.
+- Native/cleanup: final PID 43568 keeps cached playlist 02 and filmstrip 03 through folder updates and opens the correct files. Native FullDescription and focus capture pass. Dirty mute then filmstrip navigation reaches the guard; background row Invoke is rejected, Cancel keeps source/edit, Undo and normal close pass. Restore every owned rename; all WAV hashes match the original, both windows close normally and stderr contains only Software path diagnostics. No Save, clipboard or OS-setting changes.
+- Status/next: h1_active, prepare a coherent checkpoint for push. Remaining offscreen accessibility navigation, selection/trim and full focus/screen-reader workflows still need work; physical-input/DPI/device, final-candidate and distribution gates remain open.
+
 ## 2026-09-06 23:42 JST - preserve tab accessibility targets across layout changes
 
 - Trigger/intent: previous turn is progress; 99eca60 CI 34039457094 succeeds. Audit ambiguous close buttons and whether cached actions still address the intended tab.

@@ -183,8 +183,26 @@ impl Filmstrip {
                             origin + egui::vec2(padding + index as f32 * STEP + 4.0, 24.0),
                             egui::vec2(120.0, 80.0),
                         );
-                        let response = ui.allocate_rect(rect, egui::Sense::click());
+                        let response = ui.interact(
+                            rect,
+                            ui.id().with(("filmstrip-item", &item.path)),
+                            egui::Sense::click(),
+                        );
                         let active = selected == Some(index);
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                ui.is_enabled(),
+                                display_name(&item.path),
+                            )
+                        });
+                        context.accesskit_node_builder(response.id, |node| {
+                            node.set_description(format!(
+                                "{}{}",
+                                item.path.display(),
+                                if active { " (current item)" } else { "" }
+                            ));
+                        });
                         ui.painter().rect_filled(rect, 0.0, Color32::from_gray(28));
                         match self.previews.get(&item.path) {
                             Some(Ok((texture, duration))) => {
@@ -228,7 +246,7 @@ impl Filmstrip {
                                 );
                             }
                         }
-                        if active || response.hovered() {
+                        if active || response.hovered() || response.has_focus() {
                             ui.painter().rect_stroke(
                                 rect.expand(3.0),
                                 2.0,
@@ -289,6 +307,89 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, MediaKind, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn accessible_items_follow_paths_and_keep_current_item_noop() {
+        let root = std::env::temp_dir().join(format!(
+            "towavue-filmstrip-accessibility-{}",
+            std::process::id()
+        ));
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                .expect("worker");
+        let mut snapshot = FolderSnapshot {
+            folder_identity: ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: (0..3)
+                .map(|index| FolderMediaItem {
+                    identity: ShellIdentity::new(vec![index]),
+                    path: root.join(format!("{index}.png")),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: SystemTime::now(),
+        };
+        let context = Context::default();
+        context.enable_accesskit();
+        let first = snapshot.items[0].path.clone();
+        let target = snapshot.items[1].path.clone();
+        let mut frame = |snapshot: &FolderSnapshot, current: &Path, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |_| strip.show(&context, Some(snapshot), Some(current), &mut actions),
+            );
+            (
+                output.platform_output.accesskit_update.expect("tree"),
+                actions,
+            )
+        };
+        frame(&snapshot, &first, vec![]);
+        let (tree, _) = frame(&snapshot, &first, vec![]);
+        let (id, node) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("1.png")
+            })
+            .expect("named filmstrip button");
+        assert_eq!(node.description(), Some(target.to_string_lossy().as_ref()));
+        let id = *id;
+        let click = || {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: id,
+                data: None,
+            })
+        };
+        snapshot.items.swap(0, 1);
+        let mut focus = click();
+        if let egui::Event::AccessKitActionRequest(request) = &mut focus {
+            request.action = egui::accesskit::Action::Focus;
+        }
+        frame(&snapshot, &first, vec![focus]);
+        assert_eq!(frame(&snapshot, &first, vec![]).0.focus, id);
+        assert!(
+            frame(&snapshot, &first, vec![click()]).1
+                == [UiAction::OpenMedia(target.clone(), false)]
+        );
+        frame(&snapshot, &target, vec![]);
+        assert!(frame(&snapshot, &target, vec![click()]).1.is_empty());
+        snapshot.items.remove(0);
+        frame(&snapshot, &first, vec![]);
+        assert!(frame(&snapshot, &first, vec![click()]).1.is_empty());
+    }
 
     #[test]
     fn seek_preview_reuses_visible_results_and_preserves_page_layout() {

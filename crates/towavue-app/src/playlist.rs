@@ -88,20 +88,33 @@ impl Playlist {
                     let text = RichText::new(format!("{}. {name}", index + 1))
                         .size(14.0)
                         .color(Color32::from_gray(if selected { 240 } else { 150 }));
-                    if ui
-                        .add_sized(
-                            egui::vec2(ui.available_width(), 32.0),
-                            egui::Button::selectable(selected, (text, egui::Atom::grow()))
-                                .truncate(),
+                    let response = ui
+                        .scope_builder(
+                            egui::UiBuilder::new().id(ui.id().with(("audio-row", &item.path))),
+                            |ui| {
+                                ui.add_sized(
+                                    egui::vec2(ui.available_width(), 32.0),
+                                    egui::Button::selectable(selected, (text, egui::Atom::grow()))
+                                        .truncate(),
+                                )
+                            },
                         )
+                        .inner
                         .on_hover_ui(|ui| {
                             ui.set_max_width(
                                 (ui.ctx().viewport_rect().width() - 32.0).clamp(1.0, 400.0),
                             );
                             ui.add(egui::Label::new(name).wrap());
-                        })
-                        .clicked()
-                    {
+                        });
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        node.clear_toggled();
+                        node.set_description(format!(
+                            "{}{}",
+                            item.path.display(),
+                            if selected { " (current track)" } else { "" }
+                        ));
+                    });
+                    if response.clicked() {
                         chosen = Some(item.path.clone());
                     }
                 }
@@ -119,6 +132,79 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn accessible_rows_follow_paths_after_shell_updates() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut playlist = Playlist::default();
+        let mut snapshot = snapshot(3);
+        let current = snapshot.items[2].path.clone();
+        let target = snapshot.items[1].path.clone();
+        let mut frame = |snapshot: &FolderSnapshot, events, disabled| {
+            let mut chosen = None;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 240.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    if disabled {
+                        ui.disable();
+                    }
+                    chosen = playlist.show(ui, Some(snapshot), Some(&current), true);
+                },
+            );
+            (
+                output.platform_output.accesskit_update.expect("tree"),
+                chosen,
+            )
+        };
+        frame(&snapshot, vec![], false);
+        let (tree, _) = frame(&snapshot, vec![], false);
+        let id = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("2. track-1.wav"))
+            .expect("named row")
+            .0;
+        let click = || {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: id,
+                data: None,
+            })
+        };
+        snapshot.items.swap(0, 1);
+        frame(&snapshot, vec![], false);
+        assert_eq!(
+            frame(&snapshot, vec![click()], false).1,
+            Some(target.clone())
+        );
+        let (tree, _) = frame(&snapshot, vec![], false);
+        let node = &tree
+            .nodes
+            .iter()
+            .find(|(candidate, _)| *candidate == id)
+            .expect("same row")
+            .1;
+        assert_eq!(node.label(), Some("1. track-1.wav"));
+        assert!(
+            node.toggled().is_none(),
+            "opening a track is not an on/off toggle"
+        );
+        assert_eq!(node.description(), Some(target.to_string_lossy().as_ref()));
+        frame(&snapshot, vec![], true);
+        assert!(frame(&snapshot, vec![click()], true).1.is_none());
+        snapshot.items.remove(0);
+        frame(&snapshot, vec![], false);
+        assert!(frame(&snapshot, vec![click()], false).1.is_none());
+        snapshot.items[0].path = PathBuf::from("another-folder/track-1.wav");
+        frame(&snapshot, vec![], false);
+        assert!(frame(&snapshot, vec![click()], false).1.is_none());
+    }
 
     #[test]
     fn playlist_rows_preserve_order_and_offer_full_width_targets() {

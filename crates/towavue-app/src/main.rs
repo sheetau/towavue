@@ -1121,7 +1121,11 @@ where
             return;
         };
         if self.clock.is_none() {
-            let mut clock = PlaybackClock::new(presentation_time, self.playback_rate());
+            let target = self
+                .session
+                .as_ref()
+                .map_or(presentation_time, PlaybackSession::target);
+            let mut clock = PlaybackClock::new(presentation_time.max(target), self.playback_rate());
             clock.set_paused(self.state == PlaybackState::Paused);
             self.clock = Some(clock);
         }
@@ -3555,12 +3559,17 @@ where
         };
         let range = self.edit_state().playback_range();
         let position = self.current_position();
-        let target = if self.state == PlaybackState::Ended {
+        let restart = next == PlaybackState::Playing
+            && (self.state == PlaybackState::Ended
+                || self.media_duration.is_some_and(|duration| {
+                    !duration.is_zero() && position >= media_time(duration)
+                }));
+        let target = if restart {
             range.start
         } else {
             range.play_target(position)
         };
-        if self.state == PlaybackState::Ended || target != position {
+        if restart || target != position {
             self.seek_to(target);
             if self.state == PlaybackState::Faulted {
                 return;
@@ -3606,6 +3615,13 @@ where
     }
 
     fn seek_to(&mut self, target: MediaTime) {
+        let end = self
+            .media_duration
+            .filter(|duration| !duration.is_zero())
+            .map(media_time);
+        let target = end
+            .map_or(target, |end| target.min(end))
+            .max(MediaTime::ZERO);
         let started = Instant::now();
         self.pending_seek_started = None;
         let edit = self.edit_state();
@@ -3613,7 +3629,8 @@ where
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        let pause = self.state == PlaybackState::Ended || !range.contains(target);
+        let pause =
+            self.state == PlaybackState::Ended || end == Some(target) || !range.contains(target);
         match session.seek_with_edits(target, edit.rate, range, pause) {
             Ok(generation) => {
                 if pause {
@@ -3908,6 +3925,10 @@ where
             .or(self.pending_time)
             .or_else(|| self.session.as_ref().map(PlaybackSession::target))
             .unwrap_or(MediaTime::ZERO);
+        let position = self
+            .media_duration
+            .filter(|duration| !duration.is_zero())
+            .map_or(position, |duration| position.min(media_time(duration)));
         self.session
             .as_ref()
             .and_then(PlaybackSession::range_end)
@@ -8263,6 +8284,31 @@ mod tests {
                     }
                 }
                 app.media_kind = Some(MediaKind::Video);
+                app.media_duration = Some(Duration::from_secs(2));
+                app.state = PlaybackState::Playing;
+                app.seek_to(time(999));
+                assert_eq!(app.current_position(), time(2));
+                assert_eq!(app.state, PlaybackState::Paused);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while app.pending_time.is_none() && Instant::now() < deadline {
+                    app.load_next_frame();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                assert!(app.pending_time.is_some(), "terminal video preview");
+                assert_eq!(app.current_position(), time(2));
+                app.advance_media();
+                assert!(
+                    app.session
+                        .as_ref()
+                        .expect("session")
+                        .video_geometry()
+                        .is_some()
+                );
+                app.toggle_pause();
+                assert_eq!(app.state, PlaybackState::Playing);
+                assert_eq!(app.current_position(), MediaTime::ZERO);
+                app.seek_to(MediaTime::from_nanoseconds(-1));
+                assert_eq!(app.current_position(), MediaTime::ZERO);
                 app.edits
                     .entry(tab)
                     .or_default()
@@ -8273,6 +8319,10 @@ mod tests {
                 assert_eq!(app.current_position(), MediaTime::ZERO);
                 assert_eq!(app.state, PlaybackState::Paused);
                 assert!(app.edits[&tab].is_dirty());
+                app.toggle_pause();
+                assert_eq!(app.state, PlaybackState::Playing);
+                assert_eq!(app.current_position(), time(1));
+                app.seek_to(time(999));
                 app.toggle_pause();
                 assert_eq!(app.state, PlaybackState::Playing);
                 assert_eq!(app.current_position(), time(1));

@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 16:14 JST - bound source seeks and preserve terminal video preview
+
+- Trigger/evidence: previous turn pushed 8f9081e (progress); CI 34018200368 succeeds. Baseline release PID 27820 receives one posted Right at a two-second EOF, shows Position 6.993s and loses the video.
+- Contract/change: clamp app Seek/position to zero and known nonzero source duration, pause endpoint Seek, and restart endpoint Play at source/trim start. Unknown/zero duration has no inferred upper bound. Parallel decode retains at most one owned preroll video frame; if no frame reaches the target before unbounded source EOF, emit the final frame before VideoFinished. Bounded trim filtering and original PTS remain intact. Anchor initial app clock no earlier than the target. No new worker/device/dependency/unsafe code or CPU transfers.
+- Verification: new software regression fails with zero terminal frames before the fix, then compares final pixels/PTS to full decode at near/exact EOF, verifies bounded-range exclusion and consumer-close termination. Expanded live-session app regression fails at 999s versus 2s before fix, then covers clamping, endpoint pause/preview/replay, negative input and trim-start replay; existing unknown-duration behavior remains covered. Format, Clippy, 222 tests (app 112/core 35/runtime 71/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: PID 22672 shows the last numbered frame 59 at 02/02 with D3D11VA selected. Final PID 40752 repeats endpoint preview and one posted Space restarts from frame 0 (capture at frame 19/0.633s). Audio PID 8292 receives seven posted Rights, stays at 30.006/30 seconds paused, then one Left reaches 25.006s without edits. All four owned windows close normally, no source save or OS settings, ignored captures/logs only. This does not re-prove the long-duration performance gate or explain prior SendKeys anomalies.
+- Status/next: h1_active. Audit terminal preview with mismatched stream lengths/VFR and the remaining everyday playback scenarios. Trace keyboard delivery if extra-input behavior recurs. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 16:04 JST - allow keyboard seek after playback ends
 
 - Trigger/evidence: previous turn pushed c50898c (progress); its CI 34017806336 remains in progress. Baseline normal release PID 11552 ignores Left at EOF, unlike timeline absolute Seek.

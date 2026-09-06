@@ -677,6 +677,8 @@ fn run_parallel_workers(
 
         let mut summary = DecodeSummary::default();
         let mut result = Ok(());
+        let mut last_preroll_video = None;
+        let mut emitted_video = false;
         for mut output in output_rx {
             if cancelled() {
                 result = Err(DecodeError::ConsumerClosed);
@@ -725,19 +727,29 @@ fn run_parallel_workers(
                     accepted = emit(output);
                 }
             } else if !finished && time.is_some_and(|time| time >= minimum_time) {
+                emitted_video = true;
+                last_preroll_video = None;
                 accepted = emit(output);
+            } else if is_video && !finished && maximum_time.is_none() && !emitted_video {
+                // Keep one owned software/native frame until a usable frame or EOF.
+                // Terminal source preview must not relax bounded trim filtering.
+                last_preroll_video = Some(output);
             }
             if finished && accepted {
+                if is_video && let Some(frame) = last_preroll_video.take() {
+                    accepted = emit(frame);
+                }
                 if is_video {
                     video_finished = true;
                 } else {
                     audio_finished = true;
                 }
-                accepted = emit(if is_video {
-                    ParallelDecodeOutput::VideoFinished
-                } else {
-                    ParallelDecodeOutput::AudioFinished
-                });
+                accepted = accepted
+                    && emit(if is_video {
+                        ParallelDecodeOutput::VideoFinished
+                    } else {
+                        ParallelDecodeOutput::AudioFinished
+                    });
             }
             if !accepted {
                 result = Err(DecodeError::ConsumerClosed);
@@ -2026,6 +2038,70 @@ mod tests {
             classify_transfer(color::TransferCharacteristic::Unspecified),
             None
         );
+    }
+
+    #[test]
+    fn terminal_seek_retains_the_last_frame_only_without_a_bounded_range() {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+        let mut reference = None;
+        decode_file_from(&path, MediaTime::ZERO, |output| {
+            if let DecodeOutput::Video(frame) = output {
+                reference = Some(frame);
+            }
+            true
+        })
+        .expect("reference decode");
+        let reference = reference.expect("last source frame");
+        for target in [1_999_000_000, 2_000_000_000] {
+            for end in [None, Some(MediaTime::from_nanoseconds(3_000_000_000))] {
+                let mut frames = Vec::new();
+                let mut finished = false;
+                super::decode_file_parallel(
+                    &path,
+                    MediaTime::from_nanoseconds(target),
+                    end,
+                    Some(super::DecodeStream::Video),
+                    |output| {
+                        match output {
+                            super::ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(
+                                frame,
+                            )) => {
+                                assert!(!finished);
+                                frames.push(frame);
+                            }
+                            super::ParallelSoftwareDecodeOutput::VideoFinished => finished = true,
+                            _ => {}
+                        }
+                        true
+                    },
+                )
+                .expect("terminal seek");
+                assert!(finished);
+                assert_eq!(frames.len(), usize::from(end.is_none()));
+                if let Some(frame) = frames.first() {
+                    assert_eq!(frame.presentation_time, reference.presentation_time);
+                    assert_eq!(frame.rgba, reference.rgba);
+                }
+            }
+        }
+        let mut calls = 0;
+        let result = super::decode_file_parallel(
+            &path,
+            MediaTime::from_nanoseconds(2_000_000_000),
+            None,
+            Some(super::DecodeStream::Video),
+            |output| {
+                assert!(matches!(
+                    output,
+                    super::ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(_))
+                ));
+                calls += 1;
+                false
+            },
+        );
+        assert!(matches!(result, Err(super::DecodeError::ConsumerClosed)));
+        assert_eq!(calls, 1, "closed consumer must not receive a completion");
     }
 
     #[test]

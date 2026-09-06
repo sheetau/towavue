@@ -296,6 +296,10 @@ RedrawRequestedはそのevent内で描画し、egui-winitのrepaint応答を次f
 
 動画・音声の相対Seek commandはPlaying/PausedだけでなくEndedでも受け付け、既存の絶対Seekと同じ停止preview経路を使う。終了後に勝手に再生を開始せず、Spaceで明示的に再開する。trim外のsource previewからPlayした場合は従来どおりtrim開始へ戻る。Loading/Faultedおよびsession不在ではSeekしない。
 
+appの絶対/相対Seekは負の時刻を0へ、取得済みの非zero durationを超えた時刻をsource末尾へ制限し、末尾へのSeekでは停止する。位置表示も同じ既知durationを上限にする。末尾で停止中のPlayは先頭またはtrim開始から再開する。長さが未取得・不明・0なら上限を推測せず、trim開始/終了をsource全体のSeek制限には使わない。
+
+parallel video decodeは対象時刻より前の最後のowned frameを一枚だけ保持し、対象以降のframeが出れば破棄する。trim上限のないsource previewで対象以降のframeがないままEOFへ達した場合だけ、その最後のframeをVideoFinishedより先に渡す。PTSは書き換えず、appの初期clockはSeek先より前へ戻さない。hardware/software共通で、追加のCPU transfer・device・workerは使わない。bounded trimの選別、取消とconsumer closeの契約は維持する。
+
 ### H1 live volume
 
 動画面と動画/音声status barの独立したvolume表示では、修飾keyなしの縦wheelで音量を調整する。Line/Pageの1単位またはPointの50 logical pxで10 percentage pointsとし、同一frameのraw eventを合算して0～2倍の既存SetVolume編集へ一度だけ渡す。音声playlist・timeline・filmstrip・tab上のscrollは奪わない。focus喪失、button保持、modal/menu/palette/grid/filmstrip中は受け付けない。smooth scrollの余韻では編集しない。

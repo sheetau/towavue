@@ -214,3 +214,5 @@ Open監査から、非zero開始PTSのTSが長い黒画面になり、offset MKV
 30秒GOPのSeek中に終了すると通常releaseが897 ms待つことを確認した。pipeline単位の取消flagを追加し、probe/Seek境界・preroll探索・demux・出力破棄中でも停止を確認する。取消後のEOF/失敗通知を抑止し、既存join・同一device所有を維持。通常releaseの同手順は63 msとなり、音声付き素材の再Seek・再生・tab closeも通過した。189 tests・Clippy・両buildと04be7aaのCIが成功。進行中のFFmpeg call/OS I/O強制中断とlaunch全体の完了ではない。
 
 別tabを閉じると停止中の動画まで先頭から再生し直す問題を通常releaseで再現した。active identityが同じままのclose・再click・単一tab巡回ではmediaを再loadしない。画像/動画/音声の位置・pause・view・世代・編集保持を回帰確認し、通常releaseでも4,200点の動画画素一致、decode開始件数不変、再生継続と最後のtabからWelcomeへの復帰を確認。190 tests・Clippy・両buildが通過。active tabを閉じた場合の既存遷移・guard・runtimeは変更せず、H1とlaunch全体は継続中。
+
+最後のtabを閉じたWelcomeに旧waveformとtrimハンドルが残る問題を通常releaseで再現した。media固有のtimeline・preview・時計・Seek計測・一時statusを破棄し、media不在時のtimeline描画とsession不在時の再生通知を拒否する。旧コードで失敗する2回帰を追加し、192 tests・Clippy・両buildが通過。同じ通常release windowで動画/音声close後の空状態と音声/画像の再openを確認。3017e12のCIも成功。次は再openをまたぐ非同期結果の識別を監査する。H1/launch全体と環境・配布gateは継続中。

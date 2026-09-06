@@ -1069,7 +1069,7 @@ where
     }
 
     fn handle_playback_event(&mut self, event: PlaybackEvent) {
-        if event.generation() != self.generation {
+        if self.session.is_none() || event.generation() != self.generation {
             return;
         }
         match event {
@@ -2353,7 +2353,9 @@ where
     }
 
     fn draw_timeline(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
-        if !self.timeline_open || self.media_kind == Some(MediaKind::Image) {
+        if !self.timeline_open
+            || !matches!(self.media_kind, Some(MediaKind::Video | MediaKind::Audio))
+        {
             return;
         }
         let max_height = root.available_height() * 0.6;
@@ -3290,11 +3292,28 @@ where
             self.reading_pages.clear();
             self.path = None;
             self.media_kind = None;
+            self.timeline_open = false;
+            self.waveform = None;
+            self.media_duration = None;
+            self.hover_thumbnail = None;
+            self.thumbnail_generation = self.thumbnail_generation.wrapping_add(1);
+            self.failed_thumbnails.clear();
+            self.waveform_loading = false;
+            self.thumbnail_loading = None;
+            self.image_view = ImageViewState::default();
             self.folder_snapshot = None;
             self.folder_watcher = None;
             self.folder_order.request(None);
             self.pending_folder = None;
             self.pending_time = None;
+            self.clock = None;
+            self.decode_finished = false;
+            self.audio_drained = true;
+            self.metrics_recorded = false;
+            self.pending_seek_started = None;
+            self.seek_latencies.clear();
+            self.drift_samples.clear();
+            self.status_message = None;
             self.state = PlaybackState::Paused;
             self.refresh_title();
             self.request_redraw();
@@ -8058,6 +8077,109 @@ mod tests {
                 assert!(!app.edits.contains_key(&background));
                 assert!(!app.export_paths.contains_key(&background));
             }
+        }
+    }
+
+    #[test]
+    fn last_tab_close_clears_media_state_before_welcome() {
+        let Some(root) =
+            isolated_test_root("tests::last_tab_close_clears_media_state_before_welcome")
+        else {
+            return;
+        };
+        for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
+            let mut app = Application::new(None, |_| {}).expect("headless app");
+            let path = root.join("closed-media");
+            let tab = app.tabs.open_new(path.clone(), kind);
+            app.path = Some(path.clone());
+            app.media_kind = Some(kind);
+            app.timeline_open = true;
+            app.media_duration = Some(Duration::from_secs(30));
+            app.clock = Some(PlaybackClock::new(media_time(Duration::from_secs(5)), 1.0));
+            app.pending_time = Some(media_time(Duration::from_secs(6)));
+            app.pending_seek_started = Some(Instant::now());
+            app.decode_finished = true;
+            app.audio_drained = false;
+            app.seek_latencies.push(Duration::from_millis(20));
+            app.drift_samples.push(Duration::from_millis(2));
+            app.image_view.zoom = towavue_core::ZoomMode::Custom(2.5);
+            let context = egui::Context::default();
+            let texture = context.load_texture(
+                "closed preview",
+                egui::ColorImage::new([1, 1], vec![Color32::WHITE]),
+                TextureOptions::LINEAR,
+            );
+            app.waveform = Some(texture.clone());
+            app.hover_thumbnail = Some((2, texture));
+            app.waveform_loading = true;
+            app.thumbnail_loading = Some(3);
+            app.failed_thumbnails.insert(1);
+            app.set_status("Position 5.000s".into());
+            app.close_tab_unchecked(tab);
+            assert!(app.path.is_none());
+            assert!(app.media_kind.is_none());
+            assert!(!app.timeline_open);
+            assert!(app.waveform.is_none());
+            assert!(app.hover_thumbnail.is_none());
+            assert!(app.media_duration.is_none());
+            assert!(!app.waveform_loading);
+            assert!(app.thumbnail_loading.is_none());
+            assert!(app.failed_thumbnails.is_empty());
+            assert!(app.clock.is_none());
+            assert!(app.pending_time.is_none());
+            assert!(app.pending_seek_started.is_none());
+            assert!(!app.decode_finished);
+            assert!(app.audio_drained);
+            assert!(app.seek_latencies.is_empty());
+            assert!(app.drift_samples.is_empty());
+            assert_eq!(app.image_view, ImageViewState::default());
+            assert_eq!(app.current_position(), MediaTime::ZERO);
+            assert_eq!(app.state, PlaybackState::Paused);
+            assert!(app.status_message.is_none());
+            app.handle_app_event(AppEvent::Duration(
+                path.clone(),
+                Ok(Duration::from_secs(30)),
+            ));
+            app.handle_app_event(AppEvent::Waveform(
+                path.clone(),
+                Err("late waveform".into()),
+            ));
+            app.handle_app_event(AppEvent::Thumbnail(
+                path,
+                app.thumbnail_generation,
+                3,
+                Err("late thumbnail".into()),
+            ));
+            assert!(app.media_duration.is_none());
+            assert!(app.status_message.is_none());
+            app.timeline_open = true;
+            let _ = context.run_ui(egui::RawInput::default(), |ui| {
+                let available = ui.available_rect_before_wrap();
+                app.draw_timeline(ui, &mut Vec::new());
+                assert_eq!(ui.available_rect_before_wrap(), available);
+            });
+        }
+    }
+
+    #[test]
+    fn playback_notifications_without_a_session_leave_welcome_unchanged() {
+        let Some(_root) = isolated_test_root(
+            "tests::playback_notifications_without_a_session_leave_welcome_unchanged",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        let state = app.state;
+        for event in [
+            PlaybackEvent::DecodeFinished(app.generation),
+            PlaybackEvent::Failed(app.generation, "closed decoder failed".into()),
+            PlaybackEvent::DeviceRemoved(app.generation, "closed device".into()),
+        ] {
+            app.handle_playback_event(event);
+            assert!(!app.decode_finished);
+            assert_eq!(app.state, state);
+            assert!(app.playback_error.is_none());
+            assert!(app.status_message.is_none());
         }
     }
 

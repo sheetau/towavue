@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 12:51 JST - clear closed media from Welcome
+
+- Trigger/evidence: previous turn pushed 3017e12; its CI and prior 0a020ee CI succeeded. Normal release PID 33820 opens video, pauses, shows timeline, then closes the last tab: Welcome retains the old waveform and trim handles. The close branch also retains the clock, previews, duration and seek state; sessionless playback events still mutate app state.
+- Contract/change: document Welcome cleanup before implementation. Last-tab close clears media-specific timeline/preview resources, loading flags, view, clock/EOF/seek metrics and transient status. Timeline requires video/audio; playback notifications require a live session as well as matching generation. Existing path/generation checks reject late preview results. No runtime/core, dependency, worker, settings or surviving-tab behavior change. This does not claim to identify old-session events after another session opens.
+- Regression: two new tests fail original code on the retained timeline and accepted DecodeFinished. For image/video/audio, verify cleanup, zero position, ignored late duration/waveform/thumbnail results and no timeline layout allocation without media. Verify sessionless EOF/failure/device-removal notifications leave state unchanged. Initial headless state is Loading, so compare the captured state rather than assume Paused.
+- Verification: format, Clippy, 192 tests (app 93/core 35/runtime 60/integrations 4), debug/release builds and diff checks pass; three live tests explicitly ignored. Fixed normal release PID 24772 pauses video, opens timeline, seeks, closes to clean Welcome; reopens generated WAV with waveform, pauses/closes to clean Welcome, then reopens PNG successfully. Both owned windows close normally. Captures/logs and generated WAV remain ignored; no source edits/export or OS changes.
+- Status/next: h1_active. Next audit asynchronous identity across reopen; physical input/DPI/device-change and distribution gates remain incomplete. Packaging choice unanswered; no publication or launch-completion claim.
+
 ## 2026-09-06 12:40 JST - keep media when the active tab identity is unchanged
 
 - Trigger/evidence: previous turn pushed 0a020ee. While reviewing the Welcome transition, find that close_tab_unchecked always reloads the surviving active media, even when closing an inactive tab. Baseline normal release PID 31712 has PNG/video tabs and paused video at burned-in 1.533s; closing the PNG restarts video Playing near 0.667s with a second D3d11va selection log. Initial 800 ms startup observation had no window yet; re-inspect the same live PID and continue, no restart.

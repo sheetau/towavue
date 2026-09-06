@@ -126,6 +126,8 @@ tab bar内のprimary dragは挿入位置だけを表示し、release時に一度
 
 mediaがない時は中央の最大660 logical pxの左揃えcolumnへwordmark、START、Open file/folder、drop案内をまとめる。狭いwindowでは余白を縮め、縦scrollで操作を残す。Openは既存CommandIdとnative pickerを使い、shortcut表示は現在のbindingsから求める。上部のWelcome表示は空状態の見出しであり、mediaのTabIdや独立したclose動作を追加しない。recent履歴・preview・session復元はこの空状態layoutとは分けて扱う。
 
+最後のtabを閉じてWelcomeへ戻る時はtimelineを閉じ、waveform/hover preview、duration、再生時計・Seek計測、一時statusを破棄する。mediaがない時にtimelineを描画せず、session不在の再生通知は受理しない。path付きpreview結果は既存のpath/世代検査で破棄する。window・shortcut・reading等の設定は維持し、再open時は既存の初期化を使う。
+
 ### M5 image presentation
 
 静止画はEXIF orientation適用後、アニメGIF、WebP、APNGは合成済みRGBA frameと10 ms以上のdeadlineへ変換する。app event loopは次frame時刻までsleepし、期限を過ぎたframeを追いつかせてからegui textureを更新する。画像textureも動画・UIと同じD3D11 deviceとback bufferへ描画し、Presentは一回に保つ。

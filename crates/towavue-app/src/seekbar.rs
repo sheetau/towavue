@@ -68,9 +68,11 @@ pub fn value_input(
     enabled: bool,
 ) -> Option<f64> {
     use egui::accesskit::{Action, ActionData, Orientation, TreeId};
-    response
-        .ctx
-        .data_mut(|data| data.insert_temp(egui::Id::new("seek-value-control"), response.id));
+    if response.has_focus() {
+        response
+            .ctx
+            .data_mut(|data| data.insert_temp(egui::Id::new("seek-value-control"), response.id));
+    }
     let enabled = enabled && response.enabled() && !egui::Popup::is_any_open(&response.ctx);
     let value = value.clamp(*range.start(), *range.end());
     response.widget_info(|| egui::WidgetInfo::slider(enabled, value, label));
@@ -105,6 +107,7 @@ pub fn value_input(
         });
     }
     let mut target = value;
+    let mut keyboard_value = false;
     response.ctx.input_mut(|input| {
         input.events.retain(|event| {
             let next = match event {
@@ -128,19 +131,29 @@ pub fn value_input(
                     pressed: true,
                     modifiers,
                     ..
-                } if focused && *modifiers == egui::Modifiers::NONE => match key {
-                    egui::Key::ArrowLeft => target - step,
-                    egui::Key::ArrowRight => target + step,
-                    egui::Key::Home => *range.start(),
-                    egui::Key::End => *range.end(),
-                    _ => return true,
-                },
+                } if focused && *modifiers == egui::Modifiers::NONE => {
+                    let next = match key {
+                        egui::Key::ArrowLeft => target - step,
+                        egui::Key::ArrowRight => target + step,
+                        egui::Key::Home => *range.start(),
+                        egui::Key::End => *range.end(),
+                        _ => return true,
+                    };
+                    keyboard_value = true;
+                    next
+                }
                 _ => return true,
             };
             target = next.clamp(*range.start(), *range.end());
             false
         })
     });
+    if keyboard_value {
+        // The first focused frame may not yet have installed egui's focus-lock filter.
+        response
+            .ctx
+            .memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+    }
     if target == value {
         return None;
     }

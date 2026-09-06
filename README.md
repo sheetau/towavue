@@ -92,7 +92,7 @@ command paletteはtitle bar直下の暗いpanelへまとめ、全幅の検索欄
 
 検索欄のCtrl+C／Ctrl+X／Ctrl+VはWindowsのテキストクリップボードを使い、外部アプリと文字列をやり取りできます。画像や選択範囲をクリップボードへコピーする機能ではありません。
 
-Windows UI AutomationへUI情報と操作を接続し、Welcome・メニュー・command paletteの操作に加え、再生位置とフォルダー内の画像位置を値として変更できます。スクリーンリーダーでの全画面操作や、trim handle・selectionなど残る独自描画部品の対応は未完了です。
+Windows UI AutomationへUI情報と操作を接続し、Welcome・メニュー・command paletteの操作に加え、再生位置・trim端点・フォルダー内の画像位置を値として変更できます。スクリーンリーダーでの全画面操作や、selectionなど残る独自描画部品の対応は未完了です。
 
 タブの閉じるボタンはUI Automationへ対象ファイル名とフルパスの説明を公開します。タブの操作対象は並べ替えや隣のタブを閉じても変わらず、未保存編集には通常の確認画面が開きます。
 
@@ -129,6 +129,8 @@ Gはメディア種別ごとの4×4 grid menuを開き、`1234/qwer/asdf/zxcv`�
 timelineは上端をdragして高さを変えられます。高さの変更ではSeekや編集は行いません。windowを縮めると映像領域を残す高さへ制限し、狭い幅ではtrim表示の説明部分を省いて端点時刻を優先します。
 
 trimの開始は上側、終了は下側のgripを横dragして調整できます。drag中は候補を表示するだけで、離した時に一回だけ編集し、Undoで戻せます。Escapeやfocus喪失で取り消します。逆転・零長の候補は赤く示し、離しても元の範囲を保持します。I/Oでの指定も引き続き使えます。
+
+trim端点はUI Automationへ開始・終了の秒数として公開します。focus中は左右で1秒ずつ、Home／Endでsourceの先頭／末尾を指定できます。逆転・零長は拒否し、変更は既存のUndo／Redoで戻せます。確認画面中は操作できません。frame単位へのsnapではありません。
 
 trim端点もbuttonを離した位置で確定します。同frameの後続cursor移動は端点へ混ぜず、focus離脱・復帰やEscapeがreleaseと同じframeに届いても編集を取り消します。
 

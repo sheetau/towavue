@@ -17,6 +17,7 @@ struct Active {
 #[derive(Clone, Default)]
 struct State {
     active: Option<Active>,
+    trim_identity: Option<(Id, Id)>,
     // Grips run before the background; release must not let it reuse this frame's press.
     claimed_frame: Option<u64>,
 }
@@ -51,17 +52,17 @@ pub fn cancel(context: &Context) -> bool {
     active.is_some()
 }
 
-pub fn retain_trim(context: &Context, identity: Id) {
-    let changed = context
-        .data(|data| {
-            data.get_temp::<State>(state_id())
-                .and_then(|state| state.active)
-        })
-        .is_some_and(|active| {
+pub fn retain_trim(context: &Context, identity: Id, generation: Id) {
+    let changed = context.data_mut(|data| {
+        let state = data.get_temp_mut_or_default::<State>(state_id());
+        let changed = state.active.is_some_and(|active| {
             active.kind == Kind::Trim
-                && active.id != identity.with(true)
-                && active.id != identity.with(false)
+                && (state.trim_identity != Some((identity, generation))
+                    || (active.id != identity.with(true) && active.id != identity.with(false)))
         });
+        state.trim_identity = Some((identity, generation));
+        changed
+    });
     if changed {
         cancel(context);
     }

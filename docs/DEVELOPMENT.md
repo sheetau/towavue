@@ -4,6 +4,13 @@
 
 ## 1. 最初に試す
 
+### trim端点の値操作とfocus保持（2026-09-07 00:44 JST）
+
+- b616c51 CI 34041820031は成功。通常release `46D211EA1B99B5CA458C2B0536357E0251FA4DC98B58DECF586EC85CE6CC0A8B`、PID 44060（開始UTC 2026-09-06 15:28:17.1791577Z）では30秒動画のtimelineに再生位置Sliderだけがあり、開始/終了の名前付きSliderはない。headless回帰もこの欠落で失敗した。
+- source秒の開始/終了、0～durationと1秒step、値操作・focus表示を追加。stable widget IDとgesture generationを分離し、編集後も取得済み参照とfocusを維持する。初回focus直後のRightで別gripへfocusが移る回帰を修正。終了拡張→開始変更が同frameに届く場合の描画順逆転も回帰で再現し、数値要求の受信順を保つ処理で修復。交互の5要求に零長拒否を混ぜ、有効な4編集だけをUndoできることも検証した。
+- 中間release `2001F1CDF636745E0C1B46C3D277BCEAD6E140E9775F8A6B14E94349CD1CE3D9`、PID 29608（15:30:54.1196932Z）と最終release `469CEA77BDF72E47B383C28DC5D06D5E7F03532832D5E750F5E2009633DA908F`、PID 47240（15:43:24.7131907Z）で、cached RangeValuePatternから開始2.5/終了20秒、開始25秒の拒否・理由表示、Rightで3.5秒とfocus保持、Undo/Redo、同じRuntimeIdを確認。Close windowで背景両端点はdisabled、SetValueはElementNotEnabledException、Cancel後は編集保持。Undoでcleanへ戻し、開始gripの80px dragで2.764830508秒、再Undoと正常終了も通過した。同frameのbatch順序はheadlessで検証し、native試験は順次要求である。
+- 9 trim回帰、253 tests（app 137/core 36/runtime 76/integration 4）、format、Clippy、debug/release buildが通過。既存live ignore 3件は残る。所有capture `target/tmp/h1-trim-values.png`で開始gripのfocusと両端点表示を目視確認。全3windowは正常終了し、movie.mp4のSHA-256は`36179A1F70ABC1EF4B4C73B85F4F387B3333080E48F9A76A55ED70EE578DEE1C`のまま。Save/clipboard/OS設定変更なし。動画stderrのD3d11va・Seek latency・AAC末尾警告は空ログや最終性能gateとして扱わない。物理key、screen reader全体、selection・画面外項目と既存実環境/配布gateは未完了。
+
 ### 全画面操作部へのkeyboard入口（2026-09-07 00:15 JST）
 
 - 4993a9c CI 34040716761は成功。全画面操作部はpointer下端hoverのみで、Tabだけでは到達できない。通常release `720F9EC306949240271B342B6A597290F1250606063F1EF1049567F36AF1C749`、PID 32984（開始UTC 2026-09-06 14:59:56.8617681Z）でmenuからfullscreenへ入り、foreground確認後Tabを送ってもUIAには案内Textだけが残った。headless回帰もTab後にcontrolsがないことで失敗した。

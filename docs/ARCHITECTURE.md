@@ -152,6 +152,8 @@ exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/core�
 
 ### H1 trim endpoint feedback
 
+trim端点のSlider identityはtab・source path・開始/終了へ固定し、pointer gestureを取り消すmedia/trim generationとは分ける。名前・source秒・0～duration・1秒stepを公開し、focus中の左右/Home/Endと数値要求を既存TrimEndpointの検証・履歴へ渡す。両端点の数値actionは描画順ではなく受信順に消費し、有効な変更だけを次のIncrement/Decrementの基準にする。直接変更は古いpointer gestureを取り消し、modal/popup中は受け付けない。focus中のgripだけ既存hover色で示し、通常shortcut/Undoを維持する。
+
 timelineには開始・終了のdrag gripを設け、未指定端点はsource先頭/末尾に置く。開始gripは上側、終了gripは下側に分け、狭い範囲でも両方を操作できる。drag中は有効な候補範囲だけを表示し、逆転/零長の候補は赤いgripで示す。release時だけ既存のtrim検証・履歴・live再構築へ一回渡し、不正な候補は既存状態を保持して理由を通知する。Escape、focus喪失、tab/source generation切替は取消。drag中のSeek・履歴追加は行わず、frame単位snapや複数区間編集は追加しない。
 
 trim gripの確定にはprimary release eventの座標を使い、同frameの後続hoverやPointerGoneで端点を変更・消失させない。同frameにfocus喪失・復帰が揃っていても取消し、Escapeとreleaseが同時のframeでも履歴へ渡さない。

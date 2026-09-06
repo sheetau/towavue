@@ -312,3 +312,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 23:54、playlistでもShell更新後にcached UIA行が別曲を指す問題を再現し、playlist/filmstripの可視項目をpath由来のIDへ固定した。filmstripの名前/Focus、playlistのInvoke、path/現在項目の説明を追加し、同じ参照での正しい曲選択・未保存Cancelを通常buildで確認。251 tests・必須check・両buildが通過。可視範囲限定の描画と既存操作を維持し、画面外項目の支援技術操作やselection/trim・実環境/配布gateは残る。
 
 2026-09-07 00:15、fullscreen操作部へTabだけで入れない問題を通常buildで確認した。既存入力処理を通過したTab/Shift+TabでExit buttonへfocusし、操作中は表示を維持、内容click/window focus喪失/overlayで解除する。画像の移動、動画の5秒Seek、逆方向focus移動とEnterによる通常window復帰、252 tests・必須check・両buildが通過。全screen reader/実入力/配布を含むH1 gateは引き続き未完了。
+
+2026-09-07 00:44、trim開始/終了へsource秒の値操作とfocus keyを追加した。編集後も同じUIA対象を保ち、両端点の数値要求は受信順に既存検証・Undoへ渡す。通常releaseで値変更・逆転拒否・focus/Undo・確認中の拒否・従来dragが通過し、253 tests・必須check・両buildも通過。selection、画面外項目、全screen reader/実環境/配布などのH1 gateは継続する。

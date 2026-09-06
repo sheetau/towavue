@@ -9,12 +9,13 @@ pub fn timeline(
     duration: MediaTime,
     source_preview: bool,
     identity: egui::Id,
-) -> Option<EditOperation> {
+    gesture_identity: egui::Id,
+) -> Vec<EditOperation> {
     let mut preview = state.clone();
-    let mut chosen = None;
+    let mut chosen = accessible_values(ui, identity, state, duration);
     let mut dragging = false;
     let mut grips = Vec::new();
-    timeline_input::retain_trim(ui.ctx(), identity);
+    timeline_input::retain_trim(ui.ctx(), identity, gesture_identity);
     for start in [true, false] {
         let time = if start {
             state.trim_start.unwrap_or(MediaTime::ZERO)
@@ -48,6 +49,25 @@ pub fn timeline(
             });
         let mut grip_x = x;
         let mut valid = true;
+        if let Some(value) = crate::seekbar::value_input(
+            &response,
+            if start {
+                "Trim start (seconds)"
+            } else {
+                "Trim end (seconds)"
+            },
+            time.as_seconds_f64(),
+            0.0..=duration.as_seconds_f64(),
+            1.0,
+            true,
+        ) {
+            let target = crate::media_time(std::time::Duration::from_secs_f64(value));
+            chosen.push(if start {
+                EditOperation::SetTrimStart(target)
+            } else {
+                EditOperation::SetTrimEnd(target)
+            });
+        }
         let drag = timeline_input::trim_drag(&response);
         if drag.dragging {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
@@ -74,11 +94,15 @@ pub fn timeline(
                     preview = candidate;
                 }
                 if drag.released {
-                    chosen = Some(operation);
+                    chosen.push(operation);
                 }
             }
         }
-        grips.push((grip_rect(grip_x), valid, response.hovered()));
+        grips.push((
+            grip_rect(grip_x),
+            valid,
+            response.hovered() || response.has_focus(),
+        ));
     }
     show(ui, rect, &preview, duration, source_preview && !dragging);
     let painter = ui.painter().with_clip_rect(rect);
@@ -106,6 +130,69 @@ pub fn timeline(
             egui::FontId::proportional(12.0),
             Color32::WHITE,
         );
+    }
+    chosen
+}
+
+fn accessible_values(
+    ui: &Ui,
+    identity: egui::Id,
+    state: &EditState,
+    duration: MediaTime,
+) -> Vec<EditOperation> {
+    use egui::accesskit::{Action, ActionData, TreeId};
+    let mut chosen = Vec::new();
+    if !ui.is_enabled() || egui::Popup::is_any_open(ui.ctx()) {
+        return chosen;
+    }
+    let mut pending = state.clone();
+    // Endpoint changes depend on each other: preserve request order, not grip drawing order.
+    ui.ctx().input_mut(|input| {
+        input.events.retain(|event| {
+            let egui::Event::AccessKitActionRequest(request) = event else {
+                return true;
+            };
+            if request.target_tree != TreeId::ROOT {
+                return true;
+            }
+            let start = request.target_node == identity.with(true).accesskit_id();
+            if !start && request.target_node != identity.with(false).accesskit_id() {
+                return true;
+            }
+            let current = if start {
+                pending.trim_start.unwrap_or(MediaTime::ZERO)
+            } else {
+                pending.trim_end.unwrap_or(duration)
+            };
+            let value = match (&request.action, &request.data) {
+                (Action::SetValue, Some(ActionData::NumericValue(value))) if value.is_finite() => {
+                    *value
+                }
+                (Action::Increment, _) => current.as_seconds_f64() + 1.0,
+                (Action::Decrement, _) => current.as_seconds_f64() - 1.0,
+                _ => return true,
+            };
+            let target = crate::media_time(std::time::Duration::from_secs_f64(
+                value.clamp(0.0, duration.as_seconds_f64()),
+            ));
+            if target != current {
+                let mut candidate = pending.clone();
+                chosen.push(if start {
+                    candidate.trim_start = Some(target);
+                    EditOperation::SetTrimStart(target)
+                } else {
+                    candidate.trim_end = Some(target);
+                    EditOperation::SetTrimEnd(target)
+                });
+                if candidate.trim_is_valid(Some(duration)) {
+                    pending = candidate;
+                }
+            }
+            false
+        });
+    });
+    if !chosen.is_empty() {
+        timeline_input::cancel(ui.ctx());
     }
     chosen
 }
@@ -227,16 +314,15 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        if let Some(operation) = timeline(
+                        chosen.extend(timeline(
                             ui,
                             rect,
                             &state,
                             MediaTime::from_nanoseconds(10_000_000_000),
                             false,
                             egui::Id::new("overlap"),
-                        ) {
-                            chosen.push(operation);
-                        }
+                            egui::Id::new("overlap-state"),
+                        ));
                     },
                 );
                 (output, chosen)
@@ -296,16 +382,15 @@ mod tests {
                         },
                         |ui| {
                             let seek = ui.allocate_rect(rect, egui::Sense::click_and_drag());
-                            if let Some(edit) = timeline(
+                            edits.extend(timeline(
                                 ui,
                                 rect,
                                 &state,
                                 MediaTime::from_nanoseconds(10_000_000_000),
                                 false,
                                 "short-trim".into(),
-                            ) {
-                                edits.push(edit);
-                            }
+                                "short-trim-state".into(),
+                            ));
                             assert!(
                                 timeline_input::seek_commit(&seek).is_none(),
                                 "trim must not seek"
@@ -386,11 +471,15 @@ mod tests {
                     },
                     |ui| {
                         let seek = ui.allocate_rect(rect, egui::Sense::click_and_drag());
-                        if let Some(operation) =
-                            timeline(ui, rect, &state, duration, false, egui::Id::new(identity))
-                        {
-                            edits.push(operation);
-                        }
+                        edits.extend(timeline(
+                            ui,
+                            rect,
+                            &state,
+                            duration,
+                            false,
+                            egui::Id::new("stable-trim-grips"),
+                            egui::Id::new(identity),
+                        ));
                         assert!(
                             !seek.clicked() && !seek.drag_stopped(),
                             "a trim gesture must not seek"
@@ -489,6 +578,7 @@ mod tests {
                 &state,
                 MediaTime::from_nanoseconds(120_000_000_000),
                 true,
+                egui::Id::new("narrow"),
                 egui::Id::new("narrow"),
             );
         });

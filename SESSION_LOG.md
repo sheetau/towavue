@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 00:44 JST - expose trim endpoints without losing focus or request order
+
+- Trigger/intent: prior checkpoint is progress; b616c51 CI 34041820031 succeeds. Native baseline and headless regression show no named trim endpoint sliders. Clipboard writes are permitted but not used.
+- Change: expose source-second endpoints with numeric actions, one-second arrows and Home/End, existing validation/history and modal rejection. Keep widget IDs stable across edits while separately invalidating pointer gestures on generation changes; preserve focused shortcuts and prevent first-arrow focus escape. Consume dependent endpoint numeric requests in input order rather than drawing order.
+- Verification: the reverse-dependent batch initially fails, then passes along with an interleaved five-request/four-edit Undo check. Nine trim tests, 253 workspace tests, format, Clippy and debug/release builds pass; three existing live ignores remain. No new dependency/runtime/COM boundary.
+- Native: final normal PID 47240 passes cached values/identities, invalid range feedback, focused Right, Undo/Redo, disabled SetValue rejection, Cancel retention and pointer drag/Undo. DEVELOPMENT records baseline/intermediate/final identities and hashes; all three windows close normally and the source fixture hash is unchanged. Owned screenshot is inspected; logs contain decode/seek/AAC messages, not a final performance gate. No Save/clipboard/OS-setting writes.
+- Status/next: h1_active; prepare this coherent checkpoint for push. Continue selection and offscreen item accessibility/full focus workflows, retaining physical-input/DPI/device, final-candidate, distribution and owner-acceptance gates.
+
 ## 2026-09-07 00:15 JST - make fullscreen controls reachable without edge hover
 
 - Trigger/intent: previous turn is progress; 4993a9c CI 34040716761 succeeds. Native PID 32984 and a new headless regression confirm Tab cannot reach hidden fullscreen controls.

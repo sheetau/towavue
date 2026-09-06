@@ -2822,13 +2822,14 @@ where
                     .vline(x, rect.y_range(), (2.0, Color32::LIGHT_BLUE));
                 let edit = self.edit_state();
                 let tab = self.tabs.active().map(|tab| tab.id);
-                let trim_operation = trim::timeline(
+                let trim_operations = trim::timeline(
                     ui,
                     rect,
                     &edit,
                     media_time(duration),
                     self.state == PlaybackState::Paused
                         && !edit.playback_range().contains(self.current_position()),
+                    ui.id().with(("trim-controls", tab, self.path.as_ref())),
                     ui.id().with((
                         tab,
                         self.generation,
@@ -2836,8 +2837,12 @@ where
                         edit.trim_end.map(MediaTime::as_nanoseconds),
                     )),
                 );
-                if let (Some(tab), Some(operation)) = (tab, trim_operation) {
-                    actions.push(UiAction::TrimEndpoint(tab, operation));
+                if let Some(tab) = tab {
+                    actions.extend(
+                        trim_operations
+                            .into_iter()
+                            .map(|operation| UiAction::TrimEndpoint(tab, operation)),
+                    );
                 }
                 let enabled = !self.modal_input_blocked()
                     && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted);
@@ -5516,6 +5521,183 @@ mod tests {
                 && node.role() == egui::accesskit::Role::Button
                 && node.supports_action(egui::accesskit::Action::Click)
         }));
+    }
+
+    #[test]
+    fn accessible_trim_values_preserve_targets_validation_and_undo() {
+        let Some(root) = isolated_test_root(
+            "tests::accessible_trim_values_preserve_targets_validation_and_undo",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let path = root.join("audio.wav");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Audio);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Audio);
+        app.media_duration = Some(Duration::from_secs(10));
+        app.state = PlaybackState::Paused;
+        app.timeline_open = true;
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        app.ui_context = Some(context.clone());
+        let frame = |app: &mut Application<_>, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            (
+                output.platform_output.accesskit_update.expect("tree"),
+                actions,
+            )
+        };
+        frame(&mut app, vec![]);
+        let (tree, _) = frame(&mut app, vec![]);
+        let ids: Vec<_> = ["Trim start (seconds)", "Trim end (seconds)"]
+            .iter()
+            .map(|label| {
+                let (id, node) = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(*label))
+                    .expect("named trim slider");
+                assert_eq!(node.role(), egui::accesskit::Role::Slider);
+                assert_eq!(node.min_numeric_value(), Some(0.0));
+                assert_eq!(node.max_numeric_value(), Some(10.0));
+                assert_eq!(node.numeric_value_step(), Some(1.0));
+                *id
+            })
+            .collect();
+        let request = |index, value| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::SetValue,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: ids[index],
+                data: Some(egui::accesskit::ActionData::NumericValue(value)),
+            })
+        };
+        let (_, actions) = frame(&mut app, vec![request(0, 2.5), request(1, 7.5)]);
+        assert!(
+            matches!(actions.as_slice(), [UiAction::TrimEndpoint(a, _), UiAction::TrimEndpoint(b, _)] if *a == tab && *b == tab)
+        );
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+        assert_eq!(
+            app.edit_state().trim_start,
+            Some(media_time(Duration::from_secs_f64(2.5)))
+        );
+        assert_eq!(
+            app.edit_state().trim_end,
+            Some(media_time(Duration::from_secs_f64(7.5)))
+        );
+        let history = app.edits[&tab].clone();
+        let (_, actions) = frame(&mut app, vec![request(0, 8.0)]);
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+        assert_eq!(app.edits[&tab], history, "crossed endpoints must not edit");
+        let (_, actions) = frame(&mut app, vec![request(1, 9.0), request(0, 8.0)]);
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+        assert_eq!(
+            app.edit_state().trim_start,
+            Some(media_time(Duration::from_secs(8))),
+            "end must expand before start moves past its old limit"
+        );
+        assert_eq!(
+            app.edit_state().trim_end,
+            Some(media_time(Duration::from_secs(9)))
+        );
+        app.undo_edit(false);
+        app.undo_edit(false);
+        let (_, actions) = frame(
+            &mut app,
+            vec![
+                request(1, 9.0),
+                request(0, 8.0),
+                request(1, 8.0),
+                request(0, 6.0),
+                request(1, 7.0),
+            ],
+        );
+        assert_eq!(actions.len(), 5);
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+        assert_eq!(
+            app.edit_state().trim_start,
+            Some(media_time(Duration::from_secs(6)))
+        );
+        assert_eq!(
+            app.edit_state().trim_end,
+            Some(media_time(Duration::from_secs(7)))
+        );
+        for _ in 0..4 {
+            app.undo_edit(false);
+        }
+        assert_eq!(app.edit_state(), history.state().clone());
+        assert!(frame(&mut app, vec![request(0, f64::NAN)]).1.is_empty());
+        let mut focus = request(0, 2.5);
+        if let egui::Event::AccessKitActionRequest(request) = &mut focus {
+            request.action = egui::accesskit::Action::Focus;
+            request.data = None;
+        }
+        frame(&mut app, vec![focus]);
+        assert!(app.owns_seek_shortcut(&KeyStroke {
+            key: Key::Character('z'),
+            modifiers: Modifiers {
+                control: true,
+                ..Default::default()
+            }
+        }));
+        let (_, actions) = frame(
+            &mut app,
+            vec![egui::Event::Key {
+                key: egui::Key::ArrowRight,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(
+            matches!(actions.as_slice(), [UiAction::TrimEndpoint(id, EditOperation::SetTrimStart(value))] if *id == tab && value.as_seconds_f64() == 3.5)
+        );
+        app.handle_ui_action(actions[0].clone());
+        let (focus_tree, _) = frame(&mut app, vec![]);
+        assert_eq!(focus_tree.focus, ids[0]);
+        app.undo_edit(false);
+        assert_eq!(
+            app.edits[&tab].state().trim_start,
+            history.state().trim_start
+        );
+        app.undo_edit(true);
+        assert_eq!(
+            app.edit_state().trim_start,
+            Some(media_time(Duration::from_secs_f64(3.5)))
+        );
+        app.pending_guard = Some(GuardedAction::Exit);
+        frame(&mut app, vec![]);
+        let (tree, actions) = frame(&mut app, vec![request(1, 9.0)]);
+        assert!(actions.is_empty());
+        assert!(
+            tree.nodes
+                .iter()
+                .find(|(id, _)| *id == ids[1])
+                .expect("disabled trim")
+                .1
+                .is_disabled()
+        );
     }
 
     #[test]

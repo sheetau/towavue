@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### Seek previewの位置と縦長素材（2026-09-06）
+
+- 旧通常release PID 2932で30秒動画の薄いseek barのx=720をhoverすると、thumbnailが左端に出ることを確認した。修正版PID 13952では同じ位置の上へ160×96で表示し、captionも中央になる。草案のhover地点とpreviewの対応を優先した変更で、本画面scrubではない。
+- 同じwindowのOpenから108×720の縦長動画を開き、右端hoverで高さ108以内・画面内のpreviewを確認。320×240へ縮小しtimelineを表示すると、previewは空き高さに縮みcaptionもtrackより上に収まった。音声なしの既存案内は維持される。両windowは通常終了し、fixture/capture/logはignoredの`target/tmp`内。
+- 回帰は100%/200%の描画入力、960×576/320×240、横長/縦長、薄いbar/96px timeline、左右端/中央の48組を描画する。旧表示サイズと、小画面で高さ制限だけを入れた場合のtrack重なりをそれぞれ検出し、修正後は通過した。物理mixed-DPIや全tooltipの検証ではない。
+
 ### 複数streamのpreview（2026-09-06）
 
 - 赤320×240の先頭映像、青160×96の既定映像、無音の先頭音声、880 Hzの既定音声を持つ4秒MKVをignoredの`target/tmp`へ生成する。旧通常release PID 39968では青い本画面に赤いhover thumbnail、空のwaveformとなった。起動直後の注入keyは未反映だったため、同じwindowを再確認・前面化してtimelineを表示した。再起動で試験を取り直していない。

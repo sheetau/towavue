@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 14:14 JST - anchor and bound seek previews
+
+- Trigger/evidence: previous turn pushed 03e2bd8 (progress); 94f97cb CI succeeded, 03e2bd8 CI remains in progress. Compare local draft seek-hover screenshots with current release: PID 2932 hovers at x=720 but thumbnail appears at the track's left edge. Existing on_hover_ui anchors the whole response and displays raw texture size without a height bound.
+- Contract/change: document hover-centered above-track tooltip, viewport containment and aspect-fit within 160x108 logical pixels. Use existing egui Tooltip lifecycle with point anchor/top alignment and centered layout. Reserve caption/frame/gap space from available screen height so small-window timelines shrink tall previews further. Preserve 20-bucket cache, async loading/failure reporting, media presentation and seek dispatch. No runtime/core changes, dependencies, timers or unsafe code.
+- Regression/checks: rendered texture rectangles cover 48 combinations of 100%/200% input scale, 960x576/320x240, landscape/portrait, compact bar/96px timeline and left/center/right hover. Original code fails size bounds; fixed-size-only variant fails above-track placement on small timeline, then adaptive height passes. Format, Clippy, 206 tests (app 97/core 35/runtime 70/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: fixed PID 13952 shows 160x96 preview centered above x=720 on the same 30s video. Open 108x720 portrait in the same window, confirm right-edge containment/108px maximum height, then 320x240 timeline with smaller preview and caption above track. Both owned windows close normally; fixture/captures/logs remain ignored, sources unchanged. Injected 96-DPI native trial, not physical mixed-DPI proof.
+- Status/next: h1_active. Continue daily viewing/interaction fidelity audit, including image-folder seek previews still absent. Full-image scrub, physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 14:06 JST - preserve playback streams in untrimmed exports
 
 - Trigger/evidence: previous turn pushed 94f97cb (progress); its CI remains in progress at this checkpoint. Default-disposition fixture exports the expected streams, but a remux with all default flags cleared plays blue 160x96/mono and saves red 320x240/stereo. Normal release PID 41696 reproduces through native Save As and reopening the output in the same window.

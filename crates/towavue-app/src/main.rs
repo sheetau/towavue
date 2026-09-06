@@ -2346,12 +2346,30 @@ where
         {
             self.load_hover_thumbnail(duration.mul_f64((bucket as f64 + 0.5) / 20.0), bucket);
         }
-        response.clone().on_hover_ui(|ui| {
+        let anchor = egui::pos2(
+            egui::lerp(response.rect.x_range(), ratio),
+            response.rect.top(),
+        );
+        let mut tooltip = egui::Tooltip::for_enabled(response)
+            .width(160.0)
+            .layout(egui::Layout::top_down(egui::Align::Center));
+        tooltip.popup = tooltip
+            .popup
+            .at_position(anchor)
+            .align(egui::RectAlign::TOP)
+            .align_alternatives(&[]);
+        tooltip.show(|ui| {
             if let Some((cached, texture)) = &self.hover_thumbnail
                 && self.media_kind == Some(MediaKind::Video)
                 && *cached == bucket
             {
-                ui.image((texture.id(), texture.size_vec2()));
+                // Reserve space above the track for the caption, frame and tooltip gap.
+                let height =
+                    (anchor.y - response.ctx.viewport_rect().top() - 40.0).clamp(1.0, 108.0);
+                ui.add(
+                    egui::Image::new((texture.id(), texture.size_vec2()))
+                        .max_size(egui::vec2(160.0, height)),
+                );
             }
             if self.failed_thumbnails.contains(&bucket) {
                 ui.label("Thumbnail unavailable");
@@ -5912,6 +5930,94 @@ mod tests {
                 assert_eq!(image_rect, screen);
             } else {
                 assert!(image_rect.top() >= 32.0 && image_rect.bottom() <= 546.0);
+            }
+        }
+    }
+
+    #[test]
+    fn seek_preview_follows_hover_and_bounds_portrait_images() {
+        let Some(_root) =
+            isolated_test_root("tests::seek_preview_follows_hover_and_bounds_portrait_images")
+        else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.media_kind = Some(MediaKind::Video);
+        for pixels_per_point in [1.0, 2.0] {
+            for screen_size in [egui::vec2(960.0, 576.0), egui::vec2(320.0, 240.0)] {
+                for (image_size, track_height) in [
+                    ([240, 144], 12.0),
+                    ([24, 400], 12.0),
+                    ([240, 144], 96.0),
+                    ([24, 400], 96.0),
+                ] {
+                    let context = egui::Context::default();
+                    context.set_pixels_per_point(pixels_per_point);
+                    context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+                    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, screen_size);
+                    let track = egui::Rect::from_min_max(
+                        egui::pos2(8.0, screen.bottom() - 30.0 - track_height),
+                        egui::pos2(screen.right() - 8.0, screen.bottom() - 24.0),
+                    );
+                    let texture = context.load_texture(
+                        "hover-fixture",
+                        egui::ColorImage::filled(image_size, Color32::WHITE),
+                        Default::default(),
+                    );
+                    for x in [track.left() + 1.0, track.center().x, track.right() - 1.0] {
+                        let ratio = seekbar::ratio(track, x);
+                        let bucket = ((ratio * 20.0).floor() as u64).min(19);
+                        app.hover_thumbnail = Some((bucket, texture.clone()));
+                        let mut output = egui::FullOutput::default();
+                        for frame in 0..5 {
+                            output = context.run_ui(
+                                egui::RawInput {
+                                    screen_rect: Some(screen),
+                                    time: Some(f64::from(x) + f64::from(frame)),
+                                    events: vec![egui::Event::PointerMoved(egui::pos2(
+                                        x,
+                                        track.center().y,
+                                    ))],
+                                    ..Default::default()
+                                },
+                                |ui| {
+                                    let response = ui.allocate_rect(track, egui::Sense::hover());
+                                    app.draw_seek_preview(
+                                        &response,
+                                        ratio,
+                                        Duration::from_secs(30),
+                                    );
+                                },
+                            );
+                        }
+                        let bounds = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Rect(rect)
+                                    if rect.brush.as_ref().is_some_and(|brush| {
+                                        brush.fill_texture_id == texture.id()
+                                    }) =>
+                                {
+                                    Some(rect.rect)
+                                }
+                                _ => None,
+                            })
+                            .expect("hover preview image");
+                        assert!(
+                            bounds.width() <= 160.1 && bounds.height() <= 108.1,
+                            "{bounds:?}"
+                        );
+                        assert!(screen.contains_rect(bounds));
+                        assert!(bounds.bottom() < track.top());
+                        if x == track.center().x {
+                            assert!(
+                                (bounds.center().x - x).abs() <= 1.0,
+                                "preview must follow hover: {bounds:?}"
+                            );
+                        }
+                    }
+                }
             }
         }
     }

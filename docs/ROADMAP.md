@@ -228,3 +228,5 @@ preview要求ごとのthread生成を、duration/波形/hover画像それぞれ�
 複数streamの通常release試験で、本体は既定の青い映像を再生するのにthumbnailは先頭の赤い映像、waveformは先頭の無音になった。previewの選択を再生と同じFFmpeg best-streamへ揃え、cache keyをv3に更新した。旧コードで失敗する回帰、204 tests・Clippy・両buildが通過し、同じ素材の通常windowでthumbnail・waveform一致と120 frames/drop 0を確認。a7274b4のCIも成功。次はexportのstream選択一致を監査する。H1全体・実機/配布gateは未完了。
 
 既定指定のない複数stream素材では、青い本画面からSave Asすると赤い別映像が保存される問題を通常releaseで再現した。trim時だけだったbest-stream指定を全動画/音声exportへ適用し、trimなしのtimestamp処理は維持。無編集・crop・trim・音声のみのdecode照合を含む205 tests・Clippy・両buildが通過し、同じ素材のSave As→再openでも青160×96/monoを確認した。次は残る日常edit/error flowと外観・操作感の監査を続ける。H1全体・実機/配布gateは未完了。
+
+Seek previewがhover位置ではなく左端に現れる問題を通常releaseで確認し、指している位置の上へ中央揃えにした。160×108 logical px以内のaspect-fitと空き高さ制限で縦長・小windowのtrack重なりも防ぐ。描画48組を含む206 tests・Clippy・両build、通常windowの横長/縦長・右端・320×240 timelineが通過。94f97cbのCIも成功。次は画像folderのseek previewなど日常閲覧の外観・操作感を監査する。H1と実機/配布gateは未完了。

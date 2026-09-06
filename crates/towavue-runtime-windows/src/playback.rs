@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 
@@ -105,6 +105,7 @@ pub struct PlaybackSession {
     current_video_unpresented: bool,
     audio: Option<AudioOutput>,
     decode_thread: Option<JoinHandle<()>>,
+    decode_cancel: Arc<AtomicBool>,
     adapter_luid: AdapterLuid,
     metrics: Arc<SharedMetrics>,
     generation: PlaybackGeneration,
@@ -143,6 +144,7 @@ impl PlaybackSession {
             current_video_unpresented: false,
             audio: None,
             decode_thread: None,
+            decode_cancel: Arc::new(AtomicBool::new(false)),
             adapter_luid,
             metrics,
             generation: PlaybackGeneration::INITIAL,
@@ -253,6 +255,8 @@ impl PlaybackSession {
         let generation = self.generation;
         let target = self.target;
         let end = self.range_end();
+        self.decode_cancel = Arc::new(AtomicBool::new(false));
+        let cancelled = Arc::clone(&self.decode_cancel);
         let decode_thread = thread::Builder::new()
             .name("towavue-decode".to_owned())
             .spawn(move || {
@@ -265,6 +269,7 @@ impl PlaybackSession {
                     generation,
                     target,
                     end,
+                    &cancelled,
                     notify.as_ref(),
                 );
             })?;
@@ -275,6 +280,7 @@ impl PlaybackSession {
     }
 
     fn stop_pipeline(&mut self) {
+        self.decode_cancel.store(true, Ordering::Relaxed);
         self.pending_video.take();
         self.current_video.take();
         self.video_rx.take();
@@ -413,6 +419,7 @@ fn run_decode_thread(
     generation: PlaybackGeneration,
     target: MediaTime,
     end: Option<MediaTime>,
+    cancelled: &AtomicBool,
     notify: &(impl Fn(PlaybackEvent) + Sync + ?Sized),
 ) {
     thread::scope(|scope| {
@@ -425,11 +432,12 @@ fn run_decode_thread(
                         if start_rx.recv().is_err() {
                             return Err(decode::DecodeError::ConsumerClosed);
                         }
-                        let result = decode::decode_file_parallel(
+                        let result = decode::decode_file_parallel_cancellable(
                             path,
                             target,
                             end,
                             Some(DecodeStream::Audio),
+                            &|| cancelled.load(Ordering::Relaxed),
                             |output| match output {
                                 ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
                                     audio.push(chunk).is_ok()
@@ -442,6 +450,7 @@ fn run_decode_thread(
                         );
                         if let Err(error) = &result
                             && !matches!(error, decode::DecodeError::ConsumerClosed)
+                            && !cancelled.load(Ordering::Relaxed)
                         {
                             notify(PlaybackEvent::Failed(generation, error.to_string()));
                         }
@@ -463,8 +472,13 @@ fn run_decode_thread(
             }
         };
         let mut hardware_output_seen = false;
-        let hardware_result =
-            decode::decode_file_hardware_parallel(path, graphics_device, target, end, |output| {
+        let hardware_result = decode::decode_file_hardware_parallel(
+            path,
+            graphics_device,
+            target,
+            end,
+            &|| cancelled.load(Ordering::Relaxed),
+            |output| {
                 if !hardware_output_seen {
                     hardware_output_seen = true;
                     notify(PlaybackEvent::DecodePathSelected(
@@ -485,19 +499,22 @@ fn run_decode_thread(
                         )
                     }
                 }
-            });
+            },
+        );
 
         let result = match hardware_result {
+            _ if cancelled.load(Ordering::Relaxed) => Err(decode::DecodeError::ConsumerClosed),
             Err(decode::DecodeError::HardwareUnavailable(_)) if !hardware_output_seen => {
                 notify(PlaybackEvent::DecodePathSelected(
                     generation,
                     DecodePath::Software,
                 ));
-                decode::decode_file_parallel(
+                decode::decode_file_parallel_cancellable(
                     path,
                     target,
                     end,
                     Some(DecodeStream::Video),
+                    &|| cancelled.load(Ordering::Relaxed),
                     |output| match output {
                         ParallelSoftwareDecodeOutput::VideoFinished => {
                             ready();
@@ -522,6 +539,7 @@ fn run_decode_thread(
 
         drop(start_audio);
         match &result {
+            _ if cancelled.load(Ordering::Relaxed) => {}
             Ok(_) => {}
             Err(decode::DecodeError::ConsumerClosed) => {}
             Err(error) => match graphics_device.device_removed_reason() {
@@ -542,7 +560,7 @@ fn run_decode_thread(
             },
             None => true,
         };
-        if result.is_ok() && audio_ok {
+        if result.is_ok() && audio_ok && !cancelled.load(Ordering::Relaxed) {
             notify(PlaybackEvent::DecodeFinished(generation));
         }
     });

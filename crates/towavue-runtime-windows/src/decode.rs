@@ -409,7 +409,7 @@ pub(crate) fn decode_file_from(
     if video.is_none() && audio.is_none() {
         return Err(DecodeError::NoMediaStream);
     }
-    seek_input(&mut input, minimum_time, video.is_some())?;
+    seek_input(&mut input, minimum_time, video.is_some(), &|| false)?;
     let mut filtered_emit = |output| {
         let presentation_time = match &output {
             DecodeOutput::Video(frame) => frame.presentation_time,
@@ -447,11 +447,23 @@ pub(crate) fn decode_file_from(
     Ok(summary)
 }
 
+#[cfg(test)]
 pub(crate) fn decode_file_parallel(
     path: &Path,
     minimum_time: MediaTime,
     maximum_time: Option<MediaTime>,
     stream: Option<DecodeStream>,
+    emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
+) -> Result<DecodeSummary, DecodeError> {
+    decode_file_parallel_cancellable(path, minimum_time, maximum_time, stream, &|| false, emit)
+}
+
+pub(crate) fn decode_file_parallel_cancellable(
+    path: &Path,
+    minimum_time: MediaTime,
+    maximum_time: Option<MediaTime>,
+    stream: Option<DecodeStream>,
+    cancelled: &(dyn Fn() -> bool + Sync),
     mut emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
     decode_file_parallel_inner(
@@ -460,6 +472,7 @@ pub(crate) fn decode_file_parallel(
         minimum_time,
         maximum_time,
         stream,
+        cancelled,
         |output| match output {
             ParallelDecodeOutput::SoftwareVideo(frame) => emit(ParallelSoftwareDecodeOutput::Item(
                 DecodeOutput::Video(frame),
@@ -485,6 +498,7 @@ pub(crate) fn decode_file_hardware_parallel(
     device: &GraphicsDevice,
     minimum_time: MediaTime,
     maximum_time: Option<MediaTime>,
+    cancelled: &(dyn Fn() -> bool + Sync),
     mut emit: impl FnMut(ParallelRuntimeDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
     decode_file_parallel_inner(
@@ -493,6 +507,7 @@ pub(crate) fn decode_file_hardware_parallel(
         minimum_time,
         maximum_time,
         Some(DecodeStream::Video),
+        cancelled,
         |output| match output {
             ParallelDecodeOutput::HardwareVideo(frame) => emit(ParallelRuntimeDecodeOutput::Item(
                 RuntimeDecodeOutput::Video(frame),
@@ -514,10 +529,13 @@ fn decode_file_parallel_inner(
     minimum_time: MediaTime,
     maximum_time: Option<MediaTime>,
     stream: Option<DecodeStream>,
+    cancelled: &(dyn Fn() -> bool + Sync),
     mut emit: impl FnMut(ParallelDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
+    check_cancelled(cancelled)?;
     ffmpeg::init()?;
     let mut input = format::input(path)?;
+    check_cancelled(cancelled)?;
     let video_config = (stream != Some(DecodeStream::Audio))
         .then(|| best_stream_config(&input, Type::Video))
         .flatten();
@@ -555,8 +573,17 @@ fn decode_file_parallel_inner(
         }
         return Err(DecodeError::NoMediaStream);
     }
-    seek_input(&mut input, minimum_time, video.is_some())?;
-    run_parallel_workers(input, video, audio, minimum_time, maximum_time, &mut emit)
+    seek_input(&mut input, minimum_time, video.is_some(), cancelled)?;
+    check_cancelled(cancelled)?;
+    run_parallel_workers(
+        input,
+        video,
+        audio,
+        minimum_time,
+        maximum_time,
+        cancelled,
+        &mut emit,
+    )
 }
 
 fn run_parallel_workers(
@@ -565,6 +592,7 @@ fn run_parallel_workers(
     audio: Option<StreamConfig>,
     minimum_time: MediaTime,
     maximum_time: Option<MediaTime>,
+    cancelled: &(dyn Fn() -> bool + Sync),
     emit: &mut impl FnMut(ParallelDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
     let origin = input_origin(&input);
@@ -586,6 +614,9 @@ fn run_parallel_workers(
                 let mut pending_video = VecDeque::new();
                 let mut pending_audio = VecDeque::new();
                 for (stream, mut packet) in input.packets() {
+                    if cancelled() {
+                        return;
+                    }
                     normalize_packet_time(&mut packet, stream.time_base(), origin);
                     if !flush_available_packets(&video_packet_tx, &mut pending_video)
                         || !flush_available_packets(&audio_packet_tx, &mut pending_audio)
@@ -604,6 +635,9 @@ fn run_parallel_workers(
                     }
                 }
                 while !pending_video.is_empty() || !pending_audio.is_empty() {
+                    if cancelled() {
+                        return;
+                    }
                     if !send_one_pending_packet(&video_packet_tx, &mut pending_video)
                         || !send_one_pending_packet(&audio_packet_tx, &mut pending_audio)
                     {
@@ -644,6 +678,10 @@ fn run_parallel_workers(
         let mut summary = DecodeSummary::default();
         let mut result = Ok(());
         for mut output in output_rx {
+            if cancelled() {
+                result = Err(DecodeError::ConsumerClosed);
+                break;
+            }
             if let ParallelDecodeOutput::Failed(error) = output {
                 result = Err(error);
                 break;
@@ -724,6 +762,7 @@ fn run_parallel_workers(
         if !demux_joined || !video_joined || !audio_joined {
             return Err(DecodeError::WorkerPanicked);
         }
+        check_cancelled(cancelled)?;
         result.map(|()| summary)
     })
 }
@@ -904,11 +943,13 @@ fn seek_input(
     input: &mut format::context::Input,
     target: MediaTime,
     video: bool,
+    cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<(), DecodeError> {
+    check_cancelled(cancelled)?;
     if target <= MediaTime::ZERO {
         return Ok(());
     }
-    if video && let Some(point) = transport_seek_point(input, target)? {
+    if video && let Some(point) = transport_seek_point(input, target, cancelled)? {
         // Exclusive input ownership on this thread; FFmpeg flushes parser/demux
         // state before repositioning. No packet/stream borrow or pointer escapes.
         let result = unsafe {
@@ -939,6 +980,7 @@ struct TransportSeekPoint {
 fn transport_seek_point(
     input: &mut format::context::Input,
     target: MediaTime,
+    cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<Option<TransportSeekPoint>, DecodeError> {
     if input.format().name() != "mpegts" || target <= MediaTime::ZERO {
         return Ok(None);
@@ -957,6 +999,7 @@ fn transport_seek_point(
     );
     let mut preroll = 0_i64;
     loop {
+        check_cancelled(cancelled)?;
         let start = target_us.saturating_sub(preroll);
         if start == 0 {
             return Ok(Some(TransportSeekPoint {
@@ -966,8 +1009,10 @@ fn transport_seek_point(
         }
         let absolute_start = start.saturating_add(origin);
         input.seek(absolute_start, ..absolute_start)?;
+        check_cancelled(cancelled)?;
         let mut position = None;
         for (stream, packet) in input.packets() {
+            check_cancelled(cancelled)?;
             if stream.index() != index {
                 continue;
             }
@@ -1000,9 +1045,17 @@ pub(crate) fn preview_seek_start(path: &Path, target: Duration) -> Result<Durati
     ffmpeg::init()?;
     let mut input = format::input(path)?;
     let target_time = MediaTime::from_nanoseconds(target.as_nanos().min(i64::MAX as u128) as i64);
-    Ok(transport_seek_point(&mut input, target_time)?
+    Ok(transport_seek_point(&mut input, target_time, &|| false)?
         .map(|point| Duration::from_micros(point.start_microseconds as u64))
         .unwrap_or(target))
+}
+
+fn check_cancelled(cancelled: &(dyn Fn() -> bool + Sync)) -> Result<(), DecodeError> {
+    if cancelled() {
+        Err(DecodeError::ConsumerClosed)
+    } else {
+        Ok(())
+    }
 }
 
 fn input_origin(input: &format::context::Input) -> i64 {
@@ -1343,6 +1396,62 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_interrupts_preroll_before_output_and_does_not_poison_the_next_decode() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+        let mut outputs = 0;
+        let missing = path.with_extension("missing");
+        let result = super::decode_file_parallel_cancellable(
+            &missing,
+            MediaTime::ZERO,
+            None,
+            None,
+            &|| true,
+            |_| {
+                outputs += 1;
+                true
+            },
+        );
+        assert!(matches!(result, Err(super::DecodeError::ConsumerClosed)));
+        assert_eq!(outputs, 0);
+
+        let checks = AtomicUsize::new(0);
+        let start = MediaTime::from_nanoseconds(1_800_000_000);
+        let result = super::decode_file_parallel_cancellable(
+            &path,
+            start,
+            None,
+            Some(super::DecodeStream::Video),
+            &|| checks.fetch_add(1, Ordering::Relaxed) >= 20,
+            |_| {
+                outputs += 1;
+                true
+            },
+        );
+        assert!(matches!(result, Err(super::DecodeError::ConsumerClosed)));
+        assert_eq!(
+            outputs, 0,
+            "cancellation must not wait for target or emit EOF"
+        );
+
+        super::decode_file_parallel_cancellable(
+            &path,
+            start,
+            None,
+            Some(super::DecodeStream::Video),
+            &|| false,
+            |_| {
+                outputs += 1;
+                true
+            },
+        )
+        .expect("fresh pipeline remains usable");
+        assert!(outputs > 1, "fresh decode emits frames and EOF");
+    }
+
+    #[test]
     fn transport_seek_matches_full_decode_inside_short_and_long_gops() {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1455,13 +1564,26 @@ mod tests {
                 .expect("GOP filmstrip");
             assert_eq!((card.image.width, card.image.height), (240, 160));
             let mut input = ffmpeg_next::format::input(&path).expect("inspect seek point");
-            let point =
-                super::transport_seek_point(&mut input, MediaTime::from_nanoseconds(5_500_000_000))
-                    .expect("find preroll")
-                    .expect("TS seek point");
+            let point = super::transport_seek_point(
+                &mut input,
+                MediaTime::from_nanoseconds(5_500_000_000),
+                &|| false,
+            )
+            .expect("find preroll")
+            .expect("TS seek point");
             assert!(
                 point.position > 0 && point.start_microseconds > 0,
                 "late seek must not always decode from the beginning"
+            );
+            let checks = std::sync::atomic::AtomicUsize::new(0);
+            let cancelled = super::transport_seek_point(
+                &mut input,
+                MediaTime::from_nanoseconds(5_500_000_000),
+                &|| checks.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 1,
+            );
+            assert!(
+                matches!(cancelled, Err(super::DecodeError::ConsumerClosed)),
+                "cancel during TS seek preparation"
             );
             drop(input);
             std::fs::remove_dir_all(cache_path).expect("remove owned preview cache");

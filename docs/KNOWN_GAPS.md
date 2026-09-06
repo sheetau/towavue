@@ -16,6 +16,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 ### UI threadを止める処理
 
+- 長いGOPのSeek中に終了すると、target到達までdecodeを待つ問題をH1で修正した。pipelineごとの取消flagを探索・demux・decoded outputで確認し、target以前のframe破棄中も停止する。1080p60・30秒GOPの通常release単発比較では終了待ち897 msから63 msへ短縮し、音声付き素材の再Seek・再生・tab closeも通過した。worker joinは維持し、進行中のFFmpeg call/OS I/Oの強制中断や、全素材の終了時間保証ではない。
 - 画像decodeとreading modeの複数画像loadはH1で単一background workerへ移した。要求・結果は最新1件だけを保持し、古い結果は表示しない。texture化とGPU uploadはUI側に残り、大きい画像の表示切替が完全に無停止とは限らない。
 - Shell snapshotはH1で非同期化した。最新1件だけを待機・保持し、古い結果をgenerationで拒否する。実行中のShell APIは強制中断しないため、次の取得がすぐ完了する保証はない。path正規化、file metadata、watcher作成、media probeにはUI側の同期処理が残る。
 - native Open file/folder/Save AsはH1で専用STAへ移した。本体入力はmodal制限するが描画・再生を続け、Cancel後は入力とdirty guardを復元する。同じ30秒H.264/AACのOpen Folder→Cancel試験は、修正前の808/900 dropsから修正後0/900 dropsになった。基準機の単発試験であり、複数DPI/monitorや全codecでの保証ではない。

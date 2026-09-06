@@ -2189,7 +2189,13 @@ where
             .show(root, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    if self.fullscreen && chrome::button(ui, "▣", "Exit fullscreen (F11)").clicked()
+                    if self.fullscreen
+                        && chrome::button(
+                            ui,
+                            "▣",
+                            &self.command_hint(CommandId::ToggleFullscreen, "Exit fullscreen"),
+                        )
+                        .clicked()
                     {
                         actions.push(UiAction::Command(CommandId::ToggleFullscreen));
                     }
@@ -2198,11 +2204,10 @@ where
                         if chrome::button(
                             ui,
                             if playing { "Ⅱ" } else { "▶" },
-                            if playing {
-                                "Pause (Space)"
-                            } else {
-                                "Play / replay (Space)"
-                            },
+                            &self.command_hint(
+                                CommandId::TogglePause,
+                                if playing { "Pause" } else { "Play / replay" },
+                            ),
                         )
                         .clicked()
                         {
@@ -2220,7 +2225,13 @@ where
                             .size(12.0)
                             .color(chrome::MUTED),
                         );
-                        if chrome::button(ui, "≋", "Waveform timeline (T)").clicked() {
+                        if chrome::button(
+                            ui,
+                            "≋",
+                            &self.command_hint(CommandId::ToggleTimeline, "Waveform timeline"),
+                        )
+                        .clicked()
+                        {
                             actions.push(UiAction::Command(CommandId::ToggleTimeline));
                         }
                         let volume = ui
@@ -2238,7 +2249,13 @@ where
                             .on_hover_text("Volume · wheel to adjust (playback and export)");
                         volume_targets.push(volume);
                     } else if self.media_kind == Some(MediaKind::Image) {
-                        if chrome::button(ui, "◫", "Reading mode (B)").clicked() {
+                        if chrome::button(
+                            ui,
+                            "◫",
+                            &self.command_hint(CommandId::ToggleReadingMode, "Reading mode"),
+                        )
+                        .clicked()
+                        {
                             actions.push(UiAction::Command(CommandId::ToggleReadingMode));
                         }
                         if self.image_view.selection.is_some()
@@ -4077,6 +4094,13 @@ where
             );
         }
         format!("{name} — towavue ({:?})", self.state)
+    }
+
+    fn command_hint(&self, command: CommandId, title: &str) -> String {
+        self.shortcuts.get(command).map_or_else(
+            || title.to_owned(),
+            |sequence| format!("{title} ({sequence})"),
+        )
     }
 
     fn command_context(&self) -> CommandContext {
@@ -6388,6 +6412,121 @@ mod tests {
         assert!(app.pending_guard.is_some());
         assert_eq!(app.path.as_ref(), Some(&source));
         assert_eq!(app.edits, edits);
+    }
+
+    #[test]
+    fn status_control_hints_follow_current_bindings_without_changing_actions() {
+        let Some(_root) = isolated_test_root(
+            "tests::status_control_hints_follow_current_bindings_without_changing_actions",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        for (kind, state, fullscreen, x, command, title) in [
+            (
+                MediaKind::Audio,
+                PlaybackState::Playing,
+                false,
+                20.0,
+                CommandId::TogglePause,
+                "Pause",
+            ),
+            (
+                MediaKind::Video,
+                PlaybackState::Paused,
+                false,
+                20.0,
+                CommandId::TogglePause,
+                "Play / replay",
+            ),
+            (
+                MediaKind::Video,
+                PlaybackState::Ended,
+                false,
+                20.0,
+                CommandId::TogglePause,
+                "Play / replay",
+            ),
+            (
+                MediaKind::Audio,
+                PlaybackState::Paused,
+                false,
+                130.0,
+                CommandId::ToggleTimeline,
+                "Waveform timeline",
+            ),
+            (
+                MediaKind::Image,
+                PlaybackState::Paused,
+                false,
+                20.0,
+                CommandId::ToggleReadingMode,
+                "Reading mode",
+            ),
+            (
+                MediaKind::Video,
+                PlaybackState::Paused,
+                true,
+                20.0,
+                CommandId::ToggleFullscreen,
+                "Exit fullscreen",
+            ),
+        ] {
+            app.media_kind = Some(kind);
+            app.state = state;
+            app.fullscreen = fullscreen;
+            for binding in [Some("Ctrl+K Ctrl+P"), Some("K"), None] {
+                app.shortcuts = ShortcutBindings::default();
+                if let Some(binding) = binding {
+                    app.shortcuts
+                        .set(command, binding.parse().expect("custom binding"));
+                }
+                let context = egui::Context::default();
+                context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+                app.media_duration = Some(Duration::from_secs(30));
+                let pos = egui::pos2(x, 284.0);
+                let frame = |events| {
+                    let mut actions = Vec::new();
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(480.0, 300.0),
+                            )),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            app.draw_status_bar(ui, &mut actions, &mut Vec::new());
+                        },
+                    );
+                    (output, actions)
+                };
+                for _ in 0..3 {
+                    frame(vec![egui::Event::PointerMoved(pos)]);
+                }
+                let (output, actions) = frame(vec![]);
+                let expected =
+                    binding.map_or_else(|| title.to_owned(), |key| format!("{title} ({key})"));
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == expected)), "missing {expected}");
+                assert!(actions.is_empty());
+                frame(vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                let actions = frame(vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }])
+                .1;
+                assert_eq!(actions.len(), 1);
+                assert!(matches!(actions[0], UiAction::Command(id) if id == command));
+            }
+        }
     }
 
     #[test]

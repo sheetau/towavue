@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 17:19 JST - show configured shortcuts in status control hints
+
+- Trigger/evidence: previous turn pushed 812fb23 (progress); CI 34020953319 succeeds. Native playlist current-row click/Space and Tab/menu activation behave correctly. A separate isolated-config trial pauses with K but still advertises Space on the play button.
+- Change: derive play/pause, waveform timeline, reading mode and exit-fullscreen tooltip/accessibility labels from current bindings, including complete prefixes and name-only unbound controls. Preserve defaults and click dispatch; app-only, no runtime/core/dependency/unsafe changes.
+- Verification: new actual status-bar draw/click regression fails on the old hint, then passes 18 state/binding combinations. Format, Clippy, 225 tests (app 113/core 35/runtime 73/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored, not hardware proof.
+- Native/cleanup: isolated APPDATA baseline and fixed windows confirm K pauses and fixed hints show Play / replay (K) and Waveform timeline (Ctrl+T). All owned windows close normally; no source save, user configuration or OS settings changed. Generated config/captures/logs remain ignored under target/tmp/h1-custom-hints*.
+- Status/next: h1_active. Owner asked whether draft video L should seek instead of its existing counterclockwise rotation; no answer yet, no default change. Continue existing keyboard/draft UX audit while retaining long-duration, physical input/DPI/device and distribution gaps. Packaging unanswered; no publication.
+
 ## 2026-09-06 17:05 JST - revalidate release seek and short 4K playback performance
 
 - Trigger/intent: previous turn pushed 4b7721b (progress); its CI 34019325547 and 9fe13a5 CI succeed. Recheck current release after terminal decode/preview changes instead of reusing older performance claims. Documentation-only checkpoint; no application behavior changes.

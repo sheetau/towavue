@@ -260,3 +260,5 @@ foreground確認後もwheelの古い座標参照を通常releaseで再現した�
 音声尾区間のhoverでFFmpegが成功終了してもPNGが空になる問題を再現した。thumbnail/filmstrip共通でこの場合だけ選択videoの最後のPTSを既存worker内で調べ、一度だけ再生成する。複数streamの最終画像/cache、TS短長GOP/B-frameと取消を含む224 tests、Clippy、両buildが通過。通常windowの7秒hoverで再生と同じ0.9秒の最終frameを確認した。09537c6 CIは成功。H1と実環境/配布gateは未完了。
 
 4b7721b通常releaseで再生中/停止中各100回Seekを再測定し、p95 102.204/42.260msで300ms基準を満たした。1分4K60は3,594表示/drop 0/CPU transfer 0、drift最大4.979ms。EOF直後のCPU増加を観測したため追加試験し、落ち着いた後の5秒sampleは二回とも0msだった。224 testsと必須checkも再通過。測定条件・hash・制限をDEVELOPMENTへ記録。これは30分性能・実DPI/device・配布gateの代替ではなく、H1は継続中。
+
+status barの4つの操作buttonでshortcut案内がSpace/T/B/F11へ固定されていた問題を修正した。現在の単一key・prefix・未割当とclick動作を実描画で確認する回帰を含む225 tests、Clippy、両buildが通過。独立設定の通常windowでもKによる停止とK/Ctrl+Tの案内を確認した。既定bindingは変更せず、草案の動画L=Seekと既存回転の競合はownerへ確認中。812fb23 CIは成功。H1と実環境/配布gateは未完了。

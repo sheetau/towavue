@@ -1,11 +1,77 @@
 use egui::{Color32, Context, Rect, Response};
 
+fn gesture_id() -> egui::Id {
+    egui::Id::new("seek-gesture")
+}
+
+pub fn is_active(context: &Context) -> bool {
+    context.data(|data| data.get_temp::<egui::Id>(gesture_id()).is_some())
+}
+
+pub fn cancel(context: &Context) -> bool {
+    let active = context.data_mut(|data| {
+        let active = data.get_temp::<egui::Id>(gesture_id());
+        data.remove::<egui::Id>(gesture_id());
+        active
+    });
+    if active.is_some() && context.dragged_id() == active {
+        context.stop_dragging();
+    }
+    active.is_some()
+}
+
+pub fn commit_position(response: &Response) -> Option<egui::Pos2> {
+    let context = &response.ctx;
+    let (pressed, release, interrupted) = context.input(|input| {
+        (
+            input.pointer.button_pressed(egui::PointerButton::Primary),
+            input.events.iter().rev().find_map(|event| match event {
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                } => Some(*pos),
+                _ => None,
+            }),
+            !input.focused
+                || input.key_pressed(egui::Key::Escape)
+                || input.events.contains(&egui::Event::WindowFocused(false)),
+        )
+    });
+    if interrupted || !response.enabled() || egui::Popup::is_any_open(context) {
+        cancel(context);
+        return None;
+    }
+    if pressed
+        && (response.is_pointer_button_down_on()
+            || response.clicked_by(egui::PointerButton::Primary))
+    {
+        context.data_mut(|data| data.insert_temp(gesture_id(), response.id));
+    }
+    let owned = context.data(|data| data.get_temp::<egui::Id>(gesture_id())) == Some(response.id);
+    let commit = (owned
+        && release.is_some()
+        && (response.clicked() || response.drag_stopped_by(egui::PointerButton::Primary)))
+        || (response.clicked() && release.is_none());
+    if owned && release.is_some() {
+        context.data_mut(|data| data.remove::<egui::Id>(gesture_id()));
+    }
+    commit
+        .then(|| {
+            release
+                .or(response.interact_pointer_pos())
+                .or(response.hover_pos())
+        })
+        .flatten()
+}
+
 pub fn show(
     context: &Context,
     status: Rect,
     progress: f32,
     parent: Option<egui::LayerId>,
-) -> Response {
+) -> (Response, Option<egui::Pos2>) {
     let area = egui::Area::new("compact-seek-bar".into());
     if let Some(parent) = parent {
         context.set_sublayer(parent, area.layer());
@@ -19,7 +85,8 @@ pub fn show(
                 egui::vec2(status.width(), 12.0),
                 egui::Sense::click_and_drag(),
             );
-            let dragging = response.dragged_by(egui::PointerButton::Primary);
+            let commit = commit_position(&response);
+            let dragging = response.dragged_by(egui::PointerButton::Primary) && is_active(context);
             let active = response.hovered() || dragging;
             let progress = if dragging {
                 response
@@ -48,7 +115,10 @@ pub fn show(
                     Color32::from_gray(230),
                 );
             }
-            response.on_hover_cursor(egui::CursorIcon::PointingHand)
+            (
+                response.on_hover_cursor(egui::CursorIcon::PointingHand),
+                commit,
+            )
         })
         .inner
 }

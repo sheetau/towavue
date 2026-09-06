@@ -232,6 +232,8 @@ timeline非表示時はstatus上端に1 physical pxのseek barを重ね、hover/
 
 timeline・compact seek bar・画像folder barのpointerによる確定はprimary（左）buttonのclick/drag releaseだけとする。secondary・middle・追加buttonのdragでSeekやfolder移動を行わず、compact barの候補位置も動かさない。既存のkeyboard/accessibilityによるprimary click経路は維持する。
 
+Seekの確定位置はprimary release event自身の座標とし、同frameで後から届いたhoverはtooltip用の位置にだけ使う。進行中のSeekは一件のwidget所有権として保持し、Escape・focus喪失・modal/別command・media切替で解除する。取消後のreleaseは移動せず、新しい押下を必要とする。fullscreenの最初のEscapeもSeek取消を優先する。編集履歴は変更しない。
+
 paletteは検索入力を保ち、上下keyで有効な候補を巡回し、Enterで共有commandへdispatch、Escapeで閉じる。eguiの破棄されたlayout passで消費したkeyのactionも保持し、同一frameの同じUI actionは一回だけ実行する。
 
 shortcut prefixは一続きのkey入力だけに有効とし、1秒の期限切れ、Escape、focus喪失、mouse press、別command、file drop・離脱確認で解除する。Escapeはprefix取消をoverlay/fullscreen解除より先に扱う。prefix開始時刻と案内の時刻を共有して通知の所有を識別し、取消ではその案内だけを消して再描画する。後から出た別通知を消さず、正常な複数key shortcutは従来どおり一回dispatchする。

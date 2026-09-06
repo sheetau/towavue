@@ -2,6 +2,16 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 11:15 JST - Seek release coordinates and cancellation ownership
+
+- Trigger/evidence: continue after a5524e6. Baseline normal release PID 37576 already cancels an ordinary timeline drag on Escape without adding a Seek record; do not claim that case was broken. Adding a post-release hover to the existing button/Seek regression does fail original code: current hover replaces the release target.
+- Contract/change: record release-event coordinates and one active Seek widget in architecture first. Shared seekbar helper returns a commit position separately from hover/tooltip position; timeline and compact media/image bars use it. Bounded transient context data tracks one widget id, requires owned release, clears on interruption or completion and preserves the existing non-pointer clicked fallback. No new polling, worker, native types, dependencies or unsafe code.
+- Cancellation: connect the shared owner to existing view-input cancellation on focus loss, commands, guards and media load. Escape sees active Seek before egui consumes it and before fullscreen exit. Escape/focus-loss events in the release frame, including focus-out/in together, block commit; disabled widgets and popups cancel. Canceled held motion/release cannot regain ownership; fresh press can.
+- Regression: all-five-button timeline/folder tests now include post-release hover and keep the release target. New test covers Escape before/on release, focus loss, same-frame focus-out/in, fullscreen Escape, another command, popup and disabled UI, followed by successful repress. Existing trim, fullscreen controls and view-drag cancellation tests pass.
+- Native: trace-free release PID 40004 receives release at x=700 followed by hover x=100 and reports Position 22.015s with one Seek. Fullscreen compact-Seek Escape keeps height 1080 and the same Seek count; the next Escape returns to windowed. During a later drag, foreground leaves for owned Welcome PID 44848 and returns, both identities checked after 150 ms; release leaves count at one, new drag raises it to two. Input is injected at 96 DPI, not physical-device/mixed-DPI proof.
+- Verification/cleanup: format, all-target Clippy, 182 tests (app 88, core 35, runtime 55, integrations 4) and debug/release builds pass; three live tests explicitly ignored, not hardware proof. CI 2912cba/34005287785 and a5524e6/34005544569 both completed successfully. All three owned processes close normally; no edit/export. Fixture hash stays F929E6FA18AA010BEBFBB3400539A4F090F7864887F4044E20B4E0C95C5B2F54. Captures/logs ignored; no instrumentation retained.
+- Status/next: h1_active. Continue short-gesture/trim-grip and remaining daily-viewing/environment checks. Actual driver/endpoint and distribution gates remain incomplete; packaging choice unanswered, no package/publication performed.
+
 ## 2026-09-06 11:04 JST - restrict pointer Seek to the primary button
 
 - Trigger/evidence: resume timeline audit after 2912cba. Normal release PID 36400 pauses around 10 seconds; secondary drag across the waveform moves to 22 seconds and adds a seek-latency record. All three app Seek/folder-bar branches accepted generic drag_stopped, including non-primary buttons.

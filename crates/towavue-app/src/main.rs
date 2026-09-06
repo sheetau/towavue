@@ -666,6 +666,7 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.cancel_view_drag();
         self.playback_error = None;
         self.pending_folder = None;
         self.folder_order.request(None);
@@ -691,7 +692,6 @@ where
         self.waveform_loading = false;
         self.thumbnail_loading = None;
         self.image_view = ImageViewState::default();
-        self.view_drag = None;
         self.path = Some(path.clone());
         self.media_kind = Some(kind);
         self.pending_time = None;
@@ -1561,7 +1561,7 @@ where
     }
 
     fn cancel_view_drag(&mut self) -> bool {
-        let mut canceled_press = false;
+        let mut canceled_press = self.ui_context.as_ref().is_some_and(seekbar::cancel);
         if let Some(state) = &mut self.ui_state {
             // Commands and focus changes can precede the frame that would start the drag.
             state.egui_input_mut().events.retain(|event| {
@@ -2285,7 +2285,7 @@ where
             } else {
                 0.0
             };
-            let response = seekbar::show(context, status, progress, parent);
+            let (response, commit) = seekbar::show(context, status, progress, parent);
             if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
                 let target =
                     seekbar::item_index(seekbar::ratio(response.rect, pointer.x), images.len());
@@ -2295,9 +2295,11 @@ where
                     images.len(),
                     display_name(&images[target].path)
                 ));
-                if (response.clicked() || response.drag_stopped_by(egui::PointerButton::Primary))
-                    && target != index
-                {
+            }
+            if let Some(pointer) = commit {
+                let target =
+                    seekbar::item_index(seekbar::ratio(response.rect, pointer.x), images.len());
+                if target != index {
                     actions.push(UiAction::OpenMedia(images[target].path.clone(), false));
                 }
             }
@@ -2314,13 +2316,14 @@ where
         };
         let progress = (self.current_position().as_seconds_f64() / duration.as_secs_f64())
             .clamp(0.0, 1.0) as f32;
-        let response = seekbar::show(context, status, progress, parent);
+        let (response, commit) = seekbar::show(context, status, progress, parent);
         if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
             let ratio = seekbar::ratio(response.rect, pointer.x);
             self.draw_seek_preview(&response, ratio, duration);
-            if response.clicked() || response.drag_stopped_by(egui::PointerButton::Primary) {
-                actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
-            }
+        }
+        if let Some(pointer) = commit {
+            let ratio = seekbar::ratio(response.rect, pointer.x);
+            actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
         }
     }
 
@@ -2404,16 +2407,16 @@ where
                 if let (Some(tab), Some(operation)) = (tab, trim_operation) {
                     actions.push(UiAction::TrimEndpoint(tab, operation));
                 }
+                if let Some(position) = seekbar::commit_position(&response) {
+                    let ratio = seekbar::ratio(rect, position.x);
+                    actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
+                }
                 let Some(position) = response.interact_pointer_pos().or(response.hover_pos())
                 else {
                     return;
                 };
                 let ratio = ((position.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-                let target = duration.mul_f32(ratio);
                 self.draw_seek_preview(&response, ratio, duration);
-                if response.clicked() || response.drag_stopped_by(egui::PointerButton::Primary) {
-                    actions.push(UiAction::Seek(media_time(target)));
-                }
             });
     }
 
@@ -4579,7 +4582,9 @@ where
             }
             self.viewing_cursor.activity();
         }
-        if (self.fullscreen || self.view_drag.is_some())
+        if (self.fullscreen
+            || self.view_drag.is_some()
+            || self.ui_context.as_ref().is_some_and(seekbar::is_active))
             && !self.palette_open
             && !self.modal_input_blocked()
             && let WindowEvent::KeyboardInput { event, .. } = &event
@@ -4696,6 +4701,117 @@ mod tests {
     }
 
     #[test]
+    fn seek_cancellation_blocks_later_release_and_preserves_fullscreen() {
+        let Some(_root) = isolated_test_root(
+            "tests::seek_cancellation_blocks_later_release_and_preserves_fullscreen",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.media_kind = Some(MediaKind::Audio);
+        app.media_duration = Some(Duration::from_secs(10));
+        app.state = PlaybackState::Paused;
+        let start = egui::pos2(100.0, 250.0);
+        let end = egui::pos2(400.0, 250.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let escape = egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: Some(egui::Key::Escape),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for interruption in 0..8 {
+            let context = egui::Context::default();
+            app.ui_context = Some(context.clone());
+            app.timeline_open = true;
+            let frame = |app: &mut Application<_>, events, focused, disabled| {
+                let mut actions = Vec::new();
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(500.0, 300.0),
+                        )),
+                        events,
+                        focused,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        if disabled {
+                            ui.disable();
+                        }
+                        app.draw_timeline(ui, &mut actions);
+                    },
+                );
+                actions
+            };
+            for _ in 0..3 {
+                frame(&mut app, vec![], true, false);
+            }
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(start)],
+                true,
+                false,
+            );
+            assert!(frame(&mut app, vec![button(start, true)], true, false).is_empty());
+            assert!(frame(&mut app, vec![egui::Event::PointerMoved(end)], true, false).is_empty());
+            assert!(seekbar::is_active(&context));
+            let mut release = vec![button(end, false)];
+            match interruption {
+                0 => {
+                    frame(&mut app, vec![escape.clone()], true, false);
+                }
+                1 => release.push(escape.clone()),
+                2 => {
+                    frame(&mut app, vec![], false, false);
+                }
+                3 => release.extend([
+                    egui::Event::WindowFocused(false),
+                    egui::Event::WindowFocused(true),
+                ]),
+                4 => {
+                    app.fullscreen = true;
+                    assert!(app.dismiss_overlay_or_fullscreen());
+                    assert!(app.fullscreen);
+                    app.fullscreen = false;
+                }
+                5 => {
+                    app.dispatch(CommandId::ToggleTimeline);
+                    app.timeline_open = true;
+                }
+                6 => {
+                    egui::Popup::open_id(&context, "seek-blocker".into());
+                    frame(&mut app, vec![], true, false);
+                    egui::Popup::close_id(&context, "seek-blocker".into());
+                }
+                _ => {
+                    frame(&mut app, vec![], true, true);
+                }
+            }
+            assert!(
+                frame(&mut app, release, true, false).is_empty(),
+                "interruption={interruption}"
+            );
+            assert!(!seekbar::is_active(&context));
+            frame(&mut app, vec![button(start, true)], true, false);
+            frame(&mut app, vec![egui::Event::PointerMoved(end)], true, false);
+            let actions = frame(&mut app, vec![button(end, false)], true, false);
+            assert!(
+                matches!(actions.as_slice(), [UiAction::Seek(_)]),
+                "new press after interruption={interruption}"
+            );
+            assert!(!seekbar::is_active(&context));
+        }
+    }
+
+    #[test]
     fn timeline_and_folder_seek_only_commit_primary_pointer_gestures() {
         let Some(root) = isolated_test_root(
             "tests::timeline_and_folder_seek_only_commit_primary_pointer_gestures",
@@ -4784,7 +4900,10 @@ mod tests {
                     assert!(frame(vec![egui::Event::PointerMoved(start)]).is_empty());
                     assert!(frame(vec![event(start, true)]).is_empty());
                     assert!(frame(vec![egui::Event::PointerMoved(end)]).is_empty());
-                    let actions = frame(vec![event(end, false)]);
+                    let actions = frame(vec![
+                        event(end, false),
+                        egui::Event::PointerMoved(egui::pos2(50.0, end.y)),
+                    ]);
                     if button != egui::PointerButton::Primary {
                         assert!(
                             actions.is_empty(),

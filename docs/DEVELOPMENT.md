@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### 単一項目の前後移動（2026-09-06）
+
+- 旧通常release PID 40588で1枚だけのfolderのPNGを100%表示にし、右矢印でFitへ戻ることを確認。回転編集後の右矢印では、行先が同じ画像なのに保存確認が出た。Cancel/Undoして通常終了する。
+- 修正版PID 42056では回転後の右矢印が未保存状態と画像を保持し、確認を出さない。最初のまとめたキー送信後に100%状態を確認できなかったため、同じwindowでCtrl+H→capture→右矢印を分けて行い、100%保持を確認した。再起動で試験を取り直していない。
+- 同じwindowへ30秒音声をOpenし、停止中の現在playlist項目をclickして01/30・pause・波形位置が変わらないことを確認。最初のclickはlabel外だったため証拠から除き、label内x=28/y=75で確認した。試用windowは通常終了し、生成PNG/audio・capture/logはignoredの`target/tmp`内。sourceの保存・変更なし。
+
 ### 画像folderのHome/End（2026-09-06）
 
 - 3枚の赤・緑・青PNGをignoredの`target/tmp/h1-boundary-folder`へ生成し、中央の緑を開く。旧通常release PID 43708でHome/End後も2/3の緑に留まることを確認した。

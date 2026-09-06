@@ -212,6 +212,8 @@ Explorerからのfile dropはwinitのowned path eventで受け、既存のextern
 
 ### H1 compact window shell
 
+folder前後移動・playlist項目の再clickなど、Navigateの行先が現在pathと同じなら共通guardの入口でno-opにする。単一項目/同種一件の巡回でも再load・不要な保存確認・export待機を発生させず、zoom/pan/selection・再生位置/pause・編集・読み込み世代を維持する。別pathへの既存guard、明示的なOpenと新規tab作成は変更しない。
+
 tab操作でactive identityが変わらない場合はmediaを再loadしない。現在tabの再clickと単一tabの巡回はno-opとし、非active tabのcloseでは対象のtab/history/export pathだけを削除してbarを再描画する。現在の再生位置・pause、画像zoom/pan/selection、読み込み世代を維持する。active tabを閉じた際の隣接tabへの移動、最後のtabのWelcome、既存のdirty/export guardは変更しない。
 
 日本語filename・入力の欠字を避けるため、runtimeはWindows Fonts内のYu Gothic Medium、Meiryo、MS Gothicの順で読める一つのfont fileを返す。appは起動時にegui既定fontの後ろへ補助fontとして登録し、英数字の見た目を維持する。fontはOSから読み、同梱・download・OS設定変更は行わない。日本語fontがない環境はdiagnosticで明示し、既定fontで継続する。これは全言語fallbackや配布fontの選定ではない。

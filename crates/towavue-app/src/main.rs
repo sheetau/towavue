@@ -3205,6 +3205,9 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        if matches!(&action, GuardedAction::Navigate(path) if self.path.as_ref() == Some(path)) {
+            return;
+        }
         self.cancel_shortcut_prefix();
         self.cancel_view_drag();
         if self.pending_dialog.is_some() || self.native_prompt.is_some() {
@@ -6264,6 +6267,107 @@ mod tests {
         assert!(app.pending_guard.is_some());
         assert_eq!(app.path.as_ref(), Some(&source));
         assert_eq!(app.edits, edits);
+    }
+
+    #[test]
+    fn navigation_to_current_media_keeps_view_playback_and_edits() {
+        let Some(root) =
+            isolated_test_root("tests::navigation_to_current_media_keeps_view_playback_and_edits")
+        else {
+            return;
+        };
+        for (kind, name) in [
+            (MediaKind::Image, "only.png"),
+            (MediaKind::Video, "only.mp4"),
+            (MediaKind::Audio, "only.wav"),
+        ] {
+            let mut app = Application::new(None, |_| {}).expect("headless application");
+            let source = root.join(name);
+            let tab = app.tabs.open_new(source.clone(), kind);
+            app.path = Some(source.clone());
+            app.media_kind = Some(kind);
+            app.state = PlaybackState::Paused;
+            let mut clock = PlaybackClock::new(MediaTime::from_nanoseconds(9_000_000_000), 1.0);
+            clock.paused_at = Some(clock.wall_anchor);
+            app.clock = Some(clock);
+            app.image_view = ImageViewState {
+                zoom: ZoomMode::Actual,
+                pan: (30.0, -12.0),
+                selection: Some(UnitRect::FULL),
+                crop_preview: true,
+            };
+            app.folder_snapshot = Some(FolderSnapshot {
+                folder_identity: towavue_core::ShellIdentity::new(vec![]),
+                folder_path: root.clone(),
+                items: vec![towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![]),
+                    path: source.clone(),
+                    kind,
+                }],
+                sort_columns: vec![],
+                source: FolderSnapshotSource::LiveExplorerView,
+                generation: 1,
+                captured_at: std::time::SystemTime::now(),
+            });
+            for dirty in [false, true] {
+                if dirty {
+                    let operation = if kind == MediaKind::Image {
+                        EditOperation::RotateClockwise
+                    } else {
+                        EditOperation::SetVolume(0.5)
+                    };
+                    app.edits.entry(tab).or_default().push(operation, kind);
+                }
+                let edits = app.edits.clone();
+                let view = app.image_view;
+                let generation = app.media_generation;
+                let position = app.current_position();
+                for action in 0..5 {
+                    match action {
+                        0 => app.navigate(true, false),
+                        1 => app.navigate(false, false),
+                        2 => app.navigate(true, true),
+                        3 => app.navigate(false, true),
+                        _ => app.handle_ui_action(UiAction::OpenMedia(source.clone(), false)),
+                    }
+                    assert_eq!(
+                        app.media_generation, generation,
+                        "same media must not reload"
+                    );
+                    assert!(app.pending_guard.is_none());
+                    assert_eq!(app.image_view, view);
+                    assert_eq!(app.edits, edits);
+                    assert_eq!(app.path.as_ref(), Some(&source));
+                    assert_eq!(app.current_position(), position);
+                    assert_eq!(app.state, PlaybackState::Paused);
+                }
+            }
+            let other_kind = if kind == MediaKind::Image {
+                MediaKind::Audio
+            } else {
+                MediaKind::Image
+            };
+            let other = root.join(if other_kind == MediaKind::Image {
+                "other.png"
+            } else {
+                "other.wav"
+            });
+            app.folder_snapshot.as_mut().expect("snapshot").items.push(
+                towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![]),
+                    path: other.clone(),
+                    kind: other_kind,
+                },
+            );
+            app.navigate(true, true);
+            assert!(app.pending_guard.is_none(), "only one matching media kind");
+            app.navigate(true, false);
+            assert!(
+                matches!(&app.pending_guard, Some(GuardedAction::Navigate(path)) if path == &other)
+            );
+            app.resolve_guard(GuardDecision::Cancel);
+            assert_eq!(app.path.as_ref(), Some(&source));
+        }
     }
 
     #[test]

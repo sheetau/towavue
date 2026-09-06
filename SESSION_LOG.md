@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 14:41 JST - ignore navigation to the current media
+
+- Trigger/evidence: previous turn pushed 7064420 (progress); 46ebb86 CI succeeded, 7064420 remains in progress. Baseline normal release PID 40588: only image in folder changes from 100% to Fit after Right; rotating then Right opens unsaved guard despite identical destination.
+- Contract/change: document same-path Navigate as a no-op at the shared guard entry, before leaving/pending-work checks. Three production lines preserve image view, playback position/pause, edits and media generation for single-item/same-kind wrap and current playlist clicks. Different-path guards, explicit Open and force-new tab creation unchanged; no runtime/core/dependency/unsafe changes.
+- Regression/checks: old code fails on media generation 1 versus expected 0. Fixed test covers image/video/audio, clean/dirty, both directions, all-kind/same-kind and current-item UI action; preserves view/path/clock/paused state/edits. Add another media kind to verify same-kind no-op and all-kind dirty guard/Cancel. Format, Clippy, 211 tests (app 102/core 35/runtime 70/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: PID 42056 preserves dirty rotation without a prompt. Initial batched keys did not establish 100% state; revisit same window and separate Actual/capture/Right to confirm 100% remains. Open audio, pause at 01/30, click selected playlist label and confirm time/pause/CTI unchanged. Initial click outside label excluded; actual x=28/y=75 hit recorded. Both owned windows close normally after undoing trial edits; generated media/captures/logs ignored, sources not saved.
+- Status/next: h1_active. Audit audio playlist row hit targets and draft layout next. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 14:34 JST - add image-folder boundary navigation
 
 - Trigger/evidence: previous turn pushed 46ebb86 (progress); its CI remains in progress at this checkpoint. Draft explicitly calls for Home/End to first/last image. Baseline normal release PID 43708 stays on middle green image after both keys in an owned three-image folder.

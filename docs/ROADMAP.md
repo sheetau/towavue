@@ -272,3 +272,5 @@ prefixの途中で別のprefix・同じprefixへ打ち直すと新しい入力�
 小窓で5 tabを開くと現在tabが画面外に隠れる問題を通常releaseで再現した。active identity/index・tab幅・表示幅の変更時だけ、既存ScrollAreaでtab全体を最小scrollする。12 tabの切替/追加/並べ替え/resizeと手動位置保持を含む229 tests、Clippy、両buildが通過。通常windowでも追加・前後切替・手動scroll保持・resize・close後の隣接tab表示を確認した。media loadや編集へ新しい動作を加えず、H1と実環境/配布gateは継続中。
 
 compact paletteのnative日本語IMEを通常releaseで再確認した。通常幅/480px幅の候補位置、候補上下移動、日本語確定、Escapeの二段階取消、F10でLatin化後の確定Enterとcommand実行Enterの分離、別の所有windowからのfocus復帰が通過した。229 testsと必須checkも再通過。新しい実装不具合は見つからず、条件と観測上の除外をDEVELOPMENTへ記録。afe7469 CIは成功。物理keyboard・別IME・mixed-DPIを含むH1全体は未完了。
+
+51b43bf通常releaseの30分4K H.264/AAC再試験は、同一processでEOFへ到達し、107,771表示・drop 0・CPU transfer 0、drift p95 4.808ms・最大32.055msだった。全区間drop 0のため先頭10分のdrop基準も満たす。5分以降のprivate memoryは粗いsampleで221.86～235.78MiB、EOF後は178.62MiB。条件・hash・限界をDEVELOPMENTへ記録し、KNOWN_GAPSのtrim grip・wheel volume・preview worker/cacheの古い記述も現行実装へ合わせた。実装変更なし。物理入力/DPI/device・配布を含むH1全体は継続中。

@@ -4,6 +4,22 @@
 
 ## 1. 最初に試す
 
+### 現行releaseの30分性能再確認（2026-09-06 18:30 JST）
+
+51b43bfの通常release（開始時HEAD aa83efd、以降は文書のみ）で、4K H.264/AACの30分連続再生がEOFへ到達した。adapterは00000000:000146b5、D3D11VA、960×576、1倍、アプリ内mute。sourceは事前hash済みでcold-storage試験ではない。再起動・Seek・並行したbuildや重い試験は行っていない。
+
+- 107,771 hardware frames＝107,771 presented＋0 droppedでsourceの全video frameと一致し、CPU transferも0。全区間drop率0%のため、先頭10分も0.1%未満となる。A/V driftはp95 4.808ms・最大32.055msで、30分の40/100ms基準内。アプリのvideo PTSとaudio master時計の差であり、物理display/speaker遅延の測定ではない。
+- 約30秒間隔の61 samplesで同一PID/start timeを追跡。開始5分後からEOF直前までの50 samples（309.5～1780.2秒）はprivate memory 221.86～235.78MiB、区間最初222.33・最後223.40MiB。EOF後1810.2秒は178.62MiBで、後の5秒CPU時間増分は0ms（時計分解能以下）。粗いprocess-memory sampleであり、GPU allocationや全瞬間のpeak・無期限の安定性の証明ではない。
+- PID 46632、開始UTC 2026-09-06T09:00:31.6472465Zの同一processで完走。最終統計とEndedを確認後、試験用muteを一回Undoし、clean titleを確認して通常終了した。source保存・OS設定変更なし。binary/source SHA-256は前後一致。raw manifest/log/sample/captureはignoredの`target/tmp/h1-current-30m*`にある。
+- 17:05の100回Seek測定とは別試験。今回の結果はこの基準機・codec・通常windowでの長時間/dropゲートを再確認したもので、他codec、実device復旧、物理入力、mixed-DPI、配布ゲートの代替ではない。
+
+測定対象のSHA-256:
+
+```text
+towavue.exe: 18F57AF2E2E7D1FCF34D64E70154080A79E661F4B02297AEE27491865F404247
+m3-4k60-30m.mp4: FEE0E738E7149225A7B4DEA02CDA75AAE6873288CBE5A1077B101829ADFD0C10
+```
+
 ### 現行releaseの性能再確認（2026-09-06 17:05 JST）
 
 4b7721bの通常releaseを再buildし、同じ基準機・960×576・1倍・アプリ内muteで測定した。preview/末尾Seek変更後の短時間確認であり、30分ゲートの再証明ではない。4b7721bと9fe13a5のCIは成功している。

@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 18:32 JST - pass current-release 30-minute playback revalidation
+
+- Trigger/intent: previous turns monitored the same trial after aa83efd (verified wait, not blocked). Revalidate long-duration playback after terminal decode and recent UI changes; aa83efd CI 34023357783 succeeds. No app code changes during measurement or this checkpoint.
+- Result: owned PID 46632, start UTC 2026-09-06T09:00:31.6472465Z, reaches Ended in the same trial. D3D11VA adapter 00000000:000146b5 reports 107771 hardware/presented frames, zero drops and CPU transfers, matching the complete source count. Drift p95/max 4.808/32.055ms passes the 30-minute gate; zero total drops also establishes the first-ten-minute drop gate. This measures app clocks, not physical output latency.
+- Conditions/evidence: code 51b43bf, default 960x576, 1x, one app mute edit, prehashed 1800.009063-second 4K H.264/AAC source, no concurrent heavy local work or restarts/seeks. Binary/source hashes match before/after; full hashes and limits recorded in DEVELOPMENT. Ignored target/tmp/h1-current-30m* preserves manifest/log/61 samples/captures. The 50 Playing samples after five minutes span private memory 221.86-235.78MiB (first 222.33, last 223.40); EOF sample 178.62MiB, later five-second CPU increment 0ms. Coarse samples do not measure GPU memory or all transient peaks.
+- Changes/cleanup: update DEVELOPMENT/ROADMAP and correct four stale KNOWN_GAPS statements against current trim grip, wheel-volume, bounded persistent preview-worker and thumbnail-cache code. Undo the single trial mute, verify clean title, close normally without Save; no source or OS settings changed.
+- Verification: format, Clippy and 229 workspace tests pass after playback; three preexisting live tests remain explicitly ignored (two default WASAPI endpoint checks and one Explorer-window check), not physical-device proof.
+- Status/next: h1_active. Commit/push this verified documentation checkpoint, then resume remaining everyday interaction/draft-fidelity audit. Physical input/DPI/device/distribution and unanswered L-default/packaging choices remain separate gaps; do not equate this baseline performance pass with launch completion.
+
 ## 2026-09-06 17:57 JST - revalidate native IME in the compact palette
 
 - Trigger/intent: previous turn pushed 51b43bf (progress); CI 34023059941 remains in progress, afe7469 CI succeeds. Recheck native composition after the palette layout change; no production defect found or code behavior changed.

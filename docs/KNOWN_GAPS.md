@@ -98,7 +98,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Rubber bandでtrack volume | 未実装 |
 | Range伸縮でrate編集 | 未実装 |
 | 上端dragでtimeline高さ変更 | H1で実装。既定96px・下限64px、上限はbarを除く残り高さの60%（小さいwindowは下限も縮小）。再生位置・編集は変えない |
-| Trim handleと編集mode | I/O端点検証、bracket・ミリ秒表示、範囲内live再生をH1で実装。drag handleは未実装 |
+| Trim handleと編集mode | I/O端点検証、bracket・ミリ秒表示、範囲内live再生と開始/終了gripのdragをH1で実装。releaseで一回だけ確定し、Escape・focus喪失・対象切替で取消。frame単位snapはない |
 
 ### 画像
 
@@ -127,7 +127,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | D3D11VA優先、software fallback | 実装済み。codec/GPU/driverごとの成功は実機依存 |
 | Audio master、seek、pause、EOF、late frame drop | 実装済み。基準fixtureで測定済み |
 | WASAPI Sharedとdefault endpoint復旧 | 実装済み。hardware/driverの広いmatrixは未検証 |
-| Wheel volume、hold中2倍速 | 未実装 |
+| Wheel volume、hold中2倍速 | 動画面と動画/音声statusのwheel音量はH1で実装。event時点のtargetで選別し、playlist scrollやmodal入力とは分離する。hold中2倍速は未実装 |
 | J/K/L、frame step | 未実装。`,` / `.`はframe stepではなくrate変更 |
 | Live playback volume/rate | H1で実装。編集値を再生・exportで共有し、rateは0.25～4倍のピッチ維持 |
 | Track selection、delete、cut、range playback | 単一trimのrange playbackのみH1で実装。track selection、delete、cutは未実装 |
@@ -158,8 +158,8 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - AppのUI testはH1でegui描画・pointer・palette focus・modalの回帰を追加した。確認画面は長文とwindow縮小/復元時の操作labelの非clip・Cancel/OK clickも検証する。実OSのIME・混在DPIやtab dragなどの操作matrix全体を自動testで保証してはいない。
 - 対応拡張子、file dialog filter、実decoder能力、export codec選択の関係を一つのcapability modelへ統一していない。拡張子を増やすだけでは対応完了にならない。
 - Loading、empty、error、unsupported capabilityのstate表現が各所のstatus textへ分散している。UX改善時には表示だけでなくstate transitionをcoreでtest可能にする余地がある。
-- filmstrip以外のpreview workerはtask単位にthreadを起動する単純構成で、優先度、同時数、cancel、重複排除を持たない。filmstripは可視集合の最新要求を単一workerで処理する。
-- hover thumbnailは同一media内で一つだけ取得し、失敗した区間は再openまで再試行しない。media load世代で旧結果を拒否する。
+- duration・waveform・hover thumbnailはH1で各種類1本の常設worker、実行中1件＋最新待機1件へ制限した。media切替/closeでは未開始要求を破棄し、owned child processも取り消す。種類間の優先度制御や進行中のnative I/Oの強制中断はない。filmstripは可視集合の最新要求を別の単一workerで処理する。
+- hover thumbnailは現在表示用のtextureを一つ保持し、20区間のcacheを利用する。失敗した区間は同じload中に再試行せず、media切替/再openで失敗記録を消す。media load世代で旧結果を拒否する。
 - 映像2秒・音声30秒のH.264/AACで判明した音声先行蓄積/黒画面は、独立input/demuxと、映像確認後に一度だけ音声を開始する構成へ変更した。同じfileの通常releaseで表示60・drop 0・CPU transfers 0、停止Seekと300msの制御開始遅延、hardware成立前のsoftware fallback/成立後のfaultを確認した。二系統読取の通常releaseによる30分4K60再試験も107,746枚表示・25枚drop・CPU transfers 0で完走し、drift p95 4.806ms・最大37.785msだった。先頭10分のdrop率は保守的上限でも0.069589%で基準内。ただし基準機とこのfixtureの測定であり、低速storageや全codecの保証ではない。
 - Exportは同じ保存先volumeの一時outputへ書き、成功後だけtargetを置換する。失敗・置換前cancelの既存target保護は回帰test済みだが、電源断時のdurabilityまでは保証していない。
 

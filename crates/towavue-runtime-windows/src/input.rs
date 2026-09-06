@@ -1,28 +1,46 @@
+use windows::Win32::Foundation::{LPARAM, POINT, WPARAM};
+use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::WindowsAndMessaging::{
-    MSG, SendMessageW, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
-    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_XBUTTONDOWN, WM_XBUTTONUP,
+    MSG, SendMessageW, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
+    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_XBUTTONDOWN, WM_XBUTTONUP,
 };
 use winit::event_loop::EventLoopBuilder;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
-/// Preserves queued button coordinates before winit emits its position-less MouseInput.
+/// Preserves queued button/wheel coordinates before winit emits position-less mouse events.
 pub fn configure_mouse_input<T>(builder: &mut EventLoopBuilder<T>) {
     builder.with_msg_hook(|message| {
         // SAFETY: winit invokes this hook on the event-loop thread with a live, aligned MSG
         // before dispatch. Copy it now; neither the pointer nor a reference escapes the callback.
         let message = unsafe { *message.cast::<MSG>() };
-        if !message.hwnd.0.is_null() && is_client_button(message.message) {
-            // SAFETY: this is the queued message's target and its scalar client coordinates.
-            // Synchronous dispatch stays on the owning UI thread; no borrowed data is sent.
-            // WM_MOUSEMOVE is not a button message, so this cannot recurse through the hook.
-            unsafe {
-                SendMessageW(
-                    message.hwnd,
-                    WM_MOUSEMOVE,
-                    Some(message.wParam),
-                    Some(message.lParam),
-                );
+        if message.hwnd.0.is_null() {
+            return false;
+        }
+        let (keys, coordinates) = if is_client_button(message.message) {
+            (message.wParam, message.lParam)
+        } else if matches!(message.message, WM_MOUSEWHEEL | WM_MOUSEHWHEEL) {
+            let mut point = POINT {
+                x: i32::from(message.lParam.0 as i16),
+                y: i32::from((message.lParam.0 >> 16) as i16),
+            };
+            // SAFETY: the queued message's target belongs to this event-loop thread. The API
+            // mutates only this stack point and retains no reference; a stale target may fail.
+            if !unsafe { ScreenToClient(message.hwnd, &mut point) }.as_bool() {
+                return false;
             }
+            let coordinates = u32::from(point.x as u16) | (u32::from(point.y as u16) << 16);
+            (
+                WPARAM(message.wParam.0 & 0xffff),
+                LPARAM(coordinates as isize),
+            )
+        } else {
+            return false;
+        };
+        // SAFETY: this is the queued message's target and its scalar client coordinates.
+        // Synchronous dispatch stays on the owning UI thread; no borrowed data is sent.
+        // WM_MOUSEMOVE is neither button nor wheel, so it cannot recurse through the hook.
+        unsafe {
+            SendMessageW(message.hwnd, WM_MOUSEMOVE, Some(keys), Some(coordinates));
         }
         false
     });
@@ -48,21 +66,23 @@ mod tests {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use std::time::{Duration, Instant};
     use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
     use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
-    use windows::Win32::UI::WindowsAndMessaging::{WM_MOUSEWHEEL, WM_NCLBUTTONDOWN, WM_PAINT};
+    use windows::Win32::UI::WindowsAndMessaging::{WM_NCLBUTTONDOWN, WM_PAINT};
     use winit::application::ApplicationHandler;
     use winit::dpi::PhysicalPosition;
-    use winit::event::{ElementState, MouseButton, StartCause, WindowEvent};
+    use winit::event::{ElementState, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
     use winit::window::{Window, WindowId};
 
     #[test]
-    fn queued_button_positions_reach_winit_before_each_button_without_cursor_motion() {
+    fn queued_mouse_positions_reach_winit_before_buttons_and_wheels_without_cursor_motion() {
         struct Trial {
             window: Option<Window>,
             deadline: Instant,
             position: Option<PhysicalPosition<f64>>,
             received: Vec<(MouseButton, ElementState, Option<PhysicalPosition<f64>>)>,
+            wheels: Vec<(MouseScrollDelta, Option<PhysicalPosition<f64>>)>,
         }
         impl ApplicationHandler for Trial {
             fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -70,6 +90,8 @@ mod tests {
                     .create_window(
                         Window::default_attributes()
                             .with_visible(false)
+                            .with_decorations(false)
+                            .with_position(PhysicalPosition::new(0, 0))
                             .with_inner_size(winit::dpi::PhysicalSize::new(500, 500)),
                     )
                     .expect("hidden mouse-input test window");
@@ -99,6 +121,31 @@ mod tests {
                         .expect("queue mouse input");
                     }
                 }
+                for (message, x, y, delta) in [
+                    (WM_MOUSEWHEEL, 300, 320, 120_i16),
+                    (
+                        windows::Win32::UI::WindowsAndMessaging::WM_MOUSEHWHEEL,
+                        -40,
+                        -50,
+                        -120_i16,
+                    ),
+                ] {
+                    let mut point = windows::Win32::Foundation::POINT { x, y };
+                    // SAFETY: the owned hidden window is live on this thread; point is writable
+                    // stack storage and the API retains no reference. No OS cursor is changed.
+                    assert!(unsafe { ClientToScreen(window_handle, &mut point) }.as_bool());
+                    let coordinates = u32::from(point.x as u16) | (u32::from(point.y as u16) << 16);
+                    // SAFETY: queue scalar screen coordinates to the retained test window only.
+                    unsafe {
+                        PostMessageW(
+                            Some(window_handle),
+                            message,
+                            WPARAM(usize::from(delta as u16) << 16),
+                            LPARAM(coordinates as isize),
+                        )
+                        .expect("queue wheel input");
+                    }
+                }
                 event_loop.set_control_flow(ControlFlow::WaitUntil(self.deadline));
             }
 
@@ -118,7 +165,10 @@ mod tests {
                     WindowEvent::CursorMoved { position, .. } => self.position = Some(position),
                     WindowEvent::MouseInput { button, state, .. } => {
                         self.received.push((button, state, self.position));
-                        if self.received.len() == 4 {
+                    }
+                    WindowEvent::MouseWheel { delta, .. } => {
+                        self.wheels.push((delta, self.position));
+                        if self.wheels.len() == 2 {
                             event_loop.exit();
                         }
                     }
@@ -135,6 +185,7 @@ mod tests {
             deadline: Instant::now() + Duration::from_secs(5),
             position: None,
             received: Vec::new(),
+            wheels: Vec::new(),
         };
         event_loop
             .run_app(&mut trial)
@@ -161,10 +212,17 @@ mod tests {
                 ),
             ]
         );
+        assert_eq!(
+            trial.wheels,
+            vec![
+                (MouseScrollDelta::LineDelta(0.0, 1.0), point(300.0, 320.0)),
+                (MouseScrollDelta::LineDelta(1.0, 0.0), point(-40.0, -50.0)),
+            ]
+        );
     }
 
     #[test]
-    fn only_client_button_messages_need_coordinate_synchronization() {
+    fn client_button_classification_excludes_wheels_and_nonclient_messages() {
         for message in [
             WM_LBUTTONDOWN,
             WM_LBUTTONUP,

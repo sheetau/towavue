@@ -6388,13 +6388,15 @@ mod tests {
                 .expect("dedicated volume label");
             assert!(label.left() >= 0.0 && label.right() <= width);
             for (pos, expected) in [(label.center(), true), (egui::pos2(100.0, 100.0), false)] {
-                frame(vec![egui::Event::PointerMoved(pos)]);
-                let actions = frame(vec![egui::Event::MouseWheel {
-                    unit: egui::MouseWheelUnit::Line,
-                    delta: egui::vec2(0.0, -1.0),
-                    phase: egui::TouchPhase::Move,
-                    modifiers: egui::Modifiers::NONE,
-                }])
+                let actions = frame(vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Line,
+                        delta: egui::vec2(0.0, -1.0),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ])
                 .1;
                 assert_eq!(
                     actions

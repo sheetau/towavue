@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 15:26 JST - synchronize queued wheel coordinates
+
+- Trigger/evidence: previous turn pushed 664d7ce (progress); its CI remains in progress. Baseline normal release PID 2764 confirms foreground, then immediate playlist-to-volume movement/wheel scrolls the old list instead of adjusting volume. Combined PointerMoved/MouseWheel app test passes, isolating the missing native coordinates.
+- Contract/change: extend the existing runtime winit hook to WM_MOUSEWHEEL/HWHEEL. Decode signed screen lParam coordinates, convert against the message's target HWND, synchronously send client WM_MOUSEMOVE with low-word key flags, then let the original wheel dispatch once. No GetCursorPos sampling, global hook, thread, core/app-native boundary or dependency changes; unsafe lifetime/thread contracts documented. Microsoft message-coordinate specification linked in architecture.
+- Verification: expanded hidden owned-window regression fails before fix: both wheels retain last button (-20,-30), not (300,320)/(-40,-50). Fixed vertical/horizontal and negative-coordinate cases pass with unchanged deltas/button sequence; real cursor is never moved by the test. App status test now batches movement and wheel in the same frame. Format, Clippy, 217 tests (app 108/core 35/runtime 70/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: fixed PID 596 immediate movement to volume changes 100% to 90%; immediate movement back to list scrolls without volume change; returning immediately to volume changes to 80%. Paused position remains 01/30. Undo both trial edits, close normally; baseline also closed normally. No source save/OS settings, ignored logs/captures only.
+- Status/next: h1_active. Audit multiple wheel targets batched within one UI frame. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 15:18 JST - add scoped wheel volume input
 
 - Trigger/evidence: previous turn pushed 881340b (progress); eeb8e0b CI succeeds. Draft requests wheel volume; baseline normal release PID 37152 stays at 100% after wheel over video.

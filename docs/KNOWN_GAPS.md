@@ -6,7 +6,7 @@
 
 ### 操作とpreviewの不一致
 
-- 動画面と動画/音声status barの音量表示にwheel音量を追加した。raw縦入力だけを使い、playlist/timelineのscroll・修飾key・drag・modal/menu/overlayとは分離する。通常windowの動画と音声で確認したが、pointerを移動した直後のwheelが音量へ届かない試行があり、同じwindowでhover確立後には成功した。この短い入力境界の原因は監査中。
+- 動画面と動画/音声status barの音量表示にwheel音量を追加した。raw縦入力だけを使い、playlist/timelineのscroll・修飾key・drag・modal/menu/overlayとは分離する。移動直後のwheelが古い位置へ届く問題は、固定winitがwheel座標を更新しないことを回帰で再現し、runtimeで各wheelのscreen座標を先行反映して修正した。通常windowの一覧→音量→一覧の即時移動も確認したが、物理device/DPIの全入力matrixではない。
 
 - Mキーの消音解除が必ず100%へ戻る問題を修正した。active tabの適用済み履歴から直前の非zero音量を復元し、未適用redoや別tabの値は使わない。音量をlive/export共通の編集として扱う設計は維持する。
 

@@ -244,3 +244,5 @@ Seek previewがhover位置ではなく左端に現れる問題を通常release�
 消音解除で50%から100%へ上がる問題を通常releaseで再現し、active tabの適用済み履歴から直前の非zero音量を復元するよう修正した。音声/動画・Undo/Redo・tab分離の回帰を含む215 tests、Clippy、両buildと通常windowの50%復帰が通過。a356646 CIは成功、eeb8e0b CIは進行中。次は残る再生操作と入力の不一致を監査する。H1と実機/配布gateは未完了。
 
 動画面と動画/音声status barの音量表示へwheel操作を追加し、raw入力だけを既存編集へ渡す。playlistのscrollとmodal/overlay等は分離した。217 tests、Clippy、両build、通常windowの動画90%・Undoと音声一覧/音量の使い分けを確認。pointer移動直後のwheel不達が一度あり、次はその入力境界を監査する。eeb8e0b CIは成功。H1と実機/配布gateは未完了。
+
+foreground確認後もwheelの古い座標参照を通常releaseで再現した。winitのposition-less wheelへ各Windows messageのsigned screen座標を先行反映し、縦/横・負座標・button列の回帰を更新した。217 tests、Clippy、両buildと通常windowの即時一覧↔音量移動が通過。次は同一frameに異なるtargetのwheelがまとめて届く場合を監査する。H1と実機/配布gateは未完了。

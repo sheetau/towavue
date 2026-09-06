@@ -298,6 +298,8 @@ RedrawRequestedはそのevent内で描画し、egui-winitのrepaint応答を次f
 
 動画面と動画/音声status barの独立したvolume表示では、修飾keyなしの縦wheelで音量を調整する。Line/Pageの1単位またはPointの50 logical pxで10 percentage pointsとし、同一frameのraw eventを合算して0～2倍の既存SetVolume編集へ一度だけ渡す。音声playlist・timeline・filmstrip・tab上のscrollは奪わない。focus喪失、button保持、modal/menu/palette/grid/filmstrip中は受け付けない。smooth scrollの余韻では編集しない。
 
+runtimeのwinit message hookはbuttonに加えWM_MOUSEWHEEL/WM_MOUSEHWHEELの座標も先行してCursorMovedへ渡す。[wheel lParamのsigned screen座標](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-mousewheel)を対象windowのclient座標へ変換し、wheel本体より前に同じUI thread上でWM_MOUSEMOVEを同期dispatchする。最新のOS cursor位置ではなく各queued messageの位置を使い、元のwheel delta・順序は変更しない。client buttonとwheel以外のmessageは補正しない。
+
 Toggle muteは現在volumeが非zeroなら0にし、0ならactive tabの適用済みedit historyを逆順に見て直前の非zero volumeへ戻す。見つからない場合だけ既定の1倍を使う。undoより先のredo履歴や別tabの値を参照せず、復元も通常のSetVolume編集としてundo/redo・live反映・exportへ接続する。
 
 動画・音声のvolumeはedit historyの現在値をlive playbackとexportで共有する。runtimeはWASAPIへ渡す直前のstereo f32 sampleへgainを適用し、decode済みqueueは元の値を保持する。変更時は5 msのrampで不連続を抑え、mute後は正確なzero sampleにする。master endpointや他applicationの音量は変更しない。初期gainはpipeline開始前に設定し、Seek・endpoint復旧・tab再open・undo/redoにも現在値を反映する。trimは別項のH1 live trim range契約に従う。

@@ -4,6 +4,13 @@
 
 ## 1. 最初に試す
 
+### Wheel直前のpointer移動（2026-09-06）
+
+- 旧通常release PID 2764でforegroundを確認し、paused音声の一覧から音量表示へ移動直後にwheelを送る。一覧だけがscrollし、volumeは100%のままになることを再現した。単なるforeground不成立ではない。
+- 固定winit 0.30.13のWM_MOUSEWHEEL/HWHEEL処理はlParam座標を使わない。既存のhidden owned-window testへ縦/横wheelを追加すると、両方が最後のbutton座標(-20,-30)を使い、期待した(300,320)/(-40,-50)にならず失敗した。runtime hookでsigned screen→client変換後のmoveを先行dispatchして通過する。
+- 修正版PID 596では同じ移動直後のwheelで100%→90%。音量表示から一覧へ即時移動したwheelは90%を保って一覧をscrollし、表示へ戻る即時wheelは80%へ変更する。停止位置は01/30のまま。2編集をUndoし、両windowとも通常終了した。source保存・OS設定変更なし。
+- appの240/480/960px回帰もPointerMovedとMouseWheelを同じframeへまとめて通過する。実機mixed-DPIや全deviceを証明する試験ではない。
+
 ### Wheel音量操作（2026-09-06）
 
 - 旧通常release PID 37152では動画面のwheel後も100%だった。修正版PID 7712では下1ノッチで90%となり、Undoで元へ戻る。音量表示をstatus barの再生controlsの隣へ分離した。

@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 15:55 JST - keep audio playlist wheel smoothing with its target
+
+- Trigger/evidence: previous turn pushed 8df753e (progress); CI 34016955447 succeeds. Baseline normal release PID 15444 changes volume to 70% then incorrectly scrolls the list when the pointer moves into it during the wheel tail.
+- Contract/change: filter playlist wheel by event-time position/layer and reuse a dedicated egui InputState for units, modifiers, touch phases and smoothing. Apply its delta to the existing ScrollArea, disabling only shared wheel input; preserve scrollbar/touch drag. Clear on load/reveal, modal/overlay, focus loss or button input. Fix persistent-state lookup to use the same IdSalt wrapper as ScrollArea. No runtime/core/dependency/unsafe changes; other ScrollAreas remain unchanged.
+- Verification: old playlist code fails the cross-target regression. Two new tests cover both movement directions, preserved smoothing distance at 30/120fps, Line/Point/Page, immediate touch movement, end outside, repeated passes and cancellation without a resumed tail. Existing current-row/manual-scroll tests pass with corrected ID. Format, Clippy, 220 tests (app 111/core 35/runtime 70/integrations 4), debug/release builds pass; three preexisting live tests explicitly ignored.
+- Native: fixed PID 40648 initial attempt leaves volume at 100%, excluded from success evidence. Reassert foreground on the same process and retry: volume 100 to 70% followed immediately by movement into the list preserves row 1. Reverse trial scrolls the list while volume stays 70%. Paused 01/30 remains; one Undo restores 100% and clean title. Both baseline/fixed windows close normally; no source save or OS settings, ignored logs/captures only. Native same-frame grouping is not claimed.
+- Status/next: h1_active. Continue auditing everyday playback interaction gaps beyond wheel targeting. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 15:36 JST - target wheel volume by event-time position
 
 - Trigger/evidence: previous turn pushed 4ff9e00 (progress); its CI and 664d7ce CI succeed. Exact draw_ui event sequence wheel-on-list then move-to-volume incorrectly emits a volume change because the old helper uses final hover for all events.

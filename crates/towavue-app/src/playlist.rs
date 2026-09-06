@@ -6,11 +6,13 @@ use towavue_core::{FolderSnapshot, MediaKind};
 #[derive(Default)]
 pub struct Playlist {
     focus: Option<(PathBuf, usize)>,
+    wheel: crate::wheel_input::Scroll,
 }
 
 impl Playlist {
     pub fn clear(&mut self) {
         self.focus = None;
+        self.wheel.clear();
     }
 
     pub fn show(
@@ -18,8 +20,10 @@ impl Playlist {
         ui: &mut egui::Ui,
         snapshot: Option<&FolderSnapshot>,
         current: Option<&Path>,
+        allow_wheel: bool,
     ) -> Option<PathBuf> {
         let mut chosen = None;
+        crate::wheel_input::begin_frame(ui.ctx());
         let items: Vec<_> = snapshot
             .into_iter()
             .flat_map(|snapshot| snapshot.items_of_kind(MediaKind::Audio))
@@ -37,16 +41,19 @@ impl Playlist {
                 .as_ref()
                 .map(|(path, index)| (path.as_path(), *index))
                 != focus;
+            let scroll_id = ui.make_persistent_id(egui::IdSalt::new("audio_playlist"));
             let mut scroll = egui::ScrollArea::vertical()
                 .id_salt("audio_playlist")
+                .scroll_source(egui::scroll_area::ScrollSource {
+                    mouse_wheel: false,
+                    ..Default::default()
+                })
                 .auto_shrink([false, false]);
             if changed {
+                self.wheel.clear();
                 if let Some((path, index)) = focus {
-                    let offset = egui::scroll_area::State::load(
-                        ui.ctx(),
-                        ui.make_persistent_id("audio_playlist"),
-                    )
-                    .map_or(0.0, |state| state.offset.y);
+                    let offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
+                        .map_or(0.0, |state| state.offset.y);
                     let top = index as f32 * 32.0;
                     let height = ui.available_height();
                     let offset = if top < offset {
@@ -60,6 +67,17 @@ impl Playlist {
                     self.focus = Some((path.to_path_buf(), index));
                 } else {
                     self.clear();
+                }
+            } else {
+                let delta = self.wheel.delta(
+                    ui,
+                    ui.available_rect_before_wrap().intersect(ui.clip_rect()),
+                    allow_wheel,
+                );
+                if delta.y != 0.0 {
+                    let offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
+                        .map_or(0.0, |state| state.offset.y);
+                    scroll = scroll.vertical_scroll_offset((offset - delta.y).max(0.0));
                 }
             }
             scroll.show_rows(ui, 32.0, items.len(), |ui, rows| {
@@ -132,7 +150,7 @@ mod tests {
                         events,
                         ..Default::default()
                     },
-                    |ui| chosen = playlist.show(ui, Some(&snapshot), Some(current)),
+                    |ui| chosen = playlist.show(ui, Some(&snapshot), Some(current), true),
                 );
                 (output, chosen)
             };
@@ -255,7 +273,7 @@ mod tests {
                         events,
                         ..Default::default()
                     },
-                    |ui| assert!(playlist.show(ui, snapshot, Some(current)).is_none()),
+                    |ui| assert!(playlist.show(ui, snapshot, Some(current), true).is_none()),
                 )
             };
         let visible = |output: &egui::FullOutput, name: &str| {
@@ -370,12 +388,98 @@ mod tests {
     }
 
     #[test]
+    fn playlist_scroll_stays_with_event_target_and_keeps_its_smoothing() {
+        let context = egui::Context::default();
+        let mut playlist = Playlist::default();
+        let snapshot = snapshot(100);
+        let mut time = 0.0;
+        let mut frame = |events| {
+            time += 1.0 / 60.0;
+            context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 300.0))),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_max_height(200.0);
+                    assert!(
+                        playlist
+                            .show(ui, Some(&snapshot), Some(&snapshot.items[0].path), true)
+                            .is_none()
+                    );
+                },
+            )
+        };
+        for _ in 0..4 {
+            frame(vec![]);
+        }
+        let baseline = texts(&frame(vec![]))[0].pos.y;
+        let offset = |output: &egui::FullOutput| {
+            let row = texts(output)
+                .into_iter()
+                .find(|text| text.pos.y >= 8.0 && text.pos.y < 180.0)
+                .expect("visible row");
+            let index: usize = row
+                .galley
+                .job
+                .text
+                .split('.')
+                .next()
+                .expect("row number")
+                .parse()
+                .expect("number");
+            (index - 1) as f32 * 32.0 + baseline - row.pos.y
+        };
+        let inside = egui::pos2(300.0, 80.0);
+        let outside = egui::pos2(300.0, 260.0);
+        let wheel = Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, -3.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![
+            Event::PointerMoved(outside),
+            wheel.clone(),
+            Event::PointerMoved(inside),
+        ]);
+        for _ in 0..60 {
+            frame(vec![]);
+        }
+        assert!(
+            offset(&frame(vec![])).abs() < 0.01,
+            "an outside wheel and its tail must never scroll the list"
+        );
+        frame(vec![
+            Event::PointerMoved(inside),
+            wheel,
+            Event::PointerMoved(outside),
+        ]);
+        let intermediate = offset(&frame(vec![]));
+        for _ in 0..60 {
+            frame(vec![]);
+        }
+        let final_offset = offset(&frame(vec![]));
+        assert!(
+            intermediate > 0.0 && intermediate < final_offset,
+            "retain smooth motion: intermediate {intermediate}, final {final_offset}"
+        );
+        let expected = context.options(|options| options.input_options.line_scroll_speed) * 3.0;
+        assert!(
+            (final_offset - expected).abs() < 0.01,
+            "the entire owned wheel distance stays with this list"
+        );
+    }
+
+    #[test]
     fn empty_playlist_has_no_rows_or_actions() {
         for snapshot in [None, Some(snapshot(0))] {
             let context = egui::Context::default();
             let mut playlist = Playlist::default();
             let output = context.run_ui(egui::RawInput::default(), |ui| {
-                assert!(playlist.show(ui, snapshot.as_ref(), None).is_none());
+                assert!(playlist.show(ui, snapshot.as_ref(), None, true).is_none());
             });
             assert!(texts(&output).is_empty());
         }

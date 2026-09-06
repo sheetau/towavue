@@ -2549,10 +2549,16 @@ where
     }
 
     fn draw_audio_playlist(&mut self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
-        if let Some(path) =
-            self.playlist
-                .show(ui, self.folder_snapshot.as_ref(), self.path.as_deref())
-        {
+        let allow_wheel = !self.modal_input_blocked()
+            && !self.palette_open
+            && !self.grid_open
+            && !self.filmstrip_open;
+        if let Some(path) = self.playlist.show(
+            ui,
+            self.folder_snapshot.as_ref(),
+            self.path.as_deref(),
+            allow_wheel,
+        ) {
             actions.push(UiAction::OpenMedia(path, false));
         }
     }

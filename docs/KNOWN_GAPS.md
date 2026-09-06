@@ -6,7 +6,7 @@
 
 ### 操作とpreviewの不一致
 
-- 同じframeで一覧と音量表示を跨いだwheelが、最後のhoverへまとめて音量変更される問題を修正した。各event時点の位置とlayerで選別し、動画面/statusの対象分だけを一回合算する。前frameの位置、離脱、複数layout passも回帰確認する。通常ScrollAreaのsmooth scroll配送は別経路のため、跨ぐ入力での一覧側の挙動は次の監査対象。
+- 同じframeで一覧と音量表示を跨いだwheelは、各event時点の位置とlayerで選別する。音声playlistのsmooth scrollも専用のegui入力状態へ分離し、音量操作の余韻が一覧へ入る問題を修正した。一覧からpointerが離れてもそのscrollは一覧だけに適用し、modal/focus喪失などでは失効する。30/120fpsの距離保持と通常windowの両方向移動を確認。他のScrollAreaを一括変更したものではなく、物理device/DPIの全入力matrixは未完了。
 
 - 動画面と動画/音声status barの音量表示にwheel音量を追加した。raw縦入力だけを使い、playlist/timelineのscroll・修飾key・drag・modal/menu/overlayとは分離する。移動直後のwheelが古い位置へ届く問題は、固定winitがwheel座標を更新しないことを回帰で再現し、runtimeで各wheelのscreen座標を先行反映して修正した。通常windowの一覧→音量→一覧の即時移動も確認したが、物理device/DPIの全入力matrixではない。
 

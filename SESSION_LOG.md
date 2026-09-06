@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 18:56 JST - cache bounded shared static-image decodes
+
+- Trigger/evidence: previous turn pushed 3fddd7a (progress), CI 34025557121 succeeds. Native PID 42724 takes 218.537-221.243ms to return to a 6000x6000 PNG on each of five round trips; component profiling isolates about 183-186ms of repeated decode and 33ms of UI color conversion.
+- Change: record the cache contract in ARCHITECTURE before implementation. Existing image worker keeps up to eight static decodes/256MiB in LRU order, validates size/mtime, and shares immutable DecodedImage through Arc with the app. Request budgets also apply to hits; skip animation/oversized/failing results. No prefetch, new worker, GPU cache, quality change, unsafe code or dependency change.
+- Verification: four focused loader tests cover shared identity, capacity/bytes/LRU, request budget, timestamp/size/missing-file invalidation, clearing/latest-generation behavior and release of ownership on close. Format, Clippy, 232 tests (app 118/core 35/runtime 75/integrations 4) and both builds pass; three existing live tests ignored, not hardware proof. Temporary component-profile example removed before final build.
+- Native: final release PID 41676 takes 48.423-49.819ms (median 49.705ms vs 220.651ms) for the same five returns. Measures title-ready, not physical presentation latency. Foreground-asserted cold/cached captures match across 248004 image pixels. PID 37064 shows a changed scratch file instead of stale cached pixels. Baseline capture without proven foreground is excluded from visual comparison; no app defect inferred from it.
+- Cleanup/limits: all three owned windows close normally with clean titles and no Save; only scratch fixture replaced for invalidation and restored afterward. Original media and OS settings unchanged. DEVELOPMENT records source/binary hashes, timings and memory limits; ignored target/tmp/h1-image-switch* holds helpers/captures/logs. Cache retention is not a process-wide memory limit.
+- Status/next: h1_active. Continue first-visit image latency/UI upload and rapid navigation evaluation; judge any prefetch or further cache from measurements. Remaining physical input/DPI/device/distribution and unanswered owner choices are separate launch gaps.
+
 ## 2026-09-06 18:45 JST - join reading pages and their hover previews
 
 - Trigger/evidence: previous turn pushed e0d1c0d (progress), CI 34024988422 succeeds. Draft-fidelity audit finds an eight-pixel reading seam in baseline release PID 20568; actual drawing with unequal image ratios also fails the centered-spread regression.

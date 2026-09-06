@@ -1,13 +1,78 @@
-use std::path::PathBuf;
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use std::time::SystemTime;
 
 use crate::image::{IMAGE_BYTE_LIMIT, decode_image_cancellable};
 use crate::{DecodedImage, ImageDecodeError};
 
 pub struct LoadedImages {
     pub generation: u64,
-    pub images: Vec<(PathBuf, Result<DecodedImage, ImageDecodeError>)>,
+    pub images: Vec<(PathBuf, Result<Arc<DecodedImage>, ImageDecodeError>)>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct ImageStamp {
+    bytes: u64,
+    modified: SystemTime,
+}
+
+impl ImageStamp {
+    fn read(path: &Path) -> Option<Self> {
+        let metadata = std::fs::metadata(path).ok()?;
+        Some(Self {
+            bytes: metadata.len(),
+            modified: metadata.modified().ok()?,
+        })
+    }
+}
+
+struct ImageCache {
+    entries: VecDeque<(PathBuf, ImageStamp, Arc<DecodedImage>)>,
+    byte_limit: usize,
+    bytes: usize,
+}
+
+impl ImageCache {
+    fn new(byte_limit: usize) -> Self {
+        Self {
+            entries: VecDeque::new(),
+            byte_limit,
+            bytes: 0,
+        }
+    }
+
+    fn take(
+        &mut self,
+        path: &Path,
+        stamp: Option<ImageStamp>,
+        remaining: usize,
+    ) -> Option<Result<Arc<DecodedImage>, ImageDecodeError>> {
+        let index = self.entries.iter().position(|entry| entry.0 == path)?;
+        let (_, cached_stamp, image) = self.entries.remove(index)?;
+        self.bytes -= image.retained_bytes();
+        (Some(cached_stamp) == stamp).then(|| {
+            if image.retained_bytes() <= remaining {
+                Ok(image)
+            } else {
+                Err(ImageDecodeError::TooLarge)
+            }
+        })
+    }
+
+    fn insert(&mut self, path: PathBuf, stamp: ImageStamp, image: Arc<DecodedImage>) {
+        let bytes = image.retained_bytes();
+        if image.is_animated() || bytes > self.byte_limit {
+            return;
+        }
+        while self.entries.len() >= 8 || self.bytes + bytes > self.byte_limit {
+            let (_, _, removed) = self.entries.pop_front().expect("cached image to evict");
+            self.bytes -= removed.retained_bytes();
+        }
+        self.bytes += bytes;
+        self.entries.push_back((path, stamp, image));
+    }
 }
 
 #[derive(Default)]
@@ -80,6 +145,7 @@ fn run_worker(
     ) -> Result<DecodedImage, ImageDecodeError>,
 ) {
     let (mutex, ready) = &*shared;
+    let mut cache = ImageCache::new(256 * 1024 * 1024);
     loop {
         let (generation, paths) = {
             let mut mailbox = ready
@@ -105,9 +171,18 @@ fn run_worker(
             if !is_current() {
                 break;
             }
-            let result = decode(&path, remaining, &is_current);
+            let stamp = ImageStamp::read(&path);
+            let result = cache
+                .take(&path, stamp, remaining)
+                .unwrap_or_else(|| decode(&path, remaining, &is_current).map(Arc::new));
             if let Ok(image) = &result {
                 remaining -= image.retained_bytes();
+                if is_current()
+                    && let Some(stamp) = stamp
+                    && ImageStamp::read(&path) == Some(stamp)
+                {
+                    cache.insert(path.clone(), stamp, Arc::clone(image));
+                }
             }
             images.push((path, result));
         }
@@ -135,6 +210,143 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    fn pixel(value: u8) -> Arc<DecodedImage> {
+        Arc::new(DecodedImage {
+            format: "PNG",
+            frames: vec![crate::DecodedImageFrame {
+                width: 1,
+                height: 1,
+                rgba: vec![value; 4],
+                delay: Duration::ZERO,
+            }],
+        })
+    }
+
+    #[test]
+    fn decoded_cache_bounds_shared_pixels_and_invalidates_file_stamps() {
+        let stamp = ImageStamp {
+            bytes: 1,
+            modified: SystemTime::UNIX_EPOCH,
+        };
+        let mut cache = ImageCache::new(8);
+        let first = pixel(1);
+        cache.insert("first".into(), stamp, Arc::clone(&first));
+        cache.insert("second".into(), stamp, pixel(2));
+        let hit = cache
+            .take(Path::new("first"), Some(stamp), 8)
+            .expect("cache hit")
+            .expect("within request budget");
+        assert!(Arc::ptr_eq(&hit, &first), "cache must not copy RGBA");
+        cache.insert("first".into(), stamp, hit);
+        cache.insert("third".into(), stamp, pixel(3));
+        assert!(cache.take(Path::new("second"), Some(stamp), 8).is_none());
+        assert_eq!(cache.bytes, 8);
+        assert!(
+            cache
+                .take(
+                    Path::new("first"),
+                    Some(ImageStamp {
+                        modified: stamp.modified + Duration::from_secs(1),
+                        ..stamp
+                    }),
+                    8
+                )
+                .is_none()
+        );
+        assert_eq!(cache.bytes, 4);
+        assert_eq!(
+            first.frames[0].rgba,
+            vec![1; 4],
+            "eviction must not invalidate the UI owner"
+        );
+        assert!(cache.take(Path::new("third"), None, 8).is_none());
+        assert_eq!(cache.bytes, 0);
+        let mut animated = (*pixel(9)).clone();
+        animated.frames.push(animated.frames[0].clone());
+        cache.insert("animation".into(), stamp, Arc::new(animated));
+        assert!(cache.entries.is_empty());
+        let mut too_large = (*pixel(9)).clone();
+        too_large.frames[0].rgba = vec![9; 12];
+        cache.insert("large".into(), stamp, Arc::new(too_large));
+        assert!(cache.entries.is_empty());
+        let mut cache = ImageCache::new(100);
+        for index in 0..9 {
+            cache.insert(index.to_string().into(), stamp, pixel(index));
+        }
+        assert_eq!(cache.entries.len(), 8);
+        assert_eq!(cache.bytes, 32);
+        assert!(cache.take(Path::new("0"), Some(stamp), 100).is_none());
+        assert!(matches!(
+            cache.take(Path::new("8"), Some(stamp), 3),
+            Some(Err(ImageDecodeError::TooLarge))
+        ));
+        assert_eq!(cache.bytes, 28);
+        let retained = cache.entries[0].2.clone();
+        assert_eq!(Arc::strong_count(&retained), 2);
+        drop(cache);
+        assert_eq!(Arc::strong_count(&retained), 1);
+    }
+
+    #[test]
+    fn worker_reuses_pixels_but_redecodes_changed_and_missing_files() {
+        let root = std::env::temp_dir().join(format!("towavue-image-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("cache fixture directory");
+        let path = root.join("image.png");
+        std::fs::write(&path, [1]).expect("initial fixture");
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let loader = ImageLoader {
+            shared: Arc::clone(&shared),
+        };
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (decoded_tx, decoded_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            run_worker(
+                shared,
+                || {
+                    ready_tx.send(()).expect("notify");
+                },
+                |path, _, _| {
+                    decoded_tx.send(()).expect("count decode");
+                    let bytes = std::fs::read(path).map_err(ImageDecodeError::Open)?;
+                    Ok((*pixel(bytes[0])).clone())
+                },
+            )
+        });
+        let load = || {
+            let generation = loader.request(vec![path.clone()]);
+            ready_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("image ready");
+            let completed = loader.take_completed().expect("completed");
+            assert_eq!(completed.generation, generation);
+            completed.images.into_iter().next().expect("image").1
+        };
+        let first = load().expect("first image");
+        decoded_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("first decode");
+        loader.request(Vec::new());
+        let second = load().expect("cached image");
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(decoded_rx.try_recv().is_err());
+        std::fs::write(&path, [2, 3]).expect("changed source size");
+        let changed = load().expect("changed image");
+        decoded_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("changed decode");
+        assert_eq!(changed.frames[0].rgba, vec![2; 4]);
+        assert!(!Arc::ptr_eq(&first, &changed));
+        std::fs::remove_file(&path).expect("remove owned source");
+        assert!(matches!(load(), Err(ImageDecodeError::Open(_))));
+        decoded_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("missing decode");
+        drop(loader);
+        worker.join().expect("cache worker exits");
+        assert_eq!(Arc::strong_count(&changed), 1);
+        std::fs::remove_dir(root).expect("remove empty owned directory");
+    }
 
     #[test]
     fn pages_share_a_budget_and_clearing_a_request_discards_queued_results() {

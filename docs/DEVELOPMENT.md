@@ -4,6 +4,29 @@
 
 ## 1. 最初に試す
 
+### 静止画の再訪decode cache（2026-09-06 18:56 JST）
+
+基準機・通常release・960×576で、6000×6000 PNG（RGBA 144,000,000 bytes）と600×800 PNGを5往復した。同一素材・同じkeydown/upを対象HWNDへ一回ずつ送り、次のfile名とPaused titleを2ms間隔で確認してから300ms空ける。これは画像decode/画面用変換の完了通知までの比較で、Present・DWM/physical displayまでの入力遅延ではない。
+
+| 大画像へ戻る5回 | 最小 | 中央値 | 最大 |
+| --- | ---: | ---: | ---: |
+| 3fddd7a、PID 42724 | 218.537ms | 220.651ms | 221.243ms |
+| 最終cache実装、PID 41676 | 48.423ms | 49.705ms | 49.819ms |
+
+- 一時的なcomponent計測では大PNGのdecodeが182.907～186.436ms、egui向け画素変換が32.542～35.758ms（各5回）。component計測用exampleは削除し、通常buildで最終測定した。初回decodeやGPU uploadの高速化を証明したものではない。
+- 同じimage workerに8件・256 MiBの静止画cacheを置き、Arcでowned RGBAをappと共有する。file size/更新時刻をdecode前後で確認し、変更/取得失敗で旧entryを捨てる。animation・大容量・失敗はcacheしない。cache hitも要求全体の512 MiB判定を通し、古い要求の破棄とwindow/GPUを持たないworker寿命を維持する。
+- native PID 37064の試用では、cache済みの所有fixtureだけを赤600×800から青320×240へ差し替えて移動し、新画像を表示した。元fixtureは変更しない。最終PID 41676の初回/cached表示は、foregroundをassertして取得した498×498＝248,004 pixelsが一致した。旧baseline captureはforeground不成立で別windowが写っており、表示比較の証拠から除外した。
+- 最終runの大画像title完了時private memoryは694.02～791.10MiB。allocator・UI texture等を含む粗い瞬間値であり、256 MiBはcache自身のRGBA上限に限る。初回cold-storage、他codec、大量画像・長期連続利用は別途評価する。
+- 全3試用windowはclean titleで通常終了し、SaveやOS設定変更はない。scratchの小画像は測定元の赤PNGへ戻した。helper/log/captureはignoredの`target/tmp/h1-image-switch*`。232 tests・format・Clippy・debug/release buildが通過し、3件の既存live testはignoreのまま。
+
+最終測定SHA-256:
+
+```text
+towavue.exe: 8B3272860DE3CA01D5C579F386291A43880490F7453F2D00C67BD9CACB1CA88A
+01-large.png: 7456E01DB2237E3D4F120F9EE9A9B50DCC0019CB87AA31C37C1636FAD6538243
+02-small.png: 5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C
+```
+
 ### Reading modeの見開き連結（2026-09-06 18:45 JST）
 
 - 基準機・960×576の通常releaseで、同じ320×240の赤/緑PNGを開きBを押した。旧PID 20568では中央8pxの隙間と外周の固定余白があり、縦横比が異なる画像の実描画testでは全体の中心もずれた。

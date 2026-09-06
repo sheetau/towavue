@@ -219,7 +219,7 @@ struct ActiveExport {
 }
 
 struct ImagePresentation {
-    decoded: DecodedImage,
+    decoded: Arc<DecodedImage>,
     texture: TextureHandle,
     frame_index: usize,
     next_frame_at: Option<Instant>,
@@ -229,7 +229,7 @@ impl ImagePresentation {
     fn from_decoded(
         context: &egui::Context,
         path: &Path,
-        decoded: DecodedImage,
+        decoded: Arc<DecodedImage>,
     ) -> Result<Self, String> {
         let first = decoded
             .frames
@@ -6001,7 +6001,8 @@ mod tests {
                         rgba: vec![255; 400 * 200 * 4],
                         delay: Duration::ZERO,
                     }],
-                },
+                }
+                .into(),
             )
             .expect("image texture"),
         );
@@ -6246,7 +6247,8 @@ mod tests {
                         rgba: vec![255; 60],
                         delay: Duration::ZERO,
                     }],
-                },
+                }
+                .into(),
             )
             .expect("image texture"),
         );
@@ -8392,14 +8394,17 @@ mod tests {
                 },
             ],
         };
-        let mut image =
-            ImagePresentation::from_decoded(&context, Path::new("image.gif"), decoded.clone())
-                .expect("image");
+        let mut image = ImagePresentation::from_decoded(
+            &context,
+            Path::new("image.gif"),
+            decoded.clone().into(),
+        )
+        .expect("image");
         image.frame_index = 1;
         let deadline = image.next_frame_at;
         let image_id = image.texture.id();
         app.image = Some(image);
-        let page = ImagePresentation::from_decoded(&context, Path::new("page.gif"), decoded)
+        let page = ImagePresentation::from_decoded(&context, Path::new("page.gif"), decoded.into())
             .expect("page");
         let page_id = page.texture.id();
         app.reading_pages = vec![Err("unreadable page".into()), Ok(page)];
@@ -8580,12 +8585,17 @@ mod tests {
             }],
         };
         assert!(
-            ImagePresentation::from_decoded(&context, Path::new("wide.png"), decoded.clone())
-                .is_err()
+            ImagePresentation::from_decoded(
+                &context,
+                Path::new("wide.png"),
+                decoded.clone().into()
+            )
+            .is_err()
         );
         context.input_mut(|input| input.max_texture_side = 8192);
-        let image = ImagePresentation::from_decoded(&context, Path::new("wide.png"), decoded)
-            .expect("device supports 4096px image");
+        let image =
+            ImagePresentation::from_decoded(&context, Path::new("wide.png"), decoded.into())
+                .expect("device supports 4096px image");
         assert_eq!(image.dimensions(), (4096, 1));
     }
 
@@ -8627,7 +8637,8 @@ mod tests {
                         rgba: vec![255; (width * height * 4) as usize],
                         delay: Duration::ZERO,
                     }],
-                },
+                }
+                .into(),
             )
             .expect("page")
         };

@@ -276,3 +276,5 @@ compact paletteのnative日本語IMEを通常releaseで再確認した。通常�
 51b43bf通常releaseの30分4K H.264/AAC再試験は、同一processでEOFへ到達し、107,771表示・drop 0・CPU transfer 0、drift p95 4.808ms・最大32.055msだった。全区間drop 0のため先頭10分のdrop基準も満たす。5分以降のprivate memoryは粗いsampleで221.86～235.78MiB、EOF後は178.62MiB。条件・hash・限界をDEVELOPMENTへ記録し、KNOWN_GAPSのtrim grip・wheel volume・preview worker/cacheの古い記述も現行実装へ合わせた。実装変更なし。物理入力/DPI/device・配布を含むH1全体は継続中。
 
 reading modeの固定8pxの隙間と等分枠による中心ずれを確認し、横は高さ・縦は幅を揃えた連結画像全体の中央fitへ変更した。seek hoverも同じ配置を使い、画像previewだけをpaddingなしcacheへ更新。異なる比率・縦横・反転・失敗page・cache移行を含む230 tests、Clippy、両buildと通常windowの見開き/hover/filmstripが通過。ページ送り・編集や動画decodeは変更しない。e0d1c0d CIも成功。残る日常操作・実環境/配布gateを含むH1は継続中。
+
+6000×6000 PNGへ戻るたび約185msの再decodeを確認し、既存worker内に静止画8件・256 MiBのLRU cacheを追加した。RGBAをArc共有し、file size/更新時刻の失効、cache hitの要求予算、animation/大容量の除外を検証。通常windowの5往復でtitle完了までの中央値は220.651→49.705ms、初回/cached表示の248,004 pixelsは一致し、所有fixture差替えも新画像を表示した。232 tests、Clippy、両buildと3fddd7a CIが通過。初回decode・GPU upload・先読み・実環境/配布を含むH1全体は継続中。

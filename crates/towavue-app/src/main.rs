@@ -4249,11 +4249,19 @@ where
         let Some(stroke) = self.key_stroke(event) else {
             return;
         };
+        self.process_shortcut(stroke);
+    }
+
+    fn process_shortcut(&mut self, stroke: KeyStroke) {
         self.entered_shortcut.push(stroke.clone());
-        match self
-            .shortcuts
-            .resolve(&self.entered_shortcut, self.command_context())
-        {
+        let context = self.command_context();
+        let mut matched = self.shortcuts.resolve(&self.entered_shortcut, context);
+        if matched == ShortcutMatch::None {
+            self.cancel_shortcut_prefix();
+            self.entered_shortcut.push(stroke);
+            matched = self.shortcuts.resolve(&self.entered_shortcut, context);
+        }
+        match matched {
             ShortcutMatch::Command(command) => {
                 self.dispatch(command);
             }
@@ -4268,17 +4276,7 @@ where
                 ));
                 self.prefix_started = self.status_message.as_ref().map(|(_, shown)| *shown);
             }
-            ShortcutMatch::None => {
-                self.entered_shortcut.clear();
-                self.entered_shortcut.push(stroke);
-                let retry = self
-                    .shortcuts
-                    .resolve(&self.entered_shortcut, self.command_context());
-                self.cancel_shortcut_prefix();
-                if let ShortcutMatch::Command(command) = retry {
-                    self.dispatch(command);
-                }
-            }
+            ShortcutMatch::None => self.cancel_shortcut_prefix(),
         }
     }
 
@@ -7382,6 +7380,69 @@ mod tests {
             "Tab".parse().expect("explicit bare Tab"),
         );
         assert!(app.owns_tab_key(&stroke("Tab")));
+    }
+
+    #[test]
+    fn shortcut_prefix_restart_keeps_the_new_prefix_and_dispatches_once() {
+        let Some(_root) = isolated_test_root(
+            "tests::shortcut_prefix_restart_keeps_the_new_prefix_and_dispatches_once",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        app.media_kind = Some(MediaKind::Video);
+        app.shortcuts = ShortcutBindings::default();
+        for (command, sequence) in [
+            (CommandId::ToggleGridMenu, "Ctrl+J Ctrl+P"),
+            (CommandId::ToggleCommandPalette, "Ctrl+K Ctrl+S"),
+            (CommandId::ToggleTimeline, "T"),
+        ] {
+            app.shortcuts
+                .set(command, sequence.parse().expect("test binding"));
+        }
+        let stroke = |key: &str| key.parse::<KeyStroke>().expect("test stroke");
+        for first in ["Ctrl+K", "Ctrl+J"] {
+            app.grid_open = false;
+            app.process_shortcut(stroke(first));
+            let old_started = Instant::now() - PREFIX_TIMEOUT / 2;
+            app.prefix_started = Some(old_started);
+            app.status_message.as_mut().expect("prefix notice").1 = old_started;
+            app.process_shortcut(stroke("Ctrl+J"));
+            assert_eq!(app.entered_shortcut, [stroke("Ctrl+J")]);
+            assert!(app.prefix_started.expect("new prefix deadline") > old_started);
+            let (notice, shown) = app.status_message.as_ref().expect("new prefix notice");
+            assert_eq!(notice, "Ctrl+J …");
+            assert_eq!(Some(*shown), app.prefix_started);
+            app.process_shortcut(stroke("Ctrl+P"));
+            assert!(app.grid_open);
+            assert!(app.entered_shortcut.is_empty());
+            assert!(app.prefix_started.is_none());
+            assert!(app.status_message.is_none());
+            app.process_shortcut(stroke("Ctrl+P"));
+            assert!(app.grid_open, "the suffix alone must not toggle again");
+        }
+        app.process_shortcut(stroke("Ctrl+J"));
+        app.process_shortcut(stroke("T"));
+        assert!(app.timeline_open, "single-key fallback remains available");
+        assert!(app.entered_shortcut.is_empty());
+        assert!(app.prefix_started.is_none());
+        app.process_shortcut(stroke("Ctrl+J"));
+        app.set_status("A later diagnostic".into());
+        app.process_shortcut(stroke("Ctrl+X"));
+        assert!(app.entered_shortcut.is_empty());
+        assert!(app.prefix_started.is_none());
+        assert_eq!(
+            app.status_message.as_ref().map(|(text, _)| text.as_str()),
+            Some("A later diagnostic")
+        );
+        app.process_shortcut(stroke("Ctrl+K"));
+        app.process_shortcut(stroke("Ctrl+S"));
+        assert!(
+            app.palette_open,
+            "an uninterrupted sequence still dispatches"
+        );
+        assert!(app.entered_shortcut.is_empty());
+        assert!(app.prefix_started.is_none());
     }
 
     #[test]

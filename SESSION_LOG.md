@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 17:34 JST - restart shortcut prefixes after mismatched input
+
+- Trigger/evidence: previous turn pushed 81cfdc9 (progress); CI 34022039915 remains in progress. With isolated toggle_pause = Ctrl+J Ctrl+P, baseline release PID 8816 stays Playing after Ctrl+K/Ctrl+J/Ctrl+P and Ctrl+J/Ctrl+J/Ctrl+P; an uninterrupted pair pauses correctly.
+- Change: reuse one command/prefix result handler after retrying the last stroke alone. Cancel the old prefix first, then retain a new prefix with its own notice/deadline instead of dropping it. Single-command fallback, unbound cancellation, dispatch and input guards remain intact. App-only; no default/config/runtime/core/dependency/unsafe changes.
+- Verification: new regression fails on an empty prefix buffer, then covers different/same-prefix restart, fresh deadline/notice ownership, exactly one command, suffix-only refusal, single-key fallback, unrelated diagnostic retention and uninterrupted sequences. Existing cancellation regression passes. Format, Clippy, 227 tests (app 115/core 35/runtime 73/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored, not hardware proof.
+- Native/cleanup: fixed PID 39660 performs the same two restart sequences and uninterrupted pair, producing Paused/Playing/Paused. Escape, an unbound Ctrl+X and a timeout prevent a suffix from acting. Both owned windows close normally; no source save, user configuration or OS setting changes. Isolated configuration/captures/logs remain ignored under target/tmp/h1-prefix-restart*.
+- Status/next: h1_active. Continue keyboard-only media/input interruption scenarios and draft UX audit. L-default and packaging choices remain unanswered; no implicit changes/publication. Long-duration, physical input/DPI/device and distribution gates remain incomplete.
+
 ## 2026-09-06 17:29 JST - restore configured Tab shortcuts before UI consumption
 
 - Trigger/evidence: previous turn pushed de31aaa (progress); CI 34021554208 succeeds. Baseline release PID 45892 opens two images but Ctrl+Tab leaves the second active. Pinned egui-winit consumes every Tab, including modified chords, before normal app dispatch; filmstrip also intercepts modified Tab as item navigation.

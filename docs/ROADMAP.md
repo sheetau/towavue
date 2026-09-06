@@ -264,3 +264,5 @@ foreground確認後もwheelの古い座標参照を通常releaseで再現した�
 status barの4つの操作buttonでshortcut案内がSpace/T/B/F11へ固定されていた問題を修正した。現在の単一key・prefix・未割当とclick動作を実描画で確認する回帰を含む225 tests、Clippy、両buildが通過。独立設定の通常windowでもKによる停止とK/Ctrl+Tの案内を確認した。既定bindingは変更せず、草案の動画L=Seekと既存回転の競合はownerへ確認中。812fb23 CIは成功。H1と実環境/配布gateは未完了。
 
 通常windowでCtrl+Tabがtabを切り替えない問題を再現し、eguiへ渡す前に現在のTab binding/prefixを共有shortcut処理へ接続した。filmstripは修飾なしのTab/Shift+Tabだけを項目移動に使う。226 tests、Clippy、両buildに加え、3 tabの前後移動、filmstrip内の使い分け、独立設定のprefix、button focus中の切替、menu/paletteの入力保持を通常windowで確認した。de31aaa CIは成功。H1と実環境/配布gateは未完了。
+
+prefixの途中で別のprefix・同じprefixへ打ち直すと新しい入力まで捨てる問題を通常windowで再現した。最後のkeyからの再判定を単一commandだけでなくprefixへも適用し、案内と期限を更新する。227 tests、Clippy、両buildが通過。独立設定の通常音声windowで打ち直し後のpause/resume、Escape・未割当・期限切れでの不実行を確認した。H1と実環境/配布gateは未完了。

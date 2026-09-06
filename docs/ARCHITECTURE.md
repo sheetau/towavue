@@ -266,6 +266,8 @@ paletteは検索入力を保ち、上下keyで有効な候補を巡回し、Ente
 
 shortcut prefixは一続きのkey入力だけに有効とし、1秒の期限切れ、Escape、focus喪失、mouse press、別command、file drop・離脱確認で解除する。Escapeはprefix取消をoverlay/fullscreen解除より先に扱う。prefix開始時刻と案内の時刻を共有して通知の所有を識別し、取消ではその案内だけを消して再描画する。後から出た別通知を消さず、正常な複数key shortcutは従来どおり一回dispatchする。
 
+入力列が一致しなくなった場合は旧prefixを解除し、最後のkeyを単独で再判定する。新しいprefixならそのkeyから続き待ちと案内・1秒の期限を開始し直す。同じprefixの押し直しも同様とする。単一commandの再判定は維持し、未割当なら待ちを残さない。
+
 shortcut設定の生成と読込は往復可能にする。`+` keyはmodifier区切りと曖昧にならない`Plus`として保存し、旧版が出力した`+`・`Ctrl++`等も同じkeyとして受け付ける。既存の利用者設定を移行のために上書きしない。
 
 status barの再生・waveform timeline・reading mode・fullscreen解除buttonは、tooltipとaccessibility labelのshortcutを現在のbindingsから取得する。prefixは全sequenceを表示し、未割当なら操作名だけにする。既定bindingとclick dispatchは変更しない。

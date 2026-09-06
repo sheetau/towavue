@@ -274,3 +274,5 @@ prefixの途中で別のprefix・同じprefixへ打ち直すと新しい入力�
 compact paletteのnative日本語IMEを通常releaseで再確認した。通常幅/480px幅の候補位置、候補上下移動、日本語確定、Escapeの二段階取消、F10でLatin化後の確定Enterとcommand実行Enterの分離、別の所有windowからのfocus復帰が通過した。229 testsと必須checkも再通過。新しい実装不具合は見つからず、条件と観測上の除外をDEVELOPMENTへ記録。afe7469 CIは成功。物理keyboard・別IME・mixed-DPIを含むH1全体は未完了。
 
 51b43bf通常releaseの30分4K H.264/AAC再試験は、同一processでEOFへ到達し、107,771表示・drop 0・CPU transfer 0、drift p95 4.808ms・最大32.055msだった。全区間drop 0のため先頭10分のdrop基準も満たす。5分以降のprivate memoryは粗いsampleで221.86～235.78MiB、EOF後は178.62MiB。条件・hash・限界をDEVELOPMENTへ記録し、KNOWN_GAPSのtrim grip・wheel volume・preview worker/cacheの古い記述も現行実装へ合わせた。実装変更なし。物理入力/DPI/device・配布を含むH1全体は継続中。
+
+reading modeの固定8pxの隙間と等分枠による中心ずれを確認し、横は高さ・縦は幅を揃えた連結画像全体の中央fitへ変更した。seek hoverも同じ配置を使い、画像previewだけをpaddingなしcacheへ更新。異なる比率・縦横・反転・失敗page・cache移行を含む230 tests、Clippy、両buildと通常windowの見開き/hover/filmstripが通過。ページ送り・編集や動画decodeは変更しない。e0d1c0d CIも成功。残る日常操作・実環境/配布gateを含むH1は継続中。

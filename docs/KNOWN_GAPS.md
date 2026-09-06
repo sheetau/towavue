@@ -116,7 +116,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Resize/resampleとinterpolation選択 | 未実装 |
 | Fullscreen | H1で画像/readingの全領域表示、Escape復帰と最大化状態の保持を実装。複数DPI/monitor matrixは未検証 |
 | 左右矢印、Home/End、Page、Backspace、A/D、数指定jump | H1で画像の左右矢印とHome/Endを共有commandへ追加。Shell snapshotの画像順で前後/端点へ移動し、reading mode・dirty guard・custom bindingに対応。現在の端点では再loadせず、paletteの文字編集を優先。動画/音声のSeekとCtrl+左右は維持。Page、Backspace、A/D、数指定jumpは未実装 |
-| Reading mode 2～10枚、縦横、反転 | 基本実装済み |
+| Reading mode 2～10枚、縦横、反転 | 横は高さ・縦は幅を揃えた隙間なしの連結表示と全体の中央fitを実装。seek hoverにも同じ配置を使い、画像previewのpaddingを除去。ページ送りは一枚ずつで、見開き単位の移動は未実装 |
 | Reading表示数のbutton drag、offset調整、設定保持 | 未実装 |
 | Marker、text、色調補正 | 草案でも後回しまたは対象外。現在も未実装 |
 

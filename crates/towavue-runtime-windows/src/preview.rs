@@ -114,12 +114,21 @@ impl PreviewCache {
         let image = if kind == MediaKind::Audio {
             self.waveform(source, 240, 160)?
         } else {
-            let key = cache_key(source, "filmstrip-v3")?;
+            let (version, filter) = if kind == MediaKind::Image {
+                (
+                    "filmstrip-image-v4",
+                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
+                )
+            } else {
+                (
+                    "filmstrip-v3",
+                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2",
+                )
+            };
+            let key = cache_key(source, version)?;
             self.load_or_generate(key, || {
                 let position = duration.unwrap_or_default().mul_f64(0.1);
-                frame_preview(source, position,
-                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2",
-                    self.cancellation.as_ref())
+                frame_preview(source, position, filter, self.cancellation.as_ref())
             })?
         };
         Ok(MediaPreview { image, duration })
@@ -835,23 +844,45 @@ mod tests {
 
         assert_eq!(generated, cached);
         assert_eq!((generated.width, generated.height), (16, 8));
+        cache
+            .load_or_generate(cache_key(&source, "filmstrip-v3").expect("old key"), || {
+                frame_preview(&source, Duration::ZERO,
+                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2", None)
+            })
+            .expect("seed legacy padded cache");
         let card = cache
             .filmstrip(&source, MediaKind::Image)
             .expect("landscape card");
-        assert_eq!((card.image.width, card.image.height), (240, 160));
+        assert_eq!((card.image.width, card.image.height), (240, 120));
         assert!(card.duration.is_none());
+        assert_eq!(
+            card.image,
+            cache
+                .filmstrip(&source, MediaKind::Image)
+                .expect("cached card")
+                .image
+        );
+        assert!(
+            card.image
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| pixel[0] > 10 && pixel[3] == 255),
+            "image card must not contain black padding"
+        );
         RgbImage::from_pixel(16, 1024, Rgb([200, 30, 10]))
             .save_with_format(&source, ImageFormat::Png)
             .expect("replace with portrait");
         let portrait = cache
             .filmstrip(&source, MediaKind::Image)
             .expect("portrait card");
-        assert_eq!((portrait.image.width, portrait.image.height), (240, 160));
+        assert_eq!((portrait.image.width, portrait.image.height), (3, 160));
         assert_ne!(
             card.image, portrait.image,
             "changed metadata invalidates disk preview"
         );
-        assert_eq!(&portrait.image.rgba[..4], &[0, 0, 0, 255]);
+        assert_eq!(&portrait.image.rgba[..4], &[200, 30, 10, 255]);
         fs::remove_dir_all(root).expect("remove preview fixture");
     }
 

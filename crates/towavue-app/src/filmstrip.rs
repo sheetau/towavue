@@ -81,15 +81,20 @@ impl Filmstrip {
             let height =
                 (response.rect.top() - response.ctx.viewport_rect().top() - 40.0).clamp(1.0, 108.0);
             let (rect, _) = ui.allocate_exact_size(egui::vec2(160.0, height), egui::Sense::hover());
-            for (index, path) in paths.iter().enumerate() {
-                let cell = crate::reading_page_rect(rect, paths.len(), index, axis, 2.0);
+            let sizes: Vec<_> = paths
+                .iter()
+                .map(|path| match self.previews.get(path) {
+                    Some(Ok((texture, _))) => texture.size_vec2(),
+                    _ => Vec2::splat(1.0),
+                })
+                .collect();
+            let cells = crate::reading_page_rects(rect, &sizes, axis, false);
+            for (path, cell) in paths.iter().zip(cells) {
                 match self.previews.get(path) {
                     Some(Ok((texture, _))) => {
-                        let scale = (cell.width() / texture.size_vec2().x)
-                            .min(cell.height() / texture.size_vec2().y);
                         ui.painter().image(
                             texture.id(),
-                            Rect::from_center_size(cell.center(), texture.size_vec2() * scale),
+                            cell,
                             Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                             Color32::WHITE,
                         );
@@ -183,9 +188,14 @@ impl Filmstrip {
                         ui.painter().rect_filled(rect, 0.0, Color32::from_gray(28));
                         match self.previews.get(&item.path) {
                             Some(Ok((texture, duration))) => {
+                                let scale = (rect.width() / texture.size_vec2().x)
+                                    .min(rect.height() / texture.size_vec2().y);
                                 ui.painter().image(
                                     texture.id(),
-                                    rect,
+                                    Rect::from_center_size(
+                                        rect.center(),
+                                        texture.size_vec2() * scale,
+                                    ),
                                     Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                                     Color32::WHITE,
                                 );
@@ -290,13 +300,14 @@ mod tests {
         context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
         let first = root.join("first.png");
         let second = root.join("second.png");
-        let textures = [Color32::RED, Color32::BLUE].map(|color| {
-            context.load_texture(
-                format!("{color:?}"),
-                egui::ColorImage::filled([240, 160], color),
-                Default::default(),
-            )
-        });
+        let textures =
+            [(Color32::RED, [80, 160]), (Color32::BLUE, [240, 120])].map(|(color, size)| {
+                context.load_texture(
+                    format!("{color:?}"),
+                    egui::ColorImage::filled(size, color),
+                    Default::default(),
+                )
+            });
         for (path, texture) in [(&first, &textures[0]), (&second, &textures[1])] {
             strip
                 .previews
@@ -347,7 +358,18 @@ mod tests {
                         })
                         .expect("page preview")
                 });
-                assert!(!bounds[0].intersects(bounds[1]));
+                let [first, second] = if reversed {
+                    [bounds[1], bounds[0]]
+                } else {
+                    bounds
+                };
+                let seam = match axis {
+                    ReadingAxis::Horizontal => first.right() - second.left(),
+                    ReadingAxis::Vertical => first.bottom() - second.top(),
+                };
+                assert!(seam.abs() < 0.001, "preview pages must touch");
+                assert!((bounds[0].aspect_ratio() - 0.5).abs() < 0.001);
+                assert!((bounds[1].aspect_ratio() - 2.0).abs() < 0.001);
                 assert!(bounds.iter().all(|rect| rect.bottom() < track.top()
                     && rect.width() <= 160.0
                     && rect.height() <= 108.0));
@@ -361,6 +383,46 @@ mod tests {
                 assert_eq!(
                     strip.generation, generation,
                     "unchanged hover must not request again"
+                );
+            }
+        }
+        let snapshot = FolderSnapshot {
+            folder_identity: ShellIdentity::new(Vec::new()),
+            folder_path: root.clone(),
+            items: [first.clone(), second.clone()]
+                .into_iter()
+                .map(|path| FolderMediaItem {
+                    identity: ShellIdentity::new(Vec::new()),
+                    path,
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: Vec::new(),
+            source: FolderSnapshotSource::NaturalNameFallback,
+            generation: 1,
+            captured_at: SystemTime::now(),
+        };
+        for pass in 0..3 {
+            let output = context.run_ui(Default::default(), |_| {
+                strip.show(&context, Some(&snapshot), Some(&first), &mut Vec::new());
+            });
+            if pass < 2 {
+                continue;
+            }
+            for (texture, ratio) in [(&textures[0], 0.5), (&textures[1], 2.0)] {
+                let rect = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => {
+                            Some(mesh.calc_bounds())
+                        }
+                        _ => None,
+                    })
+                    .expect("filmstrip card");
+                assert!(
+                    (rect.aspect_ratio() - ratio).abs() < 0.001,
+                    "unpadded card must not stretch"
                 );
             }
         }

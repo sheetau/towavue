@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 18:45 JST - join reading pages and their hover previews
+
+- Trigger/evidence: previous turn pushed e0d1c0d (progress), CI 34024988422 succeeds. Draft-fidelity audit finds an eight-pixel reading seam in baseline release PID 20568; actual drawing with unequal image ratios also fails the centered-spread regression.
+- Change: record the accepted layout in ARCHITECTURE before implementation. Normalize page height horizontally or width vertically, fit/center the joined spread, remove fixed reading margins, preserve ratios/order and error slots. Share the layout with folder seek previews. Only image filmstrip cache moves to unpadded v4; fit those textures inside regular cards. Keep video/audio previews, bounded workers/cache, navigation and edits unchanged.
+- Verification: focused reading/preview/cache regressions, format, Clippy, 230 workspace tests (app 118/core 35/runtime 73/integrations 4), debug/release builds pass. Three preexisting live tests explicitly ignored, not hardware proof. Tests cover unequal ratios, both axes/reversal, three view sizes, fullscreen flag, empty/single/ten-page geometry, errors, preview reuse and legacy padded cache invalidation.
+- Native/cleanup: fixed PID 40264 shows joined red/green pages horizontally, vertically, reversed at 480x300, in seek hover and regular filmstrip. Five-second settled CPU increment is 0ms. Both owned windows close normally with clean titles; no Save/source or OS settings writes. Ignored target/tmp/h1-reading-joined-* captures/logs and DEVELOPMENT preserve conditions and binary hash.
+- Status/next: h1_active. Continue image-viewing responsiveness and remaining draft/day-to-day audit; reading page navigation remains one image at a time and is documented separately. Physical input/DPI/device/distribution and unanswered default-key/packaging decisions remain incomplete. Do not broaden this display fix into tab/session or editing redesign.
+
 ## 2026-09-06 18:32 JST - pass current-release 30-minute playback revalidation
 
 - Trigger/intent: previous turns monitored the same trial after aa83efd (verified wait, not blocked). Revalidate long-duration playback after terminal decode and recent UI changes; aa83efd CI 34023357783 succeeds. No app code changes during measurement or this checkpoint.

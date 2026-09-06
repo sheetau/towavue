@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### Reading modeの見開き連結（2026-09-06 18:45 JST）
+
+- 基準機・960×576の通常releaseで、同じ320×240の赤/緑PNGを開きBを押した。旧PID 20568では中央8pxの隙間と外周の固定余白があり、縦横比が異なる画像の実描画testでは全体の中心もずれた。
+- 修正後PID 40264は同じ横並びが隙間なく中央に収まり、Rの縦並び、H反転と480×300へのresizeでもmedia領域内に収まる。folder seekのhoverは赤/緑を連結したpreviewとなり、Fの通常filmstripでも縦横比を保つ。ページ送り・source・編集状態は変えていない。
+- 横では高さ、縦では幅を揃え、全体をaspect-fitする同じ配置を本表示とhoverで使用。画像だけのpreview cacheをpaddingなしのv4へ更新し、旧v3の画像を再利用しない。動画/音声のcache・生成経路と64 MiB上限は維持する。極端な縦横比の低解像度previewでは整数pixelへの丸めは残る。
+- 変更前に失敗する実描画回帰、縦横/反転/通常・fullscreen flag/3寸法、異なる画像比率、空/1/10枚の配置、失敗page表示、hoverと通常filmstrip、旧cacheからの再生成を確認。230 tests・format・Clippy・debug/release buildが通過。3件の既存live testはignoreであり実device検証の代用ではない。
+- 両windowはclean状態で通常終了し、SaveやOS設定変更はしていない。固定版の静止後5秒CPU時間増分は0ms（時計分解能以下）。capture/logはignoredの`target/tmp/h1-reading-joined-*`。測定release SHA-256は`39D3B4E1AD8B3318ACFAB20D8A7EB429D2B3518AF37C7886889CB941A50370B2`。物理入力・mixed-DPIや見開き単位のnavigationの証明ではない。
+
 ### 現行releaseの30分性能再確認（2026-09-06 18:30 JST）
 
 51b43bfの通常release（開始時HEAD aa83efd、以降は文書のみ）で、4K H.264/AACの30分連続再生がEOFへ到達した。adapterは00000000:000146b5、D3D11VA、960×576、1倍、アプリ内mute。sourceは事前hash済みでcold-storage試験ではない。再起動・Seek・並行したbuildや重い試験は行っていない。

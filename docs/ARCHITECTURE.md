@@ -140,6 +140,8 @@ selectionは元画像に対する正規化矩形として保持し、表示scale
 
 reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降の画像だけをShell view順のまま2～10 page取得する。横・縦配置と表示順反転はpresentation状態だけを変更し、個別画像のselectionや編集状態を作らない。
 
+H1のreading表示は横並びで高さ、縦並びで幅を揃え、各画像の縦横比を保って隙間なく連結する。連結した全体をmedia領域へaspect-fitして中央に置き、外周の固定余白は加えない。反転は並び順だけを変える。読込失敗pageは正方形の場所を残し、後続pageを詰めて順序を偽らない。folder seekのreading previewにも同じ配置を使うため、画像用filmstrip cacheはpaddingなしの縮小画像を保持する。動画/音声preview、読み込み件数・worker・cache上限、page送り・編集状態は変更しない。
+
 ### M6 non-destructive editing and export
 
 `EditHistory`は適用済みcursorとsaved cursorを別に持つ。新しいoperationをundo位置から追加した場合はredo branchを破棄し、破棄されたbranchにsaved cursorがあれば保存済みidentityも失効する。tab titleとwindow titleの`*`およびstatusのUnsavedは、現在cursorとsaved cursorが一致するまで消えない。folder内移動は同じtabの履歴を破棄するためcloseと同じguard対象だが、tab切替は履歴を保持するためguardしない。

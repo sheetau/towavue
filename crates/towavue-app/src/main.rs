@@ -1822,32 +1822,32 @@ where
     }
 
     fn draw_reading_pages(&self, ui: &mut egui::Ui) {
-        let viewport = ui
-            .max_rect()
-            .shrink(if self.fullscreen { 0.0 } else { 8.0 });
+        let viewport = ui.max_rect();
         let first = self
             .image
             .as_ref()
             .map(Ok)
             .or_else(|| self.image_error.as_ref().map(Err));
-        let count = self.reading_pages.len() + usize::from(first.is_some());
-        if count == 0 {
+        let pages: Vec<_> = first
+            .into_iter()
+            .chain(self.reading_pages.iter().map(|page| page.as_ref()))
+            .collect();
+        if pages.is_empty() {
             ui.centered_and_justified(|ui| ui.label("No image pages available"));
             return;
         }
-        let gap = 8.0;
+        let sizes: Vec<_> = pages
+            .iter()
+            .map(|page| page.map_or(egui::Vec2::splat(1.0), |image| image.texture.size_vec2()))
+            .collect();
+        let rects = reading_page_rects(
+            viewport,
+            &sizes,
+            self.reading_settings.axis,
+            self.reading_settings.reversed,
+        );
         let painter = ui.painter_at(viewport);
-        for (index, image) in first
-            .into_iter()
-            .chain(self.reading_pages.iter().map(|page| page.as_ref()))
-            .enumerate()
-        {
-            let index = if self.reading_settings.reversed {
-                count - 1 - index
-            } else {
-                index
-            };
-            let page = reading_page_rect(viewport, count, index, self.reading_settings.axis, gap);
+        for (image, page) in pages.into_iter().zip(rects) {
             let image = match image {
                 Ok(image) => image,
                 Err(error) => {
@@ -1858,12 +1858,9 @@ where
                     continue;
                 }
             };
-            let dimensions = image.dimensions();
-            let scale = towavue_core::fit_scale(dimensions, (page.width(), page.height()));
-            let size = egui::vec2(dimensions.0 as f32 * scale, dimensions.1 as f32 * scale);
             painter.image(
                 image.texture.id(),
-                egui::Rect::from_center_size(page.center(), size),
+                page,
                 egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                 Color32::WHITE,
             );
@@ -4748,32 +4745,43 @@ fn fitted_video_rect(viewport: egui::Rect, size: (u32, u32), pixel_aspect: f32) 
     egui::Rect::from_center_size(viewport.center(), display * scale)
 }
 
-fn reading_page_rect(
+fn reading_page_rects(
     viewport: egui::Rect,
-    count: usize,
-    index: usize,
+    sizes: &[egui::Vec2],
     axis: ReadingAxis,
-    gap: f32,
-) -> egui::Rect {
-    let count = count.max(1) as f32;
-    match axis {
-        ReadingAxis::Horizontal => {
-            let width = (viewport.width() - gap * (count - 1.0)).max(1.0) / count;
-            let left = viewport.left() + index as f32 * (width + gap);
-            egui::Rect::from_min_size(
-                egui::pos2(left, viewport.top()),
-                egui::vec2(width, viewport.height()),
-            )
-        }
-        ReadingAxis::Vertical => {
-            let height = (viewport.height() - gap * (count - 1.0)).max(1.0) / count;
-            let top = viewport.top() + index as f32 * (height + gap);
-            egui::Rect::from_min_size(
-                egui::pos2(viewport.left(), top),
-                egui::vec2(viewport.width(), height),
-            )
-        }
+    reversed: bool,
+) -> Vec<egui::Rect> {
+    if sizes.is_empty() {
+        return Vec::new();
     }
+    let (along, across) = match axis {
+        ReadingAxis::Horizontal => (egui::vec2(1.0, 0.0), egui::vec2(0.0, 1.0)),
+        ReadingAxis::Vertical => (egui::vec2(0.0, 1.0), egui::vec2(1.0, 0.0)),
+    };
+    let lengths: Vec<_> = sizes
+        .iter()
+        .map(|size| size.dot(along) / size.dot(across))
+        .collect();
+    let total: f32 = lengths.iter().sum();
+    let spread = along * total + across;
+    let scale = (viewport.width() / spread.x).min(viewport.height() / spread.y);
+    let origin = viewport.center() - spread * scale * 0.5;
+    let mut offset = 0.0;
+    lengths
+        .into_iter()
+        .map(|length| {
+            let position = if reversed {
+                total - offset - length
+            } else {
+                offset
+            };
+            offset += length;
+            egui::Rect::from_min_size(
+                origin + along * position * scale,
+                (along * length + across) * scale,
+            )
+        })
+        .collect()
 }
 
 fn display_name(path: &Path) -> String {
@@ -8599,16 +8607,149 @@ mod tests {
     }
 
     #[test]
+    fn reading_draw_joins_pages_and_centers_the_spread_without_changing_media() {
+        let Some(root) = isolated_test_root(
+            "tests::reading_draw_joins_pages_and_centers_the_spread_without_changing_media",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let context = egui::Context::default();
+        let make_page = |width, height| {
+            ImagePresentation::from_decoded(
+                &context,
+                &root.join("page.png"),
+                DecodedImage {
+                    format: "PNG",
+                    frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                        width,
+                        height,
+                        rgba: vec![255; (width * height * 4) as usize],
+                        delay: Duration::ZERO,
+                    }],
+                },
+            )
+            .expect("page")
+        };
+        app.image = Some(make_page(8, 16));
+        app.reading_pages = vec![Ok(make_page(16, 8))];
+        let ids = [
+            app.image.as_ref().expect("first").texture.id(),
+            app.reading_pages[0].as_ref().expect("second").texture.id(),
+        ];
+        let generation = app.image_generation;
+        for axis in [ReadingAxis::Horizontal, ReadingAxis::Vertical] {
+            for reversed in [false, true] {
+                for fullscreen in [false, true] {
+                    for size in [
+                        egui::vec2(960.0, 514.0),
+                        egui::vec2(480.0, 238.0),
+                        egui::vec2(200.0, 400.0),
+                    ] {
+                        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 32.0), size);
+                        app.reading_settings.axis = axis;
+                        app.reading_settings.reversed = reversed;
+                        app.fullscreen = fullscreen;
+                        let output = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(viewport),
+                                ..Default::default()
+                            },
+                            |ui| app.draw_reading_pages(ui),
+                        );
+                        let bounds = ids.map(|id| {
+                            output
+                                .shapes
+                                .iter()
+                                .find_map(|shape| match &shape.shape {
+                                    egui::Shape::Mesh(mesh) if mesh.texture_id == id => {
+                                        Some(mesh.calc_bounds())
+                                    }
+                                    _ => None,
+                                })
+                                .expect("drawn page")
+                        });
+                        let spread = bounds[0].union(bounds[1]);
+                        assert!((spread.center() - viewport.center()).length() < 0.01);
+                        assert!(viewport.expand(0.01).contains_rect(spread));
+                        assert!(
+                            (spread.width() - viewport.width()).abs() < 0.01
+                                || (spread.height() - viewport.height()).abs() < 0.01
+                        );
+                        assert!((bounds[0].aspect_ratio() - 0.5).abs() < 0.001);
+                        assert!((bounds[1].aspect_ratio() - 2.0).abs() < 0.001);
+                        let [first, second] = if reversed {
+                            [bounds[1], bounds[0]]
+                        } else {
+                            bounds
+                        };
+                        match axis {
+                            ReadingAxis::Horizontal => {
+                                assert!(
+                                    (first.right() - second.left()).abs() < 0.01,
+                                    "horizontal seam: {bounds:?}"
+                                );
+                                assert!((first.height() - second.height()).abs() < 0.01);
+                            }
+                            ReadingAxis::Vertical => {
+                                assert!(
+                                    (first.bottom() - second.top()).abs() < 0.01,
+                                    "vertical seam: {bounds:?}"
+                                );
+                                assert!((first.width() - second.width()).abs() < 0.01);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(app.image_generation, generation);
+        assert!(app.edits.is_empty());
+        app.reading_pages.insert(0, Err("unreadable page".into()));
+        let output = context.run_ui(Default::default(), |ui| app.draw_reading_pages(ui));
+        assert!(output.shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "unreadable page")
+        }));
+        for id in ids {
+            assert!(output.shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == id)
+            }));
+        }
+    }
+
+    #[test]
     fn reading_page_geometry_follows_the_selected_axis() {
         let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0));
 
-        let horizontal = reading_page_rect(viewport, 2, 1, ReadingAxis::Horizontal, 8.0);
-        let vertical = reading_page_rect(viewport, 2, 1, ReadingAxis::Vertical, 8.0);
+        let sizes = [egui::vec2(3.0, 2.0); 2];
+        let horizontal = reading_page_rects(viewport, &sizes, ReadingAxis::Horizontal, false)[1];
+        let vertical = reading_page_rects(viewport, &sizes, ReadingAxis::Vertical, false)[1];
 
-        assert_eq!(horizontal.left(), 154.0);
-        assert_eq!(horizontal.width(), 146.0);
-        assert_eq!(vertical.top(), 104.0);
-        assert_eq!(vertical.height(), 96.0);
+        assert_eq!(horizontal.left(), 150.0);
+        assert_eq!(horizontal.width(), 150.0);
+        assert_eq!(vertical.top(), 100.0);
+        assert_eq!(vertical.height(), 100.0);
+        for count in [0, 1, 10] {
+            for axis in [ReadingAxis::Horizontal, ReadingAxis::Vertical] {
+                let rects =
+                    reading_page_rects(viewport, &vec![egui::Vec2::splat(1.0); count], axis, true);
+                assert_eq!(rects.len(), count);
+                assert!(
+                    rects
+                        .iter()
+                        .all(|rect| viewport.expand(0.001).contains_rect(*rect))
+                );
+                for pair in rects.windows(2) {
+                    assert_eq!(
+                        match axis {
+                            ReadingAxis::Horizontal => pair[0].left() - pair[1].right(),
+                            ReadingAxis::Vertical => pair[0].top() - pair[1].bottom(),
+                        },
+                        0.0
+                    );
+                }
+            }
+        }
     }
 
     #[test]

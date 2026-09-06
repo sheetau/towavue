@@ -4,6 +4,15 @@
 
 ## 1. 最初に試す
 
+### UI Automationの繰り返し確認での取得停止（2026-09-06 21:39 JST）
+
+- f0f1994 CI 34032823555は成功。通常release `DB4BA189E55AADF5FEA202F5DA356B30330E9A0A69E5EC66F468F5E247F477E0`で再調査した。所有PNGコピーを読み込み後に不正PNGへ置換する試行PID 5352（開始UTC 12:22:04.2182507Z）は、保存確認20要素からexport失敗後0要素となった。新しいMTA照会clientでも同じで、Escapeで失敗通知を閉じても戻らない。STAだけの問題やエラー文だけの問題とは断定できない。
+- WelcomeからOpenを経る通常release PID 46068（12:28:02.0047695Z）は、Export failedを18要素のtree内で取得し、IsModal=true、配下OKのInvokeまで成功した。しかし次の保存確認照会は0要素となった。一時ログ付きdebug PID 39168（12:25:16.4413738Z）は同様の流れでOK→保存確認Cancelも通過したが、診断buildの成功を通常buildの解決とは扱わない。
+- 通常release PID 47288（12:31:03.9809339Z）では、同一MTA clientとroot参照を保持して保存確認→native Save As→Export failedを観測。失敗通知のIsModalと配下OKを確認/実行した後のFindAllがtimeoutした。短命clientだけに限定された問題とも言えない。
+- 最小化した手順は「所有PNGをRでdirty化→UIAのClose window→Cancelを5回繰り返す」。通常release PID 46572（12:33:33.4466587Z）は2回復帰後、3回目のClose window実行後のCancel照会が停止した。modalの意味情報5行だけを外した比較release PID 24452（12:36:20.9419832Z、SHA-256 `BB9BF07999B07B9111410D666398DAE3907BB5B12B51C4417745ABD2F0962D9D`）も同じ位置で停止。比較元の名称追加だけを原因とはできず、FFmpeg・保存・native pickerなしでも再現する。WM_NULL応答とkeyboard取消/Undo/正常終了は保たれたが、これだけではproviderやevent loopの健全性を証明しない。
+- 既存headless回帰にもClose window/Cancelの5往復を追加し、各action一回、guard状態、終了しないこと、編集履歴保持を確認した。これは通過するが、Windows provider経路の回帰再現ではない。244 tests・format・Clippy・両build通過。診断ログと比較用コードは全て除去し、production変更なし。test追加後の通常release SHA-256は`6D4405AB108DFDFDEB77BFF13458A2310AEBFD22427CC7E4B2ABBDAAE0C5F451`で、上記native比較binaryとは区別する。
+- 全6試験windowを正常終了し、所有コピーを原本と同じSHA-256 `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`へ復元。新規export出力なし、通常app stderrは空、clipboard/OS設定変更なし。ignored `target/tmp/h1-uia-export-recovery/`と`h1-uia-inspect.ps1`、`h1-uia-persistent.ps1`、`h1-uia-guard-cycle.ps1`、`h1-native-dialog-path.ps1`に再試験用素材/手順を保持する。次はこの5往復を用い、provider取得/イベント配送を独立に計測する。根本原因は未確定で、依存更新や意味情報の削除を修正として採用しない。
+
 ### 保存関連modalの名前と階層（2026-09-06 21:23 JST）
 
 - 0690cc7比較releaseのPID 41992（開始UTC 12:01:20.0348354Z）では、保存確認の見出しはTextで親がapp root、Window型の子要素は0だった。3つの既存modalに見出しと同名のAccessKit Dialog/modal情報を付け、内容を同じUIの子にする。通常background exportと既存focus/keyboard方針は変更しない。

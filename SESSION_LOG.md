@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 21:39 JST - isolate repeated Windows accessibility query failure
+
+- Trigger/status: previous f0f1994 checkpoint is progress; CI 34032823555 succeeds. Investigate the unresolved native error-dialog tree loss without assuming an export defect.
+- Evidence: reproduce zero descendants after failed export with fresh MTA clients. Other normal-release trials expose Export failed/IsModal/contained OK, then fail on the returning guard; a persistent MTA client also times out after OK. A trace-only debug trial passes, so neither welcome startup nor client lifetime establishes a fix.
+- Minimal reproduction: owned dirty PNG, UIA Close window/Cancel repeatedly. Normal PID 46572 and a comparison with only modal metadata removed (PID 24452) both recover twice and stop on the third guard's Cancel lookup. No export/picker/FFmpeg is required. Both apps still accept keyboard cancellation, Undo and normal close. DEVELOPMENT records all six process identities, binaries and exact evidence limits.
+- Change/verification: extend the existing headless modal test with five Close window/Cancel cycles, checking one action, guard state, retained history and no exit. Focused test, 244 tests, format, Clippy and both builds pass; three live ignores remain. The headless success does not reproduce or fix native provider failure. Remove all temporary production traces/comparison edits; no production or dependency changes remain.
+- Cleanup: all six app windows close normally; restore the owned PNG copy to the unchanged original hash, no export output remains. Normal stderr is empty; trace log/helpers stay ignored under target/tmp. No clipboard, OS settings or original-media changes.
+- Status/next: h1_active, root cause unproven. Checkpoint the smaller reproduction and headless boundary; next instrument provider queries/event delivery around the five-cycle native trial, without treating a dependency update or removal of semantics as an evidenced fix. Other launch gates remain open.
+
 ## 2026-09-06 21:23 JST - name save-related accessibility dialogs
 
 - Trigger/intent: 0690cc7 CI 34031789285 succeeds. Native baseline exposes the guard heading under the app root with no dialog. Add named Dialog/modal metadata to the three existing save-related modals without changing layout, keyboard focus policy or nonmodal export.

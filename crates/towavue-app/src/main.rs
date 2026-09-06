@@ -5266,6 +5266,24 @@ mod tests {
                 .iter()
                 .any(|(_, node)| node.label() == Some("towavue menu") && !node.is_disabled())
         );
+        app.palette_open = false;
+        for _ in 0..5 {
+            for label in ["Close window", "Cancel"] {
+                let (tree, _) = frame(&mut app, vec![]);
+                let target = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(label))
+                    .expect("action remains available")
+                    .0;
+                let (_, actions) = frame(&mut app, vec![click(target)]);
+                assert_eq!(actions.len(), 1, "one {label} action per cycle");
+                app.handle_ui_action(actions[0].clone());
+                assert_eq!(app.pending_guard.is_some(), label == "Close window");
+                assert!(!app.exit_requested);
+                assert_eq!(app.edits[&tab], history);
+            }
+        }
     }
 
     #[test]

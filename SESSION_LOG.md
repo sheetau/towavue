@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 15:09 JST - restore the previous volume when unmuting
+
+- Trigger/evidence: previous turn pushed eeb8e0b (progress). a356646 CI succeeds; eeb8e0b CI 34015576061 remains in progress. Everyday playback audit finds ToggleMute always restores 1.0. Baseline normal release PID 40604 goes from 50% through mute to 100%.
+- Contract/change: unmute searches the active tab's applied operations backwards for its most recent positive SetVolume, using the existing 2.0 gain limit and default 1.0 only without a prior value. Undo-future and other tabs are excluded. Restore remains a normal volume edit; no extra state, runtime/core changes, dependencies, unsafe code or OS settings.
+- Verification: old code fails 1.0 versus expected 0.35. Regression covers audio/video, default/low/amplified volume, intervening edits, Undo/Redo, history branching, independent tabs, repeated zero edits and unchanged media generation/paused state. Format, Clippy, 215 tests (app 106/core 35/runtime 70/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: fixed PID 34076 shows 50% to 0% to 50% during playback. Paused Undo/Redo shows 0%/50% at unchanged 18-second position. Both owned windows undo all seven trial edits and close normally; source not saved, captures/logs ignored. No new loopback measurement; existing runtime gain/ramp path unchanged.
+- Status/next: h1_active. Continue auditing remaining playback input mismatches. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 15:03 JST - reveal the current audio playlist row
 
 - Trigger/evidence: previous turn pushed a356646 (progress); CI 34015268440 remains in progress. Baseline normal release PID 28620 opens track 24 but displays rows from track 1, leaving the current item outside the viewport.

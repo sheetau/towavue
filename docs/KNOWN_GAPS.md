@@ -6,6 +6,8 @@
 
 ### 操作とpreviewの不一致
 
+- Mキーの消音解除が必ず100%へ戻る問題を修正した。active tabの適用済み履歴から直前の非zero音量を復元し、未適用redoや別tabの値は使わない。音量をlive/export共通の編集として扱う設計は維持する。
+
 - 単一項目のfolder前後移動でzoomがFitへ戻り、未保存編集があると同じ画像への移動でも保存確認が出る問題を修正した。同じpathへのNavigateは共通入口でno-opとし、現在playlist項目の再clickも再生位置/pauseを保つ。別pathへのguard、明示的なOpen、新規tabは維持する。
 
 - 複数stream素材で再生とthumbnail・filmstrip・waveformが異なる問題をH1で修正した。再生と同じFFmpeg best-streamを明示指定し、旧cacheを失効させる。続いてtrimなしの保存で別映像/音声になる問題も通常releaseで再現し、exportへ同じ選択を適用した。無編集・crop・trim・音声のみの回帰とSave As→再openを確認したが、全container/stream配置の保証や手動stream選択UIはない。

@@ -240,3 +240,5 @@ Seek previewがhover位置ではなく左端に現れる問題を通常release�
 音声playlistを番号付き32pxの全幅行へ変更し、現在曲の強調・名前省略・window幅内の全文tooltip・可視行描画を追加した。1万曲の描画と全幅click/scroll選曲を含む213 tests、Clippy、両buildが通過。通常windowの右端click・小window・日本語tooltip・scroll後の選曲を確認し、12322d5 CIも成功。次はplaylistで現在曲が画面外にある場合の導線を監査する。曲長の列は追加していない。H1と実機/配布gateは未完了。
 
 音声の途中曲を直接開いても現在行が見えない問題を通常releaseで再現し、open/選曲/tab再表示/順序変更時だけの最小scrollを追加した。同一曲の手動scrollとguard Cancelを維持する。1万曲の表示回帰を含む214 tests、Clippy、両buildと通常windowの選曲・Cancel・tab復帰が通過。次は残る日常の再生操作を監査する。a356646 CIは進行中で、H1と実機/配布gateは未完了。
+
+消音解除で50%から100%へ上がる問題を通常releaseで再現し、active tabの適用済み履歴から直前の非zero音量を復元するよう修正した。音声/動画・Undo/Redo・tab分離の回帰を含む215 tests、Clippy、両buildと通常windowの50%復帰が通過。a356646 CIは成功、eeb8e0b CIは進行中。次は残る再生操作と入力の不一致を監査する。H1と実機/配布gateは未完了。

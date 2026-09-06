@@ -20,6 +20,8 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 
 曲を開く・選曲する・tabへ戻ると、playlistの現在行が画面外なら必要な分だけscrollします。同じ曲の再生中は手動scrollした位置を保持します。
 
+Mキーの消音解除は、100%へ固定で戻さず、そのtabの直前の非zero音量を復元します。音量は既存の編集履歴に含まれ、Undo/Redoと保存にも反映されます。
+
 ## 文書
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md): 技術選定、境界、データフロー、不変条件

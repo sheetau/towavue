@@ -2708,11 +2708,25 @@ where
                 self.push_edit(EditOperation::SetVolume(volume));
             }
             CommandId::ToggleMute => {
-                let volume = if self.edit_state().volume == 0.0 {
-                    1.0
-                } else {
-                    0.0
-                };
+                let volume =
+                    if self.edit_state().volume == 0.0 {
+                        self.tabs
+                            .active()
+                            .and_then(|tab| self.edits.get(&tab.id))
+                            .and_then(|history| {
+                                history.operations().iter().rev().find_map(|operation| {
+                                    match *operation {
+                                        EditOperation::SetVolume(volume) if volume > 0.0 => {
+                                            Some(volume.min(2.0))
+                                        }
+                                        _ => None,
+                                    }
+                                })
+                            })
+                            .unwrap_or(1.0)
+                    } else {
+                        0.0
+                    };
                 self.push_edit(EditOperation::SetVolume(volume));
             }
             CommandId::RateDown => {
@@ -6261,6 +6275,84 @@ mod tests {
         assert!(app.pending_guard.is_some());
         assert_eq!(app.path.as_ref(), Some(&source));
         assert_eq!(app.edits, edits);
+    }
+
+    #[test]
+    fn unmute_restores_applied_volume_history_for_each_tab() {
+        let Some(root) =
+            isolated_test_root("tests::unmute_restores_applied_volume_history_for_each_tab")
+        else {
+            return;
+        };
+        for (kind, name) in [(MediaKind::Audio, "one.wav"), (MediaKind::Video, "one.mp4")] {
+            let mut app = Application::new(None, |_| {}).expect("headless application");
+            let source = root.join(name);
+            let first = app.tabs.open_new(source.clone(), kind);
+            app.path = Some(source.clone());
+            app.media_kind = Some(kind);
+            app.state = PlaybackState::Paused;
+            let generation = app.media_generation;
+            app.dispatch(CommandId::ToggleMute);
+            assert_eq!(app.edit_state().volume, 0.0);
+            app.dispatch(CommandId::ToggleMute);
+            assert_eq!(app.edit_state().volume, 1.0, "initial default volume");
+            for volume in [0.35, 1.6, 0.2] {
+                app.push_edit(EditOperation::SetVolume(volume));
+                app.dispatch(CommandId::ToggleMute);
+                assert_eq!(app.edit_state().volume, 0.0);
+                app.push_edit(EditOperation::SetRate(1.25));
+                app.dispatch(CommandId::ToggleMute);
+                assert_eq!(
+                    app.edit_state().volume,
+                    volume,
+                    "restore previous nonzero volume"
+                );
+                app.dispatch(CommandId::Undo);
+                assert_eq!(app.edit_state().volume, 0.0);
+                app.dispatch(CommandId::Redo);
+                assert_eq!(app.edit_state().volume, volume);
+            }
+            app.dispatch(CommandId::ToggleMute);
+            app.push_edit(EditOperation::SetVolume(0.8));
+            app.dispatch(CommandId::Undo);
+            app.dispatch(CommandId::ToggleMute);
+            assert_eq!(app.edit_state().volume, 0.2, "ignore unapplied redo volume");
+            assert_eq!(app.edit_state().rate, 1.25);
+            assert!(
+                !app.edits.get_mut(&first).expect("history").redo(),
+                "unmute branches the history"
+            );
+            app.dispatch(CommandId::ToggleMute);
+            let second = app.tabs.open_new(root.join("second.wav"), kind);
+            app.push_edit(EditOperation::SetVolume(0.65));
+            app.dispatch(CommandId::ToggleMute);
+            app.dispatch(CommandId::ToggleMute);
+            assert_eq!(app.edit_state().volume, 0.65);
+            assert_eq!(app.edits[&first].state().volume, 0.0);
+            app.tabs.activate(first);
+            app.dispatch(CommandId::ToggleMute);
+            assert_eq!(
+                app.edit_state().volume,
+                0.2,
+                "return to the first tab's own volume"
+            );
+            assert_eq!(app.edits[&second].state().volume, 0.65);
+            app.push_edit(EditOperation::SetVolume(0.0));
+            app.push_edit(EditOperation::SetVolume(0.0));
+            app.dispatch(CommandId::ToggleMute);
+            assert_eq!(
+                app.edit_state().volume,
+                0.2,
+                "skip repeated zero-volume edits"
+            );
+            assert_ne!(first, second);
+            assert_eq!(
+                app.media_generation, generation,
+                "volume does not reload media"
+            );
+            assert_eq!(app.state, PlaybackState::Paused);
+            assert!(app.pending_guard.is_none());
+        }
     }
 
     #[test]

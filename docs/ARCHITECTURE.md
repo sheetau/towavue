@@ -296,6 +296,8 @@ RedrawRequestedはそのevent内で描画し、egui-winitのrepaint応答を次f
 
 ### H1 live volume
 
+Toggle muteは現在volumeが非zeroなら0にし、0ならactive tabの適用済みedit historyを逆順に見て直前の非zero volumeへ戻す。見つからない場合だけ既定の1倍を使う。undoより先のredo履歴や別tabの値を参照せず、復元も通常のSetVolume編集としてundo/redo・live反映・exportへ接続する。
+
 動画・音声のvolumeはedit historyの現在値をlive playbackとexportで共有する。runtimeはWASAPIへ渡す直前のstereo f32 sampleへgainを適用し、decode済みqueueは元の値を保持する。変更時は5 msのrampで不連続を抑え、mute後は正確なzero sampleにする。master endpointや他applicationの音量は変更しない。初期gainはpipeline開始前に設定し、Seek・endpoint復旧・tab再open・undo/redoにも現在値を反映する。trimは別項のH1 live trim range契約に従う。
 
 ### H1 live rate

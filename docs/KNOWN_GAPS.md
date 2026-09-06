@@ -60,7 +60,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 | 草案 | 現状 |
 |---|---|
-| 全機能を一つのlogo menuへ集約 | H1でFile / Edit / Viewへ分類し、関連項目の区切り、現在shortcutの右揃え、window内scrollを実装。全registry commandの重複・欠落をtestする |
+| 全機能を一つのlogo menuへ集約 | H1でFile / Edit / Viewへ分類し、関連項目の区切り、現在shortcutの右揃え、window内scrollを実装。keyboard focusを最深menu内に保ち、上下/Tab移動、左右の階層移動、Enter/Space選択とEscape取消に対応。全registry commandの一意配置、無効項目、末尾到達・再openとpointer操作をtestする |
 | File/Edit/Viewの3方向drag gestureとSVG logo | logo形状をvector描画。方向gestureは未実装 |
 | 黒基調のcompactなwindow shell | 32px title/tab barと30px status、window操作、右寄せ情報をH1で実装。複数DPI/monitorのmatrixは未検証 |
 | Command palette | titleの部分一致検索、上下選択、有効候補の巡回、Enter実行、Escape閉じを実装。IME eventと重複keyを分離し、focus再要求で毎文字の変換が取り消される不具合も修正。Windows日本語IMEの候補表示・上下選択・確定・取消と確定後のcommand実行を実windowで確認した。ranking、categoryはない。物理keyboard・他IME・focus/DPIを含む横断matrixは未完了 |

@@ -59,8 +59,23 @@ pub fn show(
     shortcuts: &ShortcutBindings,
 ) -> Option<CommandId> {
     let mut chosen = None;
+    let keyboard = MenuKeyboard::begin(ui);
+    let mut categories = Vec::new();
     for (title, groups) in MENUS {
-        ui.menu_button(*title, |ui| {
+        let category = ui.next_auto_id();
+        if keyboard.right && ui.memory(|memory| memory.has_focus(category)) {
+            let submenu = egui::containers::menu::SubMenu::id_from_widget_id(category);
+            // MenuState drops an open child unless it is marked live before the next lookup.
+            egui::containers::menu::MenuState::mark_shown(ui.ctx(), submenu);
+            egui::containers::menu::MenuState::from_ui(ui, |state, _| {
+                state.open_item = Some(submenu);
+            });
+        }
+        let mut return_to_category = false;
+        let menu = ui.menu_button(*title, |ui| {
+            let keyboard = MenuKeyboard::begin(ui);
+            return_to_category = keyboard.left;
+            let mut items = Vec::new();
             egui::ScrollArea::vertical()
                 .id_salt(title)
                 .max_height((ui.ctx().content_rect().height() - 64.0).max(100.0))
@@ -78,22 +93,136 @@ pub fn show(
                                 .get(*id)
                                 .map(ToString::to_string)
                                 .unwrap_or_default();
-                            if ui
-                                .add_enabled(
-                                    definition.is_enabled(context),
-                                    egui::Button::new(definition.title).shortcut_text(shortcut),
-                                )
-                                .clicked()
-                            {
+                            let response = ui.add_enabled(
+                                definition.is_enabled(context),
+                                egui::Button::new(definition.title).shortcut_text(shortcut),
+                            );
+                            if response.enabled() {
+                                items.push(response.id);
+                            }
+                            if response.gained_focus() {
+                                response.scroll_to_me(None);
+                            }
+                            if response.clicked() {
                                 chosen = Some(*id);
                                 ui.close();
                             }
                         }
                     }
                 });
+            keyboard.finish(ui, items);
+        });
+        categories.push(menu.response.id);
+        if return_to_category {
+            egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = None);
+            menu.response.request_focus();
+        }
+    }
+    keyboard.finish(ui, categories);
+    chosen
+}
+
+struct MenuKeyboard {
+    active: bool,
+    left: bool,
+    right: bool,
+}
+
+impl MenuKeyboard {
+    fn begin(ui: &egui::Ui) -> Self {
+        let (last_pass, items, selected) = ui
+            .data(|data| {
+                data.get_temp::<(u64, Vec<egui::Id>, Option<egui::Id>)>(
+                    ui.id().with("keyboard-items"),
+                )
+            })
+            .unwrap_or_default();
+        let reopened = last_pass + 1 < ui.ctx().cumulative_pass_nr();
+        let active = egui::containers::menu::MenuState::from_ui(ui, |state, _| {
+            if reopened {
+                state.open_item = None;
+            }
+            state.open_item.is_none()
+        });
+        let mut result = Self {
+            active,
+            left: false,
+            right: false,
+        };
+        if !active {
+            return result;
+        }
+        let (backward, forward, left, right) = ui.input_mut(|input| {
+            (
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
+                    | input.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+                    | input.consume_key(egui::Modifiers::NONE, egui::Key::Tab),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
+            )
+        });
+        result.left = left;
+        result.right = right;
+        // Egui installs focus locks only after a full focused frame; keep our selection across that gap.
+        if (left || right)
+            && let Some(id) = selected.filter(|id| items.contains(id))
+        {
+            ui.memory_mut(|memory| memory.request_focus(id));
+        }
+        if (reopened || !ui.memory(|memory| items.iter().any(|id| memory.has_focus(*id))))
+            && let Some(id) = items.first()
+        {
+            ui.memory_mut(|memory| memory.request_focus(*id));
+            ui.input_mut(|input| {
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Space);
+            });
+        }
+        if (backward || forward) && !items.is_empty() {
+            let current = items
+                .iter()
+                .position(|id| Some(*id) == selected)
+                .unwrap_or(0);
+            let next = if backward {
+                (current + items.len() - 1) % items.len()
+            } else {
+                (current + 1) % items.len()
+            };
+            ui.memory_mut(|memory| memory.request_focus(items[next]));
+        }
+        result
+    }
+
+    fn finish(self, ui: &egui::Ui, items: Vec<egui::Id>) {
+        if self.active
+            && egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item.is_none())
+        {
+            ui.memory_mut(|memory| {
+                if !items.iter().any(|id| memory.has_focus(*id))
+                    && let Some(id) = items.first()
+                {
+                    memory.request_focus(*id);
+                }
+                for id in &items {
+                    memory.set_focus_lock_filter(
+                        *id,
+                        egui::EventFilter {
+                            tab: true,
+                            horizontal_arrows: true,
+                            vertical_arrows: true,
+                            ..Default::default()
+                        },
+                    );
+                }
+            });
+        }
+        let pass = ui.ctx().cumulative_pass_nr();
+        let selected = ui.memory(|memory| items.iter().find(|id| memory.has_focus(**id)).copied());
+        ui.data_mut(|data| {
+            data.insert_temp(ui.id().with("keyboard-items"), (pass, items, selected))
         });
     }
-    chosen
 }
 
 #[cfg(test)]
@@ -101,6 +230,106 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    #[test]
+    fn keyboard_stays_in_menu_tree_and_scrolls_to_enabled_items() {
+        let context = egui::Context::default();
+        let shortcuts = ShortcutBindings::default();
+        let mut time = 0.0;
+        let mut frame = |events| {
+            let mut chosen = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.menu_button("Menu", |ui| {
+                        if let Some(command) = show(ui, CommandContext::default(), &shortcuts) {
+                            chosen.push(command);
+                        }
+                    });
+                    assert!(!ui.button("Background action").clicked());
+                },
+            );
+            time += 0.1;
+            (output, chosen)
+        };
+        for _ in 0..3 {
+            frame(vec![]);
+        }
+        let key = |key, shift| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers {
+                shift,
+                ..Default::default()
+            },
+        };
+        frame(vec![key(egui::Key::Tab, false)]);
+        frame(vec![key(egui::Key::Enter, false)]);
+        let mut navigate = |key_code, shift, label| {
+            let (_, chosen) = frame(vec![key(key_code, shift)]);
+            assert!(chosen.is_empty());
+            for _ in 0..15 {
+                assert!(frame(vec![]).1.is_empty());
+            }
+            let (output, chosen) = frame(vec![]);
+            assert!(chosen.is_empty());
+            let position = text_position(&output, label)
+                .unwrap_or_else(|| panic!("{label} is visible after {key_code:?}"));
+            let focused = context
+                .memory(|memory| memory.focused())
+                .expect("menu focus");
+            let response = context.read_response(focused).expect("focused response");
+            let rect = context
+                .layer_transform_to_global(response.layer_id)
+                .unwrap_or_default()
+                * response.rect;
+            assert!(
+                rect.contains(position),
+                "focus belongs to {label} after {key_code:?}: {rect:?} vs {position:?}"
+            );
+        };
+        navigate(egui::Key::ArrowRight, false, "Open file");
+        navigate(egui::Key::ArrowDown, false, "Open folder");
+        navigate(egui::Key::ArrowDown, false, "Close tab");
+        navigate(egui::Key::ArrowDown, false, "Reload keyboard shortcuts");
+        navigate(egui::Key::Tab, false, "Open file");
+        navigate(egui::Key::ArrowLeft, false, "File");
+        navigate(egui::Key::ArrowDown, false, "Edit");
+        navigate(egui::Key::ArrowRight, false, "Edit");
+        navigate(egui::Key::ArrowLeft, false, "Edit");
+        navigate(egui::Key::ArrowDown, false, "View");
+        navigate(egui::Key::ArrowRight, false, "Toggle fullscreen");
+        navigate(egui::Key::Tab, true, "Show command palette");
+        assert_eq!(
+            frame(vec![key(egui::Key::Enter, false)]).1,
+            [ToggleCommandPalette]
+        );
+        assert!(text_position(&frame(vec![]).0, "File").is_none());
+        assert!(click(&mut frame, egui::pos2(20.0, 15.0)).is_empty());
+        frame(vec![key(egui::Key::ArrowUp, false)]);
+        frame(vec![key(egui::Key::ArrowRight, false)]);
+        for _ in 0..15 {
+            frame(vec![]);
+        }
+        let (output, chosen) = frame(vec![]);
+        assert!(chosen.is_empty());
+        assert!(
+            text_position(&output, "Toggle fullscreen").is_some(),
+            "reopened submenu scrolls back to its focused first item"
+        );
+        frame(vec![key(egui::Key::Escape, false)]);
+        assert!(text_position(&frame(vec![]).0, "File").is_none());
+    }
 
     #[test]
     fn menu_opens_and_dispatches_file_action() {

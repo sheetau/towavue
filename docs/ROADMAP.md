@@ -270,3 +270,5 @@ prefixの途中で別のprefix・同じprefixへ打ち直すと新しい入力�
 草案との再照合からcommand paletteを暗いcompact panelへ変更し、見出し枠を除き、検索欄を全幅、shortcutを右揃えにした。長いprefixの幅を制限し、window内で全文tooltipを表示する。960/480/240pxの配置・非重複・行全幅click、既存IME/検索を含む228 tests、Clippy、両buildが通過。通常windowでも変更前後、Zoom out実行、小窓の末尾候補、長いprefixの省略/全文表示を確認した。f21154e/81cfdc9 CIは成功。H1と実環境/配布gateは未完了。
 
 小窓で5 tabを開くと現在tabが画面外に隠れる問題を通常releaseで再現した。active identity/index・tab幅・表示幅の変更時だけ、既存ScrollAreaでtab全体を最小scrollする。12 tabの切替/追加/並べ替え/resizeと手動位置保持を含む229 tests、Clippy、両buildが通過。通常windowでも追加・前後切替・手動scroll保持・resize・close後の隣接tab表示を確認した。media loadや編集へ新しい動作を加えず、H1と実環境/配布gateは継続中。
+
+compact paletteのnative日本語IMEを通常releaseで再確認した。通常幅/480px幅の候補位置、候補上下移動、日本語確定、Escapeの二段階取消、F10でLatin化後の確定Enterとcommand実行Enterの分離、別の所有windowからのfocus復帰が通過した。229 testsと必須checkも再通過。新しい実装不具合は見つからず、条件と観測上の除外をDEVELOPMENTへ記録。afe7469 CIは成功。物理keyboard・別IME・mixed-DPIを含むH1全体は未完了。

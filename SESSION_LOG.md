@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 17:57 JST - revalidate native IME in the compact palette
+
+- Trigger/intent: previous turn pushed 51b43bf (progress); CI 34023059941 remains in progress, afe7469 CI succeeds. Recheck native composition after the palette layout change; no production defect found or code behavior changed.
+- Native: owned release PID 21808 shows Japanese IME suggestions below the query at 960x576 and 480x300. With uninterrupted foreground, Space conversion, Down/Up candidate movement and Enter commit produce Japanese text while keeping the palette open. Escape cancels preedit before a second Escape closes the palette. F10 converts composition to Latin open; its confirmation Enter leaves the palette, a later Enter opens native picker 1119538, then Cancel returns to Welcome.
+- Focus/evidence limits: verified focus moves to owned Welcome PID 41844 and back, retains the query and permits Escape close. Earlier observations interrupted by foreground reacquisition are excluded from candidate/commit proof. This is automated key delivery with the installed Japanese IME, not physical-keyboard/other-IME/mixed-DPI coverage. Conditions and binary hash recorded in DEVELOPMENT.
+- Verification/cleanup: five focused palette tests, format, Clippy and 229 workspace tests pass; three preexisting live tests explicitly ignored, not hardware proof. Both windows close normally; no source/file selection/export or user/OS configuration writes. Normal IME mode keys are limited to the owned test window. Captures/logs ignored under target/tmp/h1-compact-ime*.
+- Status/next: h1_active. Revalidate the current release's long-duration 4K playback with authoritative process monitoring; avoid concurrent heavy local work during measurement. Continue remaining everyday/draft and physical input/DPI/device/distribution checks. L-default and packaging choices unanswered; no implicit defaults/publication.
+
 ## 2026-09-06 17:51 JST - keep the active tab visible in an overflowing bar
 
 - Trigger/evidence: previous turn pushed afe7469 (progress); CI 34022748175 remains in progress. Baseline release PID 24540 opens five images in a 480x300 window: the final blue image is displayed but its active tab is outside the strip, including after cycling first/last.

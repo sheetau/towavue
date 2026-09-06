@@ -546,6 +546,15 @@ towavue/
 
 現在の`crates/towavue-app/src/main.rs`は約2,800行あり、今後のUI反復で最も衝突しやすい場所である。ただし、先に大規模分割だけを行うのではなく、実際に変更するまとまりが明確になった時点で、例えばtop bar、timeline、image interactionのような単位を一つずつ移す。移動と挙動変更を同じ差分へ混ぜない。
 
+### Compact paletteのnative IME再確認（2026-09-06）
+
+- 51b43bfの通常release、Windows build 26200、既存の日本語IMEで実施。binary SHA-256: `18F57AF2E2E7D1FCF34D64E70154080A79E661F4B02297AEE27491865F404247`。code変更・event注入用app hookはない。
+- 所有Welcome windowのpaletteで通常のIME mode keyとkey入力を使用し、960×576と480×300の検索欄直下に候補を確認。小窓ではSpaceで変換候補を開き、Downでニホンゴ、Upで日本語へ戻し、Enterで確定してもpaletteが残ることを確認した。
+- preeditへの最初のEscapeは入力だけを取り消し、次のEscapeでpaletteを閉じる。`open`のcompositionをF10でLatinに変換し、確認Enterではpaletteを保持、次の独立したEnterでnative Open pickerが開く。pickerはCancelし、fileを開かない。
+- 別の所有Welcome windowへfocusを移し、元へ戻った後も文字列を保持し、Escapeでpaletteを閉じられる。focus先は両processのwindow handleで確認した。
+- 試験間のforeground再取得は変換を中断しうるため、その途中結果を候補操作の成功証拠に含めない。最終の候補移動・確定/取消は、一続きのforeground確認済み入力列で検証した。
+- 両windowは正常終了。設定file・source・OS全体のIME設定は変更せず、captures/logsは`target/tmp/h1-compact-ime*`へ保持。これは注入keyによる現在のIME/layoutの確認であり、物理keyboard・別IME・実mixed-DPI matrixの代替ではない。
+
 ## 8. UI/UX変更の判断基準
 
 - 実装済みcommandの入口はmenu、palette、shortcut、gridで同じ`CommandId`を共有する。入口ごとに別logicを作らない。

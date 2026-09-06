@@ -183,4 +183,4 @@ H1の個別修正が通ったことと、配布可能な品質の判定を分け
 | 環境・入力 | 日本語font・scale入力の回帰とWindows日本語IMEの基本候補操作は確認済み。物理keyboard・他IME・focus、異なる実DPI間の移動、keyboard-only/accessibilityの横断matrixは未完了 |
 | 配布 | portable ZIPかinstallerかはownerへ確認中。FFmpeg binary/licenseの配布決定、clean machine起動確認、package作成・公開は未実施。H1と分けて計画する |
 
-同一frameの選択/panは固定egui event列で確認した。直接postしたWindows button/move列は通常releaseで結果が揃わず、配送条件をまだ説明できていない。通常mouse注入での選択・pan・click preview成功とは分け、nativeのbatched配送を次の入力監査に残す。
+同一frameの選択/panは固定egui event列で確認し、native traceでも押下～release～後続hoverが同frameに入り正しい選択を保持した。前回の「選択なし」はPNGの読み取り誤りで、実pixelに白い境界と内外の明暗が残ることを再確認した。続く細い選択は同じ左辺を右端へ再dragした結果であり、配送不整合の証拠ではない。別に再現した描画前のEscape取消漏れは保留押下の破棄で修正済み。物理入力・混在DPIのmatrixは引き続き未完了。

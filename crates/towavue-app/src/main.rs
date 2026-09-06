@@ -1561,8 +1561,27 @@ where
     }
 
     fn cancel_view_drag(&mut self) -> bool {
+        let mut canceled_press = false;
+        if let Some(state) = &mut self.ui_state {
+            // Commands and focus changes can precede the frame that would start the drag.
+            state.egui_input_mut().events.retain(|event| {
+                let press = matches!(
+                    event,
+                    egui::Event::PointerButton {
+                        button: egui::PointerButton::Primary | egui::PointerButton::Secondary,
+                        pressed: true,
+                        ..
+                    }
+                );
+                canceled_press |= press;
+                !press
+            });
+        }
         let Some(drag) = self.view_drag.take() else {
-            return false;
+            if canceled_press {
+                self.request_redraw();
+            }
+            return canceled_press;
         };
         match drag {
             ViewDrag::Selection { before, .. } => self.image_view.selection = before,
@@ -7146,6 +7165,134 @@ mod tests {
                 .all(|vertex| (2.5 / 8.0..=5.5 / 8.0).contains(&vertex.uv.x)
                     && (3.5 / 8.0..=4.5 / 8.0).contains(&vertex.uv.y))
         );
+    }
+
+    #[test]
+    fn cancellation_discards_undrawn_presses_but_allows_subsequent_presses() {
+        let Some(_root) = isolated_test_root(
+            "tests::cancellation_discards_undrawn_presses_but_allows_subsequent_presses",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.media_kind = Some(MediaKind::Image);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0));
+        let start = egui::pos2(100.0, 100.0);
+        let end = egui::pos2(300.0, 300.0);
+        for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary] {
+            for interruption in 0..3 {
+                let context = egui::Context::default();
+                app.ui_state = Some(egui_winit::State::new(
+                    context.clone(),
+                    egui::ViewportId::ROOT,
+                    &winit::raw_window_handle::DisplayHandle::windows(),
+                    Some(1.0),
+                    None,
+                    None,
+                ));
+                let original = (interruption == 1).then_some(UnitRect {
+                    min: UnitPoint { x: 0.4, y: 0.4 },
+                    max: UnitPoint { x: 0.8, y: 0.8 },
+                });
+                app.image_view.selection = original;
+                app.image_view.pan = (10.0, 20.0);
+                let event = |pressed, pos| egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                let pending = app.ui_state.as_mut().expect("input state").egui_input_mut();
+                let retained = vec![
+                    egui::Event::PointerMoved(start),
+                    egui::Event::Key {
+                        key: egui::Key::A,
+                        physical_key: Some(egui::Key::A),
+                        pressed: false,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, 1.0),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    event(false, start),
+                ];
+                pending.events = retained.clone();
+                pending.events.push(event(true, start));
+                match interruption {
+                    0 => assert!(app.cancel_view_drag()),
+                    1 => {
+                        app.fullscreen = true;
+                        assert!(app.dismiss_overlay_or_fullscreen());
+                        assert!(app.fullscreen);
+                        app.fullscreen = false;
+                    }
+                    _ => app.dispatch(CommandId::ClearSelection),
+                }
+                let pending = app.ui_state.as_mut().expect("input state").egui_input_mut();
+                assert_eq!(pending.events, retained);
+                pending
+                    .events
+                    .extend([egui::Event::PointerMoved(end), event(false, end)]);
+                let canceled = std::mem::take(&mut pending.events);
+                for (index, events) in [
+                    vec![egui::Event::PointerMoved(start)],
+                    canceled,
+                    vec![
+                        event(true, start),
+                        egui::Event::PointerMoved(end),
+                        event(false, end),
+                    ],
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let _ = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let response = ui.interact(
+                                screen,
+                                "pending-drag".into(),
+                                egui::Sense::click_and_drag(),
+                            );
+                            let pointer = ui.input(|input| input.pointer.hover_pos());
+                            if button == egui::PointerButton::Primary {
+                                app.update_selection(&response, screen, (500, 500), false, pointer);
+                            } else {
+                                app.update_pan(&response, pointer);
+                            }
+                        },
+                    );
+                    assert_eq!(
+                        app.image_view.selection,
+                        if index == 2 && button == egui::PointerButton::Primary {
+                            Some(UnitRect {
+                                min: UnitPoint { x: 0.2, y: 0.2 },
+                                max: UnitPoint { x: 0.6, y: 0.6 },
+                            })
+                        } else {
+                            original
+                        }
+                    );
+                    assert_eq!(
+                        app.image_view.pan,
+                        if index == 2 && button == egui::PointerButton::Secondary {
+                            (210.0, 220.0)
+                        } else {
+                            (10.0, 20.0)
+                        }
+                    );
+                    assert!(app.view_drag.is_none());
+                }
+            }
+        }
     }
 
     #[test]

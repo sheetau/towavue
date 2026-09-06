@@ -100,6 +100,8 @@ Windowsでreleaseが最後のcursor移動通知より先に届く場合も、but
 
 選択drag・panの途中でEscapeを押すと、開始前の範囲・位置へ戻ります。focus喪失、保存確認やoverlay、別commandでも進行中の操作を取り消し、buttonを押し直すまで再開しません。fullscreen中も最初のEscapeはdragの取消だけを行います。編集履歴やsource fileは変更しません。
 
+押下直後、まだ描画されていない時点のEscapeも取消対象です。保留押下を次の描画へ持ち越さず、既存selectionやfullscreenは保持します。
+
 画像の100%は画面の実pixel基準です。zoomは現在の表示領域とcrop・回転後の寸法を使うため、小さいwindowやcrop previewからの一段の拡大も現在の見た目を基準にします。
 
 Ctrl+wheelはcursor位置を基点に拡大・縮小します。wheelがzoom倍率へ変換された後の入力を使うよう修正し、実windowでの動作を確認しました。palette・grid・保存確認中やmenu上のwheelでは背景画像を拡大しません。

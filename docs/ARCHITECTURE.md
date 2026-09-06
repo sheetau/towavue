@@ -174,6 +174,8 @@ runtimeのparallel decode収集点で映像PTSを[start, end)へ制限し、音�
 
 押下・移動・releaseが同一frameに届く場合も、button eventの座標から開始と確定を行う。開始はenabledなsurfaceのclip内かつその位置の最前面layerに限り、他widgetのdragを横取りしない。終点はrelease event自身の座標とし、同じframe内で後から届いたhover位置へ置き換えない。eguiが認識するclickは既存crop previewとして扱い、取消後に元の押下eventを再利用しない。
 
+取消時は未描画のegui-winit入力に残るprimary/secondary押下も破棄する。描画前の押下→Escapeやfocus離脱・復帰から古い操作を開始させないためであり、移動・release・keyboard・wheelは保持する。保留押下の取消もEscapeを一回消費し、既存selectionやfullscreenを同時に解除しない。取消後に届いた新しい押下は通常どおり扱う。
+
 Windowsではqueued button releaseが最後のWM_MOUSEMOVEより先に届く場合がある。固定winit 0.30.13はbutton messageの座標をMouseInputへ渡さないため、runtimeがevent-loop builderのmessage hookを設定し、client-area button down/upのdispatch直前に同じwindow・wParam・lParamでWM_MOUSEMOVEを同期送信する。button message自体は一度だけ通常dispatchし、通常の重複move除去・capture・modifier・egui入力経路を維持する。[button message](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-lbuttonup)と[WM_MOUSEMOVE](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-mousemove)が持つclient座標をそのまま使い、後のGetCursorPos値で履歴を置き換えない。pointerやnative messageはruntime内だけに閉じ、appへは従来のwinit eventだけを渡す。global hook・polling・別threadは追加せず、native STA dialogとnon-client messageは対象外とする。
 
 selectionのdrag中は正規化座標を使い、releaseとcrop確定時に現在の編集後寸法へ丸める。画像は1 pixel、動画は偶数の位置・寸法を使う。各辺を近いgrid境界へ丸め、同じ境界へ潰れた場合は内側の最小1 grid領域とする。現行defaultのlibopenh264は2×2を実際にencodeできず16×16未満を拒否したため、動画cropの確定は16×16以上に限定する。小さすぎる選択は勝手に16×16へ広げず、案内とともにselection・履歴を保持する。非finite・逆転・範囲外の選択と寸法未取得も確定しない。

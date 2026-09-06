@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 22:43 JST - compare native UIA clients and reduced providers
+
+- Trigger/intent: 3edc5b8 CI 34033827557 succeeds. Narrow the repeated guard-query timeout; do not treat a dependency upgrade or removal of semantics as a fix without evidence.
+- Evidence: a Rust MTA CUIAutomation8 client with 2s timeouts reproduces the third-cycle failure, excluding a managed-client-only explanation. Traced property/navigation calls return and tree updates continue; sampled parent edges show no obvious cycle, but unmeasured COM/Windows waits remain. Root caching and stricter WM_GETOBJECT filtering do not fix it.
+- Comparisons: full app fails with drawing omitted; reduced sized-button UI fails on the seventh lookup even with drawing omitted. Small independent debug/release providers pass 10-20 cycles; an embedded provider using the app's dependencies, window/font/style/input hook, renderer initialization and idle workers passes 15. Actual media loading/event-state integration remains different. DEVELOPMENT records selected identities, HRESULTs and limits; ignored helpers/logs preserve diagnostics.
+- Change/verification: match observed Focus then Click in the existing five-cycle headless test and assert focus belongs to the returned tree. Remove every temporary production edit and dependency override. Focused test, 244 tests, format, Clippy and both builds pass, with three existing live ignores. Restored normal PID 13884 still fails on the third Cancel lookup; this checkpoint is not a native fix.
+- Cleanup: all owned app/provider windows close normally, app rotations are undone, PNG hash is unchanged and final normal stderr is empty. No Save, clipboard, OS-setting or capture changes. Prepare this test/evidence-only checkpoint for push.
+- Status/next: h1_active, root cause unproven. Compare the actual application's loaded-media state and event processing with the passing embedded provider, retaining the normal-build three-cycle reproduction as the required repair check. Screen-reader and other launch gates remain open.
+
 ## 2026-09-06 21:39 JST - isolate repeated Windows accessibility query failure
 
 - Trigger/status: previous f0f1994 checkpoint is progress; CI 34032823555 succeeds. Investigate the unresolved native error-dialog tree loss without assuming an export defect.

@@ -5276,7 +5276,12 @@ mod tests {
                     .find(|(_, node)| node.label() == Some(label))
                     .expect("action remains available")
                     .0;
-                let (_, actions) = frame(&mut app, vec![click(target)]);
+                let mut focus = click(target);
+                if let egui::Event::AccessKitActionRequest(request) = &mut focus {
+                    request.action = egui::accesskit::Action::Focus;
+                }
+                let (tree, actions) = frame(&mut app, vec![focus, click(target)]);
+                assert!(tree.nodes.iter().any(|(id, _)| *id == tree.focus));
                 assert_eq!(actions.len(), 1, "one {label} action per cycle");
                 app.handle_ui_action(actions[0].clone());
                 assert_eq!(app.pending_guard.is_some(), label == "Close window");

@@ -300,3 +300,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 保存関連3 modalの名前と子要素階層を追加し、既存layout回帰で通常background exportとの区別も確認した。244 tests・format・Clippy・両buildが通過。実windowでは保存確認と継続前export待ちのIsModal/子buttonが通過したが、export失敗試行はUIA timeout後に子要素0となりnative semantics未確認。次は同一経路のtree喪失を比較buildと切り分ける。screen reader/focusと既存launch gateは未完了。
 
 21:39の再調査ではexport失敗のIsModal/OK取得が成功する試行も得たが、その後の照会停止が残った。保存もpickerも使わないClose window/Cancelの反復へ絞ると、通常/意味情報追加前相当の比較でともに3回目に停止する。headless 5往復・244 tests・format・Clippy・両buildは通過。production変更なしで再現条件を記録し、次はWindows provider取得/イベント配送を調べる。起動経路や短命client、名称追加だけを根本原因とせず、launch gateを閉じない。
+
+22:43の比較では独立Rust UIA clientでも通常buildの3回目timeoutを再現した。一方、本体の依存関係・window設定・renderer初期化・常駐workerを使う最小providerは15往復通過。Focus→Clickとfocus IDのheadless検査を強化し、244 testsと必須checkは通過したが、production修正は未採用。次はmedia読込み後の本体state/event処理との差を絞り、通常buildの反復試験で修復を確認する。

@@ -4,6 +4,17 @@
 
 ## 1. 最初に試す
 
+### UI Automationのnative client・最小provider比較（2026-09-06 22:40 JST）
+
+- 3edc5b8 CI 34033827557は成功。所有PNGのClose window/Cancel反復を継続調査した。独立Rust clientはMTAのCUIAutomation8を使い、connection/transaction timeoutを各2秒に設定する。本体releaseのPID 19604（開始UTC 12:46:30.9088737Z）は2往復後、3回目のCancel検索で`0x80131505`。managed UIA wrapperや短命clientだけの問題ではない。
+- 一時コピーの固定accesskit_windows 0.32.1へWM_GETOBJECT・GetPropertyValue・Navigateの入口/出口を記録した。PID 39184（12:57:53.1525908Z）でも同じ失敗が出るが、記録したproperty/navigation呼出しは戻り、本体のtree更新も継続する。追加の親edge観測に明白な循環は見つからない。未計測のCOM呼出しやWindows内部待ちまでは除外できず、「providerは正常」とは判定しない。root COM参照cacheとWM_GETOBJECT対象制限の比較も失敗し、採用しない。
+- 本体のUI縮小比較では通常buttonだけが5往復成功、top barだけは4回目、chrome buttonだけと通常のサイズ指定buttonだけは7回目の検索で失敗した。通常buttonの5回成功を長期安定の証拠にしない。tooltip削除、直接の名前設定、glyphの別描画も改善しない。最終比較PID 35976（13:39:20.1422166Z）はサイズ指定buttonと実保存確認だけを残し、frameの描画/presentを省略しても6往復後、7回目のClose window検索で失敗。描画装置は初期化したままである。
+- ignored `target/tmp/uia-native-probe/`に独立clientと小さなwinit/egui providerを作成。最初のproviderのCancel無効は試験側のrepaint deadline処理不足で、修正後は通過した。`0x80040200`はUIA_E_NOTSUPPORTEDであり、本体のtimeoutとは区別する。最小providerのサイズ指定button/同等guardはdebugで10往復、release PID 11040（13:28:08.7755953Z）で15往復成功。20ms周期の更新を加えたrelease PID 40340（13:33:48.6561625Z）も20往復成功した。
+- 本体binaryへ一時組込みして同じ依存解決で比較すると、PID 34164（13:35:03.1186771Z）は15往復成功。guardのID/Export button構造を合わせた43796（13:35:57.0205806Z）、本体のwindow設定/font/style/mouse hookを加えた36908（13:36:45.1889470Z）、renderer初期化を加えた41556（13:37:34.9077465Z）、Applicationの常駐workerも作成した41788（13:38:21.6232113Z）も各15往復成功。実media読込みや本体のevent/state処理全部を再現した試験ではなく、原因は依然未確定。
+- 既存headless 5往復を、nativeで観測したFocus→Clickの順へ合わせ、返されたfocus IDがtree内に存在することも検査する。全一時production変更、依存override、traceを除去し、通常buildへ戻す。依存更新やUI縮小は修正として残さない。次は本体のmedia読込み後の状態・event処理と、この通過providerの差を比較する。
+- 復元後の通常release SHA-256は`6BF0D9EC65BA79BC6EC392631D79AAA561622ECF6A5BBD3742E42D8E883AC3D8`。PID 13884（13:42:03.3737141Z）でも2往復後の3回目Cancel検索が同じtimeoutで失敗した。WM_NULLは応答し、Escape/Undo後に正常終了、stderrは空。244 tests（app 129/core 36/runtime 75/integration 4）、format、Clippy、両buildの通過と、native問題が未解決であることを分けて記録する。既存live ignore 3件は実機成功の証拠に含めない。
+- 全所有windowは正常終了。本体の試験回転はUndoし、PNGのSHA-256は`5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`で不変。Save、clipboard、OS設定変更、画面captureなし。診断source・binary・ログはtarget/tmpだけに保持し、これらの成功をscreen readerやlaunch gateの完了とは扱わない。
+
 ### UI Automationの繰り返し確認での取得停止（2026-09-06 21:39 JST）
 
 - f0f1994 CI 34032823555は成功。通常release `DB4BA189E55AADF5FEA202F5DA356B30330E9A0A69E5EC66F468F5E247F477E0`で再調査した。所有PNGコピーを読み込み後に不正PNGへ置換する試行PID 5352（開始UTC 12:22:04.2182507Z）は、保存確認20要素からexport失敗後0要素となった。新しいMTA照会clientでも同じで、Escapeで失敗通知を閉じても戻らない。STAだけの問題やエラー文だけの問題とは断定できない。

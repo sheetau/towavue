@@ -4,6 +4,13 @@
 
 ## 1. 最初に試す
 
+### playlistの画面外行へのkeyboard移動（2026-09-07 00:54 JST）
+
+- 前turnのab655b8はpush済みで作業開始時のworktreeはclean、CI 34043334821は実行中。基準release `469CEA77BDF72E47B383C28DC5D06D5E7F03532832D5E750F5E2009633DA908F`、PID 42612（開始UTC 2026-09-06 15:47:28.9178265Z）で所有50曲の先頭行へUIA Focus、Endを送っても先頭に留まる。1万曲のheadless回帰も同じ期待で失敗した。
+- focus先のpath/IDを現在曲から分離し、上下/Home/End/PageUp/PageDownで必要な行を表示・focusする。Enter/Spaceだけ選曲へ渡す。初案は同frameのEnd→Enterで選曲が抜け、回帰で失敗。移動と実行を受信順に処理し、逆順のSpace→Homeも元の対象を実行するよう修正した。可視Button数は12未満のまま、20行の上下移動、disabled拒否、既存Shell identity・wheel・手動scroll保持を検証した。
+- 中間release `830B0C4FD3A60CD59D73EA8D338262BE3A26B95998568E4CC6A52E16A79B4130`、PID 39192（15:50:21.5244777Z）と最終release `7A9A6585AC63BBBC7284443333811F67E4F398E91535DCDD2C05115D161FDE3C`、PID 42060（15:52:54.3185176Z）でEnd→50、Up→49、Enterで049再生、Home→1、PageDown→13を確認。最初のfocus移動だけでは001を保持する。049をmuteでdirtyにして一覧末尾へ移動・Enterするとguard、背景行disabled、Cancelで049/編集保持、Undoでcleanと正常終了まで通過。物理入力ではなく所有foregroundへの入力注入であり、同frame順序はheadlessの証拠である。
+- 6 playlist tests、254 workspace tests（app 138/core 36/runtime 76/integration 4）、format、Clippy、debug/release buildが通過。既存live ignore 3件は残る。全3windowは正常終了し、所有capture `target/tmp/h1-playlist-keyboard.png`でfocus行表示を目視確認。fixtureは新規生成した1秒無音WAVの50 copiesで、既存素材/Save/clipboard/OS設定は変更していない。ログはSoftware pathと音声用のzero video metricsであり性能gateではない。screen reader全体、filmstripの画面外操作、selectionと既存実環境/配布gateは未完了。
+
 ### trim端点の値操作とfocus保持（2026-09-07 00:44 JST）
 
 - b616c51 CI 34041820031は成功。通常release `46D211EA1B99B5CA458C2B0536357E0251FA4DC98B58DECF586EC85CE6CC0A8B`、PID 44060（開始UTC 2026-09-06 15:28:17.1791577Z）では30秒動画のtimelineに再生位置Sliderだけがあり、開始/終了の名前付きSliderはない。headless回帰もこの欠落で失敗した。

@@ -6,12 +6,14 @@ use towavue_core::{FolderSnapshot, MediaKind};
 #[derive(Default)]
 pub struct Playlist {
     focus: Option<(PathBuf, usize)>,
+    keyboard_focus: Option<(PathBuf, egui::Id)>,
     wheel: crate::wheel_input::Scroll,
 }
 
 impl Playlist {
     pub fn clear(&mut self) {
         self.focus = None;
+        self.keyboard_focus = None;
         self.wheel.clear();
     }
 
@@ -30,6 +32,49 @@ impl Playlist {
             .collect();
         egui::Frame::new().inner_margin(8).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
+            let mut reveal = None;
+            if ui.is_enabled()
+                && !egui::Popup::is_any_open(ui.ctx())
+                && let Some((path, id)) = &self.keyboard_focus
+                && ui.memory(|memory| memory.has_focus(*id))
+                && let Some(mut index) = items.iter().position(|item| &item.path == path)
+            {
+                let page = (ui.available_height() / 32.0).floor().max(1.0) as usize;
+                ui.input_mut(|input| {
+                    input.events.retain(|event| {
+                        let egui::Event::Key {
+                            key,
+                            pressed: true,
+                            modifiers,
+                            ..
+                        } = event
+                        else {
+                            return true;
+                        };
+                        if *modifiers != egui::Modifiers::NONE {
+                            return true;
+                        }
+                        index = match key {
+                            egui::Key::ArrowUp => index.saturating_sub(1),
+                            egui::Key::ArrowDown => (index + 1).min(items.len() - 1),
+                            egui::Key::Home => 0,
+                            egui::Key::End => items.len() - 1,
+                            egui::Key::PageUp => index.saturating_sub(page),
+                            egui::Key::PageDown => (index + page).min(items.len() - 1),
+                            egui::Key::Enter | egui::Key::Space => {
+                                chosen = Some(items[index].path.clone());
+                                return false;
+                            }
+                            _ => return true,
+                        };
+                        reveal = Some(index);
+                        false
+                    });
+                });
+                if reveal.is_some() {
+                    ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+                }
+            }
             let focus = current.and_then(|path| {
                 items
                     .iter()
@@ -49,9 +94,9 @@ impl Playlist {
                     ..Default::default()
                 })
                 .auto_shrink([false, false]);
-            if changed {
+            if changed || reveal.is_some() {
                 self.wheel.clear();
-                if let Some((path, index)) = focus {
+                if let Some(index) = reveal.or_else(|| focus.map(|(_, index)| index)) {
                     let offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
                         .map_or(0.0, |state| state.offset.y);
                     let top = index as f32 * 32.0;
@@ -64,7 +109,7 @@ impl Playlist {
                         offset
                     };
                     scroll = scroll.vertical_scroll_offset(offset);
-                    self.focus = Some((path.to_path_buf(), index));
+                    self.focus = focus.map(|(path, index)| (path.to_path_buf(), index));
                 } else {
                     self.clear();
                 }
@@ -106,6 +151,12 @@ impl Playlist {
                             );
                             ui.add(egui::Label::new(name).wrap());
                         });
+                    if reveal == Some(index) {
+                        response.request_focus();
+                    }
+                    if response.has_focus() {
+                        self.keyboard_focus = Some((item.path.clone(), response.id));
+                    }
                     ui.ctx().accesskit_node_builder(response.id, |node| {
                         node.clear_toggled();
                         node.set_description(format!(
@@ -132,6 +183,118 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn keyboard_focus_reaches_virtualized_rows_without_selecting_them() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let mut playlist = Playlist::default();
+        let snapshot = snapshot(10_000);
+        let current = &snapshot.items[0].path;
+        let mut frame = |events, disabled| {
+            let mut chosen = None;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 240.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    if disabled {
+                        ui.disable();
+                    }
+                    chosen = playlist.show(ui, Some(&snapshot), Some(current), true);
+                },
+            );
+            (
+                output.platform_output.accesskit_update.expect("tree"),
+                chosen,
+            )
+        };
+        let key = |key| Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![], false);
+        let (tree, _) = frame(vec![], false);
+        let first = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("1. track-0.wav"))
+            .expect("first row")
+            .0;
+        frame(
+            vec![Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Focus,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: first,
+                    data: None,
+                },
+            )],
+            false,
+        );
+        for (key_code, expected) in [
+            (egui::Key::End, "10000. track-9999.wav"),
+            (egui::Key::ArrowUp, "9999. track-9998.wav"),
+            (egui::Key::Home, "1. track-0.wav"),
+            (egui::Key::PageDown, "8. track-7.wav"),
+            (egui::Key::PageUp, "1. track-0.wav"),
+        ] {
+            let (tree, chosen) = frame(vec![key(key_code)], false);
+            assert!(chosen.is_none(), "focus navigation must not select a track");
+            let focused = tree
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == tree.focus)
+                .expect("visible focus");
+            assert_eq!(focused.1.label(), Some(expected));
+            assert!(
+                tree.nodes
+                    .iter()
+                    .filter(|(_, node)| node.role() == egui::accesskit::Role::Button)
+                    .count()
+                    < 12,
+                "keep offscreen rows virtualized"
+            );
+        }
+        for index in 1..20 {
+            let (tree, chosen) = frame(vec![key(egui::Key::ArrowDown)], false);
+            assert!(chosen.is_none());
+            assert_eq!(
+                tree.nodes
+                    .iter()
+                    .find(|(id, _)| *id == tree.focus)
+                    .expect("row focus")
+                    .1
+                    .label(),
+                Some(format!("{}. track-{index}.wav", index + 1).as_str())
+            );
+        }
+        assert_eq!(
+            frame(vec![key(egui::Key::Enter)], false).1,
+            Some(snapshot.items[19].path.clone())
+        );
+        assert_eq!(
+            frame(vec![key(egui::Key::End), key(egui::Key::Enter)], false).1,
+            Some(snapshot.items[9999].path.clone()),
+            "a batched Enter must activate the new focus"
+        );
+        assert_eq!(
+            frame(vec![key(egui::Key::Space), key(egui::Key::Home)], false).1,
+            Some(snapshot.items[9999].path.clone()),
+            "activation before navigation retains its original target"
+        );
+        frame(vec![], true);
+        assert!(
+            frame(vec![key(egui::Key::End), key(egui::Key::Enter)], true)
+                .1
+                .is_none()
+        );
+    }
 
     #[test]
     fn accessible_rows_follow_paths_after_shell_updates() {

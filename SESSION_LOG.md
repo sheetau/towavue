@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 00:54 JST - navigate offscreen playlist rows without changing playback
+
+- Trigger/intent: previous turn is progress; ab655b8 is pushed and CI 34043334821 is still running at audit. Native baseline and 10,000-row regression confirm End cannot leave the focused first visible row.
+- Change: track the actual focused row independently from playback; unmodified arrows/Home/End/Page keys reveal and focus the target in Shell audio order. Enter/Space alone selects through the existing guard. Preserve virtualization, pointer/UIA actions, modal/popup exclusion and manual-scroll behavior.
+- Iteration/verification: same-frame End then Enter initially loses activation; process navigation/activation in order, with the reverse ordering also tested. Six playlist tests, 254 workspace tests, format, Clippy and both builds pass; three existing live ignores remain. No dependencies or runtime changes.
+- Native/cleanup: final normal PID 42060 reaches rows 50/49/1/13, selects 049 only on Enter, then dirty navigation reaches the guard with background row disabled; Cancel retains track/edit, Undo and normal close pass. DEVELOPMENT records all three binary/process identities. All trial windows close normally, owned focus capture is inspected. Use newly generated silent fixtures; no original-media, Save, clipboard or OS-setting changes.
+- Status/next: h1_active; prepare this coherent checkpoint for push. Continue screen-reader/focus workflow coverage and remaining filmstrip/selection work, retaining physical-input/DPI/device, final-candidate and distribution gates.
+
 ## 2026-09-07 00:44 JST - expose trim endpoints without losing focus or request order
 
 - Trigger/intent: prior checkpoint is progress; b616c51 CI 34041820031 succeeds. Native baseline and headless regression show no named trim endpoint sliders. Clipboard writes are permitted but not used.

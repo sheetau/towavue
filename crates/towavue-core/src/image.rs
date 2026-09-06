@@ -36,7 +36,20 @@ impl UnitRect {
         if square && image_size.0 > 0 && image_size.1 > 0 {
             let pixel_width = (current.x - start.x).abs() * image_size.0 as f32;
             let pixel_height = (current.y - start.y).abs() * image_size.1 as f32;
-            let side = pixel_width.max(pixel_height);
+            let available_width = if current.x < start.x {
+                start.x
+            } else {
+                1.0 - start.x
+            } * image_size.0 as f32;
+            let available_height = if current.y < start.y {
+                start.y
+            } else {
+                1.0 - start.y
+            } * image_size.1 as f32;
+            let side = pixel_width
+                .max(pixel_height)
+                .min(available_width)
+                .min(available_height);
             current.x = start.x + (side / image_size.0 as f32).copysign(current.x - start.x);
             current.y = start.y + (side / image_size.1 as f32).copysign(current.y - start.y);
             current = current.clamped();
@@ -232,6 +245,32 @@ mod tests {
 
         assert!((selection.width() - 0.2).abs() < f32::EPSILON * 2.0);
         assert!((selection.height() - 0.4).abs() < f32::EPSILON * 2.0);
+    }
+
+    #[test]
+    fn square_drag_stops_at_image_bounds_without_changing_ratio() {
+        for size in [(1_000, 500), (500, 1_000)] {
+            for start in [UnitPoint { x: 0.9, y: 0.2 }, UnitPoint { x: 0.1, y: 0.8 }] {
+                for current in [
+                    UnitPoint { x: 1.2, y: 1.2 },
+                    UnitPoint { x: -0.2, y: 1.2 },
+                    UnitPoint { x: 1.2, y: -0.2 },
+                    UnitPoint { x: -0.2, y: -0.2 },
+                ] {
+                    let selection = UnitRect::from_drag(start, current, size, true);
+                    assert!(
+                        (selection.width() * size.0 as f32 - selection.height() * size.1 as f32)
+                            .abs()
+                            < 0.001
+                    );
+                    assert!(selection.min.x >= 0.0 && selection.min.y >= 0.0);
+                    assert!(selection.max.x <= 1.0 && selection.max.y <= 1.0);
+                    assert!(selection.contains(start));
+                    assert!(selection.min.x == start.x || selection.max.x == start.x);
+                    assert!(selection.min.y == start.y || selection.max.y == start.y);
+                }
+            }
+        }
     }
 
     #[test]

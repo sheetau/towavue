@@ -284,3 +284,5 @@ reading modeの固定8pxの隙間と等分枠による中心ずれを確認し�
 初回画像の画面用変換も測定し、行内が全opaqueの場合だけalpha変換を省くようにした。透明/半透明の既存egui変換とsource RGBAを維持する。通常releaseで未cacheの6000×6000 PNGを5枚開くtitle中央値は233.814→219.187ms、表示248,004 pixelsは一致。全alpha値と混在行の回帰、234 tests・Clippy・両buildが通過。OS file cacheはwarmであり、cold-storage、decode/uploadの無停止化やlaunch全体の完了ではない。
 
 アニメ画像の長いdeadline遅延で過去の全周回を数える処理を発見し、周期の整数剰余で省略するようにした。合成2日gapのrelease単発計測は20.918→0.005ms。同じframeへ戻る場合はuploadを省き、2日/3650日・端数delay・境界の正確なframe/期限を検証。236 tests・Clippy・両buildと通常windowのGIF更新が通過。OSスリープ復帰の実試験ではなく、実環境/配布を含むH1は継続中。
+
+日常選択操作の監査で、Shift正方形/比率付きresizeが画像端で比率を失うことをtestと通常windowで再現した。共通の寸法上限、固定辺/中心とdrag開始比率を保持する修正により、同じ入力が端で正方形のまま止まる。縦横/全方向/zero縮小後と既存取消/cropの回帰、238 tests・Clippy・両build、25cc2e1 CIが通過。読書モードの見開き区切り方はownerへ確認中で、現行navigationは変更していない。実環境/配布を含むH1は継続中。

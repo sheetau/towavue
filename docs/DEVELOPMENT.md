@@ -4,6 +4,15 @@
 
 ## 1. 最初に試す
 
+### 画像端でのShift選択比率（2026-09-06 19:46 JST）
+
+- Shiftで正方形を作る処理が両軸を独立にclampし、画像端で長方形になる問題をcore testと通常release PID 44696で再現した。600×800の赤PNGを960×576で表示し、window内(630,140)→(650,440)をShift dragすると右端の細長い選択になった。Shift付き辺resizeも直交軸だけのclampで比率と中心が変わり、変更前のapp testが失敗した。
+- 正方形作成は始点から両方向へ確保できる共通のpixel寸法で制限する。辺resizeは反対側の辺と直交中心を保ち、画像端に収まる最大寸法で止める。drag前の選択比率を使い、一度幅/高さがzeroになっても戻す操作で比率を復元できる。非Shiftの操作、取消、crop/exportは変更しない。release時の既存整数/動画偶数pixel整列による丸めは残る。
+- core回帰は縦長/横長画像、全4方向と画像外pointerで正方形・始点・境界を検証。app回帰は全4辺と縦横寸法で、zeroへ縮小後の再拡大でも比率・固定辺・中心・境界を維持する。既存の疎な入力、取消/focus/overlay、1 pixel選択、crop制約の回帰も通過。238 tests（app 123/core 36/runtime 75/integration 4）・format・Clippy・両buildが通過し、3件の既存live ignoreは実device証明ではない。
+- 最終通常release PID 47484（開始UTC 2026-09-06T10:45:34.4260795Z）では同じShift dragが右端に収まる正方形になる。Escapeで解除後、(400,80)→(500,180)の通常選択を作り、右辺中央(500,130)→(650,130)のShift dragで上端へ接する正方形のまま止まる。left辺と垂直中心は保持された。前段PID 43360も同形状を確認したが、最終確認はratio基準修正後の47484を使う。
+- foregroundを確認し、注入Shiftはfinallyで解除した。全3所有windowはclean titleで通常終了、Save/source/OS設定変更なし。captures/空のstderr logはignoredの`target/tmp/h1-selection-*`。物理pointer/keyboardやmixed-DPI matrixの代替ではない。
+- 最終binary SHA-256: `38C2D611B88C5C47BB087801C735CED6BF315B92C32EA087FD945CD1767427FD`。baseline binary: `3AE8785A7B8F5F9907966A0A419EFBBA7482A333F46564A79C035CC7B0753D26`。赤PNG: `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`。
+
 ### アニメ画像の長いdeadline遅延（2026-09-06 19:35 JST）
 
 - 既存のframe追従loopは遅れた全周回を一枚ずつ数えていた。1×1の3 frames、delay 10/20/30ms、2日＋35msの時刻差を同じrelease testへ注入すると、追従関数が修正前20.918ms、修正後0.005msだった。実OSスリープ/復帰や画面latencyの試験ではなく、合成時刻でUI側計算を切り分けた単発値である。一周して同じframeへ戻る際の不要なtexture uploadも変更前に回帰testが失敗した。

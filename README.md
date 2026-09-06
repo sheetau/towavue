@@ -126,6 +126,8 @@ gridのkeyはQWERTYの`1234/qwer/asdf/zxcv`に相当する物理位置です。S
 
 画像ではCtrl+wheelまたは+/-でzoom、Ctrl+Hでactual size、Shift+Wでfit、右dragでpanします。左dragでselectionを作り、辺dragでresize、Shift付き作成で正方形、Shift付きresizeで比率を保持します。選択範囲clickまたはCtrl+Shift+Yはcrop previewです。Bでreading mode、Rで縦横切替、Hで表示順反転、Ctrl+[ / Ctrl+]で表示数を2～10枚に変更できます。
 
+Shift付きの選択は画像端で片側だけが潰れないよう、比率を保って拡大を止めます。辺のresizeでは反対側と直交方向の中心を保ち、drag開始時の比率を使います。確定時の整数pixel（動画は偶数pixel）への丸めは従来どおりです。
+
 reading modeは横並びなら高さ、縦並びなら幅を揃え、ページ間の隙間なしで全体を中央へ収めます。各画像の縦横比は保ち、シークバーの見開きpreviewも同じ並べ方を使います。読めないページは場所を残してエラーを表示します。ページ送りは従来どおり一枚ずつです。
 
 選択範囲の始点と辺resizeの判定はbuttonを押した位置を使い、release位置まで反映してからpixelへ丸めます。移動eventが少ないdragで始点がずれたり選択が消えたりする処理を修正しました。

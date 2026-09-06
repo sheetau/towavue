@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 19:46 JST - preserve constrained selection ratios at image edges
+
+- Trigger/evidence: previous turn pushed 25cc2e1 (progress); CI 34027898405 succeeds. Daily-viewing audit reproduces Shift square creation turning into a tall rectangle at the image boundary in normal PID 44696. Core square and app ratio-resize regressions both fail before correction.
+- Change: record the accepted constraint before implementation. Limit square creation by available space in both axes. Ratio edge resize stops expansion while retaining the opposite edge and perpendicular center; use pre-drag ratio so collapsing an extent to zero does not lose it. Keep ordinary drag, cancellation, final pixel alignment, crop/export and runtime boundaries unchanged.
+- Verification: cover portrait/landscape, all four drag directions/edges, outside pointer, fixed origin/edge/center, and zero-collapse/re-expansion. Existing sparse-event, cancellation/focus/overlay, single-pixel and crop regressions pass. Format, Clippy, 238 tests (app 123/core 36/runtime 75/integrations 4) and both builds pass; three existing live ignores are not hardware proof.
+- Native/cleanup: final PID 47484 repeats baseline Shift drag as a bounded square, then clears it and enlarges a selection's right edge while retaining square ratio at the top boundary. Intermediate PID 43360 also inspected; final source includes pre-drag ratio retention. All three owned windows close normally with clean titles, no Save/source/OS changes, and injected Shift released in finally. DEVELOPMENT records hashes/coordinates/limits; captures and empty logs remain ignored under target/tmp/h1-selection-*.
+- Owner choice/status: asked whether reading spreads should be anchored to folder start or the opened image; no answer yet, no navigation change. h1_active. Continue daily-viewing/launch-readiness audit while keeping reading choice, physical input/DPI/device checks and distribution decisions distinct from completed selection work.
+
 ## 2026-09-06 19:35 JST - bound animated-image deadline catch-up
 
 - Trigger/evidence: previous turn pushed b7c9142 (progress); its CI 34027537728 remains in progress, preceding 5d1d529 CI succeeds. Long-gap audit finds framewise catch-up proportional to elapsed cycles. A release test with three 1x1 frames at 10/20/30ms takes 20.918ms after a synthetic two-day gap; a same-frame/full-cycle no-upload regression fails before the fix.

@@ -1870,8 +1870,15 @@ where
         let Some(mut selection) = self.image_view.selection else {
             return;
         };
-        let pixel_ratio = selection.width() * image_size.0 as f32
-            / (selection.height() * image_size.1 as f32).max(1.0);
+        let ratio_selection = match self.view_drag {
+            Some(ViewDrag::Selection {
+                before: Some(before),
+                ..
+            }) => before,
+            _ => selection,
+        };
+        let pixel_ratio = ratio_selection.width() * image_size.0 as f32
+            / (ratio_selection.height() * image_size.1 as f32).max(1.0);
         match edge {
             SelectionDrag::Left => selection.min.x = point.x.min(selection.max.x),
             SelectionDrag::Right => selection.max.x = point.x.max(selection.min.x),
@@ -1882,17 +1889,35 @@ where
         if preserve_ratio && image_size.0 > 0 && image_size.1 > 0 {
             match edge {
                 SelectionDrag::Left | SelectionDrag::Right => {
-                    let height = selection.width() * image_size.0 as f32
+                    let center = (selection.min.y + selection.max.y) * 0.5;
+                    let width = selection.width().min(
+                        2.0 * center.min(1.0 - center) * image_size.1 as f32 * pixel_ratio
+                            / image_size.0 as f32,
+                    );
+                    if matches!(edge, SelectionDrag::Left) {
+                        selection.min.x = selection.max.x - width;
+                    } else {
+                        selection.max.x = selection.min.x + width;
+                    }
+                    let height = width * image_size.0 as f32
                         / pixel_ratio.max(f32::EPSILON)
                         / image_size.1 as f32;
-                    let center = (selection.min.y + selection.max.y) * 0.5;
                     selection.min.y = (center - height * 0.5).max(0.0);
                     selection.max.y = (center + height * 0.5).min(1.0);
                 }
                 SelectionDrag::Top | SelectionDrag::Bottom => {
-                    let width = selection.height() * image_size.1 as f32 * pixel_ratio
-                        / image_size.0 as f32;
                     let center = (selection.min.x + selection.max.x) * 0.5;
+                    let height = selection.height().min(
+                        2.0 * center.min(1.0 - center) * image_size.0 as f32
+                            / pixel_ratio.max(f32::EPSILON)
+                            / image_size.1 as f32,
+                    );
+                    if matches!(edge, SelectionDrag::Top) {
+                        selection.min.y = selection.max.y - height;
+                    } else {
+                        selection.max.y = selection.min.y + height;
+                    }
+                    let width = height * image_size.1 as f32 * pixel_ratio / image_size.0 as f32;
                     selection.min.x = (center - width * 0.5).max(0.0);
                     selection.max.x = (center + width * 0.5).min(1.0);
                 }
@@ -8771,6 +8796,75 @@ mod tests {
                     context.tex_manager().write().take_delta().set.len(),
                     usize::from(expected_frame != current)
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn selection_edge_ratio_stops_at_bounds_without_moving_its_anchor() {
+        let Some(_root) = isolated_test_root(
+            "tests::selection_edge_ratio_stops_at_bounds_without_moving_its_anchor",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        for size in [(1_000, 500), (500, 1_000)] {
+            for edge in [
+                SelectionDrag::Left,
+                SelectionDrag::Right,
+                SelectionDrag::Top,
+                SelectionDrag::Bottom,
+            ] {
+                let horizontal = matches!(edge, SelectionDrag::Left | SelectionDrag::Right);
+                let before = if horizontal {
+                    UnitRect {
+                        min: UnitPoint { x: 0.4, y: 0.1 },
+                        max: UnitPoint { x: 0.6, y: 0.3 },
+                    }
+                } else {
+                    UnitRect {
+                        min: UnitPoint { x: 0.1, y: 0.4 },
+                        max: UnitPoint { x: 0.3, y: 0.6 },
+                    }
+                };
+                app.image_view.selection = Some(before);
+                app.view_drag = Some(ViewDrag::Selection {
+                    mode: edge,
+                    before: Some(before),
+                });
+                let collapsed = match edge {
+                    SelectionDrag::Left | SelectionDrag::Top => before.max,
+                    _ => before.min,
+                };
+                app.resize_selection(edge, collapsed, true, size);
+                let target = match edge {
+                    SelectionDrag::Left | SelectionDrag::Top => UnitPoint { x: 0.0, y: 0.0 },
+                    _ => UnitPoint { x: 1.0, y: 1.0 },
+                };
+                app.resize_selection(edge, target, true, size);
+                let after = app.image_view.selection.expect("selection");
+                assert!(
+                    (after.width() / after.height() - before.width() / before.height()).abs()
+                        < 0.00001
+                );
+                assert!(after.min.x >= 0.0 && after.min.y >= 0.0);
+                assert!(after.max.x <= 1.0 && after.max.y <= 1.0);
+                if horizontal {
+                    assert!(
+                        (after.min.y + after.max.y - before.min.y - before.max.y).abs() < 0.00001
+                    );
+                } else {
+                    assert!(
+                        (after.min.x + after.max.x - before.min.x - before.max.x).abs() < 0.00001
+                    );
+                }
+                match edge {
+                    SelectionDrag::Left => assert_eq!(after.max.x, before.max.x),
+                    SelectionDrag::Right => assert_eq!(after.min.x, before.min.x),
+                    SelectionDrag::Top => assert_eq!(after.max.y, before.max.y),
+                    SelectionDrag::Bottom => assert_eq!(after.min.y, before.min.y),
+                    _ => unreachable!(),
+                }
             }
         }
     }

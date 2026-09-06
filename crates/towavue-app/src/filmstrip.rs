@@ -20,6 +20,7 @@ pub struct Filmstrip {
     visible: Vec<PathBuf>,
     previews: HashMap<PathBuf, Preview>,
     focus: Option<PathBuf>,
+    focus_requested: bool,
 }
 
 impl Filmstrip {
@@ -30,16 +31,22 @@ impl Filmstrip {
             visible: Vec::new(),
             previews: HashMap::new(),
             focus: None,
+            focus_requested: false,
         })
     }
 
     pub fn clear(&mut self) {
+        self.focus_requested = false;
         if !self.visible.is_empty() || self.focus.is_some() {
             self.generation = self.loader.request(Vec::new());
             self.visible.clear();
             self.previews.clear();
             self.focus = None;
         }
+    }
+
+    pub fn focus_current(&mut self) {
+        self.focus_requested = true;
     }
 
     pub fn finish(&mut self, context: &Context) {
@@ -166,7 +173,7 @@ impl Filmstrip {
                     .auto_shrink([false, false])
                     .max_height(HEIGHT)
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
-                if recenter {
+                if recenter || self.focus_requested {
                     scroll = scroll.horizontal_scroll_offset(selected.unwrap_or(0) as f32 * STEP);
                 }
                 scroll.show_viewport(ui, |ui, viewport| {
@@ -189,6 +196,14 @@ impl Filmstrip {
                             egui::Sense::click(),
                         );
                         let active = selected == Some(index);
+                        if active
+                            && self.focus_requested
+                            && response.enabled()
+                            && !egui::Popup::is_any_open(context)
+                        {
+                            response.request_focus();
+                            self.focus_requested = false;
+                        }
                         response.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,
@@ -307,6 +322,130 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, MediaKind, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn keyboard_focus_request_reveals_current_once_and_waits_for_items() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-filmstrip-focus-{}", std::process::id()));
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                .expect("worker");
+        let snapshot = FolderSnapshot {
+            folder_identity: ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: (0..50_000)
+                .map(|index| FolderMediaItem {
+                    identity: ShellIdentity::new(vec![]),
+                    path: root.join(format!("{index}.png")),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: SystemTime::now(),
+        };
+        let context = Context::default();
+        context.enable_accesskit();
+        let frame = |strip: &mut Filmstrip, snapshot, current, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |_| strip.show(&context, snapshot, current, &mut actions),
+            );
+            assert!(actions.is_empty(), "focus requests do not open media");
+            output.platform_output.accesskit_update.expect("tree")
+        };
+        strip.focus_current();
+        frame(&mut strip, None, None, vec![]);
+        assert!(strip.focus_requested, "wait for the folder snapshot");
+        for _ in 0..3 {
+            frame(
+                &mut strip,
+                Some(&snapshot),
+                Some(&snapshot.items[0].path),
+                vec![],
+            );
+        }
+        let tree = frame(
+            &mut strip,
+            Some(&snapshot),
+            Some(&snapshot.items[0].path),
+            vec![],
+        );
+        assert_eq!(
+            tree.nodes
+                .iter()
+                .find(|(id, _)| *id == tree.focus)
+                .expect("focused first item")
+                .1
+                .label(),
+            Some("0.png")
+        );
+        strip.focus_current();
+        let tree = frame(
+            &mut strip,
+            Some(&snapshot),
+            Some(&snapshot.items[49_999].path),
+            vec![],
+        );
+        assert_eq!(
+            tree.nodes
+                .iter()
+                .find(|(id, _)| *id == tree.focus)
+                .expect("focused last item")
+                .1
+                .label(),
+            Some("49999.png")
+        );
+        assert!(!strip.focus_requested);
+        assert!(strip.visible.len() <= 9);
+        let other = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("49998.png")
+            })
+            .expect("previous item")
+            .0;
+        frame(
+            &mut strip,
+            Some(&snapshot),
+            Some(&snapshot.items[49_999].path),
+            vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Focus,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: other,
+                    data: None,
+                },
+            )],
+        );
+        assert_eq!(
+            frame(
+                &mut strip,
+                Some(&snapshot),
+                Some(&snapshot.items[49_999].path),
+                vec![]
+            )
+            .focus,
+            other,
+            "ordinary redraw does not steal focus"
+        );
+        strip.focus_current();
+        strip.clear();
+        assert!(
+            !strip.focus_requested,
+            "closing clears a pending focus request"
+        );
+    }
 
     #[test]
     fn accessible_items_follow_paths_and_keep_current_item_noop() {

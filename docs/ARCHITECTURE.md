@@ -212,6 +212,8 @@ filmstripは中央の横scroll overlayとし、背景を暗くして現在項目
 
 Tabはeguiのfocus traversalより前にfilmstripへ渡す。ただしpalette、grid、modal確認の最中は横取りしない。縦wheelの横変換はfilmstripのscroll領域だけに設定し、他のUIのscroll方向は変えない。
 
+Tab/Shift+Tabによる移動は、既存のguard付きNavigate後に現在項目への一回のfocus要求も残す。表示可能になった現在項目を中央へ寄せてfocusし、通常再描画ではfocusを奪わない。snapshot未到着・Area sizing中は待ち、clearで要求を破棄する。保存確認中はfilmstripを表示しない既存制約で背景focusを防ぎ、Cancel後は変更していない現在pathへ戻る。項目focusがEscapeを消費する前に既存のoverlay解除へ渡すが、通常windowのmenu popup・palette・modalはそれぞれの入力を優先する。
+
 画面内の項目だけを単一runtime workerへ要求する。待機要求は最新1件、最大64項目、RGBAは各240×160以下とし、結果はpath/generationで照合する。UI textureは現在の可視集合だけ保持し、folder snapshot更新・closeでは失効する。diskは既存のmetadata付き64 MiB preview cacheを共有する。古い要求の未開始項目は処理せず、開始済みFFmpeg/FFprobeは下記preview取消tokenで停止する。window closeでそのprocess完了をjoinしない。decoder作業領域のメモリ上限は保証しない。
 
 ### H1 external file drop

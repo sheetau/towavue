@@ -4581,6 +4581,7 @@ where
                 .intersects(ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER)
         {
             self.navigate(!self.modifiers.shift_key(), false);
+            self.filmstrip.focus_current();
             return;
         }
         let Some(stroke) = self.key_stroke(event) else {
@@ -5220,6 +5221,11 @@ where
             self.viewing_cursor.activity();
         }
         if (self.fullscreen
+            || (self.filmstrip_open
+                && !self
+                    .ui_context
+                    .as_ref()
+                    .is_some_and(egui::Popup::is_any_open))
             || self.view_drag.is_some()
             || self
                 .ui_context

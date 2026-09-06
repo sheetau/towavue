@@ -316,3 +316,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 2026-09-07 00:44、trim開始/終了へsource秒の値操作とfocus keyを追加した。編集後も同じUIA対象を保ち、両端点の数値要求は受信順に既存検証・Undoへ渡す。通常releaseで値変更・逆転拒否・focus/Undo・確認中の拒否・従来dragが通過し、253 tests・必須check・両buildも通過。selection、画面外項目、全screen reader/実環境/配布などのH1 gateは継続する。
 
 2026-09-07 00:54、playlistの画面外行へ上下/Home/End/Pageでfocus移動できるようにした。移動は再生曲を変えず、Enter/Spaceで既存guard付き選曲へ渡す。1万曲で可視行限定のまま到達する回帰と通常releaseの末尾移動・選曲・未保存Cancel、254 tests・必須check・両buildが通過。全screen reader、filmstripの画面外操作、selectionと実環境/配布gateは継続する。
+
+2026-09-07 01:04、filmstripのTab移動後にfocusが旧項目へ残る問題と、項目focus中のEscapeがoverlayを閉じない問題を通常buildで修正確認した。5万項目の限定描画/focus回帰、連続Tab/逆移動、保存確認Cancel後の保持、255 tests・必須check・両buildが通過。全screen reader/selection・実環境/最終候補/配布を含むH1 gateは引き続き未完了。

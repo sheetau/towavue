@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 01:04 JST - align filmstrip keyboard focus with navigation
+
+- Trigger/intent: previous turn is progress; 1d64216 CI 34043801020 succeeds during this turn. Native baseline shows Tab changes 001 to 002 but leaves focus on 001.
+- Change: request current-item focus once after guarded filmstrip Tab/Shift+Tab navigation; reveal the target without expanding virtualization or stealing focus on ordinary redraws. Preserve pending requests through missing snapshot/Area sizing, and cancel on clear. Also route filmstrip Escape before focused-item key capture, leaving normal-window menu/palette/modal precedence intact.
+- Evidence/iteration: the intermediate normal build fixes forward/reverse focus but Escape only clears focus and leaves filmstrip buttons in the native tree. Fix the routing and repeat. An initial foreground failure sends no keys; revalidate and reuse the same live process. DEVELOPMENT excludes the baseline's out-of-range Escape query from closure evidence.
+- Verification: new 50,000-item regression, five filmstrip tests, 255 workspace tests, format, Clippy and both builds pass; three existing live ignores remain. Final normal PID 24540 passes 002 through 014, reverse to 013, one-Escape close, dirty Tab guard/Cancel with original track/edit/current focus, Undo and normal close.
+- Cleanup/status: all three windows close normally; inspect the owned focus capture. Reuse silent fixtures; no Save/clipboard/original-media/OS-setting changes. Logs are narrow audio-path evidence, not a performance gate. h1_active; prepare this checkpoint for push.
+- Next: continue complete focus/screen-reader and selection workflows, preserving the remaining physical-input/DPI/device, final-candidate, distribution and owner-acceptance gates.
+
 ## 2026-09-07 00:54 JST - navigate offscreen playlist rows without changing playback
 
 - Trigger/intent: previous turn is progress; ab655b8 is pushed and CI 34043334821 is still running at audit. Native baseline and 10,000-row regression confirm End cannot leave the focused first visible row.

@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### filmstripのTab focus追従とEscape（2026-09-07 01:04 JST）
+
+- 前turnの1d64216はpush済み、作業開始時worktreeはclean。CI 34043801020は作業中に成功。基準release `7A9A6585AC63BBBC7284443333811F67E4F398E91535DCDD2C05115D161FDE3C`、PID 43388（開始UTC 2026-09-06 15:56:32.4766748Z）で所有50曲のfilmstrip 001へUIA Focus後、Tabで002を再生してもfocusは001に留まった。
+- Tabのguard付きNavigate後に一回の現在項目focus要求を追加。5万項目の回帰でsnapshot待ち・初回Area sizing、先頭から末尾へのfocus、最大9可視項目、再描画時の別focus保持とclearでの取消を確認した。新しい移動commandや全件描画は追加しない。
+- 中間release `EE599CEB76BE73B401A1C5386D4781BDF5055F1CC5A1FC09E1493F235D8A2EA3`、PID 20280（16:00:51.2199388Z）で002～014のTab/逆移動focusは一致したが、Escapeはfocusだけを解除してfilmstripを残した。後続UIA treeにも009～017のfilmstrip Buttonが存在する。この入口も修正した。最初の試行はforeground確認で入力前に停止し、同じPID/開始時刻を確認して再試行した。基準試行のEscape後014照会は元から可視範囲外なので、閉じた証拠には含めない。
+- 最終release `294DCD4ED37A2476F600713CEFE60146ADBAE59A388E55E6850F893C8219EAE4`、PID 24540（16:02:51.9426810Z）で同じ連続Tab→014、Shift+Tab→013、Escape一回でfilmstrip消失が通過。013をmuteでdirtyにして再open・Tabすると保存確認へ入り、Cancelで013/編集を保持して013のfocusへ戻る。Escape、Undoでclean、正常終了まで確認した。keyboardは所有foregroundへの入力注入であり物理入力ではない。
+- 5 filmstrip tests、255 workspace tests（app 139/core 36/runtime 76/integration 4）、format、Clippy、debug/release buildが通過。既存live ignore 3件は残る。全3windowは正常終了、所有capture `target/tmp/h1-filmstrip-focus.png`の013表示/focusを目視確認。既存の無音WAV fixtureを使い、Save/clipboard/原本/OS設定変更なし。Software pathと音声用zero video metricsは性能gateではない。screen reader全体、selection、他のfocus経路、実入力/DPI/device・最終候補/配布gateは継続する。
+
 ### playlistの画面外行へのkeyboard移動（2026-09-07 00:54 JST）
 
 - 前turnのab655b8はpush済みで作業開始時のworktreeはclean、CI 34043334821は実行中。基準release `469CEA77BDF72E47B383C28DC5D06D5E7F03532832D5E750F5E2009633DA908F`、PID 42612（開始UTC 2026-09-06 15:47:28.9178265Z）で所有50曲の先頭行へUIA Focus、Endを送っても先頭に留まる。1万曲のheadless回帰も同じ期待で失敗した。

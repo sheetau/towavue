@@ -1041,11 +1041,16 @@ fn transport_seek_point(
     }
 }
 
-pub(crate) fn preview_seek_start(path: &Path, target: Duration) -> Result<Duration, DecodeError> {
+pub(crate) fn preview_seek_start(
+    path: &Path,
+    target: Duration,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<Duration, DecodeError> {
+    check_cancelled(cancelled)?;
     ffmpeg::init()?;
     let mut input = format::input(path)?;
     let target_time = MediaTime::from_nanoseconds(target.as_nanos().min(i64::MAX as u128) as i64);
-    Ok(transport_seek_point(&mut input, target_time, &|| false)?
+    Ok(transport_seek_point(&mut input, target_time, cancelled)?
         .map(|point| Duration::from_micros(point.start_microseconds as u64))
         .unwrap_or(target))
 }

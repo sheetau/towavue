@@ -4,7 +4,7 @@ use std::thread;
 
 use towavue_core::MediaKind;
 
-use crate::{MediaPreview, PreviewCache};
+use crate::{Cancellation, MediaPreview, PreviewCache};
 
 pub const VISIBLE_PREVIEW_LIMIT: usize = 64;
 
@@ -20,6 +20,7 @@ struct Mailbox {
     pending: Option<Vec<(PathBuf, MediaKind)>>,
     completed: Vec<LoadedPreview>,
     closed: bool,
+    cancellation: Cancellation,
 }
 
 pub struct PreviewLoader {
@@ -33,8 +34,9 @@ impl PreviewLoader {
         thread::Builder::new()
             .name("towavue-filmstrip".into())
             .spawn(move || {
-                run_worker(worker_shared, notify, |path, kind| {
+                run_worker(worker_shared, notify, |path, kind, cancellation| {
                     cache
+                        .cancellable(cancellation.clone())
                         .filmstrip(path, kind)
                         .map_err(|error| error.to_string())
                 });
@@ -45,6 +47,8 @@ impl PreviewLoader {
     pub fn request(&self, paths: Vec<(PathBuf, MediaKind)>) -> u64 {
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("preview mailbox");
+        mailbox.cancellation.cancel();
+        mailbox.cancellation = Cancellation::default();
         mailbox.generation = mailbox.generation.wrapping_add(1);
         mailbox.pending =
             (!paths.is_empty()).then(|| paths.into_iter().take(VISIBLE_PREVIEW_LIMIT).collect());
@@ -63,21 +67,22 @@ impl Drop for PreviewLoader {
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("preview mailbox");
         mailbox.closed = true;
+        mailbox.cancellation.cancel();
         mailbox.pending = None;
         mailbox.completed.clear();
         ready.notify_one();
-        // An in-flight preview process owns no window/GPU objects and cannot publish after close.
+        // Cancel the owned child without joining work that may still be inside native probing.
     }
 }
 
 fn run_worker(
     shared: Arc<(Mutex<Mailbox>, Condvar)>,
     notify: impl Fn(),
-    generate: impl Fn(&std::path::Path, MediaKind) -> Result<MediaPreview, String>,
+    generate: impl Fn(&std::path::Path, MediaKind, &Cancellation) -> Result<MediaPreview, String>,
 ) {
     let (mutex, ready) = &*shared;
     loop {
-        let (generation, paths) = {
+        let (generation, paths, cancellation) = {
             let mut mailbox = ready
                 .wait_while(mutex.lock().expect("preview mailbox"), |mailbox| {
                     !mailbox.closed && mailbox.pending.is_none()
@@ -89,6 +94,7 @@ fn run_worker(
             (
                 mailbox.generation,
                 mailbox.pending.take().expect("pending previews"),
+                mailbox.cancellation.clone(),
             )
         };
         for (path, kind) in paths {
@@ -98,7 +104,7 @@ fn run_worker(
                     break;
                 }
             }
-            let result = generate(&path, kind);
+            let result = generate(&path, kind, &cancellation);
             let publish = {
                 let mut mailbox = mutex.lock().expect("preview mailbox");
                 if mailbox.closed || mailbox.generation != generation {
@@ -137,7 +143,7 @@ mod tests {
             run_worker(
                 shared,
                 || tx.send(()).expect("notify progress"),
-                |_, _| Err("fixture failure".into()),
+                |_, _, _| Err("fixture failure".into()),
             )
         });
         let generation = loader.request(
@@ -175,12 +181,15 @@ mod tests {
                 run_worker(
                     shared,
                     || ready_tx.send(()).expect("notify result"),
-                    |path, _| {
+                    |path, _, cancellation| {
                         started_tx.send(path.to_owned()).expect("notify start");
                         if path == std::path::Path::new("old.png") {
                             release_rx
                                 .recv_timeout(Duration::from_secs(5))
                                 .expect("release generation");
+                            assert!(cancellation.is_cancelled());
+                        } else {
+                            assert!(!cancellation.is_cancelled());
                         }
                         Err("fixture failure".into())
                     },

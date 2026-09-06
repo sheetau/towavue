@@ -280,7 +280,7 @@ private mediaをrepositoryやissueへ添付しない。再現fixtureを作る場
 - 通常clickで同tab移動、middle clickで新規tab、未保存回転後の別項目clickでdirty guard、Cancelで編集保持を確認した。Tab / Shift+Tabは当初eguiのfocus移動に消費され、通常wheelも横移動しなかった。filmstripの入力優先と局所scroll設定を修正後、実windowで前後移動・wheel横移動を確認した。key送信を含む試験であり、物理keyboard/IME matrixではない。
 - 開いているfolderへ壊れたPNGを追加するとwatcherが列を更新し、該当項目だけNo previewとなった。可視項目以外は要求しない。5万件の仮想snapshot testで960×576の要求数は9件以内となり、現在項目変更、primary/middle click、wheel、範囲外texture破棄を確認した。worker testは最大64件、段階的通知、古い未開始項目の省略、実行中結果の失効、close時の非待機を確認する。5万fileの実Explorer測定ではない。
 - 表示が落ち着いた静止画＋filmstripの5秒間CPU時間は15.625 ms。別pathのcold preview cacheで30秒H.264/AAC再生中に開くと、900 presented / 0 dropped / 0 CPU transfers、drift p95/max 4.138/4.557 msでEOFに到達した。いずれも基準機の単発debug trialで、全codec・大規模folder・DPI/monitorの性能保証ではない。
-- 開始済みFFmpeg/FFprobeは強制cancelしない。遅い/破損mediaのprocessが終了するまでは同workerの後続項目が待つが、古い結果は適用せずwindow closeもjoinしない。既存64 MiB disk cacheを共有し、表示用RGBAは各240×160、UI textureは可視集合のみ保持する。
+- 表示範囲の変更・clear・closeは開始済みのowned FFmpeg/FFprobeも停止する。native probeや同じ要求内の遅いmediaは後続項目を待たせる場合があるが、古い結果は適用せずwindow closeもjoinしない。既存64 MiB disk cacheを共有し、表示用RGBAは各240×160、UI textureは可視集合のみ保持する。
 
 ### H1で確認したExplorer drop scenario
 

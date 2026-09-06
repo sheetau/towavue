@@ -764,7 +764,8 @@ where
         let notify = Arc::clone(&self.notify);
         let generation = self.media_generation;
         self.waveform_loading = true;
-        self.waveform_worker.submit(move || {
+        self.waveform_worker.submit(move |cancellation| {
+            let cache = cache.cancellable(cancellation);
             let result = cache
                 .waveform(&path, 640, 96)
                 .map_err(|error| error.to_string());
@@ -783,7 +784,8 @@ where
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
         self.thumbnail_loading = Some(bucket);
-        self.thumbnail_worker.submit(move || {
+        self.thumbnail_worker.submit(move |cancellation| {
+            let cache = cache.cancellable(cancellation);
             let result = cache
                 .thumbnail(&path, position, 240)
                 .map_err(|error| error.to_string());
@@ -795,7 +797,8 @@ where
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
         let generation = self.media_generation;
-        self.duration_worker.submit(move || {
+        self.duration_worker.submit(move |cancellation| {
+            let cache = cache.cancellable(cancellation);
             let result = cache.duration(&path).map_err(|error| error.to_string());
             notify(AppEvent::Duration(path, generation, result));
         });

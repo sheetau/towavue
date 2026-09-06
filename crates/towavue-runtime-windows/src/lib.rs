@@ -1,6 +1,7 @@
 //! Windows-specific media, graphics, audio, and Shell integration boundary.
 
 mod audio;
+mod cancellation;
 mod decode;
 mod dialog;
 mod export;
@@ -19,6 +20,7 @@ mod tempo;
 mod watch;
 
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};
+pub use cancellation::Cancellation;
 pub use decode::{AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, VideoFrame};
 pub use dialog::{
     DialogError, FileDialogKind, PromptButtons, PromptResponse, cursor_position_in_window,

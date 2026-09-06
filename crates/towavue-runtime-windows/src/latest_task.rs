@@ -1,12 +1,15 @@
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
-type Task = Box<dyn FnOnce() + Send>;
+use crate::Cancellation;
+
+type Task = Box<dyn FnOnce(Cancellation) + Send>;
 
 #[derive(Default)]
 struct Mailbox {
     pending: Option<Task>,
     closed: bool,
+    cancellation: Cancellation,
 }
 
 /// Runs one task at a time, retaining only the latest unstarted task.
@@ -21,7 +24,7 @@ impl LatestTask {
         thread::Builder::new().name(name.into()).spawn(move || {
             let (mutex, ready) = &*worker_shared;
             loop {
-                let task = {
+                let (task, cancellation) = {
                     let mut mailbox = ready
                         .wait_while(mutex.lock().expect("task mailbox"), |mailbox| {
                             !mailbox.closed && mailbox.pending.is_none()
@@ -30,21 +33,29 @@ impl LatestTask {
                     if mailbox.closed {
                         return;
                     }
-                    mailbox.pending.take().expect("pending task")
+                    (
+                        mailbox.pending.take().expect("pending task"),
+                        mailbox.cancellation.clone(),
+                    )
                 };
-                task();
+                task(cancellation);
             }
         })?;
         Ok(Self { shared })
     }
 
-    pub fn submit(&self, task: impl FnOnce() + Send + 'static) {
-        self.shared.0.lock().expect("task mailbox").pending = Some(Box::new(task));
+    pub fn submit(&self, task: impl FnOnce(Cancellation) + Send + 'static) {
+        let mut mailbox = self.shared.0.lock().expect("task mailbox");
+        mailbox.cancellation.cancel();
+        mailbox.cancellation = Cancellation::default();
+        mailbox.pending = Some(Box::new(task));
         self.shared.1.notify_one();
     }
 
     pub fn clear(&self) {
-        self.shared.0.lock().expect("task mailbox").pending = None;
+        let mut mailbox = self.shared.0.lock().expect("task mailbox");
+        mailbox.cancellation.cancel();
+        mailbox.pending = None;
     }
 }
 
@@ -52,6 +63,7 @@ impl Drop for LatestTask {
     fn drop(&mut self) {
         let mut mailbox = self.shared.0.lock().expect("task mailbox");
         mailbox.closed = true;
+        mailbox.cancellation.cancel();
         mailbox.pending = None;
         self.shared.1.notify_one();
         // In-flight preview work owns no window/GPU resources; do not block window close.
@@ -71,7 +83,7 @@ mod tests {
             let worker = LatestTask::new("latest-task-test").expect("worker");
             let (started_tx, started_rx) = mpsc::channel();
             let (release_tx, release_rx) = mpsc::channel();
-            worker.submit(move || {
+            worker.submit(move |_| {
                 started_tx.send(()).expect("started");
                 release_rx
                     .recv_timeout(Duration::from_secs(5))
@@ -83,7 +95,7 @@ mod tests {
             let (result_tx, result_rx) = mpsc::channel();
             for index in 0..1000 {
                 let tx = result_tx.clone();
-                worker.submit(move || {
+                worker.submit(move |_| {
                     tx.send(index).expect("result");
                 });
             }
@@ -108,7 +120,7 @@ mod tests {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let (finished_tx, finished_rx) = mpsc::channel();
-        worker.submit(move || {
+        worker.submit(move |_| {
             started_tx.send(()).expect("started");
             release_rx
                 .recv_timeout(Duration::from_secs(5))
@@ -119,7 +131,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("first task");
         let (pending_tx, pending_rx) = mpsc::channel();
-        worker.submit(move || {
+        worker.submit(move |_| {
             pending_tx.send(()).expect("must not execute");
         });
         drop(worker);

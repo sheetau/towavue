@@ -8,6 +8,8 @@ use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use towavue_core::MediaKind;
 
+use crate::Cancellation;
+
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CACHE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -25,6 +27,8 @@ pub struct MediaPreview {
 
 #[derive(Debug, Error)]
 pub enum PreviewError {
+    #[error("preview cancelled")]
+    Cancelled,
     #[error("preview cache I/O failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("could not decode generated preview: {0}")]
@@ -47,6 +51,7 @@ pub enum PreviewError {
 #[derive(Clone)]
 pub struct PreviewCache {
     root: PathBuf,
+    cancellation: Option<Cancellation>,
 }
 
 impl PreviewCache {
@@ -61,7 +66,21 @@ impl PreviewCache {
 
     pub fn new(root: PathBuf) -> Result<Self, PreviewError> {
         fs::create_dir_all(&root)?;
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            cancellation: None,
+        })
+    }
+
+    pub fn cancellable(&self, cancellation: Cancellation) -> Self {
+        Self {
+            root: self.root.clone(),
+            cancellation: Some(cancellation),
+        }
+    }
+
+    fn check_cancelled(&self) -> Result<(), PreviewError> {
+        check_cancelled(self.cancellation.as_ref())
     }
 
     pub fn thumbnail(
@@ -70,12 +89,14 @@ impl PreviewCache {
         position: Duration,
         width: u32,
     ) -> Result<PreviewImage, PreviewError> {
+        self.check_cancelled()?;
         let key = cache_key(
             source,
             &format!("thumbnail-v2-{}-{width}", position.as_millis()),
         )?;
         self.load_or_generate(key, || {
-            let mut arguments = preview_input_arguments(source, position)?;
+            let mut arguments =
+                preview_input_arguments(source, position, self.cancellation.as_ref())?;
             arguments.extend([
                 "-map".into(),
                 "0:v:0".into(),
@@ -84,11 +105,12 @@ impl PreviewCache {
                 "-frames:v".into(),
                 "1".into(),
             ]);
-            run_ffmpeg(&arguments)
+            run_ffmpeg(&arguments, self.cancellation.as_ref())
         })
     }
 
     pub fn filmstrip(&self, source: &Path, kind: MediaKind) -> Result<MediaPreview, PreviewError> {
+        self.check_cancelled()?;
         let duration = (kind != MediaKind::Image)
             .then(|| self.duration(source).ok())
             .flatten();
@@ -98,7 +120,7 @@ impl PreviewCache {
             let key = cache_key(source, "filmstrip-v2")?;
             self.load_or_generate(key, || {
                 let position = duration.unwrap_or_default().mul_f64(0.1);
-                let mut arguments = preview_input_arguments(source, position)?;
+                let mut arguments = preview_input_arguments(source, position, self.cancellation.as_ref())?;
                 arguments.extend([
                     "-map".into(),
                     "0:v:0".into(),
@@ -107,7 +129,7 @@ impl PreviewCache {
                     "-frames:v".into(),
                     "1".into(),
                 ]);
-                run_ffmpeg(&arguments)
+                run_ffmpeg(&arguments, self.cancellation.as_ref())
             })?
         };
         Ok(MediaPreview { image, duration })
@@ -119,6 +141,7 @@ impl PreviewCache {
         width: u32,
         height: u32,
     ) -> Result<PreviewImage, PreviewError> {
+        self.check_cancelled()?;
         let key = cache_key(source, &format!("waveform-{width}-{height}"))?;
         self.load_or_generate(key, || {
             run_ffmpeg(&[
@@ -132,13 +155,13 @@ impl PreviewCache {
                 "[wave]".into(),
                 "-frames:v".into(),
                 "1".into(),
-            ])
+            ], self.cancellation.as_ref())
         })
     }
 
     pub fn duration(&self, source: &Path) -> Result<Duration, PreviewError> {
         let executable = tool_path("ffprobe.exe");
-        let output = hidden_command(
+        let command = hidden_command(
             &executable,
             [
                 "-v",
@@ -149,12 +172,8 @@ impl PreviewCache {
                 "default=noprint_wrappers=1",
                 &source.display().to_string(),
             ],
-        )
-        .output()
-        .map_err(|source| PreviewError::Start {
-            program: "FFprobe",
-            source,
-        })?;
+        );
+        let output = run_command(command, self.cancellation.as_ref(), "FFprobe")?;
         if !output.status.success() {
             return Err(PreviewError::InvalidDuration);
         }
@@ -166,14 +185,17 @@ impl PreviewCache {
         key: String,
         generate: impl FnOnce() -> Result<Vec<u8>, PreviewError>,
     ) -> Result<PreviewImage, PreviewError> {
+        self.check_cancelled()?;
         let path = self.root.join(format!("{key}.png"));
         if let Ok(bytes) = fs::read(&path)
             && let Ok(image) = decode_png(&bytes)
         {
+            self.check_cancelled()?;
             return Ok(image);
         }
         let bytes = generate()?;
         let image = decode_png(&bytes)?;
+        self.check_cancelled()?;
         let temporary = self.root.join(format!("{key}.{}.tmp", std::process::id()));
         fs::write(&temporary, &bytes)?;
         if let Err(error) = fs::rename(&temporary, &path) {
@@ -234,9 +256,12 @@ fn cache_key(source: &Path, variant: &str) -> Result<String, PreviewError> {
     Ok(format!("{:016x}", hasher.finish()))
 }
 
-fn run_ffmpeg(arguments: &[String]) -> Result<Vec<u8>, PreviewError> {
+fn run_ffmpeg(
+    arguments: &[String],
+    cancellation: Option<&Cancellation>,
+) -> Result<Vec<u8>, PreviewError> {
     let executable = tool_path("ffmpeg.exe");
-    let output = hidden_command(
+    let command = hidden_command(
         &executable,
         ["-hide_banner", "-loglevel", "error"]
             .into_iter()
@@ -249,12 +274,8 @@ fn run_ffmpeg(arguments: &[String]) -> Result<Vec<u8>, PreviewError> {
                 "png".into(),
                 "pipe:1".into(),
             ]),
-    )
-    .output()
-    .map_err(|source| PreviewError::Start {
-        program: "FFmpeg",
-        source,
-    })?;
+    );
+    let output = run_command(command, cancellation, "FFmpeg")?;
     if !output.status.success() || output.stdout.is_empty() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         return Err(PreviewError::Generate(if message.is_empty() {
@@ -287,11 +308,18 @@ fn tool_path(name: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
-fn preview_input_arguments(source: &Path, position: Duration) -> Result<Vec<String>, PreviewError> {
+fn preview_input_arguments(
+    source: &Path,
+    position: Duration,
+    cancellation: Option<&Cancellation>,
+) -> Result<Vec<String>, PreviewError> {
+    check_cancelled(cancellation)?;
     let start = if position.is_zero() || MediaKind::from_path(source) == Some(MediaKind::Image) {
         position
     } else {
-        crate::decode::preview_seek_start(source, position)?
+        crate::decode::preview_seek_start(source, position, &|| {
+            cancellation.is_some_and(Cancellation::is_cancelled)
+        })?
     };
     let mut arguments = vec![
         "-ss".into(),
@@ -306,6 +334,28 @@ fn preview_input_arguments(source: &Path, position: Duration) -> Result<Vec<Stri
         ]);
     }
     Ok(arguments)
+}
+
+fn check_cancelled(cancellation: Option<&Cancellation>) -> Result<(), PreviewError> {
+    if cancellation.is_some_and(Cancellation::is_cancelled) {
+        Err(PreviewError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
+fn run_command(
+    mut command: Command,
+    cancellation: Option<&Cancellation>,
+    program: &'static str,
+) -> Result<std::process::Output, PreviewError> {
+    check_cancelled(cancellation)?;
+    let output = match cancellation {
+        Some(cancellation) => cancellation.output(command),
+        None => command.output(),
+    };
+    check_cancelled(cancellation)?;
+    output.map_err(|source| PreviewError::Start { program, source })
 }
 
 fn probed_duration(text: &str) -> Result<Duration, PreviewError> {
@@ -343,6 +393,33 @@ mod tests {
     use image::{ImageFormat, Rgb, RgbImage};
 
     use super::*;
+
+    #[test]
+    fn cancelled_previews_stop_before_file_access_or_process_start() {
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        let cache = PreviewCache {
+            root: PathBuf::from("must-not-create-cache"),
+            cancellation: Some(cancellation),
+        };
+        let missing = Path::new("must-not-open-media.mp4");
+        assert!(matches!(
+            cache.duration(missing),
+            Err(PreviewError::Cancelled)
+        ));
+        assert!(matches!(
+            cache.thumbnail(missing, Duration::from_secs(1), 240),
+            Err(PreviewError::Cancelled)
+        ));
+        assert!(matches!(
+            cache.waveform(missing, 640, 96),
+            Err(PreviewError::Cancelled)
+        ));
+        assert!(matches!(
+            cache.filmstrip(missing, MediaKind::Video),
+            Err(PreviewError::Cancelled)
+        ));
+    }
 
     #[test]
     fn duration_metadata_rejects_invalid_and_unrepresentable_values() {

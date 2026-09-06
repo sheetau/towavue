@@ -78,7 +78,7 @@ Seekの確定にはbuttonを離した位置を使い、その後のcursor移動�
 
 動画のhover thumbnailを取得できない区間では「Thumbnail unavailable」と表示し、同じfileを開いている間はその区間を繰り返し取得しません。再openで再試行できます。thumbnailの失敗だけで再生・Seek・保存を無効にはしません。
 
-duration・波形・hover thumbnailの生成は、それぞれ実行中1件と最新の待機1件に制限します。連続したfile切替で処理を増やし続けませんが、開始済みの古い処理の完了を待つ場合はあります。
+duration・波形・hover thumbnailの生成は、それぞれ実行中1件と最新の待機1件に制限します。file切替・closeでは不要なFFmpeg/FFprobeを停止し、filmstripも表示範囲の変更・closeで旧処理を取り消します。ただし、実行中のfilesystem I/Oやnative probeによる待ち時間をなくす保証ではありません。
 
 動画はbar・timelineを除いた領域へ縦横比を保って表示し、非正方形pixelのsample aspect ratioも反映します。hardware/softwareとも同じ表示矩形を使い、crop selectionも映像に合わせます。
 

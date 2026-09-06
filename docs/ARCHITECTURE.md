@@ -204,7 +204,7 @@ filmstripは中央の横scroll overlayとし、背景を暗くして現在項目
 
 Tabはeguiのfocus traversalより前にfilmstripへ渡す。ただしpalette、grid、modal確認の最中は横取りしない。縦wheelの横変換はfilmstripのscroll領域だけに設定し、他のUIのscroll方向は変えない。
 
-画面内の項目だけを単一runtime workerへ要求する。待機要求は最新1件、最大64項目、RGBAは各240×160以下とし、結果はpath/generationで照合する。UI textureは現在の可視集合だけ保持し、folder snapshot更新・closeでは失効する。diskは既存のmetadata付き64 MiB preview cacheを共有する。古い要求の未開始項目は処理せず、開始済みFFmpeg/FFprobeは完了後の結果を捨てる。window closeでそのprocess完了をjoinしない。これはpreview processの強制cancelやdecoder作業領域の上限を保証する変更ではない。
+画面内の項目だけを単一runtime workerへ要求する。待機要求は最新1件、最大64項目、RGBAは各240×160以下とし、結果はpath/generationで照合する。UI textureは現在の可視集合だけ保持し、folder snapshot更新・closeでは失効する。diskは既存のmetadata付き64 MiB preview cacheを共有する。古い要求の未開始項目は処理せず、開始済みFFmpeg/FFprobeは下記preview取消tokenで停止する。window closeでそのprocess完了をjoinしない。decoder作業領域のメモリ上限は保証しない。
 
 ### H1 external file drop
 
@@ -322,7 +322,9 @@ FFmpegはtargetと同じfilesystemの専用一時directoryへ出力する。成�
 
 preview cacheはruntimeがFFmpeg / FFprobeの子processとdisk I/Oを所有し、appへowned RGBA画像とdurationだけを返す。cache keyは正規化path、file size、更新時刻、preview種別と寸法から作り、`%LOCALAPPDATA%\towavue\preview-cache`を64 MiB以内へ古い順に削減する。waveform、duration、hover thumbnailは専用workerで生成し、path付きeventをappへ返すため、古いtabの結果を現在のtabへ適用せずUI threadもblockしない。
 
-H1ではduration・waveform・hover thumbnailごとにruntime所有の常設workerを1本だけ使い、実行中1件＋最新の待機1件へ制限する。新しい要求は未開始の旧要求を置き換え、media load/最後のtab closeでは待機を消す。3種類は互いに待たせず、別のfilmstrip workerは従来どおり独立する。window closeは未開始要求を破棄してworkerへ終了を伝え、window/GPUを所有しない実行中previewをjoinしない。開始済みprocessの強制cancel・個別decoderのメモリ上限ではなく、windowあたりの同時処理件数の上限である。
+H1ではduration・waveform・hover thumbnailごとにruntime所有の常設workerを1本だけ使い、実行中1件＋最新の待機1件へ制限する。新しい要求は未開始の旧要求を置き換え、media load/最後のtab closeでは待機を消す。3種類は互いに待たせず、別のfilmstrip workerは従来どおり独立する。window closeは未開始要求を破棄してworkerへ終了を伝え、window/GPUを所有しない実行中previewをjoinしない。これは個別decoderのメモリ上限ではなく、windowあたりの同時処理件数の上限である。
+
+preview取消では要求単位のtokenに実行中のowned Childを登録する。要求置換・clear・worker dropはtokenを失効し、その子processだけをkillする。spawn/登録と取消を同じ短いlockで直列化し、取消済み要求から子processを後発させない。worker側でstdout/stderrを並行排出して終了を回収し、次の要求は新しいtokenを使う。[Rust Childの寿命契約](https://doc.rust-lang.org/std/process/struct.Child.html)に従い、handleのdropだけに終了を任せない。filmstripも同じ取消を使う。cache/TS Seek準備は処理境界で失効を確認するが、実行中のfilesystem I/Oやnative FFmpeg probeを強制中断する保証はない。UIはprocessの完了やreader threadをjoinしない。
 
 grid menuは既存のcommand registryだけをdispatchし、画像・動画・音声ごとの16 commandを`%APPDATA%\towavue\grid.conf`に保持する。cell順は物理keyの`1234/qwer/asdf/zxcv`と固定してclickとkey入力を一致させる。表示・非表示には短いopacity transitionだけを使い、media操作の意味を持つanimationは追加しない。
 

@@ -224,7 +224,7 @@ shortcut prefixは一続きのkey入力だけに有効とし、1秒の期限切�
 
 shortcut設定の生成と読込は往復可能にする。`+` keyはmodifier区切りと曖昧にならない`Plus`として保存し、旧版が出力した`+`・`Ctrl++`等も同じkeyとして受け付ける。既存の利用者設定を移行のために上書きしない。
 
-IMEのpreedit中、および確定/取消などIME eventを含むframeでは、paletteの上下・Enter・Escapeのkey eventを消費し、IME eventだけをTextEditへ渡す。確定用Enterをcommand実行やTextEditのfocus解除、取消用Escapeをpalette closeへ二重使用しない。入力欄の固定idへ描画前にfocusを要求し、eguiの上下focus移動による確定文字の取りこぼしを防ぐ。composition状態はpalette resetで解除し、通常の操作は次の独立key入力から再開する。OSのIME状態・keyboard layoutや設定は書き換えない。
+IMEのpreedit中、および確定/取消などIME eventを含むframeでは、paletteの上下・Enter・Escapeのkey eventを消費し、IME eventだけをTextEditへ渡す。確定用Enterをcommand実行やTextEditのfocus解除、取消用Escapeをpalette closeへ二重使用しない。入力欄の固定idにfocusがない時だけ描画前に要求し、eguiの上下focus移動による確定文字の取りこぼしを防ぐ。固定版eguiのrequest_focusはIME中断も要求するため、focus保持中は再要求しない。composition状態はpalette resetで解除し、通常の操作は次の独立key入力から再開する。OSのIME状態・keyboard layoutや設定は書き換えない。
 
 ### H1 video viewport
 

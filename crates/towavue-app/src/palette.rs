@@ -60,7 +60,11 @@ impl CommandPalette {
                 ui.set_width((context.content_rect().width() - 48.0).clamp(200.0, 520.0));
                 let previous_query = self.query.clone();
                 let query_id = egui::Id::new("command-palette-query");
-                ui.memory_mut(|memory| memory.request_focus(query_id));
+                ui.memory_mut(|memory| {
+                    if !memory.has_focus(query_id) {
+                        memory.request_focus(query_id);
+                    }
+                });
                 ui.add(egui::TextEdit::singleline(&mut self.query).id(query_id));
                 let query_changed = previous_query != self.query;
                 if query_changed {
@@ -203,6 +207,64 @@ mod tests {
             },
         );
         assert!(closed);
+    }
+
+    #[test]
+    fn focused_palette_does_not_request_native_ime_cancellation() {
+        let context = egui::Context::default();
+        let mut palette = CommandPalette::default();
+        let commands = CommandContext {
+            palette_open: true,
+            ..Default::default()
+        };
+        let shortcuts = ShortcutBindings::default();
+        let mut run = |events| {
+            context.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |_| {
+                    assert_eq!(palette.show(&context, commands, &shortcuts), (None, false));
+                },
+            )
+        };
+        for _ in 0..3 {
+            run(vec![]);
+        }
+        for text in ["ｎ", "に", "にほ", "にほん", "にほんご", "日本語"] {
+            for events in [
+                vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+                    text: text.into(),
+                    active_range_chars: Some(0..text.chars().count()),
+                })],
+                vec![],
+            ] {
+                let output = run(events);
+                assert!(
+                    !output
+                        .platform_output
+                        .ime
+                        .expect("focused text input")
+                        .should_interrupt_composition
+                );
+            }
+        }
+        let output = run(vec![
+            egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: String::new(),
+                active_range_chars: None,
+            }),
+            egui::Event::Ime(egui::ImeEvent::Commit("日本語".into())),
+        ]);
+        assert!(
+            !output
+                .platform_output
+                .ime
+                .expect("committed text input")
+                .should_interrupt_composition
+        );
+        assert_eq!(palette.query, "日本語");
     }
 
     #[test]

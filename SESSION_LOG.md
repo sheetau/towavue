@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 09:10 JST - palette / native IME composition survives focused redraws
+
+- Trigger/evidence: following 17ef1f5's verified playback fix, tested the installed Japanese input layout in an owned Welcome window. With IME on, each character disappears. Temporary native event tracing shows Preedit followed immediately by empty Preedit/Commit and Disabled; direct Latin input remains intact. Fixed egui 0.35.0 Memory::request_focus explicitly interrupts composition, and the palette called it every frame. Earlier event-only text assertions missed this backend output.
+- Contract/fix: document before implementation that the palette requests focus only when its fixed query id lacks focus. Preserve pre-draw focus recovery, IME/key separation and normal command dispatch. The new regression fails on the original code and verifies no platform IME cancellation throughout successive preedits, idle frames and final commit. No runtime, dependency or unsafe changes.
+- Native: the same traced debug flow now displays the Windows candidate window, navigates down/up, commits Japanese text without closing the palette, cancels preedit with one Escape and closes with the next. F10 converts composition to `open`; its confirmation Enter keeps the palette, and a later independent Enter opens the native picker. The picker was absent at the initial 250-ms observation but present on reinspection of the same process; Cancel closes it normally. Uninstrumented release independently displays candidates and retains the Japanese commit.
+- Verification/cleanup: tracing and its environment variable removed before final format, all-target Clippy, 168 tests (app 76, core 35, runtime 53, integrations 4) and debug/release builds; three live tests explicitly ignored. Prior 17ef1f5 CI 34000154309 succeeded. All owned PIDs 44532/17464/10152/44072 close normally. Captures/logs remain ignored under target/tmp/h1-native-ime*. Used normal mode keys in the owned window, not OS/default-layout settings changes; no media edits/exports. This is native IME via automated key delivery at 96 DPI, not a physical-keyboard or all-IME matrix.
+- Status/next: h1_active. Audit focus and keyboard-only daily interactions next. Other IMEs, physical keyboards, mixed-DPI, actual driver/endpoint recovery and distribution remain incomplete; packaging question unanswered, no package/publication performed.
+
 ## 2026-09-06 08:59 JST - independent stream feeds / long-run gate verified
 
 - Trigger/intent: finish the same normal-release 30-minute trial from the preceding entry before checkpointing the playback fix. PID 20224 retained its recorded start identity and binary hash; no restart, seek, pause, competing playback or build during measurement.

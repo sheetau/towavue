@@ -63,7 +63,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | 全機能を一つのlogo menuへ集約 | H1でFile / Edit / Viewへ分類し、関連項目の区切り、現在shortcutの右揃え、window内scrollを実装。全registry commandの重複・欠落をtestする |
 | File/Edit/Viewの3方向drag gestureとSVG logo | logo形状をvector描画。方向gestureは未実装 |
 | 黒基調のcompactなwindow shell | 32px title/tab barと30px status、window操作、右寄せ情報をH1で実装。複数DPI/monitorのmatrixは未検証 |
-| Command palette | titleの部分一致検索、上下選択、有効候補の巡回、Enter実行、Escape閉じを実装。IME eventと重複keyを分離し、確定文字の保持を回帰testした。ranking、categoryはない。物理keyboard・実IME候補操作のmatrixは未検証 |
+| Command palette | titleの部分一致検索、上下選択、有効候補の巡回、Enter実行、Escape閉じを実装。IME eventと重複keyを分離し、focus再要求で毎文字の変換が取り消される不具合も修正。Windows日本語IMEの候補表示・上下選択・確定・取消と確定後のcommand実行を実windowで確認した。ranking、categoryはない。物理keyboard・他IME・focus/DPIを含む横断matrixは未完了 |
 | 日本語filename・文字表示 | Windowsの日本語fontを既定fontの後ろへ追加し、tab/statusの欠字を修正。日本語fontがない環境や全言語のfallbackは未対応 |
 | Custom shortcutとprefix key | text設定として実装。GUI editor、競合表示、recording UIはない |
 | Media別4×4 grid | key/clickとtext設定を実装。H1で列はみ出し、名前/path省略、click後のclose、物理位置対応と修飾key競合を修正。paletteとは同時表示しない。配置編集UI、drag配置、詳細animationはない |
@@ -179,5 +179,5 @@ H1の個別修正が通ったことと、配布可能な品質の判定を分け
 | 編集・保存・終了の安全性 | dirty guard、複数tabの順次保存、export失敗/取消、描画不能時の保存を自動testと所有windowで確認。今後のUI変更でも同じflowを維持する |
 | 再生性能・復旧 | 基準機の30分4K60と100回Seek測定は通過。制御故障による復旧と、実driver/endpoint変更の証拠は別であり、後者は未完了 |
 | 日常操作と草案の外観 | compact shell、filmstrip、menu、tab並べ替え、空のWelcomeからのOpen/Cancel/復帰を確認。timeline操作と狭いwindowでの発見性を引き続き評価する。Welcomeのrecent/session復元や別window結合は未実装だが一括追加しない |
-| 環境・入力 | 日本語fontとscale入力の回帰はあるが、実IME、異なる実DPI間の移動、keyboard-only/accessibilityの横断matrixは未完了 |
+| 環境・入力 | 日本語font・scale入力の回帰とWindows日本語IMEの基本候補操作は確認済み。物理keyboard・他IME・focus、異なる実DPI間の移動、keyboard-only/accessibilityの横断matrixは未完了 |
 | 配布 | portable ZIPかinstallerかはownerへ確認中。FFmpeg binary/licenseの配布決定、clean machine起動確認、package作成・公開は未実施。H1と分けて計画する |

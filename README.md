@@ -24,6 +24,8 @@ Mキーの消音解除は、100%へ固定で戻さず、そのtabの直前の非
 
 動画面、または動画/音声のstatus barの音量表示上ではwheelで音量を調整できます。音声playlist上では一覧scrollを優先します。Ctrl/Shiftなどの修飾key、drag中、menuや確認画面の表示中は音量を変更しません。
 
+動画・音声は再生終了後も左右矢印で5秒Seekでき、移動先で停止します。Spaceで再生を再開できます。
+
 ## 文書
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md): 技術選定、境界、データフロー、不変条件

@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 16:04 JST - allow keyboard seek after playback ends
+
+- Trigger/evidence: previous turn pushed c50898c (progress); its CI 34017806336 remains in progress. Baseline normal release PID 11552 ignores Left at EOF, unlike timeline absolute Seek.
+- Contract/change: accept Ended in relative Seek's existing state guard. Reuse seek_to's paused preview, zero floor, edit/range and explicit Play behavior; Loading/Faulted/no-session remain rejected. App-only, no runtime/core/dependency/unsafe changes.
+- Verification: new hidden-window regression fails on unchanged seek generation before the fix. With a real video-only session it covers both media command contexts/directions, paused destination, preserved edits, trim-outside preview/Play return and Loading/Faulted refusal; renderer absence has an explicit skip. This run executes the renderer path. Format, Clippy, 221 tests (app 112/core 35/runtime 70/integrations 4), debug/release builds pass; three preexisting live tests explicitly ignored.
+- Native: fixed video PID 26424 returns from EOF to frame 0 paused; Space resumes. A later unexpected mute edit blocks close: Cancel and one Undo restore clean title, then normal close. Audio PID 18604 initial SendKeys Left produces two seeks to 19.784s, excluded from single-input proof. On the same process, explicit Space down/up resumes without a volume edit; after natural EOF, one posted Left down/up yields one decode restart and paused 24.919s from approximately 29.9s. Clean normal close; baseline also closes normally. No source save/OS settings; captures/logs ignored. Extra SendKeys/mute inputs are not attributed to a cause without an event trace.
+- Status/next: h1_active. Trace native keyboard delivery if extra-input behavior recurs; continue playback input audit, including endpoint bounds. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 15:55 JST - keep audio playlist wheel smoothing with its target
 
 - Trigger/evidence: previous turn pushed 8df753e (progress); CI 34016955447 succeeds. Baseline normal release PID 15444 changes volume to 70% then incorrectly scrolls the list when the pointer moves into it during the wheel tail.

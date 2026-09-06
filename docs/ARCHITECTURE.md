@@ -294,6 +294,8 @@ RedrawRequestedはそのevent内で描画し、egui-winitのrepaint応答を次f
 
 音声だけ、または動画frameを待たない音声末尾の再生中は、位置表示へ20 ms後のUI repaintを要求する。audio eventのpoll自体は次の描画を無条件予約しない。pause後はこの周期描画を止める。WASAPIとdecodeのthread・clock契約は変更しない。
 
+動画・音声の相対Seek commandはPlaying/PausedだけでなくEndedでも受け付け、既存の絶対Seekと同じ停止preview経路を使う。終了後に勝手に再生を開始せず、Spaceで明示的に再開する。trim外のsource previewからPlayした場合は従来どおりtrim開始へ戻る。Loading/Faultedおよびsession不在ではSeekしない。
+
 ### H1 live volume
 
 動画面と動画/音声status barの独立したvolume表示では、修飾keyなしの縦wheelで音量を調整する。Line/Pageの1単位またはPointの50 logical pxで10 percentage pointsとし、同一frameのraw eventを合算して0～2倍の既存SetVolume編集へ一度だけ渡す。音声playlist・timeline・filmstrip・tab上のscrollは奪わない。focus喪失、button保持、modal/menu/palette/grid/filmstrip中は受け付けない。smooth scrollの余韻では編集しない。

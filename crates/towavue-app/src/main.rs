@@ -3587,8 +3587,10 @@ where
     }
 
     fn seek_relative(&mut self, forward: bool) {
-        if !matches!(self.state, PlaybackState::Playing | PlaybackState::Paused)
-            || self.session.is_none()
+        if !matches!(
+            self.state,
+            PlaybackState::Playing | PlaybackState::Paused | PlaybackState::Ended
+        ) || self.session.is_none()
         {
             return;
         }
@@ -8196,6 +8198,105 @@ mod tests {
             export_name(Path::new("photo.final.png")),
             "photo.final-export.png"
         );
+    }
+
+    #[test]
+    fn keyboard_seek_from_eof_uses_the_paused_preview_path() {
+        let Some(root) =
+            isolated_test_root("tests::keyboard_seek_from_eof_uses_the_paused_preview_path")
+        else {
+            return;
+        };
+        let source =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+        let path = root.join("video-only.mp4");
+        let ffmpeg = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+            .join("bin/ffmpeg.exe");
+        assert!(
+            std::process::Command::new(ffmpeg)
+                .args(["-v", "error", "-i"])
+                .arg(source)
+                .args(["-an", "-c:v", "copy"])
+                .arg(&path)
+                .status()
+                .expect("video-only fixture")
+                .success()
+        );
+        struct Trial(PathBuf);
+        impl ApplicationHandler for Trial {
+            fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+                let window = Arc::new(
+                    event_loop
+                        .create_window(Window::default_attributes().with_visible(false))
+                        .expect("hidden seek test window"),
+                );
+                let renderer = match FrameRenderer::new(&window) {
+                    Ok(renderer) => renderer,
+                    Err(error) => {
+                        eprintln!("SKIP EOF keyboard seek: D3D11 unavailable: {error}");
+                        event_loop.exit();
+                        return;
+                    }
+                };
+                let mut app = Application::new(None, |_| {}).expect("test app");
+                app.window = Some(window);
+                app.renderer = Some(renderer);
+                app.load_path(self.0.clone(), MediaKind::Video);
+                assert_eq!(app.state, PlaybackState::Playing);
+                let tab = app.tabs.open_new(self.0.clone(), MediaKind::Video);
+                let time = |seconds| media_time(Duration::from_secs(seconds));
+                for kind in [MediaKind::Video, MediaKind::Audio] {
+                    app.media_kind = Some(kind);
+                    for forward in [false, true] {
+                        app.seek_to(time(1));
+                        app.state = PlaybackState::Ended;
+                        let generation = app.generation;
+                        app.dispatch(if forward {
+                            CommandId::SeekForward
+                        } else {
+                            CommandId::SeekBackward
+                        });
+                        assert_eq!(app.generation, generation.next());
+                        assert_eq!(app.state, PlaybackState::Paused);
+                        assert_eq!(app.current_position(), time(if forward { 6 } else { 0 }));
+                        assert!(!app.edits.contains_key(&tab));
+                    }
+                }
+                app.media_kind = Some(MediaKind::Video);
+                app.edits
+                    .entry(tab)
+                    .or_default()
+                    .push(EditOperation::SetTrimStart(time(1)), MediaKind::Video);
+                app.seek_to(time(1));
+                app.state = PlaybackState::Ended;
+                app.dispatch(CommandId::SeekBackward);
+                assert_eq!(app.current_position(), MediaTime::ZERO);
+                assert_eq!(app.state, PlaybackState::Paused);
+                assert!(app.edits[&tab].is_dirty());
+                app.toggle_pause();
+                assert_eq!(app.state, PlaybackState::Playing);
+                assert_eq!(app.current_position(), time(1));
+                for state in [PlaybackState::Loading, PlaybackState::Faulted] {
+                    app.state = state;
+                    let generation = app.generation;
+                    app.dispatch(CommandId::SeekBackward);
+                    assert_eq!(app.generation, generation);
+                    assert_eq!(app.state, state);
+                }
+                eprintln!("EOF keyboard seek: paused targets and trim restart passed");
+                event_loop.exit();
+            }
+
+            fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+        }
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        let mut builder = EventLoop::builder();
+        builder.with_any_thread(true);
+        builder
+            .build()
+            .expect("test event loop")
+            .run_app(&mut Trial(path))
+            .expect("seek trial");
     }
 
     #[test]

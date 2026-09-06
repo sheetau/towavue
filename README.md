@@ -92,6 +92,8 @@ gridのkeyはQWERTYの`1234/qwer/asdf/zxcv`に相当する物理位置です。S
 
 画像ではCtrl+wheelまたは+/-でzoom、Ctrl+Hでactual size、Shift+Wでfit、右dragでpanします。左dragでselectionを作り、辺dragでresize、Shift付き作成で正方形、Shift付きresizeで比率を保持します。選択範囲clickまたはCtrl+Shift+Yはcrop previewです。Bでreading mode、Rで縦横切替、Hで表示順反転、Ctrl+[ / Ctrl+]で表示数を2～10枚に変更できます。
 
+選択範囲の始点と辺resizeの判定はbuttonを押した位置を使い、release位置まで反映してからpixelへ丸めます。移動eventが少ないdragで始点がずれたり選択が消えたりする処理を修正しました。
+
 画像の100%は画面の実pixel基準です。zoomは現在の表示領域とcrop・回転後の寸法を使うため、小さいwindowやcrop previewからの一段の拡大も現在の見た目を基準にします。
 
 Ctrl+wheelはcursor位置を基点に拡大・縮小します。wheelがzoom倍率へ変換された後の入力を使うよう修正し、実windowでの動作を確認しました。palette・grid・保存確認中やmenu上のwheelでは背景画像を拡大しません。

@@ -90,7 +90,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 |---|---|
 | Static/animated imageとAVIF | 実装済み。ただし互換性とmemory上限は限定的 |
 | Cursor基点zoom、pan、actual、fit | 実装済み。H1でCtrl+wheelがeguiのscroll→zoom変換後に無反応となる抜けを修正。実wheel eventの倍率・frame間隔・cursor基点とoverlay遮断を回帰testし、通常releaseで拡大/縮小を確認 |
-| Selection作成、正方形、辺resize、ratio保持 | 基本実装済み |
+| Selection作成、正方形、辺resize、ratio保持 | 基本実装済み。H1で押下位置を保持し、release位置の反映漏れを修正。画像/動画の疎なevent列・逆方向・辺hit・範囲外開始・click previewを回帰test。nativeで通常の疎なdragと辺resizeを確認したが、移動直後のrelease注入はclick扱いとなる一例があり高速入力の順序は未監査 |
 | Selectionの移動 | 未実装。内部clickはcrop previewになる |
 | 指定aspect ratio | 未実装 |
 | Crop、90度rotate、flip、undo/redo、export | 実装済み |

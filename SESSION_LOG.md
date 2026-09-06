@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 10:03 JST - selection drag / preserve press and release coordinates
+
+- Trigger/evidence: continue input audit after 808e5d0. Baseline normal release PID 10548 receives press (300,200), one move to (600,400), release with 100-ms-separated input; selection disappears. update_selection used the first drag-recognized position as its origin and did not apply the release position. ca80d35 CI 34002238129 succeeded.
+- Contract/change: accept press-origin/edge-hit and release-coordinate semantics in ARCHITECTURE first. Cache the existing SelectionDrag mode on surface press, use that origin for new selections and edge recognition, apply the last position before pixel snapping and clear pending mode on release, including clicks. Handle ordered move/release events in one egui frame even without a drag-start response; preserve inside-click crop preview. No new edit operations, dependencies, unsafe code, runtime or source-file changes.
+- Regression: new image/video test fails on original production code and passes after the fix. Covers sparse forward/reverse selection, final-position changes on release, ordered move/release in one frame, left-edge resizing, outside-image origin rejection and image-only click preview. Existing one-pixel selection, crop geometry and export tests pass.
+- Native: final normal release PID 15432 repeats the baseline coordinates and now shows the correct selection. A 100-ms-separated sparse edge drag moves the left edge to x=350 while retaining other edges; Crop reports 302x241 pixels, Undo restores the source view. An earlier immediate SetCursorPos/release injection instead entered crop preview (362x241 crop subsequently undone); do not claim this proves native coalesced delivery or fast-drag correctness. Its event ordering remains to audit, distinct from the deterministic egui event test.
+- Verification/cleanup: format, all-target Clippy, 174 tests (app 82, core 35, runtime 53, integrations 4) and debug/release builds pass; three live tests explicitly ignored, not hardware proof. Prior 808e5d0 CI 34002551053 succeeded. Owned baseline/final processes close normally. Both trial crops undone; no export. Source SHA-256 remains 636C096506CFD9FBFEAC2A1BD44EF7DAD07BBC13F76EF2474A896E06C5D0D406. Captures/logs under ignored target/tmp/h1-selection-* only; owner docs updated.
+- Status/next: h1_active. Audit native fast-drag event ordering and selection/pan cancellation across modal/focus changes; physical-input/mixed-DPI, actual driver/endpoint and distribution gates remain incomplete. Packaging choice still unanswered; no package/publication performed.
+
 ## 2026-09-06 09:55 JST - image wheel / consume native zoom input
 
 - Trigger/evidence: continue daily-viewing audit after ca80d35. Normal release PID 5272 ignores Ctrl+wheel on page-01.png. Fixed egui 0.35 converts modified wheel input into zoom_delta and leaves smooth_scroll_delta empty; the app read the latter. Existing geometry test manually overwrote processed scroll state and missed the real input path.

@@ -1558,22 +1558,36 @@ where
         square: bool,
         pointer: Option<egui::Pos2>,
     ) {
-        let Some(pointer) = pointer else { return };
+        let (pressed, released, origin) = response.ctx.input(|input| {
+            (
+                input.pointer.button_pressed(egui::PointerButton::Primary),
+                input.pointer.button_released(egui::PointerButton::Primary),
+                input.pointer.press_origin(),
+            )
+        });
+        let Some(pointer) = pointer else {
+            if released {
+                self.selection_drag = None;
+            }
+            return;
+        };
         let point = unit_point(pointer, image_rect);
-        if response.drag_started_by(egui::PointerButton::Primary) && image_rect.contains(pointer) {
+        if pressed
+            && response.is_pointer_button_down_on()
+            && let Some(origin) = origin.filter(|origin| image_rect.contains(*origin))
+        {
             self.selection_drag = self
                 .image_view
                 .selection
-                .and_then(|selection| selection_edge(pointer, image_rect, selection))
-                .or_else(|| {
-                    self.image_view
-                        .selection
-                        .filter(|selection| selection.contains(point))
-                        .map(|_| SelectionDrag::New(point))
-                })
-                .or(Some(SelectionDrag::New(point)));
+                .and_then(|selection| selection_edge(origin, image_rect, selection))
+                .or(Some(SelectionDrag::New(unit_point(origin, image_rect))));
         }
-        if response.dragged_by(egui::PointerButton::Primary) {
+        // A move and release in one frame can bypass egui's drag-start notification.
+        let dragging = response.dragged_by(egui::PointerButton::Primary)
+            || (released
+                && self.selection_drag.is_some()
+                && !response.clicked_by(egui::PointerButton::Primary));
+        if dragging {
             match self.selection_drag {
                 Some(SelectionDrag::New(start)) => {
                     self.image_view.selection =
@@ -1583,12 +1597,14 @@ where
                 None => {}
             }
         }
-        if response.drag_stopped_by(egui::PointerButton::Primary) {
-            self.selection_drag = None;
+        if dragging && released {
             self.image_view.selection = self.image_view.selection.and_then(|selection| {
                 PixelCrop::from_selection(selection, image_size, self.media_kind?)
                     .map(|crop| crop.unit_rect(image_size))
             });
+        }
+        if released {
+            self.selection_drag = None;
         }
         if self.media_kind == Some(MediaKind::Image)
             && response.clicked_by(egui::PointerButton::Primary)
@@ -7013,6 +7029,105 @@ mod tests {
                 .all(|vertex| (2.5 / 8.0..=5.5 / 8.0).contains(&vertex.uv.x)
                     && (3.5 / 8.0..=4.5 / 8.0).contains(&vertex.uv.y))
         );
+    }
+
+    #[test]
+    fn selection_drag_uses_press_and_release_positions_with_sparse_events() {
+        let Some(_root) = isolated_test_root(
+            "tests::selection_drag_uses_press_and_release_positions_with_sparse_events",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0));
+        let image = egui::Rect::from_min_max(egui::pos2(50.0, 50.0), egui::pos2(450.0, 450.0));
+        let rectangle = |x, y, width, height| PixelCrop {
+            x,
+            y,
+            width,
+            height,
+        };
+        for kind in [MediaKind::Image, MediaKind::Video] {
+            for coalesced_release in [false, true] {
+                for (start, end, initial, expected) in [
+                    (
+                        egui::pos2(100.0, 100.0),
+                        egui::pos2(300.0, 300.0),
+                        None,
+                        Some(rectangle(50, 50, 200, 200)),
+                    ),
+                    (
+                        egui::pos2(300.0, 300.0),
+                        egui::pos2(100.0, 100.0),
+                        None,
+                        Some(rectangle(50, 50, 200, 200)),
+                    ),
+                    (
+                        egui::pos2(150.0, 250.0),
+                        egui::pos2(190.0, 250.0),
+                        Some(rectangle(100, 100, 200, 200)),
+                        Some(rectangle(140, 100, 160, 200)),
+                    ),
+                    (egui::pos2(20.0, 20.0), egui::pos2(300.0, 300.0), None, None),
+                    (
+                        egui::pos2(250.0, 250.0),
+                        egui::pos2(250.0, 250.0),
+                        Some(rectangle(100, 100, 200, 200)),
+                        Some(rectangle(100, 100, 200, 200)),
+                    ),
+                ] {
+                    let context = egui::Context::default();
+                    app.media_kind = Some(kind);
+                    app.selection_drag = None;
+                    app.image_view.selection = initial.map(|crop| crop.unit_rect((400, 400)));
+                    app.image_view.crop_preview = false;
+                    let button = |pressed, pos| egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    };
+                    let mut frames = vec![
+                        vec![egui::Event::PointerMoved(start)],
+                        vec![button(true, start)],
+                    ];
+                    if !coalesced_release {
+                        frames.push(vec![egui::Event::PointerMoved(start.lerp(end, 0.5))]);
+                    }
+                    frames.push(vec![egui::Event::PointerMoved(end), button(false, end)]);
+                    for events in frames {
+                        let _ = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(screen),
+                                events,
+                                ..Default::default()
+                            },
+                            |ui| {
+                                let response = ui.interact(
+                                    screen,
+                                    "selection-sparse".into(),
+                                    egui::Sense::click_and_drag(),
+                                );
+                                let pointer = ui.input(|input| input.pointer.hover_pos());
+                                app.update_selection(&response, image, (400, 400), false, pointer);
+                            },
+                        );
+                    }
+                    let actual = app.image_view.selection.and_then(|selection| {
+                        PixelCrop::from_selection(selection, (400, 400), kind)
+                    });
+                    assert_eq!(
+                        actual, expected,
+                        "{kind:?}, coalesced={coalesced_release}, {start:?} -> {end:?}"
+                    );
+                    assert!(app.selection_drag.is_none());
+                    assert_eq!(
+                        app.image_view.crop_preview,
+                        kind == MediaKind::Image && start == end
+                    );
+                }
+            }
+        }
     }
 
     #[test]

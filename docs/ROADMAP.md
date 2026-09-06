@@ -190,3 +190,5 @@ logo menuの矢印操作が背後のWelcomeへfocusを移し、意図しないfo
 画像のLeft/Rightが無反応だった基本閲覧操作を補い、画像専用Previous/Next commandと既定bindingを追加した。動画・音声のSeek、Ctrl+左右、既存custom binding優先は維持。追加前に失敗するキー解決回帰、Shell順とdirty Cancel、通常releaseの画像往復・reading移動・menu dispatchを確認し、173 tests・Clippy・debug/release buildが通過した。839137fのCIも成功。Home/End等の追加aliasは含めず、残る日常閲覧と環境依存gateの監査を続ける。H1/launch全体は未完了。
 
 Ctrl+wheelの画像zoomが無反応になる不具合を通常releaseで再現した。固定eguiが変換済みのzoom倍率を使い、cursor基点と同frame描画を保つよう修正。旧testの処理済みscroll値の直接変更を実wheel eventへ置き換えると旧コードで失敗し、修正後は倍率・30/120fps相当・overlay遮断も通過した。通常releaseの往復zoom、palette/menu/dirty guardでの背景保持、173 tests・Clippy・debug/release buildを確認。物理mouse/trackpadとDPIのmatrixを含むH1全体は継続中。
+
+選択dragが認識された時点の位置を始点としていたため、移動eventが少ないと選択が消える不具合を通常releaseで再現した。画像/動画共通の処理で押下位置を保持し、release位置を適用後にpixelへ丸める。新しい回帰は旧コードで失敗し、疎なevent・move/release同frame・逆方向・辺resize・画像外開始・click previewを含めて修正後に通過。通常releaseの選択・辺resize・crop/Undoと174 tests・Clippy・両buildを確認した。移動直後のrelease注入がclick扱いとなった別試行は未解明として残し、高速native入力とmodal/focusを次に監査する。H1全体は継続中。

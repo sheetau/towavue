@@ -168,6 +168,8 @@ runtimeのparallel decode収集点で映像PTSを[start, end)へ制限し、音�
 
 ### H1 pixel-aligned crop
 
+画像・動画の選択dragはbuttonを押した位置を始点とし、その位置で既存selectionの辺hitを判定する。drag認識までの移動量を失わず、release frameの最終位置を適用してからpixelへ丸める。移動eventが少なくても選択範囲が消えたり辺resizeが新規選択へ変わったりしない。画像外から開始したdragで選択を作らず、範囲内clickの一時crop previewとShiftの制約は維持する。
+
 selectionのdrag中は正規化座標を使い、releaseとcrop確定時に現在の編集後寸法へ丸める。画像は1 pixel、動画は偶数の位置・寸法を使う。各辺を近いgrid境界へ丸め、同じ境界へ潰れた場合は内側の最小1 grid領域とする。現行defaultのlibopenh264は2×2を実際にencodeできず16×16未満を拒否したため、動画cropの確定は16×16以上に限定する。小さすぎる選択は勝手に16×16へ広げず、案内とともにselection・履歴を保持する。非finite・逆転・範囲外の選択と寸法未取得も確定しない。
 
 確定cropは正規化floatではなく、編集時点の整数pixel矩形を`EditOperation::Crop`へ保持する。previewはその矩形からUVと整数寸法を求め、FFmpegへ同じ整数と`exact=1`を渡す。回転/反転/cropの履歴順は変えず、既存の履歴はmemory内だけのため保存形式の移行は生じない。確定時に出力寸法をstatusへ表示し、全領域cropはdirty履歴を増やさない。選択の一時crop previewも同じimage pixel丸めを使う。動画の一般的なresize/paddingやencoder変更は行わない。

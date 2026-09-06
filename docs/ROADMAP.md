@@ -294,3 +294,5 @@ reading modeの固定8pxの隙間と等分枠による中心ずれを確認し�
 続いてOS text clipboard用の固定egui-winit featureとlockを変更し、検索欄のUnicode paste/copy/cut回帰を追加した。ownerの書込み許可後、通常releaseでOSからのpaste、copy/cut後の完全一致、外部変更後の再pasteを確認。変更前の同じpasteは空欄のままで、最終feature buildでは通過した。240 tests・format・Clippy・両buildも通過。clipboard競合、accessibility経路と既存launch gateは残る。
 
 Windows accessibility bridgeを初回表示前に接続し、初期tree要求/action/無効化を既存event loopへ統合した。UI AutomationでWelcome子要素0→12、menu→palette→検索文字列設定→Open file実行/取消→終了が通過。空白名、固定TextEditのSetValue不処理、候補行のToggle扱いを修正し、headless tree/action回帰を追加した。243 tests・format・Clippy・両buildが通過。5秒idle CPU増分0msはこの通常windowだけの観測で、screen reader・custom widget・実環境/配布gateは残る。
+
+続く保存ガード監査で、UI AutomationのInvokeから確認中の背景menuを開ける問題を実windowで再現した。背景rootの無効化、popupの解除/overlay表示保留と、最前面の確認以外の配送済みUiAction拒否を追加。244 tests・format・Clippy・両buildが通過し、通常windowでも古いmenu参照のInvoke拒否、Cancel後のdirty保持/再有効化を確認した。modalの意味情報/読上げ順と既存launch gateは継続する。

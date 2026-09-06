@@ -1404,6 +1404,13 @@ where
         self.image_seek_preview_active = false;
         self.video_rect = None;
         let context = root.ctx().clone();
+        let modal_blocked = self.modal_input_blocked();
+        if modal_blocked {
+            let opacity = root.opacity();
+            root.disable();
+            root.set_opacity(opacity);
+            egui::Popup::close_all(&context);
+        }
         wheel_input::begin_frame(&context);
         let mut volume_targets = Vec::new();
         let status_rect = if self.fullscreen {
@@ -1466,20 +1473,26 @@ where
                 });
         }
         if self.filmstrip_open {
-            self.filmstrip.show(
-                &context,
-                self.folder_snapshot.as_ref(),
-                self.path.as_deref(),
-                actions,
-            );
+            if !modal_blocked {
+                self.filmstrip.show(
+                    &context,
+                    self.folder_snapshot.as_ref(),
+                    self.path.as_deref(),
+                    actions,
+                );
+            }
         } else if !self.image_seek_preview_active {
             self.filmstrip.clear();
         }
-        if self.palette_open {
+        if self.palette_open && !modal_blocked {
             self.draw_command_palette(&context, actions);
         }
-        self.draw_grid_menu(&context, actions);
-        self.draw_export_status(&context, actions);
+        if !modal_blocked {
+            self.draw_grid_menu(&context, actions);
+        }
+        if self.export_error.is_none() {
+            self.draw_export_status(&context, actions);
+        }
         if let Some(error) = &self.export_error {
             let modal = egui::Modal::new("export-error".into()).show(&context, |ui| {
                 ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 520.0));
@@ -2769,6 +2782,20 @@ where
 
     fn handle_ui_action(&mut self, action: UiAction) {
         if self.pending_dialog.is_some() || self.native_prompt.is_some() {
+            return;
+        }
+        if self.modal_input_blocked()
+            && !match action {
+                UiAction::ResolveGuard(_) => {
+                    self.pending_guard.is_some() && self.export_error.is_none()
+                }
+                UiAction::DismissExportError => self.export_error.is_some(),
+                UiAction::CancelExport => {
+                    self.active_export.is_some() && self.export_error.is_none()
+                }
+                _ => false,
+            }
+        {
             return;
         }
         match action {
@@ -5124,6 +5151,122 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accessibility_modal_blocks_background_and_preserves_guard_decisions() {
+        let Some(root) = isolated_test_root(
+            "tests::accessibility_modal_blocks_background_and_preserves_guard_decisions",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let path = root.join("image.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Image);
+        app.state = PlaybackState::Paused;
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let history = app.edits[&tab].clone();
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = |app: &mut Application<_>, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            (
+                output.platform_output.accesskit_update.expect("tree"),
+                actions,
+            )
+        };
+        let click = |target_node| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node,
+                data: None,
+            })
+        };
+        frame(&mut app, vec![]);
+        app.pending_guard = Some(GuardedAction::CloseTab(tab));
+        app.palette_open = true;
+        app.handle_ui_action(UiAction::Command(CommandId::ToggleReadingMode));
+        assert!(
+            !app.reading_mode,
+            "queued background command must not bypass guard"
+        );
+        for _ in 0..3 {
+            let (tree, actions) = frame(&mut app, vec![]);
+            assert!(actions.is_empty());
+            assert!(app.palette_open);
+            assert!(
+                !tree
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some("Search commands"))
+            );
+            for label in ["towavue menu", "Reading mode (B)", "Close window"] {
+                let (id, node) = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(label))
+                    .expect("background button");
+                assert!(node.is_disabled(), "background {label} must be disabled");
+                assert!(frame(&mut app, vec![click(*id)]).1.is_empty());
+            }
+        }
+        let (tree, _) = frame(&mut app, vec![]);
+        let discard = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Discard edits"))
+            .expect("discard button")
+            .0;
+        app.export_error = Some("Deliberate fixture error".into());
+        assert!(frame(&mut app, vec![click(discard)]).1.is_empty());
+        app.handle_ui_action(UiAction::ResolveGuard(GuardDecision::Discard));
+        assert_eq!(app.edits[&tab], history);
+        assert!(app.pending_guard.is_some());
+        app.handle_ui_action(UiAction::DismissExportError);
+        let (tree, _) = frame(&mut app, vec![]);
+        let cancel = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Cancel"))
+            .expect("cancel button")
+            .0;
+        let (_, actions) = frame(&mut app, vec![click(cancel)]);
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(
+            actions[0],
+            UiAction::ResolveGuard(GuardDecision::Cancel)
+        ));
+        app.handle_ui_action(actions[0].clone());
+        assert!(app.pending_guard.is_none());
+        assert_eq!(app.edits[&tab], history);
+        let (tree, _) = frame(&mut app, vec![]);
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("Search commands"))
+        );
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("towavue menu") && !node.is_disabled())
+        );
+    }
 
     #[test]
     fn accessibility_activation_and_actions_reach_existing_welcome_commands() {

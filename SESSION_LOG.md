@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 20:57 JST - block accessibility actions behind modal guards
+
+- Trigger/evidence: previous turn pushed ddb9a3f (progress), CI 34031300276 now succeeds. Native R/Ctrl+W on the owned red image exposes enabled background UIA controls; invoking the menu opens it behind the unsaved guard. A regression also fails because an already-queued background command bypasses the guard.
+- Changes: disable background root while preserving existing backdrop opacity, close menu popups and defer independent overlays without clearing their state. Reject queued UiAction except the active confirmation/error dismissal/export cancellation; prevent stale Discard under an export error. No decode, save or dependency changes.
+- Verification: 244 tests (app 129/core 36/runtime 75/integrations 4), format, Clippy and both builds pass; three existing live ignores remain. Regression covers first/subsequent modal frames, disabled nodes/background Click, stale Discard, one-shot Cancel, history and palette restoration.
+- Native result/cleanup: final trial PID 44432 starts 11:55:10.0740628Z; old menu reference rejects Invoke with ElementNotEnabled, Cancel keeps dirty title and re-enables UI. Undo the owned rotation and close normally. Baseline window also cancels/undoes/closes, stderr empty and fixture hash unchanged. DEVELOPMENT records native/test-only build hashes and ignored captures/logs. No Save, clipboard or OS-setting changes.
+- Status/next: h1_active. Prepare this verified input-protection checkpoint for push. Continue modal semantic names/read order/focus and other custom-widget accessibility/launch gates; this fix does not prove full screen-reader support or launch readiness.
+
 ## 2026-09-06 20:44 JST - connect and validate Windows accessibility events
 
 - Trigger/intent: previous turn pushed c59fa73 (progress); CI 34030274550 succeeds. Baseline native UI Automation exposes zero descendants. Connect the pinned egui-winit AccessKit adapter before first window display, request tree generation on activation and route matching-window actions through existing input/output without new polling or native pointers in app.

@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 保存確認中のUI Automation入力保護（2026-09-06 20:57 JST）
+
+- ddb9a3f通常releaseの所有PID 44264（開始UTC 2026-09-06T11:49:51.6434446Z）、600×800の赤PNGでR→Ctrl+Wを実施。保存確認中も背景のmenu/Reading mode/Close windowがUIAでenabledと公開され、menuのInvokeでFile/Edit/Viewが現れた。固定eguiのAccessKit Clickはpointerのmodal遮断とは別に処理されていた。
+- 背景rootを無効化し、既存backdrop以外の追加opacity低下を避ける。popupは閉じ、独立overlayは状態を保って表示を保留する。配送済みUiActionも確認/最前面error解除/export取消以外は拒否し、error通知中の古いDiscardで下の保存確認を進めない。
+- 修正通常releaseの所有PID 44432（開始UTC 2026-09-06T11:55:10.0740628Z）で同じR→Ctrl+Wを確認。背景3 buttonがdisabledで、確認前のmenu参照によるInvokeはElementNotEnabledとして拒否され、File submenuも現れない。CancelのInvoke後はdirty titleを保持し、背景menuを再有効化した。試験回転をUndoして正常終了。比較windowもCancel/Undo後に正常終了し、両stderrは空。source SHA-256は`5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`のまま、Save/clipboard/OS設定の変更なし。
+- native修正binary SHA-256: `549B4D0BA13AD5DF9689A096FBD629958D15BDB1DE7FC8B38CB66E77D83AEEAA`、比較binary: `39642B0314D1BADBAB000CEDC6BCA985AA5C0DE4C48A44CDD2BB7A637039209B`。その後のtest-only追加を含むbuildは`CD5F741B81A3B62639C3D06AA60FA14A62743645AF7B78209320C67DC0DDF4B2`。実機capture/logはignoredの`target/tmp/h1-uia-guard-*`。960×576、現在機のWindows build 26200に限定した入力保護の証拠である。
+- 回帰は変更前に配送済み背景commandの拒否で失敗。修正後はmodal初回/継続frameのtree、背景Click、error中の旧Discard、Cancelの一回実行、履歴保持とpalette表示の保留/復帰を検証する。244 tests（app 129/core 36/runtime 75/integration 4）・format・Clippy・両buildが通過。screen readerでのmodal名/読み順/focus、全custom widgetの操作確認は残る。
+
 ### Windows UI Automation連携（2026-09-06 20:44 JST）
 
 - c59fa73の通常release（PID 19532、開始UTC 2026-09-06T11:28:08.0491227Z）で所有windowのUI Automation descendantsは0だった。固定egui-winitのaccesskit featureを有効化し、windowの初回表示前にadapterを作成、初期tree要求・action・無効化を既存event loopへ接続した。非Windows用の推移依存もlockされるが、Windows dependency treeにasync-executorはなく、app独自のworker/poll/COM providerは追加しない。

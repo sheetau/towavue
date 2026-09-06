@@ -6,7 +6,7 @@
 
 ### 操作とpreviewの不一致
 
-- 複数stream素材で再生とthumbnail・filmstrip・waveformが異なる問題をH1で修正した。再生と同じFFmpeg best-streamを明示指定し、旧cacheを失効させる。既定の2本目映像/音声を持つMKVで回帰と通常releaseを確認したが、手動stream選択UIはない。exportの自動stream選択との一致は別途監査する。
+- 複数stream素材で再生とthumbnail・filmstrip・waveformが異なる問題をH1で修正した。再生と同じFFmpeg best-streamを明示指定し、旧cacheを失効させる。続いてtrimなしの保存で別映像/音声になる問題も通常releaseで再現し、exportへ同じ選択を適用した。無編集・crop・trim・音声のみの回帰とSave As→再openを確認したが、全container/stream配置の保証や手動stream選択UIはない。
 
 - 非zeroのcontainer開始時刻による黒画面・時刻ずれはH1でinput原点を引くdecode/Seek/exportへ揃えた。Matroskaの長さも補正し、MP4/MKV/TSの0/5秒offsetを回帰比較する。TSは実packet keyframeを確認する段階的なpreroll探索を追加し、短い/長いGOPとMPEG-2 B-frameのSeek・thumbnailを全decode基準へ照合した。通常releaseのoffset TSではhardware Seek・timeline preview・trim exportを確認。4K60 TSの45秒付近Seekは単発277.736 msで、以後899枚をdrop 0で再生した。全形式の破損header・不連続PTS・長いGOP・低速storageに対する精度やlatency保証ではない。
 - 動画はH1でbar・timelineを除いた領域へsample aspect ratio込みでaspect-fitし、display matrixの90度単位回転・反転を自動適用する。8通りの向きと編集/保存後の再open、hardware/software表示を検証した。任意角度・scale・shear・射影は非対応として明示errorにする。全containerの動的metadata切替を含むmatrixは未検証。

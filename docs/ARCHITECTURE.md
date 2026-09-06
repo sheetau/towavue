@@ -314,6 +314,8 @@ textureの一辺の上限はrendererが実際のD3D feature levelから返す。
 
 ### H1 export lifecycle
 
+動画・音声exportはtrimの有無によらず再生と同じFFmpeg best-streamを明示指定する。CLIの画素数/channel数による自動選択へ戻さず、選んだ映像・音声だけへ編集を適用する。既存のcopyts/start_at_zeroはtrim時だけとし、trimなしの時刻処理は変更しない。静止画のexport経路と保存先の保護は維持する。
+
 Open file/folderとSave Asは専用STAでnative dialogを表示し、UIはthreadをjoinせず結果eventを受ける。本体windowをownerに指定して通常のmodal入力制限を保ち、workerがwindowの共有所有権を保持してnative handleの寿命を保証する（[IModalWindow::Show](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-imodalwindow-show)）。同時pickerは1件、picker中も描画・再生を継続し、選択前の保留Open Folderは失効させる。Save As結果は開始時のtab/pathと照合し、Cancel・失敗では書き出さずdirty guardを復元する。native dialogを閉じるまで本体の終了操作は受け付けない。
 
 owner handleはUI threadで取得し、COM objectとSTA cleanupはworker内へ閉じ込める。復帰時はruntimeが現在のclient座標を読み取り、appがeguiのpointer位置を更新する。native dialogがcursor eventを消費しても、pointerを動かさずに次のbuttonをclickできるようにする。

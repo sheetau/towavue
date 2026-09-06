@@ -10,6 +10,12 @@
 - 修正release PID 28992は同じpathのv3 cacheで青い本画面・thumbnailと非空waveformが一致。D3d11va、120 hardware/presented frames、drop/CPU transfer 0、drift p95 3.899 ms/最大4.203 ms。両windowは通常終了した。
 - 自動回帰は同構成の1秒素材で再生の映像寸法・音声sampleを確認し、thumbnail・filmstripの青色と波形を照合する。旧コードでthumbnailのassertが失敗し、修正後は通過した。全container/stream配置やexportの選択一致を保証する試験ではない。
 
+### 複数streamのSave As（2026-09-06）
+
+- 上記素材を青→赤、tone→無音の順にremuxし、既定指定を全て外す。旧通常release PID 41696では青160×96を表示するが、native Save As→再openで赤320×240になった。保存音声もmonoからstereoへ変わる。既定指定を残した素材のCLI出力は一致していたため、それだけでは差を検出できなかった。
+- 修正release PID 45184は同じ素材・同じSave As操作で青160×96/monoを保存し、同じwindowへ再openして青い映像を確認した。元素材と保存物の各再生はD3d11va、120 frames、drop/CPU transfer 0。再openのdrift p95 3.671 ms/最大6.600 ms。両windowは通常終了し、sourceは編集せず、出力・capture・logはignoredの`target/tmp`内。
+- 自動回帰は青/赤とtone/無音の4streamで、無編集・crop・trim・音声のみの保存をdecode比較する。音声の第2streamにはhearing_impairedを付け、channel数だけでは選択が一致しない場合も含める。hardware/softwareの引数に同じindexが入り、copyts/start_at_zeroはtrim時だけであることを確認する。hardware encoderの実行成功そのものを引数testで証明するものではない。
+
 ### 破損mediaからのOpen回復（2026-09-06）
 
 - aedb74bの通常releaseを、mediaではない短いtextを入れたローカル`.mp4`で起動する。中央に`Could not play media`とprobeの原因が残り、短時間statusのduration失敗とは区別できた。

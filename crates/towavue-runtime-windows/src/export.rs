@@ -108,7 +108,7 @@ fn export_cancellable(
         return Err(ExportError::InvalidTrim);
     }
     check_cancelled(cancelled)?;
-    let trim_streams = TrimStreams::probe(request, &state)?;
+    let streams = ExportStreams::probe(request)?;
     let trimmed_kind =
         (state.trim_start.is_some() || state.trim_end.is_some()).then_some(request.kind);
     let staging = StagedExport::new(&request.target)?;
@@ -124,7 +124,7 @@ fn export_cancellable(
     if request.hardware_encode && hardware_encode_supported_target(request) {
         let hardware = run_ffmpeg(
             &executable,
-            ffmpeg_arguments(&staged_request, true, &trim_streams),
+            ffmpeg_arguments(&staged_request, true, &streams),
             cancelled,
             progress,
         )?;
@@ -137,7 +137,7 @@ fn export_cancellable(
     }
     let output = run_ffmpeg(
         &executable,
-        ffmpeg_arguments(&staged_request, false, &trim_streams),
+        ffmpeg_arguments(&staged_request, false, &streams),
         cancelled,
         progress,
     )?;
@@ -325,16 +325,14 @@ fn run_ffmpeg(
 }
 
 #[derive(Default)]
-struct TrimStreams {
+struct ExportStreams {
     video: Option<(usize, ffmpeg::Rational)>,
     audio: Option<(usize, ffmpeg::Rational)>,
 }
 
-impl TrimStreams {
-    fn probe(request: &ExportRequest, state: &EditState) -> Result<Self, ExportError> {
-        if request.kind == MediaKind::Image
-            || (state.trim_start.is_none() && state.trim_end.is_none())
-        {
+impl ExportStreams {
+    fn probe(request: &ExportRequest) -> Result<Self, ExportError> {
+        if request.kind == MediaKind::Image {
             return Ok(Self::default());
         }
         let probe = || -> Result<Self, ffmpeg::Error> {
@@ -361,12 +359,16 @@ impl TrimStreams {
             Ok(Self { video, audio })
         };
         probe().map_err(|error| {
-            ExportError::Failed(format!("could not inspect trim streams: {error}"))
+            ExportError::Failed(format!("could not inspect export streams: {error}"))
         })
     }
 }
 
-fn ffmpeg_arguments(request: &ExportRequest, hardware: bool, streams: &TrimStreams) -> Vec<String> {
+fn ffmpeg_arguments(
+    request: &ExportRequest,
+    hardware: bool,
+    streams: &ExportStreams,
+) -> Vec<String> {
     let state = EditState::from_operations(&request.operations);
     let mut arguments = vec![
         "-hide_banner".into(),
@@ -383,8 +385,10 @@ fn ffmpeg_arguments(request: &ExportRequest, hardware: bool, streams: &TrimStrea
         "0".into(),
     ];
     if streams.video.is_some() || streams.audio.is_some() {
-        arguments.push("-copyts".into());
-        arguments.push("-start_at_zero".into());
+        if state.trim_start.is_some() || state.trim_end.is_some() {
+            arguments.push("-copyts".into());
+            arguments.push("-start_at_zero".into());
+        }
         for (index, _) in streams.video.iter().chain(streams.audio.iter()) {
             arguments.extend(["-map".into(), format!("0:{index}")]);
         }
@@ -564,6 +568,134 @@ mod tests {
     use towavue_core::{MediaTime, PixelCrop};
 
     use super::*;
+
+    #[test]
+    fn export_preserves_playback_streams_with_and_without_trim() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("towavue-export-streams-{unique}"));
+        fs::create_dir(&directory).expect("fixture directory");
+        let source = directory.join("source.mkv");
+        let executable = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+            .join("bin/ffmpeg.exe");
+        let generated = Command::new(executable)
+            .args([
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=blue:s=160x96:r=30:d=1",
+            ])
+            .args(["-f", "lavfi", "-i", "color=red:s=320x240:r=30:d=1"])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=880:sample_rate=48000:duration=1",
+            ])
+            .args(["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo:d=1"])
+            .args(["-map", "0:v", "-map", "1:v", "-map", "2:a", "-map", "3:a"])
+            .args([
+                "-c:v",
+                "libopenh264",
+                "-c:a",
+                "pcm_s16le",
+                "-disposition",
+                "0",
+                "-disposition:a:1",
+                "hearing_impaired",
+            ])
+            .arg(&source)
+            .output()
+            .expect("generate multistream fixture");
+        assert!(
+            generated.status.success(),
+            "{}",
+            String::from_utf8_lossy(&generated.stderr)
+        );
+        let inspect = |path: &Path, dimensions: Option<(u32, u32)>| {
+            let mut video_seen = false;
+            let mut audible = false;
+            crate::decode_file(path, |output| {
+                match output {
+                    DecodeOutput::Video(frame) => {
+                        assert_eq!(
+                            Some((frame.width, frame.height)),
+                            dimensions,
+                            "{}",
+                            path.display()
+                        );
+                        assert!(
+                            frame.rgba[0] < 10 && frame.rgba[2] > 240,
+                            "export must retain the blue playback stream"
+                        );
+                        video_seen = true;
+                    }
+                    DecodeOutput::Audio(chunk) => {
+                        audible |= chunk
+                            .bytes
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .any(|bytes| f32::from_le_bytes(*bytes).abs() > 0.01);
+                    }
+                }
+                true
+            })
+            .expect("decode selected streams");
+            assert_eq!(video_seen, dimensions.is_some());
+            assert!(audible, "export must retain the audible playback stream");
+        };
+        inspect(&source, Some((160, 96)));
+        for (name, kind, operations, dimensions) in [
+            ("plain.mkv", MediaKind::Video, vec![], Some((160, 96))),
+            (
+                "crop.mkv",
+                MediaKind::Video,
+                vec![EditOperation::Crop(PixelCrop {
+                    x: 0,
+                    y: 0,
+                    width: 32,
+                    height: 32,
+                })],
+                Some((32, 32)),
+            ),
+            (
+                "trim.mkv",
+                MediaKind::Video,
+                vec![EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(
+                    500_000_000,
+                ))],
+                Some((160, 96)),
+            ),
+            ("audio.wav", MediaKind::Audio, vec![], None),
+        ] {
+            let target = directory.join(name);
+            let request = ExportRequest {
+                source: source.clone(),
+                target: target.clone(),
+                kind,
+                operations,
+                hardware_encode: false,
+            };
+            let streams = ExportStreams::probe(&request).expect("selected input streams");
+            for hardware in [false, true] {
+                let arguments = ffmpeg_arguments(&request, hardware, &streams).join(" ");
+                assert!(arguments.contains("-map 0:2"));
+                assert_eq!(arguments.contains("-map 0:0"), kind == MediaKind::Video);
+                assert_eq!(
+                    arguments.contains("-copyts -start_at_zero"),
+                    name == "trim.mkv"
+                );
+            }
+            export_media(&request).expect("export selected streams");
+            inspect(&target, dimensions);
+        }
+        fs::remove_dir_all(directory).expect("remove owned export fixtures");
+    }
 
     #[test]
     fn trim_export_preserves_source_boundaries_and_rejects_empty_media() {
@@ -822,7 +954,7 @@ mod tests {
             hardware_encode: false,
         };
 
-        let arguments = ffmpeg_arguments(&request, false, &TrimStreams::default());
+        let arguments = ffmpeg_arguments(&request, false, &ExportStreams::default());
         let filter = arguments
             .windows(2)
             .find_map(|pair| (pair[0] == "-vf").then_some(pair[1].as_str()))
@@ -868,7 +1000,7 @@ mod tests {
             hardware_encode: false,
         };
 
-        let streams = TrimStreams {
+        let streams = ExportStreams {
             video: Some((0, ffmpeg::Rational(1, 1000))),
             audio: Some((1, ffmpeg::Rational(1, 48000))),
         };
@@ -891,7 +1023,7 @@ mod tests {
             hardware_encode: true,
         };
 
-        let arguments = ffmpeg_arguments(&request, true, &TrimStreams::default()).join(" ");
+        let arguments = ffmpeg_arguments(&request, true, &ExportStreams::default()).join(" ");
 
         assert!(arguments.contains("-c:v h264_mf -hw_encoding 1"));
     }

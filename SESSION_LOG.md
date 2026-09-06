@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 14:06 JST - preserve playback streams in untrimmed exports
+
+- Trigger/evidence: previous turn pushed 94f97cb (progress); its CI remains in progress at this checkpoint. Default-disposition fixture exports the expected streams, but a remux with all default flags cleared plays blue 160x96/mono and saves red 320x240/stereo. Normal release PID 41696 reproduces through native Save As and reopening the output in the same window.
+- Contract/change: document export selection matching playback regardless of trim. Rename private TrimStreams to ExportStreams and probe all video/audio requests; explicitly map existing best-stream indices for both hardware attempt and software fallback. Keep copyts/start_at_zero restricted to trim, existing timestamp filters, still-image bypass, staging, cancel and target protection. No new dependencies, unsafe code, app/core or playback changes.
+- Verification: generated four-stream regression first fails on plain.mkv output dimensions (320x240 vs expected 160x96). Fixed unedited/cropped/trimmed video and audio-only exports decode to blue and audible samples; secondary silent stereo is marked hearing_impaired to exercise selection beyond channel count. Argument checks cover identical hardware/software indices and trim-only timestamp flags. Focused export tests, format, Clippy, 205 tests (app 96/core 35/runtime 70/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: fixed PID 45184 opens identical source, saves to a new ignored path and reopens blue 160x96/mono. Source/output each decode via D3d11va with 120 hardware/presented, zero drops/CPU transfers; reopened drift p95 3.671 ms/max 6.600 ms. Both owned windows close normally. Source unchanged; outputs/captures/logs remain ignored.
+- Status/next: h1_active. Continue remaining daily edit/error flows and visual/interaction fidelity audit; stream selector UI is not added. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 13:58 JST - align previews with playback stream selection
 
 - Trigger/evidence: previous checkpoint a7274b4 CI succeeded. A four-stream MKV has first red video/silent audio and default second blue video/880 Hz audio. Baseline normal release PID 39968 plays blue but shows red hover thumbnail and empty waveform. Initial injected startup keys were not applied; inspect/front the same window before confirming timeline evidence, without restarting.

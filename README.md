@@ -14,7 +14,7 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 - ライセンス: MIT OR Apache-2.0
 - 次の工程: H1 human evaluation and UX stabilization。実際の利用flowを観察し、小さな検証可能な単位でUI/UXと機能の不一致を直す
 
-複数の映像・音声streamを含む素材では、thumbnail・filmstrip・waveformも再生と同じstreamを自動選択します。手動でstreamを切り替えるUIはありません。
+複数の映像・音声streamを含む素材では、thumbnail・filmstrip・waveformと保存も再生と同じstreamを自動選択します。手動でstreamを切り替えるUIはありません。
 
 ## 文書
 

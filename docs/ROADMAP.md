@@ -226,3 +226,5 @@ preview要求ごとのthread生成を、duration/波形/hover画像それぞれ�
 2時間AACのwaveform完了までを測ると、旧showwavespic子processが約1.36 GBを保持した。PCMの逐次集計・隣接bin併合へ変更し、集計を最大width×1024個のu64、入力を64 KiBに限定。短い素材の画素一致、長い素材/急変のbar差1 pixel以内、奇数byte分割・末尾不正、診断pipe上限を確認した。203 tests・Clippy・両buildが通過。通常releaseで子process約42 MB、本体合計約191 MB、生成観測3.3→2.4秒、波形本体41,078画素一致、生成中終了65 msと子process残存なしを確認。7660b7eのCIも成功。次は残る日常media/error flowを監査する。H1全体・環境/配布gateは継続中。
 
 複数streamの通常release試験で、本体は既定の青い映像を再生するのにthumbnailは先頭の赤い映像、waveformは先頭の無音になった。previewの選択を再生と同じFFmpeg best-streamへ揃え、cache keyをv3に更新した。旧コードで失敗する回帰、204 tests・Clippy・両buildが通過し、同じ素材の通常windowでthumbnail・waveform一致と120 frames/drop 0を確認。a7274b4のCIも成功。次はexportのstream選択一致を監査する。H1全体・実機/配布gateは未完了。
+
+既定指定のない複数stream素材では、青い本画面からSave Asすると赤い別映像が保存される問題を通常releaseで再現した。trim時だけだったbest-stream指定を全動画/音声exportへ適用し、trimなしのtimestamp処理は維持。無編集・crop・trim・音声のみのdecode照合を含む205 tests・Clippy・両buildが通過し、同じ素材のSave As→再openでも青160×96/monoを確認した。次は残る日常edit/error flowと外観・操作感の監査を続ける。H1全体・実機/配布gateは未完了。

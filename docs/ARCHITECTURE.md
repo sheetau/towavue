@@ -92,6 +92,8 @@ codec metadata、device、driverのいずれかがD3D11VAを成立させられ�
 
 ### M3 synchronization and recovery
 
+appのmedia読み込み番号をopen（失敗を含む）と最後のtab closeごとに更新し、再生callback・duration・waveform・hover thumbnailの結果へ付ける。現在の番号だけを受理し、同じpathへの再openでも旧結果を破棄する。再生はその上でruntimeのSeek/recovery世代を照合する。番号はappの既存thumbnail世代を共有・改名し、runtime sessionの初期世代やqueue/thread構成は変えない。
+
 renderer再作成不能時は、GPUを使わない所有window付きnative確認を専用workerで表示する。Retryは失敗前のsource位置と再生/停止状態を使い、Cancelは編集を保持する。以後の終了要求はnativeのExport/Discard/Cancel確認から既存のSave As・background exportへ接続する。export失敗もnative通知にし、未保存編集を消さない。native確認とfile dialogは同時に一つだけとし、確認中の別操作を受け付けない。通常rendererがある場合のegui UIは変更しない。
 
 native確認中にexportが完了した場合、保留された終了/移動は確認を閉じてから現在のdirty状態で再判定する。保存済みの旧tabへ再度保存を求めず、未保存tabが残ればそちらを確認する。file dialog・実行中export・未確認export errorがある間は継続せず、Cancelで取り消したguardを復活させない。

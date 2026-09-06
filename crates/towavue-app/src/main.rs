@@ -148,10 +148,11 @@ enum AppEvent {
     DialogFinished(Result<Option<PathBuf>, DialogError>),
     PromptFinished(Result<PromptResponse, DialogError>),
     Export(ExportEvent),
-    Playback(PlaybackEvent),
-    Duration(PathBuf, Result<Duration, String>),
+    Playback(u64, PlaybackEvent),
+    Duration(PathBuf, u64, Result<Duration, String>),
     Waveform(
         PathBuf,
+        u64,
         Result<towavue_runtime_windows::PreviewImage, String>,
     ),
     Thumbnail(
@@ -435,7 +436,7 @@ struct Application<N> {
     waveform: Option<TextureHandle>,
     media_duration: Option<Duration>,
     hover_thumbnail: Option<(u64, TextureHandle)>,
-    thumbnail_generation: u64,
+    media_generation: u64,
     failed_thumbnails: BTreeSet<u64>,
     waveform_loading: bool,
     thumbnail_loading: Option<u64>,
@@ -535,7 +536,7 @@ where
             waveform: None,
             media_duration: None,
             hover_thumbnail: None,
-            thumbnail_generation: 0,
+            media_generation: 0,
             failed_thumbnails: BTreeSet::new(),
             waveform_loading: false,
             thumbnail_loading: None,
@@ -688,7 +689,7 @@ where
         self.waveform = None;
         self.media_duration = None;
         self.hover_thumbnail = None;
-        self.thumbnail_generation = self.thumbnail_generation.wrapping_add(1);
+        self.media_generation = self.media_generation.wrapping_add(1);
         self.failed_thumbnails.clear();
         self.waveform_loading = false;
         self.thumbnail_loading = None;
@@ -717,13 +718,14 @@ where
         };
         let graphics_device = renderer.graphics_device();
         let notify = Arc::clone(&self.notify);
+        let media_generation = self.media_generation;
         match PlaybackSession::open(
             &path,
             graphics_device,
             self.edit_state().volume,
             self.edit_state().rate,
             self.edit_state().playback_range(),
-            move |event| notify(AppEvent::Playback(event)),
+            move |event| notify(AppEvent::Playback(media_generation, event)),
         ) {
             Ok(session) => {
                 self.generation = session.generation();
@@ -750,6 +752,7 @@ where
         };
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
+        let generation = self.media_generation;
         self.waveform_loading = true;
         if let Err(error) = std::thread::Builder::new()
             .name("towavue-waveform".into())
@@ -757,7 +760,7 @@ where
                 let result = cache
                     .waveform(&path, 640, 96)
                     .map_err(|error| error.to_string());
-                notify(AppEvent::Waveform(path, result));
+                notify(AppEvent::Waveform(path, generation, result));
             })
         {
             self.waveform_loading = false;
@@ -772,7 +775,7 @@ where
         let Some(path) = self.path.clone() else {
             return;
         };
-        let generation = self.thumbnail_generation;
+        let generation = self.media_generation;
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
         self.thumbnail_loading = Some(bucket);
@@ -794,11 +797,12 @@ where
     fn load_duration(&mut self, path: PathBuf) {
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
+        let generation = self.media_generation;
         if let Err(error) = std::thread::Builder::new()
             .name("towavue-duration".into())
             .spawn(move || {
                 let result = cache.duration(&path).map_err(|error| error.to_string());
-                notify(AppEvent::Duration(path, result));
+                notify(AppEvent::Duration(path, generation, result));
             })
         {
             self.set_status(format!("Could not start duration worker: {error}"));
@@ -1004,15 +1008,23 @@ where
             AppEvent::DialogFinished(result) => self.finish_dialog(result),
             AppEvent::PromptFinished(result) => self.finish_native_prompt(result),
             AppEvent::Export(event) => self.handle_export_event(event),
-            AppEvent::Playback(event) => self.handle_playback_event(event),
-            AppEvent::Duration(path, result) if self.path.as_ref() == Some(&path) => match result {
-                Ok(duration) => {
-                    self.media_duration = Some(duration);
-                    self.request_redraw();
+            AppEvent::Playback(generation, event) if generation == self.media_generation => {
+                self.handle_playback_event(event);
+            }
+            AppEvent::Duration(path, generation, result)
+                if self.path.as_ref() == Some(&path) && generation == self.media_generation =>
+            {
+                match result {
+                    Ok(duration) => {
+                        self.media_duration = Some(duration);
+                        self.request_redraw();
+                    }
+                    Err(error) => self.set_status(format!("Duration unavailable: {error}")),
                 }
-                Err(error) => self.set_status(format!("Duration unavailable: {error}")),
-            },
-            AppEvent::Waveform(path, result) if self.path.as_ref() == Some(&path) => {
+            }
+            AppEvent::Waveform(path, generation, result)
+                if self.path.as_ref() == Some(&path) && generation == self.media_generation =>
+            {
                 self.waveform_loading = false;
                 match result {
                     Ok(preview) => {
@@ -1033,7 +1045,7 @@ where
                 }
             }
             AppEvent::Thumbnail(path, generation, bucket, result)
-                if self.path.as_ref() == Some(&path) && generation == self.thumbnail_generation =>
+                if self.path.as_ref() == Some(&path) && generation == self.media_generation =>
             {
                 if self.thumbnail_loading != Some(bucket) {
                     return;
@@ -1062,8 +1074,9 @@ where
                     self.request_redraw();
                 }
             }
-            AppEvent::Duration(_, _)
-            | AppEvent::Waveform(_, _)
+            AppEvent::Playback(_, _)
+            | AppEvent::Duration(_, _, _)
+            | AppEvent::Waveform(_, _, _)
             | AppEvent::Thumbnail(_, _, _, _) => {}
         }
     }
@@ -3296,7 +3309,7 @@ where
             self.waveform = None;
             self.media_duration = None;
             self.hover_thumbnail = None;
-            self.thumbnail_generation = self.thumbnail_generation.wrapping_add(1);
+            self.media_generation = self.media_generation.wrapping_add(1);
             self.failed_thumbnails.clear();
             self.waveform_loading = false;
             self.thumbnail_loading = None;
@@ -5248,6 +5261,7 @@ mod tests {
                     .output()
                     .expect("run isolated application test");
             std::fs::remove_dir_all(&root).expect("remove isolated test files");
+            eprint!("{}", String::from_utf8_lossy(&result.stderr));
             assert!(
                 result.status.success(),
                 "{}\n{}",
@@ -5936,7 +5950,7 @@ mod tests {
         }
         assert_eq!(app.state, PlaybackState::Playing);
         assert!(app.playback_error.is_none());
-        let previous_generation = app.thumbnail_generation;
+        let previous_generation = app.media_generation;
         app.load_path(path.clone(), MediaKind::Video);
         app.load_hover_thumbnail(Duration::from_secs(15), 10);
         assert_eq!(app.thumbnail_loading, Some(10), "reload permits retry");
@@ -5970,7 +5984,7 @@ mod tests {
         app.thumbnail_loading = Some(11);
         app.handle_app_event(AppEvent::Thumbnail(
             path,
-            app.thumbnail_generation,
+            app.media_generation,
             11,
             Ok(preview),
         ));
@@ -8040,7 +8054,7 @@ mod tests {
             app.media_duration = Some(Duration::from_secs(30));
             app.timeline_open = true;
             app.image_generation = 17;
-            app.thumbnail_generation = 23;
+            app.media_generation = 23;
             app.image_view.zoom = towavue_core::ZoomMode::Custom(2.5);
             app.image_view.pan = (20.0, -10.0);
             app.image_view.selection = Some(UnitRect::FULL);
@@ -8071,7 +8085,7 @@ mod tests {
                 assert_eq!(app.current_position(), position);
                 assert_eq!(app.media_duration, Some(Duration::from_secs(30)));
                 assert!(app.timeline_open);
-                assert_eq!((app.image_generation, app.thumbnail_generation), (17, 23));
+                assert_eq!((app.image_generation, app.media_generation), (17, 23));
                 assert_eq!(app.image_view, view);
                 assert_eq!(app.edits[&active], history);
                 assert!(!app.edits.contains_key(&background));
@@ -8138,15 +8152,17 @@ mod tests {
             assert!(app.status_message.is_none());
             app.handle_app_event(AppEvent::Duration(
                 path.clone(),
+                app.media_generation,
                 Ok(Duration::from_secs(30)),
             ));
             app.handle_app_event(AppEvent::Waveform(
                 path.clone(),
+                app.media_generation,
                 Err("late waveform".into()),
             ));
             app.handle_app_event(AppEvent::Thumbnail(
                 path,
-                app.thumbnail_generation,
+                app.media_generation,
                 3,
                 Err("late thumbnail".into()),
             ));
@@ -8159,6 +8175,154 @@ mod tests {
                 assert_eq!(ui.available_rect_before_wrap(), available);
             });
         }
+    }
+
+    #[test]
+    fn reopened_path_rejects_old_duration_and_waveform_results() {
+        let Some(root) =
+            isolated_test_root("tests::reopened_path_rejects_old_duration_and_waveform_results")
+        else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        let path = root.join("reopened.mp4");
+        app.load_path(path.clone(), MediaKind::Video);
+        let old = app.media_generation;
+        app.load_path(path.clone(), MediaKind::Video);
+        assert_ne!(app.media_generation, old);
+        app.status_message = None;
+        app.waveform_loading = true;
+        app.ui_context = Some(egui::Context::default());
+        let preview = towavue_runtime_windows::PreviewImage {
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4],
+        };
+        for result in [Ok(Duration::from_secs(99)), Err("old duration".into())] {
+            app.handle_app_event(AppEvent::Duration(path.clone(), old, result));
+            assert!(app.media_duration.is_none());
+            assert!(app.status_message.is_none());
+        }
+        for result in [Ok(preview.clone()), Err("old waveform".into())] {
+            app.handle_app_event(AppEvent::Waveform(path.clone(), old, result));
+            assert!(app.waveform.is_none());
+            assert!(app.waveform_loading);
+            assert!(app.status_message.is_none());
+        }
+        app.handle_app_event(AppEvent::Duration(
+            path.clone(),
+            app.media_generation,
+            Ok(Duration::from_secs(2)),
+        ));
+        app.handle_app_event(AppEvent::Waveform(path, app.media_generation, Ok(preview)));
+        assert_eq!(app.media_duration, Some(Duration::from_secs(2)));
+        assert!(app.waveform.is_some());
+        assert!(!app.waveform_loading);
+    }
+
+    #[test]
+    fn reopened_playback_rejects_events_from_the_previous_session() {
+        let Some(root) =
+            isolated_test_root("tests::reopened_playback_rejects_events_from_the_previous_session")
+        else {
+            return;
+        };
+        let source =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+        let path = root.join("video-only.mp4");
+        let ffmpeg = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+            .join("bin/ffmpeg.exe");
+        assert!(
+            std::process::Command::new(ffmpeg)
+                .args(["-v", "error", "-i"])
+                .arg(source)
+                .args(["-an", "-c:v", "copy"])
+                .arg(&path)
+                .status()
+                .expect("video-only fixture")
+                .success()
+        );
+        struct Trial(PathBuf);
+        impl ApplicationHandler for Trial {
+            fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+                let window = Arc::new(
+                    event_loop
+                        .create_window(Window::default_attributes().with_visible(false))
+                        .expect("hidden playback test window"),
+                );
+                let renderer = match FrameRenderer::new(&window) {
+                    Ok(renderer) => renderer,
+                    Err(error) => {
+                        eprintln!("SKIP reopened playback: D3D11 renderer unavailable: {error}");
+                        event_loop.exit();
+                        return;
+                    }
+                };
+                let (tx, rx) = std::sync::mpsc::channel();
+                let mut app = Application::new(None, move |event| {
+                    let _ = tx.send(event);
+                })
+                .expect("test app");
+                app.window = Some(window);
+                app.renderer = Some(renderer);
+                app.load_path(self.0.clone(), MediaKind::Video);
+                assert_eq!(app.state, PlaybackState::Playing);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let (old_media, old_playback) = loop {
+                    let event = rx
+                        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        .expect("first session playback callback");
+                    if let AppEvent::Playback(media, event) = event {
+                        break (media, event.generation());
+                    }
+                };
+                app.load_path(self.0.clone(), MediaKind::Video);
+                assert_eq!(app.state, PlaybackState::Playing);
+                assert_ne!(app.media_generation, old_media);
+                assert_eq!(
+                    app.generation, old_playback,
+                    "session-local generations overlap"
+                );
+                for event in [
+                    PlaybackEvent::DecodeFinished(old_playback),
+                    PlaybackEvent::Failed(old_playback, "old failure".into()),
+                    PlaybackEvent::DeviceRemoved(old_playback, "old device".into()),
+                    PlaybackEvent::VideoReady(old_playback),
+                    PlaybackEvent::AudioReady(old_playback),
+                ] {
+                    app.handle_app_event(AppEvent::Playback(old_media, event));
+                    assert_eq!(app.state, PlaybackState::Playing);
+                    assert!(!app.decode_finished);
+                    assert!(app.pending_time.is_none());
+                    assert!(app.playback_error.is_none());
+                }
+                app.handle_app_event(AppEvent::Playback(
+                    app.media_generation,
+                    PlaybackEvent::DecodeFinished(app.generation.next()),
+                ));
+                assert!(!app.decode_finished, "seek generation is still checked");
+                app.handle_app_event(AppEvent::Playback(
+                    app.media_generation,
+                    PlaybackEvent::DecodeFinished(app.generation),
+                ));
+                assert!(
+                    app.decode_finished,
+                    "current session notifications are accepted"
+                );
+                eprintln!("reopened playback: live session identity checks passed");
+                event_loop.exit();
+            }
+
+            fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+        }
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        let mut builder = EventLoop::builder();
+        builder.with_any_thread(true);
+        builder
+            .build()
+            .expect("test event loop")
+            .run_app(&mut Trial(path))
+            .expect("playback trial");
     }
 
     #[test]

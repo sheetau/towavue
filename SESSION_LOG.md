@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 20:04 JST - distinguish launch evidence from missing platform integration
+
+- Trigger/intent: previous turn pushed 9fe5a3a (progress); CI 34028868218 remains in progress at inspection. Re-audit the full launch objective instead of treating accumulated small fixes as completion. Read current manifests, CI, architecture/gates, fixed dependency code, historical trial manifest/log and draft Welcome/reading/audio images.
+- New findings: egui-winit has no enabled clipboard/arboard feature, its actual clipboard implementation falls back to a per-state String, and the app has no alternative OS text clipboard bridge. Accesskit's presence in the dependency graph does not provide Windows accessibility: egui-winit's feature/adapter initialization/action route is absent. Record both as missing implementation, not merely untested support.
+- Evidence boundaries: current OS is build 26200 and CI uses windows-2022, not a Windows 10 22H2 validation. Verify the archived 51b43bf 30-minute log's 107771 frames/zero drops/transfers and 4.808/32.055ms drift without relabeling it as the current binary. Keep physical input/DPI/device, final-candidate checks, design acceptance and distribution decisions explicit.
+- Changes/verification: update KNOWN_GAPS section 6 as the existing authoritative audit, not a duplicate checklist; link the next work from ROADMAP. Re-run format, Clippy and 239 tests, all pass with three existing live ignores. Confirm core/app unsafe forbids and excluded tracked artifacts. No app code, clipboard, OS state, dependency, packaging or publication changes.
+- Status/next: h1_active, launch completion unproven. Prioritize OS text clipboard integration and the Windows accessibility path, using isolated or explicitly approved native validation. Reading grouping and prior owner choices remain unanswered; this is not yet an impasse because concrete in-scope implementation work remains.
+
 ## 2026-09-06 19:56 JST - verify image error recovery across navigation and close
 
 - Trigger/intent: previous turn pushed 8796ad8 (progress), CI 34028432419 succeeds. Continue daily-viewing audit beyond existing zoom/selection regressions with a native error-state recovery flow. No reading navigation policy decision received; leave that behavior unchanged.

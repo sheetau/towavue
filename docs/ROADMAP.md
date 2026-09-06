@@ -288,3 +288,5 @@ reading modeの固定8pxの隙間と等分枠による中心ずれを確認し�
 日常選択操作の監査で、Shift正方形/比率付きresizeが画像端で比率を失うことをtestと通常windowで再現した。共通の寸法上限、固定辺/中心とdrag開始比率を保持する修正により、同じ入力が端で正方形のまま止まる。縦横/全方向/zero縮小後と既存取消/cropの回帰、238 tests・Clippy・両build、25cc2e1 CIが通過。読書モードの見開き区切り方はownerへ確認中で、現行navigationは変更していない。実環境/配布を含むH1は継続中。
 
 画像errorからの継続操作を通常releaseで確認し、不正PNGのreading error枠/隣の正常page、左右移動、同じpathの修復後再読込、最後のtabからWelcomeへの復帰が通過した。実workerを使うBMP回帰を追加し、正確な修復RGBAと旧error解除も検証。挙動変更なしで239 tests・Clippy・両buildと8796ad8 CIが通過。全codec/実環境/配布を含むH1の完了を示すものではない。
+
+20:04のlaunch再監査で、現行build/回帰、過去binaryの性能記録、未実装と実環境未検証をKNOWN_GAPS §6へ分離した。固定egui-winitのOS text clipboard連携が無効で内部fallbackのみ、Windows accessibility bridgeも未接続と確認し、次の実装候補とする。Windows 10 22H2での確認、最終候補の性能/保存確認、実device/input/DPI、配布判断は残る。239 tests・format・Clippyを再実行して通過したが、launch完了とは扱わない。

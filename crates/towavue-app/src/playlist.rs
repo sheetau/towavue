@@ -3,22 +3,66 @@ use std::path::{Path, PathBuf};
 use egui::{Color32, RichText};
 use towavue_core::{FolderSnapshot, MediaKind};
 
-pub fn show(
-    ui: &mut egui::Ui,
-    snapshot: Option<&FolderSnapshot>,
-    current: Option<&Path>,
-) -> Option<PathBuf> {
-    let mut chosen = None;
-    let items: Vec<_> = snapshot
-        .into_iter()
-        .flat_map(|snapshot| snapshot.items_of_kind(MediaKind::Audio))
-        .collect();
-    egui::Frame::new().inner_margin(8).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        egui::ScrollArea::vertical()
-            .id_salt("audio_playlist")
-            .auto_shrink([false, false])
-            .show_rows(ui, 32.0, items.len(), |ui, rows| {
+#[derive(Default)]
+pub struct Playlist {
+    focus: Option<(PathBuf, usize)>,
+}
+
+impl Playlist {
+    pub fn clear(&mut self) {
+        self.focus = None;
+    }
+
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        snapshot: Option<&FolderSnapshot>,
+        current: Option<&Path>,
+    ) -> Option<PathBuf> {
+        let mut chosen = None;
+        let items: Vec<_> = snapshot
+            .into_iter()
+            .flat_map(|snapshot| snapshot.items_of_kind(MediaKind::Audio))
+            .collect();
+        egui::Frame::new().inner_margin(8).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let focus = current.and_then(|path| {
+                items
+                    .iter()
+                    .position(|item| item.path == path)
+                    .map(|index| (path, index))
+            });
+            let changed = self
+                .focus
+                .as_ref()
+                .map(|(path, index)| (path.as_path(), *index))
+                != focus;
+            let mut scroll = egui::ScrollArea::vertical()
+                .id_salt("audio_playlist")
+                .auto_shrink([false, false]);
+            if changed {
+                if let Some((path, index)) = focus {
+                    let offset = egui::scroll_area::State::load(
+                        ui.ctx(),
+                        ui.make_persistent_id("audio_playlist"),
+                    )
+                    .map_or(0.0, |state| state.offset.y);
+                    let top = index as f32 * 32.0;
+                    let height = ui.available_height();
+                    let offset = if top < offset {
+                        top
+                    } else if top + 32.0 > offset + height {
+                        (top + 32.0 - height).max(0.0)
+                    } else {
+                        offset
+                    };
+                    scroll = scroll.vertical_scroll_offset(offset);
+                    self.focus = Some((path.to_path_buf(), index));
+                } else {
+                    self.clear();
+                }
+            }
+            scroll.show_rows(ui, 32.0, items.len(), |ui, rows| {
                 for index in rows {
                     let item = items[index];
                     let selected = current == Some(item.path.as_path());
@@ -44,8 +88,9 @@ pub fn show(
                     }
                 }
             });
-    });
-    chosen
+        });
+        chosen
+    }
 }
 
 #[cfg(test)]
@@ -76,7 +121,8 @@ mod tests {
             );
             let current = snapshot.items[2].path.as_path();
             let time = std::cell::Cell::new(0.0);
-            let frame = |events| {
+            let mut playlist = Playlist::default();
+            let mut frame = |events| {
                 time.set(time.get() + 0.2);
                 let mut chosen = None;
                 let output = context.run_ui(
@@ -86,7 +132,7 @@ mod tests {
                         events,
                         ..Default::default()
                     },
-                    |ui| chosen = show(ui, Some(&snapshot), Some(current)),
+                    |ui| chosen = playlist.show(ui, Some(&snapshot), Some(current)),
                 );
                 (output, chosen)
             };
@@ -196,11 +242,140 @@ mod tests {
     }
 
     #[test]
+    fn playlist_reveals_changed_current_row_without_overriding_manual_scroll() {
+        let context = egui::Context::default();
+        let mut playlist = Playlist::default();
+        let mut snapshot = snapshot(10_000);
+        let last = snapshot.items[9999].path.clone();
+        let frame =
+            |playlist: &mut Playlist, snapshot: Option<&FolderSnapshot>, current: &Path, events| {
+                context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 240.0))),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| assert!(playlist.show(ui, snapshot, Some(current)).is_none()),
+                )
+            };
+        let visible = |output: &egui::FullOutput, name: &str| {
+            texts(output).iter().any(|text| {
+                text.galley.job.text.ends_with(name)
+                    && text.pos.y >= 8.0
+                    && text.pos.y + text.galley.size().y <= 232.0
+            })
+        };
+        frame(&mut playlist, None, &last, vec![]);
+        assert!(
+            playlist.focus.is_none(),
+            "wait for the snapshot before consuming reveal"
+        );
+        for _ in 0..4 {
+            frame(&mut playlist, Some(&snapshot), &last, vec![]);
+        }
+        let output = frame(&mut playlist, Some(&snapshot), &last, vec![]);
+        assert!(
+            visible(&output, "track-9999.wav"),
+            "initial late-file open must reveal the current row"
+        );
+        assert!(texts(&output).len() < 12);
+
+        let scroll_away = |playlist: &mut Playlist, snapshot: &FolderSnapshot, path: &Path| {
+            frame(
+                playlist,
+                Some(snapshot),
+                path,
+                vec![Event::PointerMoved(egui::pos2(400.0, 50.0))],
+            );
+            frame(
+                playlist,
+                Some(snapshot),
+                path,
+                vec![Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, 1600.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            for _ in 0..50 {
+                frame(playlist, Some(snapshot), path, vec![]);
+            }
+            frame(playlist, Some(snapshot), path, vec![Event::PointerGone])
+        };
+        let output = scroll_away(&mut playlist, &snapshot, &last);
+        assert!(
+            !visible(&output, "track-9999.wav"),
+            "manual scroll must not snap back on redraw"
+        );
+        let first = snapshot.items[0].path.clone();
+        for _ in 0..4 {
+            frame(&mut playlist, Some(&snapshot), &first, vec![]);
+        }
+        let output = frame(&mut playlist, Some(&snapshot), &first, vec![]);
+        assert!(
+            visible(&output, "track-0.wav"),
+            "navigation reveals the first row"
+        );
+        let before = texts(&output)[0].pos;
+        let second = snapshot.items[1].path.clone();
+        let output = frame(&mut playlist, Some(&snapshot), &second, vec![]);
+        assert_eq!(
+            texts(&output)[0].pos,
+            before,
+            "already-visible navigation does not move the list"
+        );
+
+        snapshot.items.swap(1, 9999);
+        for _ in 0..4 {
+            frame(&mut playlist, Some(&snapshot), &second, vec![]);
+        }
+        assert!(
+            visible(
+                &frame(&mut playlist, Some(&snapshot), &second, vec![]),
+                "track-1.wav"
+            ),
+            "Shell reorder reveals the new index"
+        );
+        assert!(!visible(
+            &scroll_away(&mut playlist, &snapshot, &second),
+            "track-1.wav"
+        ));
+        playlist.clear();
+        for _ in 0..4 {
+            frame(&mut playlist, Some(&snapshot), &second, vec![]);
+        }
+        assert!(
+            visible(
+                &frame(&mut playlist, Some(&snapshot), &second, vec![]),
+                "track-1.wav"
+            ),
+            "tab reactivation reveals the current row again"
+        );
+
+        let removed = snapshot.items.pop().expect("current row");
+        frame(&mut playlist, Some(&snapshot), &second, vec![]);
+        assert!(playlist.focus.is_none());
+        snapshot.items.insert(0, removed);
+        for _ in 0..4 {
+            frame(&mut playlist, Some(&snapshot), &second, vec![]);
+        }
+        assert!(
+            visible(
+                &frame(&mut playlist, Some(&snapshot), &second, vec![]),
+                "track-1.wav"
+            ),
+            "a reappearing item can be revealed"
+        );
+    }
+
+    #[test]
     fn empty_playlist_has_no_rows_or_actions() {
         for snapshot in [None, Some(snapshot(0))] {
             let context = egui::Context::default();
+            let mut playlist = Playlist::default();
             let output = context.run_ui(egui::RawInput::default(), |ui| {
-                assert!(show(ui, snapshot.as_ref(), None).is_none());
+                assert!(playlist.show(ui, snapshot.as_ref(), None).is_none());
             });
             assert!(texts(&output).is_empty());
         }

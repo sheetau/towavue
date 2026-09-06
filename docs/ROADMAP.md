@@ -238,3 +238,5 @@ Seek previewがhover位置ではなく左端に現れる問題を通常release�
 単一項目folderの右矢印でzoomがFitへ戻り、同じ画像なのに保存確認が出る問題を通常releaseで再現した。共通Navigate guardの入口で同じpathをno-opにし、playlistの現在項目clickにも適用。旧コードで失敗する世代・view・clock・編集保持の回帰を含む211 tests、Clippy、両buildが通過。通常windowで100%・dirty画像の保持、停止音声の現在行clickを確認した。次はaudio playlistのクリック領域と草案layoutを監査する。H1と実機/配布gateは未完了。
 
 音声playlistを番号付き32pxの全幅行へ変更し、現在曲の強調・名前省略・window幅内の全文tooltip・可視行描画を追加した。1万曲の描画と全幅click/scroll選曲を含む213 tests、Clippy、両buildが通過。通常windowの右端click・小window・日本語tooltip・scroll後の選曲を確認し、12322d5 CIも成功。次はplaylistで現在曲が画面外にある場合の導線を監査する。曲長の列は追加していない。H1と実機/配布gateは未完了。
+
+音声の途中曲を直接開いても現在行が見えない問題を通常releaseで再現し、open/選曲/tab再表示/順序変更時だけの最小scrollを追加した。同一曲の手動scrollとguard Cancelを維持する。1万曲の表示回帰を含む214 tests、Clippy、両buildと通常windowの選曲・Cancel・tab復帰が通過。次は残る日常の再生操作を監査する。a356646 CIは進行中で、H1と実機/配布gateは未完了。

@@ -469,6 +469,7 @@ struct Application<N> {
     modifiers: ModifiersState,
     filmstrip_open: bool,
     filmstrip: filmstrip::Filmstrip,
+    playlist: playlist::Playlist,
     image_seek_preview_active: bool,
     grid_open: bool,
     palette_open: bool,
@@ -573,6 +574,7 @@ where
             modifiers: ModifiersState::default(),
             filmstrip_open: false,
             filmstrip,
+            playlist: playlist::Playlist::default(),
             image_seek_preview_active: false,
             grid_open: false,
             palette_open: false,
@@ -678,6 +680,7 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.playlist.clear();
         self.cancel_view_drag();
         self.playback_error = None;
         self.pending_folder = None;
@@ -2471,8 +2474,10 @@ where
             });
     }
 
-    fn draw_audio_playlist(&self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
-        if let Some(path) = playlist::show(ui, self.folder_snapshot.as_ref(), self.path.as_deref())
+    fn draw_audio_playlist(&mut self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        if let Some(path) =
+            self.playlist
+                .show(ui, self.folder_snapshot.as_ref(), self.path.as_deref())
         {
             actions.push(UiAction::OpenMedia(path, false));
         }
@@ -3331,6 +3336,7 @@ where
             self.image = None;
             self.reading_pages.clear();
             self.path = None;
+            self.playlist.clear();
             self.media_kind = None;
             self.timeline_open = false;
             self.waveform = None;

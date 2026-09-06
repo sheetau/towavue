@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 15:03 JST - reveal the current audio playlist row
+
+- Trigger/evidence: previous turn pushed a356646 (progress); CI 34015268440 remains in progress. Baseline normal release PID 28620 opens track 24 but displays rows from track 1, leaving the current item outside the viewport.
+- Contract/change: app-owned Playlist remembers current path/index. Initial snapshot arrival, actual media load/tab activation and changed Shell index reveal an offscreen row with minimum vertical adjustment. Repeated drawing preserves manual scroll; missing items do not consume reveal. Load/last-tab close clear focus; pending/Cancelled navigation does not. No runtime, core, playback, dependency or unsafe changes.
+- Verification: regression renders 10,000 tracks through missing snapshot, initial last item, manual scroll, first/visible-adjacent navigation, Shell reorder, clear/reactivation and disappearance/reappearance. Clamping offset to zero fails initial visibility. Format, Clippy, 214 tests (app 105/core 35/runtime 70/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: fixed PID 40276 initially reveals all of row 24. Volume edit plus Ctrl+Right shows dirty guard without moving the list; Escape preserves current row/offset. Undo then Ctrl+Right reveals row 1. Manual wheel scroll remains while playback position updates; open an image tab then reactivate audio and row 1 is visible again. Baseline/fixed windows close normally, sources not saved, ignored trial logs/captures only.
+- Status/next: h1_active. Audit remaining everyday playback interactions. Per-track playlist duration remains absent; physical input/DPI/device-change and distribution gates remain incomplete. Packaging unanswered, no publication.
+
 ## 2026-09-06 14:55 JST - improve audio playlist row layout and targets
 
 - Trigger/evidence: previous turn pushed 12322d5 (progress); its CI and 7064420 CI now succeed. Existing playlist labels only accepted clicks within text width. Draft shows numbered, spacious rows and a brighter current item.

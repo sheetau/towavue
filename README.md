@@ -18,6 +18,8 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 
 音声playlistはShell順の番号付き一覧です。行全体をclickして選曲でき、現在曲を明るく表示します。長い名前は一行に省略し、hoverで全文を確認できます。多数の曲も可視行だけを描画します。各曲の長さの列はまだありません。
 
+曲を開く・選曲する・tabへ戻ると、playlistの現在行が画面外なら必要な分だけscrollします。同じ曲の再生中は手動scrollした位置を保持します。
+
 ## 文書
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md): 技術選定、境界、データフロー、不変条件

@@ -252,6 +252,8 @@ modal入力を保護している間は背景rootのwidgetを無効化し、既�
 
 保存確認・export通知は現在のegui表示領域に幅を制限する。長いfile名は一行で省略してtooltipに全文を残し、確認buttonは横幅に応じて折り返す。エラー詳細の縦scrollには画面高に応じた上限を設け、確認buttonを詳細の外に保つ。OSのDPIや設定は変更しない。
 
+保存確認、export失敗、継続前のexport待ちは、内容を描く前に同じ見出しを名前にしたAccessKit Dialog/modal nodeを作り、説明とbuttonをその子要素にする。通常のbackground export windowはmodal扱いにしない。見た目と既存のTab/Enter/Escape、確認buttonの初期focus方針は変更せず、名前/階層だけでscreen readerの読上げ完了を宣言しない。
+
 画像・reading・動画のfullscreen閲覧中だけ、入力が2秒ないとcursorを隠す。windowがactiveでpointerが内側にあることを条件とし、button保持・selection drag、filmstrip/palette/grid、picker・dirty guard・export、loading/error・file hover中は表示する。pointer移動・button・wheel・key入力、focus/入退出の変化で期限をリセットし、fullscreen解除時も表示へ戻す。音声playlistとWelcomeでは隠さない。eguiのplatform outputでcursorを統一管理し、期限をevent loopの既存待機へ統合する。非表示中という理由だけで再描画やpollを追加しない。最小化からpointerを動かさず復帰するとCursorEnteredが届かない場合があるため、focus取得時も既存のpicker復帰と同じclient座標更新を行う。
 
 ### H1 seek bar and command palette

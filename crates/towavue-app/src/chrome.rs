@@ -17,6 +17,15 @@ pub fn bar() -> egui::Frame {
         .inner_margin(egui::Margin::symmetric(6, 2))
 }
 
+pub fn modal_heading(ui: &mut Ui, title: &str) {
+    ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
+        node.set_role(egui::accesskit::Role::Dialog);
+        node.set_label(title);
+        node.set_modal();
+    });
+    ui.heading(title);
+}
+
 pub fn button(ui: &mut Ui, glyph: &str, label: &str) -> egui::Response {
     let painted = matches!(glyph, "≋" | "◫" | "Ⅱ");
     let response = ui

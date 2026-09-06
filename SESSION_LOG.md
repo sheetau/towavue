@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 21:23 JST - name save-related accessibility dialogs
+
+- Trigger/intent: 0690cc7 CI 34031789285 succeeds. Native baseline exposes the guard heading under the app root with no dialog. Add named Dialog/modal metadata to the three existing save-related modals without changing layout, keyboard focus policy or nonmodal export.
+- Regression: extend the existing resize/layout test to check one named modal, modal flag and contained action buttons across five modes and five sizes. It fails first for missing Dialog, then for orphan children with ui.id(); use egui's accessibility ui.unique_id(). Format, Clippy, 244 tests and both builds pass; three existing live ignores remain.
+- Native evidence: PID 21248 (12:07:08.3207967Z) exposes Unsaved edits and Exporting before continuing with IsModal=true and contained action buttons; invoke export cancellation through the latter. Lost output from an earlier attempt is excluded. DEVELOPMENT records baseline/final binary hashes and exact scopes.
+- Unresolved finding: owned-copy malformed-source export in PID 35584 (12:15:34.1070704Z) visibly reaches Export failed, but UIA times out then returns zero descendants even after Tab. No restart or success claim; baseline reproduction/cause remains the next investigation. Headless error metadata passes but native error accessibility is unverified.
+- Cleanup: all three windows close normally after cancellation and Undo. Restore the owned source copy; original hashes unchanged, no export output remains, app stderr empty. Delete an unverified foreground capture; retain only owned trial evidence. No clipboard or OS-setting changes.
+- Status/next: h1_active. Checkpoint the narrow semantic improvement with its native limitation documented; investigate UIA tree loss around export failure before claiming full modal accessibility. Other screen-reader, physical environment, final-candidate and distribution gates remain open.
+
 ## 2026-09-06 20:57 JST - block accessibility actions behind modal guards
 
 - Trigger/evidence: previous turn pushed ddb9a3f (progress), CI 34031300276 now succeeds. Native R/Ctrl+W on the owned red image exposes enabled background UIA controls; invoking the menu opens it behind the unsaved guard. A regression also fails because an already-queued background command bypasses the guard.

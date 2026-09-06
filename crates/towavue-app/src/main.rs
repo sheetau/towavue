@@ -1496,7 +1496,7 @@ where
         if let Some(error) = &self.export_error {
             let modal = egui::Modal::new("export-error".into()).show(&context, |ui| {
                 ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 520.0));
-                ui.heading("Export failed");
+                chrome::modal_heading(ui, "Export failed");
                 ui.label("Your edits and existing files have been kept.");
                 egui::ScrollArea::vertical()
                     .max_height((context.content_rect().height() - 130.0).clamp(20.0, 220.0))
@@ -1568,7 +1568,7 @@ where
         if export.continuation.is_some() {
             egui::Modal::new("export-before-continuing".into()).show(context, |ui| {
                 ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 340.0));
-                ui.heading("Exporting before continuing");
+                chrome::modal_heading(ui, "Exporting before continuing");
                 contents(ui);
             });
         } else {
@@ -1588,7 +1588,7 @@ where
             .map_or_else(|| "this media".to_owned(), display_name);
         let modal = egui::Modal::new("unsaved-edit-guard".into()).show(context, |ui| {
             ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 520.0));
-            ui.heading("Unsaved edits");
+            chrome::modal_heading(ui, "Unsaved edits");
             ui.separator();
             ui.label("Export edits before continuing?");
             ui.add(egui::Label::new(&name).truncate())
@@ -6110,6 +6110,7 @@ mod tests {
             return;
         };
         let context = egui::Context::default();
+        context.enable_accesskit();
         let mut app = Application::new(None, |_| {}).expect("headless application");
         app.path = Some(PathBuf::from(format!(
             "{}.png",
@@ -6174,6 +6175,46 @@ mod tests {
                         "Cancel",
                     ],
                 };
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree");
+                let dialogs: Vec<_> = tree
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| node.role() == egui::accesskit::Role::Dialog)
+                    .collect();
+                if mode == 2 {
+                    assert!(dialogs.is_empty(), "background export is not modal");
+                } else {
+                    assert_eq!(dialogs.len(), 1, "one named active modal");
+                    let (_, dialog) = dialogs[0];
+                    assert_eq!(dialog.label(), Some(expected[0]));
+                    assert!(dialog.is_modal());
+                    let mut descendants = dialog.children().to_vec();
+                    let mut index = 0;
+                    while index < descendants.len() {
+                        let id = descendants[index];
+                        let (_, node) = tree
+                            .nodes
+                            .iter()
+                            .find(|(node_id, _)| *node_id == id)
+                            .expect("modal descendant");
+                        descendants.extend_from_slice(node.children());
+                        index += 1;
+                    }
+                    for label in &expected[1..] {
+                        assert!(
+                            tree.nodes.iter().any(|(id, node)| {
+                                node.role() == egui::accesskit::Role::Button
+                                    && node.label() == Some(*label)
+                                    && descendants.contains(id)
+                            }),
+                            "{label} must belong to the dialog"
+                        );
+                    }
+                }
                 let mut target = egui::Pos2::ZERO;
                 for label in expected {
                     let shape = output

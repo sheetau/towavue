@@ -296,3 +296,5 @@ reading modeの固定8pxの隙間と等分枠による中心ずれを確認し�
 Windows accessibility bridgeを初回表示前に接続し、初期tree要求/action/無効化を既存event loopへ統合した。UI AutomationでWelcome子要素0→12、menu→palette→検索文字列設定→Open file実行/取消→終了が通過。空白名、固定TextEditのSetValue不処理、候補行のToggle扱いを修正し、headless tree/action回帰を追加した。243 tests・format・Clippy・両buildが通過。5秒idle CPU増分0msはこの通常windowだけの観測で、screen reader・custom widget・実環境/配布gateは残る。
 
 続く保存ガード監査で、UI AutomationのInvokeから確認中の背景menuを開ける問題を実windowで再現した。背景rootの無効化、popupの解除/overlay表示保留と、最前面の確認以外の配送済みUiAction拒否を追加。244 tests・format・Clippy・両buildが通過し、通常windowでも古いmenu参照のInvoke拒否、Cancel後のdirty保持/再有効化を確認した。modalの意味情報/読上げ順と既存launch gateは継続する。
+
+保存関連3 modalの名前と子要素階層を追加し、既存layout回帰で通常background exportとの区別も確認した。244 tests・format・Clippy・両buildが通過。実windowでは保存確認と継続前export待ちのIsModal/子buttonが通過したが、export失敗試行はUIA timeout後に子要素0となりnative semantics未確認。次は同一経路のtree喪失を比較buildと切り分ける。screen reader/focusと既存launch gateは未完了。

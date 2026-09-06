@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 保存関連modalの名前と階層（2026-09-06 21:23 JST）
+
+- 0690cc7比較releaseのPID 41992（開始UTC 12:01:20.0348354Z）では、保存確認の見出しはTextで親がapp root、Window型の子要素は0だった。3つの既存modalに見出しと同名のAccessKit Dialog/modal情報を付け、内容を同じUIの子にする。通常background exportと既存focus/keyboard方針は変更しない。
+- 回帰はDialog不在で失敗し、最初の実装も子buttonが別階層になるため失敗した。固定eguiのaccessibility用`ui.unique_id()`を使う修正後、5表示mode・240～960pxの縮小/復元で名前、modal flag、操作buttonの所属と既存layout確認が通過。244 tests（app 129/core 36/runtime 75/integration 4）、format、Clippy、両buildが通過。既存live ignore 3件は実機経路の証明に含めない。
+- 最終通常release SHA-256は`DB4BA189E55AADF5FEA202F5DA356B30330E9A0A69E5EC66F468F5E247F477E0`、比較は`CD5F741B81A3B62639C3D06AA60FA14A62743645AF7B78209320C67DC0DDF4B2`。PID 21248（開始UTC 12:07:08.3207967Z）でUnsaved editsのWindowPattern.IsModal=trueと3 buttonの所属を確認。専用の新規出力先へのexportではExporting before continuingもIsModal=true、その配下のCancel exportをInvokeできた。先行試行の出力記録欠落は成功根拠に使わず、保存確認へ戻った状態を確認して別の新規出力先で再検証した。
+- エラー試行PID 35584（開始UTC 12:15:34.1070704Z）は読み込み済みの所有素材コピーだけを不正PNGへ置き換え、専用の新規出力先へexportした。Export failed画面と詳細は所有windowのcaptureで確認したが、UIA照会がtimeoutし、その後同一processへの照会も子要素0だった。Tab後も変わらず、原因と比較buildでの再現は未確認。エラーmodalのnative semantics成功とは扱わず、次にこのtree喪失を切り分ける。
+- 比較/最終/エラーの全windowは取消・所有回転のUndo後に正常終了。新規export出力は残らず、エラー用コピーを元の赤PNGへ復元した。原本2枚のhashは不変、app stderrは全て空（意図したFFmpeg失敗は画面内の詳細）。ignoredの`target/tmp/h1-modal-names*`に試験記録を保持し、前面を保証できなかった対象外captureは削除した。clipboard/OS設定は変更せず、screen readerの読上げ順・focus・全custom widget対応は未証明。
+
 ### 保存確認中のUI Automation入力保護（2026-09-06 20:57 JST）
 
 - ddb9a3f通常releaseの所有PID 44264（開始UTC 2026-09-06T11:49:51.6434446Z）、600×800の赤PNGでR→Ctrl+Wを実施。保存確認中も背景のmenu/Reading mode/Close windowがUIAでenabledと公開され、menuのInvokeでFile/Edit/Viewが現れた。固定eguiのAccessKit Clickはpointerのmodal遮断とは別に処理されていた。

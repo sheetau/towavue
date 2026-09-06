@@ -4172,6 +4172,40 @@ where
         }
     }
 
+    fn owns_tab_key(&self, stroke: &KeyStroke) -> bool {
+        if stroke.key != Key::Tab
+            || self.palette_open
+            || self.grid_open
+            || self.modal_input_blocked()
+            || self
+                .ui_context
+                .as_ref()
+                .is_some_and(egui::Popup::is_any_open)
+        {
+            return false;
+        }
+        let modified = stroke.modifiers.control || stroke.modifiers.alt || stroke.modifiers.logo;
+        if self.filmstrip_open && !modified {
+            return true;
+        }
+        if !modified
+            && self
+                .ui_context
+                .as_ref()
+                .is_some_and(egui::Context::egui_wants_keyboard_input)
+        {
+            return false;
+        }
+        let mut entered = self.entered_shortcut.clone();
+        entered.push(stroke.clone());
+        let context = self.command_context();
+        self.shortcuts.resolve(&entered, context) != ShortcutMatch::None
+            || self
+                .shortcuts
+                .resolve(std::slice::from_ref(stroke), context)
+                != ShortcutMatch::None
+    }
+
     fn process_key(&mut self, event: &KeyEvent) {
         if self.modal_input_blocked() {
             return;
@@ -4203,7 +4237,12 @@ where
             }
             return;
         }
-        if self.filmstrip_open && event.logical_key == WinitKey::Named(NamedKey::Tab) {
+        if self.filmstrip_open
+            && event.logical_key == WinitKey::Named(NamedKey::Tab)
+            && !self
+                .modifiers
+                .intersects(ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER)
+        {
             self.navigate(!self.modifiers.shift_key(), false);
             return;
         }
@@ -4849,16 +4888,16 @@ where
             self.process_key(event);
             return;
         }
-        // egui always consumes Tab for focus traversal; the open filmstrip owns navigation.
-        if self.filmstrip_open
-            && !self.palette_open
-            && !self.grid_open
-            && !self.modal_input_blocked()
-            && let WindowEvent::KeyboardInput { event, .. } = &event
-            && event.logical_key == WinitKey::Named(NamedKey::Tab)
-        {
-            self.process_key(event);
-            return;
+        // egui consumes even modified Tab; reserve only filmstrip navigation and bound chords.
+        if let WindowEvent::KeyboardInput { event, .. } = &event {
+            self.expire_shortcut_prefix();
+            if self
+                .key_stroke(event)
+                .is_some_and(|stroke| self.owns_tab_key(&stroke))
+            {
+                self.process_key(event);
+                return;
+            }
         }
         if let WindowEvent::KeyboardInput { event, .. } = &event
             && self.grid_key_index(event.physical_key).is_some()
@@ -7272,6 +7311,77 @@ mod tests {
             );
             assert!(!app.fullscreen_controls_visible);
         }
+    }
+
+    #[test]
+    fn tab_shortcuts_reach_bindings_without_stealing_ui_focus_navigation() {
+        let Some(_root) = isolated_test_root(
+            "tests::tab_shortcuts_reach_bindings_without_stealing_ui_focus_navigation",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        let stroke = |key: &str| key.parse::<KeyStroke>().expect("Tab shortcut");
+        for filmstrip in [false, true] {
+            app.filmstrip_open = filmstrip;
+            for key in ["Ctrl+Tab", "Ctrl+Shift+Tab"] {
+                assert!(app.owns_tab_key(&stroke(key)), "app owns {key}");
+            }
+            for key in ["Tab", "Shift+Tab"] {
+                assert_eq!(app.owns_tab_key(&stroke(key)), filmstrip);
+            }
+            assert!(!app.owns_tab_key(&stroke("Alt+Tab")));
+            app.palette_open = true;
+            assert!(!app.owns_tab_key(&stroke("Ctrl+Tab")));
+            app.palette_open = false;
+            app.grid_open = true;
+            assert!(!app.owns_tab_key(&stroke("Ctrl+Tab")));
+            app.grid_open = false;
+            app.pending_guard = Some(GuardedAction::Exit);
+            assert!(!app.owns_tab_key(&stroke("Ctrl+Tab")));
+            app.pending_guard = None;
+        }
+        app.filmstrip_open = false;
+        let context = egui::Context::default();
+        context.memory_mut(|memory| memory.request_focus(egui::Id::new("focused control")));
+        app.ui_context = Some(context);
+        assert!(
+            app.owns_tab_key(&stroke("Ctrl+Tab")),
+            "focused button permits tab cycling"
+        );
+        assert!(
+            !app.owns_tab_key(&stroke("Tab")),
+            "bare Tab traverses controls"
+        );
+        egui::Popup::open_id(
+            app.ui_context.as_ref().expect("context"),
+            "tab-blocker".into(),
+        );
+        assert!(!app.owns_tab_key(&stroke("Ctrl+Tab")), "menu owns keys");
+        app.ui_context = None;
+        app.shortcuts.set(
+            CommandId::NextTab,
+            "Ctrl+N".parse().expect("custom next tab"),
+        );
+        assert!(!app.owns_tab_key(&stroke("Ctrl+Tab")), "no fixed alias");
+        app.shortcuts.set(
+            CommandId::NextTab,
+            "Ctrl+K Ctrl+Tab".parse().expect("prefix binding"),
+        );
+        app.entered_shortcut = vec![stroke("Ctrl+K")];
+        assert!(app.owns_tab_key(&stroke("Ctrl+Tab")), "prefix suffix");
+        app.entered_shortcut.clear();
+        assert!(!app.owns_tab_key(&stroke("Ctrl+Tab")));
+        app.shortcuts.set(
+            CommandId::NextTab,
+            "Ctrl+Tab Ctrl+N".parse().expect("Tab prefix"),
+        );
+        assert!(app.owns_tab_key(&stroke("Ctrl+Tab")), "prefix start");
+        app.shortcuts.set(
+            CommandId::NextTab,
+            "Tab".parse().expect("explicit bare Tab"),
+        );
+        assert!(app.owns_tab_key(&stroke("Tab")));
     }
 
     #[test]

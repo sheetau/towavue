@@ -62,6 +62,8 @@ cargo run -p towavue-app -- path\to\media.mp4
 
 prefixの続きは1秒以内に入力します。Escape、click、別commandやwindowへのfocus移動で待ちを解除し、途中から戻ったkeyを前のprefixへつなげません。
 
+Ctrl+Tab／Ctrl+Shift+Tabでtabを前後に切り替えます。filmstripを開いている場合も、通常のTab／Shift+Tabによる項目移動と区別します。menu・palette・確認画面の入力を優先し、custom設定へ変更した後に元の既定キーを固定aliasとして残しません。
+
 設定ファイルでは`+` keyを`Plus`（例: `Ctrl+Plus`）と書けます。旧版が生成した`+`や`Ctrl++`も読み込めるため、既存設定の書き直しは不要です。
 
 保存確認のEscapeは編集を保持してCancelします。Tab／Shift+Tabでbuttonを選び、Enter／Spaceで実行できます。export失敗ではエラー通知だけを閉じ、保留中の保存確認は残ります。背景クリックで保存・破棄・確認解除は行いません。

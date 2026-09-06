@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 17:29 JST - restore configured Tab shortcuts before UI consumption
+
+- Trigger/evidence: previous turn pushed de31aaa (progress); CI 34021554208 succeeds. Baseline release PID 45892 opens two images but Ctrl+Tab leaves the second active. Pinned egui-winit consumes every Tab, including modified chords, before normal app dispatch; filmstrip also intercepts modified Tab as item navigation.
+- Change: reserve Tab events matching current enabled bindings/prefixes before egui consumption, including modified chords with ordinary button focus. Preserve menu/palette/grid/modal ownership and unbound/control focus traversal. Limit filmstrip item navigation to Tab/Shift+Tab without Control/Alt/Super. Reuse shared dispatch and prefix expiry, no fixed aliases/default changes, runtime/core/dependency/unsafe changes.
+- Verification: routing regression fails first on default Ctrl+Tab and then on focused-button handling; covers both directions, filmstrip/plain Tab, overlays/guard/menu, rebindings and prefix start/suffix. Format, Clippy, 226 tests (app 114/core 35/runtime 73/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored, not hardware proof.
+- Native: PID 33044 cycles three tabs in both directions, preserves filmstrip Tab/Shift+Tab item movement and Ctrl+Tab tab switching, retains palette input and normal Tab/Enter menu access. Isolated-config PID 43240 verifies Ctrl+K Ctrl+Tab works and the former standalone Ctrl+Tab no longer acts. Final PID 8680 verifies visible logo focus does not block Ctrl+Tab, while its open menu does. All four owned windows close normally; no source saves, user configuration or OS settings changed; captures/logs/config ignored under target/tmp/h1-tab-shortcut*.
+- Status/next: h1_active. Continue prefix interruption/restart and keyboard-only media flows. L-default conflict and packaging choices remain unanswered; no implicit changes/publication. Long-duration, physical input/DPI/device and distribution gates remain incomplete.
+
 ## 2026-09-06 17:19 JST - show configured shortcuts in status control hints
 
 - Trigger/evidence: previous turn pushed 812fb23 (progress); CI 34020953319 succeeds. Native playlist current-row click/Space and Tab/menu activation behave correctly. A separate isolated-config trial pauses with K but still advertises Space on the play button.

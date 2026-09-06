@@ -6,7 +6,7 @@
 
 ### 操作とpreviewの不一致
 
-- 映像より音声が長い素材で、再生中に音声だけの区間へSeekすると黒画面になる問題を修正した。最終映像をlate-frame dropから除外して保持し、音声clockは継続する。MP4/MKV・不均等なframe間隔の末尾画像照合と通常D3D11VA表示を確認。ただし、この区間のhover thumbnail取得失敗は別経路の未解決事項。
+- 映像より音声が長い素材で、再生中に音声だけの区間へSeekすると黒画面になる問題を修正した。最終映像をlate-frame dropから除外して保持し、音声clockは継続する。MP4/MKV・不均等なframe間隔の末尾画像照合と通常D3D11VA表示を確認。hover thumbnail/filmstripの空画像も最終選択frameの時刻へ一度だけ再生成し、通常windowと複数stream・TSの回帰で確認した。空preview時の追加decodeは長いGOPや遅いstorageに影響される。
 
 - 同じframeで一覧と音量表示を跨いだwheelは、各event時点の位置とlayerで選別する。音声playlistのsmooth scrollも専用のegui入力状態へ分離し、音量操作の余韻が一覧へ入る問題を修正した。一覧からpointerが離れてもそのscrollは一覧だけに適用し、modal/focus喪失などでは失効する。30/120fpsの距離保持と通常windowの両方向移動を確認。他のScrollAreaを一括変更したものではなく、物理device/DPIの全入力matrixは未完了。
 

@@ -40,6 +40,8 @@ pub enum PreviewError {
     },
     #[error("FFmpeg preview generation failed: {0}")]
     Generate(String),
+    #[error("no video frame at the requested preview position")]
+    NoFrame,
     #[error("preview input preparation failed: {0}")]
     Seek(#[from] crate::DecodeError),
     #[error("FFprobe returned an invalid duration")]
@@ -95,15 +97,12 @@ impl PreviewCache {
             &format!("thumbnail-v3-{}-{width}", position.as_millis()),
         )?;
         self.load_or_generate(key, || {
-            let mut arguments =
-                preview_input_arguments(source, position, self.cancellation.as_ref())?;
-            arguments.extend([
-                "-vf".into(),
-                format!("scale={width}:-2:force_original_aspect_ratio=decrease"),
-                "-frames:v".into(),
-                "1".into(),
-            ]);
-            run_ffmpeg(&arguments, self.cancellation.as_ref())
+            frame_preview(
+                source,
+                position,
+                &format!("scale={width}:-2:force_original_aspect_ratio=decrease"),
+                self.cancellation.as_ref(),
+            )
         })
     }
 
@@ -118,14 +117,9 @@ impl PreviewCache {
             let key = cache_key(source, "filmstrip-v3")?;
             self.load_or_generate(key, || {
                 let position = duration.unwrap_or_default().mul_f64(0.1);
-                let mut arguments = preview_input_arguments(source, position, self.cancellation.as_ref())?;
-                arguments.extend([
-                    "-vf".into(),
-                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2".into(),
-                    "-frames:v".into(),
-                    "1".into(),
-                ]);
-                run_ffmpeg(&arguments, self.cancellation.as_ref())
+                frame_preview(source, position,
+                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2",
+                    self.cancellation.as_ref())
             })?
         };
         Ok(MediaPreview { image, duration })
@@ -290,6 +284,35 @@ fn cache_key(source: &Path, variant: &str) -> Result<String, PreviewError> {
     Ok(format!("{:016x}", hasher.finish()))
 }
 
+fn frame_preview(
+    source: &Path,
+    position: Duration,
+    filter: &str,
+    cancellation: Option<&Cancellation>,
+) -> Result<Vec<u8>, PreviewError> {
+    let generate = |position| {
+        let mut arguments = preview_input_arguments(source, position, cancellation)?;
+        arguments.extend(["-vf".into(), filter.into(), "-frames:v".into(), "1".into()]);
+        run_ffmpeg(&arguments, cancellation)
+    };
+    match generate(position) {
+        Err(PreviewError::NoFrame)
+            if !position.is_zero() && MediaKind::from_path(source) == Some(MediaKind::Video) =>
+        {
+            let last = crate::decode::preview_last_video_time(source, position, &|| {
+                cancellation.is_some_and(Cancellation::is_cancelled)
+            });
+            check_cancelled(cancellation)?;
+            let last = last?
+                .filter(|last| *last < position)
+                .ok_or(PreviewError::NoFrame)?;
+            // CLI seek times have microsecond precision; rounding must not exclude the last frame.
+            generate(last.saturating_sub(Duration::from_micros(1)))
+        }
+        result => result,
+    }
+}
+
 fn run_ffmpeg(
     arguments: &[String],
     cancellation: Option<&Cancellation>,
@@ -310,13 +333,16 @@ fn run_ffmpeg(
             ]),
     );
     let output = run_command(command, cancellation, "FFmpeg")?;
-    if !output.status.success() || output.stdout.is_empty() {
+    if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         return Err(PreviewError::Generate(if message.is_empty() {
             format!("process exited with {}", output.status)
         } else {
             message
         }));
+    }
+    if output.stdout.is_empty() {
+        return Err(PreviewError::NoFrame);
     }
     Ok(output.stdout)
 }
@@ -429,6 +455,99 @@ mod tests {
     use image::{ImageFormat, Rgb, RgbImage};
 
     use super::*;
+
+    #[test]
+    fn video_previews_use_the_last_selected_frame_beyond_its_end() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("towavue-preview-tail-{unique}"));
+        let cache = PreviewCache::new(root.join("cache")).expect("cache");
+        let source = root.join("tail.mp4");
+        assert!(
+            hidden_command(
+                &tool_path("ffmpeg.exe"),
+                [
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=blue:s=160x96:r=5:d=12",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=s=160x96:r=5:d=1",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=sample_rate=48000:duration=12",
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "1:v",
+                    "-map",
+                    "2:a",
+                    "-c:v",
+                    "libopenh264",
+                    "-c:a",
+                    "aac",
+                    "-disposition:v:0",
+                    "0",
+                    "-disposition:v:1",
+                    "default",
+                ]
+            )
+            .arg(&source)
+            .status()
+            .expect("tail fixture")
+            .success()
+        );
+        let last = cache
+            .thumbnail(&source, Duration::from_millis(799), 160)
+            .expect("last frame");
+        for position in [Duration::from_secs(1), Duration::from_secs(10)] {
+            let preview = cache
+                .thumbnail(&source, position, 160)
+                .expect("tail thumbnail");
+            assert_eq!(preview, last);
+            assert_eq!(
+                cache
+                    .thumbnail(&source, position, 160)
+                    .expect("cached tail"),
+                last
+            );
+        }
+        let card = cache
+            .filmstrip(&source, MediaKind::Video)
+            .expect("tail filmstrip");
+        assert_eq!((card.image.width, card.image.height), (240, 160));
+        let mut args =
+            preview_input_arguments(&source, Duration::from_millis(799), None).expect("input");
+        args.extend(["-vf".into(), "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2".into(), "-frames:v".into(), "1".into()]);
+        assert_eq!(
+            card.image,
+            decode_png(&run_ffmpeg(&args, None).expect("reference card")).expect("PNG")
+        );
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        assert!(matches!(
+            cache
+                .cancellable(cancellation)
+                .thumbnail(&source, Duration::from_secs(11), 160),
+            Err(PreviewError::Cancelled)
+        ));
+        let checks = std::sync::atomic::AtomicUsize::new(0);
+        assert!(matches!(
+            crate::decode::preview_last_video_time(&source, Duration::from_secs(10), &|| {
+                checks.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 8
+            }),
+            Err(crate::DecodeError::ConsumerClosed)
+        ));
+        assert_eq!(checks.load(std::sync::atomic::Ordering::Relaxed), 9);
+        fs::remove_dir_all(root).expect("remove preview fixture");
+    }
 
     #[test]
     fn previews_use_the_playback_streams_not_the_first_streams() {

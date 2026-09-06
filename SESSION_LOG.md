@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 16:29 JST - generate tail thumbnails from the final selected video frame
+
+- Trigger/evidence: previous turn pushed 9fe13a5 (progress); 09537c6 CI succeeds, 9fe13a5 CI remains in progress. Baseline PID 4740 shows Thumbnail unavailable at seven-second hover; FFmpeg exits successfully with no PNG after the one-second video ends.
+- Contract/change: distinguish empty successful output from process failure. Shared thumbnail/filmstrip generation retries once only for nonzero video positions with empty output. Probe the final selected-stream PTS by cancellable serial decode on the existing preview worker, retaining timestamps only; retry one microsecond earlier through the same FFmpeg orientation/SAR/scale/pad path. No new worker/dependency/unsafe code or playback changes. Successful cache keys remain valid; empty misses were never cached. Extra decode is confined to fallback and remains storage/GOP dependent.
+- Verification: new multistream regression fails with empty output before fix; after fix, one-second default video beats a twelve-second first video, terminal thumbnails match final pixels and cache hits, and filmstrip matches the same final-frame reference. Check precancel and cancellation during native timestamp decode. Extend TS short/long-GOP and B-frame tests with terminal thumbnail pixel comparison. Format, Clippy, 224 tests (app 112/core 35/runtime 73/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: fixed PID 44160 displays the same final 0.9-second image as playback at seven-second hover, with no unavailable diagnostic. Hover does not move paused playback or create edits. Both owned windows close normally; no source save/OS settings, captures/logs ignored.
+- Status/next: h1_active. Continue auditing playback/preview consistency and responsiveness on larger media, rather than treating narrow fixture success as launch completion. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication. Prior extra SendKeys input cause remains unproven.
+
 ## 2026-09-06 16:20 JST - retain terminal video while seeking into an audio tail
 
 - Trigger/evidence: previous turn pushed 09537c6 (progress); CI 34018643905 remains in progress. New VFR/unequal-stream decode matrix passes, but baseline normal release PID 35920 turns black after one posted Right into an eight-second audio tail beyond one-second video. Runtime reports one hardware frame, zero presented and one dropped.

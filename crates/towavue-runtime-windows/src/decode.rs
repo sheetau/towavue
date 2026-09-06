@@ -1078,6 +1078,52 @@ pub(crate) fn preview_input(
     Ok((start, stream))
 }
 
+pub(crate) fn preview_last_video_time(
+    path: &Path,
+    target: Duration,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<Option<Duration>, DecodeError> {
+    check_cancelled(cancelled)?;
+    ffmpeg::init()?;
+    let mut input = format::input(path)?;
+    let config = best_stream_config(&input, Type::Video).ok_or(DecodeError::NoMediaStream)?;
+    let mut decoder = codec::context::Context::from_parameters(config.parameters)?
+        .decoder()
+        .video()?;
+    let origin = input_origin(&input);
+    let target = MediaTime::from_nanoseconds(target.as_nanos().min(i64::MAX as u128) as i64);
+    seek_input(&mut input, target, true, cancelled)?;
+    let mut last = None;
+    let mut receive = |decoder: &mut codec::decoder::Video| -> Result<(), DecodeError> {
+        loop {
+            check_cancelled(cancelled)?;
+            let mut decoded = frame::Video::empty();
+            match decoder.receive_frame(&mut decoded) {
+                Ok(()) => {
+                    if let Some(timestamp) = decoded.timestamp() {
+                        let time = timestamp_to_media_time(Some(timestamp), config.time_base);
+                        last = Some(Duration::from_nanos(time.as_nanoseconds().max(0) as u64));
+                    }
+                }
+                Err(error) if decoder_is_drained(error) => return Ok(()),
+                Err(error) => return Err(error.into()),
+            }
+        }
+    };
+    for (stream, mut packet) in input.packets() {
+        check_cancelled(cancelled)?;
+        if stream.index() == config.index {
+            normalize_packet_time(&mut packet, stream.time_base(), origin);
+            decoder.send_packet(&packet)?;
+            receive(&mut decoder)?;
+        }
+    }
+    check_cancelled(cancelled)?;
+    decoder.send_eof()?;
+    receive(&mut decoder)?;
+    Ok(last)
+}
+
 fn check_cancelled(cancelled: &(dyn Fn() -> bool + Sync)) -> Result<(), DecodeError> {
     if cancelled() {
         Err(DecodeError::ConsumerClosed)
@@ -1591,6 +1637,18 @@ mod tests {
                 .filmstrip(&path, towavue_core::MediaKind::Video)
                 .expect("GOP filmstrip");
             assert_eq!((card.image.width, card.image.height), (240, 160));
+            let last = reference.last().expect("final TS frame");
+            let thumbnail = cache
+                .thumbnail(&path, std::time::Duration::from_secs(6), 160)
+                .expect("terminal TS thumbnail");
+            assert!(
+                thumbnail
+                    .rgba
+                    .iter()
+                    .zip(&last.1)
+                    .all(|(actual, expected)| actual.abs_diff(*expected) <= 3),
+                "terminal thumbnail at GOP {gop}"
+            );
             let mut input = ffmpeg_next::format::input(&path).expect("inspect seek point");
             let point = super::transport_seek_point(
                 &mut input,

@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 全画面操作部へのkeyboard入口（2026-09-07 00:15 JST）
+
+- 4993a9c CI 34040716761は成功。全画面操作部はpointer下端hoverのみで、Tabだけでは到達できない。通常release `720F9EC306949240271B342B6A597290F1250606063F1EF1049567F36AF1C749`、PID 32984（開始UTC 2026-09-06 14:59:56.8617681Z）でmenuからfullscreenへ入り、foreground確認後Tabを送ってもUIAには案内Textだけが残った。headless回帰もTab後にcontrolsがないことで失敗した。
+- eguiへ届いたTab/Shift+TabでExit fullscreenへ入る経路を追加し、操作部のfocusとTab巡回中の表示を維持する。初回Area sizingを跨いでfocus要求を保持し、内容部分のclickでfocus/keyboard表示を解除する。window focus喪失・modal/overlay・content dragも除外する。初案のcontext input lock内でのlayout再要求はdebug回帰でlock失敗となり撤回。最終実装は入力の読取りとfocus変更を分離し、追加poll/timerはない。
+- 中間通常release `1062996843B4E3C7397D0AE90AF705F9488F637A36863272EC694478BBEDB2B8`、画像PID 34840（15:08:49.2501521Z）でTab→Exit、続くTabでImage position→Rightで01から02、内容clickで非表示、Shift+Tabで再表示、Enterで通常windowへ戻る流れが通過。所有capture `target/tmp/h1-fullscreen-keyboard.png`で画像領域を縮めず操作部を重ねることを目視確認した。直前のrelease差替えはbaseline window保持中で失敗しており、旧hashのまま起動したPID 32112（15:08:18.5498324Z）は成功証拠から除外し正常終了した。
+- 通常windowでのfocus変更を明示的に除外した最終release `46D211EA1B99B5CA458C2B0536357E0251FA4DC98B58DECF586EC85CE6CC0A8B`、動画PID 43224（15:12:35.0784882Z）でも、30秒Pausedからfullscreen/TabでExitへ入り、Tab巡回で再生位置へ、Leftで25秒Paused、Shift+TabでExitへ戻りEnterで通常window復帰/正常終了が通過した。物理keyboardではなく所有foregroundへの入力注入である。
+- 新規focus回帰と既存pointer seek/overlay回帰、252 tests（app 136/core 36/runtime 76/integration 4）、format、Clippy、debug/release buildが通過。既存live ignore 3件は残る。全4試験windowは正常終了し、画像stderrは空、動画stderrはD3d11va選択・seek latency・既存AAC末尾警告と短いfixtureの統計（900表示、drop/CPU transfer 0）を記録。Save/clipboard/OS設定変更なし。この短区間を最終候補性能gateの代替にせず、全screen reader・実入力/DPI/device・配布も未完了である。
+
 ### フォルダー更新後の一覧操作対象とfilmstrip意味情報（2026-09-06 23:54 JST）
 
 - 9984456 CI 34040095093は成功。playlistのcached row actionがShell順更新後に別曲を選ぶ回帰を再現し、filmstripは名前付きButton欠落で回帰が失敗した。通常release `D4F8D64C46FC573D9CCC3F0CE27505B0111A2D147F13064412BEB02A9BE3F409`、PID 47568（開始UTC 14:47:42.7912434Z）でも、所有01/02/03.wavの02行を保持して01の拡張子を一時的に対象外へ変えると、同じRuntimeIdが03を指した。filmstripには可視3項目の名前付きButtonがなく、現在曲のTextだけがあった。

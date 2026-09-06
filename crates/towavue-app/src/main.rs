@@ -509,6 +509,8 @@ struct Application<N> {
     window: Option<Arc<Window>>,
     fullscreen: bool,
     fullscreen_controls_visible: bool,
+    fullscreen_controls_focus_requested: bool,
+    fullscreen_controls_keyboard: bool,
     fullscreen_was_maximized: bool,
     viewing_cursor: cursor::ViewingCursor,
     pending_dialog: Option<DialogIntent>,
@@ -616,6 +618,8 @@ where
             window: None,
             fullscreen: false,
             fullscreen_controls_visible: false,
+            fullscreen_controls_focus_requested: false,
+            fullscreen_controls_keyboard: false,
             fullscreen_was_maximized: false,
             viewing_cursor: cursor::ViewingCursor::default(),
             pending_dialog: None,
@@ -2347,15 +2351,62 @@ where
             && !self.palette_open
             && !self.grid_open
             && !self.filmstrip_open
+            && !egui::Popup::is_any_open(context)
             && self.view_drag.is_none();
-        self.fullscreen_controls_visible = eligible
-            && context.input(|input| {
+        let controls_have_focus = || {
+            context
+                .memory(egui::Memory::focused)
+                .and_then(|id| context.read_response(id))
+                .is_some_and(|response| {
+                    ["fullscreen-controls", "compact-seek-bar"]
+                        .into_iter()
+                        .any(|id| {
+                            response.layer_id == egui::LayerId::new(egui::Order::Middle, id.into())
+                        })
+                })
+        };
+        let was_visible = self.fullscreen_controls_visible;
+        let (held, at_edge, tab, focused, outside_press) =
+            context.input(|input| {
                 let held = input.pointer.any_down() || input.pointer.any_released();
                 let at_edge = input.pointer.hover_pos().is_some_and(|pointer| {
                     screen.contains(pointer) && pointer.y >= screen.bottom() - 48.0
                 });
-                input.focused && ((self.fullscreen_controls_visible && held) || (at_edge && !held))
+                let tab = input.events.iter().any(|event| matches!(event,
+                    egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. }
+                    if !modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd && !modifiers.command
+                ));
+                (
+                    held,
+                    at_edge,
+                    tab,
+                    input.focused,
+                    input.pointer.any_pressed() && !at_edge,
+                )
             });
+        if eligible
+            && outside_press
+            && controls_have_focus()
+            && let Some(id) = context.memory(egui::Memory::focused)
+        {
+            context.memory_mut(|memory| memory.surrender_focus(id));
+        }
+        // Tab traversal can briefly have no focused widget while wrapping.
+        self.fullscreen_controls_keyboard = eligible
+            && focused
+            && !outside_press
+            && (self.fullscreen_controls_keyboard || (!held && tab) || controls_have_focus());
+        // A newly shown Area needs a sizing pass before its Exit button can receive focus.
+        self.fullscreen_controls_focus_requested = eligible
+            && focused
+            && !outside_press
+            && (self.fullscreen_controls_focus_requested || (tab && !was_visible && !held));
+        self.fullscreen_controls_visible = eligible
+            && focused
+            && (self.fullscreen_controls_keyboard
+                || self.fullscreen_controls_focus_requested
+                || (was_visible && (held || controls_have_focus()))
+                || (!held && at_edge));
         if !self.fullscreen_controls_visible {
             return;
         }
@@ -2375,6 +2426,9 @@ where
                 let status = self.draw_status_bar(ui, actions, volume_targets);
                 self.draw_seek_bar(context, status, Some(ui.layer_id()), actions);
             });
+        if controls_have_focus() {
+            self.fullscreen_controls_focus_requested = false;
+        }
     }
 
     fn draw_status_bar(
@@ -2389,15 +2443,18 @@ where
             .show(root, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    if self.fullscreen
-                        && chrome::button(
+                    if self.fullscreen {
+                        let response = chrome::button(
                             ui,
                             "▣",
                             &self.command_hint(CommandId::ToggleFullscreen, "Exit fullscreen"),
-                        )
-                        .clicked()
-                    {
-                        actions.push(UiAction::Command(CommandId::ToggleFullscreen));
+                        );
+                        if self.fullscreen_controls_focus_requested && response.enabled() {
+                            response.request_focus();
+                        }
+                        if response.clicked() {
+                            actions.push(UiAction::Command(CommandId::ToggleFullscreen));
+                        }
                     }
                     if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
                         let playing = self.state == PlaybackState::Playing;
@@ -4385,6 +4442,8 @@ where
         }
         self.fullscreen = enabled;
         self.fullscreen_controls_visible = false;
+        self.fullscreen_controls_focus_requested = false;
+        self.fullscreen_controls_keyboard = false;
         self.viewing_cursor.activity();
         if let Some(window) = &self.window {
             let monitor = window.current_monitor();
@@ -4402,7 +4461,7 @@ where
             }
         }
         self.set_status(if enabled {
-            "Fullscreen — move to the bottom for controls · Escape to return".into()
+            "Fullscreen — Tab or bottom edge for controls · Escape to return".into()
         } else {
             "Windowed view".into()
         });
@@ -8275,6 +8334,113 @@ mod tests {
             assert_eq!(app.path.as_ref(), Some(&source));
             assert_eq!(app.edits, edits);
         }
+    }
+
+    #[test]
+    fn fullscreen_controls_are_reachable_and_retained_by_keyboard_focus() {
+        let Some(root) = isolated_test_root(
+            "tests::fullscreen_controls_are_reachable_and_retained_by_keyboard_focus",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.fullscreen = true;
+        app.media_kind = Some(MediaKind::Image);
+        app.path = Some(root.join("image.png"));
+        app.state = PlaybackState::Paused;
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        app.ui_context = Some(context.clone());
+        let frame = |app: &mut Application<_>, events, focused| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    focused,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            assert!(actions.is_empty());
+            output.platform_output.accesskit_update.expect("tree")
+        };
+        let tab = |shift| egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: if shift {
+                egui::Modifiers::SHIFT
+            } else {
+                egui::Modifiers::NONE
+            },
+        };
+        frame(&mut app, vec![], true);
+        assert!(!app.fullscreen_controls_visible);
+        frame(&mut app, vec![tab(false)], true);
+        let tree = frame(&mut app, vec![], true);
+        assert!(
+            app.fullscreen_controls_visible,
+            "Tab reveals controls without a pointer"
+        );
+        assert!(tree.nodes.iter().any(|(id, node)| {
+            *id == tree.focus
+                && node
+                    .label()
+                    .is_some_and(|label| label.starts_with("Exit fullscreen"))
+        }));
+        for shift in [false, true, false, false] {
+            frame(&mut app, vec![tab(shift)], true);
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(egui::pos2(720.0, 300.0))],
+                true,
+            );
+            assert!(
+                app.fullscreen_controls_visible,
+                "focus survives pointer movement"
+            );
+        }
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                vec![egui::Event::PointerButton {
+                    pos: egui::pos2(720.0, 300.0),
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true,
+            );
+        }
+        frame(&mut app, vec![], true);
+        assert!(
+            !app.fullscreen_controls_visible,
+            "content click returns to pointer behavior"
+        );
+        frame(&mut app, vec![tab(false)], true);
+        frame(&mut app, vec![], true);
+        assert!(app.fullscreen_controls_visible);
+        frame(&mut app, vec![], false);
+        assert!(!app.fullscreen_controls_visible);
+        frame(&mut app, vec![], true);
+        assert!(!app.fullscreen_controls_visible);
+        frame(&mut app, vec![tab(true)], true);
+        frame(&mut app, vec![], true);
+        assert!(
+            app.fullscreen_controls_visible,
+            "Shift+Tab also reveals controls"
+        );
+        app.pending_guard = Some(GuardedAction::Exit);
+        frame(&mut app, vec![tab(false)], true);
+        assert!(!app.fullscreen_controls_visible);
+        app.pending_guard = None;
+        frame(&mut app, vec![], true);
+        assert!(!app.fullscreen_controls_visible);
     }
 
     #[test]

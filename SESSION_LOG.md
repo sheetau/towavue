@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 00:15 JST - make fullscreen controls reachable without edge hover
+
+- Trigger/intent: previous turn is progress; 4993a9c CI 34040716761 succeeds. Native PID 32984 and a new headless regression confirm Tab cannot reach hidden fullscreen controls.
+- Change: unclaimed Tab/Shift+Tab reveals controls and initially focuses Exit fullscreen. Retain the request through Area sizing and the display through Tab wrap; content click releases control focus, and window blur/modal/overlays/content drag clear keyboard mode. Preserve bound-key dispatch, pointer hold/release, media geometry and normal-window focus; update the entry hint. No polling or new shortcut alias.
+- Iteration/verification: a draft nested context-lock layout request fails the debug regression and is removed. The final input read/focus write are separate. New focus and existing pointer/overlay tests, 252 workspace tests, format, Clippy and both builds pass; three existing live ignores remain.
+- Native: image PID 34840 passes Tab entry, focus to image position, Right navigation, content click hide, Shift+Tab reentry and Enter exit. Final video PID 43224 repeats entry/traversal, 30-to-25-second seek and reverse traversal/Enter exit. DEVELOPMENT records identities/hashes and the excluded old-binary PID 32112 after a locked release replacement.
+- Cleanup/status: all four windows close normally; image stderr is empty, video logs decode/seek/AAC messages and short-fixture statistics, not a full performance gate. Owned capture/logs remain ignored; no Save/clipboard/OS-setting changes. h1_active, prepare this checkpoint for push.
+- Next: continue selection/trim and complete focus/screen-reader workflows, preserving the remaining physical-input/DPI/device, final-candidate and distribution gates.
+
 ## 2026-09-06 23:54 JST - keep folder item actions tied to media paths
 
 - Trigger/intent: previous turn is progress; 9984456 CI 34040095093 succeeds. Audit playlist/filmstrip for the same slot-identity problem without changing Shell order or virtualization.

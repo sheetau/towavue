@@ -23,6 +23,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - Save/Save AsはH1でbackground化済み。書き出した時間とcancelを表示し、完了までは一時outputだけを変更する。同時jobは1件でqueueはない。通常export中も再生・tab切替・追加編集ができるが、対象tabのclose・移動とprocess終了はjobの完了またはcancelを待つ。
 - waveform、duration、hover thumbnailはH1で各種類1 worker、実行中1件＋最新の待機1件へ制限した。media切替/最後のtab closeで未開始要求を捨て、owned FFmpeg/FFprobeも停止する。2時間音声のwaveform生成中に本体を閉じると旧実装では子processが残ったが、修正後の通常releaseでは終了時と500 ms後に残存なしを確認した。実行中のfilesystem I/O/native probeの強制中断や個別decoderのメモリ上限は保証しない。open番号とsession内Seek/recovery世代による旧結果の拒否も維持する。
 - filmstripは可視項目だけを単一workerで順次読み込み、待機要求・結果・UI textureを最大64項目、各RGBAを240×160に制限する。表示範囲の変更・clear・closeで同じpreview取消を使うが、native probeや同一要求内の遅い素材は後続previewを待たせる。失敗項目はNo previewと詳細tooltipで表示する。
+- waveformの全音声frame保持をPCMの逐次集計へ変更した。640列では和の保持量が最大5 MiB、入力bufferは64 KiB。短い音声は従来と画素一致、長い音声/急変の回帰ではbar高さの差1 pixel以内を確認した。2時間AACの単発通常release試験では子processのピークprivate bytesが1,360,474,112から41,574,400へ減り、本体との合計ピークは190,844,928 bytes。生成観測時間も3,315から2,405 msへ短縮したが、全codecやcold storageを保証する結果ではない。
 - animated imageはframe列を先に保持する。H1で1画像/reading要求のRGBA保持量を合計512 MiBに制限したが、decoder作業領域・GPU texture・切替前の旧画像は別である。超過時はerrorとし、部分animationや低解像度へは自動縮退しない。
 
 ### 開発版としての不足

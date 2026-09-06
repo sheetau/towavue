@@ -1,5 +1,5 @@
 use std::io::{self, Read};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -30,7 +30,23 @@ impl Cancellation {
         }
     }
 
-    pub(crate) fn output(&self, mut command: Command) -> io::Result<Output> {
+    pub(crate) fn output(&self, command: Command) -> io::Result<Output> {
+        let (status, stdout, stderr) = self.read_output(command, |reader| {
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes).map(|_| bytes)
+        })?;
+        Ok(Output {
+            status,
+            stdout,
+            stderr,
+        })
+    }
+
+    pub(crate) fn read_output<T: Send>(
+        &self,
+        mut command: Command,
+        read_stdout: impl FnOnce(&mut dyn Read) -> io::Result<T> + Send,
+    ) -> io::Result<(ExitStatus, T, Vec<u8>)> {
         let (mut stdout, mut stderr) = {
             let mut active = self.0.child.lock().expect("preview child");
             if self.is_cancelled() {
@@ -51,13 +67,21 @@ impl Cancellation {
             pipes
         };
         thread::scope(|scope| {
-            let output = scope.spawn(move || {
-                let mut bytes = Vec::new();
-                stdout.read_to_end(&mut bytes).map(|_| bytes)
-            });
+            let output = scope.spawn(move || read_stdout(&mut stdout));
             let diagnostics = scope.spawn(move || {
                 let mut bytes = Vec::new();
-                stderr.read_to_end(&mut bytes).map(|_| bytes)
+                let mut buffer = [0; 4096];
+                loop {
+                    let count = stderr.read(&mut buffer)?;
+                    if count == 0 {
+                        break;
+                    }
+                    bytes.extend_from_slice(&buffer[..count]);
+                    if bytes.len() > 16_384 {
+                        bytes.drain(..bytes.len() - 16_384);
+                    }
+                }
+                Ok::<_, io::Error>(bytes)
             });
             let status = loop {
                 let mut active = self.0.child.lock().expect("preview child");
@@ -78,11 +102,11 @@ impl Cancellation {
                 drop(active);
                 thread::sleep(Duration::from_millis(20));
             };
-            Ok(Output {
+            Ok((
                 status,
-                stdout: output.join().expect("preview output reader")?,
-                stderr: diagnostics.join().expect("preview diagnostic reader")?,
-            })
+                output.join().expect("preview output reader")?,
+                diagnostics.join().expect("preview diagnostic reader")?,
+            ))
         })
     }
 }
@@ -105,6 +129,38 @@ mod tests {
             0x0800_0000,
         );
         command
+    }
+
+    #[test]
+    fn process_pipes_are_drained_and_only_the_diagnostic_tail_is_kept() {
+        const CHILD: &str = "TOWAVUE_DIAGNOSTIC_FIXTURE";
+        if std::env::var_os(CHILD).is_some() {
+            use std::io::Write;
+            std::io::stderr()
+                .write_all(&vec![b'x'; 100_000])
+                .expect("diagnostics");
+            std::io::stderr()
+                .write_all(b"diagnostic tail")
+                .expect("tail");
+            std::io::stdout()
+                .write_all(&vec![b'y'; 100_000])
+                .expect("output");
+            return;
+        }
+        let mut command = Command::new(std::env::current_exe().expect("test executable"));
+        command.args(["--exact", "cancellation::tests::process_pipes_are_drained_and_only_the_diagnostic_tail_is_kept", "--nocapture"])
+            .env(CHILD, "1");
+        <Command as std::os::windows::process::CommandExt>::creation_flags(
+            &mut command,
+            0x0800_0000,
+        );
+        let output = Cancellation::default()
+            .output(command)
+            .expect("pipe fixture");
+        assert!(output.status.success());
+        assert!(output.stdout.len() >= 100_000);
+        assert_eq!(output.stderr.len(), 16_384);
+        assert!(output.stderr.ends_with(b"diagnostic tail"));
     }
 
     #[test]

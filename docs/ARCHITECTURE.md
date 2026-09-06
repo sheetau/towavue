@@ -326,6 +326,8 @@ H1ではduration・waveform・hover thumbnailごとにruntime所有の常設work
 
 preview取消では要求単位のtokenに実行中のowned Childを登録する。要求置換・clear・worker dropはtokenを失効し、その子processだけをkillする。spawn/登録と取消を同じ短いlockで直列化し、取消済み要求から子processを後発させない。worker側でstdout/stderrを並行排出して終了を回収し、次の要求は新しいtokenを使う。[Rust Childの寿命契約](https://doc.rust-lang.org/std/process/struct.Child.html)に従い、handleのdropだけに終了を任せない。filmstripも同じ取消を使う。cache/TS Seek準備は処理境界で失効を確認するが、実行中のfilesystem I/Oやnative FFmpeg probeを強制中断する保証はない。UIはprocessの完了やreader threadをjoinしない。
 
+waveformはFFmpegからmono S16 PCMを逐次受け取り、runtimeで平均絶対振幅を集計して中央揃えの白いbarへ描く。全frameを終端まで保持するshowwavespicを使わない。64 KiB入力bufferと最大width×1024個のu64和を保持し、満杯になったら隣接binを併合して時間粒度を倍にする。終端の実sample数で従来と同じ列範囲を求め、集計binの部分重なりだけ平均値で近似する。640列の和は最大5 MiBで、音声の長さには比例しない。短い素材・silence・pulse・rampで従来平均振幅との誤差を検証し、duration metadata欠落には依存しない。PNG寸法・白色・透明背景・cache上限を維持し、waveform cache keyはv2へ更新する。子process診断も末尾16 KiBへ限定する。FFmpeg自身のdecoder/demuxer作業領域を含むprocess全体の厳密なメモリ上限ではない。
+
 grid menuは既存のcommand registryだけをdispatchし、画像・動画・音声ごとの16 commandを`%APPDATA%\towavue\grid.conf`に保持する。cell順は物理keyの`1234/qwer/asdf/zxcv`と固定してclickとkey入力を一致させる。表示・非表示には短いopacity transitionだけを使い、media操作の意味を持つanimationは追加しない。
 
 grid入力はwinit PhysicalKeyのDigit1～4とKeyQ/W/E/R/A/S/D/F/Z/X/C/Vへ対応させ、logical文字やIME確定文字を位置として使わない。Shift/Capsによる文字変化は位置を変えず、Ctrl/Alt/Super付きは通常shortcut側へ渡す。gridの対象keyはeguiのfocus処理より先に扱うが、palette・modal中は横取りしない。paletteを開いたらgridを閉じ、入力欄へ集中させる。keyboard layout・OS IME設定は変更しない。

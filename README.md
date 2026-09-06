@@ -80,6 +80,8 @@ Seekの確定にはbuttonを離した位置を使い、その後のcursor移動�
 
 duration・波形・hover thumbnailの生成は、それぞれ実行中1件と最新の待機1件に制限します。file切替・closeでは不要なFFmpeg/FFprobeを停止し、filmstripも表示範囲の変更・closeで旧処理を取り消します。ただし、実行中のfilesystem I/Oやnative probeによる待ち時間をなくす保証ではありません。
 
+波形は音声を逐次読み取り、画面幅に応じた一定量の集計データから描きます。2時間音声の通常release試験では、生成用processのピーク使用量が約1.36 GBから約42 MBへ下がり、本体との合計も約191 MBでした。素材・codecを問わない総メモリ上限ではありません。
+
 動画はbar・timelineを除いた領域へ縦横比を保って表示し、非正方形pixelのsample aspect ratioも反映します。hardware/softwareとも同じ表示矩形を使い、crop selectionも映像に合わせます。
 
 動画の回転metadataも、90度単位の回転・反転として自動適用します。その向きを基準にcropや手動回転を行い、保存後も同じ向きになります。任意角度や変形を含む非対応のdisplay matrixは無視せず、理由を画面へ表示します。再生失敗の理由は、一時通知が消えた後も別mediaを開くまで残ります。

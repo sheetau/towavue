@@ -142,20 +142,48 @@ impl PreviewCache {
         height: u32,
     ) -> Result<PreviewImage, PreviewError> {
         self.check_cancelled()?;
-        let key = cache_key(source, &format!("waveform-{width}-{height}"))?;
+        if width == 0 || height == 0 {
+            return Err(PreviewError::Generate("invalid waveform dimensions".into()));
+        }
+        let key = cache_key(source, &format!("waveform-v2-{width}-{height}"))?;
         self.load_or_generate(key, || {
-            run_ffmpeg(&[
-                "-i".into(),
-                source.display().to_string(),
-                "-filter_complex".into(),
-                format!(
-                    "[0:a:0]aformat=channel_layouts=mono,showwavespic=s={width}x{height}:colors=white[wave]"
-                ),
-                "-map".into(),
-                "[wave]".into(),
-                "-frames:v".into(),
-                "1".into(),
-            ], self.cancellation.as_ref())
+            let command = hidden_command(
+                &tool_path("ffmpeg.exe"),
+                [
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    &source.display().to_string(),
+                    "-map",
+                    "0:a:0",
+                    "-ac",
+                    "1",
+                    "-c:a",
+                    "pcm_s16le",
+                    "-f",
+                    "s16le",
+                    "pipe:1",
+                ],
+            );
+            let cancellation = self.cancellation.clone().unwrap_or_default();
+            let result = cancellation.read_output(command, move |reader| {
+                Ok(crate::waveform::read(reader, width, height))
+            });
+            self.check_cancelled()?;
+            let (status, image, diagnostics) = result.map_err(|source| PreviewError::Start {
+                program: "FFmpeg",
+                source,
+            })?;
+            if !status.success() {
+                return Err(PreviewError::Generate(
+                    String::from_utf8_lossy(&diagnostics).trim().into(),
+                ));
+            }
+            let image = image.map_err(|error| PreviewError::Generate(error.to_string()))?;
+            let mut png = std::io::Cursor::new(Vec::new());
+            image.write_to(&mut png, image::ImageFormat::Png)?;
+            Ok(png.into_inner())
         })
     }
 
@@ -393,6 +421,69 @@ mod tests {
     use image::{ImageFormat, Rgb, RgbImage};
 
     use super::*;
+
+    #[test]
+    fn streaming_waveform_matches_showwavespic_with_bounded_column_error() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("towavue-stream-waveform-{unique}"));
+        let cache = PreviewCache::new(root.join("cache")).expect("cache");
+        for (duration, width) in [("1.37", 127), ("61.37", 127)] {
+            let source = root.join(format!("{duration}.wav"));
+            let status = hidden_command(
+                &tool_path("ffmpeg.exe"),
+                ["-v", "error", "-f", "lavfi", "-i"],
+            )
+            .arg(format!(
+                "aevalsrc=0.7*sin(2*PI*440*t)*(0.5+0.5*sin(2*PI*0.37*t)):s=44100:d={duration}"
+            ))
+            .args(["-ac", "2", "-c:a", "pcm_s16le"])
+            .arg(&source)
+            .status()
+            .expect("audio fixture");
+            assert!(status.success());
+            let filter =
+                format!("aformat=channel_layouts=mono,showwavespic=s={width}x96:colors=white");
+            let reference = run_ffmpeg(
+                &[
+                    "-i".into(),
+                    source.display().to_string(),
+                    "-filter_complex".into(),
+                    filter,
+                    "-frames:v".into(),
+                    "1".into(),
+                ],
+                None,
+            )
+            .expect("reference waveform");
+            let reference = decode_png(&reference).expect("reference PNG");
+            let actual = cache
+                .waveform(&source, width, 96)
+                .expect("streaming waveform");
+            assert_eq!((actual.width, actual.height), (width, 96));
+            if duration == "1.37" {
+                assert_eq!(actual.rgba, reference.rgba);
+            }
+            for x in 0..width as usize {
+                let bar = |image: &PreviewImage| {
+                    (0..96)
+                        .filter(|y| image.rgba[(y * width as usize + x) * 4 + 3] != 0)
+                        .count()
+                };
+                assert!(
+                    bar(&actual).abs_diff(bar(&reference)) <= 1,
+                    "duration {duration}, column {x}"
+                );
+            }
+            assert_eq!(
+                cache.waveform(&source, width, 96).expect("cache hit"),
+                actual
+            );
+        }
+        fs::remove_dir_all(root).expect("remove owned waveform fixtures");
+    }
 
     #[test]
     fn cancelled_previews_stop_before_file_access_or_process_start() {

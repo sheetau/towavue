@@ -1,3 +1,4 @@
+use egui::AtomExt;
 use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definitions};
 
 #[derive(Default)]
@@ -53,11 +54,18 @@ impl CommandPalette {
         });
         egui::Window::new("Command palette")
             .id("command-palette".into())
-            .anchor(egui::Align2::CENTER_TOP, [0.0, 48.0])
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 34.0])
+            .title_bar(false)
             .collapsible(false)
             .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(egui::Color32::from_gray(16))
+                    .inner_margin(6)
+                    .corner_radius(4),
+            )
             .show(context, |ui| {
-                ui.set_width((context.content_rect().width() - 48.0).clamp(200.0, 520.0));
+                ui.set_width((context.content_rect().width() - 48.0).clamp(120.0, 588.0));
                 let previous_query = self.query.clone();
                 let query_id = egui::Id::new("command-palette-query");
                 ui.memory_mut(|memory| {
@@ -65,7 +73,14 @@ impl CommandPalette {
                         memory.request_focus(query_id);
                     }
                 });
-                ui.add(egui::TextEdit::singleline(&mut self.query).id(query_id));
+                ui.add_sized(
+                    [ui.available_width(), 24.0],
+                    egui::TextEdit::singleline(&mut self.query)
+                        .id(query_id)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("> Search commands"),
+                )
+                .on_hover_text("Up / Down: select   Enter: run   Esc: close");
                 let query_changed = previous_query != self.query;
                 if query_changed {
                     self.selected = None;
@@ -92,8 +107,9 @@ impl CommandPalette {
                     chosen = Some(matches[index].id);
                 }
                 egui::ScrollArea::vertical()
-                    .max_height((context.content_rect().height() - 140.0).clamp(80.0, 320.0))
+                    .max_height((context.content_rect().height() - 90.0).clamp(40.0, 264.0))
                     .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
                         if matches.is_empty() {
                             ui.weak("No matching commands");
                         }
@@ -102,12 +118,34 @@ impl CommandPalette {
                                 .get(definition.id)
                                 .map(ToString::to_string)
                                 .unwrap_or_default();
-                            let response = ui.add_enabled(
-                                enabled[index],
-                                egui::Button::new(format!("{}    {}", definition.title, shortcut))
-                                    .selected(self.selected == Some(index))
-                                    .min_size(egui::vec2(ui.available_width(), 24.0)),
-                            );
+                            let response = ui
+                                .add_enabled(
+                                    enabled[index],
+                                    egui::Button::selectable(
+                                        self.selected == Some(index),
+                                        (
+                                            definition.title,
+                                            egui::Atom::grow(),
+                                            egui::RichText::new(&shortcut)
+                                                .color(crate::chrome::MUTED)
+                                                .atom_max_width(ui.available_width() * 0.5),
+                                        ),
+                                    )
+                                    .truncate()
+                                    .min_size(egui::vec2(ui.available_width(), 22.0)),
+                                )
+                                .on_hover_ui(|ui| {
+                                    ui.set_max_width(
+                                        (context.content_rect().width() - 32.0).clamp(1.0, 588.0),
+                                    );
+                                    ui.add(
+                                        egui::Label::new(format!(
+                                            "{}  {}",
+                                            definition.title, shortcut
+                                        ))
+                                        .wrap(),
+                                    );
+                                });
                             if (up || down || query_changed) && self.selected == Some(index) {
                                 response.scroll_to_me(Some(egui::Align::Center));
                             }
@@ -116,7 +154,6 @@ impl CommandPalette {
                             }
                         }
                     });
-                ui.weak("Up / Down: select   Enter: run   Esc: close");
             });
         (chosen, close)
     }
@@ -139,6 +176,136 @@ fn next_enabled(current: Option<usize>, enabled: &[bool], forward: bool) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_palette_keeps_search_and_shortcut_columns_inside_the_window() {
+        for size in [
+            egui::vec2(960.0, 576.0),
+            egui::vec2(480.0, 300.0),
+            egui::vec2(240.0, 180.0),
+        ] {
+            let context = egui::Context::default();
+            context.global_style_mut(|style| {
+                crate::chrome::style(style);
+                style.animation_time = 0.0;
+                style.interaction.tooltip_delay = 0.0;
+            });
+            let mut palette = CommandPalette {
+                query: "open".into(),
+                ..Default::default()
+            };
+            let commands = CommandContext {
+                palette_open: true,
+                ..Default::default()
+            };
+            let mut shortcuts = ShortcutBindings::default();
+            shortcuts.set(
+                CommandId::OpenFile,
+                "Ctrl+O".parse().expect("file shortcut"),
+            );
+            let prefix = "Ctrl+Shift+K Ctrl+Shift+P Ctrl+Shift+S";
+            shortcuts.set(
+                CommandId::OpenFolder,
+                prefix.parse().expect("folder prefix"),
+            );
+            let mut frame = |events| {
+                let mut chosen = Vec::new();
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        events,
+                        ..Default::default()
+                    },
+                    |_| {
+                        if let (Some(command), _) = palette.show(&context, commands, &shortcuts) {
+                            chosen.push(command);
+                        }
+                    },
+                );
+                (output, chosen)
+            };
+            for _ in 0..4 {
+                frame(vec![]);
+            }
+            let (output, chosen) = frame(vec![]);
+            assert!(chosen.is_empty());
+            let panel = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.fill == egui::Color32::from_gray(16) => {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .expect("dark palette panel");
+            assert!(panel.left() >= 0.0 && panel.right() <= size.x);
+            assert!(panel.top() >= 32.0 && panel.bottom() <= size.y);
+            assert!(panel.width() <= 600.0);
+            assert!(
+                output.platform_output.ime.is_some(),
+                "focused search supports IME"
+            );
+            let search = context
+                .read_response("command-palette-query".into())
+                .expect("search widget")
+                .rect;
+            assert!(
+                search.width() >= panel.width() - 24.0,
+                "full-width search: {search:?} inside {panel:?} at {size:?}"
+            );
+            let text = |label: &str| {
+                output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.job.text == label => Some(text),
+                        _ => None,
+                    })
+                    .expect("separate command/shortcut text")
+            };
+            let file = text("Open file");
+            let folder = text("Open folder");
+            let first = text("Ctrl+O");
+            let second = text(prefix);
+            assert!((file.pos.x - folder.pos.x).abs() < 1.0);
+            assert!(
+                (first.pos.x + first.galley.size().x - second.pos.x - second.galley.size().x).abs()
+                    < 1.0
+            );
+            assert!(first.pos.x >= file.pos.x + file.galley.size().x);
+            assert!(second.pos.x >= folder.pos.x + folder.galley.size().x);
+            assert!(second.pos.x + second.galley.size().x < panel.right());
+            let pos = egui::pos2(panel.right() - 8.0, folder.pos.y + 7.0);
+            for _ in 0..3 {
+                frame(vec![egui::Event::PointerMoved(pos)]);
+            }
+            let tooltip = frame(vec![]).0;
+            let label = format!("Open folder  {prefix}");
+            let tooltip = tooltip
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.job.text == label => Some(text),
+                    _ => None,
+                })
+                .expect("complete shortcut tooltip");
+            assert!(tooltip.pos.x >= 0.0 && tooltip.pos.x + tooltip.galley.size().x <= size.x);
+            frame(vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            let (_, chosen) = frame(vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            assert_eq!(chosen, [CommandId::OpenFolder]);
+        }
+    }
 
     #[test]
     fn palette_accepts_text_navigation_enter_and_empty_results_across_layout_passes() {

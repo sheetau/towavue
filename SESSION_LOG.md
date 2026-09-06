@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 17:44 JST - align command palette with the compact dark draft
+
+- Trigger/evidence: previous turn pushed f21154e (progress); its CI 34022250177 and 81cfdc9 CI succeed. Reinspect local draft screenshots and compare baseline release PID 14784: large gray title frame, half-width search and filled buttons diverge from the compact palette. Record the accepted visual contract in ARCHITECTURE before implementation.
+- Change: maximum 600px dark panel below the title bar, no visible window heading, full-width search, 22px selectable rows with command left/shortcut right. Bound shortcut width to half a row, truncate and show complete text in a window-bounded tooltip. Move keyboard help to the search tooltip. Preserve matching, enabled state, command dispatch and IME handling; palette-only code, no runtime/core/dependency/unsafe/default changes.
+- Verification: new rendered regression initially fails on the old panel, then checks 960/480/240px containment, full-width query response, aligned/nonoverlapping columns, long-prefix tooltip bounds and full-row click. A long prefix exposed remaining row overflow; bounding its atom width resolves it. Existing navigation/empty-result/disabled/IME regressions pass. Format, Clippy, 228 tests (app 116/core 35/runtime 73/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored, not hardware proof.
+- Native/cleanup: PID 17372 shows the compact panel, searches zoom and executes Zoom out, then reaches the final enabled command in a 480x300 window. Final isolated-config PID 43040 verifies clearer shortcut text and a long prefix's truncation/complete tooltip. All three owned windows close normally; no source save, user configuration or OS setting changes. Captures/logs/config remain ignored under target/tmp/h1-palette-style*.
+- Status/next: h1_active. Continue draft fidelity and everyday navigation audit, including tab-bar overflow/active-tab visibility. Native IME layout after this visual change and physical input/DPI/device/long-duration/distribution gates remain incomplete. L-default and packaging choices unanswered; no implicit defaults/publication.
+
 ## 2026-09-06 17:34 JST - restart shortcut prefixes after mismatched input
 
 - Trigger/evidence: previous turn pushed 81cfdc9 (progress); CI 34022039915 remains in progress. With isolated toggle_pause = Ctrl+J Ctrl+P, baseline release PID 8816 stays Playing after Ctrl+K/Ctrl+J/Ctrl+P and Ctrl+J/Ctrl+J/Ctrl+P; an uninterrupted pair pauses correctly.

@@ -266,3 +266,5 @@ status barの4つの操作buttonでshortcut案内がSpace/T/B/F11へ固定され
 通常windowでCtrl+Tabがtabを切り替えない問題を再現し、eguiへ渡す前に現在のTab binding/prefixを共有shortcut処理へ接続した。filmstripは修飾なしのTab/Shift+Tabだけを項目移動に使う。226 tests、Clippy、両buildに加え、3 tabの前後移動、filmstrip内の使い分け、独立設定のprefix、button focus中の切替、menu/paletteの入力保持を通常windowで確認した。de31aaa CIは成功。H1と実環境/配布gateは未完了。
 
 prefixの途中で別のprefix・同じprefixへ打ち直すと新しい入力まで捨てる問題を通常windowで再現した。最後のkeyからの再判定を単一commandだけでなくprefixへも適用し、案内と期限を更新する。227 tests、Clippy、両buildが通過。独立設定の通常音声windowで打ち直し後のpause/resume、Escape・未割当・期限切れでの不実行を確認した。H1と実環境/配布gateは未完了。
+
+草案との再照合からcommand paletteを暗いcompact panelへ変更し、見出し枠を除き、検索欄を全幅、shortcutを右揃えにした。長いprefixの幅を制限し、window内で全文tooltipを表示する。960/480/240pxの配置・非重複・行全幅click、既存IME/検索を含む228 tests、Clippy、両buildが通過。通常windowでも変更前後、Zoom out実行、小窓の末尾候補、長いprefixの省略/全文表示を確認した。f21154e/81cfdc9 CIは成功。H1と実環境/配布gateは未完了。

@@ -286,3 +286,5 @@ reading modeの固定8pxの隙間と等分枠による中心ずれを確認し�
 アニメ画像の長いdeadline遅延で過去の全周回を数える処理を発見し、周期の整数剰余で省略するようにした。合成2日gapのrelease単発計測は20.918→0.005ms。同じframeへ戻る場合はuploadを省き、2日/3650日・端数delay・境界の正確なframe/期限を検証。236 tests・Clippy・両buildと通常windowのGIF更新が通過。OSスリープ復帰の実試験ではなく、実環境/配布を含むH1は継続中。
 
 日常選択操作の監査で、Shift正方形/比率付きresizeが画像端で比率を失うことをtestと通常windowで再現した。共通の寸法上限、固定辺/中心とdrag開始比率を保持する修正により、同じ入力が端で正方形のまま止まる。縦横/全方向/zero縮小後と既存取消/cropの回帰、238 tests・Clippy・両build、25cc2e1 CIが通過。読書モードの見開き区切り方はownerへ確認中で、現行navigationは変更していない。実環境/配布を含むH1は継続中。
+
+画像errorからの継続操作を通常releaseで確認し、不正PNGのreading error枠/隣の正常page、左右移動、同じpathの修復後再読込、最後のtabからWelcomeへの復帰が通過した。実workerを使うBMP回帰を追加し、正確な修復RGBAと旧error解除も検証。挙動変更なしで239 tests・Clippy・両buildと8796ad8 CIが通過。全codec/実環境/配布を含むH1の完了を示すものではない。

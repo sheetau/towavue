@@ -8907,6 +8907,113 @@ mod tests {
     }
 
     #[test]
+    fn failed_image_navigation_keeps_reading_pages_and_recovers_without_restarting() {
+        let Some(root) = isolated_test_root(
+            "tests::failed_image_navigation_keeps_reading_pages_and_recovers_without_restarting",
+        ) else {
+            return;
+        };
+        let broken = root.join("01-broken.bmp");
+        let good = root.join("02-good.bmp");
+        let mut bitmap = vec![0_u8; 62];
+        bitmap[..2].copy_from_slice(b"BM");
+        bitmap[2..6].copy_from_slice(&62_u32.to_le_bytes());
+        bitmap[10..14].copy_from_slice(&54_u32.to_le_bytes());
+        bitmap[14..18].copy_from_slice(&40_u32.to_le_bytes());
+        bitmap[18..22].copy_from_slice(&2_u32.to_le_bytes());
+        bitmap[22..26].copy_from_slice(&1_u32.to_le_bytes());
+        bitmap[26..28].copy_from_slice(&1_u16.to_le_bytes());
+        bitmap[28..30].copy_from_slice(&24_u16.to_le_bytes());
+        bitmap[34..38].copy_from_slice(&8_u32.to_le_bytes());
+        bitmap[54..].copy_from_slice(&[0, 0, 255, 0, 255, 0, 0, 0]);
+        std::fs::write(&broken, b"malformed image").expect("broken fixture");
+        std::fs::write(&good, &bitmap).expect("valid fixture");
+        let (notify, events) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            let _ = notify.send(event);
+        })
+        .expect("headless application");
+        let context = egui::Context::default();
+        app.ui_context = Some(context.clone());
+        app.tabs.open_new(broken.clone(), MediaKind::Image);
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![0]),
+            folder_path: root.clone(),
+            items: [&broken, &good]
+                .into_iter()
+                .enumerate()
+                .map(|(index, path)| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![index as u8]),
+                    path: path.clone(),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: Vec::new(),
+            source: towavue_core::FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::UNIX_EPOCH,
+        });
+        let wait = |app: &mut Application<_>| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.image_loading {
+                let event = events
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .expect("image worker completion");
+                if matches!(event, AppEvent::ImagesReady) {
+                    app.finish_image_load();
+                }
+            }
+        };
+        app.reading_mode = true;
+        app.load_path(broken.clone(), MediaKind::Image);
+        wait(&mut app);
+        assert_eq!(app.state, PlaybackState::Faulted);
+        assert!(app.image.is_none() && app.image_error.is_some());
+        let page = app.reading_pages[0]
+            .as_ref()
+            .expect("valid second page")
+            .texture
+            .id();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 576.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.draw_image(ui),
+        );
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Mesh(mesh) if mesh.texture_id == page
+        )));
+        app.dispatch(CommandId::NextImage);
+        wait(&mut app);
+        assert_eq!(app.path.as_ref(), Some(&good));
+        assert_eq!(app.state, PlaybackState::Paused);
+        assert!(app.image_error.is_none() && app.playback_error.is_none());
+        app.dispatch(CommandId::PreviousImage);
+        wait(&mut app);
+        assert_eq!(app.state, PlaybackState::Faulted);
+        std::fs::write(&broken, &bitmap).expect("repair owned fixture");
+        app.dispatch(CommandId::NextImage);
+        wait(&mut app);
+        app.dispatch(CommandId::PreviousImage);
+        wait(&mut app);
+        assert_eq!(app.path.as_ref(), Some(&broken));
+        assert_eq!(app.state, PlaybackState::Paused);
+        assert!(app.image_error.is_none() && app.playback_error.is_none());
+        assert_eq!(
+            app.image.as_ref().expect("repaired image").decoded.frames[0].rgba,
+            [255, 0, 0, 255, 0, 255, 0, 255]
+        );
+        app.dispatch(CommandId::CloseTab);
+        assert!(app.tabs.tabs().is_empty() && app.path.is_none());
+        assert!(app.image.is_none() && app.image_error.is_none());
+        assert!(app.reading_pages.is_empty() && !app.image_loading);
+    }
+
+    #[test]
     fn image_texture_cache_reuses_only_shared_static_decodes_within_its_limits() {
         let context = egui::Context::default();
         let make_image = |value| {

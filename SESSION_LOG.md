@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 19:56 JST - verify image error recovery across navigation and close
+
+- Trigger/intent: previous turn pushed 8796ad8 (progress), CI 34028432419 succeeds. Continue daily-viewing audit beyond existing zoom/selection regressions with a native error-state recovery flow. No reading navigation policy decision received; leave that behavior unchanged.
+- Native evidence: same normal-release PID 43832 starts on an owned malformed PNG, shows an error slot beside a good reading page, navigates to the good image, revisits the error, then loads repaired contents at the same path after another round trip. Last-tab close reaches clean Welcome. Captures inspected with proven foreground; three diagnostics correspond to deliberate malformed loads, no repair failure.
+- Regression: add an isolated test using real ImageLoader and malformed/valid BMP files. Cover valid reading-page mesh despite primary failure, next/previous commands, repair with exact RGBA, fault clearing and last-tab cleanup. Correct a test-only Rect-versus-Mesh inspection mistake; no production defect or behavior change inferred. Folder order is a fixture, not real Explorer proof.
+- Verification/cleanup: format, Clippy, 239 tests (app 124/core 36/runtime 75/integrations 4) and both builds pass; three existing live ignores remain explicit. Close the owned native window normally, restore the malformed scratch, no Save/original-source/OS changes. DEVELOPMENT records binary/source hashes and limits; ignored target/tmp/h1-image-error-* preserves captures/log/fixtures.
+- Status/next: h1_active. Retain this passing recovery behavior and continue remaining launch-critical interaction/fidelity audit. Reading grouping, physical input/DPI/device validation and distribution decisions remain unresolved; do not present this narrow recovery flow as overall launch completion.
+
 ## 2026-09-06 19:46 JST - preserve constrained selection ratios at image edges
 
 - Trigger/evidence: previous turn pushed 25cc2e1 (progress); CI 34027898405 succeeds. Daily-viewing audit reproduces Shift square creation turning into a tall rectangle at the image boundary in normal PID 44696. Core square and app ratio-resize regressions both fail before correction.

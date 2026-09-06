@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 画像エラーからの継続操作（2026-09-06 19:56 JST）
+
+- 8796ad8の通常release、所有PID 43832（開始UTC 2026-09-06T10:51:42.3549463Z）、960×576で実施。所有folder内に不正なPNG signatureの`01-broken.png`と正常な赤600×800の`02-good.png`を置き、前者から起動した。
+- FaultedでもBのreading modeでは先頭errorの位置を保ち、隣の正常画像を表示する。Rightで正常画像へ移動し、Bで通常表示へ戻るとPausedとなり、旧errorは残らない。Leftで不正fileに戻った後、そのscratchだけを正常PNGへ置換してRight→Leftすると、同じprocessで修復済み内容を読み直してPausedになる。Ctrl+Wで最後のtabを閉じたWelcomeにもerror表示は残らなかった。
+- 操作/captureは対象PIDの開始時刻とforegroundを確認した。windowはWelcomeから通常終了、Save・元素材・OS設定の変更はない。差替えたscratchは元の不正内容へ戻した。stderrの3件は初回・reading再取得・再訪の意図したdecode失敗で、修復後の追加errorはない。captures/logはignoredの`target/tmp/h1-image-error-*`。
+- 自動回帰は隔離folder内の不正BMPと2×1の正常BMPで、実ImageLoaderの完了を待ち、error状態の正常reading page mesh、前後command、修復後の正確なRGBA、旧error解除と最終tab終了を検証する。Shell順は固定snapshot fixtureであり実Explorerの再検証ではない。最初のtestは描画shapeをRectと誤認して失敗したため、実際のMeshを検査するよう修正した。app動作の不具合としては扱わない。
+- 挙動修正・architecture変更は不要だった。239 tests（app 124/core 36/runtime 75/integration 4）・format・Clippy・両buildが通過。既存live test 3件のignore、全codec/破損形式、実DPI/入力deviceの未検証をこの結果で埋めない。native試験binary SHA-256は`38C2D611B88C5C47BB087801C735CED6BF315B92C32EA087FD945CD1767427FD`、正常PNGは`5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`。
+
 ### 画像端でのShift選択比率（2026-09-06 19:46 JST）
 
 - Shiftで正方形を作る処理が両軸を独立にclampし、画像端で長方形になる問題をcore testと通常release PID 44696で再現した。600×800の赤PNGを960×576で表示し、window内(630,140)→(650,440)をShift dragすると右端の細長い選択になった。Shift付き辺resizeも直交軸だけのclampで比率と中心が変わり、変更前のapp testが失敗した。

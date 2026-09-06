@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 22:57 JST - keep the idle Shell STA responsive to Windows messages
+
+- Trigger/intent: 5f13a18 is progress and CI 34036970810 succeeds. Continue the normal-build UIA guard failure, separating actual image loading from folder discovery.
+- Cause/evidence: seeded app state and image-only loading each pass ten native cycles; folder-only discovery fails on the fourth lookup. The Shell STA blocks on a Condvar after resolving a snapshot, leaving Windows messages unprocessed. A hidden-window idle-message regression fails before the change; removing message wake from the new wait also makes it fail.
+- Fix: replace the Condvar with an owned auto-reset event and MsgWaitForMultipleObjectsEx, pumping the worker's queue outside the mailbox lock. Preserve latest-request replacement, generation invalidation, nonblocking close, Shell ordering and runtime ownership. No periodic polling, UI or dependency changes; remove temporary app seed branches.
+- Native: normal PID 44824 passes 30 guard cycles, then malformed-owned-source export reaches named/modal Export failed and returns through OK to named/modal Unsaved edits and Cancel. Ten more cycles pass in the same process; 5s idle CPU delta is zero. After test-only strengthening, final normal PID 39620 passes another ten cycles. DEVELOPMENT records identities/hashes and narrow evidence limits.
+- Verification/cleanup: focused Shell tests, format, Clippy, 245 tests and both builds pass; three existing live ignores remain explicit. All five trial windows close normally after Undo. Restore the owned PNG to its original hash; no output file remains, normal stderr is empty, no clipboard/OS-setting/capture changes. Prepare this coherent fix for push.
+- Status/next: h1_active. The reproduced UIA timeout is repaired, not full accessibility or launch completion. Continue custom-widget semantics/actions and practical focus/screen-reader coverage, alongside the remaining physical-input/DPI/device, final-candidate and distribution gates.
+
 ## 2026-09-06 22:43 JST - compare native UIA clients and reduced providers
 
 - Trigger/intent: 3edc5b8 CI 34033827557 succeeds. Narrow the repeated guard-query timeout; do not treat a dependency upgrade or removal of semantics as a fix without evidence.

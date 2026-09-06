@@ -1,8 +1,9 @@
 use std::cmp::Ordering;
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -11,9 +12,10 @@ use towavue_core::{
     FolderMediaItem, FolderSnapshot, FolderSnapshotSource, MediaKind, PropertyKey, ShellIdentity,
     SortColumn, SortDirection,
 };
-use windows::Win32::Foundation::{HWND, PROPERTYKEY, RECT};
+use windows::Win32::Foundation::{HANDLE, HWND, PROPERTYKEY, RECT, WAIT_FAILED};
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree, IServiceProvider};
 use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
+use windows::Win32::System::Threading::{CreateEventW, INFINITE, SetEvent};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
@@ -24,8 +26,9 @@ use windows::Win32::UI::Shell::{
     SORTCOLUMN, SVGIO_ALLVIEW, SVGIO_FLAG_VIEWORDER, ShellWindows, StrCmpLogicalW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE, PeekMessageW,
-    TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE,
+    CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, MWMO_INPUTAVAILABLE,
+    MsgWaitForMultipleObjectsEx, PM_REMOVE, PeekMessageW, QS_ALLINPUT, TranslateMessage,
+    WINDOW_EX_STYLE, WINDOW_STYLE,
 };
 use windows::core::{Interface, PCWSTR, w};
 
@@ -51,9 +54,40 @@ struct Mailbox {
     closed: bool,
 }
 
+struct ShellWake(OwnedHandle);
+
+impl ShellWake {
+    fn new() -> Result<Self, FolderOrderError> {
+        // SAFETY: unnamed auto-reset event, with no borrowed security/name data. Transfer
+        // its sole ownership to OwnedHandle; shared worker state keeps it live through waits.
+        let handle = unsafe { CreateEventW(None, false, false, None) }
+            .map_err(|_| FolderOrderError::WorkerStopped)?;
+        Ok(Self(unsafe { OwnedHandle::from_raw_handle(handle.0) }))
+    }
+
+    fn signal(&self) {
+        // SAFETY: the borrowed event remains live; signaling is thread-safe and carries no data.
+        unsafe { SetEvent(HANDLE(self.0.as_raw_handle())).expect("signal Shell worker") };
+    }
+
+    fn wait(&self) {
+        // SAFETY: this worker retains the event for the entire wait. No mailbox lock is held.
+        // Wake for queued/sent Windows messages as well as requests; dispatch on the owning STA.
+        let result = unsafe {
+            MsgWaitForMultipleObjectsEx(
+                Some(&[HANDLE(self.0.as_raw_handle())]),
+                INFINITE,
+                QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE,
+            )
+        };
+        assert_ne!(result, WAIT_FAILED, "wait for Shell requests or messages");
+    }
+}
+
 /// The STA owns all Shell objects; requests and results carry only owned domain values.
 pub struct FolderOrderProvider {
-    shared: Arc<(Mutex<Mailbox>, Condvar)>,
+    shared: Arc<(Mutex<Mailbox>, ShellWake)>,
 }
 
 impl FolderOrderProvider {
@@ -62,7 +96,7 @@ impl FolderOrderProvider {
     }
 
     pub fn with_notify(notify: impl Fn() + Send + 'static) -> Result<Self, FolderOrderError> {
-        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let shared = Arc::new((Mutex::new(Mailbox::default()), ShellWake::new()?));
         let worker_shared = Arc::clone(&shared);
         thread::Builder::new()
             .name("towavue-shell-sta".into())
@@ -93,7 +127,7 @@ impl FolderOrderProvider {
             reply,
         });
         mailbox.completed = None;
-        ready.notify_one();
+        ready.signal();
         mailbox.generation
     }
 
@@ -114,28 +148,31 @@ impl Drop for FolderOrderProvider {
         mailbox.closed = true;
         mailbox.pending = None;
         mailbox.completed = None;
-        ready.notify_one();
+        ready.signal();
         // A Shell extension can block inside COM. The STA finishes and releases its own objects.
     }
 }
 
 fn run_requests(
-    shared: Arc<(Mutex<Mailbox>, Condvar)>,
+    shared: Arc<(Mutex<Mailbox>, ShellWake)>,
     notify: impl Fn(),
     mut resolve: impl FnMut(&Path, u64) -> FolderSnapshot,
 ) {
     let (mutex, ready) = &*shared;
     loop {
+        // SAFETY: pump only this worker's queue, outside the mailbox lock. Shell/COM may
+        // retain apartment-affine helper windows after a folder snapshot has completed.
+        unsafe { pump_messages() };
         let request = {
-            let mut mailbox = ready
-                .wait_while(mutex.lock().expect("Shell mailbox"), |mailbox| {
-                    !mailbox.closed && mailbox.pending.is_none()
-                })
-                .expect("Shell mailbox");
+            let mut mailbox = mutex.lock().expect("Shell mailbox");
             if mailbox.closed {
                 return;
             }
-            mailbox.pending.take().expect("pending Shell request")
+            mailbox.pending.take()
+        };
+        let Some(request) = request else {
+            ready.wait();
+            continue;
         };
         let snapshot = resolve(&request.folder, request.generation);
         let publish = {
@@ -159,7 +196,7 @@ fn run_requests(
     }
 }
 
-fn shell_worker(shared: Arc<(Mutex<Mailbox>, Condvar)>, notify: impl Fn()) {
+fn shell_worker(shared: Arc<(Mutex<Mailbox>, ShellWake)>, notify: impl Fn()) {
     // SAFETY: this worker owns every COM interface it creates and never moves one across threads.
     // It initializes and uninitializes the apartment on this same thread.
     let initialized = unsafe { OleInitialize(None).is_ok() };
@@ -634,8 +671,82 @@ mod tests {
     };
 
     #[test]
+    fn idle_shell_worker_services_window_messages_and_closes_without_requests() {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_NULL,
+        };
+
+        let shared = Arc::new((
+            Mutex::new(Mailbox::default()),
+            ShellWake::new().expect("wake event"),
+        ));
+        let provider = FolderOrderProvider {
+            shared: Arc::clone(&shared),
+        };
+        let (window_tx, window_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            // SAFETY: this thread owns the hidden test window until its request loop returns.
+            // Only its integer identity crosses threads for a bounded, scalar message probe.
+            let window = unsafe {
+                CreateWindowExW(
+                    WINDOW_EX_STYLE::default(),
+                    w!("STATIC"),
+                    w!(""),
+                    WINDOW_STYLE::default(),
+                    0,
+                    0,
+                    1,
+                    1,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .expect("hidden Shell-thread test window")
+            };
+            window_tx
+                .send(window.0 as usize)
+                .expect("test window identity");
+            run_requests(shared, || {}, |_, _| panic!("no folder requests"));
+            // SAFETY: the request loop has stopped; destroy this thread's retained window.
+            unsafe { DestroyWindow(window).expect("destroy test window") };
+        });
+        let window = window_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker window");
+        let responsive = (0..3).all(|_| {
+            // Separate probes so dispatch at startup alone cannot normally satisfy this test.
+            thread::sleep(Duration::from_millis(20));
+            // SAFETY: the worker retains this HWND until provider drop below. WM_NULL has no
+            // pointer payload; timeout bounds the call without terminating the worker.
+            unsafe {
+                SendMessageTimeoutW(
+                    HWND(window as *mut _),
+                    WM_NULL,
+                    WPARAM(0),
+                    LPARAM(0),
+                    SMTO_ABORTIFHUNG,
+                    1000,
+                    None,
+                )
+                .0 != 0
+            }
+        });
+        drop(provider);
+        worker.join().expect("idle worker exits on close");
+        assert!(
+            responsive,
+            "idle Shell STA must dispatch incoming window messages"
+        );
+    }
+
+    #[test]
     fn asynchronous_requests_replace_queued_work_and_reject_stale_results() {
-        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let shared = Arc::new((
+            Mutex::new(Mailbox::default()),
+            ShellWake::new().expect("wake event"),
+        ));
         let provider = FolderOrderProvider {
             shared: Arc::clone(&shared),
         };
@@ -704,7 +815,10 @@ mod tests {
 
     #[test]
     fn closing_during_shell_work_does_not_wait_or_publish() {
-        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let shared = Arc::new((
+            Mutex::new(Mailbox::default()),
+            ShellWake::new().expect("wake event"),
+        ));
         let provider = FolderOrderProvider {
             shared: Arc::clone(&shared),
         };

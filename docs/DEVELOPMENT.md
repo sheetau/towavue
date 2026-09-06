@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### Shell STA待機によるUIA反復停止の修正（2026-09-06 22:55 JST）
+
+- 5f13a18 CI 34036970810は成功。素材を読まずdirtyなtabだけを作る一時比較PID 48072（開始UTC 13:45:19.1643086Z）は10往復成功。画像読込みだけを加えた42532（13:46:28.5349412Z）も10往復成功し、folder情報取得だけを加えた45108（13:46:28.5455480Z）は3往復後、4回目のClose window検索で`0x80131505`となった。画像rendererやAccessKitの名前処理ではなく、Shell処理を含む経路へ絞れた。
+- Shell STAはsnapshot完了後に通常のCondvarだけで待ち、Windows messageを処理していなかった。所有する非表示windowへのWM_NULLを送る回帰testは変更前に1秒timeoutで失敗。要求/終了用auto-reset eventとmessage-aware waitへ置き換え、mailbox lock外でqueueを処理すると通過した。待機対象からmessageを除く負の比較でも再び失敗し、復元後に通過。既存の最新要求・世代失効・実行中close・実Shell順testも維持する。
+- 比較用のapp変更を全除去した通常release `8AA8FF70D9278B354BFC8CA408154E639F781A718CCCAE0218F871BF712495E3`、PID 44824（13:49:55.1564300Z）でR→Close window/Cancelを30往復し、全て通過。前回通常buildの3回目停止とは異なり、最終treeにも12要素が残った。独立Rust MTA clientのconnection/transaction timeoutは各2秒のままである。
+- 同じPIDの読込み済み所有PNGだけを既存53-byte不正fixtureへ差し替え、UIAからExport and continueを実行し、未存在の専用出力先をnative Save Asへ入力した。別MTA clientでExport failedの18要素、IsModal=true、配下OKを取得/Invokeし、戻り先Unsaved editsの20要素、IsModal=true、3 buttonを取得/Cancelできた。その後さらに10往復が通過し、失敗前からprocessを替えていない。
+- 所有PNGを正常素材から復元し、SHA-256 `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`を確認。新規export出力は作られなかった。5秒idleのCPU増分0ms、private memoryは125.58MiBの単発観測。全4試験windowはUndo後に正常終了、通常stderrは空、clipboard/OS設定/capture変更なし。sourceとhelper/logはignored target/tmpに限定した。
+- この修正は再現したSTA待機停止を解決するものであり、全screen reader、実入力/DPI/device、最終候補性能や配布の完了証拠ではない。UI・依存バージョン・Shell並び順は変更せず、周期pollも追加しない。
+- 最後に回帰のmessage probeを3回へ強化した最終通常release `1BFC6C4B10802FBCACAA71BD5E7FF5444EE79984B16873D3A1F43450776962C8`、PID 39620（13:56:19.2743538Z）でも10往復/Undo/正常終了を確認し、stderrは空。245 tests（app 129/core 36/runtime 76/integration 4）、format、Clippy、両buildが通過。既存live ignore 3件は実機成功の証拠には含めない。
+
 ### UI Automationのnative client・最小provider比較（2026-09-06 22:40 JST）
 
 - 3edc5b8 CI 34033827557は成功。所有PNGのClose window/Cancel反復を継続調査した。独立Rust clientはMTAのCUIAutomation8を使い、connection/transaction timeoutを各2秒に設定する。本体releaseのPID 19604（開始UTC 12:46:30.9088737Z）は2往復後、3回目のCancel検索で`0x80131505`。managed UIA wrapperや短命clientだけの問題ではない。

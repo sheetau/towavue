@@ -302,3 +302,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 21:39の再調査ではexport失敗のIsModal/OK取得が成功する試行も得たが、その後の照会停止が残った。保存もpickerも使わないClose window/Cancelの反復へ絞ると、通常/意味情報追加前相当の比較でともに3回目に停止する。headless 5往復・244 tests・format・Clippy・両buildは通過。production変更なしで再現条件を記録し、次はWindows provider取得/イベント配送を調べる。起動経路や短命client、名称追加だけを根本原因とせず、launch gateを閉じない。
 
 22:43の比較では独立Rust UIA clientでも通常buildの3回目timeoutを再現した。一方、本体の依存関係・window設定・renderer初期化・常駐workerを使う最小providerは15往復通過。Focus→Clickとfocus IDのheadless検査を強化し、244 testsと必須checkは通過したが、production修正は未採用。次はmedia読込み後の本体state/event処理との差を絞り、通常buildの反復試験で修復を確認する。
+
+22:55、UIA反復停止をShell STAの仕事待ちへ絞り、Windows messageも処理できるevent待機へ修正した。通常buildの30往復、同じprocessでexport失敗のOK→保存確認Cancel、続く10往復が通過。message待機の回帰は変更前と負の比較で失敗し、修正後は通過する。UIやShell順を変えず、次は残るcustom widget・screen reader/focusと既存launch gateを監査する。

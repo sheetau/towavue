@@ -36,6 +36,8 @@ pub enum PreviewError {
     },
     #[error("FFmpeg preview generation failed: {0}")]
     Generate(String),
+    #[error("preview seek preparation failed: {0}")]
+    Seek(#[from] crate::DecodeError),
     #[error("FFprobe returned an invalid duration")]
     InvalidDuration,
     #[error("LOCALAPPDATA is unavailable")]
@@ -70,21 +72,19 @@ impl PreviewCache {
     ) -> Result<PreviewImage, PreviewError> {
         let key = cache_key(
             source,
-            &format!("thumbnail-{}-{width}", position.as_millis()),
+            &format!("thumbnail-v2-{}-{width}", position.as_millis()),
         )?;
         self.load_or_generate(key, || {
-            run_ffmpeg(&[
-                "-ss".into(),
-                format!("{:.6}", position.as_secs_f64()),
-                "-i".into(),
-                source.display().to_string(),
+            let mut arguments = preview_input_arguments(source, position)?;
+            arguments.extend([
                 "-map".into(),
                 "0:v:0".into(),
                 "-vf".into(),
                 format!("scale={width}:-2:force_original_aspect_ratio=decrease"),
                 "-frames:v".into(),
                 "1".into(),
-            ])
+            ]);
+            run_ffmpeg(&arguments)
         })
     }
 
@@ -95,21 +95,19 @@ impl PreviewCache {
         let image = if kind == MediaKind::Audio {
             self.waveform(source, 240, 160)?
         } else {
-            let key = cache_key(source, "filmstrip-v1")?;
+            let key = cache_key(source, "filmstrip-v2")?;
             self.load_or_generate(key, || {
                 let position = duration.unwrap_or_default().mul_f64(0.1);
-                run_ffmpeg(&[
-                    "-ss".into(),
-                    format!("{:.6}", position.as_secs_f64()),
-                    "-i".into(),
-                    source.display().to_string(),
+                let mut arguments = preview_input_arguments(source, position)?;
+                arguments.extend([
                     "-map".into(),
                     "0:v:0".into(),
                     "-vf".into(),
                     "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2".into(),
                     "-frames:v".into(),
                     "1".into(),
-                ])
+                ]);
+                run_ffmpeg(&arguments)
             })?
         };
         Ok(MediaPreview { image, duration })
@@ -146,9 +144,9 @@ impl PreviewCache {
                 "-v",
                 "error",
                 "-show_entries",
-                "format=duration",
+                "format=format_name,start_time,duration",
                 "-of",
-                "default=noprint_wrappers=1:nokey=1",
+                "default=noprint_wrappers=1",
                 &source.display().to_string(),
             ],
         )
@@ -157,14 +155,10 @@ impl PreviewCache {
             program: "FFprobe",
             source,
         })?;
-        let seconds = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| PreviewError::InvalidDuration)?;
-        if !output.status.success() || !seconds.is_finite() || seconds < 0.0 {
+        if !output.status.success() {
             return Err(PreviewError::InvalidDuration);
         }
-        Ok(Duration::from_secs_f64(seconds))
+        probed_duration(&String::from_utf8_lossy(&output.stdout))
     }
 
     fn load_or_generate(
@@ -293,6 +287,46 @@ fn tool_path(name: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
+fn preview_input_arguments(source: &Path, position: Duration) -> Result<Vec<String>, PreviewError> {
+    let start = if position.is_zero() || MediaKind::from_path(source) == Some(MediaKind::Image) {
+        position
+    } else {
+        crate::decode::preview_seek_start(source, position)?
+    };
+    let mut arguments = vec![
+        "-ss".into(),
+        format!("{:.6}", start.as_secs_f64()),
+        "-i".into(),
+        source.display().to_string(),
+    ];
+    if start < position {
+        arguments.extend([
+            "-ss".into(),
+            format!("{:.6}", (position - start).as_secs_f64()),
+        ]);
+    }
+    Ok(arguments)
+}
+
+fn probed_duration(text: &str) -> Result<Duration, PreviewError> {
+    let field = |prefix| text.lines().find_map(|line| line.strip_prefix(prefix));
+    let mut seconds = field("duration=")
+        .and_then(|value| value.parse::<f64>().ok())
+        .ok_or(PreviewError::InvalidDuration)?;
+    if field("format_name=").is_some_and(|name| {
+        name.split(',')
+            .any(|format| matches!(format, "matroska" | "webm"))
+    }) {
+        // The pinned Matroska demuxer exposes the segment end, not end minus start.
+        if let Some(start) = field("start_time=").filter(|value| *value != "N/A") {
+            seconds -= start
+                .parse::<f64>()
+                .map_err(|_| PreviewError::InvalidDuration)?;
+        }
+    }
+    Duration::try_from_secs_f64(seconds).map_err(|_| PreviewError::InvalidDuration)
+}
+
 fn decode_png(bytes: &[u8]) -> Result<PreviewImage, image::ImageError> {
     let rgba = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)?.to_rgba8();
     Ok(PreviewImage {
@@ -309,6 +343,70 @@ mod tests {
     use image::{ImageFormat, Rgb, RgbImage};
 
     use super::*;
+
+    #[test]
+    fn duration_metadata_rejects_invalid_and_unrepresentable_values() {
+        for text in [
+            "",
+            "duration=N/A",
+            "duration=NaN",
+            "duration=inf",
+            "duration=-1",
+            "duration=1e100",
+            "format_name=matroska,webm\nstart_time=3\nduration=2",
+            "format_name=matroska,webm\nstart_time=NaN\nduration=2",
+        ] {
+            assert!(probed_duration(text).is_err(), "{text}");
+        }
+        for text in [
+            "format_name=matroska,webm\nstart_time=5\nduration=7",
+            "format_name=matroska,webm\nstart_time=N/A\nduration=2",
+            "format_name=mpegts\nstart_time=11.4\nduration=2",
+            "format_name=mov,mp4,m4a,3gp,3g2,mj2\nstart_time=5\nduration=2",
+        ] {
+            assert_eq!(
+                probed_duration(text).expect("valid duration"),
+                Duration::from_secs(2)
+            );
+        }
+    }
+
+    #[test]
+    fn duration_is_relative_to_input_origin_for_mkv_mp4_and_ts() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("towavue-origin-duration-{unique}"));
+        let cache = PreviewCache::new(root.join("cache")).expect("cache");
+        let source =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+        for extension in ["mkv", "mp4", "ts"] {
+            let mut durations = Vec::new();
+            for offset in ["0", "5"] {
+                let target = root.join(format!("offset-{offset}.{extension}"));
+                let output = hidden_command(&tool_path("ffmpeg.exe"), ["-v", "error", "-i"])
+                    .arg(&source)
+                    .args(["-map", "0", "-c", "copy", "-output_ts_offset", offset])
+                    .arg(&target)
+                    .output()
+                    .expect("remux timestamp fixture");
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                durations.push(cache.duration(&target).expect("normalized duration"));
+            }
+            // MP4's zero-origin edit list can discard one 1,024-sample AAC priming packet.
+            assert!(
+                durations[0].abs_diff(durations[1]) < Duration::from_millis(22),
+                "{extension}: {durations:?}"
+            );
+            assert!((2.0..2.1).contains(&durations[1].as_secs_f64()));
+        }
+        fs::remove_dir_all(root).expect("remove owned duration fixtures");
+    }
 
     #[test]
     fn thumbnail_is_generated_and_reused_from_disk() {

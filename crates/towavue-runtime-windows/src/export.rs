@@ -384,6 +384,7 @@ fn ffmpeg_arguments(request: &ExportRequest, hardware: bool, streams: &TrimStrea
     ];
     if streams.video.is_some() || streams.audio.is_some() {
         arguments.push("-copyts".into());
+        arguments.push("-start_at_zero".into());
         for (index, _) in streams.video.iter().chain(streams.audio.iter()) {
             arguments.extend(["-map".into(), format!("0:{index}")]);
         }
@@ -714,13 +715,43 @@ mod tests {
             String::from_utf8_lossy(&remux.stderr)
         );
         let shifted_target = directory.join("shifted.avi");
+        let mut first_video = None;
+        crate::decode::decode_file(&shifted, |output| {
+            if let DecodeOutput::Video(frame) = output {
+                first_video.get_or_insert(frame.presentation_time);
+            }
+            true
+        })
+        .expect("decode nonzero-origin source");
+        assert_eq!(first_video, Some(MediaTime::ZERO));
+        let (mut videos, mut samples) = (0, 0);
+        crate::decode::decode_file_parallel(
+            &shifted,
+            MediaTime::from_nanoseconds(1_000_000_000),
+            Some(MediaTime::from_nanoseconds(1_100_000_000)),
+            None,
+            |output| {
+                match output {
+                    crate::decode::ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(_)) => {
+                        videos += 1
+                    }
+                    crate::decode::ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(
+                        chunk,
+                    )) => samples += chunk.frames,
+                    _ => {}
+                }
+                true
+            },
+        )
+        .expect("seek and trim relative to the source origin");
+        assert_eq!((videos, samples), (3, 4_800));
         export_media(&ExportRequest {
             source: shifted,
             target: shifted_target.clone(),
             kind: MediaKind::Video,
             operations: vec![
-                EditOperation::SetTrimStart(MediaTime::from_nanoseconds(5_067_000_001)),
-                EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(5_100_000_001)),
+                EditOperation::SetTrimStart(MediaTime::from_nanoseconds(67_000_001)),
+                EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(100_000_001)),
             ],
             hardware_encode: false,
         })
@@ -847,7 +878,7 @@ mod tests {
             arguments.contains("trim=start_pts=2000:end_pts=5000,setpts=(PTS-STARTPTS)/4.0000")
         );
         assert!(arguments.contains("atrim=start_pts=96000:end_pts=240000,asetpts=PTS-STARTPTS,atempo=2.0000,atempo=2.0000,volume=0.5000"));
-        assert!(arguments.contains("-copyts -map 0:0 -map 0:1"));
+        assert!(arguments.contains("-copyts -start_at_zero -map 0:0 -map 0:1"));
     }
 
     #[test]

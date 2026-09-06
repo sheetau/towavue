@@ -6,6 +6,7 @@
 
 ### 操作とpreviewの不一致
 
+- 非zeroのcontainer開始時刻による黒画面・時刻ずれはH1でinput原点を引くdecode/Seek/exportへ揃えた。Matroskaの長さも補正し、MP4/MKV/TSの0/5秒offsetを回帰比較する。TSは実packet keyframeを確認する段階的なpreroll探索を追加し、短い/長いGOPとMPEG-2 B-frameのSeek・thumbnailを全decode基準へ照合した。通常releaseのoffset TSではhardware Seek・timeline preview・trim exportを確認。4K60 TSの45秒付近Seekは単発277.736 msで、以後899枚をdrop 0で再生した。全形式の破損header・不連続PTS・長いGOP・低速storageに対する精度やlatency保証ではない。
 - 動画はH1でbar・timelineを除いた領域へsample aspect ratio込みでaspect-fitし、display matrixの90度単位回転・反転を自動適用する。8通りの向きと編集/保存後の再open、hardware/software表示を検証した。任意角度・scale・shear・射影は非対応として明示errorにする。全containerの動的metadata切替を含むmatrixは未検証。
 - 動画・音声のvolume・mute・rateはH1でlive playbackにも反映する。rate変更は現在位置からpipelineを再構築するため短い再primingを伴い、音声を無途切れで連続変速する方式ではない。
 - 動画のcrop、rotate、flipはH1でhardware/software両方のlive previewへ反映した。cropは整数pixel矩形をexportと共有し、画像1 pixel・動画偶数pixelに揃える。既定H.264 encoderのため動画は16×16未満を確定しない。PNGの1×1・奇数位置/寸法・回転後の再cropは画素一致を検証したが、動画の圧縮・chroma再構成や全codec/HDRの色一致を保証するものではない。
@@ -171,7 +172,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 ### 2026-09-06のlaunch監査整理
 
-- 次のコード監査対象は同期media probeを含むOpenの応答。小さい破損MP4のerror表示と回復は通過したが、大きい素材・遅いstorageでのUI停止時間は未測定であり、worker化の完了とは扱わない。まず再現素材と入力受付から表示までの測定境界を決める。
+- 同期probe単体の局所測定では1.5 GB MP4が約20～22 ms、4K60 TSが約45～49 msだった。Open全体・cold storageのlatencyではなく、worker化の完了とも扱わない。この監査で見つけた時刻原点・duration・TS Seek不一致は上記の修正と試験へ進めた。長いGOPや遅い読み取りでのSeek・切替応答は別途測定が必要である。
 - 物理keyboard/pointer、混在DPI、実endpoint切替・driver resetは、注入入力や所有process内の制御faultとは別の未完了gate。ユーザーのOS設定や他applicationへ影響する操作を暗黙に実施しない。
 - 配布方式、FFmpeg同梱・license条件、clean-machine起動は未決定・未検証。portable/installerの選択前にpackageや公開を始めない。recent/session、方向gesture、複数区間編集などの追加機能は、これらのgateを満たす代替にはならない。
 

@@ -208,3 +208,5 @@ Seekのrelease後hoverが確定位置へ混ざるケースを回帰で再現し�
 trim gripにもrelease後hoverが端点へ混ざる不具合があり、通常releaseでx=600に離してからx=800へ動かすと開始25.196秒になることを再現した。端点はrelease eventから求め、同frameのfocus離脱・復帰も取消とする。開始/終了のhover・PointerGone・同時Escape/focus回帰と、通常releaseでの開始18.833秒・終了22.015秒、Undo/Redo、全編集Undoを確認。182 tests・Clippy・両buildが通過し、sourceは不変。入力処理だけを変更し、履歴・export・再生pipelineは未変更。短いgestureと環境依存gateを含むH1全体は継続中。
 
 押下と移動が同frameに届く短いtrimは、旧releaseで編集されず背景Seekへ化けた。Seek/gripの入力を共有し、押下位置のclip/layer判定、grip優先、一度使った押下の同frame再利用防止、releaseまでの距離判定を追加した。開始/終了の短いdragとclick、全frame内Seek、遮蔽/無効/clip外、複数layout passを回帰確認。通常releaseでも同じ入力がtrim開始18.833秒となり、短い背景Seek22.015秒・trim Escape・Undoを確認した。184 tests・Clippy・両buildが通過し、85b70e3のCIも成功。履歴/export/runtimeは変更せず、残る日常操作・環境・launch gateを継続する。
+
+Open監査から、非zero開始PTSのTSが長い黒画面になり、offset MKVの長さが過大になる問題を再現した。decode/Seek/exportをinput原点からの時刻へ揃え、Matroskaのdurationを補正。別途TSの途中Seekが空になるため、実packet keyframeを段階的に探すprerollをdecodeとpreviewで共有した。188 tests・Clippy・両build、通常releaseのhardware/software表示、MKV中央Seek、TS Seek/preview/trim保存が通過。4K60 TSの45秒Seekは単発277.736 ms、以後899枚drop 0で完走した。長いGOP・低速storageの応答、実入力/環境、配布を含むlaunch全体は引き続き未完了。

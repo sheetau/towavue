@@ -403,12 +403,13 @@ pub(crate) fn decode_file_from(
 ) -> Result<DecodeSummary, DecodeError> {
     ffmpeg::init()?;
     let mut input = format::input(path)?;
+    let origin = input_origin(&input);
     let mut video = create_video_pipeline(&input)?;
     let mut audio = create_audio_pipeline(&input)?;
     if video.is_none() && audio.is_none() {
         return Err(DecodeError::NoMediaStream);
     }
-    seek_input(&mut input, minimum_time)?;
+    seek_input(&mut input, minimum_time, video.is_some())?;
     let mut filtered_emit = |output| {
         let presentation_time = match &output {
             DecodeOutput::Video(frame) => frame.presentation_time,
@@ -418,7 +419,8 @@ pub(crate) fn decode_file_from(
     };
 
     let mut summary = DecodeSummary::default();
-    for (stream, packet) in input.packets() {
+    for (stream, mut packet) in input.packets() {
+        normalize_packet_time(&mut packet, stream.time_base(), origin);
         if let Some(pipeline) = video.as_mut()
             && stream.index() == pipeline.stream_index
         {
@@ -553,7 +555,7 @@ fn decode_file_parallel_inner(
         }
         return Err(DecodeError::NoMediaStream);
     }
-    seek_input(&mut input, minimum_time)?;
+    seek_input(&mut input, minimum_time, video.is_some())?;
     run_parallel_workers(input, video, audio, minimum_time, maximum_time, &mut emit)
 }
 
@@ -565,6 +567,7 @@ fn run_parallel_workers(
     maximum_time: Option<MediaTime>,
     emit: &mut impl FnMut(ParallelDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
+    let origin = input_origin(&input);
     let video_stream_index = video.as_ref().map(|video| match video {
         ParallelVideoConfig::Software(config) => config.index,
         ParallelVideoConfig::Hardware(config, _) => config.index,
@@ -582,7 +585,8 @@ fn run_parallel_workers(
             .spawn_scoped(scope, move || {
                 let mut pending_video = VecDeque::new();
                 let mut pending_audio = VecDeque::new();
-                for (stream, packet) in input.packets() {
+                for (stream, mut packet) in input.packets() {
+                    normalize_packet_time(&mut packet, stream.time_base(), origin);
                     if !flush_available_packets(&video_packet_tx, &mut pending_video)
                         || !flush_available_packets(&audio_packet_tx, &mut pending_audio)
                     {
@@ -896,13 +900,126 @@ fn run_parallel_audio_worker(
         .map_err(|_| DecodeError::ConsumerClosed)
 }
 
-fn seek_input(input: &mut format::context::Input, target: MediaTime) -> Result<(), DecodeError> {
+fn seek_input(
+    input: &mut format::context::Input,
+    target: MediaTime,
+    video: bool,
+) -> Result<(), DecodeError> {
     if target <= MediaTime::ZERO {
         return Ok(());
     }
-    let timestamp_microseconds = target.as_nanoseconds() / 1_000;
+    if video && let Some(point) = transport_seek_point(input, target)? {
+        // Exclusive input ownership on this thread; FFmpeg flushes parser/demux
+        // state before repositioning. No packet/stream borrow or pointer escapes.
+        let result = unsafe {
+            ffmpeg::ffi::av_seek_frame(
+                input.as_mut_ptr(),
+                -1,
+                point.position,
+                ffmpeg::ffi::AVSEEK_FLAG_BYTE,
+            )
+        };
+        return if result < 0 {
+            Err(ffmpeg::Error::from(result).into())
+        } else {
+            Ok(())
+        };
+    }
+    let timestamp_microseconds =
+        (target.as_nanoseconds() / 1_000).saturating_add(input_origin(input));
     input.seek(timestamp_microseconds, ..timestamp_microseconds)?;
     Ok(())
+}
+
+struct TransportSeekPoint {
+    position: i64,
+    start_microseconds: i64,
+}
+
+fn transport_seek_point(
+    input: &mut format::context::Input,
+    target: MediaTime,
+) -> Result<Option<TransportSeekPoint>, DecodeError> {
+    if input.format().name() != "mpegts" || target <= MediaTime::ZERO {
+        return Ok(None);
+    }
+    let Some(stream) = input.streams().best(Type::Video) else {
+        return Ok(None);
+    };
+    let index = stream.index();
+    let time_base = stream.time_base();
+    let origin = input_origin(input);
+    let target_us = target.as_nanoseconds() / 1_000;
+    let target_tick = target_us.saturating_add(origin).rescale_with(
+        ffmpeg::rescale::TIME_BASE,
+        time_base,
+        Rounding::Down,
+    );
+    let mut preroll = 0_i64;
+    loop {
+        let start = target_us.saturating_sub(preroll);
+        if start == 0 {
+            return Ok(Some(TransportSeekPoint {
+                position: 0,
+                start_microseconds: 0,
+            }));
+        }
+        let absolute_start = start.saturating_add(origin);
+        input.seek(absolute_start, ..absolute_start)?;
+        let mut position = None;
+        for (stream, packet) in input.packets() {
+            if stream.index() != index {
+                continue;
+            }
+            let Some(time) = packet.pts().or_else(|| packet.dts()) else {
+                continue;
+            };
+            if time > target_tick {
+                break;
+            }
+            if packet.is_key() && packet.position() >= 0 {
+                position = Some(packet.position() as i64);
+            }
+        }
+        if let Some(position) = position {
+            return Ok(Some(TransportSeekPoint {
+                position,
+                start_microseconds: start,
+            }));
+        }
+        preroll = if preroll == 0 {
+            1_000_000
+        } else {
+            preroll.saturating_mul(2)
+        }
+        .min(target_us);
+    }
+}
+
+pub(crate) fn preview_seek_start(path: &Path, target: Duration) -> Result<Duration, DecodeError> {
+    ffmpeg::init()?;
+    let mut input = format::input(path)?;
+    let target_time = MediaTime::from_nanoseconds(target.as_nanos().min(i64::MAX as u128) as i64);
+    Ok(transport_seek_point(&mut input, target_time)?
+        .map(|point| Duration::from_micros(point.start_microseconds as u64))
+        .unwrap_or(target))
+}
+
+fn input_origin(input: &format::context::Input) -> i64 {
+    // The owning input is immutably borrowed on its current thread. Read only the
+    // initialized scalar; no pointer escapes or concurrent demux access occurs.
+    let start = unsafe { (*input.as_ptr()).start_time };
+    if start == ffmpeg::ffi::AV_NOPTS_VALUE {
+        0
+    } else {
+        start
+    }
+}
+
+fn normalize_packet_time(packet: &mut ffmpeg::Packet, time_base: Rational, origin: i64) {
+    let offset = origin.rescale(ffmpeg::rescale::TIME_BASE, time_base);
+    packet.set_pts(packet.pts().map(|time| time.saturating_sub(offset)));
+    packet.set_dts(packet.dts().map(|time| time.saturating_sub(offset)));
 }
 
 pub(crate) fn probe_audio_format(path: &Path) -> Result<Option<AudioFormat>, DecodeError> {
@@ -1200,6 +1317,156 @@ mod tests {
         let time = timestamp_to_media_time(Some(90_000), Rational::new(1, 90_000));
 
         assert_eq!(time.as_nanoseconds(), 1_000_000_000);
+    }
+
+    #[test]
+    fn packet_origin_keeps_stream_offsets_preroll_and_missing_timestamps() {
+        use ffmpeg_next::{self as ffmpeg, Rescale};
+
+        for origin in [0_i64, 11_378_667, -1_000_000] {
+            for time_base in [Rational(1, 90_000), Rational(1, 48_000)] {
+                let offset = origin.rescale(ffmpeg::rescale::TIME_BASE, time_base);
+                let mut packet = ffmpeg::Packet::empty();
+                packet.set_pts(Some(offset + 1_920));
+                packet.set_dts(Some(offset - 960));
+                packet.set_duration(1_024);
+                super::normalize_packet_time(&mut packet, time_base, origin);
+                assert_eq!(packet.pts(), Some(1_920));
+                assert_eq!(packet.dts(), Some(-960));
+                assert_eq!(packet.duration(), 1_024);
+                packet.set_pts(None);
+                packet.set_dts(None);
+                super::normalize_packet_time(&mut packet, time_base, origin);
+                assert_eq!((packet.pts(), packet.dts()), (None, None));
+            }
+        }
+    }
+
+    #[test]
+    fn transport_seek_matches_full_decode_inside_short_and_long_gops() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let executable =
+            std::path::PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+                .join("bin/ffmpeg.exe");
+        for (codec, gop, b_frames) in [
+            ("libopenh264", 30, 0),
+            ("libopenh264", 120, 0),
+            ("mpeg2video", 30, 2),
+        ] {
+            let path =
+                std::env::temp_dir().join(format!("towavue-ts-seek-{unique}-{codec}-{gop}.ts"));
+            let generated = std::process::Command::new(&executable)
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=160x96:rate=30:duration=6",
+                    "-c:v",
+                    codec,
+                    "-g",
+                    &gop.to_string(),
+                    "-bf",
+                    &b_frames.to_string(),
+                    "-output_ts_offset",
+                    "10",
+                ])
+                .arg(&path)
+                .output()
+                .expect("generate GOP fixture");
+            assert!(
+                generated.status.success(),
+                "{}",
+                String::from_utf8_lossy(&generated.stderr)
+            );
+            let mut reference = Vec::new();
+            super::decode_file(&path, |output| {
+                if let DecodeOutput::Video(frame) = output {
+                    reference.push((frame.presentation_time, frame.rgba));
+                }
+                true
+            })
+            .expect("full source decode");
+            assert_eq!(reference.len(), 180);
+            let cache_path = path.with_extension("cache");
+            let cache = crate::PreviewCache::new(cache_path.clone()).expect("preview cache");
+            for start_ns in [500_000_000, 3_500_000_000, 5_500_000_000] {
+                let start = MediaTime::from_nanoseconds(start_ns);
+                let end = MediaTime::from_nanoseconds(start_ns + 200_000_000);
+                let expected: Vec<_> = reference
+                    .iter()
+                    .filter(|(time, _)| *time >= start && *time < end)
+                    .cloned()
+                    .collect();
+                let mut actual = Vec::new();
+                super::decode_file_parallel(
+                    &path,
+                    start,
+                    Some(end),
+                    Some(super::DecodeStream::Video),
+                    |output| {
+                        if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) =
+                            output
+                        {
+                            actual.push((frame.presentation_time, frame.rgba));
+                        }
+                        true
+                    },
+                )
+                .expect("seek decode");
+                assert!(
+                    actual == expected,
+                    "GOP {gop}, seek {start_ns}: {} frames instead of {}",
+                    actual.len(),
+                    expected.len()
+                );
+                let mut serial = None;
+                let result = super::decode_file_from(&path, start, |output| {
+                    if let DecodeOutput::Video(frame) = output {
+                        serial = Some((frame.presentation_time, frame.rgba));
+                        return false;
+                    }
+                    true
+                });
+                assert!(matches!(result, Err(super::DecodeError::ConsumerClosed)));
+                assert!(
+                    serial.as_ref() == expected.first(),
+                    "serial seek at {start_ns}"
+                );
+                let thumbnail = cache
+                    .thumbnail(&path, std::time::Duration::from_nanos(start_ns as u64), 160)
+                    .expect("GOP thumbnail");
+                assert_eq!((thumbnail.width, thumbnail.height), (160, 96));
+                assert!(
+                    thumbnail
+                        .rgba
+                        .iter()
+                        .zip(&expected[0].1)
+                        .all(|(actual, expected)| actual.abs_diff(*expected) <= 3),
+                    "thumbnail chose a different frame at GOP {gop}, {start_ns}"
+                );
+            }
+            let card = cache
+                .filmstrip(&path, towavue_core::MediaKind::Video)
+                .expect("GOP filmstrip");
+            assert_eq!((card.image.width, card.image.height), (240, 160));
+            let mut input = ffmpeg_next::format::input(&path).expect("inspect seek point");
+            let point =
+                super::transport_seek_point(&mut input, MediaTime::from_nanoseconds(5_500_000_000))
+                    .expect("find preroll")
+                    .expect("TS seek point");
+            assert!(
+                point.position > 0 && point.start_microseconds > 0,
+                "late seek must not always decode from the beginning"
+            );
+            drop(input);
+            std::fs::remove_dir_all(cache_path).expect("remove owned preview cache");
+            std::fs::remove_file(path).expect("remove owned GOP fixture");
+        }
     }
 
     #[test]

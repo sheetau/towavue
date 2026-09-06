@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### アニメ画像の長いdeadline遅延（2026-09-06 19:35 JST）
+
+- 既存のframe追従loopは遅れた全周回を一枚ずつ数えていた。1×1の3 frames、delay 10/20/30ms、2日＋35msの時刻差を同じrelease testへ注入すると、追従関数が修正前20.918ms、修正後0.005msだった。実OSスリープ/復帰や画面latencyの試験ではなく、合成時刻でUI側計算を切り分けた単発値である。一周して同じframeへ戻る際の不要なtexture uploadも変更前に回帰testが失敗した。
+- 最初の一周から周期を求め、整数nanosecondの剰余で完全な周回を飛ばす。最大二周ぶんのframe探索となり、delay値や位相は変更しない。同じframe番号なら次の期限だけ更新し、texture変換/uploadと画像由来のredrawは行わない。新worker・cache・時計変更はない。
+- 回帰は2日/3650日のgap、異なる初期frame、nanosecond端数のある3種類のdelay、deadline直前/一致/直後、完全周期の境界を確認。短い範囲では従来のframe逐次計算を独立した参照として、最終frame・正確な次期限・upload件数を照合する。235/236件目のtestsを含む計236 tests（app 122/core 35/runtime 75/integration 4）、format、Clippy、両buildが通過。3件の既存live ignoreは実device確認ではない。一時計測出力は最終sourceから除去した。
+- 通常releaseの所有PID 46052（開始UTC 2026-09-06T10:34:47.2798406Z）で640×360・10 frames/2秒の`page-03.gif`を表示。foregroundを確認した2枚のcaptureでframeが進むことを目視し、clean titleで通常終了した。Save/source/OS設定の変更なし。実スリープ、長時間のOS停止、物理入力/全codecの代替証拠にはしない。
+- native binary SHA-256: `3AE8785A7B8F5F9907966A0A419EFBBA7482A333F46564A79C035CC7B0753D26`。GIF SHA-256: `EC4B85BCE7C7E44BD85FD45F7F0FC076B97AFBD5329AB8840C66930AF7A350EB`。captureと空のstderr logはignoredの`target/tmp/h1-animation-*`。
+
 ### 初回画像の画面用変換（2026-09-06 19:27 JST）
 
 - 6000×6000 PNGのRGBA→egui変換を一時exampleで比較した。全画像のalpha事前走査は末尾だけ半透明の条件で約31→37msへ悪化したため不採用。行単位のopaque判定では、6回の計測が不透明31.427～32.069→19.261～20.341ms、末尾だけ半透明31.677～33.725→19.409～20.634ms、全体半透明46.548～48.214→39.486～40.456msで、全画素が従来変換と一致した。このexampleは削除し、最終コードは固定Rustのlintに合わせて4-byte配列sliceを使う。

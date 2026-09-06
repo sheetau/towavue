@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 19:35 JST - bound animated-image deadline catch-up
+
+- Trigger/evidence: previous turn pushed b7c9142 (progress); its CI 34027537728 remains in progress, preceding 5d1d529 CI succeeds. Long-gap audit finds framewise catch-up proportional to elapsed cycles. A release test with three 1x1 frames at 10/20/30ms takes 20.918ms after a synthetic two-day gap; a same-frame/full-cycle no-upload regression fails before the fix.
+- Change: record the contract before implementation. Derive one full cycle, skip elapsed complete cycles with integer nanosecond remainder, and traverse only the residual phase. Preserve frame and next deadline; omit texture upload/redraw when the frame index is unchanged. No extra worker/cache, frame timing changes, dependencies or unsafe code.
+- Verification: same release component test takes 0.005ms after the change, a scoped single measurement rather than real sleep/display latency. Tests cover two-day/3650-day gaps, all initial frame positions, fractional delays, deadline and cycle boundaries against independent framewise reference, and upload counts. Remove temporary timing output. Format, Clippy, 236 tests (app 122/core 35/runtime 75/integrations 4) and both builds pass; three preexisting live ignores are not physical-device proof.
+- Native/cleanup: normal release PID 46052 displays advancing GIF frames in two foreground-verified captures and closes normally with a clean title. No Save/source/OS changes. DEVELOPMENT records source/binary hashes and limits; captures/empty stderr log remain ignored under target/tmp/h1-animation-*.
+- Status/next: h1_active. Continue remaining daily-viewing/draft UX and launch-readiness audit; do not substitute synthetic deadline testing for physical sleep/input/DPI/device verification. Distribution and unanswered owner choices remain separate gaps.
+
 ## 2026-09-06 19:27 JST - reduce initial image color-conversion work
 
 - Trigger/evidence: previous turn pushed 5d1d529 (progress); CI 34027138464 remains in progress at inspection. Audit initial image work after bounded revisit caching. Temporary component profiling finds about 31-32ms of opaque RGBA conversion; a whole-image opacity scan regresses late-transparency cases and is rejected.

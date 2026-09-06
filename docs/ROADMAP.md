@@ -282,3 +282,5 @@ reading modeの固定8pxの隙間と等分枠による中心ずれを確認し�
 続く再訪計測で反復texture変換/uploadを確認し、同じdecode identityの静止画textureを最大8件・RGBA相当256 MiBで再利用するようにした。graphics復旧開始で破棄し、古いfile内容をpathだけで再利用しない。同条件5往復のtitle完了中央値は49.705→16.500ms。連続31入力とscratch差替え後の正しい画像、upload deltaのないhit、上限/除外/復旧を確認し、233 tests・Clippy・両buildと9be0d14 CIが通過。初回表示・実device/配布などのlaunch gateは残り、H1は継続する。
 
 初回画像の画面用変換も測定し、行内が全opaqueの場合だけalpha変換を省くようにした。透明/半透明の既存egui変換とsource RGBAを維持する。通常releaseで未cacheの6000×6000 PNGを5枚開くtitle中央値は233.814→219.187ms、表示248,004 pixelsは一致。全alpha値と混在行の回帰、234 tests・Clippy・両buildが通過。OS file cacheはwarmであり、cold-storage、decode/uploadの無停止化やlaunch全体の完了ではない。
+
+アニメ画像の長いdeadline遅延で過去の全周回を数える処理を発見し、周期の整数剰余で省略するようにした。合成2日gapのrelease単発計測は20.918→0.005ms。同じframeへ戻る場合はuploadを省き、2日/3650日・端数delay・境界の正確なframe/期限を検証。236 tests・Clippy・両buildと通常windowのGIF更新が通過。OSスリープ復帰の実試験ではなく、実環境/配布を含むH1は継続中。

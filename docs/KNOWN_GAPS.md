@@ -28,6 +28,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 ### UI threadを止める処理
 
+- animated imageのdeadlineが長く遅れた場合、過去の全frameを一枚ずつ数える処理を完全周回の省略へ変更した。frameと次期限の位相を保ち、同じframeへ戻る場合の不要なuploadも省く。合成2日gapのrelease単発測定は20.918→0.005msだが、OSの実スリープ復帰試験やGPU upload自体の高速化ではない。
 - 長いGOPのSeek中に終了すると、target到達までdecodeを待つ問題をH1で修正した。pipelineごとの取消flagを探索・demux・decoded outputで確認し、target以前のframe破棄中も停止する。1080p60・30秒GOPの通常release単発比較では終了待ち897 msから63 msへ短縮し、音声付き素材の再Seek・再生・tab closeも通過した。worker joinは維持し、進行中のFFmpeg call/OS I/Oの強制中断や、全素材の終了時間保証ではない。
 - 画像decodeとreading modeの複数画像loadはH1で単一background workerへ移した。要求・結果は最新1件だけを保持し、古い結果は表示しない。texture化とGPU uploadはUI側に残り、大きい画像の表示切替が完全に無停止とは限らない。
 - 初回の画面用変換は行単位のopaque判定で不要なalpha変換を省いた。透明/半透明行の丸めと全画素一致を保ち、通常releaseの未cache大PNG5枚ではtitle完了中央値233.814→219.187ms。decodeとuploadは残るため、cold-storageや初回表示全体の問題を解消したものではない。

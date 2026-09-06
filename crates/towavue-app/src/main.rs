@@ -319,15 +319,30 @@ impl ImagePresentation {
         if now < deadline {
             return false;
         }
+        let previous_frame = self.frame_index;
+        let previous_deadline = deadline;
         while deadline <= now {
             self.frame_index = (self.frame_index + 1) % self.decoded.frames.len();
             deadline += self.decoded.frames[self.frame_index].delay;
+            if self.frame_index == previous_frame && deadline <= now {
+                // Skip complete cycles without iterating over time spent away from the UI.
+                let cycle = deadline - previous_deadline;
+                let remainder = (now - deadline).as_nanos() % cycle.as_nanos();
+                deadline = now
+                    - Duration::new(
+                        (remainder / 1_000_000_000) as u64,
+                        (remainder % 1_000_000_000) as u32,
+                    );
+            }
+        }
+        self.next_frame_at = Some(deadline);
+        if self.frame_index == previous_frame {
+            return false;
         }
         self.texture.set(
             color_image(&self.decoded.frames[self.frame_index]),
             TextureOptions::LINEAR,
         );
-        self.next_frame_at = Some(deadline);
         true
     }
 }
@@ -8673,6 +8688,90 @@ mod tests {
             assert_eq!(position.as_seconds_f64(), 10.0 + 2.0 * f64::from(rate));
             assert_eq!(clock.position(), position);
             assert_eq!(clock.due_at(position), clock.wall_anchor + elapsed);
+        }
+    }
+
+    #[test]
+    fn animation_catches_up_after_a_long_deadline_gap() {
+        let context = egui::Context::default();
+        let decoded = Arc::new(DecodedImage {
+            format: "GIF",
+            frames: [10, 20, 30]
+                .into_iter()
+                .map(|milliseconds| towavue_runtime_windows::DecodedImageFrame {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![milliseconds as u8, 0, 0, 255],
+                    delay: Duration::from_millis(milliseconds),
+                })
+                .collect(),
+        });
+        let mut image = ImagePresentation::from_decoded(&context, Path::new("a.gif"), decoded)
+            .expect("animation");
+        let start = Instant::now();
+        image.next_frame_at = Some(start + Duration::from_millis(10));
+        let _ = context.tex_manager().write().take_delta();
+        assert!(!image.advance_animation(start + Duration::from_millis(60)));
+        assert_eq!(image.next_frame_at, Some(start + Duration::from_millis(70)));
+        assert!(context.tex_manager().write().take_delta().set.is_empty());
+        let now = start + Duration::from_secs(2 * 24 * 60 * 60) + Duration::from_millis(35);
+        assert!(image.advance_animation(now));
+        assert_eq!(image.frame_index, 2);
+        assert_eq!(image.next_frame_at, Some(now + Duration::from_millis(25)));
+        let now = start + Duration::from_secs(3650 * 24 * 60 * 60) + Duration::from_millis(35);
+        assert!(!image.advance_animation(now));
+        assert_eq!(image.frame_index, 2);
+        assert_eq!(image.next_frame_at, Some(now + Duration::from_millis(25)));
+    }
+
+    #[test]
+    fn animation_deadlines_match_framewise_advancement_at_cycle_boundaries() {
+        let context = egui::Context::default();
+        let decoded = Arc::new(DecodedImage {
+            format: "GIF",
+            frames: [10_000_001, 20_000_003, 30_000_007]
+                .into_iter()
+                .map(|nanoseconds| towavue_runtime_windows::DecodedImageFrame {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![255; 4],
+                    delay: Duration::from_nanos(nanoseconds),
+                })
+                .collect(),
+        });
+        let start = Instant::now();
+        for current in 0..decoded.frames.len() {
+            for elapsed in [
+                0,
+                1,
+                10,
+                11,
+                20_000_003,
+                30_000_017,
+                60_000_021,
+                2_000_000_000,
+            ] {
+                let mut image =
+                    ImagePresentation::from_decoded(&context, Path::new("a.gif"), decoded.clone())
+                        .expect("animation");
+                image.frame_index = current;
+                image.next_frame_at = Some(start + Duration::from_nanos(10));
+                let _ = context.tex_manager().write().take_delta();
+                let now = start + Duration::from_nanos(elapsed);
+                let mut expected_frame = current;
+                let mut expected_deadline = image.next_frame_at.expect("deadline");
+                while expected_deadline <= now {
+                    expected_frame = (expected_frame + 1) % decoded.frames.len();
+                    expected_deadline += decoded.frames[expected_frame].delay;
+                }
+                assert_eq!(image.advance_animation(now), expected_frame != current);
+                assert_eq!(image.frame_index, expected_frame);
+                assert_eq!(image.next_frame_at, Some(expected_deadline));
+                assert_eq!(
+                    context.tex_manager().write().take_delta().set.len(),
+                    usize::from(expected_frame != current)
+                );
+            }
         }
     }
 

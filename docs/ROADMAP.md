@@ -182,3 +182,5 @@ fullscreenの下端hoverに既存status/seek操作と解除buttonを追加した
 映像・音声のinput/demuxを分離し、各streamを既存のbounded queueへ接続した。最初の映像/映像終端で音声decodeを一度だけ開始するため、hardware確認前の音声蓄積を除去できる。元fixtureの通常releaseは60枚表示・drop 0・CPU transfers 0でEOFとなり、停止Seekも復旧した。167 testsとClippy/buildが通過し、100回Seekのp95は再生中101.286ms・停止中42.494msで300ms以内。二系統読取の30分4K60試験も107,746枚表示・25枚drop・CPU transfers 0、drift p95 4.806ms・最大37.785msで完走した。先頭600秒の35,925 frameへ全dropsを割り当てた上限でも0.069589%で、長時間/10分drop gateを満たす。次は残る入力・実機環境と日常flowの監査へ戻る。H1/launch全体は未完了。
 
 Windows日本語IMEの実入力で、各文字のpreedit直後に空の確定が来て文字が消える不具合を再現した。固定eguiのrequest_focusがIME中断も要求するため、既にfocusがあるframeでは再要求しないようにした。OSへ出す中断flagを確認する回帰testは修正前に失敗・修正後に成功。実候補の上下選択・日本語確定・Escape取消・確定後の独立EnterによるOpen、通常releaseの候補表示と168 tests・Clippy/buildが通過した。前回17ef1f5のCIも成功。次はfocusとkeyboard-onlyの日常操作を監査する。物理keyboard・他IME・混在DPI・実device復旧・配布を含むH1全体は未完了。
+
+通常releaseでIME候補中のfocus離脱・復帰後の文字保持とEscapeを確認した。未保存確認もTab/Shift+TabとEnterでCancel、Save As取消からの編集保持、明示DiscardによるWelcome復帰を確認し、source hashは不変。keyboard focusと全3 decisionのwidget出力を回帰testへ追加し、169 tests・Clippy/buildが通過した。今回はproduction動作の変更なし。次はmenu/Welcomeを含む残りのkeyboard-only操作を監査する。環境・配布を含むH1全体は継続中。

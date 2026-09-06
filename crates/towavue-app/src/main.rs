@@ -4844,6 +4844,73 @@ mod tests {
     }
 
     #[test]
+    fn unsaved_guard_keyboard_focus_selects_only_the_requested_decision() {
+        let Some(root) = isolated_test_root(
+            "tests::unsaved_guard_keyboard_focus_selects_only_the_requested_decision",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let path = root.join("image.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Image);
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        app.pending_guard = Some(GuardedAction::CloseTab(tab));
+        let history = app.edits[&tab].clone();
+        for (tabs, reverse, activation, expected) in [
+            (1, false, egui::Key::Enter, GuardDecision::Save),
+            (2, false, egui::Key::Enter, GuardDecision::Discard),
+            (3, false, egui::Key::Enter, GuardDecision::Cancel),
+            (1, true, egui::Key::Space, GuardDecision::Cancel),
+        ] {
+            let context = egui::Context::default();
+            let run = |events| {
+                let mut actions = Vec::new();
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 300.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |_| app.draw_unsaved_guard(&context, &mut actions),
+                );
+                actions
+            };
+            let key = |key, shift| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers {
+                    shift,
+                    ..Default::default()
+                },
+            };
+            for _ in 0..3 {
+                assert!(run(vec![]).is_empty());
+            }
+            assert!(run(vec![key(egui::Key::Enter, false)]).is_empty());
+            for _ in 0..tabs {
+                assert!(run(vec![key(egui::Key::Tab, reverse)]).is_empty());
+            }
+            assert!(matches!(
+                run(vec![key(activation, false)]).as_slice(),
+                [UiAction::ResolveGuard(decision)] if *decision == expected
+            ));
+            assert_eq!(app.edits[&tab], history);
+            assert_eq!(app.tabs.active().map(|tab| tab.id), Some(tab));
+            assert!(app.active_export.is_none());
+        }
+    }
+
+    #[test]
     fn confirmation_layout_keeps_actions_visible_after_resizing_with_long_text() {
         let Some(_root) = isolated_test_root(
             "tests::confirmation_layout_keeps_actions_visible_after_resizing_with_long_text",

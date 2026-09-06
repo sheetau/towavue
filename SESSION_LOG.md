@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 19:18 JST - reuse bounded static-image textures
+
+- Trigger/evidence: continue H1 after 9be0d14 (progress), CI 34026112273 succeeds. Repeated 6000x6000 image upload/render/Present takes 30.626-71.356ms in a temporary instrumented baseline, beyond the already-cached decode. Record the scoped texture contract before implementation.
+- Change: app retains up to eight static textures/256MiB RGBA-equivalent in LRU order and reuses only matching shared decoded-image identity. Skip animation/oversized/failing results; clear on graphics recovery before any failure route. Current image/reading textures retain their existing restoration path. No prefetch, quality change, worker, dependency or unsafe additions; separate cache ownership is not a process-wide memory limit.
+- Verification: regression fails before reuse; passes with identical texture ID and no upload delta. Cover new decode at the same path, LRU/byte/count limits, exclusions, clearing and headless recovery while preserving the current texture. Format, Clippy, 233 tests (app 119/core 35/runtime 75/integrations 4), debug/release builds and diff checks pass; three preexisting live tests ignored, not hardware proof. Temporary trace removed before final release.
+- Native: final PID 42824 returns to the large image in 15.695-18.372ms, median 16.500ms vs 49.705ms for the CPU-only cache. Title-ready is not physical presentation latency. Foreground-checked screen sampling supports quicker color transitions but adds GDI/DWM overhead. Initial exact-color helper mismatch is excluded, not an app timeout. Cached display, 31 rapid Right inputs and changed scratch pixels/dimensions are visually correct; coarse private-memory samples span 556.90-557.16MiB.
+- Cleanup: all three owned windows close normally with clean titles and no Save. Scratch replacement restored, original sources and OS settings unchanged. DEVELOPMENT records binary/source identity, methods and limits; helpers/captures/logs remain ignored under target/tmp.
+- Status/next: h1_active. Continue initial image decode/first-visit responsiveness and draft/day-to-day audit. Physical input/DPI/device/distribution and unanswered owner choices remain separate launch gaps.
+
 ## 2026-09-06 18:56 JST - cache bounded shared static-image decodes
 
 - Trigger/evidence: previous turn pushed 3fddd7a (progress), CI 34025557121 succeeds. Native PID 42724 takes 218.537-221.243ms to return to a 6000x6000 PNG on each of five round trips; component profiling isolates about 183-186ms of repeated decode and 33ms of UI color conversion.

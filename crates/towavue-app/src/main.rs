@@ -17,7 +17,7 @@ mod trim;
 mod welcome;
 mod wheel_input;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -218,11 +218,60 @@ struct ActiveExport {
     continuation: Option<GuardedAction>,
 }
 
+#[derive(Clone)]
 struct ImagePresentation {
     decoded: Arc<DecodedImage>,
     texture: TextureHandle,
     frame_index: usize,
     next_frame_at: Option<Instant>,
+}
+
+struct ImageTextureCache {
+    entries: VecDeque<ImagePresentation>,
+    byte_limit: usize,
+}
+
+impl ImageTextureCache {
+    fn new(byte_limit: usize) -> Self {
+        Self {
+            entries: VecDeque::new(),
+            byte_limit,
+        }
+    }
+
+    fn load(
+        &mut self,
+        context: &egui::Context,
+        path: &Path,
+        decoded: Arc<DecodedImage>,
+    ) -> Result<ImagePresentation, String> {
+        if let Some(index) = self
+            .entries
+            .iter()
+            .position(|image| Arc::ptr_eq(&image.decoded, &decoded))
+        {
+            let image = self.entries.remove(index).expect("cached image");
+            self.entries.push_back(image.clone());
+            return Ok(image);
+        }
+        let image = ImagePresentation::from_decoded(context, path, decoded)?;
+        let bytes = image.decoded.retained_bytes();
+        if !image.decoded.is_animated() && bytes <= self.byte_limit {
+            while self.entries.len() >= 8
+                || self
+                    .entries
+                    .iter()
+                    .map(|image| image.decoded.retained_bytes())
+                    .sum::<usize>()
+                    + bytes
+                    > self.byte_limit
+            {
+                self.entries.pop_front();
+            }
+            self.entries.push_back(image.clone());
+        }
+        Ok(image)
+    }
 }
 
 impl ImagePresentation {
@@ -424,6 +473,7 @@ struct Application<N> {
     path: Option<PathBuf>,
     media_kind: Option<MediaKind>,
     image: Option<ImagePresentation>,
+    image_texture_cache: ImageTextureCache,
     image_loader: ImageLoader,
     image_generation: u64,
     image_loading: bool,
@@ -529,6 +579,7 @@ where
             path: None,
             media_kind: None,
             image: None,
+            image_texture_cache: ImageTextureCache::new(256 * 1024 * 1024),
             image_loader,
             image_generation: 0,
             image_loading: false,
@@ -952,7 +1003,7 @@ where
         }
         match decoded
             .map_err(|error| error.to_string())
-            .and_then(|decoded| ImagePresentation::from_decoded(&context, &path, decoded))
+            .and_then(|decoded| self.image_texture_cache.load(&context, &path, decoded))
         {
             Ok(image) => {
                 let (width, height) = image.dimensions();
@@ -975,7 +1026,7 @@ where
             .map(|(path, decoded)| {
                 decoded
                     .map_err(|error| error.to_string())
-                    .and_then(|decoded| ImagePresentation::from_decoded(&context, &path, decoded))
+                    .and_then(|decoded| self.image_texture_cache.load(&context, &path, decoded))
                     .map_err(|error| format!("{}: {error}", display_name(&path)))
             })
             .collect();
@@ -3832,6 +3883,7 @@ where
     }
 
     fn recover_graphics_device(&mut self, position: MediaTime) {
+        self.image_texture_cache.entries.clear();
         let state = self.state;
         self.queued_recovery = None;
         self.pending_seek_started = None;
@@ -8438,8 +8490,45 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
+        let context = egui::Context::default();
+        app.image = Some(
+            app.image_texture_cache
+                .load(
+                    &context,
+                    Path::new("image.png"),
+                    Arc::new(DecodedImage {
+                        format: "PNG",
+                        frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                            width: 1,
+                            height: 1,
+                            rgba: vec![255; 4],
+                            delay: Duration::ZERO,
+                        }],
+                    }),
+                )
+                .expect("cached current image"),
+        );
+        let _ = context.run_ui(Default::default(), |ui| {
+            ui.label("fixture");
+        });
+        let image_id = app.image.as_ref().expect("image").texture.id();
+        assert_eq!(app.image_texture_cache.entries.len(), 1);
         app.pending_seek_started = Some(Instant::now());
         app.recover_graphics_device(MediaTime::ZERO);
+        assert!(app.image_texture_cache.entries.is_empty());
+        assert_eq!(
+            app.image
+                .as_ref()
+                .expect("current image survives cache clear")
+                .texture
+                .id(),
+            image_id
+        );
+        assert!(
+            app.restored_ui_textures(&context)
+                .iter()
+                .any(|(id, _)| *id == image_id)
+        );
         assert_eq!(app.state, PlaybackState::Faulted);
         assert!(app.pending_seek_started.is_none());
         assert!(app.renderer.is_none());
@@ -8570,6 +8659,99 @@ mod tests {
             assert_eq!(clock.position(), position);
             assert_eq!(clock.due_at(position), clock.wall_anchor + elapsed);
         }
+    }
+
+    #[test]
+    fn image_texture_cache_reuses_only_shared_static_decodes_within_its_limits() {
+        let context = egui::Context::default();
+        let make_image = |value| {
+            Arc::new(DecodedImage {
+                format: "PNG",
+                frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![value; 4],
+                    delay: Duration::ZERO,
+                }],
+            })
+        };
+        let mut cache = ImageTextureCache::new(8);
+        let first = make_image(10);
+        let first_id = cache
+            .load(&context, Path::new("same.png"), first.clone())
+            .expect("first")
+            .texture
+            .id();
+        let _ = context.tex_manager().write().take_delta();
+        assert_eq!(
+            cache
+                .load(&context, Path::new("same.png"), first.clone())
+                .expect("cached")
+                .texture
+                .id(),
+            first_id
+        );
+        assert!(
+            context.tex_manager().write().take_delta().set.is_empty(),
+            "cache hit must not enqueue another upload"
+        );
+        let second = make_image(20);
+        let second_id = cache
+            .load(&context, Path::new("same.png"), second.clone())
+            .expect("changed content")
+            .texture
+            .id();
+        assert_ne!(
+            first_id, second_id,
+            "same path with a new decode must not use stale pixels"
+        );
+        cache
+            .load(&context, Path::new("first.png"), first.clone())
+            .expect("refresh LRU");
+        cache
+            .load(&context, Path::new("third.png"), make_image(30))
+            .expect("evict second");
+        assert_eq!(cache.entries.len(), 2);
+        assert_ne!(
+            cache
+                .load(&context, Path::new("second.png"), second)
+                .expect("reupload evicted")
+                .texture
+                .id(),
+            second_id
+        );
+        let mut animation = (*make_image(40)).clone();
+        animation.frames.push(animation.frames[0].clone());
+        let animation = Arc::new(animation);
+        let a = cache
+            .load(&context, Path::new("a.gif"), animation.clone())
+            .expect("animation");
+        let b = cache
+            .load(&context, Path::new("a.gif"), animation)
+            .expect("uncached animation");
+        assert_ne!(a.texture.id(), b.texture.id());
+        assert_eq!(cache.entries.len(), 2);
+        let mut cache = ImageTextureCache::new(3);
+        cache
+            .load(&context, Path::new("large.png"), first.clone())
+            .expect("display larger than cache");
+        assert!(cache.entries.is_empty());
+        let mut cache = ImageTextureCache::new(100);
+        for value in 0..9 {
+            cache
+                .load(&context, Path::new("page.png"), make_image(value))
+                .expect("page");
+        }
+        assert_eq!(cache.entries.len(), 8);
+        cache.entries.clear();
+        assert_ne!(
+            cache
+                .load(&context, Path::new("same.png"), first)
+                .expect("reload after clear")
+                .texture
+                .id(),
+            first_id
+        );
     }
 
     #[test]

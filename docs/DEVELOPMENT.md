@@ -4,6 +4,22 @@
 
 ## 1. 最初に試す
 
+### 静止画の再訪texture再利用（2026-09-06 19:18 JST）
+
+下記decode cache試験と同じ素材・通常release・960×576・5往復・title判定で、app側のtexture再利用を比較した。file名とPaused titleの更新はGPU Presentより先に起こりうるため、物理表示完了時間ではない。
+
+| 大画像へ戻る5回 | 最小 | 中央値 | 最大 |
+| --- | ---: | ---: | ---: |
+| 9be0d14、decode cacheのみ、PID 41676 | 48.423ms | 49.705ms | 49.819ms |
+| texture再利用、PID 42824 | 15.695ms | 16.500ms | 18.372ms |
+
+- 別の一時instrumented baseline PID 45724では、6000×6000 textureを含むUI renderからPresentまでが初回68.007ms、再訪5回30.626～71.356ms。純粋な転送時間ではないが、再decode以外の反復作業を確認した。traceは除去して最終releaseをbuildし、最終logにtrace/errorはない。
+- 同じDecodedImageのArc identityに限りTextureHandleを再利用する。最大8件・RGBA相当256 MiBのLRUで、animation・容量超過・失敗は保持しない。decode側と画素を共有するがGPU resourceとcacheの所有範囲は別であり、process全体の上限ではない。graphics復旧開始時にはcacheを破棄し、現在画像/reading pageだけ既存経路で再uploadする。
+- cache hitでも別textureになる変更前の回帰を確認し、修正後は同じIDかつupload deltaなし。新decodeの同path、LRU、byte/件数制限、animation/容量超過、clear、復旧失敗時のcache破棄と現在画像復元を検証。233 tests（app 119/core 35/runtime 75/integration 4）・format・Clippy・debug/release buildが通過。既存live test 3件のignoreは実device確認の代替ではない。
+- foregroundを毎sample確認する単一点screen samplerの暖機後3回では、baseline PID 36344の緑への変化が107.932～151.150ms、固定PID 42824が20.278～36.245ms。GDI/DWM取得自体に待ちがあり、物理入力から表示までの精密測定ではない。最初のbaseline helperは緑255を要求して実色254を取り逃したため、そのtimeoutをapp障害やlatency値に含めない。同じPIDで許容差をRGB各2へ修正して再測定した。
+- 最終PIDのcached表示、31回のRight keydown/up後の正しい大画像、所有scratchを赤600×800から青320×240へ置換した後の新しい表示をcaptureで確認。大画像title時のprivate memoryは556.90～557.16MiB（5点）であり、GPU memoryやtransient peakを測ったものではない。初回decode/変換/uploadはこの変更では省かれない。
+- 全3所有windowはclean titleで通常終了し、Save・OS設定変更はない。差替えscratchは元の赤PNGへ戻し、原素材は変更しない。helper/log/captureはignoredの`target/tmp/h1-image-present*`、`h1-image-upload*`、`h1-image-texture*`。最終PID開始UTCは2026-09-06T10:11:52.6111128Z、binary SHA-256は`4BDD4B90BC94AEC6B5C11D14E85C5B6F69C577D8384F95E021B5BB001DCEDCA1`。素材hashは下記と同一。
+
 ### 静止画の再訪decode cache（2026-09-06 18:56 JST）
 
 基準機・通常release・960×576で、6000×6000 PNG（RGBA 144,000,000 bytes）と600×800 PNGを5往復した。同一素材・同じkeydown/upを対象HWNDへ一回ずつ送り、次のfile名とPaused titleを2ms間隔で確認してから300ms空ける。これは画像decode/画面用変換の完了通知までの比較で、Present・DWM/physical displayまでの入力遅延ではない。

@@ -278,3 +278,5 @@ compact paletteのnative日本語IMEを通常releaseで再確認した。通常�
 reading modeの固定8pxの隙間と等分枠による中心ずれを確認し、横は高さ・縦は幅を揃えた連結画像全体の中央fitへ変更した。seek hoverも同じ配置を使い、画像previewだけをpaddingなしcacheへ更新。異なる比率・縦横・反転・失敗page・cache移行を含む230 tests、Clippy、両buildと通常windowの見開き/hover/filmstripが通過。ページ送り・編集や動画decodeは変更しない。e0d1c0d CIも成功。残る日常操作・実環境/配布gateを含むH1は継続中。
 
 6000×6000 PNGへ戻るたび約185msの再decodeを確認し、既存worker内に静止画8件・256 MiBのLRU cacheを追加した。RGBAをArc共有し、file size/更新時刻の失効、cache hitの要求予算、animation/大容量の除外を検証。通常windowの5往復でtitle完了までの中央値は220.651→49.705ms、初回/cached表示の248,004 pixelsは一致し、所有fixture差替えも新画像を表示した。232 tests、Clippy、両buildと3fddd7a CIが通過。初回decode・GPU upload・先読み・実環境/配布を含むH1全体は継続中。
+
+続く再訪計測で反復texture変換/uploadを確認し、同じdecode identityの静止画textureを最大8件・RGBA相当256 MiBで再利用するようにした。graphics復旧開始で破棄し、古いfile内容をpathだけで再利用しない。同条件5往復のtitle完了中央値は49.705→16.500ms。連続31入力とscratch差替え後の正しい画像、upload deltaのないhit、上限/除外/復旧を確認し、233 tests・Clippy・両buildと9be0d14 CIが通過。初回表示・実device/配布などのlaunch gateは残り、H1は継続する。

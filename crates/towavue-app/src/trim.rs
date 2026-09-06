@@ -13,7 +13,22 @@ pub fn timeline(
     let mut chosen = None;
     let mut dragging = false;
     let mut grips = Vec::new();
-    let cancelled = ui.input(|input| !input.focused || input.key_pressed(egui::Key::Escape));
+    let (cancelled, release) = ui.input(|input| {
+        (
+            !input.focused
+                || input.key_pressed(egui::Key::Escape)
+                || input.events.contains(&egui::Event::WindowFocused(false)),
+            input.events.iter().rev().find_map(|event| match event {
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                } => Some(*pos),
+                _ => None,
+            }),
+        )
+    });
     for start in [true, false] {
         let time = if start {
             state.trim_start.unwrap_or(MediaTime::ZERO)
@@ -52,7 +67,7 @@ pub fn timeline(
         {
             if cancelled {
                 ui.ctx().stop_dragging();
-            } else if let Some(pointer) = response.interact_pointer_pos() {
+            } else if let Some(pointer) = release.or(response.interact_pointer_pos()) {
                 dragging = true;
                 grip_x = pointer.x.clamp(rect.left(), rect.right());
                 let ratio = (f64::from(grip_x) - f64::from(rect.left())) / f64::from(rect.width());
@@ -281,7 +296,17 @@ mod tests {
 
     #[test]
     fn trim_grips_commit_once_without_seek_and_cancel_on_escape_focus_or_identity_change() {
-        for (start, cancel) in [(true, 0), (false, 0), (true, 1), (true, 2), (true, 3)] {
+        for (start, cancel) in [
+            (true, 0),
+            (false, 0),
+            (true, 1),
+            (true, 2),
+            (true, 3),
+            (true, 4),
+            (false, 4),
+            (true, 5),
+            (false, 5),
+        ] {
             let context = egui::Context::default();
             let rect = Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(400.0, 100.0));
             let state = EditState::default();
@@ -355,7 +380,27 @@ mod tests {
             if cancel == 3 {
                 frame(vec![], true, identity);
             }
-            let edits = frame(vec![button(target, false)], true, identity);
+            let mut release = vec![
+                button(target, false),
+                egui::Event::PointerMoved(egui::pos2(380.0, y)),
+                egui::Event::PointerGone,
+            ];
+            if cancel == 4 {
+                release.extend([
+                    egui::Event::WindowFocused(false),
+                    egui::Event::WindowFocused(true),
+                ]);
+            }
+            if cancel == 5 {
+                release.push(egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            let edits = frame(release, true, identity);
             let expected = if start {
                 EditOperation::SetTrimStart(MediaTime::from_nanoseconds(5_000_000_000))
             } else {

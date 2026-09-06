@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 11:22 JST - trim grip release coordinates and same-frame cancellation
+
+- Trigger/evidence: extend 7fa28a4's release audit to trim grips. Regression fails on original code with SetTrimStart(9s) instead of release target 5s. Normal release PID 44196 presses the start grip, releases at x=600 then receives hover x=800; UI stores 25.196s, matching hover rather than release. Undo that sole trial edit before normal close.
+- Contract/change: document primary-release coordinates and same-frame cancellation before implementation. Read the release event for either grip and prefer it over interact_pointer_pos; include WindowFocused(false) events even when final input.focused is true. No new gesture state, dependency, unsafe, history, export or playback-pipeline changes.
+- Regression: expand the existing grip test for both endpoints with release→hover→PointerGone, same-frame focus-out/in and Escape+release. Preserve prior separate-frame Escape/focus, identity-change cancellation, no background Seek, one commit and unchanged source EditState. All five trim tests pass.
+- Native: trace-free normal release PID 45524 repeats the start sequence and stores 18.833s. End grip releases at x=700 then hovers x=200 and stores 22.015s, keeping the valid interval. Undo restores only the end to 30.032s; Redo restores 22.015s. Undo both owned edits to a clean title and close normally. No export; injected input at 96 DPI, not physical-input/mixed-DPI proof.
+- Verification/cleanup: format, all-target Clippy, 182 tests (app 88, core 35, runtime 55, integrations 4), debug/release builds pass; three live tests explicitly ignored, not hardware proof. Both owned processes close normally. Source SHA-256 remains F929E6FA18AA010BEBFBB3400539A4F090F7864887F4044E20B4E0C95C5B2F54. Captures/logs stay ignored; README, architecture and roadmap updated. Prior CI 7fa28a4/34006093440 is in progress at last inspection, not inferred failed or restarted.
+- Status/next: h1_active. Continue short-gesture and remaining daily-viewing/environment gates. Actual driver/endpoint recovery and distribution remain incomplete; packaging choice unanswered, no package/publication performed.
+
 ## 2026-09-06 11:15 JST - Seek release coordinates and cancellation ownership
 
 - Trigger/evidence: continue after a5524e6. Baseline normal release PID 37576 already cancels an ordinary timeline drag on Escape without adding a Seek record; do not claim that case was broken. Adding a post-release hover to the existing button/Seek regression does fail original code: current hover replaces the release target.

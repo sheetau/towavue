@@ -90,6 +90,8 @@ timelineは上端をdragして高さを変えられます。高さの変更で�
 
 trimの開始は上側、終了は下側のgripを横dragして調整できます。drag中は候補を表示するだけで、離した時に一回だけ編集し、Undoで戻せます。Escapeやfocus喪失で取り消します。逆転・零長の候補は赤く示し、離しても元の範囲を保持します。I/Oでの指定も引き続き使えます。
 
+trim端点もbuttonを離した位置で確定します。同frameの後続cursor移動は端点へ混ぜず、focus離脱・復帰やEscapeがreleaseと同じframeに届いても編集を取り消します。
+
 gridは小さいwindowでも4列を保ち、長い名前は省略・hoverで全文表示します。clickとkeyはどちらも一回実行して閉じます。
 
 gridのkeyはQWERTYの`1234/qwer/asdf/zxcv`に相当する物理位置です。Shiftで位置は変わらず、Ctrl/Alt/Windows key付きは通常shortcutとして扱います。paletteを開くとgridは閉じます。

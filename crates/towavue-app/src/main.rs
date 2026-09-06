@@ -294,6 +294,18 @@ enum SelectionDrag {
 }
 
 #[derive(Clone, Copy)]
+enum ViewDrag {
+    Selection {
+        mode: SelectionDrag,
+        before: Option<UnitRect>,
+    },
+    Pan {
+        origin: egui::Pos2,
+        before: (f32, f32),
+    },
+}
+
+#[derive(Clone, Copy)]
 struct ImageTransform {
     uv: [UnitPoint; 4],
     size: (f32, f32),
@@ -413,7 +425,7 @@ struct Application<N> {
     playback_error: Option<String>,
     image_view: ImageViewState,
     image_viewport: egui::Vec2,
-    selection_drag: Option<SelectionDrag>,
+    view_drag: Option<ViewDrag>,
     reading_mode: bool,
     reading_settings: ReadingSettings,
     reading_pages: Vec<Result<ImagePresentation, String>>,
@@ -513,7 +525,7 @@ where
             playback_error: None,
             image_view: ImageViewState::default(),
             image_viewport: egui::Vec2::ZERO,
-            selection_drag: None,
+            view_drag: None,
             reading_mode: false,
             reading_settings: ReadingSettings::default(),
             reading_pages: Vec::new(),
@@ -679,7 +691,7 @@ where
         self.waveform_loading = false;
         self.thumbnail_loading = None;
         self.image_view = ImageViewState::default();
-        self.selection_drag = None;
+        self.view_drag = None;
         self.path = Some(path.clone());
         self.media_kind = Some(kind);
         self.pending_time = None;
@@ -1477,12 +1489,11 @@ where
             egui::Sense::click_and_drag(),
         );
 
-        let (shift, zoom, pointer, pointer_delta) = ui.input(|input| {
+        let (shift, zoom, pointer) = ui.input(|input| {
             (
                 input.modifiers.shift,
                 input.zoom_delta(),
                 input.pointer.hover_pos(),
-                input.pointer.delta(),
             )
         });
         if zoom != 1.0
@@ -1502,10 +1513,7 @@ where
                 self.image_view.pan.1 += correction.y;
             }
         }
-        if response.dragged_by(egui::PointerButton::Secondary) {
-            self.image_view.pan.0 += pointer_delta.x;
-            self.image_view.pan.1 += pointer_delta.y;
-        }
+        self.update_pan(&response, pointer);
 
         let displayed = egui::vec2(transform.size.0 * scale, transform.size.1 * scale);
         let center = viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
@@ -1552,6 +1560,68 @@ where
         }
     }
 
+    fn cancel_view_drag(&mut self) -> bool {
+        let Some(drag) = self.view_drag.take() else {
+            return false;
+        };
+        match drag {
+            ViewDrag::Selection { before, .. } => self.image_view.selection = before,
+            ViewDrag::Pan { before, .. } => self.image_view.pan = before,
+        }
+        self.request_redraw();
+        true
+    }
+
+    fn view_drag_allowed(&mut self, context: &egui::Context) -> bool {
+        if !context.input(|input| input.focused)
+            || self.modal_input_blocked()
+            || self.palette_open
+            || self.grid_open
+            || self.filmstrip_open
+            || egui::Popup::is_any_open(context)
+        {
+            self.cancel_view_drag();
+            return false;
+        }
+        true
+    }
+
+    fn update_pan(&mut self, response: &egui::Response, pointer: Option<egui::Pos2>) {
+        if !self.view_drag_allowed(&response.ctx) {
+            return;
+        }
+        let (pressed, released, origin) = response.ctx.input(|input| {
+            (
+                input.pointer.button_pressed(egui::PointerButton::Secondary),
+                input
+                    .pointer
+                    .button_released(egui::PointerButton::Secondary),
+                input.pointer.press_origin(),
+            )
+        });
+        if pressed
+            && self.view_drag.is_none()
+            && response.is_pointer_button_down_on()
+            && let Some(origin) = origin
+        {
+            self.view_drag = Some(ViewDrag::Pan {
+                origin,
+                before: self.image_view.pan,
+            });
+        }
+        if let Some(ViewDrag::Pan { origin, before }) = self.view_drag {
+            if (response.dragged_by(egui::PointerButton::Secondary) || released)
+                && let Some(pointer) = pointer
+            {
+                let delta = pointer - origin;
+                self.image_view.pan = (before.0 + delta.x, before.1 + delta.y);
+            }
+            if released {
+                self.view_drag = None;
+            }
+        }
+    }
+
     fn update_selection(
         &mut self,
         response: &egui::Response,
@@ -1560,6 +1630,9 @@ where
         square: bool,
         pointer: Option<egui::Pos2>,
     ) {
+        if !self.view_drag_allowed(&response.ctx) {
+            return;
+        }
         let (pressed, released, origin) = response.ctx.input(|input| {
             (
                 input.pointer.button_pressed(egui::PointerButton::Primary),
@@ -1568,35 +1641,45 @@ where
             )
         });
         let Some(pointer) = pointer else {
-            if released {
-                self.selection_drag = None;
+            if released && matches!(self.view_drag, Some(ViewDrag::Selection { .. })) {
+                self.view_drag = None;
             }
             return;
         };
         let point = unit_point(pointer, image_rect);
         if pressed
+            && self.view_drag.is_none()
             && response.is_pointer_button_down_on()
             && let Some(origin) = origin.filter(|origin| image_rect.contains(*origin))
         {
-            self.selection_drag = self
+            let mode = self
                 .image_view
                 .selection
                 .and_then(|selection| selection_edge(origin, image_rect, selection))
-                .or(Some(SelectionDrag::New(unit_point(origin, image_rect))));
+                .unwrap_or(SelectionDrag::New(unit_point(origin, image_rect)));
+            self.view_drag = Some(ViewDrag::Selection {
+                mode,
+                before: self.image_view.selection,
+            });
         }
+        let selection_owned = matches!(self.view_drag, Some(ViewDrag::Selection { .. }));
         // A move and release in one frame can bypass egui's drag-start notification.
-        let dragging = response.dragged_by(egui::PointerButton::Primary)
-            || (released
-                && self.selection_drag.is_some()
-                && !response.clicked_by(egui::PointerButton::Primary));
+        let dragging = selection_owned
+            && (response.dragged_by(egui::PointerButton::Primary)
+                || (released && !response.clicked_by(egui::PointerButton::Primary)));
         if dragging {
-            match self.selection_drag {
-                Some(SelectionDrag::New(start)) => {
+            match self.view_drag {
+                Some(ViewDrag::Selection {
+                    mode: SelectionDrag::New(start),
+                    ..
+                }) => {
                     self.image_view.selection =
                         Some(UnitRect::from_drag(start, point, image_size, square));
                 }
-                Some(edge) => self.resize_selection(edge, point, square, image_size),
-                None => {}
+                Some(ViewDrag::Selection { mode, .. }) => {
+                    self.resize_selection(mode, point, square, image_size)
+                }
+                _ => {}
             }
         }
         if dragging && released {
@@ -1605,10 +1688,11 @@ where
                     .map(|crop| crop.unit_rect(image_size))
             });
         }
-        if released {
-            self.selection_drag = None;
+        if released && matches!(self.view_drag, Some(ViewDrag::Selection { .. })) {
+            self.view_drag = None;
         }
         if self.media_kind == Some(MediaKind::Image)
+            && selection_owned
             && response.clicked_by(egui::PointerButton::Primary)
             && self
                 .image_view
@@ -1983,7 +2067,7 @@ where
             && !self.palette_open
             && !self.grid_open
             && !self.filmstrip_open
-            && self.selection_drag.is_none();
+            && self.view_drag.is_none();
         self.fullscreen_controls_visible = eligible
             && context.input(|input| {
                 let held = input.pointer.any_down() || input.pointer.any_released();
@@ -2427,6 +2511,7 @@ where
 
     fn dispatch(&mut self, command: CommandId) {
         self.cancel_shortcut_prefix();
+        self.cancel_view_drag();
         if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             return;
         }
@@ -3061,6 +3146,7 @@ where
 
     fn request_guarded(&mut self, action: GuardedAction) {
         self.cancel_shortcut_prefix();
+        self.cancel_view_drag();
         if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             self.set_status("Close the file dialog before leaving.".into());
             return;
@@ -3821,6 +3907,8 @@ where
             self.grid_open = false;
             self.request_redraw();
             true
+        } else if self.cancel_view_drag() {
+            true
         } else if self.fullscreen {
             self.set_fullscreen(false);
             true
@@ -4127,7 +4215,7 @@ where
             && self.image_error.is_none()
             && !self.reading_pages.iter().any(Result::is_err)
             && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted)
-            && self.selection_drag.is_none()
+            && self.view_drag.is_none()
             && !self.filmstrip_open
             && !self.palette_open
             && !self.grid_open
@@ -4425,6 +4513,9 @@ where
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
         }
+        if matches!(event, WindowEvent::Focused(false)) {
+            self.cancel_view_drag();
+        }
         if matches!(
             event,
             WindowEvent::Focused(false)
@@ -4451,7 +4542,7 @@ where
             }
             self.viewing_cursor.activity();
         }
-        if self.fullscreen
+        if (self.fullscreen || self.view_drag.is_some())
             && !self.palette_open
             && !self.modal_input_blocked()
             && let WindowEvent::KeyboardInput { event, .. } = &event
@@ -4772,7 +4863,12 @@ mod tests {
                 7 => app.pending_dialog = Some(DialogIntent::OpenFile),
                 8 => app.pending_guard = Some(GuardedAction::Exit),
                 9 => app.export_error = Some("fixture failure".into()),
-                10 => app.selection_drag = Some(SelectionDrag::Left),
+                10 => {
+                    app.view_drag = Some(ViewDrag::Selection {
+                        mode: SelectionDrag::Left,
+                        before: None,
+                    })
+                }
                 11 => app.state = PlaybackState::Loading,
                 12 => app.fullscreen_controls_visible = true,
                 _ => app.reading_pages.push(Err("fixture failure".into())),
@@ -4789,7 +4885,7 @@ mod tests {
             app.pending_dialog = None;
             app.pending_guard = None;
             app.export_error = None;
-            app.selection_drag = None;
+            app.view_drag = None;
             app.reading_pages.clear();
             assert!(app.cursor_can_hide(true));
         }
@@ -5737,7 +5833,10 @@ mod tests {
             app.grid_open = blocked == 1;
             app.filmstrip_open = blocked == 2;
             app.pending_guard = (blocked == 3).then_some(GuardedAction::Exit);
-            app.selection_drag = (blocked == 4).then_some(SelectionDrag::Left);
+            app.view_drag = (blocked == 4).then_some(ViewDrag::Selection {
+                mode: SelectionDrag::Left,
+                before: None,
+            });
             frame(
                 &mut app,
                 vec![egui::Event::PointerMoved(edge)],
@@ -7034,6 +7133,185 @@ mod tests {
     }
 
     #[test]
+    fn pan_commits_the_release_position_and_cancel_requires_a_new_press() {
+        let Some(_root) = isolated_test_root(
+            "tests::pan_commits_the_release_position_and_cancel_requires_a_new_press",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0));
+        let button = |pressed, pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for interruption in 0..5 {
+            let context = egui::Context::default();
+            app.image_view.pan = (10.0, 20.0);
+            let frame = |app: &mut Application<_>, events, focused| {
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        events,
+                        focused,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let response =
+                            ui.interact(screen, "cancel-pan".into(), egui::Sense::click_and_drag());
+                        let pointer = ui.input(|input| input.pointer.hover_pos());
+                        app.update_pan(&response, pointer);
+                    },
+                );
+            };
+            let start = egui::pos2(100.0, 100.0);
+            frame(&mut app, vec![egui::Event::PointerMoved(start)], true);
+            frame(&mut app, vec![button(true, start)], true);
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(egui::pos2(130.0, 140.0))],
+                true,
+            );
+            assert_eq!(app.image_view.pan, (40.0, 60.0));
+            match interruption {
+                0 | 1 => {}
+                2 => app.pending_guard = Some(GuardedAction::Exit),
+                3 => {
+                    app.fullscreen = true;
+                    assert!(app.dismiss_overlay_or_fullscreen());
+                    assert!(app.fullscreen);
+                }
+                _ => app.dispatch(CommandId::ToggleFullscreen),
+            }
+            frame(&mut app, vec![], interruption != 1);
+            app.pending_guard = None;
+            app.fullscreen = false;
+            let end = egui::pos2(180.0, 190.0);
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(end), button(false, end)],
+                true,
+            );
+            assert_eq!(
+                app.image_view.pan,
+                if interruption == 0 {
+                    (90.0, 110.0)
+                } else {
+                    (10.0, 20.0)
+                }
+            );
+            assert!(app.view_drag.is_none());
+            let before = app.image_view.pan;
+            frame(&mut app, vec![button(true, end)], true);
+            let next = end + egui::vec2(50.0, 30.0);
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(next), button(false, next)],
+                true,
+            );
+            assert_eq!(app.image_view.pan, (before.0 + 50.0, before.1 + 30.0));
+            assert!(app.view_drag.is_none());
+        }
+    }
+
+    #[test]
+    fn selection_drag_cancels_without_resuming_after_focus_or_overlay_interruptions() {
+        let Some(_root) = isolated_test_root(
+            "tests::selection_drag_cancels_without_resuming_after_focus_or_overlay_interruptions",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.media_kind = Some(MediaKind::Image);
+        let original = Some(UnitRect {
+            min: UnitPoint { x: 0.2, y: 0.2 },
+            max: UnitPoint { x: 0.8, y: 0.8 },
+        });
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0));
+        let button = |pressed, x| egui::Event::PointerButton {
+            pos: egui::pos2(x, 250.0),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for interruption in 0..9 {
+            let context = egui::Context::default();
+            app.image_view.selection = original;
+            let frame = |app: &mut Application<_>, events, focused| {
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        events,
+                        focused,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let response = ui.interact(
+                            screen,
+                            "cancel-selection".into(),
+                            egui::Sense::click_and_drag(),
+                        );
+                        let pointer = ui.input(|input| input.pointer.hover_pos());
+                        app.update_selection(&response, screen, (500, 500), false, pointer);
+                    },
+                );
+            };
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(egui::pos2(100.0, 250.0))],
+                true,
+            );
+            frame(&mut app, vec![button(true, 100.0)], true);
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(egui::pos2(150.0, 250.0))],
+                true,
+            );
+            assert_ne!(app.image_view.selection, original);
+            match interruption {
+                0 => {}
+                1 => app.pending_guard = Some(GuardedAction::Exit),
+                2 => app.palette_open = true,
+                3 => app.grid_open = true,
+                4 => app.filmstrip_open = true,
+                5 => app.pending_dialog = Some(DialogIntent::OpenFile),
+                6 => {
+                    app.fullscreen = true;
+                    assert!(app.dismiss_overlay_or_fullscreen());
+                    assert!(app.fullscreen);
+                }
+                7 => app.dispatch(CommandId::ToggleFullscreen),
+                _ => egui::Popup::open_id(&context, "interrupt-drag".into()),
+            }
+            frame(&mut app, vec![], interruption != 0);
+            assert_eq!(
+                app.image_view.selection, original,
+                "interruption {interruption}"
+            );
+            app.pending_guard = None;
+            app.pending_dialog = None;
+            app.palette_open = false;
+            app.grid_open = false;
+            app.filmstrip_open = false;
+            app.fullscreen = false;
+            egui::Popup::close_id(&context, "interrupt-drag".into());
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(egui::pos2(300.0, 250.0))],
+                true,
+            );
+            frame(&mut app, vec![button(false, 300.0)], true);
+            assert_eq!(
+                app.image_view.selection, original,
+                "release after interruption {interruption}"
+            );
+            assert!(!app.image_view.crop_preview);
+        }
+    }
+
+    #[test]
     fn selection_drag_uses_press_and_release_positions_with_sparse_events() {
         let Some(_root) = isolated_test_root(
             "tests::selection_drag_uses_press_and_release_positions_with_sparse_events",
@@ -7080,7 +7358,7 @@ mod tests {
                 ] {
                     let context = egui::Context::default();
                     app.media_kind = Some(kind);
-                    app.selection_drag = None;
+                    app.view_drag = None;
                     app.image_view.selection = initial.map(|crop| crop.unit_rect((400, 400)));
                     app.image_view.crop_preview = false;
                     let button = |pressed, pos| egui::Event::PointerButton {
@@ -7122,7 +7400,7 @@ mod tests {
                         actual, expected,
                         "{kind:?}, coalesced={coalesced_release}, {start:?} -> {end:?}"
                     );
-                    assert!(app.selection_drag.is_none());
+                    assert!(app.view_drag.is_none());
                     assert_eq!(
                         app.image_view.crop_preview,
                         kind == MediaKind::Image && start == end

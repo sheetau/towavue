@@ -92,6 +92,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | Cursor基点zoom、pan、actual、fit | 実装済み。H1でCtrl+wheelがeguiのscroll→zoom変換後に無反応となる抜けを修正。実wheel eventの倍率・frame間隔・cursor基点とoverlay遮断を回帰testし、通常releaseで拡大/縮小を確認 |
 | Selection作成、正方形、辺resize、ratio保持 | 基本実装済み。H1で押下位置を保持し、release位置の反映漏れを修正。画像/動画の疎なevent列・逆方向・辺hit・範囲外開始・click previewを回帰test。移動直後のrelease注入がclick扱いになった例は、Windows button座標の先行反映で解消し通常releaseで確認。物理入力・mixed-DPIの全matrixは未完了 |
 | Selectionの移動 | 未実装。内部clickはcrop previewになる |
+| 選択drag・panの取消 | H1で開始前の範囲/位置を保持し、Escape・focus喪失・modal/overlay・別commandで復元。取消後のmove/releaseで再開しない。回帰testと通常releaseのEscape、focus往復、dirty guard保持を確認 |
 | 指定aspect ratio | 未実装 |
 | Crop、90度rotate、flip、undo/redo、export | 実装済み |
 | 自由回転 | 未実装 |

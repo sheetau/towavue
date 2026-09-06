@@ -96,6 +96,8 @@ gridのkeyはQWERTYの`1234/qwer/asdf/zxcv`に相当する物理位置です。S
 
 Windowsでreleaseが最後のcursor移動通知より先に届く場合も、button messageの座標を先に反映します。移動直後のreleaseが古い位置でclick扱いとなる例を修正し、通常releaseで高速の辺resizeと通常clickを確認しました。
 
+選択drag・panの途中でEscapeを押すと、開始前の範囲・位置へ戻ります。focus喪失、保存確認やoverlay、別commandでも進行中の操作を取り消し、buttonを押し直すまで再開しません。fullscreen中も最初のEscapeはdragの取消だけを行います。編集履歴やsource fileは変更しません。
+
 画像の100%は画面の実pixel基準です。zoomは現在の表示領域とcrop・回転後の寸法を使うため、小さいwindowやcrop previewからの一段の拡大も現在の見た目を基準にします。
 
 Ctrl+wheelはcursor位置を基点に拡大・縮小します。wheelがzoom倍率へ変換された後の入力を使うよう修正し、実windowでの動作を確認しました。palette・grid・保存確認中やmenu上のwheelでは背景画像を拡大しません。

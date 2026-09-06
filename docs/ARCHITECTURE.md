@@ -208,6 +208,8 @@ Explorerからのfile dropはwinitのowned path eventで受け、既存のextern
 
 ### H1 compact window shell
 
+tab操作でactive identityが変わらない場合はmediaを再loadしない。現在tabの再clickと単一tabの巡回はno-opとし、非active tabのcloseでは対象のtab/history/export pathだけを削除してbarを再描画する。現在の再生位置・pause、画像zoom/pan/selection、読み込み世代を維持する。active tabを閉じた際の隣接tabへの移動、最後のtabのWelcome、既存のdirty/export guardは変更しない。
+
 日本語filename・入力の欠字を避けるため、runtimeはWindows Fonts内のYu Gothic Medium、Meiryo、MS Gothicの順で読める一つのfont fileを返す。appは起動時にegui既定fontの後ろへ補助fontとして登録し、英数字の見た目を維持する。fontはOSから読み、同梱・download・OS設定変更は行わない。日本語fontがない環境はdiagnosticで明示し、既定fontで継続する。これは全言語fallbackや配布fontの選定ではない。
 
 上部は32 logical pxの単一title/tab bar、下部は30 logical pxのstatus barとし、暗いneutral色でmedia領域を優先する。appはdecorationsなしのwinit windowにlogo menu・tab・window controlsを描画し、移動・resize・minimize・maximizeはwinitのWindows操作へ委ねる。window closeは既存のdirty/export guardを必ず通す。tab幅は等分、最大160 px・最小72 pxとし、収まらない場合は横scrollする。path/名前は省略表示と全文tooltipを使い、右側の状態表示へ専用領域を確保する。menuの方向gestureとtab reorderはこの変更には含めない。

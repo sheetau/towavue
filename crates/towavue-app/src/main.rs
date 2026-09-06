@@ -3138,6 +3138,9 @@ where
     }
 
     fn activate_tab(&mut self, id: TabId) {
+        if self.tabs.active().is_some_and(|tab| tab.id == id) {
+            return;
+        }
         if self.tabs.activate(id)
             && let Some((path, kind)) = self.tabs.active().map(|tab| {
                 (
@@ -3260,11 +3263,16 @@ where
     }
 
     fn close_tab_unchecked(&mut self, id: TabId) {
+        let was_active = self.tabs.active().is_some_and(|tab| tab.id == id);
         if self.tabs.close(id).is_none() {
             return;
         }
         self.edits.remove(&id);
         self.export_paths.remove(&id);
+        if !was_active {
+            self.request_redraw();
+            return;
+        }
         if let Some((path, kind)) = self.tabs.active().map(|tab| {
             (
                 tab.target.current_path().to_owned(),
@@ -7981,6 +7989,76 @@ mod tests {
         let crop = PixelCrop::from_selection(selection, (16_384, 16_384), MediaKind::Image)
             .expect("pixel crop");
         assert_eq!((crop.width, crop.height), (1, 1));
+    }
+
+    #[test]
+    fn unchanged_active_tab_keeps_playback_view_and_pending_load_state() {
+        let Some(root) = isolated_test_root(
+            "tests::unchanged_active_tab_keeps_playback_view_and_pending_load_state",
+        ) else {
+            return;
+        };
+        for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
+            let mut app = Application::new(None, |_| {}).expect("headless app");
+            let background = app
+                .tabs
+                .open_new(root.join("background.png"), MediaKind::Image);
+            app.edits.insert(background, EditHistory::default());
+            app.export_paths
+                .insert(background, root.join("background-export.png"));
+            let path = root.join(match kind {
+                MediaKind::Image => "active.png",
+                MediaKind::Video => "active.mp4",
+                MediaKind::Audio => "active.wav",
+            });
+            let active = app.tabs.open_new(path.clone(), kind);
+            app.path = Some(path.clone());
+            app.media_kind = Some(kind);
+            app.state = PlaybackState::Paused;
+            let mut clock = PlaybackClock::new(media_time(Duration::from_secs(5)), 1.0);
+            clock.set_paused(true);
+            app.clock = Some(clock);
+            app.media_duration = Some(Duration::from_secs(30));
+            app.timeline_open = true;
+            app.image_generation = 17;
+            app.thumbnail_generation = 23;
+            app.image_view.zoom = towavue_core::ZoomMode::Custom(2.5);
+            app.image_view.pan = (20.0, -10.0);
+            app.image_view.selection = Some(UnitRect::FULL);
+            app.edits.entry(active).or_default().push(
+                if kind == MediaKind::Audio {
+                    EditOperation::SetVolume(0.4)
+                } else {
+                    EditOperation::RotateClockwise
+                },
+                kind,
+            );
+            let history = app.edits[&active].clone();
+            let view = app.image_view;
+            let position = app.current_position();
+            for operation in 0..3 {
+                match operation {
+                    0 => app.close_tab_unchecked(background),
+                    1 => app.activate_tab(active),
+                    _ => app.cycle_tab(true),
+                }
+                assert_eq!(app.tabs.active().map(|tab| tab.id), Some(active));
+                assert_eq!(app.path.as_ref(), Some(&path));
+                assert_eq!(
+                    app.state,
+                    PlaybackState::Paused,
+                    "{kind:?}, operation {operation}"
+                );
+                assert_eq!(app.current_position(), position);
+                assert_eq!(app.media_duration, Some(Duration::from_secs(30)));
+                assert!(app.timeline_open);
+                assert_eq!((app.image_generation, app.thumbnail_generation), (17, 23));
+                assert_eq!(app.image_view, view);
+                assert_eq!(app.edits[&active], history);
+                assert!(!app.edits.contains_key(&background));
+                assert!(!app.export_paths.contains_key(&background));
+            }
+        }
     }
 
     #[test]

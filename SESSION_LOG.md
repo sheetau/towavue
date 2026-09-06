@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 12:40 JST - keep media when the active tab identity is unchanged
+
+- Trigger/evidence: previous turn pushed 0a020ee. While reviewing the Welcome transition, find that close_tab_unchecked always reloads the surviving active media, even when closing an inactive tab. Baseline normal release PID 31712 has PNG/video tabs and paused video at burned-in 1.533s; closing the PNG restarts video Playing near 0.667s with a second D3d11va selection log. Initial 800 ms startup observation had no window yet; re-inspect the same live PID and continue, no restart.
+- Contract/change: document no reload when active identity is unchanged. Add early return for activating the current tab (also single-tab cycling); closing an inactive tab still removes its history/export path and redraws the tab bar but leaves media alone. Active close/last-tab Welcome and dirty/export guards remain unchanged. Eight production lines in the app; no runtime/core, worker, dependency or configuration change. Welcome's transient previous-status text is not changed in this checkpoint.
+- Regression: new headless test fails original code with Image/Loading instead of Paused. For image/video/audio, close background, activate current, and cycle the sole tab; assert current path/id, frozen position, playback state, duration, timeline, image/thumbnail generations, zoom/pan/selection and edit history unchanged, and closed-tab maps removed. Compare the captured paused clock value rather than assuming zero nanoseconds passed before pause.
+- Native verification: normal release PID 13040 repeats the two-tab setup, clicks the current video tab and closes background PNG. It remains Paused, all 4,200 sampled media pixels match before/after, and only one D3d11va selection is logged. Resume and click the sole active tab: Playing continues without another decode start. Ctrl+W returns to Welcome. Both owned trial windows close normally; no edits/export, source or OS changes; captures/logs ignored.
+- Checks/status: format, Clippy, 190 tests (app 91/core 35/runtime 60/integrations 4), debug/release builds and diff checks pass; three live tests explicitly ignored. Prior CI 34009267923 is still running, not claimed passed. h1_active; next check CI and continue daily-flow/launch evidence. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 12:31 JST - cancel playback preroll before its target
 
 - Trigger/evidence: previous turn pushed 04be7aa; CI 34008772953 succeeded. Generate an ignored 30s, 1080p60 H.264 TS with one 1,800-frame GOP. Normal release baseline PID 46672 pauses, seeks near the end and closes immediately afterward; normal close takes 897 ms. Output filtering did not observe consumer loss while dropping frames before the seek target.

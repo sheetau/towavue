@@ -4,6 +4,13 @@
 
 ## 1. 最初に試す
 
+### Frame内のwheel音量配送（2026-09-06）
+
+- 旧コードのdraw_ui回帰は「一覧上でwheel→音量表示へ移動」で音量変更を発行して失敗する。逆順、一覧と音量の両方でwheelを含む列も、各eventの位置へ割り当てる修正後に通過する。
+- 前frame末尾を次frame先頭のwheel位置に使い、PointerGoneで失効する。動画面/status相当の複数targetを一回合算し、重複領域を二重計上しない。eguiのdiscard後のpassではwheel eventが空になることを実測し、最初のpassのactionを保持する既存render経路を維持した。
+- 通常release PID 42956へ一覧の下2単位と音量表示の下1単位を続けてqueueし、音量が対象分だけの90%となることを確認。Undo一回で100%へ戻り、paused 01/30を保持して通常終了した。native入力が何frameに分かれたかは測定していないため、同一frame配送の厳密な証拠はheadless回帰とする。source保存・OS変更なし。
+- 一覧のsmooth scroll自体は別経路で、複数領域を跨ぐframeでの配送は引き続き監査する。
+
 ### Wheel直前のpointer移動（2026-09-06）
 
 - 旧通常release PID 2764でforegroundを確認し、paused音声の一覧から音量表示へ移動直後にwheelを送る。一覧だけがscrollし、volumeは100%のままになることを再現した。単なるforeground不成立ではない。

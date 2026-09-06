@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-06 15:36 JST - target wheel volume by event-time position
+
+- Trigger/evidence: previous turn pushed 4ff9e00 (progress); its CI and 664d7ce CI succeed. Exact draw_ui event sequence wheel-on-list then move-to-volume incorrectly emits a volume change because the old helper uses final hover for all events.
+- Contract/change: app-only wheel_input tracks each frame's initial/final pointer and event-time moves/gone. Collect enabled status/video responses, test event positions against their rectangles/frontmost layers and sum once into the existing tab-checked volume edit. Preserve first-pass origin, reject frames with button press/focus loss, keep existing modifiers/overlays/limits. No runtime/core/dependency/unsafe changes.
+- Verification: old draw_ui regression fails. Fixed 240/480/960 tests cover both directions and mixed targets. New regression covers prior-frame starting position, gone, two/overlapping regions and discard passes; egui consumes wheel events after pass 0, existing render action retention remains necessary. Format, Clippy, 218 tests (app 109/core 35/runtime 70/integrations 4), debug/release builds and diff check pass; three preexisting live tests explicitly ignored.
+- Native: normal release PID 42956 receives queued list -2 and volume -1 inputs and displays 90%, then one Undo restores 100%; paused 01/30 is preserved. Native frame grouping was not measured, so exact same-frame proof is the headless regression. Owned window closes normally, source not saved, ignored logs/captures only.
+- Status/next: h1_active. Audit ScrollArea smooth-scroll routing across multiple regions in one frame; that separate path is unchanged. Physical input/DPI/device-change and distribution gates remain incomplete; packaging unanswered, no publication.
+
 ## 2026-09-06 15:26 JST - synchronize queued wheel coordinates
 
 - Trigger/evidence: previous turn pushed 664d7ce (progress); its CI remains in progress. Baseline normal release PID 2764 confirms foreground, then immediate playlist-to-volume movement/wheel scrolls the old list instead of adjusting volume. Combined PointerMoved/MouseWheel app test passes, isolating the missing native coordinates.

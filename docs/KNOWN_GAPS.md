@@ -6,6 +6,8 @@
 
 ### 操作とpreviewの不一致
 
+- 同じframeで一覧と音量表示を跨いだwheelが、最後のhoverへまとめて音量変更される問題を修正した。各event時点の位置とlayerで選別し、動画面/statusの対象分だけを一回合算する。前frameの位置、離脱、複数layout passも回帰確認する。通常ScrollAreaのsmooth scroll配送は別経路のため、跨ぐ入力での一覧側の挙動は次の監査対象。
+
 - 動画面と動画/音声status barの音量表示にwheel音量を追加した。raw縦入力だけを使い、playlist/timelineのscroll・修飾key・drag・modal/menu/overlayとは分離する。移動直後のwheelが古い位置へ届く問題は、固定winitがwheel座標を更新しないことを回帰で再現し、runtimeで各wheelのscreen座標を先行反映して修正した。通常windowの一覧→音量→一覧の即時移動も確認したが、物理device/DPIの全入力matrixではない。
 
 - Mキーの消音解除が必ず100%へ戻る問題を修正した。active tabの適用済み履歴から直前の非zero音量を復元し、未適用redoや別tabの値は使わない。音量をlive/export共通の編集として扱う設計は維持する。

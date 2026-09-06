@@ -15,6 +15,7 @@ mod shortcuts;
 mod timeline_input;
 mod trim;
 mod welcome;
+mod wheel_input;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -1268,11 +1269,13 @@ where
         self.image_seek_preview_active = false;
         self.video_rect = None;
         let context = root.ctx().clone();
+        wheel_input::begin_frame(&context);
+        let mut volume_targets = Vec::new();
         let status_rect = if self.fullscreen {
             None
         } else {
             self.draw_top_bar(root, actions);
-            let rect = self.draw_status_bar(root, actions);
+            let rect = self.draw_status_bar(root, actions, &mut volume_targets);
             self.draw_timeline(root, actions);
             Some(rect)
         };
@@ -1305,13 +1308,14 @@ where
                             });
                     }
                 } else if self.media_kind == Some(MediaKind::Video) {
-                    self.draw_video_edit_overlay(ui, actions);
+                    self.draw_video_edit_overlay(ui, &mut volume_targets);
                 }
             });
         if let Some(rect) = status_rect {
             self.draw_seek_bar(&context, rect, None, actions);
         }
-        self.draw_fullscreen_controls(&context, actions);
+        self.draw_fullscreen_controls(&context, actions, &mut volume_targets);
+        self.volume_wheel(&context, &volume_targets, actions);
         if self.fullscreen
             && let Some((message, started)) = &self.status_message
             && started.elapsed() < STATUS_MESSAGE_DURATION
@@ -1551,7 +1555,11 @@ where
         }
     }
 
-    fn draw_video_edit_overlay(&mut self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+    fn draw_video_edit_overlay(
+        &mut self,
+        ui: &mut egui::Ui,
+        volume_targets: &mut Vec<egui::Response>,
+    ) {
         let Some((width, height, pixel_aspect)) = self
             .session
             .as_ref()
@@ -1571,52 +1579,46 @@ where
             egui::Sense::click_and_drag(),
         );
         let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
-        self.volume_wheel(&response, actions);
+        volume_targets.push(response.clone());
         self.update_selection(&response, viewport, size, shift, pointer);
         if let Some(selection) = self.image_view.selection {
             paint_selection(&ui.painter_at(viewport), viewport, selection);
         }
     }
 
-    fn volume_wheel(&self, response: &egui::Response, actions: &mut Vec<UiAction>) {
+    fn volume_wheel(
+        &self,
+        context: &egui::Context,
+        targets: &[egui::Response],
+        actions: &mut Vec<UiAction>,
+    ) {
         let Some(tab) = self.tabs.active() else {
             return;
         };
-        if !response.hovered()
-            || !matches!(self.media_kind, Some(MediaKind::Video | MediaKind::Audio))
+        if !matches!(self.media_kind, Some(MediaKind::Video | MediaKind::Audio))
             || self.modal_input_blocked()
             || self.palette_open
             || self.grid_open
             || self.filmstrip_open
-            || egui::Popup::is_any_open(&response.ctx)
+            || egui::Popup::is_any_open(context)
         {
             return;
         }
-        let delta = response.ctx.input(|input| {
-            if !input.focused || input.pointer.any_down() || !input.modifiers.is_none() {
-                return 0.0;
-            }
-            input
-                .events
-                .iter()
-                .filter_map(|event| match event {
-                    egui::Event::MouseWheel {
-                        unit,
-                        delta,
-                        modifiers,
-                        ..
-                    } if modifiers.is_none() => Some(
-                        delta.y
-                            / if *unit == egui::MouseWheelUnit::Point {
-                                50.0
-                            } else {
-                                1.0
-                            },
-                    ),
-                    _ => None,
+        if context.input(|input| {
+            !input.focused
+                || input.pointer.any_down()
+                || !input.modifiers.is_none()
+                || input.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::PointerButton { pressed: true, .. }
+                            | egui::Event::WindowFocused(false)
+                    )
                 })
-                .sum::<f32>()
-        });
+        }) {
+            return;
+        }
+        let delta = wheel_input::volume_delta(context, targets);
         let before = self.edit_state().volume;
         let volume = (before + delta * 0.1).clamp(0.0, 2.0);
         if volume != before {
@@ -2124,7 +2126,12 @@ where
             });
     }
 
-    fn draw_fullscreen_controls(&mut self, context: &egui::Context, actions: &mut Vec<UiAction>) {
+    fn draw_fullscreen_controls(
+        &mut self,
+        context: &egui::Context,
+        actions: &mut Vec<UiAction>,
+        volume_targets: &mut Vec<egui::Response>,
+    ) {
         let screen = context.content_rect();
         let eligible = self.fullscreen
             && !self.modal_input_blocked()
@@ -2156,12 +2163,17 @@ where
             .show(context, |ui| {
                 ui.set_width(rect.width());
                 ui.set_height(rect.height());
-                let status = self.draw_status_bar(ui, actions);
+                let status = self.draw_status_bar(ui, actions, volume_targets);
                 self.draw_seek_bar(context, status, Some(ui.layer_id()), actions);
             });
     }
 
-    fn draw_status_bar(&self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) -> egui::Rect {
+    fn draw_status_bar(
+        &self,
+        root: &mut egui::Ui,
+        actions: &mut Vec<UiAction>,
+        volume_targets: &mut Vec<egui::Response>,
+    ) -> egui::Rect {
         egui::Panel::bottom("status")
             .exact_size(30.0)
             .frame(chrome::bar())
@@ -2215,7 +2227,7 @@ where
                                 ),
                             )
                             .on_hover_text("Volume · wheel to adjust (playback and export)");
-                        self.volume_wheel(&volume, actions);
+                        volume_targets.push(volume);
                     } else if self.media_kind == Some(MediaKind::Image) {
                         if chrome::button(ui, "◫", "Reading mode (B)").clicked() {
                             actions.push(UiAction::Command(CommandId::ToggleReadingMode));
@@ -5981,7 +5993,7 @@ mod tests {
         for (scale, label) in [(0.0025, "0.25%"), (0.01355, "1.36%"), (0.1, "10%")] {
             app.image_view.zoom = ZoomMode::Custom(scale);
             let output = context.run_ui(Default::default(), |ui| {
-                app.draw_status_bar(ui, &mut Vec::new());
+                app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
             });
             assert!(output.shapes.iter().any(|shape| {
                 matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains(label))
@@ -6387,6 +6399,50 @@ mod tests {
                 })
                 .expect("dedicated volume label");
             assert!(label.left() >= 0.0 && label.right() <= width);
+            let outside = egui::pos2(100.0, 100.0);
+            let wheel = egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, -1.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            };
+            for (events, expected) in [
+                (
+                    vec![
+                        egui::Event::PointerMoved(outside),
+                        wheel.clone(),
+                        egui::Event::PointerMoved(label.center()),
+                    ],
+                    false,
+                ),
+                (
+                    vec![
+                        egui::Event::PointerMoved(label.center()),
+                        wheel.clone(),
+                        egui::Event::PointerMoved(outside),
+                    ],
+                    true,
+                ),
+                (
+                    vec![
+                        egui::Event::PointerMoved(outside),
+                        wheel.clone(),
+                        egui::Event::PointerMoved(label.center()),
+                        wheel.clone(),
+                    ],
+                    true,
+                ),
+            ] {
+                let actions = frame(events).1;
+                assert!(
+                    if expected {
+                        actions == [UiAction::Volume(tab, 0.9)]
+                    } else {
+                        actions.is_empty()
+                    },
+                    "each wheel belongs to its event-time position"
+                );
+            }
             for (pos, expected) in [(label.center(), true), (egui::pos2(100.0, 100.0), false)] {
                 let actions = frame(vec![
                     egui::Event::PointerMoved(pos),
@@ -6451,7 +6507,8 @@ mod tests {
                         egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(200.0, 160.0)),
                         egui::Sense::hover(),
                     );
-                    app.volume_wheel(&response, &mut actions);
+                    wheel_input::begin_frame(ui.ctx());
+                    app.volume_wheel(ui.ctx(), &[response], &mut actions);
                 },
             );
             actions

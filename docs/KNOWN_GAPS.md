@@ -209,6 +209,23 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 
 ## 6. Launch判断に残る確認（2026-09-06 20:04 JST再監査）
 
+### 2026-09-07 22:04の再開確認
+
+- 6時間以上後の明示的再開に際し、古い失敗annotationだけでは現在の実行可否を証明できないため、既存workflowを一度だけ再試行した。`196c116`のCI 34091346834はattempt 2/job 101750929926で全step成功（22:03:52 JST完了）。CI起動障害は現在のblockerから外す。課金設定・spending limit・workflowは変更しておらず、アカウント側で何が変わったかは推測しない。
+- ローカルのformat・Clippy・268 testsも再通過し、release SHA256は下記の`339046…7FCA2`と一致。製品code/依存に変更はなく、15:35/15:38にローカル保持した監査記録を確認済みcheckpointへまとめる。既存live ignore 3件は合格に数えない。
+- 目標は再開したがlaunch完了ではない。実音声出力切替の許可、実環境/owner受入と配布方針は未確認のまま。配布方式は方針確認の質問のみを出し、package作成・公開・課金/OS操作は開始していない。以下の15:35記録は当時の状態であり、最新HEADのCI失敗を現在も継続中とは扱わない。
+
+### 2026-09-07 15:35の引継ぎ状態
+
+- 現在HEADは`196c116`。製品code/依存/toolchainは`a5639e5`以後差分なしで、release SHA256は`339046281C097BE5BA05D91BDA9D73F8501BD433A0A6AA96EF4C77E6DD87FCA2`。core/appのunsafe禁止とcoreの無依存を再確認し、concepts/vendor/target/generated mediaはtrackedでない。
+- ローカルの直近format・Clippy・268 testsは通過。既存live ignore 3件は合格ではない。`80108c4`のCI 34090843746は全step成功。一方、最新`196c116`の[CI 34091346834](https://github.com/sheetau/towavue/actions/runs/34091346834)はrunner未割当・stepなしで失敗し、check annotationは支払い失敗またはspending limitによる未開始を示す。コードのtest failureではないが、最新HEADのCI通過とも扱わない。ownerによるアカウント確認が必要で、課金設定変更、上限引上げ、再run、追加pushを暗黙に行わない。
+- 同じreleaseで代表PNG/chirp/動画の保存・再open、4条件計400回Seek、30分4K60のdrop/drift gate、同倍率の実2画面での画像・動画・reading/fullscreen/最大化復帰を確認した。DEVELOPMENTの14:28～15:31記録が証拠の範囲であり、全codec・全環境・物理遅延の保証ではない。
+- 未解決の技術的観測: 約15分の一時メモリ増加の原因、粗い標本に現れない短いpeak、進行中native I/Oの待ちなど。位置Seekの非再現を「修正済み」や「リークなし」としない。
+- 未確認の実環境gate: 物理keyboard/pointer・他IME・screen readerの全体操作、実mixed-DPI、Windows 10 22H2、実endpoint切替/抜き差し/driver reset。現在2画面はともに100%、OSはWindows 11 build 26200。既定音声出力を一時変更する許可は未受領で、clipboard許可や自動goal継続で代用しない。
+- owner判断を要するgate: 草案に対する外観/操作の受入とreadingの区切り方、portable/installerの選択、FFmpeg同梱・license条件、clean-machine配布検証。version 0.0.0と開発FFmpeg配置を完成packageと呼ばず、H1から配布作業へ無断で範囲を広げない。recent/sessionや高度な編集など、後回しの追加機能をこれらの代替にしない。
+
+全体のlaunch完了は未証明。15:35時点で全native trialは終了し、OS設定・課金・配布操作は行っていない。この引継ぎ更新はCI再開条件の確認までローカルに保持した（22:04に上記の再試行成功を確認）。
+
 2026-09-07 15:07追記: a5639e5通常releaseの代表PNG/chirp/動画保存・再open、4条件各100回のSeek（p95 30.766～105.332ms）に加え、同binaryの30分再生も確認した。107,771 hardware frames、12 drops、CPU transfer 0、drift p95/max 4.803/36.985ms、先頭10分drop率の保守的上限0.033403%で基準内（DEVELOPMENTの14:28/14:32/15:07記録）。約15分でprivate memoryが約319.59 MiBへ増えて次の標本で約223.41 MiBへ戻る挙動が再現したが、原因は未特定。下表の32967f9とは別の証拠であり、実環境・配布・owner受入gateは引き続き未完了。
 
 15:17の位置切り分けでは、起動後早期に880秒へSeekして899～930秒を2回通過しても約224～228 MiBだった。Seek直後の約418～453 MiBへの増加は300秒でも起き、約10秒後には戻る。source位置だけで連続再生の一時増加を説明する証拠はなく、原因確定や全peak/リーク有無の証明ではない。

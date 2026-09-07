@@ -2,6 +2,27 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 22:04 JST - resume verification after a bounded Actions retry succeeds
+
+- Trigger/intent: resume the previously blocked full goal after more than six hours; prior turn made no implementation progress. Preserve the local audit changes. An old failed-run annotation does not establish current account availability, so retry the existing failed project check once within unchanged account limits.
+- Result: run 34091346834 attempt 2/job 101750929926 starts on a runner and completes every step successfully at 22:03:52 JST, verifying HEAD 196c116. Monitor session 50576 completes normally; no repeated retry. Remove CI startup failure as a current blocker without inferring how account state changed.
+- Verification: local format, Clippy and 268 tests pass again; three existing live ignores remain unexecuted. Release hash remains 339046281C097BE5BA05D91BDA9D73F8501BD433A0A6AA96EF4C77E6DD87FCA2. No product/dependency/workflow, billing/spending-limit or OS changes; no native trial or package publication.
+- Areas/status/next: update KNOWN_GAPS and this log, including the preserved afternoon audit, for a verified checkpoint. h1_active; the resumed blocked audit is fresh and the CI condition is resolved. A distribution-format preference question is pending, not authorization to publish; real-audio-switch permission and physical-input/IME/DPI/Windows-10/device/distribution/owner-design gates remain open. Continue from those requirements without treating this CI success as launch completion.
+
+## 2026-09-07 15:38 JST - stop automatic continuation pending owner and account action
+
+- Trigger/evidence: the same latest-HEAD Actions blockage is confirmed for the third consecutive goal turn. Run 34091346834 remains terminal before startup with the payment/spending-limit annotation; no replacement or live run exists. Previous turn produced no progress, not a verified wait. No authorization or account-resolution information has arrived.
+- Decision: mark the full launch goal blocked, not complete. Current checks/native evidence do not satisfy the remaining real-environment, latest-HEAD CI, distribution and owner-acceptance requirements; repeating completed same-scale trials or making speculative changes cannot substitute for them.
+- Handoff: HEAD stays 196c116. SESSION_LOG and KNOWN_GAPS remain local, unstaged audit changes; no product changes, CI retry, push, billing/OS mutation or live trial. Diff whitespace checked. Owner must resolve/check Actions account availability and provide the outstanding real-device-test permission and acceptance/distribution decisions. On resumption, revalidate current state and treat any new blocked audit as fresh.
+
+## 2026-09-07 15:35 JST - audit remaining launch gates and identify Actions account blockage
+
+- Trigger/intent: previous turn is progress; clean HEAD 196c116 confirmed. Consolidate current launch evidence and outstanding owner/environment requirements without treating continuation as OS or billing authorization.
+- CI evidence: run 34091346834/job 101645273941 fails before startup, with no runner and no steps. Its check annotation attributes this to failed account payments or a spending limit. Prior run 34090843746 for 80108c4 completes all steps successfully. Product code/dependencies/toolchain have no diff from a5639e5 through current HEAD; release hash remains 339046281C097BE5BA05D91BDA9D73F8501BD433A0A6AA96EF4C77E6DD87FCA2. This is not a test failure and not a passing latest-HEAD CI.
+- Audit: core/app still forbid unsafe, core has no dependencies, generated/reference/vendor/build areas are untracked. Current local checks and native save/Seek/soak/same-scale monitor evidence are recorded, while real-input/IME/screen-reader/mixed-DPI/Windows-10/device, distribution and owner-design acceptance remain unproven. The memory transient remains unexplained; do not claim it fixed.
+- Safety/areas: no live towavue trials remain. Do not change billing/spending limits, rerun Actions, push another checkpoint, change audio defaults, or start packaging without the needed external state/authorization. Update KNOWN_GAPS and this log locally only; no product changes or new test run, since this is evidence/account-state auditing, not a checkpoint. Diff whitespace checked.
+- Status/next: h1_active; first observation of the Actions account blocker, so the strict repeated-block threshold is not yet met. Ask owner to check Actions billing/limits and retain the separate audio-switch permission request. When account state is resolved, revalidate and rerun the failed latest-HEAD check before the next verified checkpoint. Preserve the full launch goal.
+
 ## 2026-09-07 15:31 JST - verify maximized video and reading across real monitors
 
 - Trigger/intent: previous turn is progress; clean 80108c4 confirmed. Extend same-scale monitor evidence to paused video and reading, without treating automatic continuation as audio-output-change authorization.

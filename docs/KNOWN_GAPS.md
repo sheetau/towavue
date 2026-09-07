@@ -209,7 +209,7 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 
 ## 6. Launch判断に残る確認（2026-09-06 20:04 JST再監査）
 
-2026-09-07 14:32追記: a5639e5通常releaseの代表PNG/chirp/動画保存・再openを確認し、4条件各100回のSeekもp95 30.766～105.332msで通過した（DEVELOPMENTの14:28/14:32記録）。下表の32967f9の30分結果とは別binaryであり、今回binaryの長時間drop/driftと残る実環境・配布・owner受入gateは未完了。
+2026-09-07 15:07追記: a5639e5通常releaseの代表PNG/chirp/動画保存・再open、4条件各100回のSeek（p95 30.766～105.332ms）に加え、同binaryの30分再生も確認した。107,771 hardware frames、12 drops、CPU transfer 0、drift p95/max 4.803/36.985ms、先頭10分drop率の保守的上限0.033403%で基準内（DEVELOPMENTの14:28/14:32/15:07記録）。約15分でprivate memoryが約319.59 MiBへ増えて次の標本で約223.41 MiBへ戻る挙動が再現したが、原因は未特定。下表の32967f9とは別の証拠であり、実環境・配布・owner受入gateは引き続き未完了。
 
 H1の個別修正が通ったことと、配布可能な品質の判定を分ける。草案の全機能を初回launchの必須条件にはしないが、以下は未確認のまま完了と扱わない。
 

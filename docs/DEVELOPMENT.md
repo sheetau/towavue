@@ -4,6 +4,19 @@
 
 ## 1. 最初に試す
 
+### a5639e5 releaseの30分再生再測定（2026-09-07 15:07 JST）
+
+14:32のSeek測定と同じ通常releaseで4K60 H.264/AACをEOFまで連続再生した。PID 516、開始UTC 2026-09-07T05:34:16.1145904Z、EOF観測15:04:26 JST（起動後1810.1秒）。adapter `00000000:000146b5`、D3D11VA、960×576、1倍、アプリ内mute、試験中UIA tree取得なし。Seek・pause・再起動・並行build/重い試験なし。監視session 78186は同じPID/開始時刻を30秒ごとに照合し、Endedで正常に完了した。
+
+- EOF logは107,771 hardware frames＝107,759 presented＋12 dropped、CPU transfer 0。全区間drop率0.011135%。A/V drift p95 4.803ms・最大36.985msで、30分の40/100ms基準を満たす。値はアプリのvideo PTSとaudio master時計の差であり、display/speakerの物理遅延ではない。
+- 終了後に固定FFprobeの`-select_streams v:0 -read_intervals %600 -count_frames`で先頭600秒を再decodeし35,925 frames、headerで全107,771 frames・1800.005729秒を確認。全12 dropsを先頭10分へ割り当てても12/35,925×100＝0.033403%以下で0.1%基準内。これは正確な区間drop数ではなく保守的上限である。
+- 30秒間隔61標本中、起動5分以降のPlayingは50標本。private memoryは最初222.63 MiB、最後224.37 MiB、範囲222.44～319.59 MiB。909.65秒の319.59 MiBは次の939.66秒に223.41 MiBへ戻った。OS PeakPagedMemorySize64は319.59 MiB。旧32967f9測定でも約913秒で増えて約943秒に戻っており、近い時刻の一時増加が再現した。原因は未特定で、30秒標本から全peak・GPU allocation・リーク有無を断定しない。
+- EOFのprivate memoryは175.11 MiB。UIA取得や終了操作より前の5.055秒idleでCPU時間増分0.015625秒。終了helperはUndo送信150ms後にまだdirtyを観測して停止したが、同じprocessの後続確認ではclean・100%へ戻っていた。Undoを再送せず、Endedとidentityを再照合してCloseMainWindow→5秒以内の終了を確認した。再生試験の再実行や強制終了はない。
+- binary SHA256 `339046281C097BE5BA05D91BDA9D73F8501BD433A0A6AA96EF4C77E6DD87FCA2`、source `tests/generated/m1/m3-4k60-30m.mp4` SHA256 `FEE0E738E7149225A7B4DEA02CDA75AAE6873288CBE5A1077B101829ADFD0C10`は試験前後で一致。事前hash済みでcold-storage試験ではない。raw evidenceはignored `target/tmp/h1-soak-a5639e5/playback.stderr.log`と`playback.samples.jsonl`。Save・clipboard・OS設定変更なし。
+- 再生終了後にformat・Clippy・268 testsを再実行して通過（既存live ignore 3件は未実行）。a5639e5のCI 34086933988とde1f9d0のCI 34087264518も成功。production変更なし。
+
+この基準機/codec/binaryでSeekと30分性能gateの証拠が揃った。今後変更したbinary、実device復旧、screen reader・物理入力・mixed-DPI、対象OS、配布とownerの外観受入へ結果を流用しない。次は約15分の一時メモリ増加がsource位置依存か起動後の時間依存かを切り分ける。
+
 ### a5639e5 releaseのSeek再測定（2026-09-07 14:32 JST）
 
 保存修正後の通常releaseで1080p H.264/AAC、960×576、1倍、アプリ内muteを測定した。5秒前進10回/後退10回を5往復し、各要求のPresent成功logを待つ。各条件100 indicesに欠落・重複なし、各processの完了log200件と一致。p50/p95は昇順50/95番目で、全条件がM3のp95≤300msを満たす。

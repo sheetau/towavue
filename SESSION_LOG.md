@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 15:07 JST - complete the current release 30-minute playback gate
+
+- Trigger/intent: previous turn starts the measured process and verifies its live monitor; continue the same PID 516/start time through EOF, without restart or seek. Worktree starts at clean de1f9d0; production binary remains a5639e5.
+- Result: EOF at 1810.1 seconds; 107771 hardware frames = 107759 presented + 12 dropped, CPU transfers zero, drift p95/max 4.803/36.985 ms. After playback, FFprobe counts 35925 frames in the first 600 seconds, giving a conservative 0.033403% ten-minute drop upper bound. Current-binary Seek and 30-minute gates pass on this reference machine/fixture.
+- Memory/evidence: 61 samples, 50 Playing samples after five minutes; private memory starts/ends 222.63/224.37 MiB, with 319.59 MiB at 909.65 seconds and 223.41 MiB next at 939.66 seconds. Similar timing recurs from the previous binary; cause remains unproven. EOF idle CPU increases 0.015625 seconds over 5.055 seconds. DEVELOPMENT records exact identities, hashes and scope limits.
+- Cleanup: monitor 78186 completes on Ended. The cleanup helper observes dirty 150 ms after Undo, but later same-process inspection confirms clean/100%; do not resend Undo. CloseMainWindow succeeds and the process exits normally. Source/binary hashes remain unchanged, no Save/clipboard/OS changes. UIA is first inspected after performance and idle measurements; build/tests run only after playback. Raw logs/samples remain ignored.
+- Verification/areas: format, Clippy, 268 tests pass; three existing live ignores remain unexecuted. CIs 34086933988 and 34087264518 succeed. DEVELOPMENT, KNOWN_GAPS and this log only.
+- Status/next: h1_active; prepare verified evidence checkpoint for push. Investigate whether the repeatable approximately 15-minute memory transient follows media position or elapsed lifetime. Preserve full real-device/input/OS/distribution and owner-design acceptance gates; performance on one fixture is not launch completion.
+
 ## 2026-09-07 14:32 JST - remeasure the current release Seek gate
 
 - Trigger/intent: previous turn is progress; clean pushed a5639e5 confirmed. Replace stale-binary Seek evidence with measurements of the saved-audio fix candidate, without production changes.

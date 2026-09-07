@@ -606,7 +606,7 @@ struct Application<N> {
     image_seek_preview_active: bool,
     grid_open: bool,
     palette_open: bool,
-    palette_return_focus: Option<egui::Id>,
+    command_overlay_return_focus: Option<egui::Id>,
     palette: palette::CommandPalette,
     status_message: Option<(String, Instant)>,
     pending_guard: Option<GuardedAction>,
@@ -717,7 +717,7 @@ where
             image_seek_preview_active: false,
             grid_open: false,
             palette_open: false,
-            palette_return_focus: None,
+            command_overlay_return_focus: None,
             palette: palette::CommandPalette::default(),
             status_message: None,
             pending_guard: None,
@@ -815,7 +815,7 @@ where
             return;
         }
         self.palette_open = false;
-        self.palette_return_focus = None;
+        self.command_overlay_return_focus = None;
         self.grid_open = false;
         self.cancel_shortcut_prefix();
         if path.is_dir() {
@@ -1439,6 +1439,20 @@ where
         self.video_rect = None;
         let context = root.ctx().clone();
         let modal_blocked = self.modal_input_blocked();
+        // Decide before the menu can close itself with this same Escape event.
+        if self.grid_open
+            && !self.palette_open
+            && !modal_blocked
+            && !egui::Popup::is_any_open(&context)
+            && context
+                .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            if self.prefix_started.is_some() {
+                self.cancel_shortcut_prefix();
+            } else {
+                self.cancel_command_overlay();
+            }
+        }
         if !modal_blocked && self.guard_return_focus.is_some() {
             if context.memory(|memory| memory.top_modal_layer().is_none()) {
                 if let Some((tab, id)) = self.guard_return_focus.take()
@@ -2424,7 +2438,12 @@ where
                                     .on_disabled_hover_text(title)
                                     .clicked()
                                 {
-                                    self.grid_open = false;
+                                    if !matches!(
+                                        command,
+                                        CommandId::ToggleGridMenu | CommandId::ToggleCommandPalette
+                                    ) {
+                                        self.grid_open = false;
+                                    }
                                     actions.push(UiAction::Command(command));
                                 }
                                 if index % 4 == 3 {
@@ -3010,13 +3029,14 @@ where
             actions.push(UiAction::Command(command));
         }
         if close {
-            self.cancel_command_palette();
+            self.cancel_command_overlay();
         }
     }
 
-    fn cancel_command_palette(&mut self) {
+    fn cancel_command_overlay(&mut self) {
         self.palette_open = false;
-        if let Some(id) = self.palette_return_focus.take()
+        self.grid_open = false;
+        if let Some(id) = self.command_overlay_return_focus.take()
             && let Some(context) = &self.ui_context
         {
             context.memory_mut(|memory| memory.request_focus(id));
@@ -3112,9 +3132,12 @@ where
         if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             return;
         }
-        self.palette_return_focus = if command == CommandId::ToggleCommandPalette {
-            if self.palette_open {
-                self.palette_return_focus
+        self.command_overlay_return_focus = if matches!(
+            command,
+            CommandId::ToggleCommandPalette | CommandId::ToggleGridMenu
+        ) {
+            if self.palette_open || self.grid_open {
+                self.command_overlay_return_focus
             } else {
                 self.ui_context
                     .as_ref()
@@ -3162,7 +3185,11 @@ where
                 self.request_redraw();
             }
             CommandId::ToggleGridMenu => {
-                self.grid_open = !self.grid_open;
+                if self.grid_open {
+                    self.cancel_command_overlay();
+                } else {
+                    self.grid_open = true;
+                }
                 self.request_redraw();
             }
             CommandId::ReloadShortcuts => match shortcuts::load() {
@@ -4645,9 +4672,8 @@ where
             return false;
         }
         if self.palette_open || self.filmstrip_open || self.grid_open {
-            self.cancel_command_palette();
+            self.cancel_command_overlay();
             self.filmstrip_open = false;
-            self.grid_open = false;
             self.request_redraw();
             true
         } else if self.cancel_view_drag() {
@@ -4783,7 +4809,12 @@ where
                 .find(|definition| definition.id == command)
                 .is_some_and(|definition| definition.is_enabled(self.command_context()));
             if enabled {
-                self.grid_open = false;
+                if !matches!(
+                    command,
+                    CommandId::ToggleGridMenu | CommandId::ToggleCommandPalette
+                ) {
+                    self.grid_open = false;
+                }
                 self.dispatch(command);
             }
             return;
@@ -6341,6 +6372,77 @@ mod tests {
             assert_eq!(crop(&app).x + crop(&app).width, right - 1);
             frame(&mut app, vec![key(egui::Key::ArrowRight)]);
         }
+        for switch_overlay in [false, true] {
+            app.dispatch(CommandId::ToggleGridMenu);
+            frame(&mut app, vec![]);
+            if switch_overlay {
+                app.dispatch(CommandId::ToggleCommandPalette);
+                frame(&mut app, vec![]);
+                app.dispatch(CommandId::ToggleGridMenu);
+            }
+            let tree = frame(&mut app, vec![]);
+            let target = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Button
+                        && node
+                            .label()
+                            .is_some_and(|label| label.contains("Rotate clockwise"))
+                })
+                .expect("grid rotation button")
+                .0;
+            frame(
+                &mut app,
+                vec![egui::Event::AccessKitActionRequest(
+                    egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Focus,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: target,
+                        data: None,
+                    },
+                )],
+            );
+            assert_eq!(frame(&mut app, vec![]).focus, target);
+            if !switch_overlay {
+                app.process_shortcut("Ctrl+K".parse().expect("default prefix"));
+                assert!(app.prefix_started.is_some());
+                frame(&mut app, vec![key(egui::Key::Escape)]);
+                assert!(app.grid_open, "Escape cancels the active prefix first");
+                assert!(app.prefix_started.is_none());
+            }
+            if switch_overlay {
+                let logo = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("towavue menu"))
+                    .expect("logo")
+                    .0;
+                frame(
+                    &mut app,
+                    vec![egui::Event::AccessKitActionRequest(
+                        egui::accesskit::ActionRequest {
+                            action: egui::accesskit::Action::Click,
+                            target_tree: egui::accesskit::TreeId::ROOT,
+                            target_node: logo,
+                            data: None,
+                        },
+                    )],
+                );
+                frame(&mut app, vec![]);
+                assert!(egui::Popup::is_any_open(&context));
+                frame(&mut app, vec![key(egui::Key::Escape)]);
+                assert!(!egui::Popup::is_any_open(&context));
+                assert!(app.grid_open, "menu Escape leaves the underlying grid open");
+            }
+            frame(&mut app, vec![key(egui::Key::Escape)]);
+            assert!(!app.grid_open, "one Escape closes a focused grid");
+            assert_eq!(frame(&mut app, vec![]).focus, ids[1]);
+            let right = crop(&app).x + crop(&app).width;
+            frame(&mut app, vec![key(egui::Key::ArrowLeft)]);
+            assert_eq!(crop(&app).x + crop(&app).width, right - 1);
+            frame(&mut app, vec![key(egui::Key::ArrowRight)]);
+        }
         let before = app.image_view.selection;
         for overlay in 0..5 {
             app.pending_guard = (overlay == 0).then_some(GuardedAction::Exit);
@@ -6478,13 +6580,13 @@ mod tests {
         app.dispatch(CommandId::SelectAll);
         frame(&mut app, vec![]);
         visible(&frame(&mut app, vec![]), 0);
-        assert!(app.palette_return_focus.is_none());
+        assert!(app.command_overlay_return_focus.is_none());
         app.dispatch(CommandId::ToggleCommandPalette);
         frame(&mut app, vec![]);
         frame(&mut app, vec![key(egui::Key::Escape)]);
         frame(&mut app, vec![]);
         visible(&frame(&mut app, vec![]), 0);
-        assert!(app.palette_return_focus.is_none());
+        assert!(app.command_overlay_return_focus.is_none());
         app.push_edit(EditOperation::FlipHorizontal);
         app.dispatch(CommandId::SelectAll);
         frame(&mut app, vec![]);
@@ -10069,6 +10171,99 @@ mod tests {
         app.dispatch(CommandId::ToggleCommandPalette);
         assert!(app.palette_open);
         assert!(!app.grid_open);
+    }
+
+    #[test]
+    fn configured_grid_actions_preserve_only_cancellation_focus() {
+        let Some(root) =
+            isolated_test_root("tests::configured_grid_actions_preserve_only_cancellation_focus")
+        else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let path = root.join("image.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Image);
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        app.ui_context = Some(context.clone());
+        let mut time = 0.0;
+        let mut frame = |app: &mut Application<_>, events, focus_origin| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let response = ui.button("Origin");
+                    if focus_origin {
+                        response.request_focus();
+                    }
+                    if app.palette_open {
+                        app.draw_command_palette(&context, &mut actions);
+                    }
+                    app.draw_grid_menu(&context, &mut actions);
+                },
+            );
+            time += 0.1;
+            for action in actions {
+                app.handle_ui_action(action);
+            }
+            output.platform_output.accesskit_update.expect("tree")
+        };
+        for command in [
+            CommandId::ToggleCommandPalette,
+            CommandId::ToggleGridMenu,
+            CommandId::RotateClockwise,
+        ] {
+            std::fs::write(
+                &app.grid_path,
+                format!("image = {}\n", [command.as_str(); 16].join(", ")),
+            )
+            .expect("isolated grid configuration");
+            app.grid_layouts = grid::load().expect("custom grid").0;
+            let origin = frame(&mut app, vec![], true).focus;
+            app.dispatch(CommandId::ToggleGridMenu);
+            frame(&mut app, vec![], false);
+            let tree = frame(&mut app, vec![], false);
+            let target = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Button
+                        && node.label().is_some_and(|label| label.starts_with("1\n"))
+                })
+                .expect("first configured cell")
+                .0;
+            frame(
+                &mut app,
+                vec![egui::Event::AccessKitActionRequest(
+                    egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Click,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: target,
+                        data: None,
+                    },
+                )],
+                false,
+            );
+            assert!(!app.grid_open);
+            if command == CommandId::ToggleCommandPalette {
+                assert!(app.palette_open);
+                frame(&mut app, vec![], false);
+                app.cancel_command_overlay();
+            }
+            assert!(app.command_overlay_return_focus.is_none());
+            if command == CommandId::RotateClockwise {
+                assert!(app.edits[&tab].is_dirty());
+                app.dispatch(CommandId::Undo);
+            } else {
+                assert_eq!(frame(&mut app, vec![], false).focus, origin);
+            }
+        }
     }
 
     #[test]

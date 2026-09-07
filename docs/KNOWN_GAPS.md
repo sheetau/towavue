@@ -91,7 +91,7 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 | 日本語filename・文字表示 | Windowsの日本語fontを既定fontの後ろへ追加し、tab/statusの欠字を修正。日本語fontがない環境や全言語のfallbackは未対応 |
 | Custom shortcutとprefix key | text設定として実装。GUI editor、競合表示、recording UIはない |
 | 検索欄などのOS clipboard連携 | 固定egui-winitのclipboard featureを有効化。日本語・アクセント文字・絵文字のpaste/copy/cut回帰と、通常releaseからOS clipboardへの正確な往復を確認。画像のclipboard copy機能はない。clipboard競合・他IME・全入力matrixは未検証 |
-| Media別4×4 grid | key/clickとtext設定を実装。H1で列はみ出し、名前/path省略、click後のclose、物理位置対応と修飾key競合を修正。paletteとは同時表示しない。配置編集UI、drag配置、詳細animationはない |
+| Media別4×4 grid | key/clickとtext設定を実装。H1で列はみ出し、名前/path省略、click後のclose、物理位置対応と修飾key競合を修正。button focus中もEscape一回で取消して元の操作部へ戻り、上のmenuとprefix取消を優先する。paletteとは同時表示せず、切替時は元の復帰先を引き継ぐ。配置編集UI、drag配置、詳細animationはない |
 | Statusへpath、位置、zoom、解像度、size、modified等 | filename、parent path、folder内位置、size、画像解像度・zoom、編集値などを部分実装。modified日時、詳細codec/stream情報はない |
 | 常時1px seek bar、hover時展開 | H1でstatus上端に実装。動画・音声はduration取得後、timeline非表示時に使える。drag終了時に一回だけSeekする |
 | Fullscreen時はUIを隠す | H1でF11/View menuのborderless fullscreenと通常bar/timeline非表示を実装。下端hoverでstatus/seek/解除buttonを重ね、dragはreleaseまで保持。画像・動画・readingでは2秒idleでcursorを隠し、入力・操作部・overlay・modal時は表示。上端tab/menu表示、double-clickは未実装 |

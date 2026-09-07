@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 13:34 JST - close a focused grid with one Escape and restore its invoking control
+
+- Trigger/intent: previous turn is progress; clean 1f941c9 confirmed. Native PID 29240 retains the grid after focused-button Escape and loses the invoking selection edge; the regression reproduces it.
+- Change: share one return-focus slot between mutually exclusive grid/palette, retain it across switches, and clear it for command execution/drop. Handle focused-grid Escape before menu drawing, preserving popup/modal/palette and active-prefix priority. No filmstrip contract, runtime, dependency or layout changes.
+- Evidence: intermediate PID 41316 reveals double-close with an overlaid menu; reproduce in a regression and move priority selection to draw start. Also reproduce and preserve prefix-first cancellation. Final normal PID 32256 passes one-Escape close, four-edge value/focus preservation, arrow continuation, menu-only first Escape, grid rotation/Undo and existing palette text/focus flows. DEVELOPMENT records all identities/hashes and the corrected preparation-helper notification mismatch.
+- Verification/cleanup: 265 workspace tests, format, Clippy and debug/release builds pass; three existing live ignores remain unexecuted. Both prior checkpoint CIs succeed. Undo trial rotation and close all three windows normally; final stderr empty, PNG hash unchanged. No Save/clipboard/OS-setting or user-config changes; custom-grid configuration is tested only in the isolated test process.
+- Areas/status/next: app main, README/ARCHITECTURE/DEVELOPMENT/KNOWN_GAPS/ROADMAP; h1_active, prepare verified checkpoint for push. Audit filmstrip cancellation and post-navigation focus next; retain full screen-reader, physical-input/IME/DPI/device, final-candidate save/performance, distribution and owner-design acceptance gates.
+
 ## 2026-09-07 13:19 JST - distinguish menu controls from similarly named notifications in native checks
 
 - Trigger/intent: previous turn is progress; verified shortcut checkpoint 4d75355 is pushed and the worktree starts clean. Audit the reported repeated-menu failure before changing product behavior.

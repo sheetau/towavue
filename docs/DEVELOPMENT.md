@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### grid取消の一回Escapeとfocus復帰（2026-09-07 13:34 JST）
+
+grid buttonのfocus中にEscapeがUIへ消費され、gridが残る問題を修正した。draw開始時にmenu/modal/paletteの優先状態を確認して取消を処理し、進行中prefixの取消も優先する。同時表示しないgrid/paletteの復帰先を一件だけ共有し、両者の切替でも最初の操作部を保持する。通常commandの実行は復帰先を破棄し、command自身のfocusを優先する。filmstripの復帰契約やruntimeは変更しない。
+
+- baseline 1f941c9通常release `6263CBEBE36210EC2CF6A26B12DD069F775AB4795B689CC80819851900982711`、画像PID 29240（開始UTC 2026-09-07T04:21:34.5454668Z）で全体選択→左辺focus→G→grid回転buttonへUIA Focus→Escape。gridが残り、左辺focusもない。追加回帰も一回取消のassertionで失敗した。
+- 中間release `CC174DCC7789F6D6FC23A7AD5D6E527FCD30731D4139C31CC145E4C797863CCB`、PID 41316（04:26:38.4022882Z）は単独gridの取消を通過したが、上のlogo menuを閉じるとgridまで閉じた。menu描画後に判定していたためで、同じ失敗を回帰へ追加してdraw開始時の判定へ移した。prefixの優先も追加回帰の失敗を確認してから修正した。
+- 最終通常release `502F5E34DFCDD6768D591316D3B168E7A3BE1A1CC5F2A89296BF481343279347`、PID 32256（04:32:47.2101420Z）でgrid取消→左辺への復帰→矢印1 pixel調整を確認。四辺とも取消前後の値不変・focus復帰が成立し、bottomではlogo menuだけを先に閉じ、次のEscapeでgridを閉じた。gridのSによる回転→grid close→Ctrl+Zも成立した。SendKeysによる通常window確認であり、物理keyboard matrixの完了ではない。
+- 同じ最終windowで既存paletteの四辺focus復帰・検索文字の隔離・矢印調整・command固有focusを再確認。準備用Select helperも旧`Edit *`検索で通知を拾って一度失敗したため、実treeを再確認しButton型に限定して再試験した。このhelper失敗は製品の退行として数えない。
+- 自動回帰はgrid/palette切替、grid上のmenu、prefix、custom gridのpalette/自身のtoggle/回転commandを含む。265 workspace tests・format・Clippy・両buildが通過。既存live ignore 3件は未実行。前回1f941c9と4d75355のCIも成功。custom grid設定は隔離test内だけで変更し、利用者設定は変えない。
+- 三つのwindowを通常終了、試験回転はUndo済み、最終stderrは空。PNG hash `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`は不変。Save・clipboard・OS設定変更なし。helper/logはignoredの`target/tmp/h1-grid-*`。性能・最終保存gateの再測定ではない。
+- 次はfilmstripの取消と選曲後のfocusを監査する。全screen reader・物理入力/他IME・実DPI/device・最終候補保存/性能・配布・外観受入を含むH1 gateは継続する。
+
 ### 連続menu操作の誤判定を訂正（2026-09-07 13:19 JST）
 
 前二項で残したcategory focus/展開の不成立は、native helperの対象選択に原因があった。`Edit *`を名前だけで検索すると、回転後の通知Text `Edit added (source unchanged)`を先に取得する。実際のEdit buttonはfocusを持っていても、通知へのHasKeyboardFocus検査・SetFocus・Invokeは失敗する。対象のButton型も照合し、アプリ側のmenu処理は変更しない。

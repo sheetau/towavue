@@ -190,7 +190,7 @@ runtimeのparallel decode収集点で映像PTSを[start, end)へ制限し、音�
 
 ### H1 pixel-aligned crop
 
-画像・動画の選択dragはbuttonを押した位置を始点とし、その位置で既存selectionの辺hitを判定する。drag認識までの移動量を失わず、release frameの最終位置を適用してからpixelへ丸める。移動eventが少なくても選択範囲が消えたり辺resizeが新規選択へ変わったりしない。画像外から開始したdragで選択を作らず、範囲内clickの一時crop previewとShiftの制約は維持する。
+画像・動画の選択dragはbuttonを押した位置を始点とし、その位置で既存selectionの辺hitを判定する。drag認識までの移動量を失わず、release frameの最終位置を適用してからpixelへ丸める。移動eventが少なくても選択範囲が消えたり辺resizeが新規選択へ変わったりしない。画像外から開始したdragで新規選択は作らないが、既存の辺のhit範囲は画像端の外側も含め、表示されたhandleを掴めるようにする。surfaceのclip/overlay遮断、範囲内clickの一時crop previewとShiftの制約は維持する。
 
 選択dragと画像panは同時に一件だけ保持する一時操作とし、開始前のselectionまたはpan位置を保存する。releaseでその表示を確定し、Escape・focus喪失・modal/palette/grid/filmstrip/menu・別commandでは開始前へ戻して操作を解除する。解除後の保持中buttonやreleaseで再開せず、新しい押下を必要とする。Escapeは既存prefix/overlayの取消を優先し、進行中dragがあればfullscreen解除やselection全消去より先にdragだけを取り消す。履歴・sourceは変更しない。panは押下位置からの差分で計算し、release時の最終位置も含める。
 
@@ -205,6 +205,12 @@ selectionのdrag中は正規化座標を使い、releaseとcrop確定時に現�
 確定cropは正規化floatではなく、編集時点の整数pixel矩形を`EditOperation::Crop`へ保持する。previewはその矩形からUVと整数寸法を求め、FFmpegへ同じ整数と`exact=1`を渡す。回転/反転/cropの履歴順は変えず、既存の履歴はmemory内だけのため保存形式の移行は生じない。確定時に出力寸法をstatusへ表示し、全領域cropはdirty履歴を増やさない。選択の一時crop previewも同じimage pixel丸めを使う。動画の一般的なresize/paddingやencoder変更は行わない。
 
 crop境界でlinear samplingが選択外の隣接pixelを混ぜないよう、画像meshを端の半pixel帯で分割し、動画shaderでも選択領域内のpixel中心へsample座標をclampする。1×1画像は一色のまま拡大される。textureの再decodeやcrop用CPU copyは追加しない。
+
+### H1 keyboard and accessible selection
+
+H1の選択操作は画像・動画のSelect all command（既定Ctrl+A、menu/palette/custom binding共通）からも開始できる。reading表示では無効とし、検索欄の全選択を奪わない。読込済みの編集後media全体を選び、一時crop previewを解除して左辺へfocusする。選択自体は編集履歴を増やさない。
+
+既存の四辺の表示位置へ名前付きpixel Sliderを公開し、focus中の矢印で画像1 pixel・動画2 pixel、Home/Endで軸端点を指定する。数値要求は四辺をまたいで受信順に処理し、pixelへ丸めた後の逆転・零長を拒否する。identityはtab/path/辺へ固定する。値操作は進行中pointer gestureを取り消し、modal/overlay/menu中は無効。pointerの辺drag・Shift制約・外観と、既存crop確定/Undo・動画16×16制約を維持する。全screen reader・拡大時に画面外となる辺へのfocus追従は別途検証する。
 
 ### H1 visual filmstrip
 

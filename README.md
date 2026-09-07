@@ -98,7 +98,9 @@ command paletteはtitle bar直下の暗いpanelへまとめ、全幅の検索欄
 
 検索欄のCtrl+C／Ctrl+X／Ctrl+VはWindowsのテキストクリップボードを使い、外部アプリと文字列をやり取りできます。画像や選択範囲をクリップボードへコピーする機能ではありません。
 
-Windows UI AutomationへUI情報と操作を接続し、Welcome・メニュー・command paletteの操作に加え、再生位置・trim端点・フォルダー内の画像位置を値として変更できます。スクリーンリーダーでの全画面操作や、selectionなど残る独自描画部品の対応は未完了です。
+Windows UI AutomationへUI情報と操作を接続し、Welcome・メニュー・command paletteの操作に加え、再生位置・trim端点・フォルダー内の画像位置・選択範囲の四辺を値として変更できます。スクリーンリーダーでの全画面操作や、拡大時の画面外ハンドルへのfocus追従は未完了です。
+
+画像・動画はCtrl+AまたはEditのSelect whole mediaで全体を選択できます。Tabで四辺のfocusを移し、矢印で画像1 pixel・動画2 pixelずつ調整します。Home/Endで軸の端へ指定でき、逆転・零長は拒否します。選択だけでは未保存編集にならず、Ctrl+Yでcropを確定しCtrl+Zで戻せます。reading表示は対象外で、検索欄のCtrl+Aは文字の全選択に使います。画像端の既存ハンドルも、操作surface内なら画像外側の部分から掴めます。
 
 タブの閉じるボタンはUI Automationへ対象ファイル名とフルパスの説明を公開します。タブの操作対象は並べ替えや隣のタブを閉じても変わらず、未保存編集には通常の確認画面が開きます。
 

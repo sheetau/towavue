@@ -26,6 +26,7 @@ pub enum CommandId {
     ActualSize,
     FitToWindow,
     ClearSelection,
+    SelectAll,
     ToggleCropPreview,
     ToggleReadingMode,
     IncreaseReadingPages,
@@ -82,6 +83,7 @@ impl CommandId {
             Self::ActualSize => "actual_size",
             Self::FitToWindow => "fit_to_window",
             Self::ClearSelection => "clear_selection",
+            Self::SelectAll => "select_all",
             Self::ToggleCropPreview => "toggle_crop_preview",
             Self::ToggleReadingMode => "toggle_reading_mode",
             Self::IncreaseReadingPages => "increase_reading_pages",
@@ -290,6 +292,7 @@ pub struct CommandDefinition {
 impl CommandDefinition {
     pub fn is_enabled(self, context: CommandContext) -> bool {
         (!self.requires_reading_mode || context.reading_mode)
+            && (self.id != CommandId::SelectAll || !context.reading_mode)
             && (self.media_kinds.is_empty()
                 || context
                     .media_kind
@@ -336,6 +339,11 @@ const COMMANDS: &[CommandDefinition] = &[
         CommandId::FitToWindow,
         "Fit image to window",
         &[MediaKind::Image],
+    ),
+    command(
+        CommandId::SelectAll,
+        "Select whole media",
+        &[MediaKind::Image, MediaKind::Video],
     ),
     command(
         CommandId::ClearSelection,

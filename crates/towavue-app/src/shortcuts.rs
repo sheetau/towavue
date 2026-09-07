@@ -51,6 +51,7 @@ fn defaults() -> ShortcutBindings {
         (CommandId::ActualSize, "Ctrl+H"),
         (CommandId::FitToWindow, "Shift+W"),
         (CommandId::ClearSelection, "Escape"),
+        (CommandId::SelectAll, "Ctrl+A"),
         (CommandId::ToggleCropPreview, "Ctrl+Shift+Y"),
         (CommandId::ToggleReadingMode, "B"),
         (CommandId::IncreaseReadingPages, "Ctrl+]"),
@@ -142,6 +143,57 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 mod tests {
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn select_all_is_visual_only_and_keeps_custom_bindings() {
+        let mut bindings = defaults();
+        let select = "Ctrl+A".parse::<KeySequence>().expect("select all");
+        for (kind, reading, enabled) in [
+            (Some(MediaKind::Image), false, true),
+            (Some(MediaKind::Video), false, true),
+            (Some(MediaKind::Audio), false, false),
+            (Some(MediaKind::Image), true, false),
+            (None, false, false),
+        ] {
+            assert_eq!(
+                bindings.resolve(
+                    select.strokes(),
+                    CommandContext {
+                        media_kind: kind,
+                        reading_mode: reading,
+                        ..Default::default()
+                    }
+                ),
+                if enabled {
+                    ShortcutMatch::Command(CommandId::SelectAll)
+                } else {
+                    ShortcutMatch::None
+                }
+            );
+        }
+        bindings.set(
+            CommandId::SelectAll,
+            "Ctrl+K A".parse().expect("custom selection"),
+        );
+        let context = CommandContext {
+            media_kind: Some(MediaKind::Image),
+            ..Default::default()
+        };
+        assert_eq!(
+            bindings.resolve(select.strokes(), context),
+            ShortcutMatch::None
+        );
+        assert_eq!(
+            bindings.resolve(
+                "Ctrl+K A"
+                    .parse::<KeySequence>()
+                    .expect("custom selection")
+                    .strokes(),
+                context
+            ),
+            ShortcutMatch::Command(CommandId::SelectAll)
+        );
+    }
 
     #[test]
     fn image_boundary_shortcuts_round_trip_and_preserve_custom_bindings() {

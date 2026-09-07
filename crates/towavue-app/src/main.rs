@@ -11,6 +11,7 @@ mod menu;
 mod palette;
 mod playlist;
 mod seekbar;
+mod selection;
 mod shortcuts;
 mod timeline_input;
 mod trim;
@@ -1704,6 +1705,7 @@ where
             && let Some(selection) = self.image_view.selection
         {
             paint_selection(&painter, image_rect, selection);
+            self.selection_controls(ui, image_rect, image_size);
         }
     }
 
@@ -1735,6 +1737,41 @@ where
         self.update_selection(&response, viewport, size, shift, pointer);
         if let Some(selection) = self.image_view.selection {
             paint_selection(&ui.painter_at(viewport), viewport, selection);
+            self.selection_controls(ui, viewport, size);
+        }
+    }
+
+    fn selection_identity(&self) -> egui::Id {
+        egui::Id::new((
+            "media-selection",
+            self.tabs.active().map(|tab| tab.id),
+            &self.path,
+        ))
+    }
+
+    fn selection_controls(&mut self, ui: &mut egui::Ui, rect: egui::Rect, size: (u32, u32)) {
+        let (Some(selected), Some(kind)) = (self.image_view.selection, self.media_kind) else {
+            return;
+        };
+        let enabled = self.view_drag_allowed(ui.ctx());
+        let (changed, invalid) = selection::controls(
+            ui,
+            self.selection_identity(),
+            rect,
+            selected,
+            size,
+            kind,
+            enabled,
+        );
+        if changed.is_some() || invalid {
+            self.cancel_view_drag();
+            if let Some(changed) = changed {
+                self.image_view.selection = Some(changed);
+            }
+            if invalid {
+                self.set_status("Selection edges must leave a non-empty rectangle".into());
+            }
+            self.request_redraw();
         }
     }
 
@@ -1868,13 +1905,17 @@ where
         };
         let point = unit_point(pointer, image_rect);
         if self.view_drag.is_none()
-            && let Some(origin) = origin.filter(|origin| image_rect.contains(*origin))
-        {
-            let mode = self
+            && let Some(origin) = origin
+            && let Some(mode) = self
                 .image_view
                 .selection
                 .and_then(|selection| selection_edge(origin, image_rect, selection))
-                .unwrap_or(SelectionDrag::New(unit_point(origin, image_rect)));
+                .or_else(|| {
+                    image_rect
+                        .contains(origin)
+                        .then(|| SelectionDrag::New(unit_point(origin, image_rect)))
+                })
+        {
             self.view_drag = Some(ViewDrag::Selection {
                 mode,
                 before: self.image_view.selection,
@@ -3067,6 +3108,34 @@ where
             CommandId::ClearSelection => {
                 self.image_view.selection = None;
                 self.image_view.crop_preview = false;
+                self.request_redraw();
+            }
+            CommandId::SelectAll => {
+                if self.reading_mode {
+                    return;
+                }
+                let size = match self.media_kind {
+                    Some(MediaKind::Image) => {
+                        self.image.as_ref().map(ImagePresentation::dimensions)
+                    }
+                    Some(MediaKind::Video) => self
+                        .session
+                        .as_ref()
+                        .and_then(PlaybackSession::video_geometry)
+                        .map(|(w, h, _)| (w, h)),
+                    _ => None,
+                };
+                if size.is_none() {
+                    self.set_status("Wait for media to load before selecting".into());
+                    return;
+                }
+                self.image_view.selection = Some(UnitRect::FULL);
+                self.image_view.crop_preview = false;
+                if let Some(context) = &self.ui_context {
+                    context.memory_mut(|memory| {
+                        memory.request_focus(self.selection_identity().with(0_usize))
+                    });
+                }
                 self.request_redraw();
             }
             CommandId::ToggleCropPreview => {
@@ -4538,7 +4607,8 @@ where
             && !self.filmstrip_open
             && !self.modal_input_blocked()
             && self.ui_context.as_ref().is_some_and(|context| {
-                seekbar::has_value_focus(context) && !egui::Popup::is_any_open(context)
+                (seekbar::has_value_focus(context) || selection::has_focus(context))
+                    && !egui::Popup::is_any_open(context)
             })
             && stroke.key != Key::Tab
             && !(self.prefix_started.is_none()
@@ -4547,6 +4617,10 @@ where
                     stroke.key,
                     Key::ArrowLeft | Key::ArrowRight | Key::Home | Key::End
                 ))
+            && !(self.prefix_started.is_none()
+                && stroke.modifiers == Modifiers::default()
+                && matches!(stroke.key, Key::ArrowUp | Key::ArrowDown)
+                && self.ui_context.as_ref().is_some_and(selection::has_focus))
     }
 
     fn process_key(&mut self, event: &KeyEvent) {
@@ -5663,6 +5737,206 @@ mod tests {
                 && node.role() == egui::accesskit::Role::Button
                 && node.supports_action(egui::accesskit::Action::Click)
         }));
+    }
+
+    #[test]
+    fn accessible_selection_edges_preserve_pixel_bounds_and_crop_history() {
+        let Some(root) = isolated_test_root(
+            "tests::accessible_selection_edges_preserve_pixel_bounds_and_crop_history",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        app.ui_context = Some(context.clone());
+        let path = root.join("image.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.image = Some(
+            ImagePresentation::from_decoded(
+                &context,
+                &path,
+                DecodedImage {
+                    format: "test",
+                    frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                        width: 400,
+                        height: 200,
+                        rgba: vec![255; 400 * 200 * 4],
+                        delay: Duration::ZERO,
+                    }],
+                }
+                .into(),
+            )
+            .expect("image texture"),
+        );
+        app.dispatch(CommandId::SelectAll);
+        let frame = |app: &mut Application<_>, events| {
+            context
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(960.0, 576.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| app.draw_ui(ui, &mut Vec::new()),
+                )
+                .platform_output
+                .accesskit_update
+                .expect("tree")
+        };
+        frame(&mut app, vec![]);
+        let tree = frame(&mut app, vec![]);
+        let mut ids = Vec::new();
+        for label in [
+            "Selection left (pixels)",
+            "Selection right (pixels)",
+            "Selection top (pixels)",
+            "Selection bottom (pixels)",
+        ] {
+            let (id, node) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(label))
+                .expect("named selection edge");
+            assert_eq!(node.role(), egui::accesskit::Role::Slider);
+            assert_eq!(node.numeric_value_step(), Some(1.0));
+            ids.push(*id);
+        }
+        assert_eq!(tree.focus, ids[0], "Select all focuses the left edge");
+        let request = |index: usize, value: f64| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::SetValue,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: ids[index],
+                data: Some(egui::accesskit::ActionData::NumericValue(value)),
+            })
+        };
+        let crop = |app: &Application<_>| {
+            PixelCrop::from_selection(
+                app.image_view.selection.expect("selection"),
+                (400, 200),
+                MediaKind::Image,
+            )
+            .expect("pixel bounds")
+        };
+        frame(
+            &mut app,
+            vec![
+                request(0, 100.0),
+                request(1, 300.0),
+                request(2, 20.0),
+                request(3, 180.0),
+            ],
+        );
+        assert_eq!(
+            crop(&app),
+            PixelCrop {
+                x: 100,
+                y: 20,
+                width: 200,
+                height: 160
+            }
+        );
+        frame(
+            &mut app,
+            vec![
+                request(1, 350.0),
+                request(0, 310.0),
+                request(1, 300.0),
+                request(0, f64::NAN),
+            ],
+        );
+        assert_eq!(
+            crop(&app),
+            PixelCrop {
+                x: 310,
+                y: 20,
+                width: 40,
+                height: 160
+            },
+            "preserve received order and reject crossing/NaN"
+        );
+        frame(&mut app, vec![request(0, 100.0), request(1, 300.0)]);
+        let selected = app.image_view.selection;
+        app.view_drag = Some(ViewDrag::Selection {
+            mode: SelectionDrag::Right,
+            before: selected,
+        });
+        frame(&mut app, vec![request(0, 101.0)]);
+        assert!(
+            app.view_drag.is_none(),
+            "value change cancels pointer ownership"
+        );
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut app, vec![key(egui::Key::ArrowRight)]);
+        assert_eq!(crop(&app).x, 102);
+        assert_eq!(frame(&mut app, vec![]).focus, ids[0]);
+        let stroke = |key| KeyStroke {
+            key,
+            modifiers: Modifiers::default(),
+        };
+        assert!(!app.owns_seek_shortcut(&stroke(Key::ArrowUp)));
+        assert!(app.owns_seek_shortcut(&stroke(Key::Character('r'))));
+        frame(&mut app, vec![key(egui::Key::Tab)]);
+        assert_eq!(frame(&mut app, vec![]).focus, ids[1]);
+        let before = app.image_view.selection;
+        for overlay in 0..5 {
+            app.pending_guard = (overlay == 0).then_some(GuardedAction::Exit);
+            app.palette_open = overlay == 1;
+            app.grid_open = overlay == 2;
+            app.filmstrip_open = overlay == 3;
+            if overlay == 4 {
+                egui::Popup::open_id(&context, "selection-test-popup".into());
+            }
+            frame(&mut app, vec![]);
+            let tree = frame(&mut app, vec![request(0, 50.0)]);
+            assert_eq!(app.image_view.selection, before);
+            assert!(
+                tree.nodes
+                    .iter()
+                    .find(|(id, _)| *id == ids[0])
+                    .expect("disabled edge")
+                    .1
+                    .is_disabled()
+            );
+            app.pending_guard = None;
+            app.palette_open = false;
+            app.grid_open = false;
+            app.filmstrip_open = false;
+            egui::Popup::close_all(&context);
+        }
+        frame(&mut app, vec![request(0, 100.0)]);
+        assert!(!app.edits.get(&tab).is_some_and(EditHistory::is_dirty));
+        app.dispatch(CommandId::ApplyCrop);
+        assert_eq!(
+            app.edits[&tab].operations(),
+            &[EditOperation::Crop(PixelCrop {
+                x: 100,
+                y: 20,
+                width: 200,
+                height: 160
+            })]
+        );
+        assert!(app.image_view.selection.is_none());
+        app.undo_edit(false);
+        assert!(!app.edits[&tab].is_dirty());
+        app.reading_mode = true;
+        app.dispatch(CommandId::SelectAll);
+        assert!(
+            app.image_view.selection.is_none(),
+            "reading is display-only"
+        );
     }
 
     #[test]
@@ -11470,6 +11744,36 @@ mod tests {
                         Some(rectangle(140, 100, 160, 200)),
                     ),
                     (egui::pos2(20.0, 20.0), egui::pos2(300.0, 300.0), None, None),
+                    (
+                        egui::pos2(48.0, 250.0),
+                        egui::pos2(100.0, 250.0),
+                        None,
+                        None,
+                    ),
+                    (
+                        egui::pos2(48.0, 250.0),
+                        egui::pos2(100.0, 250.0),
+                        Some(rectangle(0, 0, 400, 400)),
+                        Some(rectangle(50, 0, 350, 400)),
+                    ),
+                    (
+                        egui::pos2(452.0, 250.0),
+                        egui::pos2(400.0, 250.0),
+                        Some(rectangle(0, 0, 400, 400)),
+                        Some(rectangle(0, 0, 350, 400)),
+                    ),
+                    (
+                        egui::pos2(250.0, 48.0),
+                        egui::pos2(250.0, 100.0),
+                        Some(rectangle(0, 0, 400, 400)),
+                        Some(rectangle(0, 50, 400, 350)),
+                    ),
+                    (
+                        egui::pos2(250.0, 452.0),
+                        egui::pos2(250.0, 400.0),
+                        Some(rectangle(0, 0, 400, 400)),
+                        Some(rectangle(0, 0, 400, 350)),
+                    ),
                     (
                         egui::pos2(250.0, 250.0),
                         egui::pos2(250.0, 250.0),

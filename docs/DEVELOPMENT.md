@@ -4,6 +4,19 @@
 
 ## 1. 最初に試す
 
+### 選択範囲のkeyboard／UIA操作（2026-09-07 11:48 JST）
+
+画像・動画のSelect whole media（既定Ctrl+A）をEdit/menu/palette/custom bindingへ加え、既存の四辺へpixel Sliderを公開した。選択作成はdirtyにせず左辺へfocusし、Tab・矢印・Home/Endと数値操作から既存crop/Undoへ接続する。readingでは無効、検索欄のCtrl+Aは文字選択のまま。新しいtoolbarや常設panel、runtime/dependencyは追加していない。
+
+- baseline `7E198DCB66E9B2809E3C7D242A3EFC41A1918250A1E93397395CC674B266F08B`、PID 32144（開始UTC 2026-09-07T02:26:00.5325245Z）には選択の名前付き操作がなく、新規回帰も同じ欠落で失敗した。foreground取得に失敗した二回はkeyを送っておらずCtrl+Aの実測とは扱わない。baselineはcleanで通常終了。
+- 最終通常releaseはSHA-256 `11FD1824A03D313820ED8FDCB6CD40825B2BE94251224579A3A9523B553AB9C2`。画像PID 17468（02:47:13.5057273Z）、動画PID 40944（02:48:02.5986783Z）。既存menuのUIA Invokeから全体選択を作り、その後は同一PID/開始時刻とforegroundを照合したkey入力・取得済みRangeValuePatternで操作した。
+- 600×800 PNGで四辺を101/499/120/680へ設定し、crop後の再選択が398×560を公開すること、Undo後600×800・cleanへ戻ることを確認。Tabが左辺から右辺へ移り、各矢印は1 pixel、逆転要求は元の値を保持する。回転後は800×600へ追従し、未保存確認中の取得済み値操作はElementNotEnabledException、Cancelで編集保持、Undoで復帰した。選択の値変更中は同じRuntimeIdを維持する。
+- 動画は1920×1080、2 pixel step。奇数の数値要求を偶数へ丸め、左辺のRight後104/1820/102/980から1716×878へcropし、Undo後1920×1080・cleanへ戻った。SpaceによるPauseも選択focus中に使える。画像・動画ともSaveせずsourceを保持し、最終両windowは正常終了した。短いD3D11VA診断は長時間性能やCPU-transfer gateの再測定ではない。
+- pointerでは全体選択の画像端handle中心の丸めで外側に落ち、dragが始まらない問題も再現した。既存辺のhitだけはsurface内の画像外側から許可し、新規選択は引き続き画像内からに限定する。四辺×画像/動画×4通りのevent配送を回帰に追加し、最終画像windowでも左辺の外側2pxからのdrag→Escape→Ctrl+Aが通過した。surface自体のclipを越える操作やzoomで画面外となる辺のfocus追従までは確認していない。
+- 最終画像windowでpaletteへrotateを入力、Ctrl+A→cropへ置換してからEscapeを押しても、元のselection左辺100pxは保持された。focus枠・既存shade/handleの最終owned capture `target/tmp/h1-selection-complete-focus.png`を目視確認した。
+- 試作中のinput lock内focus照会はdebug回帰で停止を検出し、照会をlock外へ移して修正した。中間image PID 32096のcrop寸法を一時statusのUIA文字から読む試験は成功証拠から除外し、同じprocessを再確認してから実際のcrop後pixel boundsで検証し直した。描画整理前のPID 33400/24404を含め、中間windowもすべてUndo後に通常終了した。
+- 最終format・Clippy・259 tests・debug/release buildは通過、既存live ignore 3件は未実行のまま。PNG SHA-256 `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`、動画 `DC645595A1165506BF5C3E685B14D7EA3B0116BBDFE74839E7DA5834CF60DA0C`は前後同一。helper/log/captureはignoredの`target/tmp/h1-selection*`。clipboard/OS設定変更なし。screen reader全体、実入力/DPI/device、最終候補の性能/保存・配布・owner受入は未完了。
+
 ### 32967f9 releaseの30分再生再測定（2026-09-07 11:19 JST）
 
 通常releaseの同一processで4K60 H.264/AACをEOFまで連続再生した。PID 44652、開始UTC 2026-09-07T01:44:14.9795225Z、EOF観測11:14:28 JST（起動後1813.7秒）。adapter `00000000:000146b5`、D3D11VA、960×576、1倍、アプリ内mute、UIA tree取得なし。Seek・pause・再起動・並行したbuildや重い試験はない。事前hash済みsourceなのでcold-storage試験ではない。

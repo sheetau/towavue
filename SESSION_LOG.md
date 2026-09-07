@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 11:48 JST - make visual selection reachable from keyboard and accessibility
+
+- Trigger/intent: previous turn is progress; 5003cdd CI 34076127069 succeeds. Native baseline has no named selection controls and a new regression fails on the missing edge. Preserve existing selection/crop semantics instead of adding a panel.
+- Change: add visual-only SelectAll with configurable Ctrl+A and shared menu/palette dispatch; expose four tab/path-stable pixel sliders with ordered numeric requests, focus keys, range rejection and modal/overlay exclusion. Selection does not create dirty history; crop/Undo and video minimum dimensions remain unchanged. A native edge miss also exposes the outside half of an existing image-boundary handle; permit existing-edge hits there while rejecting new selections from outside.
+- Iteration/verification: debug regression catches nested input/focus locking; move the focus read outside the input lock. Expanded sparse-input regression fails on the outside-edge hit, then passes all four edges/media/delivery variants. Preserve original selection painting/clip in final review. Nine selection tests, 259 workspace tests, format, Clippy and both builds pass; three existing live ignores remain.
+- Native: final normal image PID 17468 verifies cached values/identity, Tab/arrows, 398x560 crop/Undo, rotated bounds, disabled SetValue rejection, dirty Cancel, outside-edge pointer drag and palette text Ctrl+A isolation. Video PID 40944 verifies even-pixel values, paused crop to 1716x878 and Undo. DEVELOPMENT records exact starts/hashes and excludes foreground misses and the invalid transient-status UIA assertion from success evidence.
+- Cleanup/areas: all seven baseline/intermediate/final windows close normally; Undo every trial edit, preserve both source hashes, inspect final owned focus capture. No Save, clipboard or OS-setting changes. App/core command/UI code and README/ARCHITECTURE/DEVELOPMENT/KNOWN_GAPS/ROADMAP change; no runtime or dependency changes.
+- Status/next: h1_active; prepare this coherent checkpoint for push. Audit focus/reveal when selection edges leave the viewport at zoom, then complete screen-reader/focus workflows. Preserve physical-input/DPI/device, final-candidate save/performance, distribution and owner-design-acceptance gates; these controlled UIA checks are not launch completion.
+
 ## 2026-09-07 11:23 JST - complete the current release long playback gate
 
 - Trigger/intent: the immediate permission-only turn made no project progress. Revalidate the worktree, persisted measurements and the same live process before continuing; 9bfc6f8 CI 34074097655 succeeds. No production changes.

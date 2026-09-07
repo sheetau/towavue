@@ -20,6 +20,8 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 
 playlistの行へfocusした時は上下で前後、Home/Endで先頭/末尾、PageUp/PageDownで一画面分を移動できます。画面外の行は必要な分だけscrollして表示します。移動だけでは曲を変えず、Enter/Spaceで選曲し、未保存編集があれば確認します。
 
+filmstrip・palette・grid・menuや確認画面を開いている間は、背景のplaylistを操作せず、hoverの説明も表示しません。閉じると通常の一覧操作へ戻ります。filmstrip自身の選曲は引き続き利用できます。
+
 playlistの可視行とfilmstripの可視項目はUI Automationから選択できます。フォルダー更新で位置が変わっても操作対象は同じパスを保持し、名前とフルパス・現在項目の説明を公開します。filmstripはfocus中にも枠と名前を表示します。画面外の全項目を支援技術だけで辿る操作の検証は未完了です。
 
 filmstripのTab/Shift+Tab移動では、切替後の現在項目へfocusも移ります。未保存確認でCancelした場合は元の項目へ戻り、項目にfocusがあってもEscape一回でfilmstripを閉じられます。

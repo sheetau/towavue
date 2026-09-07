@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 10:34 JST - block playlist interaction behind overlays
+
+- Trigger/intent: previous turn is progress; 50b209d CI 34044338058 succeeds. Investigate the background playlist hover visible behind filmstrip.
+- Evidence/change: native baseline allows a background click to select 002 and cached UIA Invoke to select 003. Disable the playlist Ui for its existing overlay/modal conditions and menu popups, preserving opacity, IDs/layout and the foreground controls. No separate tooltip or runtime changes are needed.
+- Verification: new regression initially fails on an enabled background row, then passes five overlay conditions for disabled state, bounds, pointer/Invoke rejection, absent tooltip and restored same-ID action. Correct a synthetic-popup lifetime issue in the fixture and remove the unnecessary tooltip draft. Seven playlist tests, 256 workspace tests, format, Clippy and both builds pass; three existing live ignores remain.
+- Native/cleanup: final normal PID 42088 retains 001 after the background click, rejects cached Invoke as ElementNotEnabledException, permits filmstrip selection of 002 and restores cached playlist selection of 003 after Escape. Inspect the owned capture; DEVELOPMENT records binary/process identities. Both windows close normally. Reuse silent fixtures; no Save/clipboard/original-media/OS-setting changes.
+- Status/next: h1_active; prepare this coherent checkpoint for push. Continue selection/focus workflow coverage and remaining real-environment, final-candidate, distribution and owner-acceptance gates; this audio-overlay correction is not launch completion.
+
 ## 2026-09-07 01:04 JST - align filmstrip keyboard focus with navigation
 
 - Trigger/intent: previous turn is progress; 1d64216 CI 34043801020 succeeds during this turn. Native baseline shows Tab changes 001 to 002 but leaves focus on 001.

@@ -4,6 +4,13 @@
 
 ## 1. 最初に試す
 
+### overlay中の背景playlist操作（2026-09-07 10:34 JST）
+
+- 50b209d CI 34044338058は成功。前回captureの背景hoverを調べ、基準release `294DCD4ED37A2476F600713CEFE60146ADBAE59A388E55E6850F893C8219EAE4`、PID 45748（開始UTC 2026-09-07 01:26:38.7421313Z）でfilmstrip中の背景行がenabled、pointer clickで002、cached UIA Invokeで003へ選曲できることを確認した。
+- playlistの既存wheel制限をUi全体の入力可否へ揃え、menu popupも含める。opacityを保持して配置/暗幕を変えない。回帰は背景enabledで失敗し、修正後はfilmstrip/palette/grid/modal/popupの5条件で同じID/位置、disabled、click/Invoke拒否、tooltip不在と解除後の再有効化が通過。途中のtooltip失敗はsynthetic popupが維持されない試験条件が原因だった。fixtureを修正し、不要だったtooltip側の実装変更は取り除いた。
+- 最終release `7E198DCB66E9B2809E3C7D242A3EFC41A1918250A1E93397395CC674B266F08B`、PID 42088（01:33:15.0284285Z）では背景click後も001を保持し、cached InvokeはElementNotEnabledException。filmstripの002は選曲でき、Escape後は同じcached playlist参照から003へ移動できた。所有capture `target/tmp/h1-playlist-overlay.png`で背景行のhover枠/tooltipがないことを目視確認した。
+- 7 playlist tests、256 workspace tests（app 140/core 36/runtime 76/integration 4）、format、Clippy、両buildが通過。既存live ignore 3件は残る。両windowは正常終了し、既存silent fixtureを使用、Save/clipboard/原本/OS設定変更なし。ログのSoftware path/zero video metricsは性能gateではない。全screen reader/selection、実入力/DPI/device・最終候補/配布gateは継続する。
+
 ### filmstripのTab focus追従とEscape（2026-09-07 01:04 JST）
 
 - 前turnの1d64216はpush済み、作業開始時worktreeはclean。CI 34043801020は作業中に成功。基準release `7A9A6585AC63BBBC7284443333811F67E4F398E91535DCDD2C05115D161FDE3C`、PID 43388（開始UTC 2026-09-06 15:56:32.4766748Z）で所有50曲のfilmstrip 001へUIA Focus後、Tabで002を再生してもfocusは001に留まった。

@@ -2878,15 +2878,21 @@ where
     }
 
     fn draw_audio_playlist(&mut self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
-        let allow_wheel = !self.modal_input_blocked()
+        let enabled = !self.modal_input_blocked()
             && !self.palette_open
             && !self.grid_open
-            && !self.filmstrip_open;
+            && !self.filmstrip_open
+            && !egui::Popup::is_any_open(ui.ctx());
+        if !enabled {
+            let opacity = ui.opacity();
+            ui.disable();
+            ui.set_opacity(opacity);
+        }
         if let Some(path) = self.playlist.show(
             ui,
             self.folder_snapshot.as_ref(),
             self.path.as_deref(),
-            allow_wheel,
+            enabled,
         ) {
             actions.push(UiAction::OpenMedia(path, false));
         }
@@ -5303,6 +5309,136 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playlist_overlays_block_background_actions_and_hover_without_changing_rows() {
+        let Some(root) = isolated_test_root(
+            "tests::playlist_overlays_block_background_actions_and_hover_without_changing_rows",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let paths: Vec<_> = (1..=3)
+            .map(|index| root.join(format!("{index:03}.wav")))
+            .collect();
+        app.path = Some(paths[0].clone());
+        app.media_kind = Some(MediaKind::Audio);
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root,
+            items: paths
+                .iter()
+                .map(|path| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![]),
+                    path: path.clone(),
+                    kind: MediaKind::Audio,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let popup_active = std::cell::Cell::new(false);
+        let frame = |app: &mut Application<_>, events| {
+            if popup_active.get() {
+                // This focused test has no menu widget to keep the synthetic popup open.
+                egui::Popup::open_id(&context, "playlist-test-menu".into());
+            }
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 240.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_audio_playlist(ui, &mut actions),
+            );
+            (output, actions)
+        };
+        frame(&mut app, vec![]);
+        let output = frame(&mut app, vec![]).0;
+        let (id, row) = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree")
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("3. 003.wav"))
+            .expect("row");
+        let id = *id;
+        let bounds = row.bounds();
+        let click = || {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: id,
+                data: None,
+            })
+        };
+        for overlay in 0..5 {
+            app.filmstrip_open = overlay == 0;
+            app.palette_open = overlay == 1;
+            app.grid_open = overlay == 2;
+            app.pending_guard = (overlay == 3).then_some(GuardedAction::Exit);
+            popup_active.set(overlay == 4);
+            let output = frame(&mut app, vec![]).0;
+            let row = &output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
+                .iter()
+                .find(|(candidate, _)| *candidate == id)
+                .expect("same row")
+                .1;
+            assert!(
+                row.is_disabled(),
+                "background row must be disabled for overlay {overlay}"
+            );
+            assert_eq!(row.bounds(), bounds, "overlay must not change row layout");
+            assert!(frame(&mut app, vec![click()]).1.is_empty());
+            let pos = egui::pos2(200.0, 88.0);
+            for _ in 0..3 {
+                let (output, actions) = frame(&mut app, vec![egui::Event::PointerMoved(pos)]);
+                assert!(actions.is_empty());
+                assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "003.wav")), "no background tooltip for overlay {overlay}");
+            }
+            for pressed in [true, false] {
+                assert!(
+                    frame(
+                        &mut app,
+                        vec![egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE
+                        }]
+                    )
+                    .1
+                    .is_empty()
+                );
+            }
+            app.filmstrip_open = false;
+            app.palette_open = false;
+            app.grid_open = false;
+            app.pending_guard = None;
+            popup_active.set(false);
+            egui::Popup::close_all(&context);
+            frame(&mut app, vec![egui::Event::PointerGone]);
+            assert!(
+                frame(&mut app, vec![click()]).1 == [UiAction::OpenMedia(paths[2].clone(), false)]
+            );
+        }
+    }
 
     #[test]
     fn accessibility_modal_blocks_background_and_preserves_guard_decisions() {

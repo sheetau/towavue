@@ -7,6 +7,17 @@
   "image_digest": "sha256:d1d34e5bb498e76cea19ee671301b7864d7e22fd806746324138c0870f253d01",
   "target_base_digest": "sha256:033e9c42838fccb3b56984a9075ce87b9ab2491ac9c7f53b5070b8b42596ce16",
   "cache_filename_hash_semantics": "SHA256 of the emitted download command, not archive content.",
+  "notice_inputs": "ffmpeg-notice-inputs.json",
+  "raw_recipe_archive": {"path":"vendor/ffmpeg/recipe-8267213e26c1031621e6e1210fe3aa4867214f6a.tar","bytes":716800,"sha256":"dc162c7511d6c005aa1f8d3f4dcfd6df88d1ef28f996e302fc57eff6ab3315c8","method":"git archive of the fixed commit; preserves original LF bytes unlike the Windows checkout with core.autocrlf=true."},
+  "patch_verification": "Raw fixed-commit patch bytes pass ordered git apply --check against selected unchanged regular entries from the corresponding cache archives. CRLF checkout copies fail the AOM check. No patch application, git am hooks or upstream build scripts execute; this is applicability evidence, not a rebuilt-binary comparison.",
+  "patches": [
+    {"path":"patches/aom/0001-Fall-back-to-built-in-vmaf-model-on-load-failure.patch","bytes":714,"sha256":"c3b757903be9b98b52b23ac40f7c49dd562cd999b5151890d19dfaf82f40ddb0","git_blob_sha1":"fa42e62794379b04bf2c6d8f76c73b78245bc4f1"},
+    {"path":"patches/aribb24/12.patch","bytes":1511,"sha256":"9059639e9577b123ac4ab3b53771e947b791c42d07b0444cf90e82f563d6d261","git_blob_sha1":"c55bf234363e5bf9d17da9f481339c91288922c6"},
+    {"path":"patches/aribb24/13.patch","bytes":713,"sha256":"4812661f1c77ec06a5a12548f166ac8646d4c7c1574848a005f0578f3d8cfc7c","git_blob_sha1":"30d17ba54b55987d4e9340861425b4d004942371"},
+    {"path":"patches/aribb24/17.patch","bytes":6204,"sha256":"1a4fc77f677a6ff87d024e3a218186160b23620c84dbd791ec5c425de0a8e6c2","git_blob_sha1":"5961b2ec9aa592710f9a55ffc8422a02204c51fd"}
+  ],
+  "compiler_runtime_evidence": {"binary_compiler":"gcc 15.2.0 (crosstool-NG 1.28.0.23_185f348)","gcc_release_commit":"5115c7e447fc07457443df874bf57840e8316d5f","recipe_flags":["-static-libgcc","-static-libstdc++"],"binary_extra_libs":"-lgomp","status":"Collect applicable GCC runtime notices and exception text separately from the 78 dependency archives; the compiler identity alone does not prove every object or redistribution condition."},
+  "rav1e_dependency_gap": "The fixed recipe runs cargo update cc before cargo cinstall. The cached source Cargo.lock is therefore not proof of the effective complete build graph. The observed image job log has no matching cc update/download/compile lines (cached stage); do not replace this evidence with a current network resolution or towavue's MSVC dependency inventory.",
   "source_content_verification": "All 78 referenced regular archives retrieved and SHA256 recorded. 74 root Git HEADs read; all 71 full-hash recipe references match. Three tag names appear in cached FETCH_HEAD; resolved HEADs recorded. Five nested OpenCL/nv-codec repository HEADs match recipe references. LAME SVN NODES has revision 6761 on all 449 rows. AMF download recipe removes .git and Thirdparty; all 577 remaining file blobs match the fixed upstream Git tree. HEAD checks do not verify complete worktrees, patches or submodules.",
   "source_cache": {
     "artifact_id": 9892918840,

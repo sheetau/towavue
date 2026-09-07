@@ -63,6 +63,23 @@ cacheには115個の実archiveと115個のsymlink aliasがある。pathとentry�
 
 LAMEのSVN databaseはメモリ内・query-onlyで読み、rootと全449 NODES行のrevision 6761を確認した。AMFはdownload recipeが`.git`とThirdpartyを除去する。23:03 JSTの追加照合で、残る577 fileすべてのGit blob hashが固定commitのtreeと一致し、欠落・追加・不一致はなかった。14 archiveにsubmodule manifestがあり、他のroot HEAD照合だけではsubmoduleやworktree内容の完全性を証明しない。内側entryの読取り以外に、sourceのbuild scriptは実行していない。
 
+### 原本patchとnative通知の抽出（2026-09-07 23:24 JST）
+
+Windows上のrecipe checkoutは`core.autocrlf=true`によりpatchをCRLFへ変換していた。AOMの適用checkはそのcopyで失敗し、固定commitのraw blobでは成功した。上流patchの不整合とは扱わず、build/source資料には`git archive`で作った改行変換なしのrecipe archiveを使う。保存先・SHA256と4 patchの原本hashは[ffmpeg-build-inputs.json](ffmpeg-build-inputs.json)に記録した。
+
+AOM 1 patchとARIB B24の12→13→17の3 patchは、cache内の対象fileを変えない`git apply --check`を通過した。これは適用可能性の確認であり、実際のgit am・autoreconf・buildや完成binaryの再現ではない。ARIBのconfigure.acのversion書換えなど、patch file以外の処理もraw recipeに含めて保持する。
+
+[ffmpeg-notice-inputs.json](ffmpeg-notice-inputs.json)は、78 archiveを内部展開せず走査したnative通知資料の入力一覧である。
+
+- 名前で検出した385 fileのうち、通知本文でないxzの`build-aux/license-check.sh`を除いた384 fileを記録した。nested/test/build資料も含む発見一覧であり、すべてが最終DLLへ組み込まれたという意味ではない。
+- named fileがないnv-codec-headersは、FFmpeg 9向けに選ばれた系列の5 headerに通知全文があった。各headerのhashと、先頭commentのoffset・長さ・hashを記録した。このheader向け許諾をNVIDIAのdriverやSDK全体へ拡張した表示にしない。
+- 原文は`target/tmp/native-notice-audit-3np__jt8/texts/<SHA256>.txt`へbyte単位で保持した。LCMS AUTHORS、OpenJPEG viewer notice、OpenMPT内LuaSocket notice、rav1e PATENTSの4 fileはUTF-8ではない。Windows-1252での表示を確認したが、元のencodingを断定したり、不正byteを置換して本文を欠落させたりしない。
+- reflogとremote refを除いたroot/nested/module HEADは117件あった。submoduleの未取得・build時の追加取得やgitlinkとの照合が残るため、HEAD一覧だけをsource全体の完成証明としない。
+
+追加で確認すべきcompiler/runtime資料も切り分けた。固定ffmpeg.exeはGCC 15.2.0 / crosstool-NG 1.28.0.23_185f348を表示し、base-win64 recipeにはstatic-libgcc/static-libstdc++、binaryのconfigurationには`-lgomp`がある。これらの適用notice・GCC runtime exception資料は78 archiveとは別に収集する。
+
+またrav1e recipeは`cargo update cc`後にstatic libraryをbuildする。元cacheのCargo.lockだけでは更新後の完全な依存集合を証明しない。元image jobのlogにもccのupdate/download/compile行はなく、現在のnetwork解決で当時のversionを推測しない。rav1e側の依存と、下記towavue本体のMSVC向け146 packageは別物であり、前回のRust本文集で代用しない。
+
 ## Rust依存と組み込みフォント（2026-09-07 22:48 JST）
 
 [rust-license-inputs.json](rust-license-inputs.json)にWindows x86-64向けの依存とライセンス資料の取得元を記録した。`cargo metadata --locked --offline --filter-platform x86_64-pc-windows-msvc`からtowavue-appのnormal/build依存を辿り、dev-only edgeを除いた146 packageが対象である。build用packageも含むため、最終binaryのlinked-runtime SBOMとは呼ばない。

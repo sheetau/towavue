@@ -161,6 +161,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 - `crates/towavue-app/src/main.rs`へevent loop、UI描画、input、tab orchestration、preview worker連携、export flowが集中している。UI反復で競合と回帰範囲が広がるため、変更対象が固まった単位から挙動を変えずに分離する価値がある。
 - AppのUI testはH1でegui描画・pointer・palette focus・modalの回帰を追加した。確認画面は長文とwindow縮小/復元時の操作labelの非clip・Cancel/OK clickも検証する。実OSのIME・混在DPIやtab dragなどの操作matrix全体を自動testで保証してはいない。
+- 現在tabの未保存確認Cancel後は、元の操作部へfocusを戻す。通常画像/動画の四辺、画像の実Save As取消→確認Cancelと、回帰での描画前再確認・隣tabへの古いfocus非復帰を確認した。全modal・全screen readerのfocus横断確認ではない。
 - 対応拡張子、file dialog filter、実decoder能力、export codec選択の関係を一つのcapability modelへ統一していない。拡張子を増やすだけでは対応完了にならない。
 - Loading、empty、error、unsupported capabilityのstate表現が各所のstatus textへ分散している。UX改善時には表示だけでなくstate transitionをcoreでtest可能にする余地がある。
 - duration・waveform・hover thumbnailはH1で各種類1本の常設worker、実行中1件＋最新待機1件へ制限した。media切替/closeでは未開始要求を破棄し、owned child processも取り消す。種類間の優先度制御や進行中のnative I/Oの強制中断はない。filmstripは可視集合の最新要求を別の単一workerで処理する。

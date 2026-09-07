@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### 未保存確認Cancel後のfocus復帰（2026-09-07 12:32 JST）
+
+現在tabの未保存確認を開く時にwidget/tabのidentityを一件保持し、取消後、eguiの前passのmodal制限が消えてから一回だけfocusを戻す。確認中の再要求・復帰描画前の再open・Save As取消で上書きせず、離脱確定やmedia loadでは破棄する。全modalの共通focus stackを追加する変更ではない。
+
+- 9dce606通常release `3CB71A59516DFB2E66ABA302C9489B2C580FBC81CEA6058D3D3400CFDC602986`、画像PID 32316（開始UTC 2026-09-07T03:20:12.5813341Z）でR→Ctrl+A→各辺Focus→Ctrl+W→EscapeまたはCancel Invoke。編集と値は残るが四辺ともfocusが失われた。app回帰でも同じ失敗を再現した。
+- 最初の直接request_focusは、前passのmodal制限によって次の描画で消えることを回帰で検出。解除後の描画まで保持するよう修正した。中間通常PID 13544（03:24:51.5622632Z、binary `25EC3CCD1AD04C66B45B34D05654E234D7950D35DEDC4CB9B01DEDD3E15F9B8F`）で四辺の往復が通過。さらにCancel直後、復帰描画前の再確認で保持IDを失う回帰を追加して修正した。
+- 追加回帰前の通常release `B25156091D6EA4FC7F57B8F36B6C3311F0F197D7CF20BEC774673511E73D70C5`、画像PID 49880（03:27:05.5321050Z）と動画PID 4532（03:28:02.7561199Z）で四辺の同手順が通過。確認中は背景Slider無効、Cancel後は元の辺を画像1px・動画2pxずつ調整でき、回転編集とmediaを保持した。
+- 画像ではExport and continue→実Save AsのEscape→確認Cancelも確認し、右辺focusとdirty編集を保持。file名の入力・保存は実行していない。owned capture `target/tmp/h1-guard-return-focus.png`で右辺focus枠を確認し、落ち着いた後の5秒CPU時間増分は0秒だった。性能gate全体の再測定ではない。
+- 回帰はegui EscapeとResolveGuard Cancel、4倍画像のfocus/reveal、確認中の再要求、描画前の再open、非同期picker取消callback、矢印・履歴保持、Discard後の隣tabへ旧focusを持ち込まないことを検証。260 workspace tests、format・Clippy・両buildが通過。既存live ignore 3件は未実行。9dce606 CI 34079199258も成功。
+- 隣tab復帰の追加回帰後、必須checkを再実行し、最終通常releaseのhashは`D263A831F4554302B5E92A13A67BEE66F7D720D7A686F5BFC7CDBD02107BB851`となった。このbinaryの画像PID 22044（03:31:25.1240169Z）と動画PID 29036（03:32:15.9901566Z）でも四辺の同手順を再確認し、画像は実Save As取消からの復帰も通過。最終owned capture `target/tmp/h1-guard-return-verified-focus.png`を目視確認し、画像の5秒idle CPU増分も0秒だった。
+- 全六windowで試験用回転をUndoして通常終了。画像stderrは空、動画はD3d11va選択診断のみ。PNG hash `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`、動画 `DC645595A1165506BF5C3E685B14D7EA3B0116BBDFE74839E7DA5834CF60DA0C`は不変。helper/logはignoredの`target/tmp/h1-guard-return*`。Save・clipboard・OS設定変更なし。全screen reader、実入力/DPI/device、最終候補保存/性能、配布・外観受入は引き続き未完了。
+
 ### パレット取消後の選択操作を継続（2026-09-07 12:18 JST）
 
 選択辺をfocus→Ctrl+Shift+P→検索→Escape→矢印というflowで、取消後に元の辺へfocusを戻す。保持するのは直前のwidget ID一件だけで、command実行・file dropでは破棄する。全modalのfocus stackやscreen reader全体を実装したものではない。

@@ -76,6 +76,8 @@ Ctrl+Tab／Ctrl+Shift+Tabでtabを前後に切り替えます。filmstripを開�
 
 保存確認のEscapeは編集を保持してCancelします。Tab／Shift+Tabでbuttonを選び、Enter／Spaceで実行できます。export失敗ではエラー通知だけを閉じ、保留中の保存確認は残ります。背景クリックで保存・破棄・確認解除は行いません。
 
+現在tabの未保存確認をCancelすると、確認前の操作部へfocusも戻します。選択辺の矢印調整を続けられ、保存先選択を取り消してから確認をCancelした場合も同じです。別のmediaへ移った場合は古いfocusを戻しません。
+
 保存確認やエラー通知中は、UI Automationからの背景操作も拒否します。paletteなどのoverlayは状態を保って一時的に隠し、Cancel後に通常操作へ戻ります。
 
 Cancel exportは保留中の自動終了・移動を止めます。保存の確定前なら既存出力と未保存編集を保持します。取消より先に保存が完了した場合は、その保存済み出力を残します。

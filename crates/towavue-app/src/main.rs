@@ -588,6 +588,7 @@ struct Application<N> {
     palette: palette::CommandPalette,
     status_message: Option<(String, Instant)>,
     pending_guard: Option<GuardedAction>,
+    guard_return_focus: Option<(TabId, egui::Id)>,
     exit_requested: bool,
     prefer_hardware_encode: bool,
 }
@@ -698,6 +699,7 @@ where
             palette: palette::CommandPalette::default(),
             status_message: None,
             pending_guard: None,
+            guard_return_focus: None,
             exit_requested: false,
             prefer_hardware_encode: false,
         })
@@ -808,6 +810,7 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.guard_return_focus = None;
         self.playlist.clear();
         self.cancel_view_drag();
         self.playback_error = None;
@@ -1413,6 +1416,18 @@ where
         self.video_rect = None;
         let context = root.ctx().clone();
         let modal_blocked = self.modal_input_blocked();
+        if !modal_blocked && self.guard_return_focus.is_some() {
+            if context.memory(|memory| memory.top_modal_layer().is_none()) {
+                if let Some((tab, id)) = self.guard_return_focus.take()
+                    && self.tabs.active().is_some_and(|active| active.id == tab)
+                {
+                    context.memory_mut(|memory| memory.request_focus(id));
+                }
+            } else {
+                // egui retains the previous pass's modal layer until the next pass ends.
+                context.request_repaint();
+            }
+        }
         if modal_blocked {
             let opacity = root.opacity();
             root.disable();
@@ -3806,6 +3821,15 @@ where
                 .find_map(|(id, history)| history.is_dirty().then_some(*id)),
         };
         if let Some(id) = dirty {
+            if self.pending_guard.is_none() && self.guard_return_focus.is_none() {
+                self.guard_return_focus = self
+                    .tabs
+                    .active()
+                    .filter(|tab| tab.id == id)
+                    .and(self.ui_context.as_ref())
+                    .and_then(|context| context.memory(|memory| memory.focused()))
+                    .map(|focus| (id, focus));
+            }
             if self.tabs.active().is_none_or(|tab| tab.id != id) {
                 self.activate_tab(id);
             }
@@ -3832,6 +3856,7 @@ where
     }
 
     fn perform_guarded(&mut self, action: GuardedAction) {
+        self.guard_return_focus = None;
         match action {
             GuardedAction::CloseTab(id) => self.close_tab_unchecked(id),
             GuardedAction::DetachTab(id) => self.detach_tab_unchecked(id),
@@ -5809,21 +5834,22 @@ mod tests {
         );
         app.dispatch(CommandId::SelectAll);
         let frame = |app: &mut Application<_>, events| {
-            context
-                .run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(960.0, 576.0),
-                        )),
-                        events,
-                        ..Default::default()
-                    },
-                    |ui| app.draw_ui(ui, &mut Vec::new()),
-                )
-                .platform_output
-                .accesskit_update
-                .expect("tree")
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            for action in actions {
+                app.handle_ui_action(action);
+            }
+            output.platform_output.accesskit_update.expect("tree")
         };
         frame(&mut app, vec![]);
         let tree = frame(&mut app, vec![]);
@@ -6093,6 +6119,66 @@ mod tests {
         frame(&mut app, vec![]);
         visible(&frame(&mut app, vec![]), 0);
         assert!(app.palette_return_focus.is_none());
+        app.push_edit(EditOperation::FlipHorizontal);
+        app.dispatch(CommandId::SelectAll);
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![key(egui::Key::Tab)]);
+        let history = app.edits[&tab].clone();
+        for escape_event in [true, false] {
+            assert_eq!(frame(&mut app, vec![]).focus, ids[1]);
+            let before = app.image_view.selection;
+            app.request_guarded(GuardedAction::CloseTab(tab));
+            frame(&mut app, vec![]);
+            frame(&mut app, vec![]);
+            if !escape_event {
+                let return_focus = app.guard_return_focus;
+                frame(&mut app, vec![key(egui::Key::Tab)]);
+                app.request_guarded(GuardedAction::CloseTab(tab));
+                assert_eq!(app.guard_return_focus, return_focus);
+                app.pending_dialog = Some(DialogIntent::Export {
+                    tab,
+                    source: path.clone(),
+                    kind: MediaKind::Image,
+                    continuation: app.pending_guard.take(),
+                });
+                frame(&mut app, vec![]);
+                app.finish_dialog(Ok(None));
+                frame(&mut app, vec![]);
+                assert!(app.pending_guard.is_some());
+                assert_eq!(app.guard_return_focus, return_focus);
+            }
+            if escape_event {
+                frame(&mut app, vec![key(egui::Key::Escape)]);
+            } else {
+                app.handle_ui_action(UiAction::ResolveGuard(GuardDecision::Cancel));
+            }
+            assert!(app.pending_guard.is_none());
+            if escape_event {
+                app.request_guarded(GuardedAction::CloseTab(tab));
+                frame(&mut app, vec![]);
+                frame(&mut app, vec![]);
+                app.resolve_guard(GuardDecision::Cancel);
+            }
+            frame(&mut app, vec![]);
+            visible(&frame(&mut app, vec![]), 1);
+            assert_eq!(app.image_view.selection, before);
+            let right = crop(&app).x + crop(&app).width;
+            frame(&mut app, vec![key(egui::Key::ArrowLeft)]);
+            assert_eq!(crop(&app).x + crop(&app).width, right - 1);
+            assert_eq!(app.edits[&tab], history);
+            assert_eq!(app.tabs.active().map(|tab| tab.id), Some(tab));
+            assert!(app.guard_return_focus.is_none());
+        }
+        let other = app.tabs.open_new(root.join("other.png"), MediaKind::Image);
+        app.tabs.activate(tab);
+        app.request_guarded(GuardedAction::CloseTab(tab));
+        frame(&mut app, vec![]);
+        app.resolve_guard(GuardDecision::Discard);
+        assert!(app.guard_return_focus.is_none());
+        assert_eq!(app.tabs.active().map(|tab| tab.id), Some(other));
+        for _ in 0..3 {
+            assert!(!ids.contains(&frame(&mut app, vec![]).focus));
+        }
     }
 
     #[test]

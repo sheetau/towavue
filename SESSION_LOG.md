@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 12:32 JST - preserve the invoking focus through unsaved confirmation cancellation
+
+- Trigger/intent: previous turn is progress; clean HEAD 9dce606 and CI 34079199258 success confirmed. Native baseline loses all four selection-edge focuses after Ctrl+W and Escape/Cancel while retaining edits; an expanded regression reproduces it.
+- Change: keep one widget/tab return target for a guard on the current tab. Wait for egui's previous-pass modal restriction to clear before consuming the focus request. Preserve it across repeated confirmation, reopen before the return frame and cancelled Save As; clear on committed leaving or media load. No runtime/dependency changes or general modal stack.
+- Iteration/verification: regression rejects the first immediate-focus implementation and later catches loss on pre-redraw reentry. Final tests cover both Cancel paths, async picker cancellation, resumed arrows, 4x reveal, retained history and Discard into another tab without stale focus. Format, Clippy, 260 tests and both builds pass; three existing live ignores remain.
+- Native/cleanup: after the last regression and rebuilt hash, final normal image PID 22044 and video PID 29036 pass all four edges; image also passes actual Save As Cancel followed by guard Cancel. Inspected owned focus capture and measured settled five-second CPU delta of zero. DEVELOPMENT records all six identities/hashes and earlier trials. Undo each trial rotation and close all windows normally; source hashes unchanged, no Save/clipboard/OS-setting changes. This is not a new broad performance result.
+- Areas/status/next: app main and README/ARCHITECTURE/DEVELOPMENT/KNOWN_GAPS/ROADMAP; h1_active, prepare the verified checkpoint for push. Continue cross-screen keyboard/focus and reading-order workflows, including menu/overlay return and full screen-reader evaluation. Physical-input/DPI/device, final-candidate save/performance, distribution and owner-design acceptance remain open.
+
 ## 2026-09-07 12:18 JST - return focus after cancelling the command palette
 
 - Trigger/intent: the immediately preceding permission acknowledgement made no project progress. Revalidate clean HEAD 88aaa73 and reproduce lost selection focus after palette Escape in native PID 20664 and an expanded regression. Prior CI 34078410677 succeeds.

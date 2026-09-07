@@ -36,12 +36,26 @@ LLVM `llvm-readobj --coff-imports`で本体とFFmpeg bin全fileのPE importを�
 
 - 配布binaryに対応するFFmpeg source一式、build configuration、変更差分と取得可能な公開先。上記releaseのassetはbinary archive群とchecksums.sha256で、対応source一式のassetはない。GitHub自動生成のSource code archiveはFFmpeg-Buildsのrecipeであり、FFmpeg本体と第三者sourceをまとめたものではない。
 - 静的に組み込まれた第三者libraryの正確なrevision・source・patch・license/notice一覧。`--pkg-config-flags=--static`と多数の外部library有効化があり、DLL名一覧だけでは足りない。[packaging recipe](https://github.com/BtbN/FFmpeg-Builds/blob/8267213e26c1031621e6e1210fe3aa4867214f6a/variants/windows-install-shared.sh)はFFmpegのheaders/docs等をcopyするが、第三者source一覧を同梱せず、pkg-configのLibs.private行も除く。
-- build時のdependency image/toolchainとrecipeの対応。release tagを現在cloneしてbuildするだけで既存binaryを再現できるとはまだ確認していない。
+- build時のdependency source内容とtoolchainの確認。下記の追跡でimage digestとrecipeの対応は判明したが、release tagを現在cloneしてbuildするだけで既存binaryを再現できるとはまだ確認していない。
 - towavue自身のCargo.lockに固定されたRust依存のlicense/notice一覧。FFmpeg側の調査で代用しない。
 
 特許関連の扱いも著作権licenseとは分ける。固定[OpenH264 recipe](https://github.com/BtbN/FFmpeg-Builds/blob/8267213e26c1031621e6e1210fe3aa4867214f6a/scripts.d/50-openh264.sh)はcommit `98bc7cbbeb7381c94ef8f9a5d158327abbf6b8b9`をsourceから静的buildする。[Cisco公式FAQ](https://www.openh264.org/faq.html)のCisco配布binaryに関する費用負担を、この別buildへ自動適用できるとは扱わない。具体的な配布条件で必要な判断を行い、全codecの特許問題がないとは宣言しない。
 
 上流READMEは日次buildを直近14件だけ保持する方針である。再配布条件を満たしたsource/binaryを自分たちのreleaseで保持する手順が必要で、期限付きの上流URLだけに依存しない。現在のarchiveはローカルvendorに保持しているが、Gitやreleaseへのbinary/source公開はまだ行っていない。
+
+### 対応buildとsourceの取得（2026-09-07 22:31 JST）
+
+[上流run 33754284571](https://github.com/BtbN/FFmpeg-Builds/actions/runs/33754284571)のHEADは上記recipe commitと一致する。image job `100646797043`の生成digestと、FFmpeg job `100652840136`がpullしたdigestは、ともに`sha256:d1d34e5bb498e76cea19ee671301b7864d7e22fd806746324138c0870f253d01`。FFmpeg jobの出力名も固定archiveと一致する。imageのtarget baseは`sha256:033e9c42838fccb3b56984a9075ce87b9ab2491ac9c7f53b5070b8b42596ce16`である。
+
+image jobが参照したsource cacheとrecipe内のrepository/revisionを[ffmpeg-build-inputs.json](ffmpeg-build-inputs.json)へ記録した。78件は実際のbuild-stage入力参照であり、最終DLLに組み込まれた全componentのSBOMではない。ファイル名内のhashはdownload command文字列のhashであって、source archiveの内容hashではない。OpenSSL、Vulkan-Headers、Mbed TLSはtag指定、LAMEはSVN revision 6761であり、取得内容との追加照合が必要である。
+
+ローカルへ保存・確認したもの（すべてGit対象外）:
+
+- recipe: `vendor/ffmpeg/build-recipe-20260903`、固定commitのclean checkout。build/download script自体は実行していない。
+- FFmpeg本体: `vendor/ffmpeg/source-e47273f4d9227152dcbf543cebaf9e2430ddbcc4.tar.gz`、17323649 bytes、SHA256 `6491DAE95E3CF3CDBAC02933B55860E782B0C4F0A6BD8F37CEF30FDED259283C`。commit指定のGitHub codeloadから取得し、configureとGPLv3/LGPLv3本文のentryを確認した。第三者sourceはこのarchiveに含めた扱いにしない。
+- build record: artifact `9893172856`、`target/tmp/ffmpeg-image-record-20260903/build-record.download`、245291 bytes。SHA256 `95B4D5C136589460A348EADC77510859F14744F8DE0805CAB33AC99685A017D8`はAPIのartifact digestと一致し、上記image manifestを含む。これはimageの全layerそのものではない。APIのURL末尾はzipだが実体はgzipのOCI archiveで、通常のgh展開が拒否した後、raw downloadのhashとtar entryで確認した。
+
+同じrunにはsource取得cache artifact `9892918840`（download-cache、2024951640 bytes、API digest `sha256:0fc20317ded7bc2aef7fdac1f085ffb8be435ae143ac78bc46ac3b6ae9d3fd83`）も残っている。取得処理は継続中で、この時点では内容hash・78件の収録・実revision・license本文の検証は未完了。cacheの先頭がZIPであることだけでは全体取得成功としない。取得後も、aom/aribb24のpatchやscript中の変更、submodule・build tool依存を別途照合する。
 
 ## Visual C++ runtime
 

@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 22:31 JST - recover upstream FFmpeg build provenance and start source-cache retrieval
+
+- Trigger/intent: previous turn is progress; clean pushed 04fc528 confirmed. Trace the fixed binary to its original dependency image and source inputs instead of attaching unrelated upstream source.
+- Evidence: upstream run 33754284571 has the fixed recipe HEAD; image job 100646797043 produces the same d1d34e5b... digest pulled by FFmpeg job 100652840136. Record the target-base digest and 78 observed build-stage cache references, mapped to explicit repository/revision values. These are build inputs, not a final linked SBOM; cache filename hashes identify download commands, not content.
+- Retrieved: clean fixed recipe checkout, exact FFmpeg codeload source and checksum-verified OCI build record stay ignored. Correct the initial recipe location by moving only the newly cloned, verified workspace directory into vendor/ffmpeg. The build-record API returns gzip despite its zip URL; gh extraction fails, but raw retrieval matches the API digest and contains the expected image manifest. No upstream build scripts execute, credentials/redirect URLs are not recorded, and no package/OS changes occur.
+- Live handoff: source cache artifact 9892918840 is 2024951640 bytes and has a ZIP header. Its original gh run download command is still live in session 32900, targeting target/tmp/ffmpeg-source-cache-20260903; do not restart it because observation yielded. No source-cache content/revision/license verification is claimed. Re-poll that handle, inspect terminal status and actual files, then validate the selected archives, patches and submodules.
+- Areas/verification/next: DISTRIBUTION and new ffmpeg-build-inputs.json preserve the provenance. All 78 mappings have unique existing recipe scripts and nonempty references; 04fc528 CI 34126992900 succeeds. Diff whitespace, format, workspace Clippy and 268 tests pass; three existing live ignores remain unexecuted. Prepare verified provenance checkpoint; h1_active with source-cache retrieval and distribution/real-environment/owner-acceptance gates open.
+
 ## 2026-09-07 22:18 JST - audit installer runtime dependencies and source provenance gaps
 
 - Trigger/intent: previous turn is progress; clean pushed 6a3c820 confirmed. Execute the first distribution prerequisite, not installer creation or publication.

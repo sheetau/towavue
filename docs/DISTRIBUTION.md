@@ -55,7 +55,25 @@ image jobが参照したsource cacheとrecipe内のrepository/revisionを[ffmpeg
 - FFmpeg本体: `vendor/ffmpeg/source-e47273f4d9227152dcbf543cebaf9e2430ddbcc4.tar.gz`、17323649 bytes、SHA256 `6491DAE95E3CF3CDBAC02933B55860E782B0C4F0A6BD8F37CEF30FDED259283C`。commit指定のGitHub codeloadから取得し、configureとGPLv3/LGPLv3本文のentryを確認した。第三者sourceはこのarchiveに含めた扱いにしない。
 - build record: artifact `9893172856`、`target/tmp/ffmpeg-image-record-20260903/build-record.download`、245291 bytes。SHA256 `95B4D5C136589460A348EADC77510859F14744F8DE0805CAB33AC99685A017D8`はAPIのartifact digestと一致し、上記image manifestを含む。これはimageの全layerそのものではない。APIのURL末尾はzipだが実体はgzipのOCI archiveで、通常のgh展開が拒否した後、raw downloadのhashとtar entryで確認した。
 
-同じrunにはsource取得cache artifact `9892918840`（download-cache、2024951640 bytes、API digest `sha256:0fc20317ded7bc2aef7fdac1f085ffb8be435ae143ac78bc46ac3b6ae9d3fd83`）も残っている。取得処理は継続中で、この時点では内容hash・78件の収録・実revision・license本文の検証は未完了。cacheの先頭がZIPであることだけでは全体取得成功としない。取得後も、aom/aribb24のpatchやscript中の変更、submodule・build tool依存を別途照合する。
+同じrunのsource取得cache artifact `9892918840`（download-cache、2024951640 bytes、API digest `sha256:0fc20317ded7bc2aef7fdac1f085ffb8be435ae143ac78bc46ac3b6ae9d3fd83`）の取得は22:48 JSTに完了した。外側のZIP自体はghが保持しないため、そのAPI digestをローカルで再計算したとは扱わない。取得した`target/tmp/ffmpeg-source-cache-20260903/cache.tar.gz`は2024336209 bytes、SHA256 `B02DC5084BA6717F7FF66961692E87E93C8A7AB7D6967F321192ED19092AD08A`である。
+
+cacheには115個の実archiveと115個のsymlink aliasがある。pathとentry種別を確認し、buildが参照した78個のhash付き通常fileだけを同directoryの`selected/.cache/downloads`へ展開した。aliasや内側source treeは展開していない。実revision・license本文に加え、aom/aribb24のpatchやscript中の変更、submodule・build tool依存の照合は別途必要である。
+
+78個すべての内容SHA256を上記JSONへ追記した。root Git HEADを持つ74件のうち、71件のcommit指定はrecipeと一致し、残るOpenSSL/Vulkan-Headers/Mbed TLSはcacheのFETCH_HEADに指定tag名があり、解決されたHEADも記録した。OpenCLのheaders/loaderとnv-codec-headersの3系列はnested repositoryで、計5 HEADがrecipeと一致する。FFmpeg 9向けrecipeが選ぶnv-codec系列は`ffnvcodec`であり、他2系列も組み込まれたと扱わない。
+
+LAMEのSVN databaseはメモリ内・query-onlyで読み、rootと全449 NODES行のrevision 6761を確認した。AMFはdownload recipeが`.git`とThirdpartyを除去するため、HEAD欠落を取得失敗とは扱わないが、固定commitとのtree比較は未完了である。14 archiveにsubmodule manifestがあり、root HEAD照合だけではsubmoduleやworktree内容の完全性を証明しない。内側entryの読取り以外に、sourceのbuild scriptは実行していない。
+
+## Rust依存と組み込みフォント（2026-09-07 22:48 JST）
+
+[rust-license-inputs.json](rust-license-inputs.json)にWindows x86-64向けの依存とライセンス資料の取得元を記録した。`cargo metadata --locked --offline --filter-platform x86_64-pc-windows-msvc`からtowavue-appのnormal/build依存を辿り、dev-only edgeを除いた146 packageが対象である。build用packageも含むため、最終binaryのlinked-runtime SBOMとは呼ばない。
+
+- 全146個のローカルcrate archiveのSHA256がCargo.lockのchecksumと一致した。rootのlicense/notice等264 file、フォント資料4 file、下記13 packageのVCS情報fileを、archive内の生bytesとSHA256で照合した。root名での発見だけでは、source内やnested directoryの追加noticeを網羅したことにはならない。
+- root資料がない13 packageのうち、AccessKit、egui、clipboard-win、profilingの12 packageはcrateのVCS情報が示す固定commitから11個の原本文書を取得した。ローカルの原本はGit blob SHA1と一致し、SHA256も上記JSONへ記録した。取得した本文は`target/tmp/rust-license-sources`配下に保持しており、まだ配布用bundleには組み込んでいない。
+- AccessKitのrootにはMIT/Apache本文だけでなく`LICENSE.chromium`もある。Cargoのlicense expressionだけを見て追加のChromium BSD noticeを捨てない。
+- epaint_default_fontsはHack、Noto Emoji、Ubuntu Light、emoji-icon-fontを埋め込む。`fonts/Hack-Regular.txt`にはMITに加えてDejaVu/Bitstream Veraの記載があり、別途OFL、Ubuntu Font Licence、emoji-icon-fontのMIT本文も保持する。egui本体のMIT/Apacheだけでフォントを扱わない。
+- ffmpeg-sys-next 9.0.0はWTFPLを宣言しているが、crate rootと固定上流treeにlicense/notice fileを発見できていない。他のffmpeg crateの本文を同crate由来と偽らず、宣言と適用する本文の根拠を補う必要がある。
+
+この一覧は資料の所在と照合記録であり、完成した第三者notice集や配布条件充足の宣言ではない。選択式licenseと追加noticeを整理し、source内の適用範囲も確認してから同梱本文を作る。
 
 ## Visual C++ runtime
 

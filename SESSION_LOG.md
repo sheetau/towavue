@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 22:55 JST - retrieve pinned dependency sources and audit Rust notice provenance
+
+- Trigger/intent: continue the installer prerequisites from clean pushed 4e75f32; its CI 34128070585 succeeds. Preserve and monitor the original source-cache download, not a replacement transfer.
+- FFmpeg result: session 32900 exits successfully at 22:48. The inner cache.tar.gz is 2024336209 bytes, SHA256 B02DC5084BA6717F7FF66961692E87E93C8A7AB7D6967F321192ED19092AD08A; the outer ZIP API digest is not independently verified. Check paths/types, extract only 78 referenced regular archives out of 115 files plus 115 symlink aliases, and hash/list all 78 without extracting source trees. All 71 full-hash root Git references and five nested OpenCL/nv-codec HEADs match recipes; record three tagged HEADs/FETCH_HEAD evidence. LAME's query-only in-memory SVN database has revision 6761 on all 449 NODES rows. AMF's recipe removes .git; its independent tree comparison remains open, as do patches, worktrees and submodules. No upstream build scripts execute.
+- Rust result: enumerate 146 Windows normal/build dependency packages excluding dev-only edges; all cached crate archives match Cargo.lock. Verify raw archive bytes for 264 root notice files, four embedded-font notices and 13 VCS records. Recover 11 notice files from the exact AccessKit/egui/clipboard-win/profiling commits for 12 packages, matching Git blob identities and recording SHA256. Include additional Chromium/font evidence; ffmpeg-sys-next still has a WTFPL declaration without a located upstream notice file. This is an input inventory, not a completed license bundle or linked-runtime SBOM.
+- Areas/verification: DISTRIBUTION, ffmpeg-build-inputs.json, new rust-license-inputs.json and this log only. Downloaded archives/notices stay ignored. Inventory counts, archive hashes, diff whitespace, format, workspace Clippy and 268 tests pass; three existing live ignores remain unexecuted. No product/binary/dependency/OS changes, installer execution, signing or publication.
+- Status/next: prepare a verified provenance checkpoint; h1_active, not launch complete. No download or source-audit process remains live. Next compare remaining source trees/patches/submodules and assemble complete third-party notices before installer implementation; retain real-environment and owner-acceptance gates.
+
 ## 2026-09-07 22:31 JST - recover upstream FFmpeg build provenance and start source-cache retrieval
 
 - Trigger/intent: previous turn is progress; clean pushed 04fc528 confirmed. Trace the fixed binary to its original dependency image and source inputs instead of attaching unrelated upstream source.

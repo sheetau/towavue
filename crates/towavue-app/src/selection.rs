@@ -8,6 +8,42 @@ pub fn has_focus(context: &egui::Context) -> bool {
         .is_some_and(|id| context.memory(|memory| memory.has_focus(id)))
 }
 
+pub fn focus_first(context: &egui::Context, identity: Id) {
+    context.memory_mut(|memory| memory.request_focus(identity.with(0_usize)));
+    context.data_mut(|data| data.insert_temp(identity.with("reveal"), 0_usize));
+}
+
+pub fn reveal_offset(
+    context: &egui::Context,
+    identity: Id,
+    viewport: Rect,
+    image: Rect,
+    selection: UnitRect,
+) -> egui::Vec2 {
+    let requested = context.data_mut(|data| data.remove_temp::<usize>(identity.with("reveal")));
+    let Some(index) =
+        requested.filter(|index| context.memory(|memory| memory.has_focus(identity.with(*index))))
+    else {
+        return egui::Vec2::ZERO;
+    };
+    if context.input(|input| input.pointer.any_down()) {
+        return egui::Vec2::ZERO;
+    }
+    let selected = crate::selection_rect(image, selection);
+    let center = [
+        selected.left_center(),
+        selected.right_center(),
+        selected.center_top(),
+        selected.center_bottom(),
+    ][index];
+    let inset = egui::vec2(
+        (viewport.width() * 0.5).min(10.0),
+        (viewport.height() * 0.5).min(10.0),
+    );
+    let visible = viewport.shrink2(inset);
+    center.clamp(visible.min, visible.max) - center
+}
+
 pub fn controls(
     ui: &mut Ui,
     identity: Id,
@@ -42,6 +78,19 @@ pub fn controls(
         "Selection bottom (pixels)",
     ];
     let enabled = enabled && ui.is_enabled() && !egui::Popup::is_any_open(ui.ctx());
+    let requested_focus = ui.input(|input| {
+        input.events.iter().rev().find_map(|event| {
+            if let egui::Event::AccessKitActionRequest(request) = event
+                && request.target_tree == TreeId::ROOT
+                && request.action == Action::Focus
+            {
+                (0..4_usize)
+                    .find(|index| identity.with(*index).accesskit_id() == request.target_node)
+            } else {
+                None
+            }
+        })
+    });
     let responses = ui
         .add_enabled_ui(enabled, |ui| {
             (0..4)
@@ -100,6 +149,8 @@ pub fn controls(
         })
         .inner;
     if !enabled {
+        ui.ctx()
+            .data_mut(|data| data.remove_temp::<usize>(identity.with("reveal")));
         return (None, false);
     }
     let mut pending = values;
@@ -181,12 +232,67 @@ pub fn controls(
         }
         .unit_rect(size)
     });
+    if let Some(index) = focused
+        && (responses[index].gained_focus() || requested_focus == Some(index) || changed.is_some())
+    {
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(identity.with("reveal"), index));
+    }
     (changed, invalid)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reveal_is_single_use_and_yields_to_disabled_controls_and_pointer_buttons() {
+        let identity = Id::new("reveal image");
+        let viewport = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 60.0));
+        let image = Rect::from_min_size(egui::pos2(-100.0, -50.0), egui::vec2(300.0, 160.0));
+        for (enabled, held, expected) in [
+            (true, false, egui::vec2(110.0, 0.0)),
+            (false, false, egui::Vec2::ZERO),
+            (true, true, egui::Vec2::ZERO),
+        ] {
+            let context = egui::Context::default();
+            let _ = context.run_ui(
+                egui::RawInput {
+                    events: if held {
+                        vec![egui::Event::PointerButton {
+                            pos: egui::pos2(50.0, 30.0),
+                            button: egui::PointerButton::Secondary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::NONE,
+                        }]
+                    } else {
+                        vec![]
+                    },
+                    ..Default::default()
+                },
+                |ui| {
+                    focus_first(&context, identity);
+                    controls(
+                        ui,
+                        identity,
+                        image,
+                        UnitRect::FULL,
+                        (300, 160),
+                        MediaKind::Image,
+                        enabled,
+                    );
+                    assert_eq!(
+                        reveal_offset(&context, identity, viewport, image, UnitRect::FULL),
+                        expected
+                    );
+                    assert_eq!(
+                        reveal_offset(&context, identity, viewport, image, UnitRect::FULL),
+                        egui::Vec2::ZERO
+                    );
+                },
+            );
+        }
+    }
 
     #[test]
     fn video_edges_snap_to_even_pixels_and_do_not_retarget_another_media() {

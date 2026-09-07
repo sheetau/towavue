@@ -210,7 +210,9 @@ crop境界でlinear samplingが選択外の隣接pixelを混ぜないよう、�
 
 H1の選択操作は画像・動画のSelect all command（既定Ctrl+A、menu/palette/custom binding共通）からも開始できる。reading表示では無効とし、検索欄の全選択を奪わない。読込済みの編集後media全体を選び、一時crop previewを解除して左辺へfocusする。選択自体は編集履歴を増やさない。
 
-既存の四辺の表示位置へ名前付きpixel Sliderを公開し、focus中の矢印で画像1 pixel・動画2 pixel、Home/Endで軸端点を指定する。数値要求は四辺をまたいで受信順に処理し、pixelへ丸めた後の逆転・零長を拒否する。identityはtab/path/辺へ固定する。値操作は進行中pointer gestureを取り消し、modal/overlay/menu中は無効。pointerの辺drag・Shift制約・外観と、既存crop確定/Undo・動画16×16制約を維持する。全screen reader・拡大時に画面外となる辺へのfocus追従は別途検証する。
+既存の四辺の表示位置へ名前付きpixel Sliderを公開し、focus中の矢印で画像1 pixel・動画2 pixel、Home/Endで軸端点を指定する。数値要求は四辺をまたいで受信順に処理し、pixelへ丸めた後の逆転・零長を拒否する。identityはtab/path/辺へ固定する。値操作は進行中pointer gestureを取り消し、modal/overlay/menu中は無効。pointerの辺drag・Shift制約・外観と、既存crop確定/Undo・動画16×16制約を維持する。全screen readerの操作完了は別途検証する。
+
+通常画像ではfocusを得た辺、値変更後のfocus辺、明示Select allの左辺へ一回のreveal要求を出す。handleとfocus枠がmedia viewportへ入る最小のlogical pan差分だけを適用し、倍率・選択pixel・編集履歴は変えない。要求消費後の通常再描画や手動panを引き戻さず、overlay/modal中やpointer button保持中はrevealしない。UIA FocusとTabも同じ要求を使う。動画は既存aspect-fit表示のままで、zoom/panを新設しない。
 
 ### H1 visual filmstrip
 

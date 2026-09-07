@@ -1706,6 +1706,20 @@ where
         {
             paint_selection(&painter, image_rect, selection);
             self.selection_controls(ui, image_rect, image_size);
+            if let Some(selection) = self.image_view.selection {
+                let offset = selection::reveal_offset(
+                    ui.ctx(),
+                    self.selection_identity(),
+                    viewport,
+                    image_rect,
+                    selection,
+                );
+                if offset != egui::Vec2::ZERO {
+                    self.image_view.pan.0 += offset.x;
+                    self.image_view.pan.1 += offset.y;
+                    self.request_redraw();
+                }
+            }
         }
     }
 
@@ -3132,9 +3146,7 @@ where
                 self.image_view.selection = Some(UnitRect::FULL);
                 self.image_view.crop_preview = false;
                 if let Some(context) = &self.ui_context {
-                    context.memory_mut(|memory| {
-                        memory.request_focus(self.selection_identity().with(0_usize))
-                    });
+                    selection::focus_first(context, self.selection_identity());
                 }
                 self.request_redraw();
             }
@@ -5937,6 +5949,82 @@ mod tests {
             app.image_view.selection.is_none(),
             "reading is display-only"
         );
+        app.reading_mode = false;
+        app.image_view.zoom = ZoomMode::Custom(4.0);
+        app.dispatch(CommandId::SelectAll);
+        let visible = |tree: &egui::accesskit::TreeUpdate, index: usize| {
+            let bounds = tree
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == ids[index])
+                .expect("edge")
+                .1
+                .bounds()
+                .expect("edge bounds");
+            assert!(
+                bounds.x0 >= 8.0 && bounds.x1 <= 952.0 && bounds.y0 >= 40.0 && bounds.y1 <= 538.0,
+                "focused edge {index} outside viewport: {bounds:?}"
+            );
+            assert_eq!(tree.focus, ids[index]);
+        };
+        frame(&mut app, vec![]);
+        visible(&frame(&mut app, vec![]), 0);
+        assert_eq!(
+            app.image_view.pan,
+            (338.0, 0.0),
+            "move only enough to reveal the focused handle"
+        );
+        for index in [1, 2, 3, 0] {
+            frame(
+                &mut app,
+                vec![egui::Event::AccessKitActionRequest(
+                    egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Focus,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: ids[index],
+                        data: None,
+                    },
+                )],
+            );
+            visible(&frame(&mut app, vec![]), index);
+            assert_eq!(app.image_view.zoom, ZoomMode::Custom(4.0));
+            assert_eq!(app.image_view.selection, Some(UnitRect::FULL));
+        }
+        let pan = app.image_view.pan;
+        for _ in 0..3 {
+            frame(&mut app, vec![]);
+        }
+        assert_eq!(app.image_view.pan, pan, "idle redraw does not recenter");
+        app.image_view.pan = (-800.0, 600.0);
+        for _ in 0..3 {
+            frame(&mut app, vec![]);
+        }
+        assert_eq!(
+            app.image_view.pan,
+            (-800.0, 600.0),
+            "manual pan is retained"
+        );
+        frame(
+            &mut app,
+            vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Focus,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: ids[0],
+                    data: None,
+                },
+            )],
+        );
+        visible(&frame(&mut app, vec![]), 0);
+        app.image_view.pan = (-800.0, 600.0);
+        app.dispatch(CommandId::SelectAll);
+        frame(&mut app, vec![]);
+        visible(&frame(&mut app, vec![]), 0);
+        frame(&mut app, vec![request(0, 350.0)]);
+        visible(&frame(&mut app, vec![]), 0);
+        assert_eq!(crop(&app).x, 350);
+        assert_eq!(app.image_view.zoom, ZoomMode::Custom(4.0));
+        assert!(!app.edits[&tab].is_dirty());
     }
 
     #[test]

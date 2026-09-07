@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 拡大画像の選択handleへfocusを追従（2026-09-07 12:02 JST）
+
+focus移動・明示的なUIA Focus・Select whole media・値変更で、対象handleとfocus枠がviewportへ入る最小panだけを適用する。倍率・選択pixel・履歴は変えず、手動panや通常再描画では自動で戻さない。pointer button保持中・無効なcontrolのrevealは消費して破棄し、後から再開しない。動画にzoom/panを追加する変更ではない。
+
+- 42ae83e通常release `11FD1824A03D313820ED8FDCB6CD40825B2BE94251224579A3A9523B553AB9C2`、PID 48216（開始UTC 2026-09-07T02:53:16.5674727Z）で600×800 PNGをCtrl+Hの100%表示にし、全体選択の左→右→上へTab移動。上辺はfocusありだがscreen Y=116、window上端234で画面外だった。4倍画像の回帰でも左辺bounds x=-327で失敗した。
+- 最初の修正はfocus変化と値変更で追従したが、同じ辺をfocusしたまま手動pan→UIA再Focusすると戻らなかった。中間PID 15340（02:58:27.3912286Z、binary `20DA287C99AC798549015C3415930F7DE19FD6781338688320FCA2A5F53FA7B9`）と追加回帰で再現し、eguiが消費する前に明示Focusも確認するよう修正した。
+- 最終通常release `0EB87A49E11F0FA089B56AE5E83E7875D8CA781594AF0ED952F9E84A81320B31`、PID 40316（03:00:52.6367912Z）でTab/Shift+Tab、UIA Focus、bottomの値変更、Ctrl+Aを確認。top/bottomの14px boundsはwindow基準Y=43/521となり、title/statusを避けた領域内へ入った。手動右dragの(-300,+60)はrelease後も保持し、同じ左辺へのUIA再Focusだけで戻った。100%とsource/選択の値を保持するowned capture `target/tmp/h1-selection-reveal-complete.png`も目視確認した。
+- 同じprocessで既存398×560 crop/Undo、回転後の値範囲、dirty guardのdisabled値要求拒否/Cancel、paletteのCtrl+Aを再確認。落ち着いた後の5秒idle CPU時間増分は0.015625秒であり、0とは記録しない。三つのtrial windowはすべてcleanで通常終了、stderrは空、PNG hash `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`は不変。Save・clipboard・OS設定変更なし。
+- 4倍で四辺のbounds・最小移動量・選択/倍率/履歴保持・同じ辺への再Focus・idle/manual pan非追従を確認。reveal要求の一回消費・disabled/button保持による破棄も回帰で確認し、10 selection tests、260 workspace tests、format・Clippy・debug/release buildが通過した。既存live ignore 3件は未実行。helper/logはignoredの`target/tmp/h1-selection-reveal*`。window resize/実DPIやscreen reader全体・最終候補性能/保存・配布/外観受入の代替とはしない。
+
 ### 選択範囲のkeyboard／UIA操作（2026-09-07 11:48 JST）
 
 画像・動画のSelect whole media（既定Ctrl+A）をEdit/menu/palette/custom bindingへ加え、既存の四辺へpixel Sliderを公開した。選択作成はdirtyにせず左辺へfocusし、Tab・矢印・Home/Endと数値操作から既存crop/Undoへ接続する。readingでは無効、検索欄のCtrl+Aは文字選択のまま。新しいtoolbarや常設panel、runtime/dependencyは追加していない。

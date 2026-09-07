@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 12:02 JST - reveal focused selection edges without changing zoom
+
+- Trigger/intent: previous turn is progress; 42ae83e CI 34077623696 succeeds. Native baseline focuses a top edge above the window; the expanded 4x regression likewise reports an offscreen left edge.
+- Change: consume one-shot image reveal requests for focus acquisition, explicit UIA Focus, SelectAll and accepted value changes. Apply only the minimum logical pan needed for the handle/focus outline; preserve zoom, selection pixels, edits and normal manual pan. Disabled controls/button holds discard requests. No video pan, runtime or dependency changes.
+- Iteration/evidence: first native correction retains manual pan but fails same-edge UIA refocus. Reproduce in the regression and inspect Focus before egui consumes it. Final normal PID 40316 passes Tab/reverse Tab, numeric changes, -300/+60 manual pan retention and same-edge refocus; existing crop/Undo, rotated bounds, dirty Cancel/disabled rejection and palette Ctrl+A also pass. DEVELOPMENT records all three process identities/hashes and the inspected owned capture.
+- Verification/cleanup: ten selection tests, 260 workspace tests, format, Clippy and both builds pass; three existing live ignores remain. Five-second settled idle CPU delta is 0.015625 seconds, not zero. All three windows close cleanly, stderr is empty and source hash is unchanged. No Save, clipboard or OS-setting changes.
+- Areas/status/next: app selection/main and README/ARCHITECTURE/DEVELOPMENT/KNOWN_GAPS/ROADMAP; h1_active, prepare this checkpoint for push. Continue cross-screen focus/reading-order and overlay-return workflows, preserving real input/DPI/device, final-candidate save/performance, distribution and owner-design-acceptance gates. This native scenario is not full screen-reader or launch completion.
+
 ## 2026-09-07 11:48 JST - make visual selection reachable from keyboard and accessibility
 
 - Trigger/intent: previous turn is progress; 5003cdd CI 34076127069 succeeds. Native baseline has no named selection controls and a new regression fails on the missing edge. Preserve existing selection/crop semantics instead of adding a panel.

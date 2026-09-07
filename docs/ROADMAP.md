@@ -326,3 +326,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 2026-09-07 11:19、上の同一processがEOFへ到達した記録を確定し、通常終了を確認した。107,758表示＋13 drop＝全107,771枚、CPU transfer 0、drift p95 4.704ms・最大30.109msで30分基準内。再decodeした先頭600秒35,925枚へ全dropsを割り当てても0.036187%以下で10分基準内。5分以降のprivateは最初223.16/最後225.42 MiBだが一時332.19 MiBへ増え、次標本で223.99 MiBへ戻った。原因やリーク不在は断定しない。EOF idleの5秒CPU増分0、hash不変、256 tests・必須checkも確認。DEVELOPMENTへ条件と限界を記録した実装変更なしの性能再確認であり、H1と最終候補/実環境/配布/外観受入は継続する。
 
 2026-09-07 11:48、画像・動画の全体選択commandと四辺のpixel値/focus操作を追加し、pointerなしの作成・調整・crop/Undoを接続した。受信順の値更新、逆転/零長の拒否、modal/overlay遮断、reading/text入力の区別とcustom bindingを回帰で確認。通常releaseで画像398×560・動画1716×878へのcrop/Undo、画像端handle外側からのdrag、dirty Cancelを確認し、259 tests・必須check・両buildも通過した。zoomで画面外に出る辺のfocus/視認性と全screen reader flowは次の監査対象。実入力/DPI/device、最終候補/配布/外観受入を含むH1全体は継続する。
+
+2026-09-07 12:02、拡大画像の選択辺へfocusすると画面外に留まる問題を修正した。一回のreveal要求から最小pan差分だけを適用し、倍率・選択・履歴と手動panを維持する。中間試験で判明した同じ辺へのUIA再Focusも対応。通常releaseのTab/逆Tab・値変更・手動pan/再Focusとcrop/Undo・dirty Cancel、260 tests・必須check・両buildが通過した。画面間の読み順/focus、実入力/DPI/device、最終候補/配布/外観受入のH1 gateは継続する。

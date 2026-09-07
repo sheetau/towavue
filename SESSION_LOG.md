@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 12:18 JST - return focus after cancelling the command palette
+
+- Trigger/intent: the immediately preceding permission acknowledgement made no project progress. Revalidate clean HEAD 88aaa73 and reproduce lost selection focus after palette Escape in native PID 20664 and an expanded regression. Prior CI 34078410677 succeeds.
+- Change: retain one invoking widget ID when opening the palette; consume it on either Escape cancellation path. Command execution and external drop discard the old target. Preserve palette text/IME handling, existing selection values, edit history and command-owned focus. Only app orchestration changes; no runtime/dependency changes or general modal focus stack.
+- Verification: ten selection tests, 260 workspace tests, format, Clippy and debug/release builds pass; three existing live ignores remain. Regression covers both dismiss paths, repeated opening, continued arrows, zoom reveal and command-owned focus after another palette round trip.
+- Native/cleanup: final normal image PID 43088 and video PID 48740 pass all four edges, query Ctrl+A isolation, 1px/2px resumed arrows and SelectAll command focus. Image zoom/manual pan/refocus and video crop/Undo also pass. DEVELOPMENT records identities/hashes and inspected owned capture. All three trial windows exit normally, source hashes are unchanged, no Save/clipboard/OS-setting changes; no new performance claim.
+- Areas/status/next: app main and README/ARCHITECTURE/DEVELOPMENT/KNOWN_GAPS/ROADMAP; h1_active, prepare the verified checkpoint for push. Continue dirty-confirmation Cancel and cross-screen focus/reading-order audits. Full screen-reader, physical-input/DPI/device, final-candidate save/performance, distribution and owner-design acceptance remain open.
+
 ## 2026-09-07 12:02 JST - reveal focused selection edges without changing zoom
 
 - Trigger/intent: previous turn is progress; 42ae83e CI 34077623696 succeeds. Native baseline focuses a top edge above the window; the expanded 4x regression likewise reports an offscreen left edge.

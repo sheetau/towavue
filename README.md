@@ -96,6 +96,8 @@ logoへTabでfocusしてEnter／Spaceでmenuを開けます。menu内は上下�
 
 command paletteはtitle bar直下の暗いpanelへまとめ、全幅の検索欄と右揃えのshortcutを表示します。小さいwindowや長いprefixは省略・全文tooltipとscrollで扱い、検索・上下選択・Enter実行・Escape取消は従来どおりです。
 
+パレットをEscapeで取り消すと、開く直前の操作部へfocusを戻します。画像・動画の選択辺を調整していた場合も、その辺の矢印操作を続けられます。コマンドを実行した場合は、その操作のfocus先を優先します。
+
 検索欄のCtrl+C／Ctrl+X／Ctrl+VはWindowsのテキストクリップボードを使い、外部アプリと文字列をやり取りできます。画像や選択範囲をクリップボードへコピーする機能ではありません。
 
 Windows UI AutomationへUI情報と操作を接続し、Welcome・メニュー・command paletteの操作に加え、再生位置・trim端点・フォルダー内の画像位置・選択範囲の四辺を値として変更できます。スクリーンリーダーでの全画面操作や、全体の読み順・focusの横断確認は未完了です。

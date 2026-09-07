@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### パレット取消後の選択操作を継続（2026-09-07 12:18 JST）
+
+選択辺をfocus→Ctrl+Shift+P→検索→Escape→矢印というflowで、取消後に元の辺へfocusを戻す。保持するのは直前のwidget ID一件だけで、command実行・file dropでは破棄する。全modalのfocus stackやscreen reader全体を実装したものではない。
+
+- 88aaa73通常release `0EB87A49E11F0FA089B56AE5E83E7875D8CA781594AF0ED952F9E84A81320B31`、画像PID 20664（開始UTC 2026-09-07T03:10:13.0993746Z）で左辺100pxからpaletteを開き、rotate→Ctrl+A→crop→Escape。値は保持するが四辺ともfocusがなくなった。既存app回帰へ右辺からの往復を追加すると、元の右辺へ戻るassertionで失敗した。
+- 修正後通常release `3CB71A59516DFB2E66ABA302C9489B2C580FBC81CEA6058D3D3400CFDC602986`、画像PID 43088（03:13:31.0989354Z）と動画PID 48740（03:15:34.7820676Z）で同じflowを四辺それぞれ確認。取消直後は値と対象を保持し、次の矢印で画像1px・動画2pxだけ変更する。検索欄のCtrl+Aは文字だけへ作用し、media移動やdirty編集を起こさない。paletteからSelect whole mediaを実行した後は左辺へfocusし、次の取消でも古い右/下辺へ戻らない。
+- 画像は100%でTab/逆Tab・最小panと手動(-300,+60)保持・同じ辺へのUIA再Focusも再確認。その後のpalette往復とowned capture `target/tmp/h1-palette-return-focus.png`を確認した。動画は1716×878 crop→Undo→1920×1080・cleanを確認。全三windowは通常終了、画像stderrは空、動画はD3d11va選択の診断のみ。これは再生性能の測定ではない。
+- 10 selection tests、260 workspace tests、format・Clippy・両buildが通過。既存live ignore 3件は未実行。回帰はegui Escapeとapp側dismissの両入口、palette再open、4倍画像での復帰/reveal、commandによるfocus切替と古い復帰先破棄を含む。88aaa73 CI 34078410677も成功した。
+- PNG hash `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`、動画 `DC645595A1165506BF5C3E685B14D7EA3B0116BBDFE74839E7DA5834CF60DA0C`は不変。helper/logはignoredの`target/tmp/h1-palette-return*`。Save・clipboard・OS設定変更なし。次は保存確認Cancelなど残る画面間focusを監査し、全screen reader・実入力/DPI/device・最終候補保存/性能・配布/外観受入gateを継続する。
+
 ### 拡大画像の選択handleへfocusを追従（2026-09-07 12:02 JST）
 
 focus移動・明示的なUIA Focus・Select whole media・値変更で、対象handleとfocus枠がviewportへ入る最小panだけを適用する。倍率・選択pixel・履歴は変えず、手動panや通常再描画では自動で戻さない。pointer button保持中・無効なcontrolのrevealは消費して破棄し、後から再開しない。動画にzoom/panを追加する変更ではない。

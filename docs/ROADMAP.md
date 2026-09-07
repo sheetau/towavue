@@ -328,3 +328,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 2026-09-07 11:48、画像・動画の全体選択commandと四辺のpixel値/focus操作を追加し、pointerなしの作成・調整・crop/Undoを接続した。受信順の値更新、逆転/零長の拒否、modal/overlay遮断、reading/text入力の区別とcustom bindingを回帰で確認。通常releaseで画像398×560・動画1716×878へのcrop/Undo、画像端handle外側からのdrag、dirty Cancelを確認し、259 tests・必須check・両buildも通過した。zoomで画面外に出る辺のfocus/視認性と全screen reader flowは次の監査対象。実入力/DPI/device、最終候補/配布/外観受入を含むH1全体は継続する。
 
 2026-09-07 12:02、拡大画像の選択辺へfocusすると画面外に留まる問題を修正した。一回のreveal要求から最小pan差分だけを適用し、倍率・選択・履歴と手動panを維持する。中間試験で判明した同じ辺へのUIA再Focusも対応。通常releaseのTab/逆Tab・値変更・手動pan/再Focusとcrop/Undo・dirty Cancel、260 tests・必須check・両buildが通過した。画面間の読み順/focus、実入力/DPI/device、最終候補/配布/外観受入のH1 gateは継続する。
+
+2026-09-07 12:18、palette取消後に選択辺のfocusが消える問題を修正した。開く直前のwidgetへ取消時だけ戻し、command実行は新しいfocus先を優先する。通常releaseの画像/動画四辺・検索Ctrl+A・継続矢印、拡大画像と動画crop/Undo、260 tests・必須check・両buildが通過。保存確認Cancelなど残る画面間focusと、全screen reader・実環境/最終候補/配布/外観受入を含むH1 gateは継続する。

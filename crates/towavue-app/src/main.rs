@@ -584,6 +584,7 @@ struct Application<N> {
     image_seek_preview_active: bool,
     grid_open: bool,
     palette_open: bool,
+    palette_return_focus: Option<egui::Id>,
     palette: palette::CommandPalette,
     status_message: Option<(String, Instant)>,
     pending_guard: Option<GuardedAction>,
@@ -693,6 +694,7 @@ where
             image_seek_preview_active: false,
             grid_open: false,
             palette_open: false,
+            palette_return_focus: None,
             palette: palette::CommandPalette::default(),
             status_message: None,
             pending_guard: None,
@@ -789,6 +791,7 @@ where
             return;
         }
         self.palette_open = false;
+        self.palette_return_focus = None;
         self.grid_open = false;
         self.cancel_shortcut_prefix();
         if path.is_dir() {
@@ -2960,8 +2963,18 @@ where
             actions.push(UiAction::Command(command));
         }
         if close {
-            self.palette_open = false;
+            self.cancel_command_palette();
         }
+    }
+
+    fn cancel_command_palette(&mut self) {
+        self.palette_open = false;
+        if let Some(id) = self.palette_return_focus.take()
+            && let Some(context) = &self.ui_context
+        {
+            context.memory_mut(|memory| memory.request_focus(id));
+        }
+        self.request_redraw();
     }
 
     fn handle_ui_action(&mut self, action: UiAction) {
@@ -3052,6 +3065,17 @@ where
         if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             return;
         }
+        self.palette_return_focus = if command == CommandId::ToggleCommandPalette {
+            if self.palette_open {
+                self.palette_return_focus
+            } else {
+                self.ui_context
+                    .as_ref()
+                    .and_then(|context| context.memory(|memory| memory.focused()))
+            }
+        } else {
+            None
+        };
         self.palette_open = false;
         match command {
             CommandId::ToggleFullscreen => self.set_fullscreen(!self.fullscreen),
@@ -4564,7 +4588,7 @@ where
             return false;
         }
         if self.palette_open || self.filmstrip_open || self.grid_open {
-            self.palette_open = false;
+            self.cancel_command_palette();
             self.filmstrip_open = false;
             self.grid_open = false;
             self.request_redraw();
@@ -5902,6 +5926,29 @@ mod tests {
         assert!(app.owns_seek_shortcut(&stroke(Key::Character('r'))));
         frame(&mut app, vec![key(egui::Key::Tab)]);
         assert_eq!(frame(&mut app, vec![]).focus, ids[1]);
+        for escape_event in [true, false] {
+            app.dispatch(CommandId::ToggleCommandPalette);
+            frame(&mut app, vec![]);
+            assert_eq!(
+                frame(&mut app, vec![]).focus,
+                egui::Id::new("command-palette-query").accesskit_id()
+            );
+            if escape_event {
+                frame(&mut app, vec![key(egui::Key::Escape)]);
+            } else {
+                assert!(app.dismiss_overlay_or_fullscreen());
+            }
+            assert!(!app.palette_open);
+            assert_eq!(
+                frame(&mut app, vec![]).focus,
+                ids[1],
+                "palette cancellation returns to the invoking edge"
+            );
+            let right = crop(&app).x + crop(&app).width;
+            frame(&mut app, vec![key(egui::Key::ArrowLeft)]);
+            assert_eq!(crop(&app).x + crop(&app).width, right - 1);
+            frame(&mut app, vec![key(egui::Key::ArrowRight)]);
+        }
         let before = app.image_view.selection;
         for overlay in 0..5 {
             app.pending_guard = (overlay == 0).then_some(GuardedAction::Exit);
@@ -6025,6 +6072,27 @@ mod tests {
         assert_eq!(crop(&app).x, 350);
         assert_eq!(app.image_view.zoom, ZoomMode::Custom(4.0));
         assert!(!app.edits[&tab].is_dirty());
+        frame(&mut app, vec![key(egui::Key::Tab)]);
+        assert_eq!(frame(&mut app, vec![]).focus, ids[1]);
+        app.dispatch(CommandId::ToggleCommandPalette);
+        frame(&mut app, vec![]);
+        app.dispatch(CommandId::ToggleCommandPalette);
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![key(egui::Key::Escape)]);
+        frame(&mut app, vec![]);
+        visible(&frame(&mut app, vec![]), 1);
+        app.dispatch(CommandId::ToggleCommandPalette);
+        frame(&mut app, vec![]);
+        app.dispatch(CommandId::SelectAll);
+        frame(&mut app, vec![]);
+        visible(&frame(&mut app, vec![]), 0);
+        assert!(app.palette_return_focus.is_none());
+        app.dispatch(CommandId::ToggleCommandPalette);
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![key(egui::Key::Escape)]);
+        frame(&mut app, vec![]);
+        visible(&frame(&mut app, vec![]), 0);
+        assert!(app.palette_return_focus.is_none());
     }
 
     #[test]

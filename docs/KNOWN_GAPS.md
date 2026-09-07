@@ -83,7 +83,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 | 全機能を一つのlogo menuへ集約 | H1でFile / Edit / Viewへ分類し、関連項目の区切り、現在shortcutの右揃え、window内scrollを実装。keyboard focusを最深menu内に保ち、上下/Tab移動、左右の階層移動、Enter/Space選択とEscape取消に対応。全registry commandの一意配置、無効項目、末尾到達・再openとpointer操作をtestする |
 | File/Edit/Viewの3方向drag gestureとSVG logo | logo形状をvector描画。方向gestureは未実装 |
 | 黒基調のcompactなwindow shell | 32px title/tab barと30px status、window操作、右寄せ情報をH1で実装。複数DPI/monitorのmatrixは未検証 |
-| Command palette | titleの部分一致検索、上下選択、有効候補の巡回、Enter実行、Escape閉じを実装。IME eventと重複keyを分離し、focus再要求で毎文字の変換が取り消される不具合も修正。Windows日本語IMEの候補表示・上下選択・確定・取消と確定後のcommand実行を実windowで確認した。ranking、categoryはない。物理keyboard・他IME・focus/DPIを含む横断matrixは未完了 |
+| Command palette | titleの部分一致検索、上下選択、有効候補の巡回、Enter実行、Escape閉じを実装。取消時に直前のfocusへ戻し、画像/動画の四辺を続けて調整できることを通常releaseで確認。command実行時は新しいfocus先を優先する。IME eventと重複keyを分離し、focus再要求で毎文字の変換が取り消される不具合も修正。Windows日本語IMEの候補表示・上下選択・確定・取消と確定後のcommand実行を実windowで確認した。ranking、categoryはない。物理keyboard・他IME・focus/DPIを含む横断matrixは未完了 |
 | 日本語filename・文字表示 | Windowsの日本語fontを既定fontの後ろへ追加し、tab/statusの欠字を修正。日本語fontがない環境や全言語のfallbackは未対応 |
 | Custom shortcutとprefix key | text設定として実装。GUI editor、競合表示、recording UIはない |
 | 検索欄などのOS clipboard連携 | 固定egui-winitのclipboard featureを有効化。日本語・アクセント文字・絵文字のpaste/copy/cut回帰と、通常releaseからOS clipboardへの正確な往復を確認。画像のclipboard copy機能はない。clipboard競合・他IME・全入力matrixは未検証 |

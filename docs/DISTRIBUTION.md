@@ -76,9 +76,21 @@ AOM 1 patchとARIB B24の12→13→17の3 patchは、cache内の対象fileを変
 - 原文は`target/tmp/native-notice-audit-3np__jt8/texts/<SHA256>.txt`へbyte単位で保持した。LCMS AUTHORS、OpenJPEG viewer notice、OpenMPT内LuaSocket notice、rav1e PATENTSの4 fileはUTF-8ではない。Windows-1252での表示を確認したが、元のencodingを断定したり、不正byteを置換して本文を欠落させたりしない。
 - reflogとremote refを除いたroot/nested/module HEADは117件あった。submoduleの未取得・build時の追加取得やgitlinkとの照合が残るため、HEAD一覧だけをsource全体の完成証明としない。
 
-追加で確認すべきcompiler/runtime資料も切り分けた。固定ffmpeg.exeはGCC 15.2.0 / crosstool-NG 1.28.0.23_185f348を表示し、base-win64 recipeにはstatic-libgcc/static-libstdc++、binaryのconfigurationには`-lgomp`がある。これらの適用notice・GCC runtime exception資料は78 archiveとは別に収集する。
+追加で確認すべきcompiler/runtime資料も切り分けた。固定ffmpeg.exeはGCC 15.2.0 / crosstool-NG 1.28.0.23_185f348を表示し、base-win64 recipeにはstatic-libgcc/static-libstdc++、binaryのconfigurationには`-lgomp`がある。これらの資料は78 archiveとは別に扱い、以下の追跡結果を記録した。
 
 またrav1e recipeは`cargo update cc`後にstatic libraryをbuildする。元cacheのCargo.lockだけでは更新後の完全な依存集合を証明しない。元image jobのlogにもccのupdate/download/compile行はなく、現在のnetwork解決で当時のversionを推測しない。rav1e側の依存と、下記towavue本体のMSVC向け146 packageは別物であり、前回のRust本文集で代用しない。
+
+### GCC本文と実rav1e libraryの追跡（2026-09-07 23:43 JST）
+
+[ffmpeg-runtime-inputs.json](ffmpeg-runtime-inputs.json)へ追加runtime資料と原本のhashを記録した。
+
+- GCC 15.2.0のrelease commit `5115c7e447fc07457443df874bf57840e8316d5f`から、COPYING3とCOPYING.RUNTIMEを`third-party/gcc-15.2.0`へ保存した。Git blobとSHA256は原本と一致する。libgcc/libgcc2.c、libgomp/libgomp.h、libstdc++のhashtable実装の先頭通知にもGPL 3以降とRuntime Library Exception 3.1の参照を確認した。[例外本文](https://github.com/gcc-mirror/gcc/blob/5115c7e447fc07457443df874bf57840e8316d5f/COPYING.RUNTIME)は対象fileとcompilation process等に条件を置くため、他componentへ一律に適用した表示にはしない。
+- 当時のimage digestからmanifestとconfigを取得し、双方のcontent hashを照合した。config digestは`sha256:f895b2da6a46618e840f97ae85abf1b946cfb39b692d7642cf89a06fefedbbbc`。そのmanifestが指定するprefix layer（85360808 bytes、`sha256:bbb9aba0ba171e6f9b085b197c582a52222c024d606a13580bddd3f1b11311f5`）も取得・照合した。containerやlibraryは実行していない。
+- layer内のlibrav1e.aは58124336 bytes、SHA256 `BC9A20F69AF4EE4ED2776BDD19354516BCA1DC60CAEF76A4C18C8B244247864A`、549 archive memberを持つ。pkg-configはrav1e 0.8.0を示し、library内のcompiler情報はRust 1.97.1 / commit `8bab26f4f68e0e26f0bb7960be334d5b520ea452`である。towavue側のRust 1.98.0とは区別する。
+- library内のCargo source pathで観測した23個のname/versionは、元source lockのpackage/checksumと一致した。対応crate archiveを取得・hash確認し、38件の通知本文をbyte単位で保存した。ただし文字列に現れないpackageがないとは証明しない。元lockは272 packageを持ち、ccは更新前の1.2.26なので、全依存や更新後lockの復元完了とは扱わない。
+- libraryのmtime `2026-08-19T15:49:10Z`を含む同targetのbuild候補はrun `32253888986` / job `96120312838`だった。ただしrun-logと直接job-logの双方がHTTP 410を返すため、同じlayerの生成元や更新後ccを確認できていない。timestampだけで同一buildとは断定しない。
+
+取得したimage資料・libraryは`target/tmp/ffmpeg-registry-provenance-20260903`、23 crateと本文は`target/tmp/ffmpeg-rav1e-crates-20260903`に保持している。GCCの2本文以外はGit対象外。次はrav1eの有効依存とRust 1.97.1 runtime/compiler-builtinsの通知、残るnative source/build資料を整える。この追跡結果は同梱するbinaryの承認や完全なSBOMではない。
 
 ## Rust依存と組み込みフォント（2026-09-07 22:48 JST）
 

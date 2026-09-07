@@ -9,3 +9,5 @@
 *.ico binary
 *.dll binary
 *.lib binary
+# Preserve the fixed upstream license's trailing blank lines byte-for-byte.
+third-party/gcc-15.2.0/COPYING.RUNTIME whitespace=-blank-at-eof

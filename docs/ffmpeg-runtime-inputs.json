@@ -1,0 +1,610 @@
+{
+  "scope": "Additional native compiler/runtime source and notice evidence for the fixed FFmpeg build; not a complete effective build graph, linked-runtime SBOM or distribution approval.",
+  "gcc": {
+    "version": "15.2.0",
+    "repository": "https://github.com/gcc-mirror/gcc",
+    "release_tag": "releases/gcc-15.2.0",
+    "commit": "5115c7e447fc07457443df874bf57840e8316d5f",
+    "license_files": [
+      {
+        "path": "COPYING3",
+        "local_path": "third-party/gcc-15.2.0/COPYING3",
+        "bytes": 35147,
+        "git_blob_sha1": "94a9ed024d3859793618152ea559a168bbcbb5e2",
+        "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+      },
+      {
+        "path": "COPYING.RUNTIME",
+        "local_path": "third-party/gcc-15.2.0/COPYING.RUNTIME",
+        "bytes": 3324,
+        "git_blob_sha1": "e1b3c69c179dfaff5744ea4bf853e6b0d90c9ef9",
+        "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+      }
+    ],
+    "source_notice_evidence": [
+      {
+        "path": "libgcc/libgcc2.c",
+        "sha256": "00bd4be43efbd9f70f6c8918cfaf7453d5bc1516c469ecb38da8777da4850fcc"
+      },
+      {
+        "path": "libgomp/libgomp.h",
+        "sha256": "caf8846bef59a11d4ae725c21f51690bc326c847b4647f2cf742386ab38f3a74"
+      },
+      {
+        "path": "libstdc++-v3/src/c++11/hashtable_c++0x.cc",
+        "sha256": "b2ce8ac41f966723b3d68c8ce8adafd51ede88e963d85764c7d179054f26ddee"
+      }
+    ]
+  },
+  "rav1e": {
+    "version": "0.8.0",
+    "image_repository": "ghcr.io/btbn/ffmpeg-builds/win64-lgpl-shared-9.0",
+    "image_digest": "sha256:d1d34e5bb498e76cea19ee671301b7864d7e22fd806746324138c0870f253d01",
+    "image_config_digest": "sha256:f895b2da6a46618e840f97ae85abf1b946cfb39b692d7642cf89a06fefedbbbc",
+    "prefix_layer": {
+      "digest": "sha256:bbb9aba0ba171e6f9b085b197c582a52222c024d606a13580bddd3f1b11311f5",
+      "bytes": 85360808,
+      "history": "COPY /opt/ffbuild/. /opt/ffbuild # buildkit"
+    },
+    "archive": {
+      "path": "opt/ffbuild/lib/librav1e.a",
+      "bytes": 58124336,
+      "sha256": "bc9a20f69af4ee4ed2776bdd19354516bca1dc60caef76a4c18c8b244247864a",
+      "ar_members": 549,
+      "mtime_utc": "2026-08-19T15:49:10+00:00"
+    },
+    "rustc_version": "1.97.1",
+    "rustc_commit": "8bab26f4f68e0e26f0bb7960be334d5b520ea452",
+    "package_evidence": "Versioned Cargo source-directory strings in the exact static library; all 23 observed pairs match the original source lock checksums. Absence of a string is not proof that a package was absent.",
+    "original_lock_package_count": 272,
+    "original_cc_version": "1.2.26",
+    "build_log_candidate": {
+      "run": 32253888986,
+      "job": 96120312838,
+      "started_at": "2026-08-19T15:15:20Z",
+      "completed_at": "2026-08-19T16:37:03Z",
+      "status": "Library timestamp lies inside this matching-target build window; this is a candidate, not proven layer ancestry. Both run-log and direct job-log endpoints return HTTP 410."
+    },
+    "open_items": [
+      "Recover the effective dependency/build graph after cargo update cc without using current network resolution as historical evidence.",
+      "Collect the Rust 1.97.1 runtime/standard-library and compiler-builtins notices separately from towavue's Rust 1.98.0 dependencies.",
+      "Complete native notice applicability, source/gitlink and build-material verification before packaging."
+    ],
+    "observed_crates": [
+      {
+        "name": "aligned-vec",
+        "version": "0.6.4",
+        "declared_license": "MIT",
+        "repository": "https://github.com/sarah-ek/aligned-vec/",
+        "vcs": {
+          "git": {
+            "sha1": "6af6c18c831c93395f948a0e6527b8d6b9729784"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE",
+            "bytes": 1062,
+            "sha256": "bf5a93d1014429b43e01c57d45bea928748fbf37d059306145a1a0a91aec2014"
+          }
+        ],
+        "archive_sha256": "dc890384c8602f339876ded803c97ad529f3842aba97f6392b3dba0dd171769b"
+      },
+      {
+        "name": "anyhow",
+        "version": "1.0.98",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/dtolnay/anyhow",
+        "vcs": {
+          "git": {
+            "sha1": "709fe86f04878a62a29b9279f5bb96422f8bca28"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 9723,
+            "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1023,
+            "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+          }
+        ],
+        "archive_sha256": "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
+      },
+      {
+        "name": "arrayvec",
+        "version": "0.7.6",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/bluss/arrayvec",
+        "vcs": {
+          "git": {
+            "sha1": "0aede877fe0bfb1ba5e3c2024df8c0958d503a83"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1071,
+            "sha256": "4da95ec4ecb65b738d470b7d762894ad9c97da93e6cbfb18b570fc2c96f4b871"
+          }
+        ],
+        "archive_sha256": "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+      },
+      {
+        "name": "av-scenechange",
+        "version": "0.14.1",
+        "declared_license": "MIT",
+        "repository": "https://github.com/rust-av/av-scenechange",
+        "vcs": {
+          "git": {
+            "sha1": "ae3d7e5f8f7d9fac3ba3813b8ffe57f7b3420a20"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE",
+            "bytes": 1076,
+            "sha256": "1e27e28eafbc439fd153d0cca093fcb9ca83f269d93393e641ce5664181fd41b"
+          }
+        ],
+        "archive_sha256": "0f321d77c20e19b92c39e7471cf986812cbb46659d2af674adc4331ef3f18394"
+      },
+      {
+        "name": "av1-grain",
+        "version": "0.2.4",
+        "declared_license": "BSD-2-Clause",
+        "repository": "https://github.com/rust-av/av1-grain",
+        "vcs": {
+          "git": {
+            "sha1": "39414994efeb7889c981cc7c88a443937ab50350"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE",
+            "bytes": 1332,
+            "sha256": "acc9e236b0011c638714a16f5634fa5bcd3be111182e237c3049db700c3521e2"
+          }
+        ],
+        "archive_sha256": "4f3efb2ca85bc610acfa917b5aaa36f3fcbebed5b3182d7f877b02531c4b80c8"
+      },
+      {
+        "name": "bitstream-io",
+        "version": "4.2.0",
+        "declared_license": "MIT/Apache-2.0",
+        "repository": "https://github.com/tuffy/bitstream-io",
+        "vcs": {
+          "git": {
+            "sha1": "4706427dbebf79f7eb36a00f780c013a39191ad6"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1062,
+            "sha256": "7a65c85c057a5538fdd8215b7aa2f3e0353f3b07c3e00bb409070b2b81375895"
+          }
+        ],
+        "archive_sha256": "6afa0fc725d5ac9efc66f47b4c533ee850eb34aa6105681b5349c27157346ffa"
+      },
+      {
+        "name": "crossbeam-deque",
+        "version": "0.8.6",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/crossbeam-rs/crossbeam",
+        "vcs": {
+          "git": {
+            "sha1": "ccd83ac4108a2a1b41e9c6e79c87267167d18dfa"
+          },
+          "path_in_vcs": "crossbeam-deque"
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1099,
+            "sha256": "5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab"
+          }
+        ],
+        "archive_sha256": "9dd111b7b7f7d55b72c0a6ae361660ee5853c9af73f70c3c2ef6858b950e2e51"
+      },
+      {
+        "name": "crossbeam-epoch",
+        "version": "0.9.18",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/crossbeam-rs/crossbeam",
+        "vcs": {
+          "git": {
+            "sha1": "9c3182abebb36bdc9446d75d4644190fef70fa01"
+          },
+          "path_in_vcs": "crossbeam-epoch"
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1099,
+            "sha256": "5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab"
+          }
+        ],
+        "archive_sha256": "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+      },
+      {
+        "name": "crossbeam-utils",
+        "version": "0.8.21",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/crossbeam-rs/crossbeam",
+        "vcs": {
+          "git": {
+            "sha1": "ccd83ac4108a2a1b41e9c6e79c87267167d18dfa"
+          },
+          "path_in_vcs": "crossbeam-utils"
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1099,
+            "sha256": "5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab"
+          }
+        ],
+        "archive_sha256": "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+      },
+      {
+        "name": "equator",
+        "version": "0.4.2",
+        "declared_license": "MIT",
+        "repository": "https://github.com/sarah-ek/equator/",
+        "vcs": {
+          "git": {
+            "sha1": "8054473359c17be1e25c0ac551a54f924337319f"
+          },
+          "path_in_vcs": "equator"
+        },
+        "notices": [
+          {
+            "path": "LICENSE",
+            "bytes": 1062,
+            "sha256": "97d3424e347e8fa236806725ce9837bb453d4dfc9ce1d4733fd6023a8038000a"
+          }
+        ],
+        "archive_sha256": "4711b213838dfee0117e3be6ac926007d7f433d7bbe33595975d4190cb07e6fc"
+      },
+      {
+        "name": "itertools",
+        "version": "0.14.0",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/rust-itertools/itertools",
+        "vcs": {
+          "git": {
+            "sha1": "a015a6831525ee1637df747d3f530a627d9741bf"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1043,
+            "sha256": "7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545"
+          }
+        ],
+        "archive_sha256": "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+      },
+      {
+        "name": "log",
+        "version": "0.4.27",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/rust-lang/log",
+        "vcs": {
+          "git": {
+            "sha1": "35161d0d25838a62d518dabe1e34e84b607446b3"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1071,
+            "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb"
+          }
+        ],
+        "archive_sha256": "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
+      },
+      {
+        "name": "memchr",
+        "version": "2.7.5",
+        "declared_license": "Unlicense OR MIT",
+        "repository": "https://github.com/BurntSushi/memchr",
+        "vcs": {
+          "git": {
+            "sha1": "3962118774ac511580c5b40fd14323e31629fa52"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "COPYING",
+            "bytes": 126,
+            "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1081,
+            "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"
+          }
+        ],
+        "archive_sha256": "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
+      },
+      {
+        "name": "nom",
+        "version": "7.1.3",
+        "declared_license": "MIT",
+        "repository": "https://github.com/Geal/nom",
+        "vcs": {
+          "git": {
+            "sha1": "869f8972a4383b13cf89574fda28cb7dbfd56517"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE",
+            "bytes": 1065,
+            "sha256": "4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0"
+          }
+        ],
+        "archive_sha256": "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
+      },
+      {
+        "name": "num-bigint",
+        "version": "0.4.6",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/rust-num/num-bigint",
+        "vcs": {
+          "git": {
+            "sha1": "a25836ec6c341d1aa40c97335842f330b6a62911"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1071,
+            "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb"
+          }
+        ],
+        "archive_sha256": "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
+      },
+      {
+        "name": "num-integer",
+        "version": "0.1.46",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/rust-num/num-integer",
+        "vcs": {
+          "git": {
+            "sha1": "ede2d2cb993e55e7b1c992bfd22ecbf16601a652"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1071,
+            "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb"
+          }
+        ],
+        "archive_sha256": "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
+      },
+      {
+        "name": "num-rational",
+        "version": "0.4.2",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/rust-num/num-rational",
+        "vcs": {
+          "git": {
+            "sha1": "4d55ad22ac86ebbc4cb45d79a956e4a1f7af57d1"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1071,
+            "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb"
+          }
+        ],
+        "archive_sha256": "f83d14da390562dca69fc84082e73e548e1ad308d24accdedd2720017cb37824"
+      },
+      {
+        "name": "num-traits",
+        "version": "0.2.19",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/rust-num/num-traits",
+        "vcs": {
+          "git": {
+            "sha1": "7ec3d41d39b28190ec1d42db38021107b3951f3a"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1071,
+            "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb"
+          }
+        ],
+        "archive_sha256": "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+      },
+      {
+        "name": "rayon",
+        "version": "1.10.0",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/rayon-rs/rayon",
+        "vcs": {
+          "git": {
+            "sha1": "7543ed40c9a017dee32b3dc72b3ae819820e8366"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1071,
+            "sha256": "0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720"
+          }
+        ],
+        "archive_sha256": "b418a60154510ca1a002a752ca9714984e21e4241e804d32555251faf8b78ffa"
+      },
+      {
+        "name": "rayon-core",
+        "version": "1.12.1",
+        "declared_license": "MIT OR Apache-2.0",
+        "repository": "https://github.com/rayon-rs/rayon",
+        "vcs": {
+          "git": {
+            "sha1": "7df6d5b8493a5fdb257565cab26dacdfe08ec8aa"
+          },
+          "path_in_vcs": "rayon-core"
+        },
+        "notices": [
+          {
+            "path": "LICENSE-APACHE",
+            "bytes": 10847,
+            "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+          },
+          {
+            "path": "LICENSE-MIT",
+            "bytes": 1071,
+            "sha256": "0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720"
+          }
+        ],
+        "archive_sha256": "1465873a3dfdaa8ae7cb14b4383657caab0b3e8a0aa9ae8e04b044854c8dfce2"
+      },
+      {
+        "name": "scan_fmt",
+        "version": "0.2.6",
+        "declared_license": "MIT",
+        "repository": "https://github.com/wlentz/scan_fmt",
+        "vcs": {
+          "git": {
+            "sha1": "07abb97f8591d5923e998fd940f42503b6ef9a69"
+          }
+        },
+        "notices": [
+          {
+            "path": "LICENSE",
+            "bytes": 1074,
+            "sha256": "4d0814fe61e6458a52ce8c744f23c6e7fbdacd20f4f6452bc5f29b7790a98588"
+          }
+        ],
+        "archive_sha256": "0b53b0a5db882a8e2fdaae0a43f7b39e7e9082389e978398bdf223a55b581248"
+      },
+      {
+        "name": "v_frame",
+        "version": "0.3.9",
+        "declared_license": "BSD-2-Clause",
+        "repository": "https://github.com/rust-av/v_frame",
+        "vcs": {
+          "git": {
+            "sha1": "e01ef7d4fbde65ca4daaf8bf8d93eee17a1703cc"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE",
+            "bytes": 1332,
+            "sha256": "02b80951ce6c1dd25d7278977222a91b2f61a883ca272b0238c52a60a03ae90a"
+          }
+        ],
+        "archive_sha256": "666b7727c8875d6ab5db9533418d7c764233ac9c0cff1d469aec8fa127597be2"
+      },
+      {
+        "name": "y4m",
+        "version": "0.8.0",
+        "declared_license": "MIT",
+        "repository": "https://github.com/image-rs/y4m.git",
+        "vcs": {
+          "git": {
+            "sha1": "11178efa16ee13217e0a442100e19b11a9fda531"
+          },
+          "path_in_vcs": ""
+        },
+        "notices": [
+          {
+            "path": "LICENSE",
+            "bytes": 1129,
+            "sha256": "1327309babc5f34582ae4731b9022c75ff6fa9903eb17cfd113f4abae95b898b"
+          }
+        ],
+        "archive_sha256": "7a5a4b21e1a62b67a2970e6831bc091d7b87e119e7f9791aef9702e3bef04448"
+      }
+    ]
+  }
+}

@@ -8,6 +8,7 @@
   "target_base_digest": "sha256:033e9c42838fccb3b56984a9075ce87b9ab2491ac9c7f53b5070b8b42596ce16",
   "cache_filename_hash_semantics": "SHA256 of the emitted download command, not archive content.",
   "notice_inputs": "ffmpeg-notice-inputs.json",
+  "additional_runtime_inputs": "ffmpeg-runtime-inputs.json",
   "raw_recipe_archive": {"path":"vendor/ffmpeg/recipe-8267213e26c1031621e6e1210fe3aa4867214f6a.tar","bytes":716800,"sha256":"dc162c7511d6c005aa1f8d3f4dcfd6df88d1ef28f996e302fc57eff6ab3315c8","method":"git archive of the fixed commit; preserves original LF bytes unlike the Windows checkout with core.autocrlf=true."},
   "patch_verification": "Raw fixed-commit patch bytes pass ordered git apply --check against selected unchanged regular entries from the corresponding cache archives. CRLF checkout copies fail the AOM check. No patch application, git am hooks or upstream build scripts execute; this is applicability evidence, not a rebuilt-binary comparison.",
   "patches": [

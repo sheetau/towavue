@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 13:07 JST - let non-text focused controls reach configured shortcuts
+
+- Trigger/intent: previous turn is progress; clean HEAD a55cd1d and CI 34081422762 success confirmed. Native PID 40548 retains logo focus but ignores R; a new regression fails at focused-control routing.
+- Change: route valid configured commands/prefixes ahead of egui-winit's focus-wide capture for ordinary non-text controls. Preserve UI activation/navigation keys, TextEdit and overlay/modal ownership, existing seek/trim/selection key handling, repeat filtering and synthetic-event exclusion. No fixed aliases, new bindings, runtime or dependency changes.
+- Verification: custom K and removed R alias, Ctrl+K Space prefix, cancellation/unmatched routing, UI-key/unbound exclusion, five blockers, text input and selection ownership pass. Format, Clippy, 264 workspace tests and both builds pass; three existing live ignores remain.
+- Native/cleanup: final normal PID 17424 passes R/Undo at logo, reading button and tab; Space opens the focused menu and palette text does not edit media. Existing selection/crop/Undo/rotated bounds and dirty guard rejection/Cancel pass. Undo all trial edits and close both windows normally; stderr empty and PNG hash unchanged. DEVELOPMENT records identities/hashes and expected disabled-action exception. No Save/clipboard/OS-setting changes.
+- Areas/status/next: app main and README/ARCHITECTURE/DEVELOPMENT/KNOWN_GAPS/ROADMAP; h1_active, prepare the verified checkpoint for push. Audit repeated menu activation/category focus next; do not conflate this routing fix with that unresolved observation. Retain full screen-reader, physical-input/DPI/device, final-candidate save/performance, distribution and owner-design acceptance gates.
+
 ## 2026-09-07 12:56 JST - prevent a stale menu focus from crashing the accessibility consumer
 
 - Trigger/intent: previous turn is progress; clean HEAD 72d09a9 confirmed. Native Welcome PID 4828 exits on menu -> palette -> Escape; stderr reports a focused ID missing from the node list. Its helper's null/empty final observation is not a success; process disappearance and panic log establish the failure.

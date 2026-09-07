@@ -4716,6 +4716,47 @@ where
                 && self.ui_context.as_ref().is_some_and(selection::has_focus))
     }
 
+    fn owns_focused_shortcut(&self, stroke: &KeyStroke) -> bool {
+        if self.owns_seek_shortcut(stroke) {
+            return true;
+        }
+        let Some(context) = &self.ui_context else {
+            return false;
+        };
+        if self.palette_open
+            || self.grid_open
+            || self.filmstrip_open
+            || self.modal_input_blocked()
+            || egui::Popup::is_any_open(context)
+            || !context.egui_wants_keyboard_input()
+            || context.text_edit_focused()
+            || seekbar::has_value_focus(context)
+            || selection::has_focus(context)
+            || stroke.key == Key::Tab
+        {
+            return false;
+        }
+        self.prefix_started.is_some()
+            || ((stroke.modifiers.control
+                || stroke.modifiers.alt
+                || stroke.modifiers.logo
+                || !matches!(
+                    stroke.key,
+                    Key::Space
+                        | Key::ArrowLeft
+                        | Key::ArrowRight
+                        | Key::ArrowUp
+                        | Key::ArrowDown
+                        | Key::Home
+                        | Key::End
+                        | Key::Escape
+                ))
+                && self
+                    .shortcuts
+                    .resolve(std::slice::from_ref(stroke), self.command_context())
+                    != ShortcutMatch::None)
+    }
+
     fn process_key(&mut self, event: &KeyEvent) {
         if self.modal_input_blocked() {
             return;
@@ -5422,7 +5463,7 @@ where
         {
             self.expire_shortcut_prefix();
             if self.key_stroke(event).is_some_and(|stroke| {
-                self.owns_tab_key(&stroke) || (!is_synthetic && self.owns_seek_shortcut(&stroke))
+                self.owns_tab_key(&stroke) || (!is_synthetic && self.owns_focused_shortcut(&stroke))
             }) {
                 self.process_key(event);
                 return;
@@ -6193,6 +6234,19 @@ mod tests {
         };
         assert!(!app.owns_seek_shortcut(&stroke(Key::ArrowUp)));
         assert!(app.owns_seek_shortcut(&stroke(Key::Character('r'))));
+        for key in [
+            Key::ArrowUp,
+            Key::ArrowRight,
+            Key::Home,
+            Key::Space,
+            Key::Character('r'),
+        ] {
+            assert_eq!(
+                app.owns_focused_shortcut(&stroke(key.clone())),
+                app.owns_seek_shortcut(&stroke(key)),
+                "selection keeps its existing key ownership"
+            );
+        }
         frame(&mut app, vec![key(egui::Key::Tab)]);
         assert_eq!(frame(&mut app, vec![]).focus, ids[1]);
         for escape_event in [true, false] {
@@ -9637,6 +9691,92 @@ mod tests {
             );
             assert!(!app.fullscreen_controls_visible);
         }
+    }
+
+    #[test]
+    fn focused_controls_allow_bound_shortcuts_without_stealing_ui_keys_or_text() {
+        let Some(root) = isolated_test_root(
+            "tests::focused_controls_allow_bound_shortcuts_without_stealing_ui_keys_or_text",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        let path = root.join("image.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Image);
+        let context = egui::Context::default();
+        app.ui_context = Some(context.clone());
+        let focus_button = || {
+            let _ = context.run_ui(egui::RawInput::default(), |ui| {
+                ui.button("Control").request_focus();
+            });
+        };
+        focus_button();
+        let stroke = |key: &str| key.parse::<KeyStroke>().expect("shortcut");
+        assert!(app.owns_focused_shortcut(&stroke("R")));
+        app.process_shortcut(stroke("R"));
+        assert!(app.edits[&tab].is_dirty());
+        assert!(app.owns_focused_shortcut(&stroke("Ctrl+Z")));
+        app.process_shortcut(stroke("Ctrl+Z"));
+        assert!(!app.edits[&tab].is_dirty());
+        for key in [
+            "Space",
+            "Tab",
+            "Left",
+            "Right",
+            "Up",
+            "Down",
+            "Home",
+            "End",
+            "Escape",
+            "Shift+Space",
+        ] {
+            assert!(!app.owns_focused_shortcut(&stroke(key)), "UI owns {key}");
+        }
+        assert!(!app.owns_focused_shortcut(&stroke("Ctrl+Alt+9")));
+        app.shortcuts
+            .set(CommandId::RotateClockwise, "K".parse().expect("custom"));
+        assert!(!app.owns_focused_shortcut(&stroke("R")), "no fixed alias");
+        assert!(app.owns_focused_shortcut(&stroke("K")));
+        app.process_shortcut(stroke("K"));
+        app.shortcuts
+            .set(CommandId::Undo, "Ctrl+K Space".parse().expect("prefix"));
+        assert!(app.owns_focused_shortcut(&stroke("Ctrl+K")));
+        app.process_shortcut(stroke("Ctrl+K"));
+        assert!(
+            app.owns_focused_shortcut(&stroke("Space")),
+            "prefix continuation"
+        );
+        app.process_shortcut(stroke("Space"));
+        assert!(!app.edits[&tab].is_dirty());
+        app.process_shortcut(stroke("Ctrl+K"));
+        assert!(app.owns_focused_shortcut(&stroke("Escape")));
+        assert!(app.owns_focused_shortcut(&stroke("Ctrl+Alt+9")));
+        app.cancel_shortcut_prefix();
+        assert!(!app.owns_focused_shortcut(&stroke("Space")));
+        for blocked in 0..5 {
+            app.palette_open = blocked == 0;
+            app.grid_open = blocked == 1;
+            app.filmstrip_open = blocked == 2;
+            app.pending_guard = (blocked == 3).then_some(GuardedAction::Exit);
+            if blocked == 4 {
+                egui::Popup::open_id(&context, "shortcut-test-popup".into());
+            }
+            assert!(!app.owns_focused_shortcut(&stroke("K")));
+            app.palette_open = false;
+            app.grid_open = false;
+            app.filmstrip_open = false;
+            app.pending_guard = None;
+            egui::Popup::close_all(&context);
+        }
+        let mut text = String::new();
+        let _ = context.run_ui(egui::RawInput::default(), |ui| {
+            ui.text_edit_singleline(&mut text).request_focus();
+        });
+        assert!(context.text_edit_focused());
+        assert!(!app.owns_focused_shortcut(&stroke("K")));
+        assert!(!app.owns_focused_shortcut(&stroke("Ctrl+K")));
     }
 
     #[test]

@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### ボタンfocus中の通常shortcutを回復（2026-09-07 13:07 JST）
+
+egui-winitがfocus中のkeyをまとめて消費する前に、文字入力でない通常controlから有効な現在binding/prefixを共通command処理へ渡す。Space・矢印・Home/End・Escapeの修飾なし/Shift付き操作とTabはUI側へ残す。進行中prefixの続きは既存shortcut処理へ渡す。palette/menu/grid/filmstrip/modal/TextEditは除外し、seek/trim/selectionの値keyとsynthetic key除外を維持する。
+
+- a55cd1d通常release `E6B8A24641057BB8146DFD2883E58E9C39C81B0E88641A40EBE996595B6EC0E6`、画像PID 40548（開始UTC 2026-09-07T04:01:00.7113017Z）でmenu Escape後のlogo focusを確認してR。focusは残るがdirtyにならず回転しないことを再現。新しい回帰もボタンfocus時のR所有権assertionで失敗した。
+- 修正後通常release `6263CBEBE36210EC2CF6A26B12DD069F775AB4795B689CC80819851900982711`、画像PID 17424（04:05:17.4757756Z）でR→Ctrl+Zが成立。logo・Reading mode button・tab本体の三箇所でfocusを保ったままdirty/cleanへ遷移した。logoのSpaceはmenuを開き、Ctrl+Shift+Pはpaletteへ移る。検索欄へrotateを入力してEscapeしても画像はdirtyにならなかった。
+- 同じwindowで四辺の値・Tab/矢印、398×560 crop/Undo、回転後の値範囲、未保存確認中の取得済みSetValue拒否・Cancel保持を再確認。log中のMethodInvocationExceptionはElementNotEnabledExceptionを含む期待された拒否であり、helperのassertionを通過している。全試験編集をUndoし、両windowを通常終了。stderrは空、PNG hash `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`は不変。
+- 回帰はR/Undo、現在のK割当と旧Rの非alias、Ctrl+K Space prefix、取消/不一致keyの配送、未割当・UI navigation/activationの除外、五つのoverlay条件、TextEdit非介入、selectionの既存key所有権を確認。264 workspace tests、format・Clippy・両buildが通過。既存live ignore 3件は未実行。a55cd1d CI 34081422762も成功。custom設定のnative再試験や物理入力matrix全体を完了した意味ではない。
+- helper/logはignoredの`target/tmp/h1-button-shortcut*`。Save・clipboard・OS設定変更なし。前項の連続menu再open時のcategory focus/展開の不成立は未解決として次に監査する。全screen reader・実DPI/device・最終候補保存/性能・配布・外観受入gateも継続する。
+
 ### menu→palette取消時のaccessibility panicを修正（2026-09-07 12:56 JST）
 
 メニューのcommand選択時は、消える項目ではなくlogoへfocusを引き継いでからdispatchする。paletteや未保存確認の取消先は有効なlogoとなり、SelectAllなどcommand固有のfocus先はその後で優先される。加えて固定eguiの完全root treeを配送する直前に、存在しないfocusをrootへ戻し、同じ古いegui focusを解除する。node一覧・有効なfocusを変更せず、accessibility無効時は何もしない。

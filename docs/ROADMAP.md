@@ -336,3 +336,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 2026-09-07 12:40、logo menuのEscape後にfocusが消える問題を修正した。commandを選ばず取消した時だけlogoへ戻し、Enter/Spaceでの再openを可能にした。Welcome/画像の親menu・submenu、通常SelectAll実行、背景click・idleとの区別を確認し、261 tests・必須check・両buildが通過。連続するoverlay操作と全screen reader・実環境/最終候補/配布/外観受入のH1 gateは継続する。
 
 2026-09-07 12:56、menu→palette→Escapeで消えた項目へのfocusがnative consumerをpanicさせる問題を修正した。commandへlogoを復帰先として引き継ぎ、完全root treeの配送前にもfocusの存在を検証する。通常Welcome/画像の生存と再open、263 tests・必須check・両buildが通過。一方でlogo focus中のR不達と連続menu再openの不成立を観測し、次の監査対象とした。全screen reader・実環境/最終候補/配布/外観受入を含むH1 gateは継続する。
+
+2026-09-07 13:07、logoなど通常controlのfocusがR/Undoを飲み込む問題を修正した。有効な現在binding/prefixだけをeguiより先に処理し、UI操作key・text・overlayと既存値操作を維持する。通常logo/reading button/tabのRとUndo、menu Space・palette文字入力、選択/crop/確認Cancel、264 tests・必須check・両buildが通過。連続menu再openの不成立と、全screen reader・実環境/最終候補/配布/外観受入のH1 gateは継続する。

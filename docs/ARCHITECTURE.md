@@ -324,6 +324,8 @@ shortcut設定の生成と読込は往復可能にする。`+` keyはmodifier区
 
 status barの再生・waveform timeline・reading mode・fullscreen解除buttonは、tooltipとaccessibility labelのshortcutを現在のbindingsから取得する。prefixは全sequenceを表示し、未割当なら操作名だけにする。既定bindingとclick dispatchは変更しない。
 
+文字入力ではない通常controlのfocus中も、有効な現在bindingに一致するcommand/prefixはegui-winitのfocus全体のkey消費より先に処理する。Ctrl/Alt/Windows keyなしのSpace・矢印・Home/End・EscapeとTabはUI操作へ残し、進行中prefixの続きは既存shortcut処理へ渡す。menu・palette・grid・filmstrip・modal・TextEditは横取りせず、seek/trim/selectionの値key所有権は既存判定を維持する。合成されたfocus復帰keyからこの経路を実行しない。
+
 egui-winitは修飾付きTabも消費するため、Tab eventのうち現在の有効bindingまたはprefixに一致するものを先に共有shortcut処理へ渡す。通常のbutton focus中も修飾付きTabは使えるが、menu・palette・grid・modalではUI入力を優先する。未割当のTabと通常controlのTab/Shift+Tab focus移動は維持する。filmstrip固有の項目移動はCtrl/Alt/Windows keyなしのTab/Shift+Tabだけとし、Ctrl+Tab等を奪わない。固定aliasや新commandは追加しない。
 
 画像の標準Left/Rightは画像専用Previous image / Next image commandへ解決し、共有Shell snapshotの画像順を一枚ずつ移動する。既存の同種移動と同じdirty/export guardを通し、reading modeでも現在画像を一枚進める。動画・音声では従来の5秒Seekを維持し、Ctrl+左右の同種移動も変更しない。新commandはmenu・palette・shortcuts.confから利用でき、設定で変更したキーとは別の固定aliasを設けない。新しい既定bindingと既存commandのcustom bindingが同じキーの場合は、従来のregistry順による既存command優先を維持する。Home/End・Page等の追加aliasや数指定jumpはこの変更に含めない。

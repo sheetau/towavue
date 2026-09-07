@@ -96,11 +96,13 @@ logo menuはFile / Edit / Viewに分かれています。FileにOpen・Export・
 
 logoへTabでfocusしてEnter／Spaceでmenuを開けます。menu内は上下またはTab／Shift+Tabで有効項目を移動し、右でsubmenu、左で親へ戻ります。Enter／Spaceで選択、Escapeでmenu全体を閉じます。再open時は先頭項目へ戻り、keyboardで選んだ項目はscroll内に表示します。
 
-Escapeでメニューを取り消すとlogoへfocusが戻り、Enter／Spaceですぐ開き直せます。コマンド実行や背景クリックでは、このfocus復帰を行いません。
+Escapeでメニューを取り消すとlogoへfocusが戻り、Enter／Spaceですぐ開き直せます。メニューからコマンドを選んだ場合もlogoを戻り先として引き継ぎ、コマンド自身のfocus先があればそちらを優先します。背景クリックでは復帰を行いません。
 
 command paletteはtitle bar直下の暗いpanelへまとめ、全幅の検索欄と右揃えのshortcutを表示します。小さいwindowや長いprefixは省略・全文tooltipとscrollで扱い、検索・上下選択・Enter実行・Escape取消は従来どおりです。
 
 パレットをEscapeで取り消すと、開く直前の操作部へfocusを戻します。画像・動画の選択辺を調整していた場合も、その辺の矢印操作を続けられます。コマンドを実行した場合は、その操作のfocus先を優先します。
+
+メニューから開いたパレットの取消で、消えたメニュー項目へfocusを戻して終了する問題を修正しました。UI Automationへ渡すfocus先も、その画面に存在することを確認します。
 
 検索欄のCtrl+C／Ctrl+X／Ctrl+VはWindowsのテキストクリップボードを使い、外部アプリと文字列をやり取りできます。画像や選択範囲をクリップボードへコピーする機能ではありません。
 

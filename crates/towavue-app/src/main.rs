@@ -193,6 +193,28 @@ fn handle_accesskit_window_event(
     }
 }
 
+fn keep_accessibility_focus_live(context: &egui::Context, output: &mut egui::PlatformOutput) {
+    let Some(update) = &mut output.accesskit_update else {
+        return;
+    };
+    let Some(tree) = &update.tree else { return };
+    // The pinned egui emits complete root trees, not incremental node lists.
+    if update.tree_id == egui::accesskit::TreeId::ROOT
+        && update.focus != tree.root
+        && !update.nodes.iter().any(|(id, _)| *id == update.focus)
+    {
+        context.memory_mut(|memory| {
+            if let Some(id) = memory
+                .focused()
+                .filter(|id| id.accesskit_id() == update.focus)
+            {
+                memory.surrender_focus(id);
+            }
+        });
+        update.focus = tree.root;
+    }
+}
+
 enum FolderIntent {
     Open,
     Refresh(PathBuf),
@@ -1336,6 +1358,7 @@ where
         let mut output = context.run_ui(input, |ui| {
             self.draw_ui(ui, &mut actions);
         });
+        keep_accessibility_focus_live(&context, &mut output.platform_output);
         if self.restore_ui_textures {
             output
                 .textures_delta
@@ -2122,6 +2145,7 @@ where
                         menu::show(ui, self.command_context(), &self.shortcuts)
                     });
                     if let Some(Some(command)) = menu.inner {
+                        menu.response.request_focus();
                         actions.push(UiAction::Command(command));
                     } else if escape
                         && menu.inner.is_some()
@@ -5896,6 +5920,127 @@ mod tests {
         frame(vec![]);
         assert!(!egui::Popup::is_any_open(&context));
         assert_ne!(frame(vec![]).focus, logo, "outside click is not Escape");
+    }
+
+    #[test]
+    fn menu_palette_round_trip_keeps_focus_in_the_live_accessibility_tree() {
+        let Some(_root) = isolated_test_root(
+            "tests::menu_palette_round_trip_keeps_focus_in_the_live_accessibility_tree",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        app.ui_context = Some(context.clone());
+        let frame = |app: &mut Application<_>, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            for action in actions {
+                app.handle_ui_action(action);
+            }
+            let tree = output.platform_output.accesskit_update.expect("tree");
+            assert!(
+                tree.nodes.iter().any(|(id, _)| *id == tree.focus),
+                "the native accessibility consumer rejects a missing focused node"
+            );
+            tree
+        };
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        frame(&mut app, vec![]);
+        let tree = frame(&mut app, vec![]);
+        let logo = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("towavue menu"))
+            .expect("logo")
+            .0;
+        for label in ["towavue menu", "View", "Show command palette"] {
+            let tree = frame(&mut app, vec![]);
+            let target = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label().is_some_and(|name| name.starts_with(label)))
+                .unwrap_or_else(|| panic!("missing {label}"))
+                .0;
+            frame(
+                &mut app,
+                vec![egui::Event::AccessKitActionRequest(
+                    egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Click,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: target,
+                        data: None,
+                    },
+                )],
+            );
+            frame(&mut app, vec![]);
+        }
+        assert!(app.palette_open);
+        assert_eq!(
+            frame(&mut app, vec![]).focus,
+            egui::Id::new("command-palette-query").accesskit_id()
+        );
+        frame(
+            &mut app,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert!(!app.palette_open);
+        assert_eq!(frame(&mut app, vec![]).focus, logo);
+    }
+
+    #[test]
+    fn accessibility_output_rejects_removed_focus_without_changing_live_nodes() {
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let removed = egui::Id::new("removed-menu-item");
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            ui.label("Existing content");
+            ui.memory_mut(|memory| memory.request_focus(removed));
+        });
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree");
+        assert_eq!(tree.focus, removed.accesskit_id());
+        assert!(!tree.nodes.iter().any(|(id, _)| *id == tree.focus));
+        let nodes = tree.nodes.clone();
+        keep_accessibility_focus_live(&context, &mut output.platform_output);
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree");
+        assert_eq!(tree.focus, tree.tree.as_ref().expect("root tree").root);
+        assert_eq!(tree.nodes, nodes);
+        assert!(context.memory(|memory| memory.focused()).is_none());
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            ui.button("Live control").request_focus();
+        });
+        let tree = output.platform_output.accesskit_update.clone();
+        let focus = context.memory(|memory| memory.focused());
+        keep_accessibility_focus_live(&context, &mut output.platform_output);
+        assert_eq!(output.platform_output.accesskit_update, tree);
+        assert_eq!(context.memory(|memory| memory.focused()), focus);
+        keep_accessibility_focus_live(&context, &mut egui::PlatformOutput::default());
+        assert_eq!(context.memory(|memory| memory.focused()), focus);
     }
 
     #[test]

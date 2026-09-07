@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### menu→palette取消時のaccessibility panicを修正（2026-09-07 12:56 JST）
+
+メニューのcommand選択時は、消える項目ではなくlogoへfocusを引き継いでからdispatchする。paletteや未保存確認の取消先は有効なlogoとなり、SelectAllなどcommand固有のfocus先はその後で優先される。加えて固定eguiの完全root treeを配送する直前に、存在しないfocusをrootへ戻し、同じ古いegui focusを解除する。node一覧・有効なfocusを変更せず、accessibility無効時は何もしない。
+
+- 72d09a9通常release `71EA1F8210E693472BE7EC40F7619B475C93E4515D7826534F1C4D57CE80D166`、Welcome PID 4828（開始UTC 2026-09-07T03:43:34.9037487Z）でmenu→View→Show command palette→zoom→Escape。process消失とstderrの`Focused ID ... is not in the node list` panicを確認した。helper末尾のnull focus/空titleは成功証拠ではなく、以後はEscape後も同一processの生存を再確認するようにした。baselineはpanic終了であり通常終了とは記録しない。
+- 最初のheadless keyboard列はpaletteを開けず再現証拠から除外。nativeと同じUIA Click列へ合わせると、focusが同じ出力のnode一覧にないassertionで失敗した。修正後の往復回帰は出力補正に頼らず各frameのfocus存在と最後のlogo復帰を確認する。境界検証の別testでは、描画中に消えたIDをfocusした不整合treeを作り、rootへの補正・egui focus解除・node不変、有効focusとaccessibility無効時の非変更を確認した。
+- 最終通常release `E6B8A24641057BB8146DFD2883E58E9C39C81B0E88641A40EBE996595B6EC0E6`、Welcome PID 36344（03:49:51.4909381Z）と画像PID 13852（03:51:11.1352716Z）で同じpalette往復後も生存し、logo focusとEnter再openを確認。画像ではmenuからのdirty close→Cancel→logo復帰も一度確認し、試験用回転はmenuのUndoで戻した。
+- 追加操作ではlogo focus中のRが編集へ届かなかった。また連続するmenu再openのhelperで、submenuが見えない、category SetFocusを受け付けない、keyboard focus確認が成立しない例を観測。途中状態を再確認し、Undoしてから次を試した。成功した再開試験と失敗した連続試験を区別し、この横断flowは未完了として次に監査する。
+- 6 menu testsと境界検証、263 workspace tests、format・Clippy・両buildが通過。既存live ignore 3件は未実行。72d09a9 CI 34080542225と012cdf2 CI 34080064221も成功。最終二windowは通常終了、stderrは空、PNG hash `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`は不変。helper/logはignoredの`target/tmp/h1-menu-palette*`。Save・clipboard・OS設定変更なし。今回の終了修正は、残る操作・全screen reader・実環境・最終候補保存/性能・配布・外観受入gateの代替ではない。
+
 ### logo menuのEscape後にkeyboard操作を継続（2026-09-07 12:40 JST）
 
 親menu・submenuをEscapeで閉じ、commandを実行していない時だけlogo buttonへfocusを戻す。次のEnter/Spaceで再openでき、Tabで離れた後や背景clickではfocusを戻さない。command registry・配置・外観・input bindingは変更しない。

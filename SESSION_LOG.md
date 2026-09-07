@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 12:56 JST - prevent a stale menu focus from crashing the accessibility consumer
+
+- Trigger/intent: previous turn is progress; clean HEAD 72d09a9 confirmed. Native Welcome PID 4828 exits on menu -> palette -> Escape; stderr reports a focused ID missing from the node list. Its helper's null/empty final observation is not a success; process disappearance and panic log establish the failure.
+- Change: hand focus from a chosen menu item to the persistent logo before dispatch, preserving command-owned focus priority. Before native platform-output delivery, validate the pinned egui's complete root tree and replace only a missing focus with root, clearing the matching stale egui focus. No runtime/dependency changes or incremental-tree rewriting.
+- Verification: native-matching UIA regression fails on missing focus before the fix and passes afterward without output correction; a separate boundary test verifies removal, node preservation, valid-focus preservation and disabled-accessibility no-op. Six menu tests, 263 workspace tests, format, Clippy and both builds pass; three existing live ignores remain. Prior 72d09a9/012cdf2 CIs succeed.
+- Native/cleanup: final normal Welcome PID 36344 and image PID 13852 survive palette cancellation and reopen from logo. A menu dirty-close Cancel returns to logo and trial rotation is undone. Final windows close normally with empty stderr and unchanged PNG hash; baseline exited by panic. DEVELOPMENT records identities, hashes and failure exclusions. No Save/clipboard/OS-setting changes.
+- Remaining evidence: logo-focused R does not apply rotation; repeated menu-helper activation sometimes loses the submenu or rejects category focus. Revalidate intermediate state and Undo each trial edit; do not count these attempts as passing the connected workflow. No speculative fix for these additional observations in this checkpoint.
+- Areas/status/next: app main and README/ARCHITECTURE/DEVELOPMENT/KNOWN_GAPS/ROADMAP; h1_active, prepare the verified crash-fix checkpoint for push. Audit non-text button shortcut routing and menu reentry next. Keep full screen-reader, physical-input/DPI/device, final-candidate save/performance, distribution and owner-design acceptance open.
+
 ## 2026-09-07 12:40 JST - return keyboard focus to the logo after menu cancellation
 
 - Trigger/intent: previous turn is progress; clean HEAD 012cdf2 confirmed. Native Welcome PID 21444 loses logo focus on Escape from both root and submenu, reproduced by a new regression. Prior CI 34080064221 remains in progress at verification.

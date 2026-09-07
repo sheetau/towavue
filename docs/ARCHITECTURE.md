@@ -512,4 +512,6 @@ M4ではName、Date modified、Date created、Size、Typeの昇順・降順、�
 
 本体はMIT OR Apache-2.0。FFmpegはGPL/nonfree componentsを無効化した9.0.1のDLLを動的リンクする。配布時には対応するFFmpeg source、build configuration、変更差分、著作権・LGPL表示、第三者license一覧を同じreleaseから取得可能にする。
 
+固定開発buildは`--enable-version3`を含み、license表示はLGPL 3以降である。本体の直接依存6 DLLに加え、ffmpeg.exe/ffprobe.exeのためavdevice DLLも必要になる。現在の同梱候補とsource・第三者表示・VC runtimeの未完了事項は[DISTRIBUTION.md](DISTRIBUTION.md)へ記録する。開発archiveにLICENSE.txtがあることだけでは配布承認としない。
+
 FFmpeg binaryやsource archiveは、再現可能なbuild・配布工程を定義するmilestoneまでGitへ入れない。

@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 22:18 JST - audit installer runtime dependencies and source provenance gaps
+
+- Trigger/intent: previous turn is progress; clean pushed 6a3c820 confirmed. Execute the first distribution prerequisite, not installer creation or publication.
+- Evidence: hash-check the fixed archive and all ten extracted PE files against ZIP entries. Inspect all PE imports: helpers also require avdevice-63.dll, bringing the required FFmpeg set to seven DLLs plus two helper executables; ffplay is unused. Build configuration and -L establish LGPL version 3 or later, not a 2.1-only label. Resolve FFmpeg and build-recipe commits; release assets do not include the corresponding dependency sources. Recipe packaging omits third-party sources and strips Libs.private. Do not mistake its GitHub source archive for a full source bundle.
+- Prerequisites: identify a signed Microsoft x64 runtime candidate by version/hash without executing it. Consult primary FFmpeg/LGPL, Microsoft and Cisco guidance; source-built OpenH264 does not establish coverage by Cisco's separately distributed binary terms. Exact third-party sources, notices, build provenance and applicable distribution conditions remain to be verified, not declared impossible or satisfied.
+- Verification: all nine documented file sizes/hashes match the inspected files; diff whitespace, format, workspace Clippy and 268 tests pass. Three existing live ignores remain unexecuted. Prior 6a3c820 CI 34126412143 succeeds.
+- Areas/status/next: add DISTRIBUTION and link it from README/ARCHITECTURE/KNOWN_GAPS. Documentation only; no production source/binary/dependency/OS changes or package release. Prepare verified checkpoint; h1_active. Next recover pinned dependency/source/patch and build-image provenance, then prepare a complete license bundle before installer implementation. Keep real-environment/owner acceptance gates open.
+
 ## 2026-09-07 22:14 JST - accept an assisted executable installer as the distribution target
 
 - Trigger/intent: owner clarifies that installation is acceptable and requests the Monapad-style form, resolving the previous distribution ambiguity. Previous goal turn is no progress; do not continue its blocked audit after this new decision.

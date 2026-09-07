@@ -49,6 +49,7 @@ Mキーの消音解除は、100%へ固定で戻さず、そのtabの直前の非
 - [ROADMAP.md](docs/ROADMAP.md): 段階的な実装順序と各ゲート
 - [DEVELOPMENT.md](docs/DEVELOPMENT.md): 開発版の試用方法、手動確認matrix、変更内容ごとの編集先
 - [KNOWN_GAPS.md](docs/KNOWN_GAPS.md): 現時点の制約、UI草案との差、次に検証する順序
+- [DISTRIBUTION.md](docs/DISTRIBUTION.md): インストーラー配布の同梱候補・対応ソース・未完了の確認事項
 - [AGENTS.md](AGENTS.md): 実装者・エージェントが常に守るルール
 - [SESSION_LOG.md](SESSION_LOG.md): セッションをまたぐ事実ベースの進捗記録
 

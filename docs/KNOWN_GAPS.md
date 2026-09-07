@@ -209,6 +209,10 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 
 ## 6. Launch判断に残る確認（2026-09-06 20:04 JST再監査）
 
+### 2026-09-07 22:18の配布依存監査
+
+[DISTRIBUTION.md](DISTRIBUTION.md)へ現行binaryの同梱候補と不足資料を記録した。補助exeのimportからavdeviceを含む7 DLLが必要で、固定FFmpegはLGPL 3以降である。全bin fileのZIP entry一致を確認したが、対応する第三者source/license一式と再現可能buildの証拠はまだ揃わない。Visual C++ runtime候補のversion・hash・署名は確認しただけで、配布条件やclean-machine起動を合格にしない。実装変更・binary公開・OS操作は行っていない。
+
 ### 2026-09-07 22:14の配布方式決定
 
 ownerは「インストールあり」「monapad側のような形」と回答した。monapadの固定commitの設定を確認し、インストール先を選べるSetup.exeをARCHITECTURE §7の配布方針にした。単一fileのportable appは要求しない。以下の22:11以前の形式確認待ちは解消したが、FFmpeg等の同梱条件、開発用環境変数なしの起動、installerの導入/更新/削除、clean-machine検証と公開は未完了。ROADMAPの段階計画に従い、Electron・自動更新・file関連付けは暗黙に追加しない。

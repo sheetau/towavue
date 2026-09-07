@@ -80,7 +80,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 logo menuのEscape取消後はlogoへfocusを戻し、Enter/Spaceで再openできる。Welcome/画像の親menu・submenuと通常command実行を確認したが、全overlay間の連続操作・screen readerの横断確認は継続中。
 
-menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でnative accessibility consumerがpanicした。command dispatch前のlogoへの引継ぎと、完全root treeのfocus存在検証で修正した。通常Welcome/画像の生存とlogo復帰を確認済み。logo focus中のR不達も非text controlのshortcut配送を修正し、logo/reading button/tabでRとUndoを確認。UI操作・検索入力は優先する。連続menu再open時のcategory focus/展開の不成立は未解決の監査対象として残る。
+menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でnative accessibility consumerがpanicした。command dispatch前のlogoへの引継ぎと、完全root treeのfocus存在検証で修正した。通常Welcome/画像の生存とlogo復帰を確認済み。logo focus中のR不達も非text controlのshortcut配送を修正し、logo/reading button/tabでRとUndoを確認。UI操作・検索入力は優先する。連続menu再openの不成立は、試験helperがEdit categoryと通知文を名前の前方一致で混同した誤判定だった。Button型も照合すると同じ通常binaryで回転/Undoとdirty close/Cancelを繰り返せる。全overlay・screen readerの横断確認まで完了した意味ではない。
 
 | 草案 | 現状 |
 |---|---|

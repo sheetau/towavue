@@ -338,3 +338,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 2026-09-07 12:56、menu→palette→Escapeで消えた項目へのfocusがnative consumerをpanicさせる問題を修正した。commandへlogoを復帰先として引き継ぎ、完全root treeの配送前にもfocusの存在を検証する。通常Welcome/画像の生存と再open、263 tests・必須check・両buildが通過。一方でlogo focus中のR不達と連続menu再openの不成立を観測し、次の監査対象とした。全screen reader・実環境/最終候補/配布/外観受入を含むH1 gateは継続する。
 
 2026-09-07 13:07、logoなど通常controlのfocusがR/Undoを飲み込む問題を修正した。有効な現在binding/prefixだけをeguiより先に処理し、UI操作key・text・overlayと既存値操作を維持する。通常logo/reading button/tabのRとUndo、menu Space・palette文字入力、選択/crop/確認Cancel、264 tests・必須check・両buildが通過。連続menu再openの不成立と、全screen reader・実環境/最終候補/配布/外観受入のH1 gateは継続する。
+
+2026-09-07 13:19、上記の連続menu再openの不成立を訂正した。試験helperがEdit buttonと通知Textを名前だけで混同しており、Button型も照合すると同じ通常binaryで回転/Undo・dirty close/Cancelを繰り返せる。製品コードは変えず、連続flowの回帰と検証記録を追加。264 tests・format・Clippyが通過した。次はgrid/filmstrip間のfocusを監査し、全screen reader・実環境/最終候補/配布/外観受入を含むH1を継続する。

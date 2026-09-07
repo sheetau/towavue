@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 13:19 JST - distinguish menu controls from similarly named notifications in native checks
+
+- Trigger/intent: previous turn is progress; verified shortcut checkpoint 4d75355 is pushed and the worktree starts clean. Audit the reported repeated-menu failure before changing product behavior.
+- Evidence/correction: native PID 11656 reproduces the helper failure. Its name-only `Edit *` lookup selects the notification Text, while the real Edit Button has focus. Restricting lookup to Button fixes the trial without a product change; the claimed category-focus defect is not established. DEVELOPMENT records exact process/binary/source identities.
+- Verification: same normal binary passes three rotation/reopen/Undo cycles, four dirty-close/Cancel/Undo cycles and final palette cancel/reopen. Extend the existing live-tree regression with three image cycles, first-category focus, notification role distinction, dirty guard cancellation and Undo. Correct an initial raw-text label-only assertion to include its value. All 264 workspace tests, format and Clippy pass; three existing live ignores remain unexecuted. Previous CI 34082273561 is still in progress when checked.
+- Cleanup/areas: undo all trial edits and close the owned window normally; stderr empty and PNG hash unchanged. No Save, clipboard, OS-setting or production-code changes; app tests and DEVELOPMENT/KNOWN_GAPS/ROADMAP updated, helpers/logs ignored.
+- Status/next: h1_active, prepare this verified test/evidence checkpoint for push. Audit grid/filmstrip cancellation and command focus next; retain full screen-reader, physical-input/IME/DPI/device, final-candidate save/performance, distribution and owner-design acceptance gates.
+
 ## 2026-09-07 13:07 JST - let non-text focused controls reach configured shortcuts
 
 - Trigger/intent: previous turn is progress; clean HEAD a55cd1d and CI 34081422762 success confirmed. Native PID 40548 retains logo focus but ignores R; a new regression fails at focused-control routing.

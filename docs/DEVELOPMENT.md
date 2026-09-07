@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 連続menu操作の誤判定を訂正（2026-09-07 13:19 JST）
+
+前二項で残したcategory focus/展開の不成立は、native helperの対象選択に原因があった。`Edit *`を名前だけで検索すると、回転後の通知Text `Edit added (source unchanged)`を先に取得する。実際のEdit buttonはfocusを持っていても、通知へのHasKeyboardFocus検査・SetFocus・Invokeは失敗する。対象のButton型も照合し、アプリ側のmenu処理は変更しない。
+
+- clean HEAD 4d75355、通常release SHA256 `6263CBEBE36210EC2CF6A26B12DD069F775AB4795B689CC80819851900982711`、画像PID 11656（開始UTC 2026-09-07T04:14:13.3419098Z）で旧helperの失敗を再現。段階ごとのtree取得では通知とfocus中のEdit buttonが同時に存在し、先頭Fileへの復帰自体も成立していた。失敗した試験の回転はEscape/Ctrl+Zで戻してから再試行した。
+- 同じwindow/binaryで型照合したhelperによる回転→再open→Undoを3周通過。menu→回転→File/Close tab→Cancel→Edit/Undoも計4周通過し、最後のmenu→palette→Escape→Enter再openも成立。すべての編集をUndoして通常終了、stderrは空。PNG SHA256 `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`は不変。Save・clipboard・OS設定変更はない。
+- 既存のpalette/live tree回帰を画像の3周操作へ拡張。毎passのfocus node存在、再open先頭File、上下階層移動、通知との役割区別、dirty確認/Cancel保持、logo復帰とUndoを確認する。最初の通知assertionはraw AccessKitのlabelだけを検査して失敗し、Textのvalueも照合して通過した。これはhelper/test条件の訂正であり製品不具合の修正前失敗ではない。
+- 264 workspace tests・format・Clippyが通過。既存live ignore 3件は未実行。変更はtestと文書のみで、通常binaryを再build/性能再測定したものではない。helper/logはignoredの`target/tmp/h1-menu-repeat*`。前回checkpointのCI 34082273561は確認時in_progress。
+- 次はgrid/filmstripの取消・command実行をまたぐfocusと日常操作を監査する。全screen reader・物理入力/他IME・実DPI/device・最終候補保存/性能・配布・外観受入gateは継続する。
+
 ### ボタンfocus中の通常shortcutを回復（2026-09-07 13:07 JST）
 
 egui-winitがfocus中のkeyをまとめて消費する前に、文字入力でない通常controlから有効な現在binding/prefixを共通command処理へ渡す。Space・矢印・Home/End・Escapeの修飾なし/Shift付き操作とTabはUI側へ残す。進行中prefixの続きは既存shortcut処理へ渡す。palette/menu/grid/filmstrip/modal/TextEditは除外し、seek/trim/selectionの値keyとsynthetic key除外を維持する。

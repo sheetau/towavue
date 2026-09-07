@@ -5965,7 +5965,7 @@ mod tests {
 
     #[test]
     fn menu_palette_round_trip_keeps_focus_in_the_live_accessibility_tree() {
-        let Some(_root) = isolated_test_root(
+        let Some(root) = isolated_test_root(
             "tests::menu_palette_round_trip_keeps_focus_in_the_live_accessibility_tree",
         ) else {
             return;
@@ -6044,6 +6044,75 @@ mod tests {
         );
         assert!(!app.palette_open);
         assert_eq!(frame(&mut app, vec![]).focus, logo);
+
+        let path = root.join("image.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Image);
+        let invoke = |app: &mut Application<_>, label: &str| {
+            let tree = frame(app, vec![]);
+            let target = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Button
+                        && node.label().is_some_and(|name| name.starts_with(label))
+                })
+                .unwrap_or_else(|| panic!("missing {label}"))
+                .0;
+            frame(
+                app,
+                vec![egui::Event::AccessKitActionRequest(
+                    egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Click,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: target,
+                        data: None,
+                    },
+                )],
+            );
+            frame(app, vec![])
+        };
+        for _ in 0..3 {
+            for command in ["Rotate clockwise", "Undo edit"] {
+                let tree = invoke(&mut app, "towavue menu");
+                let focused = tree.nodes.iter().find(|(id, _)| *id == tree.focus);
+                assert!(
+                    focused.is_some_and(|(_, node)| node
+                        .label()
+                        .is_some_and(|name| name.starts_with("File"))),
+                    "reopened menu starts at File: {focused:?}"
+                );
+                frame(
+                    &mut app,
+                    vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                );
+                frame(
+                    &mut app,
+                    vec![key(egui::Key::ArrowRight, egui::Modifiers::NONE)],
+                );
+                invoke(&mut app, command);
+                assert_eq!(app.edits[&tab].is_dirty(), command == "Rotate clockwise");
+                if command == "Rotate clockwise" {
+                    let tree = invoke(&mut app, "towavue menu");
+                    assert!(tree.nodes.iter().any(|(_, node)| {
+                        (node.label() == Some("Edit added (source unchanged)")
+                            || node.value() == Some("Edit added (source unchanged)"))
+                            && node.role() != egui::accesskit::Role::Button
+                    }));
+                    frame(
+                        &mut app,
+                        vec![key(egui::Key::ArrowRight, egui::Modifiers::NONE)],
+                    );
+                    invoke(&mut app, "Close tab");
+                    assert!(app.pending_guard.is_some());
+                    invoke(&mut app, "Cancel");
+                    assert!(app.pending_guard.is_none());
+                    assert!(app.edits[&tab].is_dirty());
+                    assert_eq!(frame(&mut app, vec![]).focus, logo);
+                }
+            }
+        }
     }
 
     #[test]

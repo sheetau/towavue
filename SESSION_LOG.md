@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 23:09 JST - generate verified Rust notices and compare the AMF source tree
+
+- Trigger/intent: previous turn is progress; clean pushed abcb980 confirmed and CI 34130165432 completes successfully. Advance the installer materials from discovery records to reproducible notice text.
+- Rust material: add pinned upstream-notice setup, an offline checksum/graph-validated generator, and regression checks. Generate 146 package sections with upstream alternative-license expressions unchanged, font/Chromium notices, newly discovered regex-syntax Unicode and tracing-core spin notices. Exclude tiff's test-image-only credits because those images are not shipped. Supply ffmpeg-sys-next's declared WTFPL using byte-verified SPDX standard text, explicitly distinguished from an upstream crate notice and from crate authorship.
+- Verification: the 1542330-byte generated bundle has SHA256 9849D7B4A28EDD77C3A816A073CC09C30E4BC5201305FC3DCACF564E7F112DF1. Check repeated byte identity, package coverage, complete supplemental notice bodies, UTF-8/LF, generation from another cwd, missing/corrupt input rejection and preservation of existing output. Fresh retrieval of all 11 upstream files and an unchanged cached rerun pass in a separate ignored fixture directory. Add notice verification to CI; no workflow publication or release upload.
+- FFmpeg evidence: read AMF's source archive without extraction and compare every file's Git blob hash against the complete pinned upstream tree, excluding Thirdparty as the download recipe does. All 577 match, with no missing/extra files. Other worktree/submodule/patch evidence and native FFmpeg/VC runtime notices remain open; no upstream build script executes.
+- Areas/checks/status: scripts, CI, third-party license provenance, distribution/input documentation and this log. PowerShell parse checks, diff whitespace, format, workspace Clippy and 268 tests pass; three existing live ignores remain unexecuted. Generated bundles/caches/fixtures stay ignored; production code, dependencies, release binary and OS settings do not change. Prepare a coherent checkpoint; h1_active, not launch complete. Next finish native dependency source/notice materials, then installer implementation and isolated install/update/uninstall verification, retaining real-environment and owner-acceptance gates.
+
 ## 2026-09-07 22:55 JST - retrieve pinned dependency sources and audit Rust notice provenance
 
 - Trigger/intent: continue the installer prerequisites from clean pushed 4e75f32; its CI 34128070585 succeeds. Preserve and monitor the original source-cache download, not a replacement transfer.

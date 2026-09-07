@@ -61,7 +61,7 @@ cacheには115個の実archiveと115個のsymlink aliasがある。pathとentry�
 
 78個すべての内容SHA256を上記JSONへ追記した。root Git HEADを持つ74件のうち、71件のcommit指定はrecipeと一致し、残るOpenSSL/Vulkan-Headers/Mbed TLSはcacheのFETCH_HEADに指定tag名があり、解決されたHEADも記録した。OpenCLのheaders/loaderとnv-codec-headersの3系列はnested repositoryで、計5 HEADがrecipeと一致する。FFmpeg 9向けrecipeが選ぶnv-codec系列は`ffnvcodec`であり、他2系列も組み込まれたと扱わない。
 
-LAMEのSVN databaseはメモリ内・query-onlyで読み、rootと全449 NODES行のrevision 6761を確認した。AMFはdownload recipeが`.git`とThirdpartyを除去するため、HEAD欠落を取得失敗とは扱わないが、固定commitとのtree比較は未完了である。14 archiveにsubmodule manifestがあり、root HEAD照合だけではsubmoduleやworktree内容の完全性を証明しない。内側entryの読取り以外に、sourceのbuild scriptは実行していない。
+LAMEのSVN databaseはメモリ内・query-onlyで読み、rootと全449 NODES行のrevision 6761を確認した。AMFはdownload recipeが`.git`とThirdpartyを除去する。23:03 JSTの追加照合で、残る577 fileすべてのGit blob hashが固定commitのtreeと一致し、欠落・追加・不一致はなかった。14 archiveにsubmodule manifestがあり、他のroot HEAD照合だけではsubmoduleやworktree内容の完全性を証明しない。内側entryの読取り以外に、sourceのbuild scriptは実行していない。
 
 ## Rust依存と組み込みフォント（2026-09-07 22:48 JST）
 
@@ -71,9 +71,23 @@ LAMEのSVN databaseはメモリ内・query-onlyで読み、rootと全449 NODES�
 - root資料がない13 packageのうち、AccessKit、egui、clipboard-win、profilingの12 packageはcrateのVCS情報が示す固定commitから11個の原本文書を取得した。ローカルの原本はGit blob SHA1と一致し、SHA256も上記JSONへ記録した。取得した本文は`target/tmp/rust-license-sources`配下に保持しており、まだ配布用bundleには組み込んでいない。
 - AccessKitのrootにはMIT/Apache本文だけでなく`LICENSE.chromium`もある。Cargoのlicense expressionだけを見て追加のChromium BSD noticeを捨てない。
 - epaint_default_fontsはHack、Noto Emoji、Ubuntu Light、emoji-icon-fontを埋め込む。`fonts/Hack-Regular.txt`にはMITに加えてDejaVu/Bitstream Veraの記載があり、別途OFL、Ubuntu Font Licence、emoji-icon-fontのMIT本文も保持する。egui本体のMIT/Apacheだけでフォントを扱わない。
-- ffmpeg-sys-next 9.0.0はWTFPLを宣言しているが、crate rootと固定上流treeにlicense/notice fileを発見できていない。他のffmpeg crateの本文を同crate由来と偽らず、宣言と適用する本文の根拠を補う必要がある。
+- ffmpeg-sys-next 9.0.0はCargo.tomlでSPDX識別子WTFPLを宣言するが、crate rootと固定上流treeにlicense/notice fileはなかった。23:03 JSTの補完では、[SPDXが同識別子へ対応付ける標準本文](https://spdx.org/licenses/WTFPL.html)を固定commitから`third-party/licenses/WTFPL.txt`へ保存し、原本のGit blob/SHA256と照合した。本文集には宣言を根拠とする標準本文であることを明記し、crate由来の文書とは表示しない。[公式FAQ](https://www.wtfpl.net/faq/)の説明どおり、本文中のSam Hocevarのcopyrightはlicense文書の著者であり、crateの著者という表示にはしない。
 
-この一覧は資料の所在と照合記録であり、完成した第三者notice集や配布条件充足の宣言ではない。選択式licenseと追加noticeを整理し、source内の適用範囲も確認してから同梱本文を作る。
+### Rust本文集の生成・検証（2026-09-07 23:05 JST）
+
+root以外も探索し、regex-syntaxのUnicode table noticeとtracing-coreのspin実装のMIT noticeを追加した。tiffの`tests/COPYRIGHT`は同梱しない試験画像だけのcreditなので除外する。選択式licenseは元のOR表示と各本文を保持し、ANDへ変更した扱いにはしない。ソース中の個別noticeの最終確認と、native FFmpeg/VC runtime資料は別途残る。
+
+通常の依存取得・build後に、次の手順で本文集を再生成できる。
+
+```powershell
+.\scripts\setup-rust-notices.ps1
+.\scripts\prepare-rust-notices.ps1
+.\scripts\test-rust-notices.ps1
+```
+
+setupは固定URLから不足する上流11 fileだけを取得し、取得前のcacheも取得後もSHA256を確認する。generator自体はofflineで、Cargo.lock・実際のWindows normal/build依存集合・全crate archive・上流本文・標準本文を検証してから、`target/distribution/RUST-THIRD-PARTY-NOTICES.txt`を書き出す。元crateのtar entryを直接読み、ローカルに展開したsourceの変更を混ぜない。別cwdからもrepositoryの固定toolchainを使い、入力エラーでは既存出力を変更しない。
+
+146 section、UTF-8/BOMなし/LF、必須追加notice、二回生成のbyte一致、上流本文の欠落・改変の拒否と既存出力保持を専用testで確認した。空cacheからの11 file取得と、再実行時の更新なしも別の隔離directoryで通過した。本文集は1542330 bytes、SHA256 `9849D7B4A28EDD77C3A816A073CC09C30E4BC5201305FC3DCACF564E7F112DF1`。CIにも生成検証を追加する。このRust本文集だけでinstaller全体の再配布条件を満たしたとは扱わない。
 
 ## Visual C++ runtime
 

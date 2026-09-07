@@ -200,5 +200,13 @@
       }
     ]
   },
-  "open_items": ["Review applicable source-level and nested notices, including AccessKit Chromium and bundled font notices.","ffmpeg-sys-next 9.0.0 declares WTFPL but no notice file was found in its crate root or pinned upstream tree; do not claim one was recovered.","Assemble and verify complete distributable notice text; this inventory does not provide it.","Distinguish build-only dependencies from linked/runtime components before presenting a runtime SBOM."]
+  "additional_crate_notices": [
+    {"name":"regex-syntax","version":"0.8.11","path":"src/unicode_tables/LICENSE-UNICODE","sha256":"74db5baf44a41b1000312c673544b3374e4198af5605c7f9080a402cec42cfa3"},
+    {"name":"tracing-core","version":"0.1.36","path":"src/spin/LICENSE","sha256":"58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79"}
+  ],
+  "license_text_fallbacks": [
+    {"name":"ffmpeg-sys-next","version":"9.0.0","path":"third-party/licenses/WTFPL.txt","sha256":"13d8825a59e5e546d41e8711405d0f335a9934362a47c04a3b4280fa7932dc4a","source_url":"https://github.com/spdx/license-list-data/blob/3ac5a9c241d97f95b22a5e366c9c841404a35639/text/WTFPL.txt","git_blob_sha1":"7a3094a826e652c23d90a7dcb54b0963790b538b","basis":"The crate's Cargo.toml declares SPDX identifier WTFPL. This is the standard text for that identifier, not a notice file recovered from the crate. Sam Hocevar's copyright in this text identifies the license author, not the authors of ffmpeg-sys-next."}
+  ],
+  "excluded_test_data_notice": {"name":"tiff","path":"tests/COPYRIGHT","reason":"Credits only test images; those images are not shipped with towavue."},
+  "open_items": ["Review source-level notices not represented by named license files before publication.","Distinguish build-only dependencies from linked/runtime components before presenting a runtime SBOM.","Prepare the separate native FFmpeg and Microsoft runtime notices; the generated Rust bundle does not cover them."]
 }

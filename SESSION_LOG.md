@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 15:17 JST - distinguish media-position memory behavior from the long-run transient
+
+- Trigger/intent: previous turn is progress; clean pushed 2857878 confirmed. Test the simple hypothesis that the approximately 15-minute memory increase follows source position, without speculative production changes.
+- Evidence: normal PID 46480/start UTC 06:10:40.5918300Z uses the same binary/4K fixture. Seek to 880 seconds, to 300, then to 880 again; collect 312 approximately half-second samples through UIA. Two 899-to-930-second crossings stay at approximately 224-228 MiB, not the long-run 319.59 MiB transient. Seek startup peaks at approximately 418-453 MiB also occur at 300 seconds and settle by ten seconds. Simple source-position causality is unsupported; elapsed lifetime, continuous decode history and OS/driver causes are not distinguished.
+- Scope/cleanup: DEVELOPMENT records hashes, per-case memory and 4K Seek timings, not a replacement for the prior 1080p percentile gate. No product code changes. Undo mute once and close normally; source/binary hashes unchanged, no Save/clipboard/OS changes. Add bounded post-Undo polling to the ignored helper only, addressing its prior premature check. Helpers/logs remain ignored.
+- Verification/areas: format, Clippy and 268 tests pass; three existing live ignores remain unexecuted. Prior CI 34089534210 is in progress when checked. DEVELOPMENT, KNOWN_GAPS and this log only.
+- Status/next: h1_active; prepare verified evidence checkpoint. Retain the unexplained long-run transient without calling it a leak or claiming it fixed. Real default-audio-endpoint switching requires explicit owner authorization because it can affect other applications; request that authorization before the real-device gate. Keep physical input/IME/DPI, Windows 10, distribution and owner-design acceptance requirements intact.
+
 ## 2026-09-07 15:07 JST - complete the current release 30-minute playback gate
 
 - Trigger/intent: previous turn starts the measured process and verifies its live monitor; continue the same PID 516/start time through EOF, without restart or seek. Worktree starts at clean de1f9d0; production binary remains a5639e5.

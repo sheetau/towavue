@@ -601,6 +601,7 @@ struct Application<N> {
     prefix_started: Option<Instant>,
     modifiers: ModifiersState,
     filmstrip_open: bool,
+    filmstrip_return_focus: Option<(u64, egui::Id)>,
     filmstrip: filmstrip::Filmstrip,
     playlist: playlist::Playlist,
     image_seek_preview_active: bool,
@@ -712,6 +713,7 @@ where
             prefix_started: None,
             modifiers: ModifiersState::default(),
             filmstrip_open: false,
+            filmstrip_return_focus: None,
             filmstrip,
             playlist: playlist::Playlist::default(),
             image_seek_preview_active: false,
@@ -2146,6 +2148,10 @@ where
     }
 
     fn draw_top_bar(&self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        let return_to_tab = root.ctx().data_mut(|data| {
+            data.remove_temp::<bool>("filmstrip-return-tab".into())
+                .unwrap_or(false)
+        });
         let window_rect = root.max_rect();
         egui::Panel::top("tabs")
             .exact_size(32.0)
@@ -2158,6 +2164,9 @@ where
                     let menu = ui.menu_button("    ", |ui| {
                         menu::show(ui, self.command_context(), &self.shortcuts)
                     });
+                    if return_to_tab && self.tabs.active().is_none() {
+                        menu.response.request_focus();
+                    }
                     if let Some(Some(command)) = menu.inner {
                         menu.response.request_focus();
                         actions.push(UiAction::Command(command));
@@ -2249,6 +2258,9 @@ where
                                         );
                                     if response.clicked() {
                                         actions.push(UiAction::ActivateTab(tab.id));
+                                    }
+                                    if return_to_tab && active {
+                                        response.request_focus();
                                     }
                                     if response.clicked_by(egui::PointerButton::Middle) {
                                         actions.push(UiAction::CloseTab(tab.id));
@@ -2440,7 +2452,9 @@ where
                                 {
                                     if !matches!(
                                         command,
-                                        CommandId::ToggleGridMenu | CommandId::ToggleCommandPalette
+                                        CommandId::ToggleGridMenu
+                                            | CommandId::ToggleCommandPalette
+                                            | CommandId::ToggleFilmstrip
                                     ) {
                                         self.grid_open = false;
                                     }
@@ -3132,6 +3146,16 @@ where
         if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             return;
         }
+        if command == CommandId::ToggleFilmstrip && !self.filmstrip_open {
+            let focus = if self.palette_open || self.grid_open {
+                self.command_overlay_return_focus
+            } else {
+                self.ui_context
+                    .as_ref()
+                    .and_then(|context| context.memory(egui::Memory::focused))
+            };
+            self.filmstrip_return_focus = focus.map(|id| (self.media_generation, id));
+        }
         self.command_overlay_return_focus = if matches!(
             command,
             CommandId::ToggleCommandPalette | CommandId::ToggleGridMenu
@@ -3174,8 +3198,12 @@ where
             CommandId::ToggleFilmstrip => {
                 if !self.filmstrip_open {
                     self.refresh_folder_snapshot();
+                    self.filmstrip.focus_current();
+                    self.grid_open = false;
+                    self.filmstrip_open = true;
+                } else {
+                    self.close_filmstrip();
                 }
-                self.filmstrip_open = !self.filmstrip_open;
                 self.request_redraw();
             }
             CommandId::ToggleCommandPalette => {
@@ -4667,13 +4695,34 @@ where
         });
     }
 
+    fn close_filmstrip(&mut self) {
+        self.filmstrip_open = false;
+        let origin = self
+            .filmstrip_return_focus
+            .take()
+            .filter(|(generation, _)| *generation == self.media_generation);
+        if let Some(context) = &self.ui_context {
+            if let Some((_, id)) = origin {
+                context.memory_mut(|memory| memory.request_focus(id));
+            } else if self.fullscreen {
+                self.fullscreen_controls_keyboard = true;
+                self.fullscreen_controls_focus_requested = true;
+            } else {
+                context.data_mut(|data| data.insert_temp("filmstrip-return-tab".into(), true));
+            }
+        }
+        self.request_redraw();
+    }
+
     fn dismiss_overlay_or_fullscreen(&mut self) -> bool {
         if self.modal_input_blocked() {
             return false;
         }
         if self.palette_open || self.filmstrip_open || self.grid_open {
             self.cancel_command_overlay();
-            self.filmstrip_open = false;
+            if self.filmstrip_open {
+                self.close_filmstrip();
+            }
             self.request_redraw();
             true
         } else if self.cancel_view_drag() {
@@ -4811,7 +4860,9 @@ where
             if enabled {
                 if !matches!(
                     command,
-                    CommandId::ToggleGridMenu | CommandId::ToggleCommandPalette
+                    CommandId::ToggleGridMenu
+                        | CommandId::ToggleCommandPalette
+                        | CommandId::ToggleFilmstrip
                 ) {
                     self.grid_open = false;
                 }
@@ -10174,6 +10225,162 @@ mod tests {
     }
 
     #[test]
+    fn filmstrip_focus_returns_to_the_origin_or_current_media_controls() {
+        let Some(root) = isolated_test_root(
+            "tests::filmstrip_focus_returns_to_the_origin_or_current_media_controls",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let path = root.join("first.png");
+        app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: vec![towavue_core::FolderMediaItem {
+                identity: towavue_core::ShellIdentity::new(vec![]),
+                path: path.clone(),
+                kind: MediaKind::Image,
+            }],
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        app.ui_context = Some(context.clone());
+        let frame = |app: &mut Application<_>, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            for action in actions {
+                app.handle_ui_action(action);
+            }
+            output.platform_output.accesskit_update.expect("tree")
+        };
+        let focus = |target| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Focus,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: target,
+                data: None,
+            })
+        };
+        frame(&mut app, vec![]);
+        let tree = frame(&mut app, vec![]);
+        let origin = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("first.png"))
+            .expect("invoking tab")
+            .0;
+        for via_palette in [false, true] {
+            frame(&mut app, vec![focus(origin)]);
+            if via_palette {
+                app.dispatch(CommandId::ToggleCommandPalette);
+                frame(&mut app, vec![]);
+            }
+            app.dispatch(CommandId::ToggleFilmstrip);
+            frame(&mut app, vec![]);
+            let tree = frame(&mut app, vec![]);
+            let item = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.description()
+                        .is_some_and(|text| text.ends_with("(current item)"))
+                })
+                .expect("current filmstrip item")
+                .0;
+            assert_eq!(tree.focus, item, "opening focuses the current item");
+            if via_palette {
+                app.push_edit(EditOperation::RotateClockwise);
+                app.request_guarded(GuardedAction::Navigate(root.join("other.png")));
+                frame(&mut app, vec![]);
+                assert!(app.pending_guard.is_some());
+                app.resolve_guard(GuardDecision::Cancel);
+                for _ in 0..3 {
+                    frame(&mut app, vec![]);
+                }
+                assert!(app.filmstrip_open);
+                assert_eq!(frame(&mut app, vec![]).focus, item);
+            }
+            assert!(app.dismiss_overlay_or_fullscreen());
+            assert_eq!(frame(&mut app, vec![]).focus, origin);
+            if via_palette {
+                app.dispatch(CommandId::Undo);
+            }
+        }
+        app.dispatch(CommandId::ToggleFilmstrip);
+        frame(&mut app, vec![]);
+        let next = root.join("second.png");
+        app.tabs.open_new(next.clone(), MediaKind::Image);
+        app.path = Some(next);
+        app.media_generation += 1;
+        assert!(app.dismiss_overlay_or_fullscreen());
+        let tree = frame(&mut app, vec![]);
+        let current = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("second.png"))
+            .expect("current tab")
+            .0;
+        assert_eq!(
+            tree.focus, current,
+            "changed media does not restore the old tab"
+        );
+        frame(&mut app, vec![focus(origin)]);
+        assert_eq!(frame(&mut app, vec![]).focus, origin, "return is one-shot");
+        app.fullscreen = true;
+        app.dispatch(CommandId::ToggleFilmstrip);
+        app.media_generation += 1;
+        assert!(app.dismiss_overlay_or_fullscreen());
+        for _ in 0..3 {
+            frame(&mut app, vec![]);
+        }
+        let tree = frame(&mut app, vec![]);
+        assert!(app.fullscreen);
+        let focused = tree
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == tree.focus)
+            .expect("fullscreen focus");
+        assert!(
+            focused
+                .1
+                .label()
+                .is_some_and(|label| label.starts_with("Exit fullscreen"))
+        );
+        app.fullscreen = false;
+        app.dispatch(CommandId::ToggleFilmstrip);
+        while let Some(tab) = app.tabs.active().map(|tab| tab.id) {
+            app.tabs.close(tab);
+        }
+        app.path = None;
+        app.media_kind = None;
+        app.media_generation += 1;
+        assert!(app.dismiss_overlay_or_fullscreen());
+        let tree = frame(&mut app, vec![]);
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(id, node)| { *id == tree.focus && node.label() == Some("towavue menu") })
+        );
+    }
+
+    #[test]
     fn configured_grid_actions_preserve_only_cancellation_focus() {
         let Some(root) =
             isolated_test_root("tests::configured_grid_actions_preserve_only_cancellation_focus")
@@ -10217,6 +10424,7 @@ mod tests {
         for command in [
             CommandId::ToggleCommandPalette,
             CommandId::ToggleGridMenu,
+            CommandId::ToggleFilmstrip,
             CommandId::RotateClockwise,
         ] {
             std::fs::write(
@@ -10255,6 +10463,10 @@ mod tests {
                 assert!(app.palette_open);
                 frame(&mut app, vec![], false);
                 app.cancel_command_overlay();
+            }
+            if command == CommandId::ToggleFilmstrip {
+                assert!(app.filmstrip_open);
+                app.close_filmstrip();
             }
             assert!(app.command_overlay_return_focus.is_none());
             if command == CommandId::RotateClockwise {

@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### filmstrip開閉と移動後のfocusを接続（2026-09-07 13:46 JST）
+
+filmstripを開く際に既存の現在項目focus要求を出し、呼出元widgetとmedia読み込み世代を保持する。同世代で閉じると呼出元へ戻し、別mediaへ移った場合は現在tab、tabのないWelcomeではlogo、fullscreenでは既存Exit操作部へ一回だけ戻す。palette/gridからの呼出はその元の復帰先を引き継ぎ、gridから開く時はgridを閉じる。選曲・Shell順・編集・runtime・外観配置は変更しない。
+
+- baseline f41a1f9通常release `502F5E34DFCDD6768D591316D3B168E7A3BE1A1CC5F2A89296BF481343279347`、画像PID 48488（開始UTC 2026-09-07T04:37:41.6256287Z）で選択左辺→F→現在filmstrip項目へUIA Focus→Escape。focusが消え、Tabで02.pngへ移って閉じる場合もfocusがなかった。新しい回帰は開いた現在項目のfocusで失敗した。
+- 最終通常release `0B84119A7B77955D23DD7CF62FF46173007FF42BE61C89789BBBE2A8C57BC7B8`、画像PID 35236（04:44:04.0350662Z）では、現在項目への自動focus、取消後の選択左辺復帰と1 pixel矢印調整を確認。01→02.png移動後は現在tab、02→03.pngのfullscreen移動後はExit fullscreenへ戻り、Enterで通常windowへ復帰した。
+- 同じ最終windowの03.pngを回転して全体選択→filmstrip→Tabで未保存確認→Escape取消。現在項目と編集を保持し、次のEscapeで左辺へ戻って調整できた。試験回転はCtrl+ZでUndo。両windowを通常終了し、最終stderrは空。01.png SHA256 `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`は不変。Save・clipboard・OS設定変更なし。
+- 回帰は現在項目への初期focus、palette/gridからの引継ぎ、dirty guard取消、読み込み世代変更後の現在tab、復帰後の手動focus保持、fullscreen/Welcome fallbackを確認。266 workspace tests・format・Clippy・両buildが通過。既存live ignore 3件は未実行。f41a1f9 CI 34083748633も成功。native試験はSendKeys/UIAによる画像flowで、物理入力や全mediaのscreen-reader matrixではない。
+- helper/logはignoredの`target/tmp/h1-filmstrip-return*`。最終候補の保存・性能gateは再測定していない。次は音声playlistのfilmstrip往復と重なったoverlayの入力・読み順を監査し、実入力/IME/DPI/device・配布・外観受入を含むH1 gateを継続する。
+
 ### grid取消の一回Escapeとfocus復帰（2026-09-07 13:34 JST）
 
 grid buttonのfocus中にEscapeがUIへ消費され、gridが残る問題を修正した。draw開始時にmenu/modal/paletteの優先状態を確認して取消を処理し、進行中prefixの取消も優先する。同時表示しないgrid/paletteの復帰先を一件だけ共有し、両者の切替でも最初の操作部を保持する。通常commandの実行は復帰先を破棄し、command自身のfocusを優先する。filmstripの復帰契約やruntimeは変更しない。

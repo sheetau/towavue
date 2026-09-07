@@ -61,6 +61,8 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 ### Shell、navigation、tab
 
+filmstripを開くと現在項目へfocusし、同じmediaで閉じると呼出元へ戻る。移動後は現在tab（fullscreenではExit、Welcomeではlogo）へ戻し、古い選択辺へ復帰しない。通常画像の取消・移動・fullscreen・dirty Cancelを確認したが、音声playlistを含む全連続flowとscreen readerの横断確認は継続中。
+
 | 草案 | 現状 |
 |---|---|
 | Explorerの実際のSort By順を全navigationで使う | 実装済み。live Explorer view、保存済みShell view、明示fallbackの順で取得 |

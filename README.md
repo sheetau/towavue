@@ -26,6 +26,8 @@ playlistの可視行とfilmstripの可視項目はUI Automationから選択で�
 
 filmstripのTab/Shift+Tab移動では、切替後の現在項目へfocusも移ります。未保存確認でCancelした場合は元の項目へ戻り、項目にfocusがあってもEscape一回でfilmstripを閉じられます。
 
+filmstripを開くと現在項目へfocusします。同じmediaのまま閉じると呼出元の操作部へ戻り、別mediaへ移った場合は現在tabへ戻ります。fullscreenでは終了操作部を復帰先にします。
+
 曲を開く・選曲する・tabへ戻ると、playlistの現在行が画面外なら必要な分だけscrollします。同じ曲の再生中は手動scrollした位置を保持します。
 
 Mキーの消音解除は、100%へ固定で戻さず、そのtabの直前の非zero音量を復元します。音量は既存の編集履歴に含まれ、Undo/Redoと保存にも反映されます。

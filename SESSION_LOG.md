@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 13:46 JST - return from filmstrip to the invoking or current media controls
+
+- Trigger/intent: previous turn is progress; clean f41a1f9 confirmed. Native PID 48488 loses focus on same-media cancellation and after navigation. Add a regression that first fails on current-item focus at opening.
+- Change: request current-item focus at open and retain invoking widget plus media generation. Close returns to the origin for unchanged media, otherwise current tab/Welcome logo/fullscreen Exit, once only. Inherit palette/grid origin and close the grid when opening filmstrip. No Shell ordering, edit, runtime, dependency or layout changes.
+- Verification: regression covers palette/grid transitions, dirty Cancel, changed generation, one-shot return, fullscreen and Welcome. Final normal PID 35236 passes selection cancellation/arrow continuation, 01-to-02 current-tab return, fullscreen 02-to-03 return/Enter exit, and dirty navigation Cancel/filmstrip close/Undo. DEVELOPMENT records process/binary/source identities. All 266 workspace tests, format, Clippy and both builds pass; three existing live ignores remain unexecuted. Prior CI 34083748633 succeeds.
+- Cleanup/areas: Undo the trial rotation, close both owned windows normally, final stderr empty, 01.png hash unchanged. No Save/clipboard/OS-setting changes; custom configuration stays in isolated tests. App main and README/ARCHITECTURE/DEVELOPMENT/KNOWN_GAPS/ROADMAP changed; native helpers/logs ignored.
+- Status/next: h1_active, prepare verified checkpoint for push. Audit audio-playlist filmstrip round trips and overlapping-overlay input/reading order next. Preserve full screen-reader, physical-input/IME/DPI/device, final-candidate save/performance, distribution and owner-design acceptance gates.
+
 ## 2026-09-07 13:34 JST - close a focused grid with one Escape and restore its invoking control
 
 - Trigger/intent: previous turn is progress; clean 1f941c9 confirmed. Native PID 29240 retains the grid after focused-button Escape and loses the invoking selection edge; the regression reproduces it.

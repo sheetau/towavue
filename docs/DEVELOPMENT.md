@@ -4,6 +4,23 @@
 
 ## 1. 最初に試す
 
+### a5639e5 releaseのSeek再測定（2026-09-07 14:32 JST）
+
+保存修正後の通常releaseで1080p H.264/AAC、960×576、1倍、アプリ内muteを測定した。5秒前進10回/後退10回を5往復し、各要求のPresent成功logを待つ。各条件100 indicesに欠落・重複なし、各processの完了log200件と一致。p50/p95は昇順50/95番目で、全条件がM3のp95≤300msを満たす。
+
+| 経路・状態 | 完了数 | p50 | p95 | 最大 |
+| --- | ---: | ---: | ---: | ---: |
+| 通常・Paused | 100/100 | 27.774ms | 31.365ms | 36.079ms |
+| 通常・Playing | 100/100 | 80.829ms | 105.332ms | 118.910ms |
+| UIA tree取得後・Paused | 100/100 | 26.800ms | 30.766ms | 39.137ms |
+| UIA tree取得後・Playing | 100/100 | 73.231ms | 99.931ms | 108.820ms |
+
+- 通常PID 46396（開始UTC 2026-09-07T05:29:22.9987071Z）、UIA PID 49868（05:30:17.4972159Z）。後者の最初の準備はforeground guardで入力前に停止。同じprocessのmenu Invokeで前面化した後、menuへ復帰したfocusでSpaceがmenuを開いたため、Escapeで閉じてPlayback positionへfocusしてからpause/muteした。未完了Seekの再送やprocess再起動はなく、測定開始前の準備差として記録する。
+- binary SHA256 `339046281C097BE5BA05D91BDA9D73F8501BD433A0A6AA96EF4C77E6DD87FCA2`、source `tests/generated/m1/m3-1080p-h264-120s.mp4` SHA256 `DC645595A1165506BF5C3E685B14D7EA3B0116BBDFE74839E7DA5834CF60DA0C`。終了後も両hash一致。両windowはmuteをUndoしてcleanな状態で正常終了、Save/clipboard/OS設定変更なし。raw logとsampleはignored `target/tmp/h1-seek-a5639e5`。
+- 各入力前にPID/開始時刻/foregroundを照合。測定境界はアプリのSeek受付からPresent成功までで、物理入力・OS配送・DWM表示時間を含まない。UIAはtree取得後であり、常駐screen readerではない。開始source位置と試行順が異なるため、条件差を純粋なUIA負荷の差と解釈しない。測定中はbuild/testを走らせず、終了後にformat・Clippy・268 testsを再実行して通過（既存live ignore 3件は未実行）。a5639e5のCI 34086933988は確認時in_progress。
+
+この基準機・codec・binaryのSeek gateの証拠であり、旧binaryの30分測定を今回の結果へ混ぜない。同binaryの長時間drop/drift、実環境・入力・配布・owner受入は未完了。
+
 ### 保存物の再openと音声tabのsource別編集（2026-09-07 14:28 JST）
 
 通常releaseで画像・音声・動画のSave As→再openを監査した。音声folder tabの再利用時に、保存済みのtrim/volume/rateとexport先が別sourceへ残る不具合を修正した。source変更時だけ既存navigationの履歴・保存先resetへ通し、同source再open、dirty保護、明示的新規tabと背景画像の編集保持を回帰試験で確認する。

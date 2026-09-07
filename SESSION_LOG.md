@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 14:32 JST - remeasure the current release Seek gate
+
+- Trigger/intent: previous turn is progress; clean pushed a5639e5 confirmed. Replace stale-binary Seek evidence with measurements of the saved-audio fix candidate, without production changes.
+- Result: normal and UIA-tree-activated playback each complete 100 paused and 100 playing seeks. All indices are unique and each process has exactly 200 completion logs. p95 values are 31.365/105.332/30.766/99.931 ms, below the 300 ms M3 gate. DEVELOPMENT records full process/binary/source identities, percentiles and measurement limits.
+- Preparation/cleanup: the UIA preparation guard rejects non-foreground input; same-process menu activation then requires moving focus from logo to playback position before Space. No seek is resent or process restarted. Undo trial mute and close both windows normally. Source/binary hashes remain unchanged; no Save/clipboard/OS changes, no build/test during measurement. Raw logs/samples remain ignored.
+- Verification/areas: afterward format, Clippy and 268 workspace tests pass; three existing live ignores remain unexecuted. Prior checkpoint CI 34086933988 is in progress when checked. DEVELOPMENT, KNOWN_GAPS and this log only.
+- Status/next: h1_active; prepare verified evidence checkpoint for push. Next run the current binary through the 30-minute 4K60 drop/drift gate without heavy concurrent work. Keep the full launch goal and remaining real-device/input/OS/distribution/owner acceptance gates intact.
+
 ## 2026-09-07 14:28 JST - reset source-owned audio edits when reusing a clean playlist tab
 
 - Trigger/intent: previous turn is progress; baseline ffb3597 and CI 34085216528 success confirmed. Representative save/reopen audit finds native audio PID 42144 reapplying saved trim/volume/rate to its exported chirp. A regression fails on retained history before the fix. User permits OS clipboard writes; none used.

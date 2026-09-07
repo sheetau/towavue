@@ -83,6 +83,12 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 最初の優先候補は、動画・音声edit値とlive playbackの不一致、同期画像loadと同期exportによるUI停止、timeline/tab/filmstrip/menuの発見性と操作感である。詳細な試用方法と現状差分は`docs/DEVELOPMENT.md`と`docs/KNOWN_GAPS.md`を正とする。PackagingはH1と並行して暗黙に開始せず、FFmpeg binaryとlicense条件を別途決定してから計画する。
 
+2026-09-07、ownerはmonapadと同様のインストーラーexeを選択した。配布形式の確認待ちは解消し、ARCHITECTURE §7へ反映した。H1の品質gateを維持し、配布準備は次の順序で進める。形式の決定だけを同梱物・公開の承認やlaunch完了としない。
+
+1. 固定FFmpegの推移依存、補助exe、対応source/build設定、第三者表示とVisual C++ runtimeの再配布条件を確認する → verify: 同梱対象と根拠を固定した一覧。必要資料が不足するbinaryは配布候補にしない。
+2. その確認後、インストール先を選べるSetup.exeと開発環境に依存しないruntime探索を実装する → verify: FFMPEG_DIRや開発用PATHなしで起動・preview・保存、任意の作業directoryからの起動とtab detachを確認する。
+3. 隔離した対象Windows環境で導入・更新・アンインストールを検証する → verify: 代表mediaの再生/保存、安全な更新、sourceと利用者設定を勝手に消さない削除。署名・公開は別途判断し、未署名試験版を公開済み製品と呼ばない。
+
 2026-09-05、exportの応答停止を改善した。runtimeのbackground job、書き出し時間表示、cancel、成功後だけのtarget置換、exportした履歴位置のsaved判定、dirty guardの成功・失敗・cancel遷移を追加した。生成fixtureと実windowで再生継続、既存target保護、追加編集のdirty保持を確認した。
 
 同日、画像decodeをlatest-only workerへ移し、画像/reading要求のRGBA保持量を512 MiBへ制限した。6000×6000画像の起動時panicをdevice上限の正しい伝達で修正し、上限超過・破損pageのerror表示と相対path起動時のShell順navigationを確認した。H1全体は未完了で、live volume/rate、草案の外観と操作感の再現を引き続き優先する。

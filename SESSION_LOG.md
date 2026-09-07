@@ -2,6 +2,21 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 22:14 JST - accept an assisted executable installer as the distribution target
+
+- Trigger/intent: owner clarifies that installation is acceptable and requests the Monapad-style form, resolving the previous distribution ambiguity. Previous goal turn is no progress; do not continue its blocked audit after this new decision.
+- Evidence/decision: read sheetau/monapad README and package.json through the repository API; HEAD is 1c765729dd1386077a3caffc67d45ed4a89506e0. Its NSIS configuration disables one-click installation and allows changing the installation directory. Adopt that user-facing Setup.exe model while retaining Rust and dynamic FFmpeg linkage; do not inherit Electron, automatic updates or file associations.
+- Plan/areas: README, ARCHITECTURE, ROADMAP and KNOWN_GAPS record the chosen form and ordered dependency/source/license inventory, environment-independent installer implementation and isolated install/update/uninstall verification. Preserve the earlier uncommitted dependency audit. No binary redistribution, package publication, signing, billing or OS-setting changes.
+- Verification/status/next: documentation-only decision; diff whitespace, format, workspace Clippy and all 268 tests pass, with three existing live ignores unexecuted. Prepare a coherent decision checkpoint. h1_active, not launch complete. Next inspect the pinned FFmpeg dependency/source/build evidence and runtime prerequisites; installer implementation follows that prerequisite, while physical environment and owner-design acceptance remain open.
+
+## 2026-09-07 22:11 JST - record executable distribution preference and current binary dependencies
+
+- Trigger/intent: owner prefers exe distribution. The previous turn asks whether this means one install-free executable; no clarification has arrived, so do not infer an installer, single-file runtime or adjacent-file package. Previous turn is no implementation progress; this turn inspects current artifacts and the live CI handle.
+- Evidence: llvm-readobj --coff-imports on the unchanged 339046281C097BE5BA05D91BDA9D73F8501BD433A0A6AA96EF4C77E6DD87FCA2 release finds avcodec-63, avfilter-12, avformat-63, avutil-61, swresample-7, swscale-10 and VCRUNTIME140 DLL imports in addition to Windows libraries. No DLLs are adjacent in target/release. Preview/export source resolves ffmpeg.exe/ffprobe.exe from FFMPEG_DIR/bin when present, otherwise uses a bare executable name. This development artifact is not a self-contained executable; direct imports are not a complete transitive dependency inventory or a clean-machine trial.
+- CI: 918d0c4 run 34125434899/job 101752898227 completes every step successfully at 22:11:06 JST. No retry, replacement workflow or billing change. No live CI monitor remains.
+- Areas/verification: update KNOWN_GAPS and this log locally; no code/dependency/binary/package/OS changes. Inspect diff whitespace; do not rerun unchanged local tests or create another checkpoint solely for a pending clarification. Prior local checks and current committed-HEAD CI remain separate from these uncommitted notes.
+- Status/next: h1_active; clarify the distribution form before changing the accepted dynamic-link design or planning packaging. Keep real audio-switch permission, physical-input/IME/DPI/Windows-10/device verification and owner-design acceptance open. No claim of launch completion.
+
 ## 2026-09-07 22:04 JST - resume verification after a bounded Actions retry succeeds
 
 - Trigger/intent: resume the previously blocked full goal after more than six hours; prior turn made no implementation progress. Preserve the local audit changes. An old failed-run annotation does not establish current account availability, so retry the existing failed project check once within unchanged account limits.

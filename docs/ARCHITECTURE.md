@@ -506,6 +506,10 @@ M4ではName、Date modified、Date created、Size、Typeの昇順・降順、�
 
 ## 7. ライセンスと配布
 
+2026-09-07、ownerの指定により、初回配布はmonapadと同様のインストーラーexeとする。参照した[monapadの配布設定](https://github.com/sheetau/monapad/blob/1c765729dd1386077a3caffc67d45ed4a89506e0/package.json)はNSIS、oneClick=false、インストール先変更可である。towavueもインストール先を選べるSetup.exeを目標とし、インストール不要の単一実行file化は要求しない。Rust/native構成は維持し、Electronやmonapadの自動更新・file関連付けをこの指定から追加しない。
+
+必要なDLL・ffmpeg.exe・ffprobe.exeはインストール先へ配置し、利用者による開発用FFMPEG_DIR/PATHの設定を必要としない構成を計画する。これは配布方式の決定であり、同梱物の検証・再配布条件の確認・installer実装・clean-machine検証の完了ではない。署名・公開・課金は別途扱う。
+
 本体はMIT OR Apache-2.0。FFmpegはGPL/nonfree componentsを無効化した9.0.1のDLLを動的リンクする。配布時には対応するFFmpeg source、build configuration、変更差分、著作権・LGPL表示、第三者license一覧を同じreleaseから取得可能にする。
 
 FFmpeg binaryやsource archiveは、再現可能なbuild・配布工程を定義するmilestoneまでGitへ入れない。

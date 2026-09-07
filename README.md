@@ -12,6 +12,7 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 - 対応予定アーキテクチャ: x86-64
 - Rust: 1.98.0 / Edition 2024 / MSVC ABI
 - ライセンス: MIT OR Apache-2.0
+- 配布予定: インストール先を選べるWindows用Setup.exe。現時点では未提供で、下記は開発版のビルド手順
 - 次の工程: H1 human evaluation and UX stabilization。実際の利用flowを観察し、小さな検証可能な単位でUI/UXと機能の不一致を直す
 
 複数の映像・音声streamを含む素材では、thumbnail・filmstrip・waveformと保存も再生と同じstreamを自動選択します。手動でstreamを切り替えるUIはありません。

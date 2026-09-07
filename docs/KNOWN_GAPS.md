@@ -209,6 +209,16 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 
 ## 6. Launch判断に残る確認（2026-09-06 20:04 JST再監査）
 
+### 2026-09-07 22:14の配布方式決定
+
+ownerは「インストールあり」「monapad側のような形」と回答した。monapadの固定commitの設定を確認し、インストール先を選べるSetup.exeをARCHITECTURE §7の配布方針にした。単一fileのportable appは要求しない。以下の22:11以前の形式確認待ちは解消したが、FFmpeg等の同梱条件、開発用環境変数なしの起動、installerの導入/更新/削除、clean-machine検証と公開は未完了。ROADMAPの段階計画に従い、Electron・自動更新・file関連付けは暗黙に追加しない。
+
+### 2026-09-07 22:11の配布希望と依存確認
+
+- ownerはexe形式の配布を希望。インストール不要の単一exe、exeインストーラー、補助fileを伴うexeのどれを意味するかは確認待ちで、単体化・同梱・公開を承認済みとは扱わない。
+- 現行release（SHA256 `339046…7FCA2`）のPE importをLLVMで確認すると、FFmpegの`avcodec-63.dll` / `avfilter-12.dll` / `avformat-63.dll` / `avutil-61.dll` / `swresample-7.dll` / `swscale-10.dll`と`VCRUNTIME140.dll`への直接依存がある。`target/release`に隣接DLLはない。preview/exportは`FFMPEG_DIR/bin`にある`ffmpeg.exe` / `ffprobe.exe`を優先し、なければ実行file名だけで起動する。現行exeを単独で渡す形は自己完結した配布物ではない。これは直接依存と探索codeの確認であり、推移依存の全一覧・clean-machine起動試験・同梱license条件の決定ではない。
+- `918d0c4`のCI 34125434899/job 101752898227は22:11:06 JSTに全step成功。実装・OS設定・packageは変更せず、この希望と確認結果だけをローカル記録する。H1と実環境・owner受入・配布gateは引き続き未完了。
+
 ### 2026-09-07 22:04の再開確認
 
 - 6時間以上後の明示的再開に際し、古い失敗annotationだけでは現在の実行可否を証明できないため、既存workflowを一度だけ再試行した。`196c116`のCI 34091346834はattempt 2/job 101750929926で全step成功（22:03:52 JST完了）。CI起動障害は現在のblockerから外す。課金設定・spending limit・workflowは変更しておらず、アカウント側で何が変わったかは推測しない。
@@ -246,7 +256,7 @@ H1の個別修正が通ったことと、配布可能な品質の判定を分け
 | OS clipboard | egui-winitのclipboard feature、arboard 3.6.1/clipboard-win 5.4.1を既存入力/platform outputへ接続。ownerの書込み許可後、通常releaseでUnicode往復・cut後の空欄・外部変更後の再pasteを確認。変更前は同じpasteが空欄のままだった | clipboardを他processが占有する場合、全形式/IMEのmatrixは未検証。画像copy機能と混同せず、以後の試験でもclipboard内容への影響を明示する |
 | accessibility | AccessKitのtree/action配送、Welcome/menu/palette、保存確認中の背景拒否、再生・画像位置・trim端点の値操作を確認。Shell STA停止を修正。tabとplaylist/filmstripの対象ID・名前・Invoke・path説明、playlistの画面外行focus移動/選曲、filmstripの連続Tab時focus・Escapeと未保存Cancelも確認。画像/動画の全体選択・四辺のpixel値/focus操作・crop/Undo・modal拒否、拡大画像の選択辺への最小pan・手動pan保持も通常releaseで検証 | screen reader、全体の読み順/focus、window resize/実mixed-DPIを含む横断focus、画面外一覧項目へ支援技術だけで到達する全操作は未完了。keyboard/native試験をscreen reader・実環境の横断matrixの代替にはしない |
 | 対象OS・入力 | 現在の機械はWindows build 26200。日本語IME、注入pointer/key、scale入力の回帰/記録はある | Windows 10 22H2実機/VM、物理keyboard/pointer、他IME、実mixed-DPI、keyboard-onlyの横断確認は未完了 |
-| 配布 | versionは0.0.0の開発workspace。setup scriptは開発用FFmpegを準備するだけで製品packageではない | portable/installer、FFmpeg配布条件と同梱物、clean-machine起動、package/publicationは未決定・未実施。H1と分けて承認された計画で進める |
+| 配布 | versionは0.0.0の開発workspace。owner指定でインストール先を選べるSetup.exeを予定。setup scriptは開発用FFmpegを準備するだけで製品packageではない | FFmpeg等の配布条件と同梱物、開発環境に依存しない起動、installer導入/更新/削除、clean-machine検証と公開は未完了。上記の段階計画で進める |
 
 根拠の詳細は[DEVELOPMENT](DEVELOPMENT.md)の各日付付きscenario、[ROADMAP](ROADMAP.md)のM3/H1 gate、appの`Cargo.toml`と固定dependency source、`.github/workflows/ci.yml`を参照する。20:04監査時のrelease出力SHA-256は`660F60A453A8C8473A2B591B3866AAC64BBE68A80F7FA6000555686EEE5615FE`で、上表の過去30分測定binaryとも、その後のclipboard/accessibility検証binaryとも異なる。全体のlaunch可否は引き続き未証明である。OS text clipboardの通常往復とaccessibility bridgeを確認した後も、custom widget・支援技術・実環境gateは残り、小さな性能改善だけでこれらを完了扱いにはしない。
 

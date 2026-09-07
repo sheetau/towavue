@@ -2,6 +2,8 @@
 
 各milestoneは前のゲートを満たしてから開始する。新機能の数ではなく、観測可能な正しさを完了条件とする。
 
+2026-09-07、H1の代表保存・再open監査で、cleanな音声folder tabの再利用時に保存済み編集が別sourceへ残る問題を修正した。同sourceとdirty編集の保護を回帰試験で保持し、通常releaseでPNGの画素一致、chirpのPCM一致、動画の4秒/120 framesと再openを確認した。詳細はDEVELOPMENTの14:28記録を参照。H1とlaunch全体は未完了である。
+
 ## M0 — Foundation（完了）
 
 Git、Rust workspace、設計・運用文書、CIを構築する。再生、UI、Shell連携のruntime実装は行わない。

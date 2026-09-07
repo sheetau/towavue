@@ -148,6 +148,8 @@ H1のreading表示は横並びで高さ、縦並びで幅を揃え、各画像�
 
 `EditHistory`は適用済みcursorとsaved cursorを別に持つ。新しいoperationをundo位置から追加した場合はredo branchを破棄し、破棄されたbranchにsaved cursorがあれば保存済みidentityも失効する。tab titleとwindow titleの`*`およびstatusのUnsavedは、現在cursorとsaved cursorが一致するまで消えない。folder内移動は同じtabの履歴を破棄するためcloseと同じguard対象だが、tab切替は履歴を保持するためguardしない。
 
+外部Openが同じfolderのcleanな音声tabを再利用して別sourceへ移る場合も、通常navigationと同じく編集履歴と直近export先を破棄する。保存済みtrim/volume/rateを次の曲や保存物へ再適用しない。同じsourceの再openは履歴を保持し、dirty/export中のplaylistや明示的新規tabは従来どおり別tabを作って元の編集を保護する。
+
 exportはruntimeだけが`ffmpeg.exe`を子processとして起動し、app/coreへFFmpeg型を公開しない。画像filterはoperation順のcrop / transpose / flip、動画filterはそれらとtrim / PTS rate、音声filterはatrim / PTS / atempo / volumeを適用し、metadataを入力からcopyする。2倍を超える、または0.5倍未満のrateは複数の`atempo`へ分解する。video/audio encodeは固定FFmpeg buildのsoftware codecを使い、hardware encodeはM7まで行わない。Save As後のSaveは同じexport先を更新できるが、sourceと同一pathへの出力は拒否してpartial overwriteによるsource破損を避ける。
 
 ### H1 trim endpoint feedback

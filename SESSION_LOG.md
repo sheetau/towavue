@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 14:28 JST - reset source-owned audio edits when reusing a clean playlist tab
+
+- Trigger/intent: previous turn is progress; baseline ffb3597 and CI 34085216528 success confirmed. Representative save/reopen audit finds native audio PID 42144 reapplying saved trim/volume/rate to its exported chirp. A regression fails on retained history before the fix. User permits OS clipboard writes; none used.
+- Change: detect a different audio source before TabSet mutates the reused target, then use existing navigation reset for edit history and export destination. Same-source reopening, dirty protection, explicit new tabs and background edits remain intact. No runtime, dependency, Shell-order or layout changes.
+- Verification: 268 workspace tests, format, Clippy and debug/release builds pass; three existing live ignores remain unexecuted. Final native PNG crop/rotate/Undo/Redo/Save As and flip/reSave match all reference RGBA pixels; chirp trim/rate/volume matches reference PCM and reopens at neutral settings through Ended. Video export has 540x960, 120 frames/4 seconds, reference SSIM 0.998862 and zero-transfer/drop D3D11VA reopen through Ended. DEVELOPMENT records exact identities, hashes, atempo duration tolerance and the AAC timestamp warning, not a clean stderr claim.
+- Cleanup/areas: all six owned windows closed normally; final three source hashes unchanged. Outputs/helpers/logs stay ignored; only owned PNG export is overwritten, never a source. App main, README, ARCHITECTURE, DEVELOPMENT and ROADMAP changed.
+- Status/next: h1_active; prepare this verified checkpoint for push. Continue final-candidate resilience/performance and remaining user-input/design acceptance audit; representative save flows do not close the full launch gate. Preserve physical screen-reader/IME/DPI/device, Windows 10, distribution and owner-design decisions.
+
 ## 2026-09-07 13:59 JST - isolate covered filmstrip input and dismiss one overlay at a time
 
 - Trigger/intent: previous turn is progress; clean 2e376b6 confirmed. Audio PID 45064 passes playlist-focus round trips but permits a cached filmstrip Invoke behind the palette to change tracks. Grid Escape also closes the underlying filmstrip; both regressions fail before their fixes.

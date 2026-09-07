@@ -4,6 +4,19 @@
 
 ## 1. 最初に試す
 
+### 保存物の再openと音声tabのsource別編集（2026-09-07 14:28 JST）
+
+通常releaseで画像・音声・動画のSave As→再openを監査した。音声folder tabの再利用時に、保存済みのtrim/volume/rateとexport先が別sourceへ残る不具合を修正した。source変更時だけ既存navigationの履歴・保存先resetへ通し、同source再open、dirty保護、明示的新規tabと背景画像の編集保持を回帰試験で確認する。
+
+- baseline ffb3597、binary `F5C51CF089A80CF4FFD91B591A5C2F728D5A657BDE39F0E14917BBFFBC5D8C55`。画像PID 34784（開始UTC 2026-09-07T05:03:30.4792446Z）と動画PID 33276（05:09:46.7949618Z）は保存・再openを通過。音声PID 42144（05:11:29.4067796Z）はchirp保存物の再open後も50%・1.25倍・trimが残り、約3秒の末尾でもPlaying表示を維持。headless回帰もsaved historyが残るassertionで修正前に失敗した。
+- 最終binary `339046281C097BE5BA05D91BDA9D73F8501BD433A0A6AA96EF4C77E6DD87FCA2`。音声PID 49592（05:23:29.3570880Z）、画像PID 37308（05:24:30.1946506Z）、動画PID 25084（05:25:37.5126639Z）。すべて通常release、UIAとowned native dialogで操作し、各保存物を同windowで再openした。全windowをcleanな状態で正常終了した。
+- PNG: 非対称64×48 testsrcからleft/right=5/42、top/bottom=7/36をcrop、時計回り回転、Undo/Redo、Save As。29×37のdecoded RGBAはFFmpeg参照と完全一致（SHA256 `ebae29bc543e282a86cde62820feb22884acc885cb642ea00e1b2c82e5cb13c2`）。さらに水平反転→Ctrl+Sで新規export先のみ更新し、再び完全一致（`effb5419b11125b40410f13e5f807d4932b1ae16a87f355ff97829c17e6f1bc1`）。再openもclean・29×37、stderr空。
+- 音声: 8秒/48k mono PCMの時間変化するchirpへtrim 2..6秒、50%、1.25倍を適用。参照filterは`atrim=start_pts=96000:end_pts=288000,asetpts=PTS-STARTPTS,atempo=1.2500,volume=0.5000`。保存PCMとSHA256 `bce492efd2b806f3c44ebb088c92f1232b345fbd79aea1f649b538a9d1274190`が一致。153658 samples / 3.201208秒で、atempo出力のため理想3.2秒とsample数は同一ではない。再openは同tab・100%・1.00倍・trimなしでEndedへ到達。stderrはSoftware decode選択と正常終了統計。先行constant-tone試験はtrim位置の証明が弱く、初回参照のvolume/atempo順も誤っていたため、最終証拠にはchirpと実装順の参照を使う。
+- 動画: 30秒1080p H.264/AACをtrim 5..9秒、crop 960×540 at 100,100、回転、Undo/Redo、Save As。540×960・120 frames・4.000000秒、AACも4秒。trim/crop/rotation参照に対する映像SSIM All=0.998862（losslessの証明ではない）。再openはEnded、D3D11VA 120 hardware/presented、0 CPU transfers/drops、drift p95/max=3.790/3.899 ms。AACのdiscarded-sample timestamp警告は残るため、stderr空とは扱わない。短時間の代表例であり性能gate全体ではない。
+- 生成物とhelper/logはignored `target/tmp/h1-release-save-20260907-1403`などに限定。元PNG SHA256 `15B8DA68F777D7CAAAB816EDE7DC7364CC979CC9BFFAAB4E93D39E24B624D49D`、chirp `4BAF8F02E0F8028C6C87349FB385F0036D27FB4C594C302E797B22198AFA1AA6`、動画 `24FD0CE978C4BD51877A49D2FBE301C39B70E6FB2E19071A6A092651A8D3A4F6`は不変。clipboard書込許可は受領したが使用せず、OS設定も変更していない。native filenameはEditではなくPaneとして公開されるため、owned dialogのfocus IDと入力後の完全pathを確認して送信した。
+
+全268 tests、format、Clippy、debug/release buildが通過。既存3 live ignoresは実行していない。今回の代表保存flow以外のformat/長時間性能、完全なscreen reader・物理入力・IME・混在DPI、実device遷移、配布とownerの外観承認は引き続き未完了。
+
 ### 最前面overlayと背後のfilmstrip入力を分離（2026-09-07 13:59 JST）
 
 palette/grid/menuの背後にあるfilmstripをdisabledにし、取得済みUIA action・pointer・keyboard操作とhover説明を止める。既存opacityとpath由来ID、限定描画は維持する。Escapeはpalette/gridを先に閉じ、filmstripを残して操作を再開する。modal中の非表示契約は変更しない。

@@ -802,13 +802,28 @@ where
                             .as_ref()
                             .is_some_and(|export| export.tab == tab.id))
             });
+        let replacing_playlist_source = kind == MediaKind::Audio
+            && !force_new_tab
+            && !dirty_playlist
+            && self
+                .tabs
+                .tabs()
+                .iter()
+                .find(|tab| {
+                    matches!(&tab.target, TabTarget::AudioFolder { folder: open, .. } if open == folder)
+                })
+                .is_some_and(|tab| tab.target.current_path() != path);
         let id = if force_new_tab || dirty_playlist {
             self.tabs.open_new(path.clone(), kind)
         } else {
             self.tabs.open_external(path.clone(), kind)
         };
-        self.edits.entry(id).or_default();
-        self.load_path(path, kind);
+        if replacing_playlist_source {
+            self.navigate_to_unchecked(path);
+        } else {
+            self.edits.entry(id).or_default();
+            self.load_path(path, kind);
+        }
     }
 
     fn open_dropped_path(&mut self, path: PathBuf) {
@@ -10834,6 +10849,76 @@ mod tests {
             app.folder_snapshot.expect("Shell snapshot").folder_path,
             folder
         );
+    }
+
+    #[test]
+    fn external_audio_source_replacement_clears_saved_edits_and_export_destination() {
+        let Some(root) = isolated_test_root(
+            "tests::external_audio_source_replacement_clears_saved_edits_and_export_destination",
+        ) else {
+            return;
+        };
+        let first = root.join("first.wav");
+        let second = root.join("second.wav");
+        let image = root.join("image.png");
+        // Headless placeholders exercise tab ownership, not media decoding.
+        for path in [&first, &second, &image] {
+            std::fs::write(path, []).expect("fixture path");
+        }
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.open_external(first.clone(), false);
+        let original = app.tabs.active().expect("audio tab").id;
+        let source = app.path.clone();
+        let history = app.edits.get_mut(&original).expect("history");
+        for operation in [
+            EditOperation::SetTrimStart(media_time(Duration::from_secs(2))),
+            EditOperation::SetTrimEnd(media_time(Duration::from_secs(6))),
+            EditOperation::SetVolume(0.5),
+            EditOperation::SetRate(1.25),
+        ] {
+            history.push(operation, MediaKind::Audio);
+        }
+        history.mark_saved();
+        let saved = history.clone();
+        app.export_paths.insert(original, second.clone());
+        app.open_external(first.clone(), false);
+        assert_eq!(app.tabs.active().expect("same tab").id, original);
+        assert_eq!(app.path, source);
+        assert_eq!(
+            app.edits[&original], saved,
+            "same source retains saved editing"
+        );
+        assert_eq!(app.export_paths[&original], second);
+        app.open_external(image, false);
+        let background = app.tabs.active().expect("image tab").id;
+        app.edits
+            .get_mut(&background)
+            .expect("image history")
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let image_history = app.edits[&background].clone();
+        app.open_external(second.clone(), false);
+        assert_eq!(app.tabs.active().expect("reused tab").id, original);
+        assert_eq!(app.edits[&original], EditHistory::default());
+        assert!(!app.export_paths.contains_key(&original));
+        assert_eq!(app.edits[&background], image_history);
+        app.edits
+            .get_mut(&original)
+            .expect("history")
+            .push(EditOperation::SetVolume(0.7), MediaKind::Audio);
+        let dirty = app.edits[&original].clone();
+        app.open_external(first.clone(), false);
+        let new = app.tabs.active().expect("protected new tab").id;
+        assert_ne!(new, original);
+        assert_eq!(app.edits[&original], dirty, "dirty playlist is not reused");
+        assert_eq!(app.edits[&new], EditHistory::default());
+        app.edits
+            .get_mut(&original)
+            .expect("old history")
+            .mark_saved();
+        let preserved = app.edits[&original].clone();
+        app.open_external(second, true);
+        assert_ne!(app.tabs.active().expect("forced new tab").id, original);
+        assert_eq!(app.edits[&original], preserved);
     }
 
     #[test]

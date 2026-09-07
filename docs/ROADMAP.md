@@ -344,3 +344,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 2026-09-07 13:34、grid button focus中にEscape一回では閉じない問題と取消時のfocus復帰を修正した。paletteとの復帰先共有、menu/modal/prefixの優先、command固有focusを回帰で確認。通常releaseの四辺復帰・矢印・重なったmenu・grid回転/Undo・既存palette flowと265 tests・必須check・両buildが通過した。次はfilmstripを跨ぐfocusを監査し、全screen reader・実環境/最終候補/配布/外観受入を含むH1 gateを継続する。
 
 2026-09-07 13:46、filmstripの初期focusと閉じた後の復帰を接続した。同じmediaなら呼出元、変更後は現在tab/fullscreen Exit/Welcome logoへ一回だけ戻す。通常画像の取消・矢印調整・移動後のtab・fullscreen復帰・dirty Cancel/Undoと266 tests・必須check・両buildが通過。音声playlist・重なったoverlay・全screen readerと、実環境/最終候補/配布/外観受入を含むH1 gateは継続する。
+
+2026-09-07 13:59、palette/grid/menu背後のfilmstripを操作できる問題と、一回のEscapeで上のgridとfilmstripが同時に閉じる問題を修正した。通常音声のplaylist往復、背景Invoke拒否と解除後の選曲、二段階取消、267 tests・必須check・両buildが通過。次は最新binaryの代表保存/再openを確認し、全screen reader・実環境/最終候補性能/配布/外観受入を含むH1 gateを継続する。

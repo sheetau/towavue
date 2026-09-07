@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 13:59 JST - isolate covered filmstrip input and dismiss one overlay at a time
+
+- Trigger/intent: previous turn is progress; clean 2e376b6 confirmed. Audio PID 45064 passes playlist-focus round trips but permits a cached filmstrip Invoke behind the palette to change tracks. Grid Escape also closes the underlying filmstrip; both regressions fail before their fixes.
+- Change: disable filmstrip controls under palette/grid/menu while preserving opacity, stable IDs and virtualization. Reject background input and hover; dismiss the top command overlay before filmstrip. Modal hiding, playback, Shell order, runtime and dependencies are unchanged.
+- Verification: three covered states reject cached Click/Focus and resume the same item afterward; focused disabled items reject pointer/middle/Enter/Space actions. Final normal PID 37824 passes native background rejection without changing track, foreground selection after palette cancellation, playlist resumption and two-stage grid/filmstrip Escape. DEVELOPMENT records process/binary/source identities. All 267 workspace tests, format, Clippy and both builds pass; three existing live ignores remain unexecuted. Prior CI 34084472949 succeeds.
+- Cleanup/areas: close both windows normally, no edits/Save/clipboard/OS-setting changes, all three WAV hashes unchanged across final testing. Final stderr contains only three expected Software decode-selection diagnostics. App main/filmstrip and README/ARCHITECTURE/DEVELOPMENT/KNOWN_GAPS/ROADMAP changed; helpers/logs ignored.
+- Status/next: h1_active, prepare verified checkpoint for push. Verify representative save/reopen on the current binary next. Retain full screen-reader/physical-input/IME/DPI/device, final-candidate performance, distribution and owner-design acceptance gates.
+
 ## 2026-09-07 13:46 JST - return from filmstrip to the invoking or current media controls
 
 - Trigger/intent: previous turn is progress; clean f41a1f9 confirmed. Native PID 48488 loses focus on same-media cancellation and after navigation. Add a regression that first fails on current-item focus at opening.

@@ -1540,6 +1540,7 @@ where
                     &context,
                     self.folder_snapshot.as_ref(),
                     self.path.as_deref(),
+                    !self.palette_open && !self.grid_open,
                     actions,
                 );
             }
@@ -4718,12 +4719,11 @@ where
         if self.modal_input_blocked() {
             return false;
         }
-        if self.palette_open || self.filmstrip_open || self.grid_open {
+        if self.palette_open || self.grid_open {
             self.cancel_command_overlay();
-            if self.filmstrip_open {
-                self.close_filmstrip();
-            }
-            self.request_redraw();
+            true
+        } else if self.filmstrip_open {
+            self.close_filmstrip();
             true
         } else if self.cancel_view_drag() {
             true
@@ -10222,6 +10222,126 @@ mod tests {
         app.dispatch(CommandId::ToggleCommandPalette);
         assert!(app.palette_open);
         assert!(!app.grid_open);
+    }
+
+    #[test]
+    fn covered_filmstrip_rejects_cached_actions_and_resumes_after_overlays() {
+        let Some(root) = isolated_test_root(
+            "tests::covered_filmstrip_rejects_cached_actions_and_resumes_after_overlays",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let first = root.join("first.wav");
+        let second = root.join("second.wav");
+        app.tabs.open_new(first.clone(), MediaKind::Audio);
+        app.path = Some(first.clone());
+        app.media_kind = Some(MediaKind::Audio);
+        app.filmstrip_open = true;
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: [&first, &second]
+                .into_iter()
+                .map(|path| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![]),
+                    path: path.clone(),
+                    kind: MediaKind::Audio,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        app.ui_context = Some(context.clone());
+        let popup = std::cell::Cell::new(false);
+        let frame = |app: &mut Application<_>, events| {
+            if popup.get() {
+                egui::Popup::open_id(&context, "covered-filmstrip-menu".into());
+            }
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            (
+                output.platform_output.accesskit_update.expect("tree"),
+                actions,
+            )
+        };
+        frame(&mut app, vec![]);
+        let tree = frame(&mut app, vec![]).0;
+        let target = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.label() == Some("second.wav") && node.role() == egui::accesskit::Role::Button
+            })
+            .expect("filmstrip second item")
+            .0;
+        let request = |action| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: target,
+                data: None,
+            })
+        };
+        for overlay in 0..3 {
+            app.palette_open = overlay == 0;
+            app.grid_open = overlay == 1;
+            popup.set(overlay == 2);
+            frame(&mut app, vec![]);
+            let (tree, actions) = frame(&mut app, vec![request(egui::accesskit::Action::Click)]);
+            assert!(
+                actions.is_empty(),
+                "covered filmstrip action must not select media"
+            );
+            assert!(
+                tree.nodes
+                    .iter()
+                    .find(|(id, _)| *id == target)
+                    .expect("stable item")
+                    .1
+                    .is_disabled()
+            );
+            let (tree, actions) = frame(&mut app, vec![request(egui::accesskit::Action::Focus)]);
+            assert!(actions.is_empty());
+            assert_ne!(tree.focus, target);
+            assert_eq!(app.path.as_ref(), Some(&first));
+            if overlay < 2 {
+                assert!(app.dismiss_overlay_or_fullscreen());
+                assert!(app.filmstrip_open, "close only the top command overlay");
+            }
+            app.palette_open = false;
+            app.grid_open = false;
+            popup.set(false);
+            egui::Popup::close_all(&context);
+            frame(&mut app, vec![]);
+            let (tree, actions) = frame(&mut app, vec![request(egui::accesskit::Action::Click)]);
+            assert!(
+                !tree
+                    .nodes
+                    .iter()
+                    .find(|(id, _)| *id == target)
+                    .expect("same item")
+                    .1
+                    .is_disabled()
+            );
+            assert!(
+                matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if path == &second)
+            );
+        }
     }
 
     #[test]

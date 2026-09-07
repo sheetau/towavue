@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 最前面overlayと背後のfilmstrip入力を分離（2026-09-07 13:59 JST）
+
+palette/grid/menuの背後にあるfilmstripをdisabledにし、取得済みUIA action・pointer・keyboard操作とhover説明を止める。既存opacityとpath由来ID、限定描画は維持する。Escapeはpalette/gridを先に閉じ、filmstripを残して操作を再開する。modal中の非表示契約は変更しない。
+
+- baseline 2e376b6通常release `0B84119A7B77955D23DD7CF62FF46173007FF42BE61C89789BBBE2A8C57BC7B8`、音声PID 45064（開始UTC 2026-09-07T04:49:30.4896715Z）。playlist行→filmstrip→Escape→行focus/下矢印は通過したが、filmstrip→menuからpaletteを開いた後も背後の02.wavがenabledで、取得済みInvokeにより検索中に01→02.wavへ変わった。gridへ切替えてEscapeするとfilmstripまで消えることも確認。二つの回帰を変更前の失敗として記録した。
+- 最終通常release `F5C51CF089A80CF4FFD91B591A5C2F728D5A657BDE39F0E14917BBFFBC5D8C55`、音声PID 37824（04:57:29.4349497Z）では背後の項目がdisabledとなり、取得済みInvokeはElementNotEnabledExceptionで拒否、曲は01.wavを保持した。palette取消後に同じ項目から02.wavへ選曲でき、filmstrip取消後にplaylistへ戻る。01.wavへ戻した次のflowでもgrid Escape後は三つのfilmstrip項目が残り、次のEscapeで元のplaylist行へ戻った。
+- 自動回帰はpalette/grid/menu各条件のcached Click/Focus拒否、同一IDの再有効化と選曲、最前面だけの取消を確認。filmstrip単体ではdisabled前のfocus解除、左/middle click・Enter/Spaceの非実行、従来のpath安定性・現在項目no-opを確認した。267 workspace tests・format・Clippy・両buildが通過。既存live ignore 3件は未実行。2e376b6 CI 34084472949も成功。
+- 両windowを通常終了し、試験に編集・Save・clipboard・OS設定変更はない。最終stderrは音声のSoftware decode選択の通常diagnostic 3件のみ。最終試験前後の01/02/03.wavはすべて同じSHA256 `0E0CD597CC65B8A0C05633352D0F8985D0F9FF02554C166771C72D6BDFF96020`で不変。helper/logはignoredの`target/tmp/h1-filmstrip-overlay*`と`h1-filmstrip-grid-baseline.log`。
+- native証拠はUIA/SendKeysによる音声flowで、実pointer・全screen reader・物理入力matrixの完了ではない。次は最新binaryの代表保存/再openへ進み、最終候補性能、実IME/DPI/device、配布と外観受入を含むH1 gateを継続する。
+
 ### filmstrip開閉と移動後のfocusを接続（2026-09-07 13:46 JST）
 
 filmstripを開く際に既存の現在項目focus要求を出し、呼出元widgetとmedia読み込み世代を保持する。同世代で閉じると呼出元へ戻し、別mediaへ移った場合は現在tab、tabのないWelcomeではlogo、fullscreenでは既存Exit操作部へ一回だけ戻す。palette/gridからの呼出はその元の復帰先を引き継ぎ、gridから開く時はgridを閉じる。選曲・Shell順・編集・runtime・外観配置は変更しない。

@@ -22,6 +22,8 @@ playlistの行へfocusした時は上下で前後、Home/Endで先頭/末尾、P
 
 filmstrip・palette・grid・menuや確認画面を開いている間は、背景のplaylistを操作せず、hoverの説明も表示しません。閉じると通常の一覧操作へ戻ります。filmstrip自身の選曲は引き続き利用できます。
 
+filmstripの上にpalette・grid・menuがある時は、背後のfilmstripも操作しません。Escapeでは上のpalette／gridを先に閉じ、filmstripの操作へ戻ります。
+
 playlistの可視行とfilmstripの可視項目はUI Automationから選択できます。フォルダー更新で位置が変わっても操作対象は同じパスを保持し、名前とフルパス・現在項目の説明を公開します。filmstripはfocus中にも枠と名前を表示します。画面外の全項目を支援技術だけで辿る操作の検証は未完了です。
 
 filmstripのTab/Shift+Tab移動では、切替後の現在項目へfocusも移ります。未保存確認でCancelした場合は元の項目へ戻り、項目にfocusがあってもEscape一回でfilmstripを閉じられます。

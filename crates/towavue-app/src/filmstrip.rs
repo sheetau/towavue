@@ -130,6 +130,7 @@ impl Filmstrip {
         context: &Context,
         snapshot: Option<&FolderSnapshot>,
         current: Option<&Path>,
+        enabled: bool,
         actions: &mut Vec<UiAction>,
     ) {
         let screen = context.content_rect();
@@ -166,6 +167,11 @@ impl Filmstrip {
             .fixed_pos(egui::pos2(screen.left(), screen.center().y - HEIGHT / 2.0))
             .constrain(false)
             .show(context, |ui| {
+                if !enabled || egui::Popup::is_any_open(context) {
+                    let opacity = ui.opacity();
+                    ui.disable();
+                    ui.set_opacity(opacity);
+                }
                 ui.set_width(screen.width());
                 ui.style_mut().always_scroll_the_only_direction = true;
                 let mut scroll = egui::ScrollArea::horizontal()
@@ -358,7 +364,7 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |_| strip.show(&context, snapshot, current, &mut actions),
+                |_| strip.show(&context, snapshot, current, true, &mut actions),
             );
             assert!(actions.is_empty(), "focus requests do not open media");
             output.platform_output.accesskit_update.expect("tree")
@@ -475,6 +481,7 @@ mod tests {
         context.enable_accesskit();
         let first = snapshot.items[0].path.clone();
         let target = snapshot.items[1].path.clone();
+        let enabled = std::cell::Cell::new(true);
         let mut frame = |snapshot: &FolderSnapshot, current: &Path, events| {
             let mut actions = Vec::new();
             let output = context.run_ui(
@@ -486,7 +493,15 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |_| strip.show(&context, Some(snapshot), Some(current), &mut actions),
+                |_| {
+                    strip.show(
+                        &context,
+                        Some(snapshot),
+                        Some(current),
+                        enabled.get(),
+                        &mut actions,
+                    )
+                },
             );
             (
                 output.platform_output.accesskit_update.expect("tree"),
@@ -504,6 +519,63 @@ mod tests {
             .expect("named filmstrip button");
         assert_eq!(node.description(), Some(target.to_string_lossy().as_ref()));
         let id = *id;
+        let bounds = node.bounds().expect("item bounds");
+        let position = egui::pos2(
+            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        );
+        frame(
+            &snapshot,
+            &first,
+            vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Focus,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: id,
+                    data: None,
+                },
+            )],
+        );
+        assert_eq!(frame(&snapshot, &first, vec![]).0.focus, id);
+        enabled.set(false);
+        assert_ne!(frame(&snapshot, &first, vec![]).0.focus, id);
+        for button in [egui::PointerButton::Primary, egui::PointerButton::Middle] {
+            for pressed in [true, false] {
+                let (_, actions) = frame(
+                    &snapshot,
+                    &first,
+                    vec![
+                        egui::Event::PointerMoved(position),
+                        egui::Event::PointerButton {
+                            pos: position,
+                            button,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+                assert!(
+                    actions.is_empty(),
+                    "disabled pointer action cannot select or open a tab"
+                );
+            }
+        }
+        for key in [egui::Key::Enter, egui::Key::Space] {
+            let (_, actions) = frame(
+                &snapshot,
+                &first,
+                vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            assert!(actions.is_empty());
+        }
+        enabled.set(true);
+        frame(&snapshot, &first, vec![]);
         let click = || {
             egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
                 action: egui::accesskit::Action::Click,
@@ -644,7 +716,13 @@ mod tests {
         };
         for pass in 0..3 {
             let output = context.run_ui(Default::default(), |_| {
-                strip.show(&context, Some(&snapshot), Some(&first), &mut Vec::new());
+                strip.show(
+                    &context,
+                    Some(&snapshot),
+                    Some(&first),
+                    true,
+                    &mut Vec::new(),
+                );
             });
             if pass < 2 {
                 continue;
@@ -752,6 +830,7 @@ mod tests {
                         &context,
                         Some(&snapshot),
                         Some(&snapshot.items[selected].path),
+                        true,
                         &mut actions,
                     )
                 },

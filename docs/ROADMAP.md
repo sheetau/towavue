@@ -320,3 +320,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 2026-09-07 01:04、filmstripのTab移動後にfocusが旧項目へ残る問題と、項目focus中のEscapeがoverlayを閉じない問題を通常buildで修正確認した。5万項目の限定描画/focus回帰、連続Tab/逆移動、保存確認Cancel後の保持、255 tests・必須check・両buildが通過。全screen reader/selection・実環境/最終候補/配布を含むH1 gateは引き続き未完了。
 
 2026-09-07 10:34、filmstripの背後のplaylist行をclick/UIAで選曲できる問題を修正した。overlay/popup/modal中の背景操作・hoverを無効化し、既存opacityと行ID/配置、foreground選曲と解除後の操作を維持する。5条件の回帰、通常releaseの背景拒否/復帰、256 tests・必須check・両buildが通過。全screen reader/selection・実環境/最終候補/配布のH1 gateは継続する。
+
+2026-09-07 10:45、32967f9 releaseの1080p Seekを通常/UIA tree取得後・停止/再生の各100回で再測定し、p95 33.651～103.416msで300msゲートを通過した。source/状態・計測境界を固定し、256 testsと必須checkも再確認。続けて同じbinaryの30分4K60再生を開始したが、完走/drop/driftはまだ未判定。古い長時間結果を流用せず、同じprocessのEOFを確認する。H1全体と最終候補/実環境/配布gateは継続する。

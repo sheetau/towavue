@@ -4,6 +4,22 @@
 
 ## 1. 最初に試す
 
+### 32967f9 releaseのSeek再測定（2026-09-07 10:45 JST）
+
+production変更なし。同一1080p H.264/AAC fixture、960×576、1倍、アプリ内muteで各要求のPresent完了を待ち、5秒前進10回/後退10回を5往復した。各modeの100 indicesは重複せず、各processの完了logも200件と一致する。p50/p95は昇順50/95番目。測定中のbuildや重い試験、Seekの再送・process再起動はない。
+
+| 経路・状態 | 完了数 | p50 | p95 | 最大 |
+| --- | ---: | ---: | ---: | ---: |
+| 通常・Paused | 100/100 | 27.913ms | 33.651ms | 39.654ms |
+| 通常・Playing | 100/100 | 84.527ms | 103.382ms | 134.114ms |
+| UIA tree取得後・Paused | 100/100 | 41.630ms | 57.750ms | 61.900ms |
+| UIA tree取得後・Playing | 100/100 | 78.309ms | 103.416ms | 108.045ms |
+
+- 全4条件でM3のp95≤300msを満たす。通常PID 6328（開始UTC 2026-09-07 01:37:39.0263612Z）、UIA tree取得後PID 15392（01:39:50.5450183Z）。後者はSliderを取得してから通常keyで測定し、固定accesskit_winit 0.32.2のWindows backendがdeactivation handlerを使用しないこともsourceで確認した。常駐screen readerのイベント処理/音声出力負荷を加えた試験ではない。試行順・開始source位置の差があり、二経路の差を純粋なUIA overheadとは断定しない。
+- 計測はアプリのSeek受付からPresent成功まで。foreground/PID/開始時刻を各入力前に照合し、Altによる他windowへの入力を使わない。物理keyboard/OS配送/DWM走査表示の時間は含まない。両windowはmuteをUndoしcleanで正常終了。sourceの前後hashは同一、Save/clipboard/OS設定変更なし。raw log/sampleはignoredの`target/tmp/h1-seek-gate-32967f9*`。
+- binary SHA-256は`7E198DCB66E9B2809E3C7D242A3EFC41A1918250A1E93397395CC674B266F08B`、sourceは`DC645595A1165506BF5C3E685B14D7EA3B0116BBDFE74839E7DA5834CF60DA0C`。この基準機/codec/単一試行の現在release測定であり、今後変更した最終候補へ流用しない。format、Clippy、256 testsも再確認した。既存live ignore 3件は残る。
+- 続く30分4K60試験はPID 44652（01:44:14.9795225Z）、同じbinary、source `FEE0E738E7149225A7B4DEA02CDA75AAE6873288CBE5A1077B101829ADFD0C10`で開始。通常window、1倍、アプリ内mute、Seekなし。開始12.5秒のsampleはPlaying、private memory 244.81 MiB。これは開始確認だけであり、長時間/drop/drift gateはEOF統計まで未判定。以後buildや重い試験を並行せず、同じprocessを監視する。
+
 ### overlay中の背景playlist操作（2026-09-07 10:34 JST）
 
 - 50b209d CI 34044338058は成功。前回captureの背景hoverを調べ、基準release `294DCD4ED37A2476F600713CEFE60146ADBAE59A388E55E6850F893C8219EAE4`、PID 45748（開始UTC 2026-09-07 01:26:38.7421313Z）でfilmstrip中の背景行がenabled、pointer clickで002、cached UIA Invokeで003へ選曲できることを確認した。

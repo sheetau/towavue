@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 10:45 JST - remeasure release seek latency and start the long playback gate
+
+- Trigger/intent: previous turn is progress; 32967f9 CI 34073495215 succeeds. Recheck speed against the actual release instead of inheriting older binary results; no production changes.
+- Completed evidence: the same 1080p fixture passes 100 Paused and 100 Playing seeks in normal PID 6328, p95 33.651/103.382ms. UIA tree acquisition before measurement in PID 15392 also passes 100 each, p95 57.750/103.416ms. All four are below 300ms; indices and completed log counts agree. DEVELOPMENT records identities/hashes, method and the narrower-than-screen-reader scope.
+- Verification/cleanup: both seek windows close normally after mute Undo; source hash unchanged. Format, Clippy and 256 tests pass again; three existing live ignores remain. No Save/clipboard/OS-setting changes, and no heavy parallel work during measurement.
+- LIVE RUN: 30-minute 4K60 playback PID 44652, start UTC 2026-09-07T01:44:14.9795225Z; monitor exec session 14488. Binary SHA-256 7E198DCB66E9B2809E3C7D242A3EFC41A1918250A1E93397395CC674B266F08B. Logs/samples: target/tmp/h1-30m-gate-32967f9.stderr.log and .samples.jsonl. First sample is Playing at 12.5s. Do not start another playback/build/heavy test or replace the exe during this run.
+- Status/next: h1_active. Poll the SAME monitor/process; observation timeout alone is not completion or restart permission. At EOF inspect frame/drop/CPU-transfer/drift totals and memory samples, Undo mute and close normally, then update long-gate evidence. Current start does not prove the 30-minute gate; final-candidate, real-environment, selection/accessibility and distribution requirements remain open.
+
 ## 2026-09-07 10:34 JST - block playlist interaction behind overlays
 
 - Trigger/intent: previous turn is progress; 50b209d CI 34044338058 succeeds. Investigate the background playlist hover visible behind filmstrip.

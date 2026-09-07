@@ -206,7 +206,7 @@ H1の個別修正が通ったことと、配布可能な品質の判定を分け
 | --- | --- | --- |
 | 再現可能なbuild・境界 | 9fe5a3aでformat/Clippy/239 testsを再実行し通過。core/appはunsafe禁止、依存とFFmpeg archive hashを固定。concepts/vendor/target/generated mediaはtrackedでない | 3件のlive ignoreは合格へ数えない。CIはwindows-2022であり、実GPUや製品対象OSの代用ではない |
 | 編集・保存・終了の安全性 | dirty guard、複数tabの順次保存、export失敗/取消、描画不能時の保存の記録と現行回帰あり。直近の画像error→移動→修復→Welcomeも実windowで通過 | 最終配布候補でも代表的な画像/動画/音声の保存・再open・取消を維持。電源断のdurabilityや全codecの保証ではない |
-| 再生性能 | 51b43bfの30分logは107771 presented、drop/CPU transfer 0、drift p95/max 4.808/32.055ms。4b7721bの100回Seekは再生/停止時p95 102.204/42.260ms | 記録は各binary/基準機限定。最終候補でM3の10分drop<0.1%、30分drift p95≤40/max≤100ms、1080p 100回Seek p95≤300msを確認し、古い測定へ新binaryのlabelを付けない |
+| 再生性能 | 51b43bfの30分logは107771 presented、drop/CPU transfer 0、drift p95/max 4.808/32.055ms。32967f9の100回Seekは再生/停止時p95 103.382/33.651ms、UIA tree取得後も103.416/57.750ms。32967f9の30分再試験は進行中 | 記録は各binary/基準機限定。最終候補でM3の10分drop<0.1%、30分drift p95≤40/max≤100ms、1080p 100回Seek p95≤300msを確認し、古い測定へ新binaryのlabelを付けない。進行中のrunはEOF統計まで合格扱いしない |
 | device復旧 | 制御faultによる再構築/保存保護とheadless回帰はある | 物理endpoint変更、unplug、実driver/adapter変更は未検証。OSや他appへ影響する試験を暗黙に実行しない |
 | 日常操作・草案の外観 | compact shell、palette、menu、filmstrip、tab、reading連結、selection、Welcomeの記録あり。今回Welcome/reading/audioの草案画像も再確認 | pixel完全一致やownerの外観受入は未証明。recent一覧、曲ごとの長さ、見開き送り等の差が残るが一括で必須扱いしない。読書の区切り方はowner回答待ち |
 | OS clipboard | egui-winitのclipboard feature、arboard 3.6.1/clipboard-win 5.4.1を既存入力/platform outputへ接続。ownerの書込み許可後、通常releaseでUnicode往復・cut後の空欄・外部変更後の再pasteを確認。変更前は同じpasteが空欄のままだった | clipboardを他processが占有する場合、全形式/IMEのmatrixは未検証。画像copy機能と混同せず、以後の試験でもclipboard内容への影響を明示する |

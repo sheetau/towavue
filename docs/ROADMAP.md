@@ -322,3 +322,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 2026-09-07 10:34、filmstripの背後のplaylist行をclick/UIAで選曲できる問題を修正した。overlay/popup/modal中の背景操作・hoverを無効化し、既存opacityと行ID/配置、foreground選曲と解除後の操作を維持する。5条件の回帰、通常releaseの背景拒否/復帰、256 tests・必須check・両buildが通過。全screen reader/selection・実環境/最終候補/配布のH1 gateは継続する。
 
 2026-09-07 10:45、32967f9 releaseの1080p Seekを通常/UIA tree取得後・停止/再生の各100回で再測定し、p95 33.651～103.416msで300msゲートを通過した。source/状態・計測境界を固定し、256 testsと必須checkも再確認。続けて同じbinaryの30分4K60再生を開始したが、完走/drop/driftはまだ未判定。古い長時間結果を流用せず、同じprocessのEOFを確認する。H1全体と最終候補/実環境/配布gateは継続する。
+
+2026-09-07 11:19、上の同一processがEOFへ到達した記録を確定し、通常終了を確認した。107,758表示＋13 drop＝全107,771枚、CPU transfer 0、drift p95 4.704ms・最大30.109msで30分基準内。再decodeした先頭600秒35,925枚へ全dropsを割り当てても0.036187%以下で10分基準内。5分以降のprivateは最初223.16/最後225.42 MiBだが一時332.19 MiBへ増え、次標本で223.99 MiBへ戻った。原因やリーク不在は断定しない。EOF idleの5秒CPU増分0、hash不変、256 tests・必須checkも確認。DEVELOPMENTへ条件と限界を記録した実装変更なしの性能再確認であり、H1と最終候補/実環境/配布/外観受入は継続する。

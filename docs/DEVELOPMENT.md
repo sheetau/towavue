@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 32967f9 releaseの30分再生再測定（2026-09-07 11:19 JST）
+
+通常releaseの同一processで4K60 H.264/AACをEOFまで連続再生した。PID 44652、開始UTC 2026-09-07T01:44:14.9795225Z、EOF観測11:14:28 JST（起動後1813.7秒）。adapter `00000000:000146b5`、D3D11VA、960×576、1倍、アプリ内mute、UIA tree取得なし。Seek・pause・再起動・並行したbuildや重い試験はない。事前hash済みsourceなのでcold-storage試験ではない。
+
+- EOF logは107,771 hardware frames＝107,758 presented＋13 dropped、CPU transfer 0。全区間drop率は0.012063%。A/V driftはp95 4.704ms・最大30.109msで30分の40/100ms基準内。アプリのvideo PTSとaudio master時計の差であり、display/speakerの物理遅延ではない。
+- 終了後、固定FFprobeの`-select_streams v:0 -read_intervals %600 -count_frames`で先頭600秒を再decodeし35,925 frames、headerの全frame数107,771を確認した。全13 dropsを先頭10分へ割り当てても13/35,925×100＝0.036187%以下で0.1%基準内。正確な区間drop数ではなく保守的上限である。
+- 30秒間隔の61標本中、起動5分以降のPlayingは50標本。private memoryは最初223.16 MiB、最後225.42 MiB、範囲223.16～332.19 MiB。912.97秒の332.19 MiBは次の942.99秒に223.99 MiBへ戻り、OSのPeakPagedMemorySize64も332.20 MiBだった。一時増加の原因は未特定で、粗い標本から全peak・GPU allocation・リークの有無を断定しない。EOF標本は177.52 MiB。
+- 途中の終了操作のtool出力が失われたため、11:19に同じPID/開始時刻とEnded・clean titleを再確認した。Undoを再送せず、落ち着いたEOF状態で5秒間のCPU時間増分0秒、private 179.48 MiBを測定。CloseMainWindowがtrueを返し、5秒以内のprocess終了を確認した。終了codeは取得できておらず0とは記録しない。再生試験の再実行や強制終了はない。
+- raw evidenceはignoredの`target/tmp/h1-30m-gate-32967f9.stderr.log`と`.samples.jsonl`。sourceは`tests/generated/m1/m3-4k60-30m.mp4`、SHA-256 `FEE0E738E7149225A7B4DEA02CDA75AAE6873288CBE5A1077B101829ADFD0C10`。binaryは下記Seekと同じ`7E198DCB66E9B2809E3C7D242A3EFC41A1918250A1E93397395CC674B266F08B`で、終了後の両hashも一致した。format・Clippy・256 testsを再実行し通過（既存live ignore 3件は未実行のまま）。9bfc6f8のCI 34074097655も成功。Save・clipboard・OS設定変更なし。これは現在binary/基準機/単一fixtureの再確認であり、最終候補やscreen reader・実環境・配布のgateを代替しない。
+
 ### 32967f9 releaseのSeek再測定（2026-09-07 10:45 JST）
 
 production変更なし。同一1080p H.264/AAC fixture、960×576、1倍、アプリ内muteで各要求のPresent完了を待ち、5秒前進10回/後退10回を5往復した。各modeの100 indicesは重複せず、各processの完了logも200件と一致する。p50/p95は昇順50/95番目。測定中のbuildや重い試験、Seekの再送・process再起動はない。
@@ -18,7 +28,7 @@ production変更なし。同一1080p H.264/AAC fixture、960×576、1倍、ア�
 - 全4条件でM3のp95≤300msを満たす。通常PID 6328（開始UTC 2026-09-07 01:37:39.0263612Z）、UIA tree取得後PID 15392（01:39:50.5450183Z）。後者はSliderを取得してから通常keyで測定し、固定accesskit_winit 0.32.2のWindows backendがdeactivation handlerを使用しないこともsourceで確認した。常駐screen readerのイベント処理/音声出力負荷を加えた試験ではない。試行順・開始source位置の差があり、二経路の差を純粋なUIA overheadとは断定しない。
 - 計測はアプリのSeek受付からPresent成功まで。foreground/PID/開始時刻を各入力前に照合し、Altによる他windowへの入力を使わない。物理keyboard/OS配送/DWM走査表示の時間は含まない。両windowはmuteをUndoしcleanで正常終了。sourceの前後hashは同一、Save/clipboard/OS設定変更なし。raw log/sampleはignoredの`target/tmp/h1-seek-gate-32967f9*`。
 - binary SHA-256は`7E198DCB66E9B2809E3C7D242A3EFC41A1918250A1E93397395CC674B266F08B`、sourceは`DC645595A1165506BF5C3E685B14D7EA3B0116BBDFE74839E7DA5834CF60DA0C`。この基準機/codec/単一試行の現在release測定であり、今後変更した最終候補へ流用しない。format、Clippy、256 testsも再確認した。既存live ignore 3件は残る。
-- 続く30分4K60試験はPID 44652（01:44:14.9795225Z）、同じbinary、source `FEE0E738E7149225A7B4DEA02CDA75AAE6873288CBE5A1077B101829ADFD0C10`で開始。通常window、1倍、アプリ内mute、Seekなし。開始12.5秒のsampleはPlaying、private memory 244.81 MiB。これは開始確認だけであり、長時間/drop/drift gateはEOF統計まで未判定。以後buildや重い試験を並行せず、同じprocessを監視する。
+- 続く30分4K60試験は同じbinary、source `FEE0E738E7149225A7B4DEA02CDA75AAE6873288CBE5A1077B101829ADFD0C10`で開始した。開始12.5秒のsampleはPlaying、private memory 244.81 MiB。その後のEOFと終了確認は上の11:19記録を参照し、開始時点の未判定を現在の状態として扱わない。
 
 ### overlay中の背景playlist操作（2026-09-07 10:34 JST）
 

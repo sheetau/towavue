@@ -2,13 +2,22 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 11:23 JST - complete the current release long playback gate
+
+- Trigger/intent: the immediate permission-only turn made no project progress. Revalidate the worktree, persisted measurements and the same live process before continuing; 9bfc6f8 CI 34074097655 succeeds. No production changes.
+- Evidence: PID 44652 reaches EOF with 107758 presented + 13 dropped = 107771 hardware frames, CPU transfers 0, drift p95/max 4.704/30.109ms. Fresh FFprobe decoding of the first 600 seconds counts 35925 frames; assigning all drops there bounds the 10-minute rate at 0.036187%, below 0.1%. Binary/source hashes remain unchanged.
+- Memory: 61 samples, including 50 Playing samples after five minutes. Private memory starts/ends that interval at 223.16/225.42 MiB but briefly reaches 332.19 MiB, then returns to 223.99 MiB in the next sample; OS peak is 332.20 MiB. Record the transient without claiming its cause or proving absence of leaks/GPU peaks.
+- Cleanup: after lost control output, exact PID/start and clean Ended title still match. Do not resend Undo. A fresh five-second idle sample records zero CPU-time increase; CloseMainWindow succeeds and the process exits within five seconds. Exit code is unavailable, not asserted zero. No playback restart, force termination, Save, clipboard or OS-setting changes.
+- Verification/areas: format, Clippy and 256 tests pass again; three existing live ignores remain explicit. DEVELOPMENT, KNOWN_GAPS and ROADMAP record the completed performance evidence and its limits. Prior LIVE RUN below is superseded; no trial app or monitor remains live.
+- Status/next: h1_active; prepare this evidence-only checkpoint for push. Continue selection/focus and complete screen-reader workflows; retain physical-input/DPI/device, final-candidate save/performance, distribution and owner-design-acceptance gates. This fixture pass is not launch completion.
+
 ## 2026-09-07 10:45 JST - remeasure release seek latency and start the long playback gate
 
 - Trigger/intent: previous turn is progress; 32967f9 CI 34073495215 succeeds. Recheck speed against the actual release instead of inheriting older binary results; no production changes.
 - Completed evidence: the same 1080p fixture passes 100 Paused and 100 Playing seeks in normal PID 6328, p95 33.651/103.382ms. UIA tree acquisition before measurement in PID 15392 also passes 100 each, p95 57.750/103.416ms. All four are below 300ms; indices and completed log counts agree. DEVELOPMENT records identities/hashes, method and the narrower-than-screen-reader scope.
 - Verification/cleanup: both seek windows close normally after mute Undo; source hash unchanged. Format, Clippy and 256 tests pass again; three existing live ignores remain. No Save/clipboard/OS-setting changes, and no heavy parallel work during measurement.
-- LIVE RUN: 30-minute 4K60 playback PID 44652, start UTC 2026-09-07T01:44:14.9795225Z; monitor exec session 14488. Binary SHA-256 7E198DCB66E9B2809E3C7D242A3EFC41A1918250A1E93397395CC674B266F08B. Logs/samples: target/tmp/h1-30m-gate-32967f9.stderr.log and .samples.jsonl. First sample is Playing at 12.5s. Do not start another playback/build/heavy test or replace the exe during this run.
-- Status/next: h1_active. Poll the SAME monitor/process; observation timeout alone is not completion or restart permission. At EOF inspect frame/drop/CPU-transfer/drift totals and memory samples, Undo mute and close normally, then update long-gate evidence. Current start does not prove the 30-minute gate; final-candidate, real-environment, selection/accessibility and distribution requirements remain open.
+- Started run (completed; see newer entry): 30-minute 4K60 playback PID 44652, start UTC 2026-09-07T01:44:14.9795225Z; monitor exec session 14488. Binary SHA-256 7E198DCB66E9B2809E3C7D242A3EFC41A1918250A1E93397395CC674B266F08B. Logs/samples: target/tmp/h1-30m-gate-32967f9.stderr.log and .samples.jsonl. First sample is Playing at 12.5s. No other playback/build/heavy test or executable replacement was permitted during this run.
+- Status/next at start (superseded by newer completion entry): h1_active. Poll the same monitor/process without restarting on observation timeout; inspect EOF statistics and memory, Undo mute and close, then record the result. Starting alone did not prove the gate; final-candidate, real-environment, selection/accessibility and distribution requirements remain open.
 
 ## 2026-09-07 10:34 JST - block playlist interaction behind overlays
 

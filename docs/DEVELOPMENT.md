@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### logo menuのEscape後にkeyboard操作を継続（2026-09-07 12:40 JST）
+
+親menu・submenuをEscapeで閉じ、commandを実行していない時だけlogo buttonへfocusを戻す。次のEnter/Spaceで再openでき、Tabで離れた後や背景clickではfocusを戻さない。command registry・配置・外観・input bindingは変更しない。
+
+- 012cdf2通常release `D263A831F4554302B5E92A13A67BEE66F7D720D7A686F5BFC7CDBD02107BB851`、Welcome PID 21444（開始UTC 2026-09-07T03:35:03.5442734Z）でlogo Focus→Enter→Escape、およびEnter→Right→Escapeの両方でlogo focusがなくなることを再現。新しいapp回帰も同じassertionで失敗した。
+- 修正後通常release `71EA1F8210E693472BE7EC40F7619B475C93E4515D7826534F1C4D57CE80D166`、Welcome PID 28972（03:38:42.8942991Z）と画像PID 42732（03:40:24.2505714Z）で同手順が通過。親menu/submenuの取消後にlogoのUIA focusがtrueとなり、Enter/Spaceで再openできた。Welcomeのowned capture `target/tmp/h1-menu-return-focus.png`でfocus枠も確認した。
+- 画像windowでは続けてmenuのSelect whole mediaをInvokeし、600×800の全体選択と左辺focusを確認。command実行のfocusをlogoへ戻さず、dirty編集も作らない。両windowとbaselineは通常終了、stderrは空、PNG hash `5F24C4FFDEA139A9C49BDEAD1873D0E714A6273BACE45DFB567D958AE2ADB72C`は不変。
+- 5 menu testsと261 workspace tests、format・Clippy・両buildが通過。既存live ignore 3件は未実行。回帰はroot/submenu、Enter/Space再open、Tab後のidle focus保持、背景clickとの区別を含む。最初のrelease buildはまだ起動中のbaseline binaryの更新で拒否されたため、その同一windowの通常終了を確認してから再buildした。強制終了・削除・履歴変更は行っていない。
+- helper/logはignoredの`target/tmp/h1-menu-return*`。Save・clipboard・OS設定変更なし。012cdf2 CI 34080064221は確認時進行中。これはscreen reader全体、各overlayを連続して開くflow、実入力/DPI/device、最終候補保存/性能・配布・外観受入を完了させるものではない。
+
 ### 未保存確認Cancel後のfocus復帰（2026-09-07 12:32 JST）
 
 現在tabの未保存確認を開く時にwidget/tabのidentityを一件保持し、取消後、eguiの前passのmodal制限が消えてから一回だけfocusを戻す。確認中の再要求・復帰描画前の再open・Save As取消で上書きせず、離脱確定やmedia loadでは破棄する。全modalの共通focus stackを追加する変更ではない。

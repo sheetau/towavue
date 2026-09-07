@@ -332,3 +332,5 @@ Windows accessibility bridgeを初回表示前に接続し、初期tree要求/ac
 2026-09-07 12:18、palette取消後に選択辺のfocusが消える問題を修正した。開く直前のwidgetへ取消時だけ戻し、command実行は新しいfocus先を優先する。通常releaseの画像/動画四辺・検索Ctrl+A・継続矢印、拡大画像と動画crop/Undo、260 tests・必須check・両buildが通過。保存確認Cancelなど残る画面間focusと、全screen reader・実環境/最終候補/配布/外観受入を含むH1 gateは継続する。
 
 2026-09-07 12:32、未保存確認のCancel後にもfocusが消える問題を修正した。直前のwidget/tabを保持し、前passのmodal制限解除後に一回だけ戻す。再確認・Save As取消をまたいで保持し、離脱/media loadで破棄する。通常画像/動画の四辺・継続矢印、画像の実Save As取消→確認Cancel、回帰と260 tests・必須check・両buildが通過。全画面間focus/読み順と、screen reader・実環境/最終候補/配布/外観受入を含むH1 gateは継続する。
+
+2026-09-07 12:40、logo menuのEscape後にfocusが消える問題を修正した。commandを選ばず取消した時だけlogoへ戻し、Enter/Spaceでの再openを可能にした。Welcome/画像の親menu・submenu、通常SelectAll実行、背景click・idleとの区別を確認し、261 tests・必須check・両buildが通過。連続するoverlay操作と全screen reader・実環境/最終候補/配布/外観受入のH1 gateは継続する。

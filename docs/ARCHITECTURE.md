@@ -248,6 +248,8 @@ tab操作でactive identityが変わらない場合はmediaを再loadしない�
 
 logo menuはFile / Edit / Viewの3分類とし、app内の固定配置で関連commandを区切る。全registry commandを一箇所ずつ配置し、title・有効条件・現在のcustom shortcutは既存registry/bindingsから取得する。shortcutは右揃え、縦に収まらないsubmenuはwindow内でscrollする。commandのdispatch・dirty guardは変更せず、分類のために新commandやruntime処理は追加しない。方向drag gestureは引き続き対象外とする。
 
+logo menuをEscapeで閉じ、commandを選んでいない場合はlogo buttonへfocusを戻す。親menu・submenu共通で、次のEnter/Spaceから再openできるようにする。背景click・command実行・通常再描画ではこのfocus復帰を要求しない。
+
 menuを開いたら最初の有効項目へfocusを渡す。最深menuが上下/Tab/Shift+Tabを循環移動、右をsubmenu展開、左を親へ戻る操作として所有し、背後のWelcomeやmedia操作へfocusを移さない。Enter/Spaceの選択とEscapeによるmenu treeの取消、pointerのhover/clickは既存egui popupを使う。有効項目だけを移動先にし、focusした項目をscroll内に表示する。
 
 ### H1 fullscreen viewing

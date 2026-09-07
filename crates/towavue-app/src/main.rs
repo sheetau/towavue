@@ -2117,13 +2117,21 @@ where
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     ui.visuals_mut().widgets.inactive.weak_bg_fill = chrome::BACKGROUND;
+                    let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
                     let menu = ui.menu_button("    ", |ui| {
-                        if let Some(command) =
-                            menu::show(ui, self.command_context(), &self.shortcuts)
-                        {
-                            actions.push(UiAction::Command(command));
-                        }
+                        menu::show(ui, self.command_context(), &self.shortcuts)
                     });
+                    if let Some(Some(command)) = menu.inner {
+                        actions.push(UiAction::Command(command));
+                    } else if escape
+                        && menu.inner.is_some()
+                        && !egui::Popup::is_id_open(
+                            ui.ctx(),
+                            egui::Popup::default_response_id(&menu.response),
+                        )
+                    {
+                        menu.response.request_focus();
+                    }
                     chrome::logo(ui, menu.response.rect);
                     menu.response.widget_info(|| {
                         egui::WidgetInfo::labeled(
@@ -5798,6 +5806,96 @@ mod tests {
                 && node.role() == egui::accesskit::Role::Button
                 && node.supports_action(egui::accesskit::Action::Click)
         }));
+    }
+
+    #[test]
+    fn menu_escape_returns_to_logo_for_keyboard_reopening() {
+        let Some(_root) =
+            isolated_test_root("tests::menu_escape_returns_to_logo_for_keyboard_reopening")
+        else {
+            return;
+        };
+        let app = Application::new(None, |_| {}).expect("headless application");
+        let context = egui::Context::default();
+        context.enable_accesskit();
+        let frame = |events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_top_bar(ui, &mut actions),
+            );
+            assert!(actions.is_empty(), "menu cancellation executes no command");
+            output.platform_output.accesskit_update.expect("tree")
+        };
+        frame(vec![]);
+        let tree = frame(vec![]);
+        let logo = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("towavue menu"))
+            .expect("logo")
+            .0;
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![key(egui::Key::Tab)]);
+        assert_eq!(frame(vec![]).focus, logo);
+        for (submenu, activation) in [(false, egui::Key::Enter), (true, egui::Key::Space)] {
+            frame(vec![key(activation)]);
+            frame(vec![]);
+            assert!(egui::Popup::is_any_open(&context));
+            if submenu {
+                frame(vec![key(egui::Key::ArrowRight)]);
+                frame(vec![]);
+            }
+            frame(vec![key(egui::Key::Escape)]);
+            let tree = frame(vec![]);
+            assert!(!egui::Popup::is_any_open(&context));
+            assert_eq!(tree.focus, logo, "Escape returns focus to the menu button");
+            frame(vec![key(activation)]);
+            frame(vec![]);
+            assert!(egui::Popup::is_any_open(&context));
+            frame(vec![key(egui::Key::Escape)]);
+            assert_eq!(frame(vec![]).focus, logo);
+        }
+        frame(vec![key(egui::Key::Tab)]);
+        let next = frame(vec![]).focus;
+        assert_ne!(next, logo);
+        for _ in 0..3 {
+            assert_eq!(frame(vec![]).focus, next, "idle does not steal focus");
+        }
+        frame(vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Focus,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: logo,
+                data: None,
+            },
+        )]);
+        frame(vec![key(egui::Key::Enter)]);
+        frame(vec![]);
+        for pressed in [true, false] {
+            frame(vec![egui::Event::PointerButton {
+                pos: egui::pos2(450.0, 270.0),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+        frame(vec![]);
+        assert!(!egui::Popup::is_any_open(&context));
+        assert_ne!(frame(vec![]).focus, logo, "outside click is not Escape");
     }
 
     #[test]

@@ -78,6 +78,8 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 ### Menu、command、status
 
+logo menuのEscape取消後はlogoへfocusを戻し、Enter/Spaceで再openできる。Welcome/画像の親menu・submenuと通常command実行を確認したが、全overlay間の連続操作・screen readerの横断確認は継続中。
+
 | 草案 | 現状 |
 |---|---|
 | 全機能を一つのlogo menuへ集約 | H1でFile / Edit / Viewへ分類し、関連項目の区切り、現在shortcutの右揃え、window内scrollを実装。keyboard focusを最深menu内に保ち、上下/Tab移動、左右の階層移動、Enter/Space選択とEscape取消に対応。全registry commandの一意配置、無効項目、末尾到達・再openとpointer操作をtestする |

@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 12:40 JST - return keyboard focus to the logo after menu cancellation
+
+- Trigger/intent: previous turn is progress; clean HEAD 012cdf2 confirmed. Native Welcome PID 21444 loses logo focus on Escape from both root and submenu, reproduced by a new regression. Prior CI 34080064221 remains in progress at verification.
+- Change: after the logo popup closes on Escape without choosing a command, request focus on its button. Do not restore on command execution, outside click or idle redraw. No new state, bindings, runtime/dependency changes or menu refactor.
+- Verification: five menu tests, 261 workspace tests, format, Clippy and both builds pass; three existing live ignores remain. Regression covers root/submenu, Enter/Space reopening, Tab followed by idle and outside-click exclusion. Initial release replacement fails while the owned baseline is live; close that same window normally before rebuilding successfully.
+- Native/cleanup: final normal Welcome PID 28972 and image PID 42732 pass Escape/refocus/reopen. Image menu SelectAll still produces full 600x800 selection with left-edge focus and no dirty edit. Inspect owned logo-focus capture; all three windows close normally, stderr is empty and PNG hash is unchanged. DEVELOPMENT records exact identities/hashes. No Save/clipboard/OS-setting changes.
+- Areas/status/next: app main and README/ARCHITECTURE/DEVELOPMENT/KNOWN_GAPS/ROADMAP; h1_active, prepare the verified checkpoint for push. Continue connected menu/overlay and cross-screen reading-order workflows, then full screen-reader evaluation. Preserve physical-input/DPI/device, final-candidate save/performance, distribution and owner-design acceptance gates.
+
 ## 2026-09-07 12:32 JST - preserve the invoking focus through unsaved confirmation cancellation
 
 - Trigger/intent: previous turn is progress; clean HEAD 9dce606 and CI 34079199258 success confirmed. Native baseline loses all four selection-edge focuses after Ctrl+W and Escape/Cancel while retaining edits; an expanded regression reproduces it.

@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 15:31 JST - verify maximized video and reading across real monitors
+
+- Trigger/intent: previous turn is progress; clean 80108c4 confirmed. Extend same-scale monitor evidence to paused video and reading, without treating automatic continuation as audio-output-change authorization.
+- Native: video PID 40472/start UTC 06:28:50.8800169Z preserves the paused 5-second frame through portrait/landscape normal-to-maximized-to-fullscreen round trips and restores both maximized and original normal rects. RePlay reaches Ended, 750 hardware/presented frames, zero transfers/drops, drift p95/max 3.584/4.266 ms. Record the AAC timestamp warning, not empty stderr.
+- Reading: PID 45156/start UTC 06:29:44.7606807Z passes the same two-monitor sequence with two horizontal pages, then vertical/reversed pages. Viewed captures confirm ordering and fit. DEVELOPMENT records exact rects, binary/source identities and limitations; two 100% monitors do not prove mixed-DPI or physical input.
+- Cleanup/verification: undo video mute and close both clean windows normally; reading stderr empty, all source/binary hashes unchanged. No Save/clipboard/OS-setting changes. Fixtures/captures/helper/logs remain ignored. Format, Clippy and 268 tests pass; three existing live ignores remain unexecuted. CI 34090227262 succeeds; 34090843746 is in progress when checked. DEVELOPMENT, KNOWN_GAPS and this log only.
+- Status/next: h1_active; prepare verified evidence checkpoint. Consolidate the remaining launch acceptance requirements against current evidence. Real audio-output switching still needs explicit owner permission; physical input/IME/mixed-DPI, Windows 10, driver transitions, distribution and owner-design acceptance remain unproven and cannot be replaced by more same-scale window trials.
+
 ## 2026-09-07 15:25 JST - inventory real devices and verify same-scale monitor round trips
 
 - Trigger/intent: previous turn is progress; clean a85e3b7 confirmed. Automatic goal continuation is not authorization to change default audio output. Inventory read-only state and use the available two-monitor setup without changing OS settings.

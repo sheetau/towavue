@@ -4,6 +4,17 @@
 
 ## 1. 最初に試す
 
+### 動画・readingの最大化/fullscreen復帰を実2画面で確認（2026-09-07 15:31 JST）
+
+前項の画像window往復に続き、同じ100%倍率の横1920×1080と縦1080×1920で、通常window→最大化→F11→Escapeで最大化へ復帰→通常サイズへ復帰を確認した。各段階のGetWindowRectとIsZoomedを照合し、fullscreen captureを目視した。production変更なし。
+
+- 通常video PID 40472（開始UTC 2026-09-07T06:28:50.8800169Z）、1080p H.264/AACの5秒でpause・アプリ内mute。両画面の往復後も5秒・Pausedを保持し、画像内timecodeも00:00:05.000。portraitでは上下余白付き、landscapeでは全画面へ16:9を保持して表示した。再Play後にEndedへ到達し、750 hardware/presented、0 CPU transfers/drops、drift p95/max=3.584/4.266ms。AAC discarded-sample timestamp警告は残るためstderr空とは記録しない。これは短時間flowであり長時間性能gateの代替ではない。
+- Reading PID 45156（06:29:44.7606807Z）。既存owned PNG2枚（64×48と29×37）を新規ignored folderへcopyして読み取り専用の試験素材とした。横並び2枚で両画面を往復し、次にR/Hで縦並び・逆順として再度両画面を往復。captureは横並びの左source/右editedから、縦並びの上edited/下sourceへ切り替わり、同一方向への寸法合わせと全体fitを保持した。ownerが求める見開き送りの区切り方を承認した証拠ではない。
+- 縦画面: 通常rect（2020,-250,800,600）、fullscreen（1920,-418,1080,1920）、最大化復帰（1912,-426,1096,1936）。横画面: 通常（40,40,960,576）、fullscreen（0,0,1920,1080）、最大化復帰（-8,-8,1936,1048）。最大化rectは移行前と復帰後が一致し、通常へ戻すと最初のrectも一致した。最大化の外側8pxはWin32のwindow境界であり、fullscreenにそのinsetを残したものではない。
+- binary SHA256 `339046281C097BE5BA05D91BDA9D73F8501BD433A0A6AA96EF4C77E6DD87FCA2`、動画 `24FD0CE978C4BD51877A49D2FBE301C39B70E6FB2E19071A6A092651A8D3A4F6`、PNG `15B8DA68F777D7CAAAB816EDE7DC7364CC979CC9BFFAAB4E93D39E24B624D49D` / `B1C8975D52FE62D6F5C1A4DA9C98809948CFA9E0510D0624C06C5B8062AA3BEF`は前後一致。動画muteをUndoし、両windowをcleanな状態で正常終了。reading stderr空。Save/clipboard/OS設定変更なし。captures/fixtures/logs/helperはignored `target/tmp/h1-monitor-max-a5639e5`など。
+
+format・Clippy・268 testsを再実行して通過（既存live ignore 3件は未実行）。a85e3b7のCI 34090227262成功、80108c4のCI 34090843746は確認時in_progress。画像・動画・readingの実2画面での同倍率fullscreen/復帰の証拠が揃ったが、実混在DPI、物理keyboard/pointer、screen reader、Windows 10、実endpoint切替/driver reset、配布とowner受入は未完了。既定音声出力を変える許可はまだ受領していない。
+
 ### 実機の読み取り確認と同倍率2画面fullscreen（2026-09-07 15:25 JST）
 
 音声出力切替の許可は未受領のため、OS設定を変えずに現状を読み取った。Windows 11 Home build 26200、横1920×1080（0,0）と縦1080×1920（1920,-418）の2画面で、GetScaleFactorForMonitorはいずれも100%。混在DPIの実機gateを満たす構成ではない。

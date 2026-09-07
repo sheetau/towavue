@@ -215,6 +215,8 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 
 15:25の実機確認では横1920×1080・縦1080×1920の2画面がともに100%であり、混在DPIは未検証のまま。通常releaseの画像移動→各画面のfullscreen→元のwindow位置/サイズ復帰、選択保持とaspect-fitは確認した。音声はUSB HIFI AUDIOとNVIDIA Broadcastがactiveで既定3rolesはUSBだったが、既定変更の許可は未受領のため切替試験はしていない。
 
+15:31には同じ2画面で動画pauseとreading（横並び、および縦並び・逆順）の最大化→fullscreen→最大化→通常window復帰も確認。動画は5秒の位置とframeを保ち、再Play後にEOFへ到達した。同倍率の実monitor間移動の証拠であり、混在DPI・物理入力・screen readerや外観のowner受入まで完了したものではない。
+
 H1の個別修正が通ったことと、配布可能な品質の判定を分ける。草案の全機能を初回launchの必須条件にはしないが、以下は未確認のまま完了と扱わない。
 
 | 領域 | 証拠の範囲 | 次に必要な確認/作業 |

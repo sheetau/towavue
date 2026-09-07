@@ -4,6 +4,17 @@
 
 ## 1. 最初に試す
 
+### 実機の読み取り確認と同倍率2画面fullscreen（2026-09-07 15:25 JST）
+
+音声出力切替の許可は未受領のため、OS設定を変えずに現状を読み取った。Windows 11 Home build 26200、横1920×1080（0,0）と縦1080×1920（1920,-418）の2画面で、GetScaleFactorForMonitorはいずれも100%。混在DPIの実機gateを満たす構成ではない。
+
+- 固定wasapi 0.24.0の読み取りAPIで、active render endpointは`Speakers (2- USB HIFI AUDIO)`と`Speakers (NVIDIA Broadcast)`の2件。Console/Multimedia/Communicationsの既定はいずれもUSB HIFI AUDIOだった。既定変更・endpoint無効化・音量変更・audio client起動は行わない。隔離したinventory toolはignored領域でoffline buildしたもので、appの依存/lockは変更していない。Broadcastは仮想endpointであり、将来の切替試験も物理unplugの証明とは分ける。
+- 通常release PID 16976（開始UTC 2026-09-07T06:23:48.4273100Z）で64×48 testsrc PNGを表示。縦画面上のwindow（2020,-250,800,600）→F11（1920,-418,1080,1920）→Escapeで元のrectへ復帰。続いて横画面上のwindow（40,40,960,576）→F11（0,0,1920,1080）→Escapeで元のrectへ復帰。各rectはGetWindowRectで照合した。
+- 最初のhelperはSelect Allを移動後に作ったため、選択保持の証拠にはせず、移動前に作成するよう修正して同processで再確認。両往復後も選択値left/right/top/bottom=0/64/0/48を保持した。owned window captureを目視し、縦画面では1080×810の画像を上下中央、横画面では1440×1080を左右中央へaspect-fitし、選択枠も対応していることを確認。画像データ全pixel一致の試験ではない。
+- binary SHA256 `339046281C097BE5BA05D91BDA9D73F8501BD433A0A6AA96EF4C77E6DD87FCA2`、PNG SHA256 `15B8DA68F777D7CAAAB816EDE7DC7364CC979CC9BFFAAB4E93D39E24B624D49D`は前後不変。cleanな状態で正常終了、stderr空。Save/clipboard/OS設定変更なし。captures/logsはignored `target/tmp/h1-monitors-a5639e5`、inventory/helpersもignored。
+
+製品変更なし。format・Clippy・268 testsが通過（既存live ignore 3件は未実行）。2857878のCI 34089534210は成功、a85e3b7のCI 34090227262は確認時in_progress。同倍率の実2画面での画像window移動/fullscreen復帰の証拠であり、動画/reading、最大化状態との組合せ、物理入力、混在DPI、Windows 10、実device復旧や外観のowner受入は未完了。
+
 ### 15分付近のメモリ変動をsource位置から切り分け（2026-09-07 15:17 JST）
 
 30分試験の約909秒での一時増加について、同じ通常releaseの新規processから880秒へSeekして900秒付近を通過させ、300秒へのSeekを挟んで880秒から再通過した。PID 46480、開始UTC 2026-09-07T06:10:40.5918300Z、960×576、1倍、アプリ内mute、UIA RangeValueによるSeek。約500msごとにprocess memoryとUIAの再生位置を記録し、3条件計312標本を取得した。これはUIAなしの連続再生と同じ条件ではなく、原因確定の試験でもない。

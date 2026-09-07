@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-07 15:25 JST - inventory real devices and verify same-scale monitor round trips
+
+- Trigger/intent: previous turn is progress; clean a85e3b7 confirmed. Automatic goal continuation is not authorization to change default audio output. Inventory read-only state and use the available two-monitor setup without changing OS settings.
+- Evidence: Windows 11 Home build 26200; landscape 1920x1080 and portrait 1080x1920, both 100% by native scale query. Fixed wasapi read-only enumeration finds USB HIFI AUDIO and NVIDIA Broadcast active, all three default roles on USB. No setter, endpoint disable or audio client is used by the isolated offline inventory tool.
+- Native: normal image PID 16976/start UTC 06:23:48.4273100Z passes portrait and landscape window/fullscreen/Escape rect restoration. Correct helper preparation to create selection before the moves, then confirm 0/64/0/48 retained in the same process. Viewed captures show centered aspect-fit and aligned selection borders. DEVELOPMENT records binary/source hashes and exact bounds.
+- Cleanup/verification: close clean normally, stderr empty, source/binary unchanged. No Save/clipboard/OS changes; inventory/helpers/captures stay ignored. Format, Clippy and 268 tests pass; three existing live ignores remain unexecuted. CI 34089534210 succeeds; 34090227262 is in progress when checked. DEVELOPMENT, KNOWN_GAPS and this log only.
+- Status/next: h1_active; prepare verified evidence checkpoint. Default-output switching still awaits explicit owner authorization. Video/reading and maximize/fullscreen combinations can be checked independently on these two same-scale monitors; do not label them mixed-DPI, physical input, Windows 10, real unplug or owner-design acceptance. Preserve distribution and full launch requirements.
+
 ## 2026-09-07 15:17 JST - distinguish media-position memory behavior from the long-run transient
 
 - Trigger/intent: previous turn is progress; clean pushed 2857878 confirmed. Test the simple hypothesis that the approximately 15-minute memory increase follows source position, without speculative production changes.

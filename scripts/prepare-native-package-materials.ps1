@@ -1,10 +1,10 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('chromaprint', 'openal', 'zvbi')][string]$Component,
+    [Parameter(Mandatory = $true)][ValidateSet('chromaprint', 'openal', 'zvbi', 'gcc-libs')][string]$Component,
     [Parameter(Mandatory = $true)][string]$PackageArchive,
     [Parameter(Mandatory = $true)][string]$Recipe,
     [Parameter(Mandatory = $true)][string]$SourceArchive,
-    [Parameter(Mandatory = $true)][string]$RuntimeDll,
+    [Parameter(Mandatory = $true)][string[]]$RuntimeDll,
     [string]$LgplLicense,
     [string]$GplLicense,
     [string]$PatchDirectory,
@@ -16,7 +16,8 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $inventoryPath = Join-Path $repositoryRoot "docs/native-$Component-inputs.json"
 $inventory = Get-Content -LiteralPath $inventoryPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($inventory.schema_version -ne 1) { throw 'Unsupported native package inventory.' }
-$media = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/msys2-media-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$packageInventory = if ($Component -eq 'gcc-libs') { 'docs/msys2-toolchain-inputs.json' } else { 'docs/msys2-media-inputs.json' }
+$media = Get-Content -LiteralPath (Join-Path $repositoryRoot $packageInventory) -Raw -Encoding UTF8 | ConvertFrom-Json
 $package = @($media.packages | Where-Object { $_.name -eq $inventory.package.name })
 if ($package.Count -ne 1 -or $package[0].version -ne $inventory.package.version -or
     $package[0].sha256 -ne $inventory.package.sha256 -or $package[0].bytes -ne $inventory.package.bytes) {
@@ -34,7 +35,11 @@ function Assert-Material([string]$Path, $Record) {
 Assert-Material $PackageArchive $inventory.package
 Assert-Material $Recipe $inventory.recipe
 Assert-Material $SourceArchive $inventory.source
-Assert-Material $RuntimeDll $inventory.runtime
+$runtimes = @($inventory.runtime)
+if ($RuntimeDll.Count -ne $runtimes.Count) { throw 'Incorrect native runtime DLL count.' }
+for ($index = 0; $index -lt $runtimes.Count; $index++) {
+    Assert-Material $RuntimeDll[$index] $runtimes[$index]
+}
 if ($inventory.lgpl) { Assert-Material $LgplLicense $inventory.lgpl }
 if ($inventory.gpl) { Assert-Material $GplLicense $inventory.gpl }
 foreach ($patch in $inventory.patches) {

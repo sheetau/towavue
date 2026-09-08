@@ -1,10 +1,10 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('chromaprint', 'openal', 'zvbi')][string]$Component,
+    [Parameter(Mandatory = $true)][ValidateSet('chromaprint', 'openal', 'zvbi', 'gcc-libs')][string]$Component,
     [Parameter(Mandatory = $true)][string]$PackageArchive,
     [Parameter(Mandatory = $true)][string]$Recipe,
     [Parameter(Mandatory = $true)][string]$SourceArchive,
-    [Parameter(Mandatory = $true)][string]$RuntimeDll,
+    [Parameter(Mandatory = $true)][string[]]$RuntimeDll,
     [string]$LgplLicense,
     [string]$GplLicense,
     [string]$PatchDirectory
@@ -27,7 +27,7 @@ New-Item -ItemType Directory -Path $testDirectory | Out-Null
 $first = Join-Path $testDirectory 'first'
 & $generator @inputs -OutputDirectory $first
 $files = @(Get-ChildItem -LiteralPath $first -Recurse -File)
-$expectedCount = @{ chromaprint = 13; openal = 18; zvbi = 17 }[$Component]
+$expectedCount = @{ chromaprint = 13; openal = 18; zvbi = 17; 'gcc-libs' = 47 }[$Component]
 if ($files.Count -ne $expectedCount -or @($files | Where-Object { $_.Extension -in @('.dll', '.exe') }).Count) {
     throw "Expected exactly $expectedCount source/provenance/notice files and no binaries."
 }
@@ -50,29 +50,60 @@ catch {
     $rejected = $true
 }
 if (-not $rejected) { throw 'Existing output was accepted.' }
-foreach ($inputName in $fileInputs) {
-    foreach ($kind in @('missing', 'corrupt')) {
+if ($Component -eq 'gcc-libs') {
+    foreach ($case in @('missing-dll', 'duplicate-dll', 'swapped-dll')) {
         $arguments = $inputs.Clone()
-        $path = Join-Path $testDirectory "$inputName-$kind"
-        if ($kind -eq 'corrupt') {
-            Copy-Item -LiteralPath $inputs[$inputName] -Destination $path
-            $bytes = [IO.File]::ReadAllBytes($path)
-            $bytes[0] = $bytes[0] -bxor 1
-            [IO.File]::WriteAllBytes($path, $bytes)
-            $corruptHash = (Get-FileHash -LiteralPath $path).Hash
+        $dlls = @($inputs.RuntimeDll)
+        $expectedMessage = 'Incorrect native runtime DLL count.'
+        switch ($case) {
+            'missing-dll' { $arguments.RuntimeDll = $dlls[0..1] }
+            'duplicate-dll' { $arguments.RuntimeDll = $dlls + $dlls[0] }
+            'swapped-dll' {
+                $arguments.RuntimeDll = @($dlls[1], $dlls[0], $dlls[2])
+                $expectedMessage = 'Native package material checksum mismatch:*'
+            }
         }
-        $arguments[$inputName] = $path
-        $destination = Join-Path $testDirectory "$inputName-$kind-output"
+        $destination = Join-Path $testDirectory $case
         $rejected = $false
         try { & $generator @arguments -OutputDirectory $destination | Out-Null }
         catch {
-            $message = $_.Exception.Message
-            if ($kind -eq 'missing' -and $message -notlike 'Missing native package material:*') { throw }
-            if ($kind -eq 'corrupt' -and $message -notlike 'Native package material checksum mismatch:*') { throw }
+            if ($_.Exception.Message -notlike $expectedMessage) { throw }
             $rejected = $true
         }
-        if (-not $rejected -or (Test-Path -LiteralPath $destination)) { throw "Invalid input created output: $inputName / $kind" }
-        if ($kind -eq 'corrupt' -and (Get-FileHash -LiteralPath $path).Hash -ne $corruptHash) { throw 'Corrupt input was modified.' }
+        if (-not $rejected -or (Test-Path -LiteralPath $destination)) { throw 'Invalid GCC runtime set created output.' }
+    }
+}
+foreach ($inputName in $fileInputs) {
+    $inputPaths = @($inputs[$inputName])
+    for ($index = 0; $index -lt $inputPaths.Count; $index++) {
+        foreach ($kind in @('missing', 'corrupt')) {
+            $arguments = $inputs.Clone()
+            $path = Join-Path $testDirectory "$inputName-$index-$kind"
+            if ($kind -eq 'corrupt') {
+                Copy-Item -LiteralPath $inputPaths[$index] -Destination $path
+                $bytes = [IO.File]::ReadAllBytes($path)
+                $bytes[0] = $bytes[0] -bxor 1
+                [IO.File]::WriteAllBytes($path, $bytes)
+                $corruptHash = (Get-FileHash -LiteralPath $path).Hash
+            }
+            if ($inputName -eq 'RuntimeDll') {
+                $changedPaths = $inputPaths.Clone()
+                $changedPaths[$index] = $path
+                $arguments[$inputName] = $changedPaths
+            }
+            else { $arguments[$inputName] = $path }
+            $destination = Join-Path $testDirectory "$inputName-$index-$kind-output"
+            $rejected = $false
+            try { & $generator @arguments -OutputDirectory $destination | Out-Null }
+            catch {
+                $message = $_.Exception.Message
+                if ($kind -eq 'missing' -and $message -notlike 'Missing native package material:*') { throw }
+                if ($kind -eq 'corrupt' -and $message -notlike 'Native package material checksum mismatch:*') { throw }
+                $rejected = $true
+            }
+            if (-not $rejected -or (Test-Path -LiteralPath $destination)) { throw "Invalid input created output: $inputName / $kind" }
+            if ($kind -eq 'corrupt' -and (Get-FileHash -LiteralPath $path).Hash -ne $corruptHash) { throw 'Corrupt input was modified.' }
+        }
     }
 }
 foreach ($patch in $inventory.patches) {

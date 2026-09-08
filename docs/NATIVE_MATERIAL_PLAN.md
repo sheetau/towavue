@@ -26,7 +26,7 @@ LGPL優先17件: chromaprint、fribidi、gettext-runtime、glib2、gmp、graphit
 
 17件ともsource archive・patch・選択表示を取得済み（zvbiは限定buildの別資料）。**取得済みは配布条件の完了ではない。** libsoxrはrecipeがchecksumをSKIPするVCS入力のため、指定commitから生成したtarを独自にhash固定し、通常file全137件をGit blobと照合した。PFFFTの別条件も保持する。Graphite2の原本にはSIL由来部分の複数license選択があり、この優先群はLGPL-only認定ではない。FriBidiのUnicode data、libblurayのlibudfread、libplaceboのstatic/header/generated入力などの範囲確認も残る。
 
-MPL群はsrtとzeromqで、両方のsource／patchを取得済み。ZeroMQの逆向きpatchと、SRTのUniversity of Illinois継承表示を保持し、取得案内と個別範囲の確認を続ける。次のsource優先対象はGCC群のgcc-libsで、実graphのlibgcc／libstdc++／libgompを対象とする。未同梱のlibquadmathを同じ扱いで加えない。
+MPL群はsrtとzeromqで、両方のsource／patchを取得済み。ZeroMQの逆向きpatchと、SRTのUniversity of Illinois継承表示を保持し、取得案内と個別範囲の確認を続ける。GCC群のgcc-libsも元16.2.0 source・17 patches／gdbinit・package表示を別資料に取得し、実graphのlibgcc／libstdc++／libgompの3 DLLへhash対応させた。例外条件と全compiler入力の確定は別に残る。未同梱のlibquadmathを同じ扱いで加えない。次はLCMSと残るstatic/header/dataの範囲・表示を先に確認する。
 
 混合scope群はfreetype、lcms2、lz4、xz。freetype／lz4／xzの原本材料は取得済み。lcms2はfast_floatのlink引数と未使用を示唆するsymbol証拠までで、全組込み範囲の確認は未完了。
 

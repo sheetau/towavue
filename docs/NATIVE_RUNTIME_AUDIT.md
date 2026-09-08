@@ -104,6 +104,18 @@ SRT 1.5.7の[元archive](https://github.com/Haivision/srt/archive/v1.5.7/srt-1.5
 
 既存collectorに、recipeの正確なVCS URL／commitとローカルarchive pinの照合、別recipe入力のpackage notice対応を追加した。VCS tarは記録したcommandで事前準備し、Download指定でもHTTP扱いで取得しない。最新`native-source-supplements-v6`は26 owners、74 inputs／67185008 bytes、165選択文書、269 files／70006200 bytesで、前資料のREADME／INPUTS以外の244 filesはhash不変。取得済みのlibrary-source優先群は17件、MPL群は2件となるが、GCC／LCMS／static／header／dataと公開source取得案内、最終候補性能・installer・対象Windowsのgateは未完了である。
 
+### GCC runtimeの元source／patch／表示資料
+
+元packageの`.BUILDINFO`が指定するGCC 16.2.0-3 recipeを確認し、[GCC 16.2.0全source](https://ftp.gnu.org/gnu/gcc/gcc-16.2.0/gcc-16.2.0.tar.xz)を取得した。107200820 bytes／SHA256 `e6738e29597f733270731aa90600f37ffdc045079dfc27ec7e8192cc81085c3e`。17 patchesとgdbinitを含む19 inputs／107250798 bytesの全hashが元recipeと一致する。archiveは158985通常files／6094 directories、link／危険なmember名なし。`.sig`の暗号検証やGCC bootstrapは行っていない。
+
+現候補の`libgcc_s_seh-1.dll`は150998 bytes／`b37c1770...`、`libgomp-1.dll`は329299 bytes／`acf25eee...`、`libstdc++-6.dll`は2661299 bytes／`887c21db...`で、全て元package監査hashと一致した。共有のpackage資料generatorを複数DLLへ対応させ、GCCだけtoolchain inventoryの同一packageへ結び付ける。資料にはruntime binaryも元binary package archiveもcopyせず、package原本の4 noticesと`.PKGINFO`／`.BUILDINFO`を選択抽出する。libatomic／libquadmath等は同梱候補へ追加しない。
+
+libgccの算術／SEH、libgomp、libstdc++例外／allocationの元fileはGPLv3以降とGCC Runtime Library Exception 3.1を明記する。COPYING3／COPYING.RUNTIMEとpackage生成READMEを原文のまま保持し、libbacktraceのBSD系表示、PSTLのApache／LLVM-exceptionとlibrary／documentation条件の区別も記録した。[例外本文](https://github.com/gcc-mirror/gcc/blob/releases/gcc-16.2.0/COPYING.RUNTIME)の対象file・Independent Module・Eligible Compilation Process条件を、別頒布するDLL自体の対応sourceや全archiveのlicenseへ一律に置き換えない。recipeのPOSIX threads、profiled bootstrap、shared/static、libgomp、libstdc++ backtrace設定と元patchを保持したが、全compiler入力・全file表示・各packageのcompilation条件の完了を主張しない。
+
+固定manifestは[native-gcc-libs-inputs.json](native-gcc-libs-inputs.json)、収集条件と限界は[GCC-LIBS-MATERIALS-README.txt](../third-party/GCC-LIBS-MATERIALS-README.txt)。`prepare-native-package-materials.ps1 -Component gcc-libs`へ元PackageArchive／Recipe／SourceArchive／PatchDirectoryを渡し、RuntimeDllには上記3 DLLをその順序の配列で指定する。新しいOutputDirectoryを使う。既存3 componentの単一DLL指定はそのまま利用できる。
+
+最終`gcc-runtime-materials-v1`は47 files／107713444 bytes。19 source選択files、6 package原本files、全source archive／18追加inputs／recipe／説明とmanifestを保持する。別cwdからの再生成と全hash一致、24 inputsの欠落／同size改変、3 DLL集合の不足・余分な重複・順序取り違えを拒否し、先行outputを保持した。Chromaprint／OpenAL／元ZVBIの既存資料試験も通過。GCC材料を集めたことだけで最終runtime品質・Setup.exe・対象Windowsやowner受入のgateは完了しない。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

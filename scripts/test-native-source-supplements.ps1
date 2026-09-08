@@ -14,6 +14,7 @@ $testDirectory = Join-Path $repositoryRoot ('target/tmp/source-supplements-test-
 New-Item -ItemType Directory -Path $testDirectory | Out-Null
 $expected = @{}
 $timestamps = @{}
+foreach ($notice in $inventory.additional_notices) { $expected[$notice.name] = $notice.sha256 }
 foreach ($package in $inventory.packages) {
     foreach ($file in $package.files) {
         $relative = $package.package + '/' + $file.name
@@ -141,16 +142,41 @@ finally { Move-Item -LiteralPath ($vcsPath + '.saved') -Destination $vcsPath }
 # Source supplements with existing package notices must preserve their original bytes too.
 $fixtureRepository = Join-Path $testDirectory 'repository'
 foreach ($name in @('scripts/prepare-native-source-supplements.ps1', 'docs/native-source-supplements.json',
-    'docs/native-runtime-recipes.json', 'docs/native-runtime-package-audit.json')) {
+    'docs/native-runtime-recipes.json', 'docs/native-runtime-package-audit.json',
+    'third-party/unicode-16.0.0/LICENSE.txt')) {
     $path = Join-Path $fixtureRepository $name
     New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repositoryRoot $name) -Destination $path
 }
 $generator = Join-Path $fixtureRepository 'scripts/prepare-native-source-supplements.ps1'
+$noticePath = Join-Path $fixtureRepository 'third-party/unicode-16.0.0/LICENSE.txt'
+$noticeBytes = [IO.File]::ReadAllBytes($noticePath)
+$arguments = @{ OutputDirectory = $rejectedOutput; CacheDirectory = $CacheDirectory; RecipeDirectory = $RecipeDirectory; Download = $true }
+Move-Item -LiteralPath $noticePath -Destination ($noticePath + '.saved')
+try { Assert-Rejected $arguments 'Missing source supplement input:*' }
+finally { Move-Item -LiteralPath ($noticePath + '.saved') -Destination $noticePath }
+$corrupt = [byte[]]$noticeBytes.Clone()
+$corrupt[0] = $corrupt[0] -bxor 1
+[IO.File]::WriteAllBytes($noticePath, $corrupt)
+$noticeHash = (Get-FileHash -LiteralPath $noticePath).Hash
+try {
+    Assert-Rejected $arguments 'Source supplement checksum mismatch:*'
+    if ((Get-FileHash -LiteralPath $noticePath).Hash -ne $noticeHash) { throw 'Corrupt additional notice was overwritten.' }
+}
+finally { [IO.File]::WriteAllBytes($noticePath, $noticeBytes) }
+if (Test-Path -LiteralPath $rejectedOutput) { throw 'Rejected additional notice created output.' }
 $manifestPath = Join-Path $fixtureRepository 'docs/native-source-supplements.json'
 $manifestBytes = [IO.File]::ReadAllBytes($manifestPath)
 $encoding = [Text.UTF8Encoding]::new($false)
 $arguments = @{ OutputDirectory = $rejectedOutput; CacheDirectory = $CacheDirectory; RecipeDirectory = $RecipeDirectory }
+$changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
+$changed.additional_notices = @()
+[IO.File]::WriteAllText($manifestPath, ($changed | ConvertTo-Json -Depth 20), $encoding)
+try {
+    Assert-Rejected $arguments 'Incomplete additional notice inventory.'
+    if (Test-Path -LiteralPath $rejectedOutput) { throw 'Omitted additional notice created output.' }
+}
+finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
 foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype', 'mingw-w64-x86_64-glib2', 'mingw-w64-x86_64-lcms2')) {
     foreach ($kind in @('missing', 'different', 'duplicate')) {
         $changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
@@ -221,4 +247,4 @@ foreach ($kind in @('commit', 'url', 'kind')) {
     }
     finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
 }
-Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, eighteen package-notice mismatches, three VCS mapping cases, source symlink exclusion, cached-input/download and output preservation."
+Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, missing/corrupt/omitted additional notice, eighteen package-notice mismatches, three VCS mapping cases, source symlink exclusion, cached-input/download and output preservation."

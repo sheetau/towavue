@@ -28,6 +28,11 @@ Source
 signatures marked SKIP by the GMP/libssh/XZ/FreeType/gettext recipes are not
 included.
 
+The additional Unicode notice is a tracked original from the pinned upstream
+tree named in INPUTS.json, not a FriBidi archive member or recipe input.
+Its bytes and Git blob ID are verified independently. The generator checks
+and copies this local notice without downloading or replacing it.
+
 Keep original archives and recipes together. Patches are not applied by this
 generator: in particular, ZeroMQ's recipe applies its commit patch in REVERSE.
 Theora also edits export lists; Snappy copies a pkg-config template. Exact
@@ -81,9 +86,13 @@ License scope observations (not blanket distribution approval):
   and documentation. The candidate stages libiconv-2.dll, not iconv.exe.
   The full source archive must not be described as exclusively LGPL.
 - FriBidi includes Unicode 16.0.0 data. Its selected generator build file
-  names UnicodeData, ArabicShaping, mirroring and bracket inputs. Retain
-  those original data in the archive and the selected Unicode notices;
-  final data attribution and applicable Unicode terms still need closure.
+  names UnicodeData, ArabicShaping, mirroring and bracket inputs. All four
+  data files match the Unicode upstream tree pinned in INPUTS.json. Retain
+  its original Unicode License V3 in unicode-16.0.0/LICENSE.txt, separately
+  from LGPL, and the original data attribution in the source archive.
+  The candidate DLL also identifies Unicode 16.0.0. The upstream ReadMe at
+  this revision is a release template, not identical to FriBidi's expanded
+  ReadMe; no equality is claimed for it or the entire upstream tree.
 - Game Music Emu's original CMake defaults to the LGPL-2.1-or-later Nuked
   YM2612 implementation, and its matched recipe does not override that
   choice. MAME is a separate GPL alternative in the full source archive;
@@ -95,8 +104,15 @@ License scope observations (not blanket distribution approval):
   exceptions for individually marked files. AUTHORS and the original patent
   discussion are retained; this is not independent patent clearance.
 - libbluray retains bundled libudfread and ASM notices. Its recipe disables
-  bdj_jar, not all native BD-J support; the selected build files distinguish
-  these paths. Static libudfread selection still needs binary/build binding.
+  bdj_jar, not native BD-J support. Its default embed_udfread=true makes the
+  bundled libudfread 1.2.0 target static; the build inventory has no external
+  libudfread, and the candidate contains its UDF diagnostics without a UDF
+  DLL import. Preserve the four original LGPL implementation files and
+  build selection evidence. Native BD-J sources are unconditional and use
+  the bundled JNI headers when jdk_home is empty, as in the matched recipe.
+  Keep both JNI headers' MPL/GPL/LGPL alternatives unmodified; the LGPL
+  option is available without relabeling them as LGPL-only. No JAR, JVM or
+  ASM binary is staged. This is not an independent full DLL rebuild.
 - Graphite2 LICENSE offers four alternatives for SIL-authored/copyrighted
   material unless otherwise specified; COPYING retains its own older
   wording. Keep both unchanged. Do not apply the MIT alternative blindly
@@ -162,12 +178,20 @@ License scope observations (not blanket distribution approval):
   Theora also supplies a separate technology statement. Preserve these texts
   without interpreting them as clearance of every third-party patent.
 - opencore-amr's opencore/NOTICE contains additional upstream contributions;
-  do not replace it with only the top-level Apache license. Applicability of
-  its inherited material to the built AMR subset still needs review.
+  do not replace it with only the top-level Apache license. Its build lists
+  select the AMR-NB/AMR-WB codec subset and small OSCL wrappers, not the
+  broader OpenCORE MPEG video/AAC/Windows Media implementations described
+  by that notice. The actual codec headers explicitly state permission
+  from the 3GPP copyright holders under the preceding Apache terms.
+  Preserve representative original headers, build lists and the separate
+  patent disclaimer; this does not establish patent clearance.
 - Snappy COPYING distinguishes library terms from benchmark-data terms
   (including CC-BY attribution). Its recipe disables tests and benchmarks.
-  The complete archive still includes those data, so source-archive release
-  obligations and linked-library scope must be reviewed separately.
+  The original target lists and all three recipe patches keep test data in
+  a separate test-support target, not the snappy library's four C++ files.
+  The complete source archive still includes differently licensed data.
+  Keep COPYING's data notices with that archive and do not describe its
+  entire contents as BSD-only or copy test media into the runtime payload.
 - ZeroMQ's MPL text and bundled wepoll/Unity notices are retained without
   claiming that every bundled test dependency is linked into its DLL.
 

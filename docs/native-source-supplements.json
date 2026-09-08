@@ -1,6 +1,43 @@
 {
   "schema_version": 1,
   "scope": "Supplementary source archives, recipe inputs and selected documents for 27 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "additional_notices": [
+    {
+      "scope": "Original Unicode License V3 from the same pinned upstream tree as the four data inputs used by FriBidi 1.0.16; not a FriBidi archive member or an MSYS2 recipe checksum.",
+      "name": "unicode-16.0.0/LICENSE.txt",
+      "bytes": 2033,
+      "git_blob": "d7e7973c2fd6f2586a8999a69dc21e39af26be0f",
+      "sha256": "fe5c62b543e287981db198f2acfa0ca732d12591a1024536dc8fd85dacd77104",
+      "repository_path": "third-party/unicode-16.0.0/LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/addf0c992050b10a0bfe8647f90fcc8fdbfe71fc/LICENSE",
+      "data_inputs": [
+        {
+          "archive_member": "fribidi-1.0.16/gen.tab/unidata/UnicodeData.txt",
+          "upstream_path": "unicodetools/data/ucd/dev/UnicodeData.txt",
+          "bytes": 2175362,
+          "sha256": "ff58e5823bd095166564a006e47d111130813dcf8bf234ef79fa51a870edb48f"
+        },
+        {
+          "archive_member": "fribidi-1.0.16/gen.tab/unidata/ArabicShaping.txt",
+          "upstream_path": "unicodetools/data/ucd/dev/ArabicShaping.txt",
+          "bytes": 41236,
+          "sha256": "764f420cedfc8b43d9fec251c957a5d55fc45d40f6573f162990ed1dce7e36e0"
+        },
+        {
+          "archive_member": "fribidi-1.0.16/gen.tab/unidata/BidiBrackets.txt",
+          "upstream_path": "unicodetools/data/ucd/dev/BidiBrackets.txt",
+          "bytes": 8891,
+          "sha256": "b8f32554c6f658821fb0ee742d21c5b1f2086b9bf13071fed04894b022f93d67"
+        },
+        {
+          "archive_member": "fribidi-1.0.16/gen.tab/unidata/BidiMirroring.txt",
+          "upstream_path": "unicodetools/data/ucd/dev/BidiMirroring.txt",
+          "bytes": 26827,
+          "sha256": "d7afdadd1bbd66f5a663ac0e8f7958f18fd9491fc0bc59ec5877cb82db71db7d"
+        }
+      ]
+    }
+  ],
   "packages": [
     {
       "package": "mingw-w64-x86_64-lcms2",
@@ -358,6 +395,11 @@
           "name": "fribidi-1.0.16/lib/meson.build",
           "bytes": 2810,
           "sha256": "2b1a880a19ee1f0cfd35f1bd49a83a4cb4166f9b9c487625625b9b4a5ff435b8"
+        },
+        {
+          "sha256": "764f420cedfc8b43d9fec251c957a5d55fc45d40f6573f162990ed1dce7e36e0",
+          "name": "fribidi-1.0.16/gen.tab/unidata/ArabicShaping.txt",
+          "bytes": 41236
         }
       ]
     },
@@ -525,6 +567,61 @@
           "name": "libbluray-1.5.0/contrib/libudfread/meson.build",
           "bytes": 2928,
           "sha256": "977bc603d7c7a4c7d660c220c202bd955d1685ff2db591575c53a973d9024712"
+        },
+        {
+          "sha256": "f44ed2267df2195d9124412263579148453f5a6e4e9f4d765e3dc2072f8b6a38",
+          "name": "libbluray-1.5.0/meson_options.txt",
+          "bytes": 1590
+        },
+        {
+          "sha256": "4c6660a675e503df059905dc2c7a01e537a6a30e00d14732fb3cc66001430cde",
+          "name": "libbluray-1.5.0/contrib/libudfread/meson_options.txt",
+          "bytes": 325
+        },
+        {
+          "sha256": "2f4d048213cb0ac030076373e6e8d5bbf45aa34a0c33339f57b4bc04d2dd06d3",
+          "name": "libbluray-1.5.0/contrib/libudfread/src/meson.build",
+          "bytes": 1476
+        },
+        {
+          "sha256": "4cf9353fb6c54e99d8c864b8fab05dd51a86d597223bd4e3705e3e6b2de65697",
+          "name": "libbluray-1.5.0/contrib/libudfread/src/udfread.c",
+          "bytes": 47282
+        },
+        {
+          "sha256": "7886d3e23af9666ea60939ee5d0cd9f654c917c7e20d2ee3d32efd777d0b91c2",
+          "name": "libbluray-1.5.0/contrib/libudfread/src/ecma167.c",
+          "bytes": 11369
+        },
+        {
+          "sha256": "fe3d223a554692972a5798dd10c7e9f965ad065425ddef94547ce8d9a30c9881",
+          "name": "libbluray-1.5.0/contrib/libudfread/src/default_blockinput.c",
+          "bytes": 4802
+        },
+        {
+          "sha256": "09420af2ef26a3668d03b19157a33675f9424a53ad46bc09ea57e24d70e533a6",
+          "name": "libbluray-1.5.0/contrib/libudfread/src/udfread-version.c",
+          "bytes": 1106
+        },
+        {
+          "sha256": "ff248fc674e2bb0060b7ad358867e0617de58fa5f6f76c617eeaa6bf7d57b148",
+          "name": "libbluray-1.5.0/jni/jni.h",
+          "bytes": 68966
+        },
+        {
+          "sha256": "66599cdfd4da98c3f26f367761c5ac32539a450f222f7da5919f9c40f1496206",
+          "name": "libbluray-1.5.0/jni/win32/jni_md.h",
+          "bytes": 2031
+        },
+        {
+          "sha256": "5fbe6d6bde9ac48a89399553d1cd1bcbfd7cffbcbc6f88aa6f010e91f1307e1f",
+          "name": "libbluray-1.5.0/src/libbluray/bdj/bdj.c",
+          "bytes": 37315
+        },
+        {
+          "sha256": "d907b91b55d16e01d6a41de461a077529126d9db6db999f6f020384d2949b78c",
+          "name": "libbluray-1.5.0/src/libbluray/disc/udf_fs.c",
+          "bytes": 7276
         }
       ]
     },
@@ -1545,6 +1642,51 @@
           "name": "opencore-amr-0.1.6/opencore/NOTICE",
           "bytes": 12498,
           "sha256": "d106802b5e406073c1d10fbe9f638234c6973ebce37df71773179642085eb489"
+        },
+        {
+          "sha256": "1f68418f91eb6fc1c0c4dbb55a262bec274fb1ad633a850624609c9653f928f7",
+          "name": "opencore-amr-0.1.6/README",
+          "bytes": 575
+        },
+        {
+          "sha256": "f10ff64fc34e90714682a63ad27254c058ede787c0961d63e27b17fe66a9e7f5",
+          "name": "opencore-amr-0.1.6/Makefile.am",
+          "bytes": 1972
+        },
+        {
+          "sha256": "f93ae617371a6bb053cf90fbec1b9fe066776923fd5e62123dd12362e13ed0ed",
+          "name": "opencore-amr-0.1.6/amrnb/Makefile.am",
+          "bytes": 8047
+        },
+        {
+          "sha256": "32d4a60e9055b5626e9c1d59bfdce1a7e950c4e593c5e87968e03aefe2052f28",
+          "name": "opencore-amr-0.1.6/amrwb/Makefile.am",
+          "bytes": 3066
+        },
+        {
+          "sha256": "f91a72705d38de34a9749c214a4cbc6ffa1da753b34b2cd11f3d6798f24ae59f",
+          "name": "opencore-amr-0.1.6/opencore/codecs_v2/audio/gsm_amr/patent_disclaimer.txt",
+          "bytes": 424
+        },
+        {
+          "sha256": "5a79c2cdf33522857224a74f46344dfb7e326a304b6b65d6bfdb43ba7433eeef",
+          "name": "opencore-amr-0.1.6/opencore/codecs_v2/audio/gsm_amr/amr_nb/dec/src/amrdecode.cpp",
+          "bytes": 15236
+        },
+        {
+          "sha256": "fc982c7a223b1181beafa279faf3edf554f6b1af5e55b6d1aad86b07bf0825cc",
+          "name": "opencore-amr-0.1.6/opencore/codecs_v2/audio/gsm_amr/amr_wb/dec/src/pvamrwbdecoder.cpp",
+          "bytes": 34476
+        },
+        {
+          "sha256": "2849e5e60122e8befb7585cd7bf87aa93ea83794f901fdaec4d5e37aa72a9cbc",
+          "name": "opencore-amr-0.1.6/amrnb/wrapper.cpp",
+          "bytes": 2246
+        },
+        {
+          "sha256": "26703bd8e537225fa2edbac63d191d3299f4c433ec1b7f4919148706918b8336",
+          "name": "opencore-amr-0.1.6/oscl/oscl_base.h",
+          "bytes": 1089
         }
       ]
     },
@@ -1601,6 +1743,21 @@
           "name": "snappy-1.2.2/COPYING",
           "bytes": 2645,
           "sha256": "55172044f7e241207117448a4d9d6ba1d0925c8ad66b5d4c08c70adfa9cc3de6"
+        },
+        {
+          "sha256": "12c5c9a0cd918a6f1fc82008926403576d93be01e149657cb7328a4c0db5aa6e",
+          "name": "snappy-1.2.2/CMakeLists.txt",
+          "bytes": 14810
+        },
+        {
+          "sha256": "614766218acd35f7cee9f2e91b56a0890cb218045044ebf026010ffc883cf344",
+          "name": "snappy-1.2.2/snappy.cc",
+          "bytes": 100564
+        },
+        {
+          "sha256": "6111a0f08d20c6fb6a2a144b94cdc87e025c6644eb46569d93f3c552c9a7155c",
+          "name": "snappy-1.2.2/snappy_test_data.cc",
+          "bytes": 2229
         }
       ]
     },

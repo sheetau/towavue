@@ -15,6 +15,7 @@ $inventory = Get-Content -LiteralPath $inventoryPath -Raw -Encoding UTF8 | Conve
 $recipes = Get-Content -LiteralPath $recipePath -Raw -Encoding UTF8 | ConvertFrom-Json
 $audit = Get-Content -LiteralPath $auditPath -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($inventory.schema_version -ne 1 -or $inventory.packages.Count -ne 27) { throw 'Incomplete source supplement inventory.' }
+if ($inventory.additional_notices.Count -ne 1) { throw 'Incomplete additional notice inventory.' }
 if (-not $CacheDirectory) { $CacheDirectory = Join-Path $repositoryRoot 'vendor/msys2/source-supplements-20260908' }
 if (-not $RecipeDirectory) { $RecipeDirectory = Join-Path $repositoryRoot 'vendor/msys2/runtime-recipes-20260908' }
 $CacheDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CacheDirectory)
@@ -35,6 +36,9 @@ function Assert-Input([string]$Path, $Record) {
 }
 
 # Check all existing inputs before retrieving anything or creating output.
+foreach ($notice in $inventory.additional_notices) {
+    Assert-Input (Join-Path $repositoryRoot $notice.repository_path) $notice
+}
 foreach ($package in $inventory.packages) {
     $owner = @($audit.packages | Where-Object { $_.name -eq $package.package })
     $recipe = @($recipes.recipes | Where-Object { $_.package -eq $package.package })
@@ -109,6 +113,12 @@ foreach ($package in $inventory.packages) {
     Write-Output "Verified source supplement: $($package.package)"
 }
 Copy-Item -LiteralPath $recipePath, $auditPath -Destination $OutputDirectory
+foreach ($notice in $inventory.additional_notices) {
+    $path = Join-Path $OutputDirectory $notice.name
+    New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot $notice.repository_path) -Destination $path
+    Assert-Input $path $notice
+}
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'third-party/NATIVE-SOURCE-SUPPLEMENTS-README.txt') -Destination (Join-Path $OutputDirectory 'README.txt')
 # INPUTS is the completion marker; failed extractions leave diagnostic output only.
 Copy-Item -LiteralPath $inventoryPath -Destination (Join-Path $OutputDirectory 'INPUTS.json')

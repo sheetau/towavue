@@ -130,6 +130,19 @@ mapはfast_floatの**import library** `liblcms2_fast_float.dll.a`を1／2回LOAD
 
 最終`native-source-supplements-v8`は27 owners、75 inputs／72913751 bytes、176選択文書、282 files／75936143 bytes。別cwd・再生成の全hash一致、102 inputsの欠落／同size改変、18 notice不整合、3 VCS対応不整合と既存output保護の試験が通過した。候補runtimeの94 files／138510464 bytesも全hashが既存記録と一致する。
 
+### 継承NOTICE・Unicode data・内蔵UDF/JNIの範囲確認
+
+取得済みのOpenCORE AMR／Snappy／FriBidi／libblurayについて、元archiveのhash・member数・通常file／directoryだけであることを再検証してfresh directoryへ展開した。今回新しいlibraryやcodecをbuild／無効化していない。
+
+- OpenCORE AMR 0.1.6: `Makefile.am`の対象はAMR-NB／AMR-WBと小さなOSCL wrapperで、包括的な`opencore/NOTICE`にあるMPEG video／AAC／Windows Mediaの実装を一括して含む構成ではない。codec treeの元headerにはApache 2.0と、3GPP TS 26.073／26.173由来部分をその条件で扱う許可を得た旨がある。NOTICE全体を削らず、代表header、wrapper、build一覧と別の`patent_disclaimer.txt`も保持する。著作権条件の確認を特許権の許諾へ置き換えない。
+- Snappy 1.2.2: core targetは4 C++ filesで、`snappy_test_data.cc`を含むtest-support targetとは分離される。対応recipeはtests／benchmarksをOFFにし、全3 patchもこの対象分離を変更しない。testdataのCC-BY等をcore DLLの条件と混同せず、元source archiveにはそのdataが残るためCOPYINGの個別表示もそのまま保持する。test mediaをruntime payloadへ加えない。
+- FriBidi 1.0.16: generatorが使うUnicodeData／ArabicShaping／BidiBrackets／BidiMirroringの4 inputsは、[固定Unicode upstream tree](https://github.com/unicode-org/unicodetools/tree/addf0c992050b10a0bfe8647f90fcc8fdbfe71fc/unicodetools/data/ucd/dev)と全byteが一致した。そのtreeの[Unicode License V3原本](https://github.com/unicode-org/unicodetools/blob/addf0c992050b10a0bfe8647f90fcc8fdbfe71fc/LICENSE)を2033 bytes／SHA256 `fe5c62b543e287981db198f2acfa0ca732d12591a1024536dc8fd85dacd77104`、Git blob `d7e7973c2fd6f2586a8999a69dc21e39af26be0f`で固定し、LGPL本文とは別に同梱資料へ追加した。候補DLLもUnicode 16.0.0を表示する。upstreamのReadMeは未展開templateでFriBidiのrelease ReadMeとは異なるため、その一致は主張しない。4 dataの個別hash・元pathもmanifestに残す。
+- libbluray 1.5.0: defaultの`embed_udfread=true`は同archiveのlibudfread 1.2.0をstatic targetにする。元build inventoryに外部libudfreadはなく、候補DLLにはそのUDF診断が存在しUDF DLL importはない。全4実装fileのLGPL 2.1-or-later原文とtarget／optionを保持する。`bdj_jar=disabled`でもnative BD-Jはcore source一覧に残り、recipe既定の空`jdk_home`は内蔵JNI headerを使う。`jni.h`／Windows `jni_md.h`のMPL／GPL／LGPL選択式原文を維持し、LGPL選択が可能なこととLGPL-onlyへの書換えを区別する。JAR／JVM／ASM binaryをstageしたという意味ではない。
+
+上記はhash対応したrecipe／sourceと候補binaryの証拠であり、独立した全DLL再buildや全static/header入力の完了証明ではない。元sourceへの選択fileを24件追加し、Unicode原本1件はrecipe外の`additional_notices`として明示する。collectorはそのtracked原本も出力前にhash検証し、Downloadでも上書きしない。
+
+最終`native-source-supplements-v9`は27 owners、従来どおり75 archive／build inputs、200選択文書と追加Unicode原本、307 files／76355951 bytes。前v8の280 files（README／INPUTS以外）は不変。別cwd／再生成、102欠落・改変pairs、追加noticeの欠落・改変・一覧除去、18 package-notice／3 VCS不整合と既存output保護の試験が通過した。候補runtime全94 filesもhash不変。残るnative／Rust内蔵依存の表示と公開取得案内、最終candidate品質・Setup.exe／対象Windows／owner受入は継続する。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

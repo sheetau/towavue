@@ -24,13 +24,13 @@
 
 LGPL優先17件: chromaprint、fribidi、gettext-runtime、glib2、gmp、graphite2、lame、libbluray、libgme、libiconv、libplacebo、libsoxr、libssh、mpg123、openal、twolame、zvbi。
 
-17件ともsource archive・patch・選択表示を取得済み（zvbiは限定buildの別資料）。**取得済みは配布条件の完了ではない。** libsoxrはrecipeがchecksumをSKIPするVCS入力のため、指定commitから生成したtarを独自にhash固定し、通常file全137件をGit blobと照合した。PFFFTの別条件も保持する。Graphite2の原本にはSIL由来部分の複数license選択があり、この優先群はLGPL-only認定ではない。FriBidiのUnicode data、libblurayのlibudfread、libplaceboのstatic/header/generated入力などの範囲確認も残る。
+17件ともsource archive・patch・選択表示を取得済み（zvbiは限定buildの別資料）。**取得済みは配布条件の完了ではない。** libsoxrはrecipeがchecksumをSKIPするVCS入力のため、指定commitから生成したtarを独自にhash固定し、通常file全137件をGit blobと照合した。PFFFTの別条件も保持する。Graphite2の原本にはSIL由来部分の複数license選択があり、この優先群はLGPL-only認定ではない。FriBidiの4 Unicode inputsは固定upstreamと一致し、そのUnicode License V3原本を追加した。libblurayの内蔵libudfreadはstatic選択とLGPL原文、native BD-JのJNIは複数license選択を確認・保持した。libplacebo等の残るstatic/header/generated入力や最終取得案内を続ける。
 
 MPL群はsrtとzeromqで、両方のsource／patchを取得済み。ZeroMQの逆向きpatchと、SRTのUniversity of Illinois継承表示を保持し、取得案内と個別範囲の確認を続ける。GCC群のgcc-libsも元16.2.0 source・17 patches／gdbinit・package表示を別資料に取得し、実graphのlibgcc／libstdc++／libgompの3 DLLへhash対応させた。例外条件と全compiler入力の確定は別に残る。未同梱のlibquadmathを同じ扱いで加えない。次は残るstatic/header/dataの範囲・表示を先に確認する。
 
 混合scope群はfreetype、lcms2、lz4、xzで、原本材料は4件とも取得済み。lcms2は追加の隔離avcodec／avfilter再linkでfast_floatのimport archiveから選択member 0、static実装archiveの選択なしを確認し、両DLLの.text／.rdataが現候補と完全一致した。これで当該link引数の疑問は狭められたが、全runtimeのstatic/header/dataや最終配布条件の完了にはしない。残る48件の表示・取り込みscopeと公開資料のまとめを進める。
 
-残る48件は上記24 owner以外の全件。package noticeが存在するだけで完了にしない。先に要確認と分かっているものは、opencore-amrの継承NOTICE、Snappyのbenchmark data、rav1e／libdoviの内蔵Rust依存、shaderc／SPIR-V／Vulkan等の取り込みsourceと生成dataである。OpenH264を含むcodecの特許・商標判断は著作権license確認と別に残す。
+notice／範囲優先48件は上記24 owner以外の全件。package noticeが存在するだけで完了にしない。この群のopencore-amrはAMR subsetのsource一覧と3GPP由来header、Snappyはtest dataとcore targetの分離を確認し、継承NOTICEとsource archive内のdata表示を保持した。次に優先するのはrav1e／libdoviの内蔵Rust依存、shaderc／SPIR-V／Vulkan等の取り込みsourceと生成dataである。OpenH264を含むcodecの特許・商標判断は著作権license確認と別に残す。
 
 ## Owner一覧の外にある入力
 

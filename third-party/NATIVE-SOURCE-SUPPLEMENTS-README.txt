@@ -8,8 +8,24 @@ and eight further library-source-first owners: libiconv, FriBidi, Game Music
 Emu, mpg123, libbluray, Graphite2, GLib and libplacebo, plus libsoxr and SRT
 and Little CMS, rav1e, libdovi, shaderc, SPIRV-Cross, Vulkan Loader,
 PCRE2, libxml2, fontconfig, HarfBuzz, libunibreak, OpenSSL, OpenCL ICD Loader
-and libva (40 owners total).
+and libva, libjxl and libopenmpt (42 owners total).
 Chromaprint, OpenAL, ZVBI and GCC runtimes have separate material bundles.
+
+Libjxl's actual library sources identify xorshift (MIT) and Vector Class
+(Apache-2.0) adaptations. Libopenmpt's TinyFFT adaptation identifies the
+original BSD-2-Clause project. codec-embedded/ retains all three unchanged
+upstream license texts at pinned reference commits, including their real
+copyrights. These reference commits are not asserted to be the historical
+adaptation revisions. Keep the original adapted source notices too.
+Libjxl disables SKCMS/SJPEG and uses system Brotli/Highway/LCMS; its shared
+package also builds tools/plugins, not all of which are candidate DLLs.
+APNG/HEVC configuration notices remain source-extra scope. Benchmark links
+stay inside the original archive and are never materialized.
+Libopenmpt retains mpt's Boost/BSD choice, Opal and sample-compression
+public-domain origin statements, and actual configure/Makefile consumers.
+Its autotools archive omits the full OpenMPT include/contrib directories;
+conditional credits alone do not prove those external implementations
+were linked. These materials do not rebuild either library.
 
 OpenSSL's README copyright and original AUTHORS list accompany Apache-2.0;
 its archive has no separate NOTICE file. Keep MSYS2's CC0 pathtools inputs
@@ -68,7 +84,8 @@ members or recipe inputs. FriBidi's pinned upstream-tree notice retains its
 independently verified Git blob. The 2026-09-08 Unicode License V3 original
 covers the other reviewed data references without rewriting older headers
 or replacing release-specific terms. The collector checks and copies both
-local notices without downloading or replacing them.
+local notices without downloading or replacing them. The same checks also
+cover the three codec-embedded reference notices described above.
 
 Keep original archives and recipes together. Patches are not applied by this
 generator: in particular, ZeroMQ's recipe applies its commit patch in REVERSE.

@@ -28,7 +28,7 @@ packageとrecipeの既定cacheは`vendor/msys2/packages-20260908`と`vendor/msys
 
 ## 照合の範囲
 
-[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2424 files／821765692 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
+[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2463 files／825653227 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
 
 本体kitを加えたv3の集約は2460 files／724157839 bytes。これは資料のサイズであり、インストーラーのサイズではない。原本source archivesを保持するが、runtime DLL／exe／static libraryを別fileとしてコピーしない。source-onlyのtoolや他targetの条件を、本体へ一律適用する表示にはしない。
 
@@ -55,6 +55,10 @@ v6の全catalog回帰が通過し、最終2648 filesは試験outputと全hash一
 OpenSSL／OpenCL／libvaの作者と別条件を加えたv7は2722 files／824237414 bytes、`FILES.json`のSHA256は`748d455ab62456ab11e418c9ae7f37d4beec1629a8d719d78e57fed132746358`。40-owner supplement v14は597 files／177095543 bytes、前v13の521 files（README／INPUTS以外）は不変。3 source archivesと6 patch/source inputs、62選択原本を追加し、根拠と限界は[platform notice review](NATIVE_PLATFORM_NOTICE_AUDIT.md)へ記録する。表示の補完であり、候補runtimeの変更や外部driverの配布承認ではない。
 
 v7も全catalog回帰を通過し、最終2722 filesは試験outputと全hash一致。supplementの146入力の欠落／改変pairsと51 package-notice不整合、追加Unicode原本／VCS／link除外／既存output保護も通過した。format／全target Clippy／270 testsは成功し、3 live ignoresは未実行のまま区別する。
+
+libjxl／libopenmptの別表示を加えたv8は2761 files／828134838 bytes、`FILES.json`のSHA256は`682a8c41ad65b6385e68f6614f1a89bbb1ad9eec8982ea85ccaac6050a8d9ee7`。42-owner supplement v15は636 files／180983078 bytesで、前v14の595 files（README／INPUTS以外）は不変。2 source archives、32選択fileとxorshift／Vector Class／TinyFFTの3原文表示を追加した。[内蔵code確認](NATIVE_CODEC_EMBEDDED_AUDIT.md)に使用箇所と参照版の限界を記録する。最終出力は試験生成物と全hash一致し、候補exe／94 runtime filesも不変。
+
+v8も全catalog回帰を通過し、supplementの150入力の欠落／改変pairs、追加5原文の欠落／改変・一覧除去、両ownerを含むpackage表示不整合、VCS／link除外／既存output保護を確認した。新規原文のfixtureコピー漏れは試験側で修正して再実行した。format／全target Clippy／270 testsも通過したが、3 live ignoresは未実行で、配布候補の新しいhardware試験とは数えない。
 
 ## まだ残るもの
 

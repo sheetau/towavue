@@ -1,7 +1,34 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for 40 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources; shader compiler static/header inputs require additional review. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 42 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources; shader compiler static/header inputs require additional review. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "additional_notices": [
+    {
+      "scope": "Original MIT notice from the project explicitly named by libjxl's xorshift128plus-inl.h; current pinned reference, not proof of the historical adaptation revision.",
+      "name": "codec-embedded/xorshift/LICENSE",
+      "bytes": 1104,
+      "sha256": "5cc074b3beb035dea30f00b1868fe5942171a456df5ab314acef6d76c91772f2",
+      "git_blob": "ed5226da0bc6bd58f28087c2564b55b835bee38e",
+      "repository_path": "third-party/codec-embedded/xorshift/LICENSE",
+      "url": "https://raw.githubusercontent.com/vpxyz/xorshift/5dc8bfcde1b2652bd36841343d02a270d8452d43/LICENSE"
+    },
+    {
+      "scope": "Original BSD-2-Clause notice from the project explicitly named by libopenmpt's TinyFFT sources; current pinned reference, not proof of the historical adaptation revision.",
+      "name": "codec-embedded/tinyfft/LICENSE",
+      "bytes": 1295,
+      "sha256": "ab4745157c29f614a59c4a35841746ba6d4aa3d79ef39728c0bf6461e7e1747d",
+      "git_blob": "8f6a4e689f2217e473b070c27c8f76792be0ff89",
+      "repository_path": "third-party/codec-embedded/tinyfft/LICENSE",
+      "url": "https://raw.githubusercontent.com/ryuhei-mori/tinyfft/1d1be6ca7027324631024fc444b8868d779e37b2/LICENSE"
+    },
+    {
+      "scope": "Original Apache-2.0 notice with Agner Fog attribution from the project referenced by libjxl's CubeRootAndAdd adaptation; not a claim that the current Vector Class header was used to build libjxl.",
+      "name": "codec-embedded/vectorclass/LICENSE",
+      "bytes": 10763,
+      "sha256": "6dac3cfa9f8ab6cd7c4b983bf8522a0f93c069b12f5df4d56d2223b1f760f37e",
+      "git_blob": "fd2deda369fba60174d44a356122e8ba1b1559ab",
+      "repository_path": "third-party/codec-embedded/vectorclass/LICENSE",
+      "url": "https://raw.githubusercontent.com/vectorclass/version2/c6bfcba4313ba70521ebc8fb6b2e03180d58f928/LICENSE"
+    },
     {
       "scope": "Original Unicode License V3 retrieved 2026-09-08 for the reviewed Unicode data references in PCRE2, libxml2, fontconfig, HarfBuzz and libunibreak. Not a source archive member or recipe input; keep release-specific data headers and separate code/test notices. This notice does not change data versions or replace FriBidi's pinned notice.",
       "name": "unicode-data-20260908/LICENSE.txt",
@@ -47,6 +74,204 @@
     }
   ],
   "packages": [
+    {
+      "package": "mingw-w64-x86_64-libjxl",
+      "recipe_sha256": "6a3f9218ac292f8dd3189cfb50b7b8fc667bfad86eee7ed5681131a0f6a95fe5",
+      "files": [
+        {
+          "name": "libjxl-0.12.0.tar.gz",
+          "bytes": 1698757,
+          "sha256": "03e9be69a30be4011f559da75328b6d7cea8ad921fabfbd551ce10bf45cdc992",
+          "kind": "source",
+          "url": "https://github.com/libjxl/libjxl/archive/v0.12.0/libjxl-0.12.0.tar.gz"
+        }
+      ],
+      "archive_prefix": "libjxl-0.12.0/",
+      "archive_entries": 934,
+      "internal_links": 12,
+      "selected_documents": [
+        {
+          "name": "libjxl-0.12.0/LICENSE",
+          "bytes": 1508,
+          "sha256": "8405932022a556380c2d8c272eff154a923feb197233f348ce5f7334fb0a5ede",
+          "package_notice": "mingw64/share/licenses/libjxl/LICENSE"
+        },
+        {
+          "name": "libjxl-0.12.0/AUTHORS",
+          "bytes": 3913,
+          "sha256": "c987f35e1e87c45aeef0c7d204f0003eb4cb9652c6f1aad45f5521e8a22d8bdd"
+        },
+        {
+          "name": "libjxl-0.12.0/.gitmodules",
+          "bytes": 1044,
+          "sha256": "0500b371f5ab49614a3b31e210208fc112bc540d339fe58a90bf0045dc56887b"
+        },
+        {
+          "name": "libjxl-0.12.0/CMakeLists.txt",
+          "bytes": 20514,
+          "sha256": "a01eb54ed6c4191cae69d8f664c5c9a1359dc1b6afdae0d13220fc2068cfac66"
+        },
+        {
+          "name": "libjxl-0.12.0/third_party/CMakeLists.txt",
+          "bytes": 8153,
+          "sha256": "b3683dfd6fffd179348126f8ae6a16693e2f7ff514593068229fd4fa8bd578c3"
+        },
+        {
+          "name": "libjxl-0.12.0/lib/CMakeLists.txt",
+          "bytes": 6275,
+          "sha256": "00038107664e8b2b94a8cba375e165fb109c32a2d7e7ebce7776ab7b76e81e00"
+        },
+        {
+          "name": "libjxl-0.12.0/lib/jxl.cmake",
+          "bytes": 10873,
+          "sha256": "6af7b0cd05b6a29ed2b8adfdb5cfc8148c095cf55e3ed7c43aa780624da1a5b8"
+        },
+        {
+          "name": "libjxl-0.12.0/lib/jxl_cms.cmake",
+          "bytes": 2715,
+          "sha256": "8768791f8bfd5dabd64dc62db2889d50e33f22e45097d686d9e2268815e5addf"
+        },
+        {
+          "name": "libjxl-0.12.0/lib/jxl_threads.cmake",
+          "bytes": 3348,
+          "sha256": "cfdfa74fbb8af5a23f196bed2538557f00ef93c8c76d512cfce7040fd7e01e3e"
+        },
+        {
+          "name": "libjxl-0.12.0/lib/jxl_lists.cmake",
+          "bytes": 13956,
+          "sha256": "706f1e6f3187f740cc0cdf03cd99c8f097ed218f9149d71aa1d1aed3260bab92"
+        },
+        {
+          "name": "libjxl-0.12.0/lib/jxl/xorshift128plus-inl.h",
+          "bytes": 3081,
+          "sha256": "5dc65a30771875d9540a1405fba03485d351f394520973842f7dd8befa772fd2"
+        },
+        {
+          "name": "libjxl-0.12.0/lib/jxl/dec_noise.cc",
+          "bytes": 5772,
+          "sha256": "afdfb04a4c9e2779eb376c05dd47fca348aece680a849da4a1a885b967508a94"
+        },
+        {
+          "name": "libjxl-0.12.0/lib/jxl/base/fast_math-inl.h",
+          "bytes": 8409,
+          "sha256": "4d3ab2d5836b67f8c91b84424a9245b8f9583fc838f3bf73e1c04c2b987b76da"
+        },
+        {
+          "name": "libjxl-0.12.0/lib/jxl/enc_xyb.cc",
+          "bytes": 15742,
+          "sha256": "3d082e2213f61117836ceba01d4d05eb4c9c0be92509b9629272ccf42ae2888a"
+        },
+        {
+          "name": "libjxl-0.12.0/lib/extras/LICENSE.apngdis",
+          "bytes": 1017,
+          "sha256": "4319c422c3bf10168877a83cd9ff848684b9e53dce9a68de0a3f454a825933f6"
+        },
+        {
+          "name": "libjxl-0.12.0/third_party/HEVCSoftware/cfg/LICENSE",
+          "bytes": 1744,
+          "sha256": "44a2c5f2ce34d00a30554a44d3e51377852f84bc183dc1b9fb2b48ece976ebef"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libopenmpt",
+      "recipe_sha256": "eaed3ea185110bb9d39014c8b798830b077407b124ff00ba1a05ced7d1b1bf80",
+      "files": [
+        {
+          "name": "libopenmpt-0.8.9+release.autotools.tar.gz",
+          "bytes": 1765691,
+          "sha256": "d7ce84fd05d686c4bcf66af40eae857afa371442db60eeda3f874bd6cf6fc318",
+          "kind": "source",
+          "url": "https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.8.9+release.autotools.tar.gz"
+        }
+      ],
+      "archive_prefix": "libopenmpt-0.8.9+release.autotools/",
+      "archive_entries": 638,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/LICENSE",
+          "bytes": 1621,
+          "sha256": "2c999e99533c10a347916a72e075bacf10fcedeff793bd90d41d812b46161da2",
+          "package_notice": "mingw64/share/licenses/libopenmpt/LICENSE"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/README.md",
+          "bytes": 2894,
+          "sha256": "65ad30b01be2b95015ae72330342f6c56747f041c8bdad7c0464e28221551973"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/Makefile.am",
+          "bytes": 35910,
+          "sha256": "ee5f804a98870dabab263405062370c325234ec3c08c2aa5fb41d37c8b8bdd89"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/configure.ac",
+          "bytes": 9881,
+          "sha256": "128aa5e7812859dcb3b516768c51e56bf0a4b540af4b3e5b0b0f41a54c91b78f"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/src/mpt/LICENSE.BSL-1.0.txt",
+          "bytes": 1338,
+          "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/src/mpt/base/algorithm.hpp",
+          "bytes": 4028,
+          "sha256": "22546e6985dc3c14bf62752b840d2bc28a67e80c617a41e89071a3e5d9c6ed05"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/common/version.cpp",
+          "bytes": 21612,
+          "sha256": "224916a14136ea265cf80a29232ea8b6424f03129851e54113cd4398913bb6f3"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/libopenmpt/libopenmpt_impl.cpp",
+          "bytes": 90487,
+          "sha256": "a13a87e3ce17ba57a35523e6bd89a41060cbb1d264570d7cf1517492ada395f7"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/soundlib/opal.h",
+          "bytes": 48392,
+          "sha256": "16d55838d26cdcc1780f64f2b016c7a2d12fc43a6ddc632da8d3ec86a3847b53"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/soundlib/OPL.cpp",
+          "bytes": 10386,
+          "sha256": "adc7f986d84d70998ff24c55e3d98e265bea77e3e72580c1c41a3e8594bb1456"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/soundlib/ITCompression.cpp",
+          "bytes": 10884,
+          "sha256": "2d996542c06f8f3c21699754efdb2c44b637e3cb5316c9239ced2a2abff74af5"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/soundlib/ITCompression.h",
+          "bytes": 3533,
+          "sha256": "f53675fcb39a6e481596d43eb4f0b6747f32984fa80f4538a0fab39d76308413"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/soundlib/Load_ams.cpp",
+          "bytes": 30262,
+          "sha256": "184be18562915aefff198bfa9fe2614ff352ef4272a23b6a113b492e3a72539f"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/soundlib/TinyFFT.cpp",
+          "bytes": 3328,
+          "sha256": "36be1a19fedac3d771734d50f40a6280c8d4bcac36fd5b07405e12242da9a722"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/soundlib/TinyFFT.h",
+          "bytes": 1185,
+          "sha256": "e62abfb7be61806c0c7f0c848f1cb9915bf48d28ff2cd597666ae481d9105c60"
+        },
+        {
+          "name": "libopenmpt-0.8.9+release.autotools/soundlib/Paula.cpp",
+          "bytes": 9444,
+          "sha256": "fdff3f3d3db8761b7f9ed179acbff4f020bbf81d2b6ed8650827d404e0e95de1"
+        }
+      ]
+    },
     {
       "package": "mingw-w64-x86_64-openssl",
       "recipe_sha256": "0f29edf384ee561bfe195608f4dbbb4231695af7958e326292034b264bc5faf1",

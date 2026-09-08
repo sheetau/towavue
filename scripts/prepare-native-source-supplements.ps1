@@ -14,8 +14,8 @@ $auditPath = Join-Path $repositoryRoot 'docs/native-runtime-package-audit.json'
 $inventory = Get-Content -LiteralPath $inventoryPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $recipes = Get-Content -LiteralPath $recipePath -Raw -Encoding UTF8 | ConvertFrom-Json
 $audit = Get-Content -LiteralPath $auditPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($inventory.schema_version -ne 1 -or $inventory.packages.Count -ne 40) { throw 'Incomplete source supplement inventory.' }
-if ($inventory.additional_notices.Count -ne 2) { throw 'Incomplete additional notice inventory.' }
+if ($inventory.schema_version -ne 1 -or $inventory.packages.Count -ne 42) { throw 'Incomplete source supplement inventory.' }
+if ($inventory.additional_notices.Count -ne 5) { throw 'Incomplete additional notice inventory.' }
 if (-not $CacheDirectory) { $CacheDirectory = Join-Path $repositoryRoot 'vendor/msys2/source-supplements-20260908' }
 if (-not $RecipeDirectory) { $RecipeDirectory = Join-Path $repositoryRoot 'vendor/msys2/runtime-recipes-20260908' }
 $CacheDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CacheDirectory)

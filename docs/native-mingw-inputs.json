@@ -1,0 +1,880 @@
+{
+  "schema_version": 1,
+  "scope": "Exact current-toolchain and shaderc build-time MinGW CRT/header/winpthreads source and notice materials. Not a whole-runtime link map, universal historical-toolchain closure or distribution approval.",
+  "package_signature_verification": {
+    "observed_on": "2026-09-08",
+    "key": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57",
+    "scope": "Eight original package signatures verified with the existing MSYS2 keyring. Offline collector checks pinned hashes, not signatures. VCS archive hashes reproduce the original recipe checksums; no commit signature claim."
+  },
+  "consumer": {
+    "package": "mingw-w64-x86_64-shaderc",
+    "input": "mingw-w64-x86_64-shaderc-2026.3-1-any.pkg.tar.zst"
+  },
+  "inputs": [
+    {
+      "name": "current/0001-Define-__-de-register_frame_info-in-fake-libgcc_s.patch",
+      "bytes": 1789,
+      "sha256": "2e779bcc60a1422b23e0cfdb5c0f6851f2382592bb4675d08a6bdef78d5e5c10",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-winpthreads/0001-Define-__-de-register_frame_info-in-fake-libgcc_s.patch",
+      "output": "current/0001-Define-__-de-register_frame_info-in-fake-libgcc_s.patch"
+    },
+    {
+      "name": "current/0001-remove-ireference-boolean.patch",
+      "bytes": 7600,
+      "sha256": "cad48616325b5e70afa4e02424021fc8d54e17dcbf86eae3df990d3500080236",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-headers/0001-remove-ireference-boolean.patch",
+      "output": "current/0001-remove-ireference-boolean.patch"
+    },
+    {
+      "name": "current/crt.PKGBUILD",
+      "bytes": 3857,
+      "sha256": "d11c98b56f634b78cc71cd00c692eef3b42b6a80a24bb5ca96d012738ed2894b",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-crt/PKGBUILD",
+      "output": "current/crt.PKGBUILD"
+    },
+    {
+      "name": "current/headers.PKGBUILD",
+      "bytes": 3020,
+      "sha256": "e0800d060a5ab139c44e5cc0bfdcaa4819c330b34d4f435401342074766b1f5c",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-headers/PKGBUILD",
+      "output": "current/headers.PKGBUILD"
+    },
+    {
+      "name": "current/mingw-w64-x86_64-crt-14.0.0.r353.g6df76fa52-4-any.pkg.tar.zst",
+      "bytes": 4007891,
+      "sha256": "2953394b94630c292c40bd27c562a41a2bfd9ec97a0e218f02de0bdf56523c3a",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-crt-14.0.0.r353.g6df76fa52-4-any.pkg.tar.zst"
+    },
+    {
+      "name": "current/mingw-w64-x86_64-crt-14.0.0.r353.g6df76fa52-4-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "d1867c76ce804bcca9a3888c6ab377dd5510b32f6bae47ccdc843cd82999cb8c",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-crt-14.0.0.r353.g6df76fa52-4-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "current/mingw-w64-x86_64-headers-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst",
+      "bytes": 6888923,
+      "sha256": "e748bfe54a0cef6f72ef47bdfaafe10435719124c0962735fc930e5549a0dd0e",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-headers-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst"
+    },
+    {
+      "name": "current/mingw-w64-x86_64-headers-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "fb5d10f2f8981ae1b3c9189a25cd24df7d18248be78407ca694ca5dea4556e60",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-headers-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "current/mingw-w64-x86_64-libwinpthread-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst",
+      "bytes": 30540,
+      "sha256": "e545ccc0416bcc62555da57959598e8559eac6a6cc1e5378bac024844d4ec8eb",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libwinpthread-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst"
+    },
+    {
+      "name": "current/mingw-w64-x86_64-libwinpthread-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "967bd72cd5ac85135cea1d47baabbd4e0b03ccacd78957961e33fa93c70a7b67",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libwinpthread-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "current/mingw-w64-x86_64-winpthreads-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst",
+      "bytes": 44057,
+      "sha256": "a456c2535c2f662eaf894b73c137f46aa23a3c80ff666dec65ca69c5c3253f92",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-winpthreads-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst"
+    },
+    {
+      "name": "current/mingw-w64-x86_64-winpthreads-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "145344fbce7890186c23e180add62a2a0a79b8e9b6e79bf9ce28ab843274038a",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-winpthreads-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "current/mingw-w64.tar",
+      "bytes": 140001280,
+      "sha256": "ec92db70e0e43e3169c0b6debc4b35abfe3bafc984b5bdc518fdab554316f644",
+      "url": "https://github.com/mingw-w64/mingw-w64.git",
+      "output": "current/mingw-w64.tar",
+      "method": "git -c core.autocrlf=false -c core.abbrev=no archive --format=tar 6df76fa527c36e770217ddd763adaaf37bd2887f"
+    },
+    {
+      "name": "current/winpthreads.PKGBUILD",
+      "bytes": 4484,
+      "sha256": "21c15283bebaea1732dda66c046cf75ce3763f6b1ba6feb95969182a138687df",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-winpthreads/PKGBUILD",
+      "output": "current/winpthreads.PKGBUILD"
+    },
+    {
+      "name": "shaderc/0001-Define-__-de-register_frame_info-in-fake-libgcc_s.patch",
+      "bytes": 1789,
+      "sha256": "2e779bcc60a1422b23e0cfdb5c0f6851f2382592bb4675d08a6bdef78d5e5c10",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/b7d5c9bf739c993304b17926dd925a6da69bae69/mingw-w64-winpthreads/0001-Define-__-de-register_frame_info-in-fake-libgcc_s.patch",
+      "output": "shaderc/0001-Define-__-de-register_frame_info-in-fake-libgcc_s.patch"
+    },
+    {
+      "name": "shaderc/0001-remove-ireference-boolean.patch",
+      "bytes": 7600,
+      "sha256": "cad48616325b5e70afa4e02424021fc8d54e17dcbf86eae3df990d3500080236",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/b7d5c9bf739c993304b17926dd925a6da69bae69/mingw-w64-headers/0001-remove-ireference-boolean.patch",
+      "output": "shaderc/0001-remove-ireference-boolean.patch"
+    },
+    {
+      "name": "shaderc/crt.PKGBUILD",
+      "bytes": 3028,
+      "sha256": "1b7b73cea11433bdd1ac1136e28d448f1d17025c0349ada080ef002e714240f2",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/b7d5c9bf739c993304b17926dd925a6da69bae69/mingw-w64-crt/PKGBUILD",
+      "output": "shaderc/crt.PKGBUILD"
+    },
+    {
+      "name": "shaderc/headers.PKGBUILD",
+      "bytes": 3020,
+      "sha256": "3f07b086ebfea7242bdb9eeb20fe39695568a1b4030876d39c489c646abbd957",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/b7d5c9bf739c993304b17926dd925a6da69bae69/mingw-w64-headers/PKGBUILD",
+      "output": "shaderc/headers.PKGBUILD"
+    },
+    {
+      "name": "shaderc/mingw-w64-x86_64-crt-14.0.0.r220.gd999af622-1-any.pkg.tar.zst",
+      "bytes": 4806658,
+      "sha256": "76220be5fc13b416892d0499c8229efe257855ac4821a15df59681728a2e7eb4",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-crt-14.0.0.r220.gd999af622-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "shaderc/mingw-w64-x86_64-crt-14.0.0.r220.gd999af622-1-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "65516f92312ed75e5c0ccded5d41916e95343c3233aa253ba38fa2c2e163d3b9",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-crt-14.0.0.r220.gd999af622-1-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "shaderc/mingw-w64-x86_64-headers-14.0.0.r220.gd999af622-1-any.pkg.tar.zst",
+      "bytes": 6893963,
+      "sha256": "dbd271b3e68aae6afbe660a4bf7781fc6d11b1a418e98e214731f44e6dee8352",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-headers-14.0.0.r220.gd999af622-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "shaderc/mingw-w64-x86_64-headers-14.0.0.r220.gd999af622-1-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "d840d06d592f71a093f162d8e8d0f5468750270df24af1e5c8bd5c24b99b5ce3",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-headers-14.0.0.r220.gd999af622-1-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "shaderc/mingw-w64-x86_64-libwinpthread-14.0.0.r220.gd999af622-1-any.pkg.tar.zst",
+      "bytes": 31477,
+      "sha256": "16bf944184656c6976b3c8b9ca872da49560d8b7cced36a63fe6638c6e63ae45",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libwinpthread-14.0.0.r220.gd999af622-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "shaderc/mingw-w64-x86_64-libwinpthread-14.0.0.r220.gd999af622-1-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "1e31a1926d5dc4e40f4c65e2396cc1f92547076889c227bcc0ef7616b83bd659",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libwinpthread-14.0.0.r220.gd999af622-1-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "shaderc/mingw-w64-x86_64-winpthreads-14.0.0.r220.gd999af622-1-any.pkg.tar.zst",
+      "bytes": 43904,
+      "sha256": "16efb7b09090ab4ef06d4a3199126518ba98b18fc34d13f446613fb6f20872cd",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-winpthreads-14.0.0.r220.gd999af622-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "shaderc/mingw-w64-x86_64-winpthreads-14.0.0.r220.gd999af622-1-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "cb94f9e6029bde980e7d3cb6b6e3dbb2b4a8e5abda6951a44791bd37669b1349",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-winpthreads-14.0.0.r220.gd999af622-1-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "shaderc/mingw-w64.tar",
+      "bytes": 139970560,
+      "sha256": "32732d20d8bbcd3626365f5a2ca7368428fec4ce1fc2fd4e308c0e82a7108088",
+      "url": "https://github.com/mingw-w64/mingw-w64.git",
+      "output": "shaderc/mingw-w64.tar",
+      "method": "git -c core.autocrlf=false -c core.abbrev=no archive --format=tar d999af62247693a8b5b25a98d67316c8bb2dcd37"
+    },
+    {
+      "name": "shaderc/winpthreads.PKGBUILD",
+      "bytes": 4484,
+      "sha256": "0620020e512317a84a0f6ab5cbcdda853bb9d43f6c3703f45b5345bb637aea08",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/b7d5c9bf739c993304b17926dd925a6da69bae69/mingw-w64-winpthreads/PKGBUILD",
+      "output": "shaderc/winpthreads.PKGBUILD"
+    },
+    {
+      "name": "COPYING.LGPLv2.1",
+      "bytes": 26419,
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+      "url": "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt",
+      "output": "COPYING.LGPLv2.1"
+    },
+    {
+      "name": "mingw-w64-x86_64-shaderc-2026.3-1-any.pkg.tar.zst",
+      "bytes": 3763245,
+      "sha256": "5e0f305cf0190f0644e8e66fe0ad37fa274f621fdeb55e7645179665df292593",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-shaderc-2026.3-1-any.pkg.tar.zst"
+    }
+  ],
+  "versions": [
+    {
+      "name": "current",
+      "commit": "6df76fa527c36e770217ddd763adaaf37bd2887f",
+      "recipe_revision": "052099e63e69816e35b05f28c852a5209c4dd1e0",
+      "source": "current/mingw-w64.tar",
+      "recipes": [
+        {
+          "input": "current/crt.PKGBUILD",
+          "patches": []
+        },
+        {
+          "input": "current/headers.PKGBUILD",
+          "patches": [
+            "current/0001-remove-ireference-boolean.patch"
+          ]
+        },
+        {
+          "input": "current/winpthreads.PKGBUILD",
+          "patches": [
+            "current/0001-Define-__-de-register_frame_info-in-fake-libgcc_s.patch"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "shaderc",
+      "commit": "d999af62247693a8b5b25a98d67316c8bb2dcd37",
+      "recipe_revision": "b7d5c9bf739c993304b17926dd925a6da69bae69",
+      "source": "shaderc/mingw-w64.tar",
+      "recipes": [
+        {
+          "input": "shaderc/crt.PKGBUILD",
+          "patches": []
+        },
+        {
+          "input": "shaderc/headers.PKGBUILD",
+          "patches": [
+            "shaderc/0001-remove-ireference-boolean.patch"
+          ]
+        },
+        {
+          "input": "shaderc/winpthreads.PKGBUILD",
+          "patches": [
+            "shaderc/0001-Define-__-de-register_frame_info-in-fake-libgcc_s.patch"
+          ]
+        }
+      ]
+    }
+  ],
+  "archives": [
+    {
+      "input": "current/mingw-w64-x86_64-crt-14.0.0.r353.g6df76fa52-4-any.pkg.tar.zst",
+      "output": "current/crt",
+      "entries": 963,
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7380,
+          "sha256": "b94fb2b245a7cacc4d127de6d064c0602006377b408ec5ba9ae4a29ffaa696ae"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 682,
+          "sha256": "730286bf0509b16ea375c0f513e56a8fc5ac0e7ac1e7cb85ebeaaa88e642854d"
+        },
+        {
+          "name": "mingw64/share/licenses/crt/COPYING",
+          "bytes": 2326,
+          "sha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f"
+        },
+        {
+          "name": "mingw64/share/licenses/crt/COPYING.MinGW-w64-runtime.txt",
+          "bytes": 12155,
+          "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f"
+        },
+        {
+          "name": "mingw64/share/licenses/crt/COPYING.MinGW-w64.txt",
+          "bytes": 5905,
+          "sha256": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1"
+        }
+      ],
+      "version_scope": "current",
+      "package_name": "mingw-w64-x86_64-crt",
+      "package_version": "14.0.0.r353.g6df76fa52-4",
+      "recipe": "current/crt.PKGBUILD"
+    },
+    {
+      "input": "current/mingw-w64-x86_64-headers-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst",
+      "output": "current/headers",
+      "entries": 2060,
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 6818,
+          "sha256": "c0fccf4e537330e5132ec9a66d5342d1387b0c4a409271280427be7e89da4b12"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 696,
+          "sha256": "1aa47faf2543e3c0dfe754502820086f3314435053264c4222e310362dde74e0"
+        },
+        {
+          "name": "mingw64/share/licenses/headers/COPYING",
+          "bytes": 2326,
+          "sha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f"
+        },
+        {
+          "name": "mingw64/share/licenses/headers/COPYING.MinGW-w64-runtime.txt",
+          "bytes": 12155,
+          "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f"
+        },
+        {
+          "name": "mingw64/share/licenses/headers/COPYING.MinGW-w64.txt",
+          "bytes": 5905,
+          "sha256": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1"
+        },
+        {
+          "name": "mingw64/share/licenses/headers/ddk-readme.txt",
+          "bytes": 650,
+          "sha256": "8d8f9924e4ea5466932000bdb9a4104da1d8ca3e4c979bb8207225522ba63826"
+        },
+        {
+          "name": "mingw64/include/intrin.h",
+          "bytes": 94589,
+          "sha256": "a582798e71ec37626f56a3ec5cbe85153f774a29767c88576e7e7d72ee0bbe01"
+        },
+        {
+          "name": "mingw64/include/psdk_inc/intrin-impl.h",
+          "bytes": 84922,
+          "sha256": "80bd5dac3b0742a6acd176269a926ee8be8f816a347bc5adcd2cec3483ffa3d6"
+        },
+        {
+          "name": "mingw64/include/stdio.h",
+          "bytes": 60460,
+          "sha256": "47d9607fc18d0bf71477ac8f5a21c4fbcf4a8dbd2dc73ef7cf39d2ba45020a90"
+        },
+        {
+          "name": "mingw64/include/stdlib.h",
+          "bytes": 27229,
+          "sha256": "63bd8bf35fc9a5ec49fec90709917f896ff8d1291626d0d32a5fc0714dc91978"
+        },
+        {
+          "name": "mingw64/include/math.h",
+          "bytes": 50494,
+          "sha256": "79b7d1865c619e828553a64de72a5dd33ecd95d91b0c29d761b9ba2c6aceaf01"
+        },
+        {
+          "name": "mingw64/include/_mingw.h",
+          "bytes": 20097,
+          "sha256": "3227915ec20706ee7dadc9f165391742a1a39545d9d5dd6df69edd77d9882e4d"
+        }
+      ],
+      "version_scope": "current",
+      "package_name": "mingw-w64-x86_64-headers",
+      "package_version": "14.0.0.r353.g6df76fa52-2",
+      "recipe": "current/headers.PKGBUILD"
+    },
+    {
+      "input": "current/mingw-w64-x86_64-libwinpthread-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst",
+      "output": "current/libwinpthread",
+      "entries": 10,
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7398,
+          "sha256": "bca7909cf839a73a943b08b276319033f3cfc47a65a69ce4b840374b39195e6e"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 766,
+          "sha256": "eb753c7821ad8df13d5a718b7ed1ca657fd0b779131823adeb6ed413b427c8f4"
+        },
+        {
+          "name": "mingw64/share/licenses/libwinpthread/COPYING",
+          "bytes": 2883,
+          "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+        }
+      ],
+      "version_scope": "current",
+      "package_name": "mingw-w64-x86_64-libwinpthread",
+      "package_version": "14.0.0.r353.g6df76fa52-2",
+      "recipe": "current/winpthreads.PKGBUILD"
+    },
+    {
+      "input": "current/mingw-w64-x86_64-winpthreads-14.0.0.r353.g6df76fa52-2-any.pkg.tar.zst",
+      "output": "current/winpthreads",
+      "entries": 21,
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7396,
+          "sha256": "cbbf92c3120c395b800c1025df03c7b0a742ef672576ed1ad0a7c78aefb4e674"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 852,
+          "sha256": "9b81a0e2fab07d7f8f85eb553246ac04bb96b6b7b6ff8a16916323aa62e3c436"
+        },
+        {
+          "name": "mingw64/share/licenses/winpthreads/COPYING",
+          "bytes": 2883,
+          "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+        },
+        {
+          "name": "mingw64/include/pthread.h",
+          "bytes": 36473,
+          "sha256": "d3ccf27efcff918405bc81f6a4e05b244eeea8f5b412c8c91bd18b81dcb51ae4"
+        }
+      ],
+      "version_scope": "current",
+      "package_name": "mingw-w64-x86_64-winpthreads",
+      "package_version": "14.0.0.r353.g6df76fa52-2",
+      "recipe": "current/winpthreads.PKGBUILD"
+    },
+    {
+      "input": "current/mingw-w64.tar",
+      "output": "current/source",
+      "entries": 7072,
+      "documents": [
+        {
+          "name": "AUTHORS",
+          "bytes": 2398,
+          "sha256": "8f308316e7a94b8410f871868bd3948f126526dc1775aeee97a0e365f9a0fd9f"
+        },
+        {
+          "name": "COPYING",
+          "bytes": 2326,
+          "sha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f"
+        },
+        {
+          "name": "COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt",
+          "bytes": 12155,
+          "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f"
+        },
+        {
+          "name": "COPYING.MinGW-w64/COPYING.MinGW-w64.txt",
+          "bytes": 5905,
+          "sha256": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1"
+        },
+        {
+          "name": "DISCLAIMER",
+          "bytes": 2245,
+          "sha256": "039ed6b4f31bb7fb97e733170b58cc435335352e4745734fcfd113877fdaf340"
+        },
+        {
+          "name": "DISCLAIMER.PD",
+          "bytes": 454,
+          "sha256": "87f33608570312a0f2a9745edcb2527275df813b13982e8c3b3f893d88a4141a"
+        },
+        {
+          "name": "mingw-w64-crt/gdtoa/README",
+          "bytes": 16505,
+          "sha256": "0d599661b3c122eec32e4fe6a1b1b90295293ceafd06ac32d27920d78d89a9b8"
+        },
+        {
+          "name": "mingw-w64-crt/gdtoa/README.mingw",
+          "bytes": 795,
+          "sha256": "99ebeaff9da932b4f6ccf341bdd22914da2de805df281cc6cf6b6925448f7d1f"
+        },
+        {
+          "name": "mingw-w64-crt/math/cephes_mconf.h",
+          "bytes": 8501,
+          "sha256": "3b8bebd3f273b0ffc2cc77d5ffab8508f6648c8ee0a244105b31b843c5ee2148"
+        },
+        {
+          "name": "mingw-w64-crt/math/cbrt.c",
+          "bytes": 1959,
+          "sha256": "9838a2299a495c6d9a41942c38ac34f0730458e3f2f41bd6d82f53c49ca269d0"
+        },
+        {
+          "name": "mingw-w64-headers/ddk/readme.txt",
+          "bytes": 650,
+          "sha256": "8d8f9924e4ea5466932000bdb9a4104da1d8ca3e4c979bb8207225522ba63826"
+        },
+        {
+          "name": "mingw-w64-libraries/winpthreads/COPYING",
+          "bytes": 2883,
+          "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+        },
+        {
+          "name": "mingw-w64-libraries/winpthreads/README",
+          "bytes": 763,
+          "sha256": "6b6633f73f422df11ab6571a3565e0075118c3723e5bbeced916a116918f4803"
+        },
+        {
+          "name": "mingw-w64-libraries/winpthreads/include/pthread.h",
+          "bytes": 36473,
+          "sha256": "d3ccf27efcff918405bc81f6a4e05b244eeea8f5b412c8c91bd18b81dcb51ae4"
+        },
+        {
+          "name": "mingw-w64-headers/crt/intrin.h",
+          "bytes": 94589,
+          "sha256": "a582798e71ec37626f56a3ec5cbe85153f774a29767c88576e7e7d72ee0bbe01"
+        },
+        {
+          "name": "mingw-w64-headers/include/psdk_inc/intrin-impl.h",
+          "bytes": 84922,
+          "sha256": "80bd5dac3b0742a6acd176269a926ee8be8f816a347bc5adcd2cec3483ffa3d6"
+        },
+        {
+          "name": "mingw-w64-headers/crt/_mingw.h.in",
+          "bytes": 20132,
+          "sha256": "d02b98c764fc7ec755a7705832114122bed3d80addc0db0d2033389b1a4edd95"
+        },
+        {
+          "name": "mingw-w64-headers/crt/stdio.h",
+          "bytes": 60460,
+          "sha256": "47d9607fc18d0bf71477ac8f5a21c4fbcf4a8dbd2dc73ef7cf39d2ba45020a90"
+        },
+        {
+          "name": "mingw-w64-headers/crt/stdlib.h",
+          "bytes": 27229,
+          "sha256": "63bd8bf35fc9a5ec49fec90709917f896ff8d1291626d0d32a5fc0714dc91978"
+        },
+        {
+          "name": "mingw-w64-headers/crt/math.h",
+          "bytes": 50494,
+          "sha256": "79b7d1865c619e828553a64de72a5dd33ecd95d91b0c29d761b9ba2c6aceaf01"
+        }
+      ],
+      "version_scope": "current"
+    },
+    {
+      "input": "shaderc/mingw-w64-x86_64-crt-14.0.0.r220.gd999af622-1-any.pkg.tar.zst",
+      "output": "shaderc/crt",
+      "entries": 964,
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7483,
+          "sha256": "97b63a3258332bb492de000af7169b899038cadd6de4dad5e70e006a1baacfa8"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 681,
+          "sha256": "4c1ffb28c1f2f120076ca24f71e8c7e7a08824f882b9378272c001bf781c424d"
+        },
+        {
+          "name": "mingw64/share/licenses/crt/COPYING",
+          "bytes": 2326,
+          "sha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f"
+        },
+        {
+          "name": "mingw64/share/licenses/crt/COPYING.MinGW-w64-runtime.txt",
+          "bytes": 12155,
+          "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f"
+        },
+        {
+          "name": "mingw64/share/licenses/crt/COPYING.MinGW-w64.txt",
+          "bytes": 5905,
+          "sha256": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1"
+        }
+      ],
+      "version_scope": "shaderc",
+      "package_name": "mingw-w64-x86_64-crt",
+      "package_version": "14.0.0.r220.gd999af622-1",
+      "recipe": "shaderc/crt.PKGBUILD"
+    },
+    {
+      "input": "shaderc/mingw-w64-x86_64-headers-14.0.0.r220.gd999af622-1-any.pkg.tar.zst",
+      "output": "shaderc/headers",
+      "entries": 2066,
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 6924,
+          "sha256": "b8078cf5ee37371a515a729b99949a45f442e4c9d9ef2e5a2e14dab35139abb5"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 695,
+          "sha256": "c6a7e0606c19f410c14d03e5088030e0e3e641fbee16d33ecce7116e75ae610b"
+        },
+        {
+          "name": "mingw64/share/licenses/headers/COPYING",
+          "bytes": 2326,
+          "sha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f"
+        },
+        {
+          "name": "mingw64/share/licenses/headers/COPYING.MinGW-w64-runtime.txt",
+          "bytes": 12155,
+          "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f"
+        },
+        {
+          "name": "mingw64/share/licenses/headers/COPYING.MinGW-w64.txt",
+          "bytes": 5905,
+          "sha256": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1"
+        },
+        {
+          "name": "mingw64/share/licenses/headers/ddk-readme.txt",
+          "bytes": 650,
+          "sha256": "8d8f9924e4ea5466932000bdb9a4104da1d8ca3e4c979bb8207225522ba63826"
+        },
+        {
+          "name": "mingw64/include/intrin.h",
+          "bytes": 94833,
+          "sha256": "0d37902d81f155b3bf7dcbbe6e4bc0a0495327b7815c3efc9370604424a8f91f"
+        },
+        {
+          "name": "mingw64/include/psdk_inc/intrin-impl.h",
+          "bytes": 84922,
+          "sha256": "80bd5dac3b0742a6acd176269a926ee8be8f816a347bc5adcd2cec3483ffa3d6"
+        },
+        {
+          "name": "mingw64/include/stdio.h",
+          "bytes": 55507,
+          "sha256": "0fe29d230290e2f0efbc5f3fa6e7644effdda000e3671fd93975ccb17f6c9055"
+        },
+        {
+          "name": "mingw64/include/stdlib.h",
+          "bytes": 28596,
+          "sha256": "735f32c04c624b98932ca968e9a0d4704896699fe78f5b389da84aadac2cff28"
+        },
+        {
+          "name": "mingw64/include/math.h",
+          "bytes": 50709,
+          "sha256": "78c02aba46623338ff401fc63bf7f9a0473e3dd7e204b43e0a8104d1b1957e9c"
+        },
+        {
+          "name": "mingw64/include/_mingw.h",
+          "bytes": 19157,
+          "sha256": "349b1432909fb9e04117e698e413e56ff0d510aae4e400fc2f7f4327998ba034"
+        }
+      ],
+      "version_scope": "shaderc",
+      "package_name": "mingw-w64-x86_64-headers",
+      "package_version": "14.0.0.r220.gd999af622-1",
+      "recipe": "shaderc/headers.PKGBUILD"
+    },
+    {
+      "input": "shaderc/mingw-w64-x86_64-libwinpthread-14.0.0.r220.gd999af622-1-any.pkg.tar.zst",
+      "output": "shaderc/libwinpthread",
+      "entries": 10,
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7501,
+          "sha256": "1f2541cf1a549a61f09aecde84d4a538e141a66bf6d1b16146001d89ecfa4568"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 765,
+          "sha256": "051640e65871ac72a217915ea39247a3d0cba568b61deae0a38c0bd442152fab"
+        },
+        {
+          "name": "mingw64/share/licenses/libwinpthread/COPYING",
+          "bytes": 2883,
+          "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+        }
+      ],
+      "version_scope": "shaderc",
+      "package_name": "mingw-w64-x86_64-libwinpthread",
+      "package_version": "14.0.0.r220.gd999af622-1",
+      "recipe": "shaderc/winpthreads.PKGBUILD"
+    },
+    {
+      "input": "shaderc/mingw-w64-x86_64-winpthreads-14.0.0.r220.gd999af622-1-any.pkg.tar.zst",
+      "output": "shaderc/winpthreads",
+      "entries": 21,
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7499,
+          "sha256": "50338811ceadec49c63c3e1b97466f68b9def5d407de68bdfabb06553b5a71fc"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 851,
+          "sha256": "5f5bce51471dbfaa209a938b7990f158f5b88bd42bee2f66b7e08e5729025e66"
+        },
+        {
+          "name": "mingw64/share/licenses/winpthreads/COPYING",
+          "bytes": 2883,
+          "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+        },
+        {
+          "name": "mingw64/include/pthread.h",
+          "bytes": 36473,
+          "sha256": "d3ccf27efcff918405bc81f6a4e05b244eeea8f5b412c8c91bd18b81dcb51ae4"
+        }
+      ],
+      "version_scope": "shaderc",
+      "package_name": "mingw-w64-x86_64-winpthreads",
+      "package_version": "14.0.0.r220.gd999af622-1",
+      "recipe": "shaderc/winpthreads.PKGBUILD"
+    },
+    {
+      "input": "shaderc/mingw-w64.tar",
+      "output": "shaderc/source",
+      "entries": 7051,
+      "documents": [
+        {
+          "name": "AUTHORS",
+          "bytes": 2398,
+          "sha256": "8f308316e7a94b8410f871868bd3948f126526dc1775aeee97a0e365f9a0fd9f"
+        },
+        {
+          "name": "COPYING",
+          "bytes": 2326,
+          "sha256": "99a69660981156c21336fdb5661f89341b013c94e4bf9e1c7467b4745718397f"
+        },
+        {
+          "name": "COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt",
+          "bytes": 12155,
+          "sha256": "1db8da07b436c68833c0673ffee3d9fcb2526047f3820b81661865dfedc79a1f"
+        },
+        {
+          "name": "COPYING.MinGW-w64/COPYING.MinGW-w64.txt",
+          "bytes": 5905,
+          "sha256": "f38e6194bd3bfa1b654f118e5acefe0aead437bbe669eee43957ccc65a7127f1"
+        },
+        {
+          "name": "DISCLAIMER",
+          "bytes": 2245,
+          "sha256": "039ed6b4f31bb7fb97e733170b58cc435335352e4745734fcfd113877fdaf340"
+        },
+        {
+          "name": "DISCLAIMER.PD",
+          "bytes": 454,
+          "sha256": "87f33608570312a0f2a9745edcb2527275df813b13982e8c3b3f893d88a4141a"
+        },
+        {
+          "name": "mingw-w64-crt/gdtoa/README",
+          "bytes": 16505,
+          "sha256": "0d599661b3c122eec32e4fe6a1b1b90295293ceafd06ac32d27920d78d89a9b8"
+        },
+        {
+          "name": "mingw-w64-crt/gdtoa/README.mingw",
+          "bytes": 795,
+          "sha256": "99ebeaff9da932b4f6ccf341bdd22914da2de805df281cc6cf6b6925448f7d1f"
+        },
+        {
+          "name": "mingw-w64-crt/math/cephes_mconf.h",
+          "bytes": 8501,
+          "sha256": "3b8bebd3f273b0ffc2cc77d5ffab8508f6648c8ee0a244105b31b843c5ee2148"
+        },
+        {
+          "name": "mingw-w64-crt/math/cbrt.c",
+          "bytes": 1959,
+          "sha256": "9838a2299a495c6d9a41942c38ac34f0730458e3f2f41bd6d82f53c49ca269d0"
+        },
+        {
+          "name": "mingw-w64-headers/ddk/readme.txt",
+          "bytes": 650,
+          "sha256": "8d8f9924e4ea5466932000bdb9a4104da1d8ca3e4c979bb8207225522ba63826"
+        },
+        {
+          "name": "mingw-w64-libraries/winpthreads/COPYING",
+          "bytes": 2883,
+          "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+        },
+        {
+          "name": "mingw-w64-libraries/winpthreads/README",
+          "bytes": 763,
+          "sha256": "6b6633f73f422df11ab6571a3565e0075118c3723e5bbeced916a116918f4803"
+        },
+        {
+          "name": "mingw-w64-libraries/winpthreads/include/pthread.h",
+          "bytes": 36473,
+          "sha256": "d3ccf27efcff918405bc81f6a4e05b244eeea8f5b412c8c91bd18b81dcb51ae4"
+        },
+        {
+          "name": "mingw-w64-headers/crt/intrin.h",
+          "bytes": 94833,
+          "sha256": "0d37902d81f155b3bf7dcbbe6e4bc0a0495327b7815c3efc9370604424a8f91f"
+        },
+        {
+          "name": "mingw-w64-headers/include/psdk_inc/intrin-impl.h",
+          "bytes": 84922,
+          "sha256": "80bd5dac3b0742a6acd176269a926ee8be8f816a347bc5adcd2cec3483ffa3d6"
+        },
+        {
+          "name": "mingw-w64-headers/crt/_mingw.h.in",
+          "bytes": 19192,
+          "sha256": "9e50bc4f9f30b0b58f063378d57c3fcfaa06ac2f65cfe0974832dc535b14941d"
+        },
+        {
+          "name": "mingw-w64-headers/crt/stdio.h",
+          "bytes": 55507,
+          "sha256": "0fe29d230290e2f0efbc5f3fa6e7644effdda000e3671fd93975ccb17f6c9055"
+        },
+        {
+          "name": "mingw-w64-headers/crt/stdlib.h",
+          "bytes": 28596,
+          "sha256": "735f32c04c624b98932ca968e9a0d4704896699fe78f5b389da84aadac2cff28"
+        },
+        {
+          "name": "mingw-w64-headers/crt/math.h",
+          "bytes": 50709,
+          "sha256": "78c02aba46623338ff401fc63bf7f9a0473e3dd7e204b43e0a8104d1b1957e9c"
+        }
+      ],
+      "version_scope": "shaderc"
+    }
+  ],
+  "matching_headers": [
+    {
+      "package_archive": "current/headers",
+      "source_archive": "current/source",
+      "package_member": "mingw64/include/intrin.h",
+      "source_member": "mingw-w64-headers/crt/intrin.h"
+    },
+    {
+      "package_archive": "current/headers",
+      "source_archive": "current/source",
+      "package_member": "mingw64/include/stdio.h",
+      "source_member": "mingw-w64-headers/crt/stdio.h"
+    },
+    {
+      "package_archive": "current/headers",
+      "source_archive": "current/source",
+      "package_member": "mingw64/include/stdlib.h",
+      "source_member": "mingw-w64-headers/crt/stdlib.h"
+    },
+    {
+      "package_archive": "current/headers",
+      "source_archive": "current/source",
+      "package_member": "mingw64/include/math.h",
+      "source_member": "mingw-w64-headers/crt/math.h"
+    },
+    {
+      "package_archive": "current/headers",
+      "source_archive": "current/source",
+      "package_member": "mingw64/include/psdk_inc/intrin-impl.h",
+      "source_member": "mingw-w64-headers/include/psdk_inc/intrin-impl.h"
+    },
+    {
+      "package_archive": "current/winpthreads",
+      "source_archive": "current/source",
+      "package_member": "mingw64/include/pthread.h",
+      "source_member": "mingw-w64-libraries/winpthreads/include/pthread.h"
+    },
+    {
+      "package_archive": "shaderc/headers",
+      "source_archive": "shaderc/source",
+      "package_member": "mingw64/include/intrin.h",
+      "source_member": "mingw-w64-headers/crt/intrin.h"
+    },
+    {
+      "package_archive": "shaderc/headers",
+      "source_archive": "shaderc/source",
+      "package_member": "mingw64/include/stdio.h",
+      "source_member": "mingw-w64-headers/crt/stdio.h"
+    },
+    {
+      "package_archive": "shaderc/headers",
+      "source_archive": "shaderc/source",
+      "package_member": "mingw64/include/stdlib.h",
+      "source_member": "mingw-w64-headers/crt/stdlib.h"
+    },
+    {
+      "package_archive": "shaderc/headers",
+      "source_archive": "shaderc/source",
+      "package_member": "mingw64/include/math.h",
+      "source_member": "mingw-w64-headers/crt/math.h"
+    },
+    {
+      "package_archive": "shaderc/headers",
+      "source_archive": "shaderc/source",
+      "package_member": "mingw64/include/psdk_inc/intrin-impl.h",
+      "source_member": "mingw-w64-headers/include/psdk_inc/intrin-impl.h"
+    },
+    {
+      "package_archive": "shaderc/winpthreads",
+      "source_archive": "shaderc/source",
+      "package_member": "mingw64/include/pthread.h",
+      "source_member": "mingw-w64-libraries/winpthreads/include/pthread.h"
+    }
+  ]
+}

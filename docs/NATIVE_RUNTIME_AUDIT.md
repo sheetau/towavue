@@ -253,6 +253,23 @@ shadercの元`.BUILDINFO`が記録するGCC／GCC-libs `16.1.0-5`を、別版の
 
 最終kitは17 source／build outputs、29 source文書、13 compiler-package文書、6 GCC-libs文書とREADME／INPUTSの67 files／103717496 bytesで、全hashが試験outputと一致した。別cwd／反復、22入力の欠落・改変pairs、8 mapping不整合、展開後checksum失敗時のcompletion marker保護、入力／既存output不変の試験が通過した。format／全target Clippy／270 testsも通過し、3 live ignoresは未実行。候補94 runtime filesは不変。残る実static／MinGW／CRT／intrinsic範囲と最終notice・source取得案内は別に確認し、この資料生成を配布承認やSetup.exe完成にしない。
 
+### MinGW CRT／header／winpthreadsの原本資料（2026-09-08 21:16 JST）
+
+現native toolchainの`14.0.0.r353.g6df76fa52`（CRTはrelease 4、他は2）と、shadercの元buildが記録する`14.0.0.r220.gd999af622-1`を分離した。CRT／headers／winpthreads／libwinpthreadの元package計8件は既存MSYS2 keyで署名検証済み。各`.BUILDINFO`のrecipe hashは[current固定revision](https://github.com/msys2/MINGW-packages/tree/052099e63e69816e35b05f28c852a5209c4dd1e0)と[shaderc側の固定revision](https://github.com/msys2/MINGW-packages/tree/b7d5c9bf739c993304b17926dd925a6da69bae69)に一致した。currentは既存toolchain一覧、旧版は元shadercのinstalled一覧へ対応させる。旧libwinpthreadを現配布DLLへ差し替えるものではない。
+
+元source commits `6df76fa527c36e770217ddd763adaaf37bd2887f`／`d999af62247693a8b5b25a98d67316c8bb2dcd37`を取得し、process限定の`core.autocrlf=false`／`core.abbrev=no`によるGit tarが両recipeのVCS checksumを再現した。順に140001280 bytes／`ec92db70e0e43e3169c0b6debc4b35abfe3bafc984b5bdc518fdab554316f644`、139970560 bytes／`32732d20d8bbcd3626365f5a2ca7368428fec4ce1fc2fd4e308c0e82a7108088`。7072／7051 entriesは安全な通常file／directoryで、package全8件も同様に確認した。commit署名・patch適用・compiler実行・build再現は主張しない。headerのboolean定義削除とwinpthreadsのbootstrap補助patchは、両版とも同じ元hashで保持する。
+
+[上流の表示方針](https://github.com/mingw-w64/mingw-w64/blob/6df76fa527c36e770217ddd763adaaf37bd2887f/COPYING.MinGW-w64/COPYING.MinGW-w64.txt)はMinGW自身のtool／profiling部分と、アプリへ取り込まれるruntimeの表示を分けている。runtime原文を省略せず保持し、Zope、getopt、gdtoa、math、musl由来、Wine由来の表示を単一のpackage labelで置換しない。原文中のCephes FIXMEも残し、新たな許諾や解決済み判断に書き換えない。WinpthreadsはMITとLockless由来の原文を共に保持する。参照されるLGPL 2.1全文は[GNU原本](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt)で補った。別途資料にあるGCC／Microsoft runtimeや、source-onlyのprofiling等を同一条件へまとめない。
+
+両版それぞれ6 installed headers（intrin.h、intrin-impl.h、stdio.h、stdlib.h、math.h、pthread.h）は元sourceとbyte一致する。intrinsic実装のPublic Domain表示とDISCLAIMER.PDを保持し、生成`_mingw.h`はtemplateと分ける。package表示も全件が保持source原本と一致した。この選択header一覧は全compiler依存や最終link mapではなく、以前のRust等の歴史的入力すべてをこの2版で代用しない。
+
+```powershell
+.\scripts\prepare-native-mingw-materials.ps1 -CacheDirectory 'path/to/mingw-material-cache' -OutputDirectory 'target/distribution/native-mingw-materials-v1'
+.\scripts\test-native-mingw-materials.ps1 -CacheDirectory 'path/to/mingw-material-cache'
+```
+
+[固定manifest](native-mingw-inputs.json)とoffline collectorは30入力、consumer／toolchain／recipe／source commit／header対応を検査する。最終kitは2全source archives、6 recipes、4 patch copies、GNU本文、88選択文書とREADME／INPUTSの103 files／281838430 bytes。compiler／DLL／static library binaryはコピーしない。全hashが試験outputと一致し、別cwd／反復、30欠落・改変pairs、11 mapping不整合、展開後checksum失敗時のcompletion marker保護、入力／既存output保持が通過した。format／全target Clippy／270 testsも通過し、3 live ignoresは未実行。実行exeと候補94 filesは不変で、最終notice・source取得案内、残る個別scope、Setup.exeと対象Windowsのgateは別に維持する。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

@@ -42,6 +42,8 @@ shaderc／SPIRV-Cross／Vulkan Loaderの3 source setsも元recipeのhashへ対�
 
 GCC／GCC-libs 16.1.0-5も両元packageの署名、同一recipe hash、元GNU sourceと14 patch／build inputsを確認し、[専用kit](native-gcc-static-inputs.json)へ保持した。GNU source署名自体は未検証である。10標準headerのinstalled／source byte一致と生成target headerを区別し、GCC例外に加えてHP／SGI／Boost由来表示、libbacktrace／PSTLの原文を保持する。67 files／103717496 bytesの生成・異常入力試験は通過したが、archiveの285／4／199 member一覧は実link選択の証明ではない。残る実static／MinGW／CRT／intrinsicの範囲を狭め、必要なnoticeとsource取得案内をまとめる。GCC資料の取得だけで配布承認や全toolchainの再build義務を導かない。
 
+続いて[MinGW資料](native-mingw-inputs.json)へ、現CRT／headers／winpthreadsとshadercが使った旧版を分離して追加した。元8 packageの署名とrecipe、2 source commitsのGit tarと元VCS checksumが一致し、6 headersずつのinstalled／source一致、package原文表示の一致を確認した。103 files／281838430 bytesのkitと異常入力試験が通過。MinGW自身のtool／profiling表示とruntime表示、GCC／Microsoft runtimeを混同せず、runtime原文を省略しない。これは別の歴史的buildや全link範囲の代用ではない。次は取得済みkitを利用者向けnotice・source取得案内へ結び、残る個別scopeを明記する。新たな全toolchain再buildを一律の条件には加えない。
+
 ## Owner一覧の外にある入力
 
 - 現候補は元85 package DLLのうちZVBIだけが限定build。84 package DLLの71 ownerと、限定ZVBIの由来を区別する。元packageの72 owner一覧は追跡用のbaselineである。

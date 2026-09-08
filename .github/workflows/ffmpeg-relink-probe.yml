@@ -1,0 +1,59 @@
+name: FFmpeg relink probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  relink:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Retrieve and verify fixed source archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe_root=$(mktemp -d "$RUNNER_TEMP/towavue-ffmpeg-XXXXXX")
+          mkdir -p "$probe_root/input/chromaprint" "$probe_root/input/ffmpeg" "$probe_root/work"
+          curl --disable --fail --location --silent --show-error --connect-timeout 20 --max-time 180 \
+            'https://codeload.github.com/acoustid/chromaprint/tar.gz/aed8eba2202dd9d7b3b0a56c77904cc805490d72' \
+            --output "$probe_root/chromaprint.tar.gz"
+          curl --disable --fail --location --silent --show-error --connect-timeout 20 --max-time 180 \
+            'https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/e47273f4d9227152dcbf543cebaf9e2430ddbcc4' \
+            --output "$probe_root/ffmpeg.tar.gz"
+          printf '%s  %s\n' \
+            eba1536d49daa17ae3c56904ea004342c42135dfdaabd7e9c5decbdb473d95ca "$probe_root/chromaprint.tar.gz" \
+            6491dae95e3cf3cdbac02933b55860e782b0c4f0a6bd8f37cef30fded259283c "$probe_root/ffmpeg.tar.gz" \
+            | sha256sum --check --strict
+          # These hash-pinned archives were path/type checked. Omit the sole
+          # header symlink alias, which the library build does not require.
+          tar -xzf "$probe_root/chromaprint.tar.gz" --strip-components=1 \
+            --exclude='chromaprint-aed8eba2202dd9d7b3b0a56c77904cc805490d72/src/include/chromaprint.h' \
+            -C "$probe_root/input/chromaprint"
+          tar -xzf "$probe_root/ffmpeg.tar.gz" --strip-components=1 -C "$probe_root/input/ffmpeg"
+          printf 'PROBE_ROOT=%s\n' "$probe_root" >> "$GITHUB_ENV"
+
+      - name: Relink inside the fixed isolated build image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image='ghcr.io/btbn/ffmpeg-builds/win64-lgpl-shared-9.0@sha256:d1d34e5bb498e76cea19ee671301b7864d7e22fd806746324138c0870f253d01'
+          docker pull "$image"
+          test "$(docker image inspect --format '{{.Id}}' "$image")" = \
+            'sha256:f895b2da6a46618e840f97ae85abf1b946cfb39b692d7642cf89a06fefedbbbc'
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,exec,nosuid,nodev,size=2g \
+            --mount "type=bind,src=$PROBE_ROOT/input,dst=/input,readonly" \
+            --mount "type=bind,src=$PROBE_ROOT/work,dst=/work" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/scripts/probe-ffmpeg-relink.sh,dst=/probe.sh,readonly" \
+            "$image" bash /probe.sh
+
+      # No artifact upload, cache export, image push or release publication.

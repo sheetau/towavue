@@ -26,6 +26,14 @@ KissFFTのCOPYINGだけでなく、その参照先`LICENSES/BSD-3-Clause`も対�
 
 ## 次の実装・検証ゲート
 
+### 隔離CIでの全体再リンク検証
+
+`.github/workflows/ffmpeg-relink-probe.yml`は手動実行専用であり、通常pushごとに重い再buildを始めない。既存の固定image `d1d34e5b...`をdigest指定で取得し、config digestも`f895b2da...`へ一致することを確認する。ChromaprintとFFmpegのcodeload sourceは固定commitとSHA256で検証する。Chromaprint archiveは1582333 bytes、SHA256 `eba1536d49daa17ae3c56904ea004342c42135dfdaabd7e9c5decbdb473d95ca`で、430通常fileが確認済みcacheと一致した。両archiveのpath/typeを検査済みで、唯一のheader symlink aliasは展開しない。
+
+`scripts/probe-ffmpeg-relink.sh`はimage内でChromaprintをGNU targetの静的libraryとして再buildし、新prefixのpkg-configを優先してFFmpeg全体を再リンクする。imageの既存feature flagsを保持し、link traceを有効にして、新libraryの選択とFFTW link入力の不在を検査する。7 DLLとffmpeg/ffprobeの生成を確認するが、Windowsでの実行や性能検証は別gateである。
+
+コンテナは非root、networkなし、read-only root、capabilityなし、権限昇格なし。source/scriptはread-only、一時workとtmpfsだけを書込み可能にする。Docker socketやGitHub tokenを渡さず、artifact/cache/image/releaseを公開するstepはない。既存の他libraryを再利用するこのprobeだけでは、有効依存graph・対応source/notice全体の確定を代替しない。開発機のWSL導入や本体DLLの差し替えも行わない。
+
 1. 固定FFmpeg sourceと同じ機能を保つcontrolled build環境を用意する。上記patchを適用したChromaprintとFFmpeg全体を再linkし、compiler・全有効依存・source・patch・configure・link設定を取得時点で固定する。rav1eの`cargo update cc`のような非固定更新を新buildへ持ち込まない。既存のLinux build imageの実行、WSL/Dockerの導入やOS変更はまだ行っていない。
 2. 新binaryのfeature一覧を旧binaryと比較する。Chromaprintを残し、FFTWをlinkしていないことをbackend設定、実link入力、library symbolとbinaryの検査で確認する。文字列がないだけでは不在証明としない。fingerprintの比較と速度計測も行う。
 3. 新binaryに対応する全source/notice/runtime資料を作る。原本recipe archiveは`git -c core.autocrlf=false archive`で生成した`recipe-8267213e26c1031621e6e1210fe3aa4867214f6a-lf.tar`を使い、全265 entryのGit blob一致を再確認する。旧archiveはCRLF変換されていたため対応原本として使わない。

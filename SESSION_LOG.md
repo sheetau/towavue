@@ -2,6 +2,13 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-08 10:20 JST - prepare an isolated whole-FFmpeg relink probe
+
+- Trigger/intent: previous turn is progress; clean pushed 34af315 confirmed. Advance from the standalone backend proof to the full GNU FFmpeg link without installing OS components or publishing unapproved binaries.
+- Inputs: retrieve the fixed Chromaprint codeload archive, 1582333 bytes, SHA256 eba1536d49daa17ae3c56904ea004342c42135dfdaabd7e9c5decbdb473d95ca; all 430 regular files match the verified source cache. Inspect paths/types for it and the fixed FFmpeg archive; omit Chromaprint's sole header symlink alias when extracting. Reuse the exact d1d34e5b... image and require its f895b2da... config identity.
+- Implementation: add a manual-only Ubuntu CI workflow and a container script. Rebuild static GNU Chromaprint with bundled KissFFT, prioritize its separate prefix, retain the image's FFmpeg feature arguments, and trace actual link inputs. Require the new library, reject FFTW link inputs/markers, and check all seven DLLs plus both helpers. Docker has no network, capabilities, privilege escalation or writable root; only fresh work/tmpfs are writable, and no token/socket is mounted. No artifact/cache/image/release export. Existing dependency binaries are still reused, so success will not by itself prove their complete source/notice graph or Windows runtime/performance.
+- Verification/status: Bash syntax, workflow YAML/manual/read-only/no-publication assertions, source hashes/content comparison, diff whitespace, format, Clippy and all 268 tests pass; three live ignores remain unexecuted. No Linux build is claimed locally. Existing normal CI 34175731040 is confirmed live in the runtime notice step; keep its handle. A non-blocking WSL2 permission question was sent for eventual local rebuilding/testing; no answer is assumed and no OS change occurred. Prepare the probe checkpoint, then dispatch and follow its actual run. h1_active; preserve full rebuild, runtime/source/notice, installer and real-environment/owner-acceptance gates.
+
 ## 2026-09-08 10:08 JST - reject the FFTW-linked distribution candidate and verify a backend replacement
 
 - Trigger/intent: previous turn is progress; clean pushed e6a7129 confirmed. Continue the distribution gate without treating FFmpeg's LGPL self-report as proof about transitive libraries.

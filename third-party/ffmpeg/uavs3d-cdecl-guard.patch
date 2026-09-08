@@ -1,0 +1,7 @@
+--- a/source/decoder/uavs3d.h
++++ b/source/decoder/uavs3d.h
+@@ -51,2 +51,4 @@
+ #define AVS3D_API
++#ifndef __cdecl
+ #define __cdecl
++#endif

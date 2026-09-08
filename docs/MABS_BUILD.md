@@ -160,6 +160,29 @@ mbedTLS HEADは`ece41aa84d7879d7e55c59e955a5884b541f7f3b`、同梱submoduleはfr
 
 全81 FFmpeg optionの再configureはlibrist検査を通過し、次の`uavs3d >= 1.1.41 not found using pkg-config`でexit 1となった。残るuavs3d/vvencのnative buildと全体統合を続ける。アプリ本体へネットワーク機能を追加したものではなく、配布・launch完了を意味しない。
 
+## uavs3d / VVenCと全configureの通過
+
+2026-09-08、固定uavs3d `0e20d2c291853f196c68922a264bcd8471d75b68`とVVenC `0f2e874451d6b194615e5dfefdc96796a7da00f4`をnative buildした。[入力一覧](ffmpeg-build-inputs.json)のsize/hashを照合し、uavs3dの180 entry、VVenCの880 entryが通常file/directoryであることを確認して展開した。全112／790 tracked blobをraw比較し、uavs3dの下記header以外は原本と一致した。
+
+uavs3dの初回configureはPowerShellで未引用の`3.5`が分割されて失敗した。また上流`version.sh`は出力先引数を受け取ってもGitの作業場所を変えず、呼出元towavueのcommitから誤った版情報を生成した。version付きCMake引数を文字列で渡し、configure/build/installをuavs3d source cwdから行うことで、正しい`1.2.89`と固定SHAへ復帰した。生成された`version.h`と`uavs3d.pc`はsource内のbuild出力であり、同じsourceから同時buildしない。
+
+公開headerの`__cdecl`再定義により、C callerの`-Werror`検証が失敗した。[uavs3d-cdecl-guard.patch](../third-party/ffmpeg/uavs3d-cdecl-guard.patch)は既存定義がある場合の再定義だけを防ぐ。`git apply --unidiff-zero --check`から実適用し、隔離fixtureで結果SHA256 `c4193da1a00d43cb41eb9e7f61c5782545e8f76ece72477edd52310f30cb6192`を検証した。修正後のnative buildと厳格なC caller compile/linkが成功した。
+
+```powershell
+.\scripts\build-video-codec-native.ps1 -Codec uavs3d -MsysRoot 'path/to/msys64' `
+    -SourceDirectory 'path/to/patched/uavs3d' -BuildDirectory 'path/to/fresh/avs3-build'
+.\scripts\build-video-codec-native.ps1 -Codec vvenc -MsysRoot 'path/to/msys64' `
+    -SourceDirectory 'path/to/verified/vvenc' -BuildDirectory 'path/to/fresh/vvc-build'
+```
+
+scriptは固定HEAD・許可した差分だけを検証し、取得やpatch適用をしない。uavs3dは元recipeと同じ10-bit/static、VVenCはRelease/static/library-only、SIMD有効、LTO無効、元と同じC++ runtime link指定を維持する。VVenCの初回手動buildは上流既定のsource内出力とccacheを使用したが、scriptでは出力を新規build root内に閉じ、ccacheを無効にした。Gitのautocrlf/filemodeもprocess内だけで設定して偽のdirty判定を避け、環境を復元する。CMake互換性警告とVVenCのlibrary-only時の上流test無効警告は残る。
+
+両codecとも2つの新規outputへbuildし、任意cwd、環境復元、既存output拒否、選択prefixとFFmpeg版条件を確認した。uavs3dはdecoderの生成・破棄と10-bit build表示までで、AVS3 bitstreamは未decodeである。VVenC `1.15.0-dev`は公開C APIから128×128の1 frameをencodeし、flush完了・1 access unit／291 bytesを確認した。これは独立decoderによるVVC復号・画質・速度の検証ではない。uavs3d試験exeはWindows DLLのみ、VVenC試験exeは加えて`libstdc++-6.dll`と`libwinpthread-1.dll`をimportする。原本COPYING／LICENSE.txt／AUTHORS.mdと対応sourceは最終配布材料へ引き継ぐ。
+
+全81 FFmpeg optionによるconfigureがexit 0で完了し、生成config.hでも全61 enableに対応するCONFIG/HAVE macroが1であることを確認した。configureはLGPLv3-or-laterと表示するが、これは最終link入力や配布条件の承認ではない。**`spirv-headers not found, swscale SPIR-V backend unavailable`警告が残る**ため、auto-detected機能まで同等とは扱わない。
+
+初回の手動codec prefixを使った全FFmpegコンパイルもexit 0で完了し、7 versioned DLL／import libraryとffmpeg・ffprobe・ffplayを生成した。build内DLL directoryと専用MSYS2 binをprocess PATHへ指定すると、ffmpeg／ffprobeが9.0.1として起動し、合成3 framesを処理できた。さらにFFmpegからlibvvencで128×128／10-bitの1 frameをencodeし、ffprobeの復号frame数1・VVC／yuv420p10leと、FFmpeg側のVVC decoderによる出力完了を確認した。codec単体のC試験より一段進んだ統合証拠だが、アプリのMSVCリンク・隔離runtime・実再生／性能・配布材料の検証はまだである。現行アプリのFFmpegは置き換えていない。SPIR-V入力の補完、修正済みcodec prefixへの統一、実binaryの機能比較と依存closureの確定を続ける。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。

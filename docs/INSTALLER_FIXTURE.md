@@ -12,6 +12,8 @@ Obtain the portable `nsis-3.12.zip` from the fixed URL in [nsis-inputs.json](nsi
 
 The script checks bytes/SHA256 before extraction or execution, checks archive paths and version, compiles with `/NOCONFIG /WX`, and tests only fresh `target/tmp/setup-fixture-<id>` directories. It does not download or install the compiler. CI downloads the same pinned archive in a separate Windows Server 2022 fixture job; that is not Windows 10/11 compatibility evidence. No generated executable or toolchain goes into Git.
 
+Use `curl.exe --fail --location` for this SourceForge URL. The initial CI download failed the identity check; a local `Invoke-WebRequest` reproduction saved an HTML page instead of the ZIP. Keep the original hash check, never accept that response or update the pin to match it. CI records actual download size/hash before verification.
+
 The official project lists 3.12 as the released version. The existing local Electron-builder cache reports 3.04; it is not used. The archive digest is locally measured, not an independently authenticated publisher checksum or a reproducible-compiler claim. The generated executable uses Unicode and zlib with the standard System plug-in; the original package `COPYING` is retained in its documents. Other compression choices and third-party plug-ins are not introduced. [Official download](https://nsis.sourceforge.io/Download), [compiler options](https://nsis.sourceforge.io/Docs/Chapter3.html), [license reference](https://nsis.sourceforge.io/Docs/AppendixI.html).
 
 ## Implemented boundary

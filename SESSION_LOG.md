@@ -2,6 +2,12 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-09 01:56 JST - correct the CI NSIS archive download
+
+- Trigger/intent: previous goal turn is progress. Start clean at pushed 6761a37; inspect the same live CI 34253650327. Fixture job 102153902323 is terminal/failure while Rust remains active. Read the completed job's log directly: archive identity rejection before extraction, not a lifecycle test failure.
+- Evidence/change: reproduce Invoke-WebRequest locally: 142268-byte HTML (magic 3c21646f, SHA bf39df0d...), not the pinned ZIP. curl --fail --location retrieves the original 2362938-byte/56581f90... archive from the same URL. Use that download method in CI and log actual size/hash; do not weaken verification or accept the HTML. Update installer guide.
+- Verification/status: downloaded archive passes the complete fixture suite at target/tmp/setup-fixture-5394e00b23e2499cba37b2b3923d920d; source and user sentinels remain. M0 format/full-target Clippy/273 tests pass again, three live ignores unexecuted. No Rust, NSIS payload or license-pin change, no application installation. Prepare a narrow checked CI checkpoint, h1_active; follow its new run without restarting the older live job, then continue final app/source/material binding and actual installer integration.
+
 ## 2026-09-09 01:51 JST - build an assisted installer lifecycle fixture
 
 - Trigger/intent: previous goal turn is progress. Start clean at pushed 06588b6; follow CI 34251121391 from in_progress to completed/success. Advance Setup safety without packaging/adopting the app runtime or installing an application on the owner's host.

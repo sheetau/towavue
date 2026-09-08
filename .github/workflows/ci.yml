@@ -23,7 +23,9 @@ jobs:
           $inputs = Get-Content docs/nsis-inputs.json -Raw | ConvertFrom-Json
           New-Item -ItemType Directory -Path target/tmp/installer-tools | Out-Null
           $archive = Join-Path $PWD 'target/tmp/installer-tools/nsis-3.12.zip'
-          Invoke-WebRequest -Uri $inputs.archive.url -OutFile $archive -TimeoutSec 45
+          curl.exe --fail --location --max-time 45 --output $archive $inputs.archive.url
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS download failed.' }
+          [pscustomobject]@{bytes=(Get-Item -LiteralPath $archive).Length;sha256=(Get-FileHash -LiteralPath $archive).Hash} | ConvertTo-Json -Compress
           .\scripts\test-setup-fixture.ps1 -NsisArchive $archive
 
   rust:

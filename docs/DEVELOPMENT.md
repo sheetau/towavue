@@ -30,9 +30,16 @@
 
 全保存windowをcleanな状態で正常終了した。元PNG／chirp／動画のhashはそれぞれ`15B8DA68F777D7CAAAB816EDE7DC7364CC979CC9BFFAAB4E93D39E24B624D49D`／`4BAF8F02E0F8028C6C87349FB385F0036D27FB4C594C302E797B22198AFA1AA6`／`24FD0CE978C4BD51877A49D2FBE301C39B70E6FB2E19071A6A092651A8D3A4F6`で不変。生成物・identity・stderr・Seek sampleは専用`release-eval-20260908`以下、操作helperはignored `target/tmp`に保持した。clipboard・OS設定・旧開発DLL／releaseは変更していない。保存後のformat／Clippy／268 testsも通過し、既存3 live ignoresは未実行。CI 34190302408は成功した。
 
-#### 継続中の30分試験
+#### 30分試験の完走確認（2026-09-08 15:08 JST）
 
-上記の全体check完了後、同じreleaseで4K60の30分試験を開始した。PID 21784、開始UTC `2026-09-08T05:37:37.6633752Z`、sourceは既存`m3-4k60-30m.mp4`（SHA256 `FEE0E738E7149225A7B4DEA02CDA75AAE6873288CBE5A1077B101829ADFD0C10`）。exe／source／DLLを起動前にhash確認し、実module pathも照合した。960×576、1倍、アプリ内mute、UIA tree取得なし。監視session 11573は同じPID／開始時刻を30秒ごとに確認している。**この記録時点ではPlayingであり、完走・drop・drift・memoryの合否は未判定。** 期限や観測のyieldだけでprocessを再起動せず、同じrunのEOFを確認する。
+上記の全体check完了後、同じreleaseで4K60の30分試験を開始した。PID 21784、開始UTC `2026-09-08T05:37:37.6633752Z`、sourceは既存`m3-4k60-30m.mp4`（SHA256 `FEE0E738E7149225A7B4DEA02CDA75AAE6873288CBE5A1077B101829ADFD0C10`）。exe／source／DLLを起動前にhash確認し、実module pathも照合した。960×576、1倍、アプリ内mute、UIA tree取得なし。監視session 11573は同じPID／開始時刻を30秒ごとに確認し、再起動・Seek・pauseなしで1801.635秒のEndedを観測して正常終了した。アプリも後述の手順で通常終了した。
+
+- adapter `00000000:000146b5`、D3D11VA、hardware／presentedとも107,771 frames、CPU transfer 0、drop 0。A/V drift p95 4.808ms・最大30.042msで30分基準内。
+- 再生終了後のFFprobeは3840×2160 H.264、stream duration 1800.005729秒／107,771 framesを確認。先頭600秒を再decodeして35,925 framesを数えた。全30分のdropが0なので、先頭10分も0%で0.1%未満の基準内。probe session 84751は成功した。
+- 全61標本、5分以降のPlayingは50標本（300.926～1771.616秒）。private memoryは区間最初224.91／最後226.64 MiB、範囲222.63～238.92 MiB。最大標本1711.576秒の238.92 MiBは次標本で226.60 MiBへ戻った。process lifetimeのOS PeakPagedMemorySize64は287.64 MiB。旧runの15分前後の約320 MiB増加は今回の標本／OS peakでは再現しなかったが、原因解明、GPU memoryやリーク不在の証明ではない。
+- EOF後、UIA・終了操作より前の5.053秒idleでCPU時間増分0秒（計測分解能以下）、private memory 180.27 MiB。最初の終了helperはforeground検査でUndo送信前に停止した。同じPID／開始時刻とEndedを再確認し、既存のforeground確認付きhelperからUndoを一度だけ送り、cleanを待ってCloseMainWindowで通常終了した。強制終了・保存・source変更なし。
+- 終了後にexe／source／6 DLLの全hash不変を照合した。再生中の並行local build・重いtest・大きなdownload・別UI trialはなく、小さなrecipe／文書／設定fileの監査だけを行った。対応する未解決の配布条件は[NATIVE_RUNTIME_AUDIT.md](NATIVE_RUNTIME_AUDIT.md)を参照し、性能合格を配布承認へ読み替えない。
+- 通常終了とprobeの完了後に、同じnative prefix／別Rust targetでformat、全target Clippy、全268 testsを再実行して成功した（session 44068）。既存3 live ignoresは未実行で、hardware exportの条件付きtestをhardware成功の根拠にはしない。試験済みrelease exeは再buildしておらず、hashも不変。
 
 短時間の代表flowとSeek gateを、長時間・実device／mixed-DPI／物理入力・全screen reader、対象OS、配布条件、Setup.exe、ownerの外観受入の完了へ拡張しない。H1全体は継続中である。
 

@@ -60,4 +60,22 @@ libvpxの第三者文書・PATENTS、Theoraの技術声明、opencore-amrの追�
 
 次は選択文書では拾い切れない個別header・同梱source/dataの範囲と、残るpackageのsource/patchを照合する。特にgettext、lcms2、XZ、ZVBIなどの混合license表示、FreeTypeの選択条件、GCC runtime exceptionもpackage labelだけで処理しない。
 
+### 混合licenseの追加読み取り（2026-09-08、未完了）
+
+再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。
+
+**Little CMS 2.19.1:** 対応recipe `c13ff2ab5c718d63da878bb180c2cc0b5ce40dec`は`-Ddefault_library=both -Dfastfloat=true`を指定する。tagのcommit `21c582a594fe5279f90c0b93437c398f93bf62b0`では、[本体library](https://github.com/mm2/Little-CMS/blob/21c582a594fe5279f90c0b93437c398f93bf62b0/src/meson.build)と[fast_float library](https://github.com/mm2/Little-CMS/blob/21c582a594fe5279f90c0b93437c398f93bf62b0/plugins/fast_float/src/meson.build)は別targetだが、後者をpkg-configの追加libraryへ入れる。本機の`lcms2.pc`（SHA256 `37a9c51d841218ad064be5cc1eb307120229ddc7c10d7411a702bdecd3aa6011`）も`-llcms2 -llcms2_fast_float`を含み、再生成FFmpegの`EXTRALIBS-avfilter`／`EXTRALIBS-avcodec`にもその引数がある。監査済みPE graphにfast_float DLLがないことだけで、静的コードも不在と断定しない。実際の選択archive／symbolとの照合を次に行う。GPLプラグインを本体MITと同一扱いせず、逆に未使用link引数だけで組込み済みとも扱わない。
+
+**ZVBI 0.2.45:** annotated tag `45138a87f86b683f9c3611793752ac08795d836f`はcommit `d3a5ee9f2b047bf16cd1ee5ccf6ec05ee75409d0`を指す。元recipeのVCS checksumは、MSYS2 makepkg実装では`git -c core.abbrev=no archive --format tar <tag>`のSHA256であり、任意のcodeload圧縮archiveのhashではない。まだそのVCS archiveの一致を確認した扱いにはしない。
+
+上流[NEWSの0.2.28記録](https://github.com/zapping-vbi/zvbi/blob/d3a5ee9f2b047bf16cd1ee5ccf6ec05ee75409d0/NEWS)はlibraryのLGPL v2以降への移行を説明する。一方、現在の[COPYING.md](https://github.com/zapping-vbi/zvbi/blob/d3a5ee9f2b047bf16cd1ee5ccf6ec05ee75409d0/COPYING.md)と`src/pdc.c`／`src/packet-830.c`のheaderは当該fileをGPL v2とし、[src/Makefile.am](https://github.com/zapping-vbi/zvbi/blob/d3a5ee9f2b047bf16cd1ee5ccf6ec05ee75409d0/src/Makefile.am)は両方を`libzvbi_la_SOURCES`へ含める。package内のCOPYINGも同じ個別条件を記す。唯一のMSYS2 patchは`-no-undefined`を追加するだけで、この相違を解消しない。GPLの`exp-vtx.c`はsourceに残るが本文が`#if 0`で無効化されており、Makefileへの列挙だけで同じ扱いにしない。FFmpegのconfigureはZVBIが0.2.28以降かを調べるが、個別licenseを検証するものではない。したがって、この不一致は配布判断前の未解決事項として保持し、旧NEWSだけで個別表記を上書きしたり、機能をstubへ置き換えたりしない。次に実DLLの対応symbolとsourceの履歴／適用範囲を確認する。
+
+現repositoryの履歴は2022年のimportで始まるため、READMEが案内する公式`vbi-archive`も確認した。両C fileは[2009-02-16の追加commit](https://github.com/zapping-vbi/vbi-archive/commit/5346888e899da55f73eba73097738021d8cbf8cf)からGPL表記を持ち、直後の[Makefile変更](https://github.com/zapping-vbi/vbi-archive/commit/64392045f9f8ac736a1f365217ec776c457f1df6)でlibrary対象へ追加されている。2008年のLGPL化告知より後の追加であり、告知だけでこれらのfileも許諾されたと推測しない。FFmpegの直接呼出一覧にPDC APIがないことも、配布するZVBI DLL自体からその実装が消える根拠にはならない。
+
+再生終了後、実際のstaged `libzvbi-0.dll`（450046 bytes、SHA256 `fa1b722aa22739a9b147f7c918a981c51fc48ebd1269b192e412b6f346f816cc`）が元package監査と一致することを再確認した。PE exportには`vbi_decode_teletext_8301_cni`／`local_time`、`vbi_decode_teletext_8302_cni`／`pdc`、`vbi_pil_is_valid_date`／`vbi_pil_to_time`等があり、forwarderではなくDLL内のExport RVAを持つ。例えば`vbi_pil_is_valid_date`はRVA `0x29620`、`vbi_pil_to_time`は`0x29ab0`。個別GPL表記の対象を単なる同梱toolと分類してこの候補をLGPL構成として承認することはできない。対応sourceのchecksum結合を完成させ、許諾の明確化または機能を保つ代替構成を検討する。外部への問い合わせ、本体license変更、PDCのstub化やcodec無効化はまだ行っていない。
+
+Little CMSについては、同じ環境のfast_float静的archiveが定義する14個の公開text symbolを取得し、再生成buildのstrip前avcodec／avfilterの全symbol table（65,335／27,148 records）と照合して一致0件、fast_float import markerも0件だった。これは未使用link引数という解釈と整合するが、全推移DLLの静的入力監査やlink traceの代わりにはしない。
+
+**XZ／FreeType／GCC runtime:** XZ 5.8.3の[固定COPYING](https://github.com/tukaani-project/xz/blob/4b73f2ec19a99ef465282fbce633e8deb33691b3/COPYING)はliblzmaの0BSDと、CLI用getoptのLGPL／補助scriptのGPLを区別する。FreeType 2.14.3の[LICENSE.TXT](https://github.com/freetype/freetype/blob/0a0221a1347e2f1e07c395263540026e9a0aa7c7/LICENSE.TXT)はFTL／GPLの選択に加え、BDF／PCF／hash、gzip、HarfBuzz由来fileの別条件を列挙する。FTL側を選ぶ場合も同本文と製品文書のクレジットが必要であり、FTLだけのcopyで全sourceの表示が揃うとは扱わない。GCC 16.2.0-3の元recipeとpackage内READMEはlibgcc／libstdc++／libgomp／libatomicのGCC Runtime Library ExceptionとlibquadmathのLGPLを区別する。現graphで使う3 DLLは前者だが、[例外本文](https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html)の適用対象／Eligible Compilation Process、対応source、その他の静的・header入力は別に確認する。package全体のGPL labelをそのまま本体アプリのlicenseへ移さない。
+
 この一覧は静的にFFmpegへ組み込んだsource dependencies、header-only code、埋め込みdata、動的LoadLibrary、driverやplugin resourceの完全な一覧ではない。recipe本体が揃っても、参照先archive・patchやMSYS2 build infrastructureは自動的には揃わない。全体build再現、release media/performance、Setup.exeと隔離Windowsでの導入／更新／削除、physical environmentとowner承認のgateを維持する。

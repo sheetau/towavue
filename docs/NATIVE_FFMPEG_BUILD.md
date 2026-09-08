@@ -60,4 +60,6 @@ testで当初作った誤prefix fixtureは、pkgconfの自動補正によって�
 
 この手順は既存の正しい構成を新規build／stagingで再現するものであり、全dependencyをsourceから再buildしたり、異なるpath／日時のPEがbit単位で同じと保証したりするものではない。installed packageの名前／版チェックも、その全header／static archiveのbyte検証や署名検証の代わりにはしない。
 
-各DLL／静的・header-only・埋め込みdataの対応材料、MSVC本体とのrelease build／媒体・長時間・性能確認、helperの隣接探索とSetup.exe、隔離した対象Windowsでの導入／更新／削除を引き続き必要とする。列挙されるhardware APIの名前は、実hardware成功を示さない。
+続く通常releaseの代表保存／再open、4条件各100回のSeek、30分4K60再生は[DEVELOPMENT.md](DEVELOPMENT.md)の条件で通過した。ただし[追加source／実DLL監査](NATIVE_RUNTIME_AUDIT.md)でZVBIの個別GPL表記に対応する関数が確認されたため、この候補をLGPL配布構成として承認しない。性能合格やCOMPLETE markerは、この条件を解決するものではない。
+
+各DLL／静的・header-only・埋め込みdataの対応材料と許諾範囲、最終採用binaryの媒体・長時間・性能確認、helperの隣接探索とSetup.exe、隔離した対象Windowsでの導入／更新／削除を引き続き必要とする。列挙されるhardware APIの名前は、実hardware成功を示さない。

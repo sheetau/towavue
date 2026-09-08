@@ -4,7 +4,7 @@
 
 2026-09-07、H1の代表保存・再open監査で、cleanな音声folder tabの再利用時に保存済み編集が別sourceへ残る問題を修正した。同sourceとdirty編集の保護を回帰試験で保持し、通常releaseでPNGの画素一致、chirpのPCM一致、動画の4秒/120 framesと再openを確認した。詳細はDEVELOPMENTの14:28記録を参照。H1とlaunch全体は未完了である。
 
-2026-09-08、再生成native FFmpegと別targetの通常releaseで、4条件各100回のSeek、画像／音声／動画の保存と再openを再確認した。Seek p95は31.764～101.288msで300ms以内、PNG画素・chirp PCMは参照と一致した。全268 testsと必須check後、同じbinaryの30分4K60試験を開始したが、まだ完走・drop／drift／memoryは未判定である。同じprocessを追跡し、旧binaryの長時間結果は流用しない。配布材料／Setup.exe、実環境とowner受入を含むH1全体は継続する。
+2026-09-08、再生成native FFmpegと別targetの通常releaseで、4条件各100回のSeek、画像／音声／動画の保存と再openを再確認した。Seek p95は31.764～101.288msで300ms以内、PNG画素・chirp PCMは参照と一致した。全268 testsと必須check後、同じbinaryの30分4K60試験も完走した。107,771表示、drop／CPU transfer 0、drift p95 4.808ms・最大30.042msで基準内。5分以降のprivateは222.63～238.92 MiBで、旧15分付近の大きな増加は今回再現しなかったが、原因やリーク不在は未証明。通常終了とexe／source／DLL不変を確認した。配布監査ではZVBIの個別GPL表記と実DLLの対応関数を確認しており、性能合格だけで同梱を承認しない。配布材料／Setup.exe、実環境とowner受入を含むH1全体は継続する。
 
 ## M0 — Foundation（完了）
 

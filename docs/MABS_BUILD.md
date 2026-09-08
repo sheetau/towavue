@@ -122,6 +122,23 @@ Chromaprint packageのstatic archiveには`fft_lib_kissfft.cpp.obj`、`kiss_fft.
 
 このpackageは配布候補として採用せず、環境内の診断入力として記録する。feature対応を、既存recipeの固定aribb24 source `5e9be272f96e00f15a2f3c5f8ba7e124862aec38`へ変更した。元cacheは109104 bytes、SHA256 `a39f0c4cd4b28cbaecaa8a65d93667525875ffedffba7a6f9f30eeebd542ceda`。次にその版を別prefixへbuildし、pkg-configの実選択を確認してconfigureを再試行する。`--enable-gpl`の追加や`--disable-libaribb24`で回避しない。LCEVC以外のlibrist（mbedTLSを含む）、uavs3d、vvencのnative source buildもまだ必要である。
 
+## aribb24のnative source build
+
+2026-09-08、上記の固定sourceを119 archive entryのpath/type検査後に展開し、元recipeの`12.patch`、`13.patch`、`17.patch`を順に適用した。作業用recipe checkoutのCRLF patchでは最初の適用検査に失敗したため、SHA256 `2d6211a7e4becbb581bf64e2d1a67ff060fb413cd157d479959934ea23f3b2a4`のraw LF recipe archiveから取り直し、[入力一覧](ffmpeg-build-inputs.json)の各patch size/hashを照合した。原本のpatchを`git -c core.autocrlf=false apply --check`で検査してから実適用する。
+
+固定sourceのCOPYINGはLGPLv3本文、public headerはLGPL 2.1-or-laterを記載する。元recipeのversion変更を[aribb24-version.patch](../third-party/ffmpeg/aribb24-version.patch)として保存し、`configure.ac`の表示を1.0.3から1.0.4へ変更した。これは既存GPL packageのversionだけを変えて採用する処理ではない。このpatchには`git apply --unidiff-zero --check`と実適用を使う。隔離fixtureで原本への実適用と結果hashを検証し、全24 tracked fileのraw Git blob比較で、差分がこのversion変更と元の3 patchに由来する6 fileだけであることも確認した。
+
+```powershell
+.\scripts\build-aribb24-native.ps1 -MsysRoot 'path/to/msys64' `
+    -SourceDirectory 'path/to/patched/aribb24' -BuildDirectory 'path/to/fresh/build'
+```
+
+このscriptは取得・patch適用・package更新をせず、固定HEADと6 fileのhashを検査する。専用non-login Bashで`ACLOCAL_PATH=/mingw64/share/aclocal`を指定して`autoreconf -fi`、native x86-64 static build、別prefixへのinstallを行う。検索pathなしの最初のAutotools試行は`PKG_CHECK_MODULES`展開に失敗したが、指定後は成功した。上流のobsolete macro、Windows permission macro再定義、`strncpy`警告とlibtoolのstatic-only警告は残っており、警告なしのbuildとは扱わない。ARIB自体は明示的にstaticを指定している。
+
+手動buildに加え、scriptによる2つの新規outputへのbuild・公開C APIのリンクと実行が成功した。`pkg-config`が新prefixを選び、FFmpegと同じ`aribb24 > 1.0.3`条件を満たすことを検査する。小さな入力`0e 41`（LS1/A）は期待するUTF-8 U+FF21へdecodeできた。任意cwd、環境変数復元、既存output拒否も確認済み。試験exeはWindows DLL以外に`libpng16-16.dll`をimportするため、これは依存すべてのstatic linkを意味しない。staged COPYINGとREADME.mdはsource原本のbyteを保持し、SHA256はそれぞれ`da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768`と`a9d5a0c8c8824d792cc57198f251c723b7ce69183efbc3a80de6384e0e60002c`である。
+
+元81 optionをすべて維持し、ARIB新prefix→LCEVC prefix→MSYS2の順で全FFmpeg configureを再実行した。ARIB検査は通過し、次の停止理由は`librist >= 0.2.7 not found using pkg-config`となった。configure全体は未成功であり、librist/mbedTLS、uavs3d、vvencの準備を続ける。今回の1文字試験は実字幕stream・描画・FFmpeg全体・配布条件の検証を代替しない。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。

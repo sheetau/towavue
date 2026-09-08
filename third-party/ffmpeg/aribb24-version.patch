@@ -1,0 +1,5 @@
+--- a/configure.ac
++++ b/configure.ac
+@@ -2 +2 @@
+-AC_INIT([aribb24], [1.0.3], [nkoriyama@gmail.com])
++AC_INIT([aribb24], [1.0.4], [nkoriyama@gmail.com])

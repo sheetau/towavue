@@ -99,6 +99,8 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 同日01:21、Help／paletteからexe隣のlicense guideをExplorerで選択する入口を追加した。専用STA worker、資料欠落時のpath案内、重複抑止・再生／未保存編集の保持を回帰と通常releaseで確認。273 tests・必須checkが通過した。古い資料集は旧exeの記録として保持し、最終app／source再対応付け、実installer配置・HTML表示・同時提供と、導入／品質／owner受入gateは継続する。
 
+同日、[NSISの安全性fixture](INSTALLER_FIXTURE.md)を先に実装し、配置先選択・既存folder拒否・日本語path・marker照合・明示fileだけの削除・利用者file保持・使用中file失敗後の再試行を検証した。fixture文書だけの通常user権限Setupで、本体／FFmpeg／VC runtime、registryやshortcutは含まない。実アプリのSetup組み込み、更新と隔離対象OSでの導入、最終資料対応付け・品質gateは継続し、この試験で第1～3段階を一括通過した扱いにしない。
+
 2026-09-08、既存preview／保存のhelper探索だけはH1の独立した修正として先に検証する。FFMPEG_DIRによる同梱版の上書きや、不足helperをPATH上の別版で埋め合わせる動作を防ぐ。第2段階のinstaller作成・runtime採用は第1段階の監査後のままとし、helper単体の検証でそのgateを通過扱いにしない。
 
 2026-09-08、第一段階で固定開発FFmpegのChromaprint→GPL FFTW静的リンクを確認し、既存binaryを配布候補から除外した。次の配布作業は[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)の機能を保つ再buildと対応資料の確定であり、旧DLLをそのままinstallerへ組み込むことではない。KissFFT版Chromaprintの単体試験は通ったが、全体差替え・性能・再配布条件のgateは未完了。

@@ -6,6 +6,8 @@
 
 同日、[Help／paletteの資料入口](DEVELOPMENT.md)を後続UI buildへ追加し、Explorerでの選択表示と欠落案内を検証した。旧03125262用の固定資料は保持しており、新195af870 buildの対応sourceとして流用しない。最終app／sourceの再対応付け、installerでの`licenses/START-HERE.html`配置、HTML実表示・同時提供と品質／導入gateは継続する。
 
+続く[NSIS安全性fixture](INSTALLER_FIXTURE.md)は、試験文書だけを配置するSetup.exeで、場所選択・既存file保護・明示一覧だけの削除を確認する。本体／FFmpeg／VCの同梱、実アプリ更新や配布採用ではない。試験生成物はGit対象外とし、実配布の最終資料・導入／品質gateは維持する。
+
 2026-09-08更新: **下記の固定開発binaryは配布候補から除外する。** Chromaprint経由でGPLのFFTWが静的リンクされていた。recipe、実libraryの未解決symbol、当時のpkg-config、avformat DLL内の識別文字列が一致する。LGPL表示だけでは既定の配布条件を満たさない。[再build計画と単体検証](FFMPEG_REBUILD.md)、[固定した根拠](ffmpeg-distribution-rejection.json)を参照。開発用fileは保持し、本体のlicense変更やcodecの暗黙の削除はしない。
 
 ## 固定binaryの確認（2026-09-07 22:18 JST）

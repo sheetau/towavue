@@ -9,6 +9,23 @@ permissions:
   contents: read
 
 jobs:
+  setup-fixture:
+    name: Installer fixture lifecycle
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build and test harmless installer fixture
+        shell: pwsh
+        run: |
+          $inputs = Get-Content docs/nsis-inputs.json -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Path target/tmp/installer-tools | Out-Null
+          $archive = Join-Path $PWD 'target/tmp/installer-tools/nsis-3.12.zip'
+          Invoke-WebRequest -Uri $inputs.archive.url -OutFile $archive -TimeoutSec 45
+          .\scripts\test-setup-fixture.ps1 -NsisArchive $archive
+
   rust:
     name: Rust checks
     runs-on: windows-2022

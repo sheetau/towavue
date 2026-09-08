@@ -510,6 +510,8 @@ M4ではName、Date modified、Date created、Size、Typeの昇順・降順、�
 
 必要なDLL・ffmpeg.exe・ffprobe.exeはインストール先へ配置し、利用者による開発用FFMPEG_DIR/PATHの設定を必要としない構成を計画する。これは配布方式の決定であり、同梱物の検証・再配布条件の確認・installer実装・clean-machine検証の完了ではない。署名・公開・課金は別途扱う。
 
+H1のinstaller安全性は、まずNSIS 3.12のUnicode／zlib、通常user権限のfixture専用Setup.exeで検証する。Welcome・インストール先選択・確認付き削除を持ち、既存の非空directory、drive root、UNC、reparse point経由の配置を拒否する。削除は完成時の配置markerを照合して同梱fileの明示一覧だけを対象とし、directoryは空の場合だけ除去する。再帰削除、再起動時削除、registry／shortcut／関連付け／共有runtimeの変更はこの段階に入れない。fixtureはアプリ・FFmpeg・VC packageを含まず、実アプリ導入／更新の完成や配布採用とは分ける。将来の本体Setupでも利用者のmedia／設定は所有対象にしない。
+
 H1の資料への入口はHelp menu／command paletteの`Show licenses and sources`とする。実行中exeの隣にある`licenses/START-HERE.html`をExplorerで選択表示し、HTMLやarchive自体は自動実行しない。欠落時は期待pathを表示し、cwd・FFMPEG_DIR・PATH・開発treeや推測した公開URLへfallbackしない。Windows runtimeの専用STA workerがShell操作を所有し、appへは成功path／errorだけを返す。appは重複要求を抑え、再生・編集状態を変えない。この入口は資料の存在・release適合性・配布採用の承認ではなく、installer側の配置と最終source同時提供は別途必要。
 
 H1の補助process探索はruntime内へ統一する。本体exeと同じdirectoryにffmpeg.exe／ffprobe.exeのいずれかが存在すれば、両方ともそのdirectoryを使う。不完全な配置を開発用helperで埋め合わせない。同梱helperが両方ともない開発配置だけ、非空のFFMPEG_DIR/binを使う。そこにも必要なexeがなければ期待pathを含むerrorにし、PATH上の別版を暗黙に起動しない。processへ渡すpathは絶対pathとし、作業directoryやPATHを変更しない。これは既存preview／保存の探索修正であり、同梱物の採用・installer作成・DLL検索規則の変更ではない。

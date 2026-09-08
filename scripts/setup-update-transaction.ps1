@@ -84,7 +84,8 @@ function Invoke-TowavueUpdateTransaction {
     param(
         [Parameter(Mandatory)][ValidateSet('Apply','Rollback')][string]$Mode,
         [Parameter(Mandatory)][string]$TransactionDirectory,
-        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$JournalSha256
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$JournalSha256,
+        [hashtable]$ExpectedRegistration
     )
     $directory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TransactionDirectory).TrimEnd('\','/')
     Assert-LocalPath $directory
@@ -111,6 +112,10 @@ function Invoke-TowavueUpdateTransaction {
                 $record.PreviousOwnershipId -cne $journal.plan.installed_ownership_id -or $record.SizeKiB -ne [Math]::Ceiling($journal.plan.incoming_bytes / 1024)) { throw 'Update registration does not match the file journal.' }
             Invoke-TowavueUpdateRegistration $record $Mode -VerifyOnly
         }
+        if ($null -ne $ExpectedRegistration -and (-not $journal.registration -or
+            $journal.registration.InstallDirectory -ine $ExpectedRegistration.InstallDirectory -or
+            $journal.registration.RegistrySubKey -ine $ExpectedRegistration.RegistrySubKey -or
+            $journal.registration.ShortcutPath -ine $ExpectedRegistration.ShortcutPath)) { throw 'Pending update belongs to another registration.' }
         if ($Mode -eq 'Apply') {
             $plan = & (Join-Path $PSScriptRoot 'get-setup-update-plan.ps1') -InstallDirectory $install -IncomingPayloadDirectory $journal.plan.incoming_directory -IncomingOwnershipId $journal.plan.incoming_ownership_id | ConvertFrom-Json
             if (($plan | ConvertTo-Json -Depth 10 -Compress) -cne ($journal.plan | ConvertTo-Json -Depth 10 -Compress)) { throw 'Installed or incoming update snapshot changed.' }

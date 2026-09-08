@@ -403,6 +403,113 @@ $before = Get-Snapshot $pair
 Expect-Failure { New-TowavueUpdateTransaction @pair } 'existing update registration is missing'
 Assert-True ((Get-Snapshot $pair) -ceq $before) 'Missing registration preparation changed files.'
 Assert-True (-not @(Get-ChildItem -LiteralPath (Split-Path -Parent $pair.InstallDirectory) -Directory -Force -Filter '.towavue-update-*').Count) 'Missing registration left a prepared transaction.'
+$registeredLibrary = Join-Path $PSScriptRoot 'setup-registered-update.ps1'
+. $registeredLibrary
+$registeredSource = [IO.File]::ReadAllText($registeredLibrary)
+$privateRegistered = Join-Path $injectionDirectory 'setup-registered-update.ps1'
+Write-Trial $privateRegistered $registeredSource
+Write-Trial $injectedPath $original
+function Set-TrialPending($Pair,$Value,[Microsoft.Win32.RegistryValueKind]$Kind='String') {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
+    $key = $base.OpenSubKey($Pair.Registration.RegistrySubKey,$true)
+    try { $key.SetValue('TowavuePendingUpdate',$Value,$Kind); $key.Flush() } finally { $key.Dispose(); $base.Dispose() }
+}
+function Start-RegisteredChild($Pair,[string]$Executable=$powerShell) {
+    $childPath = Join-Path $trialRoot ('pending-child-' + [guid]::NewGuid().ToString('N') + '.ps1')
+    $json = $Pair | ConvertTo-Json -Depth 5 -Compress
+    # Windows PowerShell reads BOM-less scripts as ANSI. Keep generated source
+    # ASCII while preserving the Unicode fixture paths in its JSON value.
+    $json = [regex]::Replace($json,'[^\x00-\x7f]',{ param($match) '\u{0:x4}' -f [int][char]$match.Value })
+    Write-Trial $childPath (". '" + (& $escape $privateRegistered) + "'`n`$pair = '" + (& $escape $json) + "' | ConvertFrom-Json`n`$arguments = @{}; foreach (`$p in `$pair.PSObject.Properties) { `$arguments[`$p.Name] = `$p.Value }; `$arguments.Registration = @{RegistrySubKey=`$pair.Registration.RegistrySubKey;ShortcutPath=`$pair.Registration.ShortcutPath}`nInvoke-TowavueRegisteredUpdate -Mode Apply @arguments`n")
+    $process = Start-Process -FilePath $Executable -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"' + $childPath + '"')) -WindowStyle Hidden -PassThru
+    $processHandle = $process.Handle
+    return $process
+}
+$pair = New-RegisteredPair 'pending-success'
+$result = Invoke-TowavueRegisteredUpdate -Mode Apply @pair
+Assert-True ($result.state -eq 'files_and_registration_applied') 'Registered entry point did not apply.'
+Assert-True (-not (Get-TrialRegistrationSnapshot $pair).Contains('TowavuePendingUpdate')) 'Successful update retained the pending pointer.'
+Assert-Applied $pair @{TransactionDirectory=$result.transaction_directory}
+Assert-True ((Invoke-TowavueRegisteredUpdate -Mode Rollback -InstallDirectory $pair.InstallDirectory -Registration $pair.Registration).state -eq 'no_pending_update') 'Completed update was treated as pending.'
+Remove-TrialRegistration $pair
+
+foreach ($boundary in @('before-files','partial-registration','before-clear')) {
+    $pair = New-RegisteredPair ('pending-exit-' + $boundary)
+    $before = Get-Snapshot $pair
+    $beforeRegistration = Get-TrialRegistrationSnapshot $pair
+    $privateSource = $registeredSource
+    if ($boundary -eq 'before-files') { $privateSource = $privateSource.Replace('$result = Invoke-TowavueUpdateTransaction','[Diagnostics.Process]::GetCurrentProcess().Kill(); $result = Invoke-TowavueUpdateTransaction') }
+    if ($boundary -eq 'before-clear') { $privateSource = $privateSource.Replace('$key.DeleteValue($pendingName)','[Diagnostics.Process]::GetCurrentProcess().Kill(); $key.DeleteValue($pendingName)') }
+    Write-Trial $privateRegistered $privateSource
+    if ($boundary -eq 'partial-registration') { Write-Trial $privateRegistration ($registrationSource.Replace($write,($write + '; [Diagnostics.Process]::GetCurrentProcess().Kill()'))) }
+    $child = Start-RegisteredChild $pair
+    Assert-True ($child.WaitForExit(30000)) "Owned pending child still running: $($child.Id)"
+    Assert-True ($child.ExitCode -ne 0) 'Pending child unexpectedly succeeded.'
+    Write-Trial $privateRegistration $registrationSource
+    $snapshot = Get-TrialRegistrationSnapshot $pair | ConvertFrom-Json
+    $saved = $snapshot.values.TowavuePendingUpdate[1]
+    Assert-True ($snapshot.values.TowavuePendingUpdate[0] -eq 'String' -and $saved) 'Abrupt exit lost its durable pointer.'
+    if ($boundary -eq 'before-files') { Assert-True ((Get-Snapshot $pair) -ceq $before) 'Files changed before pointer publication boundary.' }
+    if ($boundary -eq 'partial-registration') { Assert-True (-not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'towavue.exe'))) 'Partial registry update published the app.' }
+    $arguments = Get-TrialRegistrationArguments $pair
+    foreach ($mode in @('VerifyRemoval','Remove')) { Expect-Failure { Invoke-TowavueRegistration @arguments -Mode $mode } 'update is pending' }
+    Expect-Failure { Invoke-TowavueRegisteredUpdate -Mode Apply @pair } 'update is pending'
+    if ($boundary -eq 'before-files') {
+        foreach ($bad in @(@(7,'DWord'),@('{}','String'),@('{broken','String'),@(($saved.Replace('"schema_version":1','"schema_version":99')),'String'))) {
+            Set-TrialPending $pair $bad[0] $bad[1]
+            $badSnapshot = Get-TrialRegistrationSnapshot $pair
+            $rejected = $false
+            try { Invoke-TowavueRegisteredUpdate -Mode Rollback -InstallDirectory $pair.InstallDirectory -Registration $pair.Registration | Out-Null } catch { $rejected = $true }
+            Assert-True ($rejected -and (Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $badSnapshot) 'Malformed pointer was accepted or changed data.'
+        }
+        Set-TrialPending $pair $saved
+        $pendingSnapshot = Get-TrialRegistrationSnapshot $pair
+        $journalPath = Join-Path ($saved | ConvertFrom-Json).TransactionDirectory 'journal.json'
+        $journalText = [IO.File]::ReadAllText($journalPath)
+        Write-Trial $journalPath ($journalText + ' ')
+        Expect-Failure { Invoke-TowavueRegisteredUpdate -Mode Rollback -InstallDirectory $pair.InstallDirectory -Registration $pair.Registration } 'journal identity differs'
+        Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $pendingSnapshot) 'Failed recovery cleared the pointer or changed files.'
+        Write-Trial $journalPath $journalText
+        $lock = [IO.File]::Open($journalPath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+        try { Expect-Failure { Invoke-TowavueRegisteredUpdate -Mode Rollback -InstallDirectory $pair.InstallDirectory -Registration $pair.Registration } 'being used by another process' }
+        finally { $lock.Dispose() }
+        Assert-True ((Get-TrialRegistrationSnapshot $pair) -ceq $pendingSnapshot) 'Locked recovery cleared the pointer.'
+        $foreign = New-RegisteredPair 'pending-foreign-binding'
+        $foreignBefore = Get-Snapshot $foreign
+        Set-TrialPending $foreign $saved
+        Expect-Failure { Invoke-TowavueRegisteredUpdate -Mode Rollback -InstallDirectory $foreign.InstallDirectory -Registration $foreign.Registration } 'belongs to another registration'
+        Assert-True ((Get-Snapshot $foreign) -ceq $foreignBefore -and (Get-Snapshot $pair) -ceq $before) 'Cross-install pointer changed files.'
+        $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
+        $key = $base.OpenSubKey($foreign.Registration.RegistrySubKey,$true)
+        try { $key.DeleteValue('TowavuePendingUpdate') } finally { $key.Dispose(); $base.Dispose() }
+        Remove-TrialRegistration $foreign
+    }
+    # No token is passed back from the terminated child. Recovery discovers it
+    # through the independently selected registration and validates its binding.
+    $result = Invoke-TowavueRegisteredUpdate -Mode Rollback -InstallDirectory $pair.InstallDirectory -Registration $pair.Registration
+    Assert-True ($result.state -eq 'files_and_registration_rolled_back' -and (Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) 'Rediscovered recovery did not restore both states and clear only its pointer.'
+    Remove-TrialRegistration $pair
+}
+
+$pair = New-RegisteredPair 'pending-concurrent'
+$before = Get-Snapshot $pair
+$beforeRegistration = Get-TrialRegistrationSnapshot $pair
+$eventId = [guid]::NewGuid().ToString('N')
+$ready = [Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,('Local\towavue-ready-' + $eventId))
+$release = [Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,('Local\towavue-release-' + $eventId))
+try {
+    $pause = "`$ready = [Threading.EventWaitHandle]::OpenExisting('Local\towavue-ready-$eventId'); `$release = [Threading.EventWaitHandle]::OpenExisting('Local\towavue-release-$eventId'); `$ready.Set() | Out-Null; `$release.WaitOne(30000) | Out-Null; throw 'Injected pending pause'; "
+    Write-Trial $privateRegistered ($registeredSource.Replace('$result = Invoke-TowavueUpdateTransaction',($pause + '$result = Invoke-TowavueUpdateTransaction')))
+    $oppositePowerShell = Join-Path $env:WINDIR $(if ([Environment]::Is64BitProcess) { 'SysWOW64/WindowsPowerShell/v1.0/powershell.exe' } else { 'Sysnative/WindowsPowerShell/v1.0/powershell.exe' })
+    $child = Start-RegisteredChild $pair $oppositePowerShell
+    Assert-True ($ready.WaitOne(30000)) 'Owned concurrent child did not signal readiness.'
+    foreach ($mode in @('Apply','Rollback')) { Expect-Failure { Invoke-TowavueRegisteredUpdate -Mode $mode @pair } 'Another update operation is active' }
+} finally { $release.Set() | Out-Null; $ready.Dispose(); $release.Dispose() }
+Assert-True ($child.WaitForExit(30000) -and $child.ExitCode -ne 0) 'Owned concurrent child did not exit at the injected boundary.'
+Invoke-TowavueRegisteredUpdate -Mode Rollback -InstallDirectory $pair.InstallDirectory -Registration $pair.Registration | Out-Null
+Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) 'Concurrent refusal or pending recovery changed original data.'
+Remove-TrialRegistration $pair
+Write-Output 'PASS: durable registered entry point, three abrupt process boundaries, rediscovery without a caller token, corrupt/locked recovery retry, malformed/cross-install pointer preservation, pending removal refusal and cross-bitness competing-process exclusion. All test keys/shortcuts removed.'
 Write-Output 'PASS: one file/registration journal, typed capture, twenty joined move interruptions, four registry write interruptions, abrupt child exit between registry writes, executable publication order, journal binding, unknown/missing registration preservation and repeated rollback. Joint test keys/shortcuts removed.'
 Write-Output "PASS: file-only prepare/apply/rollback, original identity/timestamps/security/alternate stream, copy-free recovery, preservation, locks, hard links, corrupt inputs, ten apply and ten rollback boundaries, abrupt child exit in a retire/publish gap: $trialRoot"
 Write-Output 'SKIP: actual Setup lifecycle/uninstaller coordination, full-volume/ACL-denial recovery, OS power loss and hostile concurrent namespace changes are not exercised.'

@@ -1,16 +1,5 @@
-function Invoke-TowavueRegistration {
-    param(
-        [Parameter(Mandatory)][ValidateSet('Inspect','Install','VerifyRemoval','Remove','VerifyUpdate','Update')][string]$Mode,
-        [Parameter(Mandatory)][string]$InstallDirectory,
-        [Parameter(Mandatory)][ValidatePattern('^towavue-local-[0-9a-f]{64}$')][string]$OwnershipId,
-        [Parameter(Mandatory)][string]$RegistrySubKey,
-        [Parameter(Mandatory)][string]$ShortcutPath,
-        [Parameter(Mandatory)][ValidateRange(1,2147483647)][int]$SizeKiB,
-        [string]$PreviousOwnershipId,
-        [int]$PreviousSizeKiB
-    )
-
-    # Production uses one HKCU uninstall key; tests use a fresh non-ARP GUID key.
+function Assert-TowavueRegistrationLocation([string]$InstallDirectory,[string]$RegistrySubKey,[string]$ShortcutPath) {
+    # Shared by registration and pending-update discovery before registry access.
     if ($RegistrySubKey -ne 'Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue-evaluation' -and
         $RegistrySubKey -notmatch '^Software\\towavue\\InstallerTests\\[0-9a-f]{32}$') { throw 'Registration key is outside the owned namespace.' }
     foreach ($path in @($InstallDirectory,$ShortcutPath)) {
@@ -24,12 +13,28 @@ function Invoke-TowavueRegistration {
         }
     }
     if ($InstallDirectory.TrimEnd('\').Length -le 2 -or [IO.Path]::GetExtension($ShortcutPath) -ne '.lnk') { throw 'Invalid dedicated installation or shortcut path.' }
+}
+
+function Invoke-TowavueRegistration {
+    param(
+        [Parameter(Mandatory)][ValidateSet('Inspect','Install','VerifyRemoval','Remove','VerifyUpdate','Update')][string]$Mode,
+        [Parameter(Mandatory)][string]$InstallDirectory,
+        [Parameter(Mandatory)][ValidatePattern('^towavue-local-[0-9a-f]{64}$')][string]$OwnershipId,
+        [Parameter(Mandatory)][string]$RegistrySubKey,
+        [Parameter(Mandatory)][string]$ShortcutPath,
+        [Parameter(Mandatory)][ValidateRange(1,2147483647)][int]$SizeKiB,
+        [string]$PreviousOwnershipId,
+        [int]$PreviousSizeKiB
+    )
+
+    Assert-TowavueRegistrationLocation $InstallDirectory $RegistrySubKey $ShortcutPath
     $updating = $Mode -in @('VerifyUpdate','Update')
     if ($updating -and ($PreviousOwnershipId -cnotmatch '^towavue-local-[0-9a-f]{64}$' -or $PreviousSizeKiB -lt 1)) { throw 'An update requires the recorded previous identity and size.' }
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
     $key = $null
     try {
         $key = $base.OpenSubKey($RegistrySubKey,$Mode -in @('Remove','Update'))
+        if ($key -and $Mode -in @('VerifyRemoval','Remove') -and $key.GetValueNames() -contains 'TowavuePendingUpdate') { throw 'An update is pending. Recover it before uninstalling.' }
         if ($updating) {
             if (-not $key) { throw 'The existing update registration is missing.' }
             if ($key.GetValueKind('InstallLocation') -ne 'String' -or $key.GetValue('InstallLocation') -ne $InstallDirectory -or

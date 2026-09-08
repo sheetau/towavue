@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('chromaprint', 'openal')][string]$Component,
+    [Parameter(Mandatory = $true)][ValidateSet('chromaprint', 'openal', 'zvbi')][string]$Component,
     [Parameter(Mandatory = $true)][string]$PackageArchive,
     [Parameter(Mandatory = $true)][string]$Recipe,
     [Parameter(Mandatory = $true)][string]$SourceArchive,
@@ -27,7 +27,7 @@ New-Item -ItemType Directory -Path $testDirectory | Out-Null
 $first = Join-Path $testDirectory 'first'
 & $generator @inputs -OutputDirectory $first
 $files = @(Get-ChildItem -LiteralPath $first -Recurse -File)
-$expectedCount = if ($Component -eq 'chromaprint') { 13 } else { 18 }
+$expectedCount = @{ chromaprint = 13; openal = 18; zvbi = 17 }[$Component]
 if ($files.Count -ne $expectedCount -or @($files | Where-Object { $_.Extension -in @('.dll', '.exe') }).Count) {
     throw "Expected exactly $expectedCount source/provenance/notice files and no binaries."
 }

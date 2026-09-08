@@ -66,13 +66,44 @@ libvpxの第三者文書・PATENTS、Theoraの技術声明、opencore-amrの追�
 
 **Little CMS 2.19.1:** 対応recipe `c13ff2ab5c718d63da878bb180c2cc0b5ce40dec`は`-Ddefault_library=both -Dfastfloat=true`を指定する。tagのcommit `21c582a594fe5279f90c0b93437c398f93bf62b0`では、[本体library](https://github.com/mm2/Little-CMS/blob/21c582a594fe5279f90c0b93437c398f93bf62b0/src/meson.build)と[fast_float library](https://github.com/mm2/Little-CMS/blob/21c582a594fe5279f90c0b93437c398f93bf62b0/plugins/fast_float/src/meson.build)は別targetだが、後者をpkg-configの追加libraryへ入れる。本機の`lcms2.pc`（SHA256 `37a9c51d841218ad064be5cc1eb307120229ddc7c10d7411a702bdecd3aa6011`）も`-llcms2 -llcms2_fast_float`を含み、再生成FFmpegの`EXTRALIBS-avfilter`／`EXTRALIBS-avcodec`にもその引数がある。監査済みPE graphにfast_float DLLがないことだけで、静的コードも不在と断定しない。実際の選択archive／symbolとの照合を次に行う。GPLプラグインを本体MITと同一扱いせず、逆に未使用link引数だけで組込み済みとも扱わない。
 
-**ZVBI 0.2.45:** annotated tag `45138a87f86b683f9c3611793752ac08795d836f`はcommit `d3a5ee9f2b047bf16cd1ee5ccf6ec05ee75409d0`を指す。元recipeのVCS checksumは、MSYS2 makepkg実装では`git -c core.abbrev=no archive --format tar <tag>`のSHA256であり、任意のcodeload圧縮archiveのhashではない。まだそのVCS archiveの一致を確認した扱いにはしない。
+**ZVBI 0.2.45:** annotated tag `45138a87f86b683f9c3611793752ac08795d836f`はcommit `d3a5ee9f2b047bf16cd1ee5ccf6ec05ee75409d0`を指す。元recipeのVCS checksumは、MSYS2 makepkg実装では`git -c core.abbrev=no archive --format tar <tag>`のSHA256であり、任意のcodeload圧縮archiveのhashではない。続く取得では、archive時にも`core.autocrlf=false`を指定して4239360 bytes／SHA256 `3dc234d716d1c51d53ae9b6b027775b3a6c9ced974bc1b246d749b44cca7d964`を再現し、元recipeのchecksumと一致した。Git for Windowsのsystem設定を継承した最初のCRLF archiveは4382720 bytesとなり拒否した。pinやOSのGit設定は変更していない。全235 entriesは224通常file＋11 directoryで、linkや危険なpathはなかった。localでtag署名の暗号検証をしたとは主張しない。
 
 上流[NEWSの0.2.28記録](https://github.com/zapping-vbi/zvbi/blob/d3a5ee9f2b047bf16cd1ee5ccf6ec05ee75409d0/NEWS)はlibraryのLGPL v2以降への移行を説明する。一方、現在の[COPYING.md](https://github.com/zapping-vbi/zvbi/blob/d3a5ee9f2b047bf16cd1ee5ccf6ec05ee75409d0/COPYING.md)と`src/pdc.c`／`src/packet-830.c`のheaderは当該fileをGPL v2とし、[src/Makefile.am](https://github.com/zapping-vbi/zvbi/blob/d3a5ee9f2b047bf16cd1ee5ccf6ec05ee75409d0/src/Makefile.am)は両方を`libzvbi_la_SOURCES`へ含める。package内のCOPYINGも同じ個別条件を記す。唯一のMSYS2 patchは`-no-undefined`を追加するだけで、この相違を解消しない。GPLの`exp-vtx.c`はsourceに残るが本文が`#if 0`で無効化されており、Makefileへの列挙だけで同じ扱いにしない。FFmpegのconfigureはZVBIが0.2.28以降かを調べるが、個別licenseを検証するものではない。したがって、この不一致は配布判断前の未解決事項として保持し、旧NEWSだけで個別表記を上書きしたり、機能をstubへ置き換えたりしない。次に実DLLの対応symbolとsourceの履歴／適用範囲を確認する。
 
 現repositoryの履歴は2022年のimportで始まるため、READMEが案内する公式`vbi-archive`も確認した。両C fileは[2009-02-16の追加commit](https://github.com/zapping-vbi/vbi-archive/commit/5346888e899da55f73eba73097738021d8cbf8cf)からGPL表記を持ち、直後の[Makefile変更](https://github.com/zapping-vbi/vbi-archive/commit/64392045f9f8ac736a1f365217ec776c457f1df6)でlibrary対象へ追加されている。2008年のLGPL化告知より後の追加であり、告知だけでこれらのfileも許諾されたと推測しない。FFmpegの直接呼出一覧にPDC APIがないことも、配布するZVBI DLL自体からその実装が消える根拠にはならない。
 
 再生終了後、実際のstaged `libzvbi-0.dll`（450046 bytes、SHA256 `fa1b722aa22739a9b147f7c918a981c51fc48ebd1269b192e412b6f346f816cc`）が元package監査と一致することを再確認した。PE exportには`vbi_decode_teletext_8301_cni`／`local_time`、`vbi_decode_teletext_8302_cni`／`pdc`、`vbi_pil_is_valid_date`／`vbi_pil_to_time`等があり、forwarderではなくDLL内のExport RVAを持つ。例えば`vbi_pil_is_valid_date`はRVA `0x29620`、`vbi_pil_to_time`は`0x29ab0`。個別GPL表記の対象を単なる同梱toolと分類してこの候補をLGPL構成として承認することはできない。対応sourceのchecksum結合を完成させ、許諾の明確化または機能を保つ代替構成を検討する。外部への問い合わせ、本体license変更、PDCのstub化やcodec無効化はまだ行っていない。
+
+ZVBIの元package／recipe／DLL／VCS archive／371-byte patchと選択原本10 filesは[native-zvbi-inputs.json](native-zvbi-inputs.json)へ固定した。既存のmaterial generatorへ`-Component zvbi`を渡し、`-PatchDirectory`に元patchを置く。生成物は全source、recipe、元patch、metadata、原本notice／scope資料、inventoryと説明の17 files／4498226 bytesで、DLL/exeは含めない。任意cwdでの再生成hash一致、全5入力の欠落・同size改変拒否、既存output保護を検証した。Chromaprint／OpenALの同generator回帰も通過した。これは未承認候補の監査材料であり、そのままinstallerへ同梱するものではない。
+
+### ZVBI限定buildの実験（2026-09-08）
+
+ownerは、FFmpegの字幕デコードを維持し、未使用の番組制御・放送時刻APIを含めない構成の検証を許可した。FFmpegは`VBI_EVENT_TTX_PAGE`だけを登録するが、元の共通headerにはGPL表記の`pdc.h`が入り、生成済み`libzvbi.h`にもその内容が転記されている。実装2 filesをlinkから外すだけでは不十分である。
+
+[実験patch](../third-party/patches/zvbi-no-program-id.patch)は固定0.2.45の7 filesだけを変更する。`pdc.*`／`packet-830.*`と既に本文が無効な`exp-vtx.c`をlibrary sourceから除き、LGPL表記の呼出側で対応経路をcompile対象外にする。PDC型のinclude／event member／private decoder memberを除き、未提供の2イベントを要求した登録は既存handlerを変更する前に失敗する。`-1`による全イベント要求も拒否するため、汎用ZVBIの全API互換品ではない。字幕のpage、文字、描画実装は変更せず、成功を返すstubやlicense headerの書換えは追加しない。
+
+公共headerは元の生成規則から再生成する。通常無効なこの規則の`io.h`は実sourceにないため`inout.h`へ直し、別build directoryからもversion入力を参照できるようにする。header生成だけをmaintainer mode外へ移し、network-tableのnetwork取得やGPLのhammgen実行は有効にしない。元source archiveのGPL対象4 filesとCOPYINGは原本のまま保持する。patchは元MSYS2の`-no-undefined`変更も含み、元patchとの二重適用はしない。
+
+```powershell
+.\scripts\build-zvbi-native-experiment.ps1 -MsysRoot 'path/to/msys64' `
+    -SourceArchive 'path/to/zvbi-0.2.45-git.tar' -BuildDirectory 'path/to/fresh/build'
+.\scripts\test-zvbi-native-experiment.ps1 -MsysRoot 'path/to/msys64' `
+    -FfmpegPrefix 'path/to/reproduced/ffmpeg/prefix' -ZvbiPrefix 'path/to/fresh/build/prefix'
+```
+
+builderはASCII・spaceなしのnative path、固定source／patch hash、未作成outputを要求する。既存native buildと同じ固定330-package MSYS2環境を用い、`test-msys2-environment.ps1 -IncludeMediaDependencies`でname／version・database・C/C++/LV2/VAAPI smokeを再確認した。process環境を限定して元autogen／configureを使い、libraryとpkg-configだけをbuild/installする。合成試験は別directoryに比較用exeと限定ZVBI DLLを置き、元FFmpeg prefixとSystem32だけのPATHを使う。開発用DLLや本体を差し替えず、実際にloadしたZVBI pathも各caller内で照合する。
+
+最初の手作業buildとfreshなscript buildが通過した。後者のDLL SHA256は`aaa79ce2955abf6cc8ed94d36158ccc5501e03b5571a91f906e9104596ee1acb`、再生成headerは`8e2a467f9ac02022a147470c868553eb563636b56b67b8f16da4aec8a8a14acc`。原本224 filesとの全hash比較は意図した7 filesだけが異なる。実compiler依存44 recordsに対象GPL header／C fileやLinux向けGPL headerはなく、preprocess後の公開headerにもPDC宣言はない。PE exportは367→348で、差は固定した19個の番組制御・時刻関連だけ、追加0。外部DLLはiconv、intl、png、winpthreadとWindows DLLである。依存DLL内部まで含む最終license監査の証明ではない。
+
+さらに任意cwdから2回目のfresh script buildも完走し、PATH／pkg-config／CFLAGSの復元を確認した。そのDLL hashは`3b18e1282a06b413e75e907d7521aceb0570b93002880df9a15e582902d7766b`であり、異なるpath／時刻のstrip前binaryがbit再現したとは主張しない。生成header hashと全字幕比較結果は一致する。CRLF archive、同size改変source、既存buildの拒否も確認し、入力と先行DLLを保持して拒否先outputを作らなかった。生成headerの元package版との差は7行追加／181行削除で、除外対象、明示time include、生成注記／入力名だけである。
+
+合成字幕は3形式（bitmap／text／ASS）×4条件（通常文字、色・倍高、national subset、mosaic）で、各3回、計36個の空でない字幕更新を要求する。字幕page filter、8/30 format 1／2の混在、字幕文字列の期待値、壊れたdata-unit長の拒否も確認する。元DLL、限定DLL＋旧header caller、限定DLL＋再生成header callerの結果1423076 bytesは完全一致し、SHA256は`c8cc9da776b4ebd34f67bfcf9126983a362ab35d90813a4345674ad3b56eb161`。比較にはbitmapの全pixel／palette、文字列、位置／時間metadataと使った公開構造体のsize／offsetを含む。単なるdecoder名の列挙ではないが、実放送の全page／error-correction／DRCS等の網羅ではない。
+
+初回のテスト素材は同page headerだけでpage終端を作らず、空出力の時点で失敗した。交互pageで終端を作り、字幕boxを含む素材へ直してから元DLLの出力を確認した。ASSのhard-space表現も通常textとは区別して期待値を検証する。build中に判明した上記header生成の不整合、PowerShellのstderr扱い、patch末尾context欠落は修正後にfresh buildで再検証した。失敗出力を合格材料へ混ぜない。
+
+**まだ採用しない。** これらの比較は既存FFmpeg DLLのZVBI境界の試験であり、新headerを入力にしたFFmpeg全体の再buildではない。次は実放送素材等の追加比較、全体build／実link入力／source・patch・noticeの結合、最終候補のmedia／性能確認を進める。以前の30分soakは旧ZVBIを含む候補の結果のままで、新DLLの性能合格として流用しない。
+
+### その他の混合license確認の続き
 
 Little CMSについては、同じ環境のfast_float静的archiveが定義する14個の公開text symbolを取得し、再生成buildのstrip前avcodec／avfilterの全symbol table（65,335／27,148 records）と照合して一致0件、fast_float import markerも0件だった。これは未使用link引数という解釈と整合するが、全推移DLLの静的入力監査やlink traceの代わりにはしない。
 

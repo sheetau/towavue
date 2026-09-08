@@ -1,0 +1,320 @@
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 738bd38..56e3d9c 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -81,7 +81,6 @@ libzvbi_la_SOURCES = \
+ 	exp-html.c \
+ 	exp-templ.c \
+ 	exp-txt.c exp-txt.h \
+-	exp-vtx.c \
+ 	export.c export.h format.h \
+ 	hamm.c hamm.h hamm-tables.h \
+ 	idl_demux.c idl_demux.h \
+@@ -98,9 +97,7 @@ libzvbi_la_SOURCES = \
+ 	misc.c misc.h \
+ 	network.h \
+ 	packet.c teletext.c teletext_decoder.h vt.h \
+-	packet-830.c packet-830.h \
+ 	page_table.c page_table.h \
+-	pdc.c pdc.h \
+ 	pfc_demux.c pfc_demux.h \
+ 	proxy-client.c proxy-client.h \
+ 	raw_decoder.c raw_decoder.h \
+@@ -124,7 +121,7 @@ libzvbi_la_LIBADD = \
+ 	$(LIBS) \
+ 	$(UNICODE_LIBS)
+ 
+-libzvbi_la_LDFLAGS = -version-info $(LIBZVBI_SO_VERSION)
++libzvbi_la_LDFLAGS = -version-info $(LIBZVBI_SO_VERSION) -no-undefined
+ 
+ libzvbi_chains_la_SOURCES = \
+ 	chains.c \
+@@ -146,13 +143,15 @@ version.h: ../configure.ac
+ 	 | sed "s/\./\\\\\n#define VBI_VERSION_MINOR /" \
+ 	 | sed "s/\./\\\\\n#define VBI_VERSION_MICRO /"` > $@
+ 
++endif
++
++# Regenerate the public header without the excluded program-ID headers.
+ # Note order matters.
+ LIBZVBI_HDRS = \
+ 	macros.h \
+ 	bcd.h \
+ 	conv.h \
+ 	network.h \
+-	pdc.h \
+ 	event.h \
+ 	format.h \
+ 	lang.h \
+@@ -167,7 +166,7 @@ LIBZVBI_HDRS = \
+ 	idl_demux.h \
+ 	pfc_demux.h \
+ 	xds_demux.h \
+-	io.h \
++	inout.h \
+ 	io-sim.h \
+ 	proxy-msg.h \
+ 	proxy-client.h \
+@@ -177,17 +176,16 @@ LIBZVBI_HDRS = \
+ 	cc.h \
+ 	teletext_decoder.h \
+ 	tables.h \
+-	packet-830.h \
+ 	vps.h \
+ 	vbi.h
+ 
+ # Concat the header files in this order and filter out all lines
+ #   before "^/* Public", after "^/* Private" and between "^/**"..."**/$"
+-libzvbi.h: version.h $(LIBZVBI_HDRS)
++libzvbi.h: version.h $(LIBZVBI_HDRS) Makefile.am
+ 	sed -ne "1,/\*\//p" $(srcdir)/vbi.h > $@
+ 	echo -e "\n/* Generated file, do not edit! */" >> $@
+ 	echo -e "\n#ifndef __LIBZVBI_H__\n#define __LIBZVBI_H__" >> $@
+-	cat version.h >> $@
++	cat $< >> $@
+ 	echo -e "\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n" >> $@
+ 	echo -e "\ntypedef struct vbi_decoder vbi_decoder;\n" >> $@
+ 	for fi in $(LIBZVBI_HDRS); do \
+@@ -197,6 +195,8 @@ libzvbi.h: version.h $(LIBZVBI_HDRS)
+ 	echo -e "\n#ifdef __cplusplus\n}\n#endif" >> $@
+ 	echo -e "\n#endif /* __LIBZVBI_H__ */" >> $@
+ 
++if MAINTAINER_MODE
++
+ network-table.h: network-table.pl Makefile.am
+ 	wget -q -O- --proxy=off \
+ 	  http://zapping.sourceforge.net/zvbi-0.3/networks.xml | \
+diff --git a/src/event.h b/src/event.h
+index 3089d0c..dc9fca0 100644
+--- a/src/event.h
++++ b/src/event.h
+@@ -25,7 +25,6 @@
+ #define EVENT_H
+ 
+ #include "bcd.h"
+-#include "pdc.h"
+ 
+ #ifndef VBI_DECODER
+ #define VBI_DECODER
+@@ -35,6 +34,7 @@ typedef struct vbi_decoder vbi_decoder;
+ /* Public */
+ 
+ #include <inttypes.h>
++#include <time.h>
+ 
+ /**
+  * @addtogroup Event Events
+@@ -654,13 +654,13 @@ extern void		vbi_reset_prog_info(vbi_program_info *pi);
+  */
+ #define	VBI_EVENT_NETWORK_ID	0x0100
+ /**
+- * A new local time has been received. ev.local_time points to a
+- * vbi_local_time structure with details.
++ * Reserved event value. Broadcast local-time decoding is unavailable
++ * in this build; registering this event fails.
+  */
+ #define VBI_EVENT_LOCAL_TIME	0x0400
+ /**
+- * A new Program ID (VPS or PDC) has been received. ev.prog_id points
+- * to a vbi_program_id structure with details.
++ * Reserved event value. Program-ID decoding is unavailable in this
++ * build; registering this event fails.
+  */
+ #define VBI_EVENT_PROG_ID	0x0800
+ /** @} */
+@@ -753,7 +753,6 @@ typedef struct vbi_event {
+                 vbi_aspect_ratio	aspect;
+ 		vbi_program_info *	prog_info;
+ 		vbi_local_time *	local_time;
+-		vbi_program_id *	prog_id;
+ 
+ 		/* Experimental. */
+ 		struct _vbi_event_cc608_page *		_cc608;
+diff --git a/src/packet.c b/src/packet.c
+index 848b44f..d965715 100644
+--- a/src/packet.c
++++ b/src/packet.c
+@@ -44,7 +44,7 @@
+ #include "vps.h"
+ #include "vbi.h"
+ #include "cache-priv.h"
+-#include "packet-830.h"
++#include "network.h"
+ 
+ #ifndef FPC
+ #  define FPC 0
+@@ -1177,9 +1177,11 @@ vbi_decode_vps(vbi_decoder *vbi, uint8_t *buf)
+ 		n->cni_vps = cni;
+ 		n->cycle = 1;
+ 
++#if 0 /* Program-ID service is excluded from this build. */
+ 		CLEAR (vbi->vps_pid);
+ 		/* May fail, leaving vbi->vps_pid unmodified. */
+ 		vbi_decode_vps_pdc (&vbi->vps_pid, buf);
++#endif
+ 	} else if (n->cycle == 1) {
+ 		unsigned int id;
+ 
+@@ -1208,6 +1210,7 @@ vbi_decode_vps(vbi_decoder *vbi, uint8_t *buf)
+ 
+ 		n->cycle = 2;
+ 
++#if 0
+ 		if (vbi->event_mask & VBI_EVENT_PROG_ID) {
+ 			vbi_program_id pid;
+ 			vbi_event e;
+@@ -1235,6 +1238,7 @@ vbi_decode_vps(vbi_decoder *vbi, uint8_t *buf)
+ 
+ 			vbi_send_event (vbi, &e);
+ 		}
++#endif
+ 	}
+ }
+ 
+@@ -2134,6 +2138,7 @@ parse_8_30(vbi_decoder *vbi, uint8_t *buffer, int packet)
+ 			return FALSE;
+ 	}
+ 
++#if 0 /* Broadcast local-time and program-ID services are excluded. */
+ 	if (designation < 2) {
+ 		/* 8/30 format 1 */
+ 
+@@ -2173,6 +2178,7 @@ parse_8_30(vbi_decoder *vbi, uint8_t *buffer, int packet)
+ 			vbi_send_event (vbi, &e);
+ 		}
+ 	}
++#endif
+ 
+ 	return TRUE;
+ }
+diff --git a/src/vbi.c b/src/vbi.c
+index e016b00..37e04d7 100644
+--- a/src/vbi.c
++++ b/src/vbi.c
+@@ -165,8 +165,6 @@ vbi_event_enable(vbi_decoder *vbi, int mask)
+ 			vbi->aspect_source = 0;
+ 		}
+ 	}
+-	if (activate & VBI_EVENT_PROG_ID)
+-		CLEAR (vbi->vps_pid);
+ 
+ 	vbi->event_mask = mask;
+ }
+@@ -191,6 +189,10 @@ vbi_event_handler_add(vbi_decoder *vbi, int event_mask,
+ 	struct event_handler *eh, **ehp;
+ 	int found = 0, mask = 0, was_locked;
+ 
++	/* This build omits program-ID and broadcast local-time decoding. */
++	if (event_mask & (VBI_EVENT_PROG_ID | VBI_EVENT_LOCAL_TIME))
++		return FALSE;
++
+ 	/* If was_locked we're a handler, no recursion. */
+ 	was_locked = pthread_mutex_trylock(&vbi->event_mutex);
+ 
+@@ -259,7 +261,9 @@ vbi_event_handler_remove(vbi_decoder *vbi, vbi_event_handler handler)
+  * @param user_data Pointer passed to the handler.
+  * 
+  * Registers a new event handler. @a event_mask can be any 'or' of VBI_EVENT_
+- * symbols, -1 for all events and 0 for none. When the @a handler with
++ * symbols except PROG_ID and LOCAL_TIME, and 0 for none. Masks requesting
++ * either unavailable service (including -1) fail without changes.
++ * When the @a handler with
+  * @a user_data is already registered, its event_mask will be changed. Any
+  * number of handlers can be registered, also different handlers for the same
+  * event which will be called in registration order.
+@@ -281,6 +285,10 @@ vbi_event_handler_register(vbi_decoder *vbi, int event_mask,
+ 	struct event_handler *eh, **ehp;
+ 	int found = 0, mask = 0, was_locked;
+ 
++	/* Reject unavailable services before changing existing handlers. */
++	if (event_mask & (VBI_EVENT_PROG_ID | VBI_EVENT_LOCAL_TIME))
++		return FALSE;
++
+ 	/* If was_locked we're a handler, no recursion. */
+ 	was_locked = pthread_mutex_trylock(&vbi->event_mutex);
+ 
+diff --git a/src/vbi.h b/src/vbi.h
+index 1ee959f..f2fccc4 100644
+--- a/src/vbi.h
++++ b/src/vbi.h
+@@ -36,7 +36,6 @@
+ #include "cache-priv.h"
+ #include "trigger.h"
+ #include "pfc_demux.h"
+-#include "pdc.h"
+ 
+ struct event_handler {
+ 	struct event_handler *	next;
+@@ -83,7 +82,6 @@ struct vbi_decoder {
+ 	int			wss_rep_ct;
+ 	double			wss_time;
+ 
+-	vbi_program_id		vps_pid;
+ };
+ 
+ #ifndef VBI_DECODER
+diff --git a/src/vps.c b/src/vps.c
+index 5cdceb6..80c792e 100644
+--- a/src/vps.c
++++ b/src/vps.c
+@@ -79,6 +79,7 @@ vbi_decode_vps_cni		(unsigned int *		cni,
+ 	return TRUE;
+ }
+ 
++#if 0 /* Program-ID APIs are excluded from this build. */
+ /**
+  * @param pid PDC program ID will be stored here.
+  * @param buffer VPS packet as defined for @c VBI_SLICED_VPS,
+@@ -176,6 +177,7 @@ vbi_decode_dvb_pdc_descriptor	(vbi_program_id *	pid,
+ 
+ 	return TRUE;
+ }
++#endif
+ 
+ /**
+  * @param buffer VPS packet as defined for @c VBI_SLICED_VPS,
+@@ -221,6 +223,7 @@ vbi_encode_vps_cni		(uint8_t		buffer[13],
+  *
+  * @since 0.2.34
+  */
++#if 0
+ vbi_bool
+ vbi_encode_vps_pdc		(uint8_t		buffer[13],
+ 				 const vbi_program_id *	pid)
+@@ -304,6 +307,8 @@ vbi_encode_dvb_pdc_descriptor	(uint8_t		buffer[5],
+ 	return TRUE;
+ }
+ 
++#endif
++
+ /*
+ Local variables:
+ c-set-style: K&R
+diff --git a/src/vps.h b/src/vps.h
+index 80b88d2..5231f91 100644
+--- a/src/vps.h
++++ b/src/vps.h
+@@ -26,7 +26,6 @@
+ 
+ #include <inttypes.h>		/* uint8_t */
+ #include "macros.h"
+-#include "pdc.h"		/* vbi_program_id */
+ 
+ VBI_BEGIN_DECLS
+ 
+@@ -47,6 +46,7 @@ extern vbi_bool
+ vbi_encode_vps_cni		(uint8_t		buffer[13],
+ 				 unsigned int		cni)
+   _vbi_nonnull ((1));
++#if 0 /* Program-ID APIs are excluded from this build. */
+ extern vbi_bool
+ vbi_decode_vps_pdc		(vbi_program_id *	pid,
+ 				 const uint8_t		buffer[13])
+@@ -77,6 +77,7 @@ vbi_encode_dvb_pdc_descriptor	(uint8_t		buffer[5],
+   ;
+ 
+ /** @} */
++#endif
+ 
+ /* Private */
+ 

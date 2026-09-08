@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('chromaprint', 'openal')][string]$Component,
+    [Parameter(Mandatory = $true)][ValidateSet('chromaprint', 'openal', 'zvbi')][string]$Component,
     [Parameter(Mandatory = $true)][string]$PackageArchive,
     [Parameter(Mandatory = $true)][string]$Recipe,
     [Parameter(Mandatory = $true)][string]$SourceArchive,

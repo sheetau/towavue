@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "scope": "Provenance and source-scope evidence for the unapproved native ZVBI DLL. GPL-marked pdc/packet-830 implementations require resolution before LGPL distribution. No permission grant, patched build, feature removal or publication is implied.",
+  "package": {
+    "name": "mingw-w64-x86_64-zvbi",
+    "version": "0.2.45-1",
+    "bytes": 328541,
+    "sha256": "2757fe0be47a7ec1e9db48b32fd3752eabdf22d753c1879864dfed33022eeffd"
+  },
+  "recipe": {
+    "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-zvbi/PKGBUILD",
+    "required_options": ["--disable-examples", "--disable-tests", "--enable-static", "--enable-shared"],
+    "bytes": 1758,
+    "sha256": "94cc0edc934b571b33168a95a748396fd3e88f2072831ed81a41d1b20a04d1f6"
+  },
+  "source": {
+    "url": "git+https://github.com/zapping-vbi/zvbi.git#tag=v0.2.45",
+    "tag_object": "45138a87f86b683f9c3611793752ac08795d836f",
+    "commit": "d3a5ee9f2b047bf16cd1ee5ccf6ec05ee75409d0",
+    "archive_command": "git -c core.autocrlf=false -c core.abbrev=no archive --format tar v0.2.45",
+    "name": "zvbi-0.2.45-git.tar",
+    "prefix": "",
+    "bytes": 4239360,
+    "sha256": "3dc234d716d1c51d53ae9b6b027775b3a6c9ced974bc1b246d749b44cca7d964"
+  },
+  "runtime": {
+    "name": "libzvbi-0.dll",
+    "bytes": 450046,
+    "sha256": "fa1b722aa22739a9b147f7c918a981c51fc48ebd1269b192e412b6f346f816cc"
+  },
+  "patches": [
+    {
+      "name": "0001-zvbi-no-undefined.patch",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-zvbi/0001-zvbi-no-undefined.patch",
+      "bytes": 371,
+      "sha256": "c29b9fb68e48dee88b6a881478a51ce6b7277f5b3c2fedbfab71cd0270c66e47"
+    }
+  ],
+  "package_metadata": [
+    {
+      "name": ".BUILDINFO",
+      "bytes": 7415,
+      "sha256": "1107ca2276936d89ef9d44a135a6011bfd6c4ceda04ef70029f92cb4efd7cd98"
+    },
+    {
+      "name": ".PKGINFO",
+      "bytes": 754,
+      "sha256": "bb142ec96c37e734567cfc6f5754b6687e51780ac3f525e8f56a91f1b1516016"
+    }
+  ],
+  "source_notices": [
+    {
+      "name": "COPYING.md",
+      "bytes": 78695,
+      "sha256": "6d679539253897582d38fcd1eabfa670c01c0ece73d8cd3dc97869fcf723f106"
+    },
+    {
+      "name": "NEWS",
+      "bytes": 17059,
+      "sha256": "2603f3fd71d839d0348fa514112e40878f699d6469f671dac7b689c38588f03f"
+    },
+    {
+      "name": "README.md",
+      "bytes": 6398,
+      "sha256": "c99ae6909e8e0f12e5b83b1eade93ff614b85d02a83a1ea5588f6be1e0ec12a6"
+    },
+    {
+      "name": "src/Makefile.am",
+      "bytes": 9256,
+      "sha256": "85227768bcefde22062795c6d63cc28626d7f926fefd7382025f6aa3f8b0afd1"
+    },
+    {
+      "name": "src/pdc.c",
+      "bytes": 38435,
+      "sha256": "6dfc006c78e625f68a0924526d73cc39e2d38de88f4076bf668f7ed21f65d778"
+    },
+    {
+      "name": "src/pdc.h",
+      "bytes": 12729,
+      "sha256": "a59cee8cf8a725530703e01dffdb1c0396c24875ad2b74d63f5e3c8f101a8252"
+    },
+    {
+      "name": "src/packet-830.c",
+      "bytes": 8239,
+      "sha256": "8ad0a75af222067e7d3257ebf56aa28e3f56021d9266e1a952fcfbc7bde50ad4"
+    },
+    {
+      "name": "src/packet-830.h",
+      "bytes": 1930,
+      "sha256": "d2f828ad0c8a58bea7cec804e23530a5ed8f5e5b06fdc88b9801d938c737b6a7"
+    },
+    {
+      "name": "src/exp-vtx.c",
+      "bytes": 4277,
+      "sha256": "7d567a83c818fe01443c8b03b457bf9867d839d79c56ec4e961996d7909a2aaf"
+    },
+    {
+      "name": "src/packet.c",
+      "bytes": 65128,
+      "sha256": "5b88d695fa5f77a6f119efa7bec4d34c4e718b79ee38545015fbd6f0e06ff314"
+    }
+  ]
+}

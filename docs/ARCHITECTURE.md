@@ -517,3 +517,5 @@ M4ではName、Date modified、Date created、Size、Typeの昇順・降順、�
 FFmpeg binaryやsource archiveは、再現可能なbuild・配布工程を定義するmilestoneまでGitへ入れない。
 
 2026-09-08、固定開発buildにはChromaprint経由のGPL FFTW静的リンクがあることを確認した。このbinaryを上記LGPL構成の配布候補から除外し、開発参照用として保持する。[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)に、機能を削らず固定sourceのKissFFT backendを選ぶ修正案と再build gateを記録した。FFmpegの自己申告licenseだけで承認せず、新binaryの実link入力と全体動作を確認する。本体のlicense変更は行わない。
+
+同日、ownerはZVBIの未使用の番組制御・放送時刻APIを含めない限定buildの検証を許可した。FFmpegのTeletext字幕デコードは維持し、codecの無効化、成功を装うstub、元license表記の変更は行わない。これは検証の許可であり、汎用ZVBIとの全API互換や配布採用の決定ではない。対象source/headerの除外、字幕の実出力比較、新headerでのFFmpeg全体再buildと最終候補の品質gateを満たすまで既存DLLを置き換えない。根拠と検証範囲は[NATIVE_RUNTIME_AUDIT.md](NATIVE_RUNTIME_AUDIT.md)へ記録する。

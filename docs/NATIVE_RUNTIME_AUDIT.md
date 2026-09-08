@@ -40,6 +40,8 @@ getterは探索を再実行せず、特定済みの72 URL/hashだけを利用す
 
 ## 残る材料と判断
 
+2026-09-08追記: 下記の履歴中の「次」は当時の残項目であり、後続の完了記録を優先する。libplaceboの外部header／生成器4入力を追加確認した。現在の残作業は[NATIVE_MATERIAL_PLAN.md](NATIVE_MATERIAL_PLAN.md)も参照。
+
 全72 ownerと一覧外のstatic／header等の残作業は[NATIVE_MATERIAL_PLAN.md](NATIVE_MATERIAL_PLAN.md)へ整理した。対応sourceを優先するものとnotice／組込み範囲を先に調べるものを分け、permissive library全件の単体再buildを一律の条件にはしない。分類・材料取得を配布承認には用いない。
 
 15 packageにはこのlicense directory内の通常fileがない。Chromaprint／OpenALは別途sourceから補完済み。残り13件のGMP、LAME、libass、libssh、libtheora、libvorbis、libvpx、LZ4、opencore-amr、Snappy、TwoLAME、ZeroMQ、zimgについても、元recipeが指定するsource archiveとpatch/templateを取得・照合した。directoryが空というだけでlicense表示が不要とは扱わない。
@@ -269,6 +271,18 @@ shadercの元`.BUILDINFO`が記録するGCC／GCC-libs `16.1.0-5`を、別版の
 ```
 
 [固定manifest](native-mingw-inputs.json)とoffline collectorは30入力、consumer／toolchain／recipe／source commit／header対応を検査する。最終kitは2全source archives、6 recipes、4 patch copies、GNU本文、88選択文書とREADME／INPUTSの103 files／281838430 bytes。compiler／DLL／static library binaryはコピーしない。全hashが試験outputと一致し、別cwd／反復、30欠落・改変pairs、11 mapping不整合、展開後checksum失敗時のcompletion marker保護、入力／既存output保持が通過した。format／全target Clippy／270 testsも通過し、3 live ignoresは未実行。実行exeと候補94 filesは不変で、最終notice・source取得案内、残る個別scope、Setup.exeと対象Windowsのgateは別に維持する。
+
+### libplaceboのheader／生成器入力（2026-09-08 22:44 JST）
+
+元libplacebo 7.360.1-2の`.BUILDINFO`はfast_float 8.2.10-1、xxHash 0.8.3-2、python-glad 2.0.8-3、Vulkan-Headers 1~1.4.350.1-1を記録する。4 packageの署名を既存MSYS2 keyで検証し、当時のrecipe hashを照合した。gladとVulkanは現在のrecipeと異なり、元buildに一致するrevisionを使う。4 source archivesは元recipeのchecksumと一致し、138／446／99／102 entriesは安全な通常file／directoryのみだった。source署名検証やpackage installは行っていない。
+
+元package内のfast_float 9 headers、glad 74 source／template／data files、Vulkan 49 headers、xxHashの実headerを全byteで元sourceと照合し、一致した。libplacebo archiveの空の`3rdparty/`をこれらの代用としない。`src/hash.h`は`XXH_INLINE_ALL`、packageの`config.h`は`PL_HAVE_XXHASH`を有効にするため、xxHash DLLの不在をcode不在とは扱わない。headerの2012–2023表示とroot LICENSEの2012–2021表示を両方保持する。
+
+`src/convert.cc`はheaderがあればfast_floatをincludeするが、変換自体は`std::from_chars`を優先し、利用できない型だけfallbackする。取得・include可能性を全fallback実装の最終link証明にしない。MIT／Apache／Boostの元選択表示とGoogle Wuffs creditを残し、Little CMSの同名GPL pluginとは区別する。
+
+OpenGL／Vulkanはpackageのconfigで有効。glad生成commandは`--reproducible --merge --api=gl:core,gles2,egl`とheader-only／mxを指定する。元のGL／EGL XML、Khronos platform header、C templatesを保持した。glad本体のMIT表示に対し、生成templateは`(WTFPL OR CC0-1.0) AND Apache-2.0`を示す。`eglplatform.h`の実Apache表示とroot紹介文の差もそのまま残す。[glad原本](https://github.com/Dav1dde/glad/blob/v2.0.8/LICENSE)。旧Vulkan-Headersの`.reuse/dep5`、MIT-only `parse_dependency.py`と原文も保持し、Loader用357.0を代用しない。これは元生成入力の確認であり、当時の生成header再現やDLL全体のbit一致ではない。
+
+[9-input shader kit](native-shader-inputs.json)へ追加し、元source／recipe／package表示／選択原文を181 files、36724662 bytesへまとめた。既存5-input kitのREADME／INPUTS以外の87 filesは不変。新しいruntime ownerやDLLは追加しない。残る個別native表示、最終source取得案内、候補品質とinstaller／対象Windowsのgateは維持する。
 
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 

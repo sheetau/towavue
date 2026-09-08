@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "scope": "Fixed static/header source materials for shaderc and Vulkan Loader, not additional runtime DLL owners, a linked SBOM, historical rebuild, final notices or distribution approval.",
+  "scope": "Fixed static/header and generator source materials for shaderc, Vulkan Loader and libplacebo, not additional runtime DLL owners, a linked SBOM, historical rebuild, final notices or distribution approval.",
   "observed_on": "2026-09-08",
   "package_signature_verification": {
     "key_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57",
-    "scope": "All five original package detached signatures verified locally using the existing MSYS2 keyring. The offline collector rechecks fixed input hashes, not signatures. Original source archive signatures were not verified."
+    "scope": "All nine original package detached signatures verified locally using the existing MSYS2 keyring. The offline collector rechecks fixed input hashes, not signatures. Original source archive signatures were not verified."
   },
   "limitations": [
     "GCC and GCC-libs 16.1.0-5 are recorded build inputs; existing GCC 16.2 runtime materials do not replace their static/compiler scope.",
@@ -13,6 +13,578 @@
     "Source-only tools, tests and documentation notices are retained without automatically assigning all of them to the runtime DLL."
   ],
   "components": [
+    {
+      "name": "fast-float",
+      "package": "mingw-w64-x86_64-fast_float",
+      "version": "8.2.10-1",
+      "consumer": "mingw-w64-x86_64-libplacebo",
+      "archive_prefix": "fast_float-8.2.10/",
+      "archive_entries": 138,
+      "internal_links": 0,
+      "package_archive": {
+        "name": "mingw-w64-x86_64-fast_float-8.2.10-1-any.pkg.tar.zst",
+        "bytes": 53853,
+        "sha256": "7d40077bcb4f71845137beeea002b510268261bddbb5b10bc496b50255b3e9bf",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-fast_float-8.2.10-1-any.pkg.tar.zst"
+      },
+      "package_signature": {
+        "name": "mingw-w64-x86_64-fast_float-8.2.10-1-any.pkg.tar.zst.sig",
+        "bytes": 566,
+        "sha256": "12126f9c14fe73aedf10c3dca455653c3de009a165c750db748f5d1167f0eac2",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-fast_float-8.2.10-1-any.pkg.tar.zst.sig"
+      },
+      "recipe": {
+        "name": "fast_float.PKGBUILD",
+        "bytes": 1652,
+        "sha256": "4f0f23d63008354436937ab6cae5d29d03a70379b2e989f7bec408b6e29bbc58",
+        "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-fast_float/PKGBUILD"
+      },
+      "source": {
+        "name": "fast_float-8.2.10.tar.gz",
+        "bytes": 140070,
+        "sha256": "76f958dd97b1cf4d8862d1f0986a47d4bdfa8845252bae15ef0f40de3b95961f",
+        "url": "https://github.com/fastfloat/fast_float/archive/v8.2.10/fast_float-8.2.10.tar.gz"
+      },
+      "patches": [],
+      "package_documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 6741,
+          "sha256": "5939d9432f06e7302975dd9c2761d6ad9856cc46874ba518a15901f7cbc3b825"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 588,
+          "sha256": "96fe8f38ef39c102b4b3e645d9a47e5f21b40723dbf3c681c94d447e42974dbc"
+        },
+        {
+          "name": "mingw64/share/licenses/fast_float/LICENSE-APACHE",
+          "bytes": 10767,
+          "sha256": "097a889aa954d04e088b790b10a4014d6189561d0a6013935a73ce3d4ddaaf06"
+        },
+        {
+          "name": "mingw64/share/licenses/fast_float/LICENSE-BOOST",
+          "bytes": 1337,
+          "sha256": "8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b"
+        },
+        {
+          "name": "mingw64/share/licenses/fast_float/LICENSE-MIT",
+          "bytes": 1079,
+          "sha256": "e562f3f974ced7e69dd1db77b820b36bcf8f30377f1aa105723fba449c53c4e6"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "fast_float-8.2.10/README.md",
+          "bytes": 23377,
+          "sha256": "45e723f9b6ad43bfade4fab7564bb9e54d1cdc974253863149715f35f97253c9"
+        },
+        {
+          "name": "fast_float-8.2.10/LICENSE-APACHE",
+          "bytes": 10767,
+          "sha256": "097a889aa954d04e088b790b10a4014d6189561d0a6013935a73ce3d4ddaaf06"
+        },
+        {
+          "name": "fast_float-8.2.10/LICENSE-MIT",
+          "bytes": 1079,
+          "sha256": "e562f3f974ced7e69dd1db77b820b36bcf8f30377f1aa105723fba449c53c4e6"
+        },
+        {
+          "name": "fast_float-8.2.10/LICENSE-BOOST",
+          "bytes": 1337,
+          "sha256": "8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b"
+        },
+        {
+          "name": "fast_float-8.2.10/CMakeLists.txt",
+          "bytes": 3508,
+          "sha256": "aa1e78226c519554232538d7e2f0fbd1d30db85b3eba7e205bcbbb846e349b49"
+        },
+        {
+          "name": "fast_float-8.2.10/include/fast_float/ascii_number.h",
+          "bytes": 27659,
+          "sha256": "10c22203dcbf1da7b75d5c1d7ee545ed7ff0a930aa454e5737faaf4059322ae7"
+        },
+        {
+          "name": "fast_float-8.2.10/include/fast_float/bigint.h",
+          "bytes": 18631,
+          "sha256": "1ed0b598da0b522613399897ddc748792dee6f804debf9fee131359252f80763"
+        },
+        {
+          "name": "fast_float-8.2.10/include/fast_float/constexpr_feature_detect.h",
+          "bytes": 1629,
+          "sha256": "2dd2dc5f98a8f1a78813e62d47e82a19ebe42af726356723d60f6eb387c6dd38"
+        },
+        {
+          "name": "fast_float-8.2.10/include/fast_float/decimal_to_binary.h",
+          "bytes": 8333,
+          "sha256": "82fad8134c272a3f1bc545b3ef367a2e9e3c7464b9dcef75640c37e325dfb973"
+        },
+        {
+          "name": "fast_float-8.2.10/include/fast_float/digit_comparison.h",
+          "bytes": 15545,
+          "sha256": "0e2e0a4aad20c0a3a647d3d5adea57ee7a843750ea989594b3ca801bd66f8264"
+        },
+        {
+          "name": "fast_float-8.2.10/include/fast_float/fast_float.h",
+          "bytes": 3932,
+          "sha256": "fec4c0dc177fb3986a9007824c81fb93338ef83a6dba23325d430174a8686ce1"
+        },
+        {
+          "name": "fast_float-8.2.10/include/fast_float/fast_table.h",
+          "bytes": 31278,
+          "sha256": "c18e0a0a2513215730557cc1dd53541cacd72855ddc0287934e78b364f989edb"
+        },
+        {
+          "name": "fast_float-8.2.10/include/fast_float/float_common.h",
+          "bytes": 46110,
+          "sha256": "59649a34137bf1f3094661a3b99688675d10dd5ea934c684d8ba85167b36e111"
+        },
+        {
+          "name": "fast_float-8.2.10/include/fast_float/parse_number.h",
+          "bytes": 20523,
+          "sha256": "cc7e47fc6e0d25926eaac14cb741bde63cf764b25bee163363d0f11ada55d4c7"
+        }
+      ]
+    },
+    {
+      "name": "glad",
+      "package": "mingw-w64-x86_64-python-glad",
+      "version": "2.0.8-3",
+      "consumer": "mingw-w64-x86_64-libplacebo",
+      "archive_prefix": "glad-2.0.8/",
+      "archive_entries": 446,
+      "internal_links": 0,
+      "package_archive": {
+        "name": "mingw-w64-x86_64-python-glad-2.0.8-3-any.pkg.tar.zst",
+        "bytes": 522207,
+        "sha256": "523d50938413b746811cee37bd03cf26797b606be5cbcb090267b0b95188320e",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-python-glad-2.0.8-3-any.pkg.tar.zst"
+      },
+      "package_signature": {
+        "name": "mingw-w64-x86_64-python-glad-2.0.8-3-any.pkg.tar.zst.sig",
+        "bytes": 566,
+        "sha256": "9833cc3eb4990f06a0e6fa96aa56c4dc208955c7dbc79479053ba6e86785951f",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-python-glad-2.0.8-3-any.pkg.tar.zst.sig"
+      },
+      "recipe": {
+        "name": "python-glad-historical.PKGBUILD",
+        "bytes": 1459,
+        "sha256": "0ec4257f45282c5b5a955155a1259526e062e50200c671d209ff79675db2ff35",
+        "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/961456e64047cfd5a1f7ebd37344f15eaa2b96a0/mingw-w64-python-glad/PKGBUILD"
+      },
+      "source": {
+        "name": "glad-2.0.8.tar.gz",
+        "bytes": 645593,
+        "sha256": "44f06f9195427c7017f5028d0894f57eb216b0a8f7c4eda7ce883732aeb2d0fc",
+        "url": "https://github.com/Dav1dde/glad/archive/v2.0.8/glad-2.0.8.tar.gz"
+      },
+      "patches": [],
+      "package_documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 5737,
+          "sha256": "c83cef76510df69bc78f6d516dd7f292e1301f059cc54c436b2df9ff883934c8"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 621,
+          "sha256": "4dbfe77a83f7ab9f2d012b1dc9d31c563755b010d34be00fb10e964970d8c1ec"
+        },
+        {
+          "name": "mingw64/share/licenses/glad/LICENSE",
+          "bytes": 3014,
+          "sha256": "cbb325cd4ac5bd06717ffa34a322b984f9d285e4c67c8ca1b7380d6ef08c2a77"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "glad-2.0.8/LICENSE",
+          "bytes": 3014,
+          "sha256": "cbb325cd4ac5bd06717ffa34a322b984f9d285e4c67c8ca1b7380d6ef08c2a77"
+        },
+        {
+          "name": "glad-2.0.8/README.md",
+          "bytes": 2416,
+          "sha256": "417d813569e93c53e6f35283a6396bfa3325dedf6de72801f375bd90e834ae80"
+        },
+        {
+          "name": "glad-2.0.8/glad/__main__.py",
+          "bytes": 6715,
+          "sha256": "db827456ac89f20e943bd55421e1469f365dfeff69a17d59fefe94c4b3fd80c8"
+        },
+        {
+          "name": "glad-2.0.8/glad/files/gl.xml",
+          "bytes": 2757083,
+          "sha256": "5f6729a142ec29f58967381b9efd4bd41ba90749a0f8bffb52bf457d54263461"
+        },
+        {
+          "name": "glad-2.0.8/glad/files/egl.xml",
+          "bytes": 194208,
+          "sha256": "cf6e45572e71bcc0fedf0db1b900445b0b03af71b18e3e25866d1ea0e8ce9a1d"
+        },
+        {
+          "name": "glad-2.0.8/glad/files/eglplatform.h",
+          "bytes": 5239,
+          "sha256": "25b5391655effcf363a38fa00c3154f356a3eab3d35dc067847875513cf1e441"
+        },
+        {
+          "name": "glad-2.0.8/glad/files/khrplatform.h",
+          "bytes": 11131,
+          "sha256": "7b1e01aaa7ad8f6fc34b5c7bdf79ebf5189bb09e2c4d2e79fc5d350623d11e83"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/__init__.py",
+          "bytes": 19390,
+          "sha256": "2c42003530568806ce839f6a5859974f374505460355739075067af9b333ef66"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/base_template.c",
+          "bytes": 6534,
+          "sha256": "389eb6435cf513a79cb4d6050b315072740e79996ea8e6fcd745e364debb49fe"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/base_template.h",
+          "bytes": 3763,
+          "sha256": "49563a140d8ca243e0de2fe0f8086d936a3a7f83433b2202df8ad93628f56c02"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/egl.c",
+          "bytes": 3633,
+          "sha256": "f39d712f0b4f359407fe61b87c97a0a59ef46ac4ef250d10bc758728db00583e"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/egl.h",
+          "bytes": 321,
+          "sha256": "d94f095c691133671634585142f76592940c0284004ea0481463dcb9b031cc3e"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/gl.c",
+          "bytes": 7293,
+          "sha256": "2246b0d81fb6f7a666d6d7cb50b86f228d1e50eaabe0ae940a7220a3eafa9093"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/gl.h",
+          "bytes": 1545,
+          "sha256": "4f7956fc5469fc6df837853c2656accce63c9ca1c278f642658737f58552f97f"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/glx.c",
+          "bytes": 3017,
+          "sha256": "44dc8d2bb57795f88544ee1c6b1c6802a532ca546aaf0b63cc4d478edad61f27"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/glx.h",
+          "bytes": 568,
+          "sha256": "6da28829c770ef0f6138b44ee3eef2cd7bd298f71cc5c8f149ecb7468def9f38"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/header_only.h",
+          "bytes": 196,
+          "sha256": "84c4e8969a972011692d697366ac92faa528ebfb4908905d7809d96c51765ec5"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/impl_util.c",
+          "bytes": 190,
+          "sha256": "249fa26c450399d3885891b4898257820f128d2b87d78e07b7629e2c25faa7c9"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/platform.h",
+          "bytes": 3039,
+          "sha256": "9938de284ac8c2020dae844392bc524c71ab8d4ba1bea20b72fbba6755be4c0f"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/template_utils.h",
+          "bytes": 3813,
+          "sha256": "90983dbebf5a2610749fc9c06017004c49bb10008de479546424ec4ab49ed070"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/vk.c",
+          "bytes": 8515,
+          "sha256": "ae1d66bb6c84590822a39482577b0972fcdc630fae5ed21d56e1f9c55a0be36a"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/vk.h",
+          "bytes": 992,
+          "sha256": "9c5921c03f781167397aa564706289925a6aad4a4b02cd6141808908a17cdf65"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/wgl.c",
+          "bytes": 3364,
+          "sha256": "a9e55b698f5b2a51385524ea5653263e12bcf5fd5835239026a5479aa42d9856"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/wgl.h",
+          "bytes": 731,
+          "sha256": "af65b6f3048568b989acfec55caf5f3cab155b942774a7a2a4a5e354e1ad5eb1"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/egl.c",
+          "bytes": 2708,
+          "sha256": "1c1b50c286a47d14850daa7db6f1856f9bdb8f0e67b8e1a58afabe786e0a0f56"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/egl.h",
+          "bytes": 171,
+          "sha256": "5810a4a75b9a9d300c73663e77752f77dfb92de8575a12b1a5b2ad53ae051a21"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/gl.c",
+          "bytes": 3872,
+          "sha256": "2454839dcf480e73a9958c093f4c8c2a2e4b9aace965cbe94ddac18574429318"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/gl.h",
+          "bytes": 436,
+          "sha256": "71bff1fcaa637b26cbe318fb1a3eb8f195f8bfa28e1945de28b30199a9ae834a"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/gles1.c",
+          "bytes": 3479,
+          "sha256": "44f48564ab92c77c8ddb41e64cd916e876251c9c4f7703eaeb67a01ea90794ed"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/gles1.h",
+          "bytes": 591,
+          "sha256": "95fa8196c51767f7ac1d7013a3c821c386cfcca12bf6290c1aea3137a018d6c2"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/gles2.c",
+          "bytes": 4725,
+          "sha256": "1be1a9db2015d92d65c90916b1fa62aa61fd649b1fb98bf7be9f54633805128f"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/gles2.h",
+          "bytes": 592,
+          "sha256": "6759e23e43fa9918515d08808aee80fd0613952674c9d1e990e48f32b4a22509"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/glsc2.c",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/glsc2.h",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/glx.c",
+          "bytes": 2053,
+          "sha256": "046d4001962f82c4a242dea7ea989d7977d2db1ef9473eb21178d7759ae074ab"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/glx.h",
+          "bytes": 181,
+          "sha256": "eafcac83b6e657c38f28e608b21220ba785086e9b45918ba0bdf2c304ed9fde1"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/library.c",
+          "bytes": 1540,
+          "sha256": "51e1a24b923e33fe7a2f4b9bfe77d16f6d129a2aca0a6007b4d4d612c96c1993"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/vulkan.c",
+          "bytes": 5111,
+          "sha256": "e300cdaf2fba9833a58958b446c2806c7d120896e17c62e30320116813308aa8"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/vulkan.h",
+          "bytes": 755,
+          "sha256": "cbd01c14f6c8d4303492d8e9ae8871a5d44ffada3b2fdc909200be57eebc60d2"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/wgl.c",
+          "bytes": 537,
+          "sha256": "dfbc6eb072d1583869f4e07d7f937e8ede55d79fc6a4fc4e6dbb577c32d87b34"
+        },
+        {
+          "name": "glad-2.0.8/glad/generator/c/templates/loader/wgl.h",
+          "bytes": 113,
+          "sha256": "10719f6cb9465c64e138fe4bc942a504d98332b957c6d1e2c8b1c2e5660b789f"
+        }
+      ]
+    },
+    {
+      "name": "xxhash",
+      "package": "mingw-w64-x86_64-xxhash",
+      "version": "0.8.3-2",
+      "consumer": "mingw-w64-x86_64-libplacebo",
+      "archive_prefix": "xxHash-0.8.3/",
+      "archive_entries": 99,
+      "internal_links": 0,
+      "package_archive": {
+        "name": "mingw-w64-x86_64-xxhash-0.8.3-2-any.pkg.tar.zst",
+        "bytes": 151014,
+        "sha256": "4d9c5b6ee7a8156128731b2204c4e718b116e49de13fc798706338094abfbadd",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-xxhash-0.8.3-2-any.pkg.tar.zst"
+      },
+      "package_signature": {
+        "name": "mingw-w64-x86_64-xxhash-0.8.3-2-any.pkg.tar.zst.sig",
+        "bytes": 566,
+        "sha256": "0d76d6b5ca7d9cbf1ca2a703961bd1a850311909fb3d7447dce946f3f4009002",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-xxhash-0.8.3-2-any.pkg.tar.zst.sig"
+      },
+      "recipe": {
+        "name": "xxhash.PKGBUILD",
+        "bytes": 2157,
+        "sha256": "07b16616eee140339e68df567190cdec4ab01aba5606c92db3ffc40a780167de",
+        "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-xxhash/PKGBUILD"
+      },
+      "source": {
+        "name": "xxhash-0.8.3.tar.gz",
+        "bytes": 1147630,
+        "sha256": "aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80",
+        "url": "https://github.com/Cyan4973/xxHash/archive/v0.8.3/xxhash-0.8.3.tar.gz"
+      },
+      "patches": [],
+      "package_documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 6732,
+          "sha256": "97391db4bff399adfdd5f9f1e49dac13f38e1e2504014356bf8c457b0cc4e617"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 523,
+          "sha256": "4d588416433af1424ee37d18347a97a0d226ee690f93382b3af451c2c0cdf174"
+        },
+        {
+          "name": "mingw64/share/licenses/xxhash/LICENSE",
+          "bytes": 1389,
+          "sha256": "6ffedbc0f7878612d2b23589f1ff2ab15633e1df7963a5d9fc750ec5500c7e7a"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "xxHash-0.8.3/LICENSE",
+          "bytes": 1389,
+          "sha256": "6ffedbc0f7878612d2b23589f1ff2ab15633e1df7963a5d9fc750ec5500c7e7a"
+        },
+        {
+          "name": "xxHash-0.8.3/README.md",
+          "bytes": 17299,
+          "sha256": "750a69246094fb9db7fe857cc81d1e9a95e30e93b0d534e461c1c762061081f1"
+        },
+        {
+          "name": "xxHash-0.8.3/xxhash.h",
+          "bytes": 268319,
+          "sha256": "17973c0dc49d9854ca26caa191f0e12f7a424b68858d9a78de3860d959d85e4b"
+        },
+        {
+          "name": "xxHash-0.8.3/cmake_unofficial/CMakeLists.txt",
+          "bytes": 7737,
+          "sha256": "f77792382a0cef2ed1746e702a1494a721487a1f132b568bd4c448fe80244b62"
+        }
+      ]
+    },
+    {
+      "name": "vulkan-headers-350",
+      "package": "mingw-w64-x86_64-vulkan-headers",
+      "version": "1~1.4.350.1-1",
+      "consumer": "mingw-w64-x86_64-libplacebo",
+      "archive_prefix": "Vulkan-Headers-vulkan-sdk-1.4.350.1/",
+      "archive_entries": 102,
+      "internal_links": 0,
+      "package_archive": {
+        "name": "mingw-w64-x86_64-vulkan-headers-1~1.4.350.1-1-any.pkg.tar.zst",
+        "bytes": 1730340,
+        "sha256": "3b67845a79a170905e3ffaa59d84c1f85edd75213a814e3f906eb68277f37993",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-vulkan-headers-1~1.4.350.1-1-any.pkg.tar.zst"
+      },
+      "package_signature": {
+        "name": "mingw-w64-x86_64-vulkan-headers-1~1.4.350.1-1-any.pkg.tar.zst.sig",
+        "bytes": 566,
+        "sha256": "4b174ee61ef4ca2af93333adc41846cb4e600bd35ce159d099f0e202647b49f2",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-vulkan-headers-1~1.4.350.1-1-any.pkg.tar.zst.sig"
+      },
+      "recipe": {
+        "name": "vulkan-headers-350.PKGBUILD",
+        "bytes": 1972,
+        "sha256": "6db7c084ab2f087511c142801c36bc9dc49c34ad38a76ab7b8606423d9bac4f8",
+        "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/554e74ffd271d50c30d7ec1054ae685b1e666736/mingw-w64-vulkan-headers/PKGBUILD"
+      },
+      "source": {
+        "name": "Vulkan-Headers-1.4.350.1.tar.gz",
+        "bytes": 3271464,
+        "sha256": "6d1bb65e49520344cc0a48af3dc02e993781efff14c7ebdcb8ae9fa23ddf7e83",
+        "url": "https://github.com/KhronosGroup/Vulkan-Headers/archive/vulkan-sdk-1.4.350.1/Vulkan-Headers-1.4.350.1.tar.gz"
+      },
+      "patches": [],
+      "package_documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 6754,
+          "sha256": "783afd1e1f2e9670a97f0a24bb7dfbb6dffd4a7751ea2a811981f8a3186d3561"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 546,
+          "sha256": "d041d5218f09288ad290ac8d8c2b482cf78702cb919f2dd981ea330eeb25d485"
+        },
+        {
+          "name": "mingw64/share/licenses/vulkan-headers/LICENSE",
+          "bytes": 458,
+          "sha256": "ac24e5ea920e4318e4d02c4086ae51f53cfb03feed06c18df1019e7ada1ec7bc"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.350.1/LICENSE.md",
+          "bytes": 458,
+          "sha256": "ac24e5ea920e4318e4d02c4086ae51f53cfb03feed06c18df1019e7ada1ec7bc"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.350.1/LICENSES/Apache-2.0.txt",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.350.1/LICENSES/MIT.txt",
+          "bytes": 1084,
+          "sha256": "1ca3502222d967f3be5751c55f6b7ee735b5383909c3b501495f54b216dbf227"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.350.1/.reuse/dep5",
+          "bytes": 509,
+          "sha256": "cdf8c8274de23c2fd0eb05c8afdaa51b0ba2fe6369505959ee7b1147be22f626"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.350.1/README.md",
+          "bytes": 1919,
+          "sha256": "28c9757358d56c906716e81b02f5c114b44f6c66fc3515222dd6c0039aa1954b"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.350.1/CMakeLists.txt",
+          "bytes": 5918,
+          "sha256": "b8ce9860d5ccad11aed6f3bf2008bbe62725db2dccdf267b8a6fa84ddc8d821d"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.350.1/include/vulkan/vk_platform.h",
+          "bytes": 2828,
+          "sha256": "949d517bb83e1d88fd4f1cef02bd3cb9ab50d44e8354cc68227cf2dccfdd3307"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.350.1/include/vulkan/vulkan_core.h",
+          "bytes": 1317089,
+          "sha256": "6d2ba4755774b1d129da6b8e661268b494d2d609df6217c6b6485acf7666b6c2"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.350.1/include/vulkan/vulkan_win32.h",
+          "bytes": 15757,
+          "sha256": "0b11442e7efa0d5b6732b9964edf6dbdf3f6cf1dd58afe7572cc9b7f6de24317"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.350.1/registry/parse_dependency.py",
+          "bytes": 15868,
+          "sha256": "00489a3b2ec34cbe21045de37c91ead429e0c1189469f0e2cfb3d2878dd929b1"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.350.1/registry/vk.xml",
+          "bytes": 3264809,
+          "sha256": "50bd8c0f316eabf73d1c5fe3add2d89eaa480dbda9282c12c289e80e9d081e08"
+        }
+      ]
+    },
     {
       "name": "glslang",
       "package": "mingw-w64-x86_64-glslang",

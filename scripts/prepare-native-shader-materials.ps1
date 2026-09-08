@@ -10,7 +10,7 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $inventoryPath = Join-Path $repositoryRoot 'docs/native-shader-inputs.json'
 $inventory = Get-Content -LiteralPath $inventoryPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $audit = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/native-runtime-package-audit.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($inventory.schema_version -ne 1 -or $inventory.components.Count -ne 5) { throw 'Incomplete native shader inventory.' }
+if ($inventory.schema_version -ne 1 -or $inventory.components.Count -ne 9) { throw 'Incomplete native shader inventory.' }
 $CacheDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CacheDirectory)
 $PackageDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($PackageDirectory)
 $OutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
@@ -98,4 +98,4 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'third-party/NATIVE-SHADER-MAT
 # A failed extraction never receives the completion inventory.
 Copy-Item -LiteralPath $inventoryPath -Destination (Join-Path $OutputDirectory 'INPUTS.json')
 Write-Output "Native shader source materials: $OutputDirectory"
-Write-Output 'Five static/header inputs only; no installation, runtime change or distribution approval.'
+Write-Output 'Nine static/header/generator inputs only; no installation, runtime change or distribution approval.'

@@ -46,6 +46,10 @@ GCC／GCC-libs 16.1.0-5も両元packageの署名、同一recipe hash、元GNU so
 
 ## 取得済み資料の入口
 
+libplaceboの残項目からfast_float／xxHash／glad／旧Vulkan-Headersの4入力も確定した。元package署名・当時のrecipeとsource checksumを照合し、実packageの9／74／49 filesとxxHash headerが原本と一致した。inline hash、条件付き数値変換、GL／EGL生成dataとtemplateの表示を9-input shader kitへ追加した。生成器本体と生成codeの条件を分ける。これは歴史的DLLのbit再現ではなく、source-onlyの別条件も削除しない。詳細は[NATIVE_RUNTIME_AUDIT.md](NATIVE_RUNTIME_AUDIT.md)に記録した。
+
+VC prerequisiteの版・公式packageと読み取り専用判定は[VC_REDIST.md](VC_REDIST.md)で確定済み。規約UIの組込みと実導入／取消／再起動は後続の隔離試験であり、同じ利用区分の質問や原本取得を繰り返さない。残るnative個別表示と最終提供案内を解消してからSetup.exeへ進む。
+
 [本体／native material catalog](NATIVE_MATERIAL_CATALOG.md)で、固定した12 kitと元71 packageの表示・recipeを一つのoffline directoryへ集約する。旧ZVBI packageと古いkitを選ばず、原文をそのまま保持する。入口のREADMEとpackage別リンクから資料へ辿れ、全fileのsize／hashを照合できる。[FFmpeg本体／5 source prefixesの資料](NATIVE_FFMPEG_MATERIALS.md)は元source全12,509 filesのpatch後一致と、実130 prefix inputs／94 runtime hashesを照合済み。[本体資料](APP_MATERIALS.md)も146 Rust依存・font原文とRust 1.98.0／MSVCの18文書を結び、旧BtbN向けGNU版を除いた。次は残る個別native scopeとVC redistributableの条件・前提実行を確定し、最終提供経路へ結ぶ。集約だけで完成した配布資料とは扱わない。
 
 ## Owner一覧の外にある入力

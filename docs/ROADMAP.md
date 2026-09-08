@@ -107,6 +107,8 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 続いてlocal Setupへ現在userだけのuninstall登録とPrograms shortcutを接続した。既存占有の拒否、payload id／pathの所有確認、変更shortcutと未知registry値の保持、使用中fileの再試行を専用GUID key／仮shortcutで検証した。WSHの日本語path拒否を実測し、Unicode Shell APIで32／64-bitの作成・読み戻しを確認。本体／VCの実導入は行わず、更新、対象OSでの登録・起動・削除、最終品質・同時提供とowner受入は継続する。
 
+既存版更新の前提として、旧marker／新旧inventoryと実bytesを照合し、追加・置換・削除・維持を分ける読み取り専用の判定を追加した。利用者の差し替えDLL、所有外衝突、不正path／DOS別名、使用中file等を拒否し、元fileは変更しない。実2708-file資料でも2707維持・inventoryのみ置換を確認したが、markerとuninstallerは試験用である。実置換・退避復旧・登録切替が揃うまでSetupの既存folder拒否を維持し、更新対応の完了とはしない。
+
 2026-09-08、既存preview／保存のhelper探索だけはH1の独立した修正として先に検証する。FFMPEG_DIRによる同梱版の上書きや、不足helperをPATH上の別版で埋め合わせる動作を防ぐ。第2段階のinstaller作成・runtime採用は第1段階の監査後のままとし、helper単体の検証でそのgateを通過扱いにしない。
 
 2026-09-08、第一段階で固定開発FFmpegのChromaprint→GPL FFTW静的リンクを確認し、既存binaryを配布候補から除外した。次の配布作業は[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)の機能を保つ再buildと対応資料の確定であり、旧DLLをそのままinstallerへ組み込むことではない。KissFFT版Chromaprintの単体試験は通ったが、全体差替え・性能・再配布条件のgateは未完了。

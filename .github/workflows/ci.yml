@@ -40,6 +40,10 @@ jobs:
         shell: pwsh
         run: .\scripts\test-setup-registration.ps1
 
+      - name: Verify read-only update planning and payload ownership
+        shell: pwsh
+        run: .\scripts\test-setup-update-plan.ps1
+
   rust:
     name: Rust checks
     runs-on: windows-2022

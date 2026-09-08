@@ -69,4 +69,24 @@ Sixteen child-process synthetic cases cover skip/required/unknown, original laun
 
 The empty-working-directory probe exposed a shared safety bug: NSIS stores a drive-root assignment as `C:`, and Windows then resolves it against the process working directory. Previous occupied-cwd tests happened to reject the result. Reject roots and drive-relative input **before** resolution; the fixture now tests empty cwd too. No actual root installation or deletion was attempted.
 
-Remaining: isolated Windows 10/11 actual install/prerequisite/registered launch/self-copy uninstall, failure recovery and registration discoverability, update design and tests, actual guide rendering, same-release installer/source delivery, final playback/physical/owner acceptance, runtime adoption and publication approval. This evaluation is not a completed or recommended end-user installer.
+## Read-only update planning
+
+`scripts/get-setup-update-plan.ps1` is the preflight for a future recoverable update, **not an updater**. Existing Setup still refuses occupied directories. The planner does not launch the old uninstaller, change app files, write registry/shortcuts, create a backup or authorize a transaction.
+
+```powershell
+.\scripts\get-setup-update-plan.ps1 `
+  -InstallDirectory 'path/to/existing-installation' `
+  -IncomingPayloadDirectory 'path/to/trusted-build/payload' `
+  -IncomingOwnershipId 'towavue-local-<incoming inventory SHA256>'
+.\scripts\test-setup-update-plan.ps1
+```
+
+It checks the old UTF-16LE marker's path and inventory hash, the caller's expected incoming inventory identity, every recorded file's actual size/hash and exact incoming coverage. The resulting JSON identifies keep/add/replace/remove actions, old metadata bytes for backup, and backup/incoming byte totals. Extra installed user files are left outside the action list; a new file colliding with an unowned path is refused. Altered or missing recorded DLLs stop planning rather than silently restoring the bundled copy. App startup still has no hash allowlist.
+
+Reject duplicate/case-colliding names, traversal/device/stream/wildcard names, reserved installer metadata, file/directory conflicts and reparse points. Expand existing DOS directory aliases before overlap checks and reject short-name aliases in inventory entries. This avoids treating two spellings of one directory as separate trees. [Windows long-path-name API](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getlongpathnamew).
+
+Read/write exclusive opens of old owned files perform no writes but reject sharing/access failures; handles are immediately released. The result is only a snapshot, not a retained lock or proof that processes cannot start later. An eventual transaction must revalidate, stage backups before replacing anything, avoid hard-link write-through, preserve file/registry/shortcut recovery state, and handle interruption and rollback without discarding user changes. The existing marker does not record the original uninstaller hash: its current bytes are captured for backup only and are never executed or authenticated by this check.
+
+Focused fixtures cover action coverage, user/replacement preservation, repeat/arbitrary cwd, malformed inventories/markers, overlaps/DOS aliases, locks and junctions. A separate full-data fixture compares the actual two 2708-file staged payloads: 2707 keep actions and only the changed inventory replacement. Its marker and uninstaller stand-in are synthetic; this is not installed-app/update or recovery evidence. Original staged payloads remain unchanged.
+
+Remaining: integrate staged replacement, rollback and registration switching into Setup; isolate Windows 10/11 actual install/update/prerequisite/registered launch/self-copy uninstall, failure recovery and registration discoverability; verify actual guide rendering, same-release installer/source delivery, final playback/physical/owner acceptance, runtime adoption and publication approval. This evaluation is not a completed or recommended end-user installer.

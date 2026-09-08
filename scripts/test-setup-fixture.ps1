@@ -36,7 +36,10 @@ function Assert-Tree([hashtable]$Before,[string]$Directory) {
 function Invoke-Fixture([string]$Executable,[string]$Arguments,[int]$Expected,[string]$WorkingDirectory=$trialRoot) {
     $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru
     [void]$process.Handle
-    if (-not $process.WaitForExit(15000)) { throw "Fixture still running; do not restart: PID $($process.Id), started $($process.StartTime.ToUniversalTime().ToString('o'))." }
+    if (-not $process.WaitForExit(15000)) {
+        Write-Output "Fixture remains live after 15 seconds; observing the same process: PID $($process.Id), $Executable $Arguments"
+        if (-not $process.WaitForExit(45000)) { throw "Fixture still running after 60 seconds; do not restart: PID $($process.Id), started $($process.StartTime.ToUniversalTime().ToString('o')), $Executable $Arguments" }
+    }
     Assert-True ($process.ExitCode -eq $Expected) "Wrong fixture exit $($process.ExitCode), expected $Expected : $Arguments"
 }
 
@@ -249,6 +252,14 @@ try {
         if ($mode -eq 'install') { Copy-Item -LiteralPath (Join-Path $gatedInstalled 'Uninstall-fixture.exe') -Destination $gatedDriver }
         else { Assert-True (-not (Test-Path -LiteralPath $gatedInstalled)) 'Gated removal/terminated pre-write install left files.' }
     }
+    # Leave the private 30-second gate unsignalled. The 15-second observation
+    # must retain this same process and accept its eventual normal completion.
+    $ready.Reset() | Out-Null
+    $release.Reset() | Out-Null
+    $observation = [Diagnostics.Stopwatch]::StartNew()
+    Invoke-Fixture $gatedSetup "/S /D=$gatedInstalled" 0
+    Assert-True ($observation.Elapsed.TotalSeconds -ge 15) 'Slow fixture did not exercise continued observation.'
+    Invoke-Fixture $driver "/S _?=$gatedInstalled" 0
 } finally { $release.Set() | Out-Null; $ready.Dispose(); $release.Dispose() }
 # A terminated operation leaves no stale kernel-object lease; retry normally.
 Invoke-Fixture $setup "/S /D=$gatedInstalled" 0

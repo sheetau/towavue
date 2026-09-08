@@ -58,6 +58,26 @@ function Assert-Applied($Pair,$Token) {
     }
     Assert-True ([IO.File]::ReadAllText((Join-Path $Pair.InstallDirectory 'user-media.txt')) -ceq 'preserve user data') 'User file changed.'
 }
+function Assert-GuardBoundary($Pair,$Token,[string]$Mode,[int]$Boundary) {
+    $app = Join-Path $Pair.InstallDirectory 'towavue.exe'
+    $uninstaller = Join-Path $Pair.InstallDirectory 'Uninstall.exe'
+    Assert-True ((Test-Path -LiteralPath $uninstaller) -eq ($Boundary -eq 10)) 'Uninstaller was published before the final move.'
+    Assert-True ((Test-Path -LiteralPath $app) -eq ($Boundary -eq 1 -or $Boundary -ge 9)) 'Application guard order differs.'
+    if ($Boundary -ge 9) {
+        $journal = Get-Content -LiteralPath (Join-Path $Token.TransactionDirectory 'journal.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($entry in $journal.entries | Where-Object { $_.name -ine 'Uninstall.exe' }) {
+            $expected = if ($Mode -eq 'Apply') { $entry.after } else { $entry.before }
+            $actual = if (Test-Path -LiteralPath (Join-Path $Pair.InstallDirectory $entry.name)) { Get-Record $Pair.InstallDirectory $entry.name } else { $null }
+            Assert-True (Test-UpdateRecord $actual $expected) 'Application was published before the other payload files agreed.'
+        }
+        if ($journal.registration) {
+            $snapshot = Get-TrialRegistrationSnapshot $Pair | ConvertFrom-Json
+            $expectedId = if ($Mode -eq 'Apply') { $journal.registration.OwnershipId } else { $journal.registration.PreviousOwnershipId }
+            $expectedSize = if ($Mode -eq 'Apply') { $journal.registration.SizeKiB } else { $journal.registration.PreviousSizeKiB }
+            Assert-True ($snapshot.values.TowavueOwnershipId[1] -ceq $expectedId -and $snapshot.values.EstimatedSize[1] -eq $expectedSize) 'Application/uninstaller publication preceded consistent registration.'
+        }
+    }
+}
 $nativeDirectory = Join-Path $trialRoot 'native-long-path'
 $nativeSource = Join-Path $nativeDirectory 'source.txt'
 Write-Trial $nativeSource 'native long-path fixture'
@@ -88,6 +108,28 @@ Push-Location $env:TEMP
 try { Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null }
 finally { Pop-Location }
 Expect-Failure { Invoke-TowavueUpdateTransaction -Mode Apply @token } 'already used'
+
+$pair = New-Pair 'unchanged-uninstaller'
+Write-Trial $pair.NewUninstaller ([IO.File]::ReadAllText((Join-Path $pair.InstallDirectory 'Uninstall.exe')))
+$before = Get-Snapshot $pair
+$token = Get-Token (New-TowavueUpdateTransaction @pair)
+Invoke-TowavueUpdateTransaction -Mode Apply @token | Out-Null
+Assert-True (Test-Path -LiteralPath (Join-Path $token.TransactionDirectory '5.apply-retired')) 'Identical uninstaller bytes bypassed retirement.'
+Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
+Assert-True ((Get-Snapshot $pair) -ceq $before) 'Identical uninstaller recovery changed original bytes.'
+
+$pair = New-Pair 'legacy-first-app-retirement'
+$before = Get-Snapshot $pair
+$token = Get-Token (New-TowavueUpdateTransaction @pair)
+$journalPath = Join-Path $token.TransactionDirectory 'journal.json'
+$journal = Get-Content -LiteralPath $journalPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$journal.schema_version = 1
+Write-Trial $journalPath ($journal | ConvertTo-Json -Depth 12)
+$token.JournalSha256 = (Get-FileHash -LiteralPath $journalPath).Hash.ToLowerInvariant()
+# Reproduce the first namespace boundary of the previous file-only protocol.
+[TowavueUpdateFiles]::Move((Join-Path $pair.InstallDirectory 'towavue.exe'),(Join-Path $token.TransactionDirectory '6.apply-retired'))
+Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
+Assert-True ((Get-Snapshot $pair) -ceq $before) 'Legacy app-first interruption did not restore its original uninstaller.'
 
 $pair = New-Pair 'unchanged-executable'
 Write-Trial (Join-Path $pair.IncomingPayloadDirectory 'towavue.exe') ([IO.File]::ReadAllText((Join-Path $pair.InstallDirectory 'towavue.exe')))
@@ -240,6 +282,7 @@ foreach ($fault in 1..10) {
     . $injectedPath
     Expect-Failure { Invoke-TowavueUpdateTransaction -Mode $mode @token } 'Injected interruption'
     . $library
+    Assert-GuardBoundary $pair $token $mode $fault
     Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
     Assert-True ((Get-Snapshot $pair) -ceq $before) "Failed recovery after $mode mutation $fault."
 }
@@ -249,7 +292,7 @@ foreach ($fault in 1..10) {
 $pair = New-Pair 'process-exit'
 $before = Get-Snapshot $pair
 $token = Get-Token (New-TowavueUpdateTransaction @pair)
-Write-Trial $injectedPath ($injected + "`nfunction Invoke-TrialFault { `$script:trialMoves++; if (`$script:trialMoves -eq 3) { [Diagnostics.Process]::GetCurrentProcess().Kill() } }`n`$script:trialMoves = 0`n")
+Write-Trial $injectedPath ($injected + "`nfunction Invoke-TrialFault { `$script:trialMoves++; if (`$script:trialMoves -eq 4) { [Diagnostics.Process]::GetCurrentProcess().Kill() } }`n`$script:trialMoves = 0`n")
 $childPath = Join-Path $trialRoot 'interrupt-child.ps1'
 $escape = { param($Value) $Value.Replace("'","''") }
 Write-Trial $childPath (". '" + (& $escape $injectedPath) + "'`nInvoke-TowavueUpdateTransaction -Mode Apply -TransactionDirectory '" + (& $escape $token.TransactionDirectory) + "' -JournalSha256 '" + $token.JournalSha256 + "'`n")
@@ -260,6 +303,7 @@ Assert-True ($child.WaitForExit(30000)) "Owned interruption child still running:
 Assert-True ($child.ExitCode -ne 0) 'Interrupted child unexpectedly succeeded.'
 Assert-True (-not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'licenses/INSTALLED-FILES.json'))) 'Child did not interrupt the retire/publish gap.'
 Assert-True (-not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'towavue.exe'))) 'Interrupted installation can launch a mixed payload.'
+Assert-True (-not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'Uninstall.exe'))) 'Interrupted installation retains an uninstaller entry point.'
 Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
 Assert-True ((Get-Snapshot $pair) -ceq $before) 'Abrupt process exit was not recoverable.'
 
@@ -310,7 +354,7 @@ $before = Get-Snapshot $pair
 $beforeRegistration = Get-TrialRegistrationSnapshot $pair
 $token = Get-Token (New-TowavueUpdateTransaction @pair)
 $journal = Get-Content -LiteralPath (Join-Path $token.TransactionDirectory 'journal.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-Assert-True ($journal.schema_version -eq 2 -and $journal.registration.PreviousSizeKiB -eq 123 -and $journal.registration.OwnershipId -ceq $pair.IncomingOwnershipId) 'Typed registration capture is not versioned and bound to the payload.'
+Assert-True ($journal.schema_version -eq 3 -and $journal.registration.PreviousSizeKiB -eq 123 -and $journal.registration.OwnershipId -ceq $pair.IncomingOwnershipId) 'Typed registration capture is not versioned and bound to the payload.'
 $result = Invoke-TowavueUpdateTransaction -Mode Apply @token
 Assert-True ($result.state -eq 'files_and_registration_applied') 'Joined update returned a file-only result.'
 Assert-Applied $pair $token
@@ -321,6 +365,20 @@ $result = Invoke-TowavueUpdateTransaction -Mode Rollback @token
 Assert-True ($result.state -eq 'files_and_registration_rolled_back') 'Joined rollback result differs.'
 Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
 Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) 'Joined rollback did not restore both states.'
+Remove-TrialRegistration $pair
+
+$pair = New-RegisteredPair 'legacy-bound-first-app-retirement'
+$before = Get-Snapshot $pair
+$beforeRegistration = Get-TrialRegistrationSnapshot $pair
+$token = Get-Token (New-TowavueUpdateTransaction @pair)
+$journalPath = Join-Path $token.TransactionDirectory 'journal.json'
+$journal = Get-Content -LiteralPath $journalPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$journal.schema_version = 2
+Write-Trial $journalPath ($journal | ConvertTo-Json -Depth 12)
+$token.JournalSha256 = (Get-FileHash -LiteralPath $journalPath).Hash.ToLowerInvariant()
+[TowavueUpdateFiles]::Move((Join-Path $pair.InstallDirectory 'towavue.exe'),(Join-Path $token.TransactionDirectory '6.apply-retired'))
+Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
+Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) 'Legacy bound app-first interruption did not restore both original states.'
 Remove-TrialRegistration $pair
 
 foreach ($mode in @('Apply','Rollback')) {
@@ -334,6 +392,7 @@ foreach ($fault in 1..10) {
     . $injectedPath
     Expect-Failure { Invoke-TowavueUpdateTransaction -Mode $mode @token } 'Injected joined interruption'
     . $library
+    Assert-GuardBoundary $pair $token $mode $fault
     Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
     Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) "Joined recovery failed after $mode move $fault."
     Remove-TrialRegistration $pair
@@ -351,6 +410,7 @@ foreach ($write in @("`$key.SetValue('EstimatedSize',`$SizeKiB,[Microsoft.Win32.
     . $injectedPath
     Expect-Failure { Invoke-TowavueUpdateTransaction -Mode $mode @token } 'Injected registry interruption'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'towavue.exe'))) 'Registry failure published the application executable.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'Uninstall.exe'))) 'Registry failure published the uninstaller.'
     . $library
     Write-Trial $privateRegistration $registrationSource
     Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
@@ -535,6 +595,7 @@ Invoke-TowavueRegisteredUpdate -Mode Rollback -InstallDirectory $pair.InstallDir
 Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) 'Concurrent refusal or pending recovery changed original data.'
 Remove-TrialRegistration $pair
 Write-Output 'PASS: durable registered entry point, three abrupt process boundaries, rediscovery without a caller token, corrupt/locked recovery retry, malformed/cross-install pointer preservation, pending removal refusal and cross-bitness competing-process exclusion. All test keys/shortcuts removed.'
+Write-Output 'PASS: schema-3 uninstaller-first retirement/app-then-uninstaller publication, all forty file-only/joined move boundaries, consistent registry before executable publication, unchanged uninstaller protection and legacy schema-1/2 first-app-retirement recovery.'
 Write-Output 'PASS: one file/registration journal, typed capture, twenty joined move interruptions, four registry write interruptions, abrupt child exit between registry writes, executable publication order, journal binding, unknown/missing registration preservation and repeated rollback. Joint test keys/shortcuts removed.'
 Write-Output "PASS: file-only prepare/apply/rollback, original identity/timestamps/security/alternate stream, copy-free recovery, preservation, locks, hard links, corrupt inputs, ten apply and ten rollback boundaries, abrupt child exit in a retire/publish gap: $trialRoot"
 Write-Output 'SKIP: actual Setup lifecycle/uninstaller coordination, full-volume/ACL-denial recovery, OS power loss and hostile concurrent namespace changes are not exercised.'

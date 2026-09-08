@@ -51,7 +51,7 @@ function New-TowavueUpdateTransaction {
         [pscustomobject]@{name=$marker.name;action='replace';before=$plan.old_metadata[0];after=$marker},
         [pscustomobject]@{name=$uninstaller.name;action='replace';before=$plan.old_metadata[1];after=$uninstaller}
     )
-    # Keep the old executable locked until every other file has its target state.
+    # Preserve stable entry indices; publication order is selected by the reader.
     $entries = @($entries | Where-Object { $_.name -ine 'towavue.exe' }) + @($entries | Where-Object { $_.name -ieq 'towavue.exe' })
     for ($index = 0; $index -lt $entries.Count; $index++) {
         $entry = $entries[$index]
@@ -70,7 +70,8 @@ function New-TowavueUpdateTransaction {
     }
     # Immutable journal, published only after every backup and staged file. The
     # independently retained digest detects corruption, not a hostile same user.
-    $schema = if ($registrationRecord) { 2 } else { 1 }
+    # Older readers must not resume the two-guard retirement/publication protocol.
+    $schema = 3
     $journal = [ordered]@{schema_version=$schema;directory=$directory;plan=$plan;entries=$entries;registration=$registrationRecord}
     $journalPath = Join-Path $directory 'journal.json'
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($journal | ConvertTo-Json -Depth 12))
@@ -102,10 +103,11 @@ function Invoke-TowavueUpdateTransaction {
         try { $journal = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
         $install = $journal.plan.install_directory
         Assert-LocalPath $install
-        if ($journal.schema_version -notin @(1,2) -or ($journal.schema_version -eq 2 -and -not $journal.registration) -or $journal.directory -cne $directory -or
+        if ($journal.schema_version -notin @(1,2,3) -or ($journal.schema_version -eq 2 -and -not $journal.registration) -or $journal.directory -cne $directory -or
             (Split-Path -Parent $install) -ine (Split-Path -Parent $directory) -or
             [TowavueUpdatePaths]::Expand($install) -ine $install -or $install -ieq $directory -or
-            -not $journal.entries -or $journal.entries[-1].name -ine 'towavue.exe') { throw 'Update journal location or schema differs.' }
+            $journal.entries.Count -lt 2 -or $journal.entries[-1].name -ine 'towavue.exe' -or
+            $journal.entries[-2].name -ine 'Uninstall.exe') { throw 'Update journal location or schema differs.' }
         if ($journal.registration) {
             $record = $journal.registration
             if ($record.InstallDirectory -cne $install -or $record.OwnershipId -cne $journal.plan.incoming_ownership_id -or
@@ -162,8 +164,8 @@ function Invoke-TowavueUpdateTransaction {
                 $held.Add($stream)
                 $expected = if ($phase -eq 'apply') { $entry.before } else { $entry.after }
                 $record = Get-UpdateStreamRecord $stream
-                $oldApp = $phase -eq 'rollback' -and $entry.name -ieq 'towavue.exe' -and (Test-UpdateRecord $record $entry.before)
-                if (-not (Test-UpdateRecord $record $expected) -and -not $oldApp) { throw 'Retired update file differs; preserve it.' }
+                $oldGuard = $phase -eq 'rollback' -and $entry.name -in @('towavue.exe','Uninstall.exe') -and (Test-UpdateRecord $record $entry.before)
+                if (-not (Test-UpdateRecord $record $expected) -and -not $oldGuard) { throw 'Retired update file differs; preserve it.' }
                 $retired = $true
                 if ($phase -eq 'apply') { $restorePaths[$index] = $path }
                 if ($phase -eq 'rollback') { $rollbackRetired = $true }
@@ -196,20 +198,37 @@ function Invoke-TowavueUpdateTransaction {
             if (-not (Test-UpdateRecord $current[$index] $expected)) { $needsChange = $true; break }
         }
         $appIndex = $journal.entries.Count - 1
+        $uninstallerIndex = $journal.entries.Count - 2
         if (-not $needsChange -and $journal.registration) { Invoke-TowavueUpdateRegistration $journal.registration $Mode }
-        if ($needsChange -and $current[$appIndex]) {
-            if ($Mode -eq 'Rollback' -and -not $restorePaths[$appIndex]) { throw 'Original retired executable is unavailable; preserve the installation.' }
-            # A process crash releases locks. Hide the executable before touching
-            # DLLs so the interrupted installation cannot launch a mixed payload.
-            $appPath = Join-Path $install $journal.entries[$appIndex].name
-            $retirement = Join-Path $directory ("$appIndex." + $Mode.ToLowerInvariant() + '-retired')
-            Assert-LocalPath $appPath
+        $guardRetirements = @{}
+        foreach ($index in @($uninstallerIndex,$appIndex)) {
+            if (-not $needsChange -or -not $current[$index]) { continue }
+            $phase = $Mode.ToLowerInvariant()
+            if ($Mode -eq 'Rollback' -and -not $restorePaths[$index]) {
+                # An interrupted first guard, a legacy journal, or a retry after
+                # app restoration may still have the original at its target.
+                if (-not (Test-UpdateRecord $current[$index] $journal.entries[$index].before)) { throw 'Original retired executable is unavailable; preserve the installation.' }
+                $phase = 'apply'
+            }
+            $retirement = Join-Path $directory ("$index.$phase-retired")
             Assert-LocalPath $retirement
             if (Test-Path -LiteralPath $retirement) { throw 'Executable retirement is already occupied; preserve the target.' }
-            [TowavueUpdateFiles]::Move($appPath,$retirement)
-            $current[$appIndex] = $null
+            $guardRetirements[$index] = $retirement
+            if ($phase -eq 'apply') { $restorePaths[$index] = $retirement }
         }
-        for ($index = 0; $index -lt $journal.entries.Count; $index++) {
+        # Validate both retirement destinations before either move. Hide removal
+        # first, then launch, before changing payload bytes; crashes release locks.
+        foreach ($index in @($uninstallerIndex,$appIndex)) {
+            if (-not $guardRetirements.ContainsKey($index)) { continue }
+            $path = Join-Path $install $journal.entries[$index].name
+            Assert-LocalPath $path
+            [TowavueUpdateFiles]::Move($path,$guardRetirements[$index])
+            $current[$index] = $null
+        }
+        # Restore/publish the uninstaller only after payload, registration and app
+        # agree. The old uninstaller need not understand our pending marker.
+        $publicationOrder = @(0..($journal.entries.Count - 1) | Where-Object { $_ -ne $appIndex -and $_ -ne $uninstallerIndex }) + @($appIndex,$uninstallerIndex)
+        foreach ($index in $publicationOrder) {
             $entry = $journal.entries[$index]
             $expected = if ($Mode -eq 'Apply') { $entry.after } else { $entry.before }
             if (Test-UpdateRecord $current[$index] $expected) { continue }

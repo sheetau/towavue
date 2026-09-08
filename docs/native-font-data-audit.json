@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "observed_date": "2026-09-08",
+  "scope": "Unicode reference review for three recipe-bound owners; libunibreak table reproductions, not DLL rebuilds. External data files remain in ignored audit storage. The source supplement retains original archives, selected code/data/notice members and the current Unicode license.",
+  "packages": [
+    {
+      "package": "mingw-w64-x86_64-fontconfig",
+      "recipe_sha256": "d4e67fa58f28fdf5fe6600f8fc474a8024e7410258fbd6f607f298ce449159fc",
+      "archive": {
+        "name": "fontconfig-2.18.3.tar.gz",
+        "bytes": 666753,
+        "sha256": "9ae01e1d53acdef56010c5451cd34aa41d325b2faccd8606448d8fa01b2496b3",
+        "kind": "source",
+        "url": "https://gitlab.freedesktop.org/fontconfig/fontconfig/-/archive/2.18.3/fontconfig-2.18.3.tar.gz"
+      },
+      "archive_entries": 745,
+      "internal_links": 0
+    },
+    {
+      "package": "mingw-w64-x86_64-harfbuzz",
+      "recipe_sha256": "7cd353a89c156c434b687ca8dda859bd61c6c4e1d3d91966c12f5b5a44d39e7f",
+      "archive": {
+        "name": "harfbuzz-14.4.0.tar.xz",
+        "bytes": 20107692,
+        "sha256": "2357ed966c6ced7bfa720b0640c0231065af01158fbea215093ffa15aed44371",
+        "kind": "source",
+        "url": "https://github.com/harfbuzz/harfbuzz/releases/download/14.4.0/harfbuzz-14.4.0.tar.xz"
+      },
+      "archive_entries": 3980,
+      "internal_links": 1
+    },
+    {
+      "package": "mingw-w64-x86_64-libunibreak",
+      "recipe_sha256": "855faf71cc7952b983ed9cf45d7b6dda8f041af53a30322f27382a13d315c65c",
+      "archive": {
+        "name": "libunibreak-7.0.tar.gz",
+        "bytes": 175378,
+        "sha256": "e4cb1a0d9aebb129c9856ec75e3d98e675997e385cce4e0106ef8f68e09afaa3",
+        "kind": "source",
+        "url": "https://github.com/adah1972/libunibreak/archive/libunibreak_7_0/libunibreak-7.0.tar.gz"
+      },
+      "archive_entries": 69,
+      "internal_links": 0
+    }
+  ],
+  "fontconfig": {
+    "unicode_version": "17.0.0",
+    "archive_member": "fontconfig-2.18.3/fc-case/CaseFolding.txt",
+    "bytes": 87539,
+    "sha256": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/CaseFolding.txt",
+    "comparison": "Raw bytes equal the official data already verified for PCRE2. fc-case/meson.build names this file and the original generator/template; no DLL regeneration claim."
+  },
+  "harfbuzz": {
+    "unicode_version": "17.0.0",
+    "evidence": "Original UCD, emoji and USE generated-table headers and generators identify this version; UCD is the default callback path unless disabled. Microsoft ms-use override inputs and MIT notice are retained. Tables are not regenerated in this review; packTab/UCDXML generation inputs are not pinned here.",
+    "excluded_link": "harfbuzz-14.4.0/CLAUDE.md -> AGENTS.md",
+    "test_scope": "Test OFL/Adobe Apache/Unicode Apache notices are separate from DLL code. No test font installation or uniform font-license claim."
+  },
+  "libunibreak": {
+    "python": "3.14.2",
+    "arguments": "-B -X utf8",
+    "stdout_comparison": "PowerShell captures stdout as lines; join with LF and final LF, then compare complete original UTF-8 source text with CRLF-to-LF normalization only.",
+    "inputs": [
+      {
+        "name": "15.0.0-LineBreak.txt",
+        "bytes": 248086,
+        "sha256": "012bca868e2c4e59a5a10a7546baf0c6fb1b2ef458c277f054915c8a49d292bf",
+        "url": "https://www.unicode.org/Public/15.0.0/ucd/LineBreak.txt"
+      },
+      {
+        "name": "15.1.0-DerivedCoreProperties.txt",
+        "bytes": 1072686,
+        "sha256": "f55d0db69123431a7317868725b1fcbf1eab6b265d756d1bd7f0f6d9f9ee108b",
+        "url": "https://www.unicode.org/Public/15.1.0/ucd/DerivedCoreProperties.txt"
+      },
+      {
+        "name": "15.1.0-EastAsianWidth.txt",
+        "bytes": 194188,
+        "sha256": "b08191401dc125f4e84ef262a95754faae6b737c79538e17ea9664a63434e94e",
+        "url": "https://www.unicode.org/Public/15.1.0/ucd/EastAsianWidth.txt"
+      },
+      {
+        "name": "15.1.0-emoji-data.txt",
+        "bytes": 111505,
+        "sha256": "d7aef489c8fe4c14f09ea5695200277c6b93ac82ac60845cdd2161b0d6835cc1",
+        "url": "https://www.unicode.org/Public/15.1.0/ucd/emoji/emoji-data.txt"
+      },
+      {
+        "name": "15.1.0-GraphemeBreakProperty.txt",
+        "bytes": 96863,
+        "sha256": "a7e52eee647e52dc210b8719b4d7037276f4b353810293d69377fc46374cec3f",
+        "url": "https://www.unicode.org/Public/15.1.0/ucd/auxiliary/GraphemeBreakProperty.txt"
+      },
+      {
+        "name": "15.1.0-LineBreak.txt",
+        "bytes": 255876,
+        "sha256": "a55cdc118493491e0a9c885b48eda953a6258a1e218f6050a11891231c79683f",
+        "url": "https://www.unicode.org/Public/15.1.0/ucd/LineBreak.txt"
+      },
+      {
+        "name": "15.1.0-WordBreakProperty.txt",
+        "bytes": 109117,
+        "sha256": "0f5f68bdab1bac4a2bf6576530dca10a322eadbc980b386a7627c89929053dc5",
+        "url": "https://www.unicode.org/Public/15.1.0/ucd/auxiliary/WordBreakProperty.txt"
+      }
+    ],
+    "reproduction": [
+      {
+        "generator": "generate_word_break.py",
+        "table": "wordbreakdata.c",
+        "inputs": [
+          "15.1.0-WordBreakProperty.txt"
+        ],
+        "original_bytes": 34539,
+        "original_sha256": "06b9a1540f1c73982cf2fd88c4070dc622164d2bc66d699d6b88d059bca108fc",
+        "full_text_equal_with_LF_stdout": true
+      },
+      {
+        "generator": "generate_grapheme_break.py",
+        "table": "graphemebreakdata.c",
+        "inputs": [
+          "15.1.0-GraphemeBreakProperty.txt"
+        ],
+        "original_bytes": 41215,
+        "original_sha256": "25082e4fb949998cdf9cf66264a7889830df60be14b6c374f4cdc35f85158300",
+        "full_text_equal_with_LF_stdout": true
+      },
+      {
+        "generator": "generate_indic_conjunct_break.py",
+        "table": "indicconjunctbreakdata.c",
+        "inputs": [
+          "15.1.0-DerivedCoreProperties.txt"
+        ],
+        "original_bytes": 7497,
+        "original_sha256": "836353832e01836ccab45ca1fb6af04df35c3c9984bbf19f21696da042da7d2d",
+        "full_text_equal_with_LF_stdout": true
+      },
+      {
+        "generator": "generate_extended_pictographic.py",
+        "table": "emojidata.c",
+        "inputs": [
+          "15.1.0-emoji-data.txt"
+        ],
+        "original_bytes": 1719,
+        "original_sha256": "5b9dcd51716871e1f5f8a65a8856f52b5140b1b626304f50e288c230cb7723e5",
+        "full_text_equal_with_LF_stdout": true
+      },
+      {
+        "generator": "generate_east_asian_width.py",
+        "table": "eastasianwidthdata.c",
+        "inputs": [
+          "15.1.0-EastAsianWidth.txt",
+          "15.1.0-LineBreak.txt"
+        ],
+        "original_bytes": 9741,
+        "original_sha256": "ccf5400d075a81d199c5128ee30d4e46a2b86f1899b2df82519c96a79fdbb297",
+        "full_text_equal_with_LF_stdout": true
+      },
+      {
+        "generator": "generate_linebreakdata.py",
+        "preparation": "Original extract_data.sed, expand_single.sed and linebreakdata1.tmpl, following src/Makefile.am without executing its download/delete targets.",
+        "table": "linebreakdata.c",
+        "inputs": [
+          "15.0.0-LineBreak.txt"
+        ],
+        "original_bytes": 554619,
+        "original_sha256": "b215da37bd17e61e10f9442271d2a01bcf031d2a7b950d1d2aa1e7c379cbf185",
+        "full_text_equal_with_LF_stdout": true
+      }
+    ]
+  }
+}

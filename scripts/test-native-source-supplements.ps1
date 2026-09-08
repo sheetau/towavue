@@ -41,7 +41,8 @@ try {
         foreach ($relative in @('glib-2.88.3/COPYING', 'glib-2.88.3/gmodule/COPYING')) {
             if (Test-Path -LiteralPath (Join-Path $output ('mingw-w64-x86_64-glib2/' + $relative))) { throw 'GLib source symlink was materialized.' }
         }
-        foreach ($relative in @('mingw-w64-x86_64-libsoxr/libsoxr-0.1.3/inst-check-soxr-lsr', 'mingw-w64-x86_64-srt/srt-1.5.7/srt-ffplay')) {
+        foreach ($relative in @('mingw-w64-x86_64-libsoxr/libsoxr-0.1.3/inst-check-soxr-lsr', 'mingw-w64-x86_64-srt/srt-1.5.7/srt-ffplay',
+            'mingw-w64-x86_64-harfbuzz/harfbuzz-14.4.0/CLAUDE.md')) {
             if (Test-Path -LiteralPath (Join-Path $output $relative)) { throw 'Source helper symlink was materialized.' }
         }
     }
@@ -143,28 +144,30 @@ finally { Move-Item -LiteralPath ($vcsPath + '.saved') -Destination $vcsPath }
 $fixtureRepository = Join-Path $testDirectory 'repository'
 foreach ($name in @('scripts/prepare-native-source-supplements.ps1', 'docs/native-source-supplements.json',
     'docs/native-runtime-recipes.json', 'docs/native-runtime-package-audit.json',
-    'third-party/unicode-16.0.0/LICENSE.txt')) {
+    'third-party/unicode-16.0.0/LICENSE.txt', 'third-party/unicode-data-20260908/LICENSE.txt')) {
     $path = Join-Path $fixtureRepository $name
     New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repositoryRoot $name) -Destination $path
 }
 $generator = Join-Path $fixtureRepository 'scripts/prepare-native-source-supplements.ps1'
-$noticePath = Join-Path $fixtureRepository 'third-party/unicode-16.0.0/LICENSE.txt'
-$noticeBytes = [IO.File]::ReadAllBytes($noticePath)
 $arguments = @{ OutputDirectory = $rejectedOutput; CacheDirectory = $CacheDirectory; RecipeDirectory = $RecipeDirectory; Download = $true }
-Move-Item -LiteralPath $noticePath -Destination ($noticePath + '.saved')
-try { Assert-Rejected $arguments 'Missing source supplement input:*' }
-finally { Move-Item -LiteralPath ($noticePath + '.saved') -Destination $noticePath }
-$corrupt = [byte[]]$noticeBytes.Clone()
-$corrupt[0] = $corrupt[0] -bxor 1
-[IO.File]::WriteAllBytes($noticePath, $corrupt)
-$noticeHash = (Get-FileHash -LiteralPath $noticePath).Hash
-try {
-    Assert-Rejected $arguments 'Source supplement checksum mismatch:*'
-    if ((Get-FileHash -LiteralPath $noticePath).Hash -ne $noticeHash) { throw 'Corrupt additional notice was overwritten.' }
+foreach ($notice in $inventory.additional_notices) {
+    $noticePath = Join-Path $fixtureRepository $notice.repository_path
+    $noticeBytes = [IO.File]::ReadAllBytes($noticePath)
+    Move-Item -LiteralPath $noticePath -Destination ($noticePath + '.saved')
+    try { Assert-Rejected $arguments 'Missing source supplement input:*' }
+    finally { Move-Item -LiteralPath ($noticePath + '.saved') -Destination $noticePath }
+    $corrupt = [byte[]]$noticeBytes.Clone()
+    $corrupt[0] = $corrupt[0] -bxor 1
+    [IO.File]::WriteAllBytes($noticePath, $corrupt)
+    $noticeHash = (Get-FileHash -LiteralPath $noticePath).Hash
+    try {
+        Assert-Rejected $arguments 'Source supplement checksum mismatch:*'
+        if ((Get-FileHash -LiteralPath $noticePath).Hash -ne $noticeHash) { throw 'Corrupt additional notice was overwritten.' }
+    }
+    finally { [IO.File]::WriteAllBytes($noticePath, $noticeBytes) }
+    if (Test-Path -LiteralPath $rejectedOutput) { throw 'Rejected additional notice created output.' }
 }
-finally { [IO.File]::WriteAllBytes($noticePath, $noticeBytes) }
-if (Test-Path -LiteralPath $rejectedOutput) { throw 'Rejected additional notice created output.' }
 $manifestPath = Join-Path $fixtureRepository 'docs/native-source-supplements.json'
 $manifestBytes = [IO.File]::ReadAllBytes($manifestPath)
 $encoding = [Text.UTF8Encoding]::new($false)
@@ -179,7 +182,8 @@ try {
 finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
 foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype', 'mingw-w64-x86_64-glib2', 'mingw-w64-x86_64-lcms2',
     'mingw-w64-x86_64-shaderc', 'mingw-w64-x86_64-spirv-cross', 'mingw-w64-x86_64-vulkan-loader',
-    'mingw-w64-x86_64-pcre2', 'mingw-w64-x86_64-libxml2')) {
+    'mingw-w64-x86_64-pcre2', 'mingw-w64-x86_64-libxml2', 'mingw-w64-x86_64-fontconfig',
+    'mingw-w64-x86_64-harfbuzz', 'mingw-w64-x86_64-libunibreak')) {
     foreach ($kind in @('missing', 'different', 'duplicate')) {
         $changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
         $package = $changed.packages | Where-Object { $_.package -eq $packageName }
@@ -188,9 +192,12 @@ foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype', '
             elseif ($packageName -eq 'mingw-w64-x86_64-lcms2') { $_.package_notice -eq 'mingw64/share/licenses/lcms2/LICENSE-fast_float' }
             elseif ($packageName -eq 'mingw-w64-x86_64-pcre2') { $_.package_notice -eq 'mingw64/share/licenses/pcre2/LICENCE.md' }
             elseif ($packageName -eq 'mingw-w64-x86_64-libxml2') { $_.package_notice -eq 'mingw64/share/licenses/libxml2/COPYING' }
+            elseif ($packageName -eq 'mingw-w64-x86_64-libunibreak') { $_.package_notice -eq 'mingw64/share/licenses/libunibreak/LICENCE' }
+            elseif ($packageName -match '-(fontconfig|harfbuzz)$') { $_.package_notice -eq ('mingw64/share/licenses/' + $Matches[1] + '/COPYING') }
             elseif ($packageName -match '-(shaderc|spirv-cross|vulkan-loader)$') { $_.package_notice -eq ('mingw64/share/licenses/' + $Matches[1] + '/LICENSE') }
             else { $_.name -match '/(COPYING|docs/FTL.TXT)$' }
         }
+        if (@($notice).Count -ne 1) { throw 'Expected one original package notice for the mutation fixture.' }
         switch ($kind) {
             'missing' { $package.selected_documents = @($package.selected_documents | Where-Object { $_.name -ne $notice.name }) }
             'different' { $notice.sha256 = '0' * 64 }
@@ -252,4 +259,4 @@ foreach ($kind in @('commit', 'url', 'kind')) {
     }
     finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
 }
-Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, missing/corrupt/omitted additional notice, thirty-three package-notice mismatches, three VCS mapping cases, source symlink exclusion, cached-input/download and output preservation."
+Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, missing/corrupt/omitted additional notices, forty-two package-notice mismatches, three VCS mapping cases, source symlink exclusion, cached-input/download and output preservation."

@@ -48,6 +48,8 @@ getterは探索を再実行せず、特定済みの72 URL/hashだけを利用す
 
 [Unicode tableの再生成](NATIVE_UNICODE_TABLE_AUDIT.md)では、PCRE2 10.48のUnicode 17.0.0とlibxml2 2.15.4の4.0.1を公式dataへ対応させた。未改変generatorの出力は改行だけをLFへ戻すと元tableの全hashと一致する。現行Unicode license原本と入力／出力の固定記録を追加したが、新data／generator／noticeのcatalog組込みは未完了。既存v5 catalogや候補DLLは変更せず、全DLL再buildや配布承認とは扱わない。
 
+続く[font／改行dataの確認](NATIVE_FONT_DATA_AUDIT.md)で、fontconfigのCaseFolding原本はUnicode 17.0とbyte一致、HarfBuzzの生成headerは17.0、libunibreakは15.0／15.1混在と特定した。後者6 tableは元generatorから全文一致する。37-owner supplementへ3原本archive・5 recipe inputsと52文書、現行Unicode noticeを追加し、Microsoft USE MITとsource-testのOFL／Apacheを区別する。外部data入力の最終提供と個別embedded-code／NOTICEは残り、HarfBuzz全生成環境やDLL再buildの完了とは扱わない。
+
 15 packageにはこのlicense directory内の通常fileがない。Chromaprint／OpenALは別途sourceから補完済み。残り13件のGMP、LAME、libass、libssh、libtheora、libvorbis、libvpx、LZ4、opencore-amr、Snappy、TwoLAME、ZeroMQ、zimgについても、元recipeが指定するsource archiveとpatch/templateを取得・照合した。directoryが空というだけでlicense表示が不要とは扱わない。
 
 ### 13件のsource補完

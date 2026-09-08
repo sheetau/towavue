@@ -55,11 +55,11 @@
       "description": "Current and shaderc build-time versions, complete runtime notices and unchanged source archives."
     },
     {
-      "name": "native-source-supplements-v12",
-      "files": 459,
-      "bytes": 97408251,
-      "tree_sha256": "521baaed833a17a9ffc49f2c5ce894ac68741517990abe91664e1264118b9342",
-      "title": "34 native source supplements",
+      "name": "native-source-supplements-v13",
+      "files": 523,
+      "bytes": 119960748,
+      "tree_sha256": "af6979161dd17541022e7956f52f7f794004380b3122e2eae15ad4dae7d83140",
+      "title": "37 native source supplements",
       "description": "Original library sources, build inputs and additional inline, data and inherited notices."
     },
     {

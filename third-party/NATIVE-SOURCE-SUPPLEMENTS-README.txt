@@ -7,17 +7,28 @@ FreeType and gettext-runtime with mixed-license scope or secondary notices,
 and eight further library-source-first owners: libiconv, FriBidi, Game Music
 Emu, mpg123, libbluray, Graphite2, GLib and libplacebo, plus libsoxr and SRT
 and Little CMS, rav1e, libdovi, shaderc, SPIRV-Cross, Vulkan Loader,
-PCRE2 and libxml2 (34 owners total).
+PCRE2, libxml2, fontconfig, HarfBuzz and libunibreak (37 owners total).
 Chromaprint, OpenAL, ZVBI and GCC runtimes have separate material bundles.
 
 PCRE2's original BSD exception and separate SLJIT license remain distinct.
 Its recipe enables JIT; the wineditline patch concerns the unbundled test
-tool. Preserve actual generated Unicode tables without claiming that the
-missing maint generator or historical data inputs have been reproduced.
+tool. Preserve actual generated Unicode tables. A separate audit reproduces
+PCRE2/libxml2 tables from the exact 17.0.0/4.0.1 data after LF normalization;
+those additional external data/generator inputs are not in this bundle.
 libxml2's dictionary/list notices include different authors and terms from
 the root introduction. Keep html5lib test notices with the source archive;
 do not label those tests as DLL code. The recipe's external W3C test suite
 is not included or executed. Unicode data attribution remains separate.
+
+Fontconfig's retained CaseFolding.txt is byte-identical to Unicode 17.0.0.
+HarfBuzz's Unicode/emoji/USE tables name 17.0.0; its Microsoft USE override
+data has a separate MIT notice, retained with the original data and consumers.
+Test-only OFL and Apache notices remain with its unchanged source archive,
+not as claims that these test fonts are installed or uniformly licensed.
+The CLAUDE.md source symlink stays only in the archive, never materialized.
+Libunibreak's line table uses Unicode 15.0 and its other five tables use
+15.1 (including emoji 15.1 data). All six reproduce from fixed official data
+with unchanged generators and LF stdout; this is not a DLL rebuild.
 
 INPUTS.json identifies unchanged source archives, patch/template inputs and
 selected original documents. Each package directory contains its exact
@@ -38,10 +49,12 @@ Source
 signatures marked SKIP by the GMP/libssh/XZ/FreeType/gettext recipes are not
 included.
 
-The additional Unicode notice is a tracked original from the pinned upstream
-tree named in INPUTS.json, not a FriBidi archive member or recipe input.
-Its bytes and Git blob ID are verified independently. The generator checks
-and copies this local notice without downloading or replacing it.
+The additional Unicode notices are tracked originals, not library archive
+members or recipe inputs. FriBidi's pinned upstream-tree notice retains its
+independently verified Git blob. The 2026-09-08 Unicode License V3 original
+covers the other reviewed data references without rewriting older headers
+or replacing release-specific terms. The collector checks and copies both
+local notices without downloading or replacing them.
 
 Keep original archives and recipes together. Patches are not applied by this
 generator: in particular, ZeroMQ's recipe applies its commit patch in REVERSE.

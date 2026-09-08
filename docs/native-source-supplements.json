@@ -1,7 +1,15 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for 34 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources; shader compiler static/header inputs require additional review. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 37 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources; shader compiler static/header inputs require additional review. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "additional_notices": [
+    {
+      "scope": "Original Unicode License V3 retrieved 2026-09-08 for the reviewed Unicode data references in PCRE2, libxml2, fontconfig, HarfBuzz and libunibreak. Not a source archive member or recipe input; keep release-specific data headers and separate code/test notices. This notice does not change data versions or replace FriBidi's pinned notice.",
+      "name": "unicode-data-20260908/LICENSE.txt",
+      "bytes": 1995,
+      "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+      "repository_path": "third-party/unicode-data-20260908/LICENSE.txt",
+      "url": "https://www.unicode.org/license.txt"
+    },
     {
       "scope": "Original Unicode License V3 from the same pinned upstream tree as the four data inputs used by FriBidi 1.0.16; not a FriBidi archive member or an MSYS2 recipe checksum.",
       "name": "unicode-16.0.0/LICENSE.txt",
@@ -39,6 +47,358 @@
     }
   ],
   "packages": [
+    {
+      "package": "mingw-w64-x86_64-fontconfig",
+      "recipe_sha256": "d4e67fa58f28fdf5fe6600f8fc474a8024e7410258fbd6f607f298ce449159fc",
+      "files": [
+        {
+          "name": "fontconfig-2.18.3.tar.gz",
+          "bytes": 666753,
+          "sha256": "9ae01e1d53acdef56010c5451cd34aa41d325b2faccd8606448d8fa01b2496b3",
+          "kind": "source",
+          "url": "https://gitlab.freedesktop.org/fontconfig/fontconfig/-/archive/2.18.3/fontconfig-2.18.3.tar.gz"
+        },
+        {
+          "name": "0011-conf-copy-instead-of-symlink.patch",
+          "bytes": 829,
+          "sha256": "73ed74a1f4624466084d219e2fbc0d5780da9f63763f1307629251e58cccf2cd",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-fontconfig/0011-conf-copy-instead-of-symlink.patch"
+        },
+        {
+          "name": "0012-conf-copy-drive-relative.patch",
+          "bytes": 512,
+          "sha256": "bb754488fbe89158eb756823757a612bdc26c1fdf0389316dc495caf027e4763",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-fontconfig/0012-conf-copy-drive-relative.patch"
+        },
+        {
+          "name": "fontconfig.hook.in",
+          "bytes": 433,
+          "sha256": "ad4ce48983045d7f39b40ca9e04d4be2eaa9177b89dcc516388d779c131a88bc",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-fontconfig/fontconfig.hook.in"
+        }
+      ],
+      "archive_prefix": "fontconfig-2.18.3/",
+      "archive_entries": 745,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "fontconfig-2.18.3/COPYING",
+          "bytes": 8616,
+          "sha256": "51a51aa9823704fd90bccc616cdd17ebabb5b2b3e9cbde886ca02c7002288067",
+          "package_notice": "mingw64/share/licenses/fontconfig/COPYING"
+        },
+        {
+          "name": "fontconfig-2.18.3/meson.build",
+          "bytes": 19484,
+          "sha256": "ea972b1281a1557cdbdaa48a64eedabfbc278994c02223d4203c81e8f822b745"
+        },
+        {
+          "name": "fontconfig-2.18.3/fc-case/meson.build",
+          "bytes": 209,
+          "sha256": "7a6db8baccf5348058e0b635b43a1218f2411ba158199ba130bb833cd87ae6e4"
+        },
+        {
+          "name": "fontconfig-2.18.3/fc-case/Makefile.am",
+          "bytes": 1505,
+          "sha256": "1068df25c5e32ea725644f0d186cd5e87f88c93d5d52d3cd33f3a0186d3a2dc7"
+        },
+        {
+          "name": "fontconfig-2.18.3/fc-case/CaseFolding.txt",
+          "bytes": 87539,
+          "sha256": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183"
+        },
+        {
+          "name": "fontconfig-2.18.3/fc-case/fc-case.py",
+          "bytes": 7852,
+          "sha256": "5aeb8d354b7abd22dd33fefd865d096986afaec9a836a69254f251ed639f0adc"
+        },
+        {
+          "name": "fontconfig-2.18.3/fc-case/fccase.tmpl.h",
+          "bytes": 1201,
+          "sha256": "a036956ad33fe8fec5687a8049fd4f774d0c130cc53d734be9858c2dcbd106b8"
+        },
+        {
+          "name": "fontconfig-2.18.3/src/fcstr.c",
+          "bytes": 32075,
+          "sha256": "bae7bd01e62c04e2d57a9b09495582cd903994dfadf8d58fe5970ca00f60e2d0"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-harfbuzz",
+      "recipe_sha256": "7cd353a89c156c434b687ca8dda859bd61c6c4e1d3d91966c12f5b5a44d39e7f",
+      "files": [
+        {
+          "name": "harfbuzz-14.4.0.tar.xz",
+          "bytes": 20107692,
+          "sha256": "2357ed966c6ced7bfa720b0640c0231065af01158fbea215093ffa15aed44371",
+          "kind": "source",
+          "url": "https://github.com/harfbuzz/harfbuzz/releases/download/14.4.0/harfbuzz-14.4.0.tar.xz"
+        },
+        {
+          "name": "001-fix-build-with-chafa.patch",
+          "bytes": 225,
+          "sha256": "26b37a1ca9872973905ecb96bcbe3f054472252320956faa74428206900d360e",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-harfbuzz/001-fix-build-with-chafa.patch"
+        },
+        {
+          "name": "002-make-library-type-in-cmake-config-unknown.patch",
+          "bytes": 1501,
+          "sha256": "189dc3cb2f9a0fd07d6499cee3307985f68e6b9d28d581d15c365b33f2012552",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-harfbuzz/002-make-library-type-in-cmake-config-unknown.patch"
+        }
+      ],
+      "archive_prefix": "harfbuzz-14.4.0/",
+      "archive_entries": 3980,
+      "internal_links": 1,
+      "selected_documents": [
+        {
+          "name": "harfbuzz-14.4.0/COPYING",
+          "bytes": 1971,
+          "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64",
+          "package_notice": "mingw64/share/licenses/harfbuzz/COPYING"
+        },
+        {
+          "name": "harfbuzz-14.4.0/meson.build",
+          "bytes": 17738,
+          "sha256": "8b464ee85d596786cb2ecd5f3d0f48898aae3137cb09271bb7bf631f3f2824fa"
+        },
+        {
+          "name": "harfbuzz-14.4.0/meson_options.txt",
+          "bytes": 3790,
+          "sha256": "0bad557ec230c1d791d6180abbd1d908474a7be5afdb9bbc5bacbbd850bfbdc0"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/meson.build",
+          "bytes": 42666,
+          "sha256": "18a07c7c3b8a2e50b2252df33805626b480df86f0b4981269338a5d3e95903cd"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/ms-use/COPYING",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/ms-use/IndicSyllabicCategory-Additional.txt",
+          "bytes": 15751,
+          "sha256": "636691ace687eed883bfb34dc2f5f27833b323bf0c078eec63ee66cbca3bfc85"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/ms-use/IndicPositionalCategory-Additional.txt",
+          "bytes": 7675,
+          "sha256": "59639508464202ec90a7d9e08a08cfbc377ea4536135c418bfdfc0f15db1ac3d"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/ms-use/IndicShapingInvalidCluster.txt",
+          "bytes": 7461,
+          "sha256": "02024d4289864665721e14ec99eb320ce187f289514b793449b4f6a8ddaf5944"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/gen-use-table.py",
+          "bytes": 15174,
+          "sha256": "64fc47c251ab98ac69f36e6cb3d410cae5e01c87311dcec20f5dec95ba4921a0"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/gen-ucd-table.py",
+          "bytes": 7707,
+          "sha256": "01da5dba81b8bfcfa2663a10492dacf61a100b30f1d3403f823a9f83c2c052c5"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/gen-emoji-table.py",
+          "bytes": 3693,
+          "sha256": "a971d7fdfdd3461431fca7d9d557c963371d2879a681cfbd435b6d7f8405ab44"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/hb-script-list.h",
+          "bytes": 20311,
+          "sha256": "18274018858eded78f2a491225e124b3105399a4d22ce14839ba5820df7a4684"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/hb-ucd-table.hh",
+          "bytes": 420557,
+          "sha256": "4c15452a7f4372c840dfac3cfc26d3d45584264392bffb681c4dfe0f46eea9c2"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/hb-unicode-emoji-table.hh",
+          "bytes": 3917,
+          "sha256": "c1e7992baefb102d8afaf4cc6b745e45ebad4eb4a12c0b928e59025bac3e8403"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/hb-ot-shaper-use-table.hh",
+          "bytes": 55727,
+          "sha256": "ba20ade85d6e49d2155ed0d96686aacdc462c711662226bde027499f5149dca3"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/hb-ucd.cc",
+          "bytes": 7196,
+          "sha256": "0bb1dc09aee15ca98a2222f7307d1a9d279646c486f8240efd50035c86554420"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/hb-unicode.cc",
+          "bytes": 17370,
+          "sha256": "2c4825a02154815244c971f23078066e8322c4a3d662936b368c7135ac624b94"
+        },
+        {
+          "name": "harfbuzz-14.4.0/src/hb-ot-shaper-use.cc",
+          "bytes": 14493,
+          "sha256": "1cf33c4ed82b65c16e02971a7f9bd5a4257423474a8aa347bfdfd11d66ed6db0"
+        },
+        {
+          "name": "harfbuzz-14.4.0/test/COPYING",
+          "bytes": 4370,
+          "sha256": "9b35b8485f69cd298fccbb3c40a827dc06cf1185553bef827903497d2944a8d7"
+        },
+        {
+          "name": "harfbuzz-14.4.0/test/shape/data/aots/COPYING",
+          "bytes": 593,
+          "sha256": "f55f74bf740db07bb032a90aa74af4307adea3d489c1ccba12453cf0c0a764cb"
+        },
+        {
+          "name": "harfbuzz-14.4.0/test/shape/data/text-rendering-tests/COPYING",
+          "bytes": 584,
+          "sha256": "d24039e4d22c9bc72096f6174374539d92a3d6e1163938546ec59179fe095e6f"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libunibreak",
+      "recipe_sha256": "855faf71cc7952b983ed9cf45d7b6dda8f041af53a30322f27382a13d315c65c",
+      "files": [
+        {
+          "name": "libunibreak-7.0.tar.gz",
+          "bytes": 175378,
+          "sha256": "e4cb1a0d9aebb129c9856ec75e3d98e675997e385cce4e0106ef8f68e09afaa3",
+          "kind": "source",
+          "url": "https://github.com/adah1972/libunibreak/archive/libunibreak_7_0/libunibreak-7.0.tar.gz"
+        }
+      ],
+      "archive_prefix": "libunibreak-libunibreak_7_0/",
+      "archive_entries": 69,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libunibreak-libunibreak_7_0/LICENCE",
+          "bytes": 1045,
+          "sha256": "0c57e2ec42ece17791a75d2f9b2f8e0663181be008667a507f765b3ef22522db",
+          "package_notice": "mingw64/share/licenses/libunibreak/LICENCE"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/Makefile.am",
+          "bytes": 3609,
+          "sha256": "7a234c67c2a0f087f70a42aab0b4c5a40bf87ad06b4844b50bf22018e7dbf1de"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/linebreakdata.c",
+          "bytes": 554619,
+          "sha256": "b215da37bd17e61e10f9442271d2a01bcf031d2a7b950d1d2aa1e7c379cbf185"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/wordbreakdata.c",
+          "bytes": 34539,
+          "sha256": "06b9a1540f1c73982cf2fd88c4070dc622164d2bc66d699d6b88d059bca108fc"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/graphemebreakdata.c",
+          "bytes": 41215,
+          "sha256": "25082e4fb949998cdf9cf66264a7889830df60be14b6c374f4cdc35f85158300"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/indicconjunctbreakdata.c",
+          "bytes": 7497,
+          "sha256": "836353832e01836ccab45ca1fb6af04df35c3c9984bbf19f21696da042da7d2d"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/eastasianwidthdata.c",
+          "bytes": 9741,
+          "sha256": "ccf5400d075a81d199c5128ee30d4e46a2b86f1899b2df82519c96a79fdbb297"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/emojidata.c",
+          "bytes": 1719,
+          "sha256": "5b9dcd51716871e1f5f8a65a8856f52b5140b1b626304f50e288c230cb7723e5"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/generate_linebreakdata.py",
+          "bytes": 1797,
+          "sha256": "082f5b0f834b2e093340ba59f62c464478e982172b2a92c9e4876a9f5a02a650"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/generate_word_break.py",
+          "bytes": 842,
+          "sha256": "301f047ae0543a9c690c95c6c20874afcb85fa55563ba760fffee182e0cac5d3"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/generate_grapheme_break.py",
+          "bytes": 878,
+          "sha256": "4da0a55f727e8450bb7c05dcb82d6d43c8fb8e6017e970fb64900ae09f06c815"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/generate_indic_conjunct_break.py",
+          "bytes": 3267,
+          "sha256": "3145cb7ebde56a2c3bd27c6856f9195766725efa2a391a6c84e82b2dcfda2bc1"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/generate_east_asian_width.py",
+          "bytes": 2601,
+          "sha256": "52442bebf36401c87ca57f75670c955f21b6eede33939ad62ae5cf92c921dbaf"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/generate_extended_pictographic.py",
+          "bytes": 827,
+          "sha256": "919307049610be92b63c5d46f070cdb09097ec5403dbb16ac500c0b28248f392"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/unicode_data_property.py",
+          "bytes": 1502,
+          "sha256": "cc36152fccd06b5af46546293ec3667f4b50a22c893021accb5bb75046e3f335"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/extract_data.sed",
+          "bytes": 55,
+          "sha256": "aa2b7c88a44244389da7ca3e823ef5b12433f9f054441c6d4e20989ac7da37ab"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/expand_single.sed",
+          "bytes": 25,
+          "sha256": "f2e09f6a4a5bc5051fad43c637198e9bd48f7d54928c97e4c48c369a537abdb1"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/linebreakdata1.tmpl",
+          "bytes": 47,
+          "sha256": "cdd77f9b59a3604ce1ef34e3bfce1ea1be63c545353a9bd58fc9ddf07f95f2b6"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/linebreak.c",
+          "bytes": 42704,
+          "sha256": "1203c7aee77011037427e56523c9372de6cfc1179ab63b379ff59ca8681ddf01"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/wordbreak.c",
+          "bytes": 16983,
+          "sha256": "d8a985c9584b52c8ec8cfde480e303c3060dc0c938758ab50965f3edebe5b956"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/graphemebreak.c",
+          "bytes": 12296,
+          "sha256": "16d38d29eaa3f07e5a98a619f7878cc2571ba854baf28e71a9b602c4ce586fbe"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/eastasianwidthdef.c",
+          "bytes": 1555,
+          "sha256": "f609d5915e4cf7572765e66aaa8bda6d315cc8ec89e01085c92683a2b1edd42d"
+        },
+        {
+          "name": "libunibreak-libunibreak_7_0/src/emojidef.c",
+          "bytes": 1563,
+          "sha256": "4baf8f003201d49cbf78d58c0938eb28e19121095314724e8dedbb610bae327f"
+        }
+      ]
+    },
     {
       "package": "mingw-w64-x86_64-pcre2",
       "recipe_sha256": "0b94fbb011bf5f78960beb73e5c8d0fd026bace4bd671ca1ee22a3e373706107",

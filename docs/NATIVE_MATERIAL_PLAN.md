@@ -6,6 +6,8 @@
 
 2026-09-08の[35 owner原文表示レビュー](NATIVE_NOTICE_REVIEW.md)で、既存補完群の外にある表示を全件読み取り・hash照合した。PCRE2の別JIT licenseとlibxml2の辞書／リスト原文を34-owner supplementへ追加した。残項目はUnicode／生成dataの参照先と、特定の内蔵code／NOTICE確認へ絞る。同文書の表は原文の代用や最終linked-code SBOMではない。
 
+続いて[fontconfig／HarfBuzz／libunibreakのdata確認](NATIVE_FONT_DATA_AUDIT.md)を完了し、37-owner supplementへ原本と別条件の表示を加えた。libunibreakの15.0／15.1混在を6 tableの再生成で確認し、HarfBuzzのMicrosoft USE表示をrootと分離して保持する。PCRE2／libxml2も含む現行Unicode noticeは収集済み。外部data入力の最終提供と、名指ししたembedded-code／NOTICEの確認は継続する。
+
 同梱するcodeに適用される条件、原本の著作権・license・NOTICE、対応sourceを提供する必要と方法、変更内容、差替え可能性を確認する。**全てのpermissive libraryの全source収集・単体再buildを、一律の法的義務やlaunch gateにはしない。** ただしpackage labelだけでpermissiveと確定せず、取り込みcode・static/header/dataを含む範囲確認が必要な場合はsourceやbuild記録を調べる。資料の生成成功も適合性の証明ではない。
 
 [FFmpeg公式checklist](https://ffmpeg.org/legal.html)は実binaryに対応するsource・build説明・変更と、外部LGPL libraryも含む確認を求める。[実FFmpegのLGPLv3本文](https://github.com/FFmpeg/FFmpeg/blob/e47273f4d9227152dcbf543cebaf9e2430ddbcc4/COPYING.LGPLv3)のheader／combined-work条件と、library自体の頒布条件を区別する。DLLならsource提供が一切不要という判断はしない。元libraryごとのversionや選択条件は別途確定する。

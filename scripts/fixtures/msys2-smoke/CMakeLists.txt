@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(towavue_msys2_smoke LANGUAGES C CXX)
+if(NOT CMAKE_C_COMPILER_ID STREQUAL "GNU" OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    message(FATAL_ERROR "The smoke test requires the candidate GNU compilers.")
+endif()
+add_library(smoke SHARED smoke.c)
+add_executable(smoke_test main.cpp)
+target_link_libraries(smoke_test PRIVATE smoke)

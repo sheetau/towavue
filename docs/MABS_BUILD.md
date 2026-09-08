@@ -31,7 +31,7 @@
 
 SFXは52898952 bytes、SHA256 `c105946e64e08f099ac0e4647461ce762b95333ad211777666476a9a41451d65`。ローカルで取得・hash照合し、隔離したGnuPG keyringで署名を検証した。VALIDSIGのprimary fingerprintは[公式installer文書](https://www.msys2.org/docs/installer/)の`0EBF782C5D53F7E5FB02A66746BD761F7A49B0EC`と一致し、署名subkeyは`E0AA0F031DBD80FFBA57B06D5A62D0CAB6264964`。個人keyringやtrust設定は変更していない。取得script内でGnuPG署名検証を自動実行した扱いにはしない。
 
-ローカルでは、archive全16581 entryが`msys64/`以下で、通常file/directoryだけであることを確認した。Windows tarは一覧を読めるが、BOING.WAVの7z filterを扱えず展開が失敗した。`vendor/msys2/base-20260611`は不完全な診断用展開であり使用しない。検証済みSFXの抽出だけを別の新規`vendor/msys2/base-sfx-20260611`へ実行し成功した。local package databaseの全90件の名前/versionは公式一覧と一致する。login shell、post-install、pacman、MABSはまだ実行していない。この長いpathは調査用であり、実buildには短いASCII pathを別途用意する。
+ローカルでは、archive全16581 entryが`msys64/`以下で、通常file/directoryだけであることを確認した。Windows tarは一覧を読めるが、BOING.WAVの7z filterを扱えず展開が失敗した。`vendor/msys2/base-20260611`は不完全な診断用展開であり使用しない。検証済みSFXの抽出だけを別の新規`vendor/msys2/base-sfx-20260611`へ実行し成功した。local package databaseの全90件の名前/versionは公式一覧と一致する。この長いpathは調査・外部installer用とし、実build用の短いASCII pathは下記の別環境に用意した。MABS自体はまだ実行していない。
 
 これはbase環境だけの固定である。追加のcompiler/FFmpeg依存packageや更新後の実効graph、全対応sourceの固定が済んだという意味ではない。
 
@@ -55,7 +55,21 @@ SFXは52898952 bytes、SHA256 `c105946e64e08f099ac0e4647461ce762b95333ad21177766
 
 getterは`vendor/msys2/packages-20260908`へ固定URLからarchiveとdetached signatureを取得し、size/hashを照合する。switchなしはoffline、改変cacheは取得ありでも保持して拒否する。packageの展開・導入、hook、live repository解決は行わない。通常pushのCIへ235 packageの取得を追加せず、native build準備として明示実行する。この集合にはFFmpegの全外部libraryやLCEVC追加build、対応source一式はまだ含まれない。
 
-ローカルで全235 archiveを取得し、size/hashと内部`.PKGINFO`のname/versionが固定recordに一致した。detached signatureも全235件を取得し、同じ隔離keyringでVALIDSIG/full trustとrevoked一覧との非該当を確認した。全署名のprimary fingerprintは上記database signerと一致する。[署名入力一覧](msys2-toolchain-signatures.json)にbytes/hash/fingerprintを残す。getterはこの検証済み署名fileのbyte固定を行うもので、GnuPGを実行し直すscriptではない。回帰試験は全470 cache fileの再利用、別cwd、offline欠落、同sizeで改変したarchiveと署名の拒否・保持を確認する。実導入やhookの監査は次に行う。
+ローカルで全235 archiveを取得し、size/hashと内部`.PKGINFO`のname/versionが固定recordに一致した。detached signatureも全235件を取得し、同じ隔離keyringでVALIDSIG/full trustとrevoked一覧との非該当を確認した。全署名のprimary fingerprintは上記database signerと一致する。[署名入力一覧](msys2-toolchain-signatures.json)にbytes/hash/fingerprintを残す。getterはこの検証済み署名fileのbyte固定を行うもので、GnuPGを実行し直すscriptではない。回帰試験は全470 cache fileの再利用、別cwd、offline欠落、同sizeで改変したarchiveと署名の拒否・保持を確認する。
+
+## 短い専用環境への導入試験
+
+2026-09-08、user profile以下の新規・短いASCII専用directoryへ検証済みSFXを展開した。Rust/MSVCや既存FFmpeg DLL、OS feature、global PATHは変更していない。通常login profileは実行せず、新環境内で`pacman-key --init`と`--populate msys2`だけを実行した。local master secret keyはその環境内だけに保持する。これは前節の公開鍵だけの監査keyringと異なる通常の初期化であり、上流pacman-keyがbundled keyのimportに用いる`--allow-weak-key-signatures`処理を含む。packageの`SigLevel`と`LocalFileSigLevel`は`Required`を維持する。
+
+全235 archiveのinstall scriptlet/hook関連9 fileを確認した。変更先はroot内のXML catalog、証明書bundle、shell一覧、文書索引、専用keyringであり、Perl module確認も含む。Windows証明書storeを変更する処理ではない。通常の`-Syu` core更新には他のMSYS processを終了する処理があるため、別bootstrapのpacmanから明示`--root`/`--dbpath`/`--gpgdir`を指定し、repositoryを含まない設定とローカル`-U --needed`で導入した。57件は同版でskip、178件を導入・更新した。
+
+このcross-root試験は無警告の自動setupとして採用しない。stdin target指定はterminal再open errorを出し、終了codeは1だったが、ALPM logにはtransaction completedが残り全235件の実導入を確認できた。またkey scriptletのprocess substitutionが`/dev/fd`で失敗し、Perl module testもfailした。新環境自身のnon-login shellでkey populateとPerl testを再実行し成功。XML catalogと両証明書bundleのpost_installも再実行し、文書索引を再生成した（indexを持たない文書・画像のwarningあり）。短いfilename引数をcache cwdから渡すnative `-Up`再検証は235件、exit 0であり、長い絶対pathのstdin渡しを再現手順にしない。導入scriptの自動化は未完了である。
+
+```powershell
+.\scripts\test-msys2-environment.ps1 -MsysRoot 'path/to/dedicated/msys64'
+```
+
+この検証scriptはlive repositoryを参照せず、全235 package名/versionの完全一致、`pacman -Dk`、`-Qk`による欠落なし、GCC/CMake/Ninja/NASMの起動、C DLLとC++ executableのcompile/link/実行を確認する。PATHは処理内だけに限定し復元する。ローカルで成功し、未更新bootstrapの拒否と別cwdでも検証した。これは初期toolchainの動作確認であり、package fileの全byte照合、MSVC ABI、全FFmpeg依存、最終配布buildの証明ではない。
 
 ## 設定値の対応
 
@@ -92,4 +106,4 @@ getterは`vendor/msys2/packages-20260908`へ固定URLからarchiveとdetached si
 
 OpenH264 x64圧縮DLLに上流scriptが指定するSHA256は`dab5f2a872777f9a58b69bfa9fbcf20d9f82f2d6ec91383fd70bff49bd34ac9f`。これは取得物を今回検証したという意味ではない。
 
-この調査から、MABSはWSL不要の有力候補だが、Full/LGPL/sharedの選択だけで旧buildと同等になるとは判断しない。次は固定MSYS2 bootstrap/package集合と上記3つの直接準備がない依存（LCEVC/LV2/VAAPI）の準備方法を確定する。その後、隔離buildで7 DLLと両helperを生成し、MSVC Rustとのリンク・Windows実行・既存機能を確認する。配布可否とlaunch完了は別gateである。
+この調査から、MABSはWSL不要の有力候補だが、Full/LGPL/sharedの選択だけで旧buildと同等になるとは判断しない。初期compilerの導入・動作確認に続き、次はmedia package集合と上記3つの直接準備がない依存（LCEVC/LV2/VAAPI）の準備方法を確定する。その後、隔離buildで7 DLLと両helperを生成し、MSVC Rustとのリンク・Windows実行・既存機能を確認する。配布可否とlaunch完了は別gateである。

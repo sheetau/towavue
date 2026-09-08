@@ -78,6 +78,34 @@ function Assert-GuardBoundary($Pair,$Token,[string]$Mode,[int]$Boundary) {
         }
     }
 }
+Add-Type @'
+using System.Text;
+using System.Runtime.InteropServices;
+public static class UpdateUninstallerAliasFixture {
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode)]
+    public static extern uint GetShortPathNameW(string path, StringBuilder output, uint size);
+}
+'@
+$aliasPair = New-Pair 'new-uninstaller-short-path'
+$aliasBefore = Get-Snapshot $aliasPair
+$shortUninstaller = [Text.StringBuilder]::new(32768)
+$shortLength = [UpdateUninstallerAliasFixture]::GetShortPathNameW($aliasPair.NewUninstaller,$shortUninstaller,32768)
+if ($shortLength -gt 0 -and $shortUninstaller.ToString() -ine $aliasPair.NewUninstaller) {
+    $canonicalParent = Split-Path -Parent $aliasPair.NewUninstaller
+    $shortLeaf = Split-Path -Leaf $shortUninstaller.ToString()
+    if ($shortLeaf -ine (Split-Path -Leaf $aliasPair.NewUninstaller)) {
+        Expect-Failure { Get-Record $canonicalParent $shortLeaf } 'short-name alias'
+    }
+    $aliasPair.NewUninstaller = $shortUninstaller.ToString()
+    $aliasToken = Get-Token (New-TowavueUpdateTransaction @aliasPair)
+    Assert-True ((Get-Snapshot $aliasPair) -ceq $aliasBefore) 'Short-path preparation changed the payload.'
+    Invoke-TowavueUpdateTransaction -Mode Apply @aliasToken | Out-Null
+    Assert-Applied $aliasPair $aliasToken
+    Invoke-TowavueUpdateTransaction -Mode Rollback @aliasToken | Out-Null
+    Assert-True ((Get-Snapshot $aliasPair) -ceq $aliasBefore) 'Short-path uninstaller did not recover exact payload bytes.'
+    Write-Output 'PASS: caller-supplied uninstaller DOS path normalizes; inventory filename aliases remain refused.'
+} else { Write-Output 'SKIP: this fixture has no distinct DOS uninstaller path; source alias normalization was not exercised.' }
+
 $nativeDirectory = Join-Path $trialRoot 'native-long-path'
 $nativeSource = Join-Path $nativeDirectory 'source.txt'
 Write-Trial $nativeSource 'native long-path fixture'

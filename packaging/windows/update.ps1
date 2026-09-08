@@ -33,7 +33,7 @@ try {
         } finally { if ($key) { $key.Dispose() }; $base.Dispose() }
     }
     . (Join-Path $PSScriptRoot '../../scripts/setup-registered-update.ps1')
-    $result = Invoke-TowavueRegisteredUpdate -Mode $Mode -InstallDirectory $InstallDirectory -Registration $registration -IncomingPayloadDirectory $IncomingPayloadDirectory -IncomingOwnershipId $IncomingOwnershipId -NewUninstaller $NewUninstaller
+    $result = Invoke-TowavueRegisteredUpdate -Mode $Mode -InstallDirectory $InstallDirectory -Registration $registration -IncomingPayloadDirectory $IncomingPayloadDirectory -IncomingOwnershipId $IncomingOwnershipId -NewUninstaller $NewUninstaller -Verbose
     if ($result.state -eq 'no_pending_update') { throw 'The pending operation already changed or completed. Inspect the installation again.' }
     Write-Output "Update operation completed: $($result.state). Recovery files are retained; no application was launched."
     exit 0

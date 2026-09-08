@@ -29,6 +29,10 @@ BrandingText "Local evaluation - not a published release"
 !define MARKER_FILE "towavue-install.ini"
 !define MARKER_SECTION "installation"
 !define UNINSTALL_FILE "Uninstall.exe"
+Var CompletionTitle
+Var CompletionText
+!define MUI_FINISHPAGE_TITLE "$CompletionTitle"
+!define MUI_FINISHPAGE_TEXT "$CompletionText"
 !define MUI_WELCOMEPAGE_TITLE "towavue local evaluation Setup"
 !define MUI_WELCOMEPAGE_TEXT "This installs towavue and its adjacent media runtime, with a Start menu shortcut and uninstall entry for the current user.$\r$\n$\r$\nChoose an empty folder or this user's registered installation to update. Interrupted updates must be restored first. Close towavue and any uninstallers before continuing.$\r$\n$\r$\nIf required, the original Microsoft Visual C++ installer asks you to review its terms. No automatic restart or application launch follows. This is a local evaluation; source archives are supplied separately."
 ; Never let the Finish page request a system restart.
@@ -219,7 +223,11 @@ Function CheckEmptyDirectory
     ${If} $1 != "."
     ${AndIf} $1 != ".."
       StrCpy $DirectoryOccupied 1
+!ifdef TOWAVUE_SETUP_APPLICATION
+      StrCpy $PathError "Choose an empty dedicated folder or this user's registered towavue installation. Other occupied folders cannot be updated."
+!else
       StrCpy $PathError "Choose an empty folder. This Setup cannot overwrite or update an existing installation."
+!endif
       Goto done_empty
     ${EndIf}
     FindNext $0 $1
@@ -237,6 +245,10 @@ Function CheckDirectoryPage
 FunctionEnd
 
 Function .onInit
+!ifdef TOWAVUE_SETUP_APPLICATION
+  StrCpy $CompletionTitle "Installation completed"
+  StrCpy $CompletionText "towavue (local evaluation) is installed.$\r$\n$\r$\nNo application was launched. Click Finish to close Setup."
+!endif
   ${GetParameters} $0
   ClearErrors
   ${GetOptions} $0 "/CHECKONLY" $1
@@ -309,10 +321,16 @@ Function CallUpdate
   ; framework reference when Windows PowerShell compiles the native bridge.
   SetOutPath "$PLUGINSDIR\update\scripts"
   System::Call 'kernel32::SetEnvironmentVariableW(w "PSModulePath", p 0)'
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\update\packaging\windows\update.ps1" -Mode $UpdateMode -InstallDirectory "$INSTDIR" -IncomingPayloadDirectory "$PLUGINSDIR\update\payload" -IncomingOwnershipId "${OWNERSHIP_ID}" -NewUninstaller "$PLUGINSDIR\update\New-Uninstall.exe"'
-  Pop $UpdateResult
-  Pop $0
-  DetailPrint "$0"
+  StrCpy $0 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\update\packaging\windows\update.ps1" -Mode $UpdateMode -InstallDirectory "$INSTDIR" -IncomingPayloadDirectory "$PLUGINSDIR\update\payload" -IncomingOwnershipId "${OWNERSHIP_ID}" -NewUninstaller "$PLUGINSDIR\update\New-Uninstall.exe"'
+  ${If} $UpdateMode == "Inspect"
+    nsExec::ExecToStack $0
+    Pop $UpdateResult
+    Pop $0
+  ${Else}
+    ; Stream phase messages while the child runs; do not truncate to stack size.
+    nsExec::ExecToLog $0
+    Pop $UpdateResult
+  ${EndIf}
 FunctionEnd
 
 Function UpdateInstallation
@@ -352,9 +370,15 @@ Function UpdateInstallation
   ${EndIf}
   ${If} $UpdateMode == "Rollback"
     DetailPrint "Previous installation restored. Run Setup again to retry the update."
+    StrCpy $CompletionTitle "Previous version restored"
+    StrCpy $CompletionText "The previous installation has been restored. The new version has not been installed.$\r$\n$\r$\nClick Finish, then run Setup again to retry the update.$\r$\n$\r$\nRecovery files are retained beside the installation folder. No application was launched."
+  ${Else}
+    StrCpy $CompletionTitle "Update completed"
+    StrCpy $CompletionText "towavue (local evaluation) has been updated.$\r$\n$\r$\nRecovery files are retained beside the installation folder. No application was launched. Click Finish to close Setup."
   ${EndIf}
   SetErrorLevel 0
   ${If} $PrerequisiteResult == 3010
+    StrCpy $CompletionText "$CompletionText$\r$\n$\r$\nWindows reports that a restart is required. Restart manually when convenient; Setup will not restart this PC."
     SetErrorLevel 3010
   ${EndIf}
 FunctionEnd
@@ -508,6 +532,7 @@ Section "Files"
     Abort "Files were installed but registration failed. See details; retain the folder or use its Uninstall.exe."
   ${EndIf}
   ${If} $PrerequisiteResult == 3010
+    StrCpy $CompletionText "$CompletionText$\r$\n$\r$\nWindows reports that a restart is required. Restart manually when convenient; Setup will not restart this PC."
     SetErrorLevel 3010
   ${EndIf}
 !endif

@@ -13,6 +13,22 @@ $programs = Join-Path $trialRoot 'programs'
 New-Item -ItemType Directory -Path $programs | Out-Null
 $shortcut = Join-Path $programs 'towavue (local evaluation).lnk'
 $utf8 = [Text.UTF8Encoding]::new($false)
+$temporary = Join-Path $trialRoot 'temporary source with spaces'
+New-Item -ItemType Directory -Path $temporary | Out-Null
+Add-Type @'
+using System.Text;
+using System.Runtime.InteropServices;
+public static class SetupTemporaryAliasFixture {
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode)]
+    public static extern uint GetShortPathNameW(string path, StringBuilder output, uint size);
+}
+'@
+$shortTemporary = [Text.StringBuilder]::new(32768)
+$shortLength = [SetupTemporaryAliasFixture]::GetShortPathNameW($temporary,$shortTemporary,32768)
+if ($shortLength -gt 0 -and $shortTemporary.ToString() -ine $temporary) {
+    $temporary = $shortTemporary.ToString()
+    Write-Output 'Using a real DOS-short temporary directory for every native Setup invocation.'
+} else { Write-Output 'SKIP: no distinct DOS temporary directory alias; native short-temp coverage unavailable.' }
 function Assert-True([bool]$Condition,[string]$Message) { if (-not $Condition) { throw $Message } }
 function Write-Trial([string]$Path,[string]$Text) {
     Assert-True ([IO.Path]::GetFullPath($Path).StartsWith($trialRoot + '\',[StringComparison]::OrdinalIgnoreCase)) 'Fixture escaped scratch.'
@@ -20,14 +36,20 @@ function Write-Trial([string]$Path,[string]$Text) {
     [IO.File]::WriteAllText($Path,$Text,$utf8)
 }
 function Invoke-Trial([string]$Executable,[string]$Arguments,[int]$Expected) {
-    $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -WorkingDirectory $trialRoot -WindowStyle Hidden -PassThru
+    $savedTemp = $env:TEMP
+    $savedTmp = $env:TMP
+    try {
+        $env:TEMP = $temporary
+        $env:TMP = $temporary
+        $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -WorkingDirectory $trialRoot -WindowStyle Hidden -PassThru
+    } finally { $env:TEMP = $savedTemp; $env:TMP = $savedTmp }
     [void]$process.Handle
     if (-not $process.WaitForExit(15000)) {
         Write-Output "Update fixture remains live; observing PID $($process.Id): $Arguments"
         if (-not $process.WaitForExit(45000)) { throw "Owned update fixture still running; do not restart: PID $($process.Id), $Executable $Arguments" }
     }
     if ($process.ExitCode -ne $Expected) {
-        foreach ($log in Get-ChildItem -LiteralPath $trialRoot -Recurse -File -Filter 'update-calls.txt') { Write-Output $log.FullName; Get-Content -LiteralPath $log.FullName -Encoding Unicode }
+        foreach ($log in Get-ChildItem -LiteralPath $trialRoot -Recurse -File -Filter 'update-transcript.txt') { Write-Output $log.FullName; Get-Content -LiteralPath $log.FullName -Encoding UTF8 }
         throw "Wrong native update exit $($process.ExitCode), expected $Expected : $Executable $Arguments"
     }
 }
@@ -70,19 +92,17 @@ $nsisSource = [regex]::Replace($nsisSource,$silentPattern,'  ; Silent execution 
 $prerequisitePattern = '(?ms)^Function CheckPrerequisite\r?\n.*?^FunctionEnd'
 Assert-True ([regex]::Matches($nsisSource,$prerequisitePattern).Count -eq 1) 'Prerequisite fixture substitution missed its boundary.'
 $nsisSource = [regex]::Replace($nsisSource,$prerequisitePattern,"Function CheckPrerequisite`n  StrCpy `$PrerequisiteResult 0`nFunctionEnd")
-$updateResultPattern = '(?m)  Pop \$UpdateResult\r?\n  Pop \$0'
-Assert-True ([regex]::Matches($nsisSource,$updateResultPattern).Count -eq 1) 'Native update diagnostics missed the result boundary.'
-$diagnostic = @'
-  Pop $UpdateResult
-  Pop $0
-  FileOpen $1 "${TRIAL_ROOT}\update-calls.txt" a
-  FileSeek $1 0 END
-  FileWriteUTF16LE $1 "$UpdateMode ($UpdateResult): $0$\r$\n"
+# Observe the values consumed by the real Finish page without claiming visual QA.
+$nsisSource += @'
+
+Function .onInstSuccess
+  FileOpen $1 "${TRIAL_ROOT}\completion.txt" w
+  FileWriteUTF16LE $1 "$CompletionTitle$\r$\n$CompletionText"
   FileClose $1
+FunctionEnd
 '@
-$nsisSource = [regex]::Replace($nsisSource,$updateResultPattern,[Text.RegularExpressions.MatchEvaluator]{ param($match) $diagnostic })
 $updateSources = @('scripts/get-setup-update-plan.ps1','scripts/setup-update-paths.ps1','scripts/setup-update-native.cs','scripts/setup-update-registration.ps1','scripts/setup-update-transaction.ps1','scripts/setup-registered-update.ps1','packaging/windows/registration-state.ps1','packaging/windows/operation-lock.ps1','packaging/windows/update.ps1')
-function Build-Trial([string]$Name,[switch]$New,[switch]$Fault) {
+function Build-Trial([string]$Name,[switch]$New,[switch]$Fault,[switch]$Restart) {
     $root = Join-Path $trialRoot $Name
     $payload = Join-Path $root 'payload'
     Write-Trial (Join-Path $payload 'towavue.exe') $(if ($New) { 'New generated text, never executed. ' + ('x' * 8192) } else { 'Old generated text, never executed.' })
@@ -108,6 +128,11 @@ function Build-Trial([string]$Name,[switch]$New,[switch]$Fault) {
     foreach ($name in $updateSources + @('packaging/windows/registration.ps1','packaging/windows/UnicodeShellLink.cs')) {
         $source = [IO.File]::ReadAllText((Join-Path $repositoryRoot $name)).Replace($productionKey,$registrySubKey)
         $source = $source.Replace('[Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)',("'" + $programs.Replace("'","''") + "'"))
+        if ($name -eq 'packaging/windows/update.ps1') {
+            $anchor = '$ErrorActionPreference = ''Stop'''
+            Assert-True ($source.Contains($anchor)) 'Update transcript missed the CLI boundary.'
+            $source = $source.Replace($anchor,($anchor + "`nStart-Transcript -LiteralPath '" + (Join-Path $root 'update-transcript.txt') + "' -Append | Out-Null"))
+        }
         if ($Fault -and $name -eq 'packaging/windows/registration-state.ps1') {
             $write = "`$key.SetValue('EstimatedSize',`$SizeKiB,[Microsoft.Win32.RegistryValueKind]::DWord)"
             Assert-True ($source.Contains($write)) 'Native update fault missed its registry boundary.'
@@ -117,7 +142,8 @@ function Build-Trial([string]$Name,[switch]$New,[switch]$Fault) {
         if ($name -in @('packaging/windows/registration.ps1','packaging/windows/registration-state.ps1','packaging/windows/UnicodeShellLink.cs')) { Write-Trial (Join-Path $root ('registration/' + (Split-Path -Leaf $name))) $source }
         if ($name -eq 'packaging/windows/operation-lock.ps1') { Write-Trial (Join-Path $root 'operation-lock.ps1') $source }
     }
-    Write-Trial (Join-Path $root 'setup.nsi') $nsisSource
+    $source = if ($Restart) { $nsisSource.Replace('StrCpy $PrerequisiteResult 0','StrCpy $PrerequisiteResult 3010') } else { $nsisSource }
+    Write-Trial (Join-Path $root 'setup.nsi') $source
     & $compiler /NOCONFIG /WX /V2 /DTOWAVUE_SETUP_APPLICATION ("/DTRIAL_ROOT=" + $root.Replace('$','$$')) (Join-Path $root 'setup.nsi')
     Assert-True ($LASTEXITCODE -eq 0) 'Native application-shaped fixture compilation failed.'
     return @{root=$root;setup=(Join-Path $root 'Setup-local.exe');payload=$payload;ownership=$ownership;size=$size}
@@ -132,13 +158,19 @@ function Assert-Updated($Build,[string]$InstallDirectory) {
     Assert-True ($state.TowavueOwnershipId[1] -ceq $Build.ownership -and $state.EstimatedSize[1] -eq $Build.size -and -not $state.PSObject.Properties['TowavuePendingUpdate']) 'Updated native registration differs or remains pending.'
     Assert-True ([IO.File]::ReadAllText((Join-Path $InstallDirectory 'user.txt')) -ceq 'Preserve user data.') 'Native update changed unrelated user data.'
 }
+function Assert-Completion($Build,[string]$Title,[string]$Text) {
+    $completion = Get-Content -LiteralPath (Join-Path $Build.root 'completion.txt') -Raw -Encoding Unicode
+    Assert-True ($completion.StartsWith($Title + "`r`n") -and $completion.Contains($Text)) 'Setup completion message misrepresents its outcome.'
+}
 $old = Build-Trial 'old'
 $new = Build-Trial 'new' -New
 $broken = Build-Trial 'broken' -New -Fault
+$restart = Build-Trial 'restart' -New -Restart
 $japanese = [string][char]0x65e5 + [char]0x672c
 foreach ($recovery in @($false,$true)) {
     $installed = Join-Path $trialRoot ("installed $recovery & `$ $japanese")
     Invoke-Trial $old.setup "/S /D=$installed" 0
+    Assert-Completion $old 'Installation completed' 'No application was launched.'
     Write-Trial (Join-Path $installed 'user.txt') 'Preserve user data.'
     $before = Get-Tree $installed
     $beforeRegistration = Get-Registration
@@ -159,6 +191,7 @@ foreach ($recovery in @($false,$true)) {
         Assert-True ((Get-Tree $installed) -ceq $partial -and (Get-Registration) -ceq $partialRegistration) 'Pending native uninstaller changed files or registration.'
         Invoke-Trial $new.setup "/S /D=$installed" 0
         Assert-True ((Get-Tree $installed) -ceq $before -and (Get-Registration) -ceq $beforeRegistration) 'Native Setup recovery did not restore exact old states.'
+        Assert-Completion $new 'Previous version restored' 'The new version has not been installed.'
     } else {
         Write-Trial (Join-Path $installed 'unchanged.dll') 'Preserve this user replacement.'
         $modified = Get-Tree $installed
@@ -166,8 +199,11 @@ foreach ($recovery in @($false,$true)) {
         Assert-True ((Get-Tree $installed) -ceq $modified -and (Get-Registration) -ceq $beforeRegistration) 'Rejected native update changed user files or registration.'
         Write-Trial (Join-Path $installed 'unchanged.dll') 'Unchanged generated text.'
     }
-    Invoke-Trial $new.setup "/S /D=$installed" 0
-    Assert-Updated $new $installed
+    $update = if ($recovery) { $new } else { $restart }
+    Invoke-Trial $update.setup "/S /D=$installed" $(if ($recovery) { 0 } else { 3010 })
+    Assert-Updated $update $installed
+    Assert-Completion $update 'Update completed' 'Recovery files are retained beside the installation folder.'
+    if (-not $recovery) { Assert-Completion $update 'Update completed' 'Restart manually when convenient; Setup will not restart this PC.' }
     Assert-True ((Get-FileHash -LiteralPath $shortcut).Hash -eq $shortcutHash) 'Native update changed the shortcut.'
     $updated = Get-Tree $installed
     Invoke-Trial $oldDriver "/S _?=$installed" 2
@@ -178,5 +214,10 @@ foreach ($recovery in @($false,$true)) {
     Assert-True ($null -eq (Get-Registration) -and -not (Test-Path -LiteralPath $shortcut)) 'Native fixture registration or shortcut remains.'
     Assert-True (@(Get-ChildItem -LiteralPath $installed -Recurse -File).Count -eq 1 -and [IO.File]::ReadAllText((Join-Path $installed 'user.txt')) -ceq 'Preserve user data.') 'Native uninstall removed user data or retained owned files.'
 }
+$transcript = Get-Content -LiteralPath (Join-Path $new.root 'update-transcript.txt') -Raw -Encoding UTF8
+foreach ($phase in @('Verifying installed and incoming file inventories.','Preparing independent recovery copies.','Recovery record saved.','Validating the retained Apply journal','Validating the retained Rollback journal','Verifying recovery files and acquiring installed-file handles.','Files and registration agree. Pending recovery record cleared.')) {
+    Assert-True ($transcript.Contains($phase)) ('Missing update phase output: ' + $phase)
+}
+Write-Output 'PASS: distinct installation/update/restoration Finish-page values, synthetic prerequisite 3010 result/manual-restart guidance and child phase output; no percentage or remaining-time estimate. Rendered progress/Finish accessibility is not qualified by these silent fixtures.'
 Write-Output "PASS: native application-shaped Setup install/update, modified-file refusal, parent/child lease reacquisition, interrupted registration, pending uninstall refusal, exact rollback/retry and updated uninstall. Test key/shortcut removed: $trialRoot"
 Write-Output 'SKIP: real app/VC installation, original prerequisite consent, normal self-copy uninstall, interactive visual/accessibility QA and supported-Windows qualification. Private fixtures bypass silent/prerequisite restrictions only in generated source.'

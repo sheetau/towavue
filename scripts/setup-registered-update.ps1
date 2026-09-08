@@ -1,5 +1,4 @@
-# Internal registered-update entry point. Actual Setup/uninstaller lifecycle
-# coordination and recovery UI must be connected before enabling installed updates.
+# Bound update entry point shared by Setup and isolated lifecycle fixtures.
 . (Join-Path $PSScriptRoot 'setup-update-transaction.ps1')
 . (Join-Path $PSScriptRoot '../packaging/windows/registration-state.ps1')
 . (Join-Path $PSScriptRoot '../packaging/windows/operation-lock.ps1')
@@ -25,6 +24,7 @@ function Invoke-TowavueRegisteredUpdate {
     $base = $null
     $key = $null
     try {
+        Write-Verbose 'Checking the registered installation and pending update record.'
         $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
         $key = $base.OpenSubKey($Registration.RegistrySubKey,$true)
         if (-not $key -or $key.GetValueKind('InstallLocation') -ne 'String' -or $key.GetValue('InstallLocation') -ine $InstallDirectory) { throw 'The expected update registration is missing or belongs to another directory.' }
@@ -38,6 +38,7 @@ function Invoke-TowavueRegisteredUpdate {
             # before any installed-file mutation. Failure retains recovery data.
             $key.SetValue($pendingName,$saved,[Microsoft.Win32.RegistryValueKind]::String)
             $key.Flush()
+            Write-Verbose 'Recovery record saved. Preparing to apply the verified update.'
         } else {
             if (-not $pending) { return [pscustomobject]@{state='no_pending_update'} }
             if ($key.GetValueKind($pendingName) -ne 'String') { throw 'Pending update record has an invalid type; preserve it.' }
@@ -53,6 +54,7 @@ function Invoke-TowavueRegisteredUpdate {
         # applied payload. Never clear the pointer merely because recovery began.
         $key.DeleteValue($pendingName)
         $key.Flush()
+        Write-Verbose 'Files and registration agree. Pending recovery record cleared.'
         return $result
     } finally {
         if ($key) { $key.Dispose() }

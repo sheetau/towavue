@@ -1,5 +1,5 @@
-# Transaction primitive. Setup must persist the returned journal digest before
-# Apply and provide recovery/cleanup UI; this is not connected to Setup yet.
+# Transaction primitive. The registered entry point persists the journal digest
+# before Apply; callers retain recovery data until separately verified cleanup.
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'setup-update-paths.ps1')
 . (Join-Path $PSScriptRoot 'setup-update-registration.ps1')
@@ -35,9 +35,14 @@ function New-TowavueUpdateTransaction {
         [Parameter(Mandatory)][string]$NewUninstaller,
         [hashtable]$Registration
     )
+    Write-Verbose 'Verifying installed and incoming file inventories. Large payloads can take several minutes.'
     $plan = & (Join-Path $PSScriptRoot 'get-setup-update-plan.ps1') -InstallDirectory $InstallDirectory -IncomingPayloadDirectory $IncomingPayloadDirectory -IncomingOwnershipId $IncomingOwnershipId | ConvertFrom-Json
     $registrationRecord = if ($null -ne $Registration) { New-TowavueUpdateRegistrationRecord $plan $Registration } else { $null }
     $NewUninstaller = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($NewUninstaller)
+    # NSIS may inherit a DOS-short temporary directory. This caller-supplied
+    # source is not an inventory name; expand it before the strict name check.
+    Assert-LocalPath $NewUninstaller
+    $NewUninstaller = [TowavueUpdatePaths]::Expand($NewUninstaller)
     $uninstaller = Get-Record (Split-Path -Parent $NewUninstaller) (Split-Path -Leaf $NewUninstaller)
     $uninstaller.name = 'Uninstall.exe'
     $directory = Join-Path (Split-Path -Parent $plan.install_directory) ('.towavue-update-' + [guid]::NewGuid().ToString('N'))
@@ -53,6 +58,7 @@ function New-TowavueUpdateTransaction {
     )
     # Preserve stable entry indices; publication order is selected by the reader.
     $entries = @($entries | Where-Object { $_.name -ine 'towavue.exe' }) + @($entries | Where-Object { $_.name -ieq 'towavue.exe' })
+    Write-Verbose 'Preparing independent recovery copies. Installed files have not been changed.'
     for ($index = 0; $index -lt $entries.Count; $index++) {
         $entry = $entries[$index]
         if ($entry.action -eq 'keep' -and $entry.name -ine 'towavue.exe') { continue }
@@ -93,6 +99,7 @@ function Invoke-TowavueUpdateTransaction {
     $directory = [TowavueUpdatePaths]::Expand($directory)
     if ((Split-Path -Leaf $directory) -cnotmatch '^\.towavue-update-[0-9a-f]{32}$') { throw 'Invalid update transaction directory.' }
     $held = [Collections.Generic.List[IDisposable]]::new()
+    Write-Verbose "Validating the retained $Mode journal and registration."
     try {
         $journalPath = Join-Path $directory 'journal.json'
         Assert-LocalPath $journalPath
@@ -119,6 +126,7 @@ function Invoke-TowavueUpdateTransaction {
             $journal.registration.RegistrySubKey -ine $ExpectedRegistration.RegistrySubKey -or
             $journal.registration.ShortcutPath -ine $ExpectedRegistration.ShortcutPath)) { throw 'Pending update belongs to another registration.' }
         if ($Mode -eq 'Apply') {
+            Write-Verbose 'Rechecking installed and incoming files before changing the installation.'
             $plan = & (Join-Path $PSScriptRoot 'get-setup-update-plan.ps1') -InstallDirectory $install -IncomingPayloadDirectory $journal.plan.incoming_directory -IncomingOwnershipId $journal.plan.incoming_ownership_id | ConvertFrom-Json
             if (($plan | ConvertTo-Json -Depth 10 -Compress) -cne ($journal.plan | ConvertTo-Json -Depth 10 -Compress)) { throw 'Installed or incoming update snapshot changed.' }
         }
@@ -126,6 +134,7 @@ function Invoke-TowavueUpdateTransaction {
         $sources = @{}
         $restorePaths = @{}
         $names = @{}
+        Write-Verbose 'Verifying recovery files and acquiring installed-file handles.'
         for ($index = 0; $index -lt $journal.entries.Count; $index++) {
             $entry = $journal.entries[$index]
             if ($entry.name -notin @('Uninstall.exe','towavue-install.ini','licenses/INSTALLED-FILES.json')) { Assert-Name $entry.name }
@@ -218,6 +227,7 @@ function Invoke-TowavueUpdateTransaction {
         }
         # Validate both retirement destinations before either move. Hide removal
         # first, then launch, before changing payload bytes; crashes release locks.
+        Write-Verbose "$Mode verification complete. Applying file and registration changes; keep Setup open."
         foreach ($index in @($uninstallerIndex,$appIndex)) {
             if (-not $guardRetirements.ContainsKey($index)) { continue }
             $path = Join-Path $install $journal.entries[$index].name

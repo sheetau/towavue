@@ -15,10 +15,10 @@
       "description": "22 versioned data files and three original scripts, with Unicode and code notices; companion to the library sources."
     },
     {
-      "name": "app-materials-v1",
+      "name": "app-materials-v2",
       "files": 11,
       "bytes": 3356087,
-      "tree_sha256": "6cfe6b9d1c059a726c3466bafb9acdbce6576751489fa33974628bde94b59a4f",
+      "tree_sha256": "df06bf02823b94e06081312d0b9fcc39b8f9afb2e3f66972e110f10381c2dc58",
       "title": "towavue application licenses and Rust/font notices",
       "description": "Original application licenses, 146 dependency entries and the app-only Rust 1.98.0 MSVC runtime notice ZIP; no excluded BtbN GNU runtime materials."
     },

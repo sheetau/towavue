@@ -7,7 +7,7 @@
 ```powershell
 .\scripts\prepare-rust-notices.ps1
 .\scripts\prepare-rust-runtime-notices.ps1 -Scope towavue
-.\scripts\prepare-app-materials.ps1 -RustNotices 'target/distribution/RUST-THIRD-PARTY-NOTICES.txt' -RuntimeNotices 'target/distribution/TOWAVUE-RUST-RUNTIME-NOTICES.zip' -Executable 'path/to/candidate/towavue.exe' -OutputDirectory 'target/distribution/app-materials-v1'
+.\scripts\prepare-app-materials.ps1 -RustNotices 'target/distribution/RUST-THIRD-PARTY-NOTICES.txt' -RuntimeNotices 'target/distribution/TOWAVUE-RUST-RUNTIME-NOTICES.zip' -Executable 'path/to/candidate/towavue.exe' -OutputDirectory 'target/distribution/app-materials-v2'
 .\scripts\test-app-materials.ps1 -RustNotices 'target/distribution/RUST-THIRD-PARTY-NOTICES.txt' -RuntimeNotices 'target/distribution/TOWAVUE-RUST-RUNTIME-NOTICES.zip' -Executable 'path/to/candidate/towavue.exe'
 ```
 
@@ -16,6 +16,8 @@ Rust依存資料は既存の固定Cargo cache／上流原文を使う。runtime�
 `-Scope towavue`は本体用2 archivesだけを読み、18文書とREADME／INPUTSを持つZIPを生成する。従来の既定出力は履歴比較用の36文書のまま維持し、別のfilenameを使う。旧BtbN向け1.97.1／GNUのarchiveがcacheになくても本体用を生成でき、ZIPの原文とmetadataにも混ぜない。現native rav1e／libdoviのRust資料は別kitである。
 
 ## 照合と限界
+
+2026-09-09、Help／paletteの資料入口を持つ10301952-byte／SHA256 `195af8705605e678a9cbe97aa57a0cdb7cae5e34bf61ee6b60e528b933f93186`へ本体の対応付けを更新した。app-materials-v2も11 files／3356087 bytesで、tree hashは`df06bf02823b94e06081312d0b9fcc39b8f9afb2e3f66972e110f10381c2dc58`。INPUTS／EVIDENCE以外の9原本はv1と全hash一致し、旧kitは旧exeの記録として保持する。新しい依存やlicense条件を加えた変更ではない。対応sourceは[候補資料集](CANDIDATE_MATERIALS.md)へ分離して固定する。
 
 [固定一覧](app-material-inputs.json)は本体exe、2 notice files、6 repository資料と元runtime inventoryをsize／hashへ固定する。Cargo.lockと依存一覧、toolchain versionとMSVC target、ZIP内18文書の原文hash、選択した2 archiveの由来を照合する。`INPUTS.json`と最後の`EVIDENCE.json`を含む11 files／3,356,087 bytesのkitを[共通catalog](NATIVE_MATERIAL_CATALOG.md)へ結ぶ。
 

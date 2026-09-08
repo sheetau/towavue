@@ -67,11 +67,11 @@ foreach ($record in $records) {
     if ($catalogNames.ContainsKey($record.name)) { throw 'Duplicate candidate catalog path.' }
     $catalogNames[$record.name] = $record
 }
-foreach ($name in @('materials/app-materials-v1/INPUTS.json','materials/native-ffmpeg-materials-v1/RUNTIME.json','native-runtime-package-audit.json')) {
+foreach ($name in @('materials/app-materials-v2/INPUTS.json','materials/native-ffmpeg-materials-v1/RUNTIME.json','native-runtime-package-audit.json')) {
     if (-not $catalogNames.ContainsKey($name)) { throw 'Missing candidate binding inventory.' }
     Assert-File (Join-Path $CatalogDirectory $name) $catalogNames[$name]
 }
-$app = Get-Content -LiteralPath (Join-Path $CatalogDirectory 'materials/app-materials-v1/INPUTS.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$app = Get-Content -LiteralPath (Join-Path $CatalogDirectory 'materials/app-materials-v2/INPUTS.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $runtime = Get-Content -LiteralPath (Join-Path $CatalogDirectory 'materials/native-ffmpeg-materials-v1/RUNTIME.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $audit = Get-Content -LiteralPath (Join-Path $CatalogDirectory 'native-runtime-package-audit.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $catalog = Get-Content -LiteralPath (Join-Path $CatalogDirectory 'CATALOG.json') -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -80,7 +80,7 @@ $runtimeFiles = Get-Files $RuntimeDirectory
 if ($runtime.Count -ne 94 -or $runtimeFiles.Count -ne 94) { throw 'Candidate runtime coverage mismatch.' }
 $ffmpegNames = @('ffmpeg.exe','ffprobe.exe','avcodec-63.dll','avdevice-63.dll','avfilter-12.dll','avformat-63.dll','avutil-61.dll','swresample-7.dll','swscale-10.dll')
 $bindings = [Collections.Generic.List[object]]::new()
-$bindings.Add([ordered]@{name=$app.candidate.name;bytes=$app.candidate.bytes;sha256=$app.candidate.sha256;material='catalog/materials/app-materials-v1/README.txt';source=$manifest.application_source.name;source_commit=$manifest.application_source_commit})
+$bindings.Add([ordered]@{name=$app.candidate.name;bytes=$app.candidate.bytes;sha256=$app.candidate.sha256;material='catalog/materials/app-materials-v2/README.txt';source=$manifest.application_source.name;source_commit=$manifest.application_source_commit})
 $runtimeNames = @{}
 $packageCount = 0
 foreach ($file in $runtime) {
@@ -129,7 +129,7 @@ $page = @('<!doctype html>','<html lang="en"><meta charset="utf-8"><title>towavu
     '<p>Local evaluation candidate &#8212; not a published or approved release. This directory contains source and notice materials, not an installer or the application binaries.</p>',
     '<h2>Application</h2>',
     ('<p><a href="' + (Link $manifest.application_source.name) + '">Application source ZIP</a> &middot; commit <code>' + $manifest.application_source_commit + '</code>. This is the source snapshot recorded for the evaluated executable, not a claim of a bit-for-bit reproducible build. It includes Cargo.lock and the pinned toolchain; dependency downloads and the separately supplied native build inputs are needed to rebuild.</p>'),
-    '<p><a href="catalog/materials/app-materials-v1/LICENSE-MIT">MIT</a> OR <a href="catalog/materials/app-materials-v1/LICENSE-APACHE">Apache-2.0</a> applies to towavue. Third-party code, fonts and data retain their own notices and original alternatives.</p>',
+    '<p><a href="catalog/materials/app-materials-v2/LICENSE-MIT">MIT</a> OR <a href="catalog/materials/app-materials-v2/LICENSE-APACHE">Apache-2.0</a> applies to towavue. Third-party code, fonts and data retain their own notices and original alternatives.</p>',
     '<h2>Component sources and notices</h2><ul>')
 foreach ($kit in $catalog.kits) {
     $page += '<li><a href="' + (Link ('catalog/materials/' + $kit.name + '/README.txt')) + '">' + (Html $kit.title) + '</a> &#8212; ' + (Html $kit.description) + '</li>'

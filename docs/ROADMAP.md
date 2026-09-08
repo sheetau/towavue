@@ -101,6 +101,8 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 同日、[NSISの安全性fixture](INSTALLER_FIXTURE.md)を先に実装し、配置先選択・既存folder拒否・日本語path・marker照合・明示fileだけの削除・利用者file保持・使用中file失敗後の再試行を検証した。fixture文書だけの通常user権限Setupで、本体／FFmpeg／VC runtime、registryやshortcutは含まない。実アプリのSetup組み込み、更新と隔離対象OSでの導入、最終資料対応付け・品質gateは継続し、この試験で第1～3段階を一括通過した扱いにしない。
 
+続いて現候補195af870とHelp対応source 06588b6を再対応付けし、app kit v2／catalog v11／候補資料v3を検証した。12 native kitsと本体の原文は維持し、224 source files・95実行file bindings・113 linksと全欠落／改変回帰が通過。実資料をexe隣へ配置したHelpの選択表示も確認した。2879 filesの資料を別提供できる約510 MBのportable ZIPへまとめ、全内容一致を検証した。実アプリSetupへの組み込み、VC consent／導入・更新・削除、同時公開と最終品質／owner受入は残る。
+
 2026-09-08、既存preview／保存のhelper探索だけはH1の独立した修正として先に検証する。FFMPEG_DIRによる同梱版の上書きや、不足helperをPATH上の別版で埋め合わせる動作を防ぐ。第2段階のinstaller作成・runtime採用は第1段階の監査後のままとし、helper単体の検証でそのgateを通過扱いにしない。
 
 2026-09-08、第一段階で固定開発FFmpegのChromaprint→GPL FFTW静的リンクを確認し、既存binaryを配布候補から除外した。次の配布作業は[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)の機能を保つ再buildと対応資料の確定であり、旧DLLをそのままinstallerへ組み込むことではない。KissFFT版Chromaprintの単体試験は通ったが、全体差替え・性能・再配布条件のgateは未完了。

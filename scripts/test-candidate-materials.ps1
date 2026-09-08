@@ -36,7 +36,7 @@ foreach ($line in (& git -C $repositoryRoot ls-tree -r $manifest.application_sou
     if ($line -notmatch '^100644 blob ([0-9a-f]{40})\t(.+)$') { throw 'Unexpected application source tree member.' }
     $sourceTree['towavue/' + $Matches[2]] = $Matches[1]
 }
-if ($LASTEXITCODE -ne 0 -or $sourceTree.Count -ne 172) { throw 'Application source commit unavailable or incomplete.' }
+if ($LASTEXITCODE -ne 0 -or $sourceTree.Count -ne 224) { throw 'Application source commit unavailable or incomplete.' }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [IO.Compression.ZipFile]::OpenRead($ApplicationSource)
 $sha1 = [Security.Cryptography.SHA1]::Create()
@@ -116,7 +116,7 @@ $arguments.ApplicationSource = Join-Path $testRoot $manifest.application_source.
 $arguments.OutputDirectory = Join-Path $testRoot 'rejected'
 $paths = @($arguments.Executable,$arguments.ApplicationSource)
 $paths += @($runtimeHashes.Keys | ForEach-Object { Join-Path $arguments.RuntimeDirectory $_ })
-$paths += @('FILES.json','CATALOG.json','materials/app-materials-v1/INPUTS.json','materials/native-ffmpeg-materials-v1/RUNTIME.json','native-runtime-package-audit.json','materials/native-data-materials-v1/UNICODE-LICENSE.txt') | ForEach-Object { Join-Path $arguments.CatalogDirectory $_ }
+$paths += @('FILES.json','CATALOG.json','materials/app-materials-v2/INPUTS.json','materials/native-ffmpeg-materials-v1/RUNTIME.json','native-runtime-package-audit.json','materials/native-data-materials-v1/UNICODE-LICENSE.txt') | ForEach-Object { Join-Path $arguments.CatalogDirectory $_ }
 $utf8 = [Text.UTF8Encoding]::new($false)
 $pairs = 0
 foreach ($path in $paths) {

@@ -2,9 +2,9 @@ Native runtime source supplements (2026-09-08)
 
 This is a preparation/audit bundle, not an approved release or complete
 corresponding-source bundle. It covers 13 package owners lacking regular
-documents under the audited package share/licenses directory, plus XZ and
-FreeType with mixed-license scope or secondary notices. Chromaprint, OpenAL
-and ZVBI have separate material bundles.
+documents under the audited package share/licenses directory, plus XZ,
+FreeType and gettext-runtime with mixed-license scope or secondary notices.
+Chromaprint, OpenAL and ZVBI have separate material bundles.
 
 INPUTS.json identifies unchanged source archives, patch/template inputs and
 selected original documents. Each package directory contains its exact
@@ -14,7 +14,8 @@ records all candidate DLL identities; this supplement generator does not
 inspect or copy a live runtime, repeat package signature verification, or
 prove bit-reproducible compilation. Upstream source signatures were not
 verified; archive hashes match the package-build-matched recipes. Source
-signatures marked SKIP by the GMP/libssh/XZ/FreeType recipes are not included.
+signatures marked SKIP by the GMP/libssh/XZ/FreeType/gettext recipes are not
+included.
 
 Keep original archives and recipes together. Patches are not applied by this
 generator: in particular, ZeroMQ's recipe applies its commit patch in REVERSE.
@@ -25,6 +26,17 @@ binary reproduction remain separate work.
 
 License scope observations (not blanket distribution approval):
 
+- Gettext 1.0 gettext-runtime/COPYING distinguishes the LGPL libintl library
+  and headers from GPL programs and documentation. The candidate stages only
+  libintl-8.dll from this package, not the tools or libasprintf. Keep the full
+  unmodified archive, all six original patches and the matched recipe. One
+  patch changes intl/libgnuintl.in.h's Windows printf-format attribute; the
+  other five target programs/tests or libasprintf. Autogen and configure also
+  affect the build, so this patch list is not compiler-input closure.
+  Four package notices are retained with explicit source-to-package paths;
+  identical LGPL text in intl and libasprintf is not a duplicate error.
+  The full archive still contains GPL tools: do not label all of it LGPL.
+  https://ftp.gnu.org/pub/gnu/gettext/gettext-1.0.tar.lz
 - XZ 5.8.3 COPYING identifies liblzma as 0BSD, separately from LGPL getopt
   in CLI tools and GPL helper scripts. The candidate stages liblzma-5.dll,
   not those tools. Preserve all COPYING files and the unchanged full archive;

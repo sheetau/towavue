@@ -155,4 +155,20 @@ foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype')) 
         finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
     }
 }
-Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, six package-notice mismatches, cached-input/download and output preservation."
+foreach ($kind in @('missing-map', 'wrong-map', 'duplicate')) {
+    $changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
+    $package = $changed.packages | Where-Object { $_.package -eq 'mingw-w64-x86_64-gettext-runtime' }
+    $notice = $package.selected_documents | Where-Object { $_.package_notice -eq 'mingw64/share/licenses/gettext-runtime/intl/COPYING.LIB' }
+    switch ($kind) {
+        'missing-map' { $notice.package_notice = $null }
+        'wrong-map' { $notice.package_notice = 'mingw64/share/licenses/gettext-runtime/libasprintf/COPYING.LIB' }
+        'duplicate' { $package.selected_documents = @($package.selected_documents) + $notice }
+    }
+    [IO.File]::WriteAllText($manifestPath, ($changed | ConvertTo-Json -Depth 10), $encoding)
+    try {
+        Assert-Rejected $arguments 'Source supplement does not retain audited package notice:*'
+        if (Test-Path -LiteralPath $rejectedOutput) { throw 'Ambiguous notice mapping created output.' }
+    }
+    finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
+}
+Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, nine package-notice mismatches, cached-input/download and output preservation."

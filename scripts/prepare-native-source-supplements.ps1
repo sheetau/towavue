@@ -14,7 +14,7 @@ $auditPath = Join-Path $repositoryRoot 'docs/native-runtime-package-audit.json'
 $inventory = Get-Content -LiteralPath $inventoryPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $recipes = Get-Content -LiteralPath $recipePath -Raw -Encoding UTF8 | ConvertFrom-Json
 $audit = Get-Content -LiteralPath $auditPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($inventory.schema_version -ne 1 -or $inventory.packages.Count -ne 15) { throw 'Incomplete source supplement inventory.' }
+if ($inventory.schema_version -ne 1 -or $inventory.packages.Count -ne 16) { throw 'Incomplete source supplement inventory.' }
 if (-not $CacheDirectory) { $CacheDirectory = Join-Path $repositoryRoot 'vendor/msys2/source-supplements-20260908' }
 if (-not $RecipeDirectory) { $RecipeDirectory = Join-Path $repositoryRoot 'vendor/msys2/runtime-recipes-20260908' }
 $CacheDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CacheDirectory)
@@ -43,7 +43,10 @@ foreach ($package in $inventory.packages) {
         throw "Stale source supplement mapping: $($package.package)"
     }
     foreach ($notice in $owner[0].package_notices) {
-        $matching = @($package.selected_documents | Where-Object { $_.bytes -eq $notice.bytes -and $_.sha256 -eq $notice.sha256 })
+        $matching = @($package.selected_documents | Where-Object {
+            $_.bytes -eq $notice.bytes -and $_.sha256 -eq $notice.sha256 -and
+            (-not $_.package_notice -or $_.package_notice -eq $notice.name)
+        })
         if ($matching.Count -ne 1) { throw "Source supplement does not retain audited package notice: $($notice.name)" }
     }
     $path = Join-Path $RecipeDirectory $recipe[0].name

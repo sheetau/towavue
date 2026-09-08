@@ -40,11 +40,13 @@ getterは探索を再実行せず、特定済みの72 URL/hashだけを利用す
 
 ## 残る材料と判断
 
+全72 ownerと一覧外のstatic／header等の残作業は[NATIVE_MATERIAL_PLAN.md](NATIVE_MATERIAL_PLAN.md)へ整理した。対応sourceを優先するものとnotice／組込み範囲を先に調べるものを分け、permissive library全件の単体再buildを一律の条件にはしない。分類・材料取得を配布承認には用いない。
+
 15 packageにはこのlicense directory内の通常fileがない。Chromaprint／OpenALは別途sourceから補完済み。残り13件のGMP、LAME、libass、libssh、libtheora、libvorbis、libvpx、LZ4、opencore-amr、Snappy、TwoLAME、ZeroMQ、zimgについても、元recipeが指定するsource archiveとpatch/templateを取得・照合した。directoryが空というだけでlicense表示が不要とは扱わない。
 
 ### 13件のsource補完
 
-[native-source-supplements.json](native-source-supplements.json)の初回補完では13 source archiveと20 patch/template、計20909402 bytesを固定した。全33 inputのSHA256が対応PKGBUILDと一致する。source署名の検証ではなく、GMP/libssh recipeでSKIP指定の署名fileは含めない。取得したsourceの全member名とtypeを監査し、zimgの7個だけ存在する内部symlinkは展開しない。現在は下記のXZ／FreeType追加を含む15 packagesを同じscriptで扱う。
+[native-source-supplements.json](native-source-supplements.json)の初回補完では13 source archiveと20 patch/template、計20909402 bytesを固定した。全33 inputのSHA256が対応PKGBUILDと一致する。source署名の検証ではなく、GMP/libssh recipeでSKIP指定の署名fileは含めない。取得したsourceの全member名とtypeを監査し、zimgの7個だけ存在する内部symlinkは展開しない。現在は下記のXZ／FreeType／gettext-runtime追加を含む16 packagesを同じscriptで扱う。
 
 47件の選択文書（license・authors・NOTICE・patent文書・GMP/LZ4の範囲確認用header/build記述）を原本byteのまま抽出する。全source、全patch/template、13 recipes、参照inventory、READMEと合わせて97 filesとなる。DLL/exeはcopyせず、recipe実行・patch適用・buildも行わない。
 
@@ -70,7 +72,17 @@ XZの11文書・scope資料とFreeTypeの17文書・source headersを追加し�
 
 両FreeType patchは元recipeと同じ`-Nbp1`のdry-runを通過した。modules.cfgはoffset +6、ftoption.hはoffset -3／fuzz 2を報告するため、完全context一致や実build再現とは記述しない。対象は意図したmodule行とsubpixel defineであり、sourceは不変。Mesonは見つかればsystem zlibを選び、現在の`libfreetype-6.dll`も`zlib1.dll`等をimportする。DLL hash `bbb3e639...`、`liblzma-5.dll`の`dc9edb9b...`は監査baselineと再一致した。これは全static／header入力の証明ではなく、XZ付属GPL toolsの同梱やFreeType内蔵zlibの使用を推測する根拠にも用いない。
 
-現在の補完資料は15 packages、37 source／patch inputs（25128962 bytes）、75選択文書を含む131 files／26323591 bytes。新4 URLの実取得と照合、任意cwdからの2回生成、52 inputの欠落・同size改変、元package表示の欠落／変更／重複6 cases、cache timestamp・先行output保持を検証した。旧資料のREADME／INPUTS以外の95 filesは同じhashで、最終資料の全131 filesが最新test出力と一致する。範囲別の表示が揃うことと、全依存の対応source／build入力・最終候補性能・installer gateの完了は区別する。
+この時点の補完資料は15 packages、37 source／patch inputs（25128962 bytes）、75選択文書を含む131 files／26323591 bytes。新4 URLの実取得と照合、任意cwdからの2回生成、52 inputの欠落・同size改変、元package表示の欠落／変更／重複6 cases、cache timestamp・先行output保持を検証した。旧資料のREADME／INPUTS以外の95 filesは同じhashで、全131 filesがtest出力と一致する。範囲別の表示が揃うことと、全依存の対応source／build入力・最終候補性能・installer gateの完了は区別する。
+
+### Gettext runtimeの対応source補完
+
+元recipeと一致する[gettext 1.0全archive](https://ftp.gnu.org/pub/gnu/gettext/gettext-1.0.tar.lz)は10261665 bytes／SHA256 `d6342cbe1411a2fe7d139bfed80c2d63b1babc92acfedc72501cc105184f61ee`。元MSYS2の6 patchesも含めた7 inputs、計10265586 bytesを取得し、全hashが`.BUILDINFO`対応recipeのchecksumと一致した。9038通常files＋308 directoriesで、link／危険なmember名はない。署名の暗号検証は行っていない。
+
+原本`gettext-runtime/COPYING`はlibintl・libasprintfとheadersをLGPL、付属programs／documentationをGPLと区別する。公開header原型`intl/libgnuintl.in.h`はLGPL 2.1以降の選択を明記する。候補にあるのは`libintl-8.dll`（298731 bytes／`0537c3dd...`）で、監査baselineのhashと再一致し、libiconv／Windows DLLをimportする。他のgettext programsやlibasprintfを同梱対象へ追加しない。6 patches中1件はこの公開headerのWindows printf属性を変更し、残りはprograms／tests／libasprintfを対象とする。全patchとrecipeは保持するが、今回は適用・Autogen・再buildを実行していない。
+
+GPL／LGPL本文、作者、範囲説明、header原型、libraryのbuild記述と代表実装の14 filesを原本byteで追加した。packageの4 noticesはsource原本と一致する。intlとlibasprintfのLGPL本文は同hashの別fileであり、`package_notice`による収録先対応を明記して照合する。正しい二重収録を拒否せず、曖昧・誤った対応や重複指定は拒否する。元archive全体をLGPL-onlyとは表示しない。
+
+現補完資料は16 owners、44 inputs／35394548 bytes、89選択文書、計153 files／36958095 bytes。新7 URLの実取得・照合、任意cwdと再生成の全hash一致、60 inputの欠落／同size改変、notice不一致9 cases、既存output・cache保持を通過した。先行131-file資料のREADME／INPUTS以外の129 filesは不変で、最終153 filesは最新test出力と一致する。実buildのgenerated／gnulib／static入力と公開するsource取得案内はまだ完了していない。
 
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 

@@ -1,7 +1,141 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for 13 runtime packages without package notices plus XZ/FreeType with mixed-license scope and secondary notices. Chromaprint/OpenAL/ZVBI have separate materials. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 13 runtime packages without package notices plus XZ/FreeType/gettext-runtime with mixed-license scope and secondary notices. Chromaprint/OpenAL/ZVBI have separate materials. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "packages": [
+    {
+      "package": "mingw-w64-x86_64-gettext-runtime",
+      "recipe_sha256": "853ef80a50588f29355722a4513f24cf1a5f8de06e0b5ee326580464db539741",
+      "files": [
+        {
+          "name": "gettext-1.0.tar.lz",
+          "kind": "source",
+          "url": "https://ftp.gnu.org/pub/gnu/gettext/gettext-1.0.tar.lz",
+          "sha256": "d6342cbe1411a2fe7d139bfed80c2d63b1babc92acfedc72501cc105184f61ee",
+          "bytes": 10261665
+        },
+        {
+          "name": "0005-Fix-compilation-of-pthread_sigmask.c.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-gettext/0005-Fix-compilation-of-pthread_sigmask.c.patch",
+          "sha256": "cbc2f533012d646521afa20f8b256917fce040741ff42cf53fb6dd7123a6670a",
+          "bytes": 453
+        },
+        {
+          "name": "122-Use-LF-as-newline-in-envsubst.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-gettext/122-Use-LF-as-newline-in-envsubst.patch",
+          "sha256": "ec39103d851262c02c27b7038f3c538e03afaefc6aa050311d62519d192ff38c",
+          "bytes": 863
+        },
+        {
+          "name": "0021-replace-fsync.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-gettext/0021-replace-fsync.patch",
+          "sha256": "380dbddee2f9e2feee4c1435e8a942b5d11d0125e60c3350ebb10c19b19011aa",
+          "bytes": 551
+        },
+        {
+          "name": "0022-libasprintf.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-gettext/0022-libasprintf.patch",
+          "sha256": "c354f6a7021069c99b90f1c6d6f6a4ccf40a01e9f6742b866df2b5a7286cb868",
+          "bytes": 983
+        },
+        {
+          "name": "0024-disable-gnu-format.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-gettext/0024-disable-gnu-format.patch",
+          "sha256": "ce7ccf6dd3a492cab322253cd67310899b546eccc25821c25cbc047a1a984633",
+          "bytes": 704
+        },
+        {
+          "name": "0030-fix-build-with-mingw-w64-clang.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-gettext/0030-fix-build-with-mingw-w64-clang.patch",
+          "sha256": "9b1b4f0c65b3bc1a3103c921a02c203cecf533d145f0bd90023406e760f81749",
+          "bytes": 367
+        }
+      ],
+      "archive_prefix": "gettext-1.0/",
+      "archive_entries": 9346,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "gettext-1.0/COPYING",
+          "bytes": 35151,
+          "sha256": "e79e9c8a0c85d735ff98185918ec94ed7d175efc377012787aebcf3b80f0d90b"
+        },
+        {
+          "name": "gettext-1.0/AUTHORS",
+          "bytes": 2637,
+          "sha256": "167b04ed012e59c2d2cfc87d420d8c8a8f5c528ef1fd068598b36d57f39db203"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/COPYING",
+          "bytes": 495,
+          "sha256": "7ef2cdfe58e0c0460657b6598b49af29d4e03c1e41cbaf0e1da1eb8ad74b95d0",
+          "package_notice": "mingw64/share/licenses/gettext-runtime/COPYING"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/AUTHORS",
+          "bytes": 145,
+          "sha256": "136ea88816ec1990c2fc060970013b9e94c875ba8b387f9bb3d62e77c90bc9b4"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/README",
+          "bytes": 174,
+          "sha256": "9702d025b37f4e305375c8d10152c1dbdef950aeafbe4a05c58b3178a6d912bb"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/intl/COPYING.LIB",
+          "bytes": 26419,
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+          "package_notice": "mingw64/share/licenses/gettext-runtime/intl/COPYING.LIB"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/intl/AUTHORS",
+          "bytes": 96,
+          "sha256": "4bd9e2cd15ab6d68b30965512b63a1d4aae95f4c1dd040657a4d1300252a695f"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/intl/README",
+          "bytes": 134,
+          "sha256": "515acabc5f0d6d5cb0e6316064c2fc7185ebb97a0b6366401eac8014044f4bbf"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/intl/Makefile.in",
+          "bytes": 142579,
+          "sha256": "0e2ed81808e778a58cbaec376988fadd47aeece4e94b88420bb677d4b96afdac"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/intl/libgnuintl.in.h",
+          "bytes": 41444,
+          "sha256": "a51e9539a6052ce168f05f2b160317c8e3909e8a1cfc861119e8b52669e2ce82"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/libasprintf/COPYING",
+          "bytes": 65,
+          "sha256": "03133addae5b99a6148c538300e6d97074453089be1423b741bd081f18e2b298",
+          "package_notice": "mingw64/share/licenses/gettext-runtime/libasprintf/COPYING"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/libasprintf/COPYING.LIB",
+          "bytes": 26419,
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+          "package_notice": "mingw64/share/licenses/gettext-runtime/libasprintf/COPYING.LIB"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/intl/dcigettext.c",
+          "bytes": 45904,
+          "sha256": "45207e8ae3149af68a73de267e46ec05a996d6b0ca0fee0ed8f9e56f7e5de6b4"
+        },
+        {
+          "name": "gettext-1.0/gettext-runtime/intl/loadmsgcat.c",
+          "bytes": 32148,
+          "sha256": "11dd7679776b12dfd81db5aff3bc92404a510475278ac57e3b8da9b972ada161"
+        }
+      ]
+    },
     {
       "package": "mingw-w64-x86_64-xz",
       "recipe_sha256": "4a55743c0aec144772fd72c5e4a3aa25a729a359516ee0ed793c3d943a31d80d",

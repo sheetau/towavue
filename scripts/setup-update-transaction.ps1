@@ -52,6 +52,7 @@ function New-TowavueUpdateTransaction {
     $entries = @($entries | Where-Object { $_.name -ine 'towavue.exe' }) + @($entries | Where-Object { $_.name -ieq 'towavue.exe' })
     for ($index = 0; $index -lt $entries.Count; $index++) {
         $entry = $entries[$index]
+        if ($entry.action -eq 'keep' -and $entry.name -ine 'towavue.exe') { continue }
         if ($entry.before) {
             Copy-UpdateFile (Join-Path $plan.install_directory $entry.name) (Join-Path $directory "$index.old") $entry.before
         }
@@ -106,6 +107,7 @@ function Invoke-TowavueUpdateTransaction {
         }
         $current = @{}
         $sources = @{}
+        $restorePaths = @{}
         $names = @{}
         for ($index = 0; $index -lt $journal.entries.Count; $index++) {
             $entry = $journal.entries[$index]
@@ -113,6 +115,7 @@ function Invoke-TowavueUpdateTransaction {
             if ($names.ContainsKey($entry.name)) { throw 'Duplicate update journal target.' }
             $names.Add($entry.name,$true)
             foreach ($side in @('old','new')) {
+                if ($entry.action -eq 'keep' -and $entry.name -ine 'towavue.exe') { break }
                 $expected = if ($side -eq 'old') { $entry.before } else { $entry.after }
                 if (-not $expected) { continue }
                 $path = Join-Path $directory "$index.$side"
@@ -140,13 +143,14 @@ function Invoke-TowavueUpdateTransaction {
                 Assert-LocalPath $path
                 if (-not (Test-Path -LiteralPath $path)) { continue }
                 if ($Mode -eq 'Apply') { throw 'Update transaction was already used; prepare a new one.' }
-                $stream = [IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+                $stream = [IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::Delete)
                 $held.Add($stream)
                 $expected = if ($phase -eq 'apply') { $entry.before } else { $entry.after }
                 $record = Get-UpdateStreamRecord $stream
                 $oldApp = $phase -eq 'rollback' -and $entry.name -ieq 'towavue.exe' -and (Test-UpdateRecord $record $entry.before)
                 if (-not (Test-UpdateRecord $record $expected) -and -not $oldApp) { throw 'Retired update file differs; preserve it.' }
                 $retired = $true
+                if ($phase -eq 'apply') { $restorePaths[$index] = $path }
                 if ($phase -eq 'rollback') { $rollbackRetired = $true }
             }
             $path = Join-Path $install $entry.name
@@ -166,6 +170,8 @@ function Invoke-TowavueUpdateTransaction {
             if (-not $old -and ($Mode -eq 'Apply' -or (-not $new -and -not $recoverableGap)) -or
                 ($Mode -eq 'Rollback' -and -not $actual -and $entry.before -and -not $retired)) { throw "Update target has an unknown state; preserve it: $($entry.name)" }
             if ($Mode -eq 'Rollback' -and -not $old -and $actual -and (Test-Path -LiteralPath (Join-Path $directory "$index.rollback-retired"))) { throw 'Rollback retirement is already occupied; preserve the target.' }
+            if ($Mode -eq 'Rollback' -and -not $old -and $entry.before -and
+                (-not $restorePaths[$index] -or -not (Test-Path -LiteralPath (Split-Path -Parent $path) -PathType Container))) { throw 'Original retired file or its parent is unavailable; preserve the installation.' }
             $current[$index] = $actual
         }
         # No installed-file mutation occurs before all source and target checks.
@@ -176,6 +182,7 @@ function Invoke-TowavueUpdateTransaction {
         }
         $appIndex = $journal.entries.Count - 1
         if ($needsChange -and $current[$appIndex]) {
+            if ($Mode -eq 'Rollback' -and -not $restorePaths[$appIndex]) { throw 'Original retired executable is unavailable; preserve the installation.' }
             # A process crash releases locks. Hide the executable before touching
             # DLLs so the interrupted installation cannot launch a mixed payload.
             $appPath = Join-Path $install $journal.entries[$appIndex].name
@@ -194,18 +201,21 @@ function Invoke-TowavueUpdateTransaction {
             Assert-LocalPath $path
             $work = Join-Path $directory ('work-' + [guid]::NewGuid().ToString('N'))
             Write-Verbose "$Mode update file: $($entry.name)"
-            if ($expected) {
-                $side = if ($Mode -eq 'Apply') { 'new' } else { 'old' }
+            if ($expected -and $Mode -eq 'Rollback') {
+                # Restore the original object, including its hard links and
+                # metadata, without allocating another file's worth of space.
+                $work = $restorePaths[$index]
+            } elseif ($expected) {
                 # Preserve the old file's copied security/streams on replacement;
                 # truncate only a private independent copy, never the target.
-                $copySide = if ($entry.before) { 'old' } else { $side }
+                $copySide = if ($entry.before) { 'old' } else { 'new' }
                 [TowavueUpdateFiles]::Copy((Join-Path $directory "$index.$copySide"),$work)
                 $stream = [IO.File]::Open($work,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
                 try {
-                    if ($side -ne $copySide) {
+                    if ($copySide -eq 'old') {
                         $stream.SetLength(0)
-                        $sources["$index.$side"].Position = 0
-                        $sources["$index.$side"].CopyTo($stream)
+                        $sources["$index.new"].Position = 0
+                        $sources["$index.new"].CopyTo($stream)
                     }
                     if (-not (Test-UpdateRecord (Get-UpdateStreamRecord $stream) $expected)) { throw 'Update work file differs.' }
                     $stream.Flush($true)

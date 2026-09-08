@@ -62,6 +62,7 @@ $pair = New-Pair 'baseline'
 $before = Get-Snapshot $pair
 $token = Get-Token (New-TowavueUpdateTransaction @pair)
 Assert-True ((Get-Snapshot $pair) -ceq $before) 'Prepare modified original files.'
+Assert-True (-not (Test-Path -LiteralPath (Join-Path $token.TransactionDirectory '1.old')) -and -not (Test-Path -LiteralPath (Join-Path $token.TransactionDirectory '1.new'))) 'Unchanged non-app file was copied unnecessarily.'
 $result = Invoke-TowavueUpdateTransaction -Mode Apply @token
 Assert-True ($result.state -eq 'payload_applied_registration_pending' -and $result.retained) 'File transaction claims registration or cleanup.'
 Assert-Applied $pair $token
@@ -104,6 +105,29 @@ foreach ($link in $links) { Assert-True ((Get-FileHash -LiteralPath $link.path).
 Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
 Assert-True ((Get-Snapshot $pair) -ceq $before) 'Hard-link rollback differs.'
 foreach ($link in $links) { Assert-True ((Get-FileHash -LiteralPath $link.path).Hash -ceq $link.hash) 'Rollback changed an outside hard link.' }
+foreach ($link in $links) {
+    Write-Trial $link.path 'identity probe after completed rollback'
+    $name = (Split-Path -Leaf $link.path).Substring('outside-'.Length)
+    Assert-True ([IO.File]::ReadAllText((Join-Path $pair.InstallDirectory $name)) -ceq 'identity probe after completed rollback') 'Rollback lost the original hard-link identity.'
+}
+
+$pair = New-Pair 'original-metadata'
+$appPath = Join-Path $pair.InstallDirectory 'towavue.exe'
+Assert-True ([IO.Path]::GetFullPath($appPath).StartsWith($trialRoot + '\')) 'Metadata fixture escaped scratch.'
+Set-Content -LiteralPath $appPath -Stream 'towavue-fixture' -Value 'preserve original alternate stream' -Encoding UTF8 -NoNewline
+[IO.File]::SetCreationTimeUtc($appPath,[datetime]::new(2005,2,3,4,5,6,[DateTimeKind]::Utc))
+[IO.File]::SetLastWriteTimeUtc($appPath,[datetime]::new(2010,3,4,5,6,7,[DateTimeKind]::Utc))
+$oldItem = Get-Item -LiteralPath $appPath
+$oldCreation = $oldItem.CreationTimeUtc.Ticks
+$oldWrite = $oldItem.LastWriteTimeUtc.Ticks
+$oldSecurity = (Get-Acl -LiteralPath $appPath).Sddl
+$token = Get-Token (New-TowavueUpdateTransaction @pair)
+Invoke-TowavueUpdateTransaction -Mode Apply @token | Out-Null
+Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
+$restored = Get-Item -LiteralPath $appPath
+Assert-True ($restored.CreationTimeUtc.Ticks -eq $oldCreation -and $restored.LastWriteTimeUtc.Ticks -eq $oldWrite) 'Original timestamps were not restored.'
+Assert-True ((Get-Acl -LiteralPath $appPath).Sddl -ceq $oldSecurity) 'Original security descriptor was not restored.'
+Assert-True ((Get-Content -LiteralPath $appPath -Stream 'towavue-fixture' -Encoding UTF8 -Raw) -ceq 'preserve original alternate stream') 'Original alternate stream was not restored.'
 
 $pair = New-Pair 'offline-recovery'
 $before = Get-Snapshot $pair
@@ -132,16 +156,17 @@ foreach ($mode in @('Apply','Rollback')) {
     Assert-True ((Get-Snapshot $pair) -ceq $before) 'Locked transaction partially changed files.'
     Invoke-TowavueUpdateTransaction -Mode $mode @token | Out-Null
 }
-foreach ($kind in @('journal','backup','stage','old-change','new-change','new-missing','incoming-change','collision','retired-change','receipt-change')) {
+foreach ($kind in @('journal','backup','stage','old-change','new-change','keep-change','new-missing','incoming-change','collision','retired-change','receipt-change')) {
     $pair = New-Pair $kind
     $token = Get-Token (New-TowavueUpdateTransaction @pair)
     $mode = 'Apply'
     $message = switch ($kind) {
         'journal' { [IO.File]::AppendAllText((Join-Path $token.TransactionDirectory 'journal.json'),' '); 'journal identity differs' }
-        'backup' { Write-Trial (Join-Path $token.TransactionDirectory '1.old') 'corrupt'; 'recovery source differs' }
+        'backup' { Write-Trial (Join-Path $token.TransactionDirectory '2.old') 'corrupt'; 'recovery source differs' }
         'stage' { Write-Trial (Join-Path $token.TransactionDirectory '0.new') 'corrupt'; 'recovery source differs' }
         'old-change' { Write-Trial (Join-Path $pair.InstallDirectory 'towavue.exe') 'user replacement'; 'differs from its recorded bytes' }
         'new-change' { Invoke-TowavueUpdateTransaction -Mode Apply @token | Out-Null; Write-Trial (Join-Path $pair.InstallDirectory 'towavue.exe') 'user replacement'; $mode = 'Rollback'; 'unknown state' }
+        'keep-change' { Invoke-TowavueUpdateTransaction -Mode Apply @token | Out-Null; Write-Trial (Join-Path $pair.InstallDirectory 'keep.dll') 'user replacement of an unchanged file'; $mode = 'Rollback'; 'unknown state' }
         'new-missing' { Invoke-TowavueUpdateTransaction -Mode Apply @token | Out-Null; [IO.File]::Move((Join-Path $pair.InstallDirectory 'towavue.exe'),(Join-Path $trialRoot 'removed-by-user.exe')); $mode = 'Rollback'; 'unknown state' }
         'incoming-change' { Write-Trial (Join-Path $pair.IncomingPayloadDirectory 'towavue.exe') 'changed input'; 'differs from its recorded bytes' }
         'collision' { Write-Trial (Join-Path $pair.InstallDirectory 'added.dll') 'user addition'; 'unowned path' }
@@ -159,6 +184,35 @@ New-Item -ItemType Directory -Path $injectionDirectory | Out-Null
 foreach ($name in @('setup-update-paths.ps1','setup-update-native.cs','get-setup-update-plan.ps1')) { [IO.File]::Copy((Join-Path $PSScriptRoot $name),(Join-Path $injectionDirectory $name)) }
 $original = [IO.File]::ReadAllText($library)
 $injectedPath = Join-Path $injectionDirectory 'setup-update-transaction.ps1'
+$pair = New-Pair 'copy-denied-recovery'
+$before = Get-Snapshot $pair
+$token = Get-Token (New-TowavueUpdateTransaction @pair)
+Invoke-TowavueUpdateTransaction -Mode Apply @token | Out-Null
+$noCopy = $original.Replace('[TowavueUpdateFiles]::Copy(',"throw 'Injected copy failure'; [TowavueUpdateFiles]::Copy(")
+Assert-True ($noCopy -cne $original) 'Copy failure injection missed the copy primitive.'
+Write-Trial $injectedPath $noCopy
+. $injectedPath
+Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
+. $library
+Assert-True ((Get-Snapshot $pair) -ceq $before) 'Recovery allocated a replacement copy.'
+
+$pair = New-Pair 'missing-retired-original'
+$token = Get-Token (New-TowavueUpdateTransaction @pair)
+Invoke-TowavueUpdateTransaction -Mode Apply @token | Out-Null
+$retired = Join-Path $token.TransactionDirectory '2.apply-retired'
+$heldElsewhere = Join-Path $token.TransactionDirectory '2.user-moved-original'
+Assert-True ($retired.StartsWith($trialRoot + '\') -and $heldElsewhere.StartsWith($trialRoot + '\')) 'Retirement trial escaped scratch.'
+[IO.File]::Move($retired,$heldElsewhere)
+$before = Get-Snapshot $pair
+Expect-Failure { Invoke-TowavueUpdateTransaction -Mode Rollback @token } 'Original retired file'
+Assert-True ((Get-Snapshot $pair) -ceq $before) 'Missing original caused a partial rollback.'
+[IO.File]::Move($heldElsewhere,$retired)
+$lock = [IO.File]::Open($retired,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+try { Expect-Failure { Invoke-TowavueUpdateTransaction -Mode Rollback @token } 'being used by another process' }
+finally { $lock.Dispose() }
+Assert-True ((Get-Snapshot $pair) -ceq $before) 'Locked original caused a partial rollback.'
+Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
+
 $matches = [regex]::Matches($original,'(?m)^\s*\[TowavueUpdateFiles\]::Move\([^\r\n]+')
 Assert-True ($matches.Count -eq 3) 'Fault injection no longer matches all mutation sites.'
 foreach ($mode in @('Apply','Rollback')) {
@@ -194,5 +248,5 @@ Assert-True (-not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'lic
 Assert-True (-not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'towavue.exe'))) 'Interrupted installation can launch a mixed payload.'
 Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
 Assert-True ((Get-Snapshot $pair) -ceq $before) 'Abrupt process exit was not recoverable.'
-Write-Output "PASS: file-only prepare/apply/rollback, preservation, locks, hard links, corrupt inputs, ten apply and ten rollback boundaries, abrupt child exit in a retire/publish gap: $trialRoot"
-Write-Output 'SKIP: actual Setup update/registration, OS power loss and hostile concurrent namespace changes are not exercised.'
+Write-Output "PASS: file-only prepare/apply/rollback, original identity/timestamps/security/alternate stream, copy-free recovery, preservation, locks, hard links, corrupt inputs, ten apply and ten rollback boundaries, abrupt child exit in a retire/publish gap: $trialRoot"
+Write-Output 'SKIP: actual Setup update/registration, full-volume/ACL-denial recovery, OS power loss and hostile concurrent namespace changes are not exercised.'

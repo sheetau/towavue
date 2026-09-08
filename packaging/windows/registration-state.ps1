@@ -1,11 +1,13 @@
 function Invoke-TowavueRegistration {
     param(
-        [Parameter(Mandatory)][ValidateSet('Inspect','Install','VerifyRemoval','Remove')][string]$Mode,
+        [Parameter(Mandatory)][ValidateSet('Inspect','Install','VerifyRemoval','Remove','VerifyUpdate','Update')][string]$Mode,
         [Parameter(Mandatory)][string]$InstallDirectory,
         [Parameter(Mandatory)][ValidatePattern('^towavue-local-[0-9a-f]{64}$')][string]$OwnershipId,
         [Parameter(Mandatory)][string]$RegistrySubKey,
         [Parameter(Mandatory)][string]$ShortcutPath,
-        [Parameter(Mandatory)][ValidateRange(1,2147483647)][int]$SizeKiB
+        [Parameter(Mandatory)][ValidateRange(1,2147483647)][int]$SizeKiB,
+        [string]$PreviousOwnershipId,
+        [int]$PreviousSizeKiB
     )
 
     # Production uses one HKCU uninstall key; tests use a fresh non-ARP GUID key.
@@ -22,10 +24,27 @@ function Invoke-TowavueRegistration {
         }
     }
     if ($InstallDirectory.TrimEnd('\').Length -le 2 -or [IO.Path]::GetExtension($ShortcutPath) -ne '.lnk') { throw 'Invalid dedicated installation or shortcut path.' }
+    $updating = $Mode -in @('VerifyUpdate','Update')
+    if ($updating -and ($PreviousOwnershipId -cnotmatch '^towavue-local-[0-9a-f]{64}$' -or $PreviousSizeKiB -lt 1)) { throw 'An update requires the recorded previous identity and size.' }
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
     $key = $null
     try {
-        $key = $base.OpenSubKey($RegistrySubKey,$Mode -eq 'Remove')
+        $key = $base.OpenSubKey($RegistrySubKey,$Mode -in @('Remove','Update'))
+        if ($updating) {
+            if (-not $key) { throw 'The existing update registration is missing.' }
+            if ($key.GetValueKind('InstallLocation') -ne 'String' -or $key.GetValue('InstallLocation') -ne $InstallDirectory -or
+                $key.GetValueKind('TowavueOwnershipId') -ne 'String' -or $key.GetValueKind('EstimatedSize') -ne 'DWord') { throw 'Update registration path or value type differs; preserve it.' }
+            $currentId = $key.GetValue('TowavueOwnershipId')
+            $currentSize = $key.GetValue('EstimatedSize')
+            if (@($PreviousOwnershipId,$OwnershipId) -cnotcontains $currentId -or @($PreviousSizeKiB,$SizeKiB) -notcontains $currentSize) { throw 'Update registration has an unknown identity or size; preserve it.' }
+            if ($Mode -eq 'VerifyUpdate') { return 'Registration transition verified; no changes made.' }
+            # Two writes are not atomic. The caller retains both typed states;
+            # retry or reversed arguments can complete a known partial transition.
+            if ($currentSize -ne $SizeKiB) { $key.SetValue('EstimatedSize',$SizeKiB,[Microsoft.Win32.RegistryValueKind]::DWord) }
+            if ($currentId -cne $OwnershipId) { $key.SetValue('TowavueOwnershipId',$OwnershipId,[Microsoft.Win32.RegistryValueKind]::String) }
+            $key.Flush()
+            return 'Updated ownership and size; shortcut and all other registration values were preserved.'
+        }
         if ($Mode -in @('Inspect','Install')) {
             if ($key -or (Test-Path -LiteralPath $ShortcutPath)) { throw 'An existing registration or shortcut occupies this application identity. It was not changed.' }
             if (-not (Test-Path -LiteralPath (Split-Path -Parent $ShortcutPath) -PathType Container)) { throw 'The per-user shortcut directory is unavailable.' }

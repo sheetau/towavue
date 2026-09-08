@@ -111,6 +111,8 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 続いてfile単位の退避・配置・復旧を試験配置へ実装した。新旧copyとjournal、直前照合と共有制限付きhandle、旧名の退避後に新名を配置する二段階処理、本体exeの最終配置、receiptを使う中断復旧を追加。32／64-bit PowerShellで更新10か所・復旧10か所の失敗と子process終了後の復旧、hard link先と利用者fileの保持を検証した。実Setupには未接続で、登録切替、journal digestの永続化と復旧UI、cleanup、対象OS・metadata／power-loss検証を残す。file試験の成功を更新全体やlaunch gateの完了とはしない。
 
+復旧は退避原本を戻す方式へ改め、復旧用data copyなしで元のhard link関係・日時・security descriptor・試験用alternate streamが戻ることを32／64-bitで確認した。登録helperには同directoryの所有ID／容量だけを切り替える処理を追加し、二つの書き込み間の失敗と逆方向復旧、未知の値・shortcut保持を試験した。原本の欠落／使用中、不明な登録状態は上書きせず停止する。fileと登録のjournal結合、実Setup／復旧UI、満杯volume・ACL・電源断と対象OSの検証は引き続き未完了である。
+
 2026-09-08、既存preview／保存のhelper探索だけはH1の独立した修正として先に検証する。FFMPEG_DIRによる同梱版の上書きや、不足helperをPATH上の別版で埋め合わせる動作を防ぐ。第2段階のinstaller作成・runtime採用は第1段階の監査後のままとし、helper単体の検証でそのgateを通過扱いにしない。
 
 2026-09-08、第一段階で固定開発FFmpegのChromaprint→GPL FFTW静的リンクを確認し、既存binaryを配布候補から除外した。次の配布作業は[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)の機能を保つ再buildと対応資料の確定であり、旧DLLをそのままinstallerへ組み込むことではない。KissFFT版Chromaprintの単体試験は通ったが、全体差替え・性能・再配布条件のgateは未完了。

@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-09 00:38 JST - include fixed external Unicode data in the material catalog
+
+- Trigger/intent: previous goal turn is progress. Confirm clean pushed 85a6e37 and poll the same CI 34244463196 to completed/success. Close the specifically identified external-data delivery gap without WSL, downloads, generator execution, installation or publication.
+- Materials: copy 22 original data files and three PCRE2 generators from previously verified local audits into a dedicated cache. The new collector uses existing audit hashes, binds PCRE2/libxml2 sources and the PCRE2 notice to the companion source manifest, validates all inputs before output, and writes its completion marker last. Preserve original audit JSON scope statements with a current README explanation. Data kit v1 has 31 files/7628780 bytes, tree 7daf7f0a....
+- Tests: focused data checks pass exact output/repeat/arbitrary cwd, 27 missing/corrupt input pairs, missing README, six mapping failures, junction/overlap rejection, incomplete-copy marker protection and original-output preservation. Evidence target/tmp/native-data-test-c5791e105cf54868b7a4440d48013a56. Catalog session 44656 passes 142 package/recipe pairs, 13 kit pairs, five manifest failures and existing link/repeat/preservation checks; evidence native-catalog-test-ae7a93c60290422d89e532fbdc1ae479.
+- Catalog/verification: final v10 has 2875 files/842769539 bytes, FILES.json 202d8a61...; thirteen kits total 2577 files/840260390 bytes. Both final outputs match tested trees file-for-file; all twelve previous kit trees, all 94 runtime hashes and exe 03125262... remain unchanged. M0 session 3210 passes format/full-target Clippy/270 tests; three live ignores remain unexecuted, no fresh hardware proof. Script parsing and whitespace checks pass.
+- Areas/status/next: new data collector/tests/README/guide, catalog inventory/count and native data/review/planning docs. All local jobs terminal; no application UI launched. Prepare coherent checkpoint, h1_active. Next bind final exe/runtime hashes to source/material versions and provide the user-facing notice/source entry, then assisted Setup.exe and isolated prerequisite/supported-Windows lifecycle. Local catalog inclusion is not publication or distribution approval; final-candidate quality and physical/owner acceptance remain open.
+
 ## 2026-09-09 00:21 JST - preserve PNG/WebP and exact OpenCL header materials
 
 - Trigger/intent: previous goal turn is progress. Confirm clean pushed c77bb06; poll the same CI 34242468726 from in_progress to completed/success. Finish the three named notice/header cases without WSL, installation, runtime adoption or publication.

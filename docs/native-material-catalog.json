@@ -7,6 +7,14 @@
   "package_notice_count": 79,
   "kits": [
     {
+      "name": "native-data-materials-v1",
+      "files": 31,
+      "bytes": 7628780,
+      "tree_sha256": "7daf7f0a72cf71eced5ce46a336f91dd584e872e700a240836d20f114e201cf5",
+      "title": "External Unicode data and original PCRE2 generators",
+      "description": "22 versioned data files and three original scripts, with Unicode and code notices; companion to the library sources."
+    },
+    {
       "name": "app-materials-v1",
       "files": 11,
       "bytes": 3356087,

@@ -13,11 +13,11 @@
 
 packageとrecipeの既定cacheは`vendor/msys2/packages-20260908`と`vendor/msys2/runtime-recipes-20260908`。別配置では`-PackageDirectory`と`-RecipeDirectory`を指定する。取得・install・recipe実行はせず、不足・改変cacheを上書き修復しない。
 
-出力の`README.md`が入口で、本体とnativeの12 kitの説明書、sourceの読み方と残作業を案内する。`PACKAGES.md`は71 ownerの元build記録・recipe・79 package noticesへ直接リンクする。packageに表示がない場合は欠落を明示し、source資料の確認へ誘導する。packageのlicense labelだけで最終適用条件を分類しない。
+出力の`README.md`が入口で、本体とnativeの13 kitの説明書、sourceの読み方と残作業を案内する。`PACKAGES.md`は71 ownerの元build記録・recipe・79 package noticesへ直接リンクする。packageに表示がない場合は欠落を明示し、source資料の確認へ誘導する。packageのlicense labelだけで最終適用条件を分類しない。
 
 | 出力 | 内容 |
 |---|---|
-| `materials/` | 固定した12 kitを原文のままコピー。各説明書・入力一覧と収集済み原文／source archivesを保持 |
+| `materials/` | 固定した13 kitを原文のままコピー。各説明書・入力一覧と収集済み原文／source archivesを保持 |
 | `packages/` | 71 ownerの`.BUILDINFO`・`.PKGINFO`・元PKGBUILDと、収録されている原文表示 |
 | `README.md`、`PACKAGES.md` | 相対pathによる案内。公開download URLを捏造せず、upstream recipe URLとlocal資料を区別 |
 | `native-runtime-package-audit.json`、`native-runtime-recipes.json` | 元72-owner baselineとrecipe由来の記録。現在採用済みruntime一覧ではない |
@@ -28,7 +28,7 @@ packageとrecipeの既定cacheは`vendor/msys2/packages-20260908`と`vendor/msys
 
 ## 照合の範囲
 
-[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2546 files／832631610 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
+[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2577 files／840260390 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
 
 本体kitを加えたv3の集約は2460 files／724157839 bytes。これは資料のサイズであり、インストーラーのサイズではない。原本source archivesを保持するが、runtime DLL／exe／static libraryを別fileとしてコピーしない。source-onlyのtoolや他targetの条件を、本体へ一律適用する表示にはしない。
 
@@ -63,6 +63,10 @@ v8も全catalog回帰を通過し、supplementの150入力の欠落／改変pair
 libpng／libwebpとOpenCL Headersを加えたv9は2844 files／835133390 bytes、`FILES.json`のSHA256は`b2cac19054e2910ea234bbe1bb806d2f976b29bc090f7962f98b68e32b808f96`。44-owner supplement v16は675 files／186988193 bytes、10-input static/API-header kit v4は225 files／37697930 bytes。前版の634／179 files（各README／INPUTS以外）は不変で、最終3出力はそれぞれ試験生成物と全hash一致した。
 
 sourceの156入力欠落／改変pairs、headerの46 pairs・9 mapping不整合、catalogの全回帰が通過した。M0のformat／全target Clippy／270 testsも成功し、3 live ignoresは未実行。候補exeと94 runtime hashesは不変で、[画像library／API headerの原文・根拠](NATIVE_IMAGE_HEADER_NOTICE_AUDIT.md)を辿れる。次は外部dataも含むsource／noticeの最終提供を組み立てる。
+
+外部Unicode dataとPCRE2生成scriptの[補助kit](NATIVE_DATA_MATERIALS.md)を加えたv10は2875 files／842769539 bytes、`FILES.json`のSHA256は`202d8a61a2de59685ba727d11c3094f75e36222a1a3a9744361d61b68fbaaab7`。新kitは31 files／7628780 bytesで、22 data filesと3 scripts、元表示・使用版の記録を含む。既存12 kitの中身は変更せず、13個目として統合する。これはローカル資料への収録であり、公開downloadや最終実行物への対応付けの完了ではない。
+
+v10の全catalog回帰と、data kitの欠落／改変・source対応・link／overlap・途中失敗marker保護が通過した。最終31／2875 filesは各試験出力と全hash一致し、既存12 kitも不変。M0のformat／全target Clippy／270 testsは成功、3 live ignoresは未実行で新しいhardware確認とは数えない。
 
 ## まだ残るもの
 

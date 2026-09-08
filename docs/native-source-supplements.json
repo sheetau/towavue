@@ -1,0 +1,615 @@
+{
+  "schema_version": 1,
+  "scope": "Supplementary source archives, recipe inputs and selected documents for the 13 runtime packages without package notices, excluding separately covered Chromaprint/OpenAL. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "packages": [
+    {
+      "package": "mingw-w64-x86_64-gmp",
+      "recipe_sha256": "b9d3bb2b5b12cb0fc47c4dc17a9a2aa82513236eaefa34c8dfc57dd0d92bc42a",
+      "files": [
+        {
+          "name": "gmp-6.3.0.tar.xz",
+          "kind": "source",
+          "url": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz",
+          "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898",
+          "bytes": 2094196
+        },
+        {
+          "name": "do-not-use-dllimport.diff",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/19a497b647dea2939e4fe9cc2ad5818f83b1632f/mingw-w64-gmp/do-not-use-dllimport.diff",
+          "sha256": "385ab704f82c47f3aecc9141f43c96e7b8de2bf0e654dc457ce0f1a039db2c68",
+          "bytes": 491
+        },
+        {
+          "name": "gmp-staticlib.diff",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/19a497b647dea2939e4fe9cc2ad5818f83b1632f/mingw-w64-gmp/gmp-staticlib.diff",
+          "sha256": "7c3cde2634baa2cb1c31404bbfed2d8d7ba33556971ac842a08f2e87667849ab",
+          "bytes": 900
+        }
+      ],
+      "archive_prefix": "gmp-6.3.0/",
+      "archive_entries": 2343,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "gmp-6.3.0/gmp-h.in",
+          "bytes": 84332,
+          "sha256": "3e09f57d413e03cbf4c967317748ae83bbae58b9860f150b7c913eaeee0d0542"
+        },
+        {
+          "name": "gmp-6.3.0/COPYING",
+          "bytes": 35147,
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        {
+          "name": "gmp-6.3.0/COPYING.LESSERv3",
+          "bytes": 7639,
+          "sha256": "a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c"
+        },
+        {
+          "name": "gmp-6.3.0/AUTHORS",
+          "bytes": 4098,
+          "sha256": "da5870e2f0482c5dc15b4cfed8bbfb51ce1279c8f8fc52bdb8c13c7cee949c32"
+        },
+        {
+          "name": "gmp-6.3.0/COPYINGv3",
+          "bytes": 35150,
+          "sha256": "e6037104443f9a7829b2aa7c5370d0789a7bda3ca65a0b904cdc0c2e285d9195"
+        },
+        {
+          "name": "gmp-6.3.0/COPYINGv2",
+          "bytes": 18092,
+          "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-lz4",
+      "recipe_sha256": "e8780f865620673525e38b992561193c841a9927ac4f81d8b3f5f6ce0534f0a4",
+      "files": [
+        {
+          "name": "lz4-1.10.0.tar.gz",
+          "kind": "source",
+          "url": "https://github.com/lz4/lz4/archive/v1.10.0.tar.gz",
+          "sha256": "537512904744b35e232912055ccf8ec66d768639ff3abe5788d90d792ec5f48b",
+          "bytes": 387114
+        }
+      ],
+      "archive_prefix": "lz4-1.10.0/",
+      "archive_entries": 251,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "lz4-1.10.0/LICENSE",
+          "bytes": 646,
+          "sha256": "4bc9c403f6b679cc076dee210e0e21c27b4e8f6d3fb43d85364c76657bfaaac5"
+        },
+        {
+          "name": "lz4-1.10.0/contrib/djgpp/LICENSE",
+          "bytes": 1292,
+          "sha256": "d011d1e02cb32b71c1ce2922ab41a2e2ad30f4ecf8de22c078d53618205abc05"
+        },
+        {
+          "name": "lz4-1.10.0/examples/COPYING",
+          "bytes": 14901,
+          "sha256": "609b910ef05c9c855ecc1da155a36ed0f57514eac452cf93446530b5ea4b3bc3"
+        },
+        {
+          "name": "lz4-1.10.0/lib/LICENSE",
+          "bytes": 1311,
+          "sha256": "8b58c446121a109ccf32edc094bba3010a3d85e4ee3702950db55e4d3e87736c"
+        },
+        {
+          "name": "lz4-1.10.0/lib/Makefile",
+          "bytes": 8956,
+          "sha256": "f5347c9e0c5e36e8be3329c8ca91c6bafbf4f6494f0484c2e8017eaa932e8c8f"
+        },
+        {
+          "name": "lz4-1.10.0/lib/lz4.h",
+          "bytes": 46014,
+          "sha256": "26b82efc53d1570f3b54eef02e9c4764c1ad374ff03cac04e2ced5ea4d4c552f"
+        },
+        {
+          "name": "lz4-1.10.0/programs/COPYING",
+          "bytes": 14901,
+          "sha256": "609b910ef05c9c855ecc1da155a36ed0f57514eac452cf93446530b5ea4b3bc3"
+        },
+        {
+          "name": "lz4-1.10.0/tests/COPYING",
+          "bytes": 14901,
+          "sha256": "609b910ef05c9c855ecc1da155a36ed0f57514eac452cf93446530b5ea4b3bc3"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libass",
+      "recipe_sha256": "7a5bd281e45fe9261942c547ccc94d196b837e754d55fe7db73b713626848527",
+      "files": [
+        {
+          "name": "libass-0.17.5.tar.xz",
+          "kind": "source",
+          "url": "https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.xz",
+          "sha256": "2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc",
+          "bytes": 460148
+        }
+      ],
+      "archive_prefix": "libass-0.17.5/",
+      "archive_entries": 147,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libass-0.17.5/COPYING",
+          "bytes": 755,
+          "sha256": "f7e30699d02798351e7f839e3d3bfeb29ce65e44efa7735c225464c4fd7dfe9c"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libssh",
+      "recipe_sha256": "a034ae78fc47fa516eee2336c44a99e8ddb2eb9e0e9f5ecea38219ad0fc85735",
+      "files": [
+        {
+          "name": "libssh-0.12.2.tar.xz",
+          "kind": "source",
+          "url": "https://www.libssh.org/files/0.12/libssh-0.12.2.tar.xz",
+          "sha256": "49560f677d96e3706a904ac2de1116e25f3680937d51e5c92198fcba4a1c1e9f",
+          "bytes": 759680
+        },
+        {
+          "name": "002-libssh-fix-pkgconfig.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/f530dd351563998f95b7c818d1a17f02009e5b82/mingw-w64-libssh/002-libssh-fix-pkgconfig.patch",
+          "sha256": "45eb3be0e97f9d50144ac14404545a1a337609b3d650aa3b2c353affefb220cd",
+          "bytes": 511
+        }
+      ],
+      "archive_prefix": "libssh-0.12.2/",
+      "archive_entries": 569,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libssh-0.12.2/AUTHORS",
+          "bytes": 488,
+          "sha256": "95b6a58ab69d7687d9486b4a859ebfc00fff25b0942cc51239ada2702ae69d1b"
+        },
+        {
+          "name": "libssh-0.12.2/COPYING",
+          "bytes": 25008,
+          "sha256": "1656186e951db1c010a8485481fa94587f7e53a26d24976bef97945ad0c4df5a"
+        },
+        {
+          "name": "libssh-0.12.2/cmake/Modules/COPYING-CMAKE-SCRIPTS",
+          "bytes": 1327,
+          "sha256": "46cde7dc11e64c78d650b4851b88f6704b4665ff60f22a1caf68ceb15e217e5b"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-lame",
+      "recipe_sha256": "8ebce80af0c5f0b09006b88fdcd320a8c17d14a52e8a493004abdd1458d21453",
+      "files": [
+        {
+          "name": "lame-3.100.tar.gz",
+          "kind": "source",
+          "url": "https://downloads.sourceforge.net/lame/lame-3.100.tar.gz",
+          "sha256": "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e",
+          "bytes": 1524133
+        },
+        {
+          "name": "0002-07-field-width-fix.all.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/b3be8a16ab7bbbba81c1d07ae1a231f23c2e31be/mingw-w64-lame/0002-07-field-width-fix.all.patch",
+          "sha256": "d3ba595816761706d1e5dcf432f0b3ad8c9c6b37584032e21bf24c89e4fd0fc8",
+          "bytes": 1097
+        },
+        {
+          "name": "0005-no-gtk.all.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/b3be8a16ab7bbbba81c1d07ae1a231f23c2e31be/mingw-w64-lame/0005-no-gtk.all.patch",
+          "sha256": "cd3c8807de5b435b8e97200e369e7e8f93f7fc0eba7d44b393ede925e42d3b00",
+          "bytes": 360
+        },
+        {
+          "name": "0006-dont-use-outdated-symbol-list.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/b3be8a16ab7bbbba81c1d07ae1a231f23c2e31be/mingw-w64-lame/0006-dont-use-outdated-symbol-list.patch",
+          "sha256": "21c7ee85854be00a3e8e6790911292837676f083a5c1085718bed899096d3679",
+          "bytes": 490
+        },
+        {
+          "name": "0007-revert-posix-code.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/b3be8a16ab7bbbba81c1d07ae1a231f23c2e31be/mingw-w64-lame/0007-revert-posix-code.patch",
+          "sha256": "1e7f61456b15ceea613de8fd982b3f892340b851393d4ca4aff44395ae237ae9",
+          "bytes": 2978
+        },
+        {
+          "name": "0008-skip-termcap.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/b3be8a16ab7bbbba81c1d07ae1a231f23c2e31be/mingw-w64-lame/0008-skip-termcap.patch",
+          "sha256": "8fddeebd0ccdec62ede2932ce3bbe767af6ed6f06018f7f13113401d4ce06179",
+          "bytes": 321
+        },
+        {
+          "name": "0009-lame-add-pkgconfig.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/b3be8a16ab7bbbba81c1d07ae1a231f23c2e31be/mingw-w64-lame/0009-lame-add-pkgconfig.patch",
+          "sha256": "65edcb5090417f822227b4a43f2f0c0224ceca7486fb3fd01aa9a6cf153ad714",
+          "bytes": 1870
+        }
+      ],
+      "archive_prefix": "lame-3.100/",
+      "archive_entries": 352,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "lame-3.100/COPYING",
+          "bytes": 25284,
+          "sha256": "bfe4a52dc4645385f356a8e83cc54216a293e3b6f1cb4f79f5fc0277abf937fd"
+        },
+        {
+          "name": "lame-3.100/LICENSE",
+          "bytes": 487,
+          "sha256": "7a40cbd8818c57e5285e83c772a459a996d1662c824a879836b97b473c07cae4"
+        },
+        {
+          "name": "lame-3.100/mpglib/AUTHORS",
+          "bytes": 604,
+          "sha256": "d8ecf9556aafa8c653796d6be3dc43deea374257680e21c30109a5c3c4484263"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libtheora",
+      "recipe_sha256": "6febdba0e00b0385072bb558eb9f9ab61c12f7604571b8c18afc2274a3455f54",
+      "files": [
+        {
+          "name": "libtheora-1.2.0.tar.gz",
+          "kind": "source",
+          "url": "https://downloads.xiph.org/releases/theora/libtheora-1.2.0.tar.gz",
+          "sha256": "279327339903b544c28a92aeada7d0dcfd0397b59c2f368cc698ac56f515906e",
+          "bytes": 2535283
+        },
+        {
+          "name": "001-example.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/d544d1e54be8fb798fb881400000983fe9e912da/mingw-w64-libtheora/001-example.patch",
+          "sha256": "5627d26c3316fef71bca037e1834bcba063dbf949ea9293820f0e68b13641105",
+          "bytes": 659
+        }
+      ],
+      "archive_prefix": "libtheora-1.2.0/",
+      "archive_entries": 423,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libtheora-1.2.0/LICENSE",
+          "bytes": 960,
+          "sha256": "2c902950c73a63cd285dc0c36573de9c5fefe66d49312949c51d941f33e92932"
+        },
+        {
+          "name": "libtheora-1.2.0/COPYING",
+          "bytes": 1470,
+          "sha256": "8417fad7da775735564e209484a2e011e0fa201e94f01fdbee6e4977e478e6fc"
+        },
+        {
+          "name": "libtheora-1.2.0/AUTHORS",
+          "bytes": 828,
+          "sha256": "ef0ba8da05924cf4e2f9acf782076892ed477c01a6d4cc9f5d107652cf84da8c"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libvorbis",
+      "recipe_sha256": "38f4410bcfba376befc9031b4c204e9abc1d5949d2e617c53497cdb19db5316a",
+      "files": [
+        {
+          "name": "libvorbis-1.3.7.tar.gz",
+          "kind": "source",
+          "url": "https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.gz",
+          "sha256": "0e982409a9c3fc82ee06e08205b1355e5c6aa4c36bca58146ef399621b0ce5ab",
+          "bytes": 1658963
+        }
+      ],
+      "archive_prefix": "libvorbis-1.3.7/",
+      "archive_entries": 466,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libvorbis-1.3.7/COPYING",
+          "bytes": 1470,
+          "sha256": "ec1815db59fcd302846df949d7424876cb2e2dc5ed1606c5fb0b36787b1cf43a"
+        },
+        {
+          "name": "libvorbis-1.3.7/AUTHORS",
+          "bytes": 65,
+          "sha256": "f5cab9f16035f770f50299f85cf2938c06dc3a9a30425961067788102ec896d3"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libvpx",
+      "recipe_sha256": "ec57aa54095093c69364d4870f84176a6470ff6eed74bea64954ed4ebec74592",
+      "files": [
+        {
+          "name": "libvpx-1.17.0.tar.gz",
+          "kind": "source",
+          "url": "https://github.com/webmproject/libvpx/archive/v1.17.0/libvpx-1.17.0.tar.gz",
+          "sha256": "1020f184046187baa2985dbde38e0691f49c44088bca7a1842b0236c6081dc0a",
+          "bytes": 5670546
+        },
+        {
+          "name": "0001-enable-shared-on.mingw.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libvpx/0001-enable-shared-on.mingw.patch",
+          "sha256": "f37a24525725cad215d73c538c0b06343b043f2b07553e7dc25835bd68af0695",
+          "bytes": 6398
+        }
+      ],
+      "archive_prefix": "libvpx-1.17.0/",
+      "archive_entries": 1344,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libvpx-1.17.0/AUTHORS",
+          "bytes": 9579,
+          "sha256": "8a98b560e5314713550e6d3ba2d8acf3ef54dfc870fc448bef08a7c57648a0bd"
+        },
+        {
+          "name": "libvpx-1.17.0/LICENSE",
+          "bytes": 1537,
+          "sha256": "8267348d5af1262c11d1a08de2f5afc77457755f1ac658627dd9acf71011d615"
+        },
+        {
+          "name": "libvpx-1.17.0/PATENTS",
+          "bytes": 1436,
+          "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+        },
+        {
+          "name": "libvpx-1.17.0/third_party/googletest/src/LICENSE",
+          "bytes": 1475,
+          "sha256": "9702de7e4117a8e2b20dafab11ffda58c198aede066406496bef670d40a22138"
+        },
+        {
+          "name": "libvpx-1.17.0/third_party/libwebm/AUTHORS.TXT",
+          "bytes": 137,
+          "sha256": "3edb5f5496bfff3d6d4a62fa75fe996b814920d0d6e348c2e65c589e7ac5d177"
+        },
+        {
+          "name": "libvpx-1.17.0/third_party/libwebm/LICENSE.TXT",
+          "bytes": 1496,
+          "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf"
+        },
+        {
+          "name": "libvpx-1.17.0/third_party/libwebm/PATENTS.TXT",
+          "bytes": 1436,
+          "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+        },
+        {
+          "name": "libvpx-1.17.0/third_party/libyuv/LICENSE",
+          "bytes": 1506,
+          "sha256": "2b2cc1180c7e6988328ad2033b04b80117419db9c4c584918bbb3cfec7e9364f"
+        },
+        {
+          "name": "libvpx-1.17.0/third_party/nalloc/LICENSE",
+          "bytes": 1069,
+          "sha256": "d7dd0396ec46975e1bf9093680068ef301bc0ed204603e623a6f7073ab922ab1"
+        },
+        {
+          "name": "libvpx-1.17.0/third_party/x86inc/LICENSE",
+          "bytes": 936,
+          "sha256": "719d8fa235f2068e0ae6d6a7dceb0a7720d7840f0f0ebed29957989e6ded3cd8"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-opencore-amr",
+      "recipe_sha256": "bc9705ceb1778361f49feaae30b3a895a92679125a31c9447aaa8b8d9d809edc",
+      "files": [
+        {
+          "name": "opencore-amr-0.1.6.tar.gz",
+          "kind": "source",
+          "url": "https://downloads.sourceforge.net/opencore-amr/opencore-amr-0.1.6.tar.gz",
+          "sha256": "483eb4061088e2b34b358e47540b5d495a96cd468e361050fae615b1809dc4a1",
+          "bytes": 939179
+        }
+      ],
+      "archive_prefix": "opencore-amr-0.1.6/",
+      "archive_entries": 491,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "opencore-amr-0.1.6/LICENSE",
+          "bytes": 10271,
+          "sha256": "8b3f1762349248d444ab9acbafe73941254e36e1064954da56bb9ddbd5873ddb"
+        },
+        {
+          "name": "opencore-amr-0.1.6/opencore/NOTICE",
+          "bytes": 12498,
+          "sha256": "d106802b5e406073c1d10fbe9f638234c6973ebce37df71773179642085eb489"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-snappy",
+      "recipe_sha256": "8a8c5a4863052e562f85dbf2364d5f198d9e13726f82da90a4188ea1f6e6f49f",
+      "files": [
+        {
+          "name": "snappy-1.2.2.tar.gz",
+          "kind": "source",
+          "url": "https://github.com/google/snappy/archive/1.2.2/snappy-1.2.2.tar.gz",
+          "sha256": "90f74bc1fbf78a6c56b3c4a082a05103b3a56bb17bca1a27e052ea11723292dc",
+          "bytes": 1108618
+        },
+        {
+          "name": "0001-cmake-add-pkgconfig.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/214f4a2a9f3a6d8e1b7b85f4ba6bdec0cbf8487c/mingw-w64-snappy/0001-cmake-add-pkgconfig.patch",
+          "sha256": "2a204d7d35509ffc290d80c641fcb7e8488c67ca550aa1695493cff12c53156b",
+          "bytes": 708
+        },
+        {
+          "name": "0002-remove-Werror-flag.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/214f4a2a9f3a6d8e1b7b85f4ba6bdec0cbf8487c/mingw-w64-snappy/0002-remove-Werror-flag.patch",
+          "sha256": "a687b1a6e07e508bf43b0cce8059c1ddba74195b4b7b822643a0d06d3083c46d",
+          "bytes": 557
+        },
+        {
+          "name": "snappy.pc.in",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/214f4a2a9f3a6d8e1b7b85f4ba6bdec0cbf8487c/mingw-w64-snappy/snappy.pc.in",
+          "sha256": "134f06ca0584a1026538d0fb972fc141c008390ecae1806184b721eca1abbc75",
+          "bytes": 245
+        },
+        {
+          "name": "cmake-dual-libs.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/214f4a2a9f3a6d8e1b7b85f4ba6bdec0cbf8487c/mingw-w64-snappy/cmake-dual-libs.patch",
+          "sha256": "37caf9737f58cdce95cdeb2c2c69a4292211750efe366a5fa4b3b61c5cb6e035",
+          "bytes": 3359
+        }
+      ],
+      "archive_prefix": "snappy-1.2.2/",
+      "archive_entries": 61,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "snappy-1.2.2/AUTHORS",
+          "bytes": 22,
+          "sha256": "710c0a3a4681c8c40f5a59eb794f61093fa142935c647c92f46ea595f0591833"
+        },
+        {
+          "name": "snappy-1.2.2/COPYING",
+          "bytes": 2645,
+          "sha256": "55172044f7e241207117448a4d9d6ba1d0925c8ad66b5d4c08c70adfa9cc3de6"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-twolame",
+      "recipe_sha256": "2a272ac1bbe6af4113d10c105e007f8b7d207ec78b794ee7e6c2c39ca150ecaa",
+      "files": [
+        {
+          "name": "twolame-0.4.0.tar.gz",
+          "kind": "source",
+          "url": "https://downloads.sourceforge.net/twolame/twolame-0.4.0.tar.gz",
+          "sha256": "cc35424f6019a88c6f52570b63e1baf50f62963a3eac52a03a800bb070d7c87d",
+          "bytes": 890908
+        },
+        {
+          "name": "0001-mingw32-does-not-need-handholding.all.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/333b732cd6c0c337f7f04e25a3b97414f046c820/mingw-w64-twolame/0001-mingw32-does-not-need-handholding.all.patch",
+          "sha256": "89bab27e8fb97eb1ca59e353705f2a22cf4e9c570c22f599b9090d0fd344b035",
+          "bytes": 288
+        },
+        {
+          "name": "0005-silent.mingw.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/333b732cd6c0c337f7f04e25a3b97414f046c820/mingw-w64-twolame/0005-silent.mingw.patch",
+          "sha256": "01b00dfa83ad4af3dad944ddbe1f5b1da03fb9ea2b699d95c9da109391eec911",
+          "bytes": 347
+        },
+        {
+          "name": "0002-Add-missing-TL_API.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/333b732cd6c0c337f7f04e25a3b97414f046c820/mingw-w64-twolame/0002-Add-missing-TL_API.patch",
+          "sha256": "ad0bf19387e842ce6070a7a812a80237b16591441f6b822909722d3870a01c88",
+          "bytes": 818
+        }
+      ],
+      "archive_prefix": "twolame-0.4.0/",
+      "archive_entries": 139,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "twolame-0.4.0/AUTHORS",
+          "bytes": 1856,
+          "sha256": "89acea387ca97766b248e553ea68400898669b1637cfa31e4ceefff9efa3744d"
+        },
+        {
+          "name": "twolame-0.4.0/COPYING",
+          "bytes": 26428,
+          "sha256": "257a842724705950b07da76ce0e22ffa80ec77b3e9dfc6702522ac342409da0f"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-zeromq",
+      "recipe_sha256": "2193e74c9e5f8abfaa530181e7e2d266cb5d7f3cb3becb87ba3a20ee17743959",
+      "files": [
+        {
+          "name": "zeromq-4.3.5.tar.gz",
+          "kind": "source",
+          "url": "https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.tar.gz",
+          "sha256": "6653ef5910f17954861fe72332e68b03ca6e4d9c7160eb3a8de5a5a913bfab43",
+          "bytes": 2530237
+        },
+        {
+          "name": "a02cbd0646175a44edb1d636911eb8dae12ec13f.patch",
+          "kind": "build-input",
+          "url": "https://github.com/zeromq/libzmq/commit/a02cbd0646175a44edb1d636911eb8dae12ec13f.patch",
+          "sha256": "6c5c612b06f4209754991bd51ca42efbfbc4c9db5b86080b0ce3bc179d2e7d3b",
+          "bytes": 815
+        }
+      ],
+      "archive_prefix": "zeromq-4.3.5/",
+      "archive_entries": 895,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "zeromq-4.3.5/LICENSE",
+          "bytes": 16725,
+          "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+        },
+        {
+          "name": "zeromq-4.3.5/AUTHORS",
+          "bytes": 2350,
+          "sha256": "9c7e32ac52c546ce6c9b328f348b2053ff6d56630cba06727e2e5abf644f4aed"
+        },
+        {
+          "name": "zeromq-4.3.5/external/unity/license.txt",
+          "bytes": 1123,
+          "sha256": "3ed9b51da86f52c729c96cc99fdde6444b2297c788a9cf4ad1d3649dc34c4985"
+        },
+        {
+          "name": "zeromq-4.3.5/external/wepoll/license.txt",
+          "bytes": 1394,
+          "sha256": "3e56262d2c0e9492f113089916ed624e98f88b31dfd6acae24ede59cdfda5a69"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-zimg",
+      "recipe_sha256": "e604ad47fa3e87e49632d3b1bc889efca30b296e4f8a05905252ac47996c514f",
+      "files": [
+        {
+          "name": "zimg-3.0.6.tar.gz",
+          "kind": "source",
+          "url": "https://github.com/sekrit-twc/zimg/archive/release-3.0.6/zimg-3.0.6.tar.gz",
+          "sha256": "be89390f13a5c9b2388ce0f44a5e89364a20c1c57ce46d382b1fcc3967057577",
+          "bytes": 326725
+        },
+        {
+          "name": "0001-zimg-export-def-symbols.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/82bcf47d0ae2621e1cd00fb82c8ee5db02b91955/mingw-w64-zimg/0001-zimg-export-def-symbols.patch",
+          "sha256": "6e52d715d19080434392f04b33005fee428368e12176da20555f4059209c8134",
+          "bytes": 460
+        }
+      ],
+      "archive_prefix": "zimg-release-3.0.6/",
+      "archive_entries": 325,
+      "internal_links": 7,
+      "selected_documents": [
+        {
+          "name": "zimg-release-3.0.6/COPYING",
+          "bytes": 484,
+          "sha256": "7637386b5f81e8a719ca336233149005e5fa28b5e6054ea7b67de49355b0ad40"
+        }
+      ]
+    }
+  ]
+}

@@ -38,6 +38,8 @@ shaderc／SPIRV-Cross／Vulkan Loaderの3 source setsも元recipeのhashへ対�
 
 続く[4 shader static／header inputs](native-shader-inputs.json)では、上記glslang／SPIRV-Tools／SPIRV-Headers／Vulkan-Headersの元package署名・recipeとsource／patch hashを照合した。生成Bison parserの例外、NVIDIA・Khronos・jsoncpp・Paul McGuire由来の原文とscopeを保持する。追加runtime ownerには数えない。glslang自体は旧SPIRV-Tools 3~1.4.350.1-1でbuildされており、そのheader／static scopeとGCC 16.1.0-5は別の残作業である。全compilerを無条件に再buildするのではなく、実際の取り込み範囲と必要な表示を先に狭める。
 
+旧SPIRV-Tools 350.1も元package署名と`.BUILDINFO`一致recipe・source hashを確認した。glslangのwrapperが読む公開headerと、そのpackage内4 headerすべての元sourceとの一致を保存する。これらのincludeは標準C/C++ headerと相互参照で、旧SPIRV-Headers grammar dataは直接includeしない。5-input kitへ原本とpackage表示を追加した。これは旧Toolsの実装を最終shadercへ二重にリンクした証明ではなく、そのbuild-time listから旧toolchain全体を無条件に追加することもしない。GCC 16.1.0-5の実static／standard-header表示と、残る個別表示・source取得案内を続ける。
+
 ## Owner一覧の外にある入力
 
 - 現候補は元85 package DLLのうちZVBIだけが限定build。84 package DLLの71 ownerと、限定ZVBIの由来を区別する。元packageの72 owner一覧は追跡用のbaselineである。

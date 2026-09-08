@@ -27,7 +27,11 @@ foreach ($component in $inventory.components) {
     foreach ($record in $component.package_documents) { $expected[$component.name + '/package/' + $record.name] = $record.sha256 }
     foreach ($record in $component.selected_documents) { $expected[$component.name + '/source/' + $record.name] = $record.sha256 }
     $parent = $audit.packages | Where-Object name -eq $component.consumer
-    $record = @{name=$parent.archive_url.Split('/')[-1];bytes=$parent.archive_bytes;sha256=$parent.archive_sha256}
+    $record = if ($parent) {
+        @{name=$parent.archive_url.Split('/')[-1];bytes=$parent.archive_bytes;sha256=$parent.archive_sha256}
+    } else {
+        ($inventory.components | Where-Object package -eq $component.consumer).package_archive
+    }
     $inputs['packages/' + $record.name] = @{Root=$PackageDirectory;Record=$record}
 }
 $expected['INPUTS.json'] = (Get-FileHash -LiteralPath $inventoryPath).Hash
@@ -98,11 +102,12 @@ foreach ($name in $inputs.Keys) {
 $manifestPath = Join-Path $fixtureRoot 'docs/native-shader-inputs.json'
 $manifestBytes = [IO.File]::ReadAllBytes($manifestPath)
 $encoding = [Text.UTF8Encoding]::new($false)
-foreach ($kind in @('consumer', 'dependency', 'package', 'recipe', 'duplicate', 'path')) {
+foreach ($kind in @('consumer', 'dependency', 'nested', 'package', 'recipe', 'duplicate', 'path')) {
     $changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
     switch ($kind) {
         'consumer' { $changed.components[0].consumer = 'unrelated'; $message = 'Stale native shader consumer mapping.' }
         'dependency' { $changed.components[0].version = 'unrelated'; $message = 'Stale native shader dependency mapping.' }
+        'nested' { $changed.components[4].consumer = 'mingw-w64-x86_64-shaderc'; $message = 'Stale native shader dependency mapping.' }
         'package' { $changed.components[0].package_archive = $changed.components[1].package_archive; $message = 'Stale native shader package mapping.' }
         'recipe' { $changed.components[0].source = $changed.components[1].source; $message = 'Stale native shader recipe mapping.' }
         'duplicate' { $changed.components[1].name = $changed.components[0].name; $message = 'Duplicate native shader component.' }
@@ -129,4 +134,4 @@ foreach ($name in $inputs.Keys) {
     }
 }
 Assert-Output (Join-Path $testRoot 'first')
-Write-Output "Native shader checks passed: $($expected.Count) exact files, arbitrary cwd/repeat, $($inputs.Count) missing/corrupt pairs, six mapping failures, two incomplete-extraction marker cases and input/output preservation. Evidence: $testRoot"
+Write-Output "Native shader checks passed: $($expected.Count) exact files, arbitrary cwd/repeat, $($inputs.Count) missing/corrupt pairs, seven mapping failures, two incomplete-extraction marker cases and input/output preservation. Evidence: $testRoot"

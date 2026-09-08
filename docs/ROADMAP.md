@@ -6,6 +6,8 @@
 
 2026-09-08、再生成native FFmpegと別targetの通常releaseで、4条件各100回のSeek、画像／音声／動画の保存と再openを再確認した。Seek p95は31.764～101.288msで300ms以内、PNG画素・chirp PCMは参照と一致した。全268 testsと必須check後、同じbinaryの30分4K60試験も完走した。107,771表示、drop／CPU transfer 0、drift p95 4.808ms・最大30.042msで基準内。5分以降のprivateは222.63～238.92 MiBで、旧15分付近の大きな増加は今回再現しなかったが、原因やリーク不在は未証明。通常終了とexe／source／DLL不変を確認した。配布監査ではZVBIの個別GPL表記と実DLLの対応関数を確認しており、性能合格だけで同梱を承認しない。配布材料／Setup.exe、実環境とowner受入を含むH1全体は継続する。
 
+同日20:43、限定ZVBIを含む新候補の長時間再生で残った303 frames差を追試した。ownerの開始時右矢印誤操作の可能性という補足に対し、30秒素材の停止中／再生中の先頭要求は全892 frames・drop 0、4K原本の先頭0→右5秒も確認した。原本の5.05秒より前は実decodeで303 frames、残107468が前回と一致する。過去keyの確証はないが問題は再現せず、owner指示に従いこの差だけの30分再試験はせず配布準備へ進む。前回を全frame再生の証明へ変更せず、H1／Setup.exe／対象環境・owner受入は未完了のまま維持する。
+
 ## M0 — Foundation（完了）
 
 Git、Rust workspace、設計・運用文書、CIを構築する。再生、UI、Shell連携のruntime実装は行わない。

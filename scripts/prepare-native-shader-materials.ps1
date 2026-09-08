@@ -10,7 +10,7 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $inventoryPath = Join-Path $repositoryRoot 'docs/native-shader-inputs.json'
 $inventory = Get-Content -LiteralPath $inventoryPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $audit = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/native-runtime-package-audit.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($inventory.schema_version -ne 1 -or $inventory.components.Count -ne 4) { throw 'Incomplete native shader inventory.' }
+if ($inventory.schema_version -ne 1 -or $inventory.components.Count -ne 5) { throw 'Incomplete native shader inventory.' }
 $CacheDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CacheDirectory)
 $PackageDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($PackageDirectory)
 $OutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
@@ -46,10 +46,18 @@ foreach ($component in $inventory.components) {
     }
     foreach ($record in @($component.package_documents) + @($component.selected_documents)) { Assert-Path $record.name }
     $consumer = @($audit.packages | Where-Object name -eq $component.consumer)
-    if ($consumer.Count -ne 1) { throw 'Stale native shader consumer mapping.' }
-    $parent = $consumer[0]
-    $parentPath = Join-Path $PackageDirectory ($parent.archive_url.Split('/')[-1])
-    Assert-Input $parentPath @{bytes=$parent.archive_bytes;sha256=$parent.archive_sha256}
+    if ($consumer.Count -eq 1) {
+        $parent = $consumer[0]
+        $parentPath = Join-Path $PackageDirectory ($parent.archive_url.Split('/')[-1])
+        Assert-Input $parentPath @{bytes=$parent.archive_bytes;sha256=$parent.archive_sha256}
+    } else {
+        $consumer = @($inventory.components | Where-Object package -eq $component.consumer)
+        if ($consumer.Count -ne 1) { throw 'Stale native shader consumer mapping.' }
+        $parent = $consumer[0].package_archive
+        Assert-Path $parent.name
+        $parentPath = Join-Path $PackageDirectory $parent.name
+        Assert-Input $parentPath $parent
+    }
     $parentBuild = (& $tar -xOf $parentPath '.BUILDINFO') -join "`n"
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read native shader consumer record.' }
     $expected = 'installed = ' + $component.package + '-' + $component.version + '-any'
@@ -90,4 +98,4 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'third-party/NATIVE-SHADER-MAT
 # A failed extraction never receives the completion inventory.
 Copy-Item -LiteralPath $inventoryPath -Destination (Join-Path $OutputDirectory 'INPUTS.json')
 Write-Output "Native shader source materials: $OutputDirectory"
-Write-Output 'Four static/header inputs only; no installation, runtime change or distribution approval.'
+Write-Output 'Five static/header inputs only; no installation, runtime change or distribution approval.'

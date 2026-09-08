@@ -4,11 +4,11 @@
   "observed_on": "2026-09-08",
   "package_signature_verification": {
     "key_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57",
-    "scope": "All four original package detached signatures verified locally using the existing MSYS2 keyring. The offline collector rechecks fixed input hashes, not signatures. Original source archive signatures were not verified."
+    "scope": "All five original package detached signatures verified locally using the existing MSYS2 keyring. The offline collector rechecks fixed input hashes, not signatures. Original source archive signatures were not verified."
   },
   "limitations": [
     "GCC and GCC-libs 16.1.0-5 are recorded build inputs; existing GCC 16.2 runtime materials do not replace their static/compiler scope.",
-    "glslang 16.3.0-1 records SPIRV-Tools 3~1.4.350.1-1; this older nested build-time input has not been collected here. Shaderc itself records SPIRV-Tools 3~1.4.357.0-1.",
+    "glslang 16.3.0-1 records SPIRV-Tools 3~1.4.350.1-1, whose original source, build recipe and public headers are now preserved separately. Shaderc itself records SPIRV-Tools 3~1.4.357.0-1; do not infer a second old implementation at final link.",
     "Preserve glslang's actual generated Bison 3.8.2 parser and explicit exception despite its root license introduction saying Bison was removed; retain additional NVIDIA and inherited header terms.",
     "Source-only tools, tests and documentation notices are retained without automatically assigning all of them to the runtime DLL."
   ],
@@ -145,6 +145,16 @@
           "name": "glslang-16.3.0/SPIRV/GLSL.std.450.h",
           "bytes": 4126,
           "sha256": "5624630f79e4ca38e51c1bec8d8eb835ab4784cfcbd4930ef88cc507f2e4551b"
+        },
+        {
+          "name": "glslang-16.3.0/SPIRV/SpvTools.h",
+          "bytes": 5280,
+          "sha256": "4016a66e43c6d016b28393f8eec85cccf69311900b719ac093239cb10954e745"
+        },
+        {
+          "name": "glslang-16.3.0/SPIRV/SpvTools.cpp",
+          "bytes": 13426,
+          "sha256": "9d3826c44f6114b99e1112bcbea105eebf17727946d5ba762dad0b0aedcf7680"
         }
       ]
     },
@@ -466,6 +476,122 @@
           "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/registry/vk.xml",
           "bytes": 3290524,
           "sha256": "264d0d7350e37d70c82407fb430d085040fc01a9a961d43dec8c2d6ed1dfd183"
+        }
+      ]
+    },
+    {
+      "name": "spirv-tools-glslang-build",
+      "package": "mingw-w64-x86_64-spirv-tools",
+      "version": "3~1.4.350.1-1",
+      "consumer": "mingw-w64-x86_64-glslang",
+      "usage": "Observed public-header input to glslang; not evidence of a second SPIRV-Tools implementation linked into shaderc. Four installed headers match original source. Their includes reference C/C++ standard headers and each other, not SPIRV-Headers grammar data.",
+      "archive_prefix": "SPIRV-Tools-vulkan-sdk-1.4.350.1/",
+      "archive_entries": 1835,
+      "internal_links": 0,
+      "package_archive": {
+        "name": "mingw-w64-x86_64-spirv-tools-3~1.4.350.1-1-any.pkg.tar.zst",
+        "bytes": 3349543,
+        "sha256": "306c85b961333fd7371de6b2f56f03ecf4846ff39c30783fbded658b31bea00d",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-spirv-tools-3~1.4.350.1-1-any.pkg.tar.zst"
+      },
+      "package_signature": {
+        "name": "mingw-w64-x86_64-spirv-tools-3~1.4.350.1-1-any.pkg.tar.zst.sig",
+        "bytes": 566,
+        "sha256": "9566bc8c15ae12bc981b2a5e84403d53e221be2108262887f44b3986c3109a66",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-spirv-tools-3~1.4.350.1-1-any.pkg.tar.zst.sig"
+      },
+      "recipe": {
+        "name": "spirv-tools-350.PKGBUILD",
+        "bytes": 3474,
+        "sha256": "2d40b15d53f2c3fe832f92cff5b1370594693be7a8c62d1eba6f06b07318ff36",
+        "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/554e74ffd271d50c30d7ec1054ae685b1e666736/mingw-w64-spirv-tools/PKGBUILD"
+      },
+      "source": {
+        "name": "spirv-tools-1.4.350.1.tar.gz",
+        "bytes": 3472729,
+        "sha256": "6f7b9b9eed9a7aa485918466ea604b4edc7969d94e96c0c13ae266f4ec120f31",
+        "url": "https://github.com/KhronosGroup/SPIRV-Tools/archive/vulkan-sdk-1.4.350.1/spirv-tools-1.4.350.1.tar.gz"
+      },
+      "patches": [
+        {
+          "name": "002-Do-not-statically-link-to-the-C-runtime-with-mingw.patch",
+          "bytes": 942,
+          "sha256": "ff63fc6e786e6b40b3ec5fa7356b671a391e3c29b7660dcc87d799de49754d2a",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/554e74ffd271d50c30d7ec1054ae685b1e666736/mingw-w64-spirv-tools/002-Do-not-statically-link-to-the-C-runtime-with-mingw.patch"
+        }
+      ],
+      "package_documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7196,
+          "sha256": "2f325148b086b84d363a60159ab165f35bfeb7806421861e4b317d477dc91c95"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 682,
+          "sha256": "ef7ebbaf3f89549c1bcf810641c9d95ad601b74a4c3181c59e991ad40dd9be22"
+        },
+        {
+          "name": "mingw64/include/spirv-tools/libspirv.h",
+          "bytes": 48870,
+          "sha256": "f4b0a2300806acf1efc9cfb79708b892891352f4d719de1f76848cc89b95acac"
+        },
+        {
+          "name": "mingw64/include/spirv-tools/libspirv.hpp",
+          "bytes": 16430,
+          "sha256": "6b6bcb9f5ab28642c51013433e75e5f9a4138577fcbce1e6204bcda47bbd1710"
+        },
+        {
+          "name": "mingw64/include/spirv-tools/linker.hpp",
+          "bytes": 4818,
+          "sha256": "cd3fc7d085f29437b4dc304a8d2496784e20703d7c9ca057a26f8226f038d8b0"
+        },
+        {
+          "name": "mingw64/include/spirv-tools/optimizer.hpp",
+          "bytes": 52249,
+          "sha256": "85f5247437234e42c2fee6ddda387f097cd1de454f0ddb3a6d827bb8d53b95db"
+        },
+        {
+          "name": "mingw64/share/licenses/spirv-tools/LICENSE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.350.1/LICENSE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.350.1/README.md",
+          "bytes": 32342,
+          "sha256": "d6b5d205e120c56ce15deeb7c0bed5e6e1f5d81cdcf3a7e1b55fdaf0ec1544b6"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.350.1/CMakeLists.txt",
+          "bytes": 16220,
+          "sha256": "131cec6c419d333531d280e82e3097bfc3ba721c1891d5c8e0092388f400be71"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.350.1/include/spirv-tools/libspirv.h",
+          "bytes": 48870,
+          "sha256": "f4b0a2300806acf1efc9cfb79708b892891352f4d719de1f76848cc89b95acac"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.350.1/include/spirv-tools/libspirv.hpp",
+          "bytes": 16430,
+          "sha256": "6b6bcb9f5ab28642c51013433e75e5f9a4138577fcbce1e6204bcda47bbd1710"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.350.1/include/spirv-tools/linker.hpp",
+          "bytes": 4818,
+          "sha256": "cd3fc7d085f29437b4dc304a8d2496784e20703d7c9ca057a26f8226f038d8b0"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.350.1/include/spirv-tools/optimizer.hpp",
+          "bytes": 52249,
+          "sha256": "85f5247437234e42c2fee6ddda387f097cd1de454f0ddb3a6d827bb8d53b95db"
         }
       ]
     }

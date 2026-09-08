@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 303 frames差の切り分けとowner追記（2026-09-08 20:43 JST）
+
+ownerから、前回の開始時に右矢印を誤って押した可能性がある（確証なし）、確認して問題がなければ次へ進んでよい、との補足があった。同じ通常release `03125262...`で短い追試を行った。30秒素材の一時停止中にM消音・UIA先頭0を要求し、表示位置0を確認して再開すると892 HW／892 presented／drop 0／CPU transfer 0でEnded。続いて15秒で停止してから再生中に先頭0を要求し、直後0.137616秒、終端でも892／892／0／0となった。drift p95／maxは各4.824／5.025 ms、4.812／16.146 ms（準備を含むraw値）。Mだけの追加Seekはこの追試では観測していない。
+
+同じ4K原本の別windowでも、一時停止中のUIA先頭要求で位置0、右矢印一回で位置5秒を確認し、再開後8.48354秒へ進んだ。Seek latencyは先頭67.915 ms／右295.038 msで、100回試験の代替とはしない。元動画の最初の6秒を同候補ffprobeで実decodeし、5秒より前は300 frames、**5.05秒より前は303 frames**と確認。総107771−303＝107468は前回のdecode数と一致する。開始直後約0.05秒で5秒Seekした場合と整合するが、前回のkey eventや正確な実targetは未記録のため、誤操作が原因と断定しない。
+
+先頭要求の不具合や説明不能なframe欠落は今回再現せず、ownerの指示に従い、この差だけを理由とした再度の30分試験は行わず配布準備へ進む。前回を全frame再生の証明へ書き換えず、長時間観測の数値と条件は下に残す。前回の保存物再open時2 dropsは別の短時間操作条件であり、この追試による修正・原因確定を主張しない。
+
+両試験は新しい隣接日本語path・専用config／cache・無FFMPEG_DIR／System32-only PATHで実施し、6直接DLLが隣接配置であることを確認。PID 50200／start `11:31:36.9488496Z`とPID 41260／start `11:34:38.6709035Z`はいずれもUndo消音・clean確認後に通常終了した。元media、exe、94 original／各copy runtimeは不変。証拠はignored `scoped-seek-zero-isolation-20260908`と`scoped-4k-zero-position-20260908`。アプリcodeやOS設定の変更はない。
+
 ### 限定ZVBI最適化候補の長時間再生（2026-09-08 20:29 JST）
 
 下記と同じ通常release `03125262...`と候補runtime全94 filesを、新しい日本語／space／ampersandの隣接配置へcopyした。FFMPEG_DIRなし、System32-only PATH、別cwd、専用config／cache。PID 11244／開始UTC `2026-09-08T10:54:58.1126879Z`の直接6 FFmpeg DLLは全てexe隣接。source `FEE0E738...`は3840×2160 H.264／AAC、video 1800.005729秒・107771 frames、format 1800.009063秒・1501066596 bytesで、旧候補試験と同じ原本である。

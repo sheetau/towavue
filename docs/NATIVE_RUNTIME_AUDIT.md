@@ -230,6 +230,14 @@ metadataの選択集合は従来一覧と一致する。library限定graphは164
 .\scripts\test-native-shader-materials.ps1 -CacheDirectory 'path/to/shader-source-cache'
 ```
 
+### glslangの旧SPIRV-Tools公開header（2026-09-08 20:43 JST）
+
+元SPIRV-Tools `3~1.4.350.1-1` package（3349543 bytes、`306c85b9...`）と署名を取得し、既存MSYS2 keyで検証した。`.BUILDINFO`のrecipe hash `2d40b15d...`は[固定recipe](https://github.com/msys2/MINGW-packages/blob/554e74ffd271d50c30d7ec1054ae685b1e666736/mingw-w64-spirv-tools/PKGBUILD)と一致し、sourceは3472729 bytes／`6f7b9b9e...`、patchも元hashと一致した。1835 source entriesは安全な通常file／directory。source署名・patch適用・再buildは行わない。
+
+packageの公開4 header（libspirv.h／libspirv.hpp／linker.hpp／optimizer.hpp）は全て元sourceとbyte一致した。glslangの`SpvTools.h/.cpp`はlibspirv.h／optimizer.hppをincludeし、後者からlibspirv.hppへ辿る。4 headerの追加includeは標準C/C++と相互参照で、旧SPIRV-Headers grammar dataを直接includeしない。Khronos／AMD、Google、Pierre MoreauのApache原文を保持し、linker.hppは保持資料であってglslangからの選択を主張しない。旧implementationの最終link範囲をpackageのbuild-time listだけから決めず、GCC 16.1／標準header・全static帰属は別に残す。
+
+collectorへ5番目のbuild-time inputとglslang親packageの照合を追加した。`native-shader-materials-v2`は13 source／build inputs・15281646 bytes、55 source文書・19 package文書を含む89 files／23222740 bytes。v1の68 files（README／INPUTS以外）は不変で、全89 hashは試験outputと一致した。別cwd／反復、24欠落・改変pairs、旧版を誤った親へ結ぶcaseを含む7 mapping不整合、2不完全extraction marker保護、入力／既存output保持の試験が通過した。前節の4-input v1を上書きせず、追加runtime ownerや配布承認にはしない。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

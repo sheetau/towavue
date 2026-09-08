@@ -238,6 +238,21 @@ packageの公開4 header（libspirv.h／libspirv.hpp／linker.hpp／optimizer.hp
 
 collectorへ5番目のbuild-time inputとglslang親packageの照合を追加した。`native-shader-materials-v2`は13 source／build inputs・15281646 bytes、55 source文書・19 package文書を含む89 files／23222740 bytes。v1の68 files（README／INPUTS以外）は不変で、全89 hashは試験outputと一致した。別cwd／反復、24欠落・改変pairs、旧版を誤った親へ結ぶcaseを含む7 mapping不整合、2不完全extraction marker保護、入力／既存output保持の試験が通過した。前節の4-input v1を上書きせず、追加runtime ownerや配布承認にはしない。
 
+### GCC 16.1のstatic／標準header資料（2026-09-08 21:02 JST）
+
+shadercの元`.BUILDINFO`が記録するGCC／GCC-libs `16.1.0-5`を、別版の16.2 DLL資料とは分けて保持した。両元packageの署名は既存MSYS2 keyで検証済みで、recipe hash `40f248fa...`は[固定recipe](https://github.com/msys2/MINGW-packages/blob/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/PKGBUILD)と一致する。GNU sourceは102456900 bytes／SHA256 `50efb4d94c3397aff3b0d61a5abd748b4dd31d9d3f2ab7be05b171d36a510f79`でrecipeと一致し、164609 entriesは安全な通常file／directoryだった。GNU source署名は取得・hash固定しただけで、暗号検証済みとは扱わない。14 patch／build inputsも元hashへ対応させた。patch適用・compiler実行・package install・再buildは行っていない。
+
+選択した標準header 10件はinstalled packageと元sourceがbyte一致する。生成target `c++config.h`は元templateとは分けて保持した。GCCの表示・Runtime Library Exceptionに加え、vectorのHewlett-Packard／Silicon Graphics、shared_ptrのBoost由来表示を原文で保持する。Boost 1.0本文は同source archiveのlibphobos配下から取得したもので、libphobosの組込みを意味しない。libbacktraceの原文、PSTLのApache／LLVM例外とMITを含む複合本文、manualとFDLも保持する。PSTLが参照するCREDITS.TXTはGCCの当該include directoryに存在せず、これでPSTL帰属全体が完了したとはしない。source-only部分を自動的にruntimeへ割り当てない。[上流の例外説明](https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html)も適用fileとcompilation条件を区別しており、GPL labelだけで本体の条件を決めない。
+
+元packageの`libgcc.a`／`libgcc_eh.a`／`libstdc++.a`には285／4／199 membersを観測した。これはarchive一覧であり、最終linkの選択memberを証明するmapではない。[固定入力](native-gcc-static-inputs.json)はconsumer package、元recipe、GCC両package、source、header対応を結ぶ。collectorは22入力のsize／hashと対応を確認し、選択済み通常memberだけを展開する。compiler／DLL／static library binaryは資料へコピーしない。
+
+```powershell
+.\scripts\prepare-native-gcc-static-materials.ps1 -CacheDirectory 'path/to/gcc-static-cache' -OutputDirectory 'target/distribution/native-gcc-static-materials-v1'
+.\scripts\test-native-gcc-static-materials.ps1 -CacheDirectory 'path/to/gcc-static-cache'
+```
+
+最終kitは17 source／build outputs、29 source文書、13 compiler-package文書、6 GCC-libs文書とREADME／INPUTSの67 files／103717496 bytesで、全hashが試験outputと一致した。別cwd／反復、22入力の欠落・改変pairs、8 mapping不整合、展開後checksum失敗時のcompletion marker保護、入力／既存output不変の試験が通過した。format／全target Clippy／270 testsも通過し、3 live ignoresは未実行。候補94 runtime filesは不変。残る実static／MinGW／CRT／intrinsic範囲と最終notice・source取得案内は別に確認し、この資料生成を配布承認やSetup.exe完成にしない。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

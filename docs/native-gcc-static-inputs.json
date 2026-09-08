@@ -1,0 +1,521 @@
+{
+  "schema_version": 1,
+  "scope": "Original GCC 16.1.0-5 static/runtime/header materials recorded by shaderc, distinct from the GCC 16.2 runtime DLL kit. Not a linked-object SBOM, compiler rebuild, Eligible Compilation Process adjudication or distribution approval.",
+  "package_signature_verification": {
+    "observed_on": "2026-09-08",
+    "key": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57",
+    "scope": "Both original GCC package signatures verified locally with the existing MSYS2 keyring. Collector verifies pinned hashes only. GNU source signature is retained but not verified."
+  },
+  "version": "16.1.0-5",
+  "consumer": {
+    "package": "mingw-w64-x86_64-shaderc",
+    "input": "mingw-w64-x86_64-shaderc-2026.3-1-any.pkg.tar.zst"
+  },
+  "recipe": "PKGBUILD",
+  "source": "gcc-16.1.0.tar.xz",
+  "recipe_inputs": [
+    "gdbinit",
+    "0002-i386-Keep-SEH-enabled-for-Win64-sysv_abi-functions.patch",
+    "0003-Windows-Follow-Posix-dir-exists-semantics-more-close.patch",
+    "0007-Build-EXTRA_GNATTOOLS-for-Ada.patch",
+    "0008-Prettify-linking-no-undefined.patch",
+    "0011-Enable-shared-gnat-implib.patch",
+    "0012-Handle-spaces-in-path-for-default-manifest.patch",
+    "0014-gcc-9-branch-clone_function_name_1-Retain-any-stdcall-suffix.patch",
+    "0020-libgomp-Don-t-hard-code-MS-printf-attributes.patch",
+    "0022-unset-native-system-header-dir.patch",
+    "0140-gcc-diagnostic-color.patch",
+    "0200-add-m-no-align-vector-insn-option-for-i386.patch",
+    "2001-fix-building-rust-on-mingw-w64.patch",
+    "3001-fix-codeview-crashes.patch"
+  ],
+  "inputs": [
+    {
+      "name": "mingw-w64-x86_64-gcc-16.1.0-5-any.pkg.tar.zst",
+      "bytes": 47837187,
+      "sha256": "10f7c55275f7fbe7924209d61c368a1a6fcf775cffbdeac2eef1f5ccacdd35cd",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-gcc-16.1.0-5-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-gcc-16.1.0-5-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "2e86e82e940b53a8cb02140a4b145c9765216285a5aed1f74e79d9d9c89a0314",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-gcc-16.1.0-5-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "mingw-w64-x86_64-gcc-libs-16.1.0-5-any.pkg.tar.zst",
+      "bytes": 1153552,
+      "sha256": "aa560f5438c35b71c3e7b24fd5becbca028f70c5b4d1f1697a86ff80fec947da",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-gcc-libs-16.1.0-5-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-gcc-libs-16.1.0-5-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "fae43f60afef002357186855925332c0aa9268a0f4f5cfe526e14ea9578cff75",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-gcc-libs-16.1.0-5-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "gcc-16.1.0.tar.xz",
+      "bytes": 102456900,
+      "sha256": "50efb4d94c3397aff3b0d61a5abd748b4dd31d9d3f2ab7be05b171d36a510f79",
+      "url": "https://ftp.gnu.org/gnu/gcc/gcc-16.1.0/gcc-16.1.0.tar.xz",
+      "output": "gcc-16.1.0.tar.xz"
+    },
+    {
+      "name": "gcc-16.1.0.tar.xz.sig",
+      "bytes": 543,
+      "sha256": "33a851c045ea2ef6f580d82b2abfb1dc75d8b270727800028ca5f40c3b4a4246",
+      "url": "https://ftp.gnu.org/gnu/gcc/gcc-16.1.0/gcc-16.1.0.tar.xz.sig",
+      "output": "gcc-16.1.0.tar.xz.sig"
+    },
+    {
+      "name": "PKGBUILD",
+      "bytes": 23978,
+      "sha256": "40f248fa589babd9315cc589a76a0c00939355bd68c92287a2dcb7d1acb58f96",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/PKGBUILD",
+      "output": "PKGBUILD"
+    },
+    {
+      "name": "mingw-w64-x86_64-shaderc-2026.3-1-any.pkg.tar.zst",
+      "bytes": 3763245,
+      "sha256": "5e0f305cf0190f0644e8e66fe0ad37fa274f621fdeb55e7645179665df292593",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-shaderc-2026.3-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "gdbinit",
+      "bytes": 180,
+      "sha256": "bce81824fc89e5e62cca350de4c17a27e27a18a1a1ad5ca3492aec1fc5af3234",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/gdbinit",
+      "output": "gdbinit"
+    },
+    {
+      "name": "0002-i386-Keep-SEH-enabled-for-Win64-sysv_abi-functions.patch",
+      "bytes": 3389,
+      "sha256": "fdf4e90a56fc195a8f9a969af39335f158a29f29d42d33c00d908fc47cf5ad24",
+      "url": "https://gcc.gnu.org/git/?p=gcc.git;a=patch;h=b0f09b72d9e1783e8ccaf2d8c1c72b03e3973f0b;hp=e88f8d7bfc811f6d152c42ba009255506f5beba1",
+      "output": "0002-i386-Keep-SEH-enabled-for-Win64-sysv_abi-functions.patch"
+    },
+    {
+      "name": "0003-Windows-Follow-Posix-dir-exists-semantics-more-close.patch",
+      "bytes": 4138,
+      "sha256": "3fc35067823f87e48dd3bfd265e7593000dc110fa9ad5f16c81b896765fc897a",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/0003-Windows-Follow-Posix-dir-exists-semantics-more-close.patch",
+      "output": "0003-Windows-Follow-Posix-dir-exists-semantics-more-close.patch"
+    },
+    {
+      "name": "0007-Build-EXTRA_GNATTOOLS-for-Ada.patch",
+      "bytes": 1267,
+      "sha256": "90d5cb570083f9dea4ac0f0f87e3e8d2230f5052e6f9b946061a20a224a9d195",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/0007-Build-EXTRA_GNATTOOLS-for-Ada.patch",
+      "output": "0007-Build-EXTRA_GNATTOOLS-for-Ada.patch"
+    },
+    {
+      "name": "0008-Prettify-linking-no-undefined.patch",
+      "bytes": 1404,
+      "sha256": "8d2d53ae26b777d90189240494de1b895c5efa1ebdcdfbf5774f29fc742499d9",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/0008-Prettify-linking-no-undefined.patch",
+      "output": "0008-Prettify-linking-no-undefined.patch"
+    },
+    {
+      "name": "0011-Enable-shared-gnat-implib.patch",
+      "bytes": 1474,
+      "sha256": "5ef4148acc4a2b7ed648d4fe75fab5545e84b4b93a12d6ba4e4ea6061dd635fa",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/0011-Enable-shared-gnat-implib.patch",
+      "output": "0011-Enable-shared-gnat-implib.patch"
+    },
+    {
+      "name": "0012-Handle-spaces-in-path-for-default-manifest.patch",
+      "bytes": 2243,
+      "sha256": "e98805ead7d78ee2a92f237894c4b2b7ddc1688e1b517d8c04f28d440202e40f",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/0012-Handle-spaces-in-path-for-default-manifest.patch",
+      "output": "0012-Handle-spaces-in-path-for-default-manifest.patch"
+    },
+    {
+      "name": "0014-gcc-9-branch-clone_function_name_1-Retain-any-stdcall-suffix.patch",
+      "bytes": 3690,
+      "sha256": "fd9bdecb2bbc4796bbc9f00b708dac42ef9e3464a06d6d27e5475cee117de5be",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/0014-gcc-9-branch-clone_function_name_1-Retain-any-stdcall-suffix.patch",
+      "output": "0014-gcc-9-branch-clone_function_name_1-Retain-any-stdcall-suffix.patch"
+    },
+    {
+      "name": "0020-libgomp-Don-t-hard-code-MS-printf-attributes.patch",
+      "bytes": 1608,
+      "sha256": "ad1f7b5e7afaaec008b7cbd14feea13a10989fa91bda7003af72d457619bb199",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/0020-libgomp-Don-t-hard-code-MS-printf-attributes.patch",
+      "output": "0020-libgomp-Don-t-hard-code-MS-printf-attributes.patch"
+    },
+    {
+      "name": "0022-unset-native-system-header-dir.patch",
+      "bytes": 860,
+      "sha256": "d8b9b979dc1742f63d23dfca92bc05944612bd196a31fb882b8a616baba84383",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/0022-unset-native-system-header-dir.patch",
+      "output": "0022-unset-native-system-header-dir.patch"
+    },
+    {
+      "name": "0140-gcc-diagnostic-color.patch",
+      "bytes": 1275,
+      "sha256": "c94004dab1685a6fa9124de86aae742df4136a2e9ff5d5e1ad87ecdc35fbcef4",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/0140-gcc-diagnostic-color.patch",
+      "output": "0140-gcc-diagnostic-color.patch"
+    },
+    {
+      "name": "0200-add-m-no-align-vector-insn-option-for-i386.patch",
+      "bytes": 7553,
+      "sha256": "1484911163634f30324827619c873a6267b377abba0df8bbedfd128163c53ea4",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/0200-add-m-no-align-vector-insn-option-for-i386.patch",
+      "output": "0200-add-m-no-align-vector-insn-option-for-i386.patch"
+    },
+    {
+      "name": "2001-fix-building-rust-on-mingw-w64.patch",
+      "bytes": 343,
+      "sha256": "a411f59953553a3d01dd64c79b1acbb91eca092c4cb01bfd26b1c51c3eb798e8",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/2001-fix-building-rust-on-mingw-w64.patch",
+      "output": "2001-fix-building-rust-on-mingw-w64.patch"
+    },
+    {
+      "name": "3001-fix-codeview-crashes.patch",
+      "bytes": 4097,
+      "sha256": "f21f9ab731e9cab8fd4ca8c289497f859ef7004e6fa0507877dc2559ac2071c3",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/18aeb95f69dd6bd3c9172a938c9fd35491536410/mingw-w64-gcc/3001-fix-codeview-crashes.patch",
+      "output": "3001-fix-codeview-crashes.patch"
+    }
+  ],
+  "archives": [
+    {
+      "input": "mingw-w64-x86_64-gcc-16.1.0-5-any.pkg.tar.zst",
+      "output": "compiler",
+      "package_name": "mingw-w64-x86_64-gcc",
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 6913,
+          "sha256": "f75381d982f6d2f6b1e7846fcd02d3f3830cad7a0c32a187d6f00c663f31a95b"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 1625,
+          "sha256": "66472c468d841d280d9d12c98f1cac3bec9f02d1a8aac867d64635f819eca0ff"
+        },
+        {
+          "name": "mingw64/include/c++/16.1.0/vector",
+          "bytes": 5832,
+          "sha256": "5580a3909d426d831bfcedeed0d6e6e069deb1cdd5be76bf7f7d28039db5e86f"
+        },
+        {
+          "name": "mingw64/include/c++/16.1.0/memory",
+          "bytes": 5822,
+          "sha256": "a20449896ef0460efad901194f275385a38ce7d457820b7cbb70e4f005ed82f5"
+        },
+        {
+          "name": "mingw64/include/c++/16.1.0/functional",
+          "bytes": 50686,
+          "sha256": "4052e70e2ab15e3b338ac8cff64ff33fd72a0f347e01d3866bc8051b9a119c36"
+        },
+        {
+          "name": "mingw64/include/c++/16.1.0/string",
+          "bytes": 4352,
+          "sha256": "8c3961037402ea9dd4b60d77063e77baaea6f423fab9aa1482af7bd80c0d898d"
+        },
+        {
+          "name": "mingw64/include/c++/16.1.0/unordered_map",
+          "bytes": 3887,
+          "sha256": "6a1eebab682d68ac8f3ef7c00bfe1cbc2582ae6e0554fb564f0ddbd944b25d5f"
+        },
+        {
+          "name": "mingw64/include/c++/16.1.0/unordered_set",
+          "bytes": 3671,
+          "sha256": "66928bad8abfb4e16ba5140686a506e04017e59be482b54c257309de93872cc9"
+        },
+        {
+          "name": "mingw64/include/c++/16.1.0/bits/stl_vector.h",
+          "bytes": 79543,
+          "sha256": "65d53c3cf04411129aa3843559999890711ccf59e28df3a1917d641d5ecc341f"
+        },
+        {
+          "name": "mingw64/include/c++/16.1.0/bits/shared_ptr_base.h",
+          "bytes": 73436,
+          "sha256": "81756cec8ef9cd911bbeb9c9493cc688bd7dd14552a6cd7c52d34bddc61b9f6e"
+        },
+        {
+          "name": "mingw64/include/c++/16.1.0/bits/std_function.h",
+          "bytes": 23486,
+          "sha256": "d28b28793cf567574d0878cdca14f57c81477cdf89c1c9c471bc5c8e5d522987"
+        },
+        {
+          "name": "mingw64/include/c++/16.1.0/bits/hashtable.h",
+          "bytes": 99046,
+          "sha256": "056e3c5e1278bc139a3155c1a32de0f59094ecc85bdc2184875ef420a14c9169"
+        },
+        {
+          "name": "mingw64/include/c++/16.1.0/x86_64-w64-mingw32/bits/c++config.h",
+          "bytes": 61219,
+          "sha256": "27641d9b116459f6e49cce089d9ab03256c09c9e51540d86c035d66639248092"
+        }
+      ]
+    },
+    {
+      "input": "mingw-w64-x86_64-gcc-libs-16.1.0-5-any.pkg.tar.zst",
+      "output": "libraries",
+      "package_name": "mingw-w64-x86_64-gcc-libs",
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 6918,
+          "sha256": "376d944dbaa814e3cfee3fc2bdcbc0fd567506197d3d6f39c063ff01079446e1"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 1219,
+          "sha256": "12511a122e27798810f0591c0d8151fe52b20bdd213adc7aa74f6b2386a1de99"
+        },
+        {
+          "name": "mingw64/share/licenses/gcc-libs/README",
+          "bytes": 236,
+          "sha256": "33400d067fa3e2bd670a0868dcdb60c9486e8f559b675cf9ff1ff55d4e0d06ab"
+        },
+        {
+          "name": "mingw64/share/licenses/gcc-libs/COPYING3",
+          "bytes": 35147,
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        {
+          "name": "mingw64/share/licenses/gcc-libs/COPYING.LIB",
+          "bytes": 26527,
+          "sha256": "a9bdde5616ecdd1e980b44f360600ee8783b1f99b8cc83a2beb163a0a390e861"
+        },
+        {
+          "name": "mingw64/share/licenses/gcc-libs/COPYING.RUNTIME",
+          "bytes": 3324,
+          "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+        }
+      ]
+    },
+    {
+      "input": "gcc-16.1.0.tar.xz",
+      "output": "source",
+      "archive_entries": 164609,
+      "internal_links": 0,
+      "documents": [
+        {
+          "name": "gcc-16.1.0/COPYING.RUNTIME",
+          "bytes": 3324,
+          "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+        },
+        {
+          "name": "gcc-16.1.0/COPYING3",
+          "bytes": 35147,
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        {
+          "name": "gcc-16.1.0/COPYING.LIB",
+          "bytes": 26527,
+          "sha256": "a9bdde5616ecdd1e980b44f360600ee8783b1f99b8cc83a2beb163a0a390e861"
+        },
+        {
+          "name": "gcc-16.1.0/COPYING3.LIB",
+          "bytes": 7639,
+          "sha256": "a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c"
+        },
+        {
+          "name": "gcc-16.1.0/COPYING",
+          "bytes": 18002,
+          "sha256": "231f7edcc7352d7734a96eef0b8030f77982678c516876fcb81e25b32d68564c"
+        },
+        {
+          "name": "gcc-16.1.0/gcc/doc/include/fdl.texi",
+          "bytes": 24970,
+          "sha256": "2b6a0198db38b8c8969e4581b2873d69411906ba8e6057c19fd6f5e00e291b2b"
+        },
+        {
+          "name": "gcc-16.1.0/libgcc/libgcc2.c",
+          "bytes": 74420,
+          "sha256": "83e1247be3f78dd8c70d32c4df95f04161c0f47838cf62be8cdb5b9eb2f06c34"
+        },
+        {
+          "name": "gcc-16.1.0/libgcc/unwind-seh.c",
+          "bytes": 15172,
+          "sha256": "a271d19ed15c58fea39045e90338de13f4043747f56e64eb6701cb2cfbb4a1df"
+        },
+        {
+          "name": "gcc-16.1.0/libgcc/Makefile.in",
+          "bytes": 40134,
+          "sha256": "5731396797424574f2a09dad6b453b2cb585f111042c44883345bb1eb6698187"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/libsupc++/eh_throw.cc",
+          "bytes": 4516,
+          "sha256": "baa34b62589d07057c7ca3749e1ed92141ef8cdc2608d464d74122a1d2729e12"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/libsupc++/new_op.cc",
+          "bytes": 1839,
+          "sha256": "9d594ffd52eb03e21e00436caabe5123babbb6a05dce5b4ecc5ecbb9fff0b13f"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/src/Makefile.am",
+          "bytes": 15286,
+          "sha256": "94faad83f3d53b37505f7f5e7b6a7004f0bc6c8e6e4adafe1538c6c7a005b5ff"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/doc/html/manual/license.html",
+          "bytes": 8434,
+          "sha256": "6ef2606fad7fce5ba388fef9d8d137178d0135f3d2c538b664229b58eae5ce06"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/README",
+          "bytes": 233,
+          "sha256": "28ccfda26b0f50642bb79c2e2ea2ec0d8a8a5fd9199ea573b28309a92f673607"
+        },
+        {
+          "name": "gcc-16.1.0/libbacktrace/backtrace.h",
+          "bytes": 9141,
+          "sha256": "3695896e276d61d9188956305b5d134729bdc5e9e9d70b247be486296bfcdf8b"
+        },
+        {
+          "name": "gcc-16.1.0/libbacktrace/README",
+          "bytes": 1927,
+          "sha256": "9d58a8341a7f1b56fac23393f86124b7d195673a722f0a09ccafc522d4ed8f63"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/pstl/LICENSE.txt",
+          "bytes": 16700,
+          "sha256": "0ca8cbe9219a841f9bc8fbb1f8ecdf5e39b1b0e23ee10fb6b0c090d8987dd1eb"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/std/vector",
+          "bytes": 5832,
+          "sha256": "5580a3909d426d831bfcedeed0d6e6e069deb1cdd5be76bf7f7d28039db5e86f"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/std/memory",
+          "bytes": 5822,
+          "sha256": "a20449896ef0460efad901194f275385a38ce7d457820b7cbb70e4f005ed82f5"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/std/functional",
+          "bytes": 50686,
+          "sha256": "4052e70e2ab15e3b338ac8cff64ff33fd72a0f347e01d3866bc8051b9a119c36"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/std/string",
+          "bytes": 4352,
+          "sha256": "8c3961037402ea9dd4b60d77063e77baaea6f423fab9aa1482af7bd80c0d898d"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/std/unordered_map",
+          "bytes": 3887,
+          "sha256": "6a1eebab682d68ac8f3ef7c00bfe1cbc2582ae6e0554fb564f0ddbd944b25d5f"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/std/unordered_set",
+          "bytes": 3671,
+          "sha256": "66928bad8abfb4e16ba5140686a506e04017e59be482b54c257309de93872cc9"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/bits/stl_vector.h",
+          "bytes": 79543,
+          "sha256": "65d53c3cf04411129aa3843559999890711ccf59e28df3a1917d641d5ecc341f"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/bits/shared_ptr_base.h",
+          "bytes": 73436,
+          "sha256": "81756cec8ef9cd911bbeb9c9493cc688bd7dd14552a6cd7c52d34bddc61b9f6e"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/bits/std_function.h",
+          "bytes": 23486,
+          "sha256": "d28b28793cf567574d0878cdca14f57c81477cdf89c1c9c471bc5c8e5d522987"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/bits/hashtable.h",
+          "bytes": 99046,
+          "sha256": "056e3c5e1278bc139a3155c1a32de0f59094ecc85bdc2184875ef420a14c9169"
+        },
+        {
+          "name": "gcc-16.1.0/libstdc++-v3/include/bits/c++config",
+          "bytes": 30148,
+          "sha256": "3a7276a35d7ea89a4fcd66d32e94f36963053bcf97ee28d9fec4a45e923914c9"
+        },
+        {
+          "name": "gcc-16.1.0/libphobos/src/LICENSE_1_0.txt",
+          "bytes": 1338,
+          "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+        }
+      ]
+    }
+  ],
+  "matching_headers": [
+    {
+      "source_member": "gcc-16.1.0/libstdc++-v3/include/std/vector",
+      "package_member": "mingw64/include/c++/16.1.0/vector"
+    },
+    {
+      "source_member": "gcc-16.1.0/libstdc++-v3/include/std/memory",
+      "package_member": "mingw64/include/c++/16.1.0/memory"
+    },
+    {
+      "source_member": "gcc-16.1.0/libstdc++-v3/include/std/functional",
+      "package_member": "mingw64/include/c++/16.1.0/functional"
+    },
+    {
+      "source_member": "gcc-16.1.0/libstdc++-v3/include/std/string",
+      "package_member": "mingw64/include/c++/16.1.0/string"
+    },
+    {
+      "source_member": "gcc-16.1.0/libstdc++-v3/include/std/unordered_map",
+      "package_member": "mingw64/include/c++/16.1.0/unordered_map"
+    },
+    {
+      "source_member": "gcc-16.1.0/libstdc++-v3/include/std/unordered_set",
+      "package_member": "mingw64/include/c++/16.1.0/unordered_set"
+    },
+    {
+      "source_member": "gcc-16.1.0/libstdc++-v3/include/bits/stl_vector.h",
+      "package_member": "mingw64/include/c++/16.1.0/bits/stl_vector.h"
+    },
+    {
+      "source_member": "gcc-16.1.0/libstdc++-v3/include/bits/shared_ptr_base.h",
+      "package_member": "mingw64/include/c++/16.1.0/bits/shared_ptr_base.h"
+    },
+    {
+      "source_member": "gcc-16.1.0/libstdc++-v3/include/bits/std_function.h",
+      "package_member": "mingw64/include/c++/16.1.0/bits/std_function.h"
+    },
+    {
+      "source_member": "gcc-16.1.0/libstdc++-v3/include/bits/hashtable.h",
+      "package_member": "mingw64/include/c++/16.1.0/bits/hashtable.h"
+    }
+  ],
+  "static_archive_observations": [
+    {
+      "name": "mingw64/lib/gcc/x86_64-w64-mingw32/16.1.0/libgcc.a",
+      "bytes": 3030662,
+      "sha256": "eb04a265ea5eaf7cfa72ac075a5508744c69f2d36a4bbd51bcaa065a09b54cf9",
+      "package": "mingw-w64-x86_64-gcc-16.1.0-5-any.pkg.tar.zst",
+      "members": 285,
+      "scope": "Original package member identity only; not copied into the material kit and not a claim that every member is linked into shaderc."
+    },
+    {
+      "name": "mingw64/lib/gcc/x86_64-w64-mingw32/16.1.0/libgcc_eh.a",
+      "bytes": 11726,
+      "sha256": "6eb2451d3f24d1c7e8c413e7fbb1d1853f593836be2274cc7b99b9dda5c89738",
+      "package": "mingw-w64-x86_64-gcc-16.1.0-5-any.pkg.tar.zst",
+      "members": 4,
+      "scope": "Original package member identity only; not copied into the material kit and not a claim that every member is linked into shaderc."
+    },
+    {
+      "name": "mingw64/lib/libstdc++.a",
+      "bytes": 8324038,
+      "sha256": "a75b19e51a36d2080f0dba231c9515ee511714e6a2f6e2dc327dbe5f158de212",
+      "package": "mingw-w64-x86_64-gcc-16.1.0-5-any.pkg.tar.zst",
+      "members": 199,
+      "scope": "Original package member identity only; not copied into the material kit and not a claim that every member is linked into shaderc."
+    }
+  ],
+  "limitations": [
+    "Ten selected installed standard headers exactly match original source. The generated target c++config.h is retained separately from its source template, not claimed byte-identical.",
+    "Retain Hewlett-Packard, Silicon Graphics and Boost-derived notices in addition to GCC exception text. The Boost 1.0 standard text is selected from libphobos within the same source archive; this is not a libphobos linkage claim.",
+    "PSTL's combined original license mentions CREDITS.TXT, absent from its GCC include directory. Preserve the original text; do not automatically classify PSTL or unrelated source components as selected runtime code.",
+    "These representative source/header observations do not identify every linked archive member, compiler intrinsic, MinGW header/CRT or inherited inline contributor. Final scope and source-access assembly remain distinct work."
+  ]
+}

@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### ライセンス／ソース案内への入口（2026-09-09 01:21 JST）
+
+Help → Show licenses and sourcesとcommand paletteの`licenses`検索を追加した。runtimeの専用STA workerがexe隣の`licenses/START-HERE.html`をExplorerで選択し、HTMLやarchiveは実行しない。cwd／PATH／FFMPEG_DIRの別資料へfallbackせず、不足時は期待pathを通常statusに表示する。再生をFaultedにせず、重複要求は一件の処理中だけ抑える。Shellの選択操作は[MicrosoftのAPI契約](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shopenfolderandselectitems)に従い、STA内のPIDLを使用後に破棄する。
+
+旧通常release `03125262...`の実menuはFile／Edit／Viewで、入口がないことを確認。最初のUIA観測はpopupの表示を待たず不十分だったため、別のfresh試験で表示を待って確認し直した。新しい通常releaseは10301952 bytes、SHA256 `195af8705605e678a9cbe97aa57a0cdb7cae5e34bf61ee6b60e528b933f93186`。新規targetへbuildし、旧exeと固定資料は保持した。
+
+日本語／空白／ampersandを含む隣接配置、FFMPEG_DIRなし・System32-only PATH・別cwd・専用APPDATA／LOCALAPPDATAで試験した。Welcomeの資料なし→期待path表示、fixture guide配置後のHelp／検索Enter→正しいExplorer folderと選択fileを確認。無音10分fixtureの再生中にも欠落案内・配置後の表示が成功し、回転の未保存状態を保った。表示位置00:43から01:24への進行、未保存確認中の背景menu無効化、Cancel後のPlaying／dirty保持、Undo／clean終了を確認した。長時間性能やdrop率の検証ではない。
+
+Menu・paletteの所有window画像を目視確認し、文字と項目が収まることを確認した。HTML自体は開いておらず、前回のブラウザー制限を回避した試験ではない。guideは明示したpath-selection fixtureであり、古い資料集を新exeの対応sourceとして認定していない。実installerの配置、最終exeとsource／noticesの再対応付け、HTML実表示・公開は残る。
+
+追加3回帰と既存menuのHelp keyboard経路、format／全target Clippy／273 testsが通過。初回Clippyの説明なしunwrapと、「Viewが最後」という試験前提を修正した。3 live ignoresは未実行。通常試験processはPID 52804／start UTC `2026-09-08T16:17:21.1005642Z`、PID 50484／`16:19:06.5015779Z`で、各6直接FFmpeg DLLは隣接配置。旧比較processを含め全て通常終了し、試験が開いたExplorer 2窓だけを閉じた。元exe・94 original／試験copy DLLと元30秒fixtureはhash不変。証拠はignored `target/tmp/license-entry-*20260909`と同名UI helper、menu／paletteのowned captures。
+
 ### 303 frames差の切り分けとowner追記（2026-09-08 20:43 JST）
 
 ownerから、前回の開始時に右矢印を誤って押した可能性がある（確証なし）、確認して問題がなければ次へ進んでよい、との補足があった。同じ通常release `03125262...`で短い追試を行った。30秒素材の一時停止中にM消音・UIA先頭0を要求し、表示位置0を確認して再開すると892 HW／892 presented／drop 0／CPU transfer 0でEnded。続いて15秒で停止してから再生中に先頭0を要求し、直後0.137616秒、終端でも892／892／0／0となった。drift p95／maxは各4.824／5.025 ms、4.812／16.146 ms（準備を含むraw値）。Mだけの追加Seekはこの追試では観測していない。

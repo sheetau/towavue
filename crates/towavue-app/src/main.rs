@@ -37,7 +37,7 @@ use towavue_runtime_windows::{
     ExportRequest, FileDialogKind, FolderOrderProvider, FolderWatcher, FrameRenderer, ImageLoader,
     LatestTask, PlaybackEvent, PlaybackSession, PreviewCache, PromptButtons, PromptResponse,
     RenderError, canonical_shell_path, configure_mouse_input, cursor_position_in_window, pick_path,
-    show_prompt,
+    reveal_license_guide, show_prompt,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -156,6 +156,7 @@ enum AppEvent {
     FilmstripReady,
     DialogFinished(Result<Option<PathBuf>, DialogError>),
     PromptFinished(Result<PromptResponse, DialogError>),
+    LicenseGuideRevealed(std::io::Result<PathBuf>),
     Export(ExportEvent),
     Playback(u64, PlaybackEvent),
     Duration(PathBuf, u64, Result<Duration, String>),
@@ -586,6 +587,7 @@ struct Application<N> {
     restore_ui_textures: bool,
     queued_recovery: Option<FallbackPrompt>,
     native_prompt: Option<FallbackPrompt>,
+    license_guide_pending: bool,
     clock: Option<PlaybackClock>,
     state: PlaybackState,
     decode_finished: bool,
@@ -698,6 +700,7 @@ where
             restore_ui_textures: false,
             queued_recovery: None,
             native_prompt: None,
+            license_guide_pending: false,
             clock: None,
             state: PlaybackState::Loading,
             decode_finished: false,
@@ -1186,6 +1189,13 @@ where
             }
             AppEvent::DialogFinished(result) => self.finish_dialog(result),
             AppEvent::PromptFinished(result) => self.finish_native_prompt(result),
+            AppEvent::LicenseGuideRevealed(result) => {
+                self.license_guide_pending = false;
+                self.set_status(match result {
+                    Ok(_) => "License and source guide selected in Explorer.".into(),
+                    Err(error) => error.to_string(),
+                });
+            }
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(generation, event) if generation == self.media_generation => {
                 self.handle_playback_event(event);
@@ -3195,6 +3205,7 @@ where
             CommandId::OpenFolder => {
                 self.begin_dialog(FileDialogKind::OpenFolder, DialogIntent::OpenFolder);
             }
+            CommandId::ShowLicenses => self.show_licenses(),
             CommandId::CloseTab => {
                 if let Some(id) = self.tabs.active().map(|tab| tab.id) {
                     self.request_guarded(GuardedAction::CloseTab(id));
@@ -3596,6 +3607,20 @@ where
             .and_then(|tab| self.edits.get(&tab.id))
             .map(EditHistory::state)
             .unwrap_or_default()
+    }
+
+    fn show_licenses(&mut self) {
+        if self.modal_input_blocked() || self.license_guide_pending {
+            return;
+        }
+        let notify = Arc::clone(&self.notify);
+        match reveal_license_guide(move |result| notify(AppEvent::LicenseGuideRevealed(result))) {
+            Ok(()) => {
+                self.license_guide_pending = true;
+                self.set_status("Opening license and source materials...".into());
+            }
+            Err(error) => self.set_status(error.to_string()),
+        }
     }
 
     fn begin_dialog(&mut self, kind: FileDialogKind, intent: DialogIntent) -> bool {
@@ -5614,6 +5639,69 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn license_guide_requests_preserve_playback_edits_and_obey_modal_guards() {
+        let Some(root) = isolated_test_root(
+            "tests::license_guide_requests_preserve_playback_edits_and_obey_modal_guards",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let path = root.join("video.mp4");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Video);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Video);
+        app.state = PlaybackState::Playing;
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Video);
+        let edit = app.edit_state();
+        app.license_guide_pending = true;
+        app.show_licenses();
+        assert!(
+            app.status_message.is_none(),
+            "duplicate request does not start another worker"
+        );
+        app.handle_app_event(AppEvent::LicenseGuideRevealed(Ok(
+            root.join("licenses/START-HERE.html")
+        )));
+        assert!(!app.license_guide_pending);
+        assert!(
+            app.status_message
+                .as_ref()
+                .expect("license success status")
+                .0
+                .contains("selected in Explorer")
+        );
+        app.status_message = None;
+        app.pending_guard = Some(GuardedAction::CloseTab(tab));
+        app.show_licenses();
+        assert!(!app.license_guide_pending);
+        assert!(
+            app.status_message.is_none(),
+            "unsaved modal blocks the request"
+        );
+        app.pending_guard = None;
+        app.license_guide_pending = true;
+        app.handle_app_event(AppEvent::LicenseGuideRevealed(Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Missing fixture license guide.",
+        ))));
+        assert!(!app.license_guide_pending);
+        assert_eq!(
+            app.status_message
+                .as_ref()
+                .expect("license failure status")
+                .0,
+            "Missing fixture license guide."
+        );
+        assert_eq!(app.state, PlaybackState::Playing);
+        assert_eq!(app.path.as_ref(), Some(&path));
+        assert_eq!(app.edit_state(), edit);
+        assert!(app.playback_error.is_none());
+    }
 
     #[test]
     fn playlist_overlays_block_background_actions_and_hover_without_changing_rows() {

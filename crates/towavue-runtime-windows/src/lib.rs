@@ -39,7 +39,9 @@ pub use playback::{DecodePath, PlaybackError, PlaybackEvent, PlaybackMetrics, Pl
 pub use preview::{MediaPreview, PreviewCache, PreviewError, PreviewImage};
 pub use preview_loader::{PreviewLoader, VISIBLE_PREVIEW_LIMIT};
 pub use renderer::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError};
-pub use shell::{FolderOrderError, FolderOrderProvider, canonical_shell_path};
+pub use shell::{
+    FolderOrderError, FolderOrderProvider, canonical_shell_path, reveal_license_guide,
+};
 pub use watch::{FolderWatchError, FolderWatcher};
 
 use std::path::Path;

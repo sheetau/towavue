@@ -510,6 +510,8 @@ M4ではName、Date modified、Date created、Size、Typeの昇順・降順、�
 
 必要なDLL・ffmpeg.exe・ffprobe.exeはインストール先へ配置し、利用者による開発用FFMPEG_DIR/PATHの設定を必要としない構成を計画する。これは配布方式の決定であり、同梱物の検証・再配布条件の確認・installer実装・clean-machine検証の完了ではない。署名・公開・課金は別途扱う。
 
+H1の資料への入口はHelp menu／command paletteの`Show licenses and sources`とする。実行中exeの隣にある`licenses/START-HERE.html`をExplorerで選択表示し、HTMLやarchive自体は自動実行しない。欠落時は期待pathを表示し、cwd・FFMPEG_DIR・PATH・開発treeや推測した公開URLへfallbackしない。Windows runtimeの専用STA workerがShell操作を所有し、appへは成功path／errorだけを返す。appは重複要求を抑え、再生・編集状態を変えない。この入口は資料の存在・release適合性・配布採用の承認ではなく、installer側の配置と最終source同時提供は別途必要。
+
 H1の補助process探索はruntime内へ統一する。本体exeと同じdirectoryにffmpeg.exe／ffprobe.exeのいずれかが存在すれば、両方ともそのdirectoryを使う。不完全な配置を開発用helperで埋め合わせない。同梱helperが両方ともない開発配置だけ、非空のFFMPEG_DIR/binを使う。そこにも必要なexeがなければ期待pathを含むerrorにし、PATH上の別版を暗黙に起動しない。processへ渡すpathは絶対pathとし、作業directoryやPATHを変更しない。これは既存preview／保存の探索修正であり、同梱物の採用・installer作成・DLL検索規則の変更ではない。
 
 本体はMIT OR Apache-2.0。配布向けFFmpegはGPL/nonfree componentsとそれに反する推移依存を除いた9.0.1のDLLを動的リンクする。配布時には対応するFFmpeg source、build configuration、変更差分、著作権・LGPL表示、第三者license一覧を同じreleaseから取得可能にする。

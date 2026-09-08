@@ -97,6 +97,8 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 2026-09-09、[評価候補と配布資料の対応付け](CANDIDATE_MATERIALS.md)で、実exe＋94 runtime files、対応する本体source snapshot、13 kitとローカルHTML案内を接続した。名指ししたnotice／data原本の収録から、利用者向けの入口と最終同時提供へ進む。ブラウザーのfile URL制限により実表示は未検証で、アプリ内の入口・Setup.exe・隔離した導入／更新／削除・最終候補品質とowner受入は引き続き未完了。資料収録だけをruntime採用・公開承認としない。
 
+同日01:21、Help／paletteからexe隣のlicense guideをExplorerで選択する入口を追加した。専用STA worker、資料欠落時のpath案内、重複抑止・再生／未保存編集の保持を回帰と通常releaseで確認。273 tests・必須checkが通過した。古い資料集は旧exeの記録として保持し、最終app／source再対応付け、実installer配置・HTML表示・同時提供と、導入／品質／owner受入gateは継続する。
+
 2026-09-08、既存preview／保存のhelper探索だけはH1の独立した修正として先に検証する。FFMPEG_DIRによる同梱版の上書きや、不足helperをPATH上の別版で埋め合わせる動作を防ぐ。第2段階のinstaller作成・runtime採用は第1段階の監査後のままとし、helper単体の検証でそのgateを通過扱いにしない。
 
 2026-09-08、第一段階で固定開発FFmpegのChromaprint→GPL FFTW静的リンクを確認し、既存binaryを配布候補から除外した。次の配布作業は[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)の機能を保つ再buildと対応資料の確定であり、旧DLLをそのままinstallerへ組み込むことではない。KissFFT版Chromaprintの単体試験は通ったが、全体差替え・性能・再配布条件のgateは未完了。

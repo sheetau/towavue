@@ -52,6 +52,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             ],
         ],
     ),
+    ("Help", &[&[ShowLicenses]]),
 ];
 
 pub fn show(
@@ -318,6 +319,7 @@ mod tests {
         assert!(text_position(&frame(vec![]).0, "File").is_none());
         assert!(click(&mut frame, egui::pos2(20.0, 15.0)).is_empty());
         frame(vec![key(egui::Key::ArrowUp, false)]);
+        frame(vec![key(egui::Key::ArrowUp, false)]);
         frame(vec![key(egui::Key::ArrowRight, false)]);
         for _ in 0..15 {
             frame(vec![]);
@@ -330,6 +332,14 @@ mod tests {
         );
         frame(vec![key(egui::Key::Escape, false)]);
         assert!(text_position(&frame(vec![]).0, "File").is_none());
+        assert!(click(&mut frame, egui::pos2(20.0, 15.0)).is_empty());
+        frame(vec![key(egui::Key::ArrowUp, false)]);
+        frame(vec![key(egui::Key::ArrowRight, false)]);
+        for _ in 0..15 {
+            frame(vec![]);
+        }
+        assert!(text_position(&frame(vec![]).0, "Show licenses and sources").is_some());
+        assert_eq!(frame(vec![key(egui::Key::Enter, false)]).1, [ShowLicenses]);
     }
 
     #[test]
@@ -455,7 +465,7 @@ mod tests {
         let mut placed = BTreeSet::new();
         assert_eq!(
             MENUS.iter().map(|(title, _)| *title).collect::<Vec<_>>(),
-            ["File", "Edit", "View"]
+            ["File", "Edit", "View", "Help"]
         );
         for (_, groups) in MENUS {
             assert!(!groups.is_empty());

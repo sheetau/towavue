@@ -72,6 +72,6 @@ v10の全catalog回帰と、data kitの欠落／改変・source対応・link／o
 
 名指ししたnotice／dataの原本収録は完了し、[候補との対応付け](CANDIDATE_MATERIALS.md)へ進んだ。過去のkitに残るhistorical／other-target／再生成環境の限界は、その検証範囲の記録として維持する。全libraryを再監査する未処理一覧へ読み替えない。
 
-残るのは、案内の実表示とアプリ内からの入口、最終releaseに対応するsource／noticeの同時提供、許諾されたVisual C++ runtime前提installerと導入検証である。
+アプリ内のHelp／palette入口は[後続UI build](DEVELOPMENT.md)で実装した。残るのは、最終exeと資料の再対応付け、installerでの案内配置とHTML実表示、最終releaseに対応するsource／noticeの同時提供、許諾されたVisual C++ runtime前提installerと導入検証である。
 
 資料が集約できても、runtime採用、インストール先を選べるSetup.exe、対象Windowsでの導入・更新・削除、実環境とowner受入のgateは残る。全permissive sourceの再buildを一律に要求する工程へは変更しない。全体の優先順は[NATIVE_MATERIAL_PLAN.md](NATIVE_MATERIAL_PLAN.md)、実行物側のgateは[DISTRIBUTION.md](DISTRIBUTION.md)を参照する。

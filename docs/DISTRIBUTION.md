@@ -4,6 +4,8 @@
 
 2026-09-09更新: [評価候補と資料の対応付け](CANDIDATE_MATERIALS.md)では、現行の候補exeと94 runtime filesを実hashで照合し、本体の対応source ZIP・13 kitの原本・ローカルHTML案内をまとめる。下記のBtbN監査記録は除外済みbinaryの履歴であり、現行候補一覧ではない。新しい資料集も公開版やインストーラーではなく、実表示・アプリ内の入口・最終同時提供と品質／導入gateは残る。
 
+同日、[Help／paletteの資料入口](DEVELOPMENT.md)を後続UI buildへ追加し、Explorerでの選択表示と欠落案内を検証した。旧03125262用の固定資料は保持しており、新195af870 buildの対応sourceとして流用しない。最終app／sourceの再対応付け、installerでの`licenses/START-HERE.html`配置、HTML実表示・同時提供と品質／導入gateは継続する。
+
 2026-09-08更新: **下記の固定開発binaryは配布候補から除外する。** Chromaprint経由でGPLのFFTWが静的リンクされていた。recipe、実libraryの未解決symbol、当時のpkg-config、avformat DLL内の識別文字列が一致する。LGPL表示だけでは既定の配布条件を満たさない。[再build計画と単体検証](FFMPEG_REBUILD.md)、[固定した根拠](ffmpeg-distribution-rejection.json)を参照。開発用fileは保持し、本体のlicense変更やcodecの暗黙の削除はしない。
 
 ## 固定binaryの確認（2026-09-07 22:18 JST）

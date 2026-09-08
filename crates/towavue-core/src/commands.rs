@@ -8,6 +8,7 @@ use crate::MediaKind;
 pub enum CommandId {
     OpenFile,
     OpenFolder,
+    ShowLicenses,
     CloseTab,
     NextTab,
     PreviousTab,
@@ -65,6 +66,7 @@ impl CommandId {
         match self {
             Self::OpenFile => "open_file",
             Self::OpenFolder => "open_folder",
+            Self::ShowLicenses => "show_licenses",
             Self::CloseTab => "close_tab",
             Self::NextTab => "next_tab",
             Self::PreviousTab => "previous_tab",
@@ -307,6 +309,7 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::OpenFile, "Open file", &[]),
     command(CommandId::ToggleFullscreen, "Toggle fullscreen", &[]),
     command(CommandId::OpenFolder, "Open folder", &[]),
+    command(CommandId::ShowLicenses, "Show licenses and sources", &[]),
     command(CommandId::CloseTab, "Close tab", &[]),
     command(CommandId::NextTab, "Next tab", &[]),
     command(CommandId::PreviousTab, "Previous tab", &[]),
@@ -527,6 +530,27 @@ impl ShortcutBindings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn license_guide_is_available_without_media_and_in_every_media_context() {
+        let id = CommandId::from_str("show_licenses").expect("registered license command");
+        assert_eq!(id, CommandId::ShowLicenses);
+        let definition = command_definitions()
+            .iter()
+            .find(|command| command.id == id)
+            .expect("license command definition");
+        for media_kind in [
+            None,
+            Some(MediaKind::Image),
+            Some(MediaKind::Video),
+            Some(MediaKind::Audio),
+        ] {
+            assert!(definition.is_enabled(CommandContext {
+                media_kind,
+                ..Default::default()
+            }));
+        }
+    }
 
     #[test]
     fn media_commands_obey_the_active_context() {

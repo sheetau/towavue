@@ -19,6 +19,8 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 
 preview／保存用の補助exeは本体と同じフォルダーを優先します。ffmpeg.exe／ffprobe.exeが片方でもあれば同じ配置だけを使い、不足を別のFFmpegで補いません。両方ともない開発配置では下記のFFMPEG_DIR/binを使います。PATH上の別版への自動切替は行わず、欠落時は必要なpathをエラーに表示します。この処理の検証は、Setup.exeの完成や同梱物の配布承認ではありません。
 
+ライセンスとソースの案内は、左上のmenu → Help → Show licenses and sources、またはcommand paletteで`licenses`を検索して辿れます。exe隣の`licenses/START-HERE.html`をExplorerで選択表示します。開発版で資料が未配置なら期待する場所を表示し、別版の資料へ自動で切り替えません。資料の同梱・最終公開はまだ完了していません。
+
 複数の映像・音声streamを含む素材では、thumbnail・filmstrip・waveformと保存も再生と同じstreamを自動選択します。手動でstreamを切り替えるUIはありません。
 
 音声playlistはShell順の番号付き一覧です。行全体をclickして選曲でき、現在曲を明るく表示します。長い名前は一行に省略し、hoverで全文を確認できます。多数の曲も可視行だけを描画します。各曲の長さの列はまだありません。

@@ -22,8 +22,9 @@ use windows::Win32::UI::Shell::{
     EBO_NOBORDER, EBO_NOPERSISTVIEWSTATE, EBO_NOTRAVELLOG, ExplorerBrowser, IExplorerBrowser,
     IFolderView2, IPersistFolder2, IShellBrowser, IShellItem, IShellItemArray, IShellWindows,
     IWebBrowserApp, SBSP_ABSOLUTE, SHCreateItemFromIDList, SHGetIDListFromObject,
-    SHParseDisplayName, SID_STopLevelBrowser, SIGDN_FILESYSPATH, SORT_ASCENDING, SORT_DESCENDING,
-    SORTCOLUMN, SVGIO_ALLVIEW, SVGIO_FLAG_VIEWORDER, ShellWindows, StrCmpLogicalW,
+    SHOpenFolderAndSelectItems, SHParseDisplayName, SID_STopLevelBrowser, SIGDN_FILESYSPATH,
+    SORT_ASCENDING, SORT_DESCENDING, SORTCOLUMN, SVGIO_ALLVIEW, SVGIO_FLAG_VIEWORDER, ShellWindows,
+    StrCmpLogicalW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, MWMO_INPUTAVAILABLE,
@@ -38,6 +39,55 @@ pub enum FolderOrderError {
     WorkerStopped,
     #[error("the Shell worker did not return a snapshot")]
     ResponseLost,
+}
+
+/// Reveals the packaged guide in Explorer; no HTML, archive or browser is launched.
+pub fn reveal_license_guide(
+    notify: impl FnOnce(std::io::Result<PathBuf>) + Send + 'static,
+) -> std::io::Result<()> {
+    thread::Builder::new()
+        .name("towavue-licenses-sta".into())
+        .spawn(move || {
+            let result = (|| {
+                let guide = license_guide(&std::env::current_exe()?)?;
+                // SAFETY: this fresh worker owns its STA. All PIDLs are created, borrowed and
+                // dropped on this thread before balancing initialization; none crosses to app.
+                unsafe { OleInitialize(None) }.map_err(std::io::Error::other)?;
+                let result = (|| {
+                    let pidl = parse_path(&guide).ok_or_else(|| {
+                        std::io::Error::other("Windows could not resolve the license guide.")
+                    })?;
+                    // SAFETY: the owned absolute PIDL stays live through the call. A zero item
+                    // count selects this file in its parent; it does not execute the file.
+                    unsafe { SHOpenFolderAndSelectItems(pidl.as_ptr(), None, 0) }
+                        .map_err(std::io::Error::other)?;
+                    Ok(guide)
+                })();
+                // SAFETY: balances this worker's successful initialization after PIDL drop.
+                unsafe { OleUninitialize() };
+                result
+            })();
+            notify(result);
+        })?;
+    Ok(())
+}
+
+fn license_guide(executable: &Path) -> std::io::Result<PathBuf> {
+    let directory = executable
+        .parent()
+        .filter(|_| executable.is_absolute())
+        .ok_or_else(|| std::io::Error::other("The application directory is unavailable."))?;
+    let guide = directory.join("licenses").join("START-HERE.html");
+    if !guide.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "Packaged licenses and sources are unavailable. Expected: {}",
+                guide.display()
+            ),
+        ));
+    }
+    canonical_shell_path(&guide)
 }
 
 struct Request {
@@ -636,6 +686,42 @@ mod tests {
     use windows::Win32::UI::Shell::{FWF_AUTOARRANGE, IShellView, SORTDIRECTION};
     use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
     use windows::core::GUID;
+
+    #[test]
+    fn license_guide_is_adjacent_and_missing_materials_never_fall_back() {
+        let root = test_directory("license-guide");
+        let application = root.join("application space & Japanese").join("licenses");
+        fs::create_dir_all(&application).expect("create materials fixture");
+        let executable = application
+            .parent()
+            .expect("fixture parent")
+            .join("towavue.exe");
+        let guide = application.join("START-HERE.html");
+        let missing = license_guide(&executable).expect_err("missing guide");
+        assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
+        assert!(missing.to_string().contains(&guide.display().to_string()));
+        fs::create_dir(&guide).expect("directory is not a guide");
+        assert!(license_guide(&executable).is_err());
+        fs::remove_dir(&guide).expect("remove empty fixture directory");
+        fs::write(&guide, b"fixture guide; never executed").expect("write fixture guide");
+        assert_eq!(
+            license_guide(&executable).expect("adjacent guide"),
+            canonical_shell_path(&guide).expect("canonical fixture guide")
+        );
+        assert!(
+            license_guide(&root.join("towavue.exe")).is_err(),
+            "do not search another application directory"
+        );
+        assert!(
+            license_guide(Path::new("towavue.exe")).is_err(),
+            "never resolve against cwd"
+        );
+        assert_eq!(
+            fs::read(&guide).expect("unchanged fixture guide"),
+            b"fixture guide; never executed"
+        );
+        fs::remove_dir_all(root).expect("remove owned materials fixture");
+    }
 
     #[test]
     fn relative_paths_match_shell_style_absolute_paths() {

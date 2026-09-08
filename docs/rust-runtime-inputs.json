@@ -10,9 +10,9 @@
       "release_manifest_url": "https://static.rust-lang.org/dist/channel-rust-1.97.1.toml",
       "release_manifest_sha256": "03569b1886ceb5c05276b50c8431ab111de944cd6140fe1fa7d821dd8e0f29cf",
       "component": "rustc",
-      "url": "https://static.rust-lang.org/dist/2026-07-16/rustc-1.97.1-x86_64-pc-windows-gnu.tar.xz",
-      "sha256": "11de14fa7ee410e9baaa070ce0cda44e155c0e9e32329db0b5f20efc0f2fa5e4",
-      "bytes": 101980832,
+      "url": "https://static.rust-lang.org/dist/2026-07-16/rustc-1.97.1-x86_64-pc-windows-gnu.tar.gz",
+      "sha256": "3e8e2ad10430ef7886cf7ba4049a69299acc353bea1336c69ede6efdc80ff147",
+      "bytes": 160869712,
       "files": [
         {
           "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/LICENSE-APACHE",
@@ -120,9 +120,9 @@
       "release_manifest_url": "https://static.rust-lang.org/dist/channel-rust-1.97.1.toml",
       "release_manifest_sha256": "03569b1886ceb5c05276b50c8431ab111de944cd6140fe1fa7d821dd8e0f29cf",
       "component": "rust-src",
-      "url": "https://static.rust-lang.org/dist/2026-07-16/rust-src-1.97.1.tar.xz",
-      "sha256": "e9a1e616d04c6845895c827a178b9227f7c7199f3f4a80af81ab3aff7b80156b",
-      "bytes": 5660384,
+      "url": "https://static.rust-lang.org/dist/2026-07-16/rust-src-1.97.1.tar.gz",
+      "sha256": "59f02b4f23fd8d7193a3cb17ea192255ccf02f1109783d7988521334891d27ae",
+      "bytes": 9079434,
       "files": [
         {
           "entry": "rust-src-1.97.1/rust-src/lib/rustlib/src/rust/library/compiler-builtins/libm/LICENSE.txt",
@@ -146,9 +146,9 @@
       "release_manifest_url": "https://static.rust-lang.org/dist/channel-rust-1.98.0.toml",
       "release_manifest_sha256": "3f7d139b73bbbd0004ef6e58b430831c68cdad2b1f64ee2eb35d54c09199489a",
       "component": "rustc",
-      "url": "https://static.rust-lang.org/dist/2026-08-20/rustc-1.98.0-x86_64-pc-windows-msvc.tar.xz",
-      "sha256": "a29cdefc01c747e15270ec64878adba4b0a88afaa7f19e3abf9231106fbd381b",
-      "bytes": 71168480,
+      "url": "https://static.rust-lang.org/dist/2026-08-20/rustc-1.98.0-x86_64-pc-windows-msvc.tar.gz",
+      "sha256": "996ed3fa10dd6097149d5feaf727354b412c7da0e063d9326fbb58242def87e1",
+      "bytes": 129328650,
       "files": [
         {
           "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/LICENSE-APACHE",
@@ -256,9 +256,9 @@
       "release_manifest_url": "https://static.rust-lang.org/dist/channel-rust-1.98.0.toml",
       "release_manifest_sha256": "3f7d139b73bbbd0004ef6e58b430831c68cdad2b1f64ee2eb35d54c09199489a",
       "component": "rust-src",
-      "url": "https://static.rust-lang.org/dist/2026-08-20/rust-src-1.98.0.tar.xz",
-      "sha256": "0e977492aed5ff137815bf9b4b796e8a85b80fb2367ed64e82d5c5839870f2bf",
-      "bytes": 5741336,
+      "url": "https://static.rust-lang.org/dist/2026-08-20/rust-src-1.98.0.tar.gz",
+      "sha256": "bd2677a9958187d726b6b99c0f92b063f7b0b2f56ecbe966cb42fc2f81809f2f",
+      "bytes": 9206956,
       "files": [
         {
           "entry": "rust-src-1.98.0/rust-src/lib/rustlib/src/rust/library/compiler-builtins/libm/LICENSE.txt",

@@ -32,6 +32,8 @@ KissFFTのCOPYINGだけでなく、その参照先`LICENSES/BSD-3-Clause`も対�
 
 `scripts/probe-ffmpeg-relink.sh`はimage内でChromaprintをGNU targetの静的libraryとして再buildし、新prefixのpkg-configを優先してFFmpeg全体を再リンクする。imageの既存feature flagsを保持し、link traceを有効にして、新libraryの選択とFFTW link入力の不在を検査する。7 DLLとffmpeg/ffprobeの生成を確認するが、Windowsでの実行や性能検証は別gateである。
 
+2026-09-08の初回probe run `34176348521`はsource取得・検証後、固定imageのpullで`manifest unknown`となり停止した。container内buildは未実行である。registryのmanifest GET/HEADは404だが、保存済みmanifest/configのSHA256は元digestと一致し、指定するconfigと17 layerのHEADはsize一致で200だった。別versionへ置換せず、この固定blob集合から元環境を復元する方法を次に検証する。全layerの取得・展開・Docker import成功はまだ確認していない。
+
 コンテナは非root、networkなし、read-only root、capabilityなし、権限昇格なし。source/scriptはread-only、一時workとtmpfsだけを書込み可能にする。Docker socketやGitHub tokenを渡さず、artifact/cache/image/releaseを公開するstepはない。既存の他libraryを再利用するこのprobeだけでは、有効依存graph・対応source/notice全体の確定を代替しない。開発機のWSL導入や本体DLLの差し替えも行わない。
 
 1. 固定FFmpeg sourceと同じ機能を保つcontrolled build環境を用意する。上記patchを適用したChromaprintとFFmpeg全体を再linkし、compiler・全有効依存・source・patch・configure・link設定を取得時点で固定する。rav1eの`cargo update cc`のような非固定更新を新buildへ持ち込まない。既存のLinux build imageの実行、WSL/Dockerの導入やOS変更はまだ行っていない。

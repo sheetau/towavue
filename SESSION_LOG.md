@@ -2,6 +2,15 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-08 10:34 JST - bound runtime notice extraction and use equivalent official gzip inputs
+
+- Trigger/intent: previous turn is progress; clean pushed 19e5ac0 confirmed. Inspect the terminal CI and relink probe rather than restart live work.
+- CI evidence: 34175731040 is cancelled at the job limit. All four downloads/checks finish in about three seconds; the first rustc XZ notice read then waits until cancellation. This locates the stage but does not prove the tar implementation's internal cause. 19e5ac0 CI 34176341413 remains live in the same step.
+- Change: select the same four official component versions in gzip form, with hashes from the already verified release manifests. Download and verify all four archives; retain every original notice entry/size/hash unchanged. Drain tar stdout asynchronously, bound process execution to 60 seconds, kill/wait on expiry before disposing the stream, and print tar version. Do not increase the job limit or add retries. The new 2093150-byte bundle is SHA256 f63c5293ba8dc59b9346084949ea7e76972ea1015c665149ecc756eb5eb9a9e3; its input provenance changes, not its 36 original documents.
+- Relink evidence: manual probe 34176348521 fails on pinned image pull with manifest unknown, before container execution. Manifest GET/HEAD return 404; all 18 referenced config/layer blobs remain HEAD-accessible with matching sizes. Reverify the retained raw manifest/config hashes d1d34e5b.../f895b2da... locally. Document the failure and exact-blob recovery next step; do not substitute a mutable image or claim a whole-FFmpeg build.
+- Verification/areas: runtime inventory/generator, distribution/rebuild documentation and this log. Local deterministic/raw-byte/arbitrary-cwd/missing/corrupt/collision tests pass with the gzip inputs; format, workspace Clippy and all 268 tests pass, with three existing live ignores unexecuted. CI confirmation of the workaround and the timeout branch remain unverified. Downloads are complete and remain ignored; no production binary/dependency/OS changes or publication. Prepare a coherent checkpoint and inspect its CI.
+- Status/next: h1_active, not launch complete. Recover the exact image from retained blobs and run the isolated whole-FFmpeg probe, then complete effective source/runtime/notices and the selected Setup.exe. WSL permission remains unanswered; no OS change is assumed. Keep physical-environment and owner-acceptance gates open.
+
 ## 2026-09-08 10:20 JST - prepare an isolated whole-FFmpeg relink probe
 
 - Trigger/intent: previous turn is progress; clean pushed 34af315 confirmed. Advance from the standalone backend proof to the full GNU FFmpeg link without installing OS components or publishing unapproved binaries.

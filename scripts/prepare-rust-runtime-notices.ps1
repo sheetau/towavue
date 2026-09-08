@@ -64,8 +64,14 @@ function Read-Notices([string]$Path, $Files) {
     $buffer = [IO.MemoryStream]::new()
     try {
         $errorRead = $process.StandardError.ReadToEndAsync()
-        $process.StandardOutput.BaseStream.CopyTo($buffer)
-        $process.WaitForExit()
+        $outputRead = $process.StandardOutput.BaseStream.CopyToAsync($buffer)
+        $timedOut = -not $process.WaitForExit(60000)
+        if ($timedOut) {
+            $process.Kill()
+            $process.WaitForExit()
+        }
+        $null = $outputRead.GetAwaiter().GetResult()
+        if ($timedOut) { throw "Runtime notice extraction exceeded 60 seconds: $Path" }
         if ($process.ExitCode -ne 0) { throw "Cannot read runtime notices: $($errorRead.Result)" }
         # The pinned archive contains regular files in manifest order. Hash each
         # segment of tar's concatenated stdout; never extract an upstream path.
@@ -111,6 +117,8 @@ $materials = [ordered]@{
     'README.txt' = $utf8.GetBytes([IO.File]::ReadAllText($readmePath, $utf8).Replace("`r`n", "`n"))
     'INPUTS.json' = $utf8.GetBytes($inventoryText)
 }
+& tar.exe --version
+if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the runtime notice archive reader.' }
 foreach ($archive in $inventory.archives) {
     Write-Output "Reading runtime notice entries: $($archive.version) $($archive.component)"
     Read-Notices (Join-Path $CacheDirectory ([uri]$archive.url).Segments[-1]) $archive.files

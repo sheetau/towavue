@@ -4,6 +4,38 @@
 
 ## 1. 最初に試す
 
+### Native FFmpeg再生成候補のrelease確認（2026-09-08 14:38 JST）
+
+3e17046の手順で再生成したFFmpegを使い、別Rust targetで通常releaseをbuildした。アプリsourceの変更はない。binary SHA256は`94AF9E14CDAC00339A0AB830BD728E22EE94B7BAB9FDE66770D9A09DE80B2BC2`。各試験のPID／開始UTC、exe／media hash、実際にloadされた6 FFmpeg DLLのpath／hashを記録した。全DLLは再生成prefixに一致する。設定とcacheは各case専用、cwdは別directory、FFMPEG_DIRを明示し、PATHは同prefix/binとSystem32のみ。これはSetup.exeや環境変数不要の起動試験ではない。
+
+#### Seek
+
+1080p H.264/AACの120秒素材、960×576、1倍、アプリ内mute。5秒前進10回／後退10回を5往復し、前のPresent成功logを待って次の入力を送る。各条件100 indicesに欠落・重複なし、各processの完了logは200件。p50／p95は昇順50／95番目で、全条件が300msゲート内だった。
+
+| 経路・状態 | 完了数 | p50 | p95 | 最大 |
+|---|---:|---:|---:|---:|
+| 通常・Paused | 100/100 | 28.031ms | 33.528ms | 43.209ms |
+| 通常・Playing | 100/100 | 89.546ms | 100.880ms | 110.654ms |
+| UIA tree取得後・Paused | 100/100 | 27.128ms | 31.764ms | 36.153ms |
+| UIA tree取得後・Playing | 100/100 | 88.203ms | 101.288ms | 108.283ms |
+
+通常PID 48444（開始UTC `2026-09-08T05:25:12.9066966Z`）、UIA PID 37772（`05:26:12.2985531Z`）。各入力前にprocess identityとforegroundを照合した。UIA条件は準備後に15 descendantsのtreeを取得し、同じprocessで測定した。物理keyboard／OS配送／DWM走査表示までの遅延や常駐screen readerの試験ではなく、条件差を純粋なUIA負荷の差とは解釈しない。測定中の並行build/testはない。両windowをmuteのUndoでcleanに戻して正常終了し、exeとsource（SHA256 `DC645595A1165506BF5C3E685B14D7EA3B0116BBDFE74839E7DA5834CF60DA0C`）の不変を確認した。
+
+#### 保存と再open
+
+- PNG、PID 49160（開始UTC `05:27:51.1251530Z`）: 非対称64×48 sourceからleft/right=5/42、top/bottom=7/36をcrop、時計回り回転、Undo/Redo、Save As。29×37のdecoded RGBAは参照と完全一致（SHA256 `EBAE29BC543E282A86CDE62820FEB22884ACC885CB642EA00E1B2C82E5CB13C2`）。続く水平反転と同じexport先へのCtrl+Sも一致（`EFFB5419B11125B40410F13E5F807D4932B1AE16A87F355FF97829C17E6F1BC1`）。同windowで再openし、clean表示とUIAの最大29×37、実画像表示を確認した。元sourceを上書きしていない。
+- 画像の再open後、選択sliderがないという補助試験の失敗があった。画面とUIAは正しい29×37を示していた。ignoredなowned-key helperがwindow helperをdot-sourceし、同名のKeys引数をnullへ上書きしてキーを送っていなかったことを確認した。要求keyを別変数へ保持する修正後、同じアプリへCtrl+Aを送り、両sliderの値と上限が29／37になることを確認した。製品の寸法不具合として扱わない。
+- 音声、PID 5396（開始UTC `05:30:39.5609360Z`）: 8秒／48kHz mono chirpへtrim 2..6秒、50%、1.25倍を適用。参照filterは`atrim=start_pts=96000:end_pts=288000,asetpts=PTS-STARTPTS,atempo=1.2500,volume=0.5000`。保存PCMは307316 bytes／153658 samplesで完全一致（SHA256 `BCE492EFD2B806F3C44EBB088C92F1232B345FBD79AEA1F649B538A9D1274190`）。最初は別folderの保存先を再openしたため新tabとなった。続けて同じ試験folderへ原本copyを置き、同folder tabで編集・新規保存・再openも実行した。2 tabsのままで同tabが新sourceへ変わり、100%／1.00倍、trim 0..3.201208、cleanでEndedとなった。二回目の保存PCMも同じ参照と一致し、編集の二重適用はない。
+- 動画、PID 42684（開始UTC `05:33:41.7331703Z`）: 30秒1080p H.264/AACへtrim 5..9秒、crop 960×540 at 100,100、回転、Undo/Redo、Save As。保存物はH.264 540×960／120 frames／4.000000秒、AACも4.000000秒。元sourceへのtrim/crop/rotation参照に対する120 frame平均SSIM Allは0.998861783で、losslessの主張ではない。同windowで再openして実映像とEndedを確認。再生統計はD3D11VA、120 hardware/presented、CPU transfer 0、drop 0、drift p95/max=3.566/3.606msだった。AAC discarded-sample timestamp警告は残る。
+
+全保存windowをcleanな状態で正常終了した。元PNG／chirp／動画のhashはそれぞれ`15B8DA68F777D7CAAAB816EDE7DC7364CC979CC9BFFAAB4E93D39E24B624D49D`／`4BAF8F02E0F8028C6C87349FB385F0036D27FB4C594C302E797B22198AFA1AA6`／`24FD0CE978C4BD51877A49D2FBE301C39B70E6FB2E19071A6A092651A8D3A4F6`で不変。生成物・identity・stderr・Seek sampleは専用`release-eval-20260908`以下、操作helperはignored `target/tmp`に保持した。clipboard・OS設定・旧開発DLL／releaseは変更していない。保存後のformat／Clippy／268 testsも通過し、既存3 live ignoresは未実行。CI 34190302408は成功した。
+
+#### 継続中の30分試験
+
+上記の全体check完了後、同じreleaseで4K60の30分試験を開始した。PID 21784、開始UTC `2026-09-08T05:37:37.6633752Z`、sourceは既存`m3-4k60-30m.mp4`（SHA256 `FEE0E738E7149225A7B4DEA02CDA75AAE6873288CBE5A1077B101829ADFD0C10`）。exe／source／DLLを起動前にhash確認し、実module pathも照合した。960×576、1倍、アプリ内mute、UIA tree取得なし。監視session 11573は同じPID／開始時刻を30秒ごとに確認している。**この記録時点ではPlayingであり、完走・drop・drift・memoryの合否は未判定。** 期限や観測のyieldだけでprocessを再起動せず、同じrunのEOFを確認する。
+
+短時間の代表flowとSeek gateを、長時間・実device／mixed-DPI／物理入力・全screen reader、対象OS、配布条件、Setup.exe、ownerの外観受入の完了へ拡張しない。H1全体は継続中である。
+
 ### 動画・readingの最大化/fullscreen復帰を実2画面で確認（2026-09-07 15:31 JST）
 
 前項の画像window往復に続き、同じ100%倍率の横1920×1080と縦1080×1920で、通常window→最大化→F11→Escapeで最大化へ復帰→通常サイズへ復帰を確認した。各段階のGetWindowRectとIsZoomedを照合し、fullscreen captureを目視した。production変更なし。

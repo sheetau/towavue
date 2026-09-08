@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "scope": "Source materials for the verified-v3 scoped ZVBI input used by the rebuilt FFmpeg candidate. Not distribution approval or general ZVBI API compatibility.",
+  "toolchain_workflow_revision": "916b02bbc17d062b98f1d0d40bf0c1dce83aba3f",
+  "original_source_files": 224,
+  "changed_sources": ["src/Makefile.am", "src/event.h", "src/packet.c", "src/vbi.c", "src/vbi.h", "src/vps.c", "src/vps.h"],
+  "repository_materials": [
+    {"name": "scripts/build-zvbi-native-experiment.ps1", "bytes": 5273, "sha256": "b323a8aa4474888df6302784075f856cc3402cef4aaf06b6a13652bbcce9a4d7"},
+    {"name": "docs/native-zvbi-inputs.json", "bytes": 3585, "sha256": "96d282e77467264e5de0f68a8236e92cf016b3c428f407cae4829d93b31353e5"},
+    {"name": "docs/msys2-toolchain-inputs.json", "bytes": 73521, "sha256": "1ab74df3062e33acd0edaf5faf98438c21df43ccb144b858d21ee85872e3306d"},
+    {"name": "docs/msys2-media-inputs.json", "bytes": 53603, "sha256": "df1857c6e04acb20e8ae62f6e4d0ee83696c910f0efc3de7954200accb301e34"},
+    {"name": "third-party/patches/zvbi-no-program-id.patch", "bytes": 8709, "sha256": "9ef31d7e15655f7ceecabb1516a663ecd01ceec0dc104b4d7aec656923a83874"}
+  ],
+  "prefix_files": [
+    {"name": "bin/libzvbi-0.dll", "bytes": 1569468, "sha256": "3b18e1282a06b413e75e907d7521aceb0570b93002880df9a15e582902d7766b"},
+    {"name": "include/libzvbi.h", "bytes": 46534, "sha256": "8e2a467f9ac02022a147470c868553eb563636b56b67b8f16da4aec8a8a14acc"},
+    {"name": "lib/libzvbi.a", "bytes": 1808696, "sha256": "b0e4155869584263f32cd3efd2708a69faba6ff524ffca4fd393c83f2b63407d"},
+    {"name": "lib/libzvbi.dll.a", "bytes": 236374, "sha256": "0dc006ad10cdd7ba44200285ac5cfd7844b803177f45d8d2094c15b5a06779ef"},
+    {"name": "lib/libzvbi.la", "bytes": 994, "sha256": "7e56c18df41e8a17c23caebc811bb723cc00dec9995b691c37d060465db633ff"},
+    {"name": "lib/pkgconfig/zvbi-0.2.pc", "bytes": 336, "sha256": "0439cbcd9bdd45e07c90cb06358df68639adef69fb72a8391e57194a18b5b3c8"}
+  ]
+}

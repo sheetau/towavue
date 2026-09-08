@@ -15,6 +15,8 @@
 
 [native-runtime-package-audit.json](native-runtime-package-audit.json)は実closureとpackage metadataのbaseline、[native-runtime-recipes.json](native-runtime-recipes.json)は対応recipeの入力一覧である。どちらもmachine固有の絶対pathを含めない。Windows KnownDLL／API set／その他host-systemの区別は既存PE監査と同じであり、host-system fileのWindows 10上での存在保証ではない。
 
+限定ZVBIを用いた後続候補では、このbaselineの85 package DLLのうちZVBIだけを置き換える。残る84 package DLLは同じhashであり、限定DLLの入力・source資料は下記の専用manifestで区別する。旧package由来の証拠を限定DLLの由来として扱わない。
+
 ## 再検証
 
 ```powershell
@@ -119,6 +121,24 @@ test wrapperの`-RecordedInput 'path/to/sample.ts'`で、従来の合成12条件
 別の[stream認識sample](https://samples.ffmpeg.org/ffmpeg-bugs/trac/ticket4221/teletext-streams-misrecognized.ts)は7569408 bytes／SHA256 `e4f4f02659c8b0e0d50691e937a9ff0068836d4379246c22f37abd0bb8de52d1`。現在のFFmpegはTeletext streamを認識せず、未知streamとDVB subtitleを報告した。fixtureは明示failureで停止することを確認し、この素材をTeletext decode成功例には数えない。demux認識問題の修正や全言語／DRCS／error-correctionの網羅は今回の比較からは証明されない。
 
 続いて`build-ffmpeg-native.ps1 -ZvbiPrefix ...`による新規FFmpeg全体buildと94-file stagingが完了した。実compiler依存は限定prefixの`libzvbi.h`を参照し、旧MSYS2 headerを含まない。`-CandidateFfmpegPrefix 'path/to/new/ffmpeg/prefix'`を比較wrapperへ追加し、avcodec／avformat／avutilも新しいDLLであることを確認した上で、上記2本を再比較した。合成条件、録画のpacket／非空出力／error数、全出力hashは旧FFmpegと完全一致した。55秒素材の比較は任意cwdからも成功し、PATHと入力は保持された。新FFmpegの構成・配置の詳細は[NATIVE_FFMPEG_BUILD.md](NATIVE_FFMPEG_BUILD.md)を参照する。これは字幕境界の追加証拠であり、全体配布承認や最終候補の長時間性能検証ではない。
+
+### 限定ZVBI候補に対応するsource資料
+
+[native-zvbi-scoped-inputs.json](native-zvbi-scoped-inputs.json)は、実際に新FFmpegへ渡した限定ZVBIの6 inputs（DLL、再生成header、static／import library、libtool metadata、pkg-config）と、固定builder・patch・source／toolchain一覧を結び付ける。collectorは元archiveへ固定patchを再適用し、元sourceの224 filesすべてを実build sourceとsize／hash照合する。変更は意図した7 filesだけであり、未コンパイルの原本も照合対象に含む。さらに6 inputsをFFmpegのbuild記録と照合し、staging先のZVBI DLLも検査する。観測した入力間の一致であって、暗号学的なbuild証明ではない。
+
+```powershell
+.\scripts\prepare-zvbi-scoped-materials.ps1 -SourceArchive 'path/to/zvbi-source.tar' `
+    -ZvbiBuildDirectory 'path/to/verified/zvbi/build' `
+    -FfmpegBuildDirectory 'path/to/verified/ffmpeg/build' -OutputDirectory 'path/to/fresh/materials'
+.\scripts\test-zvbi-scoped-materials.ps1 -SourceArchive 'path/to/zvbi-source.tar' `
+    -ZvbiBuildDirectory 'path/to/verified/zvbi/build' -FfmpegBuildDirectory 'path/to/verified/ffmpeg/build'
+```
+
+最終資料は13 files／4623779 bytes。無変更の全source archive、元COPYING／NEWS／README、固定patch、builderと入力一覧、実生成header、説明書、最後に生成するEVIDENCE.jsonを含む。DLL／exe／static library／録画／字幕出力は含めない。任意cwdとコピー入力からの全hash一致、22 inputsの欠落・同size改変とFFmpeg記録の6不一致条件、計50拒否case、既存output・元入力・PATH／cwd保持を確認した。初回の異常系試験では元metadataの欠落が通常の読込例外となったため、固定repository inputsの存在・hash検査を読込前へ移し、全caseを再実行した。
+
+同梱builderを資料directoryから参照し、別cwd／fresh native build directoryで再buildした。44 compiler依存と公開header検査を通過し、header hashは`8e2a467f...`のまま、DLLは`8a32b48449dc1bc254a2c87a3077a3c55b97b4b166733034148cb81b6e8abae5`となった。19 exportsだけの除外と、合成12条件＋ticket4165の3形式の全出力一致（`dc327785...`）を新FFmpeg／実load path確認付きで再検証した。最終資料とこの再buildに用いた資料の差は説明書の文章だけで、build inputsは全hash一致。bit-identical rebuildや未試験のstream互換性は主張しない。
+
+これは限定ZVBIのsource／patch／header資料の確認であり、元archive全fileがLGPL-onlyという判断ではない。元license noticesを保持し、MSYS2 packages／bootstrap手順は同梱せず固定workflow revisionへ結び付ける。Autotools生成物、system headers、compilerや推移依存のsource／static／data資料の全体確認、新候補のrelease性能、Setup.exeと対象Windowsのgateは未完了である。旧DLLの監査資料も履歴として分離保持し、製品への差替え・配布承認は行わない。
 
 ### その他の混合license確認の続き
 

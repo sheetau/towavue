@@ -183,6 +183,29 @@ scriptは固定HEAD・許可した差分だけを検証し、取得やpatch適�
 
 初回の手動codec prefixを使った全FFmpegコンパイルもexit 0で完了し、7 versioned DLL／import libraryとffmpeg・ffprobe・ffplayを生成した。build内DLL directoryと専用MSYS2 binをprocess PATHへ指定すると、ffmpeg／ffprobeが9.0.1として起動し、合成3 framesを処理できた。さらにFFmpegからlibvvencで128×128／10-bitの1 frameをencodeし、ffprobeの復号frame数1・VVC／yuv420p10leと、FFmpeg側のVVC decoderによる出力完了を確認した。codec単体のC試験より一段進んだ統合証拠だが、アプリのMSVCリンク・隔離runtime・実再生／性能・配布材料の検証はまだである。現行アプリのFFmpegは置き換えていない。SPIR-V入力の補完、修正済みcodec prefixへの統一、実binaryの機能比較と依存closureの確定を続ける。
 
+## SPIR-V補完、リンク順の修正とruntime隔離試験
+
+2026-09-08、同じ署名済みsnapshotから`mingw-w64-x86_64-spirv-headers 2~1.4.357.0-1`だけを追加した。193255 bytes、SHA256 `afe7a50e11fc56d8c59666dcf195d40fb439c11e38f96a2fa1acfe62fc24e073`。archive／`.PKGINFO`／detached signatureのfull trust、追加hookなしを確認してlocal `-U --needed`で導入した。既存329 packageは変更せず、現在の[media入力](msys2-media-inputs.json)は95件、全体330件である。660 cache fileの検証、環境整合性、native C/C++/LV2/VAAPI試験も成功した。再configureではSPIR-V header macroが有効になり、不足警告は解消した。
+
+**前節の最初のnative FFmpeg生成物と、ヘッダーだけ補完した次の生成物は配布候補から除外する。** 実PE importを辿ると、前者は新しいaribb24 prefixをpkg-configで選んでも、旧MSYS2 `libaribb24-0.dll`へリンクしていた。全体の`-L`列では他library由来のMSYS2 pathが先行していたためである。pkg-configの版検査とFFmpegの自己申告licenseだけでは、この選択違いを検出できなかった。成果物は診断用に保持し、現行アプリのDLLは変更していない。
+
+修正はFFmpeg sourceの変更ではなく、全81 optionを維持したうえで`--extra-cflags`と`--extra-ldflags`へ5つの専用prefixを先行指定することとした。順序はaribb24、LCEVC、librist、uavs3d、VVenCで、前者へ各`-I<prefix>/include`、後者へ各`-L<prefix>/lib`を渡す。全prefixは検証済みscriptの出力を使用し、同じ順序のpkg-config pathに続けてMSYS2 prefixを置く。これらは各1つの文字列引数としてconfigureへ渡す。生成CFLAGS/LDFLAGSで実際の順序を確認し、新規buildでconfigure／makeがexit 0となった。
+
+新avcodec DLLには`arib_instance_new`と`arib_decode_buffer`の定義が存在し、`libaribb24-0.dll`のimportはなくなった。全runtime graphにも旧ARIB DLLは含まれない。全61 enable macroとSPIR-V headerが有効、GPL/nonfree flagは無効である。これは他の全リンク入力や配布条件の承認を意味しない。
+
+```powershell
+.\scripts\get-native-runtime-dependencies.ps1 -EntryPoints 'path/to/ffmpeg.exe','path/to/ffprobe.exe' `
+    -SearchDirectories 'path/to/ffmpeg/dlls','path/to/msys64/mingw64/bin' `
+    -ObjdumpExecutable 'path/to/msys64/mingw64/bin/objdump.exe'
+.\scripts\test-native-runtime-dependencies.ps1 -MsysRoot 'path/to/msys64'
+```
+
+監査scriptはPE importを再帰的に読み、file size/hashと依存edgeを返すだけで、copyや実行はしない。実buildでは7 library directoryを検索対象へ渡す。Windows KnownDLLs、API set、その他のhost-system fileを区別し、通常DLLは指定directory内の一意な候補を要求する。System32に存在するだけでWindows標準と扱わない。実際にOpenCL.dllはSystem32にもあるKhronos loaderであり、隔離試験では指定MSYS2版を同梱した。KnownDLL名のshadow、通常DLLの重複・欠落、任意cwdとhashを既存C/C++ fixtureで検証した。動的LoadLibraryやdriver/plugin探索、host-system fileの対象OSでの存在は別検証である。
+
+修正前graphは95 files／143833446 bytes、新graphは94 files／143954529 bytesだった。新graphは2 helper、7 FFmpeg DLL、72 package由来の85 DLLで、`ffplay`はこの集約対象に含めない。新規隔離directoryへ94 filesをcopyして全hashを照合し、別の空cwd・`PATH=Windows System32のみ`で合成3 framesの処理と、既存VVC fixtureの復号frame数1を確認した。開発toolchain pathは不要だったが、これは現在のhost上の試験であり、clean Windows 10／installer試験ではない。単なるimport graphは全対応source/notice一覧の代わりにはならない。
+
+旧開発FFmpegと新隔離helperの実一覧を比較し、decoder 537、encoder 228、filter 531、demuxer 364、muxer 184、protocol 44、hardware API名9がすべて一致した。各集合で追加・欠落とも0である。hardware API名の列挙は実device動作を意味しない。次はこの候補の再現可能な構成手順、Chromaprint fingerprint／backend、全材料、MSVCアプリ統合・実再生／性能を検証し、Setup.exeへ進める。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。

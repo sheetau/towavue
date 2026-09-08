@@ -5,6 +5,7 @@
   "base_inventory": "msys2-toolchain-inputs.json",
   "database_sha256": "58dada89a98d5edcd8b3d959d62202ffff132a1027f6923dabc19c0a220bd5fe",
   "roots": [
+    "mingw-w64-x86_64-spirv-headers",
     "mingw-w64-x86_64-python-jinja",
     "mingw-w64-x86_64-python-jsonschema",
     "mingw-w64-x86_64-SDL2",
@@ -65,6 +66,19 @@
     "mingw-w64-x86_64-zvbi"
   ],
   "packages": [
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-spirv-headers",
+      "version": "2~1.4.357.0-1",
+      "bytes": 193255,
+      "sha256": "afe7a50e11fc56d8c59666dcf195d40fb439c11e38f96a2fa1acfe62fc24e073",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-spirv-headers-2~1.4.357.0-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "bc004912e2310717d1ede7fe97e1f4d06e8eea9555a61ff0c1b1a7d877e0ae61",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
     {
       "repository": "mingw64",
       "name": "mingw-w64-x86_64-python-attrs",

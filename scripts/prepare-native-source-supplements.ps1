@@ -14,7 +14,7 @@ $auditPath = Join-Path $repositoryRoot 'docs/native-runtime-package-audit.json'
 $inventory = Get-Content -LiteralPath $inventoryPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $recipes = Get-Content -LiteralPath $recipePath -Raw -Encoding UTF8 | ConvertFrom-Json
 $audit = Get-Content -LiteralPath $auditPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($inventory.schema_version -ne 1 -or $inventory.packages.Count -ne 16) { throw 'Incomplete source supplement inventory.' }
+if ($inventory.schema_version -ne 1 -or $inventory.packages.Count -ne 24) { throw 'Incomplete source supplement inventory.' }
 if (-not $CacheDirectory) { $CacheDirectory = Join-Path $repositoryRoot 'vendor/msys2/source-supplements-20260908' }
 if (-not $RecipeDirectory) { $RecipeDirectory = Join-Path $repositoryRoot 'vendor/msys2/runtime-recipes-20260908' }
 $CacheDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CacheDirectory)
@@ -92,7 +92,7 @@ foreach ($package in $inventory.packages) {
     $source = @($package.files | Where-Object { $_.kind -eq 'source' })
     if ($source.Count -ne 1) { throw 'Expected one pinned source archive per supplement.' }
     # Only fixed regular members of the hash-verified original archive are selected.
-    # Internal zimg symlinks stay inside the preserved archive and are not extracted.
+    # Internal zimg/GLib symlinks stay inside the preserved archives and are not extracted.
     & $tar -xf (Join-Path $directory $source[0].name) -C $directory @($package.selected_documents.name)
     if ($LASTEXITCODE -ne 0) { throw "Source supplement document extraction failed: $($package.package)" }
     foreach ($document in $package.selected_documents) { Assert-Input (Join-Path $directory $document.name) $document }

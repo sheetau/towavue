@@ -37,6 +37,9 @@ try {
         foreach ($relative in $expected.Keys) {
             if ((Get-FileHash -LiteralPath (Join-Path $output $relative)).Hash -ne $expected[$relative]) { throw "Supplement bytes changed: $relative" }
         }
+        foreach ($relative in @('glib-2.88.3/COPYING', 'glib-2.88.3/gmodule/COPYING')) {
+            if (Test-Path -LiteralPath (Join-Path $output ('mingw-w64-x86_64-glib2/' + $relative))) { throw 'GLib source symlink was materialized.' }
+        }
     }
 }
 finally { Pop-Location }
@@ -137,11 +140,14 @@ $manifestPath = Join-Path $fixtureRepository 'docs/native-source-supplements.jso
 $manifestBytes = [IO.File]::ReadAllBytes($manifestPath)
 $encoding = [Text.UTF8Encoding]::new($false)
 $arguments = @{ OutputDirectory = $rejectedOutput; CacheDirectory = $CacheDirectory; RecipeDirectory = $RecipeDirectory }
-foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype')) {
+foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype', 'mingw-w64-x86_64-glib2')) {
     foreach ($kind in @('missing', 'different', 'duplicate')) {
         $changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
         $package = $changed.packages | Where-Object { $_.package -eq $packageName }
-        $notice = $package.selected_documents | Where-Object { $_.name -match '/(COPYING|docs/FTL.TXT)$' }
+        $notice = $package.selected_documents | Where-Object {
+            if ($packageName -eq 'mingw-w64-x86_64-glib2') { $_.package_notice -eq 'mingw64/share/licenses/glib2/COPYING' }
+            else { $_.name -match '/(COPYING|docs/FTL.TXT)$' }
+        }
         switch ($kind) {
             'missing' { $package.selected_documents = @($package.selected_documents | Where-Object { $_.name -ne $notice.name }) }
             'different' { $notice.sha256 = '0' * 64 }
@@ -171,4 +177,4 @@ foreach ($kind in @('missing-map', 'wrong-map', 'duplicate')) {
     }
     finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
 }
-Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, nine package-notice mismatches, cached-input/download and output preservation."
+Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, twelve package-notice mismatches, GLib symlink exclusion, cached-input/download and output preservation."

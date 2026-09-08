@@ -1,7 +1,580 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for 13 runtime packages without package notices plus XZ/FreeType/gettext-runtime with mixed-license scope and secondary notices. Chromaprint/OpenAL/ZVBI have separate materials. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 24 runtime package owners, including eight additional library-source-first packages. Chromaprint/OpenAL/ZVBI have separate materials. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "packages": [
+    {
+      "package": "mingw-w64-x86_64-libiconv",
+      "recipe_sha256": "9b3212d06910560fb59e017e0b73a29d392a5082d3a47a613e61509bd7dcd475",
+      "files": [
+        {
+          "name": "libiconv-1.19.tar.gz",
+          "kind": "source",
+          "url": "https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.19.tar.gz",
+          "sha256": "88dd96a8c0464eca144fc791ae60cd31cd8ee78321e67397e25fc095c4a19aa6",
+          "bytes": 5921103
+        },
+        {
+          "name": "0003-add-cp65001-as-utf8-alias.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libiconv/0003-add-cp65001-as-utf8-alias.patch",
+          "sha256": "cb2b1cca44c9b9bd11c3bd33997c10d22dff263542275324c88f34b59910ef87",
+          "bytes": 518
+        },
+        {
+          "name": "0002-fix-cr-for-awk-in-configure.all.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libiconv/0002-fix-cr-for-awk-in-configure.all.patch",
+          "sha256": "89d5c0f666e50a0186cfb142ba7b77e8fe1ac4d65bdfd9ae14ae8d2f0045a87c",
+          "bytes": 415
+        },
+        {
+          "name": "fix-pointer-buf.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libiconv/fix-pointer-buf.patch",
+          "sha256": "6b6e2393840f4dc6067587165777b1a07978f4c05247d7c1010a45ad251bbeeb",
+          "bytes": 1664
+        },
+        {
+          "name": "iconv.pc",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libiconv/iconv.pc",
+          "sha256": "56e7ec406bf42eb66b1d972f20d229f7a76ba00c38c7b4403bf348875704baae",
+          "bytes": 240
+        }
+      ],
+      "archive_prefix": "libiconv-1.19/",
+      "archive_entries": 1142,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libiconv-1.19/COPYING.LIB",
+          "bytes": 26419,
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+          "package_notice": "mingw64/share/licenses/libiconv/COPYING.LIB"
+        },
+        {
+          "name": "libiconv-1.19/AUTHORS",
+          "bytes": 31,
+          "sha256": "ed10ef2a01effb12849006d43262ffde5cf72a7d5423bbc8aa66fc6959774c0c"
+        },
+        {
+          "name": "libiconv-1.19/libcharset/COPYING.LIB",
+          "bytes": 26419,
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+          "package_notice": "mingw64/share/licenses/libiconv/libcharset/COPYING.LIB"
+        },
+        {
+          "name": "libiconv-1.19/libcharset/AUTHORS",
+          "bytes": 31,
+          "sha256": "ed10ef2a01effb12849006d43262ffde5cf72a7d5423bbc8aa66fc6959774c0c"
+        },
+        {
+          "name": "libiconv-1.19/COPYING",
+          "bytes": 35147,
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+          "package_notice": "mingw64/share/licenses/libiconv/COPYING"
+        },
+        {
+          "name": "libiconv-1.19/README",
+          "bytes": 5741,
+          "sha256": "4ae66e61d1c6593c84c47105b368d579bcee1af566dbb959ec63a0c48425dcf4",
+          "package_notice": "mingw64/share/licenses/libiconv/README"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-fribidi",
+      "recipe_sha256": "8b0dfca7f26b9f1b7f32fef6ab348b7c7d07b2c568c1b9d75820346f026316b6",
+      "files": [
+        {
+          "name": "fribidi-1.0.16.tar.xz",
+          "kind": "source",
+          "url": "https://github.com/fribidi/fribidi/releases/download/v1.0.16/fribidi-1.0.16.tar.xz",
+          "sha256": "1b1cde5b235d40479e91be2f0e88a309e3214c8ab470ec8a2744d82a5a9ea05c",
+          "bytes": 1098260
+        }
+      ],
+      "archive_prefix": "fribidi-1.0.16/",
+      "archive_entries": 196,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "fribidi-1.0.16/AUTHORS",
+          "bytes": 1640,
+          "sha256": "cb173f55c9514c8f38f4647ac3fedd5f8611358d331e65ab955da931e826861c"
+        },
+        {
+          "name": "fribidi-1.0.16/COPYING",
+          "bytes": 26440,
+          "sha256": "32434afcc8666ba060e111d715bfdb6c2d5dd8a35fa4d3ab8ad67d8f850d2f2b",
+          "package_notice": "mingw64/share/licenses/fribidi/COPYING"
+        },
+        {
+          "name": "fribidi-1.0.16/gen.tab/unidata/ReadMe.txt",
+          "bytes": 693,
+          "sha256": "14cafa23788d3a20dd21d6b0cdcb8d6dab520781fcd9ad9392f3b88ea607e633"
+        },
+        {
+          "name": "fribidi-1.0.16/gen.tab/unidata/BidiBrackets.txt",
+          "bytes": 8891,
+          "sha256": "b8f32554c6f658821fb0ee742d21c5b1f2086b9bf13071fed04894b022f93d67"
+        },
+        {
+          "name": "fribidi-1.0.16/gen.tab/unidata/BidiMirroring.txt",
+          "bytes": 26827,
+          "sha256": "d7afdadd1bbd66f5a663ac0e8f7958f18fd9491fc0bc59ec5877cb82db71db7d"
+        },
+        {
+          "name": "fribidi-1.0.16/meson.build",
+          "bytes": 2597,
+          "sha256": "484ec5aa67a62a7917dcecd229cdf823d9ddc477f2c4e3de399494e19a97b511"
+        },
+        {
+          "name": "fribidi-1.0.16/gen.tab/meson.build",
+          "bytes": 2552,
+          "sha256": "3c7d7118340e65747458b87b05426f9a6769424d1166e9cd74219f641539b88c"
+        },
+        {
+          "name": "fribidi-1.0.16/lib/meson.build",
+          "bytes": 2810,
+          "sha256": "2b1a880a19ee1f0cfd35f1bd49a83a4cb4166f9b9c487625625b9b4a5ff435b8"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libgme",
+      "recipe_sha256": "61ee7212d0225c5f539913bc22ef54df4419042f780468c51a0c1b212cc7ad00",
+      "files": [
+        {
+          "name": "libgme-0.6.5-src.tar.gz",
+          "kind": "source",
+          "url": "https://github.com/libgme/game-music-emu/releases/download/0.6.5/libgme-0.6.5-src.tar.gz",
+          "sha256": "a133f19278222136ba0d8c27b64a07987ba05fec9d2e6d293ccd8cabdd97ddbb",
+          "bytes": 347787
+        }
+      ],
+      "archive_prefix": "libgme-0.6.5/",
+      "archive_entries": 173,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libgme-0.6.5/gme/ext/LICENSE",
+          "bytes": 1089,
+          "sha256": "8fb093f26ed0d78c8ca033bbec7063ac5b34c5d2475e6bd121d03ccfaaf2355f"
+        },
+        {
+          "name": "libgme-0.6.5/license.gpl2.txt",
+          "bytes": 18092,
+          "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+        },
+        {
+          "name": "libgme-0.6.5/license.txt",
+          "bytes": 26938,
+          "sha256": "d2efc89fbb7533572a472d34e07964951810a3a4f8d3159ecc2dcaa1452c5c26",
+          "package_notice": "mingw64/share/licenses/libgme/license.txt"
+        },
+        {
+          "name": "libgme-0.6.5/CMakeLists.txt",
+          "bytes": 5248,
+          "sha256": "d2fec31c03a470e1e0590da227306cb3d914240e5c50ff49255081250627d17c"
+        },
+        {
+          "name": "libgme-0.6.5/gme/CMakeLists.txt",
+          "bytes": 15873,
+          "sha256": "3b580fbcdf94f87a35e35e6f855e5df47af5fde9a6334f3a17c5e6b32b9eb704"
+        },
+        {
+          "name": "libgme-0.6.5/gme.txt",
+          "bytes": 15481,
+          "sha256": "c99eab314bb78e42c129b1be11f56854a919d20bf4ac3bd3097f241eae1fb389"
+        },
+        {
+          "name": "libgme-0.6.5/gme/Ym2612_Nuked.cpp",
+          "bytes": 51307,
+          "sha256": "a3fdbfe7b37b3fd7ede083e5e89e1c7ba517540279f19b8bc21af7d3fc479e57"
+        },
+        {
+          "name": "libgme-0.6.5/gme/Ym2612_MAME.cpp",
+          "bytes": 89842,
+          "sha256": "d9c15bc360f0861b386c795968f7b254df9cbf5302eba38b5c364577c12db557"
+        },
+        {
+          "name": "libgme-0.6.5/gme/Ym2612_GENS.cpp",
+          "bytes": 36265,
+          "sha256": "e9bb8453f96dcaddbcf65105506d4346cd7acd6ec9b7470df07cff9fe129420b"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-mpg123",
+      "recipe_sha256": "408c256745a669d0bcf5bdf3a93278dbf776c0b0f6d0106ff0d816184fd41d11",
+      "files": [
+        {
+          "name": "mpg123-1.33.7.tar.bz2",
+          "kind": "source",
+          "url": "https://sourceforge.net/projects/mpg123/files/mpg123/1.33.7/mpg123-1.33.7.tar.bz2",
+          "sha256": "31d0e35a4ca567ec9b5ebda6c3062bb4435d6d3eacd6ef0d95cadd7854dc03ee",
+          "bytes": 1126376
+        }
+      ],
+      "archive_prefix": "mpg123-1.33.7/",
+      "archive_entries": 392,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "mpg123-1.33.7/AUTHORS",
+          "bytes": 9370,
+          "sha256": "fb18c9abae864a20f691e949e4c7871c79f5f0861b3a3dcaf5881c3c02cf5cc2"
+        },
+        {
+          "name": "mpg123-1.33.7/COPYING",
+          "bytes": 40718,
+          "sha256": "c22482728a634a8dfdb4ff72a96d4c1ed64cd8f3e79335c401751ac591609366",
+          "package_notice": "mingw64/share/licenses/mpg123/COPYING"
+        },
+        {
+          "name": "mpg123-1.33.7/doc/PATENTS",
+          "bytes": 3211,
+          "sha256": "a16db5483cc2ab07a81b152fe9147f0ef196d38d26477c7b8c803aff6522e8bc"
+        },
+        {
+          "name": "mpg123-1.33.7/doc/LICENSE",
+          "bytes": 957,
+          "sha256": "cca79ea6fc0a7715e52450df2d86311f990e85067dd13f4d7f5a88d4fd23a07c"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libbluray",
+      "recipe_sha256": "47f0e0b69cec5ec64738bea4f6e88702f103188f6f48acdaf1d34922e34a3212",
+      "files": [
+        {
+          "name": "libbluray-1.5.0.tar.xz",
+          "kind": "source",
+          "url": "https://download.videolan.org/pub/videolan/libbluray/1.5.0/libbluray-1.5.0.tar.xz",
+          "sha256": "f676408e91a5d321abf8b8d4dfdae36205c297dab5c54c3ec519639025f474a2",
+          "bytes": 473072
+        }
+      ],
+      "archive_prefix": "libbluray-1.5.0/",
+      "archive_entries": 1112,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libbluray-1.5.0/COPYING",
+          "bytes": 24478,
+          "sha256": "b3aa400aca6d2ba1f0bd03bd98d03d1fe7489a3bbb26969d72016360af8a5c9d",
+          "package_notice": "mingw64/share/licenses/libbluray/COPYING"
+        },
+        {
+          "name": "libbluray-1.5.0/contrib/asm/LICENSE.txt",
+          "bytes": 1598,
+          "sha256": "293b6af371eee28b0ff16f0334ea19e20a3d5522143faa4b95b346855507879a"
+        },
+        {
+          "name": "libbluray-1.5.0/contrib/libudfread/COPYING",
+          "bytes": 26530,
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+        },
+        {
+          "name": "libbluray-1.5.0/README.md",
+          "bytes": 3223,
+          "sha256": "7543cb2ba47ab1165d1463c0c8ab300c042544a372cdc7b1760ff9e75e749e9b"
+        },
+        {
+          "name": "libbluray-1.5.0/meson.build",
+          "bytes": 7421,
+          "sha256": "5f707fc923e4d2b9c845adff896b7c1734ea257e4a5fe77c67ddc856caaf73a0"
+        },
+        {
+          "name": "libbluray-1.5.0/src/meson.build",
+          "bytes": 3934,
+          "sha256": "4c9be69a05379b6295a023cbe24ff374b953e588175a9951841429209b2046e2"
+        },
+        {
+          "name": "libbluray-1.5.0/src/libbluray/meson.build",
+          "bytes": 1056,
+          "sha256": "fc24c849aab354c5a41265a3f5679efe73d2dc4d5ba6e29864e4060e4ef64677"
+        },
+        {
+          "name": "libbluray-1.5.0/src/libbluray/bdj/meson.build",
+          "bytes": 2246,
+          "sha256": "a419307b3a08cc178214bbf6f82a616540181f8920cc52c417cbb8d7052a22c1"
+        },
+        {
+          "name": "libbluray-1.5.0/contrib/libudfread/meson.build",
+          "bytes": 2928,
+          "sha256": "977bc603d7c7a4c7d660c220c202bd955d1685ff2db591575c53a973d9024712"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-graphite2",
+      "recipe_sha256": "2fd68eeb0a96760c64f203506004dd0485fc588bdc0fb83684665821493df6d5",
+      "files": [
+        {
+          "name": "graphite2-1.3.15.tgz",
+          "kind": "source",
+          "url": "https://github.com/silnrsi/graphite/releases/download/1.3.15/graphite2-1.3.15.tgz",
+          "sha256": "c6bc8b4252724665297f7cad0c55897285c673f9b8e6db3522ace833593fe0b1",
+          "bytes": 13674849
+        },
+        {
+          "name": "001-graphite2-1.3.12-win64.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-graphite2/001-graphite2-1.3.12-win64.patch",
+          "sha256": "a77a3e21099454b0732da2ec37067c871c267e9443a9c6c56ca44245e6a64c4f",
+          "bytes": 1629
+        },
+        {
+          "name": "002-graphite2-1.2.1-pkgconfig.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-graphite2/002-graphite2-1.2.1-pkgconfig.patch",
+          "sha256": "5ca68f1d7418c5d159c3eebb9f1ad31e71ebfe3b9492d3fe78db360bcf626ffe",
+          "bytes": 999
+        },
+        {
+          "name": "003-graphite2-1.3.12-staticbuild.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-graphite2/003-graphite2-1.3.12-staticbuild.patch",
+          "sha256": "7cfc9f8bcb786b89713cfd043bc471ef61441360fa6b45b5fc2e93cd69e79e93",
+          "bytes": 2717
+        },
+        {
+          "name": "004-graphite2-1.3.12-dllimport-fix.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-graphite2/004-graphite2-1.3.12-dllimport-fix.patch",
+          "sha256": "cc33eab2ac0e335963d678ce7af15ccfef4cbc94e6722ffeb99b200f14a5003d",
+          "bytes": 3626
+        },
+        {
+          "name": "005-remove-unknown-dep.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-graphite2/005-remove-unknown-dep.patch",
+          "sha256": "026e1bf900610d4f01d9f191aa75dfc9e0398737653589f1b42f41659d21a828",
+          "bytes": 762
+        }
+      ],
+      "archive_prefix": "graphite2-1.3.15/",
+      "archive_entries": 552,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "graphite2-1.3.15/COPYING",
+          "bytes": 1235,
+          "sha256": "2c272829ff23f182c8bf7ea12fedea69b0ae148663123ed5240c117cb129c9c1",
+          "package_notice": "mingw64/share/licenses/graphite2/COPYING"
+        },
+        {
+          "name": "graphite2-1.3.15/LICENSE",
+          "bytes": 29228,
+          "sha256": "cab46cd45adbfea4b1d0f14b033c70062c73074fa0b56532c2f351576ddf455e",
+          "package_notice": "mingw64/share/licenses/graphite2/LICENSE"
+        },
+        {
+          "name": "graphite2-1.3.15/debian-src/copyright",
+          "bytes": 10027,
+          "sha256": "88f17179e66c9efcdd88316a0294499bd5e221e8ccb14523c389fccc491bfb3a"
+        },
+        {
+          "name": "graphite2-1.3.15/site/LICENSE",
+          "bytes": 1070,
+          "sha256": "d33679dceb70f30adc7d184ab009dc92e7b03385a606e544feb7465357e078d3"
+        },
+        {
+          "name": "graphite2-1.3.15/CMakeLists.txt",
+          "bytes": 4520,
+          "sha256": "0582b6342db5962f786669200a99aa56150f8b2f03792f67a043a0c48b666e54"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-glib2",
+      "recipe_sha256": "79703d0e70f2b78826985d290197499d3327fda5b65f1f725a612a1ad008544e",
+      "files": [
+        {
+          "name": "glib-2.88.3.tar.xz",
+          "kind": "source",
+          "url": "https://download.gnome.org/sources/glib/2.88/glib-2.88.3.tar.xz",
+          "sha256": "ab24d24e698dfa1e408b7bcdb508f4aafc906185a8b8ce72fdf79bbbdc9b383b",
+          "bytes": 5794356
+        },
+        {
+          "name": "7e69f88480a4bf8d9653efd0310c4c25390a0c8b.patch",
+          "kind": "build-input",
+          "url": "https://gitlab.gnome.org/GNOME/glib/-/commit/7e69f88480a4bf8d9653efd0310c4c25390a0c8b.patch",
+          "sha256": "4902e5748c6954ed38f690f27954db96709e705ff83bbdb4ebf7392a21f65824",
+          "bytes": 1012
+        },
+        {
+          "name": "0002-disable_glib_compile_schemas_warning.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-glib2/0002-disable_glib_compile_schemas_warning.patch",
+          "sha256": "396c25cfd740ffbb72209133c7b9453173167577265a4bb14502678de8d5a8f9",
+          "bytes": 1299
+        },
+        {
+          "name": "0004-disable-explicit-ms-bitfields.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-glib2/0004-disable-explicit-ms-bitfields.patch",
+          "sha256": "48e94a9e61f8db9a2dc66556f12c725efe5e247a9ddc5b491f8cb8310a387293",
+          "bytes": 494
+        },
+        {
+          "name": "glib-compile-schemas.hook.in",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-glib2/glib-compile-schemas.hook.in",
+          "sha256": "0c3d54636407e0e13429b73959cace626253cd772e1d4870de0fb92b0b99545a",
+          "bytes": 408
+        },
+        {
+          "name": "gio-querymodules.hook.in",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-glib2/gio-querymodules.hook.in",
+          "sha256": "f18d27d98709dba8c5f9756672baaf0158fb4353c9edbdc2e80021f88ff34ced",
+          "bytes": 293
+        },
+        {
+          "name": "pyscript2exe.py",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-glib2/pyscript2exe.py",
+          "sha256": "3c65bc3dd7337877e14b19bc7c42918bde664a11a860cfc0b9db891f8a1052db",
+          "bytes": 600
+        }
+      ],
+      "archive_prefix": "glib-2.88.3/",
+      "archive_entries": 2481,
+      "internal_links": 2,
+      "selected_documents": [
+        {
+          "name": "glib-2.88.3/LICENSES/AFL-2.0.txt",
+          "bytes": 8987,
+          "sha256": "7ecc7db84298adb05d2cf10339c63a5315a1c5c270a68d97d7d40a53b508ccde"
+        },
+        {
+          "name": "glib-2.88.3/LICENSES/Apache-2.0.txt",
+          "bytes": 10280,
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        },
+        {
+          "name": "glib-2.88.3/LICENSES/CC-BY-SA-3.0.txt",
+          "bytes": 22240,
+          "sha256": "3f941b3b89cf7b8370ceb83cc76d2120d471b58735d8ca60238a751a48d7f72f"
+        },
+        {
+          "name": "glib-2.88.3/LICENSES/CC0-1.0.txt",
+          "bytes": 7048,
+          "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+        },
+        {
+          "name": "glib-2.88.3/LICENSES/GPL-2.0-or-later.txt",
+          "bytes": 17337,
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "name": "glib-2.88.3/LICENSES/LGPL-2.1-or-later.txt",
+          "bytes": 25967,
+          "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+          "package_notice": "mingw64/share/licenses/glib2/COPYING"
+        },
+        {
+          "name": "glib-2.88.3/LICENSES/LLVM-exception.txt",
+          "bytes": 919,
+          "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e"
+        },
+        {
+          "name": "glib-2.88.3/LICENSES/LicenseRef-old-glib-tests.txt",
+          "bytes": 841,
+          "sha256": "fb261b2d5dbe76c4850f90da763210bc385e52428df6bbfd7b06295ac8a32914"
+        },
+        {
+          "name": "glib-2.88.3/LICENSES/MIT.txt",
+          "bytes": 1078,
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+        },
+        {
+          "name": "glib-2.88.3/LICENSES/MPL-1.1.txt",
+          "bytes": 23669,
+          "sha256": "6214f8b1300bb9f37b16ebc146f8f61af0187e0025042ff95c8b3030744a8795"
+        },
+        {
+          "name": "glib-2.88.3/docs/reference/AUTHORS",
+          "bytes": 122,
+          "sha256": "b4f60a02b2b1f82764f8295b2eafbfcd4c33f596d70abcf5cb3c3623b1cfbc6d"
+        },
+        {
+          "name": "glib-2.88.3/docs/reference/COPYING",
+          "bytes": 1698,
+          "sha256": "b1ec1d0e5947f81e815d8771f7d4d90671a94bb10a42dc687fb566de461a57aa"
+        },
+        {
+          "name": "glib-2.88.3/gmodule/AUTHORS",
+          "bytes": 25,
+          "sha256": "28073c8c65c072387b778ba00b6c24a2ff1b573ca4415e151aa91fab5a6454be"
+        },
+        {
+          "name": "glib-2.88.3/subprojects/gvdb/COPYING",
+          "bytes": 26445,
+          "sha256": "bdbcdaa7858872393e9d6b216bbdc8a23e99d98dd6cdb7cda19458025b9e19fc"
+        },
+        {
+          "name": "glib-2.88.3/subprojects/gvdb/LICENSES/LGPL-2.1-or-later.txt",
+          "bytes": 26001,
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libplacebo",
+      "recipe_sha256": "db36a2a78cc154d92620201323bccb86343de4d3559834a70f8693a914a6ddf3",
+      "files": [
+        {
+          "name": "libplacebo-v7.360.1.tar.gz",
+          "kind": "source",
+          "url": "https://code.videolan.org/videolan/libplacebo/-/archive/v7.360.1/libplacebo-v7.360.1.tar.gz",
+          "sha256": "14c0a99f4b01557ec9826ce6b1d52f6de21be274ba03fd5aab7307f18766dc39",
+          "bytes": 862303
+        },
+        {
+          "name": "0001-add-cflags-private.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libplacebo/0001-add-cflags-private.patch",
+          "sha256": "bda9bed8b8fff7e69fe750b6f2caafde67f63343d05698a81fb1f7b27ac4cca3",
+          "bytes": 281
+        }
+      ],
+      "archive_prefix": "libplacebo-v7.360.1/",
+      "archive_entries": 277,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libplacebo-v7.360.1/LICENSE",
+          "bytes": 24478,
+          "sha256": "b3aa400aca6d2ba1f0bd03bd98d03d1fe7489a3bbb26969d72016360af8a5c9d",
+          "package_notice": "mingw64/share/licenses/libplacebo/LICENSE"
+        },
+        {
+          "name": "libplacebo-v7.360.1/demos/LICENSE",
+          "bytes": 7048,
+          "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+        },
+        {
+          "name": "libplacebo-v7.360.1/README.md",
+          "bytes": 16601,
+          "sha256": "c2f16e5506392de185a08b77a22bb4b650bd69eb06d5d04bd55e2882f4808d53"
+        },
+        {
+          "name": "libplacebo-v7.360.1/meson.build",
+          "bytes": 24266,
+          "sha256": "55d5c686404f976ffd49c000f76c1ace926a0aa0a5ac0c5dfa4ca4e8067b33d8"
+        },
+        {
+          "name": "libplacebo-v7.360.1/src/meson.build",
+          "bytes": 9550,
+          "sha256": "69ca9f3ebe4162840c23d0fe5c180af0c5e9b32f7ae9fc056e846e38f54d3a55"
+        }
+      ]
+    },
     {
       "package": "mingw-w64-x86_64-gettext-runtime",
       "recipe_sha256": "853ef80a50588f29355722a4513f24cf1a5f8de06e0b5ee326580464db539741",

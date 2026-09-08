@@ -84,6 +84,16 @@ GPL／LGPL本文、作者、範囲説明、header原型、libraryのbuild記述�
 
 現補完資料は16 owners、44 inputs／35394548 bytes、89選択文書、計153 files／36958095 bytes。新7 URLの実取得・照合、任意cwdと再生成の全hash一致、60 inputの欠落／同size改変、notice不一致9 cases、既存output・cache保持を通過した。先行131-file資料のREADME／INPUTS以外の129 filesは不変で、最終153 filesは最新test出力と一致する。実buildのgenerated／gnulib／static入力と公開するsource取得案内はまだ完了していない。
 
+### Library-source優先8件の追加資料
+
+libiconv 1.19、FriBidi 1.0.16、Game Music Emu 0.6.5、mpg123 1.33.7、libbluray 1.5.0、Graphite2 1.3.15、GLib 2.88.3、libplacebo 7.360.1の元archiveと16 patches／templates／hooks／scriptを取得した。24 inputs／29315063 bytesの全hashが`.BUILDINFO`対応recipeと一致する。各ownerの現候補DLLも監査baselineと一致する。上流署名検証、recipe実行、patch適用や各libraryの再buildは行っていない。
+
+archiveのmember名とtypeを確認し、GLibのCOPYINGとgmodule/COPYINGだけが内部link（他7 archiveは通常file／directoryのみ）。選択文書はlinkではなく通常fileの原本から61件追加し、元packageの12 noticesをbyte単位で対応付けた。libiconvの同内容COPYING.LIBは各package pathを明記する。GLibの通常target本文は保持するがlink自体は展開せず、archive内の重複原文も改変しない。
+
+確認した範囲と限界は同梱READMEにも記録した。libiconvはlibrary／headerとprogram／docsを区別する。Game Music Emuは[元CMake](https://github.com/libgme/game-music-emu/blob/0.6.5/CMakeLists.txt)でLGPLのNuked実装が既定、対応recipeに上書きはないが、これはDLLの全compiler入力を証明するものではない。別のGPL MAME実装も全archiveには残す。Graphite2の[LICENSE](https://github.com/silnrsi/graphite/blob/1.3.15/LICENSE)の複数選択を第三者codeやtest fontへ一律に適用しない。FriBidiのUnicode 16 data、libblurayのlibudfread／native BD-J、libplaceboのxxhash／fast_float／Vulkan headers／glad生成物は追加scope確認が必要である。libplaceboのfast_floatとLittle CMSの同名pluginは別物として扱う。
+
+最新補完資料`native-source-supplements-v5`は24 owners、68 inputs／64709611 bytes、150選択文書、計246 files／67179202 bytes。元153-file資料のREADME／INPUTS以外の151 filesはhash不変。新24 URLの取得・照合、任意cwd／再生成の全hash、92 inputの欠落／同size改変、表示不一致12 cases、GLib link非展開と既存cache／output保持を確認した。最初のGLib異常系fixtureは同名COPYINGを複数選んだため失敗し、対象package pathを明示して全試験を再実行した。収集の完了を配布承認や全対応sourceの完了にはしない。[残作業](NATIVE_MATERIAL_PLAN.md)ではlibsoxrのVCS source対応、SRT、GCC、static/header/data表示と最終候補／installerのgateを維持する。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

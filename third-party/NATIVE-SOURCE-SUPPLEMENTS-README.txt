@@ -3,7 +3,9 @@ Native runtime source supplements (2026-09-08)
 This is a preparation/audit bundle, not an approved release or complete
 corresponding-source bundle. It covers 13 package owners lacking regular
 documents under the audited package share/licenses directory, plus XZ,
-FreeType and gettext-runtime with mixed-license scope or secondary notices.
+FreeType and gettext-runtime with mixed-license scope or secondary notices,
+and eight further library-source-first owners: libiconv, FriBidi, Game Music
+Emu, mpg123, libbluray, Graphite2, GLib and libplacebo (24 owners total).
 Chromaprint, OpenAL and ZVBI have separate material bundles.
 
 INPUTS.json identifies unchanged source archives, patch/template inputs and
@@ -26,6 +28,50 @@ binary reproduction remain separate work.
 
 License scope observations (not blanket distribution approval):
 
+- The eight additional packages retain their original source archives and
+  all 16 checksum-bound patches/templates/hooks/scripts with exact recipes.
+  Package notices map to original source bytes; libiconv's two identical
+  COPYING.LIB files retain distinct package identities. GLib's COPYING is
+  an internal symlink: its regular LICENSES/LGPL-2.1-or-later.txt target is
+  selected instead. Both GLib links and seven earlier zimg links remain in
+  the full archives, not materialized in this bundle. Redundant copies of
+  identical license text remain in their original archives.
+- libiconv's README distinguishes LGPL libraries/headers from GPL programs
+  and documentation. The candidate stages libiconv-2.dll, not iconv.exe.
+  The full source archive must not be described as exclusively LGPL.
+- FriBidi includes Unicode 16.0.0 data. Its selected generator build file
+  names UnicodeData, ArabicShaping, mirroring and bracket inputs. Retain
+  those original data in the archive and the selected Unicode notices;
+  final data attribution and applicable Unicode terms still need closure.
+- Game Music Emu's original CMake defaults to the LGPL-2.1-or-later Nuked
+  YM2612 implementation, and its matched recipe does not override that
+  choice. MAME is a separate GPL alternative in the full source archive;
+  retaining license.gpl2.txt is not evidence that MAME is linked. Preserve
+  the emulator source headers and MIT gme/ext/LICENSE as well. This is
+  recipe/source evidence, not independent DLL compiler-input closure.
+  https://github.com/libgme/game-music-emu/blob/0.6.5/CMakeLists.txt
+- mpg123's COPYING supplies project attribution and LGPL 2.1 terms, with
+  exceptions for individually marked files. AUTHORS and the original patent
+  discussion are retained; this is not independent patent clearance.
+- libbluray retains bundled libudfread and ASM notices. Its recipe disables
+  bdj_jar, not all native BD-J support; the selected build files distinguish
+  these paths. Static libudfread selection still needs binary/build binding.
+- Graphite2 LICENSE offers four alternatives for SIL-authored/copyrighted
+  material unless otherwise specified; COPYING retains its own older
+  wording. Keep both unchanged. Do not apply the MIT alternative blindly
+  to third-party code, test fonts, bindings or the entire source archive.
+  The original Debian copyright inventory and site license are retained
+  as scope clues, not a current complete notice inventory.
+  https://github.com/silnrsi/graphite/blob/1.3.15/LICENSE
+- GLib's original LICENSES directory includes several different terms;
+  their presence does not assign every license to libglib-2.0-0.dll.
+  Keep the original commit patch, two downstream patches, two hook
+  templates and Python helper without executing them during collection.
+- libplacebo's recipe applies its pkg-config patch at the install prefix,
+  not to the source tree. Static/header/generated inputs remain open,
+  including xxhash, fast_float, Vulkan headers and glad output. Its
+  fast_float build dependency is distinct from Little CMS's same-named
+  plugin; do not infer the latter's license from the former's name.
 - Gettext 1.0 gettext-runtime/COPYING distinguishes the LGPL libintl library
   and headers from GPL programs and documentation. The candidate stages only
   libintl-8.dll from this package, not the tools or libasprintf. Keep the full

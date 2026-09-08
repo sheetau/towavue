@@ -24,7 +24,7 @@
 
 LGPL優先17件: chromaprint、fribidi、gettext-runtime、glib2、gmp、graphite2、lame、libbluray、libgme、libiconv、libplacebo、libsoxr、libssh、mpg123、openal、twolame、zvbi。
 
-このうちsource archive・patch・選択表示の取得済みはchromaprint、gettext-runtime、gmp、lame、libssh、openal、twolameと限定zvbi。**取得済みは配布条件の完了ではない。** 次のsource取得候補はfribidi、glib2、graphite2、libbluray、libgme、libiconv、libplacebo、libsoxr、mpg123の9件。特にlibiconvは今回確認したlibintlからも使われる。
+このうちlibsoxr以外の16件はsource archive・patch・選択表示を取得済み（zvbiは限定buildの別資料）。**取得済みは配布条件の完了ではない。** libsoxrはrecipeがchecksumをSKIPするVCS入力を使うため、任意のrelease tarballで代用せず、指定commitとsourceの対応を次に固定する。Graphite2の原本にはSIL由来部分の複数license選択があり、この優先群はLGPL-only認定ではない。FriBidiのUnicode data、libblurayのlibudfread、libplaceboのstatic/header/generated入力などの範囲確認も残る。
 
 MPL群はsrtとzeromqで、zeromqのsource／逆向きpatchは取得済み、srtは未整備。GCC群はgcc-libsで、実graphのlibgcc／libstdc++／libgompを対象とする。未同梱のlibquadmathを同じ扱いで加えない。
 

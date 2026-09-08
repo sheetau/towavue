@@ -213,6 +213,23 @@ metadataの選択集合は従来一覧と一致する。library限定graphは164
 
 既存supplementを32 ownersへ拡張し、40選択文書を追加した。最終`native-source-supplements-v11`は82 archive／build inputs・80514256 bytes、308選択文書と追加Unicode原本、427 files／90583218 bytes。v10の377 files（README／INPUTS以外）は不変。別cwd／反復hash、114欠落・改変pairs、27 package-notice不整合、追加Unicodeと3 VCS不整合、元入力／既存output保護の試験を通過した。full sourceや個別表示の保全であり、最終公開用notice／source案内や全static入力の完了ではない。
 
+## 2026-09-08 shader static／header入力の原本確認
+
+[native-shader-inputs.json](native-shader-inputs.json)は、上記shadercのglslang 16.3.0-1、SPIRV-Tools 3~1.4.357.0-1、SPIRV-Headers 2~1.4.357.0-1と、Vulkan LoaderのVulkan-Headers 1~1.4.357.0-1を固定する。4 package署名は既存MSYS2 key `5F944B02…AA0AA7F57`で検証した。各`.BUILDINFO`と一致するrecipeを固定revisionから取得し、4 source archives計11792958 bytesと2 patchesのhashを照合した。3391／1841／141／102 archive entriesは通常file／directoryのみで、安全なpathを確認した。source署名検証・patch適用・recipe実行・再buildは行っていない。
+
+- glslangのroot LICENSE冒頭はBisonを除去したと述べるが、実際のCMake targetはBison 3.8.2生成の`glslang_tab.cpp`を選択する。そのheaderとroot license末尾のBison例外を含む原文を保持する。preprocessorのNVIDIA条件、継承headerと生成SPIR-V／GLSL headerの表示も、単一BSD labelへ置き換えない。
+- SPIRV-ToolsのCMakeはSPIRV-Headersのgrammar JSONとgeneratorを使う。実在する`generate_registry_tables.py`／`generate_language_headers.py`と入力原本を保持する。SPIRV-HeadersのREUSE mappingとjsoncpp、Vulkan-Headersの生成header／registryも含める。Vulkanの`parse_dependency.py`はPaul McGuire由来表示を持つMIT-onlyで、全fileを一律Apache/MIT選択としない。doc／test／generator専用資料を自動的にDLL組込みcodeへ数えない。
+- glslang自体のbuild記録はSPIRV-Tools **3~1.4.350.1-1**で、shadercが記録する357.0とは異なる。glslangのSPIRV wrapperは外部Toolsのheaderをincludeするため、旧版のbuild-time scopeを別に残す。GCC／gcc-libsも4 package共通で16.1.0-5であり、既存16.2 runtime資料による置換はしない。
+
+4 inputsは追加runtime DLL ownerではなく、72-owner baseline／32-owner supplementとは別の資料である。固定offline collectorは親consumer package・依存version・recipe／source hashを照合し、元source／recipe／patch、46 source選択文書、12 package metadata／noticeを保存する。binary packageやDLLは資料outputへcopyしない。全static/link範囲・公開notice／source案内・配布承認は引き続き未完了。
+
+最終`native-shader-materials-v1`は10 source／build inputs・11804501 bytesを含む70 files／19396998 bytes。全hashは試験outputと一致した。`test-native-shader-materials.ps1`は別cwd／反復出力、20入力の欠落・改変pairs、6 mapping不整合、2 extraction後のchecksum不一致時のcompletion marker保護、入力／既存output不変を確認した。format／全target Clippy／270 testsも通過。生成例は以下で、固定package cacheは既定の`vendor/msys2/packages-20260908`を使う。
+
+```powershell
+.\scripts\prepare-native-shader-materials.ps1 -CacheDirectory 'path/to/shader-source-cache' -OutputDirectory 'target/distribution/native-shader-materials-v1'
+.\scripts\test-native-shader-materials.ps1 -CacheDirectory 'path/to/shader-source-cache'
+```
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

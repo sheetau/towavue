@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### 限定ZVBI最適化候補の長時間再生（2026-09-08 20:29 JST）
+
+下記と同じ通常release `03125262...`と候補runtime全94 filesを、新しい日本語／space／ampersandの隣接配置へcopyした。FFMPEG_DIRなし、System32-only PATH、別cwd、専用config／cache。PID 11244／開始UTC `2026-09-08T10:54:58.1126879Z`の直接6 FFmpeg DLLは全てexe隣接。source `FEE0E738...`は3840×2160 H.264／AAC、video 1800.005729秒・107771 frames、format 1800.009063秒・1501066596 bytesで、旧候補試験と同じ原本である。
+
+960×576へ配置し、アプリ内M消音後、UTC `10:55:57.4890765Z`に所有windowのUIA RangeValueで先頭0を一回要求した。準備段階には3 seek latency logs（114.715／58.682／250.102 ms）と4 decode-path logsがある。その後は追加Seek／UIA tree／入力／resize／captureを行わず、30秒間隔で同一PID／開始時刻のresourceとtitleを観測した。並行処理はsource資料の読取り、低速に制限した約11.8 MBの取得・小archive展開とscript／文書編集で、build／回帰試験／別UI試験は終了後まで待った。
+
+20:26:15のsampleでEndedを確認。adapter `00000000:000146b5`、hardware frames **107468**、CPU transfers **0**、presented **107467**、dropped **1**（約0.00093%）。raw drift p95 **4.802 ms**／max **37.806 ms**。frame metricsは最後のSeek時にresetする一方、appのdrift／seek統計は準備段階も含むため、測定区間だけの統計とは呼ばない。要求時刻から5分後以降のPlaying 50 samplesではprivate **222.64～227.91 MiB**、Endedで180.36 MiB。今回大きな増加は観測しなかったが、原因やリーク不在の証明ではない。
+
+**decode数が元動画より303 frames少ない。** 先頭0を要求した事実だけで全frameの再生を証明せず、準備／Seekによる実開始位置とgeneration切替を次に切り分ける。30分素材で終端へ到達した長時間観測として保持し、「先頭から全30分を再生」「新候補の全区間gate完了」とは扱わない。raw setup seek p95も100回Seek試験の代替ではない。前回の保存物再open時2 dropsは別条件の観測として残す。
+
+Ended後、最初のcaptureはforeground guardで拒否され出力なし。所有UIA focus後に最終映像をcaptureして確認し、Undoで消音編集を戻してcleanなwindowを通常終了した。元media／両exe／全94 original・copied runtime hashesは不変。資料回帰試験、format／全target Clippy／270 testsは終了後に通過、live ignores 3件は未実行。証拠はignored `scoped-candidate-release-30m-20260908`のidentity、63 resource samples、stderrとowned ended capture。Setup.exe・対象Windows lifecycle・高負荷／Seek／物理環境／owner受入は継続する。
+
 ### 限定ZVBI候補と現行コードの最適化版（2026-09-08 19:52 JST）
 
 1504bee時点のアプリcodeを、限定ZVBI headerで再生成したFFmpeg候補に対して通常release buildした。旧試用releaseを置き換えず、別のRust targetに生成したexeは10287104 bytes、SHA256 `03125262C28C0DF0190B6D0DFE7B0EFB1DFBCEB55946C4AF7E40E4AF0AAD43F3`。format／全target Clippy／270 testsも通過した。以下は短時間の操作試験であり、旧候補の30分性能結果を引き継ぐものではない。

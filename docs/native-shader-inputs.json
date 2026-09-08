@@ -1,0 +1,473 @@
+{
+  "schema_version": 1,
+  "scope": "Fixed static/header source materials for shaderc and Vulkan Loader, not additional runtime DLL owners, a linked SBOM, historical rebuild, final notices or distribution approval.",
+  "observed_on": "2026-09-08",
+  "package_signature_verification": {
+    "key_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57",
+    "scope": "All four original package detached signatures verified locally using the existing MSYS2 keyring. The offline collector rechecks fixed input hashes, not signatures. Original source archive signatures were not verified."
+  },
+  "limitations": [
+    "GCC and GCC-libs 16.1.0-5 are recorded build inputs; existing GCC 16.2 runtime materials do not replace their static/compiler scope.",
+    "glslang 16.3.0-1 records SPIRV-Tools 3~1.4.350.1-1; this older nested build-time input has not been collected here. Shaderc itself records SPIRV-Tools 3~1.4.357.0-1.",
+    "Preserve glslang's actual generated Bison 3.8.2 parser and explicit exception despite its root license introduction saying Bison was removed; retain additional NVIDIA and inherited header terms.",
+    "Source-only tools, tests and documentation notices are retained without automatically assigning all of them to the runtime DLL."
+  ],
+  "components": [
+    {
+      "name": "glslang",
+      "package": "mingw-w64-x86_64-glslang",
+      "version": "16.3.0-1",
+      "consumer": "mingw-w64-x86_64-shaderc",
+      "archive_prefix": "glslang-16.3.0/",
+      "archive_entries": 3391,
+      "internal_links": 0,
+      "package_archive": {
+        "name": "mingw-w64-x86_64-glslang-16.3.0-1-any.pkg.tar.zst",
+        "bytes": 2326488,
+        "sha256": "e0830308b113cadb34a1505c73db8cab00bfd6c2fe71fc8bced123217af1e915",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-glslang-16.3.0-1-any.pkg.tar.zst"
+      },
+      "package_signature": {
+        "name": "mingw-w64-x86_64-glslang-16.3.0-1-any.pkg.tar.zst.sig",
+        "bytes": 566,
+        "sha256": "78deddbbf95c84a8c33bb5c30dfcfe09640974224c7459864118be1d37570b03",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-glslang-16.3.0-1-any.pkg.tar.zst.sig"
+      },
+      "recipe": {
+        "name": "glslang.PKGBUILD",
+        "bytes": 2869,
+        "sha256": "8765077c9169f3087692854aaabe501c88940931acb52997d61dff0ab7d64070",
+        "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-glslang/PKGBUILD"
+      },
+      "source": {
+        "name": "glslang-16.3.0.tar.gz",
+        "bytes": 4326298,
+        "sha256": "efff5a15258dce1ca2d323bf64c974f5fca03778174615dbc30c8d36db645bf5",
+        "url": "https://github.com/KhronosGroup/glslang/archive/16.3.0/glslang-16.3.0.tar.gz"
+      },
+      "patches": [
+        {
+          "name": "002-remove-deprecated-mingw-secure-api.patch",
+          "bytes": 546,
+          "sha256": "c0a1b75449fa7ab6448b38b3d55bff1c150c2083894063cb95ad5b165bf79fe0",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-glslang/002-remove-deprecated-mingw-secure-api.patch"
+        }
+      ],
+      "package_documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7181,
+          "sha256": "cf431ae5d6da19400f02f530251bc0bec0a160a59ebb6f2ce08e19aad24b9000"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 643,
+          "sha256": "1b03579b1aac0183d803aa4a80f3527cbcae86b1020e62ac383c073e022d6c94"
+        },
+        {
+          "name": "mingw64/share/licenses/glslang/LICENSE.txt",
+          "bytes": 54615,
+          "sha256": "17e70c676e1521ff3e4686f04a2053d93a7e28a33be8de7ec37ab0ff72feb677"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "glslang-16.3.0/LICENSE.txt",
+          "bytes": 54615,
+          "sha256": "17e70c676e1521ff3e4686f04a2053d93a7e28a33be8de7ec37ab0ff72feb677"
+        },
+        {
+          "name": "glslang-16.3.0/README.md",
+          "bytes": 21654,
+          "sha256": "23e59605244e5db18d839d04349446430bbb77840051022102cadb01945deef7"
+        },
+        {
+          "name": "glslang-16.3.0/CMakeLists.txt",
+          "bytes": 16365,
+          "sha256": "4cb60295be9bcd6b77ce9ca373d4f2a04bbb5df4554af170ee986de547daa59d"
+        },
+        {
+          "name": "glslang-16.3.0/glslang/CMakeLists.txt",
+          "bytes": 10786,
+          "sha256": "4693098940a9002084625f9fac70a6e7e157dff16bf0d3ec1ddc0b72e9dbe84c"
+        },
+        {
+          "name": "glslang-16.3.0/SPIRV/CMakeLists.txt",
+          "bytes": 4204,
+          "sha256": "81591c9851d290ce5597a7de1880618edaf893a3e8634bb29067ec76a8aa2cfb"
+        },
+        {
+          "name": "glslang-16.3.0/glslang/Include/Common.h",
+          "bytes": 9362,
+          "sha256": "9fabe3a6436367346ce6848f614cb45cbd5311ad2ce0b428ea645049c70ddbd5"
+        },
+        {
+          "name": "glslang-16.3.0/glslang/MachineIndependent/glslang.y",
+          "bytes": 186053,
+          "sha256": "7668d3acd29161bc5528ed728d33eeff9b6ba4100d8e95b2650e4431a54282be"
+        },
+        {
+          "name": "glslang-16.3.0/glslang/MachineIndependent/glslang_tab.cpp",
+          "bytes": 692831,
+          "sha256": "b9b1b2aebcda752ec5e88172a8d2b5de788f806e0b1058a39fbeff971d4484f3"
+        },
+        {
+          "name": "glslang-16.3.0/glslang/MachineIndependent/glslang_tab.cpp.h",
+          "bytes": 29771,
+          "sha256": "46c94ef48472cdef96b55c930a212a64ba274341482f567c145faa24c0c92f8b"
+        },
+        {
+          "name": "glslang-16.3.0/glslang/MachineIndependent/gl_types.h",
+          "bytes": 10171,
+          "sha256": "f5f31cbb457a6ae11eb42dd14773c5ab6d39fe06dc6bbab52df5f663f1c5cdba"
+        },
+        {
+          "name": "glslang-16.3.0/glslang/MachineIndependent/preprocessor/Pp.cpp",
+          "bytes": 52435,
+          "sha256": "25c0ac597903f1b75d697c7ac68c060acd27cf9a26dbaa2a3f0694dc53080e14"
+        },
+        {
+          "name": "glslang-16.3.0/glslang/MachineIndependent/preprocessor/PpContext.h",
+          "bytes": 28118,
+          "sha256": "b147a04cb5b547e887ff3eb438af53ec29dd380e5435a263c232228b35acf9cf"
+        },
+        {
+          "name": "glslang-16.3.0/glslang/OSDependent/Windows/ossource.cpp",
+          "bytes": 2315,
+          "sha256": "13d42cab609705bb0b3451bb3701c66e30d7ab5380ffdfd1684d9d005bae3793"
+        },
+        {
+          "name": "glslang-16.3.0/SPIRV/spirv.hpp11",
+          "bytes": 289415,
+          "sha256": "39d93c8f3e8a0e0a89741df8b008e20f4f241495d2312338aee5b36b2dfc1eba"
+        },
+        {
+          "name": "glslang-16.3.0/SPIRV/GLSL.std.450.h",
+          "bytes": 4126,
+          "sha256": "5624630f79e4ca38e51c1bec8d8eb835ab4784cfcbd4930ef88cc507f2e4551b"
+        }
+      ]
+    },
+    {
+      "name": "spirv-tools",
+      "package": "mingw-w64-x86_64-spirv-tools",
+      "version": "3~1.4.357.0-1",
+      "consumer": "mingw-w64-x86_64-shaderc",
+      "archive_prefix": "SPIRV-Tools-vulkan-sdk-1.4.357.0/",
+      "archive_entries": 1841,
+      "internal_links": 0,
+      "package_archive": {
+        "name": "mingw-w64-x86_64-spirv-tools-3~1.4.357.0-1-any.pkg.tar.zst",
+        "bytes": 3405658,
+        "sha256": "bb6e72fc281c3670bed3ce0456c546ca51d845fcb7eb810f13d5e0c7439e3f4e",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-spirv-tools-3~1.4.357.0-1-any.pkg.tar.zst"
+      },
+      "package_signature": {
+        "name": "mingw-w64-x86_64-spirv-tools-3~1.4.357.0-1-any.pkg.tar.zst.sig",
+        "bytes": 566,
+        "sha256": "f0da9549005f71b81309be2a4481dd50b9be8176b2024a682807ad984ca30a78",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-spirv-tools-3~1.4.357.0-1-any.pkg.tar.zst.sig"
+      },
+      "recipe": {
+        "name": "spirv-tools.PKGBUILD",
+        "bytes": 3474,
+        "sha256": "366e84b236a1d7ca393a69bd1f1b0120952800dba411dc7efac233c1208b63b6",
+        "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-spirv-tools/PKGBUILD"
+      },
+      "source": {
+        "name": "spirv-tools-1.4.357.0.tar.gz",
+        "bytes": 3518451,
+        "sha256": "d31e7109b6ef3559067e53e520870eafed7c9534d00db9728814b6df03fa4a5e",
+        "url": "https://github.com/KhronosGroup/SPIRV-Tools/archive/vulkan-sdk-1.4.357.0/spirv-tools-1.4.357.0.tar.gz"
+      },
+      "patches": [
+        {
+          "name": "002-Do-not-statically-link-to-the-C-runtime-with-mingw.patch",
+          "bytes": 942,
+          "sha256": "ff63fc6e786e6b40b3ec5fa7356b671a391e3c29b7660dcc87d799de49754d2a",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-spirv-tools/002-Do-not-statically-link-to-the-C-runtime-with-mingw.patch"
+        }
+      ],
+      "package_documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7194,
+          "sha256": "311b287d7ac5175b7e4ebcf852fe2c755420be2f4e916b63e2af96a7c72b09dd"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 682,
+          "sha256": "a7f71a17a643aab195c65d5abcb5d3aee496280d2bc1f8fdf67e37ee6550b519"
+        },
+        {
+          "name": "mingw64/share/licenses/spirv-tools/LICENSE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.357.0/LICENSE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.357.0/README.md",
+          "bytes": 32338,
+          "sha256": "73f877eb9cd8fc1e8df662a8438caf86fbd58809fe2113616da87709bf8ab617"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.357.0/CMakeLists.txt",
+          "bytes": 16220,
+          "sha256": "131cec6c419d333531d280e82e3097bfc3ba721c1891d5c8e0092388f400be71"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.357.0/source/CMakeLists.txt",
+          "bytes": 19281,
+          "sha256": "f76aac8a06f8e2857fe272bcfad5b7474e40803fcb4ba02aefeed39559ba7106"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.357.0/source/opt/CMakeLists.txt",
+          "bytes": 8420,
+          "sha256": "b3579fff9b8af3394cd34220b8d5a2da6d81e77314e301df8a1730e0abce28a5"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.357.0/external/CMakeLists.txt",
+          "bytes": 8173,
+          "sha256": "c5b11328d54ced5ad055f3060f89ababd9466ac20f5aab6c7d3cd9662230879a"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.357.0/source/util/hex_float.h",
+          "bytes": 84275,
+          "sha256": "a511c1392b279a954636d2d5d249a6d5c648abe32fc1a3adc2517f38fcccf7e9"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.357.0/utils/vscode/src/lsp/LICENSE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.357.0/utils/generate_registry_tables.py",
+          "bytes": 3548,
+          "sha256": "a463d6e8213c7c33a2106b213d82c831b6bc1bd13d34749994378e9de03eb42b"
+        },
+        {
+          "name": "SPIRV-Tools-vulkan-sdk-1.4.357.0/utils/generate_language_headers.py",
+          "bytes": 6380,
+          "sha256": "6eb84f776d2c0f4d901a979734e5cf58dd122c8f5c312fb860cd26714947c126"
+        }
+      ]
+    },
+    {
+      "name": "spirv-headers",
+      "package": "mingw-w64-x86_64-spirv-headers",
+      "version": "2~1.4.357.0-1",
+      "consumer": "mingw-w64-x86_64-shaderc",
+      "archive_prefix": "SPIRV-Headers-vulkan-sdk-1.4.357.0/",
+      "archive_entries": 141,
+      "internal_links": 0,
+      "package_archive": {
+        "name": "mingw-w64-x86_64-spirv-headers-2~1.4.357.0-1-any.pkg.tar.zst",
+        "bytes": 193255,
+        "sha256": "afe7a50e11fc56d8c59666dcf195d40fb439c11e38f96a2fa1acfe62fc24e073",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-spirv-headers-2~1.4.357.0-1-any.pkg.tar.zst"
+      },
+      "package_signature": {
+        "name": "mingw-w64-x86_64-spirv-headers-2~1.4.357.0-1-any.pkg.tar.zst.sig",
+        "bytes": 566,
+        "sha256": "bc004912e2310717d1ede7fe97e1f4d06e8eea9555a61ff0c1b1a7d877e0ae61",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-spirv-headers-2~1.4.357.0-1-any.pkg.tar.zst.sig"
+      },
+      "recipe": {
+        "name": "spirv-headers.PKGBUILD",
+        "bytes": 1740,
+        "sha256": "c94660e48b8ce0487e3c9889d1fff4530eb058f7e0e1ca624d106234177134d2",
+        "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-spirv-headers/PKGBUILD"
+      },
+      "source": {
+        "name": "spirv-headers-1.4.357.0.tar.gz",
+        "bytes": 571830,
+        "sha256": "4d703067a7e06331ccb37bdfed3f9b7879cc61969a2689ae95c95db34a47ff07",
+        "url": "https://github.com/KhronosGroup/SPIRV-Headers/archive/vulkan-sdk-1.4.357.0/spirv-headers-1.4.357.0.tar.gz"
+      },
+      "patches": [],
+      "package_documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 6750,
+          "sha256": "0d52c4722426d1be49190c080a5fed5f5b8c64feab0058260fde884fde1224cb"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 572,
+          "sha256": "4a734b4b5af63627d2a77b080cc3cb93690efd3aa2510ef946b99b8c44d6d442"
+        },
+        {
+          "name": "mingw64/share/licenses/spirv-headers/LICENSE",
+          "bytes": 23503,
+          "sha256": "ea43b1de38a6f90c488800d66dec1ed671e68cda530266bc96951fb5b6307613"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "SPIRV-Headers-vulkan-sdk-1.4.357.0/LICENSE",
+          "bytes": 23503,
+          "sha256": "ea43b1de38a6f90c488800d66dec1ed671e68cda530266bc96951fb5b6307613"
+        },
+        {
+          "name": "SPIRV-Headers-vulkan-sdk-1.4.357.0/LICENSES/MIT.txt",
+          "bytes": 1087,
+          "sha256": "6d7c9e9d7d12c8d3753bdb24417b84819ba4d6c2f025c37948113d86dc81eef9"
+        },
+        {
+          "name": "SPIRV-Headers-vulkan-sdk-1.4.357.0/LICENSES/CC-BY-4.0.txt",
+          "bytes": 17023,
+          "sha256": "d557539df68e771cc1eedcc91d13f70fca930e508d11eedcafa4b15db49e3744"
+        },
+        {
+          "name": "SPIRV-Headers-vulkan-sdk-1.4.357.0/REUSE.toml",
+          "bytes": 812,
+          "sha256": "819c595a7d8e0fade237fc63ee87524d4e7bc6f7d0f5cf52341ff9d1b371a97a"
+        },
+        {
+          "name": "SPIRV-Headers-vulkan-sdk-1.4.357.0/README.md",
+          "bytes": 7832,
+          "sha256": "4cde8b17c8040c0fbb9c0ed527c83c6932aad87b582ff17df93593cefdecdee9"
+        },
+        {
+          "name": "SPIRV-Headers-vulkan-sdk-1.4.357.0/CMakeLists.txt",
+          "bytes": 2353,
+          "sha256": "18202317ea71c2e01a7eafb325354cc45adbea9f7f65492128e2b38160550858"
+        },
+        {
+          "name": "SPIRV-Headers-vulkan-sdk-1.4.357.0/include/spirv/unified1/spirv.hpp",
+          "bytes": 316191,
+          "sha256": "2d117943804fa4e2b9e902d18b115ce8496c8608114cdb54a5110ddb95fe1191"
+        },
+        {
+          "name": "SPIRV-Headers-vulkan-sdk-1.4.357.0/include/spirv/unified1/spirv.core.grammar.json",
+          "bytes": 610599,
+          "sha256": "fc328b3a978cf6128617c679f1932717fb9a5fdbc9049c4124c2cc5f2f35cb4b"
+        },
+        {
+          "name": "SPIRV-Headers-vulkan-sdk-1.4.357.0/tools/buildHeaders/jsoncpp/dist/jsoncpp.cpp",
+          "bytes": 147987,
+          "sha256": "7e3744005f1ee198e119fcfc7ba74c12465300a8fe626169f1180f551a4fc64a"
+        },
+        {
+          "name": "SPIRV-Headers-vulkan-sdk-1.4.357.0/tools/buildHeaders/bin/generate_language_headers.py",
+          "bytes": 6955,
+          "sha256": "3581c7806abed37ee64ea208d40380e56aeaeab18692b0a07524f3eba5537225"
+        }
+      ]
+    },
+    {
+      "name": "vulkan-headers",
+      "package": "mingw-w64-x86_64-vulkan-headers",
+      "version": "1~1.4.357.0-1",
+      "consumer": "mingw-w64-x86_64-vulkan-loader",
+      "archive_prefix": "Vulkan-Headers-vulkan-sdk-1.4.357.0/",
+      "archive_entries": 102,
+      "internal_links": 0,
+      "package_archive": {
+        "name": "mingw-w64-x86_64-vulkan-headers-1~1.4.357.0-1-any.pkg.tar.zst",
+        "bytes": 1768187,
+        "sha256": "68c7b758194a255c66d08fe484fe615e254fad9259a70c9dc9d9bec9e51b1384",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-vulkan-headers-1~1.4.357.0-1-any.pkg.tar.zst"
+      },
+      "package_signature": {
+        "name": "mingw-w64-x86_64-vulkan-headers-1~1.4.357.0-1-any.pkg.tar.zst.sig",
+        "bytes": 566,
+        "sha256": "6375909d536da69d0ae877f480867df8db6f99db1e0b534df9fe1698df814f71",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-vulkan-headers-1~1.4.357.0-1-any.pkg.tar.zst.sig"
+      },
+      "recipe": {
+        "name": "vulkan-headers.PKGBUILD",
+        "bytes": 1972,
+        "sha256": "5bb2533341aa92f79bc70d0f8873c3aec2aceb486d7aff230b4945710c802639",
+        "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-vulkan-headers/PKGBUILD"
+      },
+      "source": {
+        "name": "Vulkan-Headers-1.4.357.0.tar.gz",
+        "bytes": 3376379,
+        "sha256": "e87dce08116151f6b6d7de6b6faf41498e87e6cf848ff16fa3bd5402190ad4a3",
+        "url": "https://github.com/KhronosGroup/Vulkan-Headers/archive/vulkan-sdk-1.4.357.0/Vulkan-Headers-1.4.357.0.tar.gz"
+      },
+      "patches": [],
+      "package_documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 6752,
+          "sha256": "8193f06dd7c2af20f9181e2e8c4bde9b2195727315ccede52e2c52f1dcd5110b"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 546,
+          "sha256": "33d33f44bcc5707a5535704d184dd57f6e915c5713780d1401b2668b80b3cb0d"
+        },
+        {
+          "name": "mingw64/share/licenses/vulkan-headers/LICENSE",
+          "bytes": 495,
+          "sha256": "95ad366d23fadf701d355bc45fb8b82ae2d700239471d35d41286ac3b08ff903"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/LICENSE.md",
+          "bytes": 495,
+          "sha256": "95ad366d23fadf701d355bc45fb8b82ae2d700239471d35d41286ac3b08ff903"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/LICENSES/Apache-2.0.txt",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/LICENSES/MIT.txt",
+          "bytes": 1084,
+          "sha256": "1ca3502222d967f3be5751c55f6b7ee735b5383909c3b501495f54b216dbf227"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/REUSE.toml",
+          "bytes": 716,
+          "sha256": "248d32fb51aa837dfbc64246dc9231a3e462e36295604f3fab2845cc19969edb"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/README.md",
+          "bytes": 1919,
+          "sha256": "28c9757358d56c906716e81b02f5c114b44f6c66fc3515222dd6c0039aa1954b"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/CMakeLists.txt",
+          "bytes": 5918,
+          "sha256": "b8ce9860d5ccad11aed6f3bf2008bbe62725db2dccdf267b8a6fa84ddc8d821d"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/include/vulkan/vk_platform.h",
+          "bytes": 2832,
+          "sha256": "a2cd9085c66776845d2524c3b0e73ccf4827ba046aa6f676c4b8ddbed47d6552"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/include/vulkan/vulkan_core.h",
+          "bytes": 1355514,
+          "sha256": "a7ac0d7e35e77f642c175af5d36729cfdae2d626d2aaa9145c030a42bd44edc6"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/include/vulkan/vulkan_win32.h",
+          "bytes": 15764,
+          "sha256": "72f0b6de71287d3b04d12235e4f2fef8f343126f85be4963c516d31d5bb4c099"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/registry/parse_dependency.py",
+          "bytes": 15868,
+          "sha256": "00489a3b2ec34cbe21045de37c91ead429e0c1189469f0e2cfb3d2878dd929b1"
+        },
+        {
+          "name": "Vulkan-Headers-vulkan-sdk-1.4.357.0/registry/vk.xml",
+          "bytes": 3290524,
+          "sha256": "264d0d7350e37d70c82407fb430d085040fc01a9a961d43dec8c2d6ed1dfd183"
+        }
+      ]
+    }
+  ]
+}

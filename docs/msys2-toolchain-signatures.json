@@ -1,0 +1,1416 @@
+{
+  "schema_version": 1,
+  "scope": "Detached signatures verified locally against the exact archives in msys2-toolchain-inputs.json; signed MSYS2 bootstrap master keys are trust anchors in an isolated audit keyring.",
+  "packages": [
+    {
+      "name": "autoconf-archive",
+      "bytes": 566,
+      "sha256": "0cd8ceb7d16dfb0445edcdf4ba0cbfa87dcefb38ce61a8e446f125cc3ce8fb9e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "bash",
+      "bytes": 566,
+      "sha256": "374843698dde21c358a227b99692824d4425a078ba7ad56c85d0087ba0ed7853",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "gcc-libs",
+      "bytes": 566,
+      "sha256": "994ccac224e5a7a3c5c11e9ea11193c956bc5d1288b1be42f9fa437286542599",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libiconv",
+      "bytes": 566,
+      "sha256": "273339e4ff358e016840a7808f6cdebc119b820ada9467f49cc4396d1d406a97",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libintl",
+      "bytes": 566,
+      "sha256": "1adbb78dc17437af97cea7491aa1637917ec09e69d3d94a628624e2b32b4d937",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "sed",
+      "bytes": 566,
+      "sha256": "f581e034fe9b375764c64880278604e0b42cb544f40c1ce01eb1492d0af1e056",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "gmp",
+      "bytes": 566,
+      "sha256": "2fe4effbb7950beba40d46dfd83db242c79d8989ee712c125e89bc292e94f24d",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mpfr",
+      "bytes": 566,
+      "sha256": "8c9a772a091365c88751e74ec280ab01435fade4dea7984676869a4d594cbeca",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "ncurses",
+      "bytes": 566,
+      "sha256": "96552e3391030cd6b26a94acfdd21880e4a2865608b94bf30759c93ca6b62e08",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libreadline",
+      "bytes": 566,
+      "sha256": "df5750167ac977dfeb76559f8d04b093a3f77215346e59ff2de4daa065ed8f36",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "gawk",
+      "bytes": 566,
+      "sha256": "54e5b27f677207d401ef32bfc3cad66f502de332e3a676a1d0898a8abaeae19b",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "m4",
+      "bytes": 566,
+      "sha256": "d38d5a7c83ef5a0ebe395bb9487e06d0067fc63f70921a23e25edfac7f34b972",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "diffutils",
+      "bytes": 566,
+      "sha256": "f25457caac4b77e5341e8fd02a53e696a023024ed398992eec199a43fd26c811",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libdb",
+      "bytes": 566,
+      "sha256": "1f0efaa8e2c0065af9e9fa8bdd8ae990ad414f121e67cb7b7e57fb8e46016294",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "db",
+      "bytes": 566,
+      "sha256": "dfd5a37a7512575806074297354f8ee3a1e1d58a750e6d30dd1522f12a4ee085",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libgdbm",
+      "bytes": 566,
+      "sha256": "b5806f722fc62740275ab0ed60d6cd2fbecd4f062597250c785634201df333b9",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "gdbm",
+      "bytes": 566,
+      "sha256": "dde1cf8a37a12fd83a97a1c25d30774b789c2b1ed772ef0b540fbc3127d64e5f",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libxcrypt",
+      "bytes": 566,
+      "sha256": "d2dda19a9fa14dc5c1cba7a41a9b47fedcdfd798fc52e3b530934146c96a6d91",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "coreutils",
+      "bytes": 566,
+      "sha256": "622861ad85807d070f3665d7f6c524c27a5e1d2050b0ee3f806247f185a07ad2",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl",
+      "bytes": 566,
+      "sha256": "ce765a38cab49068899305c3c1118b5fecbbf983d5893be9f72d08f359ff965e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "autoconf2.73",
+      "bytes": 566,
+      "sha256": "78ac95867dbf91725adfd15768b085a36c9dc575d93cdae980bc8d44357568dc",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "autoconf2.72",
+      "bytes": 566,
+      "sha256": "ef080640a2f4db8cdf96f764be38d170ce39c69ddfd5574612ff8eb07e7fae57",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "autoconf2.71",
+      "bytes": 565,
+      "sha256": "5eb76a37edce9d18310998225a683d2a7a35863e618ce8d05721e2d8c45acfb7",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "autoconf2.69",
+      "bytes": 566,
+      "sha256": "5cd385bd0d01ade7d357d1dc07a7079e4015dcf837c3bf84177e725bd223d894",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "autoconf2.13",
+      "bytes": 566,
+      "sha256": "0da9f5e3136b671dcaf1d40281f37e500998ab9b1f7a46fbbc60241d05863b67",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "autoconf-wrapper",
+      "bytes": 566,
+      "sha256": "2c468ca05aeb570e9a127fb5bf0db31516d8ebb0bab2036b74fffb4fdede8eb0",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libffi",
+      "bytes": 566,
+      "sha256": "dd707edd30ab2fcd7861d04d935f9c33e8b1e07e67f52b4b8022d16ceaac4340",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libgc",
+      "bytes": 566,
+      "sha256": "5f3bfec9262f061171c0ac93732b82e1c6dcb0378607fe008ddf494e750dc046",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libunistring",
+      "bytes": 566,
+      "sha256": "e42366a37f23d640892962d99378c16544c3444e7ac76a4ab8011d6fdc78d6f0",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libguile",
+      "bytes": 566,
+      "sha256": "4e4255dc3d26d417021cafd94ca9ff3ca26d77518138aca0781c55b56a43608d",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "zlib",
+      "bytes": 566,
+      "sha256": "97d2a513a19b53edd250476da081803124c985e1fc726b52602fb82908d2d62e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libxml2",
+      "bytes": 566,
+      "sha256": "f9ae37cdfa8c2dbfb6712f60aeb8cfb861ed22ca6579bd12352abf2860315f74",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "autogen",
+      "bytes": 566,
+      "sha256": "d81d0f37853c6bced6af8a4e0d7f262b1aa31dc17a60ad64d7f627854538e4d1",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "automake1.11",
+      "bytes": 566,
+      "sha256": "99a5cad2d07ddea9df55c583f3b4ddad36497b0005877493160faafab05e38c0",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "automake1.12",
+      "bytes": 566,
+      "sha256": "fdb398d249cece07264a185177ff1e54573c0b9df184c094ead7a0105c598d99",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "automake1.13",
+      "bytes": 566,
+      "sha256": "58af6d9609e881ff51c42c78166823b6db7e0f19bd6b88952337dc941c1bf5a6",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "automake1.14",
+      "bytes": 566,
+      "sha256": "821f02f882a2b393e9bad3ff2a6e60a70fa12e4ff0faa8f1817360c2238fcd8e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "automake1.15",
+      "bytes": 566,
+      "sha256": "1138487e8b7e859929e7ed0da75b718dab4a48dfffa5564b5e7ff519b789e554",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "automake1.16",
+      "bytes": 566,
+      "sha256": "563b28d0e047afac9b83dbd905ab84056c23c11388e8444ed41f1d051b94b8c1",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "automake1.17",
+      "bytes": 566,
+      "sha256": "6190c9e05b22a0a5409a77091ed3b5525e0c9cd5ab222a94d35cea3e71a298d7",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "automake1.18",
+      "bytes": 566,
+      "sha256": "97904aaceae899d0a5952e280fb6aa48106bc698531cdceeaa7303ea4aab0d93",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "automake-wrapper",
+      "bytes": 566,
+      "sha256": "7925cca62a4809f3ab990b2c79bbf6b542319e7ddd40329d3627c8737eecade1",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "bash-completion",
+      "bytes": 566,
+      "sha256": "5533e3e222ad32481d778a37086b0d5d630c902446a13b56223c8e28f7773ada",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libbz2",
+      "bytes": 566,
+      "sha256": "8d2642418c1db5f80efdb272196b201ef117292db0f0280dadedd4701763a4f3",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libexpat",
+      "bytes": 566,
+      "sha256": "f653bdcc7b760ef006e2ab7cd19214fabcdabd3c31c925fa6fad7c4628312614",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "liblzma",
+      "bytes": 566,
+      "sha256": "12fb9f2a3767974e638ea4854183d889a698ef9d328bd7ebfb15ee52a59cce6f",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "liblz4",
+      "bytes": 566,
+      "sha256": "7d19164b38f93ae16af84617ac7cf5df2cb3d6ccdefd348f1015c7198e877ca1",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libopenssl",
+      "bytes": 566,
+      "sha256": "f1a1f61663220a8c60f94c3afcb22fe26325ebcefa5cd175a41529bc7edbe6fa",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libzstd",
+      "bytes": 566,
+      "sha256": "fa9200763ed912254353ea15b36342824881d6e8f91558f3793168b576192d6a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "bsdtar",
+      "bytes": 566,
+      "sha256": "f5c47ddc30d9a34470e0ae4a663722053f749548c3a7920d0e7df15afa939988",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "bzip2",
+      "bytes": 566,
+      "sha256": "3bff08c011162a3a1c800a12b3c422b59c36127f9df267b14fe8e9bd4b2ba3da",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "openssl",
+      "bytes": 566,
+      "sha256": "a8f3b1c3ad8ee6e27f667448f91dd03e4acdfd46110a3849e1261928d257e8b1",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "findutils",
+      "bytes": 566,
+      "sha256": "89e5c679db160d56a7b88b4c82a14187168272a51e8f919cc1e8be0b09254c9a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libpcre2_8",
+      "bytes": 566,
+      "sha256": "eda4199be5fc753668ad5ca6c79e6da9b7a37bdba9f1d0c71f3c5ac5e5c01d49",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "less",
+      "bytes": 566,
+      "sha256": "cd7147888cabacc0c9807c2d90aa97b79758be4f74170d665a08591405e65526",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "gzip",
+      "bytes": 566,
+      "sha256": "a7cc40f2a7b0fa29c204c0ac1366f595ba33fdd0d4013f91f38f459a105f1a41",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "info",
+      "bytes": 566,
+      "sha256": "3d009bb77efd7b553898f73b21f4325188111e0f1b66397a0a57c4b283513ffd",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libtasn1",
+      "bytes": 566,
+      "sha256": "ae7d5d10f0d524153dfe8bdb106ba1e0b397bf9e1d22d16fcba806e67df41e15",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libp11-kit",
+      "bytes": 566,
+      "sha256": "bd3cad79f7d5440d5cfee0caf720849312284054b6ff564cd58e78a907d456e8",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "p11-kit",
+      "bytes": 566,
+      "sha256": "d8ea75713efa164627519549f908a667661063967c48f0fbb4e98733df53f20c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "ca-certificates",
+      "bytes": 566,
+      "sha256": "c573f00de50b080d3d308676d38aed14f557e9cde1c2d8f868781ea3bed0fbe0",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "brotli",
+      "bytes": 565,
+      "sha256": "22fb9bea320e78cf82d827ea82f2538d03bccc0c6cd6617a62039d3d12fa4daa",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libidn2",
+      "bytes": 566,
+      "sha256": "0a63ede3181976c7ffe97aec1aab6dc8c52e45e550eaf1edb93e3cd777901ffb",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libnghttp3",
+      "bytes": 566,
+      "sha256": "73761453f9acbb9cbfd2951a4cf3dfe28673200dd444dea79264c864d610dd47",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libngtcp2",
+      "bytes": 566,
+      "sha256": "2d6b01f0fb3f9bb1193bd639bb36b8fe7371cec8ef423a5b05796c6808ba610e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libnghttp2",
+      "bytes": 566,
+      "sha256": "6ee279c9edaeafc1a4dff549029afb3e33e84c0dae70584f60ced91fbfda7126",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libpsl",
+      "bytes": 566,
+      "sha256": "b9877ec2a6aed59c45742d3aafb342470feb0efe2f47963416326644c42135bd",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libssh2",
+      "bytes": 566,
+      "sha256": "8190b424b591b1ed71fba0c7e9853e71c023fd5c665071a3a315acb4bd1533c6",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libcurl",
+      "bytes": 566,
+      "sha256": "57763bb8f3762bbe9571be25d6fd089efd0a27a5dc2065068317db929050807e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "curl",
+      "bytes": 566,
+      "sha256": "4dd4ef96ba8553147a00ef722205c515ba621400de85c8d34373333ec7e86ec2",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libpcre",
+      "bytes": 566,
+      "sha256": "76c4c41d12e380e6cdf1e6e0242c64b53a5dfdfb0d946ca98b4af99f2df14990",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "grep",
+      "bytes": 566,
+      "sha256": "ffa35ecbdb81cf800a6083be6a7bfbbfbf3fe482510a65869698e0405390583d",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "filesystem",
+      "bytes": 566,
+      "sha256": "4f2b4f21dea6b268317998a84ed7ee50c78d4d45a548b1167d9a78e43c3862f2",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "dash",
+      "bytes": 566,
+      "sha256": "184323957eccb897ef65aa9a3ec21b70c22802fa8d02e679b3cc7affeff7e08c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "file",
+      "bytes": 566,
+      "sha256": "9d76081160bd2870532132802589d0c7a5200c413c8157cc6b509d2f487c3e46",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libargp",
+      "bytes": 566,
+      "sha256": "e96f57cad76c80f3e0d2ef4d98c7f037da6bd2baefae3628feb0845705ed1489",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "getent",
+      "bytes": 566,
+      "sha256": "6e1ccd65338bd7782d2669f6dc67b3e41c4e0d7bdbce63e99cd4c354e380952f",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "inetutils",
+      "bytes": 566,
+      "sha256": "9e6e915747bb2a9f9d1c6b9ef307d886a863eceaf76cc28cbcbe514d0dcb8806",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mintty",
+      "bytes": 566,
+      "sha256": "fc863054c35190c59649ee46865108f70de3ca52d02315d5753caf3476039c88",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "msys2-keyring",
+      "bytes": 566,
+      "sha256": "3f38969ef1141264363c591cee0a0b78de79a6d326df1e191295874a778cb604",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "msys2-launcher",
+      "bytes": 566,
+      "sha256": "b7c734cf3afb62c618738e6fa66a59e6600420135840b177e2d8fa6d4cae947a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "msys2-runtime",
+      "bytes": 566,
+      "sha256": "c66d5755ea88cc98ecfce0de66c56bad5b50f820f353307a7f157ac508c39f67",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "nano",
+      "bytes": 566,
+      "sha256": "0e25eab46b9686803563142ca525b269fdf4305e5698d0419b0a4db2701d677c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libgettextpo",
+      "bytes": 566,
+      "sha256": "4c37a6483148ec0e3c7fe0e6b73109be0a6d82ef9069ea92c63e22438e00783f",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libasprintf",
+      "bytes": 566,
+      "sha256": "57f2c559f8521d0aae13bb14a180edf388c974f7240ad6cad141f3d9898474e2",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "gettext",
+      "bytes": 566,
+      "sha256": "66995cb353db6537ffc23ccc3049b3dcb36cfa98c51981ec2d87491734240781",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libgpg-error",
+      "bytes": 566,
+      "sha256": "8deddc811dbb3c68e82293cf628a101686dcff42172a4c142fc8f82c49c26786",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libassuan",
+      "bytes": 566,
+      "sha256": "80eca1860dd981d2a9a32a40dcea8b2bf34abe1a8df931e4dc41d47300abf2c2",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libgcrypt",
+      "bytes": 566,
+      "sha256": "4d693970bde3851baaa41f92a66d8dd02c21e55ff7401caf56c9915ee6f52825",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libhogweed",
+      "bytes": 566,
+      "sha256": "ebc58ddd409135d14a9595cdeae51c4700ec28ec5e9297a3eecac854660cafe7",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libnettle",
+      "bytes": 565,
+      "sha256": "85fd6cf7226bca625bcbda7fc1463a0ae15eead01d1f017be8dab2d76f84495c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libgnutls",
+      "bytes": 566,
+      "sha256": "93747b5872434917969136798bada84bdc41c712241d38342d17ab6ded7f20da",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libksba",
+      "bytes": 566,
+      "sha256": "98c46f788d3a085d3de19a9a1f5bd4bfc196d9e5c6db9d426690b93d2f40e13c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libnpth",
+      "bytes": 566,
+      "sha256": "e881b657c9557e965383319d97e1e4096e92cfbf9e9731a00fa7d8e35318474a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libsqlite",
+      "bytes": 566,
+      "sha256": "65bb533fb7b8fc0e243c81f2d8d97843d27c8c490a7f8ed22b33acf2be0e30ff",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "nettle",
+      "bytes": 566,
+      "sha256": "aab60ae6740212c51c57c921cab4c004360c40f12a61e19a55ce0c049696f759",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "pinentry",
+      "bytes": 566,
+      "sha256": "ba14898f1e74d9fc2d84d8234c49603c23d3c18ad87ad06f01f00137cc2b873a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "gnupg",
+      "bytes": 566,
+      "sha256": "4a93c63e05ace744bd1528d8477ce8e654487a088daa4dca8fd727d777c4773e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "pacman-mirrors",
+      "bytes": 566,
+      "sha256": "4f9b80df4db2f71146ccd0ed76302c9f751c47ea4aa0f56192f1cdbc7f197c62",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "which",
+      "bytes": 566,
+      "sha256": "a252b5093f445c6e6b0adecf9115a1bb2a194c56492e8984e2da7bd8bfd457d5",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "xz",
+      "bytes": 566,
+      "sha256": "1c5f76e2e5f5dafb4d2301201b1297df94a53c88f45aa594e7fd161d13b786ef",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "zstd",
+      "bytes": 566,
+      "sha256": "8bc891c344c33fe3f4d7b4c2742387f7c0b35c3acaaffc3d3dd4e38ee7373c4c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "pacman",
+      "bytes": 566,
+      "sha256": "5e1ba3629ba46322ba38afe2050c72e9c8d3e08cfb59b01eeefb62cc6786cc20",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "pacman-contrib",
+      "bytes": 566,
+      "sha256": "1fbcdd9e3963af707b1548e1318c76e6ef4f701becf4648aa126a44d942c721c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "rebase",
+      "bytes": 566,
+      "sha256": "786c27104db179f773ab7e9ff7528ad881b1bcfe4492f54bba3281b585f69c18",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "tar",
+      "bytes": 566,
+      "sha256": "db89bbaa5b227cb35b36a1a1f3b90925b94dbfd4031c4722b6fc66b27375ea5c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "time",
+      "bytes": 566,
+      "sha256": "fd39660c76c39ae121cc5ecfebd62236719ad1307eb727486fd01be40fa01b44",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "tzcode",
+      "bytes": 566,
+      "sha256": "3278883eb0c721802186ecf427e018de3994b3d64fb779e2a62e11ff5afab124",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libutil-linux",
+      "bytes": 566,
+      "sha256": "300dce2e36f58f14a860a478b4594a765fa955711ba07b4d0c150c91dbbe592d",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "util-linux",
+      "bytes": 566,
+      "sha256": "d4e123eb9c8cef0ea7dad3718f8ada5a40dd46a026781ebd556442e51f54a714",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "wget",
+      "bytes": 566,
+      "sha256": "bd570f240f5de0f45b014aefbdc15375b71de5bdee8031d58138c34f325af2e5",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "base",
+      "bytes": 566,
+      "sha256": "a158ff272a7e4ea90f88e4ffbd79d6fb45ef966fceb77c8703af05cfc66ca7d3",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "dos2unix",
+      "bytes": 566,
+      "sha256": "9d9a44ce3a3b4ccf63cdae866f309f86b05332da630ba1cbd0cdae1c1049e561",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libedit",
+      "bytes": 566,
+      "sha256": "cea62afb5546b9dc5d95e134ab4ce9db868e541b8b2b9516d8cee99276882413",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "heimdal-libs",
+      "bytes": 566,
+      "sha256": "3ed7244898fe3cd66e9bf04cd57926640f47593d44073300afa0e45ef56d9552",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "heimdal",
+      "bytes": 566,
+      "sha256": "113236a4daf2914fd119d541664aeb8398092ce55c05bcad630b440d4ee03a98",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libcbor",
+      "bytes": 566,
+      "sha256": "aa81966a4929ac9b1f4e34c0566090236e65bfbaee4c5a931e85b8e5e797bd4a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libfido2",
+      "bytes": 566,
+      "sha256": "a423daadd68eb7720a053bbc2f1df0b0e41d8277549a678ceeb08688d9191ed9",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "openssh",
+      "bytes": 566,
+      "sha256": "2b66f1e7dd51a246e48fa14994d95e75da2ab3b4637e7e5937b324707493657e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-Error",
+      "bytes": 566,
+      "sha256": "3e23045c3693fb1a10587bdaa77bea67c15ecb1c1c68caeb8869d803bd886b92",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-Authen-SASL",
+      "bytes": 566,
+      "sha256": "de30fa6f83635d1777fbb2556e93e2c8b55d19f091a37284433d9a646e47bc5d",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-Encode-Locale",
+      "bytes": 566,
+      "sha256": "43e22af7497587b9c516de00d4aa39fd9af2d40306e239d66ffbe1e043ccf237",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-HTTP-Date",
+      "bytes": 566,
+      "sha256": "fe2f94a7ce41e6680229af56fb2854376072872ee0b274ca6eb452d1b06785f6",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-File-Listing",
+      "bytes": 566,
+      "sha256": "51ceccc07161f820b9d6bb5261cd1149bac6817da560c7c3a764b9344326163e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-HTML-Tagset",
+      "bytes": 566,
+      "sha256": "13c851c40f3c2c4c9e1d84b56586050553ba3d63ff6e5534aa5331986d3fc040",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-Clone",
+      "bytes": 566,
+      "sha256": "8949a9cc900bcefb15e7a89205dcc214e78dddf093c88fbc6adde9be27fee95c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-IO-HTML",
+      "bytes": 566,
+      "sha256": "dbc8337f5e00ec1a55d2be358547da5fd58983de95727255e11f199cc4a44408",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-LWP-MediaTypes",
+      "bytes": 566,
+      "sha256": "6296d857b3a056958e26b839087b1220f96cd4d603b9b43e785fab8989bb839b",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-URI",
+      "bytes": 566,
+      "sha256": "72761f9d7b90c6d8f28f760060fd8f9499c0b52d1ca1a8985d5de348fbb26e8d",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-HTTP-Message",
+      "bytes": 566,
+      "sha256": "d9cd47675c36f0ba1f10f8a39d7636b17100d500b397d18c57c47f91ca737e71",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-HTML-Parser",
+      "bytes": 566,
+      "sha256": "e39022a4646e6dddac229b5cbb54b50f20ca428dd40e0a4f218d7e9a634f28df",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-HTTP-Cookies",
+      "bytes": 566,
+      "sha256": "a5ffec537185ef7f10ffc8c14e25afd3c02ebd27c75a5ad0d62af5f4ace845ae",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-HTTP-Daemon",
+      "bytes": 566,
+      "sha256": "0a4ea1c6f54212ea32d297523398b48177f273f04f0f367fda9c471d4f8dc874",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-http-cookiejar",
+      "bytes": 566,
+      "sha256": "7dba9903b6ac80eef19f54e8f9966ab620f323fbae272adbfa1915cb3e6ff16f",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-HTTP-Negotiate",
+      "bytes": 566,
+      "sha256": "db890714a21d5983245e3c58864b80217e4fd6a9da4593d871eba5b45944e66e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-Net-HTTP",
+      "bytes": 566,
+      "sha256": "8b14c956851dc1fa45258ff6c7aa77f1c7a0a7c852ea8cf0a34a5ef6ed194412",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-WWW-RobotRules",
+      "bytes": 566,
+      "sha256": "45ff071f5a1d061ad1746e26a4e6b0857d4b03194960b44b610e1afc9092e2a9",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-Try-Tiny",
+      "bytes": 566,
+      "sha256": "e8d60a66ae2d817399f5a13563359cecc1cf02485358f7160a35a7e3ff77f1af",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-libwww",
+      "bytes": 566,
+      "sha256": "bff3cfefb4e328c17547d5bdb023af633dc8bede3a6be89e2cf99e51b7f3d352",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-TimeDate",
+      "bytes": 566,
+      "sha256": "6fdecebf1e8d8a96a4a7cfba03b29f951f928ce1decbd5d509b63903c92b0902",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-MailTools",
+      "bytes": 566,
+      "sha256": "b086744da958b5d6ff839a407f43e7dce1a6fc16b6decfe9067d56de2d224b1c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-IO-Stringy",
+      "bytes": 566,
+      "sha256": "58c7659780d807451a44fa973345d8a135f6b75ac7b19d817b1c32c073efe844",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-Convert-BinHex",
+      "bytes": 566,
+      "sha256": "82e16d0f1c7eee7c4bc909d8506d71e96df4cd442fd9ac1f0d79084c01f0ace2",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-MIME-tools",
+      "bytes": 566,
+      "sha256": "a62a21a4a6b5543db4ac68dfe8c62c0a948645ad0fbdec829e090cb802fa863a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-Net-SSLeay",
+      "bytes": 566,
+      "sha256": "7fd8bfb5963fff6b208c64c84c1b4da73e478783d84a8e3c7d897b180edc3c7a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-IO-Socket-SSL",
+      "bytes": 566,
+      "sha256": "2b9a93025b6630b7187c5f5d924a6cce34be96b6a4c02775874f8f6e70047210",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-Net-SMTP-SSL",
+      "bytes": 566,
+      "sha256": "b19cd59fdab4af1757bfa31bf6a83103547847f1f44ddee736af1f20afae7230",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "perl-TermReadKey",
+      "bytes": 566,
+      "sha256": "592d4709e8b3b0325498cc6aaebd5904536a879def56fed1c9787cbbf9563397",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "git",
+      "bytes": 566,
+      "sha256": "87088f173c5dbadb75afeb1d50270c1bb521fae018e1585841de9bc5ecb6cf37",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libltdl",
+      "bytes": 566,
+      "sha256": "508b95da395c883113e366e036623339c0e4d6f12b6a0e31f036eec7c3ffe6af",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libtool",
+      "bytes": 566,
+      "sha256": "2cb1b651c9c5e10eabdd4de44f6c0d3ad80f84dbb2141315bbf1ae11907e60c0",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "make",
+      "bytes": 566,
+      "sha256": "7f53c96aeb1a29d9917e2b00e9f709fbdc5b0458e6535e88b1fed69365191265",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libwinpthread",
+      "bytes": 566,
+      "sha256": "967bd72cd5ac85135cea1d47baabbd4e0b03ccacd78957961e33fa93c70a7b67",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-tzdata",
+      "bytes": 566,
+      "sha256": "37bb2ee128205f07eebe34924d3e283e600447c66a484653640541d817b08d91",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-gcc-libs",
+      "bytes": 566,
+      "sha256": "9d28b584a1746ca55bbb9aa814283d21886ff222c7e7edfbd371e69151199e85",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libiconv",
+      "bytes": 566,
+      "sha256": "89de5b11d92ed20d7a960d5658cfd98b670f323802ea805c229fdc5f14efc5eb",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-gettext-runtime",
+      "bytes": 566,
+      "sha256": "f4da268315da6eb32c01715830743e6a10c960392eb1e9e57ee33060a6411379",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-zlib",
+      "bytes": 566,
+      "sha256": "c11e9e3e495eefb0d0d1ef53303f28430ef47967c4fe484b3742d59c012f60f8",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-zstd",
+      "bytes": 566,
+      "sha256": "8007e5509c5cc470eb231ad586b61b9cc74e7a6c060792a990a0b20728c67cb3",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-binutils",
+      "bytes": 566,
+      "sha256": "6e7d4bb231bccd400b4a92e885d0db6505d89a0d11152d0e7df88f5fc04ea1de",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-fmt",
+      "bytes": 566,
+      "sha256": "9636c0ed90035b125d10be2f49b8746a8f91aaa044d9ee25493b1e005cfb1b00",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-xxhash",
+      "bytes": 566,
+      "sha256": "0d76d6b5ca7d9cbf1ca2a703961bd1a850311909fb3d7447dce946f3f4009002",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-openssl",
+      "bytes": 566,
+      "sha256": "271e1fc7c813a7a57695ce1bd8048ddb18e8acdbd4a53e8c6cefb9312ba98e9d",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-hiredis",
+      "bytes": 566,
+      "sha256": "17f348fb4b1821cb1e926043a476c1184251219fc063c02c46d206995d3a2552",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libltdl",
+      "bytes": 566,
+      "sha256": "635e5c846fa759da10d31ef787df166c8e8e960e99132fe0bdde18bb9bf608a7",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-hwloc",
+      "bytes": 566,
+      "sha256": "0cc79bb0d69eafaf5bc983569221230bb387ec30dd06f125c57ac101b7e4b6a9",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-tbb",
+      "bytes": 566,
+      "sha256": "1fa36786363710fdd3e2d2785675311533716be609c63f4f377cc760adf74031",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libblake3",
+      "bytes": 566,
+      "sha256": "ca64984ef6127b1c58e9850c9ef6ff8b41be796a017434dadd5285a6b69cdc1f",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-ccache",
+      "bytes": 566,
+      "sha256": "eb49e0df75bc009f167f263234cd9cf0ae2810dce9c91c0da426468dc0db88a8",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-cppdap",
+      "bytes": 566,
+      "sha256": "669f63fd480c59142a20bdb9976f71c6642eee3fef5ca4adc8383387d04113c1",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-c-ares",
+      "bytes": 566,
+      "sha256": "d025d6505b42e77159117e60aebeab65bc581919a890d63e45e4d8f86b0a48f0",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-brotli",
+      "bytes": 566,
+      "sha256": "41d40cbb64a05c0e4d41347fa3bb8e2fbe7239c689a91463e2a9316aa9fd381a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libunistring",
+      "bytes": 566,
+      "sha256": "a2b54a0a61cd062476f4098491f887b85b5575ba1e7429e1a7e7aac8786014ac",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libidn2",
+      "bytes": 566,
+      "sha256": "b30b2e03097cafc670024cb12f0a27216bdbb92f3c1f2b98d624dec25aae83a2",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libpsl",
+      "bytes": 566,
+      "sha256": "079f4cf402739116e3518642182aa2944a434129d6dabe2ea76bce455b770e64",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libtasn1",
+      "bytes": 566,
+      "sha256": "7b2fe55d20c9e862f2e40860fc93c0b08b944de17486ee2985694ea7d55027f5",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libffi",
+      "bytes": 566,
+      "sha256": "e1dc3072e95312c8474c1b4ad335c6fd9387a390fba70b6b46961b74e195c95c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-p11-kit",
+      "bytes": 566,
+      "sha256": "4a366c6211bce2682d52b2cfe0af3be819b03ad2c0b01155dce30fda56d903c0",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-ca-certificates",
+      "bytes": 566,
+      "sha256": "a467916e99060a57fab2770f97fa9ae676ffa63d4ae948d25dd0d9434cdd561b",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libssh2",
+      "bytes": 566,
+      "sha256": "da3a9f48beeafe3abf6fc4ee54dce4e649c51ef2989c51ac2e20f848b6d6228d",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-nghttp2",
+      "bytes": 566,
+      "sha256": "670726578c0f8644dbaf07c5c75c8dba01cc11f860de0681ea841fabcd0c9125",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-gmp",
+      "bytes": 566,
+      "sha256": "a70d99dc9a6165886e1a03c973246377eda2005f33fe9f07815ae8f43aa0a8e5",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-nettle",
+      "bytes": 566,
+      "sha256": "d9c1ba25960d2ac18365a7a4faf4df7725d929a8aa11b9fba579c4cb23c80281",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-gnutls",
+      "bytes": 566,
+      "sha256": "75032e84bda92415aaa2d087af5c542e42de1eb5df33d63db578e0c00cee9b8b",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-ngtcp2",
+      "bytes": 566,
+      "sha256": "295a5c8850d678e368d675ffb61301ec5111b7d79c06f50bc5f8199bfc825ab7",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-nghttp3",
+      "bytes": 566,
+      "sha256": "70943751c82c23189be9eaae1e2834fb475847be3c3e7dbf681a16848b63b854",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-curl",
+      "bytes": 566,
+      "sha256": "ca43d56d9990f095c9f55b2c5af31cb2c9d71581ca7b12cb1c6de0bfe4f48cce",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-expat",
+      "bytes": 566,
+      "sha256": "1c9d1812145dc1d60b0c4707c47cde002d91351aed7ae5b3f88f89b010d9209e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-jsoncpp",
+      "bytes": 566,
+      "sha256": "bc9587f5cfa8ee783bcf402dee7c1a838b69ac300cddadd475c46c86c9cef1bb",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-bzip2",
+      "bytes": 566,
+      "sha256": "8b1bd4ae1cf67012bebed27d6e5a45354b800ea6567e855aa0e166345151dabe",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libb2",
+      "bytes": 566,
+      "sha256": "531641974e77221fd40545eba8e46b5a121cdaf854ab986c42d2ae6771c85ac1",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-lz4",
+      "bytes": 566,
+      "sha256": "b93f8744214febab59babdcb97db3d9e9dad4ddab8be8f48208e3c31a4bf6cad",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-wineditline",
+      "bytes": 566,
+      "sha256": "faca085903442e43903d536df67f2a9d3354c793c081937016bab25f23b10540",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-pcre2",
+      "bytes": 566,
+      "sha256": "0acde7c6f6752e93ee42765f4701c9b7da752e711ce54083291ec5541e50832a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-xz",
+      "bytes": 566,
+      "sha256": "4628a04fd58d0f845af1ca23e7e5740be8a830d8787ae35e7c96a49d3728dc60",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libarchive",
+      "bytes": 566,
+      "sha256": "d6eea9ea6e6552472c2fb8d6e0dd93bbe8620cd32764beb7e9d66a08ba0a17cd",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libuv",
+      "bytes": 566,
+      "sha256": "752e67da3a67a33e6e0398098adff69e932cb22cf1c77dd3d8e5e143328b2001",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-ninja",
+      "bytes": 566,
+      "sha256": "6af85a86f1591a57b428ae71d224b5bb082ba8d04f2de5da20c45d8940267fdb",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-pkgconf",
+      "bytes": 566,
+      "sha256": "942480d25d97d0c8f84cde273ef1550a91ab0b3ecd0161c9cf4866456ebc36b1",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-rhash",
+      "bytes": 566,
+      "sha256": "dd9a4d1268f87a3b50882e4f93d850e7ee27c8e97bc45460b2d57e36f94b0efe",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-cmake",
+      "bytes": 566,
+      "sha256": "dc537a8a72565030361a464088e9c02579ef06976f5cfa44c1ef1a46bd5b5897",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-dlfcn",
+      "bytes": 566,
+      "sha256": "54f0237f9e5f299d4b5e06b4187bf893df4d445754dd6657a33a6592b29b0127",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-headers",
+      "bytes": 566,
+      "sha256": "fb5d10f2f8981ae1b3c9189a25cd24df7d18248be78407ca694ca5dea4556e60",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-crt",
+      "bytes": 566,
+      "sha256": "d1867c76ce804bcca9a3888c6ab377dd5510b32f6bae47ccdc843cd82999cb8c",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-isl",
+      "bytes": 566,
+      "sha256": "e2119db75c92fb0d36de0ff70a11ed326d01e13a955311567171e2f40590a7ca",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-mpfr",
+      "bytes": 566,
+      "sha256": "697c93a308af6cce48e30bae914f68922897818425bb78bf4e6805f4871aa34f",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-mpc",
+      "bytes": 566,
+      "sha256": "30c2508bcf5496f4676d4dcac2ba8494d4d4df3cc3c324289b190daf7198afb0",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-windows-default-manifest",
+      "bytes": 566,
+      "sha256": "d3719889029b308d5a1f0f87aaba63c675c7ad77e842170c2255b952034516b5",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-winpthreads",
+      "bytes": 566,
+      "sha256": "145344fbce7890186c23e180add62a2a0a79b8e9b6e79bf9ce28ab843274038a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-gcc",
+      "bytes": 566,
+      "sha256": "9fa3860720f650e8071487e76f72a21db10ce56d2187f8bbecd93f5d44d9d7f0",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-gettext-libtextstyle",
+      "bytes": 566,
+      "sha256": "52ce208d1ec865c35fdec35d2dae17526641bfc8c0d23905f20d73def2e1118d",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-gettext-tools",
+      "bytes": 566,
+      "sha256": "8d997f95b4d52302291cd4daf02bd0b68e408543ae2bc3a3e55b1a3c9fb6e17d",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-mpdecimal",
+      "bytes": 566,
+      "sha256": "954cb62dca7dfe9ae56ee30d72e3b29cfea7f9db20d7802fd1bf1beb0c0654fa",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libtre",
+      "bytes": 566,
+      "sha256": "75fad12e9335f8b80f25a0ddfcfcbb7f422e53f3f6f8375c28a5154c50ca1f23",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-libsystre",
+      "bytes": 566,
+      "sha256": "f72f1710c4947f1eb3eabc653abe8912dc5c3fc359614b04061544a84012548b",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-ncurses",
+      "bytes": 566,
+      "sha256": "054664578c7cca3039e8ef37249ba3607450e1aff3d3dccc61d993497b86096a",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-tcl",
+      "bytes": 566,
+      "sha256": "711950e316cb38cad247c1c7ae9e8c613ebbf56e94fd4f1a0c10c146eb82394e",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-sqlite3",
+      "bytes": 566,
+      "sha256": "9732884802d4530d65a8cb027a7e0cf1ae9d6a08c503a2f07ecc0e66000b8688",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-tk",
+      "bytes": 566,
+      "sha256": "c072b0bc6a47d2d65d2210584ffc1aaa03ac78b4c40153c0b9ead77ded0ccff7",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-python",
+      "bytes": 566,
+      "sha256": "d2fce9c61d78a2a17afa7f0cb8a6cb655cde20e9cc1fd0f0fc6d0c476e538a49",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-meson",
+      "bytes": 566,
+      "sha256": "c6fb783ddd9984b19e2057cd573a0ed4886740c62372bd28c80ec8a9a49b0b78",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "mingw-w64-x86_64-nasm",
+      "bytes": 566,
+      "sha256": "83350ef8335e2a08cbc37050b99e2a354eb64656c193eedb1825976ffba70612",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "p7zip",
+      "bytes": 566,
+      "sha256": "62e65365870114c6a477453368d4f7b64f974136c6d0c64d34e2dca2b41e05bb",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libarchive",
+      "bytes": 566,
+      "sha256": "1e613183de10c6994a1ade29c9aa30a4791fe3fa8e249e0c8e0a24e482e2baa7",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libgpgme",
+      "bytes": 566,
+      "sha256": "0d6f7e32228175ff397d55ea3509459cd5adfa3e5b5b5350b7c511c4c6e2c080",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "pacutils",
+      "bytes": 566,
+      "sha256": "deb9b08cd83fbc1687948f85f3a6f22c73dc16a3e08d22e8854c797b1ed94259",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "patch",
+      "bytes": 566,
+      "sha256": "b05a72f972973df0b5aea64fa0531b12832f2a6c79af2bf93c481e00b7f2a674",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "apr",
+      "bytes": 566,
+      "sha256": "100c7618d273489b459ed84189093962dcb03ec6dcb1f9cfaa4317bcddcfb3dd",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "expat",
+      "bytes": 566,
+      "sha256": "a61ae4d7abe4215c3df153accd76322c4132f7edfefddd8e5aca2343c364cbed",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "apr-util",
+      "bytes": 566,
+      "sha256": "d5ef4178e2fa9dbc98cb66d97a6acc599b7c1bda156385c649ddccd0f9d3335d",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libsasl",
+      "bytes": 566,
+      "sha256": "bf7b6611c6d9c662fe80b7cc5669937f84ec80c71b95945327df7b6cabbfe435",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "libserf",
+      "bytes": 566,
+      "sha256": "b35a6365f2446d3ab7ca5c6be069d0042af8f48aec7476a709bd0138de97ed65",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "subversion",
+      "bytes": 566,
+      "sha256": "f682906b13b88a72a8dfa443417efb8198291ff69904f5e6f2c0b38488b99667",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "unzip",
+      "bytes": 566,
+      "sha256": "d1cfddcfb59ca4adf645f1b6c7b03c1aa9a8376da2a68ff3363d281a86c8eebe",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    },
+    {
+      "name": "winpty",
+      "bytes": 566,
+      "sha256": "24d29fff2d68085d5ee28640ec0724024b405116566b79cc056692a9fd8c17a9",
+      "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+    }
+  ]
+}

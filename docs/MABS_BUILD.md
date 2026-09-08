@@ -35,6 +35,28 @@ SFXは52898952 bytes、SHA256 `c105946e64e08f099ac0e4647461ce762b95333ad21177766
 
 これはbase環境だけの固定である。追加のcompiler/FFmpeg依存packageや更新後の実効graph、全対応sourceの固定が済んだという意味ではない。
 
+## 初期ビルドツールのpackage固定
+
+[msys2-toolchain-inputs.json](msys2-toolchain-inputs.json)は2026-09-08に取得したmingw64/msys databaseから、初期MABS環境の235 package（圧縮合計251642436 bytes）を固定する。bootstrapに含まれる90 packageすべてとMABS初期toolの計114 rootを、空の隔離local databaseに対してpacman 6.1.0/libalpm 14.0.0で解決した。特定のinstalled状態に依存した差分一覧ではなく、基礎環境を含む取得集合である。
+
+- mingw64 database SHA256: `58dada89a98d5edcd8b3d959d62202ffff132a1027f6923dabc19c0a220bd5fe`
+- msys database SHA256: `195d16e76dffa1b4322ac8e7eb0d68e2c989b14ed8120a1a0ff28a9cb5c9cd46`
+- 両databaseの署名者fingerprint: `5F944B027F7FE2091985AA2EFA11531AA0AA7F57`
+- 新GNU候補: GCC `16.2.0-3`、CMake `4.4.3-2`、Ninja `1.13.2-1`、NASM `3.02-1`。従来BtbNのGCC 15.2と同一toolchainではなく、Rust本体のMSVC環境は変えない。
+
+署名検証には署名済みbootstrapに含まれるMSYS2公開鍵と5つのmaster key一覧を使用した。専用keyring内だけでその5鍵を明示trust anchorとして設定し、database signerのfull trustを確認した。個人keyringや既存環境の署名policyは変更せず、隔離pacman設定も`SigLevel = Required`を維持する。長いpathでagent初期化が失敗するため、ここではsecret key作成や通常のpacman-key初期化を行っていない。pacmanは旧pubring形式がないというwarningを出すが、署名検証付きのprint-only解決は成功した。これはそのまま本番の鍵初期化手順ではない。
+
+全235 recordのname/version/size/SHA256/filenameを元database entryと別途照合し、すべてのrootが選択またはprovideされることを確認した。依存version制約の解決は独自実装でなくpacmanに任せる。91 entryには埋込みPGPSIGがなく、直接取得するdetached signatureを検証する。署名欄の不在だけでpackageを未署名と断定したり、署名検証を無効化して導入したりしない。
+
+```powershell
+.\scripts\get-msys2-toolchain.ps1 -Download
+.\scripts\test-msys2-toolchain.ps1
+```
+
+getterは`vendor/msys2/packages-20260908`へ固定URLからarchiveとdetached signatureを取得し、size/hashを照合する。switchなしはoffline、改変cacheは取得ありでも保持して拒否する。packageの展開・導入、hook、live repository解決は行わない。通常pushのCIへ235 packageの取得を追加せず、native build準備として明示実行する。この集合にはFFmpegの全外部libraryやLCEVC追加build、対応source一式はまだ含まれない。
+
+ローカルで全235 archiveを取得し、size/hashと内部`.PKGINFO`のname/versionが固定recordに一致した。detached signatureも全235件を取得し、同じ隔離keyringでVALIDSIG/full trustとrevoked一覧との非該当を確認した。全署名のprimary fingerprintは上記database signerと一致する。[署名入力一覧](msys2-toolchain-signatures.json)にbytes/hash/fingerprintを残す。getterはこの検証済み署名fileのbyte固定を行うもので、GnuPGを実行し直すscriptではない。回帰試験は全470 cache fileの再利用、別cwd、offline欠落、同sizeで改変したarchiveと署名の拒否・保持を確認する。実導入やhookの監査は次に行う。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。

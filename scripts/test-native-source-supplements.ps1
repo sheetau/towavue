@@ -177,13 +177,15 @@ try {
     if (Test-Path -LiteralPath $rejectedOutput) { throw 'Omitted additional notice created output.' }
 }
 finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
-foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype', 'mingw-w64-x86_64-glib2', 'mingw-w64-x86_64-lcms2')) {
+foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype', 'mingw-w64-x86_64-glib2', 'mingw-w64-x86_64-lcms2',
+    'mingw-w64-x86_64-shaderc', 'mingw-w64-x86_64-spirv-cross', 'mingw-w64-x86_64-vulkan-loader')) {
     foreach ($kind in @('missing', 'different', 'duplicate')) {
         $changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
         $package = $changed.packages | Where-Object { $_.package -eq $packageName }
         $notice = $package.selected_documents | Where-Object {
             if ($packageName -eq 'mingw-w64-x86_64-glib2') { $_.package_notice -eq 'mingw64/share/licenses/glib2/COPYING' }
             elseif ($packageName -eq 'mingw-w64-x86_64-lcms2') { $_.package_notice -eq 'mingw64/share/licenses/lcms2/LICENSE-fast_float' }
+            elseif ($packageName -match '-(shaderc|spirv-cross|vulkan-loader)$') { $_.package_notice -eq ('mingw64/share/licenses/' + $Matches[1] + '/LICENSE') }
             else { $_.name -match '/(COPYING|docs/FTL.TXT)$' }
         }
         switch ($kind) {
@@ -247,4 +249,4 @@ foreach ($kind in @('commit', 'url', 'kind')) {
     }
     finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
 }
-Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, missing/corrupt/omitted additional notice, eighteen package-notice mismatches, three VCS mapping cases, source symlink exclusion, cached-input/download and output preservation."
+Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, missing/corrupt/omitted additional notice, twenty-seven package-notice mismatches, three VCS mapping cases, source symlink exclusion, cached-input/download and output preservation."

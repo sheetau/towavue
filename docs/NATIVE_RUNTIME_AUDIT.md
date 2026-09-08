@@ -203,6 +203,16 @@ metadataの選択集合は従来一覧と一致する。library限定graphは164
 
 両種graphとmetadataの反復hashは一致し、通常graph／metadataは別cwdからの再実行も一致した。元source／lock、compiler入力、実runtimeのhash、選択集合とC API型による差分を照合した。最終候補の94 filesも不変で、M0は270 tests・format／Clippyが通過し、live ignores 3件は未実行。cargo-c内部のCargo版・追加flag、過去のlibdovi unlocked fetch、標準libraryや生成／static／headerの範囲はこの観測だけで確定しない。歴史的buildの完全再現や配布承認とは区別し、次は残る個別表示とshaderc／SPIR-V／Vulkan等を調べる。
 
+### Shaderc／SPIRV-Cross／Vulkan Loaderの原本と内蔵表示
+
+元packageの`.BUILDINFO`へ対応するrecipeから、shaderc 2026.3、SPIRV-Cross／Vulkan Loader 1.4.357.0の3 source archivesと2 patchesを取得した。計4064916 bytesで、全hashがrecipeと一致する。archiveの276／5176／327 entriesは通常file／directoryのみ。source署名の検証、recipe実行、patch適用、DLL再buildは行わず、実候補全94 filesのhashも不変。
+
+- **Vulkan Loader:** [Windows targetのsource一覧](https://github.com/KhronosGroup/Vulkan-Loader/blob/vulkan-sdk-1.4.357.0/loader/CMakeLists.txt)にはcJSONとdirent_on_windowsがある。cJSONのMIT原文、後者のHPND-Kevlin-Henney原文と追加のKhronos／Valve／LunarG著作権表示を、完全な元C／header fileのまま保持した。[REUSE mapping](https://github.com/KhronosGroup/Vulkan-Loader/blob/vulkan-sdk-1.4.357.0/REUSE.toml)とlicense本文dictionary、生成header、build設定も残す。root Apache表示だけで完了にしない。recipeのpatchはpkg-config import-library suffixだけを変更する。loader codegenは独立optionであり、今回生成物を作り直していない。元buildのVulkan-Headersは`1~1.4.357.0-1`で、外部header／生成元の範囲は別確認。
+- **SPIRV-Cross:** [shared C API target](https://github.com/KhronosGroup/SPIRV-Cross/blob/vulkan-sdk-1.4.357.0/CMakeLists.txt)はcore／各compiler sourceと同梱SPIR-V headersを使う。Apache OR MITの元header表示、MIT本文、Khronos termsと`.reuse/dep5`を保持する。古いdep5と現headerで表記が異なる部分は書き換えず両方を残す。full source内のtest／reference／文書表示を、そのままruntime payloadのlicenseとは扱わない。
+- **Shaderc:** 元recipeはthird_partyを外し、glslang／SPIRV-Toolsをpackageから使う。[MinGW向け設定](https://github.com/google/shaderc/blob/v2026.3/cmake/utils.cmake)は既定で`-static -static-libgcc -static-libstdc++`を付ける。これは実DLLのimportがKERNEL32／msvcrtのみであることと整合し、依存がないことを意味しない。元build記録はGCC `16.1.0-5`、glslang `16.3.0-1`、SPIRV-Tools `3~1.4.357.0-1`、SPIRV-Headers `2~1.4.357.0-1`。既存の別版GCC DLL資料やshadercに添付された古いdependency noticeだけで、これらのstatic／header範囲を確認済みにしない。元patchとlibrary target一覧、AUTHORS・依存原文を保持し、次にこの固定入力を確認する。
+
+既存supplementを32 ownersへ拡張し、40選択文書を追加した。最終`native-source-supplements-v11`は82 archive／build inputs・80514256 bytes、308選択文書と追加Unicode原本、427 files／90583218 bytes。v10の377 files（README／INPUTS以外）は不変。別cwd／反復hash、114欠落・改変pairs、27 package-notice不整合、追加Unicodeと3 VCS不整合、元入力／既存output保護の試験を通過した。full sourceや個別表示の保全であり、最終公開用notice／source案内や全static入力の完了ではない。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

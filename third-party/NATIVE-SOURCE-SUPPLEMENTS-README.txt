@@ -6,7 +6,8 @@ documents under the audited package share/licenses directory, plus XZ,
 FreeType and gettext-runtime with mixed-license scope or secondary notices,
 and eight further library-source-first owners: libiconv, FriBidi, Game Music
 Emu, mpg123, libbluray, Graphite2, GLib and libplacebo, plus libsoxr and SRT
-and Little CMS, rav1e and libdovi (29 owners total).
+and Little CMS, rav1e, libdovi, shaderc, SPIRV-Cross and Vulkan Loader
+(32 owners total).
 Chromaprint, OpenAL, ZVBI and GCC runtimes have separate material bundles.
 
 INPUTS.json identifies unchanged source archives, patch/template inputs and
@@ -42,6 +43,24 @@ binary reproduction remain separate work.
 
 License scope observations (not blanket distribution approval):
 
+- Shaderc retains source/build originals and upstream dependency notices.
+  Its recipe de-vendors glslang/SPIRV-Tools and its MinGW defaults request
+  static libgcc/libstdc++. The actual build records GCC 16.1.0-5, glslang
+  16.3.0-1, SPIRV-Tools 3~1.4.357.0-1 and SPIRV-Headers 2~1.4.357.0-1.
+  These exact static/header inputs remain a separate review; neither the
+  package's root Apache text nor old bundled notices close that scope.
+- SPIRV-Cross preserves Apache/MIT alternatives, copyright-bearing headers,
+  generated SPIR-V headers, Khronos terms and .reuse/dep5. Keep differing
+  source annotations intact. Source-only test/reference/document licenses
+  do not imply that those files are part of the runtime payload.
+- Vulkan Loader's Windows source list includes cJSON and dirent_on_windows.
+  Preserve their complete original MIT and HPND-Kevlin-Henney notices,
+  including the additional Khronos/Valve/LunarG copyrights, plus REUSE
+  mapping and generated-header scope. Its root Apache notice is not the
+  complete notice set. Vulkan-Headers 1~1.4.357.0-1 from the original build
+  record and other static/header inputs remain separate work. The patch
+  adjusts the pkg-config import-library suffix; this collector does not
+  apply it or regenerate loader code.
 - rav1e 0.8.1 and libdovi 3.4.0 retain their original Cargo manifests/locks
   and package notices. rav1e also preserves all x86 assembly source notices,
   the ISC x86inc header, IVF license and original non-UTF-8 PATENTS bytes.

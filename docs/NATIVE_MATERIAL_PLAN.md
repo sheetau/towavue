@@ -34,6 +34,8 @@ notice／範囲優先48件は上記24 owner以外の全件。package noticeが�
 
 続く[GNU-host選択確認](native-rust-gnu-selection.json)では、元MSYS2 Rust／Cargoをinstallせずに隔離実行した。元lockのmetadata到達集合は129／28件のまま、library限定unit graphは121／28件（target library unitあり65／23件、hostのみ56／5件）だった。C API crate typesへの変更でも選択集合は不変。compileやbuild scriptは実行せず、既存157件の材料は保持する。これは元build hostの違いを狭める観測であり、歴史的cargo-c／link範囲や生成codeの表示を確定するものではない。次は個別表示・標準library／static／header／生成dataとshaderc／SPIR-V／Vulkanの範囲を進める。
 
+shaderc／SPIRV-Cross／Vulkan Loaderの3 source setsも元recipeのhashへ対応させ、32-owner supplementへ追加した。Vulkan Loader内のcJSON MITとWindows direntのHPND原文・追加著作権、SPIRV-Crossの複数選択と生成header表示を保持する。shadercはMinGWで外部shader librariesとGCC runtimeをstaticに取り込む設定なので、PEの2 system importsだけでは範囲が閉じない。次の固定入力は元buildのglslang 16.3.0-1、SPIRV-Tools 3~1.4.357.0-1、SPIRV-Headers 2~1.4.357.0-1、GCC 16.1.0-5と、LoaderのVulkan-Headers 1~1.4.357.0-1。既に収集した別版runtime DLL用資料をそのまま代用しない。
+
 ## Owner一覧の外にある入力
 
 - 現候補は元85 package DLLのうちZVBIだけが限定build。84 package DLLの71 ownerと、限定ZVBIの由来を区別する。元packageの72 owner一覧は追跡用のbaselineである。

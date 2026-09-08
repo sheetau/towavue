@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 限定ZVBI候補と現行コードの最適化版（2026-09-08 19:52 JST）
+
+1504bee時点のアプリcodeを、限定ZVBI headerで再生成したFFmpeg候補に対して通常release buildした。旧試用releaseを置き換えず、別のRust targetに生成したexeは10287104 bytes、SHA256 `03125262C28C0DF0190B6D0DFE7B0EFB1DFBCEB55946C4AF7E40E4AF0AAD43F3`。format／全target Clippy／270 testsも通過した。以下は短時間の操作試験であり、旧候補の30分性能結果を引き継ぐものではない。
+
+候補runtime全94 filesとexeを、新しい`日本語 viewer & tools`へcopyした。FFMPEG_DIRなし、PATHはSystem32のみ、無関係のcwd、専用config／cache。PID 41708、開始UTC `2026-09-08T10:48:48.8404304Z`の実windowで、隣接した直接6 FFmpeg DLLを確認した。30秒H.264/AAC source（SHA256 `F929E6FA18AA010BEBFBB3400539A4F090F7864887F4044E20B4E0C95C5B2F54`）の再生終了、waveform、native Save As、保存物のOpen、filmstrip thumbnailを確認した。画面captureはPID／開始時刻／foregroundを検査し、最初のforeground取得失敗では保存せず、所有windowへのUIA focus後に取得した。
+
+保存物は2072076 bytes、160×96 H.264／48 kHz AAC／30.065960秒、SHA256 `6B983DFBADE1EE4A24802CB0825FF2CBC289A4FBAFE809A533DBB3E83E1DA43C`。同梱helperでprobe・全decodeを通過した。実windowの最初の再生はD3D11VA 892 frames／CPU transfers 0／presented 892／dropped 0、drift p95 4.714 ms／max 5.213 ms。保存物を開いた再生は892／0／890／2、drift p95 4.786 ms／max 30.257 msだった。**後者の2 dropを隠さず、操作を含む短時間試験の観測として残す。** 高負荷・長時間の定常性能やHW encodeの証明ではない。
+
+両tabがcleanなwindowを正常終了し、元media／exe／94 runtime filesとcopyのhashが不変であることを確認した。旧release `94AF9E14...`も不変。証拠はignored `scoped-candidate-release-smoke-20260908`のidentity、stderr、owned captures、保存物。Setup.exe、対象Windowsでの導入／更新／削除、新候補の長時間・高負荷・Seek比較、物理環境とowner受入は未完了。
+
 ### 補助exeの配置と探索（2026-09-08 19:18 JST）
 
 previewと保存の探索をruntime内へ統一した。本体と同じdirectoryにffmpeg.exe／ffprobe.exeのいずれかがあれば、その配置を使う。片方が不足してもFFMPEG_DIRやPATHの別版を混ぜない。両方ともない開発配置だけFFMPEG_DIR/binを使い、未設定／不足なら期待pathを含むerrorにする。絶対pathを子processへ渡し、アプリのcwd／PATHは変更しない。

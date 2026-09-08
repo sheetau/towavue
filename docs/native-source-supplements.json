@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for 29 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 32 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources; shader compiler static/header inputs require additional review. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "additional_notices": [
     {
       "scope": "Original Unicode License V3 from the same pinned upstream tree as the four data inputs used by FriBidi 1.0.16; not a FriBidi archive member or an MSYS2 recipe checksum.",
@@ -39,6 +39,280 @@
     }
   ],
   "packages": [
+    {
+      "package": "mingw-w64-x86_64-shaderc",
+      "recipe_sha256": "c0269897415c571bd069446ca78a73ed9f600b2603be134aba122e8051f8b1b1",
+      "archive_prefix": "shaderc-2026.3/",
+      "archive_entries": 276,
+      "internal_links": 0,
+      "files": [
+        {
+          "name": "shaderc-2026.3.tar.gz",
+          "bytes": 230772,
+          "sha256": "ee493ccf1b3038b4ef2fe024664c5eb2dc4bcc1f6b05b33e3909de0e19c81024",
+          "url": "https://github.com/google/shaderc/archive/v2026.3/shaderc-2026.3.tar.gz",
+          "kind": "source"
+        },
+        {
+          "name": "0001-fix-glslang-hlsl-linking-order.patch",
+          "bytes": 541,
+          "sha256": "af880b221603e2b5c34dd306feeb4fa9af5803ebc841d64ab8e4be0e7455a6ba",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-shaderc/0001-fix-glslang-hlsl-linking-order.patch",
+          "kind": "build-input"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "shaderc-2026.3/LICENSE",
+          "bytes": 11357,
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "package_notice": "mingw64/share/licenses/shaderc/LICENSE"
+        },
+        {
+          "name": "shaderc-2026.3/AUTHORS",
+          "bytes": 310,
+          "sha256": "9fb4b067e4c9a1f91ea1c26465b3d1c6b515cb24860e0dbb719879925a5a1248"
+        },
+        {
+          "name": "shaderc-2026.3/README.md",
+          "bytes": 10620,
+          "sha256": "d235a03d95cd3beb134cd8fe7a947ed927f215d20ce5b542edadbc0b78e22905"
+        },
+        {
+          "name": "shaderc-2026.3/DEPS",
+          "bytes": 1359,
+          "sha256": "f629401c15ad76ce96405ec97257db08df112f68cf1557f49f50f14bc8c0ac33"
+        },
+        {
+          "name": "shaderc-2026.3/CMakeLists.txt",
+          "bytes": 6308,
+          "sha256": "616a68ff206c8bf5b22601f6f23bf2c7b9f27977587d113c652f4bfb5a55f07d"
+        },
+        {
+          "name": "shaderc-2026.3/cmake/utils.cmake",
+          "bytes": 7436,
+          "sha256": "b2b1c824f7e19b26ef359d9757ea964e7b6cfcd61f9c855438593186e244b1a3"
+        },
+        {
+          "name": "shaderc-2026.3/libshaderc/CMakeLists.txt",
+          "bytes": 3889,
+          "sha256": "3de01a6851451924f66921d5bc09f525696d3fa4f02ae8de6286f91eda3260f1"
+        },
+        {
+          "name": "shaderc-2026.3/libshaderc_util/CMakeLists.txt",
+          "bytes": 2776,
+          "sha256": "e90fc44377103ea4da7d5e1ab1d101422878216ea6cc775bd36750ad24469d7b"
+        },
+        {
+          "name": "shaderc-2026.3/third_party/CMakeLists.txt",
+          "bytes": 5180,
+          "sha256": "816c896de0d07527a6b29796e0db4cf2d22eff333101fa17991b817ff0f35836"
+        },
+        {
+          "name": "shaderc-2026.3/third_party/LICENSE.glslang",
+          "bytes": 8280,
+          "sha256": "b5a00e94f058edc87e05978329b55730d8689abe61205d9018443d03de4f07da"
+        },
+        {
+          "name": "shaderc-2026.3/third_party/LICENSE.spirv-tools",
+          "bytes": 11650,
+          "sha256": "47e20ce182bc68fab1a0cfb129b03c326aaf4f2b6b7905aa9d376d31018bd29f"
+        }
+      ],
+      "scope_notes": "Recipe de-vendors dependencies. Retain upstream dependency notices as source originals, not as substitutes for exact glslang/SPIRV-Tools/SPIRV-Headers build inputs. MinGW defaults request static libgcc/libstdc++; original build record uses GCC 16.1.0-5, glslang 16.3.0-1, SPIRV-Tools 3~1.4.357.0-1 and SPIRV-Headers 2~1.4.357.0-1. These static/header scopes remain separate from runtime DLL imports."
+    },
+    {
+      "package": "mingw-w64-x86_64-spirv-cross",
+      "recipe_sha256": "a21a1b6ad2fba87a56ec62e289d3356a96937e80ec22c5afd7edf089120c0356",
+      "archive_prefix": "SPIRV-Cross-vulkan-sdk-1.4.357.0/",
+      "archive_entries": 5176,
+      "internal_links": 0,
+      "files": [
+        {
+          "name": "spirv-cross-1.4.357.0.tar.gz",
+          "bytes": 2012325,
+          "sha256": "97c910326afdd44d794ce8561326fa675fd1958b27142f03295403044d639639",
+          "url": "https://github.com/KhronosGroup/SPIRV-Cross/archive/vulkan-sdk-1.4.357.0/spirv-cross-1.4.357.0.tar.gz",
+          "kind": "source"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/LICENSE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "package_notice": "mingw64/share/licenses/spirv-cross/LICENSE"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/LICENSES/CC-BY-4.0.txt",
+          "bytes": 16814,
+          "sha256": "b89aeb7c2a164a0576786dd2a8b57f2fb628b23981f0a06bd77e2f99a9befa0f"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/LICENSES/LicenseRef-KhronosFreeUse.txt",
+          "bytes": 1305,
+          "sha256": "fbeaca472f4f70e276dd1106ca5097435967a22ad6c1d8200aef7ad9f70aaf3f"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/LICENSES/MIT.txt",
+          "bytes": 1108,
+          "sha256": "8f25018489d6fe0dec34a352314c38dc146247b7de65735790f4398a92afa84b"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/.reuse/dep5",
+          "bytes": 417,
+          "sha256": "16c3263c9f0f55ad30b533e134f9b073535dafb6f01ac2e8dda9909ce222e0a9"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/CMakeLists.txt",
+          "bytes": 28122,
+          "sha256": "62f64611fa8d1e5db3cd9c09cb757f5d02a426838247b16a5bb8bfb3824baec5"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/README.md",
+          "bytes": 23308,
+          "sha256": "a5274d3a59afc6d3cd33cdc63be7a72000400d81be5906110d6f7cb12999d1e6"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/spirv.hpp",
+          "bytes": 311927,
+          "sha256": "2ea0dd70e12e289c77a0347dfe88b5e1b6481a70e1804fab1557423394120f9f"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/spirv.h",
+          "bytes": 320719,
+          "sha256": "62e24e3f287d612b47163350a04aa0b49822c1437be407fbe10e488b9e4adf3a"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/GLSL.std.450.h",
+          "bytes": 3073,
+          "sha256": "6f56e094663fded4435ab1d3d8c24d72adb3bf82832fc002ecf0a0d4d96543e9"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/NonSemanticShaderDebugInfo100.h",
+          "bytes": 7918,
+          "sha256": "f22e8ce116c326c81ad4d0cc99b8da7b95f8fb800de77c11f7129bd04d251299"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/spirv_cross.hpp",
+          "bytes": 53957,
+          "sha256": "503ad44a4bb5a2e71b7ac624804f2d2f9d73b73b94c2ed59593b02b165376bf8"
+        },
+        {
+          "name": "SPIRV-Cross-vulkan-sdk-1.4.357.0/spirv_cross_c.h",
+          "bytes": 55185,
+          "sha256": "8939834efb802521ad36f97f2afd83fa03a0daecbefc2124c4e56be77d126d4f"
+        }
+      ],
+      "scope_notes": "Shared C API includes core/compiler sources and bundled generated SPIR-V headers. Preserve Apache/MIT alternatives, original copyright-bearing headers, Khronos terms, and .reuse/dep5 without rewriting differing header annotations. Test/reference/doc license materials in full source do not make them runtime payload."
+    },
+    {
+      "package": "mingw-w64-x86_64-vulkan-loader",
+      "recipe_sha256": "bbd903b1b9c75d6803aaf92ecec0f1ab284e4581f3ed855f6b334ecd0c7bce7d",
+      "archive_prefix": "Vulkan-Loader-vulkan-sdk-1.4.357.0/",
+      "archive_entries": 327,
+      "internal_links": 0,
+      "files": [
+        {
+          "name": "Vulkan-Loader-1.4.357.0.tar.gz",
+          "bytes": 1820868,
+          "sha256": "54f2537df22313768da0317dda2abdaaab7711b4081c48c869a79db343d0ae70",
+          "url": "https://github.com/KhronosGroup/Vulkan-Loader/archive/vulkan-sdk-1.4.357.0/Vulkan-Loader-1.4.357.0.tar.gz",
+          "kind": "source"
+        },
+        {
+          "name": "001-fix-import-library-name.patch",
+          "bytes": 410,
+          "sha256": "3b4a05ba0d8df9cdde475fee056e8c67891ce1b02ff4ce37216beec5ae783d24",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-vulkan-loader/001-fix-import-library-name.patch",
+          "kind": "build-input"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/LICENSE.txt",
+          "bytes": 11661,
+          "sha256": "43c0a37e6a0fa7ff3c843b3ec5a4fac84b712558ddac103fbd4c1649662a9ece",
+          "package_notice": "mingw64/share/licenses/vulkan-loader/LICENSE"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/LICENSES/Apache-2.0.txt",
+          "bytes": 10280,
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/LICENSES/CC-BY-4.0.txt",
+          "bytes": 17023,
+          "sha256": "d557539df68e771cc1eedcc91d13f70fca930e508d11eedcafa4b15db49e3744"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/LICENSES/HPND-Kevlin-Henney.txt",
+          "bytes": 421,
+          "sha256": "9c73641270f020fce60e4b6aa93f56754763916517cd72d21a73527696ccd3ed"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/LICENSES/MIT-Khronos-old.txt",
+          "bytes": 1305,
+          "sha256": "fbeaca472f4f70e276dd1106ca5097435967a22ad6c1d8200aef7ad9f70aaf3f"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/LICENSES/MIT.txt",
+          "bytes": 1078,
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/REUSE.toml",
+          "bytes": 5218,
+          "sha256": "28aaffabd1db6f2d1f67b80bb14544f29763a3949bbf46da6a02913b2eea289a"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/CMakeLists.txt",
+          "bytes": 16890,
+          "sha256": "36d8c05b2ea5500bf594e9618bf015d6ff8ca5f1ff0258f4b6f137380fd4b92e"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/loader/CMakeLists.txt",
+          "bytes": 25870,
+          "sha256": "b90eae95866837d4b49d50ecdaaffc1bdef784ccd01a5afb06b3cabb478d48a7"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/loader/cJSON.c",
+          "bytes": 55513,
+          "sha256": "38b3239b34b8bf00ac0d5acffbc46456a63f0036723489e5667f35f6d1c79671"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/loader/cJSON.h",
+          "bytes": 9870,
+          "sha256": "27b4640a1cd36cb9e3da2c1e63d66ba4d70b4ace0d8d4d5b6c09cc775d6489f3"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/loader/dirent_on_windows.c",
+          "bytes": 3797,
+          "sha256": "4d4181b0018d7ddc29a866aebcc0f5a1b6574de56a3ef574b20698792b325338"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/loader/dirent_on_windows.h",
+          "bytes": 1262,
+          "sha256": "3ac29aed7e519e45b131ef5d3b7ebdd4f616424790c462811bf50755776085bc"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/loader/generated/vk_loader_extensions.h",
+          "bytes": 33145,
+          "sha256": "ee317e5edc6b2417ad7b0b00abc3e8a9cc5f27f4b39a0c9bbc5bdd543e05b0ec"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/loader/generated/vk_object_types.h",
+          "bytes": 27150,
+          "sha256": "c256d77228719e3812d3e7d6a70d7acc5478378aa315d0db2921a941a36e2567"
+        },
+        {
+          "name": "Vulkan-Loader-vulkan-sdk-1.4.357.0/scripts/known_good.json",
+          "bytes": 1369,
+          "sha256": "7db5c4f77f4a91209735550a61f6b676fff2068c83a701c3b6bf5e76d09e05e4"
+        }
+      ],
+      "scope_notes": "Windows loader source list includes bundled cJSON (MIT) and dirent_on_windows (HPND-Kevlin-Henney with additional Khronos/Valve/LunarG copyrights). Retain complete original files and REUSE mapping, not just the package's Apache root text. Header/generated-source scope is separate; original build records Vulkan-Headers 1~1.4.357.0-1. Recipe changes only import-library pkg-config suffix; no patch application or new loader build is performed."
+    },
     {
       "internal_links": 0,
       "archive_prefix": "rav1e-0.8.1/",

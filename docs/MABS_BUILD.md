@@ -18,6 +18,23 @@
 | build/media-suite_helper.sh | `fb55749ba8cf382070863259e4374b1c360792dabca9bc7fb3db32e98bd815c4` |
 | build/media-suite_update.sh | `663b6aff9d16c6c18121087f974fff972a30eb64478a3b9e325569cd7d749a48` |
 
+## 固定bootstrapの取得・検証
+
+[msys2-bootstrap-inputs.json](msys2-bootstrap-inputs.json)は日付release `2026-06-11`のx64 base SFX、上流checksum、署名、package一覧をsize/SHA256で固定する。調査時にGitHubの`releases/latest` APIはnightlyを返したため、このAPIをsetupで解決しない。
+
+```powershell
+.\scripts\get-msys2-bootstrap.ps1 -Download
+.\scripts\test-msys2-bootstrap.ps1
+```
+
+取得先はignoredな`vendor/msys2/bootstrap-20260611`。`-Download`なしはoffline検証だけであり、不足cacheは作らず失敗する。取得ありでも既存の不正cacheを上書きしない。curlの接続20秒・全体180秒上限、download一時fileのhash検証後の移動を使う。このscriptとCIは原本取得/検証だけで、SFX実行、MSYS2初期化やpackage更新を行わない。
+
+SFXは52898952 bytes、SHA256 `c105946e64e08f099ac0e4647461ce762b95333ad211777666476a9a41451d65`。ローカルで取得・hash照合し、隔離したGnuPG keyringで署名を検証した。VALIDSIGのprimary fingerprintは[公式installer文書](https://www.msys2.org/docs/installer/)の`0EBF782C5D53F7E5FB02A66746BD761F7A49B0EC`と一致し、署名subkeyは`E0AA0F031DBD80FFBA57B06D5A62D0CAB6264964`。個人keyringやtrust設定は変更していない。取得script内でGnuPG署名検証を自動実行した扱いにはしない。
+
+ローカルでは、archive全16581 entryが`msys64/`以下で、通常file/directoryだけであることを確認した。Windows tarは一覧を読めるが、BOING.WAVの7z filterを扱えず展開が失敗した。`vendor/msys2/base-20260611`は不完全な診断用展開であり使用しない。検証済みSFXの抽出だけを別の新規`vendor/msys2/base-sfx-20260611`へ実行し成功した。local package databaseの全90件の名前/versionは公式一覧と一致する。login shell、post-install、pacman、MABSはまだ実行していない。この長いpathは調査用であり、実buildには短いASCII pathを別途用意する。
+
+これはbase環境だけの固定である。追加のcompiler/FFmpeg依存packageや更新後の実効graph、全対応sourceの固定が済んだという意味ではない。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。

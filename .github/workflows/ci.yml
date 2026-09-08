@@ -50,3 +50,9 @@ jobs:
         run: |
           .\scripts\prepare-rust-runtime-notices.ps1 -Download
           .\scripts\test-rust-runtime-notices.ps1
+
+      - name: Verify pinned MSYS2 bootstrap inputs
+        shell: pwsh
+        run: |
+          .\scripts\get-msys2-bootstrap.ps1 -Download
+          .\scripts\test-msys2-bootstrap.ps1

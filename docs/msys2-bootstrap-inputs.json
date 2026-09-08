@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "release": "2026-06-11",
+  "scope": "Build-environment bootstrap only; not the complete MABS package graph or an application redistributable.",
+  "release_url": "https://github.com/msys2/msys2-installer/releases/tag/2026-06-11",
+  "signing_key_fingerprint": "0EBF782C5D53F7E5FB02A66746BD761F7A49B0EC",
+  "signing_key_source": "https://www.msys2.org/docs/installer/",
+  "files": [
+    {
+      "name": "msys2-base-x86_64-20260611.sfx.exe",
+      "asset_id": 444454841,
+      "bytes": 52898952,
+      "sha256": "c105946e64e08f099ac0e4647461ce762b95333ad211777666476a9a41451d65"
+    },
+    {
+      "name": "msys2-base-x86_64-20260611.sfx.exe.sha256",
+      "asset_id": 444454850,
+      "bytes": 101,
+      "sha256": "327f404f2cf4380c1ddcb7dbcfc780ed2bc3bdce8a42d32e5f5b05dbd7271bcd"
+    },
+    {
+      "name": "msys2-base-x86_64-20260611.sfx.exe.sig",
+      "asset_id": 444454851,
+      "bytes": 566,
+      "sha256": "446dc3d2faffc88d0fbfaff3b0fb3398e989dc84a737d511623a7557194a741d"
+    },
+    {
+      "name": "msys2-base-x86_64-20260611.packages.txt",
+      "asset_id": 444454840,
+      "bytes": 1508,
+      "sha256": "45fb386d514128291832c9cf78474d6104a8f6058197f6de370141e13f9a79bb"
+    }
+  ]
+}

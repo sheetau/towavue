@@ -223,7 +223,7 @@ installはFFmpeg DLLをstripするため、前節のbuild内fileのhashをその
 
 比較scriptは旧helperで20秒の440 Hz音、200 Hzからのlinear chirp、seed 1202のwhite noise、無音をPCM化し、その同一byte列を両helperへ渡す。11025 Hz mono／44100 Hz stereoの8条件で、algorithm 1のraw fingerprint各140 wordsが完全一致した。PATHはSystem32だけにし、各helperに隣接するDLLを使う。任意cwdでの再実行、PATH復元、同一exe指定の拒否も確認した。fixtureは毎回新規のignored directoryへ保持する。以前の単体API試験をこの結果で置き換えず、native FFmpeg経由の追加証拠とする。全入力での同値性、backendの実link由来、速度、対応source/noticeの完全性は別gateである。
 
-次は正しい全体build／staging手順の再現、packageの実link入力・対応source/noticeの確定とrelease版の媒体／性能検証を進める。helperの隣接探索はまだ実装しておらず、今回のアプリ試験も`FFMPEG_DIR`を指定している。Setup.exeや設定不要のinstall動作が確認できたとは扱わない。
+2026-09-08 14:17、正しい全体build／stagingを[固定手順](NATIVE_FFMPEG_BUILD.md)へまとめ、新しいsource/build/prefixで実行した。94-file graph、85 package DLL、機能集合、音声指紋、別Rust targetからのMSVC全268 testsを再確認した。packageの実link入力・対応source/noticeの確定とrelease版の媒体／性能検証は継続する。helperの隣接探索はまだ実装しておらず、今回のアプリ試験も`FFMPEG_DIR`を指定している。Setup.exeや設定不要のinstall動作が確認できたとは扱わない。
 
 ## Native Chromaprintの対応資料とpackage横断確認
 

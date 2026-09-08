@@ -273,6 +273,10 @@ sourceの518 entryはすべて通常file/directoryで、全461 fileを展開後�
 
 初期17-file資料はHRTF表示補完前の診断用として保持し、`native-openal-materials-v2`を今回の検証結果とする。OpenALの5通常入力と4 patchesそれぞれの欠落・同size改変拒否、任意cwdでの全file一致、既存出力保護が通った。Chromaprintの5入力試験も従来commandから成功した。生成scriptは取得・patch適用・build・binary copy・公開をしない。残る混合license packageや表示不足packageのsource対応、全体build再現・runtime/performance／Setup.exeのgateは未完了である。
 
+## Runtime全packageへの監査拡大
+
+2026-09-08、[NATIVE_RUNTIME_AUDIT.md](NATIVE_RUNTIME_AUDIT.md)へ横断監査をまとめた。94-file PE closure内の85 package DLLを、72固定archive内の実fileと全hash照合し、各packageの元build metadataと80 noticeを保持した。さらに全72 PKGBUILDを`.BUILDINFO` hashへ一致させ、43件は調査revision、29件は個別履歴revisionで固定した。改変package／parse可能な改変DLLの拒否、元入力・output・PATH保護、固定recipeの実取得とcache試験が通った。これを全source/patch/dataの完成や配布承認とは扱わない。次は同文書の不足資料とmixed-license scopeを確認する。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。

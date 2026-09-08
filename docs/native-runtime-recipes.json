@@ -1,0 +1,582 @@
+{
+    "schema_version":  1,
+    "scope":  "Exact PKGBUILD bytes identified by the 72 runtime package build records; source archives, patches, repository build infrastructure and embedded inputs require separate coverage. No recipe execution is authorized.",
+    "recipes":  [
+                    {
+                        "package":  "mingw-w64-x86_64-aom",
+                        "name":  "mingw-w64-x86_64-aom.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-aom/PKGBUILD",
+                        "bytes":  2366,
+                        "sha256":  "24de479e6fac0d9a071c32c5480b3209e92236f593016c4d93e1816e2562e9d6"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-brotli",
+                        "name":  "mingw-w64-x86_64-brotli.PKGBUILD",
+                        "revision":  "9b344635687ddaf0703725e32965f212ce40208e",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/9b344635687ddaf0703725e32965f212ce40208e/mingw-w64-brotli/PKGBUILD",
+                        "bytes":  3059,
+                        "sha256":  "894120dac11e7fffd72224148e22d424075fabf23a8cafbf4f2c5390c73755c9"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-bzip2",
+                        "name":  "mingw-w64-x86_64-bzip2.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-bzip2/PKGBUILD",
+                        "bytes":  2200,
+                        "sha256":  "a82348d211ec09835b8d77de2e98d3153831a9389cdaf6cb8cfadf711096aa24"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-chromaprint",
+                        "name":  "mingw-w64-x86_64-chromaprint.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-chromaprint/PKGBUILD",
+                        "bytes":  2014,
+                        "sha256":  "434eb5b783c1ce5f83352a7bf69853d53ba751d12f63a4417be8b0dd3ca39bd7"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-crypto++",
+                        "name":  "mingw-w64-x86_64-crypto++.PKGBUILD",
+                        "revision":  "4cedac2d1c4be287b563282162705242e4a9f1d3",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/4cedac2d1c4be287b563282162705242e4a9f1d3/mingw-w64-crypto++/PKGBUILD",
+                        "bytes":  3593,
+                        "sha256":  "e70e7330dbbd89cf77f192d3864bf287c9454109605005fc1b299ed503b9171e"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-dav1d",
+                        "name":  "mingw-w64-x86_64-dav1d.PKGBUILD",
+                        "revision":  "d4f3f5f07586f1d40ce9bad1c540da3f951c8c39",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/d4f3f5f07586f1d40ce9bad1c540da3f951c8c39/mingw-w64-dav1d/PKGBUILD",
+                        "bytes":  2125,
+                        "sha256":  "f44d69b4c2181fe1e6a6808d48a1fc92b9ea8c7bb7f7b761f0c60b562015723f"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-expat",
+                        "name":  "mingw-w64-x86_64-expat.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-expat/PKGBUILD",
+                        "bytes":  2428,
+                        "sha256":  "126c496ed77fa60cf251d222044604d8f2968393d5fe5444d902092c75086a61"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-fontconfig",
+                        "name":  "mingw-w64-x86_64-fontconfig.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-fontconfig/PKGBUILD",
+                        "bytes":  3571,
+                        "sha256":  "d4e67fa58f28fdf5fe6600f8fc474a8024e7410258fbd6f607f298ce449159fc"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-freetype",
+                        "name":  "mingw-w64-x86_64-freetype.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-freetype/PKGBUILD",
+                        "bytes":  3264,
+                        "sha256":  "6b8fb0122bf6adbb608240a000aea22b7fe2c3cf2eba533155b3a9864d1511fd"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-fribidi",
+                        "name":  "mingw-w64-x86_64-fribidi.PKGBUILD",
+                        "revision":  "1b186c7a9d46f95cd9ebb694d98297fc39ccba7a",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/1b186c7a9d46f95cd9ebb694d98297fc39ccba7a/mingw-w64-fribidi/PKGBUILD",
+                        "bytes":  1920,
+                        "sha256":  "8b0dfca7f26b9f1b7f32fef6ab348b7c7d07b2c568c1b9d75820346f026316b6"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-gcc-libs",
+                        "name":  "mingw-w64-x86_64-gcc-libs.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-gcc/PKGBUILD",
+                        "bytes":  25852,
+                        "sha256":  "226e4b4d6a5786b66eaf260181b5260934a77ee1d6548ef9d1f735ebaae30f1d"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-gettext-runtime",
+                        "name":  "mingw-w64-x86_64-gettext-runtime.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-gettext/PKGBUILD",
+                        "bytes":  8260,
+                        "sha256":  "853ef80a50588f29355722a4513f24cf1a5f8de06e0b5ee326580464db539741"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-glib2",
+                        "name":  "mingw-w64-x86_64-glib2.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-glib2/PKGBUILD",
+                        "bytes":  5284,
+                        "sha256":  "79703d0e70f2b78826985d290197499d3327fda5b65f1f725a612a1ad008544e"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-gmp",
+                        "name":  "mingw-w64-x86_64-gmp.PKGBUILD",
+                        "revision":  "19a497b647dea2939e4fe9cc2ad5818f83b1632f",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/19a497b647dea2939e4fe9cc2ad5818f83b1632f/mingw-w64-gmp/PKGBUILD",
+                        "bytes":  2288,
+                        "sha256":  "b9d3bb2b5b12cb0fc47c4dc17a9a2aa82513236eaefa34c8dfc57dd0d92bc42a"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-graphite2",
+                        "name":  "mingw-w64-x86_64-graphite2.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-graphite2/PKGBUILD",
+                        "bytes":  3934,
+                        "sha256":  "2fd68eeb0a96760c64f203506004dd0485fc588bdc0fb83684665821493df6d5"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-harfbuzz",
+                        "name":  "mingw-w64-x86_64-harfbuzz.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-harfbuzz/PKGBUILD",
+                        "bytes":  6711,
+                        "sha256":  "7cd353a89c156c434b687ca8dda859bd61c6c4e1d3d91966c12f5b5a44d39e7f"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-highway",
+                        "name":  "mingw-w64-x86_64-highway.PKGBUILD",
+                        "revision":  "82bcf47d0ae2621e1cd00fb82c8ee5db02b91955",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/82bcf47d0ae2621e1cd00fb82c8ee5db02b91955/mingw-w64-highway/PKGBUILD",
+                        "bytes":  2392,
+                        "sha256":  "f3719af88cb60e6d5d83b9ca76552bfddeae72c91c9cda1f81323ef016daa19a"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-kvazaar",
+                        "name":  "mingw-w64-x86_64-kvazaar.PKGBUILD",
+                        "revision":  "63934dd8be1a5227e299c398635cbbd21a8ba2c5",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/63934dd8be1a5227e299c398635cbbd21a8ba2c5/mingw-w64-kvazaar/PKGBUILD",
+                        "bytes":  1654,
+                        "sha256":  "0f0d1a2cc1a72d6c62ce35b1df74b898117e7a3954f60bf66949ca9ff3352449"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-lame",
+                        "name":  "mingw-w64-x86_64-lame.PKGBUILD",
+                        "revision":  "b3be8a16ab7bbbba81c1d07ae1a231f23c2e31be",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/b3be8a16ab7bbbba81c1d07ae1a231f23c2e31be/mingw-w64-lame/PKGBUILD",
+                        "bytes":  2780,
+                        "sha256":  "8ebce80af0c5f0b09006b88fdcd320a8c17d14a52e8a493004abdd1458d21453"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-lcms2",
+                        "name":  "mingw-w64-x86_64-lcms2.PKGBUILD",
+                        "revision":  "c13ff2ab5c718d63da878bb180c2cc0b5ce40dec",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/c13ff2ab5c718d63da878bb180c2cc0b5ce40dec/mingw-w64-lcms2/PKGBUILD",
+                        "bytes":  1899,
+                        "sha256":  "6f39c90313ec3f739b7406d6c7e2eb802c8aa8142323278a36d41083e765350f"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libaribcaption",
+                        "name":  "mingw-w64-x86_64-libaribcaption.PKGBUILD",
+                        "revision":  "3efb26ff574aab02f6976da3c1a4f0ecf00adf49",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/3efb26ff574aab02f6976da3c1a4f0ecf00adf49/mingw-w64-libaribcaption/PKGBUILD",
+                        "bytes":  2292,
+                        "sha256":  "01eab28e60442b62260767eda3a240a85ba7d94925321e080c95e287eb7d6b46"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libass",
+                        "name":  "mingw-w64-x86_64-libass.PKGBUILD",
+                        "revision":  "4b52fc4e3153c00e248e2e9c9fd01edfdc296232",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/4b52fc4e3153c00e248e2e9c9fd01edfdc296232/mingw-w64-libass/PKGBUILD",
+                        "bytes":  2022,
+                        "sha256":  "7a5bd281e45fe9261942c547ccc94d196b837e754d55fe7db73b713626848527"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libbluray",
+                        "name":  "mingw-w64-x86_64-libbluray.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libbluray/PKGBUILD",
+                        "bytes":  2135,
+                        "sha256":  "47f0e0b69cec5ec64738bea4f6e88702f103188f6f48acdaf1d34922e34a3212"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libdovi",
+                        "name":  "mingw-w64-x86_64-libdovi.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libdovi/PKGBUILD",
+                        "bytes":  1692,
+                        "sha256":  "9d9c7ca22ff45570a70a75123885ca3fc402c70ecc92eea356d13f2e115b615d"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libgme",
+                        "name":  "mingw-w64-x86_64-libgme.PKGBUILD",
+                        "revision":  "ecdee2b039f812db9a8a49c42067f4a99fa412da",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/ecdee2b039f812db9a8a49c42067f4a99fa412da/mingw-w64-libgme/PKGBUILD",
+                        "bytes":  1714,
+                        "sha256":  "61ee7212d0225c5f539913bc22ef54df4419042f780468c51a0c1b212cc7ad00"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libiconv",
+                        "name":  "mingw-w64-x86_64-libiconv.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libiconv/PKGBUILD",
+                        "bytes":  4906,
+                        "sha256":  "9b3212d06910560fb59e017e0b73a29d392a5082d3a47a613e61509bd7dcd475"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libjxl",
+                        "name":  "mingw-w64-x86_64-libjxl.PKGBUILD",
+                        "revision":  "9dca8325b88c4baf6123ecc52ef0bd1278e5e9e1",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/9dca8325b88c4baf6123ecc52ef0bd1278e5e9e1/mingw-w64-libjxl/PKGBUILD",
+                        "bytes":  3899,
+                        "sha256":  "6a3f9218ac292f8dd3189cfb50b7b8fc667bfad86eee7ed5681131a0f6a95fe5"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libogg",
+                        "name":  "mingw-w64-x86_64-libogg.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libogg/PKGBUILD",
+                        "bytes":  2333,
+                        "sha256":  "007f7e94f4d3a44c63a0684a8c69446b885a289eb00c12e9111aa5dc8a5e3933"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libopenmpt",
+                        "name":  "mingw-w64-x86_64-libopenmpt.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libopenmpt/PKGBUILD",
+                        "bytes":  1975,
+                        "sha256":  "eaed3ea185110bb9d39014c8b798830b077407b124ff00ba1a05ced7d1b1bf80"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libplacebo",
+                        "name":  "mingw-w64-x86_64-libplacebo.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libplacebo/PKGBUILD",
+                        "bytes":  2960,
+                        "sha256":  "db36a2a78cc154d92620201323bccb86343de4d3559834a70f8693a914a6ddf3"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libpng",
+                        "name":  "mingw-w64-x86_64-libpng.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libpng/PKGBUILD",
+                        "bytes":  3440,
+                        "sha256":  "d398f1e6ea9e549a638491308155e47e27a0953781ccce28707243f6eff29c81"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libsodium",
+                        "name":  "mingw-w64-x86_64-libsodium.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libsodium/PKGBUILD",
+                        "bytes":  1286,
+                        "sha256":  "ce4d4edb41e6f0aa1deda64510778d44d4e313bc978cb888052d58fa24d522f7"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libsoxr",
+                        "name":  "mingw-w64-x86_64-libsoxr.PKGBUILD",
+                        "revision":  "c2510aad3e0885c3e66af0f768690bd0fc6c0d8a",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/c2510aad3e0885c3e66af0f768690bd0fc6c0d8a/mingw-w64-libsoxr/PKGBUILD",
+                        "bytes":  3316,
+                        "sha256":  "6778f60a0458a04a323015ff71dd04a37e15a154649d9e0523e347555c645aa1"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libssh",
+                        "name":  "mingw-w64-x86_64-libssh.PKGBUILD",
+                        "revision":  "f530dd351563998f95b7c818d1a17f02009e5b82",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/f530dd351563998f95b7c818d1a17f02009e5b82/mingw-w64-libssh/PKGBUILD",
+                        "bytes":  2778,
+                        "sha256":  "a034ae78fc47fa516eee2336c44a99e8ddb2eb9e0e9f5ecea38219ad0fc85735"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libtheora",
+                        "name":  "mingw-w64-x86_64-libtheora.PKGBUILD",
+                        "revision":  "d544d1e54be8fb798fb881400000983fe9e912da",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/d544d1e54be8fb798fb881400000983fe9e912da/mingw-w64-libtheora/PKGBUILD",
+                        "bytes":  1686,
+                        "sha256":  "6febdba0e00b0385072bb558eb9f9ab61c12f7604571b8c18afc2274a3455f54"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libunibreak",
+                        "name":  "mingw-w64-x86_64-libunibreak.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libunibreak/PKGBUILD",
+                        "bytes":  1595,
+                        "sha256":  "855faf71cc7952b983ed9cf45d7b6dda8f041af53a30322f27382a13d315c65c"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libva",
+                        "name":  "mingw-w64-x86_64-libva.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libva/PKGBUILD",
+                        "bytes":  2161,
+                        "sha256":  "a6e16da012c8fd4d900e114c6430ca1f5ae25fc7da27d69bce74a4cd67251376"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libvorbis",
+                        "name":  "mingw-w64-x86_64-libvorbis.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libvorbis/PKGBUILD",
+                        "bytes":  1119,
+                        "sha256":  "38f4410bcfba376befc9031b4c204e9abc1d5949d2e617c53497cdb19db5316a"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libvpl",
+                        "name":  "mingw-w64-x86_64-libvpl.PKGBUILD",
+                        "revision":  "6b0a4b9cab8a1dd3c2d8cb9ba9e7b119c272b6b5",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/6b0a4b9cab8a1dd3c2d8cb9ba9e7b119c272b6b5/mingw-w64-libvpl/PKGBUILD",
+                        "bytes":  3015,
+                        "sha256":  "25e2112ac24d70e385bdf6b2152d3c362f0b590dcd1eff6c07bed79c5bf5be65"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libvpx",
+                        "name":  "mingw-w64-x86_64-libvpx.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libvpx/PKGBUILD",
+                        "bytes":  2667,
+                        "sha256":  "ec57aa54095093c69364d4870f84176a6470ff6eed74bea64954ed4ebec74592"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libwebp",
+                        "name":  "mingw-w64-x86_64-libwebp.PKGBUILD",
+                        "revision":  "b51e3e923e17c2f17a5f6feebe98d0e2fab25e23",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/b51e3e923e17c2f17a5f6feebe98d0e2fab25e23/mingw-w64-libwebp/PKGBUILD",
+                        "bytes":  3282,
+                        "sha256":  "d15596f0825cbace1453462ab406b1d1ec6ac12be21d1d5655a17c22656318e1"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libwinpthread",
+                        "name":  "mingw-w64-x86_64-libwinpthread.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-winpthreads/PKGBUILD",
+                        "bytes":  4484,
+                        "sha256":  "21c15283bebaea1732dda66c046cf75ce3763f6b1ba6feb95969182a138687df"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-libxml2",
+                        "name":  "mingw-w64-x86_64-libxml2.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libxml2/PKGBUILD",
+                        "bytes":  5129,
+                        "sha256":  "05fa27f6ce261f7c5ca58a57f0f346fd25b45bb97a4e10ffd3d7be2334a9cb09"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-lilv",
+                        "name":  "mingw-w64-x86_64-lilv.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-lilv/PKGBUILD",
+                        "bytes":  1916,
+                        "sha256":  "a76dda2d7676282e72ee3ba7d6e51157fb307344d43355b3941d3f3fefe0220e"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-lz4",
+                        "name":  "mingw-w64-x86_64-lz4.PKGBUILD",
+                        "revision":  "26b20edb402699905eeb07184038e4f1915b2d5b",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/26b20edb402699905eeb07184038e4f1915b2d5b/mingw-w64-lz4/PKGBUILD",
+                        "bytes":  1376,
+                        "sha256":  "e8780f865620673525e38b992561193c841a9927ac4f81d8b3f5f6ce0534f0a4"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-mpg123",
+                        "name":  "mingw-w64-x86_64-mpg123.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-mpg123/PKGBUILD",
+                        "bytes":  1855,
+                        "sha256":  "408c256745a669d0bcf5bdf3a93278dbf776c0b0f6d0106ff0d816184fd41d11"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-openal",
+                        "name":  "mingw-w64-x86_64-openal.PKGBUILD",
+                        "revision":  "3da1e4e9f763ce05ebf2c0e244dcf3e66f44bb66",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/3da1e4e9f763ce05ebf2c0e244dcf3e66f44bb66/mingw-w64-openal/PKGBUILD",
+                        "bytes":  3353,
+                        "sha256":  "18af836318e047249589a2df8af950a792f5512bc21923b9470f5902abf6414a"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-opencl-icd",
+                        "name":  "mingw-w64-x86_64-opencl-icd.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-opencl-icd/PKGBUILD",
+                        "bytes":  1546,
+                        "sha256":  "5efc21b2d3345afb8d668f3f50964db445db4c609cf28670608b1db78fb03136"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-opencore-amr",
+                        "name":  "mingw-w64-x86_64-opencore-amr.PKGBUILD",
+                        "revision":  "1e192c8e73903e7b31631cb20985ad4e10a3a134",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/1e192c8e73903e7b31631cb20985ad4e10a3a134/mingw-w64-opencore-amr/PKGBUILD",
+                        "bytes":  1283,
+                        "sha256":  "bc9705ceb1778361f49feaae30b3a895a92679125a31c9447aaa8b8d9d809edc"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-openh264",
+                        "name":  "mingw-w64-x86_64-openh264.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-openh264/PKGBUILD",
+                        "bytes":  2295,
+                        "sha256":  "90f24f363abae09bf91d4a7d724970c2725e2551ad490fcec01f41e99a54b3b4"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-openjpeg2",
+                        "name":  "mingw-w64-x86_64-openjpeg2.PKGBUILD",
+                        "revision":  "04c47e52b6a95a3bec8211a7acaa20f18c7cffce",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/04c47e52b6a95a3bec8211a7acaa20f18c7cffce/mingw-w64-openjpeg2/PKGBUILD",
+                        "bytes":  4197,
+                        "sha256":  "8901865f116d6eaa71bb2ff14dcaaa9a301185fd5cf62408d73dcfd2901c8334"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-openssl",
+                        "name":  "mingw-w64-x86_64-openssl.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-openssl/PKGBUILD",
+                        "bytes":  3815,
+                        "sha256":  "0f29edf384ee561bfe195608f4dbbb4231695af7958e326292034b264bc5faf1"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-opus",
+                        "name":  "mingw-w64-x86_64-opus.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-opus/PKGBUILD",
+                        "bytes":  2499,
+                        "sha256":  "8083c9d501119e6ecf4ed7cd6b9a19eae65127aa8fd32c41b795aff1c47546b9"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-pcre2",
+                        "name":  "mingw-w64-x86_64-pcre2.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-pcre2/PKGBUILD",
+                        "bytes":  2860,
+                        "sha256":  "0b94fbb011bf5f78960beb73e5c8d0fd026bace4bd671ca1ee22a3e373706107"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-rav1e",
+                        "name":  "mingw-w64-x86_64-rav1e.PKGBUILD",
+                        "revision":  "e40c44b5845788d409b0add8fd86d1d6b64961c6",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/e40c44b5845788d409b0add8fd86d1d6b64961c6/mingw-w64-rav1e/PKGBUILD",
+                        "bytes":  2024,
+                        "sha256":  "25fb776e94e0c78d303840121c696a80b8ad8aff798c778bce0d7f3f25ff942b"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-serd",
+                        "name":  "mingw-w64-x86_64-serd.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-serd/PKGBUILD",
+                        "bytes":  1756,
+                        "sha256":  "cb4cc488c8303789058ad3e3cf425106abe57dbc75c6f08203f45da069f6bc02"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-shaderc",
+                        "name":  "mingw-w64-x86_64-shaderc.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-shaderc/PKGBUILD",
+                        "bytes":  3186,
+                        "sha256":  "c0269897415c571bd069446ca78a73ed9f600b2603be134aba122e8051f8b1b1"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-snappy",
+                        "name":  "mingw-w64-x86_64-snappy.PKGBUILD",
+                        "revision":  "214f4a2a9f3a6d8e1b7b85f4ba6bdec0cbf8487c",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/214f4a2a9f3a6d8e1b7b85f4ba6bdec0cbf8487c/mingw-w64-snappy/PKGBUILD",
+                        "bytes":  2970,
+                        "sha256":  "8a8c5a4863052e562f85dbf2364d5f198d9e13726f82da90a4188ea1f6e6f49f"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-sord",
+                        "name":  "mingw-w64-x86_64-sord.PKGBUILD",
+                        "revision":  "b69b74f1e20401fd3014155a2c549e5ea3978d1c",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/b69b74f1e20401fd3014155a2c549e5ea3978d1c/mingw-w64-sord/PKGBUILD",
+                        "bytes":  1832,
+                        "sha256":  "0540b52f1ac66bcad4c3c80da1baab2858cc2e926e6c23fb3f6a511567271c10"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-spirv-cross",
+                        "name":  "mingw-w64-x86_64-spirv-cross.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-spirv-cross/PKGBUILD",
+                        "bytes":  2415,
+                        "sha256":  "a21a1b6ad2fba87a56ec62e289d3356a96937e80ec22c5afd7edf089120c0356"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-sratom",
+                        "name":  "mingw-w64-x86_64-sratom.PKGBUILD",
+                        "revision":  "e74976859f1745a72796c2a255791ec9fc5f6050",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/e74976859f1745a72796c2a255791ec9fc5f6050/mingw-w64-sratom/PKGBUILD",
+                        "bytes":  1715,
+                        "sha256":  "aa40caa0f331b0f628f427a04cc85760c94cd31229e2c4b2a4e69544619afa72"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-srt",
+                        "name":  "mingw-w64-x86_64-srt.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-srt/PKGBUILD",
+                        "bytes":  2060,
+                        "sha256":  "d19531282e69ec583125a645bbd9e3d3638ff7a323a58bf138421d7a063b7694"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-svt-av1",
+                        "name":  "mingw-w64-x86_64-svt-av1.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-svt-av1/PKGBUILD",
+                        "bytes":  2146,
+                        "sha256":  "008773202e39d8c0e6a635bb5df48ffbdef4c9e9bacbe746fd11277e4ee33ef8"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-twolame",
+                        "name":  "mingw-w64-x86_64-twolame.PKGBUILD",
+                        "revision":  "333b732cd6c0c337f7f04e25a3b97414f046c820",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/333b732cd6c0c337f7f04e25a3b97414f046c820/mingw-w64-twolame/PKGBUILD",
+                        "bytes":  1721,
+                        "sha256":  "2a272ac1bbe6af4113d10c105e007f8b7d207ec78b794ee7e6c2c39ca150ecaa"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-vmaf",
+                        "name":  "mingw-w64-x86_64-vmaf.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-vmaf/PKGBUILD",
+                        "bytes":  1820,
+                        "sha256":  "bcc78fae65e0dacb989bbb127ce89c6a2deb825fad78e0bb8761ff2c60fa6995"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-vulkan-loader",
+                        "name":  "mingw-w64-x86_64-vulkan-loader.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-vulkan-loader/PKGBUILD",
+                        "bytes":  2673,
+                        "sha256":  "bbd903b1b9c75d6803aaf92ecec0f1ab284e4581f3ed855f6b334ecd0c7bce7d"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-xz",
+                        "name":  "mingw-w64-x86_64-xz.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-xz/PKGBUILD",
+                        "bytes":  2198,
+                        "sha256":  "4a55743c0aec144772fd72c5e4a3aa25a729a359516ee0ed793c3d943a31d80d"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-zeromq",
+                        "name":  "mingw-w64-x86_64-zeromq.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-zeromq/PKGBUILD",
+                        "bytes":  1949,
+                        "sha256":  "2193e74c9e5f8abfaa530181e7e2d266cb5d7f3cb3becb87ba3a20ee17743959"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-zimg",
+                        "name":  "mingw-w64-x86_64-zimg.PKGBUILD",
+                        "revision":  "82bcf47d0ae2621e1cd00fb82c8ee5db02b91955",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/82bcf47d0ae2621e1cd00fb82c8ee5db02b91955/mingw-w64-zimg/PKGBUILD",
+                        "bytes":  1620,
+                        "sha256":  "e604ad47fa3e87e49632d3b1bc889efca30b296e4f8a05905252ac47996c514f"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-zix",
+                        "name":  "mingw-w64-x86_64-zix.PKGBUILD",
+                        "revision":  "b92a64462051b7494e00d748ba5e15d9a63fc1c9",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/b92a64462051b7494e00d748ba5e15d9a63fc1c9/mingw-w64-zix/PKGBUILD",
+                        "bytes":  1731,
+                        "sha256":  "8730ee28350ffd24d054f43532cc995e3fdb2633f9b937f995a5aa0cb59e4d0e"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-zlib",
+                        "name":  "mingw-w64-x86_64-zlib.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-zlib/PKGBUILD",
+                        "bytes":  4262,
+                        "sha256":  "8a4a54a964eab7efa313e2faa8267052bc237ef61f8adf82a55cc93f4028db8a"
+                    },
+                    {
+                        "package":  "mingw-w64-x86_64-zvbi",
+                        "name":  "mingw-w64-x86_64-zvbi.PKGBUILD",
+                        "revision":  "052099e63e69816e35b05f28c852a5209c4dd1e0",
+                        "url":  "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-zvbi/PKGBUILD",
+                        "bytes":  1758,
+                        "sha256":  "94cc0edc934b571b33168a95a748396fd3e88f2072831ed81a41d1b20a04d1f6"
+                    }
+                ]
+}

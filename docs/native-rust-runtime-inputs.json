@@ -1,0 +1,3220 @@
+{
+  "schema_version": 1,
+  "scope": "Original MSYS2 Rust runtime/source-package documents, build inputs and full 1.87 library-lock crate materials. Not a linked SBOM, complete compiler source/rebuild kit, historical GNU unit graph, license/patent clearance or distribution approval. Compiler binary packages are inputs only, never copied to output.",
+  "evidence": {
+    "signature_key": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57",
+    "signature_scope": "All four package signatures verified using the existing MSYS2 public keyring with gpgv; collector performs offline byte checks, not renewed signature verification.",
+    "library_notice_sha256": "592ea218c47b2b50c8d8c53bf44512856fc93942e6686cca55e64311363681c0",
+    "library_notice_limit": "Both package COPYRIGHT-library.html files are identical and their out-of-tree dependency sections are empty. Retain unchanged, never treat them as complete dependency notices.",
+    "rust187_lock_scope": "All 42 registry entries, including other targets and test/build dependencies. Source-lock inventory, not Windows linked-code selection.",
+    "builtins187": {
+      "version": "0.1.152",
+      "crate_vcs_commit": "52d96c47681ef504a8ad7398efffe53214898aab",
+      "libm_submodule_commit": "69219c491ee9f05761d2068fd6d4c7c0de6faa3a",
+      "notice_basis": "Root notice from crate VCS commit; libm notice from its recorded submodule. Crate omits standalone license files; original source math headers are retained in the full archive."
+    },
+    "remaining_scope": "Original GNU-host crate selection, individual inline/generated notices, and non-Rust compiler/CRT/static inputs remain separate checks. Fortanix SGX and r-efi/r-efi-alloc source archives are retained without claiming that their absent standalone license documents have been resolved."
+  },
+  "toolchains": [
+    {
+      "used_by": "rav1e",
+      "build_rust_package": "mingw-w64-x86_64-rust-1.87.0-2-any",
+      "version": "1.87.0-2",
+      "recipe": "rust-1.87.0-2.PKGBUILD",
+      "recipe_commit": "301c64f3dd42962143bc7679e088b00c7ed2636f",
+      "source_release": {
+        "url": "https://static.rust-lang.org/dist/rustc-1.87.0-src.tar.gz",
+        "sha256": "149bb9fd29be592da4e87900fc68f0629a37bf6850b46339dd44434c04fd8e76",
+        "collected": false
+      },
+      "recipe_inputs": [
+        "recipe-inputs-1.87.0-2/0001-rustc-llvm-fix-libs.patch",
+        "recipe-inputs-1.87.0-2/0004-compiler-Use-wasm-ld-for-wasm-targets.patch",
+        "recipe-inputs-1.87.0-2/0008-disable-self-contained-for-gnu-targets.patch",
+        "recipe-inputs-1.87.0-2/bootstrap.toml"
+      ]
+    },
+    {
+      "used_by": "libdovi",
+      "build_rust_package": "mingw-w64-x86_64-rust-1.97.0-1-any",
+      "version": "1.97.0-1",
+      "recipe": "rust-1.97.0-1.PKGBUILD",
+      "recipe_commit": "a2b4aa07f355fd36922c3318f7584c8d77146899",
+      "source_release": {
+        "url": "https://static.rust-lang.org/dist/rustc-1.97.0-src.tar.xz",
+        "sha256": "de002ee301c1b7422b0a7b09d7c4cb4924cd3224e6cfb24f065dad786dd3ed12",
+        "collected": false
+      },
+      "recipe_inputs": [
+        "recipe-inputs-1.97.0-1/0002-bootstrap-Change-bash-completion-dir.patch",
+        "recipe-inputs-1.97.0-1/0004-compiler-Use-wasm-ld-for-wasm-targets.patch",
+        "recipe-inputs-1.97.0-1/0008-disable-self-contained-for-gnu-targets.patch",
+        "recipe-inputs-1.97.0-1/0016-allow-shared-llvm-for-all.patch",
+        "recipe-inputs-1.97.0-1/0017-enable-native-tls-for-gcc-envs.patch",
+        "recipe-inputs-1.97.0-1/bootstrap-wasm.toml",
+        "recipe-inputs-1.97.0-1/bootstrap.toml"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "name": "mingw-w64-x86_64-rust-1.87.0-2-any.pkg.tar.zst",
+      "bytes": 87275845,
+      "sha256": "3c4ef7e2604aefaea4a9d166179c2615a0021d25bc23fec23811535eaf2faa6f",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rust-1.87.0-2-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-rust-1.87.0-2-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "c45a866dbe9d4afa1783ac3dcd8fee7f4d5ee52e5b666c149015ec8db74377b1",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rust-1.87.0-2-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "mingw-w64-x86_64-rust-src-1.87.0-2-any.pkg.tar.zst",
+      "bytes": 3295909,
+      "sha256": "28802c18142f167254f525ea77f4c9e7be00cac8760ea6da5297625e0e9977a7",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rust-src-1.87.0-2-any.pkg.tar.zst",
+      "output": "sources/mingw-w64-x86_64-rust-src-1.87.0-2-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-rust-src-1.87.0-2-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "daf0d9d42309bd555b7fc4ae2117d11274ed60d30a9df0a3e3e8e507d282d306",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rust-src-1.87.0-2-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "rust-1.87.0-2.PKGBUILD",
+      "bytes": 11445,
+      "sha256": "d3c06b5a2a762993c7a7f9a6aec10473131cfee38f4b6891cb663ec64e0c8a68",
+      "output": "build/rust-1.87.0-2.PKGBUILD",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/301c64f3dd42962143bc7679e088b00c7ed2636f/mingw-w64-rust/PKGBUILD"
+    },
+    {
+      "name": "recipe-inputs-1.87.0-2/0001-rustc-llvm-fix-libs.patch",
+      "bytes": 494,
+      "sha256": "7cb1773c288ffb1c1e751edc49b1890c84bf9c362742bc5225d19d474edb73a0",
+      "output": "build/recipe-inputs-1.87.0-2/0001-rustc-llvm-fix-libs.patch",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/301c64f3dd42962143bc7679e088b00c7ed2636f/mingw-w64-rust/0001-rustc-llvm-fix-libs.patch"
+    },
+    {
+      "name": "recipe-inputs-1.87.0-2/0004-compiler-Use-wasm-ld-for-wasm-targets.patch",
+      "bytes": 944,
+      "sha256": "56882f1a0f1404c10c7726d6cc37444f2b343e72b969badfcb43760f80db0f32",
+      "output": "build/recipe-inputs-1.87.0-2/0004-compiler-Use-wasm-ld-for-wasm-targets.patch",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/301c64f3dd42962143bc7679e088b00c7ed2636f/mingw-w64-rust/0004-compiler-Use-wasm-ld-for-wasm-targets.patch"
+    },
+    {
+      "name": "recipe-inputs-1.87.0-2/0008-disable-self-contained-for-gnu-targets.patch",
+      "bytes": 540,
+      "sha256": "87b68c2dfbe996d3ef439278e1ac90997fc4ea192f449e8f00262360a551386a",
+      "output": "build/recipe-inputs-1.87.0-2/0008-disable-self-contained-for-gnu-targets.patch",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/301c64f3dd42962143bc7679e088b00c7ed2636f/mingw-w64-rust/0008-disable-self-contained-for-gnu-targets.patch"
+    },
+    {
+      "name": "recipe-inputs-1.87.0-2/bootstrap.toml",
+      "bytes": 3266,
+      "sha256": "4450ad9b3acd4cb694f1b4356545aabdbc1074fadba01c5f6f09639c2d94f786",
+      "output": "build/recipe-inputs-1.87.0-2/bootstrap.toml",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/301c64f3dd42962143bc7679e088b00c7ed2636f/mingw-w64-rust/bootstrap.toml"
+    },
+    {
+      "name": "mingw-w64-x86_64-rust-1.97.0-1-any.pkg.tar.zst",
+      "bytes": 67473155,
+      "sha256": "2a15f760cf541d3bb8b129d44c7f363a9692f1ce78d94840b4ec84ee477aaecb",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rust-1.97.0-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-rust-1.97.0-1-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "db3567dc765c917eae0114b96913d6d506570d07caebbd2ae42257879db6dd32",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rust-1.97.0-1-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "mingw-w64-x86_64-rust-src-1.97.0-1-any.pkg.tar.zst",
+      "bytes": 6046197,
+      "sha256": "aee3169920fcc5b6e7bf425f419dc5ee7a4ce72c3c36d5f20f56387f5edcf300",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rust-src-1.97.0-1-any.pkg.tar.zst",
+      "output": "sources/mingw-w64-x86_64-rust-src-1.97.0-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-rust-src-1.97.0-1-any.pkg.tar.zst.sig",
+      "bytes": 566,
+      "sha256": "5326a5cd7edcbbb67d0a183211d0a793f1698db362b66dbb5cb6d4cf4f7645b6",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rust-src-1.97.0-1-any.pkg.tar.zst.sig"
+    },
+    {
+      "name": "rust-1.97.0-1.PKGBUILD",
+      "bytes": 10882,
+      "sha256": "4dc096d171145a54e716c59498934d6ec3366c88d7f2a79badb695f6431aea0b",
+      "output": "build/rust-1.97.0-1.PKGBUILD",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/a2b4aa07f355fd36922c3318f7584c8d77146899/mingw-w64-rust/PKGBUILD"
+    },
+    {
+      "name": "recipe-inputs-1.97.0-1/0002-bootstrap-Change-bash-completion-dir.patch",
+      "bytes": 985,
+      "sha256": "db5d0dbeaaab5bd22c71ef35d1978960dd7e79cc153e5eeb72a5f635255991de",
+      "output": "build/recipe-inputs-1.97.0-1/0002-bootstrap-Change-bash-completion-dir.patch",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/a2b4aa07f355fd36922c3318f7584c8d77146899/mingw-w64-rust/0002-bootstrap-Change-bash-completion-dir.patch"
+    },
+    {
+      "name": "recipe-inputs-1.97.0-1/0004-compiler-Use-wasm-ld-for-wasm-targets.patch",
+      "bytes": 944,
+      "sha256": "56882f1a0f1404c10c7726d6cc37444f2b343e72b969badfcb43760f80db0f32",
+      "output": "build/recipe-inputs-1.97.0-1/0004-compiler-Use-wasm-ld-for-wasm-targets.patch",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/a2b4aa07f355fd36922c3318f7584c8d77146899/mingw-w64-rust/0004-compiler-Use-wasm-ld-for-wasm-targets.patch"
+    },
+    {
+      "name": "recipe-inputs-1.97.0-1/0008-disable-self-contained-for-gnu-targets.patch",
+      "bytes": 545,
+      "sha256": "767db21e86364eb6777404ba6eee94133b5878ad42fa34afa9aea641ab533759",
+      "output": "build/recipe-inputs-1.97.0-1/0008-disable-self-contained-for-gnu-targets.patch",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/a2b4aa07f355fd36922c3318f7584c8d77146899/mingw-w64-rust/0008-disable-self-contained-for-gnu-targets.patch"
+    },
+    {
+      "name": "recipe-inputs-1.97.0-1/0016-allow-shared-llvm-for-all.patch",
+      "bytes": 448,
+      "sha256": "691f9dcaeb8a340fd279eea1d54a9077305e0a74a32d8cf020a85e50b1956553",
+      "output": "build/recipe-inputs-1.97.0-1/0016-allow-shared-llvm-for-all.patch",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/a2b4aa07f355fd36922c3318f7584c8d77146899/mingw-w64-rust/0016-allow-shared-llvm-for-all.patch"
+    },
+    {
+      "name": "recipe-inputs-1.97.0-1/0017-enable-native-tls-for-gcc-envs.patch",
+      "bytes": 518,
+      "sha256": "45e4f00d325e6d2110198526df1919ae760b050eef85b9d6f3f88b79115b29da",
+      "output": "build/recipe-inputs-1.97.0-1/0017-enable-native-tls-for-gcc-envs.patch",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/a2b4aa07f355fd36922c3318f7584c8d77146899/mingw-w64-rust/0017-enable-native-tls-for-gcc-envs.patch"
+    },
+    {
+      "name": "recipe-inputs-1.97.0-1/bootstrap-wasm.toml",
+      "bytes": 3252,
+      "sha256": "3dcac012fea5051cc080c0e841492d848056ea8bd19e80d6527fb7acec88784d",
+      "output": "build/recipe-inputs-1.97.0-1/bootstrap-wasm.toml",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/a2b4aa07f355fd36922c3318f7584c8d77146899/mingw-w64-rust/bootstrap-wasm.toml"
+    },
+    {
+      "name": "recipe-inputs-1.97.0-1/bootstrap.toml",
+      "bytes": 1979,
+      "sha256": "142fbd0821a3c04a0350a037496173dfba5e109cc42032719c1fde541258ddad",
+      "output": "build/recipe-inputs-1.97.0-1/bootstrap.toml",
+      "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/a2b4aa07f355fd36922c3318f7584c8d77146899/mingw-w64-rust/bootstrap.toml"
+    },
+    {
+      "name": "upstream-notices/compiler-builtins-0.1.152-LICENSE.txt",
+      "bytes": 14757,
+      "sha256": "789f172b2ebcfdd6ce9f0ef16763615c07d04fd1e0d352f7ce39c927d308de64",
+      "output": "upstream-notices/compiler-builtins-0.1.152-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/rust-lang/compiler-builtins/52d96c47681ef504a8ad7398efffe53214898aab/LICENSE.txt"
+    },
+    {
+      "name": "upstream-notices/libm-69219c49-LICENSE.txt",
+      "bytes": 14088,
+      "sha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7",
+      "output": "upstream-notices/libm-69219c49-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/rust-lang/libm/69219c491ee9f05761d2068fd6d4c7c0de6faa3a/LICENSE.txt"
+    },
+    {
+      "name": "std-1.87-crates/addr2line-0.24.2.crate",
+      "bytes": 39015,
+      "sha256": "dfbe277e56a376000877090da837660b4427aad530e3028d44e0bffe4f89a1c1",
+      "url": "https://static.crates.io/crates/addr2line/addr2line-0.24.2.crate",
+      "output": "std-1.87-crates/addr2line-0.24.2.crate"
+    },
+    {
+      "name": "std-1.87-crates/adler2-2.0.0.crate",
+      "bytes": 13529,
+      "sha256": "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627",
+      "url": "https://static.crates.io/crates/adler2/adler2-2.0.0.crate",
+      "output": "std-1.87-crates/adler2-2.0.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/allocator-api2-0.2.21.crate",
+      "bytes": 63622,
+      "sha256": "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923",
+      "url": "https://static.crates.io/crates/allocator-api2/allocator-api2-0.2.21.crate",
+      "output": "std-1.87-crates/allocator-api2-0.2.21.crate"
+    },
+    {
+      "name": "std-1.87-crates/cc-1.2.0.crate",
+      "bytes": 92640,
+      "sha256": "1aeb932158bd710538c73702db6945cb68a8fb08c519e6e12706b94263b36db8",
+      "url": "https://static.crates.io/crates/cc/cc-1.2.0.crate",
+      "output": "std-1.87-crates/cc-1.2.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/cfg-if-1.0.0.crate",
+      "bytes": 7934,
+      "sha256": "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd",
+      "url": "https://static.crates.io/crates/cfg-if/cfg-if-1.0.0.crate",
+      "output": "std-1.87-crates/cfg-if-1.0.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/compiler_builtins-0.1.152.crate",
+      "bytes": 224321,
+      "sha256": "2153cf213eb259361567720ce55f6446f17acd0ccca87fb6dc05360578228a58",
+      "url": "https://static.crates.io/crates/compiler_builtins/compiler_builtins-0.1.152.crate",
+      "output": "std-1.87-crates/compiler_builtins-0.1.152.crate"
+    },
+    {
+      "name": "std-1.87-crates/dlmalloc-0.2.7.crate",
+      "bytes": 84295,
+      "sha256": "d9b5e0d321d61de16390ed273b647ce51605b575916d3c25e6ddf27a1e140035",
+      "url": "https://static.crates.io/crates/dlmalloc/dlmalloc-0.2.7.crate",
+      "output": "std-1.87-crates/dlmalloc-0.2.7.crate"
+    },
+    {
+      "name": "std-1.87-crates/fortanix-sgx-abi-0.5.0.crate",
+      "bytes": 13334,
+      "sha256": "57cafc2274c10fab234f176b25903ce17e690fca7597090d50880e047a0389c5",
+      "url": "https://static.crates.io/crates/fortanix-sgx-abi/fortanix-sgx-abi-0.5.0.crate",
+      "output": "std-1.87-crates/fortanix-sgx-abi-0.5.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/getopts-0.2.21.crate",
+      "bytes": 18457,
+      "sha256": "14dbbfd5c71d70241ecf9e6f13737f7b5ce823821063188d7e46c41d371eebd5",
+      "url": "https://static.crates.io/crates/getopts/getopts-0.2.21.crate",
+      "output": "std-1.87-crates/getopts-0.2.21.crate"
+    },
+    {
+      "name": "std-1.87-crates/gimli-0.31.1.crate",
+      "bytes": 279515,
+      "sha256": "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f",
+      "url": "https://static.crates.io/crates/gimli/gimli-0.31.1.crate",
+      "output": "std-1.87-crates/gimli-0.31.1.crate"
+    },
+    {
+      "name": "std-1.87-crates/hashbrown-0.15.2.crate",
+      "bytes": 138478,
+      "sha256": "bf151400ff0baff5465007dd2f3e717f3fe502074ca563069ce3a6629d07b289",
+      "url": "https://static.crates.io/crates/hashbrown/hashbrown-0.15.2.crate",
+      "output": "std-1.87-crates/hashbrown-0.15.2.crate"
+    },
+    {
+      "name": "std-1.87-crates/hermit-abi-0.5.0.crate",
+      "bytes": 17480,
+      "sha256": "fbd780fe5cc30f81464441920d82ac8740e2e46b29a6fad543ddd075229ce37e",
+      "url": "https://static.crates.io/crates/hermit-abi/hermit-abi-0.5.0.crate",
+      "output": "std-1.87-crates/hermit-abi-0.5.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/libc-0.2.171.crate",
+      "bytes": 785246,
+      "sha256": "c19937216e9d3aa9956d9bb8dfc0b0c8beb6058fc4f7a4dc4d850edf86a237d6",
+      "url": "https://static.crates.io/crates/libc/libc-0.2.171.crate",
+      "output": "std-1.87-crates/libc-0.2.171.crate"
+    },
+    {
+      "name": "std-1.87-crates/memchr-2.7.4.crate",
+      "bytes": 96670,
+      "sha256": "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3",
+      "url": "https://static.crates.io/crates/memchr/memchr-2.7.4.crate",
+      "output": "std-1.87-crates/memchr-2.7.4.crate"
+    },
+    {
+      "name": "std-1.87-crates/miniz_oxide-0.8.3.crate",
+      "bytes": 61827,
+      "sha256": "b8402cab7aefae129c6977bb0ff1b8fd9a04eb5b51efc50a70bea51cda0c7924",
+      "url": "https://static.crates.io/crates/miniz_oxide/miniz_oxide-0.8.3.crate",
+      "output": "std-1.87-crates/miniz_oxide-0.8.3.crate"
+    },
+    {
+      "name": "std-1.87-crates/object-0.36.7.crate",
+      "bytes": 329938,
+      "sha256": "62948e14d923ea95ea2c7c86c71013138b66525b86bdc08d2dcc262bdb497b87",
+      "url": "https://static.crates.io/crates/object/object-0.36.7.crate",
+      "output": "std-1.87-crates/object-0.36.7.crate"
+    },
+    {
+      "name": "std-1.87-crates/proc-macro2-1.0.93.crate",
+      "bytes": 52388,
+      "sha256": "60946a68e5f9d28b0dc1c21bb8a97ee7d018a8b322fa57838ba31cc878e22d99",
+      "url": "https://static.crates.io/crates/proc-macro2/proc-macro2-1.0.93.crate",
+      "output": "std-1.87-crates/proc-macro2-1.0.93.crate"
+    },
+    {
+      "name": "std-1.87-crates/quote-1.0.38.crate",
+      "bytes": 31252,
+      "sha256": "0e4dccaaaf89514f546c693ddc140f729f958c247918a13380cccc6078391acc",
+      "url": "https://static.crates.io/crates/quote/quote-1.0.38.crate",
+      "output": "std-1.87-crates/quote-1.0.38.crate"
+    },
+    {
+      "name": "std-1.87-crates/r-efi-4.5.0.crate",
+      "bytes": 63921,
+      "sha256": "e9e935efc5854715dfc0a4c9ef18dc69dee0ec3bf9cc3ab740db831c0fdd86a3",
+      "url": "https://static.crates.io/crates/r-efi/r-efi-4.5.0.crate",
+      "output": "std-1.87-crates/r-efi-4.5.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/r-efi-alloc-1.0.0.crate",
+      "bytes": 13351,
+      "sha256": "31d6f09fe2b6ad044bc3d2c34ce4979796581afd2f1ebc185837e02421e02fd7",
+      "url": "https://static.crates.io/crates/r-efi-alloc/r-efi-alloc-1.0.0.crate",
+      "output": "std-1.87-crates/r-efi-alloc-1.0.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/rand-0.9.0.crate",
+      "bytes": 97798,
+      "sha256": "3779b94aeb87e8bd4e834cee3650289ee9e0d5677f976ecdb6d219e5f4f6cd94",
+      "url": "https://static.crates.io/crates/rand/rand-0.9.0.crate",
+      "output": "std-1.87-crates/rand-0.9.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/rand_core-0.9.0.crate",
+      "bytes": 23441,
+      "sha256": "b08f3c9802962f7e1b25113931d94f43ed9725bebc59db9d0c3e9a23b67e15ff",
+      "url": "https://static.crates.io/crates/rand_core/rand_core-0.9.0.crate",
+      "output": "std-1.87-crates/rand_core-0.9.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/rand_xorshift-0.4.0.crate",
+      "bytes": 10262,
+      "sha256": "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a",
+      "url": "https://static.crates.io/crates/rand_xorshift/rand_xorshift-0.4.0.crate",
+      "output": "std-1.87-crates/rand_xorshift-0.4.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/rustc-demangle-0.1.24.crate",
+      "bytes": 29047,
+      "sha256": "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f",
+      "url": "https://static.crates.io/crates/rustc-demangle/rustc-demangle-0.1.24.crate",
+      "output": "std-1.87-crates/rustc-demangle-0.1.24.crate"
+    },
+    {
+      "name": "std-1.87-crates/shlex-1.3.0.crate",
+      "bytes": 18713,
+      "sha256": "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64",
+      "url": "https://static.crates.io/crates/shlex/shlex-1.3.0.crate",
+      "output": "std-1.87-crates/shlex-1.3.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/syn-2.0.98.crate",
+      "bytes": 297807,
+      "sha256": "36147f1a48ae0ec2b5b3bc5b537d267457555a10dc06f3dbc8cb11ba3006d3b1",
+      "url": "https://static.crates.io/crates/syn/syn-2.0.98.crate",
+      "output": "std-1.87-crates/syn-2.0.98.crate"
+    },
+    {
+      "name": "std-1.87-crates/unicode-ident-1.0.16.crate",
+      "bytes": 47684,
+      "sha256": "a210d160f08b701c8721ba1c726c11662f877ea6b7094007e1ca9a1041945034",
+      "url": "https://static.crates.io/crates/unicode-ident/unicode-ident-1.0.16.crate",
+      "output": "std-1.87-crates/unicode-ident-1.0.16.crate"
+    },
+    {
+      "name": "std-1.87-crates/unicode-width-0.1.14.crate",
+      "bytes": 271615,
+      "sha256": "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af",
+      "url": "https://static.crates.io/crates/unicode-width/unicode-width-0.1.14.crate",
+      "output": "std-1.87-crates/unicode-width-0.1.14.crate"
+    },
+    {
+      "name": "std-1.87-crates/unwinding-0.2.5.crate",
+      "bytes": 28025,
+      "sha256": "51f06a05848f650946acef3bf525fe96612226b61f74ae23ffa4e98bfbb8ab3c",
+      "url": "https://static.crates.io/crates/unwinding/unwinding-0.2.5.crate",
+      "output": "std-1.87-crates/unwinding-0.2.5.crate"
+    },
+    {
+      "name": "std-1.87-crates/wasi-0.11.0+wasi-snapshot-preview1.crate",
+      "bytes": 28131,
+      "sha256": "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423",
+      "url": "https://static.crates.io/crates/wasi/wasi-0.11.0+wasi-snapshot-preview1.crate",
+      "output": "std-1.87-crates/wasi-0.11.0+wasi-snapshot-preview1.crate"
+    },
+    {
+      "name": "std-1.87-crates/windows-sys-0.59.0.crate",
+      "bytes": 2387323,
+      "sha256": "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b",
+      "url": "https://static.crates.io/crates/windows-sys/windows-sys-0.59.0.crate",
+      "output": "std-1.87-crates/windows-sys-0.59.0.crate"
+    },
+    {
+      "name": "std-1.87-crates/windows-targets-0.52.6.crate",
+      "bytes": 6403,
+      "sha256": "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973",
+      "url": "https://static.crates.io/crates/windows-targets/windows-targets-0.52.6.crate",
+      "output": "std-1.87-crates/windows-targets-0.52.6.crate"
+    },
+    {
+      "name": "std-1.87-crates/windows_aarch64_gnullvm-0.52.6.crate",
+      "bytes": 435718,
+      "sha256": "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3",
+      "url": "https://static.crates.io/crates/windows_aarch64_gnullvm/windows_aarch64_gnullvm-0.52.6.crate",
+      "output": "std-1.87-crates/windows_aarch64_gnullvm-0.52.6.crate"
+    },
+    {
+      "name": "std-1.87-crates/windows_aarch64_msvc-0.52.6.crate",
+      "bytes": 832615,
+      "sha256": "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469",
+      "url": "https://static.crates.io/crates/windows_aarch64_msvc/windows_aarch64_msvc-0.52.6.crate",
+      "output": "std-1.87-crates/windows_aarch64_msvc-0.52.6.crate"
+    },
+    {
+      "name": "std-1.87-crates/windows_i686_gnu-0.52.6.crate",
+      "bytes": 880402,
+      "sha256": "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b",
+      "url": "https://static.crates.io/crates/windows_i686_gnu/windows_i686_gnu-0.52.6.crate",
+      "output": "std-1.87-crates/windows_i686_gnu-0.52.6.crate"
+    },
+    {
+      "name": "std-1.87-crates/windows_i686_gnullvm-0.52.6.crate",
+      "bytes": 475940,
+      "sha256": "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66",
+      "url": "https://static.crates.io/crates/windows_i686_gnullvm/windows_i686_gnullvm-0.52.6.crate",
+      "output": "std-1.87-crates/windows_i686_gnullvm-0.52.6.crate"
+    },
+    {
+      "name": "std-1.87-crates/windows_i686_msvc-0.52.6.crate",
+      "bytes": 901163,
+      "sha256": "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66",
+      "url": "https://static.crates.io/crates/windows_i686_msvc/windows_i686_msvc-0.52.6.crate",
+      "output": "std-1.87-crates/windows_i686_msvc-0.52.6.crate"
+    },
+    {
+      "name": "std-1.87-crates/windows_x86_64_gnu-0.52.6.crate",
+      "bytes": 836363,
+      "sha256": "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78",
+      "url": "https://static.crates.io/crates/windows_x86_64_gnu/windows_x86_64_gnu-0.52.6.crate",
+      "output": "std-1.87-crates/windows_x86_64_gnu-0.52.6.crate"
+    },
+    {
+      "name": "std-1.87-crates/windows_x86_64_gnullvm-0.52.6.crate",
+      "bytes": 435707,
+      "sha256": "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d",
+      "url": "https://static.crates.io/crates/windows_x86_64_gnullvm/windows_x86_64_gnullvm-0.52.6.crate",
+      "output": "std-1.87-crates/windows_x86_64_gnullvm-0.52.6.crate"
+    },
+    {
+      "name": "std-1.87-crates/windows_x86_64_msvc-0.52.6.crate",
+      "bytes": 832564,
+      "sha256": "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec",
+      "url": "https://static.crates.io/crates/windows_x86_64_msvc/windows_x86_64_msvc-0.52.6.crate",
+      "output": "std-1.87-crates/windows_x86_64_msvc-0.52.6.crate"
+    },
+    {
+      "name": "std-1.87-crates/zerocopy-0.8.17.crate",
+      "bytes": 230971,
+      "sha256": "aa91407dacce3a68c56de03abe2760159582b846c6a4acd2f456618087f12713",
+      "url": "https://static.crates.io/crates/zerocopy/zerocopy-0.8.17.crate",
+      "output": "std-1.87-crates/zerocopy-0.8.17.crate"
+    },
+    {
+      "name": "std-1.87-crates/zerocopy-derive-0.8.17.crate",
+      "bytes": 81373,
+      "sha256": "06718a168365cad3d5ff0bb133aad346959a2074bd4a85c121255a11304a8626",
+      "url": "https://static.crates.io/crates/zerocopy-derive/zerocopy-derive-0.8.17.crate",
+      "output": "std-1.87-crates/zerocopy-derive-0.8.17.crate"
+    }
+  ],
+  "archives": [
+    {
+      "input": "mingw-w64-x86_64-rust-1.87.0-2-any.pkg.tar.zst",
+      "output": "rust-1.87.0-2",
+      "package_name": "mingw-w64-x86_64-rust",
+      "version": "1.87.0-2",
+      "recipe": "rust-1.87.0-2.PKGBUILD",
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7826,
+          "sha256": "87e15ea5a87c1e752965ab3af4ca18a97113e85e8fef528656ae960a510ff9f5"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 1479,
+          "sha256": "c572c6482bd901ae74685ec8bf3b52cff6676f8321d7b0e282321bda9ed69f64"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/COPYRIGHT.html",
+          "bytes": 10142,
+          "sha256": "81c453dfb18b05efcddedda14e624bccf8aee988604412ca5871d5459b041f90"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/COPYRIGHT-library.html",
+          "bytes": 3691,
+          "sha256": "592ea218c47b2b50c8d8c53bf44512856fc93942e6686cca55e64311363681c0"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/Apache-2.0.txt",
+          "bytes": 10280,
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/BSD-2-Clause.txt",
+          "bytes": 1267,
+          "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/CC-BY-SA-4.0.txt",
+          "bytes": 20137,
+          "sha256": "23ee78c8bae49cf08ea2f0c84945c66b987ebe4520881fb51b3dad4fb43d07c2"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/GCC-exception-3.1.txt",
+          "bytes": 3320,
+          "sha256": "a3966c9410ef94a1efbfa9ec04e9c1994026a70623fbf0885ce36737bfba3b54"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/GPL-2.0-only.txt",
+          "bytes": 17642,
+          "sha256": "54b212ba1f97f6948fa5486239ab505dd820b02e50cbfd296b4062c8609a70af"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/GPL-3.0-or-later.txt",
+          "bytes": 34795,
+          "sha256": "05315fce6c35f79b8a35454828995fa26336f235895ac64557abc028f4ffcea2"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/ISC.txt",
+          "bytes": 730,
+          "sha256": "0ff61769b238634e042ab759dddfd104a8e69d091e3600ae3410e401a6164381"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/LLVM-exception.txt",
+          "bytes": 919,
+          "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/MIT.txt",
+          "bytes": 1078,
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/NCSA.txt",
+          "bytes": 1676,
+          "sha256": "39cb0234065c92b9e6cee3830cbb52b1aa289aa8fe9ba2e66730fec5cf05c630"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/OFL-1.1.txt",
+          "bytes": 4016,
+          "sha256": "8eea8287e5876b539670cadb82e99f9a7afddec6f6730811be1daf25d2e9bcfd"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/Unicode-3.0.txt",
+          "bytes": 1995,
+          "sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443"
+        }
+      ]
+    },
+    {
+      "input": "mingw-w64-x86_64-rust-src-1.87.0-2-any.pkg.tar.zst",
+      "output": "rust-src-1.87.0-2",
+      "package_name": "mingw-w64-x86_64-rust-src",
+      "version": "1.87.0-2",
+      "recipe": "rust-1.87.0-2.PKGBUILD",
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7830,
+          "sha256": "3c1de4bc0557ab7d3cec9aa8f00a8dda725bc4182b99c68ff9ffe78501ff2bc6"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 1072,
+          "sha256": "4186fa6244c6700fd2cc1e7232a74041f0d8006a1e12b64bd3ddb0ad6262844d"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/alloc/Cargo.toml",
+          "bytes": 1214,
+          "sha256": "7aa0efa1279e0f52a3e23fcb4d32c6abc534addb0613b99336f0a1c9c84d7b9e"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/alloctests/Cargo.toml",
+          "bytes": 906,
+          "sha256": "b511e46697e29b0d5c594a89852c5fbfbd9df085d43a88bbaf8d70d6dd2fa71f"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/backtrace/Cargo.lock",
+          "bytes": 6982,
+          "sha256": "c738ebd52dacfa0aff4e4d32c46cadc66e0ad6a800587bc6c50644ff58664bc7"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/backtrace/Cargo.toml",
+          "bytes": 2957,
+          "sha256": "cee6138e7305e40f8fcb120d7650cc2bfef67afc70a560e6684dbb489310f12d"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/backtrace/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/backtrace/LICENSE-MIT",
+          "bytes": 1057,
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/Cargo.lock",
+          "bytes": 12739,
+          "sha256": "0b408243b7d57c70dc26025ab900108445367aa9b5f013afa544d73ac1d8cea6"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/Cargo.toml",
+          "bytes": 1717,
+          "sha256": "a0af4f89359d59dcfebd1fd2fa052caaabb18d26e5c4f3f3e42e89736a4b7175"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/core/Cargo.toml",
+          "bytes": 1381,
+          "sha256": "cae240139de14c2c334353cba80ca31f7aae6829d1df4140fe1b619e818bcab5"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/coretests/Cargo.toml",
+          "bytes": 541,
+          "sha256": "143cdceac8feb45a8596f9892f2287c90ba4a25964497e30154b0ac926e6af1c"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/panic_abort/Cargo.toml",
+          "bytes": 546,
+          "sha256": "04f325076f9ffb907c1ac198bf05625ed4e8fb4cf4a312aa4b9e9c08ab898d55"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/panic_unwind/Cargo.toml",
+          "bytes": 665,
+          "sha256": "5c9d84a5719f7f7b06d194285c5e521e9270e559c178baf5950daffa912262bb"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/Cargo.lock",
+          "bytes": 7718,
+          "sha256": "a457d172e3a5b03c056ac24fce6953e85ec19964db8b17ca1054394183b2aec2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/Cargo.toml",
+          "bytes": 209,
+          "sha256": "061197eadd81a9ca04ac77ce4c7d970df794fd7eaae21ae8181a05ef37ee6a37"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/crates/core_simd/Cargo.toml",
+          "bytes": 697,
+          "sha256": "6be1e0ad329950be3e10031a70f9ccbe3a1a398a9d4f5e72d18c61558d550dae"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/crates/core_simd/LICENSE-APACHE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/crates/core_simd/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "eb07d497d26e6d68fbc76e793f5e5c9cfa197df2a580e47383569c287a55edf9"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/crates/std_float/Cargo.toml",
+          "bytes": 453,
+          "sha256": "444e45fbf753bde6451919cc263aaab02d212ffcb7d6325bd441e8183bfdb314"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/crates/test_helpers/Cargo.toml",
+          "bytes": 179,
+          "sha256": "3125abd8712d29ec9882654dd39d95c7aa35109e7ffdd0639b0d8f972418fc61"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/LICENSE-APACHE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "eb07d497d26e6d68fbc76e793f5e5c9cfa197df2a580e47383569c287a55edf9"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/proc_macro/Cargo.toml",
+          "bytes": 371,
+          "sha256": "81f124f969da73b8558e7fcea24fc8a9dfed7f4e266246a16e3bf603fbef1dcd"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/profiler_builtins/Cargo.toml",
+          "bytes": 224,
+          "sha256": "b3be7d23ecaad7957ef93ba57457ab08953043959639721c0e3d0b6b72035190"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/rustc-std-workspace-alloc/Cargo.toml",
+          "bytes": 243,
+          "sha256": "a78d5697cabb2756f007a1d10c92587524f6cae7cec840b9e693f86e8043943a"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/rustc-std-workspace-core/Cargo.toml",
+          "bytes": 240,
+          "sha256": "b1283a0d37fc6be970f23362fb454403b1446764450ccb40545eb0b1bbdeba2b"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/rustc-std-workspace-std/Cargo.toml",
+          "bytes": 237,
+          "sha256": "4539f959d0ca9c4551a86a07596e037fa3f596e5d2cd5732b80269d86ae0790d"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/std/Cargo.toml",
+          "bytes": 5396,
+          "sha256": "d06f69fb76654f88fc995fe115eba9a073915fa920f2b3c230c9acac602fb9f7"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/assert-instr-macro/Cargo.toml",
+          "bytes": 260,
+          "sha256": "55531ebec62c1bbeefc19d4b67a182e4e94c28159f7c494938653ba162995500"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/core_arch/Cargo.toml",
+          "bytes": 1238,
+          "sha256": "e23e572d793ace1bcc3af1c6e3ea8189557d6d08c36d66ed9cc70b550fee85b7"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/core_arch/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/core_arch/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "29662666b44dff84977b46e05642cdef910bc3a93a17b5fd86e632bafa59cf21"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/simd-test-macro/Cargo.toml",
+          "bytes": 257,
+          "sha256": "308a1612f950649cf15fd85157fa2a1ec0b432ca0846b7b53a960d43e22a1294"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/std_detect/Cargo.toml",
+          "bytes": 1447,
+          "sha256": "479cf7e536f317a1a0f76abf95f7c234582188ef4e39ffdfe793e75d9ff68a57"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/std_detect/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/std_detect/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "29662666b44dff84977b46e05642cdef910bc3a93a17b5fd86e632bafa59cf21"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/stdarch-gen-arm/Cargo.toml",
+          "bytes": 672,
+          "sha256": "682a99f67f82f41310fae87ff3bc57668f4329aab6f4e9c18dcaf12ee53e16ba"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/stdarch-gen-loongarch/Cargo.toml",
+          "bytes": 288,
+          "sha256": "e962cbc183e5523eaa21f34813108de86902b8a63a621defec83080c07dda258"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/stdarch-test/Cargo.toml",
+          "bytes": 833,
+          "sha256": "d1cbbe26bf0ab31350fe27c60e0bc7a0a26196c0bd6614d179ae820146e02e5a"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/examples/Cargo.toml",
+          "bytes": 587,
+          "sha256": "bbcbc916b989051013a5526d6c1d94e6eb43d2f384ff2c0b92a32c4e2329085f"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "29662666b44dff84977b46e05642cdef910bc3a93a17b5fd86e632bafa59cf21"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/sysroot/Cargo.toml",
+          "bytes": 1446,
+          "sha256": "69c788828f65dd5579c4943d500f34942210b2ba3e53a1da1e0379d2fc379844"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/test/Cargo.toml",
+          "bytes": 391,
+          "sha256": "cf8b3a2c9fd0a09268d1ea0dd0289967a3030d1841d54c32332b5cb31a3a7a11"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/unwind/Cargo.toml",
+          "bytes": 1080,
+          "sha256": "f419b9fd56e584d36a910d7b242a8e067b94ca5207d5a0b55d7bc301e6857780"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/windows_targets/Cargo.toml",
+          "bytes": 284,
+          "sha256": "3fa8a123427eaabeaa99dba7f954ffe57cd008557fe638ad6d4a2bf16b0f7c5c"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/src/llvm-project/libunwind/LICENSE.TXT",
+          "bytes": 16706,
+          "sha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d"
+        },
+        {
+          "name": "mingw64/share/licenses/rust-src/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "name": "mingw64/share/licenses/rust-src/LICENSE-MIT",
+          "bytes": 1068,
+          "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1"
+        }
+      ]
+    },
+    {
+      "input": "mingw-w64-x86_64-rust-1.97.0-1-any.pkg.tar.zst",
+      "output": "rust-1.97.0-1",
+      "package_name": "mingw-w64-x86_64-rust",
+      "version": "1.97.0-1",
+      "recipe": "rust-1.97.0-1.PKGBUILD",
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7622,
+          "sha256": "456ee19a5d4a33ef570f9e3060451219a35ce67a46ef102613e4894ffa1f23a6"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 1472,
+          "sha256": "8642394c3e768bfcbe952a84fb74c27b75194befc4df9072fb5280a71020640f"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/COPYRIGHT.html",
+          "bytes": 10138,
+          "sha256": "cbbb53c491b161cf137f77a0cb13aae5d8a7144603b791c7981f3505a8abab2f"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/COPYRIGHT-library.html",
+          "bytes": 3691,
+          "sha256": "592ea218c47b2b50c8d8c53bf44512856fc93942e6686cca55e64311363681c0"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/Apache-2.0.txt",
+          "bytes": 10280,
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/BSD-2-Clause.txt",
+          "bytes": 1267,
+          "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/CC-BY-SA-4.0.txt",
+          "bytes": 20137,
+          "sha256": "23ee78c8bae49cf08ea2f0c84945c66b987ebe4520881fb51b3dad4fb43d07c2"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/GCC-exception-3.1.txt",
+          "bytes": 3320,
+          "sha256": "a3966c9410ef94a1efbfa9ec04e9c1994026a70623fbf0885ce36737bfba3b54"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/GPL-2.0-only.txt",
+          "bytes": 17642,
+          "sha256": "54b212ba1f97f6948fa5486239ab505dd820b02e50cbfd296b4062c8609a70af"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/GPL-3.0-or-later.txt",
+          "bytes": 34795,
+          "sha256": "05315fce6c35f79b8a35454828995fa26336f235895ac64557abc028f4ffcea2"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/ISC.txt",
+          "bytes": 730,
+          "sha256": "0ff61769b238634e042ab759dddfd104a8e69d091e3600ae3410e401a6164381"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/LLVM-exception.txt",
+          "bytes": 919,
+          "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/MIT.txt",
+          "bytes": 1078,
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/NCSA.txt",
+          "bytes": 1676,
+          "sha256": "39cb0234065c92b9e6cee3830cbb52b1aa289aa8fe9ba2e66730fec5cf05c630"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/OFL-1.1.txt",
+          "bytes": 4016,
+          "sha256": "8eea8287e5876b539670cadb82e99f9a7afddec6f6730811be1daf25d2e9bcfd"
+        },
+        {
+          "name": "mingw64/share/doc/rustc/licenses/Unicode-3.0.txt",
+          "bytes": 1995,
+          "sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443"
+        }
+      ]
+    },
+    {
+      "input": "mingw-w64-x86_64-rust-src-1.97.0-1-any.pkg.tar.zst",
+      "output": "rust-src-1.97.0-1",
+      "package_name": "mingw-w64-x86_64-rust-src",
+      "version": "1.97.0-1",
+      "recipe": "rust-1.97.0-1.PKGBUILD",
+      "documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 7626,
+          "sha256": "4546b11c30c8fb7f2bc727d18a9fb330842f9a8457795ad46f6bd5521d998172"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 1094,
+          "sha256": "21963c0b51c41128e35feba58889c7bd79a13925e9f3d2265eaa46925c19b3cc"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/alloc/Cargo.toml",
+          "bytes": 860,
+          "sha256": "3a0273fc73bd77700c12cacb61a751cffd3ab24d26899af33d5d7109b252f6f4"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/alloctests/Cargo.toml",
+          "bytes": 884,
+          "sha256": "37aab2cca5451287f6f7009623c51b6eafd11140b2feb818899daf7dd3527aac"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/backtrace/Cargo.lock",
+          "bytes": 5120,
+          "sha256": "36519dabef71867e2c10489243338322a8ad50c86480b414d9eb49c6d4703f00"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/backtrace/Cargo.toml",
+          "bytes": 2944,
+          "sha256": "88f61931ab9a172abc1b9080c9115a2bda8bd93a897e4cf54a64421a232011c1"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/backtrace/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/backtrace/LICENSE-MIT",
+          "bytes": 1057,
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/Cargo.lock",
+          "bytes": 9834,
+          "sha256": "02120dd57c4c5fd70c81fd92472681c8de5cc2dd78258276da37bb2253666061"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/Cargo.toml",
+          "bytes": 3070,
+          "sha256": "b346ae33bd9648949894510a2bcc1d1f8b78c7301c3110e4a98b68bacd3b4584"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/builtins-shim/Cargo.toml",
+          "bytes": 2374,
+          "sha256": "469851485264c98dc4d10eff9c1949c7b02fb8d893b93c4f4c769a4368a0bea8"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/builtins-test/Cargo.toml",
+          "bytes": 2163,
+          "sha256": "c0d23679f60fd60e4ff5835c29d9096e4a814f4d5fa5c5c04be06d55cc2f75e6"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/builtins-test-intrinsics/Cargo.toml",
+          "bytes": 818,
+          "sha256": "d12e0fb9265c924470e486f867ce15a7f3d6245b6a459121f0f734c57c59862a"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/Cargo.lock",
+          "bytes": 39834,
+          "sha256": "895928e05b64a2c0bf4497a555a07f6628a3562a9c180472051dfc68e0f8b4aa"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/Cargo.toml",
+          "bytes": 2641,
+          "sha256": "8055a98179315b927b21011c150ad36c0a6b5f5b756ac7aa22ac4c203abe949a"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins/Cargo.toml",
+          "bytes": 2005,
+          "sha256": "d89e31fed70f2cad9c6e91b787bf4c0fb680c631196b2a7215c81745aaf7fb7e"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/crates/api-list-common/Cargo.toml",
+          "bytes": 116,
+          "sha256": "0772b344c536c4905a02ae5855d1aa2d7a4ecb7d429542d9de44e5fc613cb29b"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/crates/libm-macros/Cargo.toml",
+          "bytes": 479,
+          "sha256": "76c081e4dcc56c584b9b0174365d9c4320bc2f2d0f7bc1f0fff929ea80f8580d"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/crates/musl-math-sys/Cargo.toml",
+          "bytes": 198,
+          "sha256": "04cd09e3e1d00778c6c22ce0db9d7cc5bf61fb3ab51113f18145fb96ca05587d"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/crates/panic-handler/Cargo.toml",
+          "bytes": 134,
+          "sha256": "e23ef44255c9074e5c045dac5dcf304d322d0697d4cf3a2902f0f34c1c3f3e58"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/crates/symbol-check/Cargo.toml",
+          "bytes": 293,
+          "sha256": "ba2b092634264c9f597446f563cefa40d7e761d3ded3c3bdab44a054fe773598"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/crates/update-api-list/Cargo.toml",
+          "bytes": 270,
+          "sha256": "2eb2ba504f2d9658cd6d745e85b9d13fdad9b0654eb82e9340295f2d04dadb28"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/crates/util/Cargo.toml",
+          "bytes": 589,
+          "sha256": "4bd7bb39d72c5627e297a601249c75133d7f3d627772327ef3adac338b659cfe"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/libm/Cargo.toml",
+          "bytes": 1456,
+          "sha256": "8448af22d4285030a2e79f825942e9b7b33dd5d1b16bc39dcf3ef7506f037f8d"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/libm/LICENSE.txt",
+          "bytes": 14088,
+          "sha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/libm-test/Cargo.toml",
+          "bytes": 2494,
+          "sha256": "b59747610e981c51e2c56436b374543f968aab86142972a125b9821308c1c7a4"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/compiler-builtins/LICENSE.txt",
+          "bytes": 15078,
+          "sha256": "ab6eec6caf0fa5775e411c7a8bc6a45c4ef2956b0980b157ab74fc5cd62a928b"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/core/Cargo.toml",
+          "bytes": 1414,
+          "sha256": "234c3bd2559267eefe9daf6f2b96c63ce4c3e8cb79c11a9d871ed2a493c9413a"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/coretests/Cargo.toml",
+          "bytes": 867,
+          "sha256": "7b4d608ad26674dc1ba93cfeec39a5a58af42098d80825e18b0b28011ef8f07b"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/panic_abort/Cargo.toml",
+          "bytes": 574,
+          "sha256": "ace456c256fad9b7344fba2b806b65e1321245c81d8fc8e7a0bdc24b391e6a55"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/panic_unwind/Cargo.toml",
+          "bytes": 633,
+          "sha256": "b49ffdbbd5f894ac559c875af53354f30174c44d7cd7e0f25808262bb972590f"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/Cargo.lock",
+          "bytes": 14683,
+          "sha256": "e55a87d684f3088642d9a98d884684445fa8b20bff78c4a73c0ea56b63b2a5f0"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/Cargo.toml",
+          "bytes": 314,
+          "sha256": "2027a8c7d74337704bc41c729c0e8a82d1ff50882c5193b45c09df1ec6842559"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/crates/core_simd/Cargo.toml",
+          "bytes": 829,
+          "sha256": "cb56f33da67a11201447d1f68ae5120252a440d6a99efb45f99c6affd0441879"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/crates/core_simd/LICENSE-APACHE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/crates/core_simd/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "eb07d497d26e6d68fbc76e793f5e5c9cfa197df2a580e47383569c287a55edf9"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/crates/std_float/Cargo.toml",
+          "bytes": 453,
+          "sha256": "444e45fbf753bde6451919cc263aaab02d212ffcb7d6325bd441e8183bfdb314"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/crates/test_helpers/Cargo.toml",
+          "bytes": 179,
+          "sha256": "56839427375e1ed1f71829be01f9c11c678460cdf4962c12e156300469320589"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/LICENSE-APACHE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/portable-simd/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "eb07d497d26e6d68fbc76e793f5e5c9cfa197df2a580e47383569c287a55edf9"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/proc_macro/Cargo.toml",
+          "bytes": 598,
+          "sha256": "82563b1be3d575d02ce51535920361b804a836b5b4a2a712fd036a254c841d36"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/profiler_builtins/Cargo.toml",
+          "bytes": 224,
+          "sha256": "b3be7d23ecaad7957ef93ba57457ab08953043959639721c0e3d0b6b72035190"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/rustc-std-workspace-alloc/Cargo.toml",
+          "bytes": 282,
+          "sha256": "40f761fd329b7ac42e0f163784227059780b99310dd7ea4f618641dab07c7514"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/rustc-std-workspace-core/Cargo.toml",
+          "bytes": 445,
+          "sha256": "f5e111f26351f69199f2a251b8f5b6c686920b8b234df084a1a616690357b5aa"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/rustc-std-workspace-std/Cargo.toml",
+          "bytes": 276,
+          "sha256": "89f2af683e07a65cc5ceb73361ec2799c67d53b2d0f85b19de78a7322164eb86"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/std/Cargo.toml",
+          "bytes": 5587,
+          "sha256": "ff5272b18cb16a9e67256a1045dc35d9d08ae38916a218f684a2ae2f4360f078"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/std_detect/Cargo.toml",
+          "bytes": 822,
+          "sha256": "7e42961094ca6980d4852bb5b38350ac505542df04d71a66d86b4f3ff72dd72f"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/Cargo.lock",
+          "bytes": 28412,
+          "sha256": "dfac7818bdb1a69f305624d0575582e63aef5e164b0808d107fc72012199235b"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/assert-instr-macro/Cargo.toml",
+          "bytes": 342,
+          "sha256": "83c63f2f176ea54fdb4ab45c3624a3d82be0d6f0aa560d516c375b5a422ae942"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/core_arch/Cargo.toml",
+          "bytes": 1091,
+          "sha256": "5a33110868ac27574aba7ddf122cc10ac71b28400c70d303a0e9fea90a9a1adb"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/core_arch/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/core_arch/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "29662666b44dff84977b46e05642cdef910bc3a93a17b5fd86e632bafa59cf21"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/simd-test-macro/Cargo.toml",
+          "bytes": 257,
+          "sha256": "308a1612f950649cf15fd85157fa2a1ec0b432ca0846b7b53a960d43e22a1294"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/stdarch-gen-arm/Cargo.toml",
+          "bytes": 714,
+          "sha256": "10f8e2bcd736200fdcaf2057f52d7ac31eacc8b56699790b42945a02761fe717"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/stdarch-gen-hexagon/Cargo.toml",
+          "bytes": 177,
+          "sha256": "a5db880d9fffa97863a3e8cb8f153291281f95bebf43094b0969af3e77a87185"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/stdarch-gen-hexagon-scalar/Cargo.toml",
+          "bytes": 184,
+          "sha256": "7fc369b9d6bd0aa61f8086fed9cc50d43668853922b9f0d3d92cc401158e107f"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/stdarch-gen-loongarch/Cargo.toml",
+          "bytes": 288,
+          "sha256": "e962cbc183e5523eaa21f34813108de86902b8a63a621defec83080c07dda258"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/crates/stdarch-test/Cargo.toml",
+          "bytes": 812,
+          "sha256": "921f9f443a864efa4b278df424bff6b8467fc5be8aa6a7bdc9d5982b2a34de70"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/examples/Cargo.toml",
+          "bytes": 649,
+          "sha256": "249f18a8593a9fd1218ba8ceaae3a51dc36f0f45cfe63728887ac768f558bbb2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/stdarch/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "29662666b44dff84977b46e05642cdef910bc3a93a17b5fd86e632bafa59cf21"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/sysroot/Cargo.toml",
+          "bytes": 1132,
+          "sha256": "a741ab496665cbe08f49ba759d6049d80a15b1eec1cce4eb3b48eb26e639bd5a"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/test/Cargo.toml",
+          "bytes": 417,
+          "sha256": "e55df52d3e67cca67636168e37955aa994c0ea2a61742eb87f5bdc1b7d125390"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/unwind/Cargo.toml",
+          "bytes": 1138,
+          "sha256": "cde3322f8dcdabd1bba87e0412073ded92a28d2e5b49b4a3eb62d79e137d2013"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/addr2line-0.25.1/Cargo.lock",
+          "bytes": 29506,
+          "sha256": "c9e56108c9a0cadb122774fbe24b2085a521ac1252686dc3cb70ae165af6bdf2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/addr2line-0.25.1/Cargo.toml",
+          "bytes": 3012,
+          "sha256": "6c371cb14bed07740324acb5b126bd58cf87771be72d4d88366b000f138b8001"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/addr2line-0.25.1/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/addr2line-0.25.1/LICENSE-MIT",
+          "bytes": 1069,
+          "sha256": "e99d88d232bf57d70f0fb87f6b496d44b6653f99f8a63d250a54c61ea4bcde40"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/adler2-2.0.1/Cargo.lock",
+          "bytes": 406,
+          "sha256": "3e44ced212a9e7ddc0a5450bcebb48ec67f32a058529856458efa36415554e53"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/adler2-2.0.1/Cargo.toml",
+          "bytes": 2148,
+          "sha256": "8f30dbd092f3acc475b9d339736cd7b64c6489bc47cd234a7f2232fc52e2d490"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/adler2-2.0.1/LICENSE-0BSD",
+          "bytes": 665,
+          "sha256": "861399f8c21c042b110517e76dc6b63a2b334276c8cf17412fc3c8908ca8dc17"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/adler2-2.0.1/LICENSE-APACHE",
+          "bytes": 10860,
+          "sha256": "8ada45cd9f843acf64e4722ae262c622a2b3b3007c7310ef36ac1061a30f6adb"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/adler2-2.0.1/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/cc-1.2.0/Cargo.lock",
+          "bytes": 5105,
+          "sha256": "b661254fadca74408d53742755b371f7ae29e501e851aeae13bcd14a51883321"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/cc-1.2.0/Cargo.toml",
+          "bytes": 1591,
+          "sha256": "50debe1b2fc050e8b305bdd514509d98cdbc59e96e5f10888df4b6fca19d3a75"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/cc-1.2.0/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/cc-1.2.0/LICENSE-MIT",
+          "bytes": 1057,
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/cfg-if-1.0.4/Cargo.lock",
+          "bytes": 556,
+          "sha256": "26922b9384045e5a3d496f21ec7c355da585d0caa1d13b887b634527d36fc450"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/cfg-if-1.0.4/Cargo.toml",
+          "bytes": 1239,
+          "sha256": "281d508beb1fe3927cf03d3f2f8c9a5117b1e4fe97ae21b9026cf318e8c35273"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/cfg-if-1.0.4/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/cfg-if-1.0.4/LICENSE-MIT",
+          "bytes": 1057,
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/dlmalloc-0.2.13/Cargo.lock",
+          "bytes": 4459,
+          "sha256": "919249e1fd4e3792a5d579a9b41d87e8cf0eb77dc0a2fcaf39885105a976e2f1"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/dlmalloc-0.2.13/Cargo.toml",
+          "bytes": 1950,
+          "sha256": "856c7c91c477f347106ed3b6d5e62aedba89c9d496c9897559ffcaf50bf577c0"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/dlmalloc-0.2.13/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/dlmalloc-0.2.13/LICENSE-MIT",
+          "bytes": 1057,
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/foldhash-0.2.0/Cargo.lock",
+          "bytes": 24729,
+          "sha256": "3bddb04a5cd4ee4b4f45de88c49f57af71ed19a2d4882ba48f160c4adea7a5cb"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/foldhash-0.2.0/Cargo.toml",
+          "bytes": 1551,
+          "sha256": "0a76cc29da1c33f4bdb505f5828ecdc20859c4cb9faa402e000f5f10511a27cc"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/foldhash-0.2.0/LICENSE",
+          "bytes": 856,
+          "sha256": "b1181a40b2a7b25cf66fd01481713bc1005df082c53ef73e851e55071b102744"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/fortanix-sgx-abi-0.6.1/Cargo.lock",
+          "bytes": 416,
+          "sha256": "34dfb5cc5c2c031cd175d51737f5a0ca6dae5fcb5eb09b046e5e1b4a96e4710f"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/fortanix-sgx-abi-0.6.1/Cargo.toml",
+          "bytes": 1690,
+          "sha256": "e301ec4af1903e47fcc50ae43490ea5c9ea7575aa5270af16de54614877c9f3a"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/getopts-0.2.24/Cargo.lock",
+          "bytes": 1054,
+          "sha256": "d53db1ee767b815f28463ae70ce0de3bce6e4e57f0f47bd1d01c9a89ada255c4"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/getopts-0.2.24/Cargo.toml",
+          "bytes": 1374,
+          "sha256": "819c8d7b776a6e79b08f87eef61cb1dd8b21bd6e65d56a312c5881abfd0df3dc"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/getopts-0.2.24/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/getopts-0.2.24/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/gimli-0.32.3/Cargo.lock",
+          "bytes": 2177,
+          "sha256": "ec7efa297c5a89fa7849f276dfe5f64bede52a266660fa77608b100e6caf2854"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/gimli-0.32.3/Cargo.toml",
+          "bytes": 2280,
+          "sha256": "2b0d60ffc8705bf1de535e36ffa090511284747388d84056d5d96a5acbb0704a"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/gimli-0.32.3/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/gimli-0.32.3/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/hashbrown-0.17.1/Cargo.lock",
+          "bytes": 18493,
+          "sha256": "718cdd290a7ed54fa011baeabe23779746318ec79e6f02918b423fce8bdc05b9"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/hashbrown-0.17.1/Cargo.toml",
+          "bytes": 3847,
+          "sha256": "afcb0e62d498f756bd4ddf69785c8282d01ee4fa40016158c7eac12ceb302f8c"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/hashbrown-0.17.1/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/hashbrown-0.17.1/LICENSE-MIT",
+          "bytes": 1060,
+          "sha256": "ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/hermit-abi-0.5.2/Cargo.lock",
+          "bytes": 649,
+          "sha256": "f6897d0209103490d3e8661678de092e4dd87f039626dba3a7f7db22d2d58f78"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/hermit-abi-0.5.2/Cargo.toml",
+          "bytes": 1191,
+          "sha256": "590188deba2a4c4fe92257a0f0ae057f0881514e3e9065c41d1c8f539f947b69"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/hermit-abi-0.5.2/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/hermit-abi-0.5.2/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/libc-0.2.185/Cargo.lock",
+          "bytes": 406,
+          "sha256": "8ff70df27ecc37f9ef130b117f62f62a77db4e24580e59cc4a8ab68782ab0e92"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/libc-0.2.185/Cargo.toml",
+          "bytes": 6241,
+          "sha256": "89d682c2bf38c3051425fd0fc4319e31d55d4d20082fc6f3445f4681e95a4b8d"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/libc-0.2.185/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/libc-0.2.185/LICENSE-MIT",
+          "bytes": 1066,
+          "sha256": "123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/memchr-2.7.6/Cargo.lock",
+          "bytes": 2120,
+          "sha256": "839877bbdcf9c1ee00d0b290c76d6adc590a2cc9e374eb2bb9dc494f803c0145"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/memchr-2.7.6/Cargo.toml",
+          "bytes": 1833,
+          "sha256": "5750ca97e8b2643f2ba1d7e98f54dcf54518c0176899e547876a59eb736198a5"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/memchr-2.7.6/LICENSE-MIT",
+          "bytes": 1081,
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/memchr-2.7.6/UNLICENSE",
+          "bytes": 1211,
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/miniz_oxide-0.8.9/Cargo.lock",
+          "bytes": 2733,
+          "sha256": "cbb9f38749859d59171bc231b62c446ac1c037e567db4e9ea5cdd9ccd65adaf8"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/miniz_oxide-0.8.9/Cargo.toml",
+          "bytes": 2057,
+          "sha256": "f0d2683434f1c0d3cd9b8080031e82aa5089c9be1779cc5101e065883258d77d"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/miniz_oxide-0.8.9/LICENSE",
+          "bytes": 1213,
+          "sha256": "4108245a1f2df9d4e94df8abed5b4ba0759bb2f9b40a6b939f1be141077ae50b"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/miniz_oxide-0.8.9/LICENSE-APACHE.md",
+          "bytes": 10174,
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/miniz_oxide-0.8.9/LICENSE-MIT.md",
+          "bytes": 1212,
+          "sha256": "799e9ca9d179295ef372f25d3769cdda7d25bb2668add6a6a1e22d1e4c678b8d"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/miniz_oxide-0.8.9/LICENSE-ZLIB.md",
+          "bytes": 984,
+          "sha256": "0a54e647fe54104658b5e563c04c6f9edf251710e47bce692e0bd990a4ddaa39"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/moto-rt-0.16.0/Cargo.lock",
+          "bytes": 647,
+          "sha256": "0ece590d12746d6fc9b61f7dca0e7fef0eabb114369835d2dc3696258e6b5149"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/moto-rt-0.16.0/Cargo.toml",
+          "bytes": 1297,
+          "sha256": "bb635efb3b8ce45bc18a6ae7618ffe1e92e2a08e1182edd304103917bc8bc095"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/moto-rt-0.16.0/LICENSE-APACHE",
+          "bytes": 10851,
+          "sha256": "69fef7b0f322a65554156141f2bc6256ed0bb78cba7e49f0d8829d7ec4ee62cd"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/moto-rt-0.16.0/LICENSE-MIT",
+          "bytes": 1075,
+          "sha256": "a7c936ff1ed8fa340172d42a98185afee078f818e907da69f3a8e336b1623b4b"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/object-0.37.3/Cargo.lock",
+          "bytes": 3729,
+          "sha256": "6de61925351faa8a2b52119d39ded76bc9e782da23ca39687f37bb8ccced06d8"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/object-0.37.3/Cargo.toml",
+          "bytes": 3600,
+          "sha256": "9373632c541767e8e6575ee1809ac4397a9e0bc6091691620ef7cefc11454a73"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/object-0.37.3/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/object-0.37.3/LICENSE-MIT",
+          "bytes": 1064,
+          "sha256": "0b74dfa0bcee5c420c6b7f67b4b2658f9ab8388c97b8e733975f2cecbdd668a6"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand_core-0.9.3/Cargo.lock",
+          "bytes": 4932,
+          "sha256": "016a63ba469879c3dc6a9fc1aea95f5a522914101a9cd7ee2c91a59c32cb6b33"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand_core-0.9.3/Cargo.toml",
+          "bytes": 1528,
+          "sha256": "88d9db5184a8b48028072059c1fdd54ba7fcdadac452ebdadbfc16f7f50790ad"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand_core-0.9.3/COPYRIGHT",
+          "bytes": 569,
+          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand_core-0.9.3/LICENSE-APACHE",
+          "bytes": 10282,
+          "sha256": "6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand_core-0.9.3/LICENSE-MIT",
+          "bytes": 1117,
+          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand_xorshift-0.4.0/Cargo.lock",
+          "bytes": 3395,
+          "sha256": "eb6254fd40f2eae936fb29e834bd2021dcb7bc4d8f030e4633190b822117f760"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand_xorshift-0.4.0/Cargo.toml",
+          "bytes": 1425,
+          "sha256": "7f81d59d8270e6b5552550a3d4a2bb9605478910f9c380ec70a14b8ee05fadbf"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand_xorshift-0.4.0/COPYRIGHT",
+          "bytes": 569,
+          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand_xorshift-0.4.0/LICENSE-APACHE",
+          "bytes": 9724,
+          "sha256": "35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand_xorshift-0.4.0/LICENSE-MIT",
+          "bytes": 1117,
+          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand-0.9.2/Cargo.lock",
+          "bytes": 7153,
+          "sha256": "59ca872218694f45284dfc098dddaf38b2a3d7cf91aff668984c53193471b086"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand-0.9.2/Cargo.toml",
+          "bytes": 2313,
+          "sha256": "2af4bbbb05a303fb72404597e803b64cb081d03b5aee2098490567afd54a2358"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand-0.9.2/COPYRIGHT",
+          "bytes": 569,
+          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand-0.9.2/LICENSE-APACHE",
+          "bytes": 9724,
+          "sha256": "35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rand-0.9.2/LICENSE-MIT",
+          "bytes": 1117,
+          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/r-efi-5.3.0/Cargo.lock",
+          "bytes": 405,
+          "sha256": "cc335892128a13fb1431213f65cfd3281ff098cf47b97882ca097f0206d7e0b0"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/r-efi-5.3.0/Cargo.toml",
+          "bytes": 1582,
+          "sha256": "dba000c0173b09b1e3b69afa42a715b5ab64355e6502ce6d9d1767c7845cf402"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/r-efi-alloc-2.1.0/Cargo.lock",
+          "bytes": 610,
+          "sha256": "1b68a566573d37c8acf2fa55975cc2035751210c2907d5d24b2dafbce98b51f4"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/r-efi-alloc-2.1.0/Cargo.toml",
+          "bytes": 1420,
+          "sha256": "95f5b59b7c9e5656c85429c21ccc14e3e6ac8019883a7b138822a76f7c596caf"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rustc-demangle-0.1.27/Cargo.lock",
+          "bytes": 415,
+          "sha256": "b9fa76658706ef3b1c31c7ac01b230f0660d3661a315e9f933fc15c64cdb1c46"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rustc-demangle-0.1.27/Cargo.toml",
+          "bytes": 1273,
+          "sha256": "ec462e775f134cf7646d9dda346c43bbc2c0cd44def02e3af5b678bb6a9d879c"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rustc-demangle-0.1.27/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rustc-demangle-0.1.27/LICENSE-MIT",
+          "bytes": 1057,
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rustc-literal-escaper-0.0.7/Cargo.lock",
+          "bytes": 421,
+          "sha256": "5a6310802cb2787786b0449a731f21ae028f65d8e937194f43dbc91443d7c638"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rustc-literal-escaper-0.0.7/Cargo.toml",
+          "bytes": 1137,
+          "sha256": "8ec932e61a0ccb03903038c58227ee5cdbee8b9fb41b64c3d38d137dc4cbbfc4"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rustc-literal-escaper-0.0.7/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/rustc-literal-escaper-0.0.7/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/shlex-1.3.0/Cargo.toml",
+          "bytes": 1074,
+          "sha256": "d7eb8c4bce681b4dd1dfc2c98c649754390775f38f4796d491948ddbb53aa2ef"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/shlex-1.3.0/LICENSE-APACHE",
+          "bytes": 566,
+          "sha256": "553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/shlex-1.3.0/LICENSE-MIT",
+          "bytes": 1092,
+          "sha256": "4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/unwinding-0.2.8/Cargo.lock",
+          "bytes": 1292,
+          "sha256": "8e2cd75cbfddfac7effd19970364642ff74b7d7e84db47d619ac07bb661780c5"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/unwinding-0.2.8/Cargo.toml",
+          "bytes": 2062,
+          "sha256": "c6a809c6316f377bd58c559a5d4935cf990c96cd73d78cbfc2695935ae4edbd6"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/unwinding-0.2.8/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/unwinding-0.2.8/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/vex-sdk-0.27.1/Cargo.lock",
+          "bytes": 408,
+          "sha256": "59d558240fdb0c8e1c4dae287282e004c8cb360aab0445ec670e43e73e3ba92f"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/vex-sdk-0.27.1/Cargo.toml",
+          "bytes": 1307,
+          "sha256": "c872fe525dec105f3b067f25b26ebc43a3a58d5d105d55e4e9d4317165243b4b"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip1-1.0.0/Cargo.lock",
+          "bytes": 645,
+          "sha256": "2bf51f26a3e08cacff990712efba2d5c7aee264caa9d94444819e376b8e53aba"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip1-1.0.0/Cargo.toml",
+          "bytes": 1299,
+          "sha256": "c3b6d1f335cb3dd52907dc1bfbc53599833027a3a2064304c9a2a2972cfccde1"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip2-1.0.3+wasi-0.2.9/Cargo.lock",
+          "bytes": 1152,
+          "sha256": "2d0d3440b60b426fc6b423115fc7cacd212ec7ea9badeab6a33a1dcd6a0832ef"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip2-1.0.3+wasi-0.2.9/Cargo.toml",
+          "bytes": 2087,
+          "sha256": "0866953177e91d75a965fed41450270c9a0c59149f1692da2ab8da13c056499e"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip2-1.0.3+wasi-0.2.9/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip2-1.0.3+wasi-0.2.9/LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "bytes": 12243,
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip2-1.0.3+wasi-0.2.9/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip3-0.6.0+wasi-0.3.0-rc-2026-03-15/Cargo.lock",
+          "bytes": 12787,
+          "sha256": "ce50fc14b012b42885aabaa6d2a981b2e03ef557fadac8ee0c658220da05abb8"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip3-0.6.0+wasi-0.3.0-rc-2026-03-15/Cargo.toml",
+          "bytes": 2493,
+          "sha256": "5d97b90425600356546062b4aba27296604f76742bc3b78e6445bf7dabb0729f"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip3-0.6.0+wasi-0.3.0-rc-2026-03-15/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip3-0.6.0+wasi-0.3.0-rc-2026-03-15/LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "bytes": 12243,
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wasip3-0.6.0+wasi-0.3.0-rc-2026-03-15/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wit-bindgen-0.57.1/Cargo.lock",
+          "bytes": 11154,
+          "sha256": "5b6b93a7b85b8e4a006039dd406b78b59ab7b09966e8fc20f5d1d61a3c0de464"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wit-bindgen-0.57.1/Cargo.toml",
+          "bytes": 2402,
+          "sha256": "bb7fe08cf7f552712e29c7373c058d5fe74d650f954c2462e523e40fee273f9f"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wit-bindgen-0.57.1/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wit-bindgen-0.57.1/LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "bytes": 12243,
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/vendor/wit-bindgen-0.57.1/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/windows_link/Cargo.toml",
+          "bytes": 324,
+          "sha256": "9fe4a9eb8f5caefc48022503d9637e8bebcefc1054ec880cf5007c05f0306900"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/library/windows-sys/Cargo.toml",
+          "bytes": 540,
+          "sha256": "e4312463c8cd3755ef0a55c0b3312c9966cdfbc26eb7bf6eae840eb12b277cf9"
+        },
+        {
+          "name": "mingw64/lib/rustlib/src/rust/src/llvm-project/libunwind/LICENSE.TXT",
+          "bytes": 16706,
+          "sha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d"
+        },
+        {
+          "name": "mingw64/share/licenses/rust-src/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "name": "mingw64/share/licenses/rust-src/LICENSE-MIT",
+          "bytes": 1068,
+          "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/addr2line-0.24.2.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "addr2line-0.24.2/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "cac8a6c406d0953ab9f3bdf7a7518acc5e0a71c3ea20787cb98731737df9af9d"
+        },
+        {
+          "name": "addr2line-0.24.2/Cargo.toml",
+          "bytes": 2999,
+          "sha256": "940373297f67456852d5236a1eb7a3856bc672c69529cbbe6052ce5f85221170"
+        },
+        {
+          "name": "addr2line-0.24.2/Cargo.toml.orig",
+          "bytes": 2738,
+          "sha256": "d8ed954f7923d197568cf269d7c148dbd6b84c74bfe55418a89b1e57b03e9cd8"
+        },
+        {
+          "name": "addr2line-0.24.2/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "addr2line-0.24.2/LICENSE-MIT",
+          "bytes": 1069,
+          "sha256": "e99d88d232bf57d70f0fb87f6b496d44b6653f99f8a63d250a54c61ea4bcde40"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/adler2-2.0.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "adler2-2.0.0/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "19a3f1bb60309d3b07c8dbb6c45080c42cf4104425622a5ae73276756cbfab95"
+        },
+        {
+          "name": "adler2-2.0.0/Cargo.toml",
+          "bytes": 2243,
+          "sha256": "56b9cca6450964cbe772b6519bc048c2f56cc80e9261de1126d789c5e1951136"
+        },
+        {
+          "name": "adler2-2.0.0/Cargo.toml.orig",
+          "bytes": 2141,
+          "sha256": "ee194c5345c7a9e7683bdc2968f4054277a2e7acb4688f3e4c0de012127beb05"
+        },
+        {
+          "name": "adler2-2.0.0/LICENSE-0BSD",
+          "bytes": 665,
+          "sha256": "861399f8c21c042b110517e76dc6b63a2b334276c8cf17412fc3c8908ca8dc17"
+        },
+        {
+          "name": "adler2-2.0.0/LICENSE-APACHE",
+          "bytes": 10860,
+          "sha256": "8ada45cd9f843acf64e4722ae262c622a2b3b3007c7310ef36ac1061a30f6adb"
+        },
+        {
+          "name": "adler2-2.0.0/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/allocator-api2-0.2.21.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "allocator-api2-0.2.21/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "f44a14175e1995bd4b75ea0c74654a53b7073fedcb37c92c41841126e6f40f17"
+        },
+        {
+          "name": "allocator-api2-0.2.21/Cargo.toml",
+          "bytes": 1250,
+          "sha256": "ddaa434cc54a30a33bbe0096e72479d71ba5deffa2ad9bee39419d4e50b75275"
+        },
+        {
+          "name": "allocator-api2-0.2.21/Cargo.toml.orig",
+          "bytes": 713,
+          "sha256": "c1688fbd2be36f529a6eebbbf62fcf612c86b6f824738a44f6caa8875f57279b"
+        },
+        {
+          "name": "allocator-api2-0.2.21/LICENSE-APACHE",
+          "bytes": 9899,
+          "sha256": "20fe7b00e904ed690e3b9fd6073784d3fc428141dbd10b81c01fd143d0797f58"
+        },
+        {
+          "name": "allocator-api2-0.2.21/LICENSE-MIT",
+          "bytes": 1046,
+          "sha256": "36516aefdc84c5d5a1e7485425913a22dbda69eb1930c5e84d6ae4972b5194b9"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/cc-1.2.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "cc-1.2.0/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "d6e26674a9d7de87dab83262a14f2377988a1e087e4b514f3983f8dd141ea813"
+        },
+        {
+          "name": "cc-1.2.0/Cargo.toml",
+          "bytes": 1591,
+          "sha256": "50debe1b2fc050e8b305bdd514509d98cdbc59e96e5f10888df4b6fca19d3a75"
+        },
+        {
+          "name": "cc-1.2.0/Cargo.toml.orig",
+          "bytes": 1536,
+          "sha256": "0aff9dc74ddbe3bfe89ad9698212a6a18d6124b9593780aad25e277d28e9a71f"
+        },
+        {
+          "name": "cc-1.2.0/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "cc-1.2.0/LICENSE-MIT",
+          "bytes": 1057,
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/cfg-if-1.0.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "cfg-if-1.0.0/.cargo_vcs_info.json",
+          "bytes": 74,
+          "sha256": "adc7a2b67bc53600a229c2892d592977aa4939434fb93f53b2e98799173a675c"
+        },
+        {
+          "name": "cfg-if-1.0.0/Cargo.toml",
+          "bytes": 1308,
+          "sha256": "5b2a8f6e5256957c029cf3a8912d51438e7faa5891c5c102c312f6d4599c1f00"
+        },
+        {
+          "name": "cfg-if-1.0.0/Cargo.toml.orig",
+          "bytes": 792,
+          "sha256": "90923641c7cd59e9f3df14ab37d39523d4a6e59cf02d7a6aae79abcaca07e3b9"
+        },
+        {
+          "name": "cfg-if-1.0.0/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "cfg-if-1.0.0/LICENSE-MIT",
+          "bytes": 1057,
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/compiler_builtins-0.1.152.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "compiler_builtins-0.1.152/.cargo_vcs_info.json",
+          "bytes": 111,
+          "sha256": "71c4c45da503b2ab0ba6b1469067d4e200733da352cf842e28954f9b15580c91"
+        },
+        {
+          "name": "compiler_builtins-0.1.152/Cargo.toml",
+          "bytes": 1769,
+          "sha256": "d9fea6fb60373103ed756b814ad73f9d6e366673ed0c9a971eb3081b994bd0e3"
+        },
+        {
+          "name": "compiler_builtins-0.1.152/Cargo.toml.orig",
+          "bytes": 2151,
+          "sha256": "9430a94bb89730ae530bf093ad0c12492d4c7a57a00d64bdb01585a84fbe6e0c"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/dlmalloc-0.2.7.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "dlmalloc-0.2.7/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "3f342f23e677e63d3552c95d447b55df29e9beaa959e2beb93c26d0d1d590dd4"
+        },
+        {
+          "name": "dlmalloc-0.2.7/Cargo.toml",
+          "bytes": 1962,
+          "sha256": "8d36ff35c7103810383f41767eb0bfb4d21c44e0d65cb6d7854de0384a7baa68"
+        },
+        {
+          "name": "dlmalloc-0.2.7/Cargo.toml.orig",
+          "bytes": 1587,
+          "sha256": "60b3ad3530340e2562064616403379a390eb7dc8896a4147d25b3f4fa38ffabc"
+        },
+        {
+          "name": "dlmalloc-0.2.7/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "dlmalloc-0.2.7/LICENSE-MIT",
+          "bytes": 1057,
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/fortanix-sgx-abi-0.5.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "fortanix-sgx-abi-0.5.0/.cargo_vcs_info.json",
+          "bytes": 120,
+          "sha256": "cc23d9fd137a0f222f3cff24e7352983348c214089e8b8c13d105b8e149f3b00"
+        },
+        {
+          "name": "fortanix-sgx-abi-0.5.0/Cargo.toml",
+          "bytes": 1621,
+          "sha256": "5ef38d3c4329644a02d5fe6019ea401cdd64d31c1a26fd16cf30c7d2dd87873f"
+        },
+        {
+          "name": "fortanix-sgx-abi-0.5.0/Cargo.toml.orig",
+          "bytes": 1131,
+          "sha256": "67987b5e75cbfee9fdacd8ab7b4bd3c7fe41a1203de87ad85eef284c7b0c7abe"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/getopts-0.2.21.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "getopts-0.2.21/Cargo.toml.orig",
+          "bytes": 736,
+          "sha256": "71482f0aa93872b207fc004a709d6f21cc2ac2f7a953a31a4cfbd3395cc35dcd"
+        },
+        {
+          "name": "getopts-0.2.21/Cargo.toml",
+          "bytes": 1247,
+          "sha256": "eb778be71513b195b13c40e7f04ebce631ec4af5858a49693a71270000288791"
+        },
+        {
+          "name": "getopts-0.2.21/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "getopts-0.2.21/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb"
+        },
+        {
+          "name": "getopts-0.2.21/.cargo_vcs_info.json",
+          "bytes": 74,
+          "sha256": "443d8cd1d909467ca9ce6a5b1e7e1526d5b23fe2898eec4f819820ccc6b53ea2"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/gimli-0.31.1.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "gimli-0.31.1/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "0b6c7b9d0fb69097dec83de46b656f81e2af61324cfa13253dbe84af73403089"
+        },
+        {
+          "name": "gimli-0.31.1/Cargo.toml",
+          "bytes": 2361,
+          "sha256": "565cde001e372608acdd3d8b4039c178e2a1a7295956a2f6241c828818602b95"
+        },
+        {
+          "name": "gimli-0.31.1/Cargo.toml.orig",
+          "bytes": 1938,
+          "sha256": "526c2e5ae92deffc63015409a43cd62fcd1dc0befc6f07136e745ca72d8f33ab"
+        },
+        {
+          "name": "gimli-0.31.1/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "gimli-0.31.1/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/hashbrown-0.15.2.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "hashbrown-0.15.2/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "0440a9993642bee36e7b0dc042c426f5325f385444f5f219e3807d6fc941da92"
+        },
+        {
+          "name": "hashbrown-0.15.2/Cargo.toml",
+          "bytes": 3167,
+          "sha256": "04ca9c21392dc5171b18af0630cae19af1a6896f9d2f61a9ab788a0511ebd63d"
+        },
+        {
+          "name": "hashbrown-0.15.2/Cargo.toml.orig",
+          "bytes": 2703,
+          "sha256": "598fefdef03d5238f5dadeef4264f806a3069b9c95de2df3d81ff2eb374de2a1"
+        },
+        {
+          "name": "hashbrown-0.15.2/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "hashbrown-0.15.2/LICENSE-MIT",
+          "bytes": 1060,
+          "sha256": "ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/hermit-abi-0.5.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "hermit-abi-0.5.0/.cargo_vcs_info.json",
+          "bytes": 104,
+          "sha256": "793b2a1b41f614a21ac7b5528d6c916f9906079dbe0d39ec39fa226630dcc11d"
+        },
+        {
+          "name": "hermit-abi-0.5.0/Cargo.toml",
+          "bytes": 1299,
+          "sha256": "68e7d566c9b644a3718ab333a97db7c17615c05db3238b6a2a925732ff9401af"
+        },
+        {
+          "name": "hermit-abi-0.5.0/Cargo.toml.orig",
+          "bytes": 623,
+          "sha256": "7574566de7d2f95568744af47207fae6c6117e8a177d22040fb7f4d63dad2a68"
+        },
+        {
+          "name": "hermit-abi-0.5.0/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "hermit-abi-0.5.0/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/libc-0.2.171.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "libc-0.2.171/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "05a2dd302c1c8516cc824f6153ebee609e340910e83f494b2c385738f9fea2ea"
+        },
+        {
+          "name": "libc-0.2.171/Cargo.toml",
+          "bytes": 4986,
+          "sha256": "7f31f2e612b4c14b57ecdcec4912ac1514e26e3c061d5b06b54e1e34e83191b1"
+        },
+        {
+          "name": "libc-0.2.171/Cargo.toml.orig",
+          "bytes": 4570,
+          "sha256": "b690a71106c17d70788343841b89bfe6cd5359b556b5b6cf394e54a1edd96281"
+        },
+        {
+          "name": "libc-0.2.171/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "name": "libc-0.2.171/LICENSE-MIT",
+          "bytes": 1076,
+          "sha256": "a8d47ff51ca256f56a8932dba07660672dbfe3004257ca8de708aac1415937a1"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/memchr-2.7.4.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "memchr-2.7.4/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "ca2ae25763f44307fd02d625d6af962227230f732824fc112f5305e31d4c98ce"
+        },
+        {
+          "name": "memchr-2.7.4/COPYING",
+          "bytes": 126,
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"
+        },
+        {
+          "name": "memchr-2.7.4/Cargo.toml",
+          "bytes": 1917,
+          "sha256": "8333f270d28547eec87c63083418550a6d9d1de14e9adbcba94ebe0f2a40db61"
+        },
+        {
+          "name": "memchr-2.7.4/Cargo.toml.orig",
+          "bytes": 2640,
+          "sha256": "8c4a39bc7158584621ad1d5001a75cd4c5aa0d41d69ca4f94698970d99bf3607"
+        },
+        {
+          "name": "memchr-2.7.4/LICENSE-MIT",
+          "bytes": 1081,
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"
+        },
+        {
+          "name": "memchr-2.7.4/UNLICENSE",
+          "bytes": 1211,
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/miniz_oxide-0.8.3.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "miniz_oxide-0.8.3/.cargo_vcs_info.json",
+          "bytes": 105,
+          "sha256": "c524955dca07cdbd1e1f95c736b21e45407fd7f87825dab8586af77572c8f032"
+        },
+        {
+          "name": "miniz_oxide-0.8.3/Cargo.toml",
+          "bytes": 2054,
+          "sha256": "d262f2a4162437fa2ebfbbe14f344cfa2f81617051c2005f47ec3501278a993f"
+        },
+        {
+          "name": "miniz_oxide-0.8.3/Cargo.toml.orig",
+          "bytes": 2005,
+          "sha256": "351dc7c8f4723aa479883e1d9d36b2119ff20808a247255ea8afe9f1d2b97f73"
+        },
+        {
+          "name": "miniz_oxide-0.8.3/LICENSE",
+          "bytes": 1213,
+          "sha256": "4108245a1f2df9d4e94df8abed5b4ba0759bb2f9b40a6b939f1be141077ae50b"
+        },
+        {
+          "name": "miniz_oxide-0.8.3/LICENSE-APACHE.md",
+          "bytes": 10174,
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        {
+          "name": "miniz_oxide-0.8.3/LICENSE-MIT.md",
+          "bytes": 1212,
+          "sha256": "799e9ca9d179295ef372f25d3769cdda7d25bb2668add6a6a1e22d1e4c678b8d"
+        },
+        {
+          "name": "miniz_oxide-0.8.3/LICENSE-ZLIB.md",
+          "bytes": 984,
+          "sha256": "0a54e647fe54104658b5e563c04c6f9edf251710e47bce692e0bd990a4ddaa39"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/object-0.36.7.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "object-0.36.7/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "5964ffb6a366f55e31eff0e190c17ac30c103b1048f7433ca3ef79dafd7a7517"
+        },
+        {
+          "name": "object-0.36.7/Cargo.toml",
+          "bytes": 3300,
+          "sha256": "875bbd91edcad1f119f8e1c213a6a2bfccc14d0b95e93ebb3fd82bf332b5dfd7"
+        },
+        {
+          "name": "object-0.36.7/Cargo.toml.orig",
+          "bytes": 4404,
+          "sha256": "054b01dad5cfbae78bce93d62e6e778dae9bb0ac29838962d1e6e06a97caa177"
+        },
+        {
+          "name": "object-0.36.7/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "object-0.36.7/LICENSE-MIT",
+          "bytes": 1064,
+          "sha256": "0b74dfa0bcee5c420c6b7f67b4b2658f9ab8388c97b8e733975f2cecbdd668a6"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/proc-macro2-1.0.93.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "proc-macro2-1.0.93/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "0a48761f42487e8c6369cd4a4fbccba99ff783316cb92f761542e0af6fa169fd"
+        },
+        {
+          "name": "proc-macro2-1.0.93/Cargo.toml",
+          "bytes": 2224,
+          "sha256": "fae52299b02be7a1b3c62d22d10c64d2221435f93282276e22baa7a84265ceaa"
+        },
+        {
+          "name": "proc-macro2-1.0.93/Cargo.toml.orig",
+          "bytes": 2085,
+          "sha256": "59c10c17910e5ca924356427d3f920684c8d4e4d5590bb522aa4b3eee8aee061"
+        },
+        {
+          "name": "proc-macro2-1.0.93/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "name": "proc-macro2-1.0.93/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/quote-1.0.38.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "quote-1.0.38/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "4b6f2264e171212d54f1d296c774a6947dbd8afd04fec94ea767d4066d1540b4"
+        },
+        {
+          "name": "quote-1.0.38/Cargo.toml",
+          "bytes": 1551,
+          "sha256": "bb574e3d71fabca988cf5b5ac7a105cafe62e401c5f423cb5cd88af9e2f805f7"
+        },
+        {
+          "name": "quote-1.0.38/Cargo.toml.orig",
+          "bytes": 960,
+          "sha256": "bf8fea51a1a8e3f530b1b2434a876488570cac019cb041a5e9be76eb35bfae04"
+        },
+        {
+          "name": "quote-1.0.38/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "name": "quote-1.0.38/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/r-efi-4.5.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "r-efi-4.5.0/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "5d92af2926dfe186811a3487008a8ce2c8a6462c8302394ae55f64f2be83ff48"
+        },
+        {
+          "name": "r-efi-4.5.0/AUTHORS",
+          "bytes": 3540,
+          "sha256": "4c505f93bebf6d3ad5ede2dbe204a1a82e25de7c212322c8d81c7382dcda7d48"
+        },
+        {
+          "name": "r-efi-4.5.0/Cargo.toml",
+          "bytes": 1453,
+          "sha256": "34755396ca8c1c2044f18987fc46861a55027fb1a4f88e20a7d045e92e5336ab"
+        },
+        {
+          "name": "r-efi-4.5.0/Cargo.toml.orig",
+          "bytes": 1323,
+          "sha256": "d05aa42a06a8928d1fde1bb1c48eda6ea5c2c2d742ea3026d9fbb4327e3e7a88"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/r-efi-alloc-1.0.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "r-efi-alloc-1.0.0/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "3833a229a5c6ad416670c24f077e84ccf7f1109b47be39400e4acd9c23b8a811"
+        },
+        {
+          "name": "r-efi-alloc-1.0.0/AUTHORS",
+          "bytes": 2985,
+          "sha256": "55d8cf02d643567a242b9254a2e41c6cb7bd98aa47ead94ce539c62ef4da48f7"
+        },
+        {
+          "name": "r-efi-alloc-1.0.0/Cargo.toml",
+          "bytes": 1435,
+          "sha256": "eabc82db884192f59c18a57e4142e3d77ac96dabe71e3471f073ef6b6acc1aa5"
+        },
+        {
+          "name": "r-efi-alloc-1.0.0/Cargo.toml.orig",
+          "bytes": 1509,
+          "sha256": "ee14f9adf7261f4608a2b79192cf20baea6278dff23da15124235892a6c9543f"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/rand-0.9.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "rand-0.9.0/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "c3497fd0468772d29f7b6efcac06775e0abc029525b091037ae48f65d54d26cf"
+        },
+        {
+          "name": "rand-0.9.0/COPYRIGHT",
+          "bytes": 569,
+          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5"
+        },
+        {
+          "name": "rand-0.9.0/Cargo.toml",
+          "bytes": 2373,
+          "sha256": "69b56138e7969cbc8d18257bc2179e442fa4960976cde885fb719f436b7b4b31"
+        },
+        {
+          "name": "rand-0.9.0/Cargo.toml.orig",
+          "bytes": 2692,
+          "sha256": "cf9574889932a74a4ec8c9575c6da19e07c44587c7d080549c36e0ecbd33c4de"
+        },
+        {
+          "name": "rand-0.9.0/LICENSE-APACHE",
+          "bytes": 9724,
+          "sha256": "35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab"
+        },
+        {
+          "name": "rand-0.9.0/LICENSE-MIT",
+          "bytes": 1117,
+          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/rand_core-0.9.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "rand_core-0.9.0/.cargo_vcs_info.json",
+          "bytes": 103,
+          "sha256": "6935b6fcbeff1796c0eacf1da8b0512a44a8f045785d97207bd68346e5901627"
+        },
+        {
+          "name": "rand_core-0.9.0/COPYRIGHT",
+          "bytes": 569,
+          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5"
+        },
+        {
+          "name": "rand_core-0.9.0/Cargo.toml",
+          "bytes": 1596,
+          "sha256": "b2b62bddc3b32fd9a16923c6f6cd3ced786a94a5a2d9a17cb161c9861c20d2de"
+        },
+        {
+          "name": "rand_core-0.9.0/Cargo.toml.orig",
+          "bytes": 1072,
+          "sha256": "7f92de6ab1024c16aaa8c9615b4fb9a38e79f9fb2d56d8639a5e1d09032b1713"
+        },
+        {
+          "name": "rand_core-0.9.0/LICENSE-APACHE",
+          "bytes": 10282,
+          "sha256": "6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51"
+        },
+        {
+          "name": "rand_core-0.9.0/LICENSE-MIT",
+          "bytes": 1117,
+          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/rand_xorshift-0.4.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "rand_xorshift-0.4.0/.cargo_vcs_info.json",
+          "bytes": 107,
+          "sha256": "e9cff6013707bd7309f7835a5b2f6e34fb2afc0e0c31f4c64d29342eb6d9b2ff"
+        },
+        {
+          "name": "rand_xorshift-0.4.0/COPYRIGHT",
+          "bytes": 569,
+          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5"
+        },
+        {
+          "name": "rand_xorshift-0.4.0/Cargo.toml",
+          "bytes": 1425,
+          "sha256": "7f81d59d8270e6b5552550a3d4a2bb9605478910f9c380ec70a14b8ee05fadbf"
+        },
+        {
+          "name": "rand_xorshift-0.4.0/Cargo.toml.orig",
+          "bytes": 911,
+          "sha256": "412a486ed1d31572e97240a6249226e16cabcbc8a501b5fa393c76d9efd73818"
+        },
+        {
+          "name": "rand_xorshift-0.4.0/LICENSE-APACHE",
+          "bytes": 9724,
+          "sha256": "35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab"
+        },
+        {
+          "name": "rand_xorshift-0.4.0/LICENSE-MIT",
+          "bytes": 1117,
+          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/rustc-demangle-0.1.24.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "rustc-demangle-0.1.24/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "f41a6696c2e36fa002ecc8b06c25785f97badfc42c18172ab7ddb40c6e589930"
+        },
+        {
+          "name": "rustc-demangle-0.1.24/Cargo.toml",
+          "bytes": 1345,
+          "sha256": "1e2ff162f1fae19b2e5af0e0e3385e194c929ce98416e8b8af4b9e99412bb0d2"
+        },
+        {
+          "name": "rustc-demangle-0.1.24/Cargo.toml.orig",
+          "bytes": 761,
+          "sha256": "485a091abce086c87579130e56cc0c794ef448f866242f0cba198231a6bc21c6"
+        },
+        {
+          "name": "rustc-demangle-0.1.24/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "rustc-demangle-0.1.24/LICENSE-MIT",
+          "bytes": 1057,
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/shlex-1.3.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "shlex-1.3.0/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "5ba6bffcbe6628331b4b8ae50936c44d6260de2913c83f55e0c19fce366af72c"
+        },
+        {
+          "name": "shlex-1.3.0/Cargo.toml",
+          "bytes": 1074,
+          "sha256": "d7eb8c4bce681b4dd1dfc2c98c649754390775f38f4796d491948ddbb53aa2ef"
+        },
+        {
+          "name": "shlex-1.3.0/Cargo.toml.orig",
+          "bytes": 585,
+          "sha256": "aba3cfcd4981d79feac94eb673bcdd0754962edc0e2a0ce81a13d5285c5a3f3d"
+        },
+        {
+          "name": "shlex-1.3.0/LICENSE-APACHE",
+          "bytes": 566,
+          "sha256": "553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583"
+        },
+        {
+          "name": "shlex-1.3.0/LICENSE-MIT",
+          "bytes": 1092,
+          "sha256": "4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/syn-2.0.98.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "syn-2.0.98/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "2003f11296d16611fa6040eb056cf697238e235f27aec55f05e20c4dde747fc1"
+        },
+        {
+          "name": "syn-2.0.98/Cargo.toml",
+          "bytes": 4748,
+          "sha256": "c65ef4680630d2f79e6de21b43e708e00987831eaeda9d7e6e28825d158f7b39"
+        },
+        {
+          "name": "syn-2.0.98/Cargo.toml.orig",
+          "bytes": 2152,
+          "sha256": "2d143bfb442785e04f6ca1de1e832f166b22b02d37cee4c57b6b48ada6284937"
+        },
+        {
+          "name": "syn-2.0.98/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "name": "syn-2.0.98/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/unicode-ident-1.0.16.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "unicode-ident-1.0.16/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "589d518933f56d676febc6af34492bc7705b3c63e5e65012bdfe1117c5328d71"
+        },
+        {
+          "name": "unicode-ident-1.0.16/Cargo.toml",
+          "bytes": 1851,
+          "sha256": "c8c101dc8a6622dc94cdbb9c2753f61237134b3e247917f1170eee3cb9794811"
+        },
+        {
+          "name": "unicode-ident-1.0.16/Cargo.toml.orig",
+          "bytes": 979,
+          "sha256": "6cd4a02369f243a63c5e9a81d771afb28adcaa55ecc9d3fc53372c532ac847b4"
+        },
+        {
+          "name": "unicode-ident-1.0.16/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "name": "unicode-ident-1.0.16/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "name": "unicode-ident-1.0.16/LICENSE-UNICODE",
+          "bytes": 1995,
+          "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/unicode-width-0.1.14.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "unicode-width-0.1.14/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "75a5377000a202fb39168df8c5ac9dafb6e99856bdece6bcae6046c438849120"
+        },
+        {
+          "name": "unicode-width-0.1.14/COPYRIGHT",
+          "bytes": 321,
+          "sha256": "23860c2a7b5d96b21569afedf033469bab9fe14a1b24a35068b8641c578ce24d"
+        },
+        {
+          "name": "unicode-width-0.1.14/Cargo.toml",
+          "bytes": 1735,
+          "sha256": "c455912954b250b8b2c6ca5cf83c29b4d4fb515a923d7dc349f6c9e6dd18439b"
+        },
+        {
+          "name": "unicode-width-0.1.14/Cargo.toml.orig",
+          "bytes": 1010,
+          "sha256": "9f332b2284b145f865663dc8c6374a0f8e9dbb42de5b9fe29b4e1923bdff84b4"
+        },
+        {
+          "name": "unicode-width-0.1.14/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "unicode-width-0.1.14/LICENSE-MIT",
+          "bytes": 1071,
+          "sha256": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/unwinding-0.2.5.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "unwinding-0.2.5/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "484cae98c28dd35cfa54735da2d34abccd9332668ea154a1be069be5f31e1801"
+        },
+        {
+          "name": "unwinding-0.2.5/Cargo.toml",
+          "bytes": 2195,
+          "sha256": "d307ba7208f1f8904dff0e4c2826b2b9767f602bcd4d6386950d48455b4a0cdd"
+        },
+        {
+          "name": "unwinding-0.2.5/Cargo.toml.orig",
+          "bytes": 1595,
+          "sha256": "b4bce42082ff0f8789f6d9384dd878b55da7796b8ca6c12ca6175bd098deb1ed"
+        },
+        {
+          "name": "unwinding-0.2.5/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "name": "unwinding-0.2.5/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/wasi-0.11.0+wasi-snapshot-preview1.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "wasi-0.11.0+wasi-snapshot-preview1/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "74c978005a37d50f39458249b0e624753ba30f87a46990a01e02a385a27f311b"
+        },
+        {
+          "name": "wasi-0.11.0+wasi-snapshot-preview1/Cargo.toml",
+          "bytes": 1291,
+          "sha256": "7a38e6f90e220716b5b3f82c0a187dfef180db8d1d262250325a655d1b9888e6"
+        },
+        {
+          "name": "wasi-0.11.0+wasi-snapshot-preview1/Cargo.toml.orig",
+          "bytes": 981,
+          "sha256": "9925182c9d14fadebeaf88dbbc2669d06332bd7ada1d06d8d6ad62399fb1f206"
+        },
+        {
+          "name": "wasi-0.11.0+wasi-snapshot-preview1/LICENSE-APACHE",
+          "bytes": 10847,
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "name": "wasi-0.11.0+wasi-snapshot-preview1/LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "bytes": 12243,
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5"
+        },
+        {
+          "name": "wasi-0.11.0+wasi-snapshot-preview1/LICENSE-MIT",
+          "bytes": 1023,
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/windows-sys-0.59.0.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "windows-sys-0.59.0/.cargo_vcs_info.json",
+          "bytes": 109,
+          "sha256": "77b8cb4c54e2e92e23ba4e3e6adcb03ad1a16fb2f1a71e69fe17390076b105b6"
+        },
+        {
+          "name": "windows-sys-0.59.0/Cargo.toml",
+          "bytes": 12683,
+          "sha256": "07576ed48257647854834ec9a8cde3bb55ffb59296a0a0efa28a9f2f141800d7"
+        },
+        {
+          "name": "windows-sys-0.59.0/Cargo.toml.orig",
+          "bytes": 11980,
+          "sha256": "4910ea0a763743eeb7b99e8923405155f2582b5e91ba367f7307fcc7f89ac09f"
+        },
+        {
+          "name": "windows-sys-0.59.0/license-apache-2.0",
+          "bytes": 11351,
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "name": "windows-sys-0.59.0/license-mit",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/windows-targets-0.52.6.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "windows-targets-0.52.6/.cargo_vcs_info.json",
+          "bytes": 113,
+          "sha256": "08a87423c6264cf77457f5c1751ddd8efd3a0c41762ca51a6365baa713b33c50"
+        },
+        {
+          "name": "windows-targets-0.52.6/Cargo.toml",
+          "bytes": 2166,
+          "sha256": "315c2609b517bc97f1ddb62ecdadfc66f44f03f6bceb74adcdc3cec26f2126b6"
+        },
+        {
+          "name": "windows-targets-0.52.6/Cargo.toml.orig",
+          "bytes": 1680,
+          "sha256": "124a89a5b658b7bbe23cada5f0e32ca41f0c2678e5746be3dedd6976685fa5c0"
+        },
+        {
+          "name": "windows-targets-0.52.6/license-apache-2.0",
+          "bytes": 11351,
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "name": "windows-targets-0.52.6/license-mit",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/windows_aarch64_gnullvm-0.52.6.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "windows_aarch64_gnullvm-0.52.6/.cargo_vcs_info.json",
+          "bytes": 124,
+          "sha256": "9ba493e9467bebf854cda22fcf1ddcf6dbe1396b3a755011527b3ffa1a2a6ff6"
+        },
+        {
+          "name": "windows_aarch64_gnullvm-0.52.6/Cargo.toml",
+          "bytes": 969,
+          "sha256": "7535a631f6950dae31847b64f09469b499bc00fc492374fbb37589cfb9f2d02e"
+        },
+        {
+          "name": "windows_aarch64_gnullvm-0.52.6/Cargo.toml.orig",
+          "bytes": 332,
+          "sha256": "6775ecceb39640c62b0e1f1cc3d4b0ac4acafbeec6d24ce9fd8b3b1cf7c4a68a"
+        },
+        {
+          "name": "windows_aarch64_gnullvm-0.52.6/license-apache-2.0",
+          "bytes": 11351,
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "name": "windows_aarch64_gnullvm-0.52.6/license-mit",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/windows_aarch64_msvc-0.52.6.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "windows_aarch64_msvc-0.52.6/.cargo_vcs_info.json",
+          "bytes": 121,
+          "sha256": "97246e22ceadcf37b130cd3279570b58260989f37ad20cb3f3fe62a20018ef0a"
+        },
+        {
+          "name": "windows_aarch64_msvc-0.52.6/Cargo.toml",
+          "bytes": 963,
+          "sha256": "36a94f20ae8c86cfc38b0489dc9c4a9d0607d5f8e1e3216c866eae9e5bd2d5a5"
+        },
+        {
+          "name": "windows_aarch64_msvc-0.52.6/Cargo.toml.orig",
+          "bytes": 329,
+          "sha256": "924ffb9dba95a55052dc3d58d091fa970580e647fc7b804783cd6c90c0356618"
+        },
+        {
+          "name": "windows_aarch64_msvc-0.52.6/license-apache-2.0",
+          "bytes": 11351,
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "name": "windows_aarch64_msvc-0.52.6/license-mit",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/windows_i686_gnu-0.52.6.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "windows_i686_gnu-0.52.6/.cargo_vcs_info.json",
+          "bytes": 117,
+          "sha256": "00517f17e6f900bc0b699d60407c36a1229899f0f0cca53abe371d3288eca71b"
+        },
+        {
+          "name": "windows_i686_gnu-0.52.6/Cargo.toml",
+          "bytes": 955,
+          "sha256": "bd9f2440820141c9a41c21b48a9d98c4c14f41936afe10e911ba963aa2c35809"
+        },
+        {
+          "name": "windows_i686_gnu-0.52.6/Cargo.toml.orig",
+          "bytes": 325,
+          "sha256": "0082103cef0e9a7ac13250eb51050ccf0b0506610bef59a8558345b6792c97e1"
+        },
+        {
+          "name": "windows_i686_gnu-0.52.6/license-apache-2.0",
+          "bytes": 11351,
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "name": "windows_i686_gnu-0.52.6/license-mit",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/windows_i686_gnullvm-0.52.6.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "windows_i686_gnullvm-0.52.6/.cargo_vcs_info.json",
+          "bytes": 121,
+          "sha256": "2adbf751fecca001bf20d0276cee5229a481b76b3c8de75a5e1cc7b8d32d5477"
+        },
+        {
+          "name": "windows_i686_gnullvm-0.52.6/Cargo.toml",
+          "bytes": 963,
+          "sha256": "ab3340805fce89252fa7d9c7e38fcdc2d8f5aa114dfdaa4d7926c7265ea54f38"
+        },
+        {
+          "name": "windows_i686_gnullvm-0.52.6/Cargo.toml.orig",
+          "bytes": 329,
+          "sha256": "7bd223c65c05f15a19e3426d9165e655aaf111b88c2001c51910946c8ad2f92c"
+        },
+        {
+          "name": "windows_i686_gnullvm-0.52.6/license-apache-2.0",
+          "bytes": 11351,
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "name": "windows_i686_gnullvm-0.52.6/license-mit",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/windows_i686_msvc-0.52.6.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "windows_i686_msvc-0.52.6/.cargo_vcs_info.json",
+          "bytes": 118,
+          "sha256": "3bda57155d1f6200bb0f6b97792b13da313e67743f2c92fa8c93406c50a59b69"
+        },
+        {
+          "name": "windows_i686_msvc-0.52.6/Cargo.toml",
+          "bytes": 957,
+          "sha256": "30419314e9cb467e2ddfe347f1626a9b59f030041bcdc9cb563cbc5a39fc4a5f"
+        },
+        {
+          "name": "windows_i686_msvc-0.52.6/Cargo.toml.orig",
+          "bytes": 326,
+          "sha256": "934cc2fefa7b48ea34307ce5cb0691aed87e11abc8d58125ebbaeaa971c56b92"
+        },
+        {
+          "name": "windows_i686_msvc-0.52.6/license-apache-2.0",
+          "bytes": 11351,
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "name": "windows_i686_msvc-0.52.6/license-mit",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/windows_x86_64_gnu-0.52.6.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "windows_x86_64_gnu-0.52.6/.cargo_vcs_info.json",
+          "bytes": 119,
+          "sha256": "54d61b833bf656586bfbd8fafcacb2200810d81570122f9ed554c7da0575d1d1"
+        },
+        {
+          "name": "windows_x86_64_gnu-0.52.6/Cargo.toml",
+          "bytes": 959,
+          "sha256": "7bd069878ae02213cb113a56b15a1eac497a697de64ec0006bb0930c49b65386"
+        },
+        {
+          "name": "windows_x86_64_gnu-0.52.6/Cargo.toml.orig",
+          "bytes": 327,
+          "sha256": "aeedc3b03332c1c651e81fd32863e7bf8ba3e09a1f22310772c4545888cf7a7d"
+        },
+        {
+          "name": "windows_x86_64_gnu-0.52.6/license-apache-2.0",
+          "bytes": 11351,
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "name": "windows_x86_64_gnu-0.52.6/license-mit",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/windows_x86_64_gnullvm-0.52.6.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "windows_x86_64_gnullvm-0.52.6/.cargo_vcs_info.json",
+          "bytes": 123,
+          "sha256": "6a2e3d83b23d2e0c745932f21871cc932450503d703901d41d628be469bd58cf"
+        },
+        {
+          "name": "windows_x86_64_gnullvm-0.52.6/Cargo.toml",
+          "bytes": 967,
+          "sha256": "b4e30fa8303981a233886a54ab98a180041adf2815f4a0d45e34484e5fb20585"
+        },
+        {
+          "name": "windows_x86_64_gnullvm-0.52.6/Cargo.toml.orig",
+          "bytes": 331,
+          "sha256": "39cf3aa438b36b3157081d1d6dced5c81a76895790dd8f100523f4b0d83818d1"
+        },
+        {
+          "name": "windows_x86_64_gnullvm-0.52.6/license-apache-2.0",
+          "bytes": 11351,
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "name": "windows_x86_64_gnullvm-0.52.6/license-mit",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/windows_x86_64_msvc-0.52.6.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "windows_x86_64_msvc-0.52.6/.cargo_vcs_info.json",
+          "bytes": 120,
+          "sha256": "d837ff4f46dcd9fa1e4c33e52e2727bec1de7302d262ca654b5cb01daea1b60f"
+        },
+        {
+          "name": "windows_x86_64_msvc-0.52.6/Cargo.toml",
+          "bytes": 961,
+          "sha256": "cebfc4eefe4d2c0da8ab97e31e3f5a518fc9db453a131d31d84dcdb5c16acb26"
+        },
+        {
+          "name": "windows_x86_64_msvc-0.52.6/Cargo.toml.orig",
+          "bytes": 328,
+          "sha256": "2194fbcaa11f15f18ced165d5b421c760d6d39029c99bfcb2d70b20d54bd25a4"
+        },
+        {
+          "name": "windows_x86_64_msvc-0.52.6/license-apache-2.0",
+          "bytes": 11351,
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "name": "windows_x86_64_msvc-0.52.6/license-mit",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/zerocopy-0.8.17.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "zerocopy-0.8.17/.cargo_vcs_info.json",
+          "bytes": 94,
+          "sha256": "797d7ae32187611403fb4f62b4642373b3a5957700cbb095ef9aea6d3beb1d34"
+        },
+        {
+          "name": "zerocopy-0.8.17/Cargo.toml",
+          "bytes": 2679,
+          "sha256": "850fd0e8739b48c8277e165448ee748dffd84092f841a58685e02de6161d2d82"
+        },
+        {
+          "name": "zerocopy-0.8.17/Cargo.toml.orig",
+          "bytes": 4463,
+          "sha256": "3e2f74fb95b75be226b81df4beb23bfa058e76dfa5acb1345a95f37777ec6962"
+        },
+        {
+          "name": "zerocopy-0.8.17/LICENSE-APACHE",
+          "bytes": 11350,
+          "sha256": "9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3"
+        },
+        {
+          "name": "zerocopy-0.8.17/LICENSE-BSD",
+          "bytes": 1275,
+          "sha256": "83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32"
+        },
+        {
+          "name": "zerocopy-0.8.17/LICENSE-MIT",
+          "bytes": 1060,
+          "sha256": "1a2f5c12ddc934d58956aa5dbdd3255fe55fd957633ab7d0d39e4f0daa73f7df"
+        }
+      ]
+    },
+    {
+      "input": "std-1.87-crates/zerocopy-derive-0.8.17.crate",
+      "output": "std-1.87",
+      "documents": [
+        {
+          "name": "zerocopy-derive-0.8.17/.cargo_vcs_info.json",
+          "bytes": 109,
+          "sha256": "76f512a158dc97c132c5c60949450d8f63726afb152b1a9f16fb323176ed1187"
+        },
+        {
+          "name": "zerocopy-derive-0.8.17/Cargo.toml",
+          "bytes": 3598,
+          "sha256": "71878ade60801c964c8243808ab7d122fa28ddc2170723af44901271337c0573"
+        },
+        {
+          "name": "zerocopy-derive-0.8.17/Cargo.toml.orig",
+          "bytes": 2162,
+          "sha256": "954b91baa319a65873556dfa110616c06a0846f4de8dcacc9f3a09746e07e055"
+        },
+        {
+          "name": "zerocopy-derive-0.8.17/LICENSE-APACHE",
+          "bytes": 11350,
+          "sha256": "9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3"
+        },
+        {
+          "name": "zerocopy-derive-0.8.17/LICENSE-BSD",
+          "bytes": 1275,
+          "sha256": "83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32"
+        },
+        {
+          "name": "zerocopy-derive-0.8.17/LICENSE-MIT",
+          "bytes": 1060,
+          "sha256": "1a2f5c12ddc934d58956aa5dbdd3255fe55fd957633ab7d0d39e4f0daa73f7df"
+        }
+      ]
+    }
+  ]
+}

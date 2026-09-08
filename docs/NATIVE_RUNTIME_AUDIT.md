@@ -166,6 +166,26 @@ offline collectorはruntime監査・source補完manifest・元lockの対応と�
 
 出力先はfresh directoryが必要。最終v1は769 files／18200522 bytesで、157 archives・604選択文書・2 locks・外部原文4件・README／INPUTSのみを含み、DLL／exeはcopyしない。別cwd／再生成の全hash一致、165入力の欠落／同size改変、6対応不整合と入力／既存output保護を検証した。source補完側も106入力pairs、Unicodeの欠落／改変／一覧除去、18 package-notice／3 VCS不整合等の回帰試験を通過した。両最終kitは試験出力と全hash一致し、現候補runtime全94 filesも不変。配布承認・compiler/runtime全範囲・Setup.exe完成の証明ではない。
 
+### Native Rust標準libraryのpackage原本と不足表示
+
+rav1e／libdoviのbuild記録にあるMSYS2 Rust 1.87.0-2／1.97.0-1について、元`rust`と対応する`rust-src`の計4 packagesを取得した。全署名を既存MSYS2 keyringのkey `5F944B027F7FE2091985AA2EFA11531AA0AA7F57`で検証し、各`.BUILDINFO`のrecipe hashは[1.87.0-2の固定recipe](https://github.com/msys2/MINGW-packages/blob/301c64f3dd42962143bc7679e088b00c7ed2636f/mingw-w64-rust/PKGBUILD)／[1.97.0-1の固定recipe](https://github.com/msys2/MINGW-packages/blob/a2b4aa07f355fd36922c3318f7584c8d77146899/mingw-w64-rust/PKGBUILD)と一致した。全11 patch／bootstrap inputsもrecipe hashへ対応する。compilerをインストール・実行しておらず、公式Rust同版のbinaryとの同一性は主張しない。
+
+**両packageの`COPYRIGHT-library.html`は同一hashで、out-of-tree dependencies欄が空だった。** SHA256は`592ea218c47b2b50c8d8c53bf44512856fc93942e6686cca55e64311363681c0`。この原本を修正せず保持するが、依存表示の完了証拠にはしない。別の`COPYRIGHT.html`はcompiler scope、`licenses/`は複数用途の本文dictionaryであり、その全licenseをWindows DLLの条件と扱わない。
+
+対応する標準library source packagesと原本表示・lock／manifestを別資料へ保持した。1.87のlibrary lockにある全42 registry crates／11616278 bytesも取得し、全checksumが一致する。これは他target・test／build依存を含むsource-lock材料であり、全42件のWindowsへのlinkを意味しない。1.97のsource packageにはvendor dependenciesとcompiler-builtins／libm sourceが含まれる。`rust-src`はcompiler全sourceではなく、compilerを作った元release archiveはrecipe内のhash／URLを記録するに留め、今回のkitには含めない。
+
+compiler_builtins 0.1.152のcrateには独立license fileがないため、VCS情報のcommit `52d96c47681ef504a8ad7398efffe53214898aab`の原本と、そのlibm submodule `69219c491ee9f05761d2068fd6d4c7c0de6faa3a`の原本を補った。crate内libmの全171 math Rust filesは当該submodule treeのGit blobsと一致する。複合license式と個別math headerをroot labelで置換しない。他target向けFortanix SGX／r-efi／r-efi-allocも独立license fileがなく、元source／metadataは保持するが追加表示の解決済みとはしない。元GNU-hostのunit選択、個別inline／生成dataと非RustのCRT／static入力も別に残る。
+
+[native-rust-runtime-inputs.json](native-rust-runtime-inputs.json)に原本hash・取得先・対応関係と限界を固定した。新collectorは65入力を出力前に照合し、packageのbuild record／recipe／既存native Rustのbuild版／1.87 source lockへの対応も検証する。Download、Cargo実行、compiler binary packageのoutputへのcopyはしない。
+
+```powershell
+.\scripts\prepare-native-rust-runtime-materials.ps1 `
+  -CacheDirectory path/to/native-rust-runtime-cache `
+  -OutputDirectory target/distribution/native-rust-runtime-materials-v1
+```
+
+cache内の相対pathと取得URLはmanifestの`inputs`を使う。最終v1は545 files／22961564 bytesで、484選択文書・2 source packages・42 crates・13 recipe／patch／config files・外部原本2件・README／INPUTSを含む。全archiveは選択前に通常file／directoryと安全pathを確認した。別cwd／再生成の全hash一致、65入力の欠落／同size改変、7対応不整合、展開後の文書hash不一致時に完成markerを残さないこと、元入力と既存outputの保護を試験した。M0の268 tests・format／Clippyも通過し、live ignores 3件と候補runtime 94 filesのhashは不変。これは資料収集の完了単位であり、全適用範囲の確定や配布承認ではない。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

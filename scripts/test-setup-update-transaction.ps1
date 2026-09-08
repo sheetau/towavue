@@ -181,7 +181,7 @@ foreach ($kind in @('journal','backup','stage','old-change','new-change','keep-c
 # Inject faults only into private generated copies; production has no test switch.
 $injectionDirectory = Join-Path $trialRoot 'injected'
 New-Item -ItemType Directory -Path $injectionDirectory | Out-Null
-foreach ($name in @('setup-update-paths.ps1','setup-update-native.cs','get-setup-update-plan.ps1')) { [IO.File]::Copy((Join-Path $PSScriptRoot $name),(Join-Path $injectionDirectory $name)) }
+foreach ($name in @('setup-update-paths.ps1','setup-update-registration.ps1','setup-update-native.cs','get-setup-update-plan.ps1')) { [IO.File]::Copy((Join-Path $PSScriptRoot $name),(Join-Path $injectionDirectory $name)) }
 $original = [IO.File]::ReadAllText($library)
 $injectedPath = Join-Path $injectionDirectory 'setup-update-transaction.ps1'
 $pair = New-Pair 'copy-denied-recovery'
@@ -248,5 +248,161 @@ Assert-True (-not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'lic
 Assert-True (-not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'towavue.exe'))) 'Interrupted installation can launch a mixed payload.'
 Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
 Assert-True ((Get-Snapshot $pair) -ceq $before) 'Abrupt process exit was not recoverable.'
+
+# Coordinate real, test-only registry values with the same file journal.
+$registrationState = Join-Path $repositoryRoot 'packaging/windows/registration-state.ps1'
+. $registrationState
+$registrationSource = [IO.File]::ReadAllText($registrationState)
+$privateRegistration = Join-Path $trialRoot 'packaging/windows/registration-state.ps1'
+Write-Trial $privateRegistration $registrationSource
+function Get-TrialRegistrationArguments($Pair) {
+    return @{
+        InstallDirectory=$Pair.InstallDirectory
+        OwnershipId=('towavue-local-' + (Get-FileHash -LiteralPath (Join-Path $Pair.InstallDirectory 'licenses/INSTALLED-FILES.json')).Hash.ToLowerInvariant())
+        SizeKiB=123
+        RegistrySubKey=$Pair.Registration.RegistrySubKey
+        ShortcutPath=$Pair.Registration.ShortcutPath
+    }
+}
+function New-RegisteredPair([string]$Name) {
+    $pair = New-Pair $Name
+    $programs = Join-Path (Split-Path -Parent $pair.InstallDirectory) 'programs'
+    New-Item -ItemType Directory -Path $programs | Out-Null
+    $pair.Registration = @{RegistrySubKey=('Software\towavue\InstallerTests\' + [guid]::NewGuid().ToString('N'));ShortcutPath=(Join-Path $programs 'fixture.lnk')}
+    $arguments = Get-TrialRegistrationArguments $pair
+    Invoke-TowavueRegistration @arguments -Mode Install | Out-Null
+    return $pair
+}
+function Get-TrialRegistrationSnapshot($Pair) {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
+    $key = $null
+    try {
+        $key = $base.OpenSubKey($Pair.Registration.RegistrySubKey)
+        $values = [ordered]@{}
+        foreach ($name in $key.GetValueNames() | Sort-Object) { $values[$name] = @($key.GetValueKind($name).ToString(),$key.GetValue($name)) }
+        return [ordered]@{values=$values;shortcut=(Get-FileHash -LiteralPath $Pair.Registration.ShortcutPath).Hash} | ConvertTo-Json -Depth 5 -Compress
+    } finally { if ($key) { $key.Dispose() }; $base.Dispose() }
+}
+function Remove-TrialRegistration($Pair) {
+    $arguments = Get-TrialRegistrationArguments $Pair
+    Invoke-TowavueRegistration @arguments -Mode Remove | Out-Null
+    Assert-True (-not (Test-Path -LiteralPath $Pair.Registration.ShortcutPath)) 'Joint trial shortcut remains.'
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
+    try { $key = $base.OpenSubKey($Pair.Registration.RegistrySubKey); if ($key) { $key.Dispose(); throw 'Joint trial registration remains.' } } finally { $base.Dispose() }
+}
+$pair = New-RegisteredPair 'joined-baseline'
+$before = Get-Snapshot $pair
+$beforeRegistration = Get-TrialRegistrationSnapshot $pair
+$token = Get-Token (New-TowavueUpdateTransaction @pair)
+$journal = Get-Content -LiteralPath (Join-Path $token.TransactionDirectory 'journal.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-True ($journal.schema_version -eq 2 -and $journal.registration.PreviousSizeKiB -eq 123 -and $journal.registration.OwnershipId -ceq $pair.IncomingOwnershipId) 'Typed registration capture is not versioned and bound to the payload.'
+$result = Invoke-TowavueUpdateTransaction -Mode Apply @token
+Assert-True ($result.state -eq 'files_and_registration_applied') 'Joined update returned a file-only result.'
+Assert-Applied $pair $token
+Invoke-TowavueUpdateRegistration $journal.registration 'Apply' -VerifyOnly
+$appliedRegistration = Get-TrialRegistrationSnapshot $pair | ConvertFrom-Json
+Assert-True ($appliedRegistration.values.TowavueOwnershipId[1] -ceq $journal.registration.OwnershipId -and $appliedRegistration.values.EstimatedSize[1] -eq $journal.registration.SizeKiB) 'Joined update did not publish the target registration values.'
+$result = Invoke-TowavueUpdateTransaction -Mode Rollback @token
+Assert-True ($result.state -eq 'files_and_registration_rolled_back') 'Joined rollback result differs.'
+Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
+Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) 'Joined rollback did not restore both states.'
+Remove-TrialRegistration $pair
+
+foreach ($mode in @('Apply','Rollback')) {
+foreach ($fault in 1..10) {
+    $pair = New-RegisteredPair ("joined-file-$mode-$fault")
+    $before = Get-Snapshot $pair
+    $beforeRegistration = Get-TrialRegistrationSnapshot $pair
+    $token = Get-Token (New-TowavueUpdateTransaction @pair)
+    if ($mode -eq 'Rollback') { Invoke-TowavueUpdateTransaction -Mode Apply @token | Out-Null }
+    Write-Trial $injectedPath ($injected + "`nfunction Invoke-TrialFault { `$script:trialMoves++; if (`$script:trialMoves -eq $fault) { throw 'Injected joined interruption' } }`n`$script:trialMoves = 0`n")
+    . $injectedPath
+    Expect-Failure { Invoke-TowavueUpdateTransaction -Mode $mode @token } 'Injected joined interruption'
+    . $library
+    Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
+    Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) "Joined recovery failed after $mode move $fault."
+    Remove-TrialRegistration $pair
+}
+foreach ($write in @("`$key.SetValue('EstimatedSize',`$SizeKiB,[Microsoft.Win32.RegistryValueKind]::DWord)","`$key.SetValue('TowavueOwnershipId',`$OwnershipId,[Microsoft.Win32.RegistryValueKind]::String)")) {
+    $pair = New-RegisteredPair ('joined-registry-' + [guid]::NewGuid().ToString('N'))
+    $before = Get-Snapshot $pair
+    $beforeRegistration = Get-TrialRegistrationSnapshot $pair
+    $token = Get-Token (New-TowavueUpdateTransaction @pair)
+    if ($mode -eq 'Rollback') { Invoke-TowavueUpdateTransaction -Mode Apply @token | Out-Null }
+    Write-Trial $injectedPath $original
+    $injectedRegistration = $registrationSource.Replace($write,($write + "; throw 'Injected registry interruption'"))
+    Assert-True ($injectedRegistration -cne $registrationSource) 'Joined registry injection missed its write.'
+    Write-Trial $privateRegistration $injectedRegistration
+    . $injectedPath
+    Expect-Failure { Invoke-TowavueUpdateTransaction -Mode $mode @token } 'Injected registry interruption'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'towavue.exe'))) 'Registry failure published the application executable.'
+    . $library
+    Write-Trial $privateRegistration $registrationSource
+    Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
+    Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) 'Joined registry interruption failed to restore both states.'
+    Remove-TrialRegistration $pair
+}
+}
+
+$pair = New-RegisteredPair 'joined-unknown-registration'
+$token = Get-Token (New-TowavueUpdateTransaction @pair)
+Invoke-TowavueUpdateTransaction -Mode Apply @token | Out-Null
+$base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
+$key = $base.OpenSubKey($pair.Registration.RegistrySubKey,$true)
+try { $key.SetValue('EstimatedSize',999,[Microsoft.Win32.RegistryValueKind]::DWord) } finally { $key.Dispose(); $base.Dispose() }
+$before = Get-Snapshot $pair
+$beforeRegistration = Get-TrialRegistrationSnapshot $pair
+Expect-Failure { Invoke-TowavueUpdateTransaction -Mode Rollback @token } 'unknown identity or size'
+Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) 'Unknown registration caused a partial file rollback.'
+$base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
+$key = $base.OpenSubKey($pair.Registration.RegistrySubKey,$true)
+try { $key.SetValue('EstimatedSize',123,[Microsoft.Win32.RegistryValueKind]::DWord) } finally { $key.Dispose(); $base.Dispose() }
+Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
+Remove-TrialRegistration $pair
+
+$pair = New-RegisteredPair 'joined-process-exit'
+$before = Get-Snapshot $pair
+$beforeRegistration = Get-TrialRegistrationSnapshot $pair
+$token = Get-Token (New-TowavueUpdateTransaction @pair)
+$journal = Get-Content -LiteralPath (Join-Path $token.TransactionDirectory 'journal.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+Write-Trial $injectedPath $original
+$write = "`$key.SetValue('EstimatedSize',`$SizeKiB,[Microsoft.Win32.RegistryValueKind]::DWord)"
+Write-Trial $privateRegistration ($registrationSource.Replace($write,($write + '; [Diagnostics.Process]::GetCurrentProcess().Kill()')))
+$childPath = Join-Path $trialRoot 'joined-interrupt-child.ps1'
+Write-Trial $childPath (". '" + (& $escape $injectedPath) + "'`nInvoke-TowavueUpdateTransaction -Mode Apply -TransactionDirectory '" + (& $escape $token.TransactionDirectory) + "' -JournalSha256 '" + $token.JournalSha256 + "'`n")
+$child = Start-Process -FilePath $powerShell -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"' + $childPath + '"')) -WindowStyle Hidden -PassThru
+$childHandle = $child.Handle
+Assert-True ($child.WaitForExit(30000)) "Owned joined interruption child still running: $($child.Id)"
+Assert-True ($child.ExitCode -ne 0 -and -not (Test-Path -LiteralPath (Join-Path $pair.InstallDirectory 'towavue.exe'))) 'Registry child did not stop before executable publication.'
+$base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
+$key = $base.OpenSubKey($pair.Registration.RegistrySubKey)
+try { Assert-True ($key.GetValue('EstimatedSize') -eq $journal.registration.SizeKiB -and $key.GetValue('TowavueOwnershipId') -ceq $journal.registration.PreviousOwnershipId) 'Child did not stop at the intended partial registry state.' }
+finally { $key.Dispose(); $base.Dispose() }
+Write-Trial $privateRegistration $registrationSource
+Invoke-TowavueUpdateTransaction -Mode Rollback @token | Out-Null
+Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) 'Abrupt joined process exit was not recoverable.'
+Remove-TrialRegistration $pair
+
+$pair = New-RegisteredPair 'joined-wrong-binding'
+$before = Get-Snapshot $pair
+$beforeRegistration = Get-TrialRegistrationSnapshot $pair
+$token = Get-Token (New-TowavueUpdateTransaction @pair)
+$journalPath = Join-Path $token.TransactionDirectory 'journal.json'
+$journal = Get-Content -LiteralPath $journalPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$journal.registration.InstallDirectory = Split-Path -Parent $pair.InstallDirectory
+Write-Trial $journalPath ($journal | ConvertTo-Json -Depth 12)
+# Even an explicitly supplied altered digest cannot bind another install path.
+$token.JournalSha256 = (Get-FileHash -LiteralPath $journalPath).Hash.ToLowerInvariant()
+Expect-Failure { Invoke-TowavueUpdateTransaction -Mode Apply @token } 'registration does not match the file journal'
+Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) 'Invalid registration binding changed either state.'
+Remove-TrialRegistration $pair
+
+$pair = New-RegisteredPair 'joined-missing-registration'
+Remove-TrialRegistration $pair
+$before = Get-Snapshot $pair
+Expect-Failure { New-TowavueUpdateTransaction @pair } 'existing update registration is missing'
+Assert-True ((Get-Snapshot $pair) -ceq $before) 'Missing registration preparation changed files.'
+Assert-True (-not @(Get-ChildItem -LiteralPath (Split-Path -Parent $pair.InstallDirectory) -Directory -Force -Filter '.towavue-update-*').Count) 'Missing registration left a prepared transaction.'
+Write-Output 'PASS: one file/registration journal, typed capture, twenty joined move interruptions, four registry write interruptions, abrupt child exit between registry writes, executable publication order, journal binding, unknown/missing registration preservation and repeated rollback. Joint test keys/shortcuts removed.'
 Write-Output "PASS: file-only prepare/apply/rollback, original identity/timestamps/security/alternate stream, copy-free recovery, preservation, locks, hard links, corrupt inputs, ten apply and ten rollback boundaries, abrupt child exit in a retire/publish gap: $trialRoot"
-Write-Output 'SKIP: actual Setup update/registration, full-volume/ACL-denial recovery, OS power loss and hostile concurrent namespace changes are not exercised.'
+Write-Output 'SKIP: actual Setup lifecycle/uninstaller coordination, full-volume/ACL-denial recovery, OS power loss and hostile concurrent namespace changes are not exercised.'

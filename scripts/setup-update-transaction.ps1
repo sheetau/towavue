@@ -1,7 +1,8 @@
-# File-only transaction primitive. Setup must persist the returned journal digest
-# before Apply and coordinate registration/recovery; this is not connected yet.
+# Transaction primitive. Setup must persist the returned journal digest before
+# Apply and provide recovery/cleanup UI; this is not connected to Setup yet.
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'setup-update-paths.ps1')
+. (Join-Path $PSScriptRoot 'setup-update-registration.ps1')
 if (-not ('TowavueUpdateFiles' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'setup-update-native.cs') }
 
 function Get-UpdateStreamRecord($Stream) {
@@ -31,9 +32,11 @@ function New-TowavueUpdateTransaction {
         [Parameter(Mandatory)][string]$InstallDirectory,
         [Parameter(Mandatory)][string]$IncomingPayloadDirectory,
         [Parameter(Mandatory)][string]$IncomingOwnershipId,
-        [Parameter(Mandatory)][string]$NewUninstaller
+        [Parameter(Mandatory)][string]$NewUninstaller,
+        [hashtable]$Registration
     )
     $plan = & (Join-Path $PSScriptRoot 'get-setup-update-plan.ps1') -InstallDirectory $InstallDirectory -IncomingPayloadDirectory $IncomingPayloadDirectory -IncomingOwnershipId $IncomingOwnershipId | ConvertFrom-Json
+    $registrationRecord = if ($null -ne $Registration) { New-TowavueUpdateRegistrationRecord $plan $Registration } else { $null }
     $NewUninstaller = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($NewUninstaller)
     $uninstaller = Get-Record (Split-Path -Parent $NewUninstaller) (Split-Path -Leaf $NewUninstaller)
     $uninstaller.name = 'Uninstall.exe'
@@ -67,7 +70,8 @@ function New-TowavueUpdateTransaction {
     }
     # Immutable journal, published only after every backup and staged file. The
     # independently retained digest detects corruption, not a hostile same user.
-    $journal = [ordered]@{schema_version=1;directory=$directory;plan=$plan;entries=$entries}
+    $schema = if ($registrationRecord) { 2 } else { 1 }
+    $journal = [ordered]@{schema_version=$schema;directory=$directory;plan=$plan;entries=$entries;registration=$registrationRecord}
     $journalPath = Join-Path $directory 'journal.json'
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($journal | ConvertTo-Json -Depth 12))
     $stream = [IO.File]::Open($journalPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
@@ -97,10 +101,16 @@ function Invoke-TowavueUpdateTransaction {
         try { $journal = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
         $install = $journal.plan.install_directory
         Assert-LocalPath $install
-        if ($journal.schema_version -ne 1 -or $journal.directory -cne $directory -or
+        if ($journal.schema_version -notin @(1,2) -or ($journal.schema_version -eq 2 -and -not $journal.registration) -or $journal.directory -cne $directory -or
             (Split-Path -Parent $install) -ine (Split-Path -Parent $directory) -or
             [TowavueUpdatePaths]::Expand($install) -ine $install -or $install -ieq $directory -or
             -not $journal.entries -or $journal.entries[-1].name -ine 'towavue.exe') { throw 'Update journal location or schema differs.' }
+        if ($journal.registration) {
+            $record = $journal.registration
+            if ($record.InstallDirectory -cne $install -or $record.OwnershipId -cne $journal.plan.incoming_ownership_id -or
+                $record.PreviousOwnershipId -cne $journal.plan.installed_ownership_id -or $record.SizeKiB -ne [Math]::Ceiling($journal.plan.incoming_bytes / 1024)) { throw 'Update registration does not match the file journal.' }
+            Invoke-TowavueUpdateRegistration $record $Mode -VerifyOnly
+        }
         if ($Mode -eq 'Apply') {
             $plan = & (Join-Path $PSScriptRoot 'get-setup-update-plan.ps1') -InstallDirectory $install -IncomingPayloadDirectory $journal.plan.incoming_directory -IncomingOwnershipId $journal.plan.incoming_ownership_id | ConvertFrom-Json
             if (($plan | ConvertTo-Json -Depth 10 -Compress) -cne ($journal.plan | ConvertTo-Json -Depth 10 -Compress)) { throw 'Installed or incoming update snapshot changed.' }
@@ -181,6 +191,7 @@ function Invoke-TowavueUpdateTransaction {
             if (-not (Test-UpdateRecord $current[$index] $expected)) { $needsChange = $true; break }
         }
         $appIndex = $journal.entries.Count - 1
+        if (-not $needsChange -and $journal.registration) { Invoke-TowavueUpdateRegistration $journal.registration $Mode }
         if ($needsChange -and $current[$appIndex]) {
             if ($Mode -eq 'Rollback' -and -not $restorePaths[$appIndex]) { throw 'Original retired executable is unavailable; preserve the installation.' }
             # A process crash releases locks. Hide the executable before touching
@@ -233,6 +244,7 @@ function Invoke-TowavueUpdateTransaction {
                 [TowavueUpdateFiles]::Move($path,$retirement)
             }
             if ($expected) {
+                if ($index -eq $appIndex -and $journal.registration) { Invoke-TowavueUpdateRegistration $journal.registration $Mode }
                 [TowavueUpdateFiles]::Move($work,$path)
                 if ($Mode -eq 'Apply') {
                     $receiptWork = Join-Path $directory ('receipt-' + [guid]::NewGuid().ToString('N'))
@@ -246,7 +258,10 @@ function Invoke-TowavueUpdateTransaction {
                 }
             }
         }
-        return [pscustomobject]@{state=$(if ($Mode -eq 'Apply') { 'payload_applied_registration_pending' } else { 'payload_rolled_back' });transaction_directory=$directory;retained=$true}
+        $state = if ($journal.registration) {
+            if ($Mode -eq 'Apply') { 'files_and_registration_applied' } else { 'files_and_registration_rolled_back' }
+        } elseif ($Mode -eq 'Apply') { 'payload_applied_registration_pending' } else { 'payload_rolled_back' }
+        return [pscustomobject]@{state=$state;transaction_directory=$directory;retained=$true}
     } finally {
         foreach ($handle in $held) { $handle.Dispose() }
     }

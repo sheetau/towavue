@@ -32,10 +32,12 @@ MPL群はsrtとzeromqで、両方のsource／patchを取得済み。ZeroMQの逆
 
 notice／範囲優先48件は上記24 owner以外の全件。package noticeが存在するだけで完了にしない。この群のopencore-amrはAMR subsetのsource一覧と3GPP由来header、Snappyはtest dataとcore targetの分離を確認し、継承NOTICEとsource archive内のdata表示を保持した。rav1e／libdoviは元sourceと内蔵Rust依存の157 crate archives・選択文書を取得し、元lock checksumへ対応させた。Rust 1.87.0／1.97.0の元MSYS2 package表示と標準library sourceも取得・署名検証したが、両版のlibrary著作権一覧は外部依存欄が空だったため、その一覧だけで完了としない。1.87 source lockの全42 cratesと省略されたcompiler-builtins／libm原本を補い、別kitに保持した。今回のMSVC-host metadataは過去のGNU-host unit graphではなく、他targetの材料も含む。次にGNUの実build範囲・個別表示と、shaderc／SPIR-V／Vulkan等の取り込みsource・生成dataを確認する。OpenH264を含むcodecの特許・商標判断は著作権license確認と別に残す。
 
+続く[GNU-host選択確認](native-rust-gnu-selection.json)では、元MSYS2 Rust／Cargoをinstallせずに隔離実行した。元lockのmetadata到達集合は129／28件のまま、library限定unit graphは121／28件（target library unitあり65／23件、hostのみ56／5件）だった。C API crate typesへの変更でも選択集合は不変。compileやbuild scriptは実行せず、既存157件の材料は保持する。これは元build hostの違いを狭める観測であり、歴史的cargo-c／link範囲や生成codeの表示を確定するものではない。次は個別表示・標準library／static／header／生成dataとshaderc／SPIR-V／Vulkanの範囲を進める。
+
 ## Owner一覧の外にある入力
 
 - 現候補は元85 package DLLのうちZVBIだけが限定build。84 package DLLの71 ownerと、限定ZVBIの由来を区別する。元packageの72 owner一覧は追跡用のbaselineである。
 - FFmpeg本体、aribb24／LCEVC／librist／uavs3d／vvencの5 source prefixes、限定ZVBI、compiler／MinGW headers・static runtimeは別の入力である。PE graphだけでこれらが全て列挙されるとは扱わない。
 - towavueのCargo.lockとRust runtimeの資料を、FFmpeg依存内のRust codeへ代用しない。Visual C++ runtimeの頒布条件とWindows system DLLの扱いも別に維持する。
 
-必要な原本材料と実binaryへの対応を確定した後、公開するsource／noticeセットと取得案内を一つにまとめる。新候補のrelease media／性能、開発環境なしのhelper探索、Setup.exe、対象Windowsの導入／更新／削除、実入力・device・owner外観受入は引き続き未完了。資料監査だけでH1やlaunchの完了条件を置き換えない。
+必要な原本材料と実binaryへの対応を確定した後、公開するsource／noticeセットと取得案内を一つにまとめる。helper探索のbundle優先・別版混在防止は既に実装し、環境変数なしのdebug実windowでpreview／保存／再open／detachを確認した。新候補のrelease media／性能、Setup.exe、対象Windowsの導入／更新／削除、実入力・device・owner外観受入は引き続き未完了。資料監査だけでH1やlaunchの完了条件を置き換えない。

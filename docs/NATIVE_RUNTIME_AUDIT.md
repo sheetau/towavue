@@ -186,6 +186,23 @@ compiler_builtins 0.1.152のcrateには独立license fileがないため、VCS�
 
 cache内の相対pathと取得URLはmanifestの`inputs`を使う。最終v1は545 files／22961564 bytesで、484選択文書・2 source packages・42 crates・13 recipe／patch／config files・外部原本2件・README／INPUTSを含む。全archiveは選択前に通常file／directoryと安全pathを確認した。別cwd／再生成の全hash一致、65入力の欠落／同size改変、7対応不整合、展開後の文書hash不一致時に完成markerを残さないこと、元入力と既存outputの保護を試験した。M0の268 tests・format／Clippyも通過し、live ignores 3件と候補runtime 94 filesのhashは不変。これは資料収集の完了単位であり、全適用範囲の確定や配布承認ではない。
 
+### GNU hostでのRust依存選択（2026-09-08、compileなし）
+
+上記の資料収集後、元MSYS2 Rust／Cargo 1.87.0-2と1.97.0-1を隔離して実行した。両方の`-vV`でGNU hostを確認し、既存MSYS2へのinstallやpackage更新は行っていない。各Rust packageの`.BUILDINFO`にある補助package計29件の元archive／署名を取得し、全署名を既存keyringで検証した。PE importの不足だったhttp-parserも同じ記録の版で補い、版別の隣接DLL＋System32だけで起動する。これらのcompiler実行用DLLをtowavueの配布候補へ追加しない。
+
+[native-rust-gnu-selection.json](native-rust-gnu-selection.json)にtool／source／lock／runtimeの対応hash、取得先、command、結果を記録した。元source lockと既存の隔離Cargo cacheを使い、`--frozen`でmetadataと[unit graph](https://doc.rust-lang.org/cargo/reference/unstable.html#unit-graph)を取得する。`RUSTC_BOOTSTRAP=1`はgraph取得の子processだけに設定し、製品のtoolchainや設定を変更しない。build script・compile・linkは実行されず、指定target directoryも生成されなかった。
+
+| 元library | GNU metadataのnormal/build到達crate | library graphのcrate | target library unitあり | host unitのみ |
+|---|---:|---:|---:|---:|
+| rav1e 0.8.1 | 129 | 121 | 65 | 56 |
+| libdovi 3.4.0 | 28 | 28 | 23 | 5 |
+
+metadataの選択集合は従来一覧と一致する。library限定graphは164／47 unitsで、rav1eの8 crates（interpolate_name、ppv-lite86、rand、rand_chacha、rand_core、serde、serde_derive、zerocopy）が選ばれない。全選択crateは既存157件の資料に含まれ、実DLLで観測した12／11 crate pathsも全てtarget library側にある。rav1eのgit2／libgit2-sys／libz-sys等はこのgraphではhost側だけだが、proc macro・build scriptの生成code／dataやassemblyを含む可能性まで消えるわけではない。**target側件数はlink後の残存code一覧ではなく、host側の表示を一律に削る根拠でもない。** 既存の157件の材料は削除しない。
+
+確認したcargo-c [0.10.13](https://github.com/lu-zero/cargo-c/blob/v0.10.13/src/build.rs)／[0.10.24](https://github.com/lu-zero/cargo-c/blob/v0.10.24/src/build.rs)は、libraryのみを選択し、capi featureと明示targetを加え、rootの名前／crate typesを変更する一方、`unit_graph`をfalseへ戻す。そのためcargo-c自体にgraph引数を渡さず、通常Cargoで代表条件を確認した。[`cargo rustc --crate-type staticlib,cdylib`](https://doc.rust-lang.org/cargo/commands/cargo-rustc.html)でもgraphを取得し、差分はrootのkind／typesとrav1eのdoctest属性だけだった。libdoviにはroot用`-Cpanic=abort`も渡したが、graphはcodegen条件全体を表すものではない。
+
+両種graphとmetadataの反復hashは一致し、通常graph／metadataは別cwdからの再実行も一致した。元source／lock、compiler入力、実runtimeのhash、選択集合とC API型による差分を照合した。最終候補の94 filesも不変で、M0は270 tests・format／Clippyが通過し、live ignores 3件は未実行。cargo-c内部のCargo版・追加flag、過去のlibdovi unlocked fetch、標準libraryや生成／static／headerの範囲はこの観測だけで確定しない。歴史的buildの完全再現や配布承認とは区別し、次は残る個別表示とshaderc／SPIR-V／Vulkan等を調べる。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

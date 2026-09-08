@@ -1,0 +1,569 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-08",
+  "scope": "Read-only dependency-selection evidence from isolated original MSYS2 GNU Rust/Cargo binaries. Not a historical cargo-c graph, linked SBOM, compiler/std rebuild, source-access completion or distribution approval. Existing material inventories are unchanged.",
+  "references": {
+    "material_inventory": "native-rust-dependencies.json",
+    "compiler_material_inventory": "native-rust-runtime-inputs.json",
+    "unit_graph_documentation": "https://doc.rust-lang.org/cargo/reference/unstable.html#unit-graph",
+    "crate_type_documentation": "https://doc.rust-lang.org/cargo/commands/cargo-rustc.html"
+  },
+  "environment": {
+    "host_and_target": "x86_64-pc-windows-gnu",
+    "os": "Windows 11 Core 10.0.26200 x64",
+    "installation": false,
+    "wsl": false,
+    "package_database_changed": false,
+    "path": "isolated version-specific mingw64/bin; Windows System32",
+    "cargo_home": "existing isolated native-rust-source-audit Cargo cache",
+    "cargo_net_offline": true,
+    "diagnostic_rustc_bootstrap": "1, unit-graph subprocesses only",
+    "build_scripts_executed": false,
+    "compilation_performed": false,
+    "source_locks_changed": false,
+    "target_directories_created": false,
+    "raw_json_note": "Ignored raw outputs include local source/cache paths; their hashes identify this observation, not portable byte-for-byte output on another machine."
+  },
+  "limits": [
+    "cargo-c explicitly disables unit_graph, sets the target even when host equals target, adds capi, selects only the library and patches its name/types. It was inspected, not executed or modified.",
+    "The Cargo CLI came from each original Rust package; cargo-c embeds its own Cargo library. Matching Rust versions and representative options do not prove identical historical internals.",
+    "The staticlib/cdylib sensitivity graphs change only root target kind/types and rav1e's doctest capability relative to plain-library graphs. Libdovi's root -Cpanic=abort is passed but not represented as a changed graph profile; no codegen/link equivalence is inferred.",
+    "Target-library selection is not retained linked code. Host-only packages may contribute generated code, data, assembly or proc-macro output and cannot automatically be excluded from notices.",
+    "Libdovi's original recipe fetch was unlocked; this frozen source-lock analysis does not establish its historical resolved lock.",
+    "Standard-library/compiler, static/header/generated/data notices and native source-access instructions remain separate work."
+  ],
+  "signature_verification": {
+    "tool": "MSYS2 gpgv with existing keyring",
+    "key": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57",
+    "support_archives": 29,
+    "result": "All supporting package detached signatures verified; versions selected from each Rust package .BUILDINFO. No keyring modification."
+  },
+  "support_packages": [
+    {
+      "name": "mingw-w64-x86_64-gcc-libs-15.1.0-5-any.pkg.tar.zst",
+      "bytes": 1069766,
+      "sha256": "67c164a34b2b5c7b413c94cd47633815e328f89bffd56757209fddce94c780f4",
+      "signature_sha256": "d79eae5c2634f0a516719da8785da302106551e0f911b4347e891d471ecd4e5b",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-gcc-libs-15.1.0-5-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-gcc-libs-16.1.0-5-any.pkg.tar.zst",
+      "bytes": 1153552,
+      "sha256": "aa560f5438c35b71c3e7b24fd5becbca028f70c5b4d1f1697a86ff80fec947da",
+      "signature_sha256": "fae43f60afef002357186855925332c0aa9268a0f4f5cfe526e14ea9578cff75",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-gcc-libs-16.1.0-5-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-http-parser-2.9.4-2-any.pkg.tar.zst",
+      "bytes": 31290,
+      "sha256": "aad9f81b686fb9c601ba55157c4bdab43db6be607d9110e81edd1b7d36a24827",
+      "signature_sha256": "9e39597b9072a5b4293bac22d993f2e8085425474e23a5f680335a69bf7398e8",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-http-parser-2.9.4-2-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-http-parser-2.9.4-3-any.pkg.tar.zst",
+      "bytes": 29069,
+      "sha256": "256075847ba32c9c4a0039ca84f939373476710f78f3d8f97f8d480f67988e67",
+      "signature_sha256": "a7f19ea89bce3300d0d4bc283baaa36cbd9e701e768d25604591babd07dff450",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-http-parser-2.9.4-3-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libffi-3.4.8-1-any.pkg.tar.zst",
+      "bytes": 43541,
+      "sha256": "43fdc7617c4c146f053937f1f5626e376b5ff521427b635724004fb80b417383",
+      "signature_sha256": "602e68a74200faa3b52cd800776229d8c2bfb78e4059b8053aa97466b5ae74ff",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libffi-3.4.8-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libffi-3.7.0-1-any.pkg.tar.zst",
+      "bytes": 49701,
+      "sha256": "3ee46739d170effec3d0089dd3f83a93fb125ba0d3dfde8f54c061f4321fc06b",
+      "signature_sha256": "a5bcff855e9f10b90730e2a6d7ddda94ceb216784ae1f369628f9a2e2c0d8fea",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libffi-3.7.0-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libgit2-1.9.0-1-any.pkg.tar.zst",
+      "bytes": 1175995,
+      "sha256": "d67eacbf66239956ea05c86e02d8ccbe22f52dbb984e455b99a4c4fd2cef84aa",
+      "signature_sha256": "0594440e78e9bdcae4c8f4aa299396ace4510f95dd46b2c010df151f614d5b18",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libgit2-1.9.0-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libgit2-1.9.4-1-any.pkg.tar.zst",
+      "bytes": 1220116,
+      "sha256": "384001ce276e530c2b0f356308c5a2d115251be056a8102ff61f8f2a178b77f3",
+      "signature_sha256": "5210cdc4b23ea917b2d876f4da77345daf46878309b864bee25986ec7161a639",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libgit2-1.9.4-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libiconv-1.18-1-any.pkg.tar.zst",
+      "bytes": 743795,
+      "sha256": "fda1cb18d83c363c73df1a836fe9ff5c830d28b8a3a693e1c05d1fdfea799119",
+      "signature_sha256": "7ed7ec7f9252a6b1043f832f39a614c27cee73603d79e582d9484afb81b8a32c",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libiconv-1.18-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libiconv-1.19-1-any.pkg.tar.zst",
+      "bytes": 745957,
+      "sha256": "21e334d0911f25de75d3e18e0697648bcecfa9658256d600cad0827d719c2f35",
+      "signature_sha256": "89de5b11d92ed20d7a960d5658cfd98b670f323802ea805c229fdc5f14efc5eb",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libiconv-1.19-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libssh2-1.11.1-1-any.pkg.tar.zst",
+      "bytes": 316460,
+      "sha256": "72ca89007f6a47685ebea09d658c707218d89cf86906ccfb7327d585d2aa876d",
+      "signature_sha256": "6c430038e80df4091ccae432d13f04138f8f225cb381497e90689b349dcbc144",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libssh2-1.11.1-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libssh2-1.11.1-2-any.pkg.tar.zst",
+      "bytes": 318627,
+      "sha256": "83d0b99f79e930b30eb642382662686b696d64ceb927c2606debd79cb6ff670a",
+      "signature_sha256": "da3a9f48beeafe3abf6fc4ee54dce4e649c51ef2989c51ac2e20f848b6d6228d",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libssh2-1.11.1-2-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libwinpthread-14.0.0.r179.g24aaa6147-1-any.pkg.tar.zst",
+      "bytes": 31504,
+      "sha256": "8f12dc1be987165faab6363a159921553b4a2ac64e443cd0e7c501c343c2a92a",
+      "signature_sha256": "75c1907b948145ddeefef1dd8b074dc59c071e0fd9a924a66d77021a08a6d82d",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libwinpthread-14.0.0.r179.g24aaa6147-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libwinpthread-git-12.0.0.r731.g2ca6f1348-1-any.pkg.tar.zst",
+      "bytes": 30954,
+      "sha256": "2bed8f7b16067e8b3718a47aff6e154b264a2fee6a92377725584f46691c4666",
+      "signature_sha256": "a0b5f83dc0245641c5866657a6e3732b1bd1dff473c495ef60001d891a7d4ef4",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libwinpthread-git-12.0.0.r731.g2ca6f1348-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libxml2-2.12.10-1-any.pkg.tar.zst",
+      "bytes": 1059606,
+      "sha256": "3011acef03b5772bf2b06c597538a1e601ba86890166793072b5248df15122c7",
+      "signature_sha256": "7834afda1a2307d106077de1064918a106c74a88645799226ed269ab639908ea",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libxml2-2.12.10-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-libxml2-2.15.3-1-any.pkg.tar.zst",
+      "bytes": 1005526,
+      "sha256": "5da9828356a54938e5402f90b0a104f8b9175ab0f5266e9ed1e6ffd057b754b1",
+      "signature_sha256": "512521a2e3a7f4cd4c908ef80623a93f32d7a6a3c5dc6a975a1bf255f62efe86",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libxml2-2.15.3-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-llvm-libs-22.1.8-1-any.pkg.tar.zst",
+      "bytes": 30975533,
+      "sha256": "0aeb618d83735e215011be876320e2f5632cd536edd32b25b40a7e20ac1179fc",
+      "signature_sha256": "9ccc4bba1eaa4cc7b3b10bf73eaeb43997a656a714b2790b2d89e41ef023b124",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-llvm-libs-22.1.8-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-openssl-3.5.0-1-any.pkg.tar.zst",
+      "bytes": 8188363,
+      "sha256": "057e88bcfb38bb24e18a2e6be0890d5820537bafdb5980401228dfa6273ad18f",
+      "signature_sha256": "a9f7cbf644cf485ca531bfbbc792b54c43a70b14b71073de46f1da6addab3656",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-openssl-3.5.0-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-openssl-3.6.3-1-any.pkg.tar.zst",
+      "bytes": 8251880,
+      "sha256": "82de7ff886112374ffae9e7b3c843c82342e198543fb024790416ef56434fe9f",
+      "signature_sha256": "9faabf136bd3645658c0169efc6b58c3667a0d9bfe66d834eee436b2d01f3c1b",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-openssl-3.6.3-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-pcre2-10.45-1-any.pkg.tar.zst",
+      "bytes": 1386530,
+      "sha256": "3c99f628571133227e4e6aac30638d03006f2bf1a85fe3ff8ad9d03b844bbac6",
+      "signature_sha256": "9169b1585633dd1e37c739f2db6aeb2dc350dc457ce884d1450c6c5b6457435c",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-pcre2-10.45-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-pcre2-10.47-1-any.pkg.tar.zst",
+      "bytes": 1435271,
+      "sha256": "7c9e3cd47af02a096c0c1810d1021f63c5fb1d22dbec91fa019d8b37eda00d98",
+      "signature_sha256": "9ad1e1323a7391229767a5ba0c96cb9254b6869abb806e835f7089d7ffebe175",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-pcre2-10.47-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-sqlite3-3.49.2-1-any.pkg.tar.zst",
+      "bytes": 2390516,
+      "sha256": "0ce93f7753199f32f3a22922b0e91db55685b60131e88ecf10fa191c7ef0c880",
+      "signature_sha256": "eee251429c2527ef372e19ac6314e8dc509519ca02da5a00a6b657df34b470f7",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-sqlite3-3.49.2-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-sqlite3-3.53.3-1-any.pkg.tar.zst",
+      "bytes": 2487480,
+      "sha256": "95db0f3c033d24378ee8821e2c7ed0a1c41c2b00e8e651801a2ebdd04bad8616",
+      "signature_sha256": "6319b1ed15724e24bf1fbe74eeb73244cbe00405f23b540e02bd6a2fda2bc4a2",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-sqlite3-3.53.3-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-xz-5.8.1-2-any.pkg.tar.zst",
+      "bytes": 485820,
+      "sha256": "7668d82118c6e850e35513bd07cb8c49cbae2234ee387efcc7610193af4213c8",
+      "signature_sha256": "0534e83a4eae688af5d0408a909f946af19a779d982740a8b66bf16432a89406",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-xz-5.8.1-2-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-xz-5.8.3-1-any.pkg.tar.zst",
+      "bytes": 486139,
+      "sha256": "075bfaf1c7527f2fdd02ad5b973378e1e8d426ba7b614f122cebd81a8fe5d1c1",
+      "signature_sha256": "4628a04fd58d0f845af1ca23e7e5740be8a830d8787ae35e7c96a49d3728dc60",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-xz-5.8.3-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-zlib-1.3.1-1-any.pkg.tar.zst",
+      "bytes": 106864,
+      "sha256": "ca04caafd73e15de216502d53038406e79d29b20c47d9a409e9b2d12858105f0",
+      "signature_sha256": "6cbc9cb05eeab6bf07b4574e5cb442d7c749ac0ef54a5f8d6ffbefd2bd79a0b3",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-zlib-1.3.1-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-zlib-1.3.2-2-any.pkg.tar.zst",
+      "bytes": 112476,
+      "sha256": "9e75842a070ba648e986e12424e1c92c9d7d77200e85f6a34eeb600819f2e694",
+      "signature_sha256": "c11e9e3e495eefb0d0d1ef53303f28430ef47967c4fe484b3742d59c012f60f8",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-zlib-1.3.2-2-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-zstd-1.5.7-1-any.pkg.tar.zst",
+      "bytes": 658076,
+      "sha256": "589c6e808b0bf34872d9ed6f5393a6df389d2ae6e3d1fdb18b8bccfca701f851",
+      "signature_sha256": "1c1b245f0ddef2b4107d00822f2a76ab15fe1e00abdb78633c086bab0c6d98c3",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-zstd-1.5.7-1-any.pkg.tar.zst"
+    },
+    {
+      "name": "mingw-w64-x86_64-zstd-1.5.7-2-any.pkg.tar.zst",
+      "bytes": 669879,
+      "sha256": "1add6705b344664f6aca108c85f79ab5bdd9e1162662bb06a4cf40a34f6e0907",
+      "signature_sha256": "8007e5509c5cc470eb231ad586b61b9cc74e7a6c060792a990a0b20728c67cb3",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-zstd-1.5.7-2-any.pkg.tar.zst"
+    }
+  ],
+  "components": [
+    {
+      "name": "rav1e",
+      "rust_package": "mingw-w64-x86_64-rust-1.87.0-2-any",
+      "source_archive_sha256": "06d1523955fb6ed9cf9992eace772121067cca7e8926988a1ee16492febbe01e",
+      "source_lock_sha256": "861482385bdef579e207bb371937dd49cb9ff47d9406c40660b760fa672d0589",
+      "runtime": {
+        "sha256": "6fe18e4a040c471dc13bcea44ecd2c6a3c040971542c6b798627e4c787056acb",
+        "name": "librav1e.dll",
+        "bytes": 3527680
+      },
+      "executables": [
+        {
+          "version": "1.87.0-2",
+          "name": "rustc.exe",
+          "bytes": 17189,
+          "sha256": "9596d8cff298c5bd1b01d4b50c8a1523104dd53fe5109aa642c3d72fcb7571fb"
+        },
+        {
+          "version": "1.87.0-2",
+          "name": "cargo.exe",
+          "bytes": 31539296,
+          "sha256": "c8c10ed8cf29c6f2f0ee8d922d9bf509aa6869f1ca89c1b65f5bda0578c0307e"
+        }
+      ],
+      "cargo_c_build_source": {
+        "name": "cargo-c-0.10.13-build.rs",
+        "bytes": 45243,
+        "sha256": "8bcd2b950ddd5dbb152a905207bcacc00ea9cd7ee14344d8537482d76c47016b",
+        "url": "https://raw.githubusercontent.com/lu-zero/cargo-c/v0.10.13/src/build.rs"
+      },
+      "commands": {
+        "metadata": "cargo metadata --frozen --format-version 1 --filter-platform x86_64-pc-windows-gnu --features capi",
+        "unit_graph": "cargo build --lib --frozen --target x86_64-pc-windows-gnu --profile release-strip --features capi --unit-graph -Z unstable-options",
+        "capi_type_sensitivity": "cargo rustc --lib --crate-type staticlib,cdylib --frozen --target x86_64-pc-windows-gnu --profile release-strip --features capi --unit-graph -Z unstable-options"
+      },
+      "outputs": [
+        {
+          "name": "rav1e.gnu.metadata.json",
+          "bytes": 771115,
+          "sha256": "c6bce47e6201ee1f891fcd1ab1ff4d202ceb5a8948052506b6e2e3717a1c4613"
+        },
+        {
+          "name": "rav1e.gnu.unit-graph.json",
+          "bytes": 145429,
+          "sha256": "717df2efcf5d9c0afdde797ed1255ec70af3d2cb7df601864a71c56e7ac38945"
+        },
+        {
+          "name": "rav1e.gnu.unit-graph.capi-types.json",
+          "bytes": 145460,
+          "sha256": "5b08fe1d729261a86cf6702a0fc8172e2b0550ef6d1d5827f4923928c9711a31"
+        }
+      ],
+      "repeat_hashes_equal": true,
+      "stderr_bytes": 0,
+      "metadata_registry_count": 129,
+      "metadata_selection_equals_previous": true,
+      "unit_count": 164,
+      "registry_package_count": 121,
+      "target_library_package_count": 65,
+      "host_only_package_count": 56,
+      "root_features": [
+        "asm",
+        "av-metrics",
+        "binaries",
+        "capi",
+        "cc",
+        "clap",
+        "clap_complete",
+        "console",
+        "default",
+        "fern",
+        "git_version",
+        "ivf",
+        "nasm-rs",
+        "nom",
+        "scan_fmt",
+        "signal-hook",
+        "signal_support",
+        "threading",
+        "y4m"
+      ],
+      "target_library_packages": [
+        "aligned-vec@0.6.4",
+        "aligned@0.4.2",
+        "anstream@0.6.19",
+        "anstyle-parse@0.2.7",
+        "anstyle-query@1.1.3",
+        "anstyle-wincon@3.0.9",
+        "anstyle@1.0.11",
+        "anyhow@1.0.98",
+        "arrayvec@0.7.6",
+        "as-slice@0.2.1",
+        "av-metrics@0.9.1",
+        "av-scenechange@0.14.1",
+        "av1-grain@0.2.4",
+        "bitstream-io@4.2.0",
+        "cfg-if@1.0.1",
+        "clap@4.5.40",
+        "clap_builder@4.5.40",
+        "clap_complete@4.5.54",
+        "clap_lex@0.7.5",
+        "colorchoice@1.0.4",
+        "console@0.15.11",
+        "core2@0.4.0",
+        "crossbeam-channel@0.5.15",
+        "crossbeam-deque@0.8.6",
+        "crossbeam-epoch@0.9.18",
+        "crossbeam-queue@0.3.12",
+        "crossbeam-utils@0.8.21",
+        "crossbeam@0.8.4",
+        "either@1.15.0",
+        "encode_unicode@1.0.0",
+        "equator@0.4.2",
+        "fern@0.7.1",
+        "is_terminal_polyfill@1.70.1",
+        "itertools@0.10.5",
+        "itertools@0.14.0",
+        "lab@0.11.0",
+        "libc@0.2.172",
+        "log@0.4.27",
+        "maybe-rayon@0.1.1",
+        "memchr@2.7.5",
+        "minimal-lexical@0.2.1",
+        "new_debug_unreachable@1.0.6",
+        "nom@7.1.3",
+        "nom@8.0.0",
+        "num-bigint@0.4.6",
+        "num-integer@0.1.46",
+        "num-rational@0.4.2",
+        "num-traits@0.2.19",
+        "once_cell@1.21.3",
+        "once_cell_polyfill@1.70.1",
+        "profiling@1.0.16",
+        "rayon-core@1.12.1",
+        "rayon@1.10.0",
+        "scan_fmt@0.2.6",
+        "stable_deref_trait@1.2.0",
+        "terminal_size@0.4.2",
+        "thiserror@1.0.69",
+        "thiserror@2.0.12",
+        "unicode-width@0.2.1",
+        "utf8parse@0.2.2",
+        "v_frame@0.3.9",
+        "windows-sys@0.59.0",
+        "windows-targets@0.52.6",
+        "windows_x86_64_gnu@0.52.6",
+        "y4m@0.8.0"
+      ],
+      "host_only_packages": [
+        "arg_enum_proc_macro@0.3.4",
+        "autocfg@1.4.0",
+        "bitflags@2.9.1",
+        "built@0.8.0",
+        "cc@1.2.26",
+        "clap_derive@4.5.40",
+        "displaydoc@0.2.5",
+        "equator-macro@0.4.2",
+        "form_urlencoded@1.2.1",
+        "getrandom@0.3.3",
+        "git2@0.20.2",
+        "heck@0.5.0",
+        "icu_collections@2.0.0",
+        "icu_locale_core@2.0.0",
+        "icu_normalizer@2.0.0",
+        "icu_normalizer_data@2.0.0",
+        "icu_properties@2.0.1",
+        "icu_properties_data@2.0.1",
+        "icu_provider@2.0.0",
+        "idna@1.0.3",
+        "idna_adapter@1.2.1",
+        "jobserver@0.1.33",
+        "libgit2-sys@0.18.1+1.9.0",
+        "libz-sys@1.1.22",
+        "litemap@0.8.0",
+        "nasm-rs@0.3.0",
+        "noop_proc_macro@0.3.0",
+        "num-derive@0.4.2",
+        "paste@1.0.15",
+        "pastey@0.1.0",
+        "percent-encoding@2.3.1",
+        "pkg-config@0.3.32",
+        "potential_utf@0.1.2",
+        "proc-macro2@1.0.95",
+        "profiling-procmacros@1.0.16",
+        "quote@1.0.40",
+        "shlex@1.3.0",
+        "simd_helpers@0.1.0",
+        "smallvec@1.15.1",
+        "syn@2.0.102",
+        "synstructure@0.13.2",
+        "thiserror-impl@1.0.69",
+        "thiserror-impl@2.0.12",
+        "tinystr@0.8.1",
+        "unicode-ident@1.0.18",
+        "url@2.5.4",
+        "utf8_iter@1.0.4",
+        "vcpkg@0.2.15",
+        "writeable@0.6.1",
+        "yoke-derive@0.8.0",
+        "yoke@0.8.0",
+        "zerofrom-derive@0.1.6",
+        "zerofrom@0.1.6",
+        "zerotrie@0.2.2",
+        "zerovec-derive@0.11.1",
+        "zerovec@0.11.2"
+      ],
+      "previous_inventory_not_selected": [
+        "interpolate_name@0.2.4",
+        "ppv-lite86@0.2.21",
+        "rand@0.9.1",
+        "rand_chacha@0.9.0",
+        "rand_core@0.9.3",
+        "serde@1.0.219",
+        "serde_derive@1.0.219",
+        "zerocopy@0.8.25"
+      ],
+      "selected_outside_previous_inventory": [],
+      "observed_dll_paths_outside_target_library_selection": []
+    },
+    {
+      "name": "libdovi",
+      "rust_package": "mingw-w64-x86_64-rust-1.97.0-1-any",
+      "source_archive_sha256": "8eac4d1c3134f53e8eb216db6450307a737425844113e480d1e9713c142a9fa2",
+      "source_lock_sha256": "5c9f344b8a49f684e409af8304e4e175618098c9b24ed8acafc5f1a469088814",
+      "runtime": {
+        "sha256": "d0ebc0d98ac67dc28b176f77af125f2066dcb6cf6283f71c102d67f0eeb1df7c",
+        "name": "libdovi.dll",
+        "bytes": 1370085
+      },
+      "executables": [
+        {
+          "version": "1.97.0-1",
+          "name": "rustc.exe",
+          "bytes": 15360,
+          "sha256": "a1e0c83ba7c35898394204714c2d0c9abd1988a06a98f6ee168232e69fffad2b"
+        },
+        {
+          "version": "1.97.0-1",
+          "name": "cargo.exe",
+          "bytes": 22846464,
+          "sha256": "dead12d3ed743c5c26804079ed8201c8c0613ec9beaeffea8435dc9049eae4f3"
+        }
+      ],
+      "cargo_c_build_source": {
+        "name": "cargo-c-0.10.24-build.rs",
+        "bytes": 48366,
+        "sha256": "7775384424f4c307f91ebfdb60e2c9afae7aeac75d85962a80586988435cda8e",
+        "url": "https://raw.githubusercontent.com/lu-zero/cargo-c/v0.10.24/src/build.rs"
+      },
+      "commands": {
+        "metadata": "cargo metadata --frozen --format-version 1 --filter-platform x86_64-pc-windows-gnu --all-features",
+        "unit_graph": "cargo build --lib --frozen --target x86_64-pc-windows-gnu --release --all-features --unit-graph -Z unstable-options",
+        "capi_type_sensitivity": "cargo rustc --lib --crate-type staticlib,cdylib --frozen --target x86_64-pc-windows-gnu --release --all-features --unit-graph -Z unstable-options -- -Cpanic=abort"
+      },
+      "outputs": [
+        {
+          "name": "libdovi.gnu.metadata.json",
+          "bytes": 366935,
+          "sha256": "4c720d1845e792218f349d136932e2efb4fd0a2aa3cd82dcf22c7b477a96f7e9"
+        },
+        {
+          "name": "libdovi.gnu.unit-graph.json",
+          "bytes": 40501,
+          "sha256": "25de31d59b8b6c5aac5a785790e88d5895aef7f951b02d946684f73741eb71b6"
+        },
+        {
+          "name": "libdovi.gnu.unit-graph.capi-types.json",
+          "bytes": 40531,
+          "sha256": "5eb1e638d22f2cf299e931c8c4c4355404b4dc5f2b4775b447d19344d366f185"
+        }
+      ],
+      "repeat_hashes_equal": true,
+      "stderr_bytes": 0,
+      "metadata_registry_count": 28,
+      "metadata_selection_equals_previous": true,
+      "unit_count": 47,
+      "registry_package_count": 28,
+      "target_library_package_count": 23,
+      "host_only_package_count": 5,
+      "root_features": [
+        "capi",
+        "libc",
+        "serde",
+        "xml"
+      ],
+      "target_library_packages": [
+        "anyhow@1.0.102",
+        "bitstream-io@4.10.0",
+        "bitvec@1.0.1",
+        "bitvec_helpers@4.0.2",
+        "crc-catalog@2.5.0",
+        "crc@3.4.0",
+        "equivalent@1.0.2",
+        "funty@2.0.0",
+        "hashbrown@0.17.1",
+        "indexmap@2.14.0",
+        "itoa@1.0.18",
+        "libc@0.2.186",
+        "memchr@2.8.0",
+        "no_std_io2@0.9.4",
+        "radium@0.7.0",
+        "roxmltree@0.21.1",
+        "serde@1.0.228",
+        "serde_core@1.0.228",
+        "serde_json@1.0.149",
+        "tap@1.0.1",
+        "tinyvec@1.11.0",
+        "wyz@0.5.1",
+        "zmij@1.0.21"
+      ],
+      "host_only_packages": [
+        "proc-macro2@1.0.106",
+        "quote@1.0.45",
+        "serde_derive@1.0.228",
+        "syn@2.0.117",
+        "unicode-ident@1.0.24"
+      ],
+      "previous_inventory_not_selected": [],
+      "selected_outside_previous_inventory": [],
+      "observed_dll_paths_outside_target_library_selection": []
+    }
+  ]
+}

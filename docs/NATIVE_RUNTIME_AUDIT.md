@@ -46,6 +46,8 @@ getterは探索を再実行せず、特定済みの72 URL/hashだけを利用す
 
 続く[35 ownerの原文レビュー](NATIVE_NOTICE_REVIEW.md)では全代表表示を読み取り、PCRE2のSLJITとlibxml2のdict／list原文を追加補完した。元source 2件とpatch 5件、計5398120 bytesをrecipeへ対応させ、23原本文書／実装・生成tableを保持する。Unicodeの元data参照や特定の内蔵code／NOTICEは同レビューの残項目へ明記し、全ownerのsource再収集を一律に始めない。
 
+[Unicode tableの再生成](NATIVE_UNICODE_TABLE_AUDIT.md)では、PCRE2 10.48のUnicode 17.0.0とlibxml2 2.15.4の4.0.1を公式dataへ対応させた。未改変generatorの出力は改行だけをLFへ戻すと元tableの全hashと一致する。現行Unicode license原本と入力／出力の固定記録を追加したが、新data／generator／noticeのcatalog組込みは未完了。既存v5 catalogや候補DLLは変更せず、全DLL再buildや配布承認とは扱わない。
+
 15 packageにはこのlicense directory内の通常fileがない。Chromaprint／OpenALは別途sourceから補完済み。残り13件のGMP、LAME、libass、libssh、libtheora、libvorbis、libvpx、LZ4、opencore-amr、Snappy、TwoLAME、ZeroMQ、zimgについても、元recipeが指定するsource archiveとpatch/templateを取得・照合した。directoryが空というだけでlicense表示が不要とは扱わない。
 
 ### 13件のsource補完

@@ -52,7 +52,7 @@ Both archives and five patch inputs match the build-record-bound recipe checksum
 
 ## Bounded follow-up
 
-1. Resolve Unicode/data references in fontconfig, HarfBuzz, libunibreak and the newly inspected PCRE2/libxml2 sources. PCRE2's generated table identifies Unicode 17.0.0 but its referenced `maint` generator is absent from the source release. libxml2's generator references UnicodeData 4.0.1, and `xmlregexp.c` includes the retained table. Do not silently substitute FriBidi's Unicode 16 materials for either historical input.
+1. Resolve Unicode/data references in fontconfig, HarfBuzz and libunibreak. [PCRE2/libxml2 table reproduction](NATIVE_UNICODE_TABLE_AUDIT.md) now establishes their exact 17.0.0/4.0.1 inputs: both complete generated files match their original release tables after CRLF-to-LF normalization only. The current Unicode license original and fixed provenance are tracked, but new data/generator materials and the notice still need catalog delivery. Do not substitute FriBidi's Unicode 16 materials or call this a DLL rebuild.
 2. Check the named attribution/embedded-code gaps above, prioritizing libjxl, libopenmpt, libva, OpenCL and OpenSSL. libjxl's actual recipe disables SKCMS/SJPEG and uses system Brotli/Highway/LCMS; do not demand sources for disabled implementations or treat that configuration alone as a complete library inventory.
 3. Connect the resulting notices and required source materials to the approved release, then implement assisted Setup.exe and isolated lifecycle checks. Preserve patent/trademark conditions separately; notice retention is not patent clearance.
 

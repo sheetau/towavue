@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "observed_date": "2026-09-08",
+  "scope": "Two source-generated Unicode table reproductions. Data and generator inputs remain in ignored audit storage, not the v5 material catalog. No DLL rebuild, binary adoption, distribution approval or source-signature verification.",
+  "notice": {
+    "name": "third-party/unicode-data-20260908/LICENSE.txt",
+    "bytes": 1995,
+    "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+    "url": "https://www.unicode.org/license.txt"
+  },
+  "pcre2": {
+    "package": "mingw-w64-x86_64-pcre2",
+    "source_archive": "pcre2-10.48.tar.bz2",
+    "source_sha256": "b6c68fdf6f3ac31388b50aa89ff0fc49c00c987c16e7b5146491d12003f2c8ed",
+    "tag": "pcre2-10.48",
+    "tag_object": "42821dd6a614c496ff0959f91bc779f57886d7e9",
+    "commit": "7978954dbd2efc6f2196869290553cf1871b4ce6",
+    "unicode_version": "17.0.0",
+    "data": [
+      {
+        "name": "BidiMirroring.txt",
+        "bytes": 26827,
+        "sha256": "a2f16fb873ab4fcdf3221cb1a8a85a134ddd6ed03603181823ff5206af3741ce",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/BidiMirroring.txt",
+        "git_blob": "bb4ea24e46adb40d7f537f1e2c1676d589446f83",
+        "upstream_path": "maint/Unicode.tables/BidiMirroring.txt"
+      },
+      {
+        "name": "CaseFolding.txt",
+        "bytes": 87539,
+        "sha256": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/CaseFolding.txt",
+        "git_blob": "a0b0f07fd64598e698fc7da3e55ca72077dd6071",
+        "upstream_path": "maint/Unicode.tables/CaseFolding.txt"
+      },
+      {
+        "name": "DerivedBidiClass.txt",
+        "bytes": 173433,
+        "sha256": "4867b4b7f0731ed1bfcd34cc6251211ff1542541fce0734b6fbda139ee80b3a4",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/extracted/DerivedBidiClass.txt",
+        "git_blob": "7ce483d2962de86f4cfe44c287fc2fb8dd0cc896",
+        "upstream_path": "maint/Unicode.tables/DerivedBidiClass.txt"
+      },
+      {
+        "name": "DerivedCoreProperties.txt",
+        "bytes": 1134783,
+        "sha256": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/DerivedCoreProperties.txt",
+        "git_blob": "f327784bf3956436efeb85e213fc637d7b3c0207",
+        "upstream_path": "maint/Unicode.tables/DerivedCoreProperties.txt"
+      },
+      {
+        "name": "DerivedGeneralCategory.txt",
+        "bytes": 277514,
+        "sha256": "d62e5bab70ca74f099343f71224fa051cb1fdd61a1ab45c0488c44cfc0b6102e",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/extracted/DerivedGeneralCategory.txt",
+        "git_blob": "41996d6348fdcd7f1a88127766b7e6b21b6159e3",
+        "upstream_path": "maint/Unicode.tables/DerivedGeneralCategory.txt"
+      },
+      {
+        "name": "emoji-data.txt",
+        "bytes": 107324,
+        "sha256": "2cb2bb9455cda83e8481541ecf5b6dfda66a3bb89efa3fa7c5297eccf607b72b",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/emoji/emoji-data.txt",
+        "git_blob": "450252c4df3fc9477f6df6635f7b4aaf61db5a0f",
+        "upstream_path": "maint/Unicode.tables/emoji-data.txt"
+      },
+      {
+        "name": "GraphemeBreakProperty.txt",
+        "bytes": 99377,
+        "sha256": "d6b51d1d2ae5c33b451b7ed994b48f1f4dc62b2272a5831e7fd418514a6bae89",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/auxiliary/GraphemeBreakProperty.txt",
+        "git_blob": "19b13571f347af21a499eeb5ac0f27fc4602dacd",
+        "upstream_path": "maint/Unicode.tables/GraphemeBreakProperty.txt"
+      },
+      {
+        "name": "PropertyAliases.txt",
+        "bytes": 9619,
+        "sha256": "4441f573caf952ffece1d7c892e7715bd7136dfc26f96eb6f268bf1e474715fb",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/PropertyAliases.txt",
+        "git_blob": "f0b4be12b91ed1fa37709726841444d92ffe0dea",
+        "upstream_path": "maint/Unicode.tables/PropertyAliases.txt"
+      },
+      {
+        "name": "PropertyValueAliases.txt",
+        "bytes": 81858,
+        "sha256": "64e9a5f76f7a1e8b5a47d6a1f9a26522a251208f5276bdfa1559dac7cf2e827a",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/PropertyValueAliases.txt",
+        "git_blob": "b92662eda2867baed56e55440e5187d52c1cb341",
+        "upstream_path": "maint/Unicode.tables/PropertyValueAliases.txt"
+      },
+      {
+        "name": "PropList.txt",
+        "bytes": 145465,
+        "sha256": "130dcddcaadaf071008bdfce1e7743e04fdfbc910886f017d9f9ac931d8c64dd",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/PropList.txt",
+        "git_blob": "e64b4224d7271c8463b4c5f80fd6e9dbb5865fbb",
+        "upstream_path": "maint/Unicode.tables/PropList.txt"
+      },
+      {
+        "name": "ScriptExtensions.txt",
+        "bytes": 20707,
+        "sha256": "ec2107e58825a1586acee8e0911ce18260394ac8b87e535ca325f1ccbeb06bc6",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/ScriptExtensions.txt",
+        "git_blob": "98b8d0fb06e5ed7c3c2f20e0202f6cccf8a984e4",
+        "upstream_path": "maint/Unicode.tables/ScriptExtensions.txt"
+      },
+      {
+        "name": "Scripts.txt",
+        "bytes": 192460,
+        "sha256": "9f5e50d3abaee7d6ce09480f325c706f485ae3240912527e651954d2d6b035bf",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/Scripts.txt",
+        "git_blob": "5574fdd6ae35ddc074397fdc60fbe2e27e795713",
+        "upstream_path": "maint/Unicode.tables/Scripts.txt"
+      },
+      {
+        "name": "UnicodeData.txt",
+        "bytes": 2198209,
+        "sha256": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
+        "url": "https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt",
+        "git_blob": "fca68e3e154e62e49727ecf69f1df442582bfa96",
+        "upstream_path": "maint/Unicode.tables/UnicodeData.txt"
+      }
+    ],
+    "generators": [
+      {
+        "name": "GenerateUcd.py",
+        "bytes": 36441,
+        "sha256": "dfe748c97d1d6ca158fd99d087d879aac53f53225893094bd875985ccfef5308",
+        "url": "https://raw.githubusercontent.com/PCRE2Project/pcre2/7978954dbd2efc6f2196869290553cf1871b4ce6/maint/GenerateUcd.py",
+        "git_blob": "795e75b02e18c5d102b2df62a1afd13860d4020b"
+      },
+      {
+        "name": "GenerateCommon.py",
+        "bytes": 11812,
+        "sha256": "ec493fa0512b830d80a67667e8a9e70b87589498d0fe4c287a6a4ecf6b7795dd",
+        "url": "https://raw.githubusercontent.com/PCRE2Project/pcre2/7978954dbd2efc6f2196869290553cf1871b4ce6/maint/GenerateCommon.py",
+        "git_blob": "11db3d4191e1f3d902f7ea537546664557d3f3b9"
+      },
+      {
+        "name": "FetchUcd.sh",
+        "bytes": 1236,
+        "sha256": "7a2f3bc69dd51835e5a170d4c9edf50065b2a90f32218569c29127248c5f2b9e",
+        "url": "https://raw.githubusercontent.com/PCRE2Project/pcre2/7978954dbd2efc6f2196869290553cf1871b4ce6/maint/FetchUcd.sh",
+        "git_blob": "9ec4ecd9489df37c4f2e88e2f9cbffe3fa958f2d"
+      }
+    ],
+    "note": "All thirteen official data files and three scripts match exact commit Git blobs. FetchUcd.sh is inspected only, not executed. GenerateUcd.py does not consume UnicodeData.txt; retain the fetch-list scope separately."
+  },
+  "libxml2": {
+    "package": "mingw-w64-x86_64-libxml2",
+    "source_archive": "libxml2-2.15.4.tar.xz",
+    "source_sha256": "98087fd181d9070724f3fbc65c7377db03038eb92bd882374daff44940138821",
+    "unicode_version": "4.0.1",
+    "data": [
+      {
+        "name": "Blocks-4.0.1.txt",
+        "bytes": 4427,
+        "sha256": "c9dba71655b8787c381b3421ba2bf9a3df9e6168b5835f93fd3931c1eeff90cf",
+        "url": "https://www.unicode.org/Public/4.0-Update1/Blocks-4.0.1.txt"
+      },
+      {
+        "name": "UnicodeData-4.0.1.txt",
+        "bytes": 897402,
+        "sha256": "de54d68f2df927a20ea4a83dfd74a543ca7f3e3df2441576e7f6a185ec6fa217",
+        "url": "https://www.unicode.org/Public/4.0-Update1/UnicodeData-4.0.1.txt"
+      }
+    ],
+    "generators": [
+      {
+        "name": "codegen/genUnicode.py",
+        "bytes": 7419,
+        "sha256": "6a1c7e87005b27ff3ad1512073426b713afae78973efa2aeef4a3553640fa66e"
+      },
+      {
+        "name": "codegen/rangetab.py",
+        "bytes": 1013,
+        "sha256": "ccb5ade9e68e843eea73da12214df60841891f1c101406b3303c760e63c798fc"
+      }
+    ],
+    "consumer": "xmlregexp.c includes codegen/unicode.inc",
+    "note": "Generators are unchanged members of the recipe-hash-matched source archive. Historical Blocks copyright and terms reference are not replaced with 2026 authorship."
+  },
+  "reproduction": {
+    "python": "Python 3.14.2",
+    "arguments": "-B -X utf8",
+    "pcre2_command": "GenerateUcd.py pcre2_ucd.c",
+    "libxml2_command": "codegen/genUnicode.py",
+    "outputs": [
+      {
+        "archive_member": "pcre2-10.48/src/pcre2_ucd.c",
+        "original_bytes": 359377,
+        "original_sha256": "cfa8bcb3ad316e09ebfdf3e4b07d708a9d4e53795cc7c0bf04ce5156d7695adc",
+        "generated_path": "pcre/pcre2_ucd.c",
+        "generated_bytes": 365200,
+        "generated_sha256": "6a0940e53d9ace2b2a36d4759cf37fcc8248d1831a62d33b7f1a5bc13b711b51",
+        "normalized_generated_sha256": "cfa8bcb3ad316e09ebfdf3e4b07d708a9d4e53795cc7c0bf04ce5156d7695adc",
+        "comparison": "Full UTF-8 bytes after CRLF-to-LF normalization only; not raw-byte equality.",
+        "equal": true
+      },
+      {
+        "archive_member": "libxml2-2.15.4/codegen/unicode.inc",
+        "original_bytes": 70042,
+        "original_sha256": "fa6edc16172c03d05719bfdb899a338fdbc3764c7848f0bdab2a3ed81603b95e",
+        "generated_path": "xml/codegen/unicode.inc",
+        "generated_bytes": 71515,
+        "generated_sha256": "bb83f7f801e2569b17fe9665d5842c69b998252f970a4cf95063686c6e4b6cc9",
+        "normalized_generated_sha256": "fa6edc16172c03d05719bfdb899a338fdbc3764c7848f0bdab2a3ed81603b95e",
+        "comparison": "Full UTF-8 bytes after CRLF-to-LF normalization only; not raw-byte equality.",
+        "equal": true
+      }
+    ]
+  }
+}

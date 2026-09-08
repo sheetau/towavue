@@ -130,6 +130,12 @@ $registration = Join-Path $OutputDirectory 'registration'
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging/windows/operation-lock.ps1') -Destination (Join-Path $OutputDirectory 'operation-lock.ps1')
 New-Item -ItemType Directory -Path $registration | Out-Null
 foreach ($name in @('registration.ps1','registration-state.ps1','UnicodeShellLink.cs')) { Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging/windows/$name") -Destination $registration }
+$updateSources = @('scripts/get-setup-update-plan.ps1','scripts/setup-update-paths.ps1','scripts/setup-update-native.cs','scripts/setup-update-registration.ps1','scripts/setup-update-transaction.ps1','scripts/setup-registered-update.ps1','packaging/windows/registration-state.ps1','packaging/windows/operation-lock.ps1','packaging/windows/update.ps1')
+foreach ($name in $updateSources) {
+    $destination = Join-Path $OutputDirectory "update/$name"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot $name) -Destination $destination
+}
 
 $utf8 = [Text.UTF8Encoding]::new($false)
 $noticeFiles = @(Get-ChildItem -LiteralPath $licenses -File -Recurse -Force | ForEach-Object { $_.FullName.Substring($licenses.Length + 1).Replace('\','/') })
@@ -161,6 +167,7 @@ $page.Add('</ul></details></html>')
 $records = @(Get-ChildItem -LiteralPath $payload -File -Recurse -Force | ForEach-Object { Get-Record $_.FullName $_.FullName.Substring($payload.Length + 1).Replace('\','/') })
 $records = @($records | Sort-Object name)
 $buildSources = @('packaging/windows/setup.nsi','packaging/windows/operation-lock.ps1','packaging/windows/prerequisite.ps1','packaging/windows/registration.ps1','packaging/windows/registration-state.ps1','packaging/windows/UnicodeShellLink.cs','scripts/build-local-setup.ps1','scripts/get-vc-redist-status.ps1','scripts/vc-redist-state.ps1','docs/setup-inputs.json','docs/nsis-inputs.json','docs/vc-redist-inputs.json')
+$buildSources = @(($buildSources + $updateSources) | Sort-Object -Unique)
 $sourceRecords = @($buildSources | ForEach-Object { Get-Record (Join-Path $repositoryRoot $_) $_ })
 $inventory = [ordered]@{schema_version=1;scope='Installed payload only; excludes this inventory itself, generated uninstaller and path-bound marker. Local evaluation, not release approval.';companion=$manifest.companion;companion_entries=@($companionEntries);build_sources=$sourceRecords;files=$records}
 $inventoryPath = Join-Path $licenses 'INSTALLED-FILES.json'
@@ -209,6 +216,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Local application Setup compilation failed; ou
 foreach ($record in $records) { Assert-File (Join-Path $payload $record.name) $record }
 foreach ($file in $binding.files) { Assert-File $binaries[$file.name] $file }
 foreach ($record in $sourceRecords) { Assert-File (Join-Path $repositoryRoot $record.name) $record }
+foreach ($name in $updateSources) { Assert-File (Join-Path $OutputDirectory "update/$name") @($sourceRecords | Where-Object { $_.name -eq $name })[0] }
 foreach ($name in @('registration.ps1','registration-state.ps1','UnicodeShellLink.cs')) {
     $record = @($sourceRecords | Where-Object { $_.name -eq "packaging/windows/$name" })[0]
     Assert-File (Join-Path $registration $name) $record

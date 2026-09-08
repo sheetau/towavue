@@ -30,7 +30,7 @@ BrandingText "Local evaluation - not a published release"
 !define MARKER_SECTION "installation"
 !define UNINSTALL_FILE "Uninstall.exe"
 !define MUI_WELCOMEPAGE_TITLE "towavue local evaluation Setup"
-!define MUI_WELCOMEPAGE_TEXT "This installs towavue and its adjacent media runtime into an empty folder, with a Start menu shortcut and uninstall entry for the current user.$\r$\n$\r$\nIf required, the original Microsoft Visual C++ installer will ask you to review its terms. No automatic restart or application launch follows.$\r$\n$\r$\nThis evaluation cannot update an existing installation. Source archives are supplied separately; see the installed licenses guide."
+!define MUI_WELCOMEPAGE_TEXT "This installs towavue and its adjacent media runtime, with a Start menu shortcut and uninstall entry for the current user.$\r$\n$\r$\nChoose an empty folder or this user's registered installation to update. Interrupted updates must be restored first. Close towavue and any uninstallers before continuing.$\r$\n$\r$\nIf required, the original Microsoft Visual C++ installer asks you to review its terms. No automatic restart or application launch follows. This is a local evaluation; source archives are supplied separately."
 ; Never let the Finish page request a system restart.
 !define MUI_FINISHPAGE_NOREBOOTSUPPORT
 !else
@@ -58,11 +58,15 @@ ShowUninstDetails show
 !insertmacro MUI_LANGUAGE "English"
 
 Var PathError
+Var DirectoryOccupied
 Var OperationHandle
 !ifdef TOWAVUE_SETUP_APPLICATION
 Var PrerequisiteResult
 Var RegistrationMode
 Var RegistrationResult
+Var UpdateMode
+Var UpdateResult
+Var UpdateDestination
 !endif
 
 ; Both paths use the same checks. Inspect all existing ancestors, not only the leaf.
@@ -194,6 +198,7 @@ Function un.onGUIEnd
 FunctionEnd
 
 Function CheckEmptyDirectory
+  StrCpy $DirectoryOccupied 0
   Call CheckPath
   ${If} $PathError != ""
     Return
@@ -213,6 +218,7 @@ Function CheckEmptyDirectory
     ${EndIf}
     ${If} $1 != "."
     ${AndIf} $1 != ".."
+      StrCpy $DirectoryOccupied 1
       StrCpy $PathError "Choose an empty folder. This Setup cannot overwrite or update an existing installation."
       Goto done_empty
     ${EndIf}
@@ -223,7 +229,7 @@ Function CheckEmptyDirectory
 FunctionEnd
 
 Function CheckDirectoryPage
-  Call CheckEmptyDirectory
+  Call CheckDestination
   ${If} $PathError != ""
     MessageBox MB_OK|MB_ICONEXCLAMATION "$PathError"
     Abort
@@ -278,6 +284,81 @@ Function .onInit
 FunctionEnd
 
 !ifdef TOWAVUE_SETUP_APPLICATION
+Function PrepareUpdateHelpers
+  InitPluginsDir
+  ClearErrors
+  SetOutPath "$PLUGINSDIR\update\scripts"
+  File "${TRIAL_ROOT}\update\scripts\get-setup-update-plan.ps1"
+  File "${TRIAL_ROOT}\update\scripts\setup-update-paths.ps1"
+  File "${TRIAL_ROOT}\update\scripts\setup-update-native.cs"
+  File "${TRIAL_ROOT}\update\scripts\setup-update-registration.ps1"
+  File "${TRIAL_ROOT}\update\scripts\setup-update-transaction.ps1"
+  File "${TRIAL_ROOT}\update\scripts\setup-registered-update.ps1"
+  SetOutPath "$PLUGINSDIR\update\packaging\windows"
+  File "${TRIAL_ROOT}\update\packaging\windows\registration-state.ps1"
+  File "${TRIAL_ROOT}\update\packaging\windows\operation-lock.ps1"
+  File "${TRIAL_ROOT}\update\packaging\windows\update.ps1"
+  ${If} ${Errors}
+    SetErrorLevel 5
+    Abort "Could not extract update tools. No application files were changed."
+  ${EndIf}
+FunctionEnd
+
+Function CallUpdate
+  ; NSIS's native System.dll lives at $PLUGINSDIR. Do not let it shadow the
+  ; framework reference when Windows PowerShell compiles the native bridge.
+  SetOutPath "$PLUGINSDIR\update\scripts"
+  System::Call 'kernel32::SetEnvironmentVariableW(w "PSModulePath", p 0)'
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\update\packaging\windows\update.ps1" -Mode $UpdateMode -InstallDirectory "$INSTDIR" -IncomingPayloadDirectory "$PLUGINSDIR\update\payload" -IncomingOwnershipId "${OWNERSHIP_ID}" -NewUninstaller "$PLUGINSDIR\update\New-Uninstall.exe"'
+  Pop $UpdateResult
+  Pop $0
+  DetailPrint "$0"
+FunctionEnd
+
+Function UpdateInstallation
+  ${IfNot} ${Silent}
+    ${If} $UpdateMode == "Rollback"
+      MessageBox MB_OKCANCEL|MB_ICONINFORMATION "Restore the previous installation using its retained update record? Close towavue and all uninstallers first. After recovery, run Setup again to retry the update." IDOK update_confirmed
+    ${Else}
+      MessageBox MB_OKCANCEL|MB_ICONINFORMATION "Update the registered installation in this folder? Close towavue and all uninstallers first. Modified owned files will stop the update; unrelated files are preserved." IDOK update_confirmed
+    ${EndIf}
+    SetErrorLevel 2
+    Abort "Update or recovery cancelled. No application files were changed."
+  ${EndIf}
+  update_confirmed:
+  ${If} $UpdateMode == "Apply"
+    Call CheckPrerequisite
+    DetailPrint "Staging the update before changing installed files..."
+    StrCpy $UpdateDestination $INSTDIR
+    StrCpy $INSTDIR "$PLUGINSDIR\update\payload"
+    ClearErrors
+    !insertmacro InstallApplicationFiles
+    StrCpy $INSTDIR $UpdateDestination
+    WriteUninstaller "$PLUGINSDIR\update\New-Uninstall.exe"
+    ${If} ${Errors}
+      SetErrorLevel 5
+      Abort "Could not stage the update. No application files were changed."
+    ${EndIf}
+  ${EndIf}
+  ; No installed state has changed. The child acquires the ordinary lease and
+  ; revalidates everything. An active competitor causes safe refusal; a completed
+  ; operation is checked as current state, not as the parent's earlier snapshot.
+  Call ReleaseOperation
+  DetailPrint "Verifying files and performing $UpdateMode. Keep Setup open; recovery data will be retained."
+  Call CallUpdate
+  ${If} $UpdateResult != 0
+    SetErrorLevel 5
+    Abort "Update or recovery stopped. See details. Retain the folder and recovery files; close file users and retry Setup."
+  ${EndIf}
+  ${If} $UpdateMode == "Rollback"
+    DetailPrint "Previous installation restored. Run Setup again to retry the update."
+  ${EndIf}
+  SetErrorLevel 0
+  ${If} $PrerequisiteResult == 3010
+    SetErrorLevel 3010
+  ${EndIf}
+FunctionEnd
+
 !macro RegistrationFunction Prefix
 Function ${Prefix}Registration
   InitPluginsDir
@@ -340,9 +421,32 @@ Function CheckPrerequisite
 FunctionEnd
 !endif
 
+Function CheckDestination
+  Call CheckEmptyDirectory
+!ifdef TOWAVUE_SETUP_APPLICATION
+  StrCpy $UpdateMode ""
+  ${If} $PathError != ""
+  ${AndIf} $DirectoryOccupied == 0
+    Return
+  ${EndIf}
+  Call PrepareUpdateHelpers
+  StrCpy $UpdateMode "Inspect"
+  Call CallUpdate
+  ${If} $UpdateResult == 10
+    StrCpy $UpdateMode "Apply"
+    StrCpy $PathError ""
+  ${ElseIf} $UpdateResult == 11
+    StrCpy $UpdateMode "Rollback"
+    StrCpy $PathError ""
+  ${Else}
+    StrCpy $UpdateMode ""
+  ${EndIf}
+!endif
+FunctionEnd
+
 Section "Files"
   ; Repeat after the page so silent mode and late directory changes cannot bypass it.
-  Call CheckEmptyDirectory
+  Call CheckDestination
   ${If} $PathError != ""
     DetailPrint "$PathError"
     SetErrorLevel 2
@@ -350,6 +454,10 @@ Section "Files"
   ${EndIf}
   Call AcquireOperation
 !ifdef TOWAVUE_SETUP_APPLICATION
+  ${If} $UpdateMode != ""
+    Call UpdateInstallation
+    Goto files_complete
+  ${EndIf}
   StrCpy $RegistrationMode "Inspect"
   Call Registration
   ${If} $RegistrationResult != 0
@@ -402,6 +510,9 @@ Section "Files"
   ${If} $PrerequisiteResult == 3010
     SetErrorLevel 3010
   ${EndIf}
+!endif
+!ifdef TOWAVUE_SETUP_APPLICATION
+  files_complete:
 !endif
   Call ReleaseOperation
 SectionEnd

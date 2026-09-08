@@ -119,6 +119,8 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 schema 3の更新／Rollbackではuninstallerを先に退避し、本体はpayload／登録が一致してから、uninstallerはさらにその後へ戻す。file-only／登録付きの移動40境界で混在中の設置exe不在と公開時の整合を確認し、同一uninstaller bytesと旧schema 1／2の本体だけ退避した状態も復旧する。起動済み旧uninstallerの制御、実Setupの更新／復旧UI接続と対象OSのgateは残す。
 
+続いてlocal Setupへ配置外staging・確認付き更新とpending記録からの旧版復旧を接続した。親が変更前にleaseを解放し、childが通常取得・全体再検証する。復旧後はSetupの再実行で更新をやり直す。実NSIS app branchを生成text payload／GUID key／仮shortcutへ限定した試験で、更新・変更file拒否・登録中断・pending削除拒否・旧状態への復旧・再更新・削除を確認した。NSIS plugin directoryのSystem.dllがPowerShellのframework参照を遮る復旧失敗も再現・修正。実アプリ／VC導入、通常自己copy削除、対象OS・詳細progress／復旧UI・cleanup・同時source提供・最終品質とowner受入は未完了である。
+
 2026-09-08、既存preview／保存のhelper探索だけはH1の独立した修正として先に検証する。FFMPEG_DIRによる同梱版の上書きや、不足helperをPATH上の別版で埋め合わせる動作を防ぐ。第2段階のinstaller作成・runtime採用は第1段階の監査後のままとし、helper単体の検証でそのgateを通過扱いにしない。
 
 2026-09-08、第一段階で固定開発FFmpegのChromaprint→GPL FFTW静的リンクを確認し、既存binaryを配布候補から除外した。次の配布作業は[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)の機能を保つ再buildと対応資料の確定であり、旧DLLをそのままinstallerへ組み込むことではない。KissFFT版Chromaprintの単体試験は通ったが、全体差替え・性能・再配布条件のgateは未完了。

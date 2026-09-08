@@ -33,6 +33,9 @@ $names.Add('licenses/INSTALLED-FILES.json',$true)
 foreach ($file in $actual) { Assert-True ($names.ContainsKey($file.FullName.Substring($payload.Length + 1).Replace('\','/'))) 'Unexpected payload file.' }
 foreach ($file in $inventory.build_sources) { Assert-File (Join-Path $repositoryRoot $file.name) $file }
 Assert-File (Join-Path $BuildDirectory 'operation-lock.ps1') @($inventory.build_sources | Where-Object { $_.name -eq 'packaging/windows/operation-lock.ps1' })[0]
+foreach ($name in @('scripts/get-setup-update-plan.ps1','scripts/setup-update-paths.ps1','scripts/setup-update-native.cs','scripts/setup-update-registration.ps1','scripts/setup-update-transaction.ps1','scripts/setup-registered-update.ps1','packaging/windows/registration-state.ps1','packaging/windows/operation-lock.ps1','packaging/windows/update.ps1')) {
+    Assert-File (Join-Path $BuildDirectory "update/$name") @($inventory.build_sources | Where-Object { $_.name -eq $name })[0]
+}
 foreach ($name in @('registration.ps1','registration-state.ps1','UnicodeShellLink.cs')) {
     $record = @($inventory.build_sources | Where-Object { $_.name -eq "packaging/windows/$name" })[0]
     Assert-File (Join-Path $BuildDirectory "registration/$name") $record

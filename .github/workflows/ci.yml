@@ -28,6 +28,10 @@ jobs:
           [pscustomobject]@{bytes=(Get-Item -LiteralPath $archive).Length;sha256=(Get-FileHash -LiteralPath $archive).Hash} | ConvertTo-Json -Compress
           .\scripts\test-setup-fixture.ps1 -NsisArchive $archive
 
+      - name: Verify native Setup update and recovery with generated payloads
+        shell: pwsh
+        run: .\scripts\test-setup-update-lifecycle.ps1 -NsisArchive target/tmp/installer-tools/nsis-3.12.zip
+
       - name: Verify portable source companion archives
         shell: pwsh
         run: .\scripts\test-candidate-material-archive.ps1

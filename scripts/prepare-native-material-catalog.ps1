@@ -14,7 +14,7 @@ $auditPath = Join-Path $repositoryRoot 'docs/native-runtime-package-audit.json'
 $audit = Get-Content -LiteralPath $auditPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $recipesPath = Join-Path $repositoryRoot 'docs/native-runtime-recipes.json'
 $recipes = Get-Content -LiteralPath $recipesPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($inventory.schema_version -ne 1 -or $inventory.kits.Count -ne 10 -or
+if ($inventory.schema_version -ne 1 -or $inventory.kits.Count -ne 11 -or
     $inventory.excluded_package -ne 'mingw-w64-x86_64-zvbi') { throw 'Incomplete native material catalog.' }
 if (-not $PackageDirectory) { $PackageDirectory = Join-Path $repositoryRoot 'vendor/msys2/packages-20260908' }
 if (-not $RecipeDirectory) { $RecipeDirectory = Join-Path $repositoryRoot 'vendor/msys2/runtime-recipes-20260908' }

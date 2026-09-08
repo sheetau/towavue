@@ -1,0 +1,385 @@
+{
+  "schema_version": 1,
+  "scope": "Scoped native FFmpeg candidate source/build materials; incomplete release review, not distribution approval.",
+  "source_check_scope": "All original regular source files after listed patches match observed build sources. Generated/system-header and historical static-input closure is not established.",
+  "tree_digest_format": "Ordinal-sorted relative path, space, decimal bytes, space, lowercase SHA256, LF; UTF-8 no BOM, final LF included.",
+  "git_archive_options": "-c core.autocrlf=false -c core.eol=lf -c core.abbrev=no archive --format=tar --prefix=COMPONENT/",
+  "aribb24_patch_origin": {
+    "recipe_commit": "8267213e26c1031621e6e1210fe3aa4867214f6a",
+    "path": "patches/aribb24",
+    "original_lf": true
+  },
+  "sources": [
+    {
+      "name": "ffmpeg",
+      "commit": "e47273f4d9227152dcbf543cebaf9e2430ddbcc4",
+      "repository": "https://github.com/FFmpeg/FFmpeg",
+      "archive": {
+        "name": "ffmpeg.tar.gz",
+        "bytes": 17323649,
+        "sha256": "6491dae95e3cf3cdbac02933b55860e782b0c4f0a6bd8f37cef30fded259283c"
+      },
+      "root": "FFmpeg-e47273f4d9227152dcbf543cebaf9e2430ddbcc4",
+      "entries": 10548,
+      "regular_files": 10422,
+      "patched_tree_sha256": "2d9dd0fe2d9473bdd00484701f6124af904c7fe3b95404cc94404f6ddd3e30ad",
+      "patches": [],
+      "notices": [
+        {
+          "name": "COPYING.LGPLv2.1",
+          "bytes": 26517,
+          "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
+        },
+        {
+          "name": "COPYING.LGPLv3",
+          "bytes": 7651,
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+        },
+        {
+          "name": "COPYING.GPLv2",
+          "bytes": 18092,
+          "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+        },
+        {
+          "name": "COPYING.GPLv3",
+          "bytes": 35147,
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        {
+          "name": "LICENSE.md",
+          "bytes": 4346,
+          "sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af"
+        },
+        {
+          "name": "CREDITS",
+          "bytes": 277,
+          "sha256": "28ecc96d495fa5ad48c76739a8f8d2c8980548d7a171585a6eb3f27a9ac8e4a2"
+        }
+      ]
+    },
+    {
+      "name": "aribb24",
+      "commit": "5e9be272f96e00f15a2f3c5f8ba7e124862aec38",
+      "repository": "https://github.com/nkoriyama/aribb24.git",
+      "archive": {
+        "name": "aribb24.tar",
+        "bytes": 225280,
+        "sha256": "0e9d1e3f41c8e5bbdcbb4f563055ab6aa395ec623e5456060ac13a7b879046f2"
+      },
+      "root": "aribb24",
+      "entries": 28,
+      "regular_files": 24,
+      "patched_tree_sha256": "5050091964a267172759eb56655a3ba5dcc7bff8fc976b099f78726b78f50486",
+      "patches": [
+        {
+          "name": "12.patch",
+          "bytes": 1511,
+          "sha256": "9059639e9577b123ac4ab3b53771e947b791c42d07b0444cf90e82f563d6d261"
+        },
+        {
+          "name": "13.patch",
+          "bytes": 713,
+          "sha256": "4812661f1c77ec06a5a12548f166ac8646d4c7c1574848a005f0578f3d8cfc7c"
+        },
+        {
+          "name": "17.patch",
+          "bytes": 6204,
+          "sha256": "1a4fc77f677a6ff87d024e3a218186160b23620c84dbd791ec5c425de0a8e6c2"
+        },
+        {
+          "name": "aribb24-version.patch",
+          "bytes": 154,
+          "sha256": "f4eaa086f2685995f172b98bfefeaaddf3ec1bfb1d0985260746ccf9ce11e258"
+        }
+      ],
+      "notices": [
+        {
+          "name": "COPYING",
+          "bytes": 7651,
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+        },
+        {
+          "name": "README.md",
+          "bytes": 103,
+          "sha256": "a9d5a0c8c8824d792cc57198f251c723b7ce69183efbc3a80de6384e0e60002c"
+        },
+        {
+          "name": "src/decoder_macro.h",
+          "bytes": 3601,
+          "sha256": "4c80b1b45d44e345677d85a5b93cf47355678bd14c3e4dd58098ff3aca992127"
+        }
+      ]
+    },
+    {
+      "name": "lcevc",
+      "commit": "a254bd474649e5dcd8182689ac414420bfe8d8c3",
+      "repository": "https://github.com/v-novaltd/LCEVCdec.git",
+      "archive": {
+        "name": "lcevc.tar",
+        "bytes": 8878080,
+        "sha256": "f275a93a7d47a753dd2d87a023c7388bf81a90d98f2e968e6197e55f2b169ae0"
+      },
+      "root": "lcevc",
+      "entries": 831,
+      "regular_files": 676,
+      "patched_tree_sha256": "b1a3504d23e9ec5eecba03eb4ac9d78764be57877064bfc23e5a6a6c9082c940",
+      "patches": [
+        {
+          "name": "lcevc-static-link-order.patch",
+          "bytes": 275,
+          "sha256": "36c78dd23b337eadaec9e8e159aabc261dd4a354e69e6294d04c9cc96467bee3"
+        }
+      ],
+      "notices": [
+        {
+          "name": "COPYING",
+          "bytes": 817,
+          "sha256": "3afa5369b4fb44e18280b6e0e275971f78bc6eaf5f53553f41f2483fd8b1267e"
+        },
+        {
+          "name": "LICENSE.md",
+          "bytes": 1659,
+          "sha256": "14358b0ecf6e7036c211c10f0f25563c94483dee7b8c7c954e09e10f3771d0af"
+        },
+        {
+          "name": "README.md",
+          "bytes": 1592,
+          "sha256": "68f4205922ba2e5c77f3a1333f5d7d3385e08ca86861a3495ab49a7214054d47"
+        }
+      ]
+    },
+    {
+      "name": "librist",
+      "commit": "4f45ef8f78983892d52ccd52d9f675435b23738f",
+      "repository": "https://code.videolan.org/rist/librist.git",
+      "archive": {
+        "name": "librist.tar",
+        "bytes": 12257280,
+        "sha256": "2d73d869cc523168f1be38e23c23518226e27bebdbe573abaeb9f9b1c047bd30"
+      },
+      "root": "librist",
+      "entries": 515,
+      "regular_files": 485,
+      "patched_tree_sha256": "8c2473e8df4ec4d5946df141b11d6dda5a02fc5d6986f7f32d037861a3a93ee7",
+      "patches": [],
+      "notices": [
+        {
+          "name": "COPYING",
+          "bytes": 1319,
+          "sha256": "b9841591a3452ee30033d8e3586c7b1244a0b2fc1dc6cb04576957c313cb2792"
+        },
+        {
+          "name": "THANKS.md",
+          "bytes": 925,
+          "sha256": "e5c6254cd7e5f0cf61738491bb45bf6650ea09f7df862599232844b89539f3a8"
+        },
+        {
+          "name": "contrib/mbedtls/LICENSE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "contrib/mbedtls/include/mbedtls/build_info.h",
+          "bytes": 6163,
+          "sha256": "9b599075b04e8d4629a9617bced2ff726a0b9407b6f343e01a32c86ea52a8998"
+        },
+        {
+          "name": "contrib/contrib_cJSON/cjson/cJSON.c",
+          "bytes": 77152,
+          "sha256": "44e3d439ed8de158fc370556b8a9e8b7f7cfc8077befa1c9897b666e0f6a2d9e"
+        }
+      ]
+    },
+    {
+      "name": "uavs3d",
+      "commit": "0e20d2c291853f196c68922a264bcd8471d75b68",
+      "repository": "https://github.com/uavs3/uavs3d.git",
+      "archive": {
+        "name": "uavs3d.tar",
+        "bytes": 4505600,
+        "sha256": "22d87f03c76c04241394f7b54b3b9de3aa3ff709da14b1eed8f2a1934e42173e"
+      },
+      "root": "uavs3d",
+      "entries": 136,
+      "regular_files": 112,
+      "patched_tree_sha256": "745fab832c772a0da9dbc0d24a413c2f33ba6b10e52d2dbe48bce30563adc56f",
+      "patches": [
+        {
+          "name": "uavs3d-cdecl-guard.patch",
+          "bytes": 139,
+          "sha256": "05b5aa649d20026e382f5541bb26240035fb16a536614c1e78347556e27f7d3f"
+        }
+      ],
+      "notices": [
+        {
+          "name": "COPYING",
+          "bytes": 1690,
+          "sha256": "5a8dcb7da222df8a81b6e334000f859248196335e2d28e1db9f3c552827d7cdf"
+        },
+        {
+          "name": "README.md",
+          "bytes": 3744,
+          "sha256": "579aa2ab28d9bf99dba263a551ef134d896c043143850b799ab1016813606f2b"
+        }
+      ]
+    },
+    {
+      "name": "vvenc",
+      "commit": "0f2e874451d6b194615e5dfefdc96796a7da00f4",
+      "repository": "https://github.com/fraunhoferhhi/vvenc.git",
+      "archive": {
+        "name": "vvenc.tar",
+        "bytes": 18237440,
+        "sha256": "6bf4a928fcfabb648714395a07b7a9f360d788965ec003bb3790597e6ed6c225"
+      },
+      "root": "vvenc",
+      "entries": 845,
+      "regular_files": 790,
+      "patched_tree_sha256": "d5eea3bb8455e96b08a1ecba31049deafb0582ecbad3b53527a47d3c3c1ca110",
+      "patches": [],
+      "notices": [
+        {
+          "name": "LICENSE.txt",
+          "bytes": 1768,
+          "sha256": "88330a2cc59b9dd90674f8759900bc9c06e9efc8799dadda067609addefb49d1"
+        },
+        {
+          "name": "AUTHORS.md",
+          "bytes": 886,
+          "sha256": "528ce2138058d7ef942cede1e6604e83614552bb460868bdb14ee033a1ffc8ba"
+        },
+        {
+          "name": "thirdparty/VTM_license.txt",
+          "bytes": 2217,
+          "sha256": "6ba35f068018aa046f88e9947a5e427ed43da19dc8455b878c9d926eca15b5b2"
+        },
+        {
+          "name": "thirdparty/nlohmann_json/LICENSE.MIT",
+          "bytes": 1076,
+          "sha256": "86b998c792894ccb911a1cb7994f7a9652894e7a094c0b5e45be2f553f45cf14"
+        },
+        {
+          "name": "thirdparty/simde/COPYING",
+          "bytes": 1077,
+          "sha256": "75ce0a8c5a7bff42fbd6f8f3b469b518132132c4f4948fb8d02b1ccb5d0df9d8"
+        }
+      ]
+    }
+  ],
+  "observed_records": [
+    {
+      "name": "build-inputs.json",
+      "bytes": 75008,
+      "sha256": "e49ecc9a1ec5d1adbeead4197374d13a4cea4c22f1f594b9cf7ea8926a91b58d"
+    },
+    {
+      "name": "runtime.json",
+      "bytes": 160273,
+      "sha256": "22b6f89b52e45e14c062fd866762da02f55eab76bc73e3225de6bebdb22687e5"
+    }
+  ],
+  "expected_counts": {
+    "configure_flags": 87,
+    "packages": 330,
+    "prefixes": 6,
+    "prefix_files": 130,
+    "runtime_files": 94
+  },
+  "repository_materials": [
+    {
+      "name": "scripts/build-aribb24-native.ps1",
+      "bytes": 4436,
+      "sha256": "13a4426ff31d1bf86ae5f8fa5c59da10efc71b86cf6fa7e77b65164900ed2c50"
+    },
+    {
+      "name": "scripts/build-lcevc-native.ps1",
+      "bytes": 3659,
+      "sha256": "4fade6f899d3a9c0bab5b30e279ee3604fb5de4d1d06c63f7f080a37eeb9418e"
+    },
+    {
+      "name": "scripts/build-librist-native.ps1",
+      "bytes": 4107,
+      "sha256": "da557ba51f0a97c72bee0beab3ee820c7aed7d963c1afc5d150e4c40fc1e3950"
+    },
+    {
+      "name": "scripts/build-video-codec-native.ps1",
+      "bytes": 5298,
+      "sha256": "27913052ec7e71d6a8d7a300670b6f0a8839664d4ea51ef0ac44c4b28d04afb7"
+    },
+    {
+      "name": "scripts/build-ffmpeg-native.ps1",
+      "bytes": 12640,
+      "sha256": "f07d447617b4e469aa4e05eb64a14686fc7484a22f00ae4df14caacea2b1ce4f"
+    },
+    {
+      "name": "scripts/test-ffmpeg-native-features.ps1",
+      "bytes": 2748,
+      "sha256": "1f5337158cbdaf948baeb24245cbbb08892cff2e78a1f9f4cb9de07f19da0af0"
+    },
+    {
+      "name": "scripts/get-native-runtime-dependencies.ps1",
+      "bytes": 3268,
+      "sha256": "34cde47a13fcdbc630e6066b4fc3e184afd10398a5a9302112333e8633483440"
+    },
+    {
+      "name": "scripts/fixtures/aribb24-smoke.c",
+      "bytes": 1256,
+      "sha256": "742726db01b69e57bbb7f87a381ae4843832e21ad4445fcfe01ac8ecae037b72"
+    },
+    {
+      "name": "scripts/fixtures/lcevc-smoke.c",
+      "bytes": 658,
+      "sha256": "fa36323d0e4e8139283b0d90847c10b66c4ab0549b8e654ba61ac595b286bb5b"
+    },
+    {
+      "name": "scripts/fixtures/librist-smoke.c",
+      "bytes": 722,
+      "sha256": "2241d3813129224fc4422a6276c8d906db17469439822b2b307ff78e1695a171"
+    },
+    {
+      "name": "scripts/fixtures/uavs3d-smoke.c",
+      "bytes": 442,
+      "sha256": "e61f90538345a84d6a7164e41974d4eb2a43fde8190f0c3c5d863289fcfda2bc"
+    },
+    {
+      "name": "scripts/fixtures/vvenc-smoke.c",
+      "bytes": 2446,
+      "sha256": "225f43d46607a0ce9649dc13a1d37578497f960e3dd8b819e0c4eac8aff94a7f"
+    },
+    {
+      "name": "scripts/fixtures/msys2-smoke/pacman.conf",
+      "bytes": 81,
+      "sha256": "dc342a432dc909f75cf61e984e975dfcce38d8516d4e548851625f54ca65e131"
+    },
+    {
+      "name": "docs/ffmpeg-native-features.json",
+      "bytes": 5257,
+      "sha256": "58602622ddc7f9ebe63e7157234c5e9bc58295b5762782f83044f71421f65716"
+    },
+    {
+      "name": "docs/msys2-toolchain-inputs.json",
+      "bytes": 73521,
+      "sha256": "1ab74df3062e33acd0edaf5faf98438c21df43ccb144b858d21ee85872e3306d"
+    },
+    {
+      "name": "docs/msys2-media-inputs.json",
+      "bytes": 53603,
+      "sha256": "df1857c6e04acb20e8ae62f6e4d0ee83696c910f0efc3de7954200accb301e34"
+    },
+    {
+      "name": "docs/native-runtime-package-audit.json",
+      "bytes": 266612,
+      "sha256": "085583aceda22c85c0a4f8d5f8d63c35e2e825e349cfe396fa5b8037a630abb1"
+    },
+    {
+      "name": "docs/ffmpeg-build-inputs.json",
+      "bytes": 43702,
+      "sha256": "7703a6154a4b3719db7e0fe9932827bac755a281467fa72e9662ab8f4ed197e5"
+    },
+    {
+      "name": "third-party/FFMPEG-NATIVE-MATERIALS-README.txt",
+      "bytes": 6224,
+      "sha256": "aff631772a786d42ca67d18e4b223607001f7e117d40ac676a5e68f86927e0bf"
+    }
+  ]
+}

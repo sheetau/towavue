@@ -79,6 +79,14 @@
       "description": "glslang, SPIRV-Tools/Headers and Vulkan-Headers, including the older glslang header input."
     },
     {
+      "name": "native-ffmpeg-materials-v1",
+      "files": 60,
+      "bytes": 62342607,
+      "tree_sha256": "ccd209cf1a1776e164290ec6e25be184bcb9c53a1c7537fda1ca672af258f700",
+      "title": "Scoped FFmpeg and five source dependencies",
+      "description": "Original sources, all six patches, native builders, selected notices and path-normalized observed build/runtime records."
+    },
+    {
       "name": "zvbi-scoped-materials-v3",
       "files": 13,
       "bytes": 4623779,
@@ -88,7 +96,6 @@
     }
   ],
   "open_items": [
-    "Add the scoped candidate's FFmpeg source, actual build configuration and five separately built source dependencies (aribb24, LCEVC, librist, uavs3d and vvenc) to the same delivery set.",
     "Join towavue's own license, Rust dependency/font notices and its MSVC Rust standard-library materials. Do not import the excluded BtbN native Rust materials as current-candidate evidence.",
     "Finish individual remaining historical/static/header/data scope and any missing original attribution. Whole source archives and package labels are not a final linked-code SBOM.",
     "Decide the permitted Visual C++ redistributable prerequisite and complete the user-facing source-access delivery alongside the exact approved release. No public release/source endpoint exists yet.",

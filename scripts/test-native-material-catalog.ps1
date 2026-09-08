@@ -150,4 +150,4 @@ foreach ($path in $fixtureInputs.Keys) {
     }
 }
 Assert-Output $first
-Write-Output 'Native catalog checks passed: exact files/links, arbitrary cwd/repeat, 142 missing/corrupt package/recipe pairs, ten kit missing/corrupt pairs, five manifest failures, failed-copy marker protection and input/output preservation.'
+Write-Output "Native catalog checks passed: exact files/links, arbitrary cwd/repeat, 142 missing/corrupt package/recipe pairs, $($inventory.kits.Count) kit missing/corrupt pairs, five manifest failures, failed-copy marker protection and input/output preservation."

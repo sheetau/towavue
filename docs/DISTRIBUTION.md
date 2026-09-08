@@ -160,7 +160,7 @@ installer設計前に、配布buildと互換なruntimeの固定version、導入�
 
 ## 取得済みnative資料への入口
 
-2026-09-08、[Native material catalog](NATIVE_MATERIAL_CATALOG.md)のoffline集約を追加した。10組の検証済みsource／notice kitと、旧ZVBIを除く71 packageの原文表示・recipeを一つのdirectoryから辿れる。全体のREADMEは未結合部分も案内する。これは審査用資料であり、公開済みsource取得先、完成license bundle、runtime採用やSetup.exeの代わりではない。
+2026-09-08、[Native material catalog](NATIVE_MATERIAL_CATALOG.md)のoffline集約を追加した。11組の検証済みsource／notice kitと、旧ZVBIを除く71 packageの原文表示・recipeを一つのdirectoryから辿れる。[限定候補FFmpegと5 source prefixes](NATIVE_FFMPEG_MATERIALS.md)の元source・全patch・build入力／実runtime記録も含む。全体のREADMEは未結合部分も案内する。これは審査用資料であり、公開済みsource取得先、完成license bundle、runtime採用やSetup.exeの代わりではない。
 
 ## 次のゲート
 

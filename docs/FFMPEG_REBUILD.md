@@ -26,13 +26,23 @@ KissFFTのCOPYINGだけでなく、その参照先`LICENSES/BSD-3-Clause`も対�
 
 ## 次の実装・検証ゲート
 
+### WSLを使わない候補選定（2026-09-08）
+
+ownerはdebug・保守負担を理由にWSL 2を採用しないと決定した。WSL導入の質問は解決済みで、導入・OS機能変更を行わない。以下は調査結果と推奨順であり、新toolchainの導入や配布binaryの採用完了ではない。
+
+- **第一候補: media-autobuild_suiteのWindows native build。** [固定README](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/README.md)はMSYS2/MinGW-w64上でのbuild、shared出力、短い空白なしpath、64-bit buildで18GB以上の空きを案内する。WSL/Dockerは不要だが、別compiler環境の保守は残る。[compile script](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/build/media-suite_compile.sh)はChromaprint選択時にfftw packageを除き、MSYS2のchromaprintを使用する。[MSYS2 recipe](https://github.com/msys2/MINGW-packages/blob/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-chromaprint/PKGBUILD)は1.6.1のstatic/shared双方で`FFT_LIB=kissfft`を指定する。これは今回のbackend問題を避けられるrecipe上の根拠であり、生成binaryや全推移依存の検証を代替しない。
+- **BtbN既成lgpl-sharedは条件付き候補。** ローカルbuild環境が不要な利点はあるが、調査時HEADの[Chromaprint recipe](https://github.com/BtbN/FFmpeg-Builds/blob/281eb062dbebd20014f777dd7bb651330443f181/scripts.d/50-chromaprint.sh)にも`FFT_LIB=fftw3`と`-lfftw3`が残る。最新assetを検査したとは扱わず、名称や更新日だけで既存の棄却判断を解除しない。FFmpeg majorを下げる代替もABI変更を伴うため暗黙に採用しない。
+- **予備案: 修正したBtbN recipeをCIだけでbuild。** 開発機へWSL/Dockerを入れずにWindows用DLLを生成できる設計だが、Linux CI/imageの保守は残る。下記の旧image復元は直近の必須作業ではなく予備調査へ下げる。新たなworkflow実行・image復元は今回の候補比較では行わない。
+
+[MABS_BUILD.md](MABS_BUILD.md)へ固定revisionのINI値、更新動作、既存機能との差を記録した。次はbootstrap/package集合と不足する依存の準備方法を固定する。FFmpeg commit、MSYS2 package version/配布archive、source、patch、compilerを固定・保存し、suiteの自動更新とsource削除をそのまま配布手順へ持ち込まない。既存MSVC Rustアプリとのリンク、DLL探索、再生/保存/性能の確認後に採用を判断する。機能の削除や本体license変更を前提にしない。
+
 ### 隔離CIでの全体再リンク検証
 
 `.github/workflows/ffmpeg-relink-probe.yml`は手動実行専用であり、通常pushごとに重い再buildを始めない。既存の固定image `d1d34e5b...`をdigest指定で取得し、config digestも`f895b2da...`へ一致することを確認する。ChromaprintとFFmpegのcodeload sourceは固定commitとSHA256で検証する。Chromaprint archiveは1582333 bytes、SHA256 `eba1536d49daa17ae3c56904ea004342c42135dfdaabd7e9c5decbdb473d95ca`で、430通常fileが確認済みcacheと一致した。両archiveのpath/typeを検査済みで、唯一のheader symlink aliasは展開しない。
 
 `scripts/probe-ffmpeg-relink.sh`はimage内でChromaprintをGNU targetの静的libraryとして再buildし、新prefixのpkg-configを優先してFFmpeg全体を再リンクする。imageの既存feature flagsを保持し、link traceを有効にして、新libraryの選択とFFTW link入力の不在を検査する。7 DLLとffmpeg/ffprobeの生成を確認するが、Windowsでの実行や性能検証は別gateである。
 
-2026-09-08の初回probe run `34176348521`はsource取得・検証後、固定imageのpullで`manifest unknown`となり停止した。container内buildは未実行である。registryのmanifest GET/HEADは404だが、保存済みmanifest/configのSHA256は元digestと一致し、指定するconfigと17 layerのHEADはsize一致で200だった。別versionへ置換せず、この固定blob集合から元環境を復元する方法を次に検証する。全layerの取得・展開・Docker import成功はまだ確認していない。
+2026-09-08の初回probe run `34176348521`はsource取得・検証後、固定imageのpullで`manifest unknown`となり停止した。container内buildは未実行である。registryのmanifest GET/HEADは404だが、保存済みmanifest/configのSHA256は元digestと一致し、指定するconfigと17 layerのHEADはsize一致で200だった。固定blob集合から元環境を復元する調査は予備案として保留する。全layerの取得・展開・Docker import成功はまだ確認していない。
 
 コンテナは非root、networkなし、read-only root、capabilityなし、権限昇格なし。source/scriptはread-only、一時workとtmpfsだけを書込み可能にする。Docker socketやGitHub tokenを渡さず、artifact/cache/image/releaseを公開するstepはない。既存の他libraryを再利用するこのprobeだけでは、有効依存graph・対応source/notice全体の確定を代替しない。開発機のWSL導入や本体DLLの差し替えも行わない。
 

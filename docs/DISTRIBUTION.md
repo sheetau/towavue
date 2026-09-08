@@ -148,6 +148,8 @@ Cargo packageの本文集とは別に、[rust-runtime-inputs.json](rust-runtime-
 
 続くrun 34175731040では4 archiveの取得・hash検証が約3秒で完了し、最初のrustc `.xz`読取りで約10分待ってjob上限へ到達した。原因を通信と断定せず、固定release manifestが指定する同versionのgzip archiveへ切り替えた。全36文書は従来と同じsize/hashで、入力一覧だけが変わる。読取りstdoutを非同期で排出し、60秒でtarを停止して失敗を報告する。tarのversionも記録する。ローカルの生成・回帰試験は通過したが、Windows Server CIでの解消確認と、旧tar内部の停止原因の確定は別である。
 
+修正後のrun `34177092293`は全step成功。Windows Server 2022上の資料stepも約42秒で取得から回帰試験まで完了した。tar表示はlibarchive 3.8.4で、ローカルと違ってliblzmaを列挙しない。gzip経路の成功は確認できたが、旧XZ読取りの内部停止原因やtimeout分岐を実証したとは扱わない。
+
 ## Visual C++ runtime
 
 開発機のVisual Studio Community 2026配下で、x64 Redistributableを読み取り確認した。file versionは`14.51.36247.0`、18731856 bytes、SHA256は`843068991DAAA1F73AD9F6239BCE4D0F6A07A51F18C37EA2A867E9BECA71295C`。AuthenticodeはValid、署名者はMicrosoft Corporationである。実行・copy・インストールはしていない。

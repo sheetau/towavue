@@ -44,6 +44,10 @@ GCC／GCC-libs 16.1.0-5も両元packageの署名、同一recipe hash、元GNU so
 
 続いて[MinGW資料](native-mingw-inputs.json)へ、現CRT／headers／winpthreadsとshadercが使った旧版を分離して追加した。元8 packageの署名とrecipe、2 source commitsのGit tarと元VCS checksumが一致し、6 headersずつのinstalled／source一致、package原文表示の一致を確認した。103 files／281838430 bytesのkitと異常入力試験が通過。MinGW自身のtool／profiling表示とruntime表示、GCC／Microsoft runtimeを混同せず、runtime原文を省略しない。これは別の歴史的buildや全link範囲の代用ではない。次は取得済みkitを利用者向けnotice・source取得案内へ結び、残る個別scopeを明記する。新たな全toolchain再buildを一律の条件には加えない。
 
+## 取得済み資料の入口
+
+[Native material catalog](NATIVE_MATERIAL_CATALOG.md)で、固定した10 kitと元71 packageの表示・recipeを一つのoffline directoryへ集約する。旧ZVBI packageと古いkitを選ばず、原文をそのまま保持する。入口のREADMEとpackage別リンクから資料へ辿れ、全fileのsize／hashを照合できる。未結合のFFmpeg本体／5 source prefixes、本体Rust・font・VC runtime、個別scopeと最終提供経路を明示しており、完成した配布資料とは扱わない。次はこの入口へ残る本体・別build sourceを結び付ける。
+
 ## Owner一覧の外にある入力
 
 - 現候補は元85 package DLLのうちZVBIだけが限定build。84 package DLLの71 ownerと、限定ZVBIの由来を区別する。元packageの72 owner一覧は追跡用のbaselineである。

@@ -158,6 +158,10 @@ Cargo packageの本文集とは別に、[rust-runtime-inputs.json](rust-runtime-
 
 installer設計前に、配布buildと互換なruntimeの固定version、導入済みversionの判定、必要時の前提installer実行・終了code・再起動要求を決める。towavueのアンインストールで共有VC runtimeを削除しない。app-local配置やstatic CRTへ暗黙に変更してこの確認を迂回しない。
 
+## 取得済みnative資料への入口
+
+2026-09-08、[Native material catalog](NATIVE_MATERIAL_CATALOG.md)のoffline集約を追加した。10組の検証済みsource／notice kitと、旧ZVBIを除く71 packageの原文表示・recipeを一つのdirectoryから辿れる。全体のREADMEは未結合部分も案内する。これは審査用資料であり、公開済みsource取得先、完成license bundle、runtime採用やSetup.exeの代わりではない。
+
 ## 次のゲート
 
 1. [FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)に従い、機能を保つ代替buildの有効dependency/source/revision/patchとlink入力を固定する。既存binaryの除外は確定しており、期限切れの旧log追跡だけを繰り返して配布承認へ進めない。既存の確認済み原本資料は再buildの入力・比較基準として活用する。

@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "scope": "Offline review catalog of collected native materials. Incomplete release materials; not a distribution approval or final linked-code SBOM.",
+  "tree_digest_format": "Ordinal-sorted relative paths using forward slashes; each UTF-8/no-BOM line is: path, one space, decimal byte length, one space, lowercase SHA256, LF. SHA256 of the complete lines including final LF.",
+  "excluded_package": "mingw-w64-x86_64-zvbi",
+  "package_count": 71,
+  "package_notice_count": 79,
+  "kits": [
+    {
+      "name": "native-chromaprint-materials",
+      "files": 13,
+      "bytes": 1641422,
+      "tree_sha256": "1a5b19442f613f47ce740afc42a7c4d5b3abbb0e171a00ea3d10f6264f3e9f9f",
+      "title": "Chromaprint 1.6.1 with KissFFT",
+      "description": "Source, recipe and individual resampling/KissFFT notices; not the excluded FFTW-backed binary."
+    },
+    {
+      "name": "native-openal-materials-v2",
+      "files": 18,
+      "bytes": 1550136,
+      "tree_sha256": "c6fefa31ee82f26d910a9a6da48469d55672a2f5cd8ab7145706c5ab806bf112",
+      "title": "OpenAL Soft",
+      "description": "Library sources, four patches, embedded KEMAR attribution and separate utility scope."
+    },
+    {
+      "name": "gcc-runtime-materials-v1",
+      "files": 47,
+      "bytes": 107713444,
+      "tree_sha256": "2c75320a67d01bd2c6b35afd08fd837e4ef197effc296427ab6d54db0db833f0",
+      "title": "GCC 16.2 runtime DLLs",
+      "description": "Original sources, recipe and runtime exception for the three audited GCC DLLs."
+    },
+    {
+      "name": "native-gcc-static-materials-v1",
+      "files": 67,
+      "bytes": 103717496,
+      "tree_sha256": "425b2436c6c703b8ff68409fe59805130f72d6f535ab75afac9b25ebde789f8b",
+      "title": "GCC 16.1 shaderc inputs",
+      "description": "Separate historical standard headers and static runtime materials."
+    },
+    {
+      "name": "native-mingw-materials-v1",
+      "files": 103,
+      "bytes": 281838430,
+      "tree_sha256": "449df7a83ded61c0bb63193960925b526daba1f79da31afdc84e6aa8c71b5267",
+      "title": "MinGW CRT, headers and winpthreads",
+      "description": "Current and shaderc build-time versions, complete runtime notices and unchanged source archives."
+    },
+    {
+      "name": "native-source-supplements-v11",
+      "files": 427,
+      "bytes": 90583218,
+      "tree_sha256": "bf7c93fedc25d87d800f05fce0d96886ef12c17cba6daf62160027a4338e7fad",
+      "title": "32 native source supplements",
+      "description": "Original library sources, build inputs and additional inline, data and inherited notices."
+    },
+    {
+      "name": "native-rust-materials-v1",
+      "files": 769,
+      "bytes": 18200522,
+      "tree_sha256": "5f1b415f1ef46a243db433b24ac0998e90b8325809c49887cf74d2f2de65bf26",
+      "title": "Rust crates inside rav1e and libdovi",
+      "description": "157 original crates tied to the native libraries' source locks, not towavue's Cargo.lock."
+    },
+    {
+      "name": "native-rust-runtime-materials-v1",
+      "files": 545,
+      "bytes": 22961564,
+      "tree_sha256": "69bd20a3e30edb69cd8b73987e54e1d3b8280b9deaa83334feac6424cc8e7046",
+      "title": "Native Rust 1.87 and 1.97 standard libraries",
+      "description": "MSYS2 source packages, dependency originals and compiler-builtins/libm notices."
+    },
+    {
+      "name": "native-shader-materials-v2",
+      "files": 89,
+      "bytes": 23222740,
+      "tree_sha256": "a45f3fbbeabd694eb92032f5c12bd8c7fc02f1f141992f5ad57b3337e6db8734",
+      "title": "Shader static libraries and generated headers",
+      "description": "glslang, SPIRV-Tools/Headers and Vulkan-Headers, including the older glslang header input."
+    },
+    {
+      "name": "zvbi-scoped-materials-v3",
+      "files": 13,
+      "bytes": 4623779,
+      "tree_sha256": "0e44f3b768b4a033c8ad31181f02627f06c3bd19533820f6f3566040055faa72",
+      "title": "Scoped ZVBI 0.2.45",
+      "description": "Unchanged upstream source plus the explicit limited-API patch, builder and verified generated header."
+    }
+  ],
+  "open_items": [
+    "Add the scoped candidate's FFmpeg source, actual build configuration and five separately built source dependencies (aribb24, LCEVC, librist, uavs3d and vvenc) to the same delivery set.",
+    "Join towavue's own license, Rust dependency/font notices and its MSVC Rust standard-library materials. Do not import the excluded BtbN native Rust materials as current-candidate evidence.",
+    "Finish individual remaining historical/static/header/data scope and any missing original attribution. Whole source archives and package labels are not a final linked-code SBOM.",
+    "Decide the permitted Visual C++ redistributable prerequisite and complete the user-facing source-access delivery alongside the exact approved release. No public release/source endpoint exists yet.",
+    "Keep runtime adoption, assisted Setup.exe, supported-Windows install/update/uninstall, physical-environment tests and owner acceptance as separate gates."
+  ]
+}

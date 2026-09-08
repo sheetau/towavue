@@ -249,6 +249,30 @@ source全481 entryを検査した。最初の通常file限定検査は内部head
 
 **次にOpenALの範囲を優先確認する。** avdeviceは`libopenal-1.dll`をimportし、実package 1.25.2-1と[固定recipe](https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-openal/PKGBUILD)のmetadataはGPL-2.0-or-laterだが、[同版上流COPYING](https://raw.githubusercontent.com/kcat/openal-soft/1.25.2/COPYING)はGNU Library GPL v2である。この差を誤記ともGPL DLLの確定とも推測しない。対応recipe hash、source、4 patches、実libraryに入るsourceと通知を照合してから採否を判断する。現候補をinstallerへ採用・公開する承認はまだ行わない。
 
+## OpenALのlibrary/tool分離と埋め込みHRTF
+
+2026-09-08、前節のOpenAL package表示とlibrary本文の差をsource levelで確認した。candidate `libopenal-1.dll`は2728444 bytes／SHA256 `cb97d2f5a9797ff64db90d0691e4ff9eb2a088026351c9bad7aa26d229a354ce`で、固定packageの展開物と一致する。実avdeviceはこのDLLをimportする。packageには`makemhr.exe`と`openal-info.exe`も入るが、94-file runtime graphには含まれない。OpenALをtowavueのWASAPI出力の代替にした変更ではない。
+
+当初取得したMSYS2調査revisionのPKGBUILDは、package内`.BUILDINFO`のhashと一致しなかった。履歴から[3da1e4e9の原本](https://raw.githubusercontent.com/msys2/MINGW-packages/3da1e4e9f763ce05ebf2c0e244dcf3e66f44bb66/mingw-w64-openal/PKGBUILD)を取得すると、3353 bytes／SHA256 `18af836318e047249589a2df8af950a792f5512bc21923b9470f5902abf6414a`で一致した。差は後の`mingw32`削除だけだが、対応資料にはhashが一致する古い原本を採用する。source 1407972 bytes／SHA256 `fb27e5839aa11f0e5b9d33756965291fad5d6909ab928ea1f796f4a1a6877894`と4 patchも、そのrecipeのchecksumと一致した。
+
+sourceの518 entryはすべて通常file/directoryで、全461 fileを展開後に原本と比較した。最初の`git apply --check`は古いfilename patchのcontext不一致で停止したが、実recipeと同じ`patch -Np1`ではfuzz 1／offset 373で適用できた。結果が変わったのはCMakeLists.txt、cmake/FindMySOFA.cmake、openal.pc.inの3 fileだけである。結果hashはそれぞれ`8130c55255d9757237e0daffeb3fa97d8d134f08c9f8b48e4a82ff89fe240b87`、`76c7e252be3da5050bccba9b5c5fe4e0cd93e4f3ee0f12104cef566ea4cc7956`、`3024b239da0558a0ea46c51f86b26a1f5a6d8761b0ca6e6eeb12ff209b6e60aa`。原本patchを保持し、ライセンス表示・library/tool構成の変更はない。
+
+[library source](https://raw.githubusercontent.com/kcat/openal-soft/1.25.2/al/buffer.cpp)はGNU Library GPL v2以降を明示する。一方、GPLの[SOFA support](https://raw.githubusercontent.com/kcat/openal-soft/1.25.2/utils/sofa-support.cpp)とmakemhr sourceはCMakeのutility targetへ分離され、OpenAL library targetのsource/link入力ではない。DLLの通常importにもlibmysofaはない。したがってpackage全体のGPL metadataをDLL本体のGPL-only判定へ直結させず、DLLのLGPL表示と、含めないGPL utilityの範囲を区別する。packageの原metadataは書き換えない。完全な実build traceやbit同一の再buildをこのsource監査だけで証明した扱いにはしない。
+
+さらに、sourceの`hrtf/Default HRTF.mhr`全159841 bytes／SHA256 `0b2f09f4d9167dec4e977e7e1a8c78df17e87da06fb0871b9896fadaa473a440`が、実DLLのbyte offset 1775392にそのまま埋め込まれていることを確認した。別data fileを配布しなくても、この入力は消えない。OpenAL docs/hrtf.txtが指す[MIT KEMAR提供元](https://sound.media.mit.edu/resources/KEMAR.html)は、研究・商用利用で著者表示を求めている。Bill Gardner／Keith Martinと1994 MIT Media Laboratoryの著作権表示、由来URLを資料READMEへ追加した。これは一般の「MIT license」を選んだという意味ではない。
+
+```powershell
+.\scripts\prepare-native-package-materials.ps1 -Component openal `
+    -PackageArchive 'path/to/mingw-w64-x86_64-openal-1.25.2-1-any.pkg.tar.zst' `
+    -Recipe 'path/to/exact/PKGBUILD' -SourceArchive 'path/to/openal-1.25.2.tar.gz' `
+    -RuntimeDll 'path/to/candidate/libopenal-1.dll' -PatchDirectory 'path/to/four/patches' `
+    -GplLicense 'path/to/ffmpeg/COPYING.GPLv2' -OutputDirectory 'path/to/fresh/materials'
+```
+
+同じ入力を`test-native-package-materials.ps1 -Component openal`へ渡すと検証できる。Chromaprintで導入した処理をこの2 componentで共用し、従来のChromaprint commandはwrapperで維持した。[OpenAL入力一覧](native-openal-inputs.json)は原本・実DLL・patch・noticeを固定する。最終OpenAL資料は18 files／1550136 bytesで、source archive、recipe、4 patches、2 package metadata、7 source notice、GPL全文、入力一覧・説明を含む。COPYINGのLibrary GPL本文、PFFFT・fmt・GSL、library著作権表示とHRTF由来を保持する。原本archiveに残すGPL utility sourceのためGPL本文も補うが、utility binaryは含めない。
+
+初期17-file資料はHRTF表示補完前の診断用として保持し、`native-openal-materials-v2`を今回の検証結果とする。OpenALの5通常入力と4 patchesそれぞれの欠落・同size改変拒否、任意cwdでの全file一致、既存出力保護が通った。Chromaprintの5入力試験も従来commandから成功した。生成scriptは取得・patch適用・build・binary copy・公開をしない。残る混合license packageや表示不足packageのsource対応、全体build再現・runtime/performance／Setup.exeのgateは未完了である。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。

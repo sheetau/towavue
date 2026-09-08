@@ -8,6 +8,7 @@
     "sha256": "51360c028cf2d5b9711c471947eabd3765f4abdfdf8140dc396bd938f7d7b486"
   },
   "recipe": {
+    "required_options": ["-DFFT_LIB=kissfft"],
     "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-chromaprint/PKGBUILD",
     "bytes": 2014,
     "sha256": "434eb5b783c1ce5f83352a7bf69853d53ba751d12f63a4417be8b0dd3ca39bd7"

@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "scope": "OpenAL Soft library DLL materials only. GPL utilities from the same package are not runtime candidates. This is not the complete FFmpeg distribution or a bit-reproducible rebuild claim.",
+  "package": {
+    "name": "mingw-w64-x86_64-openal",
+    "version": "1.25.2-1",
+    "bytes": 1822499,
+    "sha256": "bef6595b1b4855d8256e91a5d25a3ff67ea3f28519d54a6783e311a6f980d60e"
+  },
+  "recipe": {
+    "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/3da1e4e9f763ce05ebf2c0e244dcf3e66f44bb66/mingw-w64-openal/PKGBUILD",
+    "required_options": ["-DALSOFT_ENABLE_MODULES=OFF", "-DALSOFT_EXAMPLES=OFF", "-DLIBTYPE=SHARED"],
+    "bytes": 3353,
+    "sha256": "18af836318e047249589a2df8af950a792f5512bc21923b9470f5902abf6414a"
+  },
+  "source": {
+    "url": "https://github.com/kcat/openal-soft/archive/1.25.2/openal-1.25.2.tar.gz",
+    "name": "openal-1.25.2.tar.gz",
+    "prefix": "openal-soft-1.25.2/",
+    "bytes": 1407972,
+    "sha256": "fb27e5839aa11f0e5b9d33756965291fad5d6909ab928ea1f796f4a1a6877894"
+  },
+  "runtime": {
+    "name": "libopenal-1.dll",
+    "bytes": 2728444,
+    "sha256": "cb97d2f5a9797ff64db90d0691e4ff9eb2a088026351c9bad7aa26d229a354ce"
+  },
+  "embedded_hrtf": {
+    "source_path": "hrtf/Default HRTF.mhr",
+    "bytes": 159841,
+    "sha256": "0b2f09f4d9167dec4e977e7e1a8c78df17e87da06fb0871b9896fadaa473a440",
+    "runtime_byte_offset": 1775392,
+    "origin": "https://sound.media.mit.edu/resources/KEMAR.html",
+    "attribution": "Bill Gardner and Keith Martin; copyright 1994 MIT Media Laboratory"
+  },
+  "gpl": {
+    "origin": "FFmpeg e47273f4d9227152dcbf543cebaf9e2430ddbcc4 COPYING.GPLv2; retained for GPL utility sources in the original archive, not a license assignment to the OpenAL DLL",
+    "bytes": 18092,
+    "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+  },
+  "patches": [
+    {
+      "name": "0001-dll-name.patch",
+      "bytes": 460,
+      "sha256": "fda6cd11b16dadb6eb391b0854c8694938cb722b2df49fd65e0575af99344a14"
+    },
+    {
+      "name": "0003-openal-not-32.mingw.patch",
+      "bytes": 292,
+      "sha256": "33dccfc603a48d265341e60bc801976d077e546ab5c91a93e8426eac01bb7ad4"
+    },
+    {
+      "name": "0004-pkgconfig-add-Cflags-private.patch",
+      "bytes": 246,
+      "sha256": "fb62d0ee19f79dc8990686c4341e1bdbc5fe91418f8deb7267b9fb3887a18e83"
+    },
+    {
+      "name": "0005-mingw-dont-check-libm.patch",
+      "bytes": 888,
+      "sha256": "6b1fa164c4d515dae069a1fcee226a555969b1b981379648ac4e11c742493512"
+    }
+  ],
+  "package_metadata": [
+    {
+      "name": ".BUILDINFO",
+      "bytes": 7929,
+      "sha256": "d16da3de466d573194efd14b2b5b70017178f1c38ff6b0aa33b20f80f95fba18"
+    },
+    {
+      "name": ".PKGINFO",
+      "bytes": 635,
+      "sha256": "a6f2bc4995ddb2b7ea9df7e8d0e7247b35f431edf6c07900cfe57ff30c20ebbc"
+    }
+  ],
+  "source_notices": [
+    {
+      "name": "docs/hrtf.txt",
+      "bytes": 3746,
+      "sha256": "efca3106588a0d35d8aefc4650a98a6e6044cbe432d7c6c34c7e912ce85f0311"
+    },
+    {
+      "name": "COPYING",
+      "bytes": 23330,
+      "sha256": "d808ce217e5b611854da622b57ec29fe545584c48bc5352fae72a4b6e5074a15"
+    },
+    {
+      "name": "LICENSE-pffft",
+      "bytes": 1669,
+      "sha256": "64056328b3e7bc104e24ef96accc1a7abead156f0c02d1b87c97e3f3a28030de"
+    },
+    {
+      "name": "gsl/LICENSE",
+      "bytes": 1157,
+      "sha256": "4c21dc82a1c7186ea754fd59d504c00947953a3401fe8e24eaa44109ef8e2555"
+    },
+    {
+      "name": "fmt-11.2.0/LICENSE",
+      "bytes": 1431,
+      "sha256": "07580f2a3b35709ce703d523f447b242f6dfec7582a8c0df102c7fa2849375f8"
+    },
+    {
+      "name": "README.md",
+      "bytes": 5358,
+      "sha256": "b7d8113e4cff86a1447b8fb514bc58f492e51797b6cb105d1f5e57c6b7ae9d39"
+    },
+    {
+      "name": "al/buffer.cpp",
+      "bytes": 67129,
+      "sha256": "940b68f39f1275ebfb293bdc57e22f5cb7d7992239f3b1d3a2a04138141e2f96"
+    }
+  ]
+}

@@ -9,6 +9,8 @@ if ((Get-Item -LiteralPath $NsisArchive).Length -ne $pins.archive.bytes -or (Get
 $trialRoot = Join-Path $repositoryRoot ('target/tmp/setup-update-lifecycle-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $trialRoot | Out-Null
 $registrySubKey = 'Software\towavue\InstallerTests\' + [guid]::NewGuid().ToString('N')
+$handoffReadyName = 'Local\towavue-handoff-ready-' + (Split-Path -Leaf $registrySubKey)
+$handoffReleaseName = 'Local\towavue-handoff-release-' + (Split-Path -Leaf $registrySubKey)
 $programs = Join-Path $trialRoot 'programs'
 New-Item -ItemType Directory -Path $programs | Out-Null
 $shortcut = Join-Path $programs 'towavue (local evaluation).lnk'
@@ -102,7 +104,7 @@ Function .onInstSuccess
 FunctionEnd
 '@
 $updateSources = @('scripts/get-setup-update-plan.ps1','scripts/setup-update-paths.ps1','scripts/setup-update-native.cs','scripts/setup-update-registration.ps1','scripts/setup-update-transaction.ps1','scripts/setup-registered-update.ps1','packaging/windows/registration-state.ps1','packaging/windows/operation-lock.ps1','packaging/windows/update.ps1')
-function Build-Trial([string]$Name,[switch]$New,[switch]$Fault,[switch]$Restart) {
+function Build-Trial([string]$Name,[switch]$New,[switch]$Fault,[switch]$Restart,[switch]$Handoff) {
     $root = Join-Path $trialRoot $Name
     $payload = Join-Path $root 'payload'
     Write-Trial (Join-Path $payload 'towavue.exe') $(if ($New) { 'New generated text, never executed. ' + ('x' * 8192) } else { 'Old generated text, never executed.' })
@@ -143,6 +145,26 @@ function Build-Trial([string]$Name,[switch]$New,[switch]$Fault,[switch]$Restart)
         if ($name -eq 'packaging/windows/operation-lock.ps1') { Write-Trial (Join-Path $root 'operation-lock.ps1') $source }
     }
     $source = if ($Restart) { $nsisSource.Replace('StrCpy $PrerequisiteResult 0','StrCpy $PrerequisiteResult 3010') } else { $nsisSource }
+    if ($Handoff) {
+        $anchor = '(?m)^  Call ReleaseOperation\r?\n  DetailPrint "Verifying files and performing'
+        Assert-True ([regex]::Matches($source,$anchor).Count -eq 1) 'Handoff gate missed its pre-child boundary.'
+        $gate = @'
+  Call ReleaseOperation
+  System::Call 'kernel32::OpenEventW(i 2, i 0, w "READY_NAME") p .r0'
+  System::Call 'kernel32::SetEvent(p r0)'
+  System::Call 'kernel32::CloseHandle(p r0)'
+  System::Call 'kernel32::OpenEventW(i 0x100000, i 0, w "RELEASE_NAME") p .r0'
+  System::Call 'kernel32::WaitForSingleObject(p r0, i 45000) i .r2'
+  System::Call 'kernel32::CloseHandle(p r0)'
+  ${If} $2 != 0
+    SetErrorLevel 5
+    Abort "Handoff fixture was not released. No child was started."
+  ${EndIf}
+  DetailPrint "Verifying files and performing
+'@
+        $gate = $gate.Replace('READY_NAME',$handoffReadyName).Replace('RELEASE_NAME',$handoffReleaseName)
+        $source = [regex]::Replace($source,$anchor,[Text.RegularExpressions.MatchEvaluator]{ param($match) $gate })
+    }
     Write-Trial (Join-Path $root 'setup.nsi') $source
     & $compiler /NOCONFIG /WX /V2 /DTOWAVUE_SETUP_APPLICATION ("/DTRIAL_ROOT=" + $root.Replace('$','$$')) (Join-Path $root 'setup.nsi')
     Assert-True ($LASTEXITCODE -eq 0) 'Native application-shaped fixture compilation failed.'
@@ -162,10 +184,40 @@ function Assert-Completion($Build,[string]$Title,[string]$Text) {
     $completion = Get-Content -LiteralPath (Join-Path $Build.root 'completion.txt') -Raw -Encoding Unicode
     Assert-True ($completion.StartsWith($Title + "`r`n") -and $completion.Contains($Text)) 'Setup completion message misrepresents its outcome.'
 }
+function Assert-HandoffRefusal($Build,[string]$InstallDirectory) {
+    . (Join-Path $repositoryRoot 'packaging/windows/operation-lock.ps1') -RegistrySubKey $registrySubKey
+    $before = Get-Tree $InstallDirectory
+    $registrationBefore = Get-Registration
+    $ready = [Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$handoffReadyName)
+    $release = [Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$handoffReleaseName)
+    $competitor = $null
+    try {
+        $process = Start-Process -FilePath $Build.setup -ArgumentList "/S /D=$InstallDirectory" -WorkingDirectory $trialRoot -WindowStyle Hidden -PassThru
+        [void]$process.Handle
+        while (-not $ready.WaitOne(15000)) {
+            if ($process.HasExited) { throw "Handoff fixture exited before the gate: $($process.ExitCode)" }
+            Write-Output "Observing the same handoff fixture PID $($process.Id) before the child gate."
+        }
+        # Successfully acquiring here proves the parent released before mutation.
+        $competitor = New-TowavueOperationLease $registrySubKey
+        Assert-True ((Get-Tree $InstallDirectory) -ceq $before -and (Get-Registration) -ceq $registrationBefore) 'Parent mutated installed state before child acquisition.'
+        [void]$release.Set()
+        while (-not $process.WaitForExit(15000)) {
+            Write-Output "Observing the same handoff fixture PID $($process.Id) while the competitor retains its lease."
+        }
+        Assert-True ($process.ExitCode -eq 5) 'Update child bypassed the competing operation lease.'
+        Assert-True ((Get-Tree $InstallDirectory) -ceq $before -and (Get-Registration) -ceq $registrationBefore) 'Competing update/recovery changed files or pending registration.'
+    } finally {
+        if ($competitor) { $competitor.Dispose() }
+        $ready.Dispose(); $release.Dispose()
+    }
+    Write-Output 'PASS: actual NSIS parent/child handoff refuses a competitor winning the released-lease gap, preserving files and the complete registration.'
+}
 $old = Build-Trial 'old'
 $new = Build-Trial 'new' -New
 $broken = Build-Trial 'broken' -New -Fault
 $restart = Build-Trial 'restart' -New -Restart
+$gated = Build-Trial 'handoff' -New -Handoff
 $japanese = [string][char]0x65e5 + [char]0x672c
 foreach ($recovery in @($false,$true)) {
     $installed = Join-Path $trialRoot ("installed $recovery & `$ $japanese")
@@ -189,10 +241,12 @@ foreach ($recovery in @($false,$true)) {
         $partialRegistration = Get-Registration
         Invoke-Trial $pendingDriver "/S _?=$installed" 3
         Assert-True ((Get-Tree $installed) -ceq $partial -and (Get-Registration) -ceq $partialRegistration) 'Pending native uninstaller changed files or registration.'
+        Assert-HandoffRefusal $gated $installed
         Invoke-Trial $new.setup "/S /D=$installed" 0
         Assert-True ((Get-Tree $installed) -ceq $before -and (Get-Registration) -ceq $beforeRegistration) 'Native Setup recovery did not restore exact old states.'
         Assert-Completion $new 'Previous version restored' 'The new version has not been installed.'
     } else {
+        Assert-HandoffRefusal $gated $installed
         Write-Trial (Join-Path $installed 'unchanged.dll') 'Preserve this user replacement.'
         $modified = Get-Tree $installed
         Invoke-Trial $new.setup "/S /D=$installed" 5

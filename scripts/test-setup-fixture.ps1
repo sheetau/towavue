@@ -33,8 +33,9 @@ function Assert-Tree([hashtable]$Before,[string]$Directory) {
     Assert-True ($Before.Count -eq $after.Count) "Changed file count: $Directory"
     foreach ($name in $Before.Keys) { Assert-True ($Before[$name] -eq $after[$name]) "Changed file: $name" }
 }
-function Invoke-Fixture([string]$Executable,[string]$Arguments,[int]$Expected) {
-    $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -WorkingDirectory $trialRoot -WindowStyle Hidden -PassThru
+function Invoke-Fixture([string]$Executable,[string]$Arguments,[int]$Expected,[string]$WorkingDirectory=$trialRoot) {
+    $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru
+    [void]$process.Handle
     if (-not $process.WaitForExit(15000)) { throw "Fixture still running; do not restart: PID $($process.Id), started $($process.StartTime.ToUniversalTime().ToString('o'))." }
     Assert-True ($process.ExitCode -eq $Expected) "Wrong fixture exit $($process.ExitCode), expected $Expected : $Arguments"
 }
@@ -78,6 +79,14 @@ $setup = Join-Path $trialRoot 'Setup-fixture.exe'
 $driveRoot = [IO.Path]::GetPathRoot($trialRoot)
 Invoke-Fixture $setup "/S /CHECKONLY /CHECKPATH=$driveRoot" 2
 Invoke-Fixture $setup '/S /CHECKONLY /CHECKPATH=\\localhost\not-a-towavue-test' 2
+# An occupied cwd previously hid drive-root sanitization: NSIS stores C:\ as C:,
+# which Windows resolves to the current directory. Exercise an empty cwd as well.
+$emptyWorkingDirectory = Join-Path $trialRoot 'empty-working-directory'
+New-Item -ItemType Directory -Path $emptyWorkingDirectory | Out-Null
+foreach ($path in @($driveRoot,$driveRoot.TrimEnd('\'),($driveRoot.TrimEnd('\') + 'relative'),'relative-folder')) {
+    Invoke-Fixture $setup "/S /CHECKONLY /CHECKPATH=$path" 2 $emptyWorkingDirectory
+}
+Assert-True (@(Get-ChildItem -LiteralPath $emptyWorkingDirectory -Force).Count -eq 0) 'Root/relative probe wrote to its working directory.'
 Assert-True (-not (Test-Path -LiteralPath (Join-Path $trialRoot 'manual-trial'))) 'Read-only probe installed files.'
 
 $occupied = Join-Path $trialRoot 'occupied'

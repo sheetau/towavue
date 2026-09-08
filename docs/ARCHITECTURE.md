@@ -516,6 +516,8 @@ H1の資料への入口はHelp menu／command paletteの`Show licenses and sourc
 
 H1の補助process探索はruntime内へ統一する。本体exeと同じdirectoryにffmpeg.exe／ffprobe.exeのいずれかが存在すれば、両方ともそのdirectoryを使う。不完全な配置を開発用helperで埋め合わせない。同梱helperが両方ともない開発配置だけ、非空のFFMPEG_DIR/binを使う。そこにも必要なexeがなければ期待pathを含むerrorにし、PATH上の別版を暗黙に起動しない。processへ渡すpathは絶対pathとし、作業directoryやPATHを変更しない。これは既存preview／保存の探索修正であり、同梱物の採用・installer作成・DLL検索規則の変更ではない。
 
+本体入りSetupの最初のlocal評価版はfixtureと同じpath／明示削除の処理を使い、95個の本体・runtime fileとnotice資料を空の専用directoryへ配置する。通常user権限・対話形式のみで、既存版の上書き、registration／shortcut、関連付け、自動起動はこのsliceには含めない。source archiveは固定hashの別companionとし、installed guideにはその名前・hash・未公開状態を明記する。元のnotice／header／build recordは保持し、archiveを省いたinstalled treeには独自のfile inventoryを付け、companion全体のinventoryと混同しない。VC判定は既存のRegistry64 readerを同梱Windows PowerShell wrapperから再利用する。必要時だけuserの確認後に元packageのfull UIを起動し、条件同意の代行やquiet installをしない。post-checkと実exit codeを確認し、3010は再起動要求として保持するが再起動・本体起動は実行しない。共有VC runtimeは削除対象にしない。これはbuildの評価段階であり、supported Windowsでの実導入・更新・削除と公開判断は別gateである。
+
 本体はMIT OR Apache-2.0。配布向けFFmpegはGPL/nonfree componentsとそれに反する推移依存を除いた9.0.1のDLLを動的リンクする。配布時には対応するFFmpeg source、build configuration、変更差分、著作権・LGPL表示、第三者license一覧を同じreleaseから取得可能にする。
 
 固定開発buildは`--enable-version3`を含み、license表示はLGPL 3以降である。本体の直接依存6 DLLに加え、ffmpeg.exe/ffprobe.exeのためavdevice DLLも必要になる。現在の同梱候補とsource・第三者表示・VC runtimeの未完了事項は[DISTRIBUTION.md](DISTRIBUTION.md)へ記録する。開発archiveにLICENSE.txtがあることだけでは配布承認としない。

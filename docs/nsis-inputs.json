@@ -14,5 +14,5 @@
     "https://nsis.sourceforge.io/Docs/Chapter4.html",
     "https://nsis.sourceforge.io/Docs/AppendixI.html"
   ],
-  "scope": "Pinned official-project portable compiler download; locally measured archive hash, not an independent publisher signature or compiler reproducibility proof. Unicode/zlib fixture only; no app, FFmpeg, VC package or publication."
+  "scope": "Pinned official-project portable compiler download; locally measured archive hash, not an independent publisher signature or compiler reproducibility proof. Unicode/zlib fixture and local application Setup builds, not publication or supported-Windows lifecycle approval."
 }

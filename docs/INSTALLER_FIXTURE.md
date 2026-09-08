@@ -1,6 +1,6 @@
 # Assisted installer lifecycle fixture
 
-This is a local safety slice, **not the towavue application installer**. It contains three harmless documents, an ownership record and an uninstaller. It does not contain the app, FFmpeg or the VC redistributable, register an application, create shortcuts, change associations, update an existing installation or publish anything. The compiler rejects invocation without the fixture-only define.
+This is a local safety slice, **not the towavue application installer**. It contains three harmless documents, an ownership record and an uninstaller. It does not contain the app, FFmpeg or the VC redistributable, register an application, create shortcuts, change associations, update an existing installation or publish anything. The compiler requires an explicit fixture or [local application](LOCAL_SETUP.md) mode; the two share path/deletion checks, not payload or prerequisite behavior.
 
 ## Build and focused verification
 
@@ -21,6 +21,7 @@ The official project lists 3.12 as the released version. The existing local Elec
 - Normal user execution, Welcome, editable destination, progress, Finish and uninstall confirmation. The default is an owned scratch location, not a real application installation directory.
 - Reject an occupied directory, drive root, UNC/device path, existing file in the ancestor chain, or reparse point in that chain. Recheck before extraction, including silent fixture tests. Existing empty directories and new nested directories are supported.
 - Preserve an explicit `/D` argument from the original command line. NSIS can otherwise replace an invalid destination with the default before `.onInit`; a rejected choice must not silently install elsewhere.
+- Reject drive roots and relative/drive-relative paths before Windows resolution. NSIS can strip the trailing separator from a root assigned to `$INSTDIR`; `C:` must not resolve to an empty current working directory. Regression probes now cover an empty cwd as well as occupied scratch.
 - Canonicalize nonexistent directories with the Windows API, normalize a trailing separator and preserve Japanese names with a UTF-16LE INI marker. The marker binds this fixture and the actual destination, not just a familiar filename.
 - Check root/nested directory and marker before deleting. Remove only the five explicit owned files, then remove directories only when empty. Extra files at either level remain. No wildcard, recursive removal, scheduled reboot deletion, shared runtime removal or settings cleanup.
 - Report incomplete installation/deletion as failure. A locked payload retains the uninstaller/marker so removal can be retried. A failure to remove the last marker is also a failure, not reported success. No automatic rollback or power-loss atomicity claim.

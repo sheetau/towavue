@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "scope": "Local application Setup evaluation, not approved for publication or supported-Windows installation.",
+  "companion": {
+    "name": "towavue-sources-195af870-c68cad34.zip",
+    "bytes": 509515254,
+    "sha256": "1fa92321d044ffa380a76caf342a33a4507ca80aca0f620740b75859a02b5d20"
+  },
+  "binding": {
+    "name": "BINDING.json",
+    "bytes": 149128,
+    "sha256": "c68cad3486e730fafdcc32ce79936a85f2d65c4206c2dd87ac4067252541569a"
+  },
+  "companion_files": 2879,
+  "binary_files": 95,
+  "distribution_approved": false
+}

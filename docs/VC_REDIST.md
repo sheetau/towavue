@@ -32,9 +32,11 @@ The reader never downloads, launches or installs a package. An explicit package 
 
 Tests cover 26 snapshots, unsupported minimum ABI, missing/corrupt packages, input preservation and unchanged live inspection. Without `PackagePath`, package/signature tests explicitly skip; CI exercises that mode. Both 64-bit and 32-bit PowerShell observe the development host's installed `14.51.36247.0`. Registration does not prove DLL health or clean-machine compatibility.
 
-## Planned installer behavior — not implemented or tested
+## Local installer integration — native lifecycle not yet tested
 
 Use the unchanged package's full UI with `/install /norestart` when needed, allowing the user to review and accept its terms. No `/quiet`, `/passive`, implicit assent or forced restart. Recheck the registry after installation; never remove the shared runtime when uninstalling towavue. [Microsoft deployment guidance](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files?view=msvc-170).
+
+The [local Setup evaluation](LOCAL_SETUP.md) now embeds the original package and a wrapper around this reader. The wrapper skips satisfied state, refuses unknown state, waits on the explicitly confirmed full-UI package, and requires both satisfied post-check and actual exit 0/3010. It records 3010 without restarting or launching the app. Sixteen synthetic child-process cases pass; this is not observation of the native installer. The owner host has only been inspected, including the packaged checker under both 32-bit and 64-bit PowerShell. No actual VC installer has been executed or terms accepted on the owner's behalf.
 
 For future isolated tests, success must also pass the post-check; reboot-required success must retain that state and avoid automatic app launch. A different-version result requires a compatible-registration recheck, not unconditional success. Cancellation, concurrent installation and other failures must stop with diagnostics. Windows Installer documents codes 0, 3010, 1638, 1602 and 1618, but the VC bootstrapper's actual return values, HRESULT wrapping, UAC cancellation and restart behavior still need observation. [MSI error codes](https://learn.microsoft.com/en-us/windows/win32/msi/error-codes).
 

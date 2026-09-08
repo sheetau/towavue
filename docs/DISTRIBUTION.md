@@ -12,6 +12,8 @@
 
 2026-09-08更新: **下記の固定開発binaryは配布候補から除外する。** Chromaprint経由でGPLのFFTWが静的リンクされていた。recipe、実libraryの未解決symbol、当時のpkg-config、avformat DLL内の識別文字列が一致する。LGPL表示だけでは既定の配布条件を満たさない。[再build計画と単体検証](FFMPEG_REBUILD.md)、[固定した根拠](ffmpeg-distribution-rejection.json)を参照。開発用fileは保持し、本体のlicense変更やcodecの暗黙の削除はしない。
 
+最新の配置工程は[本体入りlocal Setup評価](LOCAL_SETUP.md)を参照する。95個の実行file、local noticesと別source companion案内、元のVC package UIへ繋ぐwrapperを組み立てた。既存folderを上書きせず、共有VCは削除しない。実アプリの導入・更新・削除は隔離した対象Windowsで未検証であり、registration／shortcut、同時提供、最終品質・owner受入と公開判断も残る。以下の旧binary監査を現行Setupへ適用しない。
+
 ## 固定binaryの確認（2026-09-07 22:18 JST）
 
 - towavue: `a5639e5`由来の通常release、SHA256 `339046281C097BE5BA05D91BDA9D73F8501BD433A0A6AA96EF4C77E6DD87FCA2`。この監査時のtracked HEADは`6a3c820`で、その間は文書変更のみ。

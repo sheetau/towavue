@@ -32,6 +32,10 @@ jobs:
         shell: pwsh
         run: .\scripts\test-candidate-material-archive.ps1
 
+      - name: Verify prerequisite wrapper with isolated synthetic processes
+        shell: pwsh
+        run: .\scripts\test-setup-prerequisite.ps1
+
   rust:
     name: Rust checks
     runs-on: windows-2022

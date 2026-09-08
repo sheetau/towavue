@@ -14,6 +14,7 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 - ライセンス: MIT OR Apache-2.0
 - 配布予定: インストール先を選べるWindows用Setup.exe。現時点では未提供で、下記は開発版のビルド手順
 - installerの[安全性試験用Setup](docs/INSTALLER_FIXTURE.md)を実装しました。試験文書だけを配置・削除するfixtureで、本体のインストーラーではありません。
+- [本体入りのlocal評価用Setup](docs/LOCAL_SETUP.md)も組み立て可能です。実機への導入・更新・削除や公開前の確認は未完了で、配布版はまだありません。
 - 次の工程: H1 human evaluation and UX stabilization。実際の利用flowを観察し、小さな検証可能な単位でUI/UXと機能の不一致を直す
 
 固定開発FFmpegには、LGPLという自己表示だけでは扱えないGPL推移依存が見つかりました。このbinaryは配布候補から外し、機能を保つ[再buildと検証](docs/FFMPEG_REBUILD.md)を進めます。現行の開発用fileや本体のライセンスは変更していません。

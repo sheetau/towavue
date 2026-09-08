@@ -118,6 +118,30 @@ setupは固定URLから不足する上流11 fileだけを取得し、取得前�
 
 146 section、UTF-8/BOMなし/LF、必須追加notice、二回生成のbyte一致、上流本文の欠落・改変の拒否と既存出力保持を専用testで確認した。空cacheからの11 file取得と、再実行時の更新なしも別の隔離directoryで通過した。本文集は1542330 bytes、SHA256 `9849D7B4A28EDD77C3A816A073CC09C30E4BC5201305FC3DCACF564E7F112DF1`。CIにも生成検証を追加する。このRust本文集だけでinstaller全体の再配布条件を満たしたとは扱わない。
 
+### Rust標準ライブラリ・補助runtimeの資料（2026-09-08）
+
+Cargo packageの本文集とは別に、[rust-runtime-inputs.json](rust-runtime-inputs.json)へ次の公式配布物を固定した。release manifestのURL/hash、archiveのURL/size/hash、選択した原本36 fileのpath/size/hashを記録している。
+
+| 使用箇所 | Rust | 対象 | compiler commit |
+|---|---|---|---|
+| towavue | 1.98.0 | x86_64-pc-windows-msvc | `88d9e12ae178fab0fb5cc050a94da85685d449ea` |
+| 固定FFmpeg内のrav1e | 1.97.1 | x86_64-pc-windows-gnu | `8bab26f4f68e0e26f0bb7960be334d5b520ea452` |
+
+公式rustc archive内のversion/git-commit-hashは、開発機のrustcと取得済みlibrav1e.aに観測したcompiler情報へそれぞれ一致する。1.98.0の`COPYRIGHT-library.html`は、インストール済みの原本ともbyte一致した。これはcompilerの識別情報と文書の照合であり、rav1eの全build依存や完成libraryの再現証明ではない。
+
+各versionについて、rustc componentから標準ライブラリ向け`COPYRIGHT-library.html`、rootのCOPYRIGHT/MIT/Apache本文と公式licenses directoryを保存する。HTMLは他platformやbuild依存も含む上流の報告書であり、Windows binaryのlinked SBOMとして扱わない。licenses directoryは本文辞書として全体を保持し、そこにGPL等があることを全licenseがtowavueへ適用されるという表示にしない。
+
+両HTMLにはcompiler-builtinsの明示的な記載がなかったため、対応する公式rust-src componentの`compiler-builtins/LICENSE.txt`と`compiler-builtins/libm/LICENSE.txt`も別fileで加える。compiler-builtinsのAND条件やLLVM exception、libm側の追加copyrightを保持し、標準ライブラリ全般のMIT OR Apache-2.0で置き換えない。個別source中の通知や他のnative runtimeの適用確認は別途残る。
+
+```powershell
+.\scripts\prepare-rust-runtime-notices.ps1 -Download
+.\scripts\test-rust-runtime-notices.ps1
+```
+
+`-Download`は不足する固定4 archiveだけを`target/tmp/rust-runtime-materials`へ取得し、改変cacheは上書き修復せず拒否する。switchなしはoffline。全archiveと原本36 fileのsize/hashを検証してから、`target/distribution/RUST-RUNTIME-NOTICES.zip`を生成する。tarのstdoutだけを読み、上流のpathをfilesystemへ展開せず、compiler/libraryを実行・インストールしない。ZIPには原本文書と説明・入力一覧だけを入れる。本文の改行・bytesは変更しない。
+
+検証では原本36件のbyte一致、二回生成の一致、別cwd起動、入力欠落/同size改変の拒否、正常な既存出力と不正cacheの保持を確認する。CIにも同じ取得・検証を追加した。この資料を含めても、native FFmpegの残るsource/noticeとVC runtime、installer導入試験は完了していない。
+
 ## Visual C++ runtime
 
 開発機のVisual Studio Community 2026配下で、x64 Redistributableを読み取り確認した。file versionは`14.51.36247.0`、18731856 bytes、SHA256は`843068991DAAA1F73AD9F6239BCE4D0F6A07A51F18C37EA2A867E9BECA71295C`。AuthenticodeはValid、署名者はMicrosoft Corporationである。実行・copy・インストールはしていない。

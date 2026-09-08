@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-08 09:44 JST - package official Rust runtime notice materials
+
+- Trigger/intent: previous turn is progress; clean pushed e41d54e and successful CI 34134802565 confirmed. Continue the installer prerequisites with the Rust runtime material missing from the Cargo dependency notice bundle.
+- Evidence: pin official Rust 1.98.0 MSVC and 1.97.1 GNU release manifests and rustc/rust-src archives. Archive version/commit metadata matches the local compiler and observed rav1e compiler identities respectively. The local 1.98.0 COPYRIGHT-library.html matches the official archive byte-for-byte. Both library reports lack an explicit compiler-builtins entry; retain matching rust-src compiler-builtins/libm license files separately, preserving their AND/OR terms and LLVM exception. Keep the complete upstream SPDX directory as a text dictionary, not a claim of universal applicability.
+- Result/areas: add rust-runtime-inputs, an offline PowerShell generator with optional checksum-verified missing-archive retrieval, regression tests, CI verification, explanatory material and distribution documentation. The ZIP contains 36 unmodified original documents plus README/INPUTS, 2093149 bytes, SHA256 0900693a416e6ae4d13b8506308438dfa6c1bd6ea3393ae7e3dcf60f782eda13. Read only selected tar stdout; no compiler/library execution, toolchain installation or upstream path extraction.
+- Verification: all archive and file sizes/hashes, exact ZIP notice bytes, deterministic regeneration, arbitrary cwd, missing and same-size modified input rejection, existing output/corrupt cache preservation and input/output collision rejection pass. Fresh retrieval of all four archives and a cached rerun produce the same ZIP without changing cached archive timestamps. PowerShell parsing, diff whitespace, format, workspace Clippy and all 268 tests pass; three existing live ignores remain unexecuted. Generated archives/bundles/fixtures stay ignored and no retrieval/test process remains live. No production code, dependency, release binary, OS setting or publication changes.
+- Status/next: h1_active, not launch complete. Finish the rav1e effective graph and remaining native source/individual notices and VC-runtime conditions, then assemble the complete native materials and implement/test the selected Setup.exe. The official reports are not a linked SBOM or full distribution approval; real-environment and owner-acceptance gates remain open.
+
 ## 2026-09-07 23:43 JST - retrieve GCC runtime texts and trace the exact rav1e library
 
 - Trigger/intent: previous turn is progress; clean pushed cd23824 confirmed and CI 34132972037 succeeds. Continue the native installer prerequisites using historical artifacts rather than a present-day dependency update.

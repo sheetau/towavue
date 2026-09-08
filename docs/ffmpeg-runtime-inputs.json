@@ -67,7 +67,7 @@
     },
     "open_items": [
       "Recover the effective dependency/build graph after cargo update cc without using current network resolution as historical evidence.",
-      "Collect the Rust 1.97.1 runtime/standard-library and compiler-builtins notices separately from towavue's Rust 1.98.0 dependencies.",
+      "Review individual source notices and any additional linked runtime materials beyond the official Rust reports and compiler-builtins/libm texts now packaged by scripts/prepare-rust-runtime-notices.ps1; see docs/rust-runtime-inputs.json.",
       "Complete native notice applicability, source/gitlink and build-material verification before packaging."
     ],
     "observed_crates": [

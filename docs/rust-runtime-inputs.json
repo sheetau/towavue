@@ -1,0 +1,278 @@
+{
+  "schema_version": 1,
+  "scope": "Unmodified official standard-library notices and compiler-builtins/libm license texts, not a linked-component SBOM or the full native FFmpeg notice bundle. The upstream SPDX directory is preserved as a text dictionary, not a claim that every listed license applies.",
+  "archives": [
+    {
+      "version": "1.97.1",
+      "target": "x86_64-pc-windows-gnu",
+      "used_by": "rav1e in the fixed FFmpeg binary",
+      "compiler_commit": "8bab26f4f68e0e26f0bb7960be334d5b520ea452",
+      "release_manifest_url": "https://static.rust-lang.org/dist/channel-rust-1.97.1.toml",
+      "release_manifest_sha256": "03569b1886ceb5c05276b50c8431ab111de944cd6140fe1fa7d821dd8e0f29cf",
+      "component": "rustc",
+      "url": "https://static.rust-lang.org/dist/2026-07-16/rustc-1.97.1-x86_64-pc-windows-gnu.tar.xz",
+      "sha256": "11de14fa7ee410e9baaa070ce0cda44e155c0e9e32329db0b5f20efc0f2fa5e4",
+      "bytes": 101980832,
+      "files": [
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/LICENSE-APACHE",
+          "output": "1.97.1-x86_64-pc-windows-gnu/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/COPYRIGHT",
+          "output": "1.97.1-x86_64-pc-windows-gnu/COPYRIGHT",
+          "bytes": 1571,
+          "sha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/LICENSE-MIT",
+          "output": "1.97.1-x86_64-pc-windows-gnu/LICENSE-MIT",
+          "bytes": 1068,
+          "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/COPYRIGHT-library.html",
+          "output": "1.97.1-x86_64-pc-windows-gnu/COPYRIGHT-library.html",
+          "bytes": 279302,
+          "sha256": "0a65bb747c49c7bb816cbc7188319bd6e4e8d08091c1190b8a3c0971c47968ed"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/Apache-2.0.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/Apache-2.0.txt",
+          "bytes": 10280,
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/Unicode-3.0.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/Unicode-3.0.txt",
+          "bytes": 1995,
+          "sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/CC-BY-SA-4.0.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/CC-BY-SA-4.0.txt",
+          "bytes": 20137,
+          "sha256": "23ee78c8bae49cf08ea2f0c84945c66b987ebe4520881fb51b3dad4fb43d07c2"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/OFL-1.1.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/OFL-1.1.txt",
+          "bytes": 4016,
+          "sha256": "8eea8287e5876b539670cadb82e99f9a7afddec6f6730811be1daf25d2e9bcfd"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/GCC-exception-3.1.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/GCC-exception-3.1.txt",
+          "bytes": 3320,
+          "sha256": "a3966c9410ef94a1efbfa9ec04e9c1994026a70623fbf0885ce36737bfba3b54"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/NCSA.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/NCSA.txt",
+          "bytes": 1676,
+          "sha256": "39cb0234065c92b9e6cee3830cbb52b1aa289aa8fe9ba2e66730fec5cf05c630"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/ISC.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/ISC.txt",
+          "bytes": 730,
+          "sha256": "0ff61769b238634e042ab759dddfd104a8e69d091e3600ae3410e401a6164381"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/MIT.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/MIT.txt",
+          "bytes": 1078,
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/BSD-2-Clause.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/BSD-2-Clause.txt",
+          "bytes": 1267,
+          "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/LLVM-exception.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/LLVM-exception.txt",
+          "bytes": 919,
+          "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/GPL-3.0-or-later.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/GPL-3.0-or-later.txt",
+          "bytes": 34795,
+          "sha256": "05315fce6c35f79b8a35454828995fa26336f235895ac64557abc028f4ffcea2"
+        },
+        {
+          "entry": "rustc-1.97.1-x86_64-pc-windows-gnu/rustc/share/doc/rust/licenses/GPL-2.0-only.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/licenses/GPL-2.0-only.txt",
+          "bytes": 17642,
+          "sha256": "54b212ba1f97f6948fa5486239ab505dd820b02e50cbfd296b4062c8609a70af"
+        }
+      ]
+    },
+    {
+      "version": "1.97.1",
+      "target": "x86_64-pc-windows-gnu",
+      "used_by": "rav1e in the fixed FFmpeg binary",
+      "compiler_commit": "8bab26f4f68e0e26f0bb7960be334d5b520ea452",
+      "release_manifest_url": "https://static.rust-lang.org/dist/channel-rust-1.97.1.toml",
+      "release_manifest_sha256": "03569b1886ceb5c05276b50c8431ab111de944cd6140fe1fa7d821dd8e0f29cf",
+      "component": "rust-src",
+      "url": "https://static.rust-lang.org/dist/2026-07-16/rust-src-1.97.1.tar.xz",
+      "sha256": "e9a1e616d04c6845895c827a178b9227f7c7199f3f4a80af81ab3aff7b80156b",
+      "bytes": 5660384,
+      "files": [
+        {
+          "entry": "rust-src-1.97.1/rust-src/lib/rustlib/src/rust/library/compiler-builtins/libm/LICENSE.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/compiler-builtins/libm/LICENSE.txt",
+          "bytes": 14088,
+          "sha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+        },
+        {
+          "entry": "rust-src-1.97.1/rust-src/lib/rustlib/src/rust/library/compiler-builtins/LICENSE.txt",
+          "output": "1.97.1-x86_64-pc-windows-gnu/compiler-builtins/LICENSE.txt",
+          "bytes": 15078,
+          "sha256": "ab6eec6caf0fa5775e411c7a8bc6a45c4ef2956b0980b157ab74fc5cd62a928b"
+        }
+      ]
+    },
+    {
+      "version": "1.98.0",
+      "target": "x86_64-pc-windows-msvc",
+      "used_by": "towavue",
+      "compiler_commit": "88d9e12ae178fab0fb5cc050a94da85685d449ea",
+      "release_manifest_url": "https://static.rust-lang.org/dist/channel-rust-1.98.0.toml",
+      "release_manifest_sha256": "3f7d139b73bbbd0004ef6e58b430831c68cdad2b1f64ee2eb35d54c09199489a",
+      "component": "rustc",
+      "url": "https://static.rust-lang.org/dist/2026-08-20/rustc-1.98.0-x86_64-pc-windows-msvc.tar.xz",
+      "sha256": "a29cdefc01c747e15270ec64878adba4b0a88afaa7f19e3abf9231106fbd381b",
+      "bytes": 71168480,
+      "files": [
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/LICENSE-APACHE",
+          "output": "1.98.0-x86_64-pc-windows-msvc/LICENSE-APACHE",
+          "bytes": 9723,
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/COPYRIGHT",
+          "output": "1.98.0-x86_64-pc-windows-msvc/COPYRIGHT",
+          "bytes": 1571,
+          "sha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/LICENSE-MIT",
+          "output": "1.98.0-x86_64-pc-windows-msvc/LICENSE-MIT",
+          "bytes": 1068,
+          "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/COPYRIGHT-library.html",
+          "output": "1.98.0-x86_64-pc-windows-msvc/COPYRIGHT-library.html",
+          "bytes": 1512520,
+          "sha256": "68129500b616d5838629e68f55ff3aed5e096dacf60ce9eb41bbe599a563afa6"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/Apache-2.0.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/Apache-2.0.txt",
+          "bytes": 10280,
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/Unicode-3.0.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/Unicode-3.0.txt",
+          "bytes": 1995,
+          "sha256": "f5062c9a188d81dfe66b56db4182dcf9e4b17c0d9b0d311a8e20b3a1b075c443"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/CC-BY-SA-4.0.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/CC-BY-SA-4.0.txt",
+          "bytes": 20137,
+          "sha256": "23ee78c8bae49cf08ea2f0c84945c66b987ebe4520881fb51b3dad4fb43d07c2"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/OFL-1.1.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/OFL-1.1.txt",
+          "bytes": 4016,
+          "sha256": "8eea8287e5876b539670cadb82e99f9a7afddec6f6730811be1daf25d2e9bcfd"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/GCC-exception-3.1.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/GCC-exception-3.1.txt",
+          "bytes": 3320,
+          "sha256": "a3966c9410ef94a1efbfa9ec04e9c1994026a70623fbf0885ce36737bfba3b54"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/NCSA.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/NCSA.txt",
+          "bytes": 1676,
+          "sha256": "39cb0234065c92b9e6cee3830cbb52b1aa289aa8fe9ba2e66730fec5cf05c630"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/ISC.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/ISC.txt",
+          "bytes": 730,
+          "sha256": "0ff61769b238634e042ab759dddfd104a8e69d091e3600ae3410e401a6164381"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/MIT.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/MIT.txt",
+          "bytes": 1078,
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/BSD-2-Clause.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/BSD-2-Clause.txt",
+          "bytes": 1267,
+          "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/LLVM-exception.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/LLVM-exception.txt",
+          "bytes": 919,
+          "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/GPL-3.0-or-later.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/GPL-3.0-or-later.txt",
+          "bytes": 34795,
+          "sha256": "05315fce6c35f79b8a35454828995fa26336f235895ac64557abc028f4ffcea2"
+        },
+        {
+          "entry": "rustc-1.98.0-x86_64-pc-windows-msvc/rustc/share/doc/rust/licenses/GPL-2.0-only.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/licenses/GPL-2.0-only.txt",
+          "bytes": 17642,
+          "sha256": "54b212ba1f97f6948fa5486239ab505dd820b02e50cbfd296b4062c8609a70af"
+        }
+      ]
+    },
+    {
+      "version": "1.98.0",
+      "target": "x86_64-pc-windows-msvc",
+      "used_by": "towavue",
+      "compiler_commit": "88d9e12ae178fab0fb5cc050a94da85685d449ea",
+      "release_manifest_url": "https://static.rust-lang.org/dist/channel-rust-1.98.0.toml",
+      "release_manifest_sha256": "3f7d139b73bbbd0004ef6e58b430831c68cdad2b1f64ee2eb35d54c09199489a",
+      "component": "rust-src",
+      "url": "https://static.rust-lang.org/dist/2026-08-20/rust-src-1.98.0.tar.xz",
+      "sha256": "0e977492aed5ff137815bf9b4b796e8a85b80fb2367ed64e82d5c5839870f2bf",
+      "bytes": 5741336,
+      "files": [
+        {
+          "entry": "rust-src-1.98.0/rust-src/lib/rustlib/src/rust/library/compiler-builtins/libm/LICENSE.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/compiler-builtins/libm/LICENSE.txt",
+          "bytes": 14088,
+          "sha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+        },
+        {
+          "entry": "rust-src-1.98.0/rust-src/lib/rustlib/src/rust/library/compiler-builtins/LICENSE.txt",
+          "output": "1.98.0-x86_64-pc-windows-msvc/compiler-builtins/LICENSE.txt",
+          "bytes": 15078,
+          "sha256": "ab6eec6caf0fa5775e411c7a8bc6a45c4ef2956b0980b157ab74fc5cd62a928b"
+        }
+      ]
+    }
+  ]
+}

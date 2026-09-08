@@ -44,3 +44,9 @@ jobs:
         run: |
           .\scripts\setup-rust-notices.ps1
           .\scripts\test-rust-notices.ps1
+
+      - name: Verify Rust runtime notices
+        shell: pwsh
+        run: |
+          .\scripts\prepare-rust-runtime-notices.ps1 -Download
+          .\scripts\test-rust-runtime-notices.ps1

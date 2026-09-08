@@ -13,3 +13,9 @@ The remaining Rust notice texts are read from checksum-verified Cargo archives
 and pinned upstream notices. See `docs/DISTRIBUTION.md` for generation and
 verification commands. The generated Rust bundle does not cover the native
 FFmpeg libraries or Microsoft runtime and is not a complete installer payload.
+
+`RUST-RUNTIME-README.txt` describes the separate Rust standard-library/runtime
+notice package. `scripts/prepare-rust-runtime-notices.ps1` preserves 36 original
+files from four checksum-pinned official release components, with provenance.
+Use `-Download` only to retrieve missing archives; generation is otherwise
+offline and never installs or executes the downloaded toolchains.

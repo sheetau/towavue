@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "scope": "Current towavue application license/Rust/font/MSVC Rust standard-library review materials, not distribution approval or Microsoft runtime redistribution permission.",
+  "version": "1.98.0",
+  "target": "x86_64-pc-windows-msvc",
+  "dependency_count": 146,
+  "runtime_notice_count": 18,
+  "candidate": {
+    "name": "towavue.exe",
+    "bytes": 10287104,
+    "sha256": "03125262c28c0df0190b6d0dfe7b0efb1dfbceb55946c4af7e40e4af0aad43f3"
+  },
+  "notice_files": [
+    {
+      "name": "RUST-THIRD-PARTY-NOTICES.txt",
+      "bytes": 1542330,
+      "sha256": "9849d7b4a28edd77c3a816a073cc09c30e4bc5201305fc3dcacf564e7f112df1"
+    },
+    {
+      "name": "TOWAVUE-RUST-RUNTIME-NOTICES.zip",
+      "bytes": 1662748,
+      "sha256": "fca7723297cbaca0263eac3044db65833c39d600de07d7af64305df72f76701d"
+    }
+  ],
+  "runtime_inventory": {
+    "name": "docs/rust-runtime-inputs.json",
+    "bytes": 13924,
+    "sha256": "d2eddbe960cdc41668b40e11c381ff7fa7313d89b60c64c3e346ef7c2b85234f"
+  },
+  "repository_materials": [
+    {
+      "name": "LICENSE-MIT",
+      "bytes": 1064,
+      "sha256": "6c0c473938df760ce747376a0fc535adaf523573bc6721a65dfd368ef872ff56"
+    },
+    {
+      "name": "LICENSE-APACHE",
+      "bytes": 11337,
+      "sha256": "a8d4c593dadce715fa12aba99c437ae488c7253292aea3d42d1dd9b83cf0a07f"
+    },
+    {
+      "name": "Cargo.lock",
+      "bytes": 88904,
+      "sha256": "482d928bc732db194d3eef577e95f92c7239c9815720c0bfe5948d2868863e3d"
+    },
+    {
+      "name": "rust-toolchain.toml",
+      "bytes": 123,
+      "sha256": "637138f8759bf52f8328b64a074e8435fd056ccea54d3a3aaf674efafc1a9eb8"
+    },
+    {
+      "name": "docs/rust-license-inputs.json",
+      "bytes": 41298,
+      "sha256": "049fda9274a7f9a900645866afac9d8baca920dfc605ebd43887ab19a4f43325"
+    },
+    {
+      "name": "third-party/APP-MATERIALS-README.txt",
+      "bytes": 2880,
+      "sha256": "3c1a444734ee5e37da45e09797e3e5e668856a5481e141d244fd05bfd7f5156e"
+    }
+  ]
+}

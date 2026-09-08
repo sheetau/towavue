@@ -1,4 +1,4 @@
-# Native資料の案内と集約
+# 本体とNative資料の案内・集約
 
 取得済みの原本を一つのdirectoryから辿るための、offline review用catalog。**完成した配布資料・配布承認・公開済みsource取得先ではない。** アプリやDLL、インストーラーは生成しない。
 
@@ -7,17 +7,17 @@
 検証済みkitを`target/distribution`へ用意した上で、未作成の出力先を指定する。入力directoryの内部や親へは出力しない。
 
 ```powershell
-.\scripts\prepare-native-material-catalog.ps1 -MaterialsDirectory 'target/distribution' -OutputDirectory 'target/native-material-catalog-v2'
+.\scripts\prepare-native-material-catalog.ps1 -MaterialsDirectory 'target/distribution' -OutputDirectory 'target/native-material-catalog-v3'
 .\scripts\test-native-material-catalog.ps1 -MaterialsDirectory 'target/distribution'
 ```
 
 packageとrecipeの既定cacheは`vendor/msys2/packages-20260908`と`vendor/msys2/runtime-recipes-20260908`。別配置では`-PackageDirectory`と`-RecipeDirectory`を指定する。取得・install・recipe実行はせず、不足・改変cacheを上書き修復しない。
 
-出力の`README.md`が入口で、11 kitの説明書、sourceの読み方と残作業を案内する。`PACKAGES.md`は71 ownerの元build記録・recipe・79 package noticesへ直接リンクする。packageに表示がない場合は欠落を明示し、source資料の確認へ誘導する。packageのlicense labelだけで最終適用条件を分類しない。
+出力の`README.md`が入口で、本体とnativeの12 kitの説明書、sourceの読み方と残作業を案内する。`PACKAGES.md`は71 ownerの元build記録・recipe・79 package noticesへ直接リンクする。packageに表示がない場合は欠落を明示し、source資料の確認へ誘導する。packageのlicense labelだけで最終適用条件を分類しない。
 
 | 出力 | 内容 |
 |---|---|
-| `materials/` | 固定した11 kitを原文のままコピー。各説明書・入力一覧と全source archivesを保持 |
+| `materials/` | 固定した12 kitを原文のままコピー。各説明書・入力一覧と収集済み原文／source archivesを保持 |
 | `packages/` | 71 ownerの`.BUILDINFO`・`.PKGINFO`・元PKGBUILDと、収録されている原文表示 |
 | `README.md`、`PACKAGES.md` | 相対pathによる案内。公開download URLを捏造せず、upstream recipe URLとlocal資料を区別 |
 | `native-runtime-package-audit.json`、`native-runtime-recipes.json` | 元72-owner baselineとrecipe由来の記録。現在採用済みruntime一覧ではない |
@@ -28,20 +28,21 @@ packageとrecipeの既定cacheは`vendor/msys2/packages-20260908`と`vendor/msys
 
 ## 照合の範囲
 
-[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2151 files／718395358 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
+[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2162 files／721751445 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
 
-FFmpeg kitを加えたv2の集約は2449 files／720799214 bytes。これは資料のサイズであり、インストーラーのサイズではない。原本source archivesを保持するが、runtime DLL／exe／static libraryを別fileとしてコピーしない。source-onlyのtoolや他targetの条件を、本体へ一律適用する表示にはしない。
+本体kitを加えたv3の集約は2460 files／724157839 bytes。これは資料のサイズであり、インストーラーのサイズではない。原本source archivesを保持するが、runtime DLL／exe／static libraryを別fileとしてコピーしない。source-onlyのtoolや他targetの条件を、本体へ一律適用する表示にはしない。
 
-回帰試験は別cwd／反復生成、全file一致と案内のlocalリンク、142 package／recipe入力の欠落・改変pairs、11 kitの名前変更・改変pairs、5 manifest不整合、途中copy失敗時のmarker保護と入力／既存output保持を検査する。原文の`COPYING.LIB`をlibrary binaryと混同しないよう、試験では拡張子に加えて実際の形式を確認する。
+回帰試験は別cwd／反復生成、全file一致と案内のlocalリンク、142 package／recipe入力の欠落・改変pairs、12 kitの名前変更・改変pairs、5 manifest不整合、途中copy失敗時のmarker保護と入力／既存output保持を検査する。原文の`COPYING.LIB`をlibrary binaryと混同しないよう、試験では拡張子に加えて実際の形式を確認する。
 
-2026-09-08のv2全試験が通過し、最終2449 filesも試験出力と全hash一致。format／全target Clippy／270 testsも通過し、3 live ignoresは未実行。11 kitを実際に検査した後、成功messageの固定「ten」だけを実count表示へ直した。
+[本体資料](APP_MATERIALS.md)はMIT／Apache-2.0原文、146 Rust依存／font表示と、Rust 1.98.0／MSVCだけの18文書ZIPを加える。旧BtbN向けRust 1.97.1／GNUの文書を同梱せず、現native Rustの別kitとも区別する。RustのMSVC targetとMicrosoftのVC redistributableの条件は同一ではない。
+
+2026-09-08、v3の全回帰試験が通過し、最終2460 filesも試験出力と全hash一致。format／全target Clippy／270 testsも通過し、3 live ignoresは未実行。本体exeと94 runtime hashesは変更していない。
 
 [FFmpeg対応資料](NATIVE_FFMPEG_MATERIALS.md)は、限定候補のFFmpeg本体と5 source prefixesの元source・全patch・builder・原文表示、実build／runtime記録を加える。全12,509 original source filesのpatch後照合は、残る生成物・歴史的static入力の完全性や、tarだけからのoffline再buildまで証明するものではない。
 
-## まだ結合していないもの
+## まだ残るもの
 
-1. towavue自身のlicense、Rust依存・font表示、MSVC Rust標準library資料。除外済みBtbN内の別Rust版を現候補へ混ぜない。
-2. 個別に残るhistorical／static／header／dataの表示・適用範囲と、必要な原本の不足確認。
-3. 許諾されたVisual C++ runtime前提installerと、最終releaseに対応するsource／noticeの提供経路。
+1. 個別に残るhistorical／static／header／dataの表示・適用範囲と、必要な原本の不足確認。
+2. 許諾されたVisual C++ runtime前提installerと、最終releaseに対応するsource／noticeの提供経路。
 
 資料が集約できても、runtime採用、インストール先を選べるSetup.exe、対象Windowsでの導入・更新・削除、実環境とowner受入のgateは残る。全permissive sourceの再buildを一律に要求する工程へは変更しない。全体の優先順は[NATIVE_MATERIAL_PLAN.md](NATIVE_MATERIAL_PLAN.md)、実行物側のgateは[DISTRIBUTION.md](DISTRIBUTION.md)を参照する。

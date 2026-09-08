@@ -46,7 +46,7 @@ GCC／GCC-libs 16.1.0-5も両元packageの署名、同一recipe hash、元GNU so
 
 ## 取得済み資料の入口
 
-[Native material catalog](NATIVE_MATERIAL_CATALOG.md)で、固定した11 kitと元71 packageの表示・recipeを一つのoffline directoryへ集約する。旧ZVBI packageと古いkitを選ばず、原文をそのまま保持する。入口のREADMEとpackage別リンクから資料へ辿れ、全fileのsize／hashを照合できる。[FFmpeg本体／5 source prefixesの資料](NATIVE_FFMPEG_MATERIALS.md)も加え、元source全12,509 filesのpatch後一致と、実130 prefix inputs／94 runtime hashesを照合した。本体Rust・font・VC runtime、個別scopeと最終提供経路は残り、完成した配布資料とは扱わない。次は本体の現Rust／font／MSVC資料をこの入口へ結び付ける。
+[本体／native material catalog](NATIVE_MATERIAL_CATALOG.md)で、固定した12 kitと元71 packageの表示・recipeを一つのoffline directoryへ集約する。旧ZVBI packageと古いkitを選ばず、原文をそのまま保持する。入口のREADMEとpackage別リンクから資料へ辿れ、全fileのsize／hashを照合できる。[FFmpeg本体／5 source prefixesの資料](NATIVE_FFMPEG_MATERIALS.md)は元source全12,509 filesのpatch後一致と、実130 prefix inputs／94 runtime hashesを照合済み。[本体資料](APP_MATERIALS.md)も146 Rust依存・font原文とRust 1.98.0／MSVCの18文書を結び、旧BtbN向けGNU版を除いた。次は残る個別native scopeとVC redistributableの条件・前提実行を確定し、最終提供経路へ結ぶ。集約だけで完成した配布資料とは扱わない。
 
 ## Owner一覧の外にある入力
 

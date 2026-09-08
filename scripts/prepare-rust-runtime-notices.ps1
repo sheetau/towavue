@@ -2,29 +2,43 @@
 param(
     [switch]$Download,
     [string]$CacheDirectory,
-    [string]$OutputPath
+    [string]$OutputPath,
+    [ValidateSet('all', 'towavue')][string]$Scope = 'all'
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 if (-not $CacheDirectory) { $CacheDirectory = Join-Path $repositoryRoot 'target/tmp/rust-runtime-materials' }
-if (-not $OutputPath) { $OutputPath = Join-Path $repositoryRoot 'target/distribution/RUST-RUNTIME-NOTICES.zip' }
-$CacheDirectory = [IO.Path]::GetFullPath($CacheDirectory)
-$OutputPath = [IO.Path]::GetFullPath($OutputPath)
+if (-not $OutputPath) {
+    $outputName = if ($Scope -eq 'towavue') { 'TOWAVUE-RUST-RUNTIME-NOTICES.zip' } else { 'RUST-RUNTIME-NOTICES.zip' }
+    $OutputPath = Join-Path $repositoryRoot ('target/distribution/' + $outputName)
+}
+$CacheDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CacheDirectory)
+$OutputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
 $inventoryPath = Join-Path $repositoryRoot 'docs/rust-runtime-inputs.json'
-$readmePath = Join-Path $repositoryRoot 'third-party/RUST-RUNTIME-README.txt'
+$readmeName = if ($Scope -eq 'towavue') { 'TOWAVUE-RUST-RUNTIME-README.txt' } else { 'RUST-RUNTIME-README.txt' }
+$readmePath = Join-Path $repositoryRoot ('third-party/' + $readmeName)
 $utf8 = [Text.UTF8Encoding]::new($false, $true)
 $inventoryText = [IO.File]::ReadAllText($inventoryPath, $utf8).Replace("`r`n", "`n")
 $inventory = $inventoryText | ConvertFrom-Json
 if ($inventory.schema_version -ne 1) { throw 'Unsupported Rust runtime notice inventory.' }
+if ($Scope -eq 'towavue') {
+    $inventory.archives = @($inventory.archives | Where-Object used_by -eq 'towavue')
+    if ($inventory.archives.Count -ne 2 -or @($inventory.archives | Where-Object target -ne 'x86_64-pc-windows-msvc').Count -or
+        @($inventory.archives | Where-Object component -eq 'rustc').Count -ne 1 -or
+        @($inventory.archives | Where-Object component -eq 'rust-src').Count -ne 1) { throw 'Incomplete towavue Rust runtime inputs.' }
+    $inventoryText = ($inventory | ConvertTo-Json -Depth 10 -Compress) + "`n"
+}
 $toolchain = [IO.File]::ReadAllText((Join-Path $repositoryRoot 'rust-toolchain.toml'), $utf8)
 $appRuntime = $inventory.archives | Where-Object { $_.used_by -eq 'towavue' -and $_.component -eq 'rustc' }
-$nativeRuntime = $inventory.archives | Where-Object { $_.used_by -eq 'rav1e in the fixed FFmpeg binary' -and $_.component -eq 'rustc' }
-$nativeInputs = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/ffmpeg-runtime-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($toolchain -notmatch ('(?m)^channel\s*=\s*"' + [regex]::Escape($appRuntime.version) + '"\s*$') -or
-    $nativeRuntime.version -ne $nativeInputs.rav1e.rustc_version -or
-    $nativeRuntime.compiler_commit -ne $nativeInputs.rav1e.rustc_commit) {
+    @($inventory.archives | Where-Object { $_.used_by -eq 'towavue' -and ($_.version -ne $appRuntime.version -or $_.compiler_commit -ne $appRuntime.compiler_commit) }).Count) {
     throw 'Rust runtime notice inventory is stale.'
+}
+if ($Scope -eq 'all') {
+    $nativeRuntime = $inventory.archives | Where-Object { $_.used_by -eq 'rav1e in the fixed FFmpeg binary' -and $_.component -eq 'rustc' }
+    $nativeInputs = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/ffmpeg-runtime-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($nativeRuntime.version -ne $nativeInputs.rav1e.rustc_version -or $nativeRuntime.compiler_commit -ne $nativeInputs.rav1e.rustc_commit) { throw 'Rust runtime notice inventory is stale.' }
 }
 $inputs = @($inventoryPath, $readmePath) + @($inventory.archives | ForEach-Object {
     Join-Path $CacheDirectory ([uri]$_.url).Segments[-1]

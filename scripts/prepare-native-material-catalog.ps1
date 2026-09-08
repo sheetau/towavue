@@ -14,7 +14,7 @@ $auditPath = Join-Path $repositoryRoot 'docs/native-runtime-package-audit.json'
 $audit = Get-Content -LiteralPath $auditPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $recipesPath = Join-Path $repositoryRoot 'docs/native-runtime-recipes.json'
 $recipes = Get-Content -LiteralPath $recipesPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($inventory.schema_version -ne 1 -or $inventory.kits.Count -ne 11 -or
+if ($inventory.schema_version -ne 1 -or $inventory.kits.Count -ne 12 -or
     $inventory.excluded_package -ne 'mingw-w64-x86_64-zvbi') { throw 'Incomplete native material catalog.' }
 if (-not $PackageDirectory) { $PackageDirectory = Join-Path $repositoryRoot 'vendor/msys2/packages-20260908' }
 if (-not $RecipeDirectory) { $RecipeDirectory = Join-Path $repositoryRoot 'vendor/msys2/runtime-recipes-20260908' }
@@ -124,8 +124,8 @@ foreach ($package in $packages) {
     $notices = if ($links.Count) { $links -join ', ' } else { 'Not present in package; see source supplements.' }
     $packageLines += '| ' + $package.name + ' / ' + $package.version + ' | [build](' + (Get-Link ($relative + '/.BUILDINFO')) + '), [recipe](' + (Get-Link ($relative + '/PKGBUILD')) + '), [upstream recipe](' + $inputRecord.recipe.url + ') | ' + $notices + ' |'
 }
-$readme = @('# towavue native source and notice catalog', '', 'INCOMPLETE REVIEW MATERIALS - NOT AN APPROVED RELEASE', '',
-    'Start with the component guide below. Each kit retains original source archives, notices, build inputs and its own provenance/scope explanation. Files are copied byte-for-byte; upstream license alternatives are not converted into combined requirements.', '',
+$readme = @('# towavue application and native source/notice catalog', '', 'INCOMPLETE REVIEW MATERIALS - NOT AN APPROVED RELEASE', '',
+    'Start with the component guide below. Native kits retain original source archives, notices and build inputs. The application kit adds its own licenses, Rust/font notices and the app-only MSVC Rust runtime notice ZIP. Each kit explains its provenance and scope; upstream license alternatives are not converted into combined requirements.', '',
     'The 71 original package owners and their available notices are listed in [PACKAGES.md](PACKAGES.md). The old ZVBI package is not copied into that list; the scoped replacement has its own materials. Baseline audit JSON inside older kits is historical evidence, not the adopted runtime list.', '',
     '## Component guide', '', '| Component | Contents and scope |', '|---|---|')
 foreach ($kit in $inventory.kits) { $readme += '| [' + $kit.title + '](' + (Get-Link ('materials/' + $kit.name + '/README.txt')) + ') | ' + $kit.description + ' |' }

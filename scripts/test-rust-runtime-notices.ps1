@@ -98,5 +98,68 @@ catch {
 if (-not $rejected -or (Get-FileHash -LiteralPath $inputPath -Algorithm SHA256).Hash -ne $inputHash) {
     throw 'Runtime input/output collision was not safely rejected.'
 }
-Write-Output 'Rust runtime notices passed: 36 exact original files, deterministic bytes, arbitrary cwd, missing/modified input rejection, existing output and corrupt cache preserved.'
+$appCache = Join-Path $testDirectory 'app-cache'
+New-Item -ItemType Directory -Path $appCache | Out-Null
+$appArchives = @($inventory.archives | Where-Object used_by -eq 'towavue')
+foreach ($archive in $appArchives) {
+    $name = ([uri]$archive.url).Segments[-1]
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot ('target/tmp/rust-runtime-materials/' + $name)) -Destination (Join-Path $appCache $name)
+}
+$appPath = Join-Path $testDirectory 'app.zip'
+& $generator -Scope towavue -CacheDirectory $appCache -OutputPath $appPath | Out-Null
+Push-Location $testDirectory
+try { & $generator -Scope towavue -CacheDirectory 'app-cache' -OutputPath 'app-repeat.zip' | Out-Null }
+finally { Pop-Location }
+$appHash = (Get-FileHash -LiteralPath $appPath).Hash
+if ($appHash -ne (Get-FileHash -LiteralPath (Join-Path $testDirectory 'app-repeat.zip')).Hash) { throw 'Repeated towavue runtime notices differ.' }
+$zip = [IO.Compression.ZipFile]::OpenRead($appPath)
+$hasher = [Security.Cryptography.SHA256]::Create()
+try {
+    $files = @($appArchives.files)
+    if ($files.Count -ne 18 -or $zip.Entries.Count -ne 20) { throw 'Unexpected towavue runtime notice coverage.' }
+    foreach ($entry in $zip.Entries) {
+        if ($entry.FullName -notin @('README.txt','INPUTS.json') -and -not $entry.FullName.StartsWith('1.98.0-x86_64-pc-windows-msvc/')) { throw 'Foreign runtime material in towavue output.' }
+    }
+    foreach ($file in $files) {
+        $entries = @($zip.Entries | Where-Object FullName -eq $file.output)
+        if ($entries.Count -ne 1 -or $entries[0].Length -ne $file.bytes) { throw 'Incomplete towavue runtime notice.' }
+        $stream = $entries[0].Open()
+        try { $hash = [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-','').ToLowerInvariant() }
+        finally { $stream.Dispose() }
+        if ($hash -ne $file.sha256) { throw 'Modified towavue runtime notice.' }
+    }
+    $reader = [IO.StreamReader]::new($zip.GetEntry('INPUTS.json').Open(),[Text.UTF8Encoding]::new($false,$true))
+    try { $embedded = $reader.ReadToEnd() | ConvertFrom-Json }
+    finally { $reader.Dispose() }
+    if ($embedded.archives.Count -ne 2 -or @($embedded.archives | Where-Object { $_.used_by -ne 'towavue' -or $_.target -ne 'x86_64-pc-windows-msvc' }).Count) { throw 'Foreign runtime provenance in towavue output.' }
+}
+finally { $hasher.Dispose(); $zip.Dispose() }
+foreach ($archive in $appArchives) {
+    $path = Join-Path $appCache ([uri]$archive.url).Segments[-1]
+    Move-Item -LiteralPath $path -Destination ($path + '.held')
+    $rejected = $false
+    try {
+        try { & $generator -Scope towavue -CacheDirectory $appCache -OutputPath $appPath | Out-Null }
+        catch { if ($_.Exception.Message -notlike 'Runtime archive is missing:*') { throw }; $rejected = $true }
+    }
+    finally { Move-Item -LiteralPath ($path + '.held') -Destination $path }
+    if (-not $rejected) { throw 'Missing towavue runtime input accepted.' }
+    $stream = [IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite)
+    try { $original = $stream.ReadByte(); $stream.Position = 0; $stream.WriteByte($original -bxor 1) }
+    finally { $stream.Dispose() }
+    $corruptHash = (Get-FileHash -LiteralPath $path).Hash
+    $rejected = $false
+    try {
+        try { & $generator -Scope towavue -Download -CacheDirectory $appCache -OutputPath $appPath | Out-Null }
+        catch { if ($_.Exception.Message -notlike 'Runtime archive checksum mismatch:*') { throw }; $rejected = $true }
+        if (-not $rejected -or (Get-FileHash -LiteralPath $path).Hash -ne $corruptHash) { throw 'Corrupt towavue runtime input accepted or replaced.' }
+    }
+    finally {
+        $stream = [IO.File]::OpenWrite($path)
+        try { $stream.WriteByte($original) }
+        finally { $stream.Dispose() }
+    }
+    if ((Get-FileHash -LiteralPath $appPath).Hash -ne $appHash) { throw 'Rejected towavue input changed existing output.' }
+}
+Write-Output 'Rust runtime notices passed: 36 original legacy files and 18 app-only originals; deterministic/arbitrary-cwd outputs; no excluded GNU inputs needed for app scope; missing/corrupt inputs and existing outputs preserved.'
 Write-Output "Artifacts: $testDirectory"

@@ -1,11 +1,19 @@
 {
   "schema_version": 1,
-  "scope": "Offline review catalog of collected native materials. Incomplete release materials; not a distribution approval or final linked-code SBOM.",
+  "scope": "Offline review catalog of application and native materials. Incomplete release materials; not a distribution approval or final linked-code SBOM.",
   "tree_digest_format": "Ordinal-sorted relative paths using forward slashes; each UTF-8/no-BOM line is: path, one space, decimal byte length, one space, lowercase SHA256, LF. SHA256 of the complete lines including final LF.",
   "excluded_package": "mingw-w64-x86_64-zvbi",
   "package_count": 71,
   "package_notice_count": 79,
   "kits": [
+    {
+      "name": "app-materials-v1",
+      "files": 11,
+      "bytes": 3356087,
+      "tree_sha256": "6cfe6b9d1c059a726c3466bafb9acdbce6576751489fa33974628bde94b59a4f",
+      "title": "towavue application licenses and Rust/font notices",
+      "description": "Original application licenses, 146 dependency entries and the app-only Rust 1.98.0 MSVC runtime notice ZIP; no excluded BtbN GNU runtime materials."
+    },
     {
       "name": "native-chromaprint-materials",
       "files": 13,
@@ -96,7 +104,6 @@
     }
   ],
   "open_items": [
-    "Join towavue's own license, Rust dependency/font notices and its MSVC Rust standard-library materials. Do not import the excluded BtbN native Rust materials as current-candidate evidence.",
     "Finish individual remaining historical/static/header/data scope and any missing original attribution. Whole source archives and package labels are not a final linked-code SBOM.",
     "Decide the permitted Visual C++ redistributable prerequisite and complete the user-facing source-access delivery alongside the exact approved release. No public release/source endpoint exists yet.",
     "Keep runtime adoption, assisted Setup.exe, supported-Windows install/update/uninstall, physical-environment tests and owner acceptance as separate gates."

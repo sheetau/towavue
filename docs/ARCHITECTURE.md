@@ -510,6 +510,8 @@ M4ではName、Date modified、Date created、Size、Typeの昇順・降順、�
 
 必要なDLL・ffmpeg.exe・ffprobe.exeはインストール先へ配置し、利用者による開発用FFMPEG_DIR/PATHの設定を必要としない構成を計画する。これは配布方式の決定であり、同梱物の検証・再配布条件の確認・installer実装・clean-machine検証の完了ではない。署名・公開・課金は別途扱う。
 
+H1の補助process探索はruntime内へ統一する。本体exeと同じdirectoryにffmpeg.exe／ffprobe.exeのいずれかが存在すれば、両方ともそのdirectoryを使う。不完全な配置を開発用helperで埋め合わせない。同梱helperが両方ともない開発配置だけ、非空のFFMPEG_DIR/binを使う。そこにも必要なexeがなければ期待pathを含むerrorにし、PATH上の別版を暗黙に起動しない。processへ渡すpathは絶対pathとし、作業directoryやPATHを変更しない。これは既存preview／保存の探索修正であり、同梱物の採用・installer作成・DLL検索規則の変更ではない。
+
 本体はMIT OR Apache-2.0。配布向けFFmpegはGPL/nonfree componentsとそれに反する推移依存を除いた9.0.1のDLLを動的リンクする。配布時には対応するFFmpeg source、build configuration、変更差分、著作権・LGPL表示、第三者license一覧を同じreleaseから取得可能にする。
 
 固定開発buildは`--enable-version3`を含み、license表示はLGPL 3以降である。本体の直接依存6 DLLに加え、ffmpeg.exe/ffprobe.exeのためavdevice DLLも必要になる。現在の同梱候補とsource・第三者表示・VC runtimeの未完了事項は[DISTRIBUTION.md](DISTRIBUTION.md)へ記録する。開発archiveにLICENSE.txtがあることだけでは配布承認としない。

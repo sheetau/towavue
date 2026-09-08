@@ -116,11 +116,7 @@ fn export_cancellable(
         target: staging.output.clone(),
         ..request.clone()
     };
-    let executable = std::env::var_os("FFMPEG_DIR")
-        .map(PathBuf::from)
-        .map(|directory| directory.join("bin").join("ffmpeg.exe"))
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from("ffmpeg.exe"));
+    let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;
     if request.hardware_encode && hardware_encode_supported_target(request) {
         let hardware = run_ffmpeg(
             &executable,

@@ -17,6 +17,8 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 
 固定開発FFmpegには、LGPLという自己表示だけでは扱えないGPL推移依存が見つかりました。このbinaryは配布候補から外し、機能を保つ[再buildと検証](docs/FFMPEG_REBUILD.md)を進めます。現行の開発用fileや本体のライセンスは変更していません。
 
+preview／保存用の補助exeは本体と同じフォルダーを優先します。ffmpeg.exe／ffprobe.exeが片方でもあれば同じ配置だけを使い、不足を別のFFmpegで補いません。両方ともない開発配置では下記のFFMPEG_DIR/binを使います。PATH上の別版への自動切替は行わず、欠落時は必要なpathをエラーに表示します。この処理の検証は、Setup.exeの完成や同梱物の配布承認ではありません。
+
 複数の映像・音声streamを含む素材では、thumbnail・filmstrip・waveformと保存も再生と同じstreamを自動選択します。手動でstreamを切り替えるUIはありません。
 
 音声playlistはShell順の番号付き一覧です。行全体をclickして選曲でき、現在曲を明るく表示します。長い名前は一行に省略し、hoverで全文を確認できます。多数の曲も可視行だけを描画します。各曲の長さの列はまだありません。

@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 補助exeの配置と探索（2026-09-08 19:18 JST）
+
+previewと保存の探索をruntime内へ統一した。本体と同じdirectoryにffmpeg.exe／ffprobe.exeのいずれかがあれば、その配置を使う。片方が不足してもFFMPEG_DIRやPATHの別版を混ぜない。両方ともない開発配置だけFFMPEG_DIR/binを使い、未設定／不足なら期待pathを含むerrorにする。絶対pathを子processへ渡し、アプリのcwd／PATHは変更しない。
+
+[RustのWindows探索規則](https://doc.rust-lang.org/std/process/struct.Command.html#platform-specific-behavior)には本体exeのdirectoryも含まれるため、旧処理でも環境変数なしの隣接配置は動作した。再現した問題は、別FFMPEG_DIRが同梱helperより優先されることだった。実helperをコピーした隔離子processの試験は旧処理でその条件だけ失敗し、修正後は無設定・競合環境・片方欠落・両方欠落の全4条件が通過した。実FFmpegでduration／thumbnail／waveform／保存・decodeを確認し、欠落時にはPATHの有効な別helperを使わず、既存出力を保持する。
+
+通常debug exe SHA256 `489AEFF19F9C4F6E130171EEEC42675C3689A310782370AA7864702AAE632F58`と限定ZVBI候補の94 runtime filesを、隔離した`日本語 viewer & tools`へ配置。FFMPEG_DIRなし、PATHはSystem32のみ、別cwd・専用設定/cacheから実windowを起動した。30秒H.264/AACの再生、filmstrip／waveform、native Save As、保存物のOpen、tabをwindow外へdragして分離した子windowの再生／previewを確認した。保存物は160×96 H.264／48 kHz AAC、30.065960秒で、元sourceはhash不変。親子の直接6 FFmpeg DLLは全て同じ配置からloadされ、正常終了した。test用app hookは追加していない。
+
+270 tests・format／Clippyと通常debug buildが通過し、候補runtimeの原本／copy全94 hashも不変。これは現在のWindows 11上の局所検証で、最適化releaseの性能、開発環境のない対象Windows、Setup.exeの導入／更新／削除、物理入力や配布監査の完了証明ではない。
+
 ### Native FFmpeg再生成候補のrelease確認（2026-09-08 14:38 JST）
 
 3e17046の手順で再生成したFFmpegを使い、別Rust targetで通常releaseをbuildした。アプリsourceの変更はない。binary SHA256は`94AF9E14CDAC00339A0AB830BD728E22EE94B7BAB9FDE66770D9A09DE80B2BC2`。各試験のPID／開始UTC、exe／media hash、実際にloadされた6 FFmpeg DLLのpath／hashを記録した。全DLLは再生成prefixに一致する。設定とcacheは各case専用、cwdは別directory、FFMPEG_DIRを明示し、PATHは同prefix/binとSystem32のみ。これはSetup.exeや環境変数不要の起動試験ではない。

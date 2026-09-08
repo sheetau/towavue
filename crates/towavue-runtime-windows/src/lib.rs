@@ -10,6 +10,7 @@ mod image;
 mod image_loader;
 mod input;
 mod latest_task;
+mod media_tools;
 mod orientation;
 mod playback;
 mod preview;

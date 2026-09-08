@@ -157,7 +157,7 @@ impl PreviewCache {
                 },
             )?;
             let command = hidden_command(
-                &tool_path("ffmpeg.exe"),
+                &tool_path("ffmpeg.exe")?,
                 [
                     "-hide_banner",
                     "-loglevel",
@@ -197,7 +197,7 @@ impl PreviewCache {
     }
 
     pub fn duration(&self, source: &Path) -> Result<Duration, PreviewError> {
-        let executable = tool_path("ffprobe.exe");
+        let executable = tool_path("ffprobe.exe")?;
         let command = hidden_command(
             &executable,
             [
@@ -326,7 +326,7 @@ fn run_ffmpeg(
     arguments: &[String],
     cancellation: Option<&Cancellation>,
 ) -> Result<Vec<u8>, PreviewError> {
-    let executable = tool_path("ffmpeg.exe");
+    let executable = tool_path("ffmpeg.exe")?;
     let command = hidden_command(
         &executable,
         ["-hide_banner", "-loglevel", "error"]
@@ -369,12 +369,11 @@ fn hidden_command(
     command
 }
 
-fn tool_path(name: &str) -> PathBuf {
-    std::env::var_os("FFMPEG_DIR")
-        .map(PathBuf::from)
-        .map(|directory| directory.join("bin").join(name))
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from(name))
+fn tool_path(name: &'static str) -> Result<PathBuf, PreviewError> {
+    crate::media_tools::tool_path(name).map_err(|source| PreviewError::Start {
+        program: name,
+        source,
+    })
 }
 
 fn preview_input_arguments(
@@ -476,7 +475,7 @@ mod tests {
         let source = root.join("tail.mp4");
         assert!(
             hidden_command(
-                &tool_path("ffmpeg.exe"),
+                &tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
                 [
                     "-v",
                     "error",
@@ -568,7 +567,7 @@ mod tests {
         let cache = PreviewCache::new(root.join("cache")).expect("cache");
         let source = root.join("streams.mkv");
         let status = hidden_command(
-            &tool_path("ffmpeg.exe"),
+            &tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
             [
                 "-v",
                 "error",
@@ -678,7 +677,7 @@ mod tests {
         for (duration, width) in [("1.37", 127), ("61.37", 127)] {
             let source = root.join(format!("{duration}.wav"));
             let status = hidden_command(
-                &tool_path("ffmpeg.exe"),
+                &tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
                 ["-v", "error", "-f", "lavfi", "-i"],
             )
             .arg(format!(
@@ -798,12 +797,15 @@ mod tests {
             let mut durations = Vec::new();
             for offset in ["0", "5"] {
                 let target = root.join(format!("offset-{offset}.{extension}"));
-                let output = hidden_command(&tool_path("ffmpeg.exe"), ["-v", "error", "-i"])
-                    .arg(&source)
-                    .args(["-map", "0", "-c", "copy", "-output_ts_offset", offset])
-                    .arg(&target)
-                    .output()
-                    .expect("remux timestamp fixture");
+                let output = hidden_command(
+                    &tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
+                    ["-v", "error", "-i"],
+                )
+                .arg(&source)
+                .args(["-map", "0", "-c", "copy", "-output_ts_offset", offset])
+                .arg(&target)
+                .output()
+                .expect("remux timestamp fixture");
                 assert!(
                     output.status.success(),
                     "{}",
@@ -896,7 +898,7 @@ mod tests {
         let source = root.join("source.wav");
         fs::create_dir_all(&root).expect("create waveform fixture directory");
         let status = hidden_command(
-            &tool_path("ffmpeg.exe"),
+            &tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
             [
                 "-hide_banner",
                 "-loglevel",
@@ -925,5 +927,155 @@ mod tests {
         assert_eq!((card.image.width, card.image.height), (240, 160));
         assert_eq!(card.duration, Some(duration));
         fs::remove_dir_all(root).expect("remove waveform fixture");
+    }
+
+    #[test]
+    fn adjacent_helpers_work_without_development_paths_and_never_mix_locations() {
+        const CHILD: &str = "TOWAVUE_ADJACENT_HELPER_FIXTURE";
+        if let Some(mode) = std::env::var_os(CHILD) {
+            let executable = std::env::current_exe().expect("child executable");
+            let directory = executable.parent().expect("child directory");
+            let cache =
+                PreviewCache::new(directory.join(format!("cache-{}", mode.to_string_lossy())))
+                    .expect("isolated preview cache");
+            let source =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+            if mode == "missing-probe" {
+                assert!(
+                    cache.duration(&source).is_err(),
+                    "must not use development FFprobe"
+                );
+                return;
+            }
+            let target = directory.join(format!("export-{}.mp4", mode.to_string_lossy()));
+            let request = crate::ExportRequest {
+                source: source.clone(),
+                target: target.clone(),
+                kind: MediaKind::Video,
+                operations: Vec::new(),
+                hardware_encode: false,
+            };
+            if mode == "missing-both" {
+                assert!(
+                    cache.duration(&source).is_err(),
+                    "must not use PATH FFprobe"
+                );
+                assert!(
+                    cache.waveform(&source, 64, 16).is_err(),
+                    "must not use PATH FFmpeg"
+                );
+                fs::write(&target, b"existing user output").expect("existing target");
+                assert!(
+                    crate::export_media(&request).is_err(),
+                    "export must not use PATH FFmpeg"
+                );
+                assert_eq!(
+                    fs::read(&target).expect("preserved target"),
+                    b"existing user output"
+                );
+                return;
+            }
+            assert!(cache.duration(&source).expect("adjacent FFprobe") > Duration::ZERO);
+            assert!(
+                cache
+                    .thumbnail(&source, Duration::ZERO, 64)
+                    .expect("adjacent thumbnail")
+                    .width
+                    > 0
+            );
+            let waveform = cache.waveform(&source, 64, 16).expect("adjacent waveform");
+            assert_eq!((waveform.width, waveform.height), (64, 16));
+            crate::export_media(&request).expect("adjacent export");
+            crate::decode_file(&target, |_| true).expect("reopen exported media");
+            return;
+        }
+
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("towavue-adjacent-{unique}"));
+        let application = root.join("日本語 viewer & tools");
+        let unrelated = root.join("unrelated working directory");
+        let decoy = root.join("other FFmpeg");
+        fs::create_dir_all(&application).expect("application directory");
+        fs::create_dir_all(&unrelated).expect("unrelated directory");
+        fs::create_dir_all(decoy.join("bin")).expect("decoy directory");
+        for name in ["ffmpeg.exe", "ffprobe.exe"] {
+            fs::write(decoy.join("bin").join(name), b"not an executable").expect("decoy helper");
+        }
+        let development = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"));
+        for entry in fs::read_dir(development.join("bin")).expect("runtime directory") {
+            let entry = entry.expect("runtime file");
+            let path = entry.path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("dll"))
+                || entry.file_name() == "ffmpeg.exe"
+                || entry.file_name() == "ffprobe.exe"
+            {
+                fs::copy(&path, application.join(entry.file_name()))
+                    .expect("isolated runtime copy");
+            }
+        }
+        let executable = application.join("towavue-helper-fixture.exe");
+        fs::copy(
+            std::env::current_exe().expect("test executable"),
+            &executable,
+        )
+        .expect("child copy");
+        let system =
+            PathBuf::from(std::env::var_os("SystemRoot").expect("Windows root")).join("System32");
+        for mode in [
+            "no-environment",
+            "conflicting-environment",
+            "missing-probe",
+            "missing-both",
+        ] {
+            if mode == "missing-probe" {
+                fs::rename(
+                    application.join("ffprobe.exe"),
+                    root.join("saved-ffprobe.exe"),
+                )
+                .expect("remove probe from fixture");
+            } else if mode == "missing-both" {
+                fs::rename(
+                    application.join("ffmpeg.exe"),
+                    root.join("saved-ffmpeg.exe"),
+                )
+                .expect("remove encoder from fixture");
+            }
+            let mut command = Command::new(&executable);
+            command.args(["--exact", "preview::tests::adjacent_helpers_work_without_development_paths_and_never_mix_locations", "--nocapture"])
+                .current_dir(&unrelated).env(CHILD, mode).env_remove("FFMPEG_DIR").env("PATH", &system);
+            match mode {
+                "conflicting-environment" => {
+                    command.env("FFMPEG_DIR", &decoy);
+                }
+                "missing-probe" => {
+                    command.env("FFMPEG_DIR", &development);
+                }
+                "missing-both" => {
+                    command.env(
+                        "PATH",
+                        std::env::join_paths([development.join("bin"), system.clone()])
+                            .expect("child PATH"),
+                    );
+                }
+                _ => {}
+            }
+            <Command as std::os::windows::process::CommandExt>::creation_flags(
+                &mut command,
+                CREATE_NO_WINDOW,
+            );
+            let output = command.output().expect("start isolated helper fixture");
+            assert!(
+                output.status.success(),
+                "{mode}: {}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        fs::remove_dir_all(root).expect("remove isolated helper fixture");
     }
 }

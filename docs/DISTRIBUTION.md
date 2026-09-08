@@ -163,3 +163,5 @@ installer設計前に、配布buildと互換なruntimeの固定version、導入�
 1. [FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)に従い、機能を保つ代替buildの有効dependency/source/revision/patchとlink入力を固定する。既存binaryの除外は確定しており、期限切れの旧log追跡だけを繰り返して配布承認へ進めない。既存の確認済み原本資料は再buildの入力・比較基準として活用する。
 2. 取得したlicense/notice、Rust依存、VC runtimeを含む配布資料を照合する。この文書は最終license bundleではない。
 3. 資料が揃ってから、ROADMAPのSetup.exe実装・隔離環境での導入/更新/削除検証へ進む。開発用FFMPEG_DIR/PATH不要、別作業directoryでの起動、preview/export、tab detachと既存H1 gateを保持する。
+
+既存helper探索の独立修正は[DEVELOPMENT.md](DEVELOPMENT.md)で局所検証した。同梱helperを優先し、不足時にPATHの別版へ切り替えない。通常debugの無環境変数・別cwd・日本語pathでpreview／保存／tab detachが動くことと、上記の配布採用・installer／対象Windows gateは区別する。

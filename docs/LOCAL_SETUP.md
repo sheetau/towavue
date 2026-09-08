@@ -32,6 +32,8 @@ The current app is 10,301,952 bytes/SHA256 `195af8705605e678a9cbe97aa57a0cdb7cae
 
 The later preview-cache I/O and startup-configuration resilience changes are not included in that packaged executable. Their separate development builds must be qualified and rebound to matching source materials before replacing the pinned Setup inputs; an old Setup is not relabeled as the latest app.
 
+The [separate c277ceb development source/runtime preparation](CANDIDATE_MATERIALS.md) verifies the new f91b4498 executable's recorded source snapshot and runtime graph without adopting it. Passing that new exe with this old source companion to the actual builder is verified to fail its binary identity check before staging. A source ZIP existing locally is not equivalent to its delivery through the installed guide or a complete matching release.
+
 ## Implemented behavior
 
 - Unicode/zlib, normal-user execution, Welcome, editable destination, progress and Finish. The default is the current user's `Programs/towavue-evaluation` under LocalAppData; a writable empty dedicated local directory can be selected. No automatic application launch or reboot.

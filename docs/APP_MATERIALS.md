@@ -1,6 +1,6 @@
 # 本体のライセンス・Rust・フォント資料
 
-現候補のtowavue.exeに対応するoffline review用kit。MIT／Apache-2.0の原文、Cargo.lock固定の146 normal／build dependenciesと埋込みfontの表示、Rust 1.98.0／MSVCの18原文を一つにまとめる。アプリ本体・Windows font・Microsoft runtimeはコピーしない。
+固定済み候補195af870のtowavue.exeに対応するoffline review用kit。MIT／Apache-2.0の原文、Cargo.lock固定の146 normal／build dependenciesと埋込みfontの表示、Rust 1.98.0／MSVCの18原文を一つにまとめる。アプリ本体・Windows font・Microsoft runtimeはコピーしない。後続のcache／起動設定修正版f91b4498は[別の開発用source準備](CANDIDATE_MATERIALS.md)の段階であり、このkitをそのexeの対応付けへ読み替えない。
 
 ## 生成
 

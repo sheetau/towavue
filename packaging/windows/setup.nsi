@@ -58,6 +58,7 @@ ShowUninstDetails show
 !insertmacro MUI_LANGUAGE "English"
 
 Var PathError
+Var OperationHandle
 !ifdef TOWAVUE_SETUP_APPLICATION
 Var PrerequisiteResult
 Var RegistrationMode
@@ -130,6 +131,67 @@ FunctionEnd
 !macroend
 !insertmacro CheckPath ""
 !insertmacro CheckPath "un."
+
+!macro OperationFunctions Prefix
+Function ${Prefix}AcquireOperation
+  InitPluginsDir
+  ClearErrors
+  SetOutPath "$PLUGINSDIR"
+  File "${TRIAL_ROOT}\operation-lock.ps1"
+  ${If} ${Errors}
+    SetErrorLevel 4
+    Abort "Could not prepare installation coordination. No application files were changed."
+  ${EndIf}
+  ; Helpers use Windows PowerShell, even when Setup was launched from PowerShell
+  ; 7. Let that child initialize its own modules; only this process is changed.
+  System::Call 'kernel32::SetEnvironmentVariableW(w "PSModulePath", p 0)'
+!ifdef TOWAVUE_SETUP_FIXTURE
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\operation-lock.ps1" -EmitName -RegistrySubKey "towavue-setup-fixture-v1"'
+!else
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\operation-lock.ps1" -EmitName'
+!endif
+  Pop $1
+  Pop $0
+  ${If} $1 != 0
+  ${OrIf} $0 == ""
+    SetErrorLevel 4
+    Abort "Could not resolve installation coordination. No application files were changed."
+  ${EndIf}
+  ; Object existence is the lease. Do not acquire thread ownership: the section
+  ; worker and GUI cleanup may run on different threads. Never inherit the handle.
+  System::Call 'kernel32::CreateMutexW(p 0, i 0, w r0) p .r1 ?e'
+  Pop $2
+  ${If} $1 == 0
+    SetErrorLevel 4
+    Abort "Could not acquire installation coordination. No application files were changed."
+  ${EndIf}
+  ${If} $2 == 183
+    System::Call 'kernel32::CloseHandle(p r1)'
+    SetErrorLevel 4
+    Abort "Another installation, update or removal is active. Close it and retry. No application files were changed."
+  ${EndIf}
+  StrCpy $OperationHandle $1
+FunctionEnd
+
+Function ${Prefix}ReleaseOperation
+  ${If} $OperationHandle != ""
+  ${AndIf} $OperationHandle != 0
+    System::Call 'kernel32::CloseHandle(p $OperationHandle)'
+    StrCpy $OperationHandle ""
+  ${EndIf}
+FunctionEnd
+
+!macroend
+!insertmacro OperationFunctions ""
+!insertmacro OperationFunctions "un."
+
+; Abort/cancel also release; silent process exit closes any remaining handle.
+Function .onGUIEnd
+  Call ReleaseOperation
+FunctionEnd
+Function un.onGUIEnd
+  Call un.ReleaseOperation
+FunctionEnd
 
 Function CheckEmptyDirectory
   Call CheckPath
@@ -286,6 +348,7 @@ Section "Files"
     SetErrorLevel 2
     Abort "$PathError"
   ${EndIf}
+  Call AcquireOperation
 !ifdef TOWAVUE_SETUP_APPLICATION
   StrCpy $RegistrationMode "Inspect"
   Call Registration
@@ -340,6 +403,7 @@ Section "Files"
     SetErrorLevel 3010
   ${EndIf}
 !endif
+  Call ReleaseOperation
 SectionEnd
 
 Section "Uninstall"
@@ -348,6 +412,7 @@ Section "Uninstall"
     SetErrorLevel 2
     Abort "$PathError"
   ${EndIf}
+  Call un.AcquireOperation
   ; Check every owned directory before any deletion.
   StrCpy $3 $INSTDIR
 !ifdef TOWAVUE_SETUP_APPLICATION
@@ -412,4 +477,5 @@ Section "Uninstall"
 !endif
   RMDir "$INSTDIR"
   SetErrorLevel 0
+  Call un.ReleaseOperation
 SectionEnd

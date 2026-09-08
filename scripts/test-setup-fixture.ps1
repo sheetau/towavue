@@ -68,6 +68,7 @@ Write-TrialFile (Join-Path $trialRoot 'payload/licenses/START-HERE.html') '<!doc
 Copy-Item -LiteralPath (Join-Path $toolDirectory 'nsis-3.12/COPYING') -Destination (Join-Path $trialRoot 'payload/licenses/NSIS-COPYING.txt')
 $payloadBefore = Get-Tree (Join-Path $trialRoot 'payload')
 $script = Join-Path $repositoryRoot 'packaging/windows/setup.nsi'
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging/windows/operation-lock.ps1') -Destination (Join-Path $trialRoot 'operation-lock.ps1')
 Invoke-Fixture $compiler ('/NOCONFIG /V2 "{0}"' -f $script) 1
 # NSIS expands dollar signs in quoted literals; escape the generated define, not shell variables.
 $compilerTrialRoot = $trialRoot.Replace('$','$$')
@@ -181,6 +182,79 @@ $nested = Join-Path $trialRoot 'new-parent/new-child'
 Invoke-Fixture $setup "/S /D=$nested\" 0
 Invoke-Fixture $driver "/S _?=$nested" 0
 Assert-True (-not (Test-Path -LiteralPath $nested)) 'New nested/trailing-slash directory did not uninstall.'
+
+# The real NSIS sections must retain the same lease as the PowerShell entry
+# point, not just perform a preflight. Gates exist only in a private script copy.
+. (Join-Path $repositoryRoot 'packaging/windows/operation-lock.ps1')
+$blockedDestination = Join-Path $trialRoot 'blocked-destination'
+$lease = New-TowavueOperationLease 'towavue-setup-fixture-v1'
+try { Invoke-Fixture $setup "/S /D=$blockedDestination" 4 }
+finally { $lease.Dispose() }
+Assert-True (-not (Test-Path -LiteralPath $blockedDestination)) 'Competing Setup created its destination.'
+$gateRoot = Join-Path $trialRoot 'gated'
+New-Item -ItemType Directory -Path $gateRoot | Out-Null
+Copy-Item -LiteralPath (Join-Path $trialRoot 'payload') -Destination (Join-Path $gateRoot 'payload') -Recurse
+Copy-Item -LiteralPath (Join-Path $trialRoot 'operation-lock.ps1') -Destination $gateRoot
+$gateId = [guid]::NewGuid().ToString('N')
+$readyName = 'Local\towavue-nsis-ready-' + $gateId
+$releaseName = 'Local\towavue-nsis-release-' + $gateId
+$ready = [Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$readyName)
+$release = [Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$releaseName)
+$gate = @'
+  System::Call 'kernel32::OpenEventW(i 2, i 0, w "READY_NAME") p .r0'
+  System::Call 'kernel32::SetEvent(p r0)'
+  System::Call 'kernel32::CloseHandle(p r0)'
+  System::Call 'kernel32::OpenEventW(i 0x100000, i 0, w "RELEASE_NAME") p .r0'
+  System::Call 'kernel32::WaitForSingleObject(p r0, i 30000)'
+  System::Call 'kernel32::CloseHandle(p r0)'
+'@
+$gate = $gate.Replace('READY_NAME',$readyName).Replace('RELEASE_NAME',$releaseName)
+$gatedSource = [IO.File]::ReadAllText($script)
+foreach ($call in @('  Call AcquireOperation','  Call un.AcquireOperation')) {
+    Assert-True ($gatedSource.Contains($call)) 'NSIS lease gate missed its acquisition site.'
+    $gatedSource = $gatedSource.Replace($call,($call + "`n" + $gate))
+}
+$gatedScript = Join-Path $gateRoot 'setup.nsi'
+Write-TrialFile $gatedScript $gatedSource
+& $compiler /NOCONFIG /WX /V2 /DTOWAVUE_SETUP_FIXTURE ("/DTRIAL_ROOT=" + $gateRoot.Replace('$','$$')) $gatedScript
+Assert-True ($LASTEXITCODE -eq 0) 'Gated fixture compilation failed.'
+$gatedSetup = Join-Path $gateRoot 'Setup-fixture.exe'
+$gatedInstalled = Join-Path $gateRoot 'installed'
+$gatedDriver = Join-Path $gateRoot 'uninstall-driver.exe'
+try {
+    foreach ($mode in @('install','uninstall','terminated-install')) {
+        $ready.Reset() | Out-Null
+        $release.Reset() | Out-Null
+        $executable = if ($mode -eq 'uninstall') { $gatedDriver } else { $gatedSetup }
+        $arguments = if ($mode -eq 'uninstall') { "/S _?=$gatedInstalled" } else { "/S /D=$gatedInstalled" }
+        $process = Start-Process -FilePath $executable -ArgumentList $arguments -WorkingDirectory $gateRoot -WindowStyle Hidden -PassThru
+        [void]$process.Handle
+        Assert-True ($ready.WaitOne(15000)) "Owned gated NSIS process did not signal: $($process.Id)"
+        $beforeGate = if (Test-Path -LiteralPath $gatedInstalled) { Get-Tree $gatedInstalled } else { $null }
+        $rejected = $false
+        try { $unexpectedLease = New-TowavueOperationLease 'towavue-setup-fixture-v1'; $unexpectedLease.Dispose() }
+        catch { if (-not $_.Exception.Message.Contains('Another installation operation is active')) { throw }; $rejected = $true }
+        Assert-True $rejected 'NSIS section did not retain the operation lease.'
+        Invoke-Fixture $setup "/S /D=$blockedDestination" 4
+        Invoke-Fixture $driver "/S _?=$gatedInstalled" 4
+        Assert-True (-not (Test-Path -LiteralPath $blockedDestination)) 'Competing installer changed its destination.'
+        if ($beforeGate) { Assert-Tree $beforeGate $gatedInstalled }
+        else { Assert-True (-not (Test-Path -LiteralPath $gatedInstalled)) 'Competing process changed the gated installation.' }
+        if ($mode -eq 'terminated-install') { $process.Kill() }
+        else { $release.Set() | Out-Null }
+        Assert-True ($process.WaitForExit(15000)) "Owned gated NSIS process still running: $($process.Id)"
+        if ($mode -ne 'terminated-install') { Assert-True ($process.ExitCode -eq 0) 'Gated NSIS lifecycle failed.' }
+        $lease = New-TowavueOperationLease 'towavue-setup-fixture-v1'
+        $lease.Dispose()
+        if ($mode -eq 'install') { Copy-Item -LiteralPath (Join-Path $gatedInstalled 'Uninstall-fixture.exe') -Destination $gatedDriver }
+        else { Assert-True (-not (Test-Path -LiteralPath $gatedInstalled)) 'Gated removal/terminated pre-write install left files.' }
+    }
+} finally { $release.Set() | Out-Null; $ready.Dispose(); $release.Dispose() }
+# A terminated operation leaves no stale kernel-object lease; retry normally.
+Invoke-Fixture $setup "/S /D=$gatedInstalled" 0
+Invoke-Fixture $driver "/S _?=$gatedInstalled" 0
+Assert-True (-not (Test-Path -LiteralPath $gatedInstalled)) 'Retry after terminated Setup failed.'
+Write-Output 'PASS: NSIS/PowerShell shared lease, competing installer/removal preservation, lease retained inside both NSIS sections, abrupt NSIS exit and retry. Only generated document fixtures were installed/removed.'
 Assert-Tree $payloadBefore (Join-Path $trialRoot 'payload')
 Assert-Tree $occupiedBefore $occupied
 Assert-True ((Get-FileHash -LiteralPath $NsisArchive).Hash -eq $manifest.archive.sha256) 'NSIS archive changed.'

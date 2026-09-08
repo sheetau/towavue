@@ -127,6 +127,7 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging/windows/prerequisit
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'docs/vc-redist-inputs.json') -Destination (Join-Path $prerequisite 'docs')
 Copy-Item -LiteralPath $VcRedist -Destination (Join-Path $prerequisite 'vc_redist.x64.exe')
 $registration = Join-Path $OutputDirectory 'registration'
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging/windows/operation-lock.ps1') -Destination (Join-Path $OutputDirectory 'operation-lock.ps1')
 New-Item -ItemType Directory -Path $registration | Out-Null
 foreach ($name in @('registration.ps1','registration-state.ps1','UnicodeShellLink.cs')) { Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging/windows/$name") -Destination $registration }
 
@@ -159,7 +160,7 @@ $page.Add('</ul></details></html>')
 
 $records = @(Get-ChildItem -LiteralPath $payload -File -Recurse -Force | ForEach-Object { Get-Record $_.FullName $_.FullName.Substring($payload.Length + 1).Replace('\','/') })
 $records = @($records | Sort-Object name)
-$buildSources = @('packaging/windows/setup.nsi','packaging/windows/prerequisite.ps1','packaging/windows/registration.ps1','packaging/windows/registration-state.ps1','packaging/windows/UnicodeShellLink.cs','scripts/build-local-setup.ps1','scripts/get-vc-redist-status.ps1','scripts/vc-redist-state.ps1','docs/setup-inputs.json','docs/nsis-inputs.json','docs/vc-redist-inputs.json')
+$buildSources = @('packaging/windows/setup.nsi','packaging/windows/operation-lock.ps1','packaging/windows/prerequisite.ps1','packaging/windows/registration.ps1','packaging/windows/registration-state.ps1','packaging/windows/UnicodeShellLink.cs','scripts/build-local-setup.ps1','scripts/get-vc-redist-status.ps1','scripts/vc-redist-state.ps1','docs/setup-inputs.json','docs/nsis-inputs.json','docs/vc-redist-inputs.json')
 $sourceRecords = @($buildSources | ForEach-Object { Get-Record (Join-Path $repositoryRoot $_) $_ })
 $inventory = [ordered]@{schema_version=1;scope='Installed payload only; excludes this inventory itself, generated uninstaller and path-bound marker. Local evaluation, not release approval.';companion=$manifest.companion;companion_entries=@($companionEntries);build_sources=$sourceRecords;files=$records}
 $inventoryPath = Join-Path $licenses 'INSTALLED-FILES.json'
@@ -215,6 +216,7 @@ foreach ($name in @('registration.ps1','registration-state.ps1','UnicodeShellLin
 Assert-File $SourceCompanion $manifest.companion
 Assert-File $NsisArchive $nsis.archive
 $setup = Get-Record (Join-Path $OutputDirectory 'Setup-local.exe') 'Setup-local.exe'
+Assert-File (Join-Path $OutputDirectory 'operation-lock.ps1') @($sourceRecords | Where-Object { $_.name -eq 'packaging/windows/operation-lock.ps1' })[0]
 $result = [ordered]@{schema_version=1;scope='Compiled only; not installed, published or approved. Update and supported-Windows registration/lifecycle verification are pending.';setup=$setup;payload_files=$records.Count;payload_bytes=($records | Measure-Object bytes -Sum).Sum;source_companion=$manifest.companion}
 # Completion is recorded only after compilation and final input/staging verification.
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'BUILD.json'),($result | ConvertTo-Json -Depth 6) + "`n",$utf8)

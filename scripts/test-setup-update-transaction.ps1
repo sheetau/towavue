@@ -58,6 +58,20 @@ function Assert-Applied($Pair,$Token) {
     }
     Assert-True ([IO.File]::ReadAllText((Join-Path $Pair.InstallDirectory 'user-media.txt')) -ceq 'preserve user data') 'User file changed.'
 }
+$nativeDirectory = Join-Path $trialRoot 'native-long-path'
+$nativeSource = Join-Path $nativeDirectory 'source.txt'
+Write-Trial $nativeSource 'native long-path fixture'
+$nativeLong = Join-Path $nativeDirectory ('x' * (263 - $nativeDirectory.Length - 1))
+$nativeCopy = Join-Path $nativeDirectory 'copy.txt'
+$nativeMoved = Join-Path $nativeDirectory 'moved.txt'
+Assert-True ($nativeLong.Length -eq 263) 'Native long-path fixture has the wrong length.'
+[TowavueUpdateFiles]::Copy($nativeSource,$nativeLong)
+Expect-Failure { [TowavueUpdateFiles]::Copy($nativeSource,$nativeLong) } 'exists'
+Expect-Failure { [TowavueUpdateFiles]::Move($nativeLong,$nativeSource) } 'exists'
+[TowavueUpdateFiles]::Copy($nativeLong,$nativeCopy)
+[TowavueUpdateFiles]::Move($nativeLong,$nativeMoved)
+Assert-True ([IO.File]::ReadAllText($nativeCopy) -ceq 'native long-path fixture' -and [IO.File]::ReadAllText($nativeMoved) -ceq 'native long-path fixture' -and [IO.File]::ReadAllText($nativeSource) -ceq 'native long-path fixture') 'Long native names changed bytes or overwrote a destination.'
+
 $pair = New-Pair 'baseline'
 $before = Get-Snapshot $pair
 $token = Get-Token (New-TowavueUpdateTransaction @pair)
@@ -255,6 +269,7 @@ $registrationState = Join-Path $repositoryRoot 'packaging/windows/registration-s
 $registrationSource = [IO.File]::ReadAllText($registrationState)
 $privateRegistration = Join-Path $trialRoot 'packaging/windows/registration-state.ps1'
 Write-Trial $privateRegistration $registrationSource
+[IO.File]::Copy((Join-Path $repositoryRoot 'packaging/windows/operation-lock.ps1'),(Join-Path $trialRoot 'packaging/windows/operation-lock.ps1'))
 function Get-TrialRegistrationArguments($Pair) {
     return @{
         InstallDirectory=$Pair.InstallDirectory
@@ -421,8 +436,15 @@ function Start-RegisteredChild($Pair,[string]$Executable=$powerShell) {
     # ASCII while preserving the Unicode fixture paths in its JSON value.
     $json = [regex]::Replace($json,'[^\x00-\x7f]',{ param($match) '\u{0:x4}' -f [int][char]$match.Value })
     Write-Trial $childPath (". '" + (& $escape $privateRegistered) + "'`n`$pair = '" + (& $escape $json) + "' | ConvertFrom-Json`n`$arguments = @{}; foreach (`$p in `$pair.PSObject.Properties) { `$arguments[`$p.Name] = `$p.Value }; `$arguments.Registration = @{RegistrySubKey=`$pair.Registration.RegistrySubKey;ShortcutPath=`$pair.Registration.ShortcutPath}`nInvoke-TowavueRegisteredUpdate -Mode Apply @arguments`n")
-    $process = Start-Process -FilePath $Executable -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"' + $childPath + '"')) -WindowStyle Hidden -PassThru
+    # Let the child host initialize its own built-in module paths. Inheriting
+    # PowerShell 7's PSModulePath hides Get-FileHash from Windows PowerShell 5.1.
+    $savedModulePath = [Environment]::GetEnvironmentVariable('PSModulePath','Process')
+    try {
+        [Environment]::SetEnvironmentVariable('PSModulePath',$null,'Process')
+        $process = Start-Process -FilePath $Executable -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"' + $childPath + '"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput ($childPath + '.out') -RedirectStandardError ($childPath + '.err')
+    } finally { [Environment]::SetEnvironmentVariable('PSModulePath',$savedModulePath,'Process') }
     $processHandle = $process.Handle
+    $process | Add-Member -NotePropertyName TrialErrorPath -NotePropertyValue ($childPath + '.err')
     return $process
 }
 $pair = New-RegisteredPair 'pending-success'
@@ -502,8 +524,11 @@ try {
     Write-Trial $privateRegistered ($registeredSource.Replace('$result = Invoke-TowavueUpdateTransaction',($pause + '$result = Invoke-TowavueUpdateTransaction')))
     $oppositePowerShell = Join-Path $env:WINDIR $(if ([Environment]::Is64BitProcess) { 'SysWOW64/WindowsPowerShell/v1.0/powershell.exe' } else { 'Sysnative/WindowsPowerShell/v1.0/powershell.exe' })
     $child = Start-RegisteredChild $pair $oppositePowerShell
-    Assert-True ($ready.WaitOne(30000)) 'Owned concurrent child did not signal readiness.'
-    foreach ($mode in @('Apply','Rollback')) { Expect-Failure { Invoke-TowavueRegisteredUpdate -Mode $mode @pair } 'Another update operation is active' }
+    if (-not $ready.WaitOne(30000)) {
+        $diagnostic = if ($child.HasExited) { "Exit $($child.ExitCode): " + (Get-Content -LiteralPath $child.TrialErrorPath -Raw) } else { "Still running: PID $($child.Id). Do not restart." }
+        throw "Owned concurrent child did not signal readiness. $diagnostic"
+    }
+    foreach ($mode in @('Apply','Rollback')) { Expect-Failure { Invoke-TowavueRegisteredUpdate -Mode $mode @pair } 'Another installation operation is active' }
 } finally { $release.Set() | Out-Null; $ready.Dispose(); $release.Dispose() }
 Assert-True ($child.WaitForExit(30000) -and $child.ExitCode -ne 0) 'Owned concurrent child did not exit at the injected boundary.'
 Invoke-TowavueRegisteredUpdate -Mode Rollback -InstallDirectory $pair.InstallDirectory -Registration $pair.Registration | Out-Null

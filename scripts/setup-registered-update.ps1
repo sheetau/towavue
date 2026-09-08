@@ -2,6 +2,7 @@
 # coordination and recovery UI must be connected before enabling installed updates.
 . (Join-Path $PSScriptRoot 'setup-update-transaction.ps1')
 . (Join-Path $PSScriptRoot '../packaging/windows/registration-state.ps1')
+. (Join-Path $PSScriptRoot '../packaging/windows/operation-lock.ps1')
 
 function Invoke-TowavueRegisteredUpdate {
     [CmdletBinding()]
@@ -18,20 +19,12 @@ function Invoke-TowavueRegisteredUpdate {
     Assert-LocalPath $InstallDirectory
     if ([TowavueUpdatePaths]::Expand($InstallDirectory) -ine $InstallDirectory) { throw 'Use the canonical installation directory.' }
     $binding = @{InstallDirectory=$InstallDirectory;RegistrySubKey=$Registration.RegistrySubKey;ShortcutPath=$Registration.ShortcutPath}
-    # Serialize this entry point across processes/bitness/sessions for this user
-    # and installation. An abandoned owner leaves the durable pending record.
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try {
-        $identity = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value + '|' + $InstallDirectory.ToUpperInvariant()
-        $mutexName = 'Global\towavue-update-' + [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity))).Replace('-','')
-    } finally { $sha.Dispose() }
-    $mutex = [Threading.Mutex]::new($false,$mutexName)
-    $owned = $false
+    # Match Setup's user/registration lease, including different destinations
+    # competing for the one product registration. No wait or thread ownership.
+    $lease = New-TowavueOperationLease $Registration.RegistrySubKey
     $base = $null
     $key = $null
     try {
-        try { $owned = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owned = $true }
-        if (-not $owned) { throw 'Another update operation is active.' }
         $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
         $key = $base.OpenSubKey($Registration.RegistrySubKey,$true)
         if (-not $key -or $key.GetValueKind('InstallLocation') -ne 'String' -or $key.GetValue('InstallLocation') -ine $InstallDirectory) { throw 'The expected update registration is missing or belongs to another directory.' }
@@ -64,7 +57,6 @@ function Invoke-TowavueRegisteredUpdate {
     } finally {
         if ($key) { $key.Dispose() }
         if ($base) { $base.Dispose() }
-        if ($owned) { $mutex.ReleaseMutex() }
-        $mutex.Dispose()
+        $lease.Dispose()
     }
 }

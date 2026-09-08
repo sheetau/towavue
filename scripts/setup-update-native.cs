@@ -13,12 +13,17 @@ public static class TowavueUpdateFiles {
     // The caller validates local non-reparse paths and retains sharing-restricted
     // handles. These synchronous calls retain no managed pointers or handles.
     // Never copy across volumes, write through a hard link, or schedule a reboot.
+    // Private work names can exceed MAX_PATH even when installed names do not.
+    // Do not depend on the embedding PowerShell executable's long-path manifest.
+    private static string NativePath(string path) {
+        return @"\\?\" + System.IO.Path.GetFullPath(path);
+    }
     public static void Move(string source, string destination) {
-        if (!MoveFileExW(source, destination, 8u))
+        if (!MoveFileExW(NativePath(source), NativePath(destination), 8u))
             throw new Win32Exception(Marshal.GetLastWin32Error());
     }
     public static void Copy(string source, string destination) {
-        if (!CopyFileW(source, destination, true))
+        if (!CopyFileW(NativePath(source), NativePath(destination), true))
             throw new Win32Exception(Marshal.GetLastWin32Error());
     }
 }

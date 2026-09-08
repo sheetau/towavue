@@ -67,7 +67,9 @@ impl PreviewCache {
     }
 
     pub fn new(root: PathBuf) -> Result<Self, PreviewError> {
-        fs::create_dir_all(&root)?;
+        if let Err(error) = fs::create_dir_all(&root) {
+            eprintln!("towavue: could not create preview cache: {error}");
+        }
         Ok(Self {
             root,
             cancellation: None,
@@ -234,14 +236,20 @@ impl PreviewCache {
         let image = decode_png(&bytes)?;
         self.check_cancelled()?;
         let temporary = self.root.join(format!("{key}.{}.tmp", std::process::id()));
-        fs::write(&temporary, &bytes)?;
-        if let Err(error) = fs::rename(&temporary, &path) {
-            let _ = fs::remove_file(&temporary);
-            if !path.exists() {
-                return Err(error.into());
-            }
+        // Disk persistence is optional once valid pixels are available.
+        if let Err(error) = fs::create_dir_all(&self.root)
+            .and_then(|()| fs::write(&temporary, &bytes))
+            .and_then(|()| {
+                fs::rename(&temporary, &path).inspect_err(|_| {
+                    let _ = fs::remove_file(&temporary);
+                })
+            })
+        {
+            eprintln!("towavue: could not store preview cache: {error}");
         }
-        self.prune()?;
+        if let Err(error) = self.prune() {
+            eprintln!("towavue: could not prune preview cache: {error}");
+        }
         Ok(image)
     }
 
@@ -463,6 +471,118 @@ mod tests {
     use image::{ImageFormat, Rgb, RgbImage};
 
     use super::*;
+
+    #[test]
+    fn an_unavailable_cache_directory_does_not_block_preview_generation() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("towavue-preview-cache-directory-{unique}"));
+        fs::create_dir(&root).expect("isolated fixture directory");
+        let cache_path = root.join("cache");
+        fs::write(&cache_path, b"preserve this file").expect("cache path collision");
+        let cache = PreviewCache::new(cache_path.clone()).expect("optional cache storage");
+        let source = root.join("source.png");
+        RgbImage::from_pixel(32, 16, Rgb([20, 40, 60]))
+            .save_with_format(&source, ImageFormat::Png)
+            .expect("source fixture");
+        let source_bytes = fs::read(&source).expect("original source");
+        let preview = cache
+            .filmstrip(&source, MediaKind::Image)
+            .expect("generate without disk cache");
+        assert_eq!((preview.image.width, preview.image.height), (240, 120));
+        assert_eq!(
+            fs::read(&cache_path).expect("collision"),
+            b"preserve this file"
+        );
+        fs::remove_file(&cache_path).expect("remove own collision fixture");
+        assert_eq!(
+            cache
+                .filmstrip(&source, MediaKind::Image)
+                .expect("retry after cache path is available")
+                .image,
+            preview.image
+        );
+        let key = cache_key(&source, "filmstrip-image-v4").expect("cache key");
+        assert!(cache_path.join(format!("{key}.png")).is_file());
+        assert_eq!(fs::read(&source).expect("unchanged source"), source_bytes);
+        fs::remove_dir_all(root).expect("remove isolated fixture");
+    }
+
+    #[test]
+    fn a_busy_cache_file_does_not_discard_a_generated_preview() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("towavue-preview-busy-cache-{unique}"));
+        let cache = PreviewCache::new(root.clone()).expect("cache");
+        let mut png = std::io::Cursor::new(Vec::new());
+        RgbImage::from_pixel(2, 2, Rgb([24, 48, 96]))
+            .write_to(&mut png, ImageFormat::Png)
+            .expect("fixture PNG");
+        let bytes = png.into_inner();
+        let expected = decode_png(&bytes).expect("fixture pixels");
+        let temporary = root.join(format!("busy.{}.tmp", std::process::id()));
+        fs::write(&temporary, b"held cache file").expect("temporary fixture");
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            // A failed write must not delete the file it could not open.
+            .share_mode(1 | 4)
+            .open(&temporary)
+            .expect("deny writes while permitting read and deletion");
+        let result = cache.load_or_generate("busy".into(), || Ok(bytes.clone()));
+        assert_eq!(
+            result.expect("cache storage is optional after successful generation"),
+            expected
+        );
+        assert_eq!(fs::read(&temporary).expect("held file"), b"held cache file");
+        assert!(!root.join("busy.png").exists());
+        drop(lock);
+        fs::remove_file(&temporary).expect("release temporary fixture");
+        assert_eq!(
+            cache
+                .load_or_generate("busy".into(), || Ok(bytes.clone()))
+                .expect("retry cache storage"),
+            expected
+        );
+        assert_eq!(
+            cache
+                .load_or_generate("busy".into(), || panic!("valid cache must be reused"))
+                .expect("cache hit after retry"),
+            expected
+        );
+        assert!(matches!(
+            cache.load_or_generate("failed".into(), || Err(PreviewError::NoFrame)),
+            Err(PreviewError::NoFrame)
+        ));
+        assert!(matches!(
+            cache.load_or_generate("invalid".into(), || Ok(vec![0; 8])),
+            Err(PreviewError::Decode(_))
+        ));
+        let cancellation = Cancellation::default();
+        assert!(matches!(
+            cache
+                .cancellable(cancellation.clone())
+                .load_or_generate("cancelled".into(), || {
+                    cancellation.cancel();
+                    Ok(bytes.clone())
+                }),
+            Err(PreviewError::Cancelled)
+        ));
+        assert!(!root.join("cancelled.png").exists());
+        fs::remove_dir_all(root).expect("remove isolated cache fixture");
+        assert_eq!(
+            cache
+                .load_or_generate("missing-root".into(), || Ok(bytes))
+                .expect("a removed cache directory does not discard pixels"),
+            expected
+        );
+        fs::remove_dir_all(&cache.root).expect("remove recreated cache fixture");
+    }
 
     #[test]
     fn video_previews_use_the_last_selected_frame_beyond_its_end() {
@@ -825,6 +945,8 @@ mod tests {
 
     #[test]
     fn thumbnail_is_generated_and_reused_from_disk() {
+        use std::os::windows::fs::OpenOptionsExt;
+
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock after epoch")
@@ -852,16 +974,28 @@ mod tests {
                     "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2", None)
             })
             .expect("seed legacy padded cache");
+        let key = cache_key(&source, "filmstrip-image-v4").expect("card key");
+        let temporary = cache.root.join(format!("{key}.{}.tmp", std::process::id()));
+        fs::write(&temporary, b"held cache file").expect("temporary fixture");
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&temporary)
+            .expect("deny cache writes and deletion");
         let card = cache
             .filmstrip(&source, MediaKind::Image)
-            .expect("landscape card");
+            .expect("generated landscape card despite cache contention");
+        assert_eq!(fs::read(&temporary).expect("held file"), b"held cache file");
+        assert!(!cache.root.join(format!("{key}.png")).exists());
+        drop(lock);
+        fs::remove_file(temporary).expect("release cache file");
         assert_eq!((card.image.width, card.image.height), (240, 120));
         assert!(card.duration.is_none());
         assert_eq!(
             card.image,
             cache
                 .filmstrip(&source, MediaKind::Image)
-                .expect("cached card")
+                .expect("cache card after releasing contention")
                 .image
         );
         assert!(

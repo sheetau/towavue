@@ -163,7 +163,7 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 | Export progress/cancel/失敗後のpartial target処理 | 書き出し済み時間とcancelを表示。成功後だけ一時outputをtargetへ置換し、失敗・置換前cancelで既存targetと編集を保持。置換後の取消は保存済み出力を残して自動離脱を止める。残り時間予測とqueueはない |
 | PQ/HLGのHDR→SDR | D3D11 Video Processorが変換を保証したhardware frameだけ許可。基準adapterは非対応error |
 | HDR displayへの10-bit pass-through | 未実装、対応を宣言しない |
-| Waveform/thumbnail disk cache | 実装済み。64 MiB固定で管理UIや手動clear commandはない |
+| Waveform/thumbnail disk cache | 実装済み。64 MiBを目標に削減。cache directory作成・保存失敗でも生成済みpreviewは返し、利用可能になれば再保存する。生成失敗や取消は別扱い。削減を妨げる権限・共有状態での容量保証、管理UIや手動clear commandはない |
 
 ## 3. Codebase上の改善余地
 

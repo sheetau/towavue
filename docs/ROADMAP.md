@@ -87,6 +87,8 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 最初の優先候補は、動画・音声edit値とlive playbackの不一致、同期画像loadと同期exportによるUI停止、timeline/tab/filmstrip/menuの発見性と操作感である。詳細な試用方法と現状差分は`docs/DEVELOPMENT.md`と`docs/KNOWN_GAPS.md`を正とする。PackagingはH1と並行して暗黙に開始せず、FFmpeg binaryとlicense条件を別途決定してから計画する。
 
+2026-09-09、cache directoryの作成不能がアプリ初期化を失敗させる経路と、cache一時fileの使用中が正常なpreviewを破棄する経路を回帰で再現した。cache I/Oだけを補助処理へ変更し、原本・衝突fileの保持、生成／decode失敗・取消の伝達、保存先復旧後の再保存を確認する。実FFmpegのfilmstrip生成でもcache使用中／作成不能からの継続と復帰を検証した。最終通常binaryの実画面／性能と、新本体・source・Setupの対応付けは引き続き必要であり、旧195af870入り評価Setupへこの修正を含むとは扱わない。
+
 2026-09-07、ownerはmonapadと同様のインストーラーexeを選択した。配布形式の確認待ちは解消し、ARCHITECTURE §7へ反映した。H1の品質gateを維持し、配布準備は次の順序で進める。形式の決定だけを同梱物・公開の承認やlaunch完了としない。
 
 1. 固定FFmpegの推移依存、補助exe、対応source/build設定、第三者表示とVisual C++ runtimeの再配布条件を確認する → verify: 同梱対象と根拠を固定した一覧。必要資料が不足するbinaryは配布候補にしない。

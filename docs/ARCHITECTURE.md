@@ -434,6 +434,8 @@ FFmpegはtargetと同じfilesystemの専用一時directoryへ出力する。成�
 
 preview cacheはruntimeがFFmpeg / FFprobeの子processとdisk I/Oを所有し、appへowned RGBA画像とdurationだけを返す。cache keyは正規化path、file size、更新時刻、preview種別と寸法から作り、`%LOCALAPPDATA%\towavue\preview-cache`を64 MiB以内へ古い順に削減する。waveform、duration、hover thumbnailは専用workerで生成し、path付きeventをappへ返すため、古いtabの結果を現在のtabへ適用せずUI threadもblockしない。
 
+disk cacheのdirectory作成・保存／削減は補助処理とする。作成不能でアプリ初期化を停止させず、保存先の使用中やI/O失敗はdiagnosticへ出して生成・decode済み画像をそのまま返す。次の生成時にdirectory作成と保存を再試行する。メディア生成／decode失敗と取消は従来どおり失敗として返す。権限・共有状態が削減を妨げる場合の64 MiB達成は保証せず、保存済みメディアや原本のerror処理へこの方針を広げない。LOCALAPPDATA自体の欠落を含む設定・環境全般のfallbackではない。
+
 H1ではduration・waveform・hover thumbnailごとにruntime所有の常設workerを1本だけ使い、実行中1件＋最新の待機1件へ制限する。新しい要求は未開始の旧要求を置き換え、media load/最後のtab closeでは待機を消す。3種類は互いに待たせず、別のfilmstrip workerは従来どおり独立する。window closeは未開始要求を破棄してworkerへ終了を伝え、window/GPUを所有しない実行中previewをjoinしない。これは個別decoderのメモリ上限ではなく、windowあたりの同時処理件数の上限である。
 
 preview取消では要求単位のtokenに実行中のowned Childを登録する。要求置換・clear・worker dropはtokenを失効し、その子processだけをkillする。spawn/登録と取消を同じ短いlockで直列化し、取消済み要求から子processを後発させない。worker側でstdout/stderrを並行排出して終了を回収し、次の要求は新しいtokenを使う。[Rust Childの寿命契約](https://doc.rust-lang.org/std/process/struct.Child.html)に従い、handleのdropだけに終了を任せない。filmstripも同じ取消を使う。cache/TS Seek準備は処理境界で失効を確認するが、実行中のfilesystem I/Oやnative FFmpeg probeを強制中断する保証はない。UIはprocessの完了やreader threadをjoinしない。

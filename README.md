@@ -8,6 +8,8 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメディア開始からの時刻へ揃えます。Matroskaの長さ表示と、TSのGOP途中Seek・thumbnailで映像が出ない問題をH1で修正しました。長いGOPのSeek中も再Seek・tab close・終了要求を処理境界で確認しますが、遅いstorageや進行中のFFmpeg callによる待ち時間をなくすものではありません。
 
+開発版では、preview cacheのフォルダー作成・保存に失敗しても、生成できたthumbnailやwaveformをそのまま利用します。保存先が使えるようになれば再試行します。メディア自体の生成・decode失敗や取消を成功扱いにするものではありません。
+
 - 対応予定OS: Windows 10 22H2以降
 - 対応予定アーキテクチャ: x86-64
 - Rust: 1.98.0 / Edition 2024 / MSVC ABI

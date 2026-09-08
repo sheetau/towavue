@@ -143,6 +143,29 @@ mapはfast_floatの**import library** `liblcms2_fast_float.dll.a`を1／2回LOAD
 
 最終`native-source-supplements-v9`は27 owners、従来どおり75 archive／build inputs、200選択文書と追加Unicode原本、307 files／76355951 bytes。前v8の280 files（README／INPUTS以外）は不変。別cwd／再生成、102欠落・改変pairs、追加noticeの欠落・改変・一覧除去、18 package-notice／3 VCS不整合と既存output保護の試験が通過した。候補runtime全94 filesもhash不変。残るnative／Rust内蔵依存の表示と公開取得案内、最終candidate品質・Setup.exe／対象Windows／owner受入は継続する。
 
+### rav1e／libdoviの元sourceとRust依存資料
+
+元packageの`.BUILDINFO`へhash対応したrecipeから、rav1e 0.8.1とlibdovi 3.4.0のsource archiveを取得した。順に3040879 bytes／SHA256 `06d1523955fb6ed9cf9992eace772121067cca7e8926988a1ee16492febbe01e`、494710 bytes／`8eac4d1c3134f53e8eb216db6450307a737425844113e480d1e9713c142a9fa2`で、recipeの値と一致する。330／242 archive entriesは通常file・directoryのみで、link／危険pathはない。source署名の検証やDLLの再buildは行っていない。
+
+既存source collectorへ2 ownersと68選択文書を追加した。rav1eはLICENSE／PATENTS、全53 x86 asmとISC条件のx86inc、lock／build設定等を含む62文書。libdoviは外側CLIではなく`dolby_vision/`のlibrary manifest／lock等6文書を使う。原文byteを保持し、異なる文字encodingのPATENTSも再encodingしない。最終`native-source-supplements-v10`は29 owners、77 archive／build inputs／76449340 bytes、268選択文書とUnicode原本、379 files／85370086 bytes。前v9の305 files（README／INPUTS以外）は不変。
+
+[native-rust-dependencies.json](native-rust-dependencies.json)は、元lockのchecksumを使ってrav1e 129件／libdovi 28件、計157 crate archives／16022087 bytesを固定する。Cargo 1.98.0の`metadata --locked --filter-platform x86_64-pc-windows-gnu`を隔離cacheで実行し、rav1eはdefault＋capi、libdoviはall-features、normal／build edgeを辿った。build scriptは実行せず元lockも不変。候補DLLにある12／11のprintable crate pathsは全てこの一覧と一致する。ただし解析hostはMSVCで元build hostはGNU、metadataのtest feature統合やCLI／build-only依存も含むため、**歴史的unit graphや実際にlinkされたcodeの完全一覧ではない。** 文字列がないことを非包含の証拠にしない。
+
+元build記録はrav1eがRust 1.87.0／cargo-c 0.10.13、libdoviがRust 1.97.0／cargo-c 0.10.24。libdoviのrecipeはfetchに`--locked`がなく、その後のbuildが`--frozen`である。今回のlock・観測version一致だけでは過去のfetchがlockを変更しなかったとは証明できない。元GNU-hostの依存選択と各Rust版の標準library／compiler表示は残作業で、towavue自身や除外済みBtbNの資料で代用しない。
+
+crate内の選択文書604件はCargo metadataやVCS情報も含み、604 licenseを意味しない。nestedなcrc-catalog／av-metrics／Unicode、build-sourceのlibgit2／libz表示も保持する。crateが省略したprofiling／profiling-procmacrosの原文2件はVCS情報の同commitから取得。av-metricsの原文は元manifestと全13 source blobsが一致するupstream commitへ対応させた。simd_helpersにはcrate／該当upstreamとも独立license fileがないため、MIT宣言と元author記録を保持し、SPDX標準本文を「作者発行のnoticeではない」と明示して別添する。placeholderのcopyright年・権利者を創作しない。取得元とhashはmanifestに記録した。個別source／生成dataの範囲確認は継続する。
+
+offline collectorはruntime監査・source補完manifest・元lockの対応と全入力hashを出力前に照合し、失敗時に完成markerを残さない。通常実行は次のとおり。
+
+```powershell
+.\scripts\prepare-native-rust-materials.ps1 `
+  -SourceSupplementDirectory target/distribution/native-source-supplements-v10 `
+  -CrateCacheDirectory vendor/msys2/native-rust-crates-20260908 `
+  -OutputDirectory target/distribution/native-rust-materials-v1
+```
+
+出力先はfresh directoryが必要。最終v1は769 files／18200522 bytesで、157 archives・604選択文書・2 locks・外部原文4件・README／INPUTSのみを含み、DLL／exeはcopyしない。別cwd／再生成の全hash一致、165入力の欠落／同size改変、6対応不整合と入力／既存output保護を検証した。source補完側も106入力pairs、Unicodeの欠落／改変／一覧除去、18 package-notice／3 VCS不整合等の回帰試験を通過した。両最終kitは試験出力と全hash一致し、現候補runtime全94 filesも不変。配布承認・compiler/runtime全範囲・Setup.exe完成の証明ではない。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

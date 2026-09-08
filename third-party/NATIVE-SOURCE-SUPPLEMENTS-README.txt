@@ -6,7 +6,7 @@ documents under the audited package share/licenses directory, plus XZ,
 FreeType and gettext-runtime with mixed-license scope or secondary notices,
 and eight further library-source-first owners: libiconv, FriBidi, Game Music
 Emu, mpg123, libbluray, Graphite2, GLib and libplacebo, plus libsoxr and SRT
-and Little CMS (27 owners total).
+and Little CMS, rav1e and libdovi (29 owners total).
 Chromaprint, OpenAL, ZVBI and GCC runtimes have separate material bundles.
 
 INPUTS.json identifies unchanged source archives, patch/template inputs and
@@ -42,6 +42,14 @@ binary reproduction remain separate work.
 
 License scope observations (not blanket distribution approval):
 
+- rav1e 0.8.1 and libdovi 3.4.0 retain their original Cargo manifests/locks
+  and package notices. rav1e also preserves all x86 assembly source notices,
+  the ISC x86inc header, IVF license and original non-UTF-8 PATENTS bytes.
+  Do not apply its root BSD label to every assembly header or dependency.
+  libdovi's library lock is dolby_vision/Cargo.lock, not the outer CLI lock.
+  Embedded crate/runtime materials are a separate inventory; these two
+  archives alone do not cover them. The package build records use Rust
+  1.87.0 and 1.97.0, not towavue's Rust 1.98.0 or the excluded BtbN runtime.
 - Little CMS 2.19.1 retains its MIT core LICENSE separately from GPL fast
   float/threaded plugin sources in the full archive. Keep the original
   plugin license/header, core/header/build descriptions, authors and

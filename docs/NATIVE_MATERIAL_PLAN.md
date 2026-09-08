@@ -30,7 +30,7 @@ MPL群はsrtとzeromqで、両方のsource／patchを取得済み。ZeroMQの逆
 
 混合scope群はfreetype、lcms2、lz4、xzで、原本材料は4件とも取得済み。lcms2は追加の隔離avcodec／avfilter再linkでfast_floatのimport archiveから選択member 0、static実装archiveの選択なしを確認し、両DLLの.text／.rdataが現候補と完全一致した。これで当該link引数の疑問は狭められたが、全runtimeのstatic/header/dataや最終配布条件の完了にはしない。残る48件の表示・取り込みscopeと公開資料のまとめを進める。
 
-notice／範囲優先48件は上記24 owner以外の全件。package noticeが存在するだけで完了にしない。この群のopencore-amrはAMR subsetのsource一覧と3GPP由来header、Snappyはtest dataとcore targetの分離を確認し、継承NOTICEとsource archive内のdata表示を保持した。次に優先するのはrav1e／libdoviの内蔵Rust依存、shaderc／SPIR-V／Vulkan等の取り込みsourceと生成dataである。OpenH264を含むcodecの特許・商標判断は著作権license確認と別に残す。
+notice／範囲優先48件は上記24 owner以外の全件。package noticeが存在するだけで完了にしない。この群のopencore-amrはAMR subsetのsource一覧と3GPP由来header、Snappyはtest dataとcore targetの分離を確認し、継承NOTICEとsource archive内のdata表示を保持した。rav1e／libdoviは元sourceと内蔵Rust依存の157 crate archives・選択文書を取得し、元lock checksumへ対応させた。ただし今回のMSVC-host metadataは過去のGNU-host unit graphではなく、Rust 1.87.0／1.97.0の標準library・compiler表示も未完了。次にその実build範囲と、shaderc／SPIR-V／Vulkan等の取り込みsource・生成dataを確認する。OpenH264を含むcodecの特許・商標判断は著作権license確認と別に残す。
 
 ## Owner一覧の外にある入力
 

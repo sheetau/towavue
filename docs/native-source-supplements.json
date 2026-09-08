@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for 27 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 29 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "additional_notices": [
     {
       "scope": "Original Unicode License V3 from the same pinned upstream tree as the four data inputs used by FriBidi 1.0.16; not a FriBidi archive member or an MSYS2 recipe checksum.",
@@ -39,6 +39,385 @@
     }
   ],
   "packages": [
+    {
+      "internal_links": 0,
+      "archive_prefix": "rav1e-0.8.1/",
+      "files": [
+        {
+          "sha256": "06d1523955fb6ed9cf9992eace772121067cca7e8926988a1ee16492febbe01e",
+          "url": "https://github.com/xiph/rav1e/archive/v0.8.1/rav1e-0.8.1.tar.gz",
+          "name": "rav1e-0.8.1.tar.gz",
+          "bytes": 3040879,
+          "kind": "source"
+        }
+      ],
+      "selected_documents": [
+        {
+          "package_notice": "mingw64/share/licenses/rav1e/LICENSE",
+          "sha256": "2dd0a109751e939dec3f80ddcfbc1ba91553f18c574399e85c159632182a2c0a",
+          "name": "rav1e-0.8.1/LICENSE",
+          "bytes": 1332
+        },
+        {
+          "package_notice": "mingw64/share/licenses/rav1e/PATENTS",
+          "sha256": "7b14a70c194b19dbd0625e7eac839a63200f67484521ce5e8d8244b127e8907a",
+          "name": "rav1e-0.8.1/PATENTS",
+          "bytes": 5702
+        },
+        {
+          "sha256": "861482385bdef579e207bb371937dd49cb9ff47d9406c40660b760fa672d0589",
+          "name": "rav1e-0.8.1/Cargo.lock",
+          "bytes": 64416
+        },
+        {
+          "sha256": "1ebf698989fc1817e6c61f4293dea634cf5823f48c6bfccb615248257819a565",
+          "name": "rav1e-0.8.1/Cargo.toml",
+          "bytes": 5603
+        },
+        {
+          "sha256": "af38ab2fd5dcfd8dca0ffc2a1dbf37650fdc563686303ff0653e887a12c55b85",
+          "name": "rav1e-0.8.1/README.md",
+          "bytes": 6368
+        },
+        {
+          "sha256": "762a52a53ca01a04d5c173619555391ec0d4029377d43e31a177d14bb0562add",
+          "name": "rav1e-0.8.1/build.rs",
+          "bytes": 7647
+        },
+        {
+          "sha256": "ca078f7f8c18729789dc6038a9813788dad2b0c946043099e776ee00a815b5be",
+          "name": "rav1e-0.8.1/cbindgen.toml",
+          "bytes": 434
+        },
+        {
+          "sha256": "5d3c397a3aeeecbc417962e4df8e8432af8219fda8a56ebe601a638a1e76c522",
+          "name": "rav1e-0.8.1/ivf/LICENSE",
+          "bytes": 1332
+        },
+        {
+          "sha256": "895a17d18b987f63153ea16b5823923bcc72d1a14e57e2b6cc55e077b749fda7",
+          "name": "rav1e-0.8.1/src/ext/x86/x86inc.asm",
+          "bytes": 56909
+        },
+        {
+          "sha256": "75c933d106e5b4b3a30328f48782cd9ec56dd257ad022ead8f097a1d984068a9",
+          "name": "rav1e-0.8.1/src/x86/cdef16_avx2.asm",
+          "bytes": 29671
+        },
+        {
+          "sha256": "099cd48bd2fd438076eb3a13ce77c5d953fc62637133a7cea7760fa54d33402c",
+          "name": "rav1e-0.8.1/src/x86/cdef16_avx512.asm",
+          "bytes": 21670
+        },
+        {
+          "sha256": "7a26a75632b7e706559afd6bb8403fb12c16a6ab7e42dff5b834ee2301131089",
+          "name": "rav1e-0.8.1/src/x86/cdef16_sse.asm",
+          "bytes": 33371
+        },
+        {
+          "sha256": "78eaabf9574e972130acb62d78201aba67a4f86dea8b06cad809d41dca67d242",
+          "name": "rav1e-0.8.1/src/x86/cdef_avx2.asm",
+          "bytes": 58549
+        },
+        {
+          "sha256": "4d46aec9e4caaa9a1024b8526fe513862c90b63bf71080b2167ac9eeb71a6775",
+          "name": "rav1e-0.8.1/src/x86/cdef_avx512.asm",
+          "bytes": 31598
+        },
+        {
+          "sha256": "857a927de9c70266d60cfe3c440734a340c5a1f129834181c826e7eb006291a2",
+          "name": "rav1e-0.8.1/src/x86/cdef_dist.asm",
+          "bytes": 7884
+        },
+        {
+          "sha256": "dd5e53c997d0d84cc9c0e107279c50b88ec0ee616b5d4167886a928c76db2d88",
+          "name": "rav1e-0.8.1/src/x86/cdef_rav1e.asm",
+          "bytes": 9172
+        },
+        {
+          "sha256": "3a514dc4436fc9f4b98fd6400efb2f363751014f3c563499b7b991e0d1c0320a",
+          "name": "rav1e-0.8.1/src/x86/cdef_sse.asm",
+          "bytes": 40722
+        },
+        {
+          "sha256": "04fb27d3ef041b6dfbdb111739cf5fdbc0e935395acd8088bf8258d3d7f79a99",
+          "name": "rav1e-0.8.1/src/x86/filmgrain16_avx2.asm",
+          "bytes": 74592
+        },
+        {
+          "sha256": "2684873bc647256f4293ac2a0a9732e0bc811977ada6618d5ce01eda7da4d0fc",
+          "name": "rav1e-0.8.1/src/x86/filmgrain16_avx512.asm",
+          "bytes": 32264
+        },
+        {
+          "sha256": "9d3c7665094e151195ac95f90dd2392acdedfcf1eb928a14e5b4f29c68b60507",
+          "name": "rav1e-0.8.1/src/x86/filmgrain16_sse.asm",
+          "bytes": 96260
+        },
+        {
+          "sha256": "6016117798157db9c0dd4c14126acc457aa89a984cdffe481013946302eea831",
+          "name": "rav1e-0.8.1/src/x86/filmgrain_avx2.asm",
+          "bytes": 65764
+        },
+        {
+          "sha256": "54d7ce1cf1bc0bb6f335068b71a0c0139de65792b22efb110caa64b9987f96fc",
+          "name": "rav1e-0.8.1/src/x86/filmgrain_avx512.asm",
+          "bytes": 28704
+        },
+        {
+          "sha256": "46a6dd29b16e9b73f112df5f63a2dae1dd904f9822e47f0bb261c54fd55c6375",
+          "name": "rav1e-0.8.1/src/x86/filmgrain_common.asm",
+          "bytes": 2154
+        },
+        {
+          "sha256": "cc9d305d26a8baa03d22453a0f41fbc06fd154280bbd39571e1c9915c98e3e1c",
+          "name": "rav1e-0.8.1/src/x86/filmgrain_sse.asm",
+          "bytes": 90583
+        },
+        {
+          "sha256": "3b88114a337c5a922b5bd634151a7111e5da03be4a2a9d47084531f39662f22f",
+          "name": "rav1e-0.8.1/src/x86/ipred16_avx2.asm",
+          "bytes": 180666
+        },
+        {
+          "sha256": "13a6004a48a140893222629fb958adc4e52b49328258a47bfa6e07713079640c",
+          "name": "rav1e-0.8.1/src/x86/ipred16_avx512.asm",
+          "bytes": 28729
+        },
+        {
+          "sha256": "f83b072f0a344e5b41165a928c214c44184564a0150c660ae2ea6d11bd2e6d68",
+          "name": "rav1e-0.8.1/src/x86/ipred16_sse.asm",
+          "bytes": 135044
+        },
+        {
+          "sha256": "4f19fc54840a159ee0f8e2f893c6bf96ee0b68664ac5bde9a14c814433d9d2a4",
+          "name": "rav1e-0.8.1/src/x86/ipred_avx2.asm",
+          "bytes": 187767
+        },
+        {
+          "sha256": "cce8dccfcb533eb740a97ed35c0e20596a98503b6f2c50c030036a2afe5e2355",
+          "name": "rav1e-0.8.1/src/x86/ipred_avx512.asm",
+          "bytes": 52718
+        },
+        {
+          "sha256": "7e56eefb41c26918b3e3d8bc1eee779a1e73909dad948e28411bc29907baa04e",
+          "name": "rav1e-0.8.1/src/x86/ipred_sse.asm",
+          "bytes": 187894
+        },
+        {
+          "sha256": "8c6444d5005172b37a950e7acb2542c767951d57039802ea3d182259f6653dd4",
+          "name": "rav1e-0.8.1/src/x86/itx16_avx2.asm",
+          "bytes": 318764
+        },
+        {
+          "sha256": "ef828c2a9f749d5cb2ed87834ce0f85502ba6ac1e7eae988f81fc51cb5ae31f4",
+          "name": "rav1e-0.8.1/src/x86/itx16_avx512.asm",
+          "bytes": 233313
+        },
+        {
+          "sha256": "384aca209a05f135bf0ddb610d14f5034de4e5c8a39511c6792d7f392ae2e954",
+          "name": "rav1e-0.8.1/src/x86/itx16_sse.asm",
+          "bytes": 285869
+        },
+        {
+          "sha256": "341bf6d0facd2f61a67f9f16df7481229136660706eb64f8a6f01d9b0513a4f9",
+          "name": "rav1e-0.8.1/src/x86/itx_avx2.asm",
+          "bytes": 207527
+        },
+        {
+          "sha256": "ddc854c641c104ec40eeaf2fa30a8ea98d777ded78241ec38e2361b97af085c0",
+          "name": "rav1e-0.8.1/src/x86/itx_avx512.asm",
+          "bytes": 304805
+        },
+        {
+          "sha256": "b207ebb4cbf84809a1d18b7f2107a2ec1a47a3b6e0ec6f89d0a1d2c921aeef38",
+          "name": "rav1e-0.8.1/src/x86/itx_sse.asm",
+          "bytes": 264136
+        },
+        {
+          "sha256": "489af057a53adf51ff8cf917ede7f4e932378a2fec6bb5d6e9c14854ab6a9190",
+          "name": "rav1e-0.8.1/src/x86/loopfilter16_avx2.asm",
+          "bytes": 34734
+        },
+        {
+          "sha256": "939c504a05cf4922904f8f49edd8249fc29d384b4b4de343cfefe7e38dcbc6de",
+          "name": "rav1e-0.8.1/src/x86/loopfilter16_avx512.asm",
+          "bytes": 34192
+        },
+        {
+          "sha256": "e0502f9c5f05b14f8dd6f766d93b0e76827b3548369c76f33541978ea5692224",
+          "name": "rav1e-0.8.1/src/x86/loopfilter16_sse.asm",
+          "bytes": 48703
+        },
+        {
+          "sha256": "721d1dce99e310fc73095ed4ef6322ae4e838a0d0d452c2d13d46902549f3717",
+          "name": "rav1e-0.8.1/src/x86/loopfilter_avx2.asm",
+          "bytes": 48646
+        },
+        {
+          "sha256": "1272a874381f443dfbb59a396af9ba3de77bca3b2e2d81ea1f1c13c96281085d",
+          "name": "rav1e-0.8.1/src/x86/loopfilter_avx512.asm",
+          "bytes": 49799
+        },
+        {
+          "sha256": "7eb8e2261b975fab158af640447337d512187a811190ab13907b8a34570dd464",
+          "name": "rav1e-0.8.1/src/x86/loopfilter_sse.asm",
+          "bytes": 63113
+        },
+        {
+          "sha256": "222a8ba5f3101907bc9331976ac109179523edc9433fe01f8447a27fb60c176b",
+          "name": "rav1e-0.8.1/src/x86/looprestoration16_avx2.asm",
+          "bytes": 79320
+        },
+        {
+          "sha256": "94e058764a67966df161f352c051031490e683a87113503fee8071ac61da5fcc",
+          "name": "rav1e-0.8.1/src/x86/looprestoration16_avx512.asm",
+          "bytes": 81399
+        },
+        {
+          "sha256": "f4c0fa43810fb266c84809d11812bd24e5dce164b7ef55ecb18fc85a10aa883d",
+          "name": "rav1e-0.8.1/src/x86/looprestoration16_sse.asm",
+          "bytes": 109707
+        },
+        {
+          "sha256": "aa92bb7d15ed7691d54f8d44a29355599625eba624670270339ba31958bc837c",
+          "name": "rav1e-0.8.1/src/x86/looprestoration_avx2.asm",
+          "bytes": 70582
+        },
+        {
+          "sha256": "a4c90a8e225d17b60e701d7669d1389ca66eeba7fa6c7dfff69232c95d02f269",
+          "name": "rav1e-0.8.1/src/x86/looprestoration_avx512.asm",
+          "bytes": 68693
+        },
+        {
+          "sha256": "5a94ecfce582617b86b9097073c1f348b53206ecdd201071ddfe4b6a56b3b583",
+          "name": "rav1e-0.8.1/src/x86/looprestoration_sse.asm",
+          "bytes": 106650
+        },
+        {
+          "sha256": "157b509d0af32f04a8566ce01fe77d2781d0ddb4da61a9a1a7d3fdfd89c9c313",
+          "name": "rav1e-0.8.1/src/x86/mc16_avx2.asm",
+          "bytes": 197088
+        },
+        {
+          "sha256": "02405721f1b7f80b1ab39ea5cf8ce11bee4d8a3dd57a4077854e038a1f77cbfa",
+          "name": "rav1e-0.8.1/src/x86/mc16_avx512.asm",
+          "bytes": 174439
+        },
+        {
+          "sha256": "c4fc182fcf7410d7427c32048b636f71e64f563993218be841bbe412526d370d",
+          "name": "rav1e-0.8.1/src/x86/mc16_sse.asm",
+          "bytes": 278104
+        },
+        {
+          "sha256": "dd05303afb6fc45a8ceb342caa7652a67a7d40c767fddc7a844b169b1a84494a",
+          "name": "rav1e-0.8.1/src/x86/mc_avx2.asm",
+          "bytes": 192573
+        },
+        {
+          "sha256": "55b608ade5c97e0f842576909dcccf21c7c8e40b1f341f79f7089ee550104647",
+          "name": "rav1e-0.8.1/src/x86/mc_avx512.asm",
+          "bytes": 163957
+        },
+        {
+          "sha256": "1f155f6c46c4ea334ed42e22f501faf4ee09e6529d8ad2a9368330577ece4dd3",
+          "name": "rav1e-0.8.1/src/x86/mc_sse.asm",
+          "bytes": 310342
+        },
+        {
+          "sha256": "419d7e18f4df3f23bcebffcaae847e4da4f5ff4f17f698452bc829d8c0545c17",
+          "name": "rav1e-0.8.1/src/x86/me.asm",
+          "bytes": 3345
+        },
+        {
+          "sha256": "2c591d8bbc8250f8ca627003cdbf20117f5c657555435c4f0b6cabea465b9743",
+          "name": "rav1e-0.8.1/src/x86/msac.asm",
+          "bytes": 18470
+        },
+        {
+          "sha256": "b499fc5a8cf7de1e9ec664708a4bb78f30496cb98dfb1bfd5da8306cef45f4d2",
+          "name": "rav1e-0.8.1/src/x86/sad_avx.asm",
+          "bytes": 6189
+        },
+        {
+          "sha256": "a1488f2661d5afabc01aa2556a0bcfc91c4f0655f463e9d5b515d4fdd702d0c7",
+          "name": "rav1e-0.8.1/src/x86/sad_sse2.asm",
+          "bytes": 10931
+        },
+        {
+          "sha256": "59e25c8466e834d18ceab23ec00f574e2287153ae8e6a829997791b72ccc40af",
+          "name": "rav1e-0.8.1/src/x86/satd.asm",
+          "bytes": 32606
+        },
+        {
+          "sha256": "a837e6b72d29d79d5f09eebdd3ab01749fe3e8448675f5a8dc08ed71c778147a",
+          "name": "rav1e-0.8.1/src/x86/satd16_avx2.asm",
+          "bytes": 30105
+        },
+        {
+          "sha256": "7d9d446b004b7b49c9601c887ab0fbb48ef888d08e6666574ca198d8ddcfcd5d",
+          "name": "rav1e-0.8.1/src/x86/sse.asm",
+          "bytes": 15685
+        },
+        {
+          "sha256": "bfd4c4525e49a54c9d06d26b560653a94cea28bdc729b3db8f05344b7a2d0200",
+          "name": "rav1e-0.8.1/src/x86/tables.asm",
+          "bytes": 46016
+        }
+      ],
+      "recipe_sha256": "25fb776e94e0c78d303840121c696a80b8ad8aff798c778bce0d7f3f25ff942b",
+      "archive_entries": 330,
+      "package": "mingw-w64-x86_64-rav1e"
+    },
+    {
+      "internal_links": 0,
+      "archive_prefix": "dovi_tool-libdovi-3.4.0/",
+      "files": [
+        {
+          "sha256": "8eac4d1c3134f53e8eb216db6450307a737425844113e480d1e9713c142a9fa2",
+          "url": "https://github.com/quietvoid/dovi_tool/archive/libdovi-3.4.0.tar.gz",
+          "name": "libdovi-3.4.0.tar.gz",
+          "bytes": 494710,
+          "kind": "source"
+        }
+      ],
+      "selected_documents": [
+        {
+          "package_notice": "mingw64/share/licenses/libdovi/LICENSE",
+          "sha256": "e9d76c149b1176de4aa0202cfb6a4a266a0c4cb71959f429d670c3a857f95e52",
+          "name": "dovi_tool-libdovi-3.4.0/dolby_vision/LICENSE",
+          "bytes": 1066
+        },
+        {
+          "sha256": "5c9f344b8a49f684e409af8304e4e175618098c9b24ed8acafc5f1a469088814",
+          "name": "dovi_tool-libdovi-3.4.0/dolby_vision/Cargo.lock",
+          "bytes": 20359
+        },
+        {
+          "sha256": "78b8ffa4f0277001fbb907126ae1247007b2606a279cb81529f57a4e0e559e4d",
+          "name": "dovi_tool-libdovi-3.4.0/dolby_vision/Cargo.toml",
+          "bytes": 1454
+        },
+        {
+          "sha256": "69eb3d680a4d9f2de8e7d530cfb32cf769da10ced83e9a81beaf068dd0223edf",
+          "name": "dovi_tool-libdovi-3.4.0/dolby_vision/README.md",
+          "bytes": 673
+        },
+        {
+          "sha256": "11fd870c2f387b93f0b52dd20a4c44c3a1a88ed0736f71a6409f9912119d2734",
+          "name": "dovi_tool-libdovi-3.4.0/dolby_vision/cbindgen.toml",
+          "bytes": 360
+        },
+        {
+          "sha256": "10ae737b55a3321974012726a94ba7b956eb0d494f3d62f587d7bdc2e26277c1",
+          "name": "dovi_tool-libdovi-3.4.0/dolby_vision/src/lib.rs",
+          "bytes": 499
+        }
+      ],
+      "recipe_sha256": "9d9c7ca22ff45570a70a75123885ca3fc402c70ecc92eea356d13f2e115b615d",
+      "archive_entries": 242,
+      "package": "mingw-w64-x86_64-libdovi"
+    },
     {
       "package": "mingw-w64-x86_64-lcms2",
       "recipe_sha256": "6f39c90313ec3f739b7406d6c7e2eb802c8aa8142323278a36d41083e765350f",

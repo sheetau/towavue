@@ -225,6 +225,30 @@ installはFFmpeg DLLをstripするため、前節のbuild内fileのhashをその
 
 次は正しい全体build／staging手順の再現、packageの実link入力・対応source/noticeの確定とrelease版の媒体／性能検証を進める。helperの隣接探索はまだ実装しておらず、今回のアプリ試験も`FFMPEG_DIR`を指定している。Setup.exeや設定不要のinstall動作が確認できたとは扱わない。
 
+## Native Chromaprintの対応資料とpackage横断確認
+
+2026-09-08、実avformatのimportに`libchromaprint.dll`と9個のChromaprint APIを確認した。candidate DLLは109083 bytes／SHA256 `c4b8563883605a106c09b060040b27d265be66ce4ca85287448fee62a0fd6163`で、固定した署名済みMSYS2 packageの展開物と一致する。DLLの通常importはGCC/C++ runtimeとWindows libraryで、FFTW DLLはない。ただしimport一覧だけで静的backend不在を証明するものではない。
+
+package内`.BUILDINFO`の`pkgbuild_sha256sum`は`434eb5b783c1ce5f83352a7bf69853d53ba751d12f63a4417be8b0dd3ca39bd7`で、[固定PKGBUILD](https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-chromaprint/PKGBUILD)の実bytesと一致した。recipeはstatic/sharedともKissFFTを明示する。指定されたChromaprint 1.6.1 release sourceは1579624 bytes／SHA256 `3368805af0ee47b9df74df10b5001a44569e01df2844dab520031720dde9ad23`で、取得物と一致した。上流packageのGCCは16.1.0-5であり、今回FFmpegをbuildした16.2.0-3と同じとは記録しない。元の全installed一覧を`.BUILDINFO`ごと保持する。これは署名済みpackageからrecipe/sourceへ辿る証拠であり、同一DLLを再生成した証拠ではない。
+
+source全481 entryを検査した。最初の通常file限定検査は内部header symlinkで停止し、展開しなかった。唯一の`src/include/chromaprint.h -> ../chromaprint.h`が実在する内部headerを指すことを確認し、そのaliasを除いて診断用に展開した。資料作成scriptはこの展開treeを信用せず、hash固定archiveから必要な通常fileだけを選択抽出する。
+
+```powershell
+.\scripts\prepare-chromaprint-materials.ps1 `
+    -PackageArchive 'path/to/mingw-w64-x86_64-chromaprint-1.6.1-1-any.pkg.tar.zst' `
+    -Recipe 'path/to/PKGBUILD' -SourceArchive 'path/to/chromaprint-1.6.1.tar.gz' `
+    -RuntimeDll 'path/to/candidate/libchromaprint.dll' `
+    -LgplLicense 'path/to/ffmpeg/COPYING.LGPLv2.1' -OutputDirectory 'path/to/fresh/materials'
+```
+
+同じ5入力を`test-chromaprint-materials.ps1`へ渡すと回帰検証できる。[入力一覧](native-chromaprint-inputs.json)とmedia package一覧を照合し、入力全部を検査してから新規outputだけに書く。source archive原本、recipe、packageの2 metadata、6 source notice file、LGPL 2.1全文、入力一覧と説明の13 filesを作る。実出力は1641422 bytesで、binaryは含まない。ChromaprintのLICENSE.mdはLGPL本文へのlinkのみなので、固定FFmpeg source内の全文も保持する。KissFFTのCOPYINGだけでなく参照先BSD本文、内蔵resamplerの個別著作権表示を含めた。
+
+最初の任意cwd検査で、PowerShell locationとprocess cwdが異なる場合の相対output解決ミスを検出した。providerのpath解決に修正し、誤配置した自作fixtureはignored診断directoryへ移動した。修正後、2つの新規outputの全file hash一致、既存output拒否、5入力それぞれの欠落と同size改変の拒否、拒否時の入力・出力保持が成功した。取得・再build・公開はscriptに含めない。全FFmpeg／GCC runtimeの対応資料をこれだけで充足した扱いにはしない。
+
+同じruntime graphの85 package DLLを72 ownerへ逆引きし、全ownerの固定archive hash、`.PKGINFO`とfile一覧も読んだ。15 packageには`share/licenses`配下の通常fileがない。別の場所やsource内にnoticeがある可能性は残るため、全体収集ではChromaprint以外も個別照合する。複数licenseを持つpackageはlibrary／tool／documentationの範囲を区別する。
+
+**次にOpenALの範囲を優先確認する。** avdeviceは`libopenal-1.dll`をimportし、実package 1.25.2-1と[固定recipe](https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-openal/PKGBUILD)のmetadataはGPL-2.0-or-laterだが、[同版上流COPYING](https://raw.githubusercontent.com/kcat/openal-soft/1.25.2/COPYING)はGNU Library GPL v2である。この差を誤記ともGPL DLLの確定とも推測しない。対応recipe hash、source、4 patches、実libraryに入るsourceと通知を照合してから採否を判断する。現候補をinstallerへ採用・公開する承認はまだ行わない。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。

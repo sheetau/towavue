@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "scope": "Corresponding-source and notice subset for the pinned native Chromaprint DLL; not the complete FFmpeg distribution or a bit-reproducible rebuild claim.",
+  "package": {
+    "name": "mingw-w64-x86_64-chromaprint",
+    "version": "1.6.1-1",
+    "bytes": 76686,
+    "sha256": "51360c028cf2d5b9711c471947eabd3765f4abdfdf8140dc396bd938f7d7b486"
+  },
+  "recipe": {
+    "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-chromaprint/PKGBUILD",
+    "bytes": 2014,
+    "sha256": "434eb5b783c1ce5f83352a7bf69853d53ba751d12f63a4417be8b0dd3ca39bd7"
+  },
+  "source": {
+    "url": "https://github.com/acoustid/chromaprint/releases/download/v1.6.1/chromaprint-1.6.1.tar.gz",
+    "name": "chromaprint-1.6.1.tar.gz",
+    "prefix": "chromaprint-1.6.1/",
+    "bytes": 1579624,
+    "sha256": "3368805af0ee47b9df74df10b5001a44569e01df2844dab520031720dde9ad23"
+  },
+  "runtime": {
+    "name": "libchromaprint.dll",
+    "bytes": 109083,
+    "sha256": "c4b8563883605a106c09b060040b27d265be66ce4ca85287448fee62a0fd6163"
+  },
+  "lgpl": {
+    "origin": "FFmpeg e47273f4d9227152dcbf543cebaf9e2430ddbcc4 COPYING.LGPLv2.1",
+    "bytes": 26517,
+    "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
+  },
+  "package_metadata": [
+    {
+      "name": ".BUILDINFO",
+      "bytes": 6740,
+      "sha256": "880189cc391d5cd638a47ba3151e9a70ffb3b0d63dc6442c30d013c28dc68ee5"
+    },
+    {
+      "name": ".PKGINFO",
+      "bytes": 591,
+      "sha256": "bf042b05fb4328758dbf0136b6b85155bc314bec810478758b7bdb705c6fb071"
+    }
+  ],
+  "source_notices": [
+    {
+      "name": "LICENSE.md",
+      "bytes": 1801,
+      "sha256": "562cfe59627e0c4e8e3b066f3ff2e9736f83811ffe4c6c2c7796595aa7595ebd"
+    },
+    {
+      "name": "README.md",
+      "bytes": 4738,
+      "sha256": "fcc714b281579c3f7b8651f079f152538d11b22ca2b512834aaab0bd1359a39e"
+    },
+    {
+      "name": "src/3rdparty/kissfft/COPYING",
+      "bytes": 246,
+      "sha256": "a2840585f8411be8e6826a31ef15ae65c950bd74a2437a73b013398a934ad0c6"
+    },
+    {
+      "name": "src/3rdparty/kissfft/LICENSES/BSD-3-Clause",
+      "bytes": 1830,
+      "sha256": "4d6bcab46f27d6d0c878e8305d4bdcfe040d52bf6656b9771f04c9fb9902c0ed"
+    },
+    {
+      "name": "src/avresample/resample2.c",
+      "bytes": 10258,
+      "sha256": "7a4fdc9b104fad896d662bd1846b474f97b11ba35656e098c4382a8651d69a33"
+    },
+    {
+      "name": "src/avresample/avcodec.h",
+      "bytes": 3043,
+      "sha256": "43f6b6479b82e5d5b99d02ee5f610b89f2ac96b925f41647641b70a316dbb99f"
+    }
+  ]
+}

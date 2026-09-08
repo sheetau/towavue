@@ -183,7 +183,8 @@ finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
 foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype', 'mingw-w64-x86_64-glib2', 'mingw-w64-x86_64-lcms2',
     'mingw-w64-x86_64-shaderc', 'mingw-w64-x86_64-spirv-cross', 'mingw-w64-x86_64-vulkan-loader',
     'mingw-w64-x86_64-pcre2', 'mingw-w64-x86_64-libxml2', 'mingw-w64-x86_64-fontconfig',
-    'mingw-w64-x86_64-harfbuzz', 'mingw-w64-x86_64-libunibreak')) {
+    'mingw-w64-x86_64-harfbuzz', 'mingw-w64-x86_64-libunibreak', 'mingw-w64-x86_64-openssl',
+    'mingw-w64-x86_64-opencl-icd', 'mingw-w64-x86_64-libva')) {
     foreach ($kind in @('missing', 'different', 'duplicate')) {
         $changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
         $package = $changed.packages | Where-Object { $_.package -eq $packageName }
@@ -193,8 +194,9 @@ foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype', '
             elseif ($packageName -eq 'mingw-w64-x86_64-pcre2') { $_.package_notice -eq 'mingw64/share/licenses/pcre2/LICENCE.md' }
             elseif ($packageName -eq 'mingw-w64-x86_64-libxml2') { $_.package_notice -eq 'mingw64/share/licenses/libxml2/COPYING' }
             elseif ($packageName -eq 'mingw-w64-x86_64-libunibreak') { $_.package_notice -eq 'mingw64/share/licenses/libunibreak/LICENCE' }
-            elseif ($packageName -match '-(fontconfig|harfbuzz)$') { $_.package_notice -eq ('mingw64/share/licenses/' + $Matches[1] + '/COPYING') }
-            elseif ($packageName -match '-(shaderc|spirv-cross|vulkan-loader)$') { $_.package_notice -eq ('mingw64/share/licenses/' + $Matches[1] + '/LICENSE') }
+            elseif ($packageName -eq 'mingw-w64-x86_64-openssl') { $_.package_notice -eq 'mingw64/share/licenses/openssl/LICENSE' }
+            elseif ($packageName -match '-(fontconfig|harfbuzz|libva)$') { $_.package_notice -eq ('mingw64/share/licenses/' + $Matches[1] + '/COPYING') }
+            elseif ($packageName -match '-(shaderc|spirv-cross|vulkan-loader|opencl-icd)$') { $_.package_notice -eq ('mingw64/share/licenses/' + $Matches[1] + '/LICENSE') }
             else { $_.name -match '/(COPYING|docs/FTL.TXT)$' }
         }
         if (@($notice).Count -ne 1) { throw 'Expected one original package notice for the mutation fixture.' }
@@ -259,4 +261,4 @@ foreach ($kind in @('commit', 'url', 'kind')) {
     }
     finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
 }
-Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, missing/corrupt/omitted additional notices, forty-two package-notice mismatches, three VCS mapping cases, source symlink exclusion, cached-input/download and output preservation."
+Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, missing/corrupt/omitted additional notices, fifty-one package-notice mismatches, three VCS mapping cases, source symlink exclusion, cached-input/download and output preservation."

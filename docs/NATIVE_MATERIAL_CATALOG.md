@@ -28,7 +28,7 @@ packageとrecipeの既定cacheは`vendor/msys2/packages-20260908`と`vendor/msys
 
 ## 照合の範囲
 
-[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2350 files／764630897 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
+[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2424 files／821765692 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
 
 本体kitを加えたv3の集約は2460 files／724157839 bytes。これは資料のサイズであり、インストーラーのサイズではない。原本source archivesを保持するが、runtime DLL／exe／static libraryを別fileとしてコピーしない。source-onlyのtoolや他targetの条件を、本体へ一律適用する表示にはしない。
 
@@ -51,6 +51,10 @@ v5の全catalog回帰も通過し、最終2584 filesは試験outputと全hash一
 fontconfig／HarfBuzz／libunibreakの補完と現行Unicode noticeを加えたv6は2648 files／767083882 bytes、`FILES.json`のSHA256は`f1357c73ef3029af346994b2515c79c5780d44f2d7ba099ca53fbed082ecc250`。37-owner supplement v13は523 files／119960748 bytesで、前v12の457 files（README／INPUTS以外）は不変。新たな原本archive・recipe inputsは8件／20953323 bytes、選択文書は52件。版の混在と別条件は[font data review](NATIVE_FONT_DATA_AUDIT.md)へ記録し、外部dataの最終提供・個別embedded-code／NOTICE・配布gateは完了扱いにしない。
 
 v6の全catalog回帰が通過し、最終2648 filesは試験outputと全hash一致。supplementでは134入力の欠落／改変pairs、42 package-notice不整合、2 Unicode原本の欠落／改変と一覧除去、3 VCS不整合を検証した。format／全target Clippy／270 testsも通過したが、3 live ignoresは未実行で新たなhardware経路の証明ではない。
+
+OpenSSL／OpenCL／libvaの作者と別条件を加えたv7は2722 files／824237414 bytes、`FILES.json`のSHA256は`748d455ab62456ab11e418c9ae7f37d4beec1629a8d719d78e57fed132746358`。40-owner supplement v14は597 files／177095543 bytes、前v13の521 files（README／INPUTS以外）は不変。3 source archivesと6 patch/source inputs、62選択原本を追加し、根拠と限界は[platform notice review](NATIVE_PLATFORM_NOTICE_AUDIT.md)へ記録する。表示の補完であり、候補runtimeの変更や外部driverの配布承認ではない。
+
+v7も全catalog回帰を通過し、最終2722 filesは試験outputと全hash一致。supplementの146入力の欠落／改変pairsと51 package-notice不整合、追加Unicode原本／VCS／link除外／既存output保護も通過した。format／全target Clippy／270 testsは成功し、3 live ignoresは未実行のまま区別する。
 
 ## まだ残るもの
 

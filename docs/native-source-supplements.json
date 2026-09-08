@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for 37 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources; shader compiler static/header inputs require additional review. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 40 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources; shader compiler static/header inputs require additional review. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "additional_notices": [
     {
       "scope": "Original Unicode License V3 retrieved 2026-09-08 for the reviewed Unicode data references in PCRE2, libxml2, fontconfig, HarfBuzz and libunibreak. Not a source archive member or recipe input; keep release-specific data headers and separate code/test notices. This notice does not change data versions or replace FriBidi's pinned notice.",
@@ -47,6 +47,415 @@
     }
   ],
   "packages": [
+    {
+      "package": "mingw-w64-x86_64-openssl",
+      "recipe_sha256": "0f29edf384ee561bfe195608f4dbbb4231695af7958e326292034b264bc5faf1",
+      "files": [
+        {
+          "name": "openssl-3.6.4.tar.gz",
+          "bytes": 55003802,
+          "sha256": "9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef",
+          "kind": "source",
+          "url": "https://github.com/openssl/openssl/releases/download/openssl-3.6.4/openssl-3.6.4.tar.gz"
+        },
+        {
+          "name": "002-relocation.patch",
+          "bytes": 3071,
+          "sha256": "3e9a8abb6ff5fb7bdb450742fb7bd85513a4abbe85594228620379bcac7c02ef",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-openssl/002-relocation.patch"
+        },
+        {
+          "name": "004-arch-suffix.patch",
+          "bytes": 1284,
+          "sha256": "6a686ef69c2b196fb1420389ccd0db84582fd288942560d5eba963c11ce8595a",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-openssl/004-arch-suffix.patch"
+        },
+        {
+          "name": "pathtools.c",
+          "bytes": 15662,
+          "sha256": "ebf471173f5ee9c4416c10a78760cea8afaf1a4a6e653977321e8547ce7bf3c0",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-openssl/pathtools.c"
+        },
+        {
+          "name": "pathtools.h",
+          "bytes": 2277,
+          "sha256": "1585ef1b61cf53a2ca27049c11d49e0834683dfda798f03547761375df482a90",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-openssl/pathtools.h"
+        }
+      ],
+      "archive_prefix": "openssl-3.6.4/",
+      "archive_entries": 6179,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "openssl-3.6.4/LICENSE.txt",
+          "bytes": 10175,
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+          "package_notice": "mingw64/share/licenses/openssl/LICENSE"
+        },
+        {
+          "name": "openssl-3.6.4/AUTHORS.md",
+          "bytes": 1022,
+          "sha256": "b9f638dfc06b59c2d3b808186c3b30f713805a5db390f5b77b1703ac58acb83e"
+        },
+        {
+          "name": "openssl-3.6.4/README.md",
+          "bytes": 8519,
+          "sha256": "996bff3a223153b1806b11d09fadf775f7ff12d85574879a3005004f113712ff"
+        },
+        {
+          "name": "openssl-3.6.4/ACKNOWLEDGEMENTS.md",
+          "bytes": 159,
+          "sha256": "58dee45791f007ced048114717f86672778fe75c551827c57e760861446ce3c3"
+        },
+        {
+          "name": "openssl-3.6.4/Configure",
+          "bytes": 144858,
+          "sha256": "622e9c7013848b2b14adf5e5d20cadd5cc1555928bfcb9b9715c0099ae578e36"
+        },
+        {
+          "name": "openssl-3.6.4/Configurations/10-main.conf",
+          "bytes": 88536,
+          "sha256": "f29bb8de5bfbace12cbf9f4fbf952fccc7a34e105d50105d35e99754df53f2df"
+        },
+        {
+          "name": "openssl-3.6.4/crypto/build.info",
+          "bytes": 5025,
+          "sha256": "09c92ed9a227774640b9dcdf456443337e521c764369be3f5263bf36778760fb"
+        },
+        {
+          "name": "openssl-3.6.4/crypto/defaults.c",
+          "bytes": 5362,
+          "sha256": "7a37dd581a1ac4c74c53452889daaa5d3b70ff2a8d804eaf127a5986adf8b382"
+        },
+        {
+          "name": "openssl-3.6.4/crypto/aes/build.info",
+          "bytes": 5677,
+          "sha256": "c7659547ef75e6646676eca073e799c552c749521089b2a527cb4ff236aff968"
+        },
+        {
+          "name": "openssl-3.6.4/crypto/sha/build.info",
+          "bytes": 7245,
+          "sha256": "1060f6ba38a6f052449034b3b81b3a00d959794e85cd355a040b883a516725ea"
+        },
+        {
+          "name": "openssl-3.6.4/crypto/aria/build.info",
+          "bytes": 63,
+          "sha256": "506e26da9ed2bd9dd14a25f593e649c5acf25bd5a56e43ccef16ec59614bb2e4"
+        },
+        {
+          "name": "openssl-3.6.4/crypto/chacha/build.info",
+          "bytes": 1894,
+          "sha256": "422e9c415ee466efa8e0e2cf68d75696610cfa6cdfadb19a5dc8d632443aa709"
+        },
+        {
+          "name": "openssl-3.6.4/crypto/aes/aes_core.c",
+          "bytes": 86415,
+          "sha256": "a70bf52702b68dbd07c7ef376e88c5b926b1a99ccfb43bef1225a59e3ab98287"
+        },
+        {
+          "name": "openssl-3.6.4/crypto/aria/aria.c",
+          "bytes": 42513,
+          "sha256": "0b3d584f0823ce98ec4bc36460c5a0e9fa3c50ac00b987f03d835bd9aef52361"
+        },
+        {
+          "name": "openssl-3.6.4/crypto/chacha/chacha_enc.c",
+          "bytes": 4765,
+          "sha256": "6bff8a2e69892124567ebf1ca3905918240d25eae6e1728a514aea6603c2a660"
+        },
+        {
+          "name": "openssl-3.6.4/crypto/aes/asm/vpaes-x86_64.pl",
+          "bytes": 31647,
+          "sha256": "be92fca8d3d31c976b0984e4c34d6017d579de2c62542c51b408d92ff4aca952"
+        },
+        {
+          "name": "openssl-3.6.4/crypto/sha/asm/sha1-x86_64.pl",
+          "bytes": 52365,
+          "sha256": "234b81acaae48de99811d956012d15e3229ec093c4dde699a51a440431844cce"
+        },
+        {
+          "name": "openssl-3.6.4/NOTES-PERL.md",
+          "bytes": 4995,
+          "sha256": "2d5b6d027a60fc65b9f1a0e994e6ad1b94f36d6b9f126da6598601c314cdedeb"
+        },
+        {
+          "name": "openssl-3.6.4/util/perl/OpenSSL/Template.pm",
+          "bytes": 3508,
+          "sha256": "dd71337bf39f0583e276b70184d925297d37124517c71b88bdc573a030598d57"
+        },
+        {
+          "name": "openssl-3.6.4/external/perl/Text-Template-1.56/LICENSE",
+          "bytes": 18412,
+          "sha256": "9837f05336ef3cbacb6a96e1672a0426d81ad01191f214b8d48e22ca62338181"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-opencl-icd",
+      "recipe_sha256": "5efc21b2d3345afb8d668f3f50964db445db4c609cf28670608b1db78fb03136",
+      "files": [
+        {
+          "name": "opencl-icd-2026.05.29.tar.gz",
+          "bytes": 115091,
+          "sha256": "48fd0c5181db7cd046f4f731d5955694892e10998d49d09ee0d997e7e04fd939",
+          "kind": "source",
+          "url": "https://github.com/KhronosGroup/OpenCL-ICD-Loader/archive/v2026.05.29/opencl-icd-2026.05.29.tar.gz"
+        }
+      ],
+      "archive_prefix": "OpenCL-ICD-Loader-2026.05.29/",
+      "archive_entries": 121,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/LICENSE",
+          "bytes": 11357,
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "package_notice": "mingw64/share/licenses/opencl-icd/LICENSE"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/CMakeLists.txt",
+          "bytes": 11050,
+          "sha256": "cfcea3e6d6a7cb5e35a39ddbb3fcde2d4a69a957f89f1d59a5fe3bf95345f919"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/README.md",
+          "bytes": 8325,
+          "sha256": "b332515b9a0bc266ad94fe6e951f0ef7a988ccb9e933068faf0fd8ba3cfde805"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd.c",
+          "bytes": 20354,
+          "sha256": "20d7fb55a6bcea2f47b38c91470decb13f35455271723c835378cc3aa8fda0c4"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd.h",
+          "bytes": 7931,
+          "sha256": "9f6caec82d643dccce79e79c23dc3f40aff6d4ddeb872eb0d3d462c8534562f8"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd_version.h",
+          "bytes": 2071,
+          "sha256": "90b0d9fa308dcee6f6eff6768b0548405bf5e3eea9e57cdc10833f5eab026dfc"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd_dispatch.c",
+          "bytes": 12014,
+          "sha256": "6903cb3703aad3cdda8074a7e76bba548258815498810b48c1b1259b28ed09c7"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd_dispatch.h",
+          "bytes": 3386,
+          "sha256": "afc4085d901059f4c0cd31fa084dd2295340f697cfbf45afb367350235ca9417"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd_dispatch_generated.c",
+          "bytes": 321954,
+          "sha256": "2ae6d1115012f8784dbe3a832a33ce2c2e1badbc00780d89158e60d6f182f9c1"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd_trace.c",
+          "bytes": 731,
+          "sha256": "8d510b6c3b5e7bc6cfbe5ddc538df22f76536604ffebe11fe7c88e28873319a4"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd_trace.h",
+          "bytes": 1296,
+          "sha256": "606133d7a3736d8b14b7e184a8a5eaf5e672ed038d6580356f4dd191bfe588d2"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd_library.h",
+          "bytes": 1171,
+          "sha256": "750670b7a199f9fc244d3d7f7f1aa9544cb3492f7872b2def0da1861d6077665"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd_envvars.h",
+          "bytes": 867,
+          "sha256": "8411202c89f816381d3c54fbcaeb4ded86be3e428469b8e6ab65ac6248642149"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd_platform.h",
+          "bytes": 1524,
+          "sha256": "134b73aa71451fa2d4d0509faeecbfe9db5233c114ee45ecd1d674419e721324"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/icd_cmake_config.h.in",
+          "bytes": 66,
+          "sha256": "49ccb9822fce14703fd3f300d39698ad335036f4c8a676150c573e72ac9387db"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/adapter.h",
+          "bytes": 2368,
+          "sha256": "cf04ee3f54cfe9fef447aaaacd27f17cf1b3fb2822b97c1d04c0f54ba6790add"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/icd_windows.c",
+          "bytes": 12804,
+          "sha256": "e90d01c4c4e0292533b0e3febcbfc17e4d85d8f57f8df08c982531b920c73ade"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/icd_windows.h",
+          "bytes": 1059,
+          "sha256": "d1415252c982b855a1f052a6af70f115edbe8235eb3d0035212ff927bb3cbe5b"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/icd_windows_apppackage.c",
+          "bytes": 4117,
+          "sha256": "238b75e5f7f8b3f27f48b7bd6aed12e8f9af9df7c0564c8aa9b96f2f39557c4d"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/icd_windows_apppackage.h",
+          "bytes": 783,
+          "sha256": "fa35420b462a9fe5086521ceb6a1ed6585b43bc7e765909260444dc0b542e720"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/icd_windows_dxgk.c",
+          "bytes": 6847,
+          "sha256": "6ec97f3890528dc89c034b08ec8d6b5a5373d3c08340ad457ae8fb4edc813a51"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/icd_windows_dxgk.h",
+          "bytes": 777,
+          "sha256": "b237f9e49280e553d45bc4ed354cfd1e901e1337767aca48883a46b4f4f49612"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/icd_windows_envvars.c",
+          "bytes": 2699,
+          "sha256": "e37010e3ce0073d4faf4477711395f73e69b02f07727cfbea844a5f2c730536e"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/icd_windows_formats.h",
+          "bytes": 1003,
+          "sha256": "69853b6277333e2087fbec58fd134f5d8548a9482315960b0419327b83bdd57a"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/icd_windows_hkr.c",
+          "bytes": 10916,
+          "sha256": "ea5bf1dfa7909e18bed0325288259c21581c8bf985069cfc39e5eb0dff10b312"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/icd_windows_hkr.h",
+          "bytes": 776,
+          "sha256": "3beb8347947bfcbeff87cf162e1310eb8cc5dd37b560b5a3398b0b2f292b120b"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/icd_windows_library.c",
+          "bytes": 1708,
+          "sha256": "2b5fde9ef41aa6f75fa96e7c697ac0e89df24061605dededa21f3af655d4e043"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/OpenCL.def",
+          "bytes": 3624,
+          "sha256": "c8f4c0cdfb909740e38608436b2165ba013329e32d546872e0f7ef151d42465f"
+        },
+        {
+          "name": "OpenCL-ICD-Loader-2026.05.29/loader/windows/OpenCL.rc",
+          "bytes": 1733,
+          "sha256": "557e9766d57c3430f223fd61b05463af935583e47bb8941209a4e001c099457f"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libva",
+      "recipe_sha256": "a6e16da012c8fd4d900e114c6430ca1f5ae25fc7da27d69bce74a4cd67251376",
+      "files": [
+        {
+          "name": "libva-2.24.1.tar.gz",
+          "bytes": 306278,
+          "sha256": "0b4a3649ee8d683b9cce2ef094df4fb039d276c0cef7e49337c43d3b297b9f42",
+          "kind": "source",
+          "url": "https://github.com/intel/libva/archive/2.24.1/libva-2.24.1.tar.gz"
+        },
+        {
+          "name": "0001-libva-add-driver-path-relocation.patch",
+          "bytes": 1724,
+          "sha256": "1cc40ae0b25f462fa0cb4c4717ea7728e8ff0d83c13197035525ff76c0947ad3",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libva/0001-libva-add-driver-path-relocation.patch"
+        },
+        {
+          "name": "0002-libva-allow-static-library.patch",
+          "bytes": 449,
+          "sha256": "d2892f008523a24fca707b501a56141eae2aee3b2ea1d708a15cc50da6082430",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libva/0002-libva-allow-static-library.patch"
+        }
+      ],
+      "archive_prefix": "libva-2.24.1/",
+      "archive_entries": 138,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libva-2.24.1/COPYING",
+          "bytes": 1130,
+          "sha256": "c86a782ee845b52472dae9b9d79fb915d333628ac0efe49cdce63644814931de",
+          "package_notice": "mingw64/share/licenses/libva/COPYING"
+        },
+        {
+          "name": "libva-2.24.1/meson.build",
+          "bytes": 5844,
+          "sha256": "c6cdba9430fb66bf1af2a01162dce58b10d36a9b03284480a6d85860e8137d56"
+        },
+        {
+          "name": "libva-2.24.1/va/meson.build",
+          "bytes": 8017,
+          "sha256": "1e4fb7e9b11259ab4051c8731cdf65c35dbd07925347ea2922c304abc2f7c309"
+        },
+        {
+          "name": "libva-2.24.1/va/va.c",
+          "bytes": 70352,
+          "sha256": "8bd378502d975f985a03e2e10ad9a6c5cb51b66be7e9d09cd3f0325e6237376c"
+        },
+        {
+          "name": "libva-2.24.1/va/va_compat.c",
+          "bytes": 1661,
+          "sha256": "eb2c0a4deb4da6c76885725c5ff52cc9298064c3d74f57e6a049672b18e9a96e"
+        },
+        {
+          "name": "libva-2.24.1/va/va_str.c",
+          "bytes": 10394,
+          "sha256": "95f925c708816bceebb69d502928ddd3bb52013d4d806c85f7b4814fdb3f0e03"
+        },
+        {
+          "name": "libva-2.24.1/va/va_trace.c",
+          "bytes": 344421,
+          "sha256": "d1c0f3bb0124c14e8122ffbc179a63ecefb87a978656413458217b775f5dfd1d"
+        },
+        {
+          "name": "libva-2.24.1/va/va.h",
+          "bytes": 219143,
+          "sha256": "b2655844c2ccf9f67756ab75c296562dba9dd623523897f765408a85e5e80b07"
+        },
+        {
+          "name": "libva-2.24.1/va/va_internal.h",
+          "bytes": 2150,
+          "sha256": "ec1a2fe977f849544e56537f71b0096b4c48ff05a619f050524ccd98fca5c4de"
+        },
+        {
+          "name": "libva-2.24.1/va/sysdeps.h",
+          "bytes": 1803,
+          "sha256": "6548f2249b55aa35ff8004ee1aade239fd337b827b8172253aed97eab2ac0976"
+        },
+        {
+          "name": "libva-2.24.1/va/compat_win32.h",
+          "bytes": 6202,
+          "sha256": "3b05debc5f64b12659285e6a638d70f3d0a4fa74984761ab89cf0d1419c8c88f"
+        },
+        {
+          "name": "libva-2.24.1/va/win32/va_win32.c",
+          "bytes": 7734,
+          "sha256": "d0c202138d4d2d15023ecb1e7774d2c19063ac4e13784e5dc763f0c51641844f"
+        },
+        {
+          "name": "libva-2.24.1/va/win32/va_win32.h",
+          "bytes": 2861,
+          "sha256": "758597deed836f172a3f18049d545630946207081fd48a85291248c7c0f6bd41"
+        }
+      ]
+    },
     {
       "package": "mingw-w64-x86_64-fontconfig",
       "recipe_sha256": "d4e67fa58f28fdf5fe6600f8fc474a8024e7410258fbd6f607f298ce449159fc",

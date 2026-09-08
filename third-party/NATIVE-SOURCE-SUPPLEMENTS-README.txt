@@ -7,8 +7,22 @@ FreeType and gettext-runtime with mixed-license scope or secondary notices,
 and eight further library-source-first owners: libiconv, FriBidi, Game Music
 Emu, mpg123, libbluray, Graphite2, GLib and libplacebo, plus libsoxr and SRT
 and Little CMS, rav1e, libdovi, shaderc, SPIRV-Cross, Vulkan Loader,
-PCRE2, libxml2, fontconfig, HarfBuzz and libunibreak (37 owners total).
+PCRE2, libxml2, fontconfig, HarfBuzz, libunibreak, OpenSSL, OpenCL ICD Loader
+and libva (40 owners total).
 Chromaprint, OpenAL, ZVBI and GCC runtimes have separate material bundles.
+
+OpenSSL's README copyright and original AUTHORS list accompany Apache-2.0;
+its archive has no separate NOTICE file. Keep MSYS2's CC0 pathtools inputs
+and patch separately, plus original public-domain cipher credits and the
+OpenSSL-sourced CRYPTOGAMS attribution. The bundled Perl Text::Template
+license applies to that source/build tool, not automatically to DLL output.
+Source signatures are not verified; the recipe retains its .asc reference.
+OpenCL's Windows/common sources retain Khronos, Valve and LunarG attribution;
+the Apache appendix placeholders remain untouched. No standalone NOTICE is
+present. External OpenCL Headers are identified separately, not reproduced
+here. libva's original core/Windows notices retain Intel, Microsoft and Emil
+Velikov attribution, rather than inventing a copyright line in COPYING.
+Neither library material set licenses or installs an external GPU driver.
 
 PCRE2's original BSD exception and separate SLJIT license remain distinct.
 Its recipe enables JIT; the wineditline patch concerns the unbundled test

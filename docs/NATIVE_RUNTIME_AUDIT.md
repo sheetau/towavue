@@ -50,6 +50,8 @@ getterは探索を再実行せず、特定済みの72 URL/hashだけを利用す
 
 続く[font／改行dataの確認](NATIVE_FONT_DATA_AUDIT.md)で、fontconfigのCaseFolding原本はUnicode 17.0とbyte一致、HarfBuzzの生成headerは17.0、libunibreakは15.0／15.1混在と特定した。後者6 tableは元generatorから全文一致する。37-owner supplementへ3原本archive・5 recipe inputsと52文書、現行Unicode noticeを追加し、Microsoft USE MITとsource-testのOFL／Apacheを区別する。外部data入力の最終提供と個別embedded-code／NOTICEは残り、HarfBuzz全生成環境やDLL再buildの完了とは扱わない。
 
+[OpenSSL／OpenCL／libvaの表示確認](NATIVE_PLATFORM_NOTICE_AUDIT.md)では、root本文だけでは分からない作者と別条件を補完した。3原本archiveと6 patch/source inputsはrecipe hashへ対応し、62選択fileを40-owner supplementへ保持する。原文のないNOTICEやcopyright行は創作せず、OpenSSLへ追加されるCC0、生成toolとDLLの違い、libvaのcore／Windowsの両sourceを区別する。外部OpenCL Headersや残る内蔵code、配布・品質gateは継続する。
+
 15 packageにはこのlicense directory内の通常fileがない。Chromaprint／OpenALは別途sourceから補完済み。残り13件のGMP、LAME、libass、libssh、libtheora、libvorbis、libvpx、LZ4、opencore-amr、Snappy、TwoLAME、ZeroMQ、zimgについても、元recipeが指定するsource archiveとpatch/templateを取得・照合した。directoryが空というだけでlicense表示が不要とは扱わない。
 
 ### 13件のsource補完

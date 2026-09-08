@@ -1,4 +1,4 @@
-Native runtime source supplements (2026-09-08)
+Native runtime source supplements (2026-09-09)
 
 This is a preparation/audit bundle, not an approved release or complete
 corresponding-source bundle. It covers 13 package owners lacking regular
@@ -8,8 +8,17 @@ and eight further library-source-first owners: libiconv, FriBidi, Game Music
 Emu, mpg123, libbluray, Graphite2, GLib and libplacebo, plus libsoxr and SRT
 and Little CMS, rav1e, libdovi, shaderc, SPIRV-Cross, Vulkan Loader,
 PCRE2, libxml2, fontconfig, HarfBuzz, libunibreak, OpenSSL, OpenCL ICD Loader
-and libva, libjxl and libopenmpt (42 owners total).
+and libva, libjxl, libopenmpt, libpng and libwebp (44 owners total).
 Chromaprint, OpenAL, ZVBI and GCC runtimes have separate material bundles.
+
+Libpng retains its original PNG license/history, APNG patch and recipe.
+Its pngminus MIT tools and gregbook dual BSD-advertising/GPL examples are
+source-extra scope, not automatically library code. Preserve Autoconf/
+Libtool helper exceptions and original x86/filter/header-generation credits.
+Libwebp's separate PATENTS and AUTHORS accompany its BSD COPYING and actual
+WebP/SharpYUV library headers. The patent grant is limited to its own terms;
+retaining it is not blanket patent clearance. Package tools and other-target
+NEON/libvpx adaptations remain distinct from the x86-64 DLL selection.
 
 Libjxl's actual library sources identify xorshift (MIT) and Vector Class
 (Apache-2.0) adaptations. Libopenmpt's TinyFFT adaptation identifies the

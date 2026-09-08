@@ -55,11 +55,11 @@
       "description": "Current and shaderc build-time versions, complete runtime notices and unchanged source archives."
     },
     {
-      "name": "native-source-supplements-v15",
-      "files": 636,
-      "bytes": 180983078,
-      "tree_sha256": "e757574cb6351815d382890595031d001691bc5a7d33a2c354187dd598dcfb50",
-      "title": "42 native source supplements",
+      "name": "native-source-supplements-v16",
+      "files": 675,
+      "bytes": 186988193,
+      "tree_sha256": "3b3ec86604759fc5b6d51716f99a12fcae4789d20ea148a313301afacee8aefc",
+      "title": "44 native source supplements",
       "description": "Original library sources, build inputs and additional inline, data and inherited notices."
     },
     {
@@ -79,11 +79,11 @@
       "description": "MSYS2 source packages, dependency originals and compiler-builtins/libm notices."
     },
     {
-      "name": "native-shader-materials-v3",
-      "files": 181,
-      "bytes": 36724662,
-      "tree_sha256": "f37c42c15a71e44fb7e74d5bf0a3e2b84beba55d1ca921d820ef98ce01255354",
-      "title": "Shader static libraries and generated headers",
+      "name": "native-shader-materials-v4",
+      "files": 225,
+      "bytes": 37697930,
+      "tree_sha256": "4331a3e42d614f61fb304d6526ee9978f6370acf838e6a2ffeefb4a2a8e523e6",
+      "title": "Shader static libraries and API headers",
       "description": "glslang, SPIRV-Tools/Headers and Vulkan-Headers, plus libplacebo's fast_float, xxHash, glad and historical Vulkan header inputs."
     },
     {

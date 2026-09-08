@@ -28,7 +28,7 @@ packageとrecipeの既定cacheは`vendor/msys2/packages-20260908`と`vendor/msys
 
 ## 照合の範囲
 
-[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2463 files／825653227 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
+[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2546 files／832631610 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
 
 本体kitを加えたv3の集約は2460 files／724157839 bytes。これは資料のサイズであり、インストーラーのサイズではない。原本source archivesを保持するが、runtime DLL／exe／static libraryを別fileとしてコピーしない。source-onlyのtoolや他targetの条件を、本体へ一律適用する表示にはしない。
 
@@ -59,6 +59,10 @@ v7も全catalog回帰を通過し、最終2722 filesは試験outputと全hash一
 libjxl／libopenmptの別表示を加えたv8は2761 files／828134838 bytes、`FILES.json`のSHA256は`682a8c41ad65b6385e68f6614f1a89bbb1ad9eec8982ea85ccaac6050a8d9ee7`。42-owner supplement v15は636 files／180983078 bytesで、前v14の595 files（README／INPUTS以外）は不変。2 source archives、32選択fileとxorshift／Vector Class／TinyFFTの3原文表示を追加した。[内蔵code確認](NATIVE_CODEC_EMBEDDED_AUDIT.md)に使用箇所と参照版の限界を記録する。最終出力は試験生成物と全hash一致し、候補exe／94 runtime filesも不変。
 
 v8も全catalog回帰を通過し、supplementの150入力の欠落／改変pairs、追加5原文の欠落／改変・一覧除去、両ownerを含むpackage表示不整合、VCS／link除外／既存output保護を確認した。新規原文のfixtureコピー漏れは試験側で修正して再実行した。format／全target Clippy／270 testsも通過したが、3 live ignoresは未実行で、配布候補の新しいhardware試験とは数えない。
+
+libpng／libwebpとOpenCL Headersを加えたv9は2844 files／835133390 bytes、`FILES.json`のSHA256は`b2cac19054e2910ea234bbe1bb806d2f976b29bc090f7962f98b68e32b808f96`。44-owner supplement v16は675 files／186988193 bytes、10-input static/API-header kit v4は225 files／37697930 bytes。前版の634／179 files（各README／INPUTS以外）は不変で、最終3出力はそれぞれ試験生成物と全hash一致した。
+
+sourceの156入力欠落／改変pairs、headerの46 pairs・9 mapping不整合、catalogの全回帰が通過した。M0のformat／全target Clippy／270 testsも成功し、3 live ignoresは未実行。候補exeと94 runtime hashesは不変で、[画像library／API headerの原文・根拠](NATIVE_IMAGE_HEADER_NOTICE_AUDIT.md)を辿れる。次は外部dataも含むsource／noticeの最終提供を組み立てる。
 
 ## まだ残るもの
 

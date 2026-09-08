@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for 42 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources; shader compiler static/header inputs require additional review. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 44 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources; shader compiler static/header inputs require additional review. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "additional_notices": [
     {
       "scope": "Original MIT notice from the project explicitly named by libjxl's xorshift128plus-inl.h; current pinned reference, not proof of the historical adaptation revision.",
@@ -74,6 +74,223 @@
     }
   ],
   "packages": [
+    {
+      "package": "mingw-w64-x86_64-libpng",
+      "recipe_sha256": "d398f1e6ea9e549a638491308155e47e27a0953781ccce28707243f6eff29c81",
+      "files": [
+        {
+          "name": "libpng-1.6.58.tar.xz",
+          "bytes": 1070096,
+          "sha256": "28eb403f51f0f7405249132cecfe82ea5c0ef97f1b32c5a65828814ae0d34775",
+          "kind": "source",
+          "url": "https://netix.dl.sourceforge.net/project/libpng/libpng16/1.6.58/libpng-1.6.58.tar.xz"
+        },
+        {
+          "name": "apng.patch",
+          "bytes": 49195,
+          "sha256": "a9c117324291cda7558ab36bec4ba28a34013d76e1ceaf9953749791a9e154a8",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libpng/apng.patch"
+        }
+      ],
+      "archive_prefix": "libpng-1.6.58/",
+      "archive_entries": 669,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libpng-1.6.58/LICENSE",
+          "bytes": 5345,
+          "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526",
+          "package_notice": "mingw64/share/licenses/libpng/LICENSE"
+        },
+        {
+          "name": "libpng-1.6.58/AUTHORS",
+          "bytes": 1773,
+          "sha256": "0c777e9f2a67bd4058ab91050eb7a56106c92ed038ba8fe5f54c83344f2d93ca"
+        },
+        {
+          "name": "libpng-1.6.58/Makefile.am",
+          "bytes": 15570,
+          "sha256": "632abf8ef8621d3d71017fcc8dcdd23812a7998c80a6da5b5da0684407664de6"
+        },
+        {
+          "name": "libpng-1.6.58/configure.ac",
+          "bytes": 27253,
+          "sha256": "03c798af46ec01b912d6bf17d6b045ca3172fd2e7ce24de73d2e8dcd839b90e6"
+        },
+        {
+          "name": "libpng-1.6.58/png.h",
+          "bytes": 148525,
+          "sha256": "81501c268ec5c3dc79efc6ac9fddb63b22a25e4931360ddd7b29b1744d6cb6b8"
+        },
+        {
+          "name": "libpng-1.6.58/intel/intel_init.c",
+          "bytes": 1792,
+          "sha256": "4474dd4e7afdeaee470746d24af4c57134c31a7e3f511ed58df0c6717657e44e"
+        },
+        {
+          "name": "libpng-1.6.58/intel/filter_sse2_intrinsics.c",
+          "bytes": 11322,
+          "sha256": "0b41c355dc139991ebe9bb8a6979497e89228ac2576897270e306136b8f90091"
+        },
+        {
+          "name": "libpng-1.6.58/scripts/dfn.awk",
+          "bytes": 5604,
+          "sha256": "4523c2bd73bf4252e0ab731bf6ed3f09c4ffb80539a26f09b2b25f76577e5b41"
+        },
+        {
+          "name": "libpng-1.6.58/scripts/pnglibconf.dfa",
+          "bytes": 42654,
+          "sha256": "4d69c96f076935ce491f76cae75c19bde1304ebdd26083cbfe5e37995412185c"
+        },
+        {
+          "name": "libpng-1.6.58/config.guess",
+          "bytes": 50850,
+          "sha256": "50205cf3ec5c7615b17f937a0a57babf4ec5cd0aade3d7b3cccbe5f1bf91a7ef"
+        },
+        {
+          "name": "libpng-1.6.58/config.sub",
+          "bytes": 39943,
+          "sha256": "26b852f75a637448360a956931439f7e818bf63150eaadb9b85484347628d1fd"
+        },
+        {
+          "name": "libpng-1.6.58/ltmain.sh",
+          "bytes": 337554,
+          "sha256": "30712e3401deb6e6d5255c71f7bd57f374429d220cfc199ba1f2376ab42c2e35"
+        },
+        {
+          "name": "libpng-1.6.58/contrib/pngminus/LICENSE.txt",
+          "bytes": 1164,
+          "sha256": "1806f1f10d393e9e377b3a8d1b968452b54f1a90378f14eeef45426946ace330"
+        },
+        {
+          "name": "libpng-1.6.58/contrib/pngminus/png2pnm.c",
+          "bytes": 9787,
+          "sha256": "36506f105ca7f183be69b69806af44fcf8c4172b88d83c7f9efcd62e40a57b6c"
+        },
+        {
+          "name": "libpng-1.6.58/contrib/pngminus/pnm2png.c",
+          "bytes": 17957,
+          "sha256": "3aeb06045387f19372f7bc43c7de466a8633936da737e9488c43a5914af2cad8"
+        },
+        {
+          "name": "libpng-1.6.58/contrib/gregbook/LICENSE",
+          "bytes": 2373,
+          "sha256": "b6a03c1803eb58ffb1f1278d5c7d4096c4c116e66dce8a7553e8c77d163c3438"
+        },
+        {
+          "name": "libpng-1.6.58/contrib/gregbook/COPYING",
+          "bytes": 18097,
+          "sha256": "d6cb0e9e560f51085556949a84af12b79a00f10ab8b66c752537faf7cd665572"
+        },
+        {
+          "name": "libpng-1.6.58/contrib/pngexif/LICENSE_MIT.txt",
+          "bytes": 1036,
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1"
+        },
+        {
+          "name": "libpng-1.6.58/ci/LICENSE_MIT.txt",
+          "bytes": 1036,
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libwebp",
+      "recipe_sha256": "d15596f0825cbace1453462ab406b1d1ec6ac12be21d1d5655a17c22656318e1",
+      "files": [
+        {
+          "name": "libwebp-1.6.0.tar.gz",
+          "bytes": 3833512,
+          "sha256": "93a852c2b3efafee3723efd4636de855b46f9fe1efddd607e1f42f60fc8f2136",
+          "kind": "source",
+          "url": "https://github.com/webmproject/libwebp/archive/v1.6.0/libwebp-1.6.0.tar.gz"
+        },
+        {
+          "name": "0001-mingw-cmake-output.patch",
+          "bytes": 572,
+          "sha256": "30ed42b782af427f57049abada30ce6d4d62318ee13014585cb352b570c68e3d",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libwebp/0001-mingw-cmake-output.patch"
+        }
+      ],
+      "archive_prefix": "libwebp-1.6.0/",
+      "archive_entries": 364,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libwebp-1.6.0/COPYING",
+          "bytes": 1496,
+          "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+          "package_notice": "mingw64/share/licenses/libwebp/COPYING"
+        },
+        {
+          "name": "libwebp-1.6.0/PATENTS",
+          "bytes": 1436,
+          "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+        },
+        {
+          "name": "libwebp-1.6.0/AUTHORS",
+          "bytes": 3279,
+          "sha256": "f251be89fd442bd9d701360730aea163cc8e2076ff03528f59267dc2c4f8b60a"
+        },
+        {
+          "name": "libwebp-1.6.0/CMakeLists.txt",
+          "bytes": 32704,
+          "sha256": "03d5331adeeacdfff75c21eb0511a9bfbbed8c7b6f72b1ac906705177690a96a"
+        },
+        {
+          "name": "libwebp-1.6.0/src/Makefile.am",
+          "bytes": 1601,
+          "sha256": "3c58c7bdb76e230d03e2ef53d19fb8fb7ea0fc90e96fb3d5832fbc92f84187d4"
+        },
+        {
+          "name": "libwebp-1.6.0/src/webp/decode.h",
+          "bytes": 24342,
+          "sha256": "e554551d085f234e930f36b5879a77ef58bfea34c48ebfd620426e63b224025c"
+        },
+        {
+          "name": "libwebp-1.6.0/src/webp/encode.h",
+          "bytes": 28501,
+          "sha256": "928e8d3ed502baa0f47ed10913ee018ed6172afcd4f308e0ea005a126b83f27e"
+        },
+        {
+          "name": "libwebp-1.6.0/src/webp/demux.h",
+          "bytes": 16019,
+          "sha256": "9b0d10c0fa1ac2dc750c4d687b038e40a685bb9240cb045759f5b9546017361d"
+        },
+        {
+          "name": "libwebp-1.6.0/src/webp/mux.h",
+          "bytes": 25966,
+          "sha256": "c72cf593f8194c671efcade33f1678294380120d45a337511d612a3acb643f35"
+        },
+        {
+          "name": "libwebp-1.6.0/sharpyuv/sharpyuv.h",
+          "bytes": 7669,
+          "sha256": "4fcb150246232b0e8e605752deb66ca861872f86dd692308d9f854e10ad964ee"
+        },
+        {
+          "name": "libwebp-1.6.0/sharpyuv/sharpyuv.c",
+          "bytes": 21787,
+          "sha256": "c4dc476dae840f1b5e05464013e801b9c40dc26854e0223211ee927a7df65fa6"
+        },
+        {
+          "name": "libwebp-1.6.0/sharpyuv/sharpyuv_gamma.c",
+          "bytes": 13621,
+          "sha256": "9dfc66458fb25b690f9ba5e1bfef91348471b0ee019239230109ec32b5816246"
+        },
+        {
+          "name": "libwebp-1.6.0/src/dsp/dec_neon.c",
+          "bytes": 69683,
+          "sha256": "12a9552e9ab7aa3f0619f04cae9bce9009e23e82b3df86aab08e811d2af949ff"
+        },
+        {
+          "name": "libwebp-1.6.0/src/dsp/enc_neon.c",
+          "bytes": 48427,
+          "sha256": "67909f893dc3daae64691d95b1a8d642917fbdd723d6d559929cae51b7e8c238"
+        }
+      ]
+    },
     {
       "package": "mingw-w64-x86_64-libjxl",
       "recipe_sha256": "6a3f9218ac292f8dd3189cfb50b7b8fc667bfad86eee7ed5681131a0f6a95fe5",

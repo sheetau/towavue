@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "scope": "Fixed static/header and generator source materials for shaderc, Vulkan Loader and libplacebo, not additional runtime DLL owners, a linked SBOM, historical rebuild, final notices or distribution approval.",
-  "observed_on": "2026-09-08",
+  "scope": "Fixed static/API-header and generator source materials for shaderc, Vulkan Loader, libplacebo and OpenCL ICD Loader, not additional runtime DLL owners, a linked SBOM, historical rebuild, final notices or distribution approval.",
+  "observed_on": "2026-09-09",
   "package_signature_verification": {
     "key_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57",
-    "scope": "All nine original package detached signatures verified locally using the existing MSYS2 keyring. The offline collector rechecks fixed input hashes, not signatures. Original source archive signatures were not verified."
+    "scope": "All ten original package detached signatures verified locally using existing MSYS2 public keys. The offline collector rechecks fixed input hashes, not signatures. Original source archive signatures were not verified."
   },
   "limitations": [
     "GCC and GCC-libs 16.1.0-5 are recorded build inputs; existing GCC 16.2 runtime materials do not replace their static/compiler scope.",
@@ -13,6 +13,254 @@
     "Source-only tools, tests and documentation notices are retained without automatically assigning all of them to the runtime DLL."
   ],
   "components": [
+    {
+      "name": "opencl-headers",
+      "package": "mingw-w64-x86_64-opencl-headers",
+      "version": "2~2026.05.29-1",
+      "consumer": "mingw-w64-x86_64-opencl-icd",
+      "archive_prefix": "OpenCL-Headers-2026.05.29/",
+      "archive_entries": 84,
+      "internal_links": 0,
+      "package_archive": {
+        "name": "mingw-w64-x86_64-opencl-headers-2~2026.05.29-1-any.pkg.tar.zst",
+        "bytes": 51817,
+        "sha256": "511d129166c913df6220c3c2016397681e7888d396164696cbb9987472f95bc5",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-opencl-headers-2~2026.05.29-1-any.pkg.tar.zst"
+      },
+      "package_signature": {
+        "name": "mingw-w64-x86_64-opencl-headers-2~2026.05.29-1-any.pkg.tar.zst.sig",
+        "bytes": 566,
+        "sha256": "bbaccbb172f7b0071ae832b176a98dcc6aee0c3255ec98de3e3344193ad96350",
+        "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-opencl-headers-2~2026.05.29-1-any.pkg.tar.zst.sig"
+      },
+      "recipe": {
+        "name": "opencl-headers.PKGBUILD",
+        "bytes": 1233,
+        "sha256": "56b52d94bc5b3399d6d30d51e43ff9de7887667349f50de0f9621c418372749b",
+        "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-opencl-headers/PKGBUILD"
+      },
+      "source": {
+        "name": "OpenCL-Headers-2026.05.29.tar.gz",
+        "bytes": 89035,
+        "sha256": "d9e6c48357de5002da11ce45de600e0c3ffe6ab4f628a3b9fe2b38603161658a",
+        "url": "https://github.com/KhronosGroup/OpenCL-Headers/archive/v2026.05.29/OpenCL-Headers-2026.05.29.tar.gz"
+      },
+      "patches": [],
+      "package_documents": [
+        {
+          "name": ".BUILDINFO",
+          "bytes": 6683,
+          "sha256": "3f09c63c4b3656cfbb522fe91ec8a63f3426464e08ec062f4c6aff7c91bffa81"
+        },
+        {
+          "name": ".PKGINFO",
+          "bytes": 538,
+          "sha256": "9c7fd994a27607fd3e3173b03d71ca3799f0fd04f6124b2e1667de93b431a955"
+        },
+        {
+          "name": "mingw64/share/licenses/opencl-headers/LICENSE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "mingw64/include/CL/cl.h",
+          "bytes": 83360,
+          "sha256": "16d09614cd7eef73b4094089cc4ce2af777181d3ffe9613473fb6d552234a4d1"
+        },
+        {
+          "name": "mingw64/include/CL/cl_d3d10.h",
+          "bytes": 8220,
+          "sha256": "47ca717770567e558acc04a8e2c681167e0a87235a891b6ad5fa864a75fae097"
+        },
+        {
+          "name": "mingw64/include/CL/cl_d3d11.h",
+          "bytes": 8258,
+          "sha256": "8da4dde0e13bca93084c1d38a967484ead1141dcb47c3c6250a40d8c9f876b4f"
+        },
+        {
+          "name": "mingw64/include/CL/cl_dx9_media_sharing.h",
+          "bytes": 12491,
+          "sha256": "2e6d66077dd18dbe1b8650db8c22dd1bd86ef4292d11bfee7644258e5385a693"
+        },
+        {
+          "name": "mingw64/include/CL/cl_dx9_media_sharing_intel.h",
+          "bytes": 959,
+          "sha256": "3b034bd16c370cb99357a9c8ed2f49c7852c8ae443ee0b76fc425427473fc7cd"
+        },
+        {
+          "name": "mingw64/include/CL/cl_egl.h",
+          "bytes": 5812,
+          "sha256": "c196854360e46b9d59ba25488d3af060d486f78da1b01d0affef8ce23af17abb"
+        },
+        {
+          "name": "mingw64/include/CL/cl_ext.h",
+          "bytes": 166137,
+          "sha256": "fe8916fd98b739cbc47ecab387bee2d258fa939c1bd2e10415c6f8f8b7055968"
+        },
+        {
+          "name": "mingw64/include/CL/cl_ext_intel.h",
+          "bytes": 902,
+          "sha256": "045c8de39a7d44ae0509cf98665d0e9717c68aa348330bbca10587b5cc857ef1"
+        },
+        {
+          "name": "mingw64/include/CL/cl_function_types.h",
+          "bytes": 33842,
+          "sha256": "f5713f68e728dc24616c99f8c9743fa06a3602332921d8bd03afbfde6f4ab72e"
+        },
+        {
+          "name": "mingw64/include/CL/cl_gl.h",
+          "bytes": 12535,
+          "sha256": "5f3cf60a28aba775dd81fb7d49f4a62f34a706fd207ffd4992314b6ea41876ac"
+        },
+        {
+          "name": "mingw64/include/CL/cl_gl_ext.h",
+          "bytes": 905,
+          "sha256": "b5f780e38110e6b048e7192fae0b05b8937bbff94eb3d4b636b08de3667071e3"
+        },
+        {
+          "name": "mingw64/include/CL/cl_half.h",
+          "bytes": 10430,
+          "sha256": "79fe3ed77a558c985d5ac4bbc3c7e978418985dd42647ede3dc3196658554ea8"
+        },
+        {
+          "name": "mingw64/include/CL/cl_icd.h",
+          "bytes": 12421,
+          "sha256": "e9744d2239acb8757333c0ecb981aeeb9bb4688dc85a2002b36557ffd7feda5b"
+        },
+        {
+          "name": "mingw64/include/CL/cl_layer.h",
+          "bytes": 4614,
+          "sha256": "a6e9c5fa1772c3ded32c6336795bf3007da893642b62bbd1d409125be260884c"
+        },
+        {
+          "name": "mingw64/include/CL/cl_platform.h",
+          "bytes": 43562,
+          "sha256": "b125cece6fe41f2e6690d88b24652c151cb6654da13b42180d69d5bd9ed526d7"
+        },
+        {
+          "name": "mingw64/include/CL/cl_va_api_media_sharing_intel.h",
+          "bytes": 7263,
+          "sha256": "5f325f5d8f8ded5a01c90da4bce319c50a81cce138ed09c71489dda545e17d3e"
+        },
+        {
+          "name": "mingw64/include/CL/cl_version.h",
+          "bytes": 3268,
+          "sha256": "1e571dd68566330dd066cf778e07909a3cabeb2b969c5578c60f14baba7df1af"
+        },
+        {
+          "name": "mingw64/include/CL/opencl.h",
+          "bytes": 970,
+          "sha256": "f4265c90329741f8d216dfdcd952047dedd08e2582da191993bb7405b2afbc6e"
+        }
+      ],
+      "selected_documents": [
+        {
+          "name": "OpenCL-Headers-2026.05.29/LICENSE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/README.md",
+          "bytes": 5717,
+          "sha256": "616af83020bd7ba28b511753fb6fc5fa5487e977e6960b14eb58f3c3c1783a50"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CMakeLists.txt",
+          "bytes": 5033,
+          "sha256": "bbf8c44549a3c92d151445f7203ea1b433851ecfeab956033dd6511679631777"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl.h",
+          "bytes": 83360,
+          "sha256": "16d09614cd7eef73b4094089cc4ce2af777181d3ffe9613473fb6d552234a4d1"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_d3d10.h",
+          "bytes": 8220,
+          "sha256": "47ca717770567e558acc04a8e2c681167e0a87235a891b6ad5fa864a75fae097"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_d3d11.h",
+          "bytes": 8258,
+          "sha256": "8da4dde0e13bca93084c1d38a967484ead1141dcb47c3c6250a40d8c9f876b4f"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_dx9_media_sharing.h",
+          "bytes": 12491,
+          "sha256": "2e6d66077dd18dbe1b8650db8c22dd1bd86ef4292d11bfee7644258e5385a693"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_dx9_media_sharing_intel.h",
+          "bytes": 959,
+          "sha256": "3b034bd16c370cb99357a9c8ed2f49c7852c8ae443ee0b76fc425427473fc7cd"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_egl.h",
+          "bytes": 5812,
+          "sha256": "c196854360e46b9d59ba25488d3af060d486f78da1b01d0affef8ce23af17abb"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_ext.h",
+          "bytes": 166137,
+          "sha256": "fe8916fd98b739cbc47ecab387bee2d258fa939c1bd2e10415c6f8f8b7055968"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_ext_intel.h",
+          "bytes": 902,
+          "sha256": "045c8de39a7d44ae0509cf98665d0e9717c68aa348330bbca10587b5cc857ef1"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_function_types.h",
+          "bytes": 33842,
+          "sha256": "f5713f68e728dc24616c99f8c9743fa06a3602332921d8bd03afbfde6f4ab72e"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_gl.h",
+          "bytes": 12535,
+          "sha256": "5f3cf60a28aba775dd81fb7d49f4a62f34a706fd207ffd4992314b6ea41876ac"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_gl_ext.h",
+          "bytes": 905,
+          "sha256": "b5f780e38110e6b048e7192fae0b05b8937bbff94eb3d4b636b08de3667071e3"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_half.h",
+          "bytes": 10430,
+          "sha256": "79fe3ed77a558c985d5ac4bbc3c7e978418985dd42647ede3dc3196658554ea8"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_icd.h",
+          "bytes": 12421,
+          "sha256": "e9744d2239acb8757333c0ecb981aeeb9bb4688dc85a2002b36557ffd7feda5b"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_layer.h",
+          "bytes": 4614,
+          "sha256": "a6e9c5fa1772c3ded32c6336795bf3007da893642b62bbd1d409125be260884c"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_platform.h",
+          "bytes": 43562,
+          "sha256": "b125cece6fe41f2e6690d88b24652c151cb6654da13b42180d69d5bd9ed526d7"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_va_api_media_sharing_intel.h",
+          "bytes": 7263,
+          "sha256": "5f325f5d8f8ded5a01c90da4bce319c50a81cce138ed09c71489dda545e17d3e"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/cl_version.h",
+          "bytes": 3268,
+          "sha256": "1e571dd68566330dd066cf778e07909a3cabeb2b969c5578c60f14baba7df1af"
+        },
+        {
+          "name": "OpenCL-Headers-2026.05.29/CL/opencl.h",
+          "bytes": 970,
+          "sha256": "f4265c90329741f8d216dfdcd952047dedd08e2582da191993bb7405b2afbc6e"
+        }
+      ]
+    },
     {
       "name": "fast-float",
       "package": "mingw-w64-x86_64-fast_float",

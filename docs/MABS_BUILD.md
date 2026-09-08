@@ -206,6 +206,25 @@ scriptは固定HEAD・許可した差分だけを検証し、取得やpatch適�
 
 旧開発FFmpegと新隔離helperの実一覧を比較し、decoder 537、encoder 228、filter 531、demuxer 364、muxer 184、protocol 44、hardware API名9がすべて一致した。各集合で追加・欠落とも0である。hardware API名の列挙は実device動作を意味しない。次はこの候補の再現可能な構成手順、Chromaprint fingerprint／backend、全材料、MSVCアプリ統合・実再生／性能を検証し、Setup.exeへ進める。
 
+## MSVCアプリ統合とChromaprint比較
+
+2026-09-08、上記のリンク優先順位を修正したbuildから、新規prefixへ`make install`がexit 0で完了した。標準installはMSVC用`.lib`を`bin`へ置くが、固定`ffmpeg-sys-next 9.0.0`の`FFMPEG_DIR`経路は`lib`を探索する。このため7個のimport libraryを同prefixの`lib`へcopyし、元fileとSHA256一致を確認した。sourceやimport libraryの再生成・本体の依存変更は不要だった。
+
+installはFFmpeg DLLをstripするため、前節のbuild内fileのhashをそのまま使わず、install後のffmpeg／ffprobeから再びPE依存graphを取得した。94 files／137343426 bytesで、旧ARIB DLLを含まない。外部85 package DLLだけを新prefixの`bin`へcopyし、各hashを確認した。開発用prefixにはheaders、import libraries、ffplayやexamplesもあり、このdirectory全体を配布対象とする決定ではない。
+
+新prefixの`FFMPEG_DIR`と`bin` PATH、既存LLVMをprocess内で指定し、別の`CARGO_TARGET_DIR`からMSVCアプリをcompile/linkした。format、workspace全targetのClippy、268 tests（app 152／core 36／runtime 76／integration 4）が成功した。3件のlive testは未実行。hardware-preferred exportを`--nocapture`で再実行すると、Media Foundation H.264 hardware encoderを利用できずhardware assertionは明示skipだった。software fallbackと出力のdecode成功をhardware encode成功とは扱わない。
+
+検証用debugアプリのSHA256は`10197c121d4b45b10b3d7b6bedf939b37c03275511e90ffc06b3ed937d226d1a`。別cwd、PATHを新prefixのbinとSystem32だけに限定してH.264/AACの2秒fixtureを開いた。実processの6個のFFmpeg module pathがすべて新prefixを指すことを照合し、通常close後のdiagnosticはD3D11VA、hardware frames 60、CPU transfers 0、presented 60、dropped 0だった。A/V drift p95は3.401 ms、最大3.427 msだが、短いdebug試験の観測値でありperformance gateの代わりにはならない。AACのtimestamp警告は残る。画面の目視・音声の聴取・長時間再生・release版の比較はこの試験に含めない。元の開発DLLとrelease exeは変更していない。
+
+```powershell
+.\scripts\test-ffmpeg-chromaprint.ps1 -ReferenceExecutable 'path/to/reference/bin/ffmpeg.exe' `
+    -CandidateExecutable 'path/to/candidate/bin/ffmpeg.exe'
+```
+
+比較scriptは旧helperで20秒の440 Hz音、200 Hzからのlinear chirp、seed 1202のwhite noise、無音をPCM化し、その同一byte列を両helperへ渡す。11025 Hz mono／44100 Hz stereoの8条件で、algorithm 1のraw fingerprint各140 wordsが完全一致した。PATHはSystem32だけにし、各helperに隣接するDLLを使う。任意cwdでの再実行、PATH復元、同一exe指定の拒否も確認した。fixtureは毎回新規のignored directoryへ保持する。以前の単体API試験をこの結果で置き換えず、native FFmpeg経由の追加証拠とする。全入力での同値性、backendの実link由来、速度、対応source/noticeの完全性は別gateである。
+
+次は正しい全体build／staging手順の再現、packageの実link入力・対応source/noticeの確定とrelease版の媒体／性能検証を進める。helperの隣接探索はまだ実装しておらず、今回のアプリ試験も`FFMPEG_DIR`を指定している。Setup.exeや設定不要のinstall動作が確認できたとは扱わない。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。

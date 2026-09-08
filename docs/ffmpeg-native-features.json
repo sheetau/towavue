@@ -1,0 +1,267 @@
+{
+  "schema_version": 1,
+  "scope": "Native dependency preparation map, not a successful FFmpeg configure/build or redistribution approval.",
+  "ffmpeg_commit": "e47273f4d9227152dcbf543cebaf9e2430ddbcc4",
+  "baseline_config_sha256": "f895b2da6a46618e840f97ae85abf1b946cfb39b692d7642cf89a06fefedbbbc",
+  "configure_flags": [
+    "--enable-version3",
+    "--disable-debug",
+    "--enable-shared",
+    "--disable-static",
+    "--disable-w32threads",
+    "--enable-pthreads",
+    "--enable-iconv",
+    "--enable-zlib",
+    "--enable-libxml2",
+    "--enable-libvmaf",
+    "--enable-fontconfig",
+    "--enable-libharfbuzz",
+    "--enable-libfreetype",
+    "--enable-libfribidi",
+    "--enable-vulkan",
+    "--enable-libvorbis",
+    "--disable-libxcb",
+    "--disable-xlib",
+    "--disable-libpulse",
+    "--enable-gmp",
+    "--enable-lzma",
+    "--enable-liblcevc-dec",
+    "--enable-opencl",
+    "--enable-amf",
+    "--enable-libaom",
+    "--enable-libaribb24",
+    "--disable-avisynth",
+    "--enable-chromaprint",
+    "--enable-libdav1d",
+    "--disable-libdavs2",
+    "--disable-libdvdread",
+    "--disable-libdvdnav",
+    "--disable-libfdk-aac",
+    "--enable-ffnvcodec",
+    "--enable-cuda-llvm",
+    "--disable-frei0r",
+    "--enable-libgme",
+    "--enable-libkvazaar",
+    "--enable-libaribcaption",
+    "--enable-libass",
+    "--enable-libbluray",
+    "--enable-libjxl",
+    "--enable-libmp3lame",
+    "--enable-libopus",
+    "--enable-libplacebo",
+    "--enable-librist",
+    "--enable-libssh",
+    "--enable-libtheora",
+    "--enable-libvpx",
+    "--enable-libwebp",
+    "--enable-libzmq",
+    "--enable-lv2",
+    "--enable-libvpl",
+    "--enable-openal",
+    "--enable-liboapv",
+    "--enable-libopencore-amrnb",
+    "--enable-libopencore-amrwb",
+    "--enable-libopenh264",
+    "--enable-libopenjpeg",
+    "--enable-libopenmpt",
+    "--enable-librav1e",
+    "--disable-librubberband",
+    "--enable-schannel",
+    "--enable-sdl2",
+    "--enable-libsnappy",
+    "--enable-libsoxr",
+    "--enable-libsrt",
+    "--enable-libsvtav1",
+    "--enable-libtwolame",
+    "--enable-libuavs3d",
+    "--disable-libdrm",
+    "--enable-vaapi",
+    "--disable-libvidstab",
+    "--enable-libvvenc",
+    "--disable-whisper",
+    "--disable-libx264",
+    "--disable-libx265",
+    "--disable-libxavs2",
+    "--disable-libxvid",
+    "--enable-libzimg",
+    "--enable-libzvbi"
+  ],
+  "package_features": {
+    "iconv": [
+      "libiconv"
+    ],
+    "zlib": [
+      "zlib"
+    ],
+    "libxml2": [
+      "libxml2"
+    ],
+    "libvmaf": [
+      "vmaf"
+    ],
+    "fontconfig": [
+      "fontconfig"
+    ],
+    "libharfbuzz": [
+      "harfbuzz"
+    ],
+    "libfreetype": [
+      "freetype"
+    ],
+    "libfribidi": [
+      "fribidi"
+    ],
+    "vulkan": [
+      "vulkan-headers",
+      "vulkan-loader",
+      "shaderc"
+    ],
+    "libvorbis": [
+      "libvorbis"
+    ],
+    "gmp": [
+      "gmp"
+    ],
+    "lzma": [
+      "xz"
+    ],
+    "opencl": [
+      "opencl-headers",
+      "opencl-icd"
+    ],
+    "amf": [
+      "amf-headers"
+    ],
+    "libaom": [
+      "aom"
+    ],
+    "chromaprint": [
+      "chromaprint"
+    ],
+    "libdav1d": [
+      "dav1d"
+    ],
+    "ffnvcodec": [
+      "ffnvcodec-headers"
+    ],
+    "cuda-llvm": [
+      "clang"
+    ],
+    "libgme": [
+      "libgme"
+    ],
+    "libkvazaar": [
+      "kvazaar"
+    ],
+    "libaribcaption": [
+      "libaribcaption"
+    ],
+    "libass": [
+      "libass"
+    ],
+    "libbluray": [
+      "libbluray"
+    ],
+    "libjxl": [
+      "libjxl"
+    ],
+    "libmp3lame": [
+      "lame"
+    ],
+    "libopus": [
+      "opus"
+    ],
+    "libplacebo": [
+      "libplacebo"
+    ],
+    "libssh": [
+      "libssh"
+    ],
+    "libtheora": [
+      "libtheora"
+    ],
+    "libvpx": [
+      "libvpx"
+    ],
+    "libwebp": [
+      "libwebp"
+    ],
+    "libzmq": [
+      "zeromq"
+    ],
+    "lv2": [
+      "lv2",
+      "lilv"
+    ],
+    "libvpl": [
+      "libvpl"
+    ],
+    "openal": [
+      "openal"
+    ],
+    "liboapv": [
+      "openapv"
+    ],
+    "libopencore-amrnb": [
+      "opencore-amr"
+    ],
+    "libopencore-amrwb": [
+      "opencore-amr"
+    ],
+    "libopenh264": [
+      "openh264"
+    ],
+    "libopenjpeg": [
+      "openjpeg2"
+    ],
+    "libopenmpt": [
+      "libopenmpt"
+    ],
+    "librav1e": [
+      "rav1e"
+    ],
+    "sdl2": [
+      "SDL2"
+    ],
+    "libsnappy": [
+      "snappy"
+    ],
+    "libsoxr": [
+      "libsoxr"
+    ],
+    "libsrt": [
+      "srt"
+    ],
+    "libsvtav1": [
+      "svt-av1"
+    ],
+    "libtwolame": [
+      "twolame"
+    ],
+    "vaapi": [
+      "libva"
+    ],
+    "libzimg": [
+      "zimg"
+    ],
+    "libzvbi": [
+      "zvbi"
+    ]
+  },
+  "source_features": {
+    "libaribb24": "5e9be272f96e00f15a2f3c5f8ba7e124862aec38",
+    "liblcevc-dec": "a254bd474649e5dcd8182689ac414420bfe8d8c3",
+    "librist": "4f45ef8f78983892d52ccd52d9f675435b23738f",
+    "libuavs3d": "0e20d2c291853f196c68922a264bcd8471d75b68",
+    "libvvenc": "0f2e874451d6b194615e5dfefdc96796a7da00f4"
+  },
+  "rejected_package_candidates": {
+    "mingw-w64-x86_64-aribb24": "1.0.3-7 fails FFmpeg's version > 1.0.3 requirement without GPL. Retain only as a build-environment diagnostic input; use the pinned source replacement."
+  },
+  "builtin_features": [
+    "version3",
+    "shared",
+    "pthreads",
+    "schannel"
+  ]
+}

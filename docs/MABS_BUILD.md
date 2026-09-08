@@ -108,6 +108,20 @@ staged prefixにはCOPYINGとLICENSE.mdを原本byteのまま保持した。SHA2
 
 これでMABSに直接の準備処理がなかったLCEVC/LV2/VAAPIの個別準備は実証できたが、FFmpeg全体のconfigure/link・有効feature比較、実codec/filter動作、全対応source/noticeとruntime配布条件は未完了である。towavueへVAAPI再生経路やplugin機能を追加した意味ではなく、既存FFmpeg構成を維持するbuild入力として扱う。
 
+## 全feature用package集合と最初のconfigure試験
+
+2026-09-08、[ffmpeg-native-features.json](ffmpeg-native-features.json)へ元image configの全81 option（61 enable）を移した。`test-ffmpeg-native-features.ps1`は原本SHA256照合と全optionの完全一致、enableごとの準備経路と入力固定を検証する。原本がない環境では原本比較のskipを明示し、自己一致だけを原本照合成功とはしない。現時点の対応は52 package feature、5 source feature、4 built-in featureである。
+
+同じdatabase snapshotから当初のpackage候補を解決し、既存249件のhash/versionを変えず72件、154812396 compressed bytesを追加取得した。全archiveのhashと`.PKGINFO`、全detached signatureのVALIDSIG/full trustを検証し、[media入力一覧](msys2-media-inputs.json)を計86件へ拡張した。`-IncludeMediaDependencies`の現在の取得・環境test対象はbase込み321件であり、前節の14件だけを追加するmodeではない。通常CIへこの大きなpackage取得は追加しない。
+
+追加の導入処理5 fileはXML catalog、GIO module cache、GSettings schema、fontconfig cacheの更新だった。XDG cache/config/dataを専用build rootへ向け、repositoryなし・Required署名のlocal `-U --needed`で導入し正常終了した。FreeType/HarfbuzzとTIFF/WebPの依存cycle warningはあったが、導入後の全321件のname/version、database整合性・file存在を確認した。642 cache fileの再利用・欠落/改変拒否、既存native C/C++とLV2/VAAPI smokeも通過した。package依存には補助tool用も含まれるため、この集合全体をinstallerへcopyする方針ではない。
+
+Chromaprint packageのstatic archiveには`fft_lib_kissfft.cpp.obj`、`kiss_fft.c.obj`、`kiss_fftr.c.obj`があり、未解決FFTW symbolはなかった。これは前のrecipe根拠を補う実入力の確認であり、最終FFmpeg linkとfingerprint比較を代替しない。OpenH264もMSYS2 package候補を取得したが、MABSのCisco配布DLLと同じもの・同じ条件と仮定せず、最終link入力と対応材料の確認を残す。
+
+固定FFmpeg source archive（SHA256 `6491dae95e3cf3cdbac02933b55860e782b0c4f0a6bd8f37cef30fded259283c`）の全10548 entryを検査して専用rootへ展開した。元の81 optionすべてにnative mingw32/x86_64、pkg-config static指定と専用prefixだけを加え、non-login Bashから実configureを開始した。最初の停止理由は**aribb24 package 1.0.3-7が、GPL無効時の`aribb24 > 1.0.3`検査を満たさないこと**だった。configureはexit 1であり、全体build成功とはしない。後続依存の検査も完了していない。
+
+このpackageは配布候補として採用せず、環境内の診断入力として記録する。feature対応を、既存recipeの固定aribb24 source `5e9be272f96e00f15a2f3c5f8ba7e124862aec38`へ変更した。元cacheは109104 bytes、SHA256 `a39f0c4cd4b28cbaecaa8a65d93667525875ffedffba7a6f9f30eeebd542ceda`。次にその版を別prefixへbuildし、pkg-configの実選択を確認してconfigureを再試行する。`--enable-gpl`の追加や`--disable-libaribb24`で回避しない。LCEVC以外のlibrist（mbedTLSを含む）、uavs3d、vvencのnative source buildもまだ必要である。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。

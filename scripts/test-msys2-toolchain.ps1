@@ -10,7 +10,7 @@ $expectedCount = 235
 if ($IncludeMediaDependencies) {
     $media = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/msys2-media-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     $inventory.packages = @($inventory.packages) + @($media.packages)
-    $expectedCount = 249
+    $expectedCount = 321
 }
 $testDirectory = Join-Path $repositoryRoot ('target/tmp/msys2-toolchain-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testDirectory | Out-Null

@@ -126,6 +126,9 @@ foreach ($name in @('get-vc-redist-status.ps1','vc-redist-state.ps1')) { Copy-It
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'packaging/windows/prerequisite.ps1') -Destination (Join-Path $prerequisite 'scripts')
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'docs/vc-redist-inputs.json') -Destination (Join-Path $prerequisite 'docs')
 Copy-Item -LiteralPath $VcRedist -Destination (Join-Path $prerequisite 'vc_redist.x64.exe')
+$registration = Join-Path $OutputDirectory 'registration'
+New-Item -ItemType Directory -Path $registration | Out-Null
+foreach ($name in @('registration.ps1','registration-state.ps1','UnicodeShellLink.cs')) { Copy-Item -LiteralPath (Join-Path $repositoryRoot "packaging/windows/$name") -Destination $registration }
 
 $utf8 = [Text.UTF8Encoding]::new($false)
 $noticeFiles = @(Get-ChildItem -LiteralPath $licenses -File -Recurse -Force | ForEach-Object { $_.FullName.Substring($licenses.Length + 1).Replace('\','/') })
@@ -156,7 +159,7 @@ $page.Add('</ul></details></html>')
 
 $records = @(Get-ChildItem -LiteralPath $payload -File -Recurse -Force | ForEach-Object { Get-Record $_.FullName $_.FullName.Substring($payload.Length + 1).Replace('\','/') })
 $records = @($records | Sort-Object name)
-$buildSources = @('packaging/windows/setup.nsi','packaging/windows/prerequisite.ps1','scripts/build-local-setup.ps1','scripts/get-vc-redist-status.ps1','scripts/vc-redist-state.ps1','docs/setup-inputs.json','docs/nsis-inputs.json','docs/vc-redist-inputs.json')
+$buildSources = @('packaging/windows/setup.nsi','packaging/windows/prerequisite.ps1','packaging/windows/registration.ps1','packaging/windows/registration-state.ps1','packaging/windows/UnicodeShellLink.cs','scripts/build-local-setup.ps1','scripts/get-vc-redist-status.ps1','scripts/vc-redist-state.ps1','docs/setup-inputs.json','docs/nsis-inputs.json','docs/vc-redist-inputs.json')
 $sourceRecords = @($buildSources | ForEach-Object { Get-Record (Join-Path $repositoryRoot $_) $_ })
 $inventory = [ordered]@{schema_version=1;scope='Installed payload only; excludes this inventory itself, generated uninstaller and path-bound marker. Local evaluation, not release approval.';companion=$manifest.companion;companion_entries=@($companionEntries);build_sources=$sourceRecords;files=$records}
 $inventoryPath = Join-Path $licenses 'INSTALLED-FILES.json'
@@ -175,6 +178,7 @@ function Nsis-Literal([string]$Text) { return $Text.Replace('$','$$').Replace('/
 $include = [Collections.Generic.List[string]]::new()
 $include.Add('!define OWNERSHIP_ID "towavue-local-' + (Get-FileHash -LiteralPath $inventoryPath).Hash.ToLowerInvariant() + '"')
 $include.Add('!define PAYLOAD_MAX_PATH ' + (($names | ForEach-Object { $_.Length + 1 } | Measure-Object -Maximum).Maximum))
+$include.Add('!define PAYLOAD_SIZE_KIB ' + [int][Math]::Ceiling(($records | Measure-Object bytes -Sum).Sum / 1024))
 $include.Add('!macro InstallApplicationFiles')
 $lastDirectory = $null
 foreach ($name in $names) {
@@ -204,10 +208,14 @@ if ($LASTEXITCODE -ne 0) { throw 'Local application Setup compilation failed; ou
 foreach ($record in $records) { Assert-File (Join-Path $payload $record.name) $record }
 foreach ($file in $binding.files) { Assert-File $binaries[$file.name] $file }
 foreach ($record in $sourceRecords) { Assert-File (Join-Path $repositoryRoot $record.name) $record }
+foreach ($name in @('registration.ps1','registration-state.ps1','UnicodeShellLink.cs')) {
+    $record = @($sourceRecords | Where-Object { $_.name -eq "packaging/windows/$name" })[0]
+    Assert-File (Join-Path $registration $name) $record
+}
 Assert-File $SourceCompanion $manifest.companion
 Assert-File $NsisArchive $nsis.archive
 $setup = Get-Record (Join-Path $OutputDirectory 'Setup-local.exe') 'Setup-local.exe'
-$result = [ordered]@{schema_version=1;scope='Compiled only; not installed, published or approved. Update, registration and supported-Windows lifecycle are pending.';setup=$setup;payload_files=$records.Count;payload_bytes=($records | Measure-Object bytes -Sum).Sum;source_companion=$manifest.companion}
+$result = [ordered]@{schema_version=1;scope='Compiled only; not installed, published or approved. Update and supported-Windows registration/lifecycle verification are pending.';setup=$setup;payload_files=$records.Count;payload_bytes=($records | Measure-Object bytes -Sum).Sum;source_companion=$manifest.companion}
 # Completion is recorded only after compilation and final input/staging verification.
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'BUILD.json'),($result | ConvertTo-Json -Depth 6) + "`n",$utf8)
 $result | ConvertTo-Json -Depth 6

@@ -32,6 +32,10 @@ foreach ($file in $inventory.files) { $names.Add($file.name,$true); Assert-File 
 $names.Add('licenses/INSTALLED-FILES.json',$true)
 foreach ($file in $actual) { Assert-True ($names.ContainsKey($file.FullName.Substring($payload.Length + 1).Replace('\','/'))) 'Unexpected payload file.' }
 foreach ($file in $inventory.build_sources) { Assert-File (Join-Path $repositoryRoot $file.name) $file }
+foreach ($name in @('registration.ps1','registration-state.ps1','UnicodeShellLink.cs')) {
+    $record = @($inventory.build_sources | Where-Object { $_.name -eq "packaging/windows/$name" })[0]
+    Assert-File (Join-Path $BuildDirectory "registration/$name") $record
+}
 $bindingEntry = @($inventory.companion_entries | Where-Object { $_.companion -eq 'BINDING.json' })
 Assert-True ($bindingEntry.Count -eq 1) 'Missing original candidate binding.'
 $bindingPath = Join-Path $licenses $bindingEntry[0].installed
@@ -112,6 +116,18 @@ foreach ($relative in @('System32','SysWOW64')) {
     if (-not $process.WaitForExit(15000)) { throw "Read-only prerequisite still running; do not restart: PID $($process.Id), start UTC $($process.StartTime.ToUniversalTime().ToString('o'))." }
     $expected = if ($before.state -eq 'satisfied') { 0 } elseif ($before.state -eq 'required') { 10 } else { 20 }
     Assert-True ($process.ExitCode -eq $expected) 'Packaged prerequisite wrapper differs from the registry reader.'
+    $registrationWrapper = Join-Path $BuildDirectory 'registration/registration.ps1'
+    $ownership = 'towavue-local-' + (Get-FileHash -LiteralPath $inventoryPath).Hash.ToLowerInvariant()
+    $sizeKiB = [int][Math]::Ceiling($build.payload_bytes / 1024)
+    $registrationArguments = '-STA -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Mode Inspect -InstallDirectory "{1}" -OwnershipId {2} -SizeKiB {3}' -f $registrationWrapper,$payload,$ownership,$sizeKiB
+    $registrationOutput = Join-Path $trialRoot "$relative-registration.txt"
+    $process = Start-Process -FilePath $powershell -ArgumentList $registrationArguments -WorkingDirectory $trialRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $registrationOutput -RedirectStandardError (Join-Path $trialRoot "$relative-registration-error.txt")
+    [void]$process.Handle
+    if (-not $process.WaitForExit(15000)) { throw "Read-only registration still running; do not restart: PID $($process.Id), start UTC $($process.StartTime.ToUniversalTime().ToString('o'))." }
+    if ($process.ExitCode -eq 20 -and (Get-Content -LiteralPath $registrationOutput -Raw).Contains('existing registration or shortcut')) {
+        Write-Output 'SKIP: the real per-user registration destination is occupied; its read-only refusal is expected. No registration was changed.'
+    }
+    else { Assert-True ($process.ExitCode -eq 0) 'Packaged read-only registration preflight failed.' }
 }
 $after = & $readerPath -PackagePath $package | ConvertFrom-Json
 Assert-True (($before | ConvertTo-Json -Compress) -eq ($after | ConvertTo-Json -Compress)) 'Live prerequisite state changed during read-only inspection.'

@@ -105,6 +105,8 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 同日、本体入りの[local Setup評価](LOCAL_SETUP.md)を組み立てた。95実行fileと2610原本を固定hashへ照合し、短いnotice名と元pathの対応表、別source companion案内、VCのfull UI／post-check wrapperを接続する。共通fixtureの空cwd試験で判明したdrive rootの相対解決を修正した。Setupの検査は配置しないprobeと資料／一覧照合、VCは読み取り専用と16模擬ケースまでで、実アプリや共有runtimeの導入・削除は行わない。registration／shortcut／更新、隔離対象OSのlifecycle、同時提供・最終品質／owner受入と配布採用は継続する。
 
+続いてlocal Setupへ現在userだけのuninstall登録とPrograms shortcutを接続した。既存占有の拒否、payload id／pathの所有確認、変更shortcutと未知registry値の保持、使用中fileの再試行を専用GUID key／仮shortcutで検証した。WSHの日本語path拒否を実測し、Unicode Shell APIで32／64-bitの作成・読み戻しを確認。本体／VCの実導入は行わず、更新、対象OSでの登録・起動・削除、最終品質・同時提供とowner受入は継続する。
+
 2026-09-08、既存preview／保存のhelper探索だけはH1の独立した修正として先に検証する。FFMPEG_DIRによる同梱版の上書きや、不足helperをPATH上の別版で埋め合わせる動作を防ぐ。第2段階のinstaller作成・runtime採用は第1段階の監査後のままとし、helper単体の検証でそのgateを通過扱いにしない。
 
 2026-09-08、第一段階で固定開発FFmpegのChromaprint→GPL FFTW静的リンクを確認し、既存binaryを配布候補から除外した。次の配布作業は[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)の機能を保つ再buildと対応資料の確定であり、旧DLLをそのままinstallerへ組み込むことではない。KissFFT版Chromaprintの単体試験は通ったが、全体差替え・性能・再配布条件のgateは未完了。

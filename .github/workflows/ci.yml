@@ -36,6 +36,10 @@ jobs:
         shell: pwsh
         run: .\scripts\test-setup-prerequisite.ps1
 
+      - name: Verify scoped per-user registration and native shortcuts
+        shell: pwsh
+        run: .\scripts\test-setup-registration.ps1
+
   rust:
     name: Rust checks
     runs-on: windows-2022

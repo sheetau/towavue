@@ -30,7 +30,7 @@ BrandingText "Local evaluation - not a published release"
 !define MARKER_SECTION "installation"
 !define UNINSTALL_FILE "Uninstall.exe"
 !define MUI_WELCOMEPAGE_TITLE "towavue local evaluation Setup"
-!define MUI_WELCOMEPAGE_TEXT "This installs towavue and its adjacent media runtime into an empty folder.$\r$\n$\r$\nIf required, the original Microsoft Visual C++ installer will ask you to review its terms. No automatic restart or application launch follows.$\r$\n$\r$\nThis evaluation cannot update an existing installation and does not create shortcuts or application registration. Source archives are supplied separately; see the installed licenses guide."
+!define MUI_WELCOMEPAGE_TEXT "This installs towavue and its adjacent media runtime into an empty folder, with a Start menu shortcut and uninstall entry for the current user.$\r$\n$\r$\nIf required, the original Microsoft Visual C++ installer will ask you to review its terms. No automatic restart or application launch follows.$\r$\n$\r$\nThis evaluation cannot update an existing installation. Source archives are supplied separately; see the installed licenses guide."
 ; Never let the Finish page request a system restart.
 !define MUI_FINISHPAGE_NOREBOOTSUPPORT
 !else
@@ -60,6 +60,8 @@ ShowUninstDetails show
 Var PathError
 !ifdef TOWAVUE_SETUP_APPLICATION
 Var PrerequisiteResult
+Var RegistrationMode
+Var RegistrationResult
 !endif
 
 ; Both paths use the same checks. Inspect all existing ancestors, not only the leaf.
@@ -214,6 +216,27 @@ Function .onInit
 FunctionEnd
 
 !ifdef TOWAVUE_SETUP_APPLICATION
+!macro RegistrationFunction Prefix
+Function ${Prefix}Registration
+  InitPluginsDir
+  ClearErrors
+  SetOutPath "$PLUGINSDIR\registration"
+  File "${TRIAL_ROOT}\registration\registration.ps1"
+  File "${TRIAL_ROOT}\registration\registration-state.ps1"
+  File "${TRIAL_ROOT}\registration\UnicodeShellLink.cs"
+  ${If} ${Errors}
+    StrCpy $RegistrationResult 20
+    Return
+  ${EndIf}
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -STA -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\registration\registration.ps1" -Mode $RegistrationMode -InstallDirectory "$INSTDIR" -OwnershipId "${OWNERSHIP_ID}" -SizeKiB ${PAYLOAD_SIZE_KIB}'
+  Pop $RegistrationResult
+  Pop $0
+  DetailPrint "$0"
+FunctionEnd
+!macroend
+!insertmacro RegistrationFunction ""
+!insertmacro RegistrationFunction "un."
+
 Function CheckPrerequisite
   InitPluginsDir
   ClearErrors
@@ -264,6 +287,12 @@ Section "Files"
     Abort "$PathError"
   ${EndIf}
 !ifdef TOWAVUE_SETUP_APPLICATION
+  StrCpy $RegistrationMode "Inspect"
+  Call Registration
+  ${If} $RegistrationResult != 0
+    SetErrorLevel 3
+    Abort "Application registration is unavailable. No application files were installed. See details."
+  ${EndIf}
   Call CheckPrerequisite
   ; The user may spend time in the prerequisite UI. Recheck before target writes.
   Call CheckEmptyDirectory
@@ -287,7 +316,8 @@ Section "Files"
     SetErrorLevel 3
     Abort "The installation is incomplete. No completion marker was written. Retain the folder for inspection."
   ${EndIf}
-  ; Last: absence or mismatch prevents the uninstaller from deleting anything.
+  ; After payload, before registration: a failed registration can still be uninstalled.
+  ; Absence or mismatch prevents the uninstaller from deleting anything.
   ; A new Windows INI otherwise uses the ANSI code page and loses Japanese paths.
   FileOpen $0 "$INSTDIR\${MARKER_FILE}" w
   FileWriteUTF16LE /BOM $0 ""
@@ -300,6 +330,12 @@ Section "Files"
   ${EndIf}
   SetErrorLevel 0
 !ifdef TOWAVUE_SETUP_APPLICATION
+  StrCpy $RegistrationMode "Install"
+  Call Registration
+  ${If} $RegistrationResult != 0
+    SetErrorLevel 3
+    Abort "Files were installed but registration failed. See details; retain the folder or use its Uninstall.exe."
+  ${EndIf}
   ${If} $PrerequisiteResult == 3010
     SetErrorLevel 3010
   ${EndIf}
@@ -329,6 +365,14 @@ Section "Uninstall"
     SetErrorLevel 2
     Abort "The ownership marker or directory is invalid. No files were removed."
   ${EndIf}
+!ifdef TOWAVUE_SETUP_APPLICATION
+  StrCpy $RegistrationMode "VerifyRemoval"
+  Call un.Registration
+  ${If} $RegistrationResult != 0
+    SetErrorLevel 3
+    Abort "Registration ownership could not be verified. No application files were removed. See details."
+  ${EndIf}
+!endif
   ClearErrors
 !ifdef TOWAVUE_SETUP_APPLICATION
   !insertmacro RemoveApplicationFiles
@@ -341,6 +385,14 @@ Section "Uninstall"
     SetErrorLevel 3
     Abort "Some files could not be removed. Close users of those files and retry; no reboot is scheduled."
   ${EndIf}
+!ifdef TOWAVUE_SETUP_APPLICATION
+  StrCpy $RegistrationMode "Remove"
+  Call un.Registration
+  ${If} $RegistrationResult != 0
+    SetErrorLevel 3
+    Abort "Some application registration could not be removed. Retain the uninstaller and marker to retry; see details."
+  ${EndIf}
+!endif
   Delete "$INSTDIR\${UNINSTALL_FILE}"
   ${If} ${Errors}
     SetErrorLevel 3

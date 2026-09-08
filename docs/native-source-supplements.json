@@ -1,7 +1,197 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for the 13 runtime packages without package notices, excluding separately covered Chromaprint/OpenAL. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 13 runtime packages without package notices plus XZ/FreeType with mixed-license scope and secondary notices. Chromaprint/OpenAL/ZVBI have separate materials. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "packages": [
+    {
+      "package": "mingw-w64-x86_64-xz",
+      "recipe_sha256": "4a55743c0aec144772fd72c5e4a3aa25a729a359516ee0ed793c3d943a31d80d",
+      "files": [
+        {
+          "name": "xz-5.8.3.tar.xz",
+          "kind": "source",
+          "url": "https://github.com/tukaani-project/xz/releases/download/v5.8.3/xz-5.8.3.tar.xz",
+          "sha256": "fff1ffcf2b0da84d308a14de513a1aa23d4e9aa3464d17e64b9714bfdd0bbfb6",
+          "bytes": 1548064
+        }
+      ],
+      "archive_prefix": "xz-5.8.3/",
+      "archive_entries": 698,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "xz-5.8.3/COPYING",
+          "bytes": 3119,
+          "sha256": "616a3ad264ce29b8f1cb97e53037b139d406899ca8d1f799651e17bfa09830b8"
+        },
+        {
+          "name": "xz-5.8.3/COPYING.0BSD",
+          "bytes": 607,
+          "sha256": "0b01625d853911cd0e2e088dcfb743261034a091bb379246cb25a14cc4c74bf1"
+        },
+        {
+          "name": "xz-5.8.3/COPYING.GPLv2",
+          "bytes": 17984,
+          "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
+        },
+        {
+          "name": "xz-5.8.3/COPYING.GPLv3",
+          "bytes": 35149,
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+        },
+        {
+          "name": "xz-5.8.3/COPYING.LGPLv2.1",
+          "bytes": 26419,
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+        },
+        {
+          "name": "xz-5.8.3/AUTHORS",
+          "bytes": 2146,
+          "sha256": "01e6df90d71d591f4307db3f397a5a4fac93b18533f5a3862156f1a0a7dc8610"
+        },
+        {
+          "name": "xz-5.8.3/THANKS",
+          "bytes": 5194,
+          "sha256": "a6770ef50c0aaf085f43e81e42b92b916a402fa73fd52f2fdd7ac816112faf20"
+        },
+        {
+          "name": "xz-5.8.3/src/liblzma/Makefile.am",
+          "bytes": 3754,
+          "sha256": "c6dc7a6b61b169c93f1e47e30bfd24a89632c670ca952cdba00fbedcf2979221"
+        },
+        {
+          "name": "xz-5.8.3/src/liblzma/api/lzma.h",
+          "bytes": 9790,
+          "sha256": "6829350ef1ee35fae25481cc87a4f4b17c4b6c2a3df26f2b34dc1804df75c0d9"
+        },
+        {
+          "name": "xz-5.8.3/src/common/tuklib_physmem.c",
+          "bytes": 5957,
+          "sha256": "78234e95be6bb40047cb0a232805deb16e16583ceedf1cf516eee7983b526139"
+        },
+        {
+          "name": "xz-5.8.3/src/common/tuklib_cpucores.c",
+          "bytes": 2679,
+          "sha256": "e9b3aa1db52699e59b6fda107ea4ad9953d66757213e29c1f0a829eb823c38a6"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-freetype",
+      "recipe_sha256": "6b8fb0122bf6adbb608240a000aea22b7fe2c3cf2eba533155b3a9864d1511fd",
+      "files": [
+        {
+          "name": "freetype-2.14.3.tar.xz",
+          "kind": "source",
+          "url": "https://download-mirror.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+          "sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+          "bytes": 2670220
+        },
+        {
+          "name": "freetype-2.10.0-enable-valid.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-freetype/freetype-2.10.0-enable-valid.patch",
+          "sha256": "30e84993f899b66c31451992667f7ac6cc9e0b19dfe2f47ccb546d77bbc77ef5",
+          "bytes": 624
+        },
+        {
+          "name": "freetype-2.10.0-enable-spr.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-freetype/freetype-2.10.0-enable-spr.patch",
+          "sha256": "0571f18d97834df020e4cbdb1338b14f9160669f868237080951e01f5b86727c",
+          "bytes": 652
+        }
+      ],
+      "archive_prefix": "freetype-2.14.3/",
+      "archive_entries": 937,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "freetype-2.14.3/LICENSE.TXT",
+          "bytes": 2149,
+          "sha256": "bd36c8b474855fa294c2ec5c184544478ef3720aad37d65a6296a4f264fd2d3b"
+        },
+        {
+          "name": "freetype-2.14.3/docs/FTL.TXT",
+          "bytes": 6743,
+          "sha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f"
+        },
+        {
+          "name": "freetype-2.14.3/docs/GPLv2.TXT",
+          "bytes": 17994,
+          "sha256": "c4120c6752c910c299e3bd9cb3a46ff262c268303ca2069b61f92f10a5656c18"
+        },
+        {
+          "name": "freetype-2.14.3/src/bdf/README",
+          "bytes": 5972,
+          "sha256": "7984455e7e5a9faba3797c8bf095fbe10cc846316b7320aff8c58402e22b82fe"
+        },
+        {
+          "name": "freetype-2.14.3/src/pcf/README",
+          "bytes": 3311,
+          "sha256": "18d9782898d9eac04476e2f744678137b2a889689ed3e923e052fc396a86f86b"
+        },
+        {
+          "name": "freetype-2.14.3/src/base/fthash.c",
+          "bytes": 8406,
+          "sha256": "693e5a54b3ce30140975a94a3369dbe706eb1f280c69e80da426d39cc45b94ef"
+        },
+        {
+          "name": "freetype-2.14.3/include/freetype/internal/fthash.h",
+          "bytes": 4055,
+          "sha256": "023d88d49d29ecf3833db7717a3f7ae223c17ec2012bdb5bf33bb67abaf616c4"
+        },
+        {
+          "name": "freetype-2.14.3/src/gzip/zlib.h",
+          "bytes": 97499,
+          "sha256": "c86a25c27f74cb97b8fa07b175f479f063d5064ace9995b4684063643c81cf1b"
+        },
+        {
+          "name": "freetype-2.14.3/src/autofit/ft-hb-ft.c",
+          "bytes": 3315,
+          "sha256": "84dd5ddff1cec222e1755b4962faf45836238dfa3a46854dabd969eb4e50f8be"
+        },
+        {
+          "name": "freetype-2.14.3/src/autofit/ft-hb-decls.h",
+          "bytes": 5350,
+          "sha256": "ed05eec3b5657f98a0c106fa4aa2e5a4bc7f0864e5d34bd5989eee6d8b718bcf"
+        },
+        {
+          "name": "freetype-2.14.3/src/autofit/ft-hb-types.h",
+          "bytes": 4139,
+          "sha256": "f106bf7cc41f52cd70907266a74a293c57bc5f71285b01c36bf198ad8b1c6234"
+        },
+        {
+          "name": "freetype-2.14.3/src/autofit/hb-script-list.h",
+          "bytes": 19854,
+          "sha256": "0627d9f6a59a8b09e562e8aeaf414300899308725350beeb50b62b8657399576"
+        },
+        {
+          "name": "freetype-2.14.3/meson.build",
+          "bytes": 14544,
+          "sha256": "ab1f596d835fb4e49aa3b42f632d1c1d7de358857f5084f2d189599cbf29b39d"
+        },
+        {
+          "name": "freetype-2.14.3/meson_options.txt",
+          "bytes": 1698,
+          "sha256": "824f59720798ca6d02aaa927beac61d27d7a3ef2a4100a28a0b9e190b58c4305"
+        },
+        {
+          "name": "freetype-2.14.3/modules.cfg",
+          "bytes": 6490,
+          "sha256": "452446eb9dbce41b02f805b50728a6c16744f1808e32777b815d39ed2a209892"
+        },
+        {
+          "name": "freetype-2.14.3/include/freetype/config/ftoption.h",
+          "bytes": 41690,
+          "sha256": "9014bc786e9c20ef03bb12cf9e4d6f273f0da24af5b9291a88eda976325ef457"
+        },
+        {
+          "name": "freetype-2.14.3/src/gzip/ftgzip.c",
+          "bytes": 20073,
+          "sha256": "9f58df64e777c7b1b5c8692881b16a4a00087b6392658e6707cfb90650854d86"
+        }
+      ]
+    },
     {
       "package": "mingw-w64-x86_64-gmp",
       "recipe_sha256": "b9d3bb2b5b12cb0fc47c4dc17a9a2aa82513236eaefa34c8dfc57dd0d92bc42a",

@@ -2,8 +2,9 @@ Native runtime source supplements (2026-09-08)
 
 This is a preparation/audit bundle, not an approved release or complete
 corresponding-source bundle. It covers 13 package owners lacking regular
-documents under the audited package share/licenses directory. Chromaprint
-and OpenAL have separate material bundles.
+documents under the audited package share/licenses directory, plus XZ and
+FreeType with mixed-license scope or secondary notices. Chromaprint, OpenAL
+and ZVBI have separate material bundles.
 
 INPUTS.json identifies unchanged source archives, patch/template inputs and
 selected original documents. Each package directory contains its exact
@@ -13,7 +14,7 @@ records all candidate DLL identities; this supplement generator does not
 inspect or copy a live runtime, repeat package signature verification, or
 prove bit-reproducible compilation. Upstream source signatures were not
 verified; archive hashes match the package-build-matched recipes. Source
-signatures marked SKIP by the GMP/libssh recipes are not included.
+signatures marked SKIP by the GMP/libssh/XZ/FreeType recipes are not included.
 
 Keep original archives and recipes together. Patches are not applied by this
 generator: in particular, ZeroMQ's recipe applies its commit patch in REVERSE.
@@ -24,6 +25,26 @@ binary reproduction remain separate work.
 
 License scope observations (not blanket distribution approval):
 
+- XZ 5.8.3 COPYING identifies liblzma as 0BSD, separately from LGPL getopt
+  in CLI tools and GPL helper scripts. The candidate stages liblzma-5.dll,
+  not those tools. Preserve all COPYING files and the unchanged full archive;
+  do not label every file in that archive 0BSD. The selected Makefile and
+  library/common source files provide scope evidence, not compiler closure.
+  https://github.com/tukaani-project/xz/blob/v5.8.3/COPYING
+- FreeType 2.14.3 LICENSE.TXT offers FTL or GPL for the main project; the
+  planned runtime route is FTL. The candidate media runtime is based in part
+  on the work of the FreeType Team (https://freetype.org). Retain this credit
+  in the distribution documentation, and retain FTL.TXT unchanged. Source
+  changes must be identified: the two original MSYS2 patches enable gxvalid
+  and otvalid modules and subpixel rendering. Their exact bytes and the
+  recipe remain together with the unmodified source archive.
+  BDF/PCF/hash notices, gzip's zlib notice and all four HarfBuzz-derived file
+  notices are also preserved. The HarfBuzz script-list copyright years differ
+  from the other three; do not collapse them into one generic MIT notice.
+  The recipe enables available dependencies. Meson prefers system zlib and
+  the audited DLL imports zlib1.dll, but no complete static/header closure
+  is claimed. The bundled gzip header also remains source material.
+  https://github.com/freetype/freetype/blob/VER-2-14-3/LICENSE.TXT
 - GMP 6.3.0 gmp-h.in offers LGPL version 3-or-later or GPL version 2-or-later.
   The planned library route is LGPL, consistent with the version3 FFmpeg
   candidate. Keep COPYING.LESSERv3 and COPYINGv3 together; preserve the other

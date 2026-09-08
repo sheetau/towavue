@@ -44,7 +44,7 @@ getterは探索を再実行せず、特定済みの72 URL/hashだけを利用す
 
 ### 13件のsource補完
 
-[native-source-supplements.json](native-source-supplements.json)に13 source archiveと20 patch/template、計20909402 bytesを固定した。全33 inputのSHA256が対応PKGBUILDと一致する。source署名の検証ではなく、GMP/libssh recipeでSKIP指定の署名fileは含めない。取得したsourceの全member名とtypeを監査し、zimgの7個だけ存在する内部symlinkは展開しない。
+[native-source-supplements.json](native-source-supplements.json)の初回補完では13 source archiveと20 patch/template、計20909402 bytesを固定した。全33 inputのSHA256が対応PKGBUILDと一致する。source署名の検証ではなく、GMP/libssh recipeでSKIP指定の署名fileは含めない。取得したsourceの全member名とtypeを監査し、zimgの7個だけ存在する内部symlinkは展開しない。現在は下記のXZ／FreeType追加を含む15 packagesを同じscriptで扱う。
 
 47件の選択文書（license・authors・NOTICE・patent文書・GMP/LZ4の範囲確認用header/build記述）を原本byteのまま抽出する。全source、全patch/template、13 recipes、参照inventory、READMEと合わせて97 filesとなる。DLL/exeはcopyせず、recipe実行・patch適用・buildも行わない。
 
@@ -60,7 +60,17 @@ GMPの`gmp-h.in`はLGPL v3以降またはGPL v2以降の選択を明示するた
 
 libvpxの第三者文書・PATENTS、Theoraの技術声明、opencore-amrの追加NOTICEも保持する。SnappyのCOPYINGにはbenchmark dataの別条件があり、recipeがtest/benchmarkを無効にしても、丸ごとのsource archive配布条件は別途確認が必要である。ZeroMQのpatchはrecipeで逆向きに適用し、Theoraにはexport list編集もあるため、patch一覧だけをbuild手順の代わりにしない。範囲と未完了事項は同梱[README](../third-party/NATIVE-SOURCE-SUPPLEMENTS-README.txt)へ記録した。
 
-次は選択文書では拾い切れない個別header・同梱source/dataの範囲と、残るpackageのsource/patchを照合する。特にgettext、lcms2、XZ、ZVBIなどの混合license表示、FreeTypeの選択条件、GCC runtime exceptionもpackage labelだけで処理しない。
+次は選択文書では拾い切れない個別header・同梱source/dataの範囲と、残るpackageのsource/patchを照合する。gettext、lcms2、GCC runtime exceptionなどもpackage labelだけで処理しない。XZ／FreeTypeとZVBIについての後続証拠は以下へ記録する。
+
+### XZ／FreeTypeのsource・二次表示の補完
+
+元packageの`.BUILDINFO`と一致するrecipeから、XZ 5.8.3 archive（1548064 bytes／`fff1ffcf...`）、FreeType 2.14.3 archive（2670220 bytes／`36bc4f1c...`）、FreeTypeの2 patches（624／652 bytes）を取得した。4 inputsすべての全SHA256がrecipeと一致し、上記manifestへ固定した。XZの698 entriesは649通常files＋49 directories、FreeTypeの937 entriesは855通常files＋82 directoriesで、link／危険なmember名はない。source署名は未検証で、SKIP指定の署名fileは含めない。
+
+XZの11文書・scope資料とFreeTypeの17文書・source headersを追加した。元packageに収録されていたXZの5 COPYING、FreeTypeのFTL／GPL本文はすべてsource原本と同じbytes／hashであり、collectorでもこの7件を照合する。FreeTypeは[LICENSE.TXT](https://github.com/freetype/freetype/blob/0a0221a1347e2f1e07c395263540026e9a0aa7c7/LICENSE.TXT)が列挙するBDF／PCF／hash、gzip、HarfBuzz由来4 filesの原本表示も保持する。HarfBuzzのscript-listは他3 filesとcopyright年が異なる。FTLを予定する候補用のFreeType Teamへのcreditと、元patchがgxvalid／otvalid・subpixel renderingを有効にする説明を資料READMEへ追加した。原本表示やpatch本文は書き換えない。
+
+両FreeType patchは元recipeと同じ`-Nbp1`のdry-runを通過した。modules.cfgはoffset +6、ftoption.hはoffset -3／fuzz 2を報告するため、完全context一致や実build再現とは記述しない。対象は意図したmodule行とsubpixel defineであり、sourceは不変。Mesonは見つかればsystem zlibを選び、現在の`libfreetype-6.dll`も`zlib1.dll`等をimportする。DLL hash `bbb3e639...`、`liblzma-5.dll`の`dc9edb9b...`は監査baselineと再一致した。これは全static／header入力の証明ではなく、XZ付属GPL toolsの同梱やFreeType内蔵zlibの使用を推測する根拠にも用いない。
+
+現在の補完資料は15 packages、37 source／patch inputs（25128962 bytes）、75選択文書を含む131 files／26323591 bytes。新4 URLの実取得と照合、任意cwdからの2回生成、52 inputの欠落・同size改変、元package表示の欠落／変更／重複6 cases、cache timestamp・先行output保持を検証した。旧資料のREADME／INPUTS以外の95 filesは同じhashで、最終資料の全131 filesが最新test出力と一致する。範囲別の表示が揃うことと、全依存の対応source／build入力・最終候補性能・installer gateの完了は区別する。
 
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 

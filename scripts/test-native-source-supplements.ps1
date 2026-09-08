@@ -123,4 +123,36 @@ finally {
 foreach ($relative in $expected.Keys) {
     if ((Get-FileHash -LiteralPath (Join-Path $output $relative)).Hash -ne $expected[$relative]) { throw 'Existing output was changed.' }
 }
-Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, cached-input/download and output preservation."
+
+# Source supplements with existing package notices must preserve their original bytes too.
+$fixtureRepository = Join-Path $testDirectory 'repository'
+foreach ($name in @('scripts/prepare-native-source-supplements.ps1', 'docs/native-source-supplements.json',
+    'docs/native-runtime-recipes.json', 'docs/native-runtime-package-audit.json')) {
+    $path = Join-Path $fixtureRepository $name
+    New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot $name) -Destination $path
+}
+$generator = Join-Path $fixtureRepository 'scripts/prepare-native-source-supplements.ps1'
+$manifestPath = Join-Path $fixtureRepository 'docs/native-source-supplements.json'
+$manifestBytes = [IO.File]::ReadAllBytes($manifestPath)
+$encoding = [Text.UTF8Encoding]::new($false)
+$arguments = @{ OutputDirectory = $rejectedOutput; CacheDirectory = $CacheDirectory; RecipeDirectory = $RecipeDirectory }
+foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype')) {
+    foreach ($kind in @('missing', 'different', 'duplicate')) {
+        $changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
+        $package = $changed.packages | Where-Object { $_.package -eq $packageName }
+        $notice = $package.selected_documents | Where-Object { $_.name -match '/(COPYING|docs/FTL.TXT)$' }
+        switch ($kind) {
+            'missing' { $package.selected_documents = @($package.selected_documents | Where-Object { $_.name -ne $notice.name }) }
+            'different' { $notice.sha256 = '0' * 64 }
+            'duplicate' { $package.selected_documents = @($package.selected_documents) + $notice }
+        }
+        [IO.File]::WriteAllText($manifestPath, ($changed | ConvertTo-Json -Depth 10), $encoding)
+        try {
+            Assert-Rejected $arguments 'Source supplement does not retain audited package notice:*'
+            if (Test-Path -LiteralPath $rejectedOutput) { throw 'Notice mismatch created output.' }
+        }
+        finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
+    }
+}
+Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, six package-notice mismatches, cached-input/download and output preservation."

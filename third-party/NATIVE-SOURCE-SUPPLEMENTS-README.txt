@@ -5,7 +5,8 @@ corresponding-source bundle. It covers 13 package owners lacking regular
 documents under the audited package share/licenses directory, plus XZ,
 FreeType and gettext-runtime with mixed-license scope or secondary notices,
 and eight further library-source-first owners: libiconv, FriBidi, Game Music
-Emu, mpg123, libbluray, Graphite2, GLib and libplacebo (24 owners total).
+Emu, mpg123, libbluray, Graphite2, GLib and libplacebo, plus libsoxr and SRT
+(26 owners total).
 Chromaprint, OpenAL and ZVBI have separate material bundles.
 
 INPUTS.json identifies unchanged source archives, patch/template inputs and
@@ -15,7 +16,15 @@ native-runtime-package-audit.json and native-runtime-recipes.json. The audit
 records all candidate DLL identities; this supplement generator does not
 inspect or copy a live runtime, repeat package signature verification, or
 prove bit-reproducible compilation. Upstream source signatures were not
-verified; archive hashes match the package-build-matched recipes. Source
+verified; downloaded archive hashes match the package-build-matched recipes.
+Libsoxr is the exception: its recipe pins a Git commit but skips an archive
+checksum. Its locally generated tar hash is our archive pin, not an upstream
+recipe checksum. Obtain the exact recipe repository/commit, run the recorded
+archive_command with core.autocrlf=false, and place that tar in the libsoxr
+cache directory before collection. Even Download will not fetch it as HTTP.
+The audited tar's 137 regular files match their Git blob IDs, with one safe
+internal helper link retained only in the archive; no submodules are present.
+Source
 signatures marked SKIP by the GMP/libssh/XZ/FreeType/gettext recipes are not
 included.
 
@@ -28,6 +37,23 @@ binary reproduction remain separate work.
 
 License scope observations (not blanket distribution approval):
 
+- libsoxr 0.1.3 LICENCE permits LGPL 2.1-or-later and specifically points to
+  embedded PFFFT terms. The matched recipe enables PFFFT and OpenMP on x64,
+  disables AVFFT, and builds both shared/static libraries and LSR bindings.
+  The candidate stages libsoxr.dll only. Preserve original NCAR/UCAR/Pommier
+  attribution in LICENSE-PFFFT (a separate recipe input/package notice),
+  pffft.c/h, Ooura's fft4g.c notice, LGPL text, authors and build descriptions.
+  GPL lsr-tests source remains in the original archive, not a runtime claim.
+  Both original patches stay unchanged. Git object/byte binding is not a
+  new build, signature check or proof of every compiler/static input.
+- SRT 1.5.7 retains its MPL 2.0 LICENSE, original source and sole Windows
+  compatibility-header patch. srtcore/core.h also contains the University
+  of Illinois notice; preserve it rather than substituting MPL alone.
+  The exact recipe selects OpenSSL and builds shared/static variants.
+  Its internal srt-ffplay link is not extracted. Complete source access
+  instructions, per-file attribution and linked dependency scope remain
+  necessary before distribution.
+  https://github.com/Haivision/srt/blob/v1.5.7/LICENSE
 - The eight additional packages retain their original source archives and
   all 16 checksum-bound patches/templates/hooks/scripts with exact recipes.
   Package notices map to original source bytes; libiconv's two identical

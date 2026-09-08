@@ -94,6 +94,16 @@ archiveのmember名とtypeを確認し、GLibのCOPYINGとgmodule/COPYINGだけ�
 
 最新補完資料`native-source-supplements-v5`は24 owners、68 inputs／64709611 bytes、150選択文書、計246 files／67179202 bytes。元153-file資料のREADME／INPUTS以外の151 filesはhash不変。新24 URLの取得・照合、任意cwd／再生成の全hash、92 inputの欠落／同size改変、表示不一致12 cases、GLib link非展開と既存cache／output保持を確認した。最初のGLib異常系fixtureは同名COPYINGを複数選んだため失敗し、対象package pathを明示して全試験を再実行した。収集の完了を配布承認や全対応sourceの完了にはしない。[残作業](NATIVE_MATERIAL_PLAN.md)ではlibsoxrのVCS source対応、SRT、GCC、static/header/data表示と最終候補／installerのgateを維持する。
 
+### libsoxrのVCS sourceとSRT資料
+
+libsoxr 0.1.3-5の元recipeは[上流Git repository](https://sourceforge.net/p/soxr/code/)のcommit `945b592b70470e29f917f4de89b4281fbbd540c0`を指定し、source checksumはSKIPする。上流からbare repositoryを取得し、`core.autocrlf=false`と固定prefixでtarを生成した。675840 bytes／SHA256 `c7b08bf2c943c9e3dc51021790529f51be2cdfd40923b815f9135edcbbf9f46c`は今回のarchive pinであり、元recipeのarchive checksumではない。137通常filesのGit blob IDsは全一致し、10 directoriesと内部helper link 1件を含む。submoduleはない。最初の全展開はWindowsでlink作成が失敗したため診断用に保持し、fresh directoryで通常fileのみを選択して照合した。配布用資料でもlinkは展開しない。
+
+元の2 patchesと別入力LICENSE-PFFFTはrecipe checksumと一致する。LICENCEはLGPL 2.1以降とPFFFTの別表示を明記する。候補のlibsoxr.dllは監査hash不変で、元recipeはPFFFT／x64 OpenMPを有効、AVFFTを無効にする。PFFFTのNCAR／UCAR／Pommier、Oouraのfft4g、作者・LGPL原文とbuild記述を保持した。GPLのlsr-testsをsource archiveに残すことは、候補DLLへの組込みを示すものではない。
+
+SRT 1.5.7の[元archive](https://github.com/Haivision/srt/archive/v1.5.7/srt-1.5.7.tar.gz)は1794204 bytes／`017cd1e4...`、唯一のWindows互換header patchもrecipeと一致する。334通常files／33 directories／内部helper link 1件。元LICENSEのMPL 2.0本文だけでなく、srtcore/core.hのUniversity of Illinois継承表示、HaiCrypt headerとbuild記述を保持する。対応recipeはOpenSSLを選び、現候補DLLのhashもbaseline不変。patch適用・独立再build・全file表示の完了やsource署名検証は主張しない。
+
+既存collectorに、recipeの正確なVCS URL／commitとローカルarchive pinの照合、別recipe入力のpackage notice対応を追加した。VCS tarは記録したcommandで事前準備し、Download指定でもHTTP扱いで取得しない。最新`native-source-supplements-v6`は26 owners、74 inputs／67185008 bytes、165選択文書、269 files／70006200 bytesで、前資料のREADME／INPUTS以外の244 filesはhash不変。取得済みのlibrary-source優先群は17件、MPL群は2件となるが、GCC／LCMS／static／header／dataと公開source取得案内、最終候補性能・installer・対象Windowsのgateは未完了である。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

@@ -40,6 +40,9 @@ try {
         foreach ($relative in @('glib-2.88.3/COPYING', 'glib-2.88.3/gmodule/COPYING')) {
             if (Test-Path -LiteralPath (Join-Path $output ('mingw-w64-x86_64-glib2/' + $relative))) { throw 'GLib source symlink was materialized.' }
         }
+        foreach ($relative in @('mingw-w64-x86_64-libsoxr/libsoxr-0.1.3/inst-check-soxr-lsr', 'mingw-w64-x86_64-srt/srt-1.5.7/srt-ffplay')) {
+            if (Test-Path -LiteralPath (Join-Path $output $relative)) { throw 'Source helper symlink was materialized.' }
+        }
     }
 }
 finally { Pop-Location }
@@ -107,7 +110,7 @@ foreach ($path in $paths) {
 }
 
 # A late corrupt input must stop Download before an earlier missing input is fetched.
-$first = $paths[0]
+$first = Join-Path $fixtureCache 'mingw-w64-x86_64-libsoxr/0001-libsoxr-fix-pkgconfig-file.patch'
 $last = $paths[-1]
 Move-Item -LiteralPath $first -Destination ($first + '.saved')
 $original = [IO.File]::ReadAllBytes($last)
@@ -126,6 +129,14 @@ finally {
 foreach ($relative in $expected.Keys) {
     if ((Get-FileHash -LiteralPath (Join-Path $output $relative)).Hash -ne $expected[$relative]) { throw 'Existing output was changed.' }
 }
+$vcsPath = Join-Path $fixtureCache 'mingw-w64-x86_64-libsoxr/libsoxr-0.1.3-git.tar'
+Move-Item -LiteralPath $vcsPath -Destination ($vcsPath + '.saved')
+try {
+    Assert-Rejected $arguments 'Missing source supplement input:*'
+    if (Test-Path -LiteralPath $vcsPath) { throw 'Download retrieved a VCS input as an HTTP archive.' }
+    if (Test-Path -LiteralPath $rejectedOutput) { throw 'Missing VCS input created output.' }
+}
+finally { Move-Item -LiteralPath ($vcsPath + '.saved') -Destination $vcsPath }
 
 # Source supplements with existing package notices must preserve their original bytes too.
 $fixtureRepository = Join-Path $testDirectory 'repository'
@@ -177,4 +188,36 @@ foreach ($kind in @('missing-map', 'wrong-map', 'duplicate')) {
     }
     finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
 }
-Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, twelve package-notice mismatches, GLib symlink exclusion, cached-input/download and output preservation."
+foreach ($kind in @('missing', 'different', 'duplicate')) {
+    $changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
+    $package = $changed.packages | Where-Object { $_.package -eq 'mingw-w64-x86_64-libsoxr' }
+    $notice = $package.files | Where-Object { $_.name -eq 'LICENSE-PFFFT' }
+    switch ($kind) {
+        'missing' { $notice.package_notice = $null }
+        'different' { $notice.sha256 = '0' * 64 }
+        'duplicate' { $package.files = @($package.files) + $notice }
+    }
+    [IO.File]::WriteAllText($manifestPath, ($changed | ConvertTo-Json -Depth 10), $encoding)
+    try {
+        Assert-Rejected $arguments 'Source supplement does not retain audited package notice:*'
+        if (Test-Path -LiteralPath $rejectedOutput) { throw 'Build-input notice mismatch created output.' }
+    }
+    finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
+}
+foreach ($kind in @('commit', 'url', 'kind')) {
+    $changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
+    $package = $changed.packages | Where-Object { $_.package -eq 'mingw-w64-x86_64-libsoxr' }
+    $source = $package.files | Where-Object { $_.kind -eq 'source' }
+    switch ($kind) {
+        'commit' { $source.vcs_commit = '0' * 40 }
+        'url' { $source.url = $source.url.Replace('git.code.sf.net', 'example.invalid') }
+        'kind' { $source.kind = 'build-input' }
+    }
+    [IO.File]::WriteAllText($manifestPath, ($changed | ConvertTo-Json -Depth 10), $encoding)
+    try {
+        Assert-Rejected $arguments 'Recipe does not identify the pinned VCS source.'
+        if (Test-Path -LiteralPath $rejectedOutput) { throw 'VCS recipe mismatch created output.' }
+    }
+    finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
+}
+Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, fifteen package-notice mismatches, three VCS mapping cases, source symlink exclusion, cached-input/download and output preservation."

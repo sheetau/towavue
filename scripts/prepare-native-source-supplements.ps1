@@ -14,7 +14,7 @@ $auditPath = Join-Path $repositoryRoot 'docs/native-runtime-package-audit.json'
 $inventory = Get-Content -LiteralPath $inventoryPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $recipes = Get-Content -LiteralPath $recipePath -Raw -Encoding UTF8 | ConvertFrom-Json
 $audit = Get-Content -LiteralPath $auditPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($inventory.schema_version -ne 1 -or $inventory.packages.Count -ne 24) { throw 'Incomplete source supplement inventory.' }
+if ($inventory.schema_version -ne 1 -or $inventory.packages.Count -ne 26) { throw 'Incomplete source supplement inventory.' }
 if (-not $CacheDirectory) { $CacheDirectory = Join-Path $repositoryRoot 'vendor/msys2/source-supplements-20260908' }
 if (-not $RecipeDirectory) { $RecipeDirectory = Join-Path $repositoryRoot 'vendor/msys2/runtime-recipes-20260908' }
 $CacheDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($CacheDirectory)
@@ -43,7 +43,8 @@ foreach ($package in $inventory.packages) {
         throw "Stale source supplement mapping: $($package.package)"
     }
     foreach ($notice in $owner[0].package_notices) {
-        $matching = @($package.selected_documents | Where-Object {
+        $noticeInputs = @($package.selected_documents) + @($package.files | Where-Object { $_.package_notice -and $_.kind -eq 'build-input' })
+        $matching = @($noticeInputs | Where-Object {
             $_.bytes -eq $notice.bytes -and $_.sha256 -eq $notice.sha256 -and
             (-not $_.package_notice -or $_.package_notice -eq $notice.name)
         })
@@ -53,9 +54,18 @@ foreach ($package in $inventory.packages) {
     Assert-Input $path $recipe[0]
     $recipeText = Get-Content -LiteralPath $path -Raw -Encoding UTF8
     foreach ($file in $package.files) {
-        if (-not $recipeText.Contains($file.sha256)) { throw "Recipe does not identify supplement checksum: $($file.name)" }
         $path = Join-Path (Join-Path $CacheDirectory $package.package) $file.name
-        if (-not $Download -or (Test-Path -LiteralPath $path)) { Assert-Input $path $file }
+        if ($file.vcs_commit) {
+            if ($file.kind -ne 'source' -or $file.vcs_commit -notmatch '^[a-f0-9]{40}$' -or
+                $file.url -notmatch ('^git\+https://[^#]+#commit=' + $file.vcs_commit + '$') -or
+                -not $recipeText.Contains('"' + $file.url + '"')) { throw 'Recipe does not identify the pinned VCS source.' }
+            # VCS archives are prepared locally with the recorded Git command, never fetched as HTTP files.
+            Assert-Input $path $file
+        }
+        else {
+            if (-not $recipeText.Contains($file.sha256)) { throw "Recipe does not identify supplement checksum: $($file.name)" }
+            if (-not $Download -or (Test-Path -LiteralPath $path)) { Assert-Input $path $file }
+        }
     }
 }
 foreach ($package in $inventory.packages) {
@@ -92,7 +102,7 @@ foreach ($package in $inventory.packages) {
     $source = @($package.files | Where-Object { $_.kind -eq 'source' })
     if ($source.Count -ne 1) { throw 'Expected one pinned source archive per supplement.' }
     # Only fixed regular members of the hash-verified original archive are selected.
-    # Internal zimg/GLib symlinks stay inside the preserved archives and are not extracted.
+    # Internal source symlinks stay inside the preserved archives and are not extracted.
     & $tar -xf (Join-Path $directory $source[0].name) -C $directory @($package.selected_documents.name)
     if ($LASTEXITCODE -ne 0) { throw "Source supplement document extraction failed: $($package.package)" }
     foreach ($document in $package.selected_documents) { Assert-Input (Join-Path $directory $document.name) $document }

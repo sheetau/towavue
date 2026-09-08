@@ -1,7 +1,152 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for 24 runtime package owners, including eight additional library-source-first packages. Chromaprint/OpenAL/ZVBI have separate materials. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 26 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI have separate materials. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "packages": [
+    {
+      "package": "mingw-w64-x86_64-libsoxr",
+      "recipe_sha256": "6778f60a0458a04a323015ff71dd04a37e15a154649d9e0523e347555c645aa1",
+      "files": [
+        {
+          "name": "libsoxr-0.1.3-git.tar",
+          "kind": "source",
+          "url": "git+https://git.code.sf.net/p/soxr/code#commit=945b592b70470e29f917f4de89b4281fbbd540c0",
+          "sha256": "c7b08bf2c943c9e3dc51021790529f51be2cdfd40923b815f9135edcbbf9f46c",
+          "bytes": 675840,
+          "vcs_commit": "945b592b70470e29f917f4de89b4281fbbd540c0",
+          "archive_command": "git -c core.autocrlf=false archive --format=tar --prefix=libsoxr-0.1.3/ --output libsoxr-0.1.3-git.tar 945b592b70470e29f917f4de89b4281fbbd540c0"
+        },
+        {
+          "name": "0001-libsoxr-fix-pkgconfig-file.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/c2510aad3e0885c3e66af0f768690bd0fc6c0d8a/mingw-w64-libsoxr/0001-libsoxr-fix-pkgconfig-file.patch",
+          "sha256": "77c45009fd5b84b56c8b0b5a90dcc6a093d129e571d13afc086c7dfe02c2be96",
+          "bytes": 2482
+        },
+        {
+          "name": "0002-libsoxr-fix-documentation-installation.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/c2510aad3e0885c3e66af0f768690bd0fc6c0d8a/mingw-w64-libsoxr/0002-libsoxr-fix-documentation-installation.patch",
+          "sha256": "7c16beb3898279db96b09b365c069071b371a1022f0baf12bb3da9d45d387fdf",
+          "bytes": 447
+        },
+        {
+          "name": "LICENSE-PFFFT",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/c2510aad3e0885c3e66af0f768690bd0fc6c0d8a/mingw-w64-libsoxr/LICENSE-PFFFT",
+          "sha256": "a9f3d236f3c14a41a1293f176d4c7c46d85404403417fcb8df6d6c9707104e42",
+          "bytes": 2122,
+          "package_notice": "mingw64/share/licenses/libsoxr/LICENSE-PFFFT"
+        }
+      ],
+      "archive_prefix": "libsoxr-0.1.3/",
+      "archive_entries": 148,
+      "internal_links": 1,
+      "selected_documents": [
+        {
+          "name": "libsoxr-0.1.3/LICENCE",
+          "bytes": 1024,
+          "sha256": "dc98676341fdcd29d9f279c9679d6a75288785b174ded8d1b2e316c366166135",
+          "package_notice": "mingw64/share/licenses/libsoxr/LICENSE"
+        },
+        {
+          "name": "libsoxr-0.1.3/COPYING.LGPL",
+          "bytes": 26432,
+          "sha256": "f2f118b9029ec1871b953639ecc46651b2fc7b62e295e6cf3ef2ac4c9a058b33",
+          "package_notice": "mingw64/share/licenses/libsoxr/COPYING.LGPL"
+        },
+        {
+          "name": "libsoxr-0.1.3/AUTHORS",
+          "bytes": 39,
+          "sha256": "e5d53cd6c716dfeabe47a9f3613a8c6815aa4a67f0f77900787c59445396aeff"
+        },
+        {
+          "name": "libsoxr-0.1.3/README",
+          "bytes": 2866,
+          "sha256": "c3d94aa8237daeb4e6bd5b6555b72bf5cf1fbe9319f5980fd5362cdc5982f90e"
+        },
+        {
+          "name": "libsoxr-0.1.3/CMakeLists.txt",
+          "bytes": 10112,
+          "sha256": "7af671e1282cee7140f2f85ec37d607468bf80c1d90d439340169bd80e308198"
+        },
+        {
+          "name": "libsoxr-0.1.3/src/CMakeLists.txt",
+          "bytes": 3705,
+          "sha256": "a259ff8e724b5ac6fa1f8dd217de276cb791145b63dbb7e9933d34d91c1a744b"
+        },
+        {
+          "name": "libsoxr-0.1.3/src/pffft.c",
+          "bytes": 67826,
+          "sha256": "2949635f6107983832a7fcb6b7a539b43022fdd64d6cc01904ff5f7d792bb4c4"
+        },
+        {
+          "name": "libsoxr-0.1.3/src/pffft.h",
+          "bytes": 7013,
+          "sha256": "98df5afd0529f0be91c5308bd4b5296454df565d4a50eaa042b477b4d8d796d7"
+        },
+        {
+          "name": "libsoxr-0.1.3/src/fft4g.c",
+          "bytes": 37406,
+          "sha256": "604e71c0dcebe1922f718f43077ccebf588c770aa76e37d28b70cbefbaa2eca1"
+        },
+        {
+          "name": "libsoxr-0.1.3/lsr-tests/COPYING",
+          "bytes": 17992,
+          "sha256": "32b1062f7da84967e7019d01ab805935caa7ab7321a7ced0e30ebe75e5df1670"
+        }
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-srt",
+      "recipe_sha256": "d19531282e69ec583125a645bbd9e3d3638ff7a323a58bf138421d7a063b7694",
+      "files": [
+        {
+          "name": "srt-1.5.7.tar.gz",
+          "kind": "source",
+          "url": "https://github.com/Haivision/srt/archive/v1.5.7/srt-1.5.7.tar.gz",
+          "sha256": "017cd1e437ef2073a4dd10ddf7b55e86bc3d6ebac0393d13bd22f6a57055d32b",
+          "bytes": 1794204
+        },
+        {
+          "name": "0006-no-msvc-compat-headers.patch",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-srt/0006-no-msvc-compat-headers.patch",
+          "sha256": "18af8a55e898b12074e797a212eda5e6f3c935dcc37745eb97a60591e80ab64e",
+          "bytes": 302
+        }
+      ],
+      "archive_prefix": "srt-1.5.7/",
+      "archive_entries": 368,
+      "internal_links": 1,
+      "selected_documents": [
+        {
+          "name": "srt-1.5.7/LICENSE",
+          "bytes": 16726,
+          "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85",
+          "package_notice": "mingw64/share/licenses/srt/LICENSE"
+        },
+        {
+          "name": "srt-1.5.7/README.md",
+          "bytes": 18584,
+          "sha256": "027906b0bc361e031fb75cef8f6688b3bd367a1f35fbb8bce72d3cd478791c86"
+        },
+        {
+          "name": "srt-1.5.7/CMakeLists.txt",
+          "bytes": 57435,
+          "sha256": "30731305bb2e43ce0ff6dd4209318e8f687d713e65160a1405cb0e476d37e900"
+        },
+        {
+          "name": "srt-1.5.7/haicrypt/hcrypt.h",
+          "bytes": 6922,
+          "sha256": "9ff39d036ecc5db745f759ea3c959f07f4b1693db4ce0d03f4994438a24a93b7"
+        },
+        {
+          "name": "srt-1.5.7/srtcore/core.h",
+          "bytes": 64345,
+          "sha256": "1d167e4b3e56ea9eac21aaa620168d558fffa7e57a4304e1946ab47eb5d5cd09"
+        }
+      ]
+    },
     {
       "package": "mingw-w64-x86_64-libiconv",
       "recipe_sha256": "9b3212d06910560fb59e017e0b73a29d392a5082d3a47a613e61509bd7dcd475",

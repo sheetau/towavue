@@ -24,9 +24,9 @@
 
 LGPL優先17件: chromaprint、fribidi、gettext-runtime、glib2、gmp、graphite2、lame、libbluray、libgme、libiconv、libplacebo、libsoxr、libssh、mpg123、openal、twolame、zvbi。
 
-このうちlibsoxr以外の16件はsource archive・patch・選択表示を取得済み（zvbiは限定buildの別資料）。**取得済みは配布条件の完了ではない。** libsoxrはrecipeがchecksumをSKIPするVCS入力を使うため、任意のrelease tarballで代用せず、指定commitとsourceの対応を次に固定する。Graphite2の原本にはSIL由来部分の複数license選択があり、この優先群はLGPL-only認定ではない。FriBidiのUnicode data、libblurayのlibudfread、libplaceboのstatic/header/generated入力などの範囲確認も残る。
+17件ともsource archive・patch・選択表示を取得済み（zvbiは限定buildの別資料）。**取得済みは配布条件の完了ではない。** libsoxrはrecipeがchecksumをSKIPするVCS入力のため、指定commitから生成したtarを独自にhash固定し、通常file全137件をGit blobと照合した。PFFFTの別条件も保持する。Graphite2の原本にはSIL由来部分の複数license選択があり、この優先群はLGPL-only認定ではない。FriBidiのUnicode data、libblurayのlibudfread、libplaceboのstatic/header/generated入力などの範囲確認も残る。
 
-MPL群はsrtとzeromqで、zeromqのsource／逆向きpatchは取得済み、srtは未整備。GCC群はgcc-libsで、実graphのlibgcc／libstdc++／libgompを対象とする。未同梱のlibquadmathを同じ扱いで加えない。
+MPL群はsrtとzeromqで、両方のsource／patchを取得済み。ZeroMQの逆向きpatchと、SRTのUniversity of Illinois継承表示を保持し、取得案内と個別範囲の確認を続ける。次のsource優先対象はGCC群のgcc-libsで、実graphのlibgcc／libstdc++／libgompを対象とする。未同梱のlibquadmathを同じ扱いで加えない。
 
 混合scope群はfreetype、lcms2、lz4、xz。freetype／lz4／xzの原本材料は取得済み。lcms2はfast_floatのlink引数と未使用を示唆するsymbol証拠までで、全組込み範囲の確認は未完了。
 

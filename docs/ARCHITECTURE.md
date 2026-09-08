@@ -444,6 +444,8 @@ waveformはFFmpegからmono S16 PCMを逐次受け取り、runtimeで平均絶�
 
 grid menuは既存のcommand registryだけをdispatchし、画像・動画・音声ごとの16 commandを`%APPDATA%\towavue\grid.conf`に保持する。cell順は物理keyの`1234/qwer/asdf/zxcv`と固定してclickとkey入力を一致させる。表示・非表示には短いopacity transitionだけを使い、media操作の意味を持つanimationは追加しない。
 
+H1の起動時はshortcut／grid設定の読込・parse・初回保存に失敗しても、その設定だけをmemory内の既定値へ戻してwindowを開く。失敗したpathと理由、既定値使用、原本を修正してReloadできることを一回のnative OK警告で知らせる。既存fileを修復・上書きせず、片方の有効な設定は保持する。明示Reloadは従来どおり失敗した設定の現在値を保持し、起動時fallbackを再適用しない。APPDATA自体の欠落やgraphics／worker初期化の失敗まで隠す規則ではない。
+
 grid入力はwinit PhysicalKeyのDigit1～4とKeyQ/W/E/R/A/S/D/F/Z/X/C/Vへ対応させ、logical文字やIME確定文字を位置として使わない。Shift/Capsによる文字変化は位置を変えず、Ctrl/Alt/Super付きは通常shortcut側へ渡す。gridの対象keyはeguiのfocus処理より先に扱うが、palette・modal中は横取りしない。paletteを開いたらgridを閉じ、入力欄へ集中させる。keyboard layout・OS IME設定は変更しない。
 
 gridの4列・4行は表示領域から求めた同じcell寸法に固定し、長いcommand名で列を拡張しない。keyと名称はcell内の行数で折返し・省略し、無効項目もhoverで全文を示す。高さが小さいcellではfontを11pxにしてkeyと名称の2行を保つ。設定pathも幅制限付き省略と全文tooltipを使う。通常cellの110×52 logical pxを上限とし、小さいwindowやUI拡大時は縮める。clickもkeyと同様に一回実行して閉じ、fade-out中のcell入力は無効にする。command配置・shortcut・有効条件は変更しない。

@@ -1,29 +1,39 @@
 use std::fs;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 
 pub fn load() -> Result<(ShortcutBindings, PathBuf), String> {
     let path = config_path()?;
+    load_from(&path).map(|bindings| (bindings, path))
+}
+
+pub fn load_from(path: &Path) -> Result<ShortcutBindings, String> {
     let defaults = defaults();
     if !path.exists() {
         let parent = path.parent().ok_or("shortcut path has no parent")?;
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        fs::write(&path, serialize(&defaults)).map_err(|error| error.to_string())?;
-        return Ok((defaults, path));
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .and_then(|mut file| file.write_all(serialize(&defaults).as_bytes()))
+            .map_err(|error| error.to_string())?;
+        return Ok(defaults);
     }
-    let text = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    parse(&text, defaults).map(|bindings| (bindings, path))
+    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    parse(&text, defaults)
 }
 
-fn config_path() -> Result<PathBuf, String> {
+pub fn config_path() -> Result<PathBuf, String> {
     let app_data = std::env::var_os("APPDATA").ok_or("APPDATA is unavailable")?;
     Ok(PathBuf::from(app_data)
         .join("towavue")
         .join("shortcuts.conf"))
 }
 
-fn defaults() -> ShortcutBindings {
+pub fn defaults() -> ShortcutBindings {
     let mut bindings = ShortcutBindings::default();
     for (command, shortcut) in [
         (CommandId::OpenFile, "Ctrl+O"),

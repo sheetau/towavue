@@ -172,6 +172,7 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 - 現在tabの未保存確認Cancel後は、元の操作部へfocusを戻す。通常画像/動画の四辺、画像の実Save As取消→確認Cancelと、回帰での描画前再確認・隣tabへの古いfocus非復帰を確認した。全modal・全screen readerのfocus横断確認ではない。
 - 対応拡張子、file dialog filter、実decoder能力、export codec選択の関係を一つのcapability modelへ統一していない。拡張子を増やすだけでは対応完了にならない。
 - Loading、empty、error、unsupported capabilityのstate表現が各所のstatus textへ分散している。UX改善時には表示だけでなくstate transitionをcoreでtest可能にする余地がある。
+- 起動時のshortcut／grid記述ミス・読込／初回保存失敗は、その設定だけ既定値へ戻して継続し、原本を保持する。path／理由付きnative警告と修正後Reloadを接続した。隔離した設定fixtureで初期化・警告状態・復旧を回帰確認済みだが、通常windowでの警告表示／focus／操作継続は未確認。
 - duration・waveform・hover thumbnailはH1で各種類1本の常設worker、実行中1件＋最新待機1件へ制限した。media切替/closeでは未開始要求を破棄し、owned child processも取り消す。種類間の優先度制御や進行中のnative I/Oの強制中断はない。filmstripは可視集合の最新要求を別の単一workerで処理する。
 - hover thumbnailは現在表示用のtextureを一つ保持し、20区間のcacheを利用する。失敗した区間は同じload中に再試行せず、media切替/再openで失敗記録を消す。media load世代で旧結果を拒否する。
 - 映像2秒・音声30秒のH.264/AACで判明した音声先行蓄積/黒画面は、独立input/demuxと、映像確認後に一度だけ音声を開始する構成へ変更した。同じfileの通常releaseで表示60・drop 0・CPU transfers 0、停止Seekと300msの制御開始遅延、hardware成立前のsoftware fallback/成立後のfaultを確認した。二系統読取の通常releaseによる30分4K60再試験も107,746枚表示・25枚drop・CPU transfers 0で完走し、drift p95 4.806ms・最大37.785msだった。先頭10分のdrop率は保守的上限でも0.069589%で基準内。ただし基準機とこのfixtureの測定であり、低速storageや全codecの保証ではない。

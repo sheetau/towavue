@@ -30,7 +30,7 @@ The builder checks pinned archives, Microsoft package identity/signature and all
 
 The current app is 10,301,952 bytes/SHA256 `195af8705605e678a9cbe97aa57a0cdb7cae5e34bf61ee6b60e528b933f93186`. It has not been rebuilt for the installer. The source companion remains 509,515,254 bytes/SHA256 `1fa92321d044ffa380a76caf342a33a4507ca80aca0f620740b75859a02b5d20`. That archive binds app/native sources, not these later installer sources. Installer-source delivery is still a release gate.
 
-The later preview-cache I/O resilience change is not included in that packaged executable. Its separate development build must be qualified and rebound to matching source materials before replacing the pinned Setup inputs; an old Setup is not relabeled as the latest app.
+The later preview-cache I/O and startup-configuration resilience changes are not included in that packaged executable. Their separate development builds must be qualified and rebound to matching source materials before replacing the pinned Setup inputs; an old Setup is not relabeled as the latest app.
 
 ## Implemented behavior
 

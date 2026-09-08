@@ -248,6 +248,7 @@ enum GuardDecision {
 }
 
 enum FallbackPrompt {
+    ConfigurationWarning(String),
     Recovery {
         position: MediaTime,
         state: PlaybackState,
@@ -587,6 +588,7 @@ struct Application<N> {
     restore_ui_textures: bool,
     queued_recovery: Option<FallbackPrompt>,
     native_prompt: Option<FallbackPrompt>,
+    configuration_warning: Option<String>,
     license_guide_pending: bool,
     clock: Option<PlaybackClock>,
     state: PlaybackState,
@@ -623,10 +625,25 @@ where
     N: Fn(AppEvent) + Send + Sync + 'static,
 {
     fn new(initial_path: Option<PathBuf>, notify: N) -> Result<Self, Box<dyn Error>> {
-        let (shortcuts, shortcut_path) = shortcuts::load()
-            .map_err(|error| format!("could not load keyboard shortcuts: {error}"))?;
-        let (grid_layouts, grid_path) =
-            grid::load().map_err(|error| format!("could not load grid menu: {error}"))?;
+        let shortcut_path = shortcuts::config_path()?;
+        let grid_path = grid::config_path()?;
+        let mut warnings = Vec::new();
+        let shortcuts = shortcuts::load_from(&shortcut_path).unwrap_or_else(|error| {
+            warnings.push(format!("{}\n{error}", shortcut_path.display()));
+            shortcuts::defaults()
+        });
+        let grid_layouts = grid::load_from(&grid_path).unwrap_or_else(|error| {
+            warnings.push(format!("{}\n{error}", grid_path.display()));
+            grid::defaults()
+        });
+        let configuration_warning = (!warnings.is_empty()).then(|| {
+            let warning = format!(
+                "Using built-in defaults for the settings below. Existing configuration files have not been changed.\n\n{}\n\nCorrect these files, then choose File > Reload keyboard shortcuts from the towavue menu.",
+                warnings.join("\n\n")
+            );
+            eprintln!("towavue: {warning}");
+            warning
+        });
         let preview_cache = PreviewCache::local()
             .map_err(|error| format!("could not open preview cache: {error}"))?;
         let notify = Arc::new(notify);
@@ -700,6 +717,7 @@ where
             restore_ui_textures: false,
             queued_recovery: None,
             native_prompt: None,
+            configuration_warning,
             license_guide_pending: false,
             clock: None,
             state: PlaybackState::Loading,
@@ -779,6 +797,10 @@ where
             self.state = PlaybackState::Paused;
         }
         self.refresh_title();
+        if let Some(warning) = self.configuration_warning.take() {
+            self.set_status(warning.clone());
+            self.open_native_prompt(FallbackPrompt::ConfigurationWarning(warning));
+        }
         self.request_redraw();
         Ok(())
     }
@@ -4294,6 +4316,7 @@ where
             return;
         };
         let (message, buttons) = match &prompt {
+            FallbackPrompt::ConfigurationWarning(message) => (message.clone(), PromptButtons::Ok),
             FallbackPrompt::Recovery { error, .. } => (
                 format!("Graphics could not be restored.\n\n{error}\n\nRetry: restore graphics at the saved playback position.\nCancel: keep all edits. Press Alt+F4 afterward to export or close."),
                 PromptButtons::RetryCancel,
@@ -4319,7 +4342,7 @@ where
             notify(AppEvent::PromptFinished(result))
         }) {
             Ok(()) => self.native_prompt = Some(prompt),
-            Err(error) => eprintln!("towavue: native graphics fallback failed: {error}"),
+            Err(error) => eprintln!("towavue: native prompt failed: {error}"),
         }
     }
 
@@ -4331,11 +4354,12 @@ where
         let response = match result {
             Ok(response) => response,
             Err(error) => {
-                eprintln!("towavue: native graphics fallback failed: {error}");
+                eprintln!("towavue: native prompt failed: {error}");
                 return;
             }
         };
         match prompt {
+            FallbackPrompt::ConfigurationWarning(_) => {}
             FallbackPrompt::Recovery {
                 position, state, ..
             } if response == PromptResponse::Retry => {
@@ -5639,6 +5663,192 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_startup_configuration_keeps_the_application_usable_and_files_intact() {
+        let Some(root) = isolated_test_root(
+            "tests::invalid_startup_configuration_keeps_the_application_usable_and_files_intact",
+        ) else {
+            return;
+        };
+        let config = root.join("config/towavue");
+        std::fs::create_dir_all(&config).expect("isolated settings directory");
+        let shortcut_path = config.join("shortcuts.conf");
+        let grid_path = config.join("grid.conf");
+        let invalid = "open_file = Ctrl+P\nnot_a_command = Ctrl+Q\n";
+        std::fs::write(&shortcut_path, invalid).expect("invalid shortcut fixture");
+        std::fs::write(&grid_path, "# use built-in grid\n").expect("grid fixture");
+        let mut app =
+            Application::new(None, |_| {}).expect("a configuration typo must not prevent startup");
+        assert_eq!(
+            app.shortcuts
+                .get(CommandId::OpenFile)
+                .expect("open binding")
+                .to_string(),
+            "Ctrl+O"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&shortcut_path).expect("original"),
+            invalid
+        );
+        assert_eq!(
+            std::fs::read_to_string(&grid_path).expect("grid"),
+            "# use built-in grid\n"
+        );
+        let warning = app.configuration_warning.take().expect("startup warning");
+        assert!(warning.contains(&app.shortcut_path.display().to_string()));
+        assert!(warning.contains("line 2"));
+        assert!(warning.contains("Using built-in defaults"));
+        assert!(warning.contains("Reload keyboard shortcuts"));
+        app.native_prompt = Some(FallbackPrompt::ConfigurationWarning(warning));
+        assert!(app.modal_input_blocked());
+        app.finish_native_prompt(Ok(PromptResponse::Ok));
+        assert!(!app.modal_input_blocked());
+        assert!(app.configuration_warning.is_none());
+        std::fs::write(&shortcut_path, "open_file = Ctrl+P\n").expect("correct fixture");
+        app.dispatch(CommandId::ReloadShortcuts);
+        assert_eq!(
+            app.shortcuts
+                .get(CommandId::OpenFile)
+                .expect("reloaded")
+                .to_string(),
+            "Ctrl+P"
+        );
+        std::fs::write(&shortcut_path, invalid).expect("break fixture again");
+        app.dispatch(CommandId::ReloadShortcuts);
+        assert_eq!(
+            app.shortcuts
+                .get(CommandId::OpenFile)
+                .expect("retained")
+                .to_string(),
+            "Ctrl+P"
+        );
+        assert!(
+            app.status_message
+                .as_ref()
+                .expect("reload error")
+                .0
+                .contains("Shortcut reload failed")
+        );
+        assert!(app.configuration_warning.is_none());
+    }
+
+    #[test]
+    fn startup_configuration_fallback_is_independent_and_handles_unreadable_files() {
+        let Some(root) = isolated_test_root(
+            "tests::startup_configuration_fallback_is_independent_and_handles_unreadable_files",
+        ) else {
+            return;
+        };
+        let config = root.join("config/towavue");
+        std::fs::create_dir_all(&config).expect("isolated settings directory");
+        let shortcut_path = config.join("shortcuts.conf");
+        let grid_path = config.join("grid.conf");
+        let custom_grid = format!("image = {}\n", ["rotate_clockwise"; 16].join(", "));
+        for (shortcuts, grid, failed_shortcuts, failed_grid) in [
+            (
+                &b"open_file = Ctrl+P\n"[..],
+                "video = open_file\n",
+                false,
+                true,
+            ),
+            (&b"bad = Ctrl+P\n"[..], "video = open_file\n", true, true),
+            (&b"\xff\xfe\x00"[..], custom_grid.as_str(), true, false),
+        ] {
+            std::fs::write(&shortcut_path, shortcuts).expect("shortcut fixture");
+            std::fs::write(&grid_path, grid).expect("grid fixture");
+            let app = Application::new(None, |_| {}).expect("recoverable settings failure");
+            let warning = app.configuration_warning.as_ref().expect("warning");
+            assert_eq!(
+                warning.contains(&app.shortcut_path.display().to_string()),
+                failed_shortcuts
+            );
+            assert_eq!(
+                warning.contains(&app.grid_path.display().to_string()),
+                failed_grid
+            );
+            assert_eq!(
+                app.shortcuts
+                    .get(CommandId::OpenFile)
+                    .expect("binding")
+                    .to_string(),
+                if failed_shortcuts { "Ctrl+O" } else { "Ctrl+P" }
+            );
+            assert_eq!(
+                *app.grid_layouts.get(MediaKind::Image),
+                if failed_grid {
+                    *grid::defaults().get(MediaKind::Image)
+                } else {
+                    [CommandId::RotateClockwise; 16]
+                }
+            );
+            assert_eq!(
+                std::fs::read(&shortcut_path).expect("original shortcuts"),
+                shortcuts
+            );
+            assert_eq!(
+                std::fs::read_to_string(&grid_path).expect("original grid"),
+                grid
+            );
+        }
+        std::fs::remove_file(&shortcut_path).expect("remove own malformed fixture");
+        std::fs::create_dir(&shortcut_path).expect("non-file configuration fixture");
+        let app = Application::new(None, |_| {}).expect("unreadable settings path");
+        assert!(
+            app.configuration_warning
+                .as_ref()
+                .expect("warning")
+                .contains("shortcuts.conf")
+        );
+        assert!(shortcut_path.is_dir());
+        drop(app);
+        std::fs::remove_dir(&shortcut_path).expect("remove own empty fixture");
+        std::fs::write(&shortcut_path, "open_file = Ctrl+P\n").expect("valid shortcuts");
+        let mut app = Application::new(None, |_| {}).expect("both configurations valid");
+        assert!(app.configuration_warning.is_none());
+        let retained_grid = *app.grid_layouts.get(MediaKind::Image);
+        std::fs::write(&grid_path, "image = unknown\n").expect("break grid fixture");
+        app.dispatch(CommandId::ReloadShortcuts);
+        assert_eq!(*app.grid_layouts.get(MediaKind::Image), retained_grid);
+        assert!(
+            app.status_message
+                .as_ref()
+                .expect("grid error")
+                .0
+                .contains("Grid reload failed")
+        );
+        assert!(app.configuration_warning.is_none());
+    }
+
+    #[test]
+    fn startup_configuration_storage_failure_does_not_overwrite_the_blocking_file() {
+        let Some(root) = isolated_test_root(
+            "tests::startup_configuration_storage_failure_does_not_overwrite_the_blocking_file",
+        ) else {
+            return;
+        };
+        let config = root.join("config");
+        std::fs::create_dir(&config).expect("isolated APPDATA");
+        let blocked = config.join("towavue");
+        std::fs::write(&blocked, b"preserve existing file").expect("directory collision");
+        let app = Application::new(None, |_| {}).expect("settings storage is recoverable");
+        let warning = app
+            .configuration_warning
+            .as_ref()
+            .expect("both failures visible");
+        assert!(warning.contains("shortcuts.conf"));
+        assert!(warning.contains("grid.conf"));
+        assert_eq!(
+            std::fs::read(&blocked).expect("preserved collision"),
+            b"preserve existing file"
+        );
+        drop(app);
+        std::fs::remove_file(&blocked).expect("remove own collision fixture");
+        let app = Application::new(None, |_| {}).expect("first-run settings can now be created");
+        assert!(app.configuration_warning.is_none());
+        assert!(app.shortcut_path.is_file());
+        assert!(app.grid_path.is_file());
+    }
 
     #[test]
     fn license_guide_requests_preserve_playback_edits_and_obey_modal_guards() {

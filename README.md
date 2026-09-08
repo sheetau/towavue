@@ -88,6 +88,8 @@ cargo run -p towavue-app -- path\to\media.mp4
 
 prefixの続きは1秒以内に入力します。Escape、click、別commandやwindowへのfocus移動で待ちを解除し、途中から戻ったkeyを前のprefixへつなげません。
 
+開発版では、起動時にshortcut／grid設定を読めない場合、その設定だけ既定値で継続してpathと理由を警告します。既存fileは書き換えません。修正後はFile → Reload keyboard shortcutsで再読み込みでき、再読み込みの失敗時は現在の設定を保持します。native警告の実画面確認は未完了です。
+
 Ctrl+Tab／Ctrl+Shift+Tabでtabを前後に切り替えます。filmstripを開いている場合も、通常のTab／Shift+Tabによる項目移動と区別します。menu・palette・確認画面の入力を優先し、custom設定へ変更した後に元の既定キーを固定aliasとして残しません。
 
 設定ファイルでは`+` keyを`Plus`（例: `Ctrl+Plus`）と書けます。旧版が生成した`+`や`Ctrl++`も読み込めるため、既存設定の書き直しは不要です。

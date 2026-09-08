@@ -95,6 +95,8 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 2026-09-08、Communityの個人開発利用をownerへ確認し、公式VC x64再配布packageと読み取り専用の導入判定を[VC_REDIST.md](VC_REDIST.md)へ固定した。26状態の回帰、原本の署名／hash、32-bit processからの64-bit登録参照を検証済み。実導入・規約同意・再起動／取消・clean-machine検証は未実施で、第2段階へ通過した扱いにしない。
 
+2026-09-09、[評価候補と配布資料の対応付け](CANDIDATE_MATERIALS.md)で、実exe＋94 runtime files、対応する本体source snapshot、13 kitとローカルHTML案内を接続した。名指ししたnotice／data原本の収録から、利用者向けの入口と最終同時提供へ進む。ブラウザーのfile URL制限により実表示は未検証で、アプリ内の入口・Setup.exe・隔離した導入／更新／削除・最終候補品質とowner受入は引き続き未完了。資料収録だけをruntime採用・公開承認としない。
+
 2026-09-08、既存preview／保存のhelper探索だけはH1の独立した修正として先に検証する。FFMPEG_DIRによる同梱版の上書きや、不足helperをPATH上の別版で埋め合わせる動作を防ぐ。第2段階のinstaller作成・runtime採用は第1段階の監査後のままとし、helper単体の検証でそのgateを通過扱いにしない。
 
 2026-09-08、第一段階で固定開発FFmpegのChromaprint→GPL FFTW静的リンクを確認し、既存binaryを配布候補から除外した。次の配布作業は[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)の機能を保つ再buildと対応資料の確定であり、旧DLLをそのままinstallerへ組み込むことではない。KissFFT版Chromaprintの単体試験は通ったが、全体差替え・性能・再配布条件のgateは未完了。

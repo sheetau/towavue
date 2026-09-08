@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "scope": "Local material binding for the evaluated candidate, not runtime adoption, a complete linked SBOM or release approval.",
+  "application_source_commit": "1504beef672517b3ae9d1a750e70ef56435ef0b3",
+  "application_source": {
+    "name": "towavue-source-1504bee.zip",
+    "bytes": 1086184,
+    "sha256": "1378dc03aa67d07574683e80d0a908cc1d52c4f032256c56a4b4bc0f86e676ea"
+  },
+  "catalog_files": 2875,
+  "catalog_inventory": {
+    "name": "FILES.json",
+    "bytes": 669034,
+    "sha256": "202d8a61a2de59685ba727d11c3094f75e36222a1a3a9744361d61b68fbaaab7"
+  },
+  "catalog_marker": {
+    "name": "CATALOG.json",
+    "bytes": 5908,
+    "sha256": "fb1be8eb716102118ad15ab97c83260a66a8eed489c5756f8a47513976cff11d"
+  }
+}

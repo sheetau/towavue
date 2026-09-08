@@ -10,6 +10,8 @@
 
 [OpenSSL／OpenCL／libvaの作者・NOTICE確認](NATIVE_PLATFORM_NOTICE_AUDIT.md)も完了し、40-owner supplementへ原文を追加した。独立NOTICEのないarchiveへ架空の表示を作らず、OpenSSLの作者／CC0追加source、OpenCLのKhronos／Valve／LunarG、libvaのIntel／Microsoft／Emil Velikovを元sourceで保持する。[libjxl／libopenmptの内蔵code確認](NATIVE_CODEC_EMBEDDED_AUDIT.md)ではxorshift／Vector Class／TinyFFTの別表示と使用箇所を追加した。[libpng／libwebpとOpenCL Headersの確認](NATIVE_IMAGE_HEADER_NOTICE_AUDIT.md)も完了し、44-owner supplementと10-input static/API-header kitへ原本を保持する。[外部data kit](NATIVE_DATA_MATERIALS.md)で既知の22 data filesと3 scriptsも収録した。次は最終実行物との対応付けと利用者向けsource／notice取得案内であり、根拠なく全permissive sourceへ監査を広げない。
 
+[評価候補の対応資料集](CANDIDATE_MATERIALS.md)で、exe＋94 runtimeの実hash、本体source commit／ZIPと13 kitを接続する。次は案内の実表示・アプリ内の入口と最終同時提供、assisted Setup.exe／隔離した導入検証である。collectorの成功をruntime採用や公開承認としない。
+
 同梱するcodeに適用される条件、原本の著作権・license・NOTICE、対応sourceを提供する必要と方法、変更内容、差替え可能性を確認する。**全てのpermissive libraryの全source収集・単体再buildを、一律の法的義務やlaunch gateにはしない。** ただしpackage labelだけでpermissiveと確定せず、取り込みcode・static/header/dataを含む範囲確認が必要な場合はsourceやbuild記録を調べる。資料の生成成功も適合性の証明ではない。
 
 [FFmpeg公式checklist](https://ffmpeg.org/legal.html)は実binaryに対応するsource・build説明・変更と、外部LGPL libraryも含む確認を求める。[実FFmpegのLGPLv3本文](https://github.com/FFmpeg/FFmpeg/blob/e47273f4d9227152dcbf543cebaf9e2430ddbcc4/COPYING.LGPLv3)のheader／combined-work条件と、library自体の頒布条件を区別する。DLLならsource提供が一切不要という判断はしない。元libraryごとのversionや選択条件は別途確定する。

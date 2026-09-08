@@ -90,6 +90,24 @@ Release/static、CPU pipeline有効、Vulkan・sample・test・trace・metrics�
 
 staged prefixにはCOPYINGとLICENSE.mdを原本byteのまま保持した。SHA256はそれぞれ`3afa5369b4fb44e18280b6e0e275971f78bc6eaf5f53553f41f2483fd8b1267e`と`14358b0ecf6e7036c211c10f0f25563c94483dee7b8c7c954e09e10f3771d0af`。[上流の追加情報](https://github.com/v-novaltd/LCEVCdec/blob/a254bd474649e5dcd8182689ac414420bfe8d8c3/README.md#notice)はBSD-3-Clause-Clearと特許ライセンスを含まない旨の保持を求める。build成功だけで配布条件を解決済みとせず、対応source・変更差分とともに配布gateへ引き継ぐ。
 
+## LV2 / VAAPI packageの追加
+
+2026-09-08、同じ署名済みmingw64/msys databaseと空のlocal databaseから、初期114 rootに`mingw-w64-x86_64-{lv2,lilv,libva}`を加えてpacmanで解決した。初期235 packageのhash/versionはすべて同じで、追加14件、圧縮合計3700292 bytesとなった。[msys2-media-inputs.json](msys2-media-inputs.json)にarchiveとdetached signatureのsize/hash、署名者を固定する。内訳はLV2、lilv、serd、sord、sratom、zix、libvaと、lilvのpackage依存に含まれるlibsndfile、libogg、FLAC、LAME、libvorbis、mpg123、Opusである。
+
+全14件のarchive hash、`.PKGINFO`のname/versionとpathを検証し、専用環境のkeyringでdetached signatureのVALIDSIG/full trustを確認した。primary fingerprintは全件`5F944B027F7FE2091985AA2EFA11531AA0AA7F57`。追加package自身のinstall scriptlet/hookはなかった。getterは従来と同じbyte検証であり、毎回のGPG実行やpackage導入を含めない。
+
+```powershell
+.\scripts\get-msys2-toolchain.ps1 -IncludeMediaDependencies -Download
+.\scripts\test-msys2-toolchain.ps1 -IncludeMediaDependencies
+.\scripts\test-msys2-environment.ps1 -MsysRoot 'path/to/msys64' -IncludeMediaDependencies
+```
+
+ローカルでは新環境自身のpacmanにrepositoryなし・Required署名設定と14個の短いarchive filenameを渡し、`-U --needed`で正常導入した。初期base packageを更新する処理ではない。全249件のname/version一致、database整合性、file欠落なしを確認した。上記switchなしの取得testは従来の235件を引き続き検証する。media追加後の環境全体検証にはswitchが必要であり、余分なinstalled packageを無条件に許容する変更ではない。
+
+環境testへLV2/lilv/VAAPIのC compile/link/runtime試験を追加した。pkg-config探索を専用prefixへ限定し、lilvのworld/URI作成と解放、`vaErrorStr`の呼出しを確認する。plugin scan/load、VA display作成、hardware初期化は行わない。lilv 0.26.4、LV2 1.18.10、libva package 2.24.1-1のheader/libraryで成功し、libvaのpkg-config/API versionは1.24.0（headerとも一致）だった。任意cwd、環境変数の復元、498 cache fileの再利用と既存の欠落・改変拒否testも通過した。
+
+これでMABSに直接の準備処理がなかったLCEVC/LV2/VAAPIの個別準備は実証できたが、FFmpeg全体のconfigure/link・有効feature比較、実codec/filter動作、全対応source/noticeとruntime配布条件は未完了である。towavueへVAAPI再生経路やplugin機能を追加した意味ではなく、既存FFmpeg構成を維持するbuild入力として扱う。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。
@@ -119,10 +137,10 @@ staged prefixにはCOPYINGとLICENSE.mdを原本byteのまま保持した。SHA2
 | OpenH264 | source静的libraryから、Cisco 2.6.0の`libopenh264-7.dll`へ変わる | API/import libraryとの整合性、追加DLL探索、配布条件を確認。未承認のままinstallerへ入れない |
 | OpenAPV | 既定option一覧にはないが、`enabled liboapv`のbuild処理は存在する | 明示optionと`SOURCE_REPO_OPENAPV`の固定を維持 |
 | LCEVC decoder | MABS build scriptと調査したMSYS2 package treeに該当項目を確認できない | 固定sourceのnative static buildと公開API試験は上記の1行修正で成功。FFmpegへの統合・実decodeを検証し、黙って無効化しない |
-| LV2 / VAAPI | MABSに直接の準備処理は確認できないが、固定MSYS2 treeにLV2/lilv/serd/sord/sratomとlibva recipeは存在する | 必要packageと推移依存を固定・明示追加する方法を検証。VAAPIをtowavueのD3D11VA代替にはしない |
+| LV2 / VAAPI | MABSに直接の準備処理は確認できない | 上記14 packageの固定・導入とC link/runtime試験は成功。FFmpegへの統合を検証し、VAAPIをtowavueのD3D11VA代替にはしない |
 | CUDA LLVM | clang package導入失敗時、helperがoptionを除去する | 構成差を失敗として検出し、静かに機能が減ったbuildを採用しない |
 | feature / license調整 | helperが選択license等に応じてoptionを書き換える | 入力fileだけでなく、最終configure・config.h・実binaryの一覧を比較 |
 
 OpenH264 x64圧縮DLLに上流scriptが指定するSHA256は`dab5f2a872777f9a58b69bfa9fbcf20d9f82f2d6ec91383fd70bff49bd34ac9f`。これは取得物を今回検証したという意味ではない。
 
-この調査から、MABSはWSL不要の有力候補だが、Full/LGPL/sharedの選択だけで旧buildと同等になるとは判断しない。初期compilerの導入・動作確認に続き、次はmedia package集合と上記3つの直接準備がない依存（LCEVC/LV2/VAAPI）の準備方法を確定する。その後、隔離buildで7 DLLと両helperを生成し、MSVC Rustとのリンク・Windows実行・既存機能を確認する。配布可否とlaunch完了は別gateである。
+この調査から、MABSはWSL不要の有力候補だが、Full/LGPL/sharedの選択だけで旧buildと同等になるとは判断しない。compilerとLCEVC/LV2/VAAPIの個別準備に続き、次は残るmedia依存を固定して既存の全feature optionへ統合する。隔離buildで7 DLLと両helperを生成し、MSVC Rustとのリンク・Windows実行・既存機能を確認する。配布可否とlaunch完了は別gateである。

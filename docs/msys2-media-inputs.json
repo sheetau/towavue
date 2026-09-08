@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "scope": "LV2 and VAAPI build inputs added to the pinned initial MSYS2 toolchain; not the full FFmpeg graph or distribution approval.",
+  "resolved_at": "2026-09-08",
+  "base_inventory": "msys2-toolchain-inputs.json",
+  "database_sha256": "58dada89a98d5edcd8b3d959d62202ffff132a1027f6923dabc19c0a220bd5fe",
+  "roots": [
+    "mingw-w64-x86_64-lv2",
+    "mingw-w64-x86_64-lilv",
+    "mingw-w64-x86_64-libva"
+  ],
+  "packages": [
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-lv2",
+      "version": "1.18.10-1",
+      "bytes": 158592,
+      "sha256": "344437437db7ce0aa43a7c726ba335776f77aabbfa5ba748cf4aab876eaafd3c",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-lv2-1.18.10-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "bd153f95eb3b9d99b29abd629a37f5e87096c8047b8700e341964d746c804d6d",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-libogg",
+      "version": "1.3.6-1",
+      "bytes": 216232,
+      "sha256": "7ef9ec16403e1489a37c3a5ce58b083408ba694c6882e673639e2250df98bb8b",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libogg-1.3.6-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "54e72119baa335958091ddafb9310b1bd68ba2fed7157d536ed386613b17ada8",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-flac",
+      "version": "1.5.0-2",
+      "bytes": 527204,
+      "sha256": "cf1713c63bd34a6ca24b231bee194c6ac319dcefa4cd41bb9fbb44c941bc6870",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-flac-1.5.0-2-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "ec9f50d978dc15e94a2b0af3e2af5272bf4973a94f19c2f90596ac57fed43ca3",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-lame",
+      "version": "3.100-3",
+      "bytes": 349976,
+      "sha256": "083e74a93c2fa764c26d73b5a21e2f5055242bc13997d8dbe6a6c2b4577d6b03",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-lame-3.100-3-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "795cace03c54c032c887723d6de434c26e716f3ca18437a5dfe2423d45c6323d",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-libvorbis",
+      "version": "1.3.7-3",
+      "bytes": 370778,
+      "sha256": "3d68dc3ccb32f0ea230a4bbc19c8fd440893058437c49864c4e26b12d6cb078a",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libvorbis-1.3.7-3-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "3e009f72283caa397a205f114b26db12dd8e17cfefcac35962654bc2bfae26de",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-mpg123",
+      "version": "1.33.7-1",
+      "bytes": 585310,
+      "sha256": "2928cf82017d27d394f383abadbae3137e3c0123a0c635b81f8192b62b8c1745",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-mpg123-1.33.7-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "23ffc13945f7a65cd4e2ca795c6f5b6456014d56f3da2ce92517dda7d46884b9",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-opus",
+      "version": "1.6.1-1",
+      "bytes": 349423,
+      "sha256": "8ff5a273c811e64c5af4c886b6f5d7a8aefca30ef2c7942a7e0a7e62c49e1c25",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-opus-1.6.1-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "3a3b6a6b809e7ba407092db78c37f221ab0c165c5a4dc2a0af36fc62e3f8468b",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-libsndfile",
+      "version": "1.2.2-1",
+      "bytes": 512062,
+      "sha256": "28f6a9be61c474fb96142be8426d551cec5f126b8a8b7ce2116379aa427e7dca",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libsndfile-1.2.2-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "3c8a3866cb8f9aaeffdf263f2c8d4db6d9d042c43341cdaab699c0de1a3f79ba",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-serd",
+      "version": "0.32.8-1",
+      "bytes": 82916,
+      "sha256": "20803998b6c28d6cdece3190b37072cd20652bd27d6dbba5e186bb757c5e202c",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-serd-0.32.8-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "e35742a474955c059c720765387d6e8de3600fce68cbed7afde7e82659c40e87",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-zix",
+      "version": "0.8.0-1",
+      "bytes": 49069,
+      "sha256": "9c26df48de7229b5837ce9de275a76670c54a531d637a63bbaef975bafc95c34",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-zix-0.8.0-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "3fa2c1b5110a6848dfaf173c74f28a1ceeed9324b606f940145c11cec9697b40",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-sord",
+      "version": "0.16.22-1",
+      "bytes": 61078,
+      "sha256": "78818e864d2feaf175322e1ed1b17d22952eb6ebe84615a906ee748cd28b3e32",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-sord-0.16.22-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "972873061cd7c5d9ed4160ce0156dc76ace2f7ebd3d7d356c1020a8e9353700c",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-sratom",
+      "version": "0.6.22-1",
+      "bytes": 38029,
+      "sha256": "61f8abcc94c2117d9a4df0a1921d1571132800f8a826628e2758e54d39979b72",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-sratom-0.6.22-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "2259f1e7cd390b5a1ba1a61b548aec76a56a9c77a6e2270a40d0043c6705a1e1",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-lilv",
+      "version": "0.26.4-1",
+      "bytes": 152262,
+      "sha256": "cf5e4027c953f1a94a7a1992e6ef578ffd4bf8eedc788830aad2517d36369bb4",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-lilv-0.26.4-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "3f63644765eb904ba6f60b78d29fe8e39d583a945aafc0fce24bdfe134f46f90",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-libva",
+      "version": "2.24.1-1",
+      "bytes": 247361,
+      "sha256": "956243be458339aa2299e554386e5451ff915e93fb44f622a88318175dcafd8c",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libva-2.24.1-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "b6db9e050b07d794c897d9d2a3f91d8ae3ff1d512c6a6001c20cf1d53ed8a6bd",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    }
+  ]
+}

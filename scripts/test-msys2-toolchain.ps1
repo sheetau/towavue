@@ -1,17 +1,23 @@
 [CmdletBinding()]
-param()
+param([switch]$IncludeMediaDependencies)
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $getter = Join-Path $PSScriptRoot 'get-msys2-toolchain.ps1'
 $cache = Join-Path $repositoryRoot 'vendor/msys2/packages-20260908'
 $inventory = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/msys2-toolchain-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$expectedCount = 235
+if ($IncludeMediaDependencies) {
+    $media = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/msys2-media-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $inventory.packages = @($inventory.packages) + @($media.packages)
+    $expectedCount = 249
+}
 $testDirectory = Join-Path $repositoryRoot ('target/tmp/msys2-toolchain-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testDirectory | Out-Null
-if ($inventory.packages.Count -ne 235 -or @($inventory.packages.name | Sort-Object -Unique).Count -ne 235) {
+if ($inventory.packages.Count -ne $expectedCount -or @($inventory.packages.name | Sort-Object -Unique).Count -ne $expectedCount) {
     throw 'Unexpected or duplicate MSYS2 toolchain packages.'
 }
-& $getter | Out-Null
+& $getter -IncludeMediaDependencies:$IncludeMediaDependencies | Out-Null
 $first = $inventory.packages[0]
 $archiveName = ([uri]$first.url).Segments[-1]
 $archivePath = Join-Path $cache $archiveName
@@ -22,7 +28,7 @@ $cacheInputs = @($inventory.packages | ForEach-Object {
 })
 $timestamps = @($cacheInputs | ForEach-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc.Ticks })
 Push-Location -LiteralPath $testDirectory
-try { & $getter -Download | Out-Null }
+try { & $getter -Download -IncludeMediaDependencies:$IncludeMediaDependencies | Out-Null }
 finally { Pop-Location }
 for ($index = 0; $index -lt $cacheInputs.Count; $index++) {
     $path = $cacheInputs[$index]
@@ -33,7 +39,7 @@ for ($index = 0; $index -lt $cacheInputs.Count; $index++) {
 
 $missing = Join-Path $testDirectory 'missing'
 $rejected = $false
-try { & $getter -CacheDirectory $missing | Out-Null }
+try { & $getter -CacheDirectory $missing -IncludeMediaDependencies:$IncludeMediaDependencies | Out-Null }
 catch {
     if ($_.Exception.Message -notlike 'MSYS2 package is missing:*') { throw }
     $rejected = $true
@@ -53,7 +59,7 @@ try {
 finally { $stream.Dispose() }
 $modifiedHash = (Get-FileHash -LiteralPath $modifiedPath -Algorithm SHA256).Hash
 $rejected = $false
-try { & $getter -Download -CacheDirectory $modified | Out-Null }
+try { & $getter -Download -CacheDirectory $modified -IncludeMediaDependencies:$IncludeMediaDependencies | Out-Null }
 catch {
     if ($_.Exception.Message -notlike 'MSYS2 package checksum mismatch:*') { throw }
     $rejected = $true
@@ -76,7 +82,7 @@ try {
 finally { $stream.Dispose() }
 $signatureHash = (Get-FileHash -LiteralPath $signaturePath -Algorithm SHA256).Hash
 $rejected = $false
-try { & $getter -Download -CacheDirectory $signatureModified | Out-Null }
+try { & $getter -Download -CacheDirectory $signatureModified -IncludeMediaDependencies:$IncludeMediaDependencies | Out-Null }
 catch {
     if ($_.Exception.Message -notlike 'MSYS2 package checksum mismatch:*.sig') { throw }
     $rejected = $true
@@ -85,5 +91,5 @@ if (-not $rejected -or (Get-FileHash -LiteralPath $signaturePath -Algorithm SHA2
     @(Get-ChildItem -LiteralPath $signatureModified).Count -ne 2) {
     throw 'Corrupt package signature was accepted, overwritten or followed by extra downloads.'
 }
-Write-Output 'MSYS2 toolchain input checks passed: 235 unique pinned archives and signatures, arbitrary cwd, cached reuse, missing offline input and same-size corrupt archive/signature rejection.'
+Write-Output "MSYS2 toolchain input checks passed: $expectedCount unique pinned archives and signatures, arbitrary cwd, cached reuse, missing offline input and same-size corrupt archive/signature rejection."
 Write-Output "Artifacts: $testDirectory"

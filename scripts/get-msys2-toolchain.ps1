@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$Download,
+    [switch]$IncludeMediaDependencies,
     [string]$CacheDirectory
 )
 
@@ -14,6 +15,12 @@ if ($signatureInventory.schema_version -ne 1 -or $signatureInventory.packages.Co
 }
 $signatures = @{}
 foreach ($signature in $signatureInventory.packages) { $signatures.Add($signature.name, $signature) }
+if ($IncludeMediaDependencies) {
+    $media = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/msys2-media-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($media.schema_version -ne 1) { throw 'Unsupported MSYS2 media inventory.' }
+    foreach ($package in $media.packages) { $signatures.Add($package.name, $package.signature) }
+    $inventory.packages = @($inventory.packages) + @($media.packages)
+}
 if (-not $CacheDirectory) { $CacheDirectory = Join-Path $repositoryRoot 'vendor/msys2/packages-20260908' }
 $CacheDirectory = [IO.Path]::GetFullPath($CacheDirectory)
 

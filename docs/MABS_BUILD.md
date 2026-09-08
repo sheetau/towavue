@@ -71,6 +71,25 @@ getterは`vendor/msys2/packages-20260908`へ固定URLからarchiveとdetached si
 
 この検証scriptはlive repositoryを参照せず、全235 package名/versionの完全一致、`pacman -Dk`、`-Qk`による欠落なし、GCC/CMake/Ninja/NASMの起動、C DLLとC++ executableのcompile/link/実行を確認する。PATHは処理内だけに限定し復元する。ローカルで成功し、未更新bootstrapの拒否と別cwdでも検証した。これは初期toolchainの動作確認であり、package fileの全byte照合、MSVC ABI、全FFmpeg依存、最終配布buildの証明ではない。
 
+## LCEVCのnative追加build
+
+2026-09-08、既存recipeと同じLCEVCdec `a254bd474649e5dcd8182689ac414420bfe8d8c3`を上記GNU環境でbuildした。[既存source入力一覧](ffmpeg-build-inputs.json)のcache原本は4621388 bytes、SHA256 `3bc741c5076ee7c279a553181cac684e58cd245e27bb82d538f17a7a0807cb85`。全866 archive entryのpath/typeを検査し、新しい短いsource directoryへ展開した。全676 tracked fileをGit blobとraw byteで比較し、差分は下記の1 fileだけと確認した。原本recipeの末尾にある削除commandは実行しない。
+
+上流のstatic用pkg-config設定では`-lstdc++ -lm`がLCEVC archiveより前に出る。C compilerと`pkg-config --static --cflags --libs lcevc_dec`で公開APIをリンクすると、C++ runtimeの未解決symbolで失敗した。[lcevc-static-link-order.patch](../third-party/ffmpeg/lcevc-static-link-order.patch)は`cmake/modules/CMakeInstall.cmake`の1行だけを変更し、その依存を末尾へ移す。原本SHA256 `d0ca6316fda02d425a18f63e23fe29190d25c4daaafc65de7083c3c45aad9161`、修正後`b93e16fa93bc816c59cf7babb5108ee7b7efdf7c5492a3ad15357790949c3354`。隔離fixtureで原本照合・patch実適用・結果hashを確認した。
+
+検証済みGit sourceへ`git -c core.autocrlf=false apply --unidiff-zero --check`で確認してから同patchを適用する。以下のscriptはsource取得・patch適用やpackage更新をせず、固定HEADと変更file/hashを確認し、新規outputだけへbuildする。
+
+```powershell
+.\scripts\build-lcevc-native.ps1 -MsysRoot 'path/to/msys64' `
+    -SourceDirectory 'path/to/patched/LCEVCdec' -BuildDirectory 'path/to/fresh/build'
+```
+
+Release/static、CPU pipeline有効、Vulkan・sample・test・trace・metricsは無効で、codecを削るminimum-size設定は使わない。既存recipeの`VN_SDK_PIPELINE_LEGACY`はこのsourceに存在しないため渡さず、`PC_LIBS_PRIVATE`も上流が再設定するため外から重複指定しない。compiler、Ninja、Git、Pythonを専用環境の実体へ明示する。初回探索ではPATHを限定してもWindows側Python 3.14.2が選ばれたため、再検証では固定packageの3.14.7を指定した。tag由来versionは取得できず、上流のproject version 4.2.0を使う。build日時埋込みは無効のままである。
+
+新規directoryへの全97 build stepと別cwdからの再buildが成功し、8 static libraryを生成した。C callerの`LCEVC_CreateDecoder`→`LCEVC_InitializeDecoder`→`LCEVC_DestroyDecoder`も、修正後のpkg-config出力だけでリンク・実行できた。既存output拒否とPATH復元を確認済み。これはenhancement bitstreamのdecodeやFFmpeg全体のリンク・実再生の代替ではない。試験exeは`libstdc++-6.dll`と`libwinpthread-1.dll`もimportするため、最終FFmpegのruntime結合方法・同梱資料は別途確定する。
+
+staged prefixにはCOPYINGとLICENSE.mdを原本byteのまま保持した。SHA256はそれぞれ`3afa5369b4fb44e18280b6e0e275971f78bc6eaf5f53553f41f2483fd8b1267e`と`14358b0ecf6e7036c211c10f0f25563c94483dee7b8c7c954e09e10f3771d0af`。[上流の追加情報](https://github.com/v-novaltd/LCEVCdec/blob/a254bd474649e5dcd8182689ac414420bfe8d8c3/README.md#notice)はBSD-3-Clause-Clearと特許ライセンスを含まない旨の保持を求める。build成功だけで配布条件を解決済みとせず、対応source・変更差分とともに配布gateへ引き継ぐ。
+
 ## 設定値の対応
 
 [固定batch](https://github.com/m-ab-s/media-autobuild_suite/blob/02eab87287e2df528f5c48512677684c323cacd0/media-autobuild_suite.bat)で確認したINI値。全optionを網羅したINIではないため、この表だけを貼り付けて無人実行しない。未指定値は再質問・INI再生成の対象になる。
@@ -99,7 +118,7 @@ getterは`vendor/msys2/packages-20260908`へ固定URLからarchiveとdetached si
 | Chromaprint | MSYS2 packageを使い、FFTW packageを除く。固定MSYS2 recipeはKissFFT | 実packageのhash/sourceとリンク入力を照合し、既存fingerprint試験を再実行 |
 | OpenH264 | source静的libraryから、Cisco 2.6.0の`libopenh264-7.dll`へ変わる | API/import libraryとの整合性、追加DLL探索、配布条件を確認。未承認のままinstallerへ入れない |
 | OpenAPV | 既定option一覧にはないが、`enabled liboapv`のbuild処理は存在する | 明示optionと`SOURCE_REPO_OPENAPV`の固定を維持 |
-| LCEVC decoder | MABS build scriptと調査したMSYS2 package treeに該当項目を確認できない | 既存の固定source/recipeを使うWindows向け追加buildを検証。黙って無効化しない |
+| LCEVC decoder | MABS build scriptと調査したMSYS2 package treeに該当項目を確認できない | 固定sourceのnative static buildと公開API試験は上記の1行修正で成功。FFmpegへの統合・実decodeを検証し、黙って無効化しない |
 | LV2 / VAAPI | MABSに直接の準備処理は確認できないが、固定MSYS2 treeにLV2/lilv/serd/sord/sratomとlibva recipeは存在する | 必要packageと推移依存を固定・明示追加する方法を検証。VAAPIをtowavueのD3D11VA代替にはしない |
 | CUDA LLVM | clang package導入失敗時、helperがoptionを除去する | 構成差を失敗として検出し、静かに機能が減ったbuildを採用しない |
 | feature / license調整 | helperが選択license等に応じてoptionを書き換える | 入力fileだけでなく、最終configure・config.h・実binaryの一覧を比較 |

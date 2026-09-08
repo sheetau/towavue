@@ -1,0 +1,6 @@
+diff --git a/cmake/modules/CMakeInstall.cmake b/cmake/modules/CMakeInstall.cmake
+--- a/cmake/modules/CMakeInstall.cmake
++++ b/cmake/modules/CMakeInstall.cmake
+@@ -110 +110 @@
+-    set(PC_LIBS "${PC_LIBS_PRIVATE};${PC_LIBS}")
++    set(PC_LIBS "${PC_LIBS};${PC_LIBS_PRIVATE}")

@@ -6,8 +6,8 @@ documents under the audited package share/licenses directory, plus XZ,
 FreeType and gettext-runtime with mixed-license scope or secondary notices,
 and eight further library-source-first owners: libiconv, FriBidi, Game Music
 Emu, mpg123, libbluray, Graphite2, GLib and libplacebo, plus libsoxr and SRT
-(26 owners total).
-Chromaprint, OpenAL and ZVBI have separate material bundles.
+and Little CMS (27 owners total).
+Chromaprint, OpenAL, ZVBI and GCC runtimes have separate material bundles.
 
 INPUTS.json identifies unchanged source archives, patch/template inputs and
 selected original documents. Each package directory contains its exact
@@ -37,6 +37,21 @@ binary reproduction remain separate work.
 
 License scope observations (not blanket distribution approval):
 
+- Little CMS 2.19.1 retains its MIT core LICENSE separately from GPL fast
+  float/threaded plugin sources in the full archive. Keep the original
+  plugin license/header, core/header/build descriptions, authors and
+  iccjpeg utility notice. The recipe builds core and fast_float as distinct
+  targets but adds both to lcms2.pc, propagating the plugin link argument.
+  The current FFmpeg configuration has CONFIG_LCMS2=0; LCMS is used through
+  libplacebo and libjxl_cms instead. No existing feature flag is changed.
+  Isolated avcodec/avfilter link replay scans the fast_float import library
+  but selects no member and no static fast_float implementation archive.
+  Both .text and .rdata sections match the staged candidate exactly.
+  Source inspection of the two LCMS clients finds core context creation
+  without plugin activation. This narrows the earlier link-argument
+  concern; it is not a blanket static/header closure or release approval.
+  Do not describe the full original source archive as MIT-only.
+  https://github.com/mm2/Little-CMS/blob/lcms2.19.1/meson.build
 - libsoxr 0.1.3 LICENCE permits LGPL 2.1-or-later and specifically points to
   embedded PFFFT terms. The matched recipe enables PFFFT and OpenMP on x64,
   disables AVFFT, and builds both shared/static libraries and LSR bindings.

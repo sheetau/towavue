@@ -116,6 +116,20 @@ libgccの算術／SEH、libgomp、libstdc++例外／allocationの元fileはGPLv3
 
 最終`gcc-runtime-materials-v1`は47 files／107713444 bytes。19 source選択files、6 package原本files、全source archive／18追加inputs／recipe／説明とmanifestを保持する。別cwdからの再生成と全hash一致、24 inputsの欠落／同size改変、3 DLL集合の不足・余分な重複・順序取り違えを拒否し、先行outputを保持した。Chromaprint／OpenAL／元ZVBIの既存資料試験も通過。GCC材料を集めたことだけで最終runtime品質・Setup.exe・対象Windowsやowner受入のgateは完了しない。
 
+### Little CMSのリンク入力確認を更新
+
+Little CMS 2.19.1の[元source archive](https://github.com/mm2/Little-CMS/releases/download/lcms2.19.1/lcms2-2.19.1.tar.gz)を取得し、5728743 bytes／SHA256 `bfc54f7bab59fbc921012014a8032e4cba4abd46db47d46b76416a8c0b2815c8`が`.BUILDINFO`対応recipeと一致した。340通常files／102 directories、link／危険なmember名はない。coreのMIT原文とGPL fast_float原文・header、build記述、作者・iccjpeg utility表示を区別して保持する。元recipeはcore／pluginを別targetでbuildし、[上流meson設定](https://github.com/mm2/Little-CMS/blob/lcms2.19.1/meson.build)はpkg-configへpluginも追加するため、利用しないconsumerにも`-llcms2_fast_float`が現れる。
+
+現FFmpegの`CONFIG_LCMS2`は既に0で、LCMSはlibjxl_cms／libplacebo経由で使われる。今回flagを変更して無効化したのではない。元`.def`／version scriptと既存1326／567 objectsを使い、avcodec／avfilterのg++ link行だけをfresh directoryへ再実行した。出力DLL／import libraryだけを隔離先へ変更し、GNU ldのmap／cross-reference／二重traceを追加する。makeのdry-runが生成する`.objs`はlocal build記録として保持し、configure・再compile・installは行わない。
+
+mapはfast_floatの**import library** `liblcms2_fast_float.dll.a`を1／2回LOADするが、選択memberは両方0件で、実装のstatic archive `liblcms2_fast_float.a`は選ばない。他のarchive memberはmapに記録されるため、member一覧自体が空という観測ではない。再linkした両DLLの`.text`／`.rdata`は、strip済み現候補DLLから読み取った同領域とbyte単位で一致する。avcodecは21344768／4641640 bytes、avfilterは5429248／1524864 bytes。現候補の全DLL hashも維持される。これで当該2 DLLのlink引数がfast_float実装を取り込むという懸念は解消したが、他componentの全static/header/data監査やDLL全体のbit-identical rebuildとは区別する。
+
+直接LCMSをimportするのは監査graph上のlibjxl_cmsとlibplacebo。追加取得したlibjxl 0.12.0 sourceは1698757 bytes／`03e9be69...`で元recipeと一致し、選択したlib subtreeにplugin登録・fast_float header参照はない。libplaceboの元src treeも同様で、両者はLCMS context生成へplugin引数をNULLで渡す。Little CMS本体のMeson source一覧にもfast_float実装はなく、pluginは別libraryとしてcoreへ依存する。これはrecipe／sourceとPE importの対応証拠であり、全packageの独立再buildを完了したという意味ではない。GPL pluginを製品へ追加したり、元archiveのGPL表示をMITへ変更したりはしない。
+
+入力・map／trace・候補DLL・一致sectionのhashは[native-lcms-link-audit.json](native-lcms-link-audit.json)へ固定した。machine pathsを含む大きなmap／traceと再link binaryはlocal監査directoryだけに保持する。LCMS原本は既存source supplementsに11文書とarchiveを追加し、packageの2 noticesも原本bytesで照合する。公開source取得案内、残る表示／static/header/dataと最終candidate品質・Setup.exeの確認は継続する。
+
+最終`native-source-supplements-v8`は27 owners、75 inputs／72913751 bytes、176選択文書、282 files／75936143 bytes。別cwd・再生成の全hash一致、102 inputsの欠落／同size改変、18 notice不整合、3 VCS対応不整合と既存output保護の試験が通過した。候補runtimeの94 files／138510464 bytesも全hashが既存記録と一致する。
+
 ### 混合licenseの追加読み取り（2026-09-08、未完了）
 
 再生成releaseの30分再生中には、小さなrecipe／文書／設定fileの読み取りだけを行った。以下は元packageと対応するrecipe、および上流のtag／commitの範囲確認であり、対応source archiveの取得・全byte照合・再buildや最終binaryの組込み範囲の証明ではない。

@@ -151,12 +151,13 @@ $manifestPath = Join-Path $fixtureRepository 'docs/native-source-supplements.jso
 $manifestBytes = [IO.File]::ReadAllBytes($manifestPath)
 $encoding = [Text.UTF8Encoding]::new($false)
 $arguments = @{ OutputDirectory = $rejectedOutput; CacheDirectory = $CacheDirectory; RecipeDirectory = $RecipeDirectory }
-foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype', 'mingw-w64-x86_64-glib2')) {
+foreach ($packageName in @('mingw-w64-x86_64-xz', 'mingw-w64-x86_64-freetype', 'mingw-w64-x86_64-glib2', 'mingw-w64-x86_64-lcms2')) {
     foreach ($kind in @('missing', 'different', 'duplicate')) {
         $changed = $encoding.GetString($manifestBytes) | ConvertFrom-Json
         $package = $changed.packages | Where-Object { $_.package -eq $packageName }
         $notice = $package.selected_documents | Where-Object {
             if ($packageName -eq 'mingw-w64-x86_64-glib2') { $_.package_notice -eq 'mingw64/share/licenses/glib2/COPYING' }
+            elseif ($packageName -eq 'mingw-w64-x86_64-lcms2') { $_.package_notice -eq 'mingw64/share/licenses/lcms2/LICENSE-fast_float' }
             else { $_.name -match '/(COPYING|docs/FTL.TXT)$' }
         }
         switch ($kind) {
@@ -220,4 +221,4 @@ foreach ($kind in @('commit', 'url', 'kind')) {
     }
     finally { [IO.File]::WriteAllBytes($manifestPath, $manifestBytes) }
 }
-Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, fifteen package-notice mismatches, three VCS mapping cases, source symlink exclusion, cached-input/download and output preservation."
+Write-Output "Source supplement checks passed: $($expected.Count) exact output files, arbitrary cwd, repeated generation, $($paths.Count) missing/corrupt input pairs, eighteen package-notice mismatches, three VCS mapping cases, source symlink exclusion, cached-input/download and output preservation."

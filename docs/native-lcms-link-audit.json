@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "scope": "Isolated avcodec/avfilter link replay and source-scope observations. Not whole-runtime static/header closure, bit-identical full DLL reproduction or release approval. Absolute-path-bearing traces and object lists remain local.",
+  "method": "Reuse current object response files and original .def/version scripts with the existing g++ link arguments. Redirect only output DLL/import-library paths to a fresh directory and add GNU ld map/cross-reference/double-trace flags. No configure option is changed. Read staged candidate PE sections directly for comparison.",
+  "ffmpeg_config_lcms2": 0,
+  "object_hash_list_format": "UTF-8, one lowercase SHA256, one space, response-file object path and LF per object, preserving response-file order.",
+  "links": [
+    {
+      "name": "avcodec-63",
+      "candidate": {
+        "name": "avcodec-63.dll",
+        "bytes": 26727424,
+        "sha256": "98c9b82665309b248d7375b720aa1a6bdff1e02ac37abbe0ea47000b8400264b"
+      },
+      "objects": 1326,
+      "object_hash_list_sha256": "69bd2acbdfbf20f85420f56ea3611289bdadac70afd286cab015f1f3f2c8bee0",
+      "map": {
+        "name": "avcodec-63.map",
+        "bytes": 12574936,
+        "sha256": "012763980da549df6d5bd789061cbc8021ca12161098fb645043ab65a03aee08"
+      },
+      "trace": {
+        "name": "avcodec-63.trace.txt",
+        "bytes": 163872,
+        "sha256": "089d1aad970ca3b3a23da7a247eed4ee04e746bbc532f13ec794c6e27c5ed34f"
+      },
+      "fast_float_import_archive_loads": 1,
+      "fast_float_selected_members": 0,
+      "fast_float_static_archive_loads": 0,
+      "equal_candidate_replay_sections": [
+        {
+          "name": ".text",
+          "bytes": 21344768,
+          "sha256": "f832ca7394ae7cbd09a6398577e833d0dc295b421fd7483e400d78a370c7a216"
+        },
+        {
+          "name": ".rdata",
+          "bytes": 4641640,
+          "sha256": "be9d008c6984392e738d91b9a0f93c13c04b52aa18d5eb2b0e65d2db594916e9"
+        }
+      ]
+    },
+    {
+      "name": "avfilter-12",
+      "candidate": {
+        "name": "avfilter-12.dll",
+        "bytes": 7251968,
+        "sha256": "c6f17a5afc69ade447d25d0717109e5518618cf58b1e5d2cb529dbc5e1aabec9"
+      },
+      "objects": 567,
+      "object_hash_list_sha256": "d480cbd816451502cf9680b0fe07d699626f05787594741807f8a480811c3fa6",
+      "map": {
+        "name": "avfilter-12.map",
+        "bytes": 4530859,
+        "sha256": "36a44daca42e1cf267ffe6bd5c196ef267b1a099784e4f6782bfc0cb2ffdd8c7"
+      },
+      "trace": {
+        "name": "avfilter-12.trace.txt",
+        "bytes": 126726,
+        "sha256": "1851afd7a50b7cd50642c5bd59ea7428361fca81956d554906ccff1cd09c410e"
+      },
+      "fast_float_import_archive_loads": 2,
+      "fast_float_selected_members": 0,
+      "fast_float_static_archive_loads": 0,
+      "equal_candidate_replay_sections": [
+        {
+          "name": ".text",
+          "bytes": 5429248,
+          "sha256": "27f40afd97519af166792fd6901f477817352a47ccbbf1237e2c037dc17e6ce3"
+        },
+        {
+          "name": ".rdata",
+          "bytes": 1524864,
+          "sha256": "efabb9687d5dbf82f957ed70ab04ed91d12e1ce4552294ebd273ae65a53018ef"
+        }
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "name": "ffmpeg/config.h",
+      "bytes": 26378,
+      "sha256": "8821f05f95867bdfd036e7af069febf8f5f6a3a67bb4de58615055016ac43fce"
+    },
+    {
+      "name": "ffmpeg/ffbuild/config.mak",
+      "bytes": 103615,
+      "sha256": "262ab884fe243bc8def7d12f867574f41b68c16bbaa6febe1d0307f9befd5081"
+    },
+    {
+      "name": "liblcms2_fast_float.dll.a",
+      "bytes": 11048,
+      "sha256": "12fc5a97e340426a7f6d5d194a36d5b07c4b681a63d4be622a45ad32996498b1"
+    },
+    {
+      "name": "liblcms2_fast_float.a",
+      "bytes": 84428,
+      "sha256": "b4e7b30cfd63175053eeb9f462825355612abb0e99e3fc4afbf8ce5b45bc16cc"
+    },
+    {
+      "name": "libjxl-0.12.0.tar.gz",
+      "bytes": 1698757,
+      "sha256": "03e9be69a30be4011f559da75328b6d7cea8ad921fabfbd551ce10bf45cdc992"
+    },
+    {
+      "name": "libjxl-0.12.0/lib/jxl/cms/jxl_cms.cc",
+      "bytes": 49228,
+      "sha256": "6655125af6a7f12bc15de3b4fdd2fbcbbabd53d7553dee285c378e0e1352e41e"
+    },
+    {
+      "name": "libplacebo-v7.360.1/src/shaders/icc.c",
+      "bytes": 30158,
+      "sha256": "62706658fe31ea11a8c9980631f46ca8fe4947313c001b7a84886195d6938d5f"
+    }
+  ]
+}

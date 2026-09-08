@@ -1,7 +1,82 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for 26 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI have separate materials. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 27 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "packages": [
+    {
+      "package": "mingw-w64-x86_64-lcms2",
+      "recipe_sha256": "6f39c90313ec3f739b7406d6c7e2eb802c8aa8142323278a36d41083e765350f",
+      "files": [
+        {
+          "name": "lcms2-2.19.1.tar.gz",
+          "kind": "source",
+          "url": "https://github.com/mm2/Little-CMS/releases/download/lcms2.19.1/lcms2-2.19.1.tar.gz",
+          "sha256": "bfc54f7bab59fbc921012014a8032e4cba4abd46db47d46b76416a8c0b2815c8",
+          "bytes": 5728743
+        }
+      ],
+      "archive_prefix": "lcms2-2.19.1/",
+      "archive_entries": 442,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "lcms2-2.19.1/LICENSE",
+          "bytes": 1080,
+          "sha256": "6dbd60437f8ef91d8de1f08ad75882547fd4931bfcc3566a0735f28db1484d31",
+          "package_notice": "mingw64/share/licenses/lcms2/LICENSE"
+        },
+        {
+          "name": "lcms2-2.19.1/AUTHORS",
+          "bytes": 1010,
+          "sha256": "4847d97cd41e980794939b1d2694bd8f67b92856ec80e95c2fcfc34066f0df93"
+        },
+        {
+          "name": "lcms2-2.19.1/meson.build",
+          "bytes": 2681,
+          "sha256": "227cfbdddd5bb7ee649431209c267bf653d38f4a1c8c81cbe4ef8881e37b6bf9"
+        },
+        {
+          "name": "lcms2-2.19.1/src/meson.build",
+          "bytes": 1389,
+          "sha256": "c0500840d6a7c3498bf572577cb10f5453c57ce7edc638ece3dab1806520dc62"
+        },
+        {
+          "name": "lcms2-2.19.1/plugins/meson.build",
+          "bytes": 135,
+          "sha256": "755348849331787bfd771ba980f55f7ffd0604c506cce007ebe3d56d4f65f599"
+        },
+        {
+          "name": "lcms2-2.19.1/plugins/fast_float/src/meson.build",
+          "bytes": 1235,
+          "sha256": "ab6e12697144989ac749565122980ecd09d9d8986856722323f925510d853e92"
+        },
+        {
+          "name": "lcms2-2.19.1/plugins/fast_float/COPYING.GPL3",
+          "bytes": 35146,
+          "sha256": "c53a65c2fd561c87eaabf1072ef5dcab8653042bc15308465f52413585eb6271",
+          "package_notice": "mingw64/share/licenses/lcms2/LICENSE-fast_float"
+        },
+        {
+          "name": "lcms2-2.19.1/plugins/fast_float/include/lcms2_fast_float.h",
+          "bytes": 9121,
+          "sha256": "dcc6b0c9c4c743d3c4de32fd0db06ec48e5680033eb7e4f8efa4d0e777467511"
+        },
+        {
+          "name": "lcms2-2.19.1/include/lcms2.h",
+          "bytes": 108852,
+          "sha256": "67f73413d7168a0cf7fa94ff3eb0d795fb75668b07d02e6ff583110166ca0f38"
+        },
+        {
+          "name": "lcms2-2.19.1/src/cmsplugin.c",
+          "bytes": 31461,
+          "sha256": "f70858b935c24e5a394e69675f723a9dc3cfab7aa89ac513abdc5db888c534fd"
+        },
+        {
+          "name": "lcms2-2.19.1/utils/jpgicc/LICENSE_iccjpeg",
+          "bytes": 3234,
+          "sha256": "8baac37d14eed89b82ffcb041677dd701164eb5cc0f26e165fe47eb11afa0dca"
+        }
+      ]
+    },
     {
       "package": "mingw-w64-x86_64-libsoxr",
       "recipe_sha256": "6778f60a0458a04a323015ff71dd04a37e15a154649d9e0523e347555c645aa1",

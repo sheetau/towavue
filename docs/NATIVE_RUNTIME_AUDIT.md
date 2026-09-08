@@ -44,6 +44,8 @@ getterは探索を再実行せず、特定済みの72 URL/hashだけを利用す
 
 全72 ownerと一覧外のstatic／header等の残作業は[NATIVE_MATERIAL_PLAN.md](NATIVE_MATERIAL_PLAN.md)へ整理した。対応sourceを優先するものとnotice／組込み範囲を先に調べるものを分け、permissive library全件の単体再buildを一律の条件にはしない。分類・材料取得を配布承認には用いない。
 
+続く[35 ownerの原文レビュー](NATIVE_NOTICE_REVIEW.md)では全代表表示を読み取り、PCRE2のSLJITとlibxml2のdict／list原文を追加補完した。元source 2件とpatch 5件、計5398120 bytesをrecipeへ対応させ、23原本文書／実装・生成tableを保持する。Unicodeの元data参照や特定の内蔵code／NOTICEは同レビューの残項目へ明記し、全ownerのsource再収集を一律に始めない。
+
 15 packageにはこのlicense directory内の通常fileがない。Chromaprint／OpenALは別途sourceから補完済み。残り13件のGMP、LAME、libass、libssh、libtheora、libvorbis、libvpx、LZ4、opencore-amr、Snappy、TwoLAME、ZeroMQ、zimgについても、元recipeが指定するsource archiveとpatch/templateを取得・照合した。directoryが空というだけでlicense表示が不要とは扱わない。
 
 ### 13件のsource補完

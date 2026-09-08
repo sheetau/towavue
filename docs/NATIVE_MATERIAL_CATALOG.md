@@ -28,13 +28,17 @@ packageとrecipeの既定cacheは`vendor/msys2/packages-20260908`と`vendor/msys
 
 ## 照合の範囲
 
-[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2254 files／735253367 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
+[固定catalog](native-material-catalog.json)は各kitのfile数・byte数と全tree digestを保持する。digestは相対path、size、SHA256をOrdinal順・UTF-8／LFで結合したもので、名前変更・欠落・追加・同size改変を区別する。元kit 2286 files／742078400 bytesを固定し、コピー後も再検査する。package／recipeは既存の固定hashと対応を検査してから、監査済み通常memberだけを展開する。kit内のreparse pointを辿らない。
 
 本体kitを加えたv3の集約は2460 files／724157839 bytes。これは資料のサイズであり、インストーラーのサイズではない。原本source archivesを保持するが、runtime DLL／exe／static libraryを別fileとしてコピーしない。source-onlyのtoolや他targetの条件を、本体へ一律適用する表示にはしない。
 
 libplaceboのfast_float／xxHash／glad／旧Vulkan-Headersを加えたv4は2552 files／737682203 bytes。9-input shader kitへ実packageと元sourceの対応を保持し、生成器・生成code・Khronos data／headerの個別表示を辿れる。元12 kitという構成と71 runtime package ownerは変えず、4つの入力を追加runtime DLLと数えない。`FILES.json`のSHA256は`a0a6bbbba4a2ee2ce28cae9cc5985d06788a8017d5092a2a706bc56e5f935722`。VC前提条件は版・読み取り専用判定を確認済みとして残項目を更新し、実導入／terms UIと最終source提供は未完了のまま区別する。
 
 v4でも下記の全catalog回帰が通過し、最終出力と試験出力の2552 filesは全hash一致。追加shader入力の試験は41欠落／改変pairs、8 mapping不整合と途中失敗時のmarker保護を確認した。全targetの270 tests・format・Clippyも通過し、未実行のlive環境試験を合格とは数えない。
+
+PCRE2／libxml2の個別原文を加えたv5は2584 files／744514967 bytes、`FILES.json`のSHA256は`93182f1b75a0572e428e179fd39464da6e237ac5aa4038f228b986768319b71e`。34-owner supplementの元source・patchとSLJIT／dict／list／html5lib表示を保持する。[35 owner原文レビュー](NATIVE_NOTICE_REVIEW.md)はpackage labelとの差と、残るUnicode／内蔵code等の確認を区別する。資料の増加はruntimeの増加や配布承認ではない。
+
+v5の全catalog回帰も通過し、最終2584 filesは試験outputと全hash一致。34-owner supplementでは123入力の欠落／改変pairsと33件のpackage表示不整合を拒否し、既存425 filesを保持した。format／全target Clippy／270 testsも通過したが、live ignoresと最終候補の環境試験は別に残る。
 
 回帰試験は別cwd／反復生成、全file一致と案内のlocalリンク、142 package／recipe入力の欠落・改変pairs、12 kitの名前変更・改変pairs、5 manifest不整合、途中copy失敗時のmarker保護と入力／既存output保持を検査する。原文の`COPYING.LIB`をlibrary binaryと混同しないよう、試験では拡張子に加えて実際の形式を確認する。
 

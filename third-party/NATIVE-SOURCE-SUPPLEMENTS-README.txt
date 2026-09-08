@@ -6,9 +6,18 @@ documents under the audited package share/licenses directory, plus XZ,
 FreeType and gettext-runtime with mixed-license scope or secondary notices,
 and eight further library-source-first owners: libiconv, FriBidi, Game Music
 Emu, mpg123, libbluray, Graphite2, GLib and libplacebo, plus libsoxr and SRT
-and Little CMS, rav1e, libdovi, shaderc, SPIRV-Cross and Vulkan Loader
-(32 owners total).
+and Little CMS, rav1e, libdovi, shaderc, SPIRV-Cross, Vulkan Loader,
+PCRE2 and libxml2 (34 owners total).
 Chromaprint, OpenAL, ZVBI and GCC runtimes have separate material bundles.
+
+PCRE2's original BSD exception and separate SLJIT license remain distinct.
+Its recipe enables JIT; the wineditline patch concerns the unbundled test
+tool. Preserve actual generated Unicode tables without claiming that the
+missing maint generator or historical data inputs have been reproduced.
+libxml2's dictionary/list notices include different authors and terms from
+the root introduction. Keep html5lib test notices with the source archive;
+do not label those tests as DLL code. The recipe's external W3C test suite
+is not included or executed. Unicode data attribution remains separate.
 
 INPUTS.json identifies unchanged source archives, patch/template inputs and
 selected original documents. Each package directory contains its exact

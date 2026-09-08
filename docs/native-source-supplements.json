@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "scope": "Supplementary source archives, recipe inputs and selected documents for 32 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources; shader compiler static/header inputs require additional review. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
+  "scope": "Supplementary source archives, recipe inputs and selected documents for 34 runtime package owners. Libsoxr uses a locally pinned archive of the recipe's Git commit, not a recipe archive checksum. Chromaprint/OpenAL/ZVBI/GCC runtimes have separate materials. Embedded Rust crate materials are separate from these library sources; shader compiler static/header inputs require additional review. Not complete corresponding source, a linked SBOM, rebuild proof or distribution approval. Source signatures are not verified.",
   "additional_notices": [
     {
       "scope": "Original Unicode License V3 from the same pinned upstream tree as the four data inputs used by FriBidi 1.0.16; not a FriBidi archive member or an MSYS2 recipe checksum.",
@@ -39,6 +39,201 @@
     }
   ],
   "packages": [
+    {
+      "package": "mingw-w64-x86_64-pcre2",
+      "recipe_sha256": "0b94fbb011bf5f78960beb73e5c8d0fd026bace4bd671ca1ee22a3e373706107",
+      "files": [
+        {
+          "name": "pcre2-10.48.tar.bz2",
+          "bytes": 2213024,
+          "sha256": "b6c68fdf6f3ac31388b50aa89ff0fc49c00c987c16e7b5146491d12003f2c8ed",
+          "kind": "source",
+          "url": "https://github.com/PhilipHazel/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.bz2"
+        },
+        {
+          "name": "0001-pcre2test-wineditline.patch",
+          "bytes": 1150,
+          "sha256": "73400390211bfaf1ad7e5b900335bc48b50d9bd1aa5b864fa54a3e8f666d5eb9",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-pcre2/0001-pcre2test-wineditline.patch"
+        }
+      ],
+      "archive_prefix": "pcre2-10.48/",
+      "archive_entries": 505,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "pcre2-10.48/COPYING",
+          "bytes": 97,
+          "sha256": "99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507",
+          "package_notice": "mingw64/share/licenses/pcre2/COPYING"
+        },
+        {
+          "name": "pcre2-10.48/LICENCE.md",
+          "bytes": 4011,
+          "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
+          "package_notice": "mingw64/share/licenses/pcre2/LICENCE.md"
+        },
+        {
+          "name": "pcre2-10.48/AUTHORS.md",
+          "bytes": 4232,
+          "sha256": "412ace3355a4d6a4d835c350a7df172903811eafda7b13500dacf58429ee757e"
+        },
+        {
+          "name": "pcre2-10.48/README",
+          "bytes": 47878,
+          "sha256": "47319985a9919d7d6030373a33233ce0449b6459a9bce23537afadb2305e2fc2"
+        },
+        {
+          "name": "pcre2-10.48/Makefile.am",
+          "bytes": 33161,
+          "sha256": "e45e3a4b913462571817ef362b67927d423923dbd63b1fafa9a186082a1cbba0"
+        },
+        {
+          "name": "pcre2-10.48/configure.ac",
+          "bytes": 49644,
+          "sha256": "1ddd0e4b3166033cc3738224bdac478512a7a3b6aa26ecc35a97ef6727b3f1d9"
+        },
+        {
+          "name": "pcre2-10.48/deps/sljit/LICENSE",
+          "bytes": 1444,
+          "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+        },
+        {
+          "name": "pcre2-10.48/deps/sljit/README.md",
+          "bytes": 1855,
+          "sha256": "60b7d9288d701fde3ca82f6186c98b23660bcd534356352632ebefef34a59535"
+        },
+        {
+          "name": "pcre2-10.48/deps/sljit/sljit_src/sljitLir.c",
+          "bytes": 137370,
+          "sha256": "a8ab301281e18970ee7459e484cfb83f07abb673fdac3aafc81393ddcd8f104a"
+        },
+        {
+          "name": "pcre2-10.48/deps/sljit/sljit_src/sljitNativeX86_common.c",
+          "bytes": 161732,
+          "sha256": "7a010d80de0f0f6c647a0532357cfe506aae540cdc71f061a883c15898088311"
+        },
+        {
+          "name": "pcre2-10.48/src/pcre2_jit_compile.c",
+          "bytes": 443884,
+          "sha256": "60cb5be780844af9edbcda95010478afe56e95623bccb677b29113b4552321c8"
+        },
+        {
+          "name": "pcre2-10.48/src/pcre2_ucd.c",
+          "bytes": 359377,
+          "sha256": "cfa8bcb3ad316e09ebfdf3e4b07d708a9d4e53795cc7c0bf04ce5156d7695adc"
+        },
+        {
+          "name": "pcre2-10.48/cmake/COPYING-CMAKE-SCRIPTS",
+          "bytes": 1326,
+          "sha256": "c666ec2313dba24523ccad88f4c04ea4b24fad6545263a35b1d4ab2b08efe50a"
+        }
+      ],
+      "scope_notes": [
+        "Preserve BSD-3-Clause WITH PCRE2-exception and the separate SLJIT BSD-2-Clause original. The recipe enables JIT; the wineditline patch concerns the unbundled pcre2test tool. Generated Unicode 17.0.0 tables remain a separate data-attribution review; the source release does not contain the referenced maint generator. Source signature is not verified."
+      ]
+    },
+    {
+      "package": "mingw-w64-x86_64-libxml2",
+      "recipe_sha256": "05fa27f6ce261f7c5ca58a57f0f346fd25b45bb97a4e10ffd3d7be2334a9cb09",
+      "files": [
+        {
+          "name": "libxml2-2.15.4.tar.xz",
+          "bytes": 3177444,
+          "sha256": "98087fd181d9070724f3fbc65c7377db03038eb92bd882374daff44940138821",
+          "kind": "source",
+          "url": "https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.4.tar.xz"
+        },
+        {
+          "name": "0001-do-not-export-DllMain.patch",
+          "bytes": 360,
+          "sha256": "baad28b724738464cebf1a4e3320111b848fd7b14619e5c0134784ef7ad2aa3a",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libxml2/0001-do-not-export-DllMain.patch"
+        },
+        {
+          "name": "0029-xml2-config-win-paths.patch",
+          "bytes": 193,
+          "sha256": "278b4531da3d2aabda080c412c5122b471202dd6df67768b38bb0c31c7a0e508",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libxml2/0029-xml2-config-win-paths.patch"
+        },
+        {
+          "name": "0031-apply-msvc-relocation.patch",
+          "bytes": 4427,
+          "sha256": "bcb2565878e524df3e3bcd1631dbcefc205e9b435a2e537c1810996b97c4dd4a",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libxml2/0031-apply-msvc-relocation.patch"
+        },
+        {
+          "name": "0032-cmake-relocation.patch",
+          "bytes": 1522,
+          "sha256": "d2bd68da35aa68197f1b0ebed2c01685a7f4c780430840784a861a540d05b130",
+          "kind": "build-input",
+          "url": "https://raw.githubusercontent.com/msys2/MINGW-packages/052099e63e69816e35b05f28c852a5209c4dd1e0/mingw-w64-libxml2/0032-cmake-relocation.patch"
+        }
+      ],
+      "archive_prefix": "libxml2-2.15.4/",
+      "archive_entries": 4524,
+      "internal_links": 0,
+      "selected_documents": [
+        {
+          "name": "libxml2-2.15.4/Copyright",
+          "bytes": 1314,
+          "sha256": "5d4873884a890122a4b9b20ad56ac6f7da1d796a5bfcf04a427970ac96217626",
+          "package_notice": "mingw64/share/licenses/libxml2/COPYING"
+        },
+        {
+          "name": "libxml2-2.15.4/README.md",
+          "bytes": 6886,
+          "sha256": "430d5fbcbad392d7b7d591a21505a02abe0d271e1913b4a077f54d15661336e9"
+        },
+        {
+          "name": "libxml2-2.15.4/dict.c",
+          "bytes": 25613,
+          "sha256": "2663392f29dd45eb7ad802c471e146d4f6f509e317a4938b496920b4ea0228b4"
+        },
+        {
+          "name": "libxml2-2.15.4/list.c",
+          "bytes": 15193,
+          "sha256": "8a04740bfd8a37f3006bfc0404aa31429e56ef991cddcd47707ce2a9b1d98506"
+        },
+        {
+          "name": "libxml2-2.15.4/Makefile.am",
+          "bytes": 5863,
+          "sha256": "6f0a8905373401624e14987534927c15fc9e1a26f723b8fb84f21c5a3aa81c4d"
+        },
+        {
+          "name": "libxml2-2.15.4/configure.ac",
+          "bytes": 28990,
+          "sha256": "8fa435f8f0614976d2c95799da09566d1b8e99a79aa49c9ccaa3a11ae0f66f89"
+        },
+        {
+          "name": "libxml2-2.15.4/codegen/genUnicode.py",
+          "bytes": 7419,
+          "sha256": "6a1c7e87005b27ff3ad1512073426b713afae78973efa2aeef4a3553640fa66e"
+        },
+        {
+          "name": "libxml2-2.15.4/codegen/unicode.inc",
+          "bytes": 70042,
+          "sha256": "fa6edc16172c03d05719bfdb899a338fdbc3764c7848f0bdab2a3ed81603b95e"
+        },
+        {
+          "name": "libxml2-2.15.4/test/html-tokenizer/NOTICE",
+          "bytes": 1270,
+          "sha256": "d6a2cb265a0a249a234b89eeffa7f316ebe5bff546672a0a2b1a861dd2238460"
+        },
+        {
+          "name": "libxml2-2.15.4/result/html-tokenizer/NOTICE",
+          "bytes": 1270,
+          "sha256": "d6a2cb265a0a249a234b89eeffa7f316ebe5bff546672a0a2b1a861dd2238460"
+        }
+      ],
+      "scope_notes": [
+        "Preserve dictionary and list implementation notices, including Gary Pennington, separately from the root Copyright. Keep html5lib test attribution with the full source archive without assigning tests to the DLL. The external W3C xmlts20130923 test suite is referenced by the recipe but not included or run; it is not a library source input. Generated Unicode data scope remains separate."
+      ]
+    },
     {
       "package": "mingw-w64-x86_64-shaderc",
       "recipe_sha256": "c0269897415c571bd069446ca78a73ed9f600b2603be134aba122e8051f8b1b1",

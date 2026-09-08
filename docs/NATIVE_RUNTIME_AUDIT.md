@@ -101,7 +101,24 @@ builderはASCII・spaceなしのnative path、固定source／patch hash、未作
 
 初回のテスト素材は同page headerだけでpage終端を作らず、空出力の時点で失敗した。交互pageで終端を作り、字幕boxを含む素材へ直してから元DLLの出力を確認した。ASSのhard-space表現も通常textとは区別して期待値を検証する。build中に判明した上記header生成の不整合、PowerShellのstderr扱い、patch末尾context欠落は修正後にfresh buildで再検証した。失敗出力を合格材料へ混ぜない。
 
-**まだ採用しない。** これらの比較は既存FFmpeg DLLのZVBI境界の試験であり、新headerを入力にしたFFmpeg全体の再buildではない。次は実放送素材等の追加比較、全体build／実link入力／source・patch・noticeの結合、最終候補のmedia／性能確認を進める。以前の30分soakは旧ZVBIを含む候補の結果のままで、新DLLの性能合格として流用しない。
+**この段階ではまだ採用しない。** 上記は既存FFmpeg DLLのZVBI境界の試験であり、新headerを入力にしたFFmpeg全体の再buildではなかった。続く実放送素材と全体buildの結果は下記へ記録する。source・patch・noticeの結合と最終候補のmedia／性能確認は維持する。以前の30分soakは旧ZVBIを含む候補の結果のままで、新DLLの性能合格として流用しない。
+
+### 実放送TSによる追加比較
+
+FFmpegの公開sampleをローカル検証用に取得した。sourceと抽出字幕／bitmapはGitにも配布物にも含めない。download元と全byteのSHA256を記録し、比較前後で入力不変を確認する。
+
+| sample | 入力bytes／SHA256 | probe／字幕decode |
+|---|---|---|
+| [ticket4165/dvbteletext.ts](https://samples.ffmpeg.org/ffmpeg-bugs/trac/ticket4165/dvbteletext.ts) | 10485760／`0a59da7544cb72ab2249c5c96a5188c19307030be57d11c214a5625ca6e82423` | 17.960056秒、stream 3／PID 0xc9、言語metadata swe,fin。各形式442 packets、各10 nonempty rectangles |
+| [ticket2086/teletextsubtitles.ts](https://samples.ffmpeg.org/ffmpeg-bugs/trac/ticket2086/teletextsubtitles.ts) | 101043044／`e005a8b9be00b9229c337ab7e028a28c87011e30f4c61d8b1cf076d21725383f` | 55.456133秒、stream 3／PID 0x6a、言語metadata ita,ita,eng。各1361 packets、bitmap／text／ASSで86／28／86 nonempty rectangles |
+
+test wrapperの`-RecordedInput 'path/to/sample.ts'`で、従来の合成12条件に加えて全Teletext packetsとEOF drainを実行する。fixtureはTeletext streamがちょうど1本あることを要求し、`txt_page=*`でpageを収集する。3形式それぞれに非空出力を要求し、packet数・decoder error・pixel／palette・文字列・位置／時刻を同じcomparison fileへ保存する。ZVBIだけでなくavcodec／avformat／avutilの実load pathもC caller内で確認する。
+
+既存FFmpeg＋元ZVBI、同FFmpeg＋限定DLL＋旧header caller、同FFmpeg＋限定DLL＋新header callerの3条件で、両sampleの全出力が一致した。各decoder error数は0。4165は合成分込み2609741 bytes／SHA256 `dc327785c60d8da44bfc3fcfe3ed0f6af21f15e1621ac259bbe69d196cb26399`、2086は11732615 bytes／`153a9b6527fe7944fc28d26cacd9f893c037cd29cde2dc733cb95b7b4b4261c9`。途中開始の映像header警告や終端付近のTS/PES破損警告は残り、decoder error 0を無警告の意味にはしない。3形式の出力数の差も元DLLと同じであり、text形式をbitmapと同一件数だと扱わない。
+
+別の[stream認識sample](https://samples.ffmpeg.org/ffmpeg-bugs/trac/ticket4221/teletext-streams-misrecognized.ts)は7569408 bytes／SHA256 `e4f4f02659c8b0e0d50691e937a9ff0068836d4379246c22f37abd0bb8de52d1`。現在のFFmpegはTeletext streamを認識せず、未知streamとDVB subtitleを報告した。fixtureは明示failureで停止することを確認し、この素材をTeletext decode成功例には数えない。demux認識問題の修正や全言語／DRCS／error-correctionの網羅は今回の比較からは証明されない。
+
+続いて`build-ffmpeg-native.ps1 -ZvbiPrefix ...`による新規FFmpeg全体buildと94-file stagingが完了した。実compiler依存は限定prefixの`libzvbi.h`を参照し、旧MSYS2 headerを含まない。`-CandidateFfmpegPrefix 'path/to/new/ffmpeg/prefix'`を比較wrapperへ追加し、avcodec／avformat／avutilも新しいDLLであることを確認した上で、上記2本を再比較した。合成条件、録画のpacket／非空出力／error数、全出力hashは旧FFmpegと完全一致した。55秒素材の比較は任意cwdからも成功し、PATHと入力は保持された。新FFmpegの構成・配置の詳細は[NATIVE_FFMPEG_BUILD.md](NATIVE_FFMPEG_BUILD.md)を参照する。これは字幕境界の追加証拠であり、全体配布承認や最終候補の長時間性能検証ではない。
 
 ### その他の混合license確認の続き
 

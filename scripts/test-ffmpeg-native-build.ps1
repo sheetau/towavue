@@ -73,6 +73,8 @@ $arguments = @{
     Aribb24Prefix = $inputs.source_prefixes[0].prefix; LcevcPrefix = $inputs.source_prefixes[1].prefix
     LibristPrefix = $inputs.source_prefixes[2].prefix; Uavs3dPrefix = $inputs.source_prefixes[3].prefix; VvencPrefix = $inputs.source_prefixes[4].prefix
 }
+$zvbiInput = @($inputs.source_prefixes | Where-Object { $_.package -eq 'zvbi-0.2' })
+if ($zvbiInput.Count) { $arguments.ZvbiPrefix = $zvbiInput[0].prefix }
 function Assert-Rejected([string]$Message) {
     $rejected = $false
     try { & $builder @arguments | Out-Null }

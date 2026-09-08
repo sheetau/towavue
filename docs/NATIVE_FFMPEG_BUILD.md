@@ -27,6 +27,8 @@ WSLを使わず、固定MSYS2環境と5つの検証済みsource prefixからFFmp
 
 上記pathは説明用。前段prefixのpkg-configには生成時の絶対pathが含まれる。pkgconfがprefixを自動補正する場合もあるが、全fieldやlibrary/headerの整合性を保証するものではないため、移動だけで正しいと判断せず、必要な場所で前段を再生成する。
 
+ZVBI限定構成を調べる場合だけ、上記builderへ`-ZvbiPrefix 'path/to/verified/zvbi/prefix'`を追加する。前段の`build-zvbi-native-experiment`と字幕比較を通した固定header／DLLを指定する。元の5-prefix既定を変更するものではなく、feature mapのpackage routeをこの実験で明示overrideし、6番目のsource prefixとして実入力を記録する。新headerのhash、旧package DLLでないこと、import library、pkg-configのprefix選択を要求する。配布採用の指定ではない。
+
 ## 手順が検査すること
 
 source archiveの全10548 entryは通常file／directoryのみで、単一root内にあり、symlink／traversalなしと監査した。builderはその固定size/hashを確認してから、新しいsource treeへ展開する。
@@ -35,14 +37,14 @@ pkg-config、CFLAGS、LDFLAGSの順序をaribb24 → LCEVC → librist → uavs3
 
 non-login Bashの8-job buildと`make install`を別logへ保存する。process内の探索・compiler flag・Bash起動file設定を一時的に外し、成功／失敗時とも復元する。OS全体のPATHやtoolchain設定は変更しない。
 
-標準install後、7個のMSVC import libraryを`bin`から`lib`へ同一byteでcopyする。ffmpeg／ffprobeのPE graphを取得し、監査済み候補の94 file名とimport edgeが一致すること、85 package DLLのsize/hashが一致することを要求する。その85 DLLだけをprefix/binへcopyし、隣接fileだけでgraphを再取得する。
+標準install後、7個のMSVC import libraryを`bin`から`lib`へ同一byteでcopyする。監査済み85 DLLの一覧をsize/hash確認してprefix/binへ配置してから、隣接fileだけでffmpeg／ffprobeのPE graphを取得する。94 file名とimport edgeの一致を要求する。ZVBI override時はその1 DLLだけを記録済みの限定prefixからcopyし、他84 DLLは従来packageのbyteと一致させる。元ZVBIと限定ZVBIが同じ探索範囲へ混ざらないようにし、inspectorの重複拒否を緩めない。override時には実compilerの`libzvbi-teletextdec.d`が新headerを参照し、MSYS2側の旧headerを参照していないことも検査する。
 
 | 出力 | 意味 |
 |---|---|
 | `source/`、`build/` | 固定sourceの新規展開と別build tree |
 | `prefix/` | MSVCアプリ検証向けの開発prefix。ffplay／headers／examplesも含み、全体を配布する決定ではない |
 | `configure.log`、`build.log`、`install.log` | 各実行のstdout/stderr。configure内部の詳細はbuild/ffbuild/config.log |
-| `build-inputs.json` | source hash、実configure引数、installed packages、5 prefixの全file hash。ローカル絶対pathを含みGitへ入れない |
+| `build-inputs.json` | source hash、実configure引数、installed packages、5 prefix（ZVBI実験時6）の全file hash。ローカル絶対pathを含みGitへ入れない |
 | `runtime.json` | 配置後の実PE graphとfile hash |
 | `COMPLETE.json` | 全build／配置検査を通った時だけ作るmarker。配布承認はfalse |
 
@@ -63,3 +65,15 @@ testで当初作った誤prefix fixtureは、pkgconfの自動補正によって�
 続く通常releaseの代表保存／再open、4条件各100回のSeek、30分4K60再生は[DEVELOPMENT.md](DEVELOPMENT.md)の条件で通過した。ただし[追加source／実DLL監査](NATIVE_RUNTIME_AUDIT.md)でZVBIの個別GPL表記に対応する関数が確認されたため、この候補をLGPL配布構成として承認しない。性能合格やCOMPLETE markerは、この条件を解決するものではない。
 
 各DLL／静的・header-only・埋め込みdataの対応材料と許諾範囲、最終採用binaryの媒体・長時間・性能確認、helperの隣接探索とSetup.exe、隔離した対象Windowsでの導入／更新／削除を引き続き必要とする。列挙されるhardware APIの名前は、実hardware成功を示さない。
+
+## 限定ZVBIを使った全体build（2026-09-08）
+
+`-ZvbiPrefix`で検証済みの限定DLL／headerを追加し、未作成directoryへ全81 optionのconfigure・8-job compile・installを完走した。61 enable、SPIR-V、GPL/nonfree無効、6 prefixの順序、実ARIB定義を検査した。`libzvbi-teletextdec.d`も新headerの参照を示す。config.hの名前付き定義は両版843件で、変化はdata path 2件とconfiguration文字列だけ、boolean値の差0だった。
+
+runtimeは94 files／138510464 bytes。file名・import edgeは旧候補と一致し、84 package DLLは旧候補と同じhash、ZVBIだけが限定buildの`3b18e1282a06b413e75e907d7521aceb0570b93002880df9a15e582902d7766b`となる。avcodecは`98c9b82665309b248d7375b720aa1a6bdff1e02ac37abbe0ea47000b8400264b`、avformatは`c28b3c02b563806c6c5597b7fea311e2b4bd9bdf595e0671ac7fed94b9ad9407`。ZVBIはまだstrip前の実験DLLであり、配置byte数を最終installer sizeとは扱わない。
+
+既存5-prefix候補に対する検証scriptの回帰と、新6-prefix候補の全検査が通過した。機能集合はdecoder 537／encoder 228／filter 531／demuxer 364／muxer 184／protocol 44／hardware API名9で一致。別cwd／System32だけのPATHで3-frame encode/decode、8条件各140語のChromaprint一致も確認した。prefix入力、runtimeの再hash／graph、MSVC import library、既存output／source改変／誤prefix拒否と環境復元を維持する。実放送2本と合成字幕の比較も、新FFmpegの実load pathを確認して一致した（[詳細](NATIVE_RUNTIME_AUDIT.md)）。
+
+新しいRust targetでこのprefixをFFMPEG_DIRへ指定し、MSVC binding／compile/link、format、全target Clippyと268 testsが通過した。3件のlive ignoreは未実行。hardware優先exportの追加実行では、このadapterに利用可能なMedia Foundation H.264 encoderがないためhardware assertionを明示skipした。fallback／出力decodeが通ったのであり、hardware encode成功ではない。
+
+旧開発DLLや測定済みreleaseは差し替えず、COMPLETEの配布承認はfalseのままである。残る対応資料・静的／header／dataのscope、最終候補のrelease品質、installerと対象Windowsのgateを維持する。

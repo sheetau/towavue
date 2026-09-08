@@ -7,6 +7,7 @@ param(
     [Parameter(Mandatory = $true)][string]$LibristPrefix,
     [Parameter(Mandatory = $true)][string]$Uavs3dPrefix,
     [Parameter(Mandatory = $true)][string]$VvencPrefix,
+    [string]$ZvbiPrefix,
     [string]$SourceArchive
 )
 
@@ -27,6 +28,14 @@ $MsysRoot = (Resolve-Path -LiteralPath $MsysRoot).Path.Replace('\', '/')
 $BuildDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($BuildDirectory).Replace('\', '/')
 $prefixes = @($Aribb24Prefix, $LcevcPrefix, $LibristPrefix, $Uavs3dPrefix, $VvencPrefix) |
     ForEach-Object { (Resolve-Path -LiteralPath $_).Path.Replace('\', '/') }
+if ($ZvbiPrefix) {
+    $ZvbiPrefix = (Resolve-Path -LiteralPath $ZvbiPrefix).Path.Replace('\', '/')
+    $prefixes += $ZvbiPrefix
+    if ((Get-FileHash -LiteralPath "$ZvbiPrefix/include/libzvbi.h").Hash -ne '8e2a467f9ac02022a147470c868553eb563636b56b67b8f16da4aec8a8a14acc' -or
+        (Get-FileHash -LiteralPath "$ZvbiPrefix/bin/libzvbi-0.dll").Hash -eq 'fa1b722aa22739a9b147f7c918a981c51fc48ebd1269b192e412b6f346f816cc') {
+        throw 'Use the verified limited ZVBI experiment header and a rebuilt DLL.'
+    }
+}
 foreach ($path in @($MsysRoot, $BuildDirectory) + $prefixes) {
     if ($path -notmatch '^[A-Za-z]:/[A-Za-z0-9_./-]+$') { throw 'Use ASCII paths without spaces for this native build.' }
 }
@@ -36,9 +45,13 @@ foreach ($path in @($MsysRoot, $SourceArchive.Replace('\', '/')) + $prefixes) {
 }
 & (Join-Path $PSScriptRoot 'test-ffmpeg-native-features.ps1')
 $packageNames = @('aribb24', 'lcevc_dec', 'librist', 'uavs3d', 'libvvenc')
-$staticLibraries = @('libaribb24.a', 'liblcevc_dec_api.a', 'librist.a', 'libuavs3d.a', 'libvvenc.a')
+$linkLibraries = @('libaribb24.a', 'liblcevc_dec_api.a', 'librist.a', 'libuavs3d.a', 'libvvenc.a')
+if ($ZvbiPrefix) {
+    $packageNames += 'zvbi-0.2'
+    $linkLibraries += 'libzvbi.dll.a'
+}
 $prefixInputs = @(for ($i = 0; $i -lt $prefixes.Count; $i++) {
-    if (-not (Test-Path -LiteralPath ($prefixes[$i] + '/lib/' + $staticLibraries[$i]) -PathType Leaf)) { throw "Missing native static library: $($packageNames[$i])" }
+    if (-not (Test-Path -LiteralPath ($prefixes[$i] + '/lib/' + $linkLibraries[$i]) -PathType Leaf)) { throw "Missing native link library: $($packageNames[$i])" }
     [ordered]@{
         package = $packageNames[$i]
         prefix = $prefixes[$i]
@@ -101,6 +114,13 @@ try {
     }
     Write-Output "Building native FFmpeg (8 jobs): $BuildDirectory/build.log"
     Invoke-BuildCommand "cd $buildUnix/build; make -j8" 'build.log'
+    if ($ZvbiPrefix) {
+        $dependencies = Get-Content -LiteralPath "$BuildDirectory/build/libavcodec/libzvbi-teletextdec.d" -Raw
+        if (-not $dependencies.Contains("$ZvbiPrefix/include/libzvbi.h") -or
+            $dependencies -match 'mingw64/include/libzvbi\.h') {
+            throw 'FFmpeg did not compile against the verified experimental ZVBI header.'
+        }
+    }
     $symbols = @(& "$MsysRoot/mingw64/bin/nm.exe" --defined-only "$BuildDirectory/build/libavcodec/avcodec-63.dll")
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect native ARIB definitions.' }
     foreach ($symbol in @('arib_instance_new', 'arib_decode_buffer')) {
@@ -114,18 +134,27 @@ try {
         if ((Get-FileHash -LiteralPath "$prefix/bin/$library.lib").Hash -ne (Get-FileHash -LiteralPath "$prefix/lib/$library.lib").Hash) { throw 'MSVC import library copy mismatch.' }
     }
     $inspector = Join-Path $PSScriptRoot 'get-native-runtime-dependencies.ps1'
-    $graph = @(& $inspector -EntryPoints "$prefix/bin/ffmpeg.exe", "$prefix/bin/ffprobe.exe" -SearchDirectories "$prefix/bin", "$MsysRoot/mingw64/bin" -ObjdumpExecutable "$MsysRoot/mingw64/bin/objdump.exe")
+    # Stage the exact package list before inspection, so no duplicate ZVBI location is allowed.
+    foreach ($name in @($baseline.packages.runtime_dlls)) {
+        $original = $baseline.runtime | Where-Object { $_.name -eq $name }
+        $runtimeInput = "$MsysRoot/mingw64/bin/$name"
+        if ($ZvbiPrefix -and $name -eq 'libzvbi-0.dll') {
+            $runtimeInput = "$ZvbiPrefix/bin/$name"
+            $original = $prefixInputs[-1].files | Where-Object { $_.name -eq 'bin/libzvbi-0.dll' }
+        }
+        if ((Get-FileHash -LiteralPath $runtimeInput).Hash -ne $original.sha256 -or (Get-Item -LiteralPath $runtimeInput).Length -ne $original.bytes) {
+            throw "Native runtime input differs from recorded bytes: $name"
+        }
+        Copy-Item -LiteralPath $runtimeInput -Destination "$prefix/bin/$name"
+        if ((Get-FileHash -LiteralPath "$prefix/bin/$name").Hash -ne $original.sha256) { throw 'Runtime DLL copy mismatch.' }
+    }
+    $graph = @(& $inspector -EntryPoints "$prefix/bin/ffmpeg.exe", "$prefix/bin/ffprobe.exe" -SearchDirectories "$prefix/bin" -ObjdumpExecutable "$MsysRoot/mingw64/bin/objdump.exe")
     if (@(Compare-Object ($baseline.runtime.name | Sort-Object) ($graph.name | Sort-Object)).Count) { throw 'Native runtime closure differs from the audited candidate.' }
     foreach ($file in $graph) {
         $original = $baseline.runtime | Where-Object { $_.name -eq $file.name }
         $actualImports = @($file.imports | ForEach-Object { $_.kind + ':' + $_.name } | Sort-Object)
         $expectedImports = @($original.imports | ForEach-Object { $_.kind + ':' + $_.name } | Sort-Object)
         if (@(Compare-Object $expectedImports $actualImports).Count) { throw "Native runtime import edges changed: $($file.name)" }
-        if ($file.path.Replace('\', '/').StartsWith("$MsysRoot/mingw64/bin/", [StringComparison]::OrdinalIgnoreCase)) {
-            if ($file.sha256 -ne $original.sha256 -or $file.bytes -ne $original.bytes) { throw "Native package DLL differs from audited bytes: $($file.name)" }
-            Copy-Item -LiteralPath $file.path -Destination "$prefix/bin/$($file.name)"
-            if ((Get-FileHash -LiteralPath "$prefix/bin/$($file.name)").Hash -ne $file.sha256) { throw 'Runtime DLL copy mismatch.' }
-        }
     }
     $staged = @(& $inspector -EntryPoints "$prefix/bin/ffmpeg.exe", "$prefix/bin/ffprobe.exe" -SearchDirectories "$prefix/bin" -ObjdumpExecutable "$MsysRoot/mingw64/bin/objdump.exe")
     Write-Evidence 'runtime.json' $staged

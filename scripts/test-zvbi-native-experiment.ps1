@@ -2,19 +2,29 @@
 param(
     [Parameter(Mandatory = $true)][string]$MsysRoot,
     [Parameter(Mandatory = $true)][string]$FfmpegPrefix,
-    [Parameter(Mandatory = $true)][string]$ZvbiPrefix
+    [Parameter(Mandatory = $true)][string]$ZvbiPrefix,
+    [string]$CandidateFfmpegPrefix,
+    [string]$RecordedInput
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $MsysRoot = (Resolve-Path -LiteralPath $MsysRoot).Path.Replace('\', '/')
 $FfmpegPrefix = (Resolve-Path -LiteralPath $FfmpegPrefix).Path.Replace('\', '/')
+if (-not $CandidateFfmpegPrefix) { $CandidateFfmpegPrefix = $FfmpegPrefix }
+$CandidateFfmpegPrefix = (Resolve-Path -LiteralPath $CandidateFfmpegPrefix).Path.Replace('\', '/')
 $ZvbiPrefix = (Resolve-Path -LiteralPath $ZvbiPrefix).Path.Replace('\', '/')
 $baselineDll = "$FfmpegPrefix/bin/libzvbi-0.dll"
 $candidateDll = "$ZvbiPrefix/bin/libzvbi-0.dll"
 $inventory = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/native-zvbi-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ((Get-FileHash -LiteralPath $baselineDll).Hash -ne $inventory.runtime.sha256) { throw 'Baseline ZVBI is not the audited package DLL.' }
 $candidateHash = (Get-FileHash -LiteralPath $candidateDll).Hash
+$recordedArguments = @()
+if ($RecordedInput) {
+    $RecordedInput = (Resolve-Path -LiteralPath $RecordedInput).Path
+    $recordedHash = (Get-FileHash -LiteralPath $RecordedInput).Hash
+    $recordedArguments = @($RecordedInput)
+}
 if ($candidateHash -eq $inventory.runtime.sha256) { throw 'A different experimental ZVBI DLL is required.' }
 function Get-Exports([string]$Dll) {
     $lines = & "$MsysRoot/mingw64/bin/objdump.exe" -p $Dll
@@ -47,21 +57,22 @@ try {
     $fixture = Join-Path $PSScriptRoot 'fixtures/zvbi-teletext-smoke.c'
     $compiler = "$MsysRoot/mingw64/bin/gcc.exe"
     foreach ($variant in @('baseline', 'limited')) {
+        $activeFfmpeg = if ($variant -eq 'baseline') { $FfmpegPrefix } else { $CandidateFfmpegPrefix }
         $env:PATH = "$MsysRoot/mingw64/bin;" + (Join-Path $env:SystemRoot 'System32')
         $include = if ($variant -eq 'baseline') { "$MsysRoot/mingw64/include" } else { "$ZvbiPrefix/include" }
         $lib = if ($variant -eq 'baseline') { "$MsysRoot/mingw64/lib" } else { "$ZvbiPrefix/lib" }
-        & $compiler -std=c11 -Wall -Wextra -Werror $fixture "-I$include" "-I$FfmpegPrefix/include" `
-            "-L$FfmpegPrefix/lib" "-L$lib" -lavcodec -lavutil -lzvbi -o "$testDirectory/$variant/smoke.exe"
+        & $compiler -std=c11 -Wall -Wextra -Werror $fixture "-I$include" "-I$activeFfmpeg/include" `
+            "-L$activeFfmpeg/lib" "-L$lib" -lavformat -lavcodec -lavutil -lzvbi -o "$testDirectory/$variant/smoke.exe"
         if ($LASTEXITCODE -ne 0) { throw "Teletext caller compilation failed: $variant" }
-        $env:PATH = "$FfmpegPrefix/bin;" + (Join-Path $env:SystemRoot 'System32')
+        $env:PATH = "$activeFfmpeg/bin;" + (Join-Path $env:SystemRoot 'System32')
         $dll = if ($variant -eq 'baseline') { $baselineDll } else { "$testDirectory/limited/libzvbi-0.dll".Replace('\', '/') }
         $scope = if ($variant -eq 'baseline') { '1' } else { '0' }
-        & "$testDirectory/$variant/smoke.exe" "$testDirectory/$variant/output.bin" $dll $scope
+        & "$testDirectory/$variant/smoke.exe" "$testDirectory/$variant/output.bin" $dll $scope "$activeFfmpeg/bin" @recordedArguments
         if ($LASTEXITCODE -ne 0) { throw "Teletext decode or actual DLL/scope check failed: $variant" }
     }
     Copy-Item -LiteralPath "$testDirectory/baseline/smoke.exe" -Destination "$testDirectory/limited/old-header.exe"
     & "$testDirectory/limited/old-header.exe" "$testDirectory/limited/old-header.bin" `
-        "$testDirectory/limited/libzvbi-0.dll".Replace('\', '/') '0'
+        "$testDirectory/limited/libzvbi-0.dll".Replace('\', '/') '0' "$CandidateFfmpegPrefix/bin" @recordedArguments
     if ($LASTEXITCODE -ne 0) { throw 'The old-header caller failed against experimental ZVBI.' }
     $expected = (Get-FileHash -LiteralPath "$testDirectory/baseline/output.bin").Hash
     foreach ($path in @("$testDirectory/limited/output.bin", "$testDirectory/limited/old-header.bin")) {
@@ -73,8 +84,12 @@ try {
         throw 'A compared ZVBI DLL changed during the test.'
     }
     Write-Output "All twelve bitmap/text/ASS cases match byte-for-byte: $expected"
+    if ($RecordedInput) {
+        if ((Get-FileHash -LiteralPath $RecordedInput).Hash -ne $recordedHash) { throw 'Recorded input changed during comparison.' }
+        Write-Output "Recorded stream output also matches; input SHA256: $recordedHash"
+    }
     Write-Output "Evidence: $testDirectory"
-    Write-Output 'Synthetic API coverage only; no recorded-broadcast, full FFmpeg rebuild, app/installer or distribution approval.'
+    Write-Output 'Only exercised API/stream cases; no app/installer or distribution approval.'
 }
 finally {
     Pop-Location

@@ -93,7 +93,7 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 2026-09-08、第一段階で固定開発FFmpegのChromaprint→GPL FFTW静的リンクを確認し、既存binaryを配布候補から除外した。次の配布作業は[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)の機能を保つ再buildと対応資料の確定であり、旧DLLをそのままinstallerへ組み込むことではない。KissFFT版Chromaprintの単体試験は通ったが、全体差替え・性能・再配布条件のgateは未完了。
 
-ZVBIについてはownerの許可を受け、未使用の番組制御・放送時刻APIを含めない限定buildを隔離して検証する。最初の合成字幕12条件では元DLLと文字・ASS・bitmapが一致したが、実放送素材、新headerでのFFmpeg全体再build、最終候補の品質・配布監査は残る。限定DLLを汎用ZVBIの全API互換品とせず、H1やinstallerのgateを短縮しない。
+ZVBIについてはownerの許可を受け、未使用の番組制御・放送時刻APIを含めない限定buildを隔離して検証する。合成字幕12条件、実放送TS 2本、新headerでのFFmpeg全体再buildと字幕出力比較は通過した。最終候補の品質・配布監査は残る。限定DLLを汎用ZVBIの全API互換品とせず、H1やinstallerのgateを短縮しない。
 
 2026-09-05、exportの応答停止を改善した。runtimeのbackground job、書き出し時間表示、cancel、成功後だけのtarget置換、exportした履歴位置のsaved判定、dirty guardの成功・失敗・cancel遷移を追加した。生成fixtureと実windowで再生継続、既存target保護、追加編集のdirty保持を確認した。
 

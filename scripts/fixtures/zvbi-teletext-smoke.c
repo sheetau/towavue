@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
 #include <libavutil/opt.h>
 #include <libzvbi.h>
 
@@ -122,9 +123,74 @@ static void event_handler(vbi_event *event, void *data)
     (void)data;
 }
 
+static void recorded_stream(FILE *output, const char *input)
+{
+    for (unsigned int format = 0; format < 3; ++format) {
+        AVFormatContext *demux = NULL;
+        require(avformat_open_input(&demux, input, NULL, NULL) == 0 &&
+                avformat_find_stream_info(demux, NULL) >= 0, "Cannot inspect recorded input.");
+        int selected = -1;
+        for (unsigned int i = 0; i < demux->nb_streams; ++i) {
+            if (demux->streams[i]->codecpar->codec_id == AV_CODEC_ID_DVB_TELETEXT) {
+                require(selected == -1, "Recorded fixture must have exactly one teletext stream.");
+                selected = (int)i;
+            }
+        }
+        require(selected >= 0, "No teletext stream found; this is not decode coverage.");
+        const AVCodec *codec = avcodec_find_decoder_by_name("libzvbi_teletextdec");
+        require(codec != NULL, "FFmpeg teletext decoder is absent.");
+        AVCodecContext *context = avcodec_alloc_context3(codec);
+        require(context && avcodec_parameters_to_context(context, demux->streams[selected]->codecpar) == 0,
+                "Cannot prepare recorded subtitle context.");
+        context->pkt_timebase = demux->streams[selected]->time_base;
+        require(av_opt_set_int(context->priv_data, "txt_format", format, 0) == 0 &&
+                av_opt_set(context->priv_data, "txt_page", "*", 0) == 0 &&
+                avcodec_open2(context, codec, NULL) == 0, "Cannot open recorded subtitle decoder.");
+        AVPacket *packet = av_packet_alloc();
+        require(packet != NULL, "Cannot allocate recorded packet.");
+        unsigned int packets = 0, nonempty = 0, errors = 0;
+        int read_result;
+        fprintf(output, "recorded %u stream %d\n", format, selected);
+        while ((read_result = av_read_frame(demux, packet)) >= 0) {
+            if (packet->stream_index == selected) {
+                AVSubtitle subtitle = {0};
+                int got = 0;
+                int result = avcodec_decode_subtitle2(context, &subtitle, &got, packet);
+                ++packets;
+                if (result < 0) {
+                    fprintf(output, "decode-error %u %d\n", packets, result);
+                    ++errors;
+                }
+                if (got) nonempty += record(output, &subtitle, 1);
+                else avsubtitle_free(&subtitle);
+            }
+            av_packet_unref(packet);
+        }
+        require(read_result == AVERROR_EOF, "Recorded input did not reach demux EOF.");
+        av_packet_unref(packet);
+        for (unsigned int drain = 0; ; ++drain) {
+            require(drain < 1000, "Recorded subtitle drain did not terminate.");
+            AVSubtitle subtitle = {0};
+            int got = 0;
+            require(avcodec_decode_subtitle2(context, &subtitle, &got, packet) >= 0,
+                    "Recorded subtitle drain failed.");
+            if (!got) { avsubtitle_free(&subtitle); break; }
+            nonempty += record(output, &subtitle, 1);
+        }
+        require(packets > 0 && nonempty > 0, "No nonempty recorded subtitle output.");
+        fprintf(output, "totals %u %u %u\n", packets, nonempty, errors);
+        printf("Recorded format %u: %u packets, %u nonempty rectangles, %u errors.\n",
+               format, packets, nonempty, errors);
+        av_packet_free(&packet);
+        avcodec_free_context(&context);
+        avformat_close_input(&demux);
+    }
+}
+
 int main(int argc, char **argv)
 {
-    require(argc == 4, "Usage: zvbi-teletext-smoke output.bin expected-dll scope(0|1)");
+    require(argc == 5 || argc == 6,
+            "Usage: zvbi-teletext-smoke output.bin expected-dll scope(0|1) ffmpeg-bin [recorded.ts]");
     require(!strcmp(argv[3], "0") || !strcmp(argv[3], "1"), "Invalid scope.");
     char module[MAX_PATH];
     DWORD length = GetModuleFileNameA(GetModuleHandleA("libzvbi-0.dll"), module, MAX_PATH);
@@ -133,6 +199,18 @@ int main(int argc, char **argv)
         if (module[i] == '\\') module[i] = '/';
     require(!_stricmp(module, argv[2]), "Loaded a different ZVBI DLL.");
     printf("Loaded ZVBI: %s\n", module);
+    const char *libraries[] = {"avcodec-63.dll", "avformat-63.dll", "avutil-61.dll"};
+    for (unsigned int i = 0; i < sizeof(libraries) / sizeof(libraries[0]); ++i) {
+        char expected[MAX_PATH];
+        int expected_length = snprintf(expected, sizeof(expected), "%s/%s", argv[4], libraries[i]);
+        require(expected_length > 0 && expected_length < MAX_PATH, "FFmpeg path is too long.");
+        length = GetModuleFileNameA(GetModuleHandleA(libraries[i]), module, MAX_PATH);
+        require(length > 0 && length < MAX_PATH, "Cannot identify loaded FFmpeg library.");
+        for (DWORD j = 0; j < length; ++j)
+            if (module[j] == '\\') module[j] = '/';
+        require(!_stricmp(module, expected), "Loaded a different FFmpeg library.");
+    }
+    printf("Loaded FFmpeg libraries from: %s\n", argv[4]);
     vbi_decoder *decoder = vbi_decoder_new();
     require(decoder != NULL, "Cannot create ZVBI decoder.");
     require(vbi_event_handler_register(decoder, VBI_EVENT_TTX_PAGE, event_handler, NULL),
@@ -188,6 +266,7 @@ int main(int argc, char **argv)
             avcodec_free_context(&context);
         }
     }
+    if (argc == 6) recorded_stream(output, argv[5]);
     require(!ferror(output) && fclose(output) == 0, "Cannot finish comparison evidence.");
     puts("Twelve nonempty FFmpeg teletext cases and malformed-packet rejection passed.");
     return 0;

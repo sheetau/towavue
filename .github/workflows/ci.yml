@@ -44,6 +44,10 @@ jobs:
         shell: pwsh
         run: .\scripts\test-setup-update-plan.ps1
 
+      - name: Verify file update rollback with isolated fault injection
+        shell: pwsh
+        run: .\scripts\test-setup-update-transaction.ps1
+
   rust:
     name: Rust checks
     runs-on: windows-2022

@@ -164,6 +164,8 @@ installer設計前に、配布buildと互換なruntimeの固定version、導入�
 
 ## 次のゲート
 
+2026-09-08、ownerはVisual Studio Communityを個人開発で利用していると確認した。[VC runtime前提条件の確認](VC_REDIST.md)で、公式の署名済みx64 package 14.51.36247.0を固定し、導入済みversionの読み取り専用判定を検証した。未導入／旧版・同版／新しいv14・不正登録を区別する。実導入、規約の代理承諾、Setup.exe完成や配布承認ではない。
+
 1. [FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)に従い、機能を保つ代替buildの有効dependency/source/revision/patchとlink入力を固定する。既存binaryの除外は確定しており、期限切れの旧log追跡だけを繰り返して配布承認へ進めない。既存の確認済み原本資料は再buildの入力・比較基準として活用する。
 2. 取得したlicense/notice、Rust依存、VC runtimeを含む配布資料を照合する。この文書は最終license bundleではない。
 3. 資料が揃ってから、ROADMAPのSetup.exe実装・隔離環境での導入/更新/削除検証へ進む。開発用FFMPEG_DIR/PATH不要、別作業directoryでの起動、preview/export、tab detachと既存H1 gateを保持する。

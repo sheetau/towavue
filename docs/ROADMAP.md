@@ -93,6 +93,8 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 2. その確認後、インストール先を選べるSetup.exeと開発環境に依存しないruntime探索を実装する → verify: FFMPEG_DIRや開発用PATHなしで起動・preview・保存、任意の作業directoryからの起動とtab detachを確認する。
 3. 隔離した対象Windows環境で導入・更新・アンインストールを検証する → verify: 代表mediaの再生/保存、安全な更新、sourceと利用者設定を勝手に消さない削除。署名・公開は別途判断し、未署名試験版を公開済み製品と呼ばない。
 
+2026-09-08、Communityの個人開発利用をownerへ確認し、公式VC x64再配布packageと読み取り専用の導入判定を[VC_REDIST.md](VC_REDIST.md)へ固定した。26状態の回帰、原本の署名／hash、32-bit processからの64-bit登録参照を検証済み。実導入・規約同意・再起動／取消・clean-machine検証は未実施で、第2段階へ通過した扱いにしない。
+
 2026-09-08、既存preview／保存のhelper探索だけはH1の独立した修正として先に検証する。FFMPEG_DIRによる同梱版の上書きや、不足helperをPATH上の別版で埋め合わせる動作を防ぐ。第2段階のinstaller作成・runtime採用は第1段階の監査後のままとし、helper単体の検証でそのgateを通過扱いにしない。
 
 2026-09-08、第一段階で固定開発FFmpegのChromaprint→GPL FFTW静的リンクを確認し、既存binaryを配布候補から除外した。次の配布作業は[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)の機能を保つ再buildと対応資料の確定であり、旧DLLをそのままinstallerへ組み込むことではない。KissFFT版Chromaprintの単体試験は通ったが、全体差替え・性能・再配布条件のgateは未完了。

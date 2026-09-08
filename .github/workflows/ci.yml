@@ -56,3 +56,7 @@ jobs:
         run: |
           .\scripts\get-msys2-bootstrap.ps1 -Download
           .\scripts\test-msys2-bootstrap.ps1
+
+      - name: Verify read-only VC prerequisite policy
+        shell: pwsh
+        run: .\scripts\test-vc-redist-status.ps1

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "scope": "Read-only prerequisite review for the x64 candidate. Not an installer, distribution approval or proof of installed-runtime health.",
+  "architecture": "x64",
+  "owner_usage": "Individual development, confirmed by the owner on 2026-09-08.",
+  "minimum_version": "14.51.36247.0",
+  "minimum_basis": "Conservative floor at the verified official current v14 package, identical to the stable Visual Studio installation's package and runtime DLL. Not a claim about the minimum API-compatible build.",
+  "package": {
+    "name": "vc_redist.x64.exe",
+    "version": "14.51.36247.0",
+    "bytes": 18731856,
+    "sha256": "843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c",
+    "url": "https://download.visualstudio.microsoft.com/download/pr/ebdab8e5-1d7b-4d9f-a11b-cbb1720c3b12/843068991DAAA1F73AD9F6239BCE4D0F6A07A51F18C37EA2A867E9BECA71295C/VC_redist.x64.exe",
+    "discovery_url": "https://aka.ms/vc14/vc_redist.x64.exe",
+    "observed_date": "2026-09-08",
+    "visual_studio_relative_path": "VC/Redist/MSVC/v145/vc_redist.x64.exe",
+    "signer_subject": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+  },
+  "development_observation": {
+    "edition": "Microsoft.VisualStudio.Product.Community",
+    "channel": "VisualStudio.18.Release",
+    "is_prerelease": false,
+    "display_version": "18.9.2",
+    "toolset_directory_version": "14.51.36231",
+    "linker_file_version": "14.51.36256.0",
+    "crt_header_version": "14.51.36244.0",
+    "redistributed_vcruntime140_version": "14.51.36247.0"
+  },
+  "registry": {
+    "hive": "LocalMachine",
+    "view": "Registry64",
+    "key": "SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64",
+    "fields": ["Installed", "Version", "Major", "Minor", "Bld", "Rbld"]
+  },
+  "planned_install_arguments": ["/install", "/norestart"],
+  "planned_ui": "Use the original package UI so the user can review and accept Microsoft's terms. Do not silently accept terms or force a restart.",
+  "community_license": {
+    "landing_url": "https://visualstudio.microsoft.com/license-terms/vs2026-ga-community/",
+    "document_url": "https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual_Studio_2026-License-Community_ENU.docx",
+    "bytes": 69066,
+    "sha256": "02ac07637f4a513a807cd3721c7620433fc483bc049d25784b0c10c54b05e1fb",
+    "eula_id": "VS2026_Comm_ENU.1033",
+    "document_updated": "2025-10-01"
+  },
+  "references": [
+    "https://learn.microsoft.com/en-us/visualstudio/releases/2026/redistribution",
+    "https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files?view=msvc-170",
+    "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170",
+    "https://learn.microsoft.com/en-us/windows/win32/msi/error-codes"
+  ],
+  "distribution_approved": false
+}

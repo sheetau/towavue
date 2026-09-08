@@ -1,5 +1,6 @@
 {
   "scope": "Additional native compiler/runtime source and notice evidence for the fixed FFmpeg build; not a complete effective build graph, linked-runtime SBOM or distribution approval.",
+  "distribution_status": "The fixed binary is rejected for the planned LGPL distribution; see ffmpeg-distribution-rejection.json and FFMPEG_REBUILD.md. Preserve this evidence as a rebuild baseline, not as approval of the original binary.",
   "gcc": {
     "version": "15.2.0",
     "repository": "https://github.com/gcc-mirror/gcc",
@@ -66,7 +67,7 @@
       "status": "Library timestamp lies inside this matching-target build window; this is a candidate, not proven layer ancestry. Both run-log and direct job-log endpoints return HTTP 410."
     },
     "open_items": [
-      "Recover the effective dependency/build graph after cargo update cc without using current network resolution as historical evidence.",
+      "For the replacement build, pin and retain the effective dependency/build graph instead of cargo update cc. The historical graph remains partial; current resolution must not be presented as a reconstruction of the old build.",
       "Review individual source notices and any additional linked runtime materials beyond the official Rust reports and compiler-builtins/libm texts now packaged by scripts/prepare-rust-runtime-notices.ps1; see docs/rust-runtime-inputs.json.",
       "Complete native notice applicability, source/gitlink and build-material verification before packaging."
     ],

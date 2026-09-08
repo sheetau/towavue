@@ -1,0 +1,133 @@
+{
+  "status": "rejected_for_planned_lgpl_distribution",
+  "scope": "The existing fixed binary is retained for development/reference only. This is a distribution-gate decision based on the observed FFTW linkage, not a legal opinion about every possible licensing arrangement.",
+  "binary": {
+    "path": "bin/avformat-63.dll",
+    "bytes": 22153728,
+    "sha256": "93cfe2d26ab9406757e6dd539efb0c1cade1c6a4b54f0871c13f1a01ac61c355",
+    "markers": [
+      {
+        "text": "fftw: %s:%d: assertion failed: %s",
+        "offset": 18686272
+      },
+      {
+        "text": "(fftw-3.3.11 fftw_wisdom",
+        "offset": 18686336
+      },
+      {
+        "text": "fftw_dft_indirect_register",
+        "offset": 18687296
+      },
+      {
+        "text": "fftw_codelet_n1_2",
+        "offset": 18689216
+      }
+    ]
+  },
+  "recipe": {
+    "commit": "8267213e26c1031621e6e1210fe3aa4867214f6a",
+    "path": "scripts.d/50-chromaprint.sh",
+    "sha256": "18f0d650b2f6442f374dd8b1a2fa000a15ab88ecbf021a0a3f5a32750c0992b6",
+    "fft_option": "-DFFT_LIB=fftw3",
+    "static_link_flags": "Libs.private: -lfftw3 -lstdc++"
+  },
+  "prefix_layer": {
+    "sha256": "bbb9aba0ba171e6f9b085b197c582a52222c024d606a13580bddd3f1b11311f5",
+    "library": {
+      "entry": "opt/ffbuild/lib/libchromaprint.a",
+      "bytes": 154134,
+      "sha256": "f9b0f540dde69cd2c646d07f32abad870383bd5e65cdcf352636d032cef9af65",
+      "object": "fft_lib_fftw3.cpp.obj",
+      "undefined_symbols": [
+        "fftw_destroy_plan",
+        "fftw_execute",
+        "fftw_free",
+        "fftw_malloc",
+        "fftw_plan_r2r_1d"
+      ]
+    },
+    "pkg_config": {
+      "entry": "opt/ffbuild/lib/pkgconfig/libchromaprint.pc",
+      "bytes": 339,
+      "sha256": "f4bd187e72c193bc6b6f0584a050599b6374d0f7a18d7007f2cae1913eacf567"
+    }
+  },
+  "source_notices": [
+    {
+      "repository": "https://github.com/FFTW/fftw3",
+      "commit": "93ed4c786934aec9946f8dda4b4e3eb08f8be41c",
+      "path": "COPYRIGHT",
+      "sha256": "8a74b35d541d93fdf58a22a3d3baa48ae3edbf6d715edfeb6457c21968ae43ac",
+      "declared_license": "GPL-2.0-or-later"
+    },
+    {
+      "repository": "https://github.com/acoustid/chromaprint",
+      "commit": "aed8eba2202dd9d7b3b0a56c77904cc805490d72",
+      "path": "README.md",
+      "sha256": "fcc714b281579c3f7b8651f079f152538d11b22ca2b512834aaab0bd1359a39e",
+      "basis": "The FFT Library section explicitly states that building with FFTW makes the resulting Chromaprint binary GPL licensed."
+    },
+    {
+      "repository": "https://github.com/acoustid/chromaprint",
+      "commit": "aed8eba2202dd9d7b3b0a56c77904cc805490d72",
+      "path": "LICENSE.md",
+      "sha256": "562cfe59627e0c4e8e3b066f3ff2e9736f83811ffe4c6c2c7796595aa7595ebd"
+    }
+  ],
+  "proposed_recipe_patch": {
+    "path": "third-party/ffmpeg/chromaprint-kissfft.patch",
+    "sha256": "035885f3653f7455d1e667bd8038145abd9b0f46c6ffb34c74b64540b431d579",
+    "original_sha256": "18f0d650b2f6442f374dd8b1a2fa000a15ab88ecbf021a0a3f5a32750c0992b6",
+    "patched_sha256": "e66512544f8a950657b1e41defe2b2a966b412fa6bd5e0a5239e73e46d487de9",
+    "apply": "git -c core.autocrlf=false apply --unidiff-zero",
+    "verified": "Check and actual application in an isolated fixture both pass, and the resulting script hash matches. This patch has not produced a replacement FFmpeg binary."
+  },
+  "kissfft_notices": [
+    {
+      "path": "src/3rdparty/kissfft/COPYING",
+      "bytes": 246,
+      "sha256": "a2840585f8411be8e6826a31ef15ae65c950bd74a2437a73b013398a934ad0c6"
+    },
+    {
+      "path": "src/3rdparty/kissfft/LICENSES/BSD-3-Clause",
+      "bytes": 1830,
+      "sha256": "4d6bcab46f27d6d0c878e8305d4bdcfe040d52bf6656b9771f04c9fb9902c0ed"
+    }
+  ],
+  "prototype": {
+    "scope": "Standalone Windows MSVC Chromaprint DLL, not a replacement for the GNU FFmpeg DLL or a full-build/performance/compliance gate.",
+    "source_commit": "aed8eba2202dd9d7b3b0a56c77904cc805490d72",
+    "cmake": "4.3.1-msvc1",
+    "compiler": "MSVC 19.51.36256.0",
+    "configuration": [
+      "-DBUILD_SHARED_LIBS=ON",
+      "-DBUILD_TOOLS=OFF",
+      "-DBUILD_TESTS=OFF",
+      "-DFFT_LIB=kissfft",
+      "-DCMAKE_DISABLE_FIND_PACKAGE_FFmpeg=ON"
+    ],
+    "dll_sha256": "fbfe358dea0d4768339545595666739bb0e0526832888af976c2b86bb94f8099",
+    "build_result": "Succeeded with upstream numeric-conversion warnings, which are not treated as a warning-free production build.",
+    "fingerprint_comparison": {
+      "algorithm": 1,
+      "duration_seconds": 20,
+      "cases": [
+        "440 Hz tone",
+        "linear chirp (110*t + 30*t*t cycles)",
+        "white noise with seed 1202",
+        "silence"
+      ],
+      "formats": [
+        {
+          "sample_rate": 11025,
+          "channels": 1
+        },
+        {
+          "sample_rate": 44100,
+          "channels": 2
+        }
+      ],
+      "result": "All eight generated PCM inputs produce exactly the same 140 uint32 fingerprint values through the prototype API and the original FFmpeg chromaprint muxer. Not proof of equivalence for every input."
+    }
+  }
+}

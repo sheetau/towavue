@@ -510,8 +510,10 @@ M4ではName、Date modified、Date created、Size、Typeの昇順・降順、�
 
 必要なDLL・ffmpeg.exe・ffprobe.exeはインストール先へ配置し、利用者による開発用FFMPEG_DIR/PATHの設定を必要としない構成を計画する。これは配布方式の決定であり、同梱物の検証・再配布条件の確認・installer実装・clean-machine検証の完了ではない。署名・公開・課金は別途扱う。
 
-本体はMIT OR Apache-2.0。FFmpegはGPL/nonfree componentsを無効化した9.0.1のDLLを動的リンクする。配布時には対応するFFmpeg source、build configuration、変更差分、著作権・LGPL表示、第三者license一覧を同じreleaseから取得可能にする。
+本体はMIT OR Apache-2.0。配布向けFFmpegはGPL/nonfree componentsとそれに反する推移依存を除いた9.0.1のDLLを動的リンクする。配布時には対応するFFmpeg source、build configuration、変更差分、著作権・LGPL表示、第三者license一覧を同じreleaseから取得可能にする。
 
 固定開発buildは`--enable-version3`を含み、license表示はLGPL 3以降である。本体の直接依存6 DLLに加え、ffmpeg.exe/ffprobe.exeのためavdevice DLLも必要になる。現在の同梱候補とsource・第三者表示・VC runtimeの未完了事項は[DISTRIBUTION.md](DISTRIBUTION.md)へ記録する。開発archiveにLICENSE.txtがあることだけでは配布承認としない。
 
 FFmpeg binaryやsource archiveは、再現可能なbuild・配布工程を定義するmilestoneまでGitへ入れない。
+
+2026-09-08、固定開発buildにはChromaprint経由のGPL FFTW静的リンクがあることを確認した。このbinaryを上記LGPL構成の配布候補から除外し、開発参照用として保持する。[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)に、機能を削らず固定sourceのKissFFT backendを選ぶ修正案と再build gateを記録した。FFmpegの自己申告licenseだけで承認せず、新binaryの実link入力と全体動作を確認する。本体のlicense変更は行わない。

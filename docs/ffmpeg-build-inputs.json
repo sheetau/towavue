@@ -9,7 +9,9 @@
   "cache_filename_hash_semantics": "SHA256 of the emitted download command, not archive content.",
   "notice_inputs": "ffmpeg-notice-inputs.json",
   "additional_runtime_inputs": "ffmpeg-runtime-inputs.json",
-  "raw_recipe_archive": {"path":"vendor/ffmpeg/recipe-8267213e26c1031621e6e1210fe3aa4867214f6a.tar","bytes":716800,"sha256":"dc162c7511d6c005aa1f8d3f4dcfd6df88d1ef28f996e302fc57eff6ab3315c8","method":"git archive of the fixed commit; preserves original LF bytes unlike the Windows checkout with core.autocrlf=true."},
+  "distribution_rejection": "ffmpeg-distribution-rejection.json",
+  "raw_recipe_archive": {"path":"vendor/ffmpeg/recipe-8267213e26c1031621e6e1210fe3aa4867214f6a-lf.tar","bytes":706560,"sha256":"2d6211a7e4becbb581bf64e2d1a67ff060fb413cd157d479959934ea23f3b2a4","method":"git -c core.autocrlf=false archive of the fixed commit. All 265 entries match their Git blob IDs, with no missing/extra files."},
+  "superseded_recipe_archive": {"path":"vendor/ffmpeg/recipe-8267213e26c1031621e6e1210fe3aa4867214f6a.tar","sha256":"dc162c7511d6c005aa1f8d3f4dcfd6df88d1ef28f996e302fc57eff6ab3315c8","status":"Rejected as byte-original material on 2026-09-08: git archive also applied core.autocrlf conversion; all 265 entries differ from their Git blobs. Retained only as diagnostic evidence."},
   "patch_verification": "Raw fixed-commit patch bytes pass ordered git apply --check against selected unchanged regular entries from the corresponding cache archives. CRLF checkout copies fail the AOM check. No patch application, git am hooks or upstream build scripts execute; this is applicability evidence, not a rebuilt-binary comparison.",
   "patches": [
     {"path":"patches/aom/0001-Fall-back-to-built-in-vmaf-model-on-load-failure.patch","bytes":714,"sha256":"c3b757903be9b98b52b23ac40f7c49dd562cd999b5151890d19dfaf82f40ddb0","git_blob_sha1":"fa42e62794379b04bf2c6d8f76c73b78245bc4f1"},

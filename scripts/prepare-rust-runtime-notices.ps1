@@ -93,7 +93,9 @@ foreach ($archive in $inventory.archives) {
         New-Item -ItemType Directory -Path $CacheDirectory -Force | Out-Null
         $temporary = Join-Path $CacheDirectory ([IO.Path]::GetRandomFileName())
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri $archive.url -OutFile $temporary
+            Write-Output "Downloading runtime archive: $([IO.Path]::GetFileName($path))"
+            & curl.exe --disable --fail --location --silent --show-error --connect-timeout 20 --max-time 180 --output $temporary $archive.url
+            if ($LASTEXITCODE -ne 0) { throw "Runtime archive download failed with exit code $LASTEXITCODE : $($archive.url)" }
             Assert-Archive $temporary $archive
             Move-Item -LiteralPath $temporary -Destination $path
         }
@@ -102,6 +104,7 @@ foreach ($archive in $inventory.archives) {
         }
     }
     Assert-Archive $path $archive
+    Write-Output "Verified runtime archive: $([IO.Path]::GetFileName($path))"
 }
 
 $materials = [ordered]@{
@@ -109,6 +112,7 @@ $materials = [ordered]@{
     'INPUTS.json' = $utf8.GetBytes($inventoryText)
 }
 foreach ($archive in $inventory.archives) {
+    Write-Output "Reading runtime notice entries: $($archive.version) $($archive.component)"
     Read-Notices (Join-Path $CacheDirectory ([uri]$archive.url).Segments[-1]) $archive.files
 }
 

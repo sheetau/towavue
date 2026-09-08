@@ -15,6 +15,8 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 - 配布予定: インストール先を選べるWindows用Setup.exe。現時点では未提供で、下記は開発版のビルド手順
 - 次の工程: H1 human evaluation and UX stabilization。実際の利用flowを観察し、小さな検証可能な単位でUI/UXと機能の不一致を直す
 
+固定開発FFmpegには、LGPLという自己表示だけでは扱えないGPL推移依存が見つかりました。このbinaryは配布候補から外し、機能を保つ[再buildと検証](docs/FFMPEG_REBUILD.md)を進めます。現行の開発用fileや本体のライセンスは変更していません。
+
 複数の映像・音声streamを含む素材では、thumbnail・filmstrip・waveformと保存も再生と同じstreamを自動選択します。手動でstreamを切り替えるUIはありません。
 
 音声playlistはShell順の番号付き一覧です。行全体をclickして選曲でき、現在曲を明るく表示します。長い名前は一行に省略し、hoverで全文を確認できます。多数の曲も可視行だけを描画します。各曲の長さの列はまだありません。

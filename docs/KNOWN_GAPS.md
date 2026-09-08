@@ -209,6 +209,10 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 
 ## 6. Launch判断に残る確認（2026-09-06 20:04 JST再監査）
 
+### 2026-09-08の配布候補除外と再build
+
+固定開発FFmpegのChromaprint→GPL FFTW静的リンクをrecipe、当時のlibrary/pkg-config、実avformat DLLで確認した。FFmpegのLGPL自己表示だけでは既定の配布構成を満たさず、旧binaryをinstallerへ入れない。[FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)のKissFFT切替patchと単体8条件のfingerprint一致は確認したが、FFmpeg全体の再build、全機能/性能の比較、対応source/notice、VC runtime、installerとclean-machine gateは残る。以前の「LGPL 3以降」は自己表示の観測であり、推移依存を含む承認ではなかった。
+
 ### 2026-09-07 22:18の配布依存監査
 
 [DISTRIBUTION.md](DISTRIBUTION.md)へ現行binaryの同梱候補と不足資料を記録した。補助exeのimportからavdeviceを含む7 DLLが必要で、固定FFmpegはLGPL 3以降である。全bin fileのZIP entry一致を確認したが、対応する第三者source/license一式と再現可能buildの証拠はまだ揃わない。Visual C++ runtime候補のversion・hash・署名は確認しただけで、配布条件やclean-machine起動を合格にしない。実装変更・binary公開・OS操作は行っていない。

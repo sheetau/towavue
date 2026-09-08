@@ -2,6 +2,8 @@
 
 2026-09-07のowner指定により、インストール先を選べるSetup.exeを目標とする。これは配布前の技術・資料監査であり、公開可能なpackageや法的適合性の認定ではない。現行のRust構成とFFmpeg動的リンクを維持する。H1の品質確認も継続する。
 
+2026-09-08更新: **下記の固定開発binaryは配布候補から除外する。** Chromaprint経由でGPLのFFTWが静的リンクされていた。recipe、実libraryの未解決symbol、当時のpkg-config、avformat DLL内の識別文字列が一致する。LGPL表示だけでは既定の配布条件を満たさない。[再build計画と単体検証](FFMPEG_REBUILD.md)、[固定した根拠](ffmpeg-distribution-rejection.json)を参照。開発用fileは保持し、本体のlicense変更やcodecの暗黙の削除はしない。
+
 ## 固定binaryの確認（2026-09-07 22:18 JST）
 
 - towavue: `a5639e5`由来の通常release、SHA256 `339046281C097BE5BA05D91BDA9D73F8501BD433A0A6AA96EF4C77E6DD87FCA2`。この監査時のtracked HEADは`6a3c820`で、その間は文書変更のみ。
@@ -10,7 +12,7 @@
 - FFmpeg source commit: `e47273f4d9227152dcbf543cebaf9e2430ddbcc4`。単なる`n9.0.1`のsource archiveを同一sourceとみなさない。
 - build recipe release tagのcommit: `8267213e26c1031621e6e1210fe3aa4867214f6a`。recipeを取得できることだけでは、binary生成時の全dependency source・toolchain/imageの一致を証明しない。
 
-LLVM `llvm-readobj --coff-imports`で本体とFFmpeg bin全fileのPE importを確認した。本体はFFmpeg DLL 6個、補助のffmpeg.exe/ffprobe.exeはさらにavdevice-63.dllを直接importする。したがって現行binaryの配布候補は以下の7 DLLと2補助exeである。ffplay.exeはtowavueから使用せず、同梱候補から除く。
+LLVM `llvm-readobj --coff-imports`で本体とFFmpeg bin全fileのPE importを確認した。本体はFFmpeg DLL 6個、補助のffmpeg.exe/ffprobe.exeはさらにavdevice-63.dllを直接importする。現行開発binaryが必要とするfileは以下の7 DLLと2補助exeである。上記の除外判断により、この一覧を配布承認としない。ffplay.exeはtowavueから使用しない。
 
 | File | Bytes | SHA256 |
 |---|---:|---|
@@ -65,7 +67,7 @@ LAMEのSVN databaseはメモリ内・query-onlyで読み、rootと全449 NODES�
 
 ### 原本patchとnative通知の抽出（2026-09-07 23:24 JST）
 
-Windows上のrecipe checkoutは`core.autocrlf=true`によりpatchをCRLFへ変換していた。AOMの適用checkはそのcopyで失敗し、固定commitのraw blobでは成功した。上流patchの不整合とは扱わず、build/source資料には`git archive`で作った改行変換なしのrecipe archiveを使う。保存先・SHA256と4 patchの原本hashは[ffmpeg-build-inputs.json](ffmpeg-build-inputs.json)に記録した。
+Windows上のrecipe checkoutは`core.autocrlf=true`によりpatchをCRLFへ変換していた。AOMの適用checkはそのcopyで失敗し、固定commitのraw blobでは成功した。上流patchの不整合とは扱わない。2026-09-08の訂正: 初回の`git archive`もこの設定の影響を受け、全265 entryがGit blobと異なっていた。`git -c core.autocrlf=false archive`で別fileへ作り直し、全265 entryの一致と欠落なしを確認した。新archiveは706560 bytes、SHA256 `2d6211a7e4becbb581bf64e2d1a67ff060fb413cd157d479959934ea23f3b2a4`。保存先・旧archiveの除外理由と4 patchの原本hashは[ffmpeg-build-inputs.json](ffmpeg-build-inputs.json)に記録した。既存のraw blobを使ったAOM/ARIBの適用checkとは区別する。
 
 AOM 1 patchとARIB B24の12→13→17の3 patchは、cache内の対象fileを変えない`git apply --check`を通過した。これは適用可能性の確認であり、実際のgit am・autoreconf・buildや完成binaryの再現ではない。ARIBのconfigure.acのversion書換えなど、patch file以外の処理もraw recipeに含めて保持する。
 
@@ -142,6 +144,8 @@ Cargo packageの本文集とは別に、[rust-runtime-inputs.json](rust-runtime-
 
 検証では原本36件のbyte一致、二回生成の一致、別cwd起動、入力欠落/同size改変の拒否、正常な既存出力と不正cacheの保持を確認する。CIにも同じ取得・検証を追加した。この資料を含めても、native FFmpegの残るsource/noticeとVC runtime、installer導入試験は完了していない。
 
+初回CIのrun 34174369000は資料step中にjobの時間上限へ到達した。元logにはarchive単位の進捗がなく、どの取得・読取りで待ったかは特定できない。生成scriptは取得/検証/読取りのstageを表示し、curl.exeで接続20秒・転送全体180秒の上限を設けた。checksum検証と不正cache/既存出力の保護は維持する。無制限retryやjob時間の引延ばしで成功扱いにしない。
+
 ## Visual C++ runtime
 
 開発機のVisual Studio Community 2026配下で、x64 Redistributableを読み取り確認した。file versionは`14.51.36247.0`、18731856 bytes、SHA256は`843068991DAAA1F73AD9F6239BCE4D0F6A07A51F18C37EA2A867E9BECA71295C`。AuthenticodeはValid、署名者はMicrosoft Corporationである。実行・copy・インストールはしていない。
@@ -152,6 +156,6 @@ installer設計前に、配布buildと互換なruntimeの固定version、導入�
 
 ## 次のゲート
 
-1. 固定recipeとbuild記録から第三者source/revision/patch一覧を確定し、不足する資料を取得する。既存binaryとの対応が確認できなければ、根拠のないsourceを添付せず、同一機能を維持する再現可能buildの計画を別途立てる。
+1. [FFMPEG_REBUILD.md](FFMPEG_REBUILD.md)に従い、機能を保つ代替buildの有効dependency/source/revision/patchとlink入力を固定する。既存binaryの除外は確定しており、期限切れの旧log追跡だけを繰り返して配布承認へ進めない。既存の確認済み原本資料は再buildの入力・比較基準として活用する。
 2. 取得したlicense/notice、Rust依存、VC runtimeを含む配布資料を照合する。この文書は最終license bundleではない。
 3. 資料が揃ってから、ROADMAPのSetup.exe実装・隔離環境での導入/更新/削除検証へ進む。開発用FFMPEG_DIR/PATH不要、別作業directoryでの起動、preview/export、tab detachと既存H1 gateを保持する。

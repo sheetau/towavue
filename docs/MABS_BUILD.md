@@ -112,7 +112,7 @@ staged prefixにはCOPYINGとLICENSE.mdを原本byteのまま保持した。SHA2
 
 2026-09-08、[ffmpeg-native-features.json](ffmpeg-native-features.json)へ元image configの全81 option（61 enable）を移した。`test-ffmpeg-native-features.ps1`は原本SHA256照合と全optionの完全一致、enableごとの準備経路と入力固定を検証する。原本がない環境では原本比較のskipを明示し、自己一致だけを原本照合成功とはしない。現時点の対応は52 package feature、5 source feature、4 built-in featureである。
 
-同じdatabase snapshotから当初のpackage候補を解決し、既存249件のhash/versionを変えず72件、154812396 compressed bytesを追加取得した。全archiveのhashと`.PKGINFO`、全detached signatureのVALIDSIG/full trustを検証し、[media入力一覧](msys2-media-inputs.json)を計86件へ拡張した。`-IncludeMediaDependencies`の現在の取得・環境test対象はbase込み321件であり、前節の14件だけを追加するmodeではない。通常CIへこの大きなpackage取得は追加しない。
+同じdatabase snapshotから当初のpackage候補を解決し、既存249件のhash/versionを変えず72件、154812396 compressed bytesを追加取得した。全archiveのhashと`.PKGINFO`、全detached signatureのVALIDSIG/full trustを検証し、[media入力一覧](msys2-media-inputs.json)を計86件へ拡張した。`-IncludeMediaDependencies`のこの時点の取得・環境test対象はbase込み321件であり、前節の14件だけを追加するmodeではない。通常CIへこの大きなpackage取得は追加しない。
 
 追加の導入処理5 fileはXML catalog、GIO module cache、GSettings schema、fontconfig cacheの更新だった。XDG cache/config/dataを専用build rootへ向け、repositoryなし・Required署名のlocal `-U --needed`で導入し正常終了した。FreeType/HarfbuzzとTIFF/WebPの依存cycle warningはあったが、導入後の全321件のname/version、database整合性・file存在を確認した。642 cache fileの再利用・欠落/改変拒否、既存native C/C++とLV2/VAAPI smokeも通過した。package依存には補助tool用も含まれるため、この集合全体をinstallerへcopyする方針ではない。
 
@@ -138,6 +138,27 @@ Chromaprint packageのstatic archiveには`fft_lib_kissfft.cpp.obj`、`kiss_fft.
 手動buildに加え、scriptによる2つの新規outputへのbuild・公開C APIのリンクと実行が成功した。`pkg-config`が新prefixを選び、FFmpegと同じ`aribb24 > 1.0.3`条件を満たすことを検査する。小さな入力`0e 41`（LS1/A）は期待するUTF-8 U+FF21へdecodeできた。任意cwd、環境変数復元、既存output拒否も確認済み。試験exeはWindows DLL以外に`libpng16-16.dll`をimportするため、これは依存すべてのstatic linkを意味しない。staged COPYINGとREADME.mdはsource原本のbyteを保持し、SHA256はそれぞれ`da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768`と`a9d5a0c8c8824d792cc57198f251c723b7ce69183efbc3a80de6384e0e60002c`である。
 
 元81 optionをすべて維持し、ARIB新prefix→LCEVC prefix→MSYS2の順で全FFmpeg configureを再実行した。ARIB検査は通過し、次の停止理由は`librist >= 0.2.7 not found using pkg-config`となった。configure全体は未成功であり、librist/mbedTLS、uavs3d、vvencの準備を続ける。今回の1文字試験は実字幕stream・描画・FFmpeg全体・配布条件の検証を代替しない。
+
+## libristのnative buildと実際の暗号依存
+
+2026-09-08、元recipeの固定mbedTLS v4.2.0とlibrist source archiveをsize/hash検査して展開した。mbedTLSは5138 entryで、147のsymlinkはすべてarchive内部の通常file/directoryを指していた。MSYS2 tarで展開する際は`/c/...`表記を使い、Windows driveのcolonをremote host指定と解釈させない。libristは550の通常entryであり、展開後の全485 tracked blobがHEAD `4f45ef8f78983892d52ccd52d9f675435b23738f`とraw byteで一致した。
+
+mbedTLS HEADは`ece41aa84d7879d7e55c59e955a5884b541f7f3b`、同梱submoduleはframework `dde0c4a0e448a0552f18817dcea633bb851fd288`、TF-PSA-Crypto `73c5da561c8e5253db7b1fb440eda86fde8d8024`、mldsa-native `5772b4f4a0105694b1203abb582273f78fa951b7`だった。native Release/static、program/test無効、`GEN_FILES=ON`でconfigureは通ったが、Pythonのjsonschema不足でcode generationが失敗した。
+
+同じ署名済みdatabase snapshotへPython jsonschema/Jinjaの2 rootを加え、既存321 packageを変更せず8件、1508303 compressed bytesを追加した。各archiveのhash・`.PKGINFO`、detached signatureのVALIDSIG/full trustを照合し、追加scriptlet/hookがないことを確認した。全署名のprimaryは`5F944B027F7FE2091985AA2EFA11531AA0AA7F57`。repositoryなし・Required署名のlocal `-U --needed`で導入し、全329 packageのname/version・database整合性・欠落なしを検証した。現在の[media入力](msys2-media-inputs.json)は94件、`-IncludeMediaDependencies`はbase込み329件である。658 cache fileの再利用・欠落/改変拒否・native C/C++/LV2/VAAPI検証も成功した。追加8件はmbedTLS 4.2診断build用で、installer入力ではない。
+
+追加後にmbedTLS 4.2の全library build/installは成功した。しかしlibristはその外部版のCMake target/public `mbedtls/aes.h`を利用できず、`builtin_mbedtls=false`を指定しても、既定fallbackによって自分のsourceに含まれるmbedTLS 3.6.6を使用した。cJSONも同梱版を使用した。**mbedTLS 4.2とリンクできたとは扱わない。** 最初のC callerもリンク自体は通ったが、`librist_version()`をpackage版番号と誤認した試験で失敗した。このAPIが返すのはVCS識別子であり、Windowsのfilemode判定による`-dirty`もcommand-local Git設定で解消した。
+
+```powershell
+.\scripts\build-librist-native.ps1 -MsysRoot 'path/to/msys64' `
+    -SourceDirectory 'path/to/verified/librist' -BuildDirectory 'path/to/fresh/build'
+```
+
+候補手順は固定librist source同梱のmbedTLS 3.6.6とcJSONを**明示的に選択**し、その他のbuiltin fallbackとwrap downloadを無効にする。外部mbedTLS 4.2 prefixを探索に入れず、元recipeの`Requires: mbedcrypto`追記も流用しない。liblz4は固定MSYS2 packageを使う。source変更は不要で、`librist.a`には実際にmbedTLSのAES/MPI定義が含まれる。2つの新規outputへnative static buildし、pkg-config prefix/version検査、公開C APIによるMAIN profile受信contextの生成・破棄、任意cwd・環境復元・既存output拒否が成功した。peerやstreamは開始していない。上流Mesonのminimum-version警告とGCCのUDP変数警告は残る。
+
+試験exeはWindows DLL以外に`liblz4.dll`と`libwinpthread-1.dll`をimportする。libristのCOPYING、`contrib/mbedtls/LICENSE`、cJSON source内noticeを保持する必要があり、最終runtime graph・対応source/notice収集・暗号化通信試験は未完了である。外部mbedTLS 4.2の診断成果物は候補link入力から除外する。
+
+全81 FFmpeg optionの再configureはlibrist検査を通過し、次の`uavs3d >= 1.1.41 not found using pkg-config`でexit 1となった。残るuavs3d/vvencのnative buildと全体統合を続ける。アプリ本体へネットワーク機能を追加したものではなく、配布・launch完了を意味しない。
 
 ## 設定値の対応
 

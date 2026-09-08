@@ -5,6 +5,8 @@
   "base_inventory": "msys2-toolchain-inputs.json",
   "database_sha256": "58dada89a98d5edcd8b3d959d62202ffff132a1027f6923dabc19c0a220bd5fe",
   "roots": [
+    "mingw-w64-x86_64-python-jinja",
+    "mingw-w64-x86_64-python-jsonschema",
     "mingw-w64-x86_64-SDL2",
     "mingw-w64-x86_64-amf-headers",
     "mingw-w64-x86_64-aom",
@@ -63,6 +65,110 @@
     "mingw-w64-x86_64-zvbi"
   ],
   "packages": [
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-python-attrs",
+      "version": "26.1.0-1",
+      "bytes": 120740,
+      "sha256": "293aba238b871e5c7f00bb748ab10711dd0f8e4b44098e8c13e2683d52786e71",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-python-attrs-26.1.0-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "fc07abfb709c306ab8ad9f08d5ce17d45a5fd606a8edbb38f507395316a1c5d6",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-python-jinja",
+      "version": "3.1.6-4",
+      "bytes": 331692,
+      "sha256": "6cc532ca389e21d91dc281aa6bcc4e9e4f99afeccc60358012587e8c9a59c7a3",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-python-jinja-3.1.6-4-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "02e695d5505832c56366dcd1c086414a90de7ddb14202059766b8244349d1401",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-python-jsonschema",
+      "version": "4.26.0-2",
+      "bytes": 236092,
+      "sha256": "bd4f739e988b9190fe46988fbbe231ed193ea4a730f8fe58ea1a76751740dcf7",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-python-jsonschema-4.26.0-2-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "41b081a7c2263de370e914790723566e71e539f7a75ea3288c14cc44d879bf5a",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-python-jsonschema-specifications",
+      "version": "2025.9.1-3",
+      "bytes": 14139,
+      "sha256": "89fbc3251d880c5a4f0a98e254a222272ec30d7dbde4f9834777ce692e2defed",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-python-jsonschema-specifications-2025.9.1-3-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "7f4a30c340d4dad6d80afda79cac749aae87b4671d98ccfe65a9b934a44b3bbf",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-python-markupsafe",
+      "version": "3.0.3-3",
+      "bytes": 24694,
+      "sha256": "9e5ba283499849af2264155de050fe8825dfc09d7e591b729918c80ad2d5eb99",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-python-markupsafe-3.0.3-3-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "ef2c43d9731153a3551f98e72101bd27ba9ae7caad73ffe1c6d7401d303f7030",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-python-referencing",
+      "version": "0.37.0-3",
+      "bytes": 71961,
+      "sha256": "8385875e4ece4af23252df4b0e98a9d9933a053b037ce4a3d2b0a8bdbb867225",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-python-referencing-0.37.0-3-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "0ef06d553a8aa6ab483893ce71bb10b981192375b42e47cbb50b40ec16cccd4a",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-python-rpds-py",
+      "version": "2026.6.3-3",
+      "bytes": 610631,
+      "sha256": "9895bdb30cc948f143ca54fcbef837caabface5fbe1004011c4c092ca5a45189",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-python-rpds-py-2026.6.3-3-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "d3e3ceba489ac5d26d5f52875124b76cebc26fa0aa26689773954cbd545fcf47",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
+    {
+      "repository": "mingw64",
+      "name": "mingw-w64-x86_64-python-typing_extensions",
+      "version": "4.16.0-1",
+      "bytes": 98354,
+      "sha256": "fc10cae6c2740ebb5bb259732a9e6b730924b2432aee4fadc557c4e08acbcd74",
+      "url": "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-python-typing_extensions-4.16.0-1-any.pkg.tar.zst",
+      "signature": {
+        "bytes": 566,
+        "sha256": "760ff4f35a02dcc5dc60ef97526366e1ad3ec80409df14a0eb35a3b785bf2ca6",
+        "primary_fingerprint": "5F944B027F7FE2091985AA2EFA11531AA0AA7F57"
+      }
+    },
     {
       "repository": "mingw64",
       "name": "mingw-w64-x86_64-lv2",

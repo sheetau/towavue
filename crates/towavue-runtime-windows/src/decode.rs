@@ -464,130 +464,179 @@ pub(crate) fn decode_file_parallel_cancellable(
     maximum_time: Option<MediaTime>,
     stream: Option<DecodeStream>,
     cancelled: &(dyn Fn() -> bool + Sync),
-    mut emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
+    emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
-    decode_file_parallel_inner(
-        path,
-        None,
+    ParallelInput::open(path, cancelled)?.decode_software(
         minimum_time,
         maximum_time,
         stream,
         cancelled,
-        |output| match output {
-            ParallelDecodeOutput::SoftwareVideo(frame) => emit(ParallelSoftwareDecodeOutput::Item(
-                DecodeOutput::Video(frame),
-            )),
-            ParallelDecodeOutput::Audio(chunk) => emit(ParallelSoftwareDecodeOutput::Item(
-                DecodeOutput::Audio(chunk),
-            )),
-            ParallelDecodeOutput::AudioFinished => {
-                emit(ParallelSoftwareDecodeOutput::AudioFinished)
-            }
-            ParallelDecodeOutput::VideoFinished => {
-                emit(ParallelSoftwareDecodeOutput::VideoFinished)
-            }
-            ParallelDecodeOutput::HardwareVideo(_) | ParallelDecodeOutput::Failed(_) => {
-                unreachable!("parallel decode output is handled internally")
-            }
-        },
+        emit,
     )
 }
 
-pub(crate) fn decode_file_hardware_parallel(
-    path: &Path,
-    device: &GraphicsDevice,
-    minimum_time: MediaTime,
-    maximum_time: Option<MediaTime>,
-    cancelled: &(dyn Fn() -> bool + Sync),
-    mut emit: impl FnMut(ParallelRuntimeDecodeOutput) -> bool,
-) -> Result<DecodeSummary, DecodeError> {
-    decode_file_parallel_inner(
-        path,
-        Some(device),
-        minimum_time,
-        maximum_time,
-        Some(DecodeStream::Video),
-        cancelled,
-        |output| match output {
-            ParallelDecodeOutput::HardwareVideo(frame) => emit(ParallelRuntimeDecodeOutput::Item(
-                RuntimeDecodeOutput::Video(frame),
-            )),
-            ParallelDecodeOutput::VideoFinished => emit(ParallelRuntimeDecodeOutput::VideoFinished),
-            ParallelDecodeOutput::SoftwareVideo(_)
-            | ParallelDecodeOutput::Audio(_)
-            | ParallelDecodeOutput::AudioFinished
-            | ParallelDecodeOutput::Failed(_) => {
-                unreachable!("parallel decode output is handled internally")
-            }
-        },
-    )
+/// An exclusively owned demux input, moved back to its session after workers join.
+/// Decoders and packet queues are per run; no stream borrow escapes a run.
+pub(crate) struct ParallelInput {
+    input: format::context::Input,
+    started: bool,
 }
 
-fn decode_file_parallel_inner(
-    path: &Path,
-    hardware_device: Option<&GraphicsDevice>,
-    minimum_time: MediaTime,
-    maximum_time: Option<MediaTime>,
-    stream: Option<DecodeStream>,
-    cancelled: &(dyn Fn() -> bool + Sync),
-    mut emit: impl FnMut(ParallelDecodeOutput) -> bool,
-) -> Result<DecodeSummary, DecodeError> {
-    check_cancelled(cancelled)?;
-    ffmpeg::init()?;
-    let mut input = format::input(path)?;
-    check_cancelled(cancelled)?;
-    let video_config = (stream != Some(DecodeStream::Audio))
-        .then(|| best_stream_config(&input, Type::Video))
-        .flatten();
-    let video = match (hardware_device, video_config) {
-        (Some(device), Some(config)) => Some(ParallelVideoConfig::Hardware(config, device.clone())),
-        (Some(_), None) => {
-            return Err(DecodeError::HardwareUnavailable(
-                "input has no video stream".to_owned(),
-            ));
-        }
-        (None, config) => config.map(ParallelVideoConfig::Software),
-    };
-    let audio = (stream != Some(DecodeStream::Video))
-        .then(|| best_stream_config(&input, Type::Audio))
-        .flatten();
-    if video.is_none() && audio.is_none() {
-        if let Some(stream) = stream
-            && best_stream_config(
-                &input,
-                match stream {
-                    DecodeStream::Video => Type::Audio,
-                    DecodeStream::Audio => Type::Video,
-                },
-            )
-            .is_some()
-        {
-            return if emit(match stream {
-                DecodeStream::Video => ParallelDecodeOutput::VideoFinished,
-                DecodeStream::Audio => ParallelDecodeOutput::AudioFinished,
-            }) {
-                Ok(DecodeSummary::default())
-            } else {
-                Err(DecodeError::ConsumerClosed)
-            };
-        }
-        return Err(DecodeError::NoMediaStream);
+impl ParallelInput {
+    pub(crate) fn open(
+        path: &Path,
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> Result<Self, DecodeError> {
+        check_cancelled(cancelled)?;
+        ffmpeg::init()?;
+        let input = format::input(path)?;
+        check_cancelled(cancelled)?;
+        Ok(Self {
+            input,
+            started: false,
+        })
     }
-    seek_input(&mut input, minimum_time, video.is_some(), cancelled)?;
-    check_cancelled(cancelled)?;
-    run_parallel_workers(
-        input,
-        video,
-        audio,
-        minimum_time,
-        maximum_time,
-        cancelled,
-        &mut emit,
-    )
+
+    pub(crate) fn decode_software(
+        &mut self,
+        minimum_time: MediaTime,
+        maximum_time: Option<MediaTime>,
+        stream: Option<DecodeStream>,
+        cancelled: &(dyn Fn() -> bool + Sync),
+        mut emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
+    ) -> Result<DecodeSummary, DecodeError> {
+        self.decode(
+            None,
+            minimum_time,
+            maximum_time,
+            stream,
+            cancelled,
+            |output| match output {
+                ParallelDecodeOutput::SoftwareVideo(frame) => emit(
+                    ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)),
+                ),
+                ParallelDecodeOutput::Audio(chunk) => emit(ParallelSoftwareDecodeOutput::Item(
+                    DecodeOutput::Audio(chunk),
+                )),
+                ParallelDecodeOutput::AudioFinished => {
+                    emit(ParallelSoftwareDecodeOutput::AudioFinished)
+                }
+                ParallelDecodeOutput::VideoFinished => {
+                    emit(ParallelSoftwareDecodeOutput::VideoFinished)
+                }
+                ParallelDecodeOutput::HardwareVideo(_) | ParallelDecodeOutput::Failed(_) => {
+                    unreachable!("parallel decode output is handled internally")
+                }
+            },
+        )
+    }
+
+    pub(crate) fn decode_hardware(
+        &mut self,
+        device: &GraphicsDevice,
+        minimum_time: MediaTime,
+        maximum_time: Option<MediaTime>,
+        cancelled: &(dyn Fn() -> bool + Sync),
+        mut emit: impl FnMut(ParallelRuntimeDecodeOutput) -> bool,
+    ) -> Result<DecodeSummary, DecodeError> {
+        self.decode(
+            Some(device),
+            minimum_time,
+            maximum_time,
+            Some(DecodeStream::Video),
+            cancelled,
+            |output| match output {
+                ParallelDecodeOutput::HardwareVideo(frame) => emit(
+                    ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)),
+                ),
+                ParallelDecodeOutput::VideoFinished => {
+                    emit(ParallelRuntimeDecodeOutput::VideoFinished)
+                }
+                ParallelDecodeOutput::SoftwareVideo(_)
+                | ParallelDecodeOutput::Audio(_)
+                | ParallelDecodeOutput::AudioFinished
+                | ParallelDecodeOutput::Failed(_) => {
+                    unreachable!("parallel decode output is handled internally")
+                }
+            },
+        )
+    }
+
+    fn decode(
+        &mut self,
+        hardware_device: Option<&GraphicsDevice>,
+        minimum_time: MediaTime,
+        maximum_time: Option<MediaTime>,
+        stream: Option<DecodeStream>,
+        cancelled: &(dyn Fn() -> bool + Sync),
+        mut emit: impl FnMut(ParallelDecodeOutput) -> bool,
+    ) -> Result<DecodeSummary, DecodeError> {
+        check_cancelled(cancelled)?;
+        let input = &mut self.input;
+        let video_config = (stream != Some(DecodeStream::Audio))
+            .then(|| best_stream_config(input, Type::Video))
+            .flatten();
+        let video = match (hardware_device, video_config) {
+            (Some(device), Some(config)) => {
+                Some(ParallelVideoConfig::Hardware(config, device.clone()))
+            }
+            (Some(_), None) => {
+                return Err(DecodeError::HardwareUnavailable(
+                    "input has no video stream".to_owned(),
+                ));
+            }
+            (None, config) => config.map(ParallelVideoConfig::Software),
+        };
+        let audio = (stream != Some(DecodeStream::Video))
+            .then(|| best_stream_config(input, Type::Audio))
+            .flatten();
+        if video.is_none() && audio.is_none() {
+            if let Some(stream) = stream
+                && best_stream_config(
+                    input,
+                    match stream {
+                        DecodeStream::Video => Type::Audio,
+                        DecodeStream::Audio => Type::Video,
+                    },
+                )
+                .is_some()
+            {
+                return if emit(match stream {
+                    DecodeStream::Video => ParallelDecodeOutput::VideoFinished,
+                    DecodeStream::Audio => ParallelDecodeOutput::AudioFinished,
+                }) {
+                    Ok(DecodeSummary::default())
+                } else {
+                    Err(DecodeError::ConsumerClosed)
+                };
+            }
+            return Err(DecodeError::NoMediaStream);
+        }
+        if self.started && minimum_time <= MediaTime::ZERO {
+            if input.format().name() == "mpegts" {
+                seek_byte_position(input, 0)?;
+            } else {
+                let origin = input_origin(input);
+                input.seek(origin, ..origin)?;
+            }
+        }
+        self.started = true;
+        seek_input(input, minimum_time, video.is_some(), cancelled)?;
+        check_cancelled(cancelled)?;
+        run_parallel_workers(
+            input,
+            video,
+            audio,
+            minimum_time,
+            maximum_time,
+            cancelled,
+            &mut emit,
+        )
+    }
 }
 
 fn run_parallel_workers(
-    mut input: format::context::Input,
+    input: &mut format::context::Input,
     video: Option<ParallelVideoConfig>,
     audio: Option<StreamConfig>,
     minimum_time: MediaTime,
@@ -595,7 +644,7 @@ fn run_parallel_workers(
     cancelled: &(dyn Fn() -> bool + Sync),
     emit: &mut impl FnMut(ParallelDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
-    let origin = input_origin(&input);
+    let origin = input_origin(input);
     let video_stream_index = video.as_ref().map(|video| match video {
         ParallelVideoConfig::Software(config) => config.index,
         ParallelVideoConfig::Hardware(config, _) => config.index,
@@ -962,26 +1011,33 @@ fn seek_input(
         return Ok(());
     }
     if video && let Some(point) = transport_seek_point(input, target, cancelled)? {
-        // Exclusive input ownership on this thread; FFmpeg flushes parser/demux
-        // state before repositioning. No packet/stream borrow or pointer escapes.
-        let result = unsafe {
-            ffmpeg::ffi::av_seek_frame(
-                input.as_mut_ptr(),
-                -1,
-                point.position,
-                ffmpeg::ffi::AVSEEK_FLAG_BYTE,
-            )
-        };
-        return if result < 0 {
-            Err(ffmpeg::Error::from(result).into())
-        } else {
-            Ok(())
-        };
+        return seek_byte_position(input, point.position);
     }
     let timestamp_microseconds =
         (target.as_nanoseconds() / 1_000).saturating_add(input_origin(input));
     input.seek(timestamp_microseconds, ..timestamp_microseconds)?;
     Ok(())
+}
+
+fn seek_byte_position(
+    input: &mut format::context::Input,
+    position: i64,
+) -> Result<(), DecodeError> {
+    // Exclusive input ownership on this thread; FFmpeg flushes parser/demux
+    // state before repositioning. No packet/stream borrow or pointer escapes.
+    let result = unsafe {
+        ffmpeg::ffi::av_seek_frame(
+            input.as_mut_ptr(),
+            -1,
+            position,
+            ffmpeg::ffi::AVSEEK_FLAG_BYTE,
+        )
+    };
+    if result < 0 {
+        Err(ffmpeg::Error::from(result).into())
+    } else {
+        Ok(())
+    }
 }
 
 struct TransportSeekPoint {
@@ -1575,6 +1631,40 @@ mod tests {
             })
             .expect("full source decode");
             assert_eq!(reference.len(), 180);
+            let mut retained =
+                super::ParallelInput::open(&path, &|| false).expect("retained input");
+            for start_ns in [0, 5_500_000_000, 0, 500_000_000, 0] {
+                let start = MediaTime::from_nanoseconds(start_ns);
+                let mut actual = Vec::new();
+                retained
+                    .decode_software(
+                        start,
+                        None,
+                        Some(super::DecodeStream::Video),
+                        &|| false,
+                        |output| {
+                            if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) =
+                                output
+                            {
+                                actual.push((frame.presentation_time, frame.rgba));
+                            }
+                            true
+                        },
+                    )
+                    .expect("reuse TS input after EOF");
+                let expected: Vec<_> = reference
+                    .iter()
+                    .filter(|(time, _)| *time >= start)
+                    .cloned()
+                    .collect();
+                assert!(
+                    actual == expected,
+                    "retained GOP {gop}, seek {start_ns}: {} versus {} frames",
+                    actual.len(),
+                    expected.len()
+                );
+            }
+            drop(retained);
             let cache_path = path.with_extension("cache");
             let cache = crate::PreviewCache::new(cache_path.clone()).expect("preview cache");
             for start_ns in [500_000_000, 3_500_000_000, 5_500_000_000] {

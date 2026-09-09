@@ -2,6 +2,14 @@
 
 This log preserves compact, factual continuity across sessions. New entries are added first.
 
+## 2026-09-10 02:50 JST - retain opened video inputs across suspension and recovery (U07 partial)
+
+- Trigger/scope: previous turn made progress and pushedd3ea67e; CI34384268941 succeeds. Continue the entire existing UX goal, with no agents, installation or publication.
+- Implementation: runtime-only ParallelInput exclusively owns the FFmpeg demux context; scoped workers borrow it and the joined video feed returns ownership to PlaybackSession. Reuse it across hide/show, Seek, device replacement and hardware-to-software fallback; decoders/queues remain per run and the hidden audio lifetime is unchanged. Explicitly rewind reused input at zero; use the existing byte-seek boundary for MPEG-TS. Close/path replacement drops the session/input. Cancelled initial open or worker failure may still require reopening; first-frame/decoder/Seek return latency remains.
+- Evidence: extend bounded-queue visibility test with a nonexistent reopen path after suspension, complete PTS/RGBA comparison, repeated zero/nonzero returns and hidden Seek/WARP replacement. This simulates an unavailable reopen path without deleting/renaming an open file. Test cleanup succeeds after dropping the session. TS H264 short/long GOP and B-frame MPEG2 each compare all180 reference frames after repeated EOF/zero/nonzero reuse. Initial time-based zero Seek loses30 frames; byte-zero correction passes all comparisons.
+- Verification: final session94454 fmt/workspace all-target Clippy/tests/release succeeds: app196/core42/runtime98/integration4 =340 passed; seven opt-in tests ignored ordinarily. Explicit session73112 WASAPI visibility and app multi-session/background/device tests pass, not skip. Final native-caption H264 D3D11VA recovery test passes with CPU transfers0 for each checked frame. Releasef504d474f552397b31b09b7dceaff7d40afb9f276f3b2dfc1f068464de49b371. Muted runtime/native test windows close; no additional interactive release trial or physical removal/loopback qualification. Dependencies/vendor/app implementation unchanged.
+- Areas/status/next: runtime decode/playback, README/architecture/UX/development/gaps/log. Push this coherent checkpoint. Continue U07 return-frame waiting, focus/resource/failure recovery, then U08/A01 and the full remaining image/video/timeline/edit/export/selection/menu ledger. Full goal remains active and incomplete; no blocker.
+
 ## 2026-09-10 02:38 JST - retain per-tab list offsets and timeline panel sizes (U07 partial)
 
 - Trigger/scope: previous turn made progress and pushed7713fbe; CI34382988768 succeeds. Continue the full UX goal. Inspection found playlist scroll and timeline size still shared through egui IDs, and filmstrip refresh clearing its view. No agents, installations or publication.

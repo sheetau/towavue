@@ -127,7 +127,8 @@ pub struct PlaybackSession {
     current_video: Option<PresentationFrame>,
     current_video_unpresented: bool,
     audio: Option<AudioOutput>,
-    video_thread: Option<JoinHandle<()>>,
+    video_thread: Option<JoinHandle<Option<decode::ParallelInput>>>,
+    video_input: Option<decode::ParallelInput>,
     audio_thread: Option<JoinHandle<()>>,
     decode_cancel: Arc<AtomicBool>,
     video_cancel: Arc<AtomicBool>,
@@ -173,6 +174,7 @@ impl PlaybackSession {
             current_video_unpresented: false,
             audio: None,
             video_thread: None,
+            video_input: None,
             audio_thread: None,
             decode_cancel: Arc::new(AtomicBool::new(false)),
             video_cancel: Arc::new(AtomicBool::new(false)),
@@ -355,22 +357,30 @@ impl PlaybackSession {
         self.video_cancel = Arc::new(AtomicBool::new(false));
         let cancelled = Arc::clone(&self.video_cancel);
         let completion = Arc::clone(&self.completion);
+        let mut input = self.video_input.take();
         let video_thread = thread::Builder::new()
             .name("towavue-video-feed".to_owned())
             .spawn(move || {
-                let result = run_video_decode(
-                    &path,
-                    &graphics_device,
-                    &video_tx,
-                    &metrics,
-                    video_generation,
-                    target,
-                    end,
-                    &cancelled,
-                    notify.as_ref(),
-                );
+                let result = (|| {
+                    if input.is_none() {
+                        input = Some(decode::ParallelInput::open(&path, &|| {
+                            cancelled.load(Ordering::Relaxed)
+                        })?);
+                    }
+                    run_video_decode(
+                        input.as_mut().expect("opened video input"),
+                        &graphics_device,
+                        &video_tx,
+                        &metrics,
+                        video_generation,
+                        target,
+                        end,
+                        &cancelled,
+                        notify.as_ref(),
+                    )
+                })();
                 if cancelled.load(Ordering::Relaxed) {
-                    return;
+                    return input;
                 }
                 match result {
                     Ok(()) if completion.finish(DecodeCompletion::VIDEO) => {
@@ -387,6 +397,7 @@ impl PlaybackSession {
                         )),
                     },
                 }
+                input
             })?;
         self.video_rx = Some(video_rx);
         self.video_thread = Some(video_thread);
@@ -411,7 +422,7 @@ impl PlaybackSession {
         self.current_video_unpresented = false;
         self.video_rx.take();
         if let Some(thread) = self.video_thread.take() {
-            let _ = thread.join();
+            self.video_input = thread.join().ok().flatten();
         }
     }
 
@@ -586,7 +597,7 @@ fn run_audio_decode(
 
 #[allow(clippy::too_many_arguments)]
 fn run_video_decode(
-    path: &Path,
+    input: &mut decode::ParallelInput,
     graphics_device: &GraphicsDevice,
     video_tx: &SyncSender<PresentationFrame>,
     metrics: &SharedMetrics,
@@ -597,8 +608,7 @@ fn run_video_decode(
     notify: &(impl Fn(PlaybackEvent) + Sync + ?Sized),
 ) -> Result<(), decode::DecodeError> {
     let mut hardware_output_seen = false;
-    let hardware_result = decode::decode_file_hardware_parallel(
-        path,
+    let hardware_result = input.decode_hardware(
         graphics_device,
         target,
         end,
@@ -634,28 +644,28 @@ fn run_video_decode(
                 generation,
                 DecodePath::Software,
             ));
-            decode::decode_file_parallel_cancellable(
-                path,
-                target,
-                end,
-                Some(DecodeStream::Video),
-                &|| cancelled.load(Ordering::Relaxed),
-                |output| match output {
-                    ParallelSoftwareDecodeOutput::VideoFinished => true,
-                    ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) => {
-                        metrics.cpu_transfer_count.fetch_add(1, Ordering::Relaxed);
-                        send_video_frame(
-                            PresentationFrame::Software(frame),
-                            video_tx,
-                            generation,
-                            cancelled,
-                            notify,
-                        )
-                    }
-                    _ => unreachable!("video-only decoder emitted audio"),
-                },
-            )
-            .map(|_| ())
+            input
+                .decode_software(
+                    target,
+                    end,
+                    Some(DecodeStream::Video),
+                    &|| cancelled.load(Ordering::Relaxed),
+                    |output| match output {
+                        ParallelSoftwareDecodeOutput::VideoFinished => true,
+                        ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) => {
+                            metrics.cpu_transfer_count.fetch_add(1, Ordering::Relaxed);
+                            send_video_frame(
+                                PresentationFrame::Software(frame),
+                                video_tx,
+                                generation,
+                                cancelled,
+                                notify,
+                            )
+                        }
+                        _ => unreachable!("video-only decoder emitted audio"),
+                    },
+                )
+                .map(|_| ())
         }
         other => other.map(|_| ()),
     }
@@ -770,6 +780,13 @@ mod tests {
             .set_video_visible(false, MediaTime::ZERO)
             .expect("hide");
         assert!(session.video_thread.is_none() && session.video_rx.is_none());
+        assert!(
+            session.video_input.is_some(),
+            "joined worker returns its input"
+        );
+        // Any path reopen from this point would fail; the open input must suffice.
+        session.path = path.with_extension("absent");
+        assert!(!session.path.exists());
         assert!(session.pending_video_time().is_none() && session.video_geometry().is_none());
         let hidden_count = session.metrics().cpu_transfer_count;
         thread::sleep(Duration::from_millis(50));
@@ -834,6 +851,29 @@ mod tests {
             .set_video_visible(true, target)
             .expect("show after hidden seek");
         assert!(wait_for_video(&mut session) >= target);
+        for target in [MediaTime::ZERO, target, MediaTime::ZERO] {
+            session
+                .set_video_visible(false, target)
+                .expect("hide again");
+            session
+                .set_video_visible(true, target)
+                .expect("resume open input");
+            assert_eq!(wait_for_video(&mut session), target);
+        }
+        session
+            .set_video_visible(false, MediaTime::ZERO)
+            .expect("hide before recovery");
+        session
+            .replace_graphics_device(
+                GraphicsDevice::warp_for_test().expect("replacement WARP device"),
+                MediaTime::ZERO,
+            )
+            .expect("recover with retained input");
+        assert!(session.video_thread.is_none());
+        session
+            .set_video_visible(true, MediaTime::ZERO)
+            .expect("return after recovery");
+        assert_eq!(wait_for_video(&mut session), MediaTime::ZERO);
         drop(session);
         std::fs::remove_file(path).expect("remove owned video-only fixture");
     }

@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 非表示動画の入力保持（2026-09-10 02:50 JST）
+
+既知終端の動画tabを隠すと映像worker／queue／frameは解放するが、開いたFFmpeg入力はsessionへ戻す。復帰・Seek・device交換では同じ映像入力を使い、D3D11VA失敗時のsoftware fallbackも開き直さない。非表示中のdecode停止と音声worker／clockは維持する。復帰時のdecoder再構築・Seek・最初のframe待機はまだ残る。
+
+回帰では満杯queueを取消した後、sessionの再open用pathを存在しないpathへ変え、保持入力だけで復帰・EOF・hidden Seek・0秒往復・WARP device交換が成立することを確認する。これは実ファイル削除／renameの試験ではない。復帰映像の全PTS／RGBAは別の完全decodeと一致する。TSはH.264短／長GOPとB-frame付きMPEG-2の各180framesを用い、EOF後の0／5.5／0／0.5／0秒の各全出力を参照と比較する。初回実装はTSの時刻Seekで先頭30framesを失い、byte位置0へ戻す修正後に一致した。
+
+最終session94454でfmt／Clippy／workspace340 testsとrelease buildが成功、通常suiteのopt-in7件はignored。別途実WASAPIの音声worker identity／clock／drain、appの複数背景sessionと同一device復旧、native captionの実H.264 D3D11VA復旧を明示実行して通過した。D3D11VA復旧の各確認frameはCPU transfers 0。mute試験であり聴感／loopbackの無音区間、物理device removalの認定ではない。release SHA256はf504d474f552397b31b09b7dceaff7d40afb9f276f3b2dfc1f068464de49b371。通常releaseの追加操作trialはこのruntime checkpointでは行っていない。
+
 ### タブ別scroll位置とtimeline高さ（2026-09-10 02:38 JST）
 
 playlistを現在曲から離れた場所までscrollし、別の音声tabを見てから戻る。元の縦位置を復元し、別tabのscroll位置を流用しない。表示中filmstripも横位置を画像／再生tabへ保持し、同じShell一覧のrefreshでは現在項目へ戻さない。別tabのtimelineを広げても各tabの高さは独立する。closeは対応panel stateを解放する。

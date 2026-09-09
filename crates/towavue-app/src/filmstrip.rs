@@ -304,6 +304,132 @@ impl Filmstrip {
         self.set_visible(wanted);
     }
 
+    pub fn show_recent(
+        &mut self,
+        ui: &mut egui::Ui,
+        paths: &[PathBuf],
+        enabled: bool,
+        actions: &mut Vec<UiAction>,
+    ) {
+        let mut wanted = Vec::new();
+        if paths.is_empty() {
+            ui.label("No recent files yet.");
+        }
+        let width = ui.available_width();
+        let columns = (((width + 8.0) / 164.0).floor() as usize).max(1);
+        let cell_width = ((width - (columns - 1) as f32 * 8.0) / columns as f32).max(1.0);
+        ui.add_enabled_ui(enabled, |ui| {
+            for row in paths.chunks(columns) {
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    for path in row {
+                        ui.push_id(path, |ui| {
+                            let (rect, response) = ui.allocate_exact_size(
+                                egui::vec2(cell_width, cell_width * 2.0 / 3.0 + 24.0),
+                                egui::Sense::click(),
+                            );
+                            response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    enabled,
+                                    display_name(path),
+                                )
+                            });
+                            ui.ctx().accesskit_node_builder(response.id, |node| {
+                                node.set_description(path.display().to_string())
+                            });
+                            if response.gained_focus() {
+                                response.scroll_to_me(None);
+                            }
+                            if !ui.is_rect_visible(rect) {
+                                return;
+                            }
+                            if enabled && let Some(kind) = MediaKind::from_path(path) {
+                                wanted.push((path.clone(), kind));
+                            }
+                            let image_rect = Rect::from_min_size(
+                                rect.min,
+                                egui::vec2(cell_width, cell_width * 2.0 / 3.0),
+                            );
+                            ui.painter()
+                                .rect_filled(image_rect, 3.0, crate::chrome::BORDER);
+                            match self.previews.get(path) {
+                                Some(Ok((texture, duration))) => {
+                                    let scale =
+                                        (image_rect.size() / texture.size_vec2()).min_elem();
+                                    let target = Rect::from_center_size(
+                                        image_rect.center(),
+                                        texture.size_vec2() * scale,
+                                    );
+                                    ui.painter().image(
+                                        texture.id(),
+                                        target,
+                                        Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                                        Color32::WHITE,
+                                    );
+                                    if let Some(duration) = duration {
+                                        ui.painter().text(
+                                            image_rect.right_bottom() - egui::vec2(4.0, 3.0),
+                                            Align2::RIGHT_BOTTOM,
+                                            format_time(media_time(*duration)),
+                                            FontId::proportional(11.0),
+                                            Color32::WHITE,
+                                        );
+                                    }
+                                }
+                                value => {
+                                    ui.painter().text(
+                                        image_rect.center(),
+                                        Align2::CENTER_CENTER,
+                                        if value.is_some() { "No preview" } else { "…" },
+                                        FontId::proportional(12.0),
+                                        crate::chrome::MUTED,
+                                    );
+                                }
+                            }
+                            let name_rect = Rect::from_min_max(
+                                egui::pos2(rect.left(), image_rect.bottom() + 4.0),
+                                rect.max,
+                            );
+                            ui.scope_builder(
+                                egui::UiBuilder::new()
+                                    .max_rect(name_rect)
+                                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                                |ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(display_name(path))
+                                                .color(crate::chrome::FOREGROUND)
+                                                .size(12.0),
+                                        )
+                                        .halign(egui::Align::Min)
+                                        .truncate(),
+                                    );
+                                },
+                            );
+                            if response.hovered() || response.has_focus() {
+                                ui.painter().rect_stroke(
+                                    image_rect,
+                                    3.0,
+                                    egui::Stroke::new(1.0, crate::chrome::FOREGROUND),
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
+                            if response.clicked() || response.middle_clicked() {
+                                actions.push(UiAction::OpenMedia(path.clone(), true));
+                            }
+                            if enabled {
+                                response.on_hover_text(path.display().to_string());
+                            }
+                        });
+                    }
+                });
+                ui.add_space(8.0);
+            }
+        });
+        self.set_visible(wanted);
+    }
+
     fn set_visible(&mut self, mut wanted: Vec<(PathBuf, MediaKind)>) {
         let visible: Vec<_> = wanted.iter().map(|(path, _)| path.clone()).collect();
         if visible != self.visible {
@@ -328,6 +454,105 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, MediaKind, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn recent_grid_uses_visible_shared_previews_and_blocks_background_actions() {
+        let root = std::env::temp_dir().join(format!("towavue-recent-grid-{}", std::process::id()));
+        let mut filmstrip = Filmstrip::new(PreviewCache::new(root.clone()).expect("cache"), || {})
+            .expect("preview worker");
+        let paths: Vec<_> = (0..40)
+            .map(|index| root.join(format!("{index:02}-image.png")))
+            .collect();
+        let context = crate::fonts::test_context();
+        context.enable_accesskit();
+        let frame = |filmstrip: &mut Filmstrip, enabled, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(660.0, 260.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        filmstrip.show_recent(ui, &paths, enabled, &mut actions)
+                    });
+                },
+            );
+            (output, actions)
+        };
+        for _ in 0..3 {
+            frame(&mut filmstrip, true, vec![]);
+        }
+        assert!(!filmstrip.visible.is_empty() && filmstrip.visible.len() < paths.len());
+        let texture = context.load_texture(
+            "recent-fixture",
+            egui::ColorImage::filled([2, 1], Color32::RED),
+            egui::TextureOptions::LINEAR,
+        );
+        let texture_id = texture.id();
+        filmstrip
+            .previews
+            .insert(paths[0].clone(), Ok((texture, None)));
+        let (output, actions) = frame(&mut filmstrip, true, vec![]);
+        assert!(actions.is_empty());
+        assert!(output.shapes.iter().any(
+            |shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id)
+        ));
+        let image_left = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id => {
+                    Some(mesh.calc_bounds().left())
+                }
+                _ => None,
+            })
+            .expect("image mesh");
+        let label_left = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "00-image.png" => Some(text.pos.x),
+                _ => None,
+            })
+            .expect("filename label");
+        assert!(
+            (image_left - label_left).abs() < 1.0,
+            "filename aligns with the card edge"
+        );
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .expect("accessible grid");
+        let (node_id, node) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("00-image.png")
+            })
+            .expect("recent button");
+        assert_eq!(
+            node.description(),
+            Some(paths[0].to_string_lossy().as_ref())
+        );
+        let event = egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: *node_id,
+            data: None,
+        });
+        let (_, actions) = frame(&mut filmstrip, true, vec![event.clone()]);
+        assert!(actions == [UiAction::OpenMedia(paths[0].clone(), true)]);
+        let (_, actions) = frame(&mut filmstrip, false, vec![event]);
+        assert!(actions.is_empty());
+        assert!(filmstrip.visible.is_empty() && filmstrip.previews.is_empty());
+        drop(filmstrip);
+        std::fs::remove_dir(root).expect("remove empty owned cache");
+    }
 
     #[test]
     fn keyboard_focus_request_reveals_current_once_and_waits_for_items() {

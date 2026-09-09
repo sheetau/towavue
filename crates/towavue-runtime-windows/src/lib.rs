@@ -17,8 +17,11 @@ mod pinned_cursor;
 mod playback;
 mod preview;
 mod preview_loader;
+mod recent;
 mod renderer;
 mod shell;
+
+pub use recent::{RecentFiles, RecentUpdate};
 mod tempo;
 mod watch;
 mod waveform;

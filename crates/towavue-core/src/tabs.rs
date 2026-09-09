@@ -50,10 +50,17 @@ pub struct Tab {
     pub target: TabTarget,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ActiveTab {
+    #[default]
+    Welcome,
+    Media(TabId),
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TabSet {
     tabs: Vec<Tab>,
-    active: Option<TabId>,
+    active: ActiveTab,
     next_id: u64,
 }
 
@@ -68,7 +75,7 @@ impl TabSet {
                     folder,
                     current: path,
                 };
-                self.active = Some(tab.id);
+                self.active = ActiveTab::Media(tab.id);
                 return tab.id;
             }
         }
@@ -88,7 +95,7 @@ impl TabSet {
             TabTarget::Media { path, kind }
         };
         self.tabs.push(Tab { id, target });
-        self.active = Some(id);
+        self.active = ActiveTab::Media(id);
         id
     }
 
@@ -97,18 +104,25 @@ impl TabSet {
     }
 
     pub fn active(&self) -> Option<&Tab> {
-        let active = self.active?;
+        let ActiveTab::Media(active) = self.active else {
+            return None;
+        };
         self.tabs.iter().find(|tab| tab.id == active)
     }
 
     pub fn active_mut(&mut self) -> Option<&mut Tab> {
-        let active = self.active?;
+        let ActiveTab::Media(active) = self.active else {
+            return None;
+        };
         self.tabs.iter_mut().find(|tab| tab.id == active)
     }
 
     pub fn activate(&mut self, id: TabId) -> bool {
+        if self.welcome() == Some(id) {
+            return true;
+        }
         if self.tabs.iter().any(|tab| tab.id == id) {
-            self.active = Some(id);
+            self.active = ActiveTab::Media(id);
             true
         } else {
             false
@@ -118,11 +132,11 @@ impl TabSet {
     pub fn close(&mut self, id: TabId) -> Option<Tab> {
         let index = self.tabs.iter().position(|tab| tab.id == id)?;
         let removed = self.tabs.remove(index);
-        if self.active == Some(id) {
+        if self.active == ActiveTab::Media(id) {
             self.active = self
                 .tabs
                 .get(index.min(self.tabs.len().saturating_sub(1)))
-                .map(|tab| tab.id);
+                .map_or(ActiveTab::Welcome, |tab| ActiveTab::Media(tab.id));
         }
         Some(removed)
     }
@@ -143,11 +157,35 @@ impl TabSet {
         self.tabs.insert(to, tab);
         true
     }
+
+    /// Media accessors exclude this non-media tab, which exists whenever no files are open.
+    pub fn welcome(&self) -> Option<TabId> {
+        (self.active == ActiveTab::Welcome).then_some(TabId(u64::MAX))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn welcome_identity_replaces_empty_selection_and_survives_close_cycles() {
+        let mut tabs = TabSet::default();
+        let welcome = tabs.welcome().expect("initial Welcome tab");
+        assert!(tabs.activate(welcome));
+        assert!(tabs.close(welcome).is_none());
+        for _ in 0..3 {
+            let first = tabs.open_new("a.png".into(), MediaKind::Image);
+            let second = tabs.open_new("b.mp4".into(), MediaKind::Video);
+            assert!(tabs.welcome().is_none());
+            assert!(!tabs.activate(welcome));
+            tabs.close(first);
+            assert_eq!(tabs.active().expect("media remains").id, second);
+            tabs.close(second);
+            assert_eq!(tabs.welcome(), Some(welcome));
+            assert!(tabs.active().is_none());
+        }
+    }
 
     #[test]
     fn reordering_preserves_identity_active_tab_and_targets() {

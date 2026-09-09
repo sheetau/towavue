@@ -135,7 +135,7 @@ mod tests {
                     let wide = fonts.layout_no_wrap("88:88 / 8888".into(), font, egui::Color32::WHITE);
                     assert!((narrow.size().x - wide.size().x).abs() < 0.01);
                 }
-                assert!(fonts.has_glyphs(&icon_font(), "\u{ea76}\u{eaa4}\u{eab8}\u{eab9}\u{eaba}\u{eabb}\u{ead1}\u{eb2c}\u{eb31}\u{eb4d}"));
+                assert!(fonts.has_glyphs(&icon_font(), "\u{ea76}\u{eaa4}\u{eab8}\u{eab9}\u{eaba}\u{eabb}\u{ead1}\u{eb2c}\u{eb31}\u{eb4d}\u{eaee}\u{eaf7}"));
             });
         });
     }

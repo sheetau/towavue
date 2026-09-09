@@ -10,7 +10,7 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 
 開発版では、preview cacheのフォルダー作成・保存に失敗しても、生成できたthumbnailやwaveformをそのまま利用します。保存先が使えるようになれば再試行します。メディア自体の生成・decode失敗や取消を成功扱いにするものではありません。
 
-小さなプレビューの画素はwindow内で最大64件・16 MiBまで共用します。読み込んだ原寸画像からも240×160以内の低解像度プレビューを作り、filmstripと画像seekのサムネイルで使います。元画像の寸法を持つプレビューが残っていれば、通常画像や見開きの原寸読込中にも先に表示します。原寸の拡大率・切り抜き・回転に合わせて描きますが、プレビューを編集・保存用の画像には使いません。未訪問／未cache画像の待機、先行サムネイル生成、最近のファイルでの表示はまだ改善途中です。
+小さなプレビューの画素はwindow内で最大64件・16 MiBまで共用します。読み込んだ原寸画像からも240×160以内の低解像度プレビューを作り、filmstripと画像seekのサムネイルで使います。元画像の寸法を持つプレビューが残っていれば、通常画像や見開きの原寸読込中にも先に表示します。原寸の拡大率・切り抜き・回転に合わせて描きますが、プレビューを編集・保存用の画像には使いません。最近のファイル一覧も同じ低解像度cacheを使います。未訪問／未cache画像の待機と先行サムネイル生成はまだ改善途中です。
 
 タブ名へマウスを置くと、その下にプレビューとフルパスを表示します。画像・音声はfilmstrip、動画はseekと同じ低解像度プレビューを共用します。動画の表示位置は現在位置に近い区間で、別タブでは最後に表示していた位置を使います。hoverだけではタブや再生位置・編集を変更しません。タブごとの完全な状態復元やバックグラウンド再生は未実装です。
 
@@ -83,7 +83,7 @@ Mキーの消音解除は、100%へ固定で戻さず、そのtabの直前の非
 
 ## ビルドと実行
 
-fileを指定せず起動するとWelcomeのSTART欄からOpen File / Open Folderを選べます。現在のshortcutも表示し、幅が狭い場合はhoverで確認できます。Explorerからのdropでも開けます。最後のmedia tabを閉じるとWelcomeへ戻ります。recent一覧とsession復元はまだありません。
+fileを指定せず起動するとWelcome tabのSTART欄からOpen File / Open Folderを選べます。現在のshortcutも表示し、幅が狭い場合はhoverで確認できます。Explorerからのdropでも開けます。最後のmedia tabを閉じるとWelcomeへ戻り、唯一のWelcomeを閉じても空のtab状態にはなりません。RECENTには直近40件のfileを新しい順で表示し、画像・動画のthumbnailと音声waveformから開けます。履歴は`%APPDATA%\towavue\recent-files.txt`のpath参照のみで、未保存編集のbackupやsession復元ではありません。壊れた履歴は上書きせず警告します。
 
 Visual StudioのDesktop development with C++ workload、Windows SDK、LLVMを導入します。Developer PowerShellで、checksum固定済みのFFmpeg 9.0.1開発ファイルを準備してから実行します。ダウンロード先と生成fixtureはGit対象外です。
 

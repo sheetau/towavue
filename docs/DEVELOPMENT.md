@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### Welcomeとrecent paths（2026-09-09 21:47 JST）
+
+fileなし起動でWelcome tabとSTART／RECENTを表示する。PNG／MP4／WAVを開いて全tabを閉じると、thumbnail／waveform・duration付き履歴から再Openできる。正常終了後の再起動でも直近40件のpath参照を復元する。履歴を`%APPDATA%\towavue\recent-files.txt`へ保存するが、未保存編集や再生状態は保存しない。破損履歴は保持し、警告とwindow内の一覧で継続する。
+
+Windows 11の隔離設定で3形式のカード、MRU更新、再起動、UIAでPNGをOpenしてWelcomeへ戻る操作、496×576の2列gridを確認。最終release4b344a39は正常終了0・stderr空、生成source3件のhash不変。自動回帰はUnicode／上限40／複数worker更新／破損保持／終了時flush、可視preview共有とoverlay背後の操作拒否を含む。全体317 passed・機器依存4 ignoredで、Windows 10・screen readerの全体matrixを通過した意味ではない。
+
 ### Native captionの描画復旧回帰（2026-09-09）
 
 通常のM0 checksに加え、H264のD3D11VA・Windows desktop・既定WASAPI endpointが使える環境で以下を実行できる。通常suiteでは能力依存のため明示的にignoreされる。M1生成fixtureが必要で、音声はsession内の0%設定とし、OS音量を変更しない。

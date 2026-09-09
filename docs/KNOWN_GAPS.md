@@ -6,7 +6,7 @@
 
 ## 1. 試用前に知るべき制約
 
-新goalの残件と各checkpointの実績は[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)で管理する。tabごとの背景再生・完全な状態保持、timelineの選択編集、repeat／shuffle等は引き続き未完である。tab context menu／一括close／path copy・Explorer表示／path-only reopenは実装したが、常設Welcome tab／recent、window間結合、keyboardからのcontext menu呼出しと全体focus／UIA監査は残る。新しい台帳は過去の「このsliceには含めない」を永久的な却下とは扱わない。
+新goalの残件と各checkpointの実績は[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)で管理する。tabごとの背景再生・完全な状態保持、timelineの選択編集、repeat／shuffle等は引き続き未完である。tab context menu／一括close／path copy・Explorer表示／path-only reopenは実装したが、window間結合、keyboardからのcontext menu呼出しと全体focus／UIA監査は残る。新しい台帳は過去の「このsliceには含めない」を永久的な却下とは扱わない。
 
 2026-09-09の通常release f91b4498では、120秒1080p H.264の先頭にkeyframeが1枚だけの生成素材で、4条件各100回Seekのp95が872.539～979.008msとなり、300ms目標を超えた。同じ生成条件を2秒間隔keyframeにした対照では40.242～108.103ms。長GOPの待ち時間は未解決であり、対照側の合格を全素材へ一般化しない。[動画保存・Seek比較の条件と範囲](DEVELOPMENT.md#新しい通常releaseの動画保存とseek条件比較2026-09-09-1410-jst)を参照。同じ本体の30分4K再生は107771 framesすべて表示・drop／CPU transfer 0、drift p95 4.812ms／最大17.349msで通過したが、単一基準機／素材の結果である。5分以降のprivateは224.23～240.14MiBで、リーク不在や実環境matrixの証明ではない。詳細はDEVELOPMENTの14:57記録を参照。
 
@@ -41,7 +41,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 - 長いGOPのSeek中に終了すると、target到達までdecodeを待つ問題をH1で修正した。pipelineごとの取消flagを探索・demux・decoded outputで確認し、target以前のframe破棄中も停止する。1080p60・30秒GOPの通常release単発比較では終了待ち897 msから63 msへ短縮し、音声付き素材の再Seek・再生・tab closeも通過した。worker joinは維持し、進行中のFFmpeg call/OS I/Oの強制中断や、全素材の終了時間保証ではない。
 - 画像decodeとreading modeの複数画像loadはH1で単一background workerへ移した。要求・結果は最新1件だけを保持し、古い結果は表示しない。texture化とGPU uploadはUI側に残り、大きい画像の表示切替が完全に無停止とは限らない。
 - 初回の画面用変換は行単位のopaque判定で不要なalpha変換を省いた。透明/半透明行の丸めと全画素一致を保ち、通常releaseの未cache大PNG5枚ではtitle完了中央値233.814→219.187ms。decodeとuploadは残るため、cold-storageや初回表示全体の問題を解消したものではない。
-- 静止画の再訪は最大8件・256 MiBのdecode cacheで高速化し、RGBAをappと共有する。file size/更新時刻の変更とmetadata失敗で失効する。同じdecode identityのtextureも最大8件・RGBA相当256 MiBで再利用し、graphics復旧時に消す。2026-09-09には移動方向の隣一件を別workerで先読みし、このdecode cacheを共用するようにした。6000×6000 PNGを600ms間隔で初めて開くtitle完了の中央値は220.113→31.840ms。見開きも読込済みページから逐次表示する。低解像度RGBAは別の64件／16 MiB cacheで共用し、元画像の寸法付きentryは通常／readingの原寸読込中にも表示する。cache missのページ寸法は仮置きで、実寸取得時に再配置される。寸法未知のdisk thumbnailは原寸代用せず、未訪問／未cache画像の黒い待機は残る。tab hoverは画像／音声のfilmstrip・動画のseek区間thumbnailを共用するが、recentと未訪問preview先行生成は未完。初回起動／cold storage、画素変換・GPU upload、連打全般の改善も残る。これらのcache上限はprocess全体のメモリ上限ではなく、title完了は物理表示遅延でもない。
+- 静止画の再訪は最大8件・256 MiBのdecode cacheで高速化し、RGBAをappと共有する。file size/更新時刻の変更とmetadata失敗で失効する。同じdecode identityのtextureも最大8件・RGBA相当256 MiBで再利用し、graphics復旧時に消す。2026-09-09には移動方向の隣一件を別workerで先読みし、このdecode cacheを共用するようにした。6000×6000 PNGを600ms間隔で初めて開くtitle完了の中央値は220.113→31.840ms。見開きも読込済みページから逐次表示する。低解像度RGBAは別の64件／16 MiB cacheで共用し、元画像の寸法付きentryは通常／readingの原寸読込中にも表示する。cache missのページ寸法は仮置きで、実寸取得時に再配置される。寸法未知のdisk thumbnailは原寸代用せず、未訪問／未cache画像の黒い待機は残る。tab hoverは画像／音声のfilmstrip・動画のseek区間thumbnailを共用するが、recentもfilmstripのpreviewを共用するが、未訪問preview先行生成は未完。初回起動／cold storage、画素変換・GPU upload、連打全般の改善も残る。これらのcache上限はprocess全体のメモリ上限ではなく、title完了は物理表示遅延でもない。
 - Shell snapshotはH1で非同期化した。最新1件だけを待機・保持し、古い結果をgenerationで拒否する。実行中のShell APIは強制中断しないため、次の取得がすぐ完了する保証はない。path正規化、file metadata、watcher作成、media probeにはUI側の同期処理が残る。
 - native Open file/folder/Save AsはH1で専用STAへ移した。本体入力はmodal制限するが描画・再生を続け、Cancel後は入力とdirty guardを復元する。同じ30秒H.264/AACのOpen Folder→Cancel試験は、修正前の808/900 dropsから修正後0/900 dropsになった。基準機の単発試験であり、複数DPI/monitorや全codecでの保証ではない。
 - Save/Save AsはH1でbackground化済み。書き出した時間とcancelを表示し、完了までは一時outputだけを変更する。同時jobは1件でqueueはない。通常export中も再生・tab切替・追加編集ができるが、対象tabのclose・移動とprocess終了はjobの完了またはcancelを待つ。
@@ -60,7 +60,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 - [local評価用Setupとuninstaller](LOCAL_SETUP.md)は実装・生成済み。正確なinstaller sourceの同梱と展開後の再buildに加え、許可されたWindows 11基準機で実導入・更新・shortcut起動・保存と通常自己copyアンインストールを確認した。利用者file／設定と共有VCは保持。Windows 10、VC未導入環境、実製品の中断復旧などは未検証で、公開配布版はない。インストール不要のportable application package、automatic update、file association、Explorer context menuはない。
 - 実アンインストール後、NSISの一時自己copy約100 KBが試験TEMPに残る。本体／登録の削除成功とTEMP全消去は別の結果であり、次の再起動で消えるとは保証しない。更新用の復旧資料も意図的に保持する。詳細とupstreamの根拠はLOCAL_SETUPの実lifecycle記録を参照。
-- settings画面、recent files、session/tab復元、window位置・sizeの保存はない。
+- settings画面、session/tab復元、window位置・sizeの保存はない。recent filesは直近40件のpath-only履歴として永続化するが、未保存編集や再生状態は復元しない。
 - Explorerからのfile/folder dropはH1で実装した。複数fileは既存Open契約で開き、folderはShell順の先頭mediaを開く。folder要求は最新1件で、複数folderを一括展開するimport queueではない。virtual file、URL、app間tab結合は対象外。
 - export errorは確認するまで残る詳細modal、画像load errorは画像領域（readingでは該当page）、動画・音声のplayback errorはFaulted中の中央領域に表示する。壊れたMP4から正常動画をOpenし、元のerror tab、最後にWelcomeへ戻るflowを通常releaseで確認した。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
 - OS-level end-to-end UI test、visual regression、複数DPI/monitorの自動matrixはない。accessibilityはheadlessのtree/action回帰とWindows UI AutomationによるWelcome/menu/paletteの手動確認を追加したが、screen readerや全custom widgetの横断matrixではない。現在のUI完了判定には実window操作が必要である。
@@ -70,7 +70,7 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 ### Shell、navigation、tab
 
-filmstripを開くと現在項目へfocusし、同じmediaで閉じると呼出元へ戻る。移動後は現在tab（fullscreenではExit、Welcomeではlogo）へ戻し、古い選択辺へ復帰しない。通常画像の取消・移動・fullscreen・dirty Cancelを確認したが、音声playlistを含む全連続flowとscreen readerの横断確認は継続中。
+filmstripを開くと現在項目へfocusし、同じmediaで閉じると呼出元へ戻る。移動後は現在tab（fullscreenではExit、WelcomeではWelcome tab）へ戻し、古い選択辺へ復帰しない。通常画像の取消・移動・fullscreen・dirty Cancelを確認したが、音声playlistを含む全連続flowとscreen readerの横断確認は継続中。
 
 音声playlistのfilmstrip往復と矢印再開も確認した。palette背後のfilmstripへUIAで選曲できた問題は、palette/grid/menu中のdisabled化で修正した。上のpalette/gridを閉じるとfilmstripを操作でき、次のEscapeでplaylistへ戻る。全screen reader・実pointer/物理入力matrixは未完了。
 
@@ -86,7 +86,7 @@ filmstripを開くと現在項目へfocusし、同じmediaで閉じると呼出�
 | 別windowへtabをdragして結合 | 未実装。process間protocolもない |
 | Filmstrip itemをwindow外へdrag | 未実装 |
 | Tabの並べ替え、drop indicator、等分幅 | 等分幅（72～160 logical px）と横scroll・名前省略、release時の並べ替え・挿入線をH1で実装。Escapeとbar外・window内dropは取消。drag中の端での自動scrollはない |
-| Welcomeのrecent files | H1でwordmark・START・Open file/folder・drop案内を中央columnへ整理。現在のshortcut、狭い画面のscroll、hover/focus表示を追加。recent listは未実装 |
+| Welcomeのrecent files | 安定した非media tab identity、Open file/folder、永続化した直近40件の可視thumbnail／waveform gridを実装。再起動復元と一覧からのOpenをWindows 11で確認。session復元・未保存backupではない |
 | Explorerから開く/新規window context menu | OS登録・配布処理が未実装 |
 
 ### Menu、command、status

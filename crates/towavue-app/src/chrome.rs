@@ -92,6 +92,8 @@ pub fn modal_heading(ui: &mut Ui, title: &str) {
 
 #[derive(Clone, Copy)]
 pub enum Icon {
+    OpenFile,
+    OpenFolder,
     Close,
     Reading,
     Pause,
@@ -103,6 +105,8 @@ pub enum Icon {
 impl Icon {
     pub fn text(self) -> egui::RichText {
         let glyph = match self {
+            Self::OpenFile => '\u{eaee}',
+            Self::OpenFolder => '\u{eaf7}',
             Self::Close => '\u{ea76}',
             Self::Reading => '\u{eaa4}',
             Self::Pause => '\u{ead1}',

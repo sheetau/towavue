@@ -165,6 +165,7 @@ enum AppEvent {
     PromptFinished(Result<PromptResponse, DialogError>),
     LicenseGuideRevealed(std::io::Result<PathBuf>),
     FileRevealed(std::io::Result<PathBuf>),
+    RecentFilesReady,
     Export(ExportEvent),
     Playback(u64, PlaybackEvent),
     Duration(PathBuf, u64, Result<Duration, String>),
@@ -563,6 +564,8 @@ struct Application<N> {
     folder_watcher: Option<(PathBuf, FolderWatcher)>,
     tabs: TabSet,
     closed_tabs: VecDeque<PathBuf>,
+    recent_files: Option<towavue_runtime_windows::RecentFiles>,
+    recent_paths: Vec<PathBuf>,
     edits: BTreeMap<TabId, EditHistory>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
@@ -704,6 +707,8 @@ where
             folder_watcher: None,
             tabs: TabSet::default(),
             closed_tabs: VecDeque::new(),
+            recent_files: None,
+            recent_paths: Vec::new(),
             edits: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
@@ -825,6 +830,18 @@ where
         self.renderer = Some(renderer);
         self.ui_context = Some(context);
         self.ui_state = Some(state);
+        let recent_result = shortcuts::config_path().and_then(|path| {
+            let notify = Arc::clone(&self.notify);
+            towavue_runtime_windows::RecentFiles::new(
+                path.with_file_name("recent-files.txt"),
+                move || notify(AppEvent::RecentFilesReady),
+            )
+            .map_err(|error| error.to_string())
+        });
+        match recent_result {
+            Ok(recent) => self.recent_files = Some(recent),
+            Err(error) => self.set_status(format!("Recent files unavailable: {error}")),
+        }
         if let Some(path) = self.initial_path.take() {
             if path.is_dir() {
                 self.open_folder_path(path);
@@ -912,6 +929,9 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        if let Some(recent) = &self.recent_files {
+            recent.record(path.clone());
+        }
         self.tab_preview.clear();
         self.clear_image_previews();
         self.guard_return_focus = None;
@@ -1397,6 +1417,19 @@ where
                 Ok(path) => format!("Selected in Explorer: {}", path.display()),
                 Err(error) => format!("Could not reveal file: {error}"),
             }),
+            AppEvent::RecentFilesReady => {
+                if let Some(update) = self
+                    .recent_files
+                    .as_ref()
+                    .and_then(|recent| recent.take_completed())
+                {
+                    self.recent_paths = update.paths;
+                    if let Some(error) = update.error {
+                        self.set_status(error);
+                    }
+                    self.request_redraw();
+                }
+            }
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(generation, event) if generation == self.media_generation => {
                 self.handle_playback_event(event);
@@ -1736,7 +1769,14 @@ where
             .frame(egui::Frame::NONE)
             .show(root, |ui| {
                 if self.path.is_none() {
-                    if let Some(command) = welcome::show(ui, &self.shortcuts) {
+                    let enabled = !modal_blocked
+                        && !self.palette_open
+                        && !self.grid_open
+                        && !egui::Popup::is_any_open(&context);
+                    if let Some(command) = welcome::show(ui, &self.shortcuts, |ui| {
+                        self.filmstrip
+                            .show_recent(ui, &self.recent_paths, enabled, actions)
+                    }) {
                         actions.push(UiAction::Command(command));
                     }
                 } else if self.state == PlaybackState::Faulted
@@ -1793,7 +1833,7 @@ where
                     actions,
                 );
             }
-        } else if !self.image_seek_preview_active {
+        } else if !self.image_seek_preview_active && self.path.is_some() {
             self.filmstrip.clear();
         }
         if self.palette_open && !modal_blocked {
@@ -2742,19 +2782,33 @@ where
                         ),
                         egui::Sense::hover(),
                     );
-                    if self.tabs.tabs().is_empty() {
+                    if let Some(id) = self.tabs.welcome() {
                         let welcome_rect = egui::Rect::from_min_size(
                             drag_rect.min,
                             egui::vec2(drag_rect.width().min(150.0), drag_rect.height()),
                         );
-                        ui.painter().rect_filled(welcome_rect, 3.0, chrome::BORDER);
-                        ui.painter().text(
-                            welcome_rect.left_center() + egui::vec2(chrome::TAB_PADDING, 0.0),
-                            Align2::LEFT_CENTER,
-                            "Welcome",
-                            egui::FontId::proportional(12.0),
-                            chrome::FOREGROUND,
-                        );
+                        ui.push_id(("welcome-tab", id.value()), |ui| {
+                            let response = ui.put(
+                                welcome_rect,
+                                egui::Button::new((
+                                    RichText::new("Welcome").color(chrome::FOREGROUND),
+                                    egui::Atom::grow(),
+                                ))
+                                .fill(chrome::BORDER)
+                                .stroke(egui::Stroke::NONE)
+                                .truncate(),
+                            );
+                            response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    ui.is_enabled(),
+                                    "Welcome tab",
+                                )
+                            });
+                            if return_to_tab {
+                                response.request_focus();
+                            }
+                        });
                     }
                     if let Some(caption) = &self.native_caption {
                         actions.extend(
@@ -6847,7 +6901,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    if let Some(command) = welcome::show(ui, &ShortcutBindings::default()) {
+                    if let Some(command) = welcome::show(ui, &ShortcutBindings::default(), |_| {}) {
                         chosen.push(command);
                     }
                 },
@@ -11927,7 +11981,7 @@ mod tests {
         assert!(
             tree.nodes
                 .iter()
-                .any(|(id, node)| { *id == tree.focus && node.label() == Some("towavue menu") })
+                .any(|(id, node)| { *id == tree.focus && node.label() == Some("Welcome tab") })
         );
     }
 

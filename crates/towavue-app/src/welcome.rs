@@ -1,9 +1,13 @@
-use egui::{Color32, RichText};
+use egui::RichText;
 use towavue_core::{CommandId, ShortcutBindings};
 
 use crate::chrome;
 
-pub fn show(ui: &mut egui::Ui, shortcuts: &ShortcutBindings) -> Option<CommandId> {
+pub fn show(
+    ui: &mut egui::Ui,
+    shortcuts: &ShortcutBindings,
+    recent: impl FnOnce(&mut egui::Ui),
+) -> Option<CommandId> {
     let mut chosen = None;
     let width = (ui.available_width() - 32.0).clamp(0.0, 660.0);
     let top = (ui.available_height() * 0.1).clamp(12.0, 60.0);
@@ -35,13 +39,17 @@ pub fn show(ui: &mut egui::Ui, shortcuts: &ShortcutBindings) -> Option<CommandId
                                 .get(command)
                                 .map(ToString::to_string)
                                 .unwrap_or_default();
-                            let icon = ui.id().with(command.as_str());
+                            let icon = if command == CommandId::OpenFolder {
+                                chrome::Icon::OpenFolder
+                            } else {
+                                chrome::Icon::OpenFile
+                            };
                             let response = ui
                                 .add_sized(
                                     [width.min(340.0), 30.0],
                                     egui::Button::new((
-                                        egui::Atom::custom(icon, egui::vec2(24.0, 16.0)),
-                                        RichText::new(label).color(Color32::from_gray(210)),
+                                        icon.text(),
+                                        RichText::new(label).color(chrome::FOREGROUND),
                                     ))
                                     .frame_when_inactive(false)
                                     .truncate()
@@ -55,42 +63,15 @@ pub fn show(ui: &mut egui::Ui, shortcuts: &ShortcutBindings) -> Option<CommandId
                                     label,
                                 )
                             });
-                            let origin = response.rect.left_center() + egui::vec2(7.0, -7.0);
-                            let points: &[(f32, f32)] = if command == CommandId::OpenFolder {
-                                &[
-                                    (0.0, 4.0),
-                                    (0.0, 1.0),
-                                    (5.0, 1.0),
-                                    (7.0, 4.0),
-                                    (15.0, 4.0),
-                                    (12.0, 13.0),
-                                    (0.0, 13.0),
-                                    (2.0, 6.0),
-                                    (14.0, 6.0),
-                                ]
-                            } else {
-                                &[
-                                    (9.0, 14.0),
-                                    (1.0, 14.0),
-                                    (1.0, 0.0),
-                                    (9.0, 0.0),
-                                    (13.0, 4.0),
-                                    (9.0, 4.0),
-                                    (9.0, 0.0),
-                                ]
-                            };
-                            ui.painter().add(egui::Shape::line(
-                                points
-                                    .iter()
-                                    .map(|&(x, y)| origin + egui::vec2(x, y))
-                                    .collect(),
-                                egui::Stroke::new(1.0, Color32::from_gray(210)),
-                            ));
                             if response.clicked() {
                                 chosen = Some(command);
                             }
                         }
                         ui.add_space(24.0);
+                        ui.label(RichText::new("RECENT").size(12.0).color(chrome::MUTED));
+                        ui.add_space(8.0);
+                        recent(ui);
+                        ui.add_space(16.0);
                         ui.add(
                             egui::Label::new(
                                 RichText::new("Drop media files or a folder here to begin.")
@@ -111,13 +92,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn welcome_idle_output_keeps_wordmark_and_shortcuts_visible() {
+        let mut app = crate::Application::new(None, |_| {}).expect("headless app");
+        let context = crate::fonts::test_context();
+        context.global_style_mut(crate::chrome::style);
+        app.ui_context = Some(context.clone());
+        let mut last = egui::FullOutput::default();
+        for index in 0..5 {
+            last = context.run_ui(
+                egui::RawInput {
+                    time: Some(index as f64 * 0.1),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut Vec::new()),
+            );
+            if last.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+                > std::time::Duration::from_millis(100)
+            {
+                break;
+            }
+        }
+        for label in ["towavue", "START", "RECENT", "Ctrl+O", "Ctrl+Shift+O"] {
+            assert!(
+                text_rect(&last, label).is_some(),
+                "{label} is present in idle CPU output"
+            );
+        }
+    }
+
+    #[test]
     fn welcome_keeps_open_actions_together_and_accessible_at_small_sizes() {
         for size in [
             egui::vec2(960.0, 514.0),
             egui::vec2(480.0, 238.0),
             egui::vec2(240.0, 119.0),
         ] {
-            let context = egui::Context::default();
+            let context = crate::fonts::test_context();
             let mut shortcuts = ShortcutBindings::default();
             shortcuts.set(
                 CommandId::OpenFile,
@@ -132,7 +146,7 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        if let Some(command) = show(ui, &shortcuts) {
+                        if let Some(command) = show(ui, &shortcuts, |_| {}) {
                             commands.push(command);
                         }
                     },
@@ -190,7 +204,7 @@ mod tests {
 
     #[test]
     fn welcome_buttons_support_keyboard_focus_and_activation() {
-        let context = egui::Context::default();
+        let context = crate::fonts::test_context();
         let frame = |events| {
             let mut commands = Vec::new();
             let _ = context.run_ui(
@@ -203,7 +217,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    if let Some(command) = show(ui, &ShortcutBindings::default()) {
+                    if let Some(command) = show(ui, &ShortcutBindings::default(), |_| {}) {
                         commands.push(command);
                     }
                 },

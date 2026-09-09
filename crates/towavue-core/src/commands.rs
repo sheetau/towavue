@@ -37,6 +37,8 @@ pub enum CommandId {
     Undo,
     Redo,
     ApplyCrop,
+    DeleteTimeSelection,
+    KeepTimeSelection,
     RotateClockwise,
     RotateCounterclockwise,
     FlipHorizontal,
@@ -120,6 +122,8 @@ impl CommandId {
             Self::Undo => "undo",
             Self::Redo => "redo",
             Self::ApplyCrop => "apply_crop",
+            Self::DeleteTimeSelection => "delete_time_selection",
+            Self::KeepTimeSelection => "keep_time_selection",
             Self::RotateClockwise => "rotate_clockwise",
             Self::RotateCounterclockwise => "rotate_counterclockwise",
             Self::FlipHorizontal => "flip_horizontal",
@@ -183,6 +187,7 @@ pub enum Key {
     F11,
     Home,
     End,
+    Delete,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -258,6 +263,7 @@ impl fmt::Display for KeyStroke {
             Key::F11 => formatter.write_str("F11"),
             Key::Home => formatter.write_str("Home"),
             Key::End => formatter.write_str("End"),
+            Key::Delete => formatter.write_str("Delete"),
         }
     }
 }
@@ -289,6 +295,7 @@ impl FromStr for KeyStroke {
                 "down" if key.is_none() => key = Some(Key::ArrowDown),
                 "tab" if key.is_none() => key = Some(Key::Tab),
                 "escape" | "esc" if key.is_none() => key = Some(Key::Escape),
+                "delete" | "del" if key.is_none() => key = Some(Key::Delete),
                 "f11" if key.is_none() => key = Some(Key::F11),
                 "home" if key.is_none() => key = Some(Key::Home),
                 "end" if key.is_none() => key = Some(Key::End),
@@ -307,6 +314,8 @@ impl FromStr for KeyStroke {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CommandContext {
+    pub timeline_open: bool,
+    pub has_time_selection: bool,
     pub media_kind: Option<MediaKind>,
     pub palette_open: bool,
     pub filmstrip_open: bool,
@@ -326,6 +335,15 @@ impl CommandDefinition {
     pub fn is_enabled(self, context: CommandContext) -> bool {
         let image_reading = context.media_kind == Some(MediaKind::Image) && context.reading_mode;
         (!self.requires_reading_mode || context.reading_mode)
+            && (!matches!(
+                self.id,
+                CommandId::DeleteTimeSelection | CommandId::KeepTimeSelection
+            ) || (context.timeline_open && context.has_time_selection))
+            && (!matches!(self.id, CommandId::SetTrimStart | CommandId::SetTrimEnd)
+                || context.timeline_open)
+            && (self.id != CommandId::ApplyCrop
+                || !context.timeline_open
+                || !context.has_time_selection)
             && (self.id != CommandId::ToggleReadingMode
                 || context.reading_mode
                 || !context.has_unsaved_edits)
@@ -407,16 +425,8 @@ const COMMANDS: &[CommandDefinition] = &[
         "Cover window with image",
         &[MediaKind::Image],
     ),
-    command(
-        CommandId::SelectAll,
-        "Select whole media",
-        &[MediaKind::Image, MediaKind::Video],
-    ),
-    command(
-        CommandId::ClearSelection,
-        "Clear visual selection",
-        &[MediaKind::Image, MediaKind::Video],
-    ),
+    command(CommandId::SelectAll, "Select whole media", ANY_MEDIA),
+    command(CommandId::ClearSelection, "Clear selection", ANY_MEDIA),
     command(
         CommandId::ToggleCropPreview,
         "Toggle crop preview",
@@ -474,8 +484,26 @@ const COMMANDS: &[CommandDefinition] = &[
         "Flip vertically",
         &[MediaKind::Image, MediaKind::Video],
     ),
-    command(CommandId::SetTrimStart, "Set trim start", PLAYABLE_MEDIA),
-    command(CommandId::SetTrimEnd, "Set trim end", PLAYABLE_MEDIA),
+    command(
+        CommandId::SetTrimStart,
+        "Set time selection start",
+        PLAYABLE_MEDIA,
+    ),
+    command(
+        CommandId::SetTrimEnd,
+        "Set time selection end",
+        PLAYABLE_MEDIA,
+    ),
+    command(
+        CommandId::DeleteTimeSelection,
+        "Delete selected time",
+        PLAYABLE_MEDIA,
+    ),
+    command(
+        CommandId::KeepTimeSelection,
+        "Keep only selected time",
+        PLAYABLE_MEDIA,
+    ),
     command(CommandId::VolumeDown, "Decrease volume", PLAYABLE_MEDIA),
     command(CommandId::VolumeUp, "Increase volume", PLAYABLE_MEDIA),
     command(CommandId::ToggleMute, "Toggle mute", PLAYABLE_MEDIA),

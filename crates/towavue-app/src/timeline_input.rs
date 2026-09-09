@@ -4,7 +4,6 @@ use egui::{Context, Id, PointerButton, Pos2, Response};
 enum Kind {
     Seek,
     VideoSeek,
-    Trim,
 }
 
 #[derive(Clone, Copy)]
@@ -31,13 +30,14 @@ impl Active {
 #[derive(Clone, Default)]
 struct State {
     active: Option<Active>,
-    trim_identity: Option<(Id, Id)>,
-    // Grips run before the background; release must not let it reuse this frame's press.
+    // A press is claimed once, including discarded UI passes and overlapping controls.
     claimed_frame: Option<u64>,
 }
 
 #[derive(Default)]
 pub struct Drag {
+    pub started: bool,
+    pub origin: Option<Pos2>,
     pub position: Option<Pos2>,
     pub released: bool,
     pub dragging: bool,
@@ -67,22 +67,7 @@ pub fn cancel(context: &Context) -> bool {
     active.is_some()
 }
 
-pub fn retain_trim(context: &Context, identity: Id, generation: Id) {
-    let changed = context.data_mut(|data| {
-        let state = data.get_temp_mut_or_default::<State>(state_id());
-        let changed = state.active.is_some_and(|active| {
-            active.kind == Kind::Trim
-                && (state.trim_identity != Some((identity, generation))
-                    || (active.id != identity.with(true) && active.id != identity.with(false)))
-        });
-        state.trim_identity = Some((identity, generation));
-        changed
-    });
-    if changed {
-        cancel(context);
-    }
-}
-
+#[cfg(test)]
 pub fn seek_commit(response: &Response) -> Option<Pos2> {
     let drag = seek_drag(response);
     if drag.released { drag.position } else { None }
@@ -94,10 +79,6 @@ pub fn seek_drag(response: &Response) -> Drag {
 
 pub fn video_seek_drag(response: &Response) -> Drag {
     update(response, Kind::VideoSeek)
-}
-
-pub fn trim_drag(response: &Response) -> Drag {
-    update(response, Kind::Trim)
 }
 
 fn update(response: &Response, kind: Kind) -> Drag {
@@ -133,6 +114,7 @@ fn update(response: &Response, kind: Kind) -> Drag {
             _ => None,
         });
     let mut first_event = 0;
+    let mut started = false;
     if let Some((index, origin)) = press
         && state.claimed_frame != Some(frame)
         && response.interact_rect.contains(origin)
@@ -147,9 +129,14 @@ fn update(response: &Response, kind: Kind) -> Drag {
         });
         state.claimed_frame = Some(frame);
         first_event = index + 1;
+        started = true;
     }
-    let mut result = Drag::default();
+    let mut result = Drag {
+        started,
+        ..Default::default()
+    };
     if let Some(mut active) = state.active.filter(|active| active.id == response.id) {
+        result.origin = Some(active.origin);
         let threshold = context.options(|options| options.input_options.max_click_dist);
         for event in &events[first_event..] {
             match event {
@@ -221,7 +208,7 @@ mod tests {
             (egui::vec2(-20.0, -20.0), false),
             (egui::vec2(0.0, 20.0), false),
         ] {
-            for kind in [Kind::VideoSeek, Kind::Seek, Kind::Trim] {
+            for kind in [Kind::VideoSeek, Kind::Seek] {
                 let mut active = Active {
                     id: Id::new("test"),
                     kind,

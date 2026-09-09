@@ -21,6 +21,7 @@ mod selection;
 mod shortcuts;
 mod tab_menu;
 mod tab_preview;
+mod time_selection;
 mod timeline_edit;
 mod timeline_input;
 mod trim;
@@ -145,7 +146,7 @@ enum UiAction {
     ActivateTab(TabId),
     TabCommand(TabId, CommandId),
     ReorderTab(TabId, usize),
-    TrimEndpoint(TabId, EditOperation),
+    TimeSelection(TabId, PlaybackGeneration, Option<towavue_core::TimeRange>),
     Volume(TabId, f32),
     CloseTab(TabId),
     DetachTab(TabId),
@@ -654,6 +655,7 @@ struct Application<N> {
     timeline_open: bool,
     waveform: Option<TextureHandle>,
     media_duration: Option<Duration>,
+    time_selection: Option<towavue_core::TimeRange>,
     hover_thumbnail: Option<(u64, TextureHandle)>,
     media_generation: u64,
     media_sequence: u64,
@@ -822,6 +824,7 @@ where
             timeline_open: false,
             waveform: None,
             media_duration: None,
+            time_selection: None,
             hover_thumbnail: None,
             media_generation: 0,
             media_sequence: 0,
@@ -1116,6 +1119,7 @@ where
             waveform: self.waveform.take(),
             view: self.image_view,
             timeline_open: self.timeline_open,
+            time_selection: self.time_selection,
             filmstrip_open: self.filmstrip_open,
             filmstrip_view: self.filmstrip.take_view(),
             playlist: std::mem::take(&mut self.playlist),
@@ -1161,6 +1165,7 @@ where
             .flatten();
         self.image_view = saved.view;
         self.timeline_open = saved.kind == MediaKind::Audio || saved.timeline_open;
+        self.time_selection = saved.time_selection;
         self.filmstrip_open = saved.filmstrip_open;
         self.playlist = saved.playlist;
         self.filmstrip.restore_view(saved.filmstrip_view);
@@ -1244,6 +1249,7 @@ where
         self.timeline_open = kind == MediaKind::Audio;
         self.waveform = None;
         self.media_duration = None;
+        self.time_selection = None;
         self.hover_thumbnail = None;
         self.next_media_instance();
         self.waveform_worker.clear();
@@ -3879,71 +3885,29 @@ where
                         Color32::GRAY,
                     );
                 }
-                let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+                let response = ui.allocate_rect(rect, egui::Sense::click_and_drag())
+                    .on_hover_text("Drag to select time · drag the playhead to seek · Delete removes selection · Ctrl+Y keeps selection");
                 let duration = self.playback_duration().unwrap_or_default();
                 if duration.is_zero() {
                     return;
                 }
-                let progress = (self.current_position().as_seconds_f64() / duration.as_secs_f64())
-                    .clamp(0.0, 1.0) as f32;
-                let x = egui::lerp(rect.x_range(), progress);
-                ui.painter()
-                    .vline(x, rect.y_range(), (2.0, chrome::FOREGROUND));
-                let edit = self.edit_state();
-                let tab = self.tabs.active().map(|tab| tab.id);
-                let trim_operations = if self
-                    .session
-                    .as_ref()
-                    .is_some_and(|session| session.timeline().is_some())
-                {
-                    Vec::new()
-                } else {
-                    trim::timeline(
-                        ui,
-                        rect,
-                        &edit,
-                        media_time(duration),
-                        self.state == PlaybackState::Paused
-                            && !edit.playback_range().contains(self.current_position()),
-                        ui.id().with(("trim-controls", tab, self.path.as_ref())),
-                        ui.id().with((
-                            tab,
-                            self.generation,
-                            edit.trim_start.map(MediaTime::as_nanoseconds),
-                            edit.trim_end.map(MediaTime::as_nanoseconds),
-                        )),
-                    )
-                };
-                if let Some(tab) = tab {
-                    actions.extend(
-                        trim_operations
-                            .into_iter()
-                            .map(|operation| UiAction::TrimEndpoint(tab, operation)),
-                    );
-                }
                 let enabled = !self.modal_input_blocked()
                     && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted);
-                let value = seekbar::value_input(
+                let result = time_selection::show(
+                    ui,
                     &response,
-                    "Playback position (seconds)",
-                    self.current_position().as_seconds_f64(),
-                    0.0..=duration.as_secs_f64(),
-                    KEYBOARD_SEEK_STEP.as_secs_f64(),
+                    media_time(duration),
+                    self.current_position(),
+                    self.time_selection,
                     enabled,
                 );
-                if response.has_focus() && enabled {
-                    ui.painter().rect_stroke(
-                        rect.shrink(1.0),
-                        0.0,
-                        ui.visuals().selection.stroke,
-                        egui::StrokeKind::Inside,
-                    );
+                if let Some(tab) = self.tabs.active()
+                    && let Some(selection) = result.selection
+                {
+                    actions.push(UiAction::TimeSelection(tab.id, self.generation, selection));
                 }
-                if let Some(value) = value {
-                    actions.push(UiAction::Seek(media_time(Duration::from_secs_f64(value))));
-                } else if let Some(position) = timeline_input::seek_commit(&response) {
-                    let ratio = seekbar::ratio(rect, position.x);
-                    actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
+                if let Some(target) = result.seek {
+                    actions.push(UiAction::Seek(target));
                 }
             });
     }
@@ -4049,10 +4013,18 @@ where
                 self.tabs.reorder(id, gap);
                 self.request_redraw();
             }
-            UiAction::TrimEndpoint(id, operation) => {
-                if !self.modal_input_blocked() && self.tabs.active().is_some_and(|tab| tab.id == id)
+            UiAction::TimeSelection(id, generation, selection) => {
+                if !self.modal_input_blocked()
+                    && self.timeline_is_visible()
+                    && self.generation == generation
+                    && self.tabs.active().is_some_and(|tab| tab.id == id)
+                    && selection.is_none_or(|range| {
+                        self.playback_duration()
+                            .is_some_and(|duration| range.end() <= media_time(duration))
+                    })
                 {
-                    self.push_edit(operation);
+                    self.time_selection = selection;
+                    self.request_redraw();
                 }
             }
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
@@ -4231,11 +4203,19 @@ where
                 }
             }
             CommandId::ClearSelection => {
+                self.time_selection = None;
                 self.image_view.selection = None;
                 self.image_view.crop_preview = false;
                 self.request_redraw();
             }
             CommandId::SelectAll => {
+                if self.timeline_is_visible() {
+                    self.time_selection = self.playback_duration().and_then(|duration| {
+                        towavue_core::TimeRange::new(MediaTime::ZERO, media_time(duration))
+                    });
+                    self.request_redraw();
+                    return;
+                }
                 if self.media_kind == Some(MediaKind::Image) && self.reading_mode {
                     return;
                 }
@@ -4380,10 +4360,21 @@ where
             CommandId::FlipHorizontal => self.push_visual_edit(EditOperation::FlipHorizontal),
             CommandId::FlipVertical => self.push_visual_edit(EditOperation::FlipVertical),
             CommandId::SetTrimStart => {
-                self.push_edit(EditOperation::SetTrimStart(self.current_position()))
+                self.set_time_selection_endpoint(true);
             }
             CommandId::SetTrimEnd => {
-                self.push_edit(EditOperation::SetTrimEnd(self.current_position()))
+                self.set_time_selection_endpoint(false);
+            }
+            CommandId::DeleteTimeSelection | CommandId::KeepTimeSelection => {
+                if let Some(range) = self.time_selection {
+                    self.push_edit(EditOperation::Timeline(
+                        if command == CommandId::DeleteTimeSelection {
+                            towavue_core::TimelineEdit::Delete(range)
+                        } else {
+                            towavue_core::TimelineEdit::Keep(range)
+                        },
+                    ));
+                }
             }
             CommandId::VolumeDown => {
                 let volume = (self.edit_state().volume - 0.1).max(0.0);
@@ -4669,6 +4660,9 @@ where
             return;
         };
         if self.edits.entry(tab.id).or_default().push(operation, kind) {
+            if matches!(operation, EditOperation::Timeline(_)) {
+                self.time_selection = None;
+            }
             self.refresh_image_edits();
             self.sync_playback_edits();
             self.set_status(match operation {
@@ -5315,6 +5309,7 @@ where
             self.timeline_open = false;
             self.waveform = None;
             self.media_duration = None;
+            self.time_selection = None;
             self.hover_thumbnail = None;
             self.next_media_instance();
             self.duration_workers.clear();
@@ -6115,6 +6110,8 @@ where
 
     fn command_context(&self) -> CommandContext {
         CommandContext {
+            timeline_open: self.timeline_is_visible(),
+            has_time_selection: self.time_selection.is_some(),
             media_kind: self.media_kind,
             palette_open: self.palette_open,
             filmstrip_open: self.filmstrip_open,
@@ -6446,6 +6443,7 @@ where
             WinitKey::Named(NamedKey::F11) => (Key::F11, false),
             WinitKey::Named(NamedKey::Home) => (Key::Home, false),
             WinitKey::Named(NamedKey::End) => (Key::End, false),
+            WinitKey::Named(NamedKey::Delete) => (Key::Delete, false),
             _ => return None,
         };
         Some(KeyStroke {
@@ -8589,229 +8587,6 @@ mod tests {
     }
 
     #[test]
-    fn accessible_trim_values_preserve_targets_validation_and_undo() {
-        let Some(root) = isolated_test_root(
-            "tests::accessible_trim_values_preserve_targets_validation_and_undo",
-        ) else {
-            return;
-        };
-        let mut app = Application::new(None, |_| {}).expect("headless application");
-        let path = root.join("audio.wav");
-        let tab = app.tabs.open_new(path.clone(), MediaKind::Audio);
-        app.path = Some(path);
-        app.media_kind = Some(MediaKind::Audio);
-        app.media_duration = Some(Duration::from_secs(10));
-        app.state = PlaybackState::Paused;
-        app.timeline_open = true;
-        let context = fonts::test_context();
-        context.enable_accesskit();
-        app.ui_context = Some(context.clone());
-        let frame = |app: &mut Application<_>, events| {
-            let mut actions = Vec::new();
-            let output = context.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(960.0, 576.0),
-                    )),
-                    events,
-                    ..Default::default()
-                },
-                |ui| app.draw_ui(ui, &mut actions),
-            );
-            (
-                output.platform_output.accesskit_update.expect("tree"),
-                actions,
-            )
-        };
-        frame(&mut app, vec![]);
-        let (tree, _) = frame(&mut app, vec![]);
-        let ids: Vec<_> = ["Trim start (seconds)", "Trim end (seconds)"]
-            .iter()
-            .map(|label| {
-                let (id, node) = tree
-                    .nodes
-                    .iter()
-                    .find(|(_, node)| node.label() == Some(*label))
-                    .expect("named trim slider");
-                assert_eq!(node.role(), egui::accesskit::Role::Slider);
-                assert_eq!(node.min_numeric_value(), Some(0.0));
-                assert_eq!(node.max_numeric_value(), Some(10.0));
-                assert_eq!(node.numeric_value_step(), Some(1.0));
-                *id
-            })
-            .collect();
-        let request = |index, value| {
-            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
-                action: egui::accesskit::Action::SetValue,
-                target_tree: egui::accesskit::TreeId::ROOT,
-                target_node: ids[index],
-                data: Some(egui::accesskit::ActionData::NumericValue(value)),
-            })
-        };
-        let (_, actions) = frame(&mut app, vec![request(0, 2.5), request(1, 7.5)]);
-        assert!(
-            matches!(actions.as_slice(), [UiAction::TrimEndpoint(a, _), UiAction::TrimEndpoint(b, _)] if *a == tab && *b == tab)
-        );
-        for action in actions {
-            app.handle_ui_action(action);
-        }
-        assert_eq!(
-            app.edit_state().trim_start,
-            Some(media_time(Duration::from_secs_f64(2.5)))
-        );
-        assert_eq!(
-            app.edit_state().trim_end,
-            Some(media_time(Duration::from_secs_f64(7.5)))
-        );
-        let history = app.edits[&tab].clone();
-        let (_, actions) = frame(&mut app, vec![request(0, 8.0)]);
-        for action in actions {
-            app.handle_ui_action(action);
-        }
-        assert_eq!(app.edits[&tab], history, "crossed endpoints must not edit");
-        let (_, actions) = frame(&mut app, vec![request(1, 9.0), request(0, 8.0)]);
-        for action in actions {
-            app.handle_ui_action(action);
-        }
-        assert_eq!(
-            app.edit_state().trim_start,
-            Some(media_time(Duration::from_secs(8))),
-            "end must expand before start moves past its old limit"
-        );
-        assert_eq!(
-            app.edit_state().trim_end,
-            Some(media_time(Duration::from_secs(9)))
-        );
-        app.undo_edit(false);
-        app.undo_edit(false);
-        let (_, actions) = frame(
-            &mut app,
-            vec![
-                request(1, 9.0),
-                request(0, 8.0),
-                request(1, 8.0),
-                request(0, 6.0),
-                request(1, 7.0),
-            ],
-        );
-        assert_eq!(actions.len(), 5);
-        for action in actions {
-            app.handle_ui_action(action);
-        }
-        assert_eq!(
-            app.edit_state().trim_start,
-            Some(media_time(Duration::from_secs(6)))
-        );
-        assert_eq!(
-            app.edit_state().trim_end,
-            Some(media_time(Duration::from_secs(7)))
-        );
-        for _ in 0..4 {
-            app.undo_edit(false);
-        }
-        assert_eq!(app.edit_state(), history.state().clone());
-        assert!(frame(&mut app, vec![request(0, f64::NAN)]).1.is_empty());
-        let mut focus = request(0, 2.5);
-        if let egui::Event::AccessKitActionRequest(request) = &mut focus {
-            request.action = egui::accesskit::Action::Focus;
-            request.data = None;
-        }
-        frame(&mut app, vec![focus]);
-        assert!(app.owns_seek_shortcut(&KeyStroke {
-            key: Key::Character('z'),
-            modifiers: Modifiers {
-                control: true,
-                ..Default::default()
-            }
-        }));
-        let (_, actions) = frame(
-            &mut app,
-            vec![egui::Event::Key {
-                key: egui::Key::ArrowRight,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::NONE,
-            }],
-        );
-        assert!(
-            matches!(actions.as_slice(), [UiAction::TrimEndpoint(id, EditOperation::SetTrimStart(value))] if *id == tab && value.as_seconds_f64() == 3.5)
-        );
-        app.handle_ui_action(actions[0].clone());
-        let (focus_tree, _) = frame(&mut app, vec![]);
-        assert_eq!(focus_tree.focus, ids[0]);
-        app.undo_edit(false);
-        assert_eq!(
-            app.edits[&tab].state().trim_start,
-            history.state().trim_start
-        );
-        app.undo_edit(true);
-        assert_eq!(
-            app.edit_state().trim_start,
-            Some(media_time(Duration::from_secs_f64(3.5)))
-        );
-        app.pending_guard = Some(GuardedAction::Exit);
-        frame(&mut app, vec![]);
-        let (tree, actions) = frame(&mut app, vec![request(1, 9.0)]);
-        assert!(actions.is_empty());
-        assert!(
-            tree.nodes
-                .iter()
-                .find(|(id, _)| *id == ids[1])
-                .expect("disabled trim")
-                .1
-                .is_disabled()
-        );
-    }
-
-    #[test]
-    fn pointer_trim_uses_validation_undo_and_modal_tab_guards() {
-        let Some(root) =
-            isolated_test_root("tests::pointer_trim_uses_validation_undo_and_modal_tab_guards")
-        else {
-            return;
-        };
-        let mut app = Application::new(None, |_| {}).expect("headless application");
-        let previous_tab = app.tabs.open_new(root.join("other.wav"), MediaKind::Audio);
-        let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
-        app.media_kind = Some(MediaKind::Audio);
-        app.media_duration = Some(Duration::from_secs(10));
-        app.state = PlaybackState::Paused;
-        let start = EditOperation::SetTrimStart(MediaTime::from_nanoseconds(2_500_000_000));
-        let end = EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(7_500_000_000));
-        app.handle_ui_action(UiAction::TrimEndpoint(tab, start));
-        assert_eq!(
-            app.edit_state().trim_start,
-            Some(MediaTime::from_nanoseconds(2_500_000_000))
-        );
-        app.handle_ui_action(UiAction::TrimEndpoint(tab, end));
-        app.undo_edit(false);
-        let history = app.edits[&tab].clone();
-        for operation in [start, EditOperation::SetTrimEnd(MediaTime::ZERO)] {
-            app.handle_ui_action(UiAction::TrimEndpoint(tab, operation));
-            assert_eq!(
-                app.edits[&tab], history,
-                "duplicate/invalid edits preserve redo"
-            );
-        }
-        app.export_error = Some("fixture modal".into());
-        app.handle_ui_action(UiAction::TrimEndpoint(tab, end));
-        assert_eq!(app.edits[&tab], history);
-        app.export_error = None;
-        app.handle_ui_action(UiAction::TrimEndpoint(previous_tab, end));
-        assert_eq!(app.edits[&tab], history);
-        app.undo_edit(true);
-        assert_eq!(
-            app.edit_state().trim_end,
-            Some(MediaTime::from_nanoseconds(7_500_000_000))
-        );
-        app.undo_edit(false);
-        app.undo_edit(false);
-        assert!(!app.edits[&tab].is_dirty());
-    }
-
-    #[test]
     fn accessible_timeline_values_use_source_time_and_respect_disabled_state() {
         let Some(_root) = isolated_test_root(
             "tests::accessible_timeline_values_use_source_time_and_respect_disabled_state",
@@ -9121,6 +8896,8 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.tabs
+            .open_new(PathBuf::from("selection-video.mp4"), MediaKind::Video);
         app.media_kind = Some(MediaKind::Video);
         app.media_duration = Some(Duration::from_secs(10));
         app.state = PlaybackState::Paused;
@@ -9217,7 +8994,7 @@ mod tests {
             frame(&mut app, vec![egui::Event::PointerMoved(end)], true, false);
             let actions = frame(&mut app, vec![button(end, false)], true, false);
             assert!(
-                matches!(actions.as_slice(), [UiAction::Seek(_)]),
+                matches!(actions.as_slice(), [UiAction::TimeSelection(_, _, Some(_))]),
                 "new press after interruption={interruption}"
             );
             assert!(!timeline_input::is_active(&context));
@@ -9233,6 +9010,7 @@ mod tests {
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
         app.path = Some(root.join("0.png"));
+        app.tabs.open_new(root.join("0.png"), MediaKind::Image);
         app.folder_snapshot = Some(FolderSnapshot {
             folder_identity: towavue_core::ShellIdentity::new(vec![]),
             folder_path: root.clone(),
@@ -9323,9 +9101,15 @@ mod tests {
                             "timeline={timeline}, {button:?}, drag={drag}"
                         );
                     } else if timeline {
-                        assert!(
-                            matches!(actions.as_slice(), [UiAction::Seek(time)] if time.as_seconds_f64() > 7.0 && time.as_seconds_f64() < 9.0)
-                        );
+                        if drag {
+                            assert!(
+                                matches!(actions.as_slice(), [UiAction::TimeSelection(_, _, Some(range))] if range.end().as_seconds_f64() > 7.0 && range.end().as_seconds_f64() < 9.0)
+                            );
+                        } else {
+                            assert!(
+                                matches!(actions.as_slice(), [UiAction::Seek(time)] if time.as_seconds_f64() > 7.0 && time.as_seconds_f64() < 9.0)
+                            );
+                        }
                     } else {
                         assert!(
                             matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if *path == root.join("2.png"))

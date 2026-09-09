@@ -196,12 +196,59 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                 .expect("pause");
             app.state = PlaybackState::Paused;
             app.seek_to(time(1200));
-            app.push_edit(EditOperation::Timeline(TimelineEdit::Delete(range(
-                500, 1000,
-            ))));
+            app.timeline_open = true;
+            app.handle_ui_action(UiAction::TimeSelection(
+                tab,
+                app.generation,
+                Some(range(500, 1000)),
+            ));
+            assert!(!app.edits[&tab].is_dirty(), "selection is not an edit");
+            app.process_shortcut("Delete".parse().expect("Delete key"));
+            assert!(app.time_selection.is_none());
             assert_eq!(app.current_position(), time(700));
             assert_eq!(app.playback_duration(), Some(Duration::from_millis(1500)));
             assert_eq!(app.media_duration, Some(Duration::from_secs(2)));
+            app.handle_ui_action(UiAction::TimeSelection(
+                tab,
+                app.generation,
+                Some(range(250, 1250)),
+            ));
+            app.process_shortcut("Ctrl+Y".parse().expect("keep shortcut"));
+            assert_eq!(app.playback_duration(), Some(Duration::from_secs(1)));
+            if !self.audio {
+                let plan = app.history_timeline().expect("history").expect("plan");
+                let mut expected_frames = 0;
+                towavue_runtime_windows::decode_file(&self.path, |output| {
+                    if let towavue_runtime_windows::DecodeOutput::Video(frame) = output
+                        && plan.edited_time(frame.presentation_time).is_some()
+                    {
+                        expected_frames += 1;
+                    }
+                    true
+                })
+                .expect("decode original reference");
+                let target = self.path.with_file_name("selected.mp4");
+                towavue_runtime_windows::export_media(&towavue_runtime_windows::ExportRequest {
+                    source: self.path.clone(),
+                    target: target.clone(),
+                    kind: MediaKind::Video,
+                    operations: app.edits[&tab].operations().to_vec(),
+                    hardware_encode: false,
+                })
+                .expect("export UI-created history");
+                let mut actual_frames = 0;
+                towavue_runtime_windows::decode_file(&target, |output| {
+                    if matches!(output, towavue_runtime_windows::DecodeOutput::Video(_)) {
+                        actual_frames += 1;
+                    }
+                    true
+                })
+                .expect("reopen selected export");
+                assert_eq!(actual_frames, expected_frames);
+                assert!(actual_frames > 0);
+            }
+            app.undo_edit(false);
+            assert_eq!(app.current_position(), time(700));
             app.push_edit(EditOperation::Timeline(TimelineEdit::Stretch(
                 range(500, 1000),
                 time(1000),
@@ -345,6 +392,7 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                 "source trim cannot mutate an edited axis"
             );
             app.toggle_pause();
+            app.time_selection = Some(range(1000, 2000));
             let other = app
                 .tabs
                 .open_new(self.path.with_file_name("other.png"), MediaKind::Image);
@@ -365,6 +413,7 @@ fn run_app_trial(root: PathBuf, audio: bool) {
             assert_eq!(saved.position(), time(4000));
             app.activate_tab(tab);
             assert_eq!(app.current_position(), time(4000));
+            assert_eq!(app.time_selection, Some(range(1000, 2000)));
             app.push_edit(EditOperation::Timeline(TimelineEdit::Delete(range(
                 0, 4000,
             ))));

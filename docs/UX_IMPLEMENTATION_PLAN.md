@@ -35,11 +35,11 @@
 | I06 | preset aspect selection、自由回転、readingの回転／反転alias | 要照合。90度・反転・正方形／比率保持は存在。任意角度の境界／export契約と入力競合を別途決める |
 | V01 | seek上dragでtimelineを開く、専用buttonを除く、timeline中thumbnailなし | 実装・検証済み。click閾値後の初動が上優勢なら展開のみ、横／下が先ならrelease時Seek。T／View／paletteは動画専用、fullscreenから展開時は通常windowへ戻る。専用buttonとtimelineのhover thumbnail生成／表示を除去。通常releaseで20秒を保持する上drag、横→上でもSeek維持を確認。V03の時間選択編集は別の未完事項 |
 | V02 | 区間低解像度previewの先行生成・即時hover、drag中も同じpreview表示 | 一部実装。20区間の遅延取得はあるが先行sheetと本画面scrubは未完。bounded生成、初期応答・長GOP負荷を測る |
-| V03 | timelineの時間選択・範囲再生・内外削除・連結、部分音量／速度、rubber-band | 基盤実装中。coreの区間列／編集↔source時刻／Keep・Delete・部分音量・Stretchと履歴replayをexport・再生engine・appへ接続。元RGBA／保存PCM、WASAPI worker／clock、D3D11VA復旧を確認。appの候補検証／Undo/Redo位置対応、編集duration／Seek／背景EOF・空plan、元波形UVの区間再配置・gain変形、preview対応とUIA Seekを検証。選択UI／rubber-band／新編集commandはまだ未公開で、現在の未編集時trim gripは要求と異なる。次はその置換とshortcut・範囲再生、実操作と保存再openを検証。長い削除区間のdecode負荷・初期Seek位相・継ぎ目の音質も残る |
+| V03 | timelineの時間選択・範囲再生・内外削除・連結、部分音量／速度、rubber-band | 部分実装。区間model／export／再生／appの時間軸・Undo/Redo・波形再配置は接続済み。旧trim gripを横dragの時間選択へ置換、CTI drag／clickはSeek。Delete／Ctrl+Y／Ctrl+A／I／O／UIA端点、tab保持・取消・stale拒否、通常releaseの0.5～1.5秒選択→Delete→Undo→Keepと選択履歴export再decodeを確認。次は部分音量rubber-band／速度stretchの直接操作、範囲再生とdifference枠・全focus/style監査。長い削除区間のdecode負荷・初期Seek位相・継ぎ目の音質、最終UI/export一致も残る |
 | V04 | 動画の閲覧／編集contextでshortcut競合を解消し誤編集を防ぐ | 未完。R/L回転、左右Seek、comma/period速度は存在。frame移動・J/L/K・長押し2倍と編集modeを一貫させる |
 | V05 | 動画のzoom・resizeと既存crop／rotate／flip／fullscreen | 一部実装。zoom／resizeは未完、単一device・preview/export一致を維持する |
 | A01 | 音声の自動次曲、repeat all／one／off、shuffleとbuttons | 主要経路実装。tab別のShell順auto-next、repeat off／all／one、shuffle一巡、前後操作、status buttons／View／palette／音声Ctrl+R。曲末にShell順を非同期再取得し、初回取得前のtab切替にも対応。実WASAPIでactive／背景の次曲・loop・dirty guard・古い通知拒否・失敗隔離を検証。通常releaseでbuttons／shortcut／自然EOFの次曲を確認。modeのrestart永続化、gapless、手動選曲の独立した履歴stackは提供しない |
-| A02 | 音声timeline常時、動画共通の選択編集・音量／速度操作 | 表示契約を実装・検証。音声timelineはfullscreenでも常設、Tでは閉じずcompact seek／専用buttonなし。通常releaseの全画面でも確認。既存waveform／trimからV03共通の選択編集・部分音量／速度へ進める |
+| A02 | 音声timeline常時、動画共通の選択編集・音量／速度操作 | 音声timelineはfullscreenでも常設、Tでは閉じずcompact seek／専用buttonなし。V03共通の時間選択・Delete／Keep・UIA端点を接続。部分音量／速度の直接操作と範囲再生は引き続き未完 |
 | E01 | metadata書換、音声抽出、normalize、stereo／mono export | 未完。現在はmetadata copyと固定export。明示optionと非破壊保存・再openの一致が必要 |
 | M01 | logoの三方向menu gestureと最小限の状態表示 | 未完。クリック／keyboard menuとlogo描画は存在。閾値・角度・mouseup・取消を共有dispatchへ渡す |
 | G01 | menu／palette／custom prefix／media別grid／dirty guard／Shell順 | 実装あり。追加commandの全入口と重なり・keyboard／IME／UIA・Undo／保存を変更ごとに再検証する |

@@ -64,6 +64,8 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::CoverWindow, "Shift+C"),
         (CommandId::ClearSelection, "Escape"),
         (CommandId::SelectAll, "Ctrl+A"),
+        (CommandId::DeleteTimeSelection, "Delete"),
+        (CommandId::KeepTimeSelection, "Ctrl+Y"),
         (CommandId::ToggleCropPreview, "Ctrl+Shift+Y"),
         (CommandId::ToggleReadingMode, "B"),
         (CommandId::IncreaseReadingPages, "Ctrl+]"),
@@ -309,13 +311,13 @@ mod tests {
     }
 
     #[test]
-    fn select_all_is_visual_only_and_keeps_custom_bindings() {
+    fn select_all_supports_time_selection_and_keeps_custom_bindings() {
         let mut bindings = defaults();
         let select = "Ctrl+A".parse::<KeySequence>().expect("select all");
         for (kind, reading, enabled) in [
             (Some(MediaKind::Image), false, true),
             (Some(MediaKind::Video), false, true),
-            (Some(MediaKind::Audio), false, false),
+            (Some(MediaKind::Audio), false, true),
             (Some(MediaKind::Image), true, false),
             (None, false, false),
         ] {
@@ -356,6 +358,56 @@ mod tests {
                 context
             ),
             ShortcutMatch::Command(CommandId::SelectAll)
+        );
+    }
+
+    #[test]
+    fn delete_and_keep_time_require_a_visible_selected_timeline_and_preserve_visual_crop() {
+        let bindings = defaults();
+        for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
+            for timeline_open in [false, true] {
+                for has_time_selection in [false, true] {
+                    let context = CommandContext {
+                        media_kind: Some(kind),
+                        timeline_open,
+                        has_time_selection,
+                        ..Default::default()
+                    };
+                    let enabled = kind != MediaKind::Image && timeline_open && has_time_selection;
+                    assert_eq!(
+                        bindings.resolve(
+                            "Delete".parse::<KeySequence>().expect("delete").strokes(),
+                            context
+                        ),
+                        if enabled {
+                            ShortcutMatch::Command(CommandId::DeleteTimeSelection)
+                        } else {
+                            ShortcutMatch::None
+                        }
+                    );
+                    if enabled {
+                        assert_eq!(
+                            bindings.resolve(
+                                "Ctrl+Y".parse::<KeySequence>().expect("keep").strokes(),
+                                context
+                            ),
+                            ShortcutMatch::Command(CommandId::KeepTimeSelection)
+                        );
+                    } else if kind == MediaKind::Video && !timeline_open {
+                        assert_eq!(
+                            bindings.resolve(
+                                "Ctrl+Y".parse::<KeySequence>().expect("crop").strokes(),
+                                context
+                            ),
+                            ShortcutMatch::Command(CommandId::ApplyCrop)
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            "Del".parse::<KeySequence>().expect("alias").to_string(),
+            "Delete"
         );
     }
 

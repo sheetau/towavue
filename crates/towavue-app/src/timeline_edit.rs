@@ -2,6 +2,28 @@ use super::*;
 use towavue_core::{EditTimeline, PlaybackRange};
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn set_time_selection_endpoint(&mut self, start: bool) {
+        let Some(duration) = self.playback_duration().map(media_time) else {
+            return;
+        };
+        let position = self.current_position().min(duration);
+        let (a, b) = if start {
+            (
+                position,
+                self.time_selection.map_or(duration, |range| range.end()),
+            )
+        } else {
+            (
+                self.time_selection
+                    .map_or(MediaTime::ZERO, |range| range.start()),
+                position,
+            )
+        };
+        if let Some(range) = towavue_core::TimeRange::new(a, b) {
+            self.time_selection = Some(range);
+            self.request_redraw();
+        }
+    }
     pub(super) fn history_timeline(&self) -> Result<Option<EditTimeline>, &'static str> {
         let history = self.tabs.active().and_then(|tab| self.edits.get(&tab.id));
         let Some(history) = history.filter(|history| {
@@ -77,6 +99,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let range_changed = plan.is_none() && session.range() != state.playback_range();
         if changed || range_changed || session.rate() != state.rate {
             if changed {
+                self.time_selection = None;
                 self.thumbnail_worker.clear();
                 self.thumbnail_loading = None;
                 self.hover_thumbnail = None;

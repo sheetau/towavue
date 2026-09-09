@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 時間範囲選択とDelete／Keep（2026-09-10）
+
+音声／展開した動画timelineの旧trim gripを除去し、CTI付近のdragはSeek、それ以外のdragは範囲選択、clickはSeekと選択解除にした。選択はtab状態で、Delete／Ctrl+Yだけが編集を追加する。I／Oの旧command IDは選択端点へ変更、Ctrl+Aは時間全選択。UIA端点の同時設定、modal／古いgeneration／別tabの拒否、取消後の新しいpress、入力batch／複数passでも一度だけcommitする回帰を追加。元trimのbackend検証は保持し、廃止したgrip専用7件の試験を除去、選択・文脈に関する4件を追加した。一般Deleteキーが未対応だったためparser／表示／Win32入力変換も接続。旧「全track dragでSeek」の試験と、tabなしのfixtureを新しい所有権へ更新した。
+
+session40939でfmt／Clippy／workspace361 tests（app202/core53/runtime102/integration4）とrelease成功、通常ignored10件のうちapp全4件を明示実行してPASS、SKIPなし。2秒video-onlyと無音WASAPI付きH.264/AACの実sessionで通常Delete／Keep shortcut、Undo、編集長・背景EOFと選択保持を確認。UIで作ったDelete→Keep履歴をMP4へexport／再decodeし、元sourceのplan選択とframe数一致。release405a87b28e577b45f046957a27487296a3e16221871e9173b750b9ac8aea2b09、前回42688f9のCI34398563716成功。
+
+通常releaseのowned試験PID32280、2秒video-only source33fcc1ada82041c377e2a99368f038f163a1ae632baf54f5710d0bb17b1c4e30で、実pointerが0.5～1.5秒を選択、Delete後のUIA最大値1秒、Ctrl+Z後2秒、UIAで再選択→Ctrl+Y後1秒。selected／kept captureを目視し、白い枠と端点、保持後のsource0.5秒frameを確認。先行PID41564は一時handle／foreground確認で入力せず中断、最新handleへ接続し直して通常close。最終試験もClose→Discardで終了し両PID消失、helper終了0。appのExitCode値はhelperから取得できず、0とは宣言しない。UIA SetFocusは一部拒否されたが、各入力前の実foreground一致を確認して送った。入力・設定・生成fileは専用temp内だけ、成功した操作はforegroundを確認したowned windowに限定した。rubber-band／部分stretch／範囲再生／difference枠などは未完。
+
 ### 編集時間軸とapp履歴・表示の接続（2026-09-10）
 
 最終session94715でfmt／Clippy／workspace364 tests（app205/core53/runtime102/integration4）／releaseが成功。通常ignored10件のうちapp全4件を明示実行してすべてPASS、SKIPなし。release5d9f00c85bc5b737bf531656d18aa1e8db16110a0f4c9b5441cd3daa9d24abe2。前回78bb232のCI34397090819も成功。通常releaseでの新編集gesture試用はまだ行っていない。

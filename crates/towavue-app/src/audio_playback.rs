@@ -326,6 +326,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             saved.path = path.clone();
             saved.clock = None;
             saved.duration = None;
+            saved.time_selection = None;
             saved.waveform = None;
             saved.pending_time = None;
             saved.audio_drained = true;

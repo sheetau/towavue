@@ -6,11 +6,13 @@
 
 ## 1. 試用前に知るべき制約
 
-2026-09-10: V03の再生engineと通常appの編集履歴／Undo/Redo・Seek・duration表示・waveform時間軸を接続した。元より長い編集の背景EOF、全削除／復元、UIA Seekも検証。新しい選択UI／rubber-band／編集commandはまだ未公開で、試験から履歴を投入して接続を確認した段階。波形は元のoverviewを区間別に再配置・gain変形する方式で、tempo後PCMの精密波形ではない。音声は初期Seek後を一続きでdecodeするため、長い削除区間の通過負荷、初期Seekの粗いPTS位相、極小区間の音質・tail補正を含む実用性能の確認が残る。短い生成素材のsample一致とWASAPI worker保持だけで、全素材のseamless再生を保証しない。
+2026-09-10: 旧trim gripを時間範囲選択へ置き換えた。横dragで範囲、CTI drag／clickでSeek、Deleteで前後連結、Ctrl+Yで範囲だけ保持、Ctrl+A／I／O／UIA端点とUndo/Redoを接続。通常releaseの実drag・Delete・Undo・Keepも確認した。部分音量rubber-band、部分速度stretchの直接操作、選択範囲だけの再生、difference枠・全focus/style監査はまだ残る。選択枠は現状白い1px線で、精密なtempo後波形ではなく元overviewを再配置する。
 
-2026-09-10: V03の単一source区間modelと保存backendは削除による前後連結、Keep、部分音量／伸縮、履歴からの復元を扱う。時間選択／rubber-band・shortcut・編集UIAの接続と実操作／保存再openの検証が残る。有限durationが必要で、全範囲削除はUndo可能な空timelineとして保持し、空mediaのexportは拒否する。動画のframe量子化、atempoのtail補正、長い履歴の負荷・継ぎ目の音質を含む最終確認は残る。
+2026-09-10: V03の再生engineと通常appの編集履歴／Undo/Redo・Seek・duration表示・waveform時間軸を接続した。元より長い編集の背景EOF、全削除／復元、UIA Seekも検証。選択・Delete／Keepは通常UIへ接続済みで、rubber-band／部分stretch操作と範囲再生が残る。波形は元のoverviewを区間別に再配置・gain変形する方式で、tempo後PCMの精密波形ではない。音声は初期Seek後を一続きでdecodeするため、長い削除区間の通過負荷、初期Seekの粗いPTS位相、極小区間の音質・tail補正を含む実用性能の確認が残る。短い生成素材のsample一致とWASAPI worker保持だけで、全素材のseamless再生を保証しない。
 
-2026-09-10: 動画の上drag展開／専用timeline button除去／timeline thumbnail廃止（V01）と音声のfullscreenを含む常時timeline（A02表示部分）を実装した。横Seekの初動固定、取消／複数pass、位置・履歴保持を回帰と通常releaseで確認。時間範囲選択・rubber-band・複数区間／部分音量・速度（V03）、先行thumbnail sheet（V02）は未完で、既存trim gripを完成仕様とは扱わない。
+2026-09-10: V03の単一source区間modelと保存backendは削除による前後連結、Keep、部分音量／伸縮、履歴からの復元を扱う。rubber-band／部分stretch・範囲再生の接続と最終実操作／保存再openの検証が残る。有限durationが必要で、全範囲削除はUndo可能な空timelineとして保持し、空mediaのexportは拒否する。動画のframe量子化、atempoのtail補正、長い履歴の負荷・継ぎ目の音質を含む最終確認は残る。
+
+2026-09-10: 動画の上drag展開／専用timeline button除去／timeline thumbnail廃止（V01）と音声のfullscreenを含む常時timeline（A02表示部分）を実装した。横Seekの初動固定、取消／複数pass、位置・履歴保持を回帰と通常releaseで確認。時間範囲選択・rubber-band・複数区間／部分音量・速度（V03）、先行thumbnail sheet（V02）は未完で、時間選択は実装済みだが、V03全体の完了とは扱わない。
 
 新goalの残件と各checkpointの実績は[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)で管理する。tabごとの背景再生は主要経路を実装したが、完全な状態保持、timelineの選択編集等は引き続き未完である。音声の自動次曲／repeat／shuffleはA01で主要経路を実装した。tab context menu／一括close／path copy・Explorer表示／path-only reopenは実装したが、window間結合、keyboardからのcontext menu呼出しと全体focus／UIA監査は残る。新しい台帳は過去の「このsliceには含めない」を永久的な却下とは扱わない。
 

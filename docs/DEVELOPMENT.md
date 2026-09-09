@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 実PTSに基づく前後フレーム探索（2026-09-10 06:52、UI未接続）
+
+最終境界監査: 各編集spanの境界ちょうど／前後1nsを照合対象へ追加し、session80922でfmt／Clippy／全380件を再実行、終了0。release検証後の追加はtestのみで、本体byteは下記のまま。
+
+runtimeへadjacent_video_frameを追加した。再生と同じbest video stream、メディア開始点への正規化、編集planの半開区間／整数時刻を使い、厳密に前／後のPTSを返す。区間の削除・伸縮を反映し、端点や全削除には候補なしを返す。固定fpsによるSeekではない。前フレームがkeyframe Seekで見つからない時だけprerollを拡大する。software codecから時刻だけを読む同期APIであり、UI threadで使わない。RGBA変換・GPU readback・WASAPIは行わず、通常再生のdevice/inputを変更しない。
+
+3回帰でMP4/mpeg4、MKV/FFV1、TS/mpeg2videoのVFRと編集後PTSを全decodeから作った参照と照合。fixtureの不等間隔、実際のB-picture、TSのnonzero originも検査した。7fps/11fpsの2streamでindex1をdefaultにした試験では、全体時刻のSeekが別streamのkeyframeに着地し、初期実装がFFV1非keyframeで失敗することを確認。探索のSeekを対象stream index/timebaseへ明示して修正した。既存の並列再生Seekも3位置で参照PTS・全RGBA列と一致することを確認し、その実装は変更していない。先頭・EOF・PTS直後・編集join・空plan、I/O前／preroll中の取消と後続queryの回復を含む。失敗したowned試験fixtureはtempに残し、成功fixtureは試験自身が回収した。
+
+最終session64267: fmt／Clippy／workspace380件（app214/core54/runtime108/integration4）とrelease終了0。通常ignored10件は未実施として別計上し、このturnで新たなGPU／WASAPI opt-inは実行していない。release SHA256 64ebbec7309c65d338fa02b1b415f9723e4a606c32bfb5f4d21ce50b44043bc6。前checkpoint7c0874bのCI34408462747は成功。まだappのcomma/period・非同期取消・タブ／世代・pause/presentationへ未接続であり、フレーム移動機能は未完成。長GOP／高解像度性能、時刻不明素材、音声の操作定義、通常windowの確認も残る。
+
 ### J/K/Lと複数ショートカットの接続（2026-09-10 06:41）
 
 J／Lを既存5秒Seek、Kを既存Play/Pauseへの追加bindingにした。左右矢印／Spaceも維持する。動画timeline表示中は主bindingのL回転を優先し、視聴中と音声ではL Seekになる。custom主bindingとそのprefixは追加bindingより先に解決する。menu／palette／status hintでは競合して使えない追加キーを省く。画像のR/Lとモーダル・文字入力・focusの既存入力経路は変更しない。

@@ -32,6 +32,10 @@ UIのdraw order内にplain meshのInvertMesh callbackを置き、vendor renderer
 
 ## 1. 目的と優先順位
 
+V04フレーム探索のruntime契約（2026-09-10、UI未接続）: adjacent_video_frameは指定時刻より厳密に前／後にある、選択video streamの異なるPTSを返す。source時間または既存EditTimelineの編集時間を受け、削除区間を飛ばし、局所stretchの整数対応付けと半開区間境界を共有する。fpsから固定間隔を作らず、時刻なしframeは明示エラーにする。次／前の候補がなければNone。逆方向はkeyframe境界で候補が得られない時だけprerollを区間先頭まで拡大する。通常containerは対象streamを指定してSeekし、TSは既存のkeyframe byte-position処理を使う。
+
+これはworkerで実行する同期探索APIであり、UI threadで呼ばない。独立したsoftware decoderからPTSだけを読み、RGBA変換・readback・画像cache・WASAPI・別D3D deviceは作らないが、codec内部のframe decode負荷は発生する。packet/frame/再試行境界で取消し、進行中のFFmpeg I/Oやcodec callの即時中断は保証しない。通常再生の入力とsingle-device presentationは不変。UI側の非同期要求、タブ／世代の照合、一時停止、結果の正確な表示・連続キー処理、長GOP性能と音声側の操作契約まで確認してからフレーム移動の完成とする。
+
 V04追加binding契約（2026-09-10）: J／K／LはSeekBackward／TogglePause／SeekForwardへの追加KeySequenceであり、別commandや固定key例外ではない。主bindingのexact／prefixを追加bindingより優先するため、動画timeline表示中と画像では主bindingのL回転、動画視聴中と音声では追加bindingのL Seekが解決される。custom主bindingも同じ優先規則を使う。setは追加bindingも含めて置換、addは重複を除いて追加する。menu／palette／status hintは解決可能な追加bindingだけ表示し、disabled commandの主bindingは学習用に残す。v2設定は明示headerと縦棒区切りの列、旧形式は従来の単一prefix列として読む。旧ファイル中の未変更標準Left／Right／Spaceだけ新しいJ/K/Lを補い、既存fileの自動書換えは行わない。
 
 H1/V04（2026-09-10）: 動画のvisual selection／crop／90度回転／flipは、実際にtimelineが表示されている状態に限定する。menu／palette／grid／custom shortcutは共通CommandDefinition判定を通し、pointer／keyboard／UIAの選択操作にも同じ可視条件を適用する。fullscreenで隠れたtimelineは編集contextではない。閉じる際は進行中の選択dragを取消し、辺focusを解放するが、確定選択と編集結果は保持し、枠は編集contextへ戻るまで表示しない。視聴中のSeek／音量／master速度／再生／保存は維持し、明示的なUndo/Redoも修正を戻せるよう有効とする。画像と音声のcontextは変えない。無効な選択処理を毎frame呼ぶだけでcompact seek gestureを取消してはならない。J/K/Lは下記の追加binding契約で接続した。frame移動、長押し速度の実装・最終操作検証まではV04未完。

@@ -32,7 +32,10 @@ mod waveform;
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};
 pub use cancellation::Cancellation;
 pub use caption::{CaptionAction, CaptionButton, NativeCaption};
-pub use decode::{AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, VideoFrame};
+pub use decode::{
+    AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, VideoFrame,
+    adjacent_video_frame,
+};
 pub use dialog::{
     DialogError, FileDialogKind, PromptButtons, PromptResponse, cursor_position_in_window,
     pick_path, show_prompt,

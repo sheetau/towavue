@@ -17,6 +17,9 @@ use towavue_core::MediaTime;
 
 use crate::{GraphicsDevice, VideoOrientation};
 
+mod frame_step;
+pub use frame_step::adjacent_video_frame;
+
 const OUTPUT_AUDIO_CHANNELS: usize = 2;
 const BYTES_PER_F32: usize = size_of::<f32>();
 const PACKET_QUEUE_CAPACITY: usize = 32;
@@ -117,6 +120,8 @@ pub struct DecodeSummary {
 /// A failure in the M1 software decode path.
 #[derive(Debug, Error)]
 pub enum DecodeError {
+    #[error("frame stepping requires video presentation timestamps")]
+    MissingVideoTimestamp,
     #[error("video display matrix is not a supported quarter-turn or reflection")]
     UnsupportedOrientation,
     #[error("FFmpeg failed: {0}")]

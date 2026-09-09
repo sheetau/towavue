@@ -10,6 +10,8 @@
 
 2026-09-10 08:12 比率選択checkpoint: I06のpreset7種を画像と編集contextの動画へ接続。編集後寸法・SAR・画素格子・custom prefix・非編集・時間選択との分離、PNGの保存／再読込画素と実動画のcrop／Undo/Redoを回帰確認。新menu監査で再現した初回矢印欠落も修正する。自由回転、通常windowの最終操作確認と台帳全体は未完。
 
+2026-09-10 08:26 自由回転基盤checkpoint: I06の画像用角度／外接寸法・非同期raster・PNG exportの共通処理を追加し、合成編集の全画素一致とanimation／Undo/Redo／tab取消を検証。操作UIはまだなく、次は画像command／角度操作へ接続する。動画と通常window／性能を含む台帳全体は引き続き未完。
+
 2026-09-09 16:48追記: ownerの最新の区切り・push依頼に従い、進行中だったcompact seek端点修正だけを検証してcheckpointに含める。ローンチ準備は再開せず、このcheckpoint後は次の機能・UI実装へ自動着手しない。既存の改善台帳は残件として保持し、次のgoal設定・作業指示を待つ。goal全体の完了を意味しない。
 
 2026-09-09 新goal: ownerが草案とfollow-upに基づく機能・操作・UI改善を指定した。[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)の台帳へ要求・既存実装・残件を対応付け、H1内で順次実装・検証する。下記の「新goal待ち」は解消したが、ローンチ準備の停止は維持する。

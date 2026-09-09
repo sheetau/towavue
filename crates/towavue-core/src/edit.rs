@@ -35,6 +35,52 @@ impl ImageResize {
     }
 }
 
+/// A clockwise raster rotation with a validated enclosing canvas.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageRotation {
+    tenths: i16,
+    source_size: (u32, u32),
+    size: (u32, u32),
+}
+
+impl ImageRotation {
+    pub fn new(tenths: i16, source_size: (u32, u32)) -> Option<Self> {
+        if !(-1800..=1800).contains(&tenths) {
+            return None;
+        }
+        ImageResize::new(source_size.0, source_size.1, ResampleFilter::Nearest)?;
+        let size = match tenths {
+            -900 | 900 => (source_size.1, source_size.0),
+            -1800 | 0 | 1800 => source_size,
+            _ => {
+                let (sin, cos) = (f64::from(tenths) * std::f64::consts::PI / 1800.0).sin_cos();
+                (
+                    (f64::from(source_size.0) * cos.abs() + f64::from(source_size.1) * sin.abs())
+                        .ceil() as u32,
+                    (f64::from(source_size.0) * sin.abs() + f64::from(source_size.1) * cos.abs())
+                        .ceil() as u32,
+                )
+            }
+        };
+        ImageResize::new(size.0, size.1, ResampleFilter::Nearest)?;
+        Some(Self {
+            tenths,
+            source_size,
+            size,
+        })
+    }
+
+    pub fn tenths(self) -> i16 {
+        self.tenths
+    }
+    pub fn source_size(self) -> (u32, u32) {
+        self.source_size
+    }
+    pub fn size(self) -> (u32, u32) {
+        self.size
+    }
+}
+
 /// A source-time half-open playback interval; no end means natural EOF.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PlaybackRange {
@@ -60,6 +106,7 @@ impl PlaybackRange {
 pub enum EditOperation {
     Timeline(crate::TimelineEdit),
     Resize(ImageResize),
+    RotateImage(ImageRotation),
     Crop(PixelCrop),
     RotateClockwise,
     RotateCounterclockwise,
@@ -75,7 +122,7 @@ impl EditOperation {
     pub fn applies_to(self, kind: MediaKind) -> bool {
         match self {
             Self::Timeline(_) => matches!(kind, MediaKind::Video | MediaKind::Audio),
-            Self::Resize(_) => kind == MediaKind::Image,
+            Self::Resize(_) | Self::RotateImage(_) => kind == MediaKind::Image,
             Self::Crop(_)
             | Self::RotateClockwise
             | Self::RotateCounterclockwise
@@ -126,7 +173,10 @@ impl EditState {
         let mut state = Self::default();
         for operation in operations {
             match *operation {
-                EditOperation::Crop(_) | EditOperation::Resize(_) | EditOperation::Timeline(_) => {}
+                EditOperation::Crop(_)
+                | EditOperation::Resize(_)
+                | EditOperation::RotateImage(_)
+                | EditOperation::Timeline(_) => {}
                 EditOperation::RotateClockwise => {
                     state.quarter_turns = (state.quarter_turns + 1) % 4;
                 }
@@ -178,6 +228,9 @@ impl EditHistory {
     }
 
     pub fn push(&mut self, operation: EditOperation, kind: MediaKind) -> bool {
+        if matches!(operation, EditOperation::RotateImage(rotation) if rotation.tenths() == 0) {
+            return false;
+        }
         if !operation.applies_to(kind) {
             return false;
         }
@@ -235,6 +288,89 @@ impl EditHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arbitrary_rotation_bounds_contain_the_source_and_keep_exact_quarter_turns() {
+        for size in [(1, 1), (2, 3), (91, 73), (3000, 4000)] {
+            for angle in -1800..=1800 {
+                let rotation = ImageRotation::new(angle, size).expect("bounded angle");
+                assert_eq!(rotation.tenths(), angle);
+                assert_eq!(rotation.source_size(), size);
+                if angle % 900 == 0 {
+                    assert_eq!(
+                        rotation.size(),
+                        if angle.abs() == 900 {
+                            (size.1, size.0)
+                        } else {
+                            size
+                        }
+                    );
+                } else {
+                    let (sin, cos) = (f64::from(angle) * std::f64::consts::PI / 1800.0).sin_cos();
+                    let mut extent = (0.0_f64, 0.0_f64);
+                    for x in [-0.5, 0.5] {
+                        for y in [-0.5, 0.5] {
+                            let (x, y) = (x * f64::from(size.0), y * f64::from(size.1));
+                            extent.0 = extent.0.max((x * cos - y * sin).abs() * 2.0);
+                            extent.1 = extent.1.max((x * sin + y * cos).abs() * 2.0);
+                        }
+                    }
+                    let out = rotation.size();
+                    assert!(f64::from(out.0) >= extent.0 && f64::from(out.0) < extent.0 + 1.0);
+                    assert!(f64::from(out.1) >= extent.1 && f64::from(out.1) < extent.1 + 1.0);
+                }
+            }
+        }
+        for angle in [-1801, 1801, i16::MIN, i16::MAX] {
+            assert!(ImageRotation::new(angle, (100, 100)).is_none());
+        }
+        for size in [
+            (0, 1),
+            (1, 0),
+            (16385, 1),
+            (16384, 16384),
+            (u32::MAX, u32::MAX),
+        ] {
+            assert!(ImageRotation::new(0, size).is_none());
+        }
+        assert!(
+            ImageRotation::new(450, (10000, 10000)).is_none(),
+            "expanded area exceeds raster budget"
+        );
+        assert!(
+            ImageRotation::new(450, (16384, 1)).is_none(),
+            "ceil pushes the expanded canvas over the area limit"
+        );
+        assert!(ImageRotation::new(450, (16000, 1)).is_some());
+    }
+
+    #[test]
+    fn image_rotation_is_undoable_and_identity_does_not_replace_the_redo_branch() {
+        let mut history = EditHistory::default();
+        let rotation =
+            EditOperation::RotateImage(ImageRotation::new(-317, (200, 100)).expect("angle"));
+        for kind in [MediaKind::Video, MediaKind::Audio] {
+            assert!(!history.push(rotation, kind));
+        }
+        assert!(history.push(rotation, MediaKind::Image));
+        assert!(history.is_dirty());
+        history.mark_saved();
+        assert!(history.undo());
+        let before = history.clone();
+        assert!(!history.push(
+            EditOperation::RotateImage(ImageRotation::new(0, (200, 100)).expect("identity")),
+            MediaKind::Image
+        ));
+        assert_eq!(history, before);
+        assert!(history.redo());
+        assert!(!history.is_dirty());
+        assert_eq!(history.operations(), &[rotation]);
+        assert_eq!(
+            history.state(),
+            EditState::default(),
+            "raster rotation is not a transport setting"
+        );
+    }
 
     #[test]
     fn resize_is_bounded_image_only_and_preserves_saved_history() {

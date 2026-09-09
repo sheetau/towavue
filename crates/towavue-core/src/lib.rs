@@ -21,7 +21,10 @@ pub use commands::{
     ShortcutBindings, ShortcutMatch, command_definitions,
 };
 pub use crop::PixelCrop;
-pub use edit::{EditHistory, EditOperation, EditState, ImageResize, PlaybackRange, ResampleFilter};
+pub use edit::{
+    EditHistory, EditOperation, EditState, ImageResize, ImageRotation, PlaybackRange,
+    ResampleFilter,
+};
 pub use image::{
     ImageViewState, ReadingAxis, ReadingSettings, UnitPoint, UnitRect, ZoomMode, fit_scale,
 };

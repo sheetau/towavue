@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## I06: 自由回転の画像基盤（2026-09-10）
+
+自由回転を画像の非同期raster編集から実装する。角度は時計回り正の0.1度単位、-180～180度。操作直前の寸法と、回転した画素領域を切らず収めるceil済み外接canvas寸法をcoreの検証済み値に保持し、最大16384px／128M pixelsの既存画像上限へ収める。角度0は履歴を増やさずRedo枝も変えない。±90／180度は既存transpose／flipを使い、任意角度は透明黒の余白とpremultiplied-alphaで補間する。固定FFmpegのrotateが対応するGBRAP8を明示し、透明色の色漏れを防ぐ。元画素と直前のcrop／resize／反転／回転の順序を保持する。
+
+表示用workerと画像exportは同じvisual filter列・固定canvas寸法を使用する。ImageViewのUVだけで自由回転を表現しない。処理待ち／失敗中は既存raster待機・errorを表示し、完了後のRGBAを既存同一deviceへ載せ、materialized状態では履歴を二重適用しない。Undoでraster編集がなくなれば保持元画像へ戻す。原本と共有cacheの画素は書換えない。workerの取消・世代・tab境界、512MiB上限と全animation frameのdelayを維持する。画像menu／数値／hold-drag操作、動画の単一device上での任意角度表示とSAR／export契約はまだ接続せず、自由回転全体の残件とする。
+
 ## I06: アスペクト比の選択プリセット（2026-09-10）
 
 1:1／4:3／3:4／3:2／2:3／16:9／9:16を共通command・Edit menu・palette・変更可能なprefix shortcut（Ctrl+Kの後に1～7）へ公開する。現在の編集後画像に内接する中央の最大矩形を作り、既存のimage1px／video2px格子へ丸める。動画はorientation／回転後のsample aspect ratioを含む表示比率で解釈するため、整数格子による比率・中心の誤差は許容する。極小／非対応寸法では無効な矩形を作らない。

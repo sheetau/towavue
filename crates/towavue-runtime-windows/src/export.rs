@@ -105,6 +105,16 @@ fn export_cancellable(
     if same_path(&request.source, &request.target) {
         return Err(ExportError::SameAsSource);
     }
+    if request.kind != MediaKind::Image
+        && request
+            .operations
+            .iter()
+            .any(|operation| matches!(operation, EditOperation::RotateImage(_)))
+    {
+        return Err(ExportError::Failed(
+            "Free rotation currently supports images only".into(),
+        ));
+    }
     let state = EditState::from_operations(&request.operations);
     if !state.trim_is_valid(None) {
         return Err(ExportError::InvalidTrim);
@@ -641,6 +651,18 @@ pub(crate) fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
     operations
         .iter()
         .filter_map(|operation| match *operation {
+            EditOperation::RotateImage(rotation) => Some(match rotation.tenths() {
+                0 => "null".into(),
+                900 => "transpose=clock".into(),
+                -900 => "transpose=cclock".into(),
+                -1800 | 1800 => "hflip,vflip".into(),
+                tenths => {
+                    let (width, height) = rotation.size();
+                    // The pinned rotate filter supports GBRAP8, not GBRAP16.
+                    // Premultiplication prevents hidden RGB from bleeding across alpha edges.
+                    format!("format=gbrap,premultiply=inplace=1,rotate={tenths}*PI/1800:ow={width}:oh={height}:c=black@0:bilinear=1,unpremultiply=inplace=1,format=rgba")
+                }
+            }),
             EditOperation::Resize(resize) => {
                 use towavue_core::ResampleFilter;
                 let (width, height) = resize.size();

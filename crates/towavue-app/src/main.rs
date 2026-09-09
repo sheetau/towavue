@@ -19,6 +19,8 @@ mod playback_tab_tests;
 mod playlist;
 mod reading_input;
 mod resize;
+#[cfg(test)]
+mod rotation_tests;
 mod seekbar;
 mod selection;
 mod selection_aspect;
@@ -535,6 +537,11 @@ impl ImageTransform {
             match *operation {
                 EditOperation::Resize(resize) => {
                     let (width, height) = resize.size();
+                    transform.size = (width as f32, height as f32);
+                }
+                EditOperation::RotateImage(rotation) => {
+                    // Arbitrary rotation is materialized by the image worker, not this UV path.
+                    let (width, height) = rotation.size();
                     transform.size = (width as f32, height as f32);
                 }
                 EditOperation::Crop(region) => transform.crop_pixels(region),
@@ -4700,10 +4707,12 @@ where
             .and_then(|tab| self.edits.get(&tab.id))
             .map_or(&[][..], EditHistory::operations)
             .to_vec();
-        if !operations
-            .iter()
-            .any(|operation| matches!(operation, EditOperation::Resize(_)))
-        {
+        if !operations.iter().any(|operation| {
+            matches!(
+                operation,
+                EditOperation::Resize(_) | EditOperation::RotateImage(_)
+            )
+        }) {
             if let Some(source) = self.image_edit_source.take() {
                 self.image_edit_worker.clear();
                 self.image_edit_generation = self.image_edit_generation.wrapping_add(1);

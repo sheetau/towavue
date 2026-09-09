@@ -34,6 +34,12 @@ fn output_size(mut size: (u32, u32), operations: &[EditOperation]) -> Result<(u3
     for operation in operations {
         match *operation {
             EditOperation::Resize(resize) => size = resize.size(),
+            EditOperation::RotateImage(rotation) => {
+                if rotation.source_size() != size {
+                    return Err("Image rotation input dimensions changed".into());
+                }
+                size = rotation.size();
+            }
             EditOperation::RotateClockwise | EditOperation::RotateCounterclockwise => {
                 size = (size.1, size.0)
             }
@@ -143,6 +149,218 @@ fn render_frame(
 mod tests {
     use super::*;
     use towavue_core::{ImageResize, PixelCrop, ResampleFilter};
+
+    #[test]
+    fn free_rotation_preserves_alpha_delays_exact_quarters_and_rejects_obsolete_geometry() {
+        use towavue_core::ImageRotation;
+        let source = DecodedImage {
+            format: "test",
+            frames: vec![DecodedImageFrame {
+                width: 9,
+                height: 7,
+                rgba: (0..63)
+                    .flat_map(|index| {
+                        if index % 9 < 4 {
+                            [255, 0, 0, 0]
+                        } else {
+                            [0, 0, 255, 255]
+                        }
+                    })
+                    .collect(),
+                delay: std::time::Duration::from_millis(123),
+            }],
+        };
+        for angle in [-1799, -450, -1, 1, 450, 899, 1350, 1799] {
+            let rotation = ImageRotation::new(angle, (9, 7)).expect("rotation");
+            let result = render_image_edits(
+                &source,
+                &[EditOperation::RotateImage(rotation)],
+                &Cancellation::default(),
+            )
+            .expect("rotate");
+            assert_eq!(result.dimensions(), rotation.size());
+            assert_eq!(result.frames[0].delay, source.frames[0].delay);
+            assert!(
+                result.frames[0]
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|rgba| rgba[3] == 0),
+                "transparent canvas"
+            );
+            assert!(
+                result.frames[0]
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|rgba| rgba[3] > 0),
+                "visible source retained"
+            );
+            for rgba in result.frames[0]
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|rgba| rgba[3] > 0)
+            {
+                assert!(
+                    rgba[0] <= 1 && rgba[1] <= 1,
+                    "hidden red leaked at {angle}: {rgba:?}"
+                );
+                assert!(rgba[2] >= 250, "visible blue darkened at {angle}: {rgba:?}");
+            }
+        }
+        for (angle, expected) in [
+            (0, vec![]),
+            (900, vec![EditOperation::RotateClockwise]),
+            (-900, vec![EditOperation::RotateCounterclockwise]),
+            (
+                1800,
+                vec![EditOperation::FlipHorizontal, EditOperation::FlipVertical],
+            ),
+            (
+                -1800,
+                vec![EditOperation::FlipHorizontal, EditOperation::FlipVertical],
+            ),
+        ] {
+            let actual = render_image_edits(
+                &source,
+                &[EditOperation::RotateImage(
+                    ImageRotation::new(angle, (9, 7)).expect("quarter"),
+                )],
+                &Cancellation::default(),
+            )
+            .expect("quarter");
+            let reference = render_image_edits(&source, &expected, &Cancellation::default())
+                .expect("existing path");
+            assert_eq!(actual.dimensions(), reference.dimensions());
+            assert_eq!(actual.frames[0].rgba, reference.frames[0].rgba);
+        }
+        assert!(
+            render_image_edits(
+                &source,
+                &[EditOperation::RotateImage(
+                    ImageRotation::new(450, (7, 9)).expect("wrong source size")
+                )],
+                &Cancellation::default()
+            )
+            .is_err()
+        );
+        let cancel = Cancellation::default();
+        cancel.cancel();
+        assert!(
+            render_image_edits(
+                &source,
+                &[EditOperation::RotateImage(
+                    ImageRotation::new(450, (9, 7)).expect("angle")
+                )],
+                &cancel
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn free_rotation_materialization_matches_png_export_in_composed_edit_order() {
+        use towavue_core::ImageRotation;
+        let root =
+            std::env::temp_dir().join(format!("towavue-rotation-export-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("owned fixture root");
+        let source_path = root.join("source.png");
+        let rgba: Vec<u8> = (0..63_u8)
+            .flat_map(|index| {
+                [
+                    index * 3,
+                    255 - index * 3,
+                    index * 2,
+                    [0, 1, 64, 127, 255][usize::from(index) % 5],
+                ]
+            })
+            .collect();
+        ::image::save_buffer(&source_path, &rgba, 9, 7, ::image::ColorType::Rgba8)
+            .expect("source PNG");
+        let original = std::fs::read(&source_path).expect("source bytes");
+        let source = crate::decode_image(&source_path).expect("decode source");
+        for angle in [
+            -1800, -1799, -900, -317, -1, 1, 450, 899, 900, 1350, 1799, 1800,
+        ] {
+            let rotation = ImageRotation::new(angle, (18, 12)).expect("first rotation");
+            let (width, height) = rotation.size();
+            let operations = vec![
+                EditOperation::Crop(PixelCrop {
+                    x: 1,
+                    y: 1,
+                    width: 7,
+                    height: 5,
+                }),
+                EditOperation::Resize(
+                    ImageResize::new(18, 12, ResampleFilter::Lanczos).expect("resize"),
+                ),
+                EditOperation::RotateImage(rotation),
+                EditOperation::FlipHorizontal,
+                EditOperation::Crop(PixelCrop {
+                    x: 1,
+                    y: 1,
+                    width: width - 2,
+                    height: height - 2,
+                }),
+                EditOperation::RotateImage(
+                    ImageRotation::new(143, (width - 2, height - 2)).expect("second rotation"),
+                ),
+                EditOperation::FlipVertical,
+            ];
+            let result = render_image_edits(&source, &operations, &Cancellation::default())
+                .expect("materialize");
+            let target = root.join(format!("{angle}.png"));
+            crate::export_media(&crate::ExportRequest {
+                source: source_path.clone(),
+                target: target.clone(),
+                kind: towavue_core::MediaKind::Image,
+                operations,
+                hardware_encode: false,
+            })
+            .expect("export PNG");
+            let exported = crate::decode_image(&target).expect("reopen PNG");
+            assert_eq!(exported.dimensions(), result.dimensions(), "angle {angle}");
+            assert_eq!(
+                exported.frames[0].rgba, result.frames[0].rgba,
+                "angle {angle}"
+            );
+            std::fs::remove_file(target).expect("owned output");
+        }
+        assert_eq!(
+            std::fs::read(&source_path).expect("source retained"),
+            original
+        );
+        let guarded_target = root.join("unsupported.bin");
+        std::fs::write(&guarded_target, b"keep existing target").expect("owned target");
+        for kind in [
+            towavue_core::MediaKind::Video,
+            towavue_core::MediaKind::Audio,
+        ] {
+            let result = crate::export_media(&crate::ExportRequest {
+                source: source_path.clone(),
+                target: guarded_target.clone(),
+                kind,
+                operations: vec![EditOperation::RotateImage(
+                    ImageRotation::new(450, (9, 7)).expect("rotation"),
+                )],
+                hardware_encode: false,
+            });
+            assert!(
+                matches!(result, Err(crate::ExportError::Failed(message)) if message == "Free rotation currently supports images only")
+            );
+            assert_eq!(
+                std::fs::read(&guarded_target).expect("target preserved"),
+                b"keep existing target"
+            );
+        }
+        std::fs::remove_file(guarded_target).expect("owned target");
+        std::fs::remove_file(source_path).expect("owned source");
+        std::fs::remove_dir(root).expect("empty owned root");
+    }
 
     #[test]
     fn resampling_does_not_blend_hidden_transparent_red_into_visible_blue() {

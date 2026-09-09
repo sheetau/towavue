@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 画像自由回転の基盤検証（2026-09-10 08:26、I06 UI未接続）
+
+この段階では新しい操作UIはない。coreのImageRotationは時計回り正の0.1度単位（-180～180度）、操作直前の寸法と外接canvasを保持する。source／出力とも16384px・128M pixels以内で検証し、角度0は履歴／Redo枝を変えない。renderer用UVへ任意角度を押し込まず、既存の非同期画像編集workerで全frameを生成する。Undoでraster編集がなくなれば保持元の画素へ戻り、materialized画素は履歴を二重適用しない。
+
+固定FFmpeg sourceのrotate対応formatを調べ、任意角度はGBRAP8のpremultiply→rotate（透明黒）→unpremultiplyへ統一した。±90／180は既存transpose／flipを使う。全3601角度の幾何境界と極小・上限・identity履歴、alpha色漏れ・delay・正確なquarter turn・取消／寸法不一致を回帰確認。crop→resize→回転→flip→crop→別角度の列を12角度でPNG保存・再decodeし、表示用RGBAと全画素一致した。原本と拒否対象の既存targetは不変。appでも2-frame画像の全RGBA／delay、copy snapshot、Undo/Redo、2回目の回転待ちでtab切替、元画素からの再開、処理失敗・old-generation／close後拒否を確認した。OS clipboardには書いていない。
+
+session61043でClippy／workspace401（app230／core57／runtime110／integration4）、app opt-in5件とReleaseがterminal exit0。opt-inは全PASS／SKIPなし、通常ignored11件とは区別する。Release SHA-256は`e9b0f33a8ae90d11d7053b993221e452a27869048e217403495d51cbe5941785`。前94f5534のCI34416039958は成功。次に画像command／角度UI／dragを接続する。動画の単一device表示・SAR・保存と通常window／大画像性能は残件であり、これを自由回転全体やgoalの完了とはしない。
+
 ### 比率から選択範囲を作る（2026-09-10 08:13、I06部分実装）
 
 Edit menuのSelect aspect ratio、またはCtrl+Kの後に1～7で、1:1／4:3／3:4／3:2／2:3／16:9／9:16の中央選択を作る。現在の編集後寸法を使い、動画ではSARとorientation／回転も反映する。画像1px／動画2pxの格子へ丸めるため、比率は画素単位の近似になる。選択自体は非編集で、既存のShift辺resize・copy・crop・Undo/Redoにつながる。動画はtimeline表示中のみ有効で、時間選択を解除してCtrl+Yのvisual cropを優先する。未読込・resample待機・reading・modalは変更しない。既存customキー／prefixとの競合では暗黙preset bindingを除外し、設定を自動書換えしない。

@@ -1,0 +1,13 @@
+[package]
+name = "egui-directx11"
+version = "0.13.0+egui-0.35.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Nekomaru-PKU/egui-directx11"
+authors = ["Nekomaru <Nekomaru@pku.edu.cn>"]
+description = "Pinned egui Direct3D11 renderer with towavue texture sampling fixes"
+
+[dependencies]
+log = "=0.4.34"
+egui = "=0.35.0"
+windows = { version = "=0.62.2", features = ["Win32_Graphics_Dxgi_Common", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Direct3D_Fxc"] }

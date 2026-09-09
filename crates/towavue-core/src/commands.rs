@@ -71,6 +71,7 @@ pub enum CommandId {
     RevealFile,
     CopyImage,
     ResizeImage,
+    ToggleImageInterpolation,
 }
 
 impl CommandId {
@@ -141,6 +142,7 @@ impl CommandId {
             Self::LastImage => "last_image",
             Self::CopyImage => "copy_image",
             Self::ResizeImage => "resize_image",
+            Self::ToggleImageInterpolation => "toggle_image_interpolation",
         }
     }
 }
@@ -528,6 +530,11 @@ const COMMANDS: &[CommandDefinition] = &[
     command(
         CommandId::ResizeImage,
         "Resize / resample image",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::ToggleImageInterpolation,
+        "Toggle image interpolation (smooth / nearest)",
         &[MediaKind::Image],
     ),
 ];

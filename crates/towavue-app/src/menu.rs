@@ -42,6 +42,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         "View",
         &[
             &[ToggleFullscreen],
+            &[ToggleImageInterpolation],
             &[TogglePause, SeekBackward, SeekForward],
             &[PreviousMedia, NextMedia, PreviousSameKind, NextSameKind],
             &[PreviousImage, NextImage, FirstImage, LastImage],

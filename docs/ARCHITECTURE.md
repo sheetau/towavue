@@ -128,6 +128,10 @@ active tabのidentity・bar内index・tab幅または表示幅が変わった場
 
 ### I05 resize/resample contract
 
+表示用interpolationはResize履歴とは独立したwindow-local設定とし、Smooth（線形）を初期値、Nearestを明示切替とする。共有ToggleImageInterpolation commandをView menu／palette／custom bindingへ公開し、読書中も許可する。元画素・編集・選択・zoom・コピー／exportには影響させず、原寸画像と見開きの全frameに適用する。textureを共有するcache cloneはRc<Cell<TextureOptions>>も共有し、変更時だけ再転送する。固定eguiのTextureMeta.optionsはset後も初期値のままなので、それを現在値の判定には使わない。animationと復旧textureへ同じ設定を渡す。低解像度loading／thumbnail、文字・UIは線形を維持する。
+
+固定egui-directx11はtexture optionsを無視して単一linear samplerを使っていたため、同じversionのsource-only修正版をvendorへ保持する。managed textureのfull／partial更新でoptionsを保持し、drawごとにmin／mag／wrap対応samplerを選ぶ。原HLSLは元のshader model 5.0／O3でD3DCompileし、compiled shader binaryはcommitしない。device・描画順・public APIは維持する。上流license／出典・変更説明をvendorへ保持し、第三者notice generatorはlocal patchを除外せずfile hashesで検証する。WARP offscreen試験をCIへ追加して混在samplerとpartial更新後の実RGBAを検証する。物理GPUや混在DPIの代替認定とはしない。
+
 Resizeは画像専用の非破壊EditOperationとし、指定幅・高さとNearest／Bilinear／Bicubic／Lanczosを履歴順に保持する。各辺1～16384、RGBA出力は一枚512 MiB以内とし、animation全frameの処理結果も合計512 MiB以内に制限する。source decodeや原本fileを置き換えず、Undo/Redoで復帰できる。表示zoom／nearest表示の選択は別のpresentation設定であり、Resize履歴へ混ぜない。
 
 Resizeを含む画像のmaterializationはruntimeのFFmpeg filter graphで行い、exportと同じvisual filter列を使う。crop／回転／反転／複数Resizeの順序を潰さず、Nearest以外は16-bit planar RGBAのpremultiply→scale→unpremultiplyを通して透明画素の色のにじみを抑える。Nearestはstraight RGBAを保持する。最終RGBAのstrideを正規化して返し、FFmpeg frameやgraphをappへ渡さない。表示／copy／exportの画素一致を透明PNGと編集順序で検証してからUI経路を完成扱いにする。

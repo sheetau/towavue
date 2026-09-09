@@ -108,7 +108,9 @@ Reading mode（B）は初期状態で1–2、3–4…と連結表示します。
 
 画像ではCtrl+C／Edit menuのCopy image or selectionで、編集後の原寸画像または選択範囲をクリップボードへコピーできます。回転・反転・cropと透過色を保持し、表示倍率や低解像度previewはコピーに使いません。アニメ画像は押した時点のframe、読書中は現在の画像fileだけを対象にします。文字入力中は通常の文字コピーを優先します。元file・編集・選択を変更せず、完了または失敗をstatusに表示します。
 
-Ctrl+R／Edit menuのResize / resample imageで幅・高さ、縦横比固定、Nearest／Bilinear／Bicubic／Lanczosを指定できます。Applyは一つの非破壊編集として追加し、Cancel／Escapeは履歴を変えません。原画像を保持して非同期処理し、Undo／Redoと保存・コピーへ反映します。処理中は待機表示となり、失敗時はUndoで復帰できます。各辺1～16384 pixel、処理結果はanimation全frame合計512 MiB以内（graphics deviceのtexture上限も適用）です。読書中の編集は無効です。表示zoom用のnearest切替は別機能として未実装です。
+Ctrl+R／Edit menuのResize / resample imageで幅・高さ、縦横比固定、Nearest／Bilinear／Bicubic／Lanczosを指定できます。Applyは一つの非破壊編集として追加し、Cancel／Escapeは履歴を変えません。原画像を保持して非同期処理し、Undo／Redoと保存・コピーへ反映します。処理中は待機表示となり、失敗時はUndoで復帰できます。各辺1～16384 pixel、処理結果はanimation全frame合計512 MiB以内（graphics deviceのtexture上限も適用）です。読書中の編集は無効です。
+
+ドット絵の拡大時はView menuのToggle image interpolation、またはcommand paletteで`nearest`を検索して、Smooth／Nearest表示を切り替えられます。これは画面表示だけの設定で、編集・保存・コピーの画素は変えません。読書表示とanimationにも適用し、現在の方式はstatusに表示します。window内のファイル移動では保持しますが、再起動時はSmoothです。初期shortcutは割り当てず、`toggle_image_interpolation`に好みのキーを設定できます。読み込み中の低解像度previewやタブ等の小さなpreviewは引き続きSmoothです。
 
 prefixの続きは1秒以内に入力します。Escape、click、別commandやwindowへのfocus移動で待ちを解除し、途中から戻ったkeyを前のprefixへつなげません。
 

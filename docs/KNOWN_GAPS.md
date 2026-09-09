@@ -135,7 +135,7 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 | Crop、90度rotate、flip、undo/redo、export | 実装済み |
 | 自由回転 | 未実装 |
 | Clipboard copy | 未実装 |
-| Resize/resampleとinterpolation選択 | Ctrl+R／共有menu・palette、寸法／比率固定／4補間、非同期処理とUndo/Redo、処理済みcopyを実装。Windows11でUIA値設定、実保存PNGとcopyの一致、Undo原画一致とRedo・Cancelを確認。resize固有の実GPU復旧／mixed-DPI追加監査と表示用nearest切替は残る |
+| Resize/resampleとinterpolation選択 | Ctrl+Rの寸法／比率固定／4補間、非同期処理とUndo/Redo、処理済みcopyを実装し保存PNGとの一致を確認。View／paletteから表示専用Smooth／Nearestも切替可能。画像／animation／読書・cache clone／復旧dataと無編集・copy不変を回帰、WARPと実windowでnearest出力画素を確認。resize固有の実GPU復旧／mixed-DPI追加監査は残る |
 | Fullscreen | H1で画像/readingの全領域表示、Escape復帰と最大化状態の保持を実装。複数DPI/monitor matrixは未検証 |
 | 左右矢印、Home/End、Page、Backspace、A/D、数指定jump | H1で画像の左右矢印とHome/Endを共有commandへ追加。Shell snapshotの画像順で前後/端点へ移動し、reading mode・dirty guard・custom bindingに対応。現在の端点では再loadせず、paletteの文字編集を優先。動画/音声のSeekとCtrl+左右は維持。Page、Backspace、A/D、数指定jumpは未実装 |
 | Reading mode 2～10枚、縦横、反転 | 横は高さ・縦は幅を揃えた隙間なしの連結表示と全体の中央fitを実装。seek hoverにも同じ配置を使い、画像previewのpaddingを除去。ページ送りは一枚ずつで、見開き単位の移動は未実装 |

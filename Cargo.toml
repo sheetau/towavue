@@ -5,6 +5,10 @@ members = [
     "crates/towavue-runtime-windows",
 ]
 resolver = "3"
+exclude = ["vendor/egui-directx11"]
+
+[patch.crates-io]
+egui-directx11 = { path = "vendor/egui-directx11" }
 
 [workspace.package]
 version = "0.0.0"

@@ -34,6 +34,10 @@ if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve notice test inputs.' }
 $bodyChecks = @($inventory.license_text_fallbacks | ForEach-Object {
     @{ path = (Join-Path $repositoryRoot $_.path); sha256 = $_.sha256 }
 })
+foreach ($vendored in $inventory.vendored_packages) {
+    $notice = $vendored.files | Where-Object path -eq 'TOWAVUE-PATCH.md'
+    $bodyChecks += @{ path = (Join-Path $repositoryRoot ($vendored.path + '/' + $notice.path)); sha256 = $notice.sha256 }
+}
 foreach ($notice in $inventory.retrieved_upstream_notices) {
     $relative = $notice.repository.Replace('https://github.com/', '') + '/' + $notice.commit + '/' + $notice.path
     $bodyChecks += @{ path = (Join-Path $repositoryRoot ('target/tmp/rust-license-sources/' + $relative)); sha256 = $notice.sha256 }

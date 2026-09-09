@@ -11,5 +11,8 @@
 *.lib binary
 # Preserve the fixed upstream license's trailing blank lines byte-for-byte.
 third-party/gcc-15.2.0/COPYING.RUNTIME whitespace=-blank-at-eof
+# Keep vendored license and shader text snapshots without whitespace-only edits.
+vendor/egui-directx11/LICENSE-* whitespace=-blank-at-eof
+vendor/egui-directx11/shaders/*.hlsl whitespace=-blank-at-eof
 # Unified-diff context preserves upstream whitespace.
 third-party/patches/zvbi-no-program-id.patch whitespace=-trailing-space,-space-before-tab

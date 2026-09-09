@@ -82,6 +82,9 @@ jobs:
       - name: Run tests
         run: cargo +1.98.0 test --workspace --all-targets
 
+      - name: Verify per-texture interpolation with offscreen WARP
+        run: cargo +1.98.0 test -p egui-directx11 --lib --locked --offline
+
       - name: Verify Rust third-party notices
         shell: pwsh
         run: |

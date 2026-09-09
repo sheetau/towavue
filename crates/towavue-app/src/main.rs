@@ -288,6 +288,7 @@ struct ImagePresentation {
     texture: TextureHandle,
     frame_index: usize,
     next_frame_at: Option<Instant>,
+    sampling: std::rc::Rc<std::cell::Cell<TextureOptions>>,
 }
 
 struct ImagePreviewPresentation {
@@ -374,6 +375,7 @@ impl ImagePresentation {
             texture,
             frame_index: 0,
             next_frame_at,
+            sampling: std::rc::Rc::new(std::cell::Cell::new(TextureOptions::LINEAR)),
         })
     }
 
@@ -410,7 +412,7 @@ impl ImagePresentation {
         }
         self.texture.set(
             color_image(&self.decoded.frames[self.frame_index]),
-            TextureOptions::LINEAR,
+            self.sampling.get(),
         );
         true
     }
@@ -581,6 +583,7 @@ struct Application<N> {
     image_edit_operations: Option<Vec<EditOperation>>,
     image_edit_pending: bool,
     image_materialized: bool,
+    nearest_images: bool,
     resize_dialog: Option<resize::ResizeDialog>,
     edits: BTreeMap<TabId, EditHistory>,
     export_paths: BTreeMap<TabId, PathBuf>,
@@ -733,6 +736,7 @@ where
             image_edit_operations: None,
             image_edit_pending: false,
             image_materialized: false,
+            nearest_images: false,
             resize_dialog: None,
             edits: BTreeMap::new(),
             export_paths: BTreeMap::new(),
@@ -2022,6 +2026,7 @@ where
     }
 
     fn draw_image(&mut self, ui: &mut egui::Ui) {
+        self.update_image_sampling();
         if self.image_edit_pending {
             ui.centered_and_justified(|ui| {
                 ui.label("Resampling image…");
@@ -3207,7 +3212,7 @@ where
                         if !self.reading_mode {
                             details.push(zoom);
                         }
-                        details.push(format!("{} {width}×{height}", image.decoded.format));
+                        details.push(format!("{} {width}×{height} · {}", image.decoded.format, if self.nearest_images { "Nearest" } else { "Smooth" }));
                     } else if self.session.is_some() {
                         let edit = self.edit_state();
                         details.push(format!("{:.2}×", edit.rate));
@@ -3850,6 +3855,18 @@ where
                 }
                 self.request_redraw();
             }
+            CommandId::ToggleImageInterpolation => {
+                self.nearest_images = !self.nearest_images;
+                self.set_status(format!(
+                    "Image display: {} (pixels and edits unchanged)",
+                    if self.nearest_images {
+                        "nearest"
+                    } else {
+                        "smooth"
+                    }
+                ));
+                self.request_redraw();
+            }
             CommandId::ResizeImage => {
                 let Some(image) = self.image.as_ref().filter(|_| self.image_error.is_none()) else {
                     self.set_status("Wait for the full image to load before resizing".into());
@@ -4076,6 +4093,26 @@ where
             "Crop {} × {} px (source unchanged)",
             crop.width, crop.height
         ));
+    }
+
+    fn update_image_sampling(&mut self) {
+        let options = if self.nearest_images {
+            TextureOptions::NEAREST
+        } else {
+            TextureOptions::LINEAR
+        };
+        for image in self.image.iter_mut().chain(
+            self.reading_pages
+                .iter_mut()
+                .filter_map(|page| page.as_mut().ok()),
+        ) {
+            if image.sampling.replace(options) != options {
+                image.texture.set(
+                    color_image(&image.decoded.frames[image.frame_index]),
+                    options,
+                );
+            }
+        }
     }
 
     fn reset_image_edits(&mut self) {
@@ -5323,7 +5360,7 @@ where
                 image.texture.id(),
                 egui::epaint::ImageDelta::full(
                     color_image(&image.decoded.frames[image.frame_index]),
-                    TextureOptions::LINEAR,
+                    image.sampling.get(),
                 ),
             ));
         }
@@ -14660,6 +14697,7 @@ mod tests {
         });
         app.image = Some(ImagePresentation {
             decoded: Arc::clone(&decoded),
+            sampling: std::rc::Rc::new(std::cell::Cell::new(TextureOptions::LINEAR)),
             frame_index: 1,
             next_frame_at: None,
             texture: context.load_texture(
@@ -14703,6 +14741,116 @@ mod tests {
             app.image_copy_request().is_none(),
             "low resolution previews cannot be copied"
         );
+    }
+
+    #[test]
+    fn image_interpolation_changes_only_sampling_and_survives_animation_and_recovery() {
+        use towavue_runtime_windows::DecodedImageFrame;
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let path = PathBuf::from("pixel-art.gif");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        let source = Arc::new(DecodedImage {
+            format: "test",
+            frames: vec![
+                DecodedImageFrame {
+                    width: 2,
+                    height: 1,
+                    rgba: vec![255; 8],
+                    delay: Duration::from_millis(100),
+                },
+                DecodedImageFrame {
+                    width: 2,
+                    height: 1,
+                    rgba: vec![127; 8],
+                    delay: Duration::from_millis(100),
+                },
+            ],
+        });
+        app.image =
+            Some(ImagePresentation::from_decoded(&context, &path, source.clone()).expect("image"));
+        app.reading_pages.push(Ok(ImagePresentation::from_decoded(
+            &context,
+            &path,
+            source.clone(),
+        )
+        .expect("reading image")));
+        app.push_visual_edit(EditOperation::RotateClockwise);
+        app.image_view.selection = Some(UnitRect::FULL);
+        app.image_view.zoom = ZoomMode::Custom(8.0);
+        let history = app.edits.clone();
+        let view = app.image_view;
+        let before_copy = app.image_copy_request().expect("copy");
+        let cached = app.image.as_ref().expect("cached presentation").clone();
+        app.dispatch(CommandId::ToggleImageInterpolation);
+        app.update_image_sampling();
+        assert!(app.nearest_images);
+        assert_eq!(
+            cached.sampling.get(),
+            TextureOptions::NEAREST,
+            "cache clones share texture sampling state"
+        );
+        for image in app.image.iter().chain(
+            app.reading_pages
+                .iter()
+                .filter_map(|page| page.as_ref().ok()),
+        ) {
+            assert_eq!(image.sampling.get(), TextureOptions::NEAREST);
+        }
+        let uploaded = context.tex_manager().write().take_delta();
+        assert_eq!(
+            uploaded
+                .set
+                .iter()
+                .filter(|(_, delta)| delta.options == TextureOptions::NEAREST)
+                .count(),
+            2
+        );
+        app.update_image_sampling();
+        assert!(
+            context.tex_manager().write().take_delta().set.is_empty(),
+            "idle redraw must not reupload pixels"
+        );
+        let copy = app.image_copy_request().expect("unchanged copy");
+        assert!(Arc::ptr_eq(&copy.image, &before_copy.image));
+        assert_eq!(
+            (copy.size, copy.source_uv),
+            (before_copy.size, before_copy.source_uv)
+        );
+        assert_eq!(app.edits, history);
+        assert_eq!(app.image_view, view);
+        let image = app.image.as_mut().expect("image");
+        image.advance_animation(image.next_frame_at.expect("deadline"));
+        assert!(
+            context
+                .tex_manager()
+                .write()
+                .take_delta()
+                .set
+                .iter()
+                .any(|(id, delta)| *id == image.texture.id()
+                    && delta.options == TextureOptions::NEAREST)
+        );
+        let _ = context.run_ui(Default::default(), |ui| {
+            ui.label("recovery fixture");
+        });
+        assert!(
+            app.restored_ui_textures(&context)
+                .iter()
+                .filter(|(id, _)| *id != egui::TextureId::default())
+                .all(|(_, delta)| delta.options == TextureOptions::NEAREST)
+        );
+        app.reading_mode = true;
+        app.dispatch(CommandId::ToggleImageInterpolation);
+        app.update_image_sampling();
+        assert!(!app.nearest_images, "reading allows display-only changes");
+        assert_eq!(app.edits, history);
+        app.nearest_images = true;
+        app.remove_tab(tab, false);
+        assert!(app.nearest_images, "window preference survives last close");
     }
 
     #[test]

@@ -73,7 +73,7 @@ while ($pending.Count -gt 0) {
     $id = $pending.Dequeue()
     if (-not $visited.Add($id)) { continue }
     $package = $packagesById[$id]
-    if ($package.source) { $resolved[$package.name + '@' + $package.version] = $package }
+    if ($package.source -or @($inventory.vendored_packages | Where-Object { $_.name -eq $package.name -and $_.version -eq $package.version }).Count) { $resolved[$package.name + '@' + $package.version] = $package }
     foreach ($edge in $nodesById[$id].deps) {
         if (@($edge.dep_kinds | Where-Object kind -ne 'dev').Count -gt 0) { $pending.Enqueue($edge.pkg) }
     }
@@ -88,17 +88,24 @@ foreach ($item in $inventory.packages) {
     $package = $resolved[$item.name + '@' + $item.version]
     if (-not $package -or $package.license -ne $item.declared_license) { throw "Stale notice entry: $($item.name)" }
     $registryDirectory = Split-Path -Parent (Split-Path -Parent $package.manifest_path)
+    $vendored = $inventory.vendored_packages | Where-Object { $_.name -eq $item.name -and $_.version -eq $item.version }
+    if ($vendored) {
+        $vendoredRoot = Join-Path $repositoryRoot $vendored.path
+        if ($package.source -or [IO.Path]::GetFullPath($package.manifest_path) -ne [IO.Path]::GetFullPath((Join-Path $vendoredRoot 'Cargo.toml'))) { throw 'Unexpected vendored renderer resolution.' }
+        foreach ($file in $vendored.files) { Assert-Hash (Join-Path $vendoredRoot $file.path) $file.sha256 }
+    }
     $registryRoot = Split-Path -Parent (Split-Path -Parent $registryDirectory)
     $stem = $item.name + '-' + $item.version
     $archive = Join-Path $registryRoot ('cache/' + (Split-Path -Leaf $registryDirectory) + '/' + $stem + '.crate')
-    Assert-Hash $archive $item.crate_sha256
+    if (-not $vendored) { Assert-Hash $archive $item.crate_sha256 }
     [void]$bundle.Append("===== $($item.name) $($item.version) =====`nDeclared license: $($item.declared_license)`nSource: $($package.repository)`n")
+    if ($vendored) { [void]$bundle.Append("`n--- Local source modification notice ---`n" + [IO.File]::ReadAllText((Join-Path $vendoredRoot 'TOWAVUE-PATCH.md'), $utf8).Replace("`r`n", "`n") + "`n") }
     $noticeCount = 0
     $entries = @($item.local_root_notice_files)
     $entries += @($inventory.additional_crate_notices | Where-Object { $_.name -eq $item.name -and $_.version -eq $item.version } | ForEach-Object path)
     if ($item.name -eq $inventory.embedded_font_notices.package) { $entries += @($inventory.embedded_font_notices.files.path) }
     foreach ($entry in $entries) {
-        $body = Read-ArchiveText $archive ($stem + '/' + $entry)
+        $body = if ($vendored) { [IO.File]::ReadAllText((Join-Path $vendoredRoot $entry), $utf8).Replace("`r`n", "`n") } else { Read-ArchiveText $archive ($stem + '/' + $entry) }
         [void]$bundle.Append("`n--- Crate file: $entry ---`n$body`n")
         $noticeCount++
     }

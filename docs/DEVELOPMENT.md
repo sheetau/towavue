@@ -4,11 +4,19 @@
 
 ## 1. 最初に試す
 
+### 表示専用Smooth／Nearest切替（2026-09-10 01:21 JST）
+
+View menuまたはpaletteで`nearest`を検索して切り替える。初期値はSmoothで、window内では画像移動・最後のtab close後も保持し、再起動時は戻す。編集・選択・zoom・copy／exportは不変、原寸画像・animation・読書へ適用する。低解像度previewとUI文字はSmoothのまま。初期keyは設けず、設定名`toggle_image_interpolation`でcustom binding可能。
+
+固定rendererはTextureOptionsを無視していたため、同versionのsource-only vendor patchでdrawごとにsamplerを選ぶ。上流HLSLを元のSM5/O3でcompileし、元licenseと変更説明・local hashを保持する。WARP offscreen試験は同一frameの線形／nearestの実RGBAとpartial options更新を検証し、CIでも実行する。固定eguiのTextureMeta.optionsがset後に更新されない点は、cache cloneと共有するsampling状態で回避し、idle時に再転送しないことを検証した。
+
+Windows11通常release6e2e22a5、interpolation-native PID55612/start16:17:41.7306227Z。元16×16の赤青checkerの拡大で、nearestの256セル中心が全て正しく、内部246015画素は全て赤か青。smoothは同領域245692画素が中間色、上部barの30720画素は両表示で一致。読書中の切替・mode解除、元256画素とclipboardの完全一致、clean状態とsource hashd2a9ca79不変、通常終了0・stderr空を確認。初期smoothと名付けたshotにはpaletteが写っていたので比較にはsmooth-cleanを使う。palette再openはqueryが消えるため、空のままEnterしたOpen dialogは所有確認後Cancelし、再検索して対象commandをInvokeした。試験helperの失敗をapp hang／再起動や成功証拠とはしない。実GPU復旧・混在DPIと全UX台帳の監査は継続する。
+
 ### Resize/resample共通処理の回帰（2026-09-09 22:23 JST、UI接続前）
 
 coreの有界ImageResize履歴とruntimeのrender_image_edits、exportの共通filter列を追加した。4補間でcrop→resize→回転／反転→crop→resize→反転を実行し、透明PNGのmaterialized RGBAと実FFmpeg書き出し後の6×8 RGBAが完全一致する。非nearestの補間では、完全透明な赤と不透明な青の境界で、中間alphaへ赤が混入しないことも検証する。Nearestのstraight RGBA、frame delay保持、取消・不正寸法・crop拒否、Undo/Redoのsaved cursorも回帰に含む。
 
-後続checkpointでCtrl+Rのmodal、原画像保持・世代検査付き非同期表示、処理済み画像のcopyへ接続した。下記「画像resizeのUI接続」に実操作の証拠を記録する。表示用nearest設定と全I05の完了監査は残る。
+後続checkpointでCtrl+Rのmodal、原画像保持・世代検査付き非同期表示、処理済み画像のcopyへ接続した。下記「画像resizeのUI接続」に実操作の証拠を記録する。表示用nearestも実装したが、全I05の追加監査は残る。
 
 ### 画像／選択範囲のclipboard copy（2026-09-09 22:12 JST）
 
@@ -1267,7 +1275,7 @@ towavue/
 - Ctrl+R／共有menu／paletteから寸法・比率固定・4補間のmodalを開く。Applyは履歴へ一件追加、Cancelは無変更。元Arcを保持して最新世代だけを非同期materializeし、表示・copyでは編集を二重適用しない。最後のResizeをUndoすると元Arcへ戻る。処理中の寸法依存操作／copyと失敗時のstale copyを拒否する。
 - 回帰は実FFmpeg worker、crop後続、animation frame／delay／deadline、Cancel／背景操作、エラーからのUndo、古い履歴／path／closed tab結果、処理済みtextureの復旧データ、custom shortcutとreading禁止を確認。modalのkeyboard testはeguiのcommand modifierも指定する。固定TextEditがUIA SetValueを処理しないことを実機で見つけ、対象ID限定の処理と比率／無効値の回帰を追加した。
 - 通常release55ea7555、resize-uia-native PID13948/start13:41:43.8489708ZでUIA幅300→高さ400、Apply、Ctrl+C、Save Asを確認。保存PNGとclipboard PNGの120000画素が一致。Cancel／Escape、Undo時の600×800と元画像480000画素一致、Redoの300×400とsaved状態復帰、通常終了0を確認した。source hash5f24c4ffは不変、stderr空。先行resize-native PID54312もkeyboard入力で300×400・Undo・終了0を確認したが、修正前UIA SetValueの無反応は成功扱いにしない。native後の追加変更はtestのみ。
-- 所有native trialのidentity／画像／export／exitはignoredのimage-viewport-20260909/resize-*へ保持する。新たなインストール・配布なし。実GPU復旧と混在DPIのresize固有監査、表示用nearest切替、残りの全UX台帳は継続対象。
+- 所有native trialのidentity／画像／export／exitはignoredのimage-viewport-20260909/resize-*へ保持する。新たなインストール・配布なし。実GPU復旧と混在DPIのresize固有監査、残りの全UX台帳は継続対象。表示用nearestは後続checkpointで実装した。
 
 ### 共通判断基準
 

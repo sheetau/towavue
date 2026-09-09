@@ -77,6 +77,42 @@ pub struct GraphicsDevice {
 }
 
 impl GraphicsDevice {
+    #[cfg(test)]
+    pub(crate) fn warp_for_test() -> Result<Self, RenderError> {
+        use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_WARP;
+        use windows::Win32::Graphics::Direct3D11::D3D11CreateDevice;
+        let mut device = None;
+        let mut context = None;
+        // The test owns the returned interfaces, has no HWND, and enables the same
+        // immediate-context serialization as production before sharing the device.
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_WARP,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                Some(&mut context),
+            )?;
+            let multithread: ID3D11Multithread = context.expect("WARP context").cast()?;
+            let _ = multithread.SetMultithreadProtected(true);
+        }
+        let device = device.expect("WARP device");
+        let dxgi: IDXGIDevice = device.cast()?;
+        // Borrowed device stays alive; the adapter is an owned temporary and desc is copied.
+        let luid = unsafe { dxgi.GetAdapter()?.GetDesc()?.AdapterLuid };
+        Ok(Self {
+            device,
+            adapter_luid: AdapterLuid {
+                low_part: luid.LowPart,
+                high_part: luid.HighPart,
+            },
+        })
+    }
+
     pub fn adapter_luid(&self) -> AdapterLuid {
         self.adapter_luid
     }

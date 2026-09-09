@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 
@@ -16,6 +16,27 @@ use crate::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError};
 
 const VIDEO_QUEUE_CAPACITY: usize = 2;
 
+#[derive(Default)]
+struct DecodeCompletion(AtomicU8);
+
+impl DecodeCompletion {
+    const VIDEO: u8 = 1;
+    const AUDIO: u8 = 2;
+
+    fn finish(&self, stream: u8) -> bool {
+        let previous = self.0.fetch_or(stream, Ordering::AcqRel);
+        previous != 3 && previous | stream == 3
+    }
+
+    fn restart_video(&self) {
+        self.0.fetch_and(!Self::VIDEO, Ordering::AcqRel);
+    }
+
+    fn finished(&self) -> bool {
+        self.0.load(Ordering::Acquire) == 3
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PlaybackEvent {
     VideoReady(PlaybackGeneration),
@@ -23,6 +44,7 @@ pub enum PlaybackEvent {
     DecodePathSelected(PlaybackGeneration, DecodePath),
     DecodeFinished(PlaybackGeneration),
     DeviceRemoved(PlaybackGeneration, String),
+    VideoFailed(PlaybackGeneration, String),
     Failed(PlaybackGeneration, String),
 }
 
@@ -34,6 +56,7 @@ impl PlaybackEvent {
             | Self::DecodePathSelected(generation, _)
             | Self::DecodeFinished(generation)
             | Self::DeviceRemoved(generation, _)
+            | Self::VideoFailed(generation, _)
             | Self::Failed(generation, _) => *generation,
         }
     }
@@ -104,11 +127,17 @@ pub struct PlaybackSession {
     current_video: Option<PresentationFrame>,
     current_video_unpresented: bool,
     audio: Option<AudioOutput>,
-    decode_thread: Option<JoinHandle<()>>,
+    video_thread: Option<JoinHandle<()>>,
+    audio_thread: Option<JoinHandle<()>>,
     decode_cancel: Arc<AtomicBool>,
+    video_cancel: Arc<AtomicBool>,
+    completion: Arc<DecodeCompletion>,
+    video_visible: bool,
+    video_target: MediaTime,
     adapter_luid: AdapterLuid,
     metrics: Arc<SharedMetrics>,
     generation: PlaybackGeneration,
+    video_generation: PlaybackGeneration,
     target: MediaTime,
     paused: bool,
     volume: f32,
@@ -143,11 +172,17 @@ impl PlaybackSession {
             current_video: None,
             current_video_unpresented: false,
             audio: None,
-            decode_thread: None,
+            video_thread: None,
+            audio_thread: None,
             decode_cancel: Arc::new(AtomicBool::new(false)),
+            video_cancel: Arc::new(AtomicBool::new(false)),
+            completion: Arc::new(DecodeCompletion::default()),
+            video_visible: true,
+            video_target: range.start,
             adapter_luid,
             metrics,
             generation: PlaybackGeneration::INITIAL,
+            video_generation: PlaybackGeneration::INITIAL,
             target: range.start,
             paused: false,
             volume,
@@ -160,6 +195,18 @@ impl PlaybackSession {
 
     pub fn generation(&self) -> PlaybackGeneration {
         self.generation
+    }
+
+    /// Check this session's stream generation after the caller checks session identity.
+    pub fn accepts_event(&self, event: &PlaybackEvent) -> bool {
+        let generation = match event {
+            PlaybackEvent::VideoReady(_)
+            | PlaybackEvent::DecodePathSelected(..)
+            | PlaybackEvent::DeviceRemoved(..)
+            | PlaybackEvent::VideoFailed(..) => self.video_generation,
+            _ => self.generation,
+        };
+        event.generation() == generation
     }
 
     pub fn seek(&mut self, target: MediaTime) -> Result<PlaybackGeneration, PlaybackError> {
@@ -246,48 +293,151 @@ impl PlaybackSession {
         {
             audio.set_paused(true)?;
         }
-        let audio_sender = audio.as_ref().map(AudioOutput::sender);
+        self.audio = audio;
+        self.decode_cancel = Arc::new(AtomicBool::new(false));
+        self.completion = Arc::new(DecodeCompletion::default());
+        if self.audio.is_none() {
+            self.completion.finish(DecodeCompletion::AUDIO);
+        }
+        if self.video_visible
+            && let Err(error) = self.start_video(self.target)
+        {
+            self.stop_pipeline();
+            return Err(error);
+        }
+        if let Some(audio) = self.audio.as_ref().map(AudioOutput::sender) {
+            let path = self.path.clone();
+            let target = self.target;
+            let end = self.range_end();
+            let cancelled = Arc::clone(&self.decode_cancel);
+            let completion = Arc::clone(&self.completion);
+            let notify = Arc::clone(&self.notify);
+            let generation = self.generation;
+            match thread::Builder::new()
+                .name("towavue-audio-feed".into())
+                .spawn(move || {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        run_audio_decode(&path, &audio, target, end, &cancelled)
+                    }))
+                    .unwrap_or(Err(decode::DecodeError::WorkerPanicked));
+                    if cancelled.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    match result {
+                        Ok(()) if completion.finish(DecodeCompletion::AUDIO) => {
+                            notify(PlaybackEvent::DecodeFinished(generation));
+                        }
+                        Ok(()) | Err(decode::DecodeError::ConsumerClosed) => {}
+                        Err(error) => notify(PlaybackEvent::Failed(generation, error.to_string())),
+                    }
+                }) {
+                Ok(thread) => self.audio_thread = Some(thread),
+                Err(error) => {
+                    self.stop_pipeline();
+                    return Err(error.into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn start_video(&mut self, target: MediaTime) -> Result<(), PlaybackError> {
+        self.video_target = target;
+        self.completion.restart_video();
         let (video_tx, video_rx) = mpsc::sync_channel(VIDEO_QUEUE_CAPACITY);
         let path = self.path.clone();
         let graphics_device = self.graphics_device.clone();
         let notify = Arc::clone(&self.notify);
         let metrics = Arc::clone(&self.metrics);
         let generation = self.generation;
-        let target = self.target;
+        let video_generation = self.video_generation;
         let end = self.range_end();
-        self.decode_cancel = Arc::new(AtomicBool::new(false));
-        let cancelled = Arc::clone(&self.decode_cancel);
-        let decode_thread = thread::Builder::new()
-            .name("towavue-decode".to_owned())
+        self.video_cancel = Arc::new(AtomicBool::new(false));
+        let cancelled = Arc::clone(&self.video_cancel);
+        let completion = Arc::clone(&self.completion);
+        let video_thread = thread::Builder::new()
+            .name("towavue-video-feed".to_owned())
             .spawn(move || {
-                run_decode_thread(
+                let result = run_video_decode(
                     &path,
                     &graphics_device,
                     &video_tx,
-                    audio_sender.as_ref(),
                     &metrics,
-                    generation,
+                    video_generation,
                     target,
                     end,
                     &cancelled,
                     notify.as_ref(),
                 );
+                if cancelled.load(Ordering::Relaxed) {
+                    return;
+                }
+                match result {
+                    Ok(()) if completion.finish(DecodeCompletion::VIDEO) => {
+                        notify(PlaybackEvent::DecodeFinished(generation));
+                    }
+                    Ok(()) | Err(decode::DecodeError::ConsumerClosed) => {}
+                    Err(error) => match graphics_device.device_removed_reason() {
+                        Some(reason) => {
+                            notify(PlaybackEvent::DeviceRemoved(video_generation, reason))
+                        }
+                        None => notify(PlaybackEvent::VideoFailed(
+                            video_generation,
+                            error.to_string(),
+                        )),
+                    },
+                }
             })?;
         self.video_rx = Some(video_rx);
-        self.audio = audio;
-        self.decode_thread = Some(decode_thread);
+        self.video_thread = Some(video_thread);
         Ok(())
     }
 
     fn stop_pipeline(&mut self) {
         self.decode_cancel.store(true, Ordering::Relaxed);
-        self.pending_video.take();
-        self.current_video.take();
-        self.video_rx.take();
+        // Release the bounded audio receiver before joining its producer.
         self.audio.take();
-        if let Some(thread) = self.decode_thread.take() {
+        self.stop_video();
+        if let Some(thread) = self.audio_thread.take() {
             let _ = thread.join();
         }
+    }
+
+    fn stop_video(&mut self) {
+        self.video_generation = self.video_generation.next();
+        self.video_cancel.store(true, Ordering::Relaxed);
+        self.pending_video.take();
+        self.current_video.take();
+        self.current_video_unpresented = false;
+        self.video_rx.take();
+        if let Some(thread) = self.video_thread.take() {
+            let _ = thread.join();
+        }
+    }
+
+    /// Suspend video decode while leaving the audio producer, output, and clock intact.
+    /// On return, the caller supplies its current source position, including paused state.
+    pub fn set_video_visible(
+        &mut self,
+        visible: bool,
+        position: MediaTime,
+    ) -> Result<(), PlaybackError> {
+        if self.video_visible == visible {
+            return Ok(());
+        }
+        self.stop_video();
+        self.completion.restart_video();
+        self.video_visible = false;
+        if visible {
+            self.start_video(position.max(MediaTime::ZERO))?;
+            self.video_visible = true;
+        }
+        Ok(())
+    }
+
+    /// DecodeFinished is a wake-up; visibility changes can invalidate an already queued one.
+    pub fn decode_finished(&self) -> bool {
+        self.completion.finished()
     }
 
     pub fn pending_video_time(&mut self) -> Option<MediaTime> {
@@ -354,7 +504,7 @@ impl PlaybackSession {
         let mut dropped = 0;
         while let Some(time) = self.pending_video_time() {
             // Only terminal source preview may precede the seek target.
-            if time >= cutoff || (time < self.target && self.current_video.is_none()) {
+            if time >= cutoff || (time < self.video_target && self.current_video.is_none()) {
                 break;
             }
             self.pending_video.take();
@@ -410,179 +560,362 @@ impl Drop for PlaybackSession {
     }
 }
 
+fn run_audio_decode(
+    path: &Path,
+    audio: &AudioOutputSender,
+    target: MediaTime,
+    end: Option<MediaTime>,
+    cancelled: &AtomicBool,
+) -> Result<(), decode::DecodeError> {
+    decode::decode_file_parallel_cancellable(
+        path,
+        target,
+        end,
+        Some(DecodeStream::Audio),
+        &|| cancelled.load(Ordering::Relaxed),
+        |output| match output {
+            ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
+                audio.push(chunk).is_ok()
+            }
+            ParallelSoftwareDecodeOutput::AudioFinished => audio.finish().is_ok(),
+            _ => unreachable!("audio-only decoder emitted video"),
+        },
+    )
+    .map(|_| ())
+}
+
 #[allow(clippy::too_many_arguments)]
-fn run_decode_thread(
+fn run_video_decode(
     path: &Path,
     graphics_device: &GraphicsDevice,
     video_tx: &SyncSender<PresentationFrame>,
-    audio: Option<&AudioOutputSender>,
     metrics: &SharedMetrics,
     generation: PlaybackGeneration,
     target: MediaTime,
     end: Option<MediaTime>,
     cancelled: &AtomicBool,
     notify: &(impl Fn(PlaybackEvent) + Sync + ?Sized),
-) {
-    thread::scope(|scope| {
-        let (start_tx, start_rx) = mpsc::sync_channel(1);
-        let audio_thread = audio
-            .map(|audio| {
-                thread::Builder::new()
-                    .name("towavue-audio-feed".into())
-                    .spawn_scoped(scope, move || {
-                        if start_rx.recv().is_err() {
-                            return Err(decode::DecodeError::ConsumerClosed);
-                        }
-                        let result = decode::decode_file_parallel_cancellable(
-                            path,
-                            target,
-                            end,
-                            Some(DecodeStream::Audio),
-                            &|| cancelled.load(Ordering::Relaxed),
-                            |output| match output {
-                                ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
-                                    audio.push(chunk).is_ok()
-                                }
-                                ParallelSoftwareDecodeOutput::AudioFinished => {
-                                    audio.finish().is_ok()
-                                }
-                                _ => unreachable!("audio-only decoder emitted video"),
-                            },
-                        );
-                        if let Err(error) = &result
-                            && !matches!(error, decode::DecodeError::ConsumerClosed)
-                            && !cancelled.load(Ordering::Relaxed)
-                        {
-                            notify(PlaybackEvent::Failed(generation, error.to_string()));
-                        }
-                        result
-                    })
-            })
-            .transpose();
-        let audio_thread = match audio_thread {
-            Ok(handle) => handle,
-            Err(error) => {
-                notify(PlaybackEvent::Failed(generation, error.to_string()));
-                return;
+) -> Result<(), decode::DecodeError> {
+    let mut hardware_output_seen = false;
+    let hardware_result = decode::decode_file_hardware_parallel(
+        path,
+        graphics_device,
+        target,
+        end,
+        &|| cancelled.load(Ordering::Relaxed),
+        |output| {
+            if !hardware_output_seen {
+                hardware_output_seen = true;
+                notify(PlaybackEvent::DecodePathSelected(
+                    generation,
+                    DecodePath::D3d11va,
+                ));
             }
-        };
-        let mut start_audio = Some(start_tx);
-        let mut ready = || {
-            if let Some(sender) = start_audio.take() {
-                let _ = sender.send(());
-            }
-        };
-        let mut hardware_output_seen = false;
-        let hardware_result = decode::decode_file_hardware_parallel(
-            path,
-            graphics_device,
-            target,
-            end,
-            &|| cancelled.load(Ordering::Relaxed),
-            |output| {
-                if !hardware_output_seen {
-                    hardware_output_seen = true;
-                    notify(PlaybackEvent::DecodePathSelected(
+            match output {
+                ParallelRuntimeDecodeOutput::VideoFinished => true,
+                ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) => {
+                    metrics.hardware_frame_count.fetch_add(1, Ordering::Relaxed);
+                    send_video_frame(
+                        PresentationFrame::Hardware(frame),
+                        video_tx,
                         generation,
-                        DecodePath::D3d11va,
-                    ));
-                    ready();
+                        cancelled,
+                        notify,
+                    )
                 }
-                match output {
-                    ParallelRuntimeDecodeOutput::VideoFinished => true,
-                    ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) => {
-                        metrics.hardware_frame_count.fetch_add(1, Ordering::Relaxed);
+            }
+        },
+    );
+
+    match hardware_result {
+        _ if cancelled.load(Ordering::Relaxed) => Err(decode::DecodeError::ConsumerClosed),
+        Err(decode::DecodeError::HardwareUnavailable(_)) if !hardware_output_seen => {
+            notify(PlaybackEvent::DecodePathSelected(
+                generation,
+                DecodePath::Software,
+            ));
+            decode::decode_file_parallel_cancellable(
+                path,
+                target,
+                end,
+                Some(DecodeStream::Video),
+                &|| cancelled.load(Ordering::Relaxed),
+                |output| match output {
+                    ParallelSoftwareDecodeOutput::VideoFinished => true,
+                    ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) => {
+                        metrics.cpu_transfer_count.fetch_add(1, Ordering::Relaxed);
                         send_video_frame(
-                            PresentationFrame::Hardware(frame),
+                            PresentationFrame::Software(frame),
                             video_tx,
                             generation,
+                            cancelled,
                             notify,
                         )
                     }
-                }
-            },
-        );
-
-        let result = match hardware_result {
-            _ if cancelled.load(Ordering::Relaxed) => Err(decode::DecodeError::ConsumerClosed),
-            Err(decode::DecodeError::HardwareUnavailable(_)) if !hardware_output_seen => {
-                notify(PlaybackEvent::DecodePathSelected(
-                    generation,
-                    DecodePath::Software,
-                ));
-                decode::decode_file_parallel_cancellable(
-                    path,
-                    target,
-                    end,
-                    Some(DecodeStream::Video),
-                    &|| cancelled.load(Ordering::Relaxed),
-                    |output| match output {
-                        ParallelSoftwareDecodeOutput::VideoFinished => {
-                            ready();
-                            true
-                        }
-                        ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) => {
-                            ready();
-                            metrics.cpu_transfer_count.fetch_add(1, Ordering::Relaxed);
-                            send_video_frame(
-                                PresentationFrame::Software(frame),
-                                video_tx,
-                                generation,
-                                notify,
-                            )
-                        }
-                        _ => unreachable!("video-only decoder emitted audio"),
-                    },
-                )
-            }
-            other => other,
-        };
-
-        drop(start_audio);
-        match &result {
-            _ if cancelled.load(Ordering::Relaxed) => {}
-            Ok(_) => {}
-            Err(decode::DecodeError::ConsumerClosed) => {}
-            Err(error) => match graphics_device.device_removed_reason() {
-                Some(reason) => notify(PlaybackEvent::DeviceRemoved(generation, reason)),
-                None => notify(PlaybackEvent::Failed(generation, error.to_string())),
-            },
+                    _ => unreachable!("video-only decoder emitted audio"),
+                },
+            )
+            .map(|_| ())
         }
-        let audio_ok = match audio_thread {
-            Some(handle) => match handle.join() {
-                Ok(result) => result.is_ok(),
-                Err(_) => {
-                    notify(PlaybackEvent::Failed(
-                        generation,
-                        decode::DecodeError::WorkerPanicked.to_string(),
-                    ));
-                    false
-                }
-            },
-            None => true,
-        };
-        if result.is_ok() && audio_ok && !cancelled.load(Ordering::Relaxed) {
-            notify(PlaybackEvent::DecodeFinished(generation));
-        }
-    });
+        other => other.map(|_| ()),
+    }
 }
 
 fn send_video_frame(
     frame: PresentationFrame,
     video_tx: &SyncSender<PresentationFrame>,
     generation: PlaybackGeneration,
+    cancelled: &AtomicBool,
     notify: &(impl Fn(PlaybackEvent) + ?Sized),
 ) -> bool {
-    if video_tx.send(frame).is_err() {
+    // stop_video drops the receiver before joining this bounded producer.
+    if cancelled.load(Ordering::Relaxed) || video_tx.send(frame).is_err() {
         return false;
     }
-    notify(PlaybackEvent::VideoReady(generation));
+    if !cancelled.load(Ordering::Relaxed) {
+        notify(PlaybackEvent::VideoReady(generation));
+    }
     true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
+
+    fn fixture() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4")
+    }
+
+    fn wait_for_video(session: &mut PlaybackSession) -> MediaTime {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(time) = session.pending_video_time() {
+                return time;
+            }
+            assert!(Instant::now() < deadline, "video frame deadline");
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn completion_notifies_once_and_video_restart_invalidates_queued_completion() {
+        for _ in 0..32 {
+            let completion = DecodeCompletion::default();
+            let notifications = AtomicU8::new(0);
+            thread::scope(|scope| {
+                for stream in [DecodeCompletion::AUDIO, DecodeCompletion::VIDEO] {
+                    let completion = &completion;
+                    let notifications = &notifications;
+                    scope.spawn(move || {
+                        if completion.finish(stream) {
+                            notifications.fetch_add(1, Ordering::Relaxed);
+                        }
+                    });
+                }
+            });
+            assert!(completion.finished());
+            assert_eq!(notifications.load(Ordering::Relaxed), 1);
+            completion.restart_video();
+            assert!(!completion.finished());
+            assert!(!completion.finish(DecodeCompletion::AUDIO));
+            assert!(completion.finish(DecodeCompletion::VIDEO));
+            assert!(completion.finished());
+        }
+    }
+
+    #[test]
+    fn hidden_video_releases_a_full_queue_and_resumes_at_the_requested_source_position() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("towavue-video-visibility-{unique}.mp4"));
+        let output = std::process::Command::new(
+            crate::media_tools::tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
+        )
+        .args(["-v", "error", "-i"])
+        .arg(fixture())
+        .args(["-map", "0:v:0", "-c", "copy", "-an"])
+        .arg(&path)
+        .output()
+        .expect("video-only fixture");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let device = GraphicsDevice::warp_for_test().expect("Windows WARP device");
+        let (sender, events) = mpsc::channel();
+        let mut session = PlaybackSession::open(
+            &path,
+            device,
+            0.0,
+            1.0,
+            PlaybackRange::default(),
+            move |event| {
+                let _ = sender.send(event);
+            },
+        )
+        .expect("video session");
+        let generation = session.generation();
+        let old_video_generation = session.video_generation;
+        assert_eq!(wait_for_video(&mut session), MediaTime::ZERO);
+        thread::sleep(Duration::from_millis(50));
+        assert!(
+            session.metrics().cpu_transfer_count <= 4,
+            "bounded output queue"
+        );
+        session
+            .set_video_visible(false, MediaTime::ZERO)
+            .expect("hide");
+        assert!(session.video_thread.is_none() && session.video_rx.is_none());
+        assert!(session.pending_video_time().is_none() && session.video_geometry().is_none());
+        let hidden_count = session.metrics().cpu_transfer_count;
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(session.metrics().cpu_transfer_count, hidden_count);
+        let target = MediaTime::from_nanoseconds(1_000_000_000);
+        session.set_paused(true).expect("pause");
+        session.set_video_visible(true, target).expect("show");
+        assert_eq!(session.generation(), generation);
+        assert!(!session.accepts_event(&PlaybackEvent::VideoReady(old_video_generation)));
+        assert!(!session.accepts_event(&PlaybackEvent::VideoFailed(
+            old_video_generation,
+            "stale".into()
+        )));
+        assert!(session.accepts_event(&PlaybackEvent::VideoReady(session.video_generation)));
+        assert!(session.accepts_event(&PlaybackEvent::AudioReady(generation)));
+        assert!(session.paused && !session.decode_finished());
+        assert!(wait_for_video(&mut session) >= target);
+        let mut observed = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            while let Some(time) = session.pending_video_time() {
+                session.advance_pending();
+                let Some(PresentationFrame::Software(frame)) = &session.current_video else {
+                    panic!("WARP must use the software fallback");
+                };
+                observed.push((time, frame.rgba.clone()));
+            }
+            if session.decode_finished() && session.pending_video_time().is_none() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "completion deadline");
+            thread::sleep(Duration::from_millis(5));
+        }
+        let mut expected = Vec::new();
+        decode::decode_file(&path, |output| {
+            if let DecodeOutput::Video(frame) = output
+                && frame.presentation_time >= target
+            {
+                expected.push((frame.presentation_time, frame.rgba));
+            }
+            true
+        })
+        .expect("reference decode");
+        assert_eq!(observed, expected);
+        assert!(events.try_iter().all(|event| !matches!(
+            event,
+            PlaybackEvent::Failed(..)
+                | PlaybackEvent::VideoFailed(..)
+                | PlaybackEvent::DeviceRemoved(..)
+        )));
+        session
+            .set_video_visible(false, target)
+            .expect("hide at EOF");
+        assert!(
+            !session.decode_finished(),
+            "old queued EOF is no longer authoritative"
+        );
+        let next_generation = session.seek(target).expect("seek while hidden");
+        assert_ne!(next_generation, generation);
+        assert!(session.video_thread.is_none() && session.paused);
+        session
+            .set_video_visible(true, target)
+            .expect("show after hidden seek");
+        assert!(wait_for_video(&mut session) >= target);
+        drop(session);
+        std::fs::remove_file(path).expect("remove owned video-only fixture");
+    }
+
+    #[test]
+    #[ignore = "requires a live Windows shared-mode audio endpoint; plays the owned fixture muted"]
+    fn video_visibility_keeps_the_live_audio_workers_and_source_clock() {
+        let device = GraphicsDevice::warp_for_test().expect("Windows WARP device");
+        let mut session = match PlaybackSession::open(
+            &fixture(),
+            device,
+            0.0,
+            1.0,
+            PlaybackRange::default(),
+            |_| {},
+        ) {
+            Ok(session) => session,
+            Err(PlaybackError::Audio(error)) => {
+                eprintln!("SKIP: shared-mode audio endpoint unavailable: {error}");
+                return;
+            }
+            Err(error) => panic!("session: {error}"),
+        };
+        wait_for_video(&mut session);
+        let output_worker = session.audio.as_ref().expect("audio output").worker_id();
+        let feed_worker = session
+            .audio_thread
+            .as_ref()
+            .expect("audio feed")
+            .thread()
+            .id();
+        let generation = session.generation();
+        let before = session.audio_position().expect("source clock");
+        session.set_video_visible(false, before).expect("hide");
+        thread::sleep(Duration::from_millis(250));
+        let hidden = session.audio_position().expect("hidden clock");
+        assert!(hidden > before.saturating_add(Duration::from_millis(100)));
+        session.set_paused(true).expect("pause hidden audio");
+        thread::sleep(Duration::from_millis(50));
+        let paused = session.audio_position().expect("paused clock");
+        session
+            .set_video_visible(true, paused)
+            .expect("show paused video");
+        assert!(wait_for_video(&mut session) >= paused);
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(session.audio_position(), Some(paused));
+        assert_eq!(
+            session.audio.as_ref().expect("retained output").worker_id(),
+            output_worker
+        );
+        assert_eq!(
+            session
+                .audio_thread
+                .as_ref()
+                .expect("retained audio feed")
+                .thread()
+                .id(),
+            feed_worker
+        );
+        assert_eq!(session.generation(), generation);
+        session.set_paused(false).expect("resume");
+        session
+            .set_video_visible(false, paused)
+            .expect("hide again");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match session.try_audio_event() {
+                Some(AudioOutputEvent::Drained) => break,
+                Some(other) => panic!("unexpected audio event: {other:?}"),
+                None => {}
+            }
+            assert!(
+                Instant::now() < deadline,
+                "audio must drain while video is hidden"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(session.audio_position().expect("drained audio clock") > paused);
+        eprintln!(
+            "PASS: hidden video stops; audio worker identities/paused clock remain and audio drains"
+        );
+    }
 
     #[test]
     fn recovery_events_retain_their_playback_generation() {

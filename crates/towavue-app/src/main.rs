@@ -1670,7 +1670,11 @@ where
     }
 
     fn handle_playback_event(&mut self, event: PlaybackEvent) {
-        if self.session.is_none() || event.generation() != self.generation {
+        if !self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.accepts_event(&event))
+        {
             return;
         }
         match event {
@@ -1682,14 +1686,19 @@ where
                 eprintln!("towavue: decode path selected: {path:?}");
             }
             PlaybackEvent::DecodeFinished(_) => {
-                self.decode_finished = true;
+                self.decode_finished = self
+                    .session
+                    .as_ref()
+                    .is_some_and(PlaybackSession::decode_finished);
                 self.check_eof();
             }
             PlaybackEvent::DeviceRemoved(_, reason) => {
                 eprintln!("towavue: recovering removed D3D11 device: {reason}");
                 self.recover_graphics_device(self.current_position());
             }
-            PlaybackEvent::Failed(_, error) => self.fail(error),
+            PlaybackEvent::Failed(_, error) | PlaybackEvent::VideoFailed(_, error) => {
+                self.fail(error)
+            }
         }
         self.request_redraw();
     }
@@ -16725,6 +16734,28 @@ mod tests {
                     PlaybackEvent::DecodeFinished(app.generation.next()),
                 ));
                 assert!(!app.decode_finished, "seek generation is still checked");
+                app.handle_app_event(AppEvent::Playback(
+                    app.media_generation,
+                    PlaybackEvent::DecodeFinished(app.generation),
+                ));
+                assert!(
+                    !app.decode_finished,
+                    "queued completion must agree with the live pipeline"
+                );
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !app
+                    .session
+                    .as_ref()
+                    .expect("live session")
+                    .decode_finished()
+                {
+                    let session = app.session.as_mut().expect("live session");
+                    if session.pending_video_time().is_some() {
+                        session.advance_pending();
+                    }
+                    assert!(Instant::now() < deadline, "live decode completion");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
                 app.handle_app_event(AppEvent::Playback(
                     app.media_generation,
                     PlaybackEvent::DecodeFinished(app.generation),

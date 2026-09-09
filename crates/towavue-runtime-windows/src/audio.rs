@@ -93,6 +93,15 @@ impl AudioOutputSender {
 }
 
 impl AudioOutput {
+    #[cfg(test)]
+    pub(crate) fn worker_id(&self) -> thread::ThreadId {
+        self.thread
+            .as_ref()
+            .expect("live audio worker")
+            .thread()
+            .id()
+    }
+
     pub fn start(format: AudioFormat) -> Result<Self, AudioOutputError> {
         Self::start_at(format, MediaTime::ZERO)
     }

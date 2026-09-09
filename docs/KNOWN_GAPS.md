@@ -10,6 +10,8 @@
 
 U07の画像側では読み込み済みの画素・texture・zoom／pan／selection・読書設定／ページをtabごとに保持する。開いた画像のsnapshotはcloseまでpinするので、decode／texture cacheの256 MiBはprocess全体の上限ではない。未完了decodeは復帰時に再要求し、未完了resizeも元Arcから再処理する。一覧のscroll／focus、動画・音声sessionの保持と背景再生は未完。device世代の違う復帰画像は再upload対象とするが、この保持経路の実GPU removal／混在DPI監査は未実施である。
 
+動画／音声のworker寿命を独立させ、音声出力を維持した映像だけの停止・位置指定復帰をruntimeで検証した。通常UIのtab切替はまだsessionを破棄するため、背景再生の完成ではない。映像worker復帰は映像入力を再openし、非表示中の全session時計／終端・復帰表示待機・一括device復旧はapp接続時の残件である。実WASAPI試験はmute状態のworker identity／source clock／drainを確認し、聴感やloopbackでの無音区間の測定ではない。
+
 2026-09-09の通常release f91b4498では、120秒1080p H.264の先頭にkeyframeが1枚だけの生成素材で、4条件各100回Seekのp95が872.539～979.008msとなり、300ms目標を超えた。同じ生成条件を2秒間隔keyframeにした対照では40.242～108.103ms。長GOPの待ち時間は未解決であり、対照側の合格を全素材へ一般化しない。[動画保存・Seek比較の条件と範囲](DEVELOPMENT.md#新しい通常releaseの動画保存とseek条件比較2026-09-09-1410-jst)を参照。同じ本体の30分4K再生は107771 framesすべて表示・drop／CPU transfer 0、drift p95 4.812ms／最大17.349msで通過したが、単一基準機／素材の結果である。5分以降のprivateは224.23～240.14MiBで、リーク不在や実環境matrixの証明ではない。詳細はDEVELOPMENTの14:57記録を参照。
 
 ### 操作とpreviewの不一致

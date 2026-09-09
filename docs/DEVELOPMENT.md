@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 背景再生に向けた映像／音声worker分離（2026-09-10 02:03 JST、tab接続前）
+
+runtimeのset_video_visibleで映像queueとworkerだけを停止し、現在source位置から復帰できる。音声feed／WASAPI outputは同じworkerとclockを保持する。通常UIのtab切替には未接続なので、音声を流したまま画像tabを見る操作はまだ完成していない。映像入力は復帰時に再openし、再openなしの完全状態保持・復帰表示・hidden終端・複数sessionのdevice復旧を別途検証する。
+
+通常回帰のWARP sessionでは、満杯の2-frame queueから停止してworker／frameを解放、非表示中にdecode数が増えず、1秒位置から戻った全frameのPTS／RGBAが参照decodeと一致する。paused、hidden中のSeek、close、stream世代の古い通知拒否と完了の一度だけの通知も確認する。WARPのsoftware fallbackはhardware decodeの証拠ではない。
+
+opt-inのvideo_visibility_keeps_the_live_audio_workers_and_source_clockを明示実行し、実WASAPI shared endpointでmute再生、非表示中のclock前進、停止中のclock固定、復帰前後の音声output／producer thread ID一致、非表示のまま自然drainを確認した。endpoint欠落はSKIP理由を出すが、今回の実行はPASSまで到達した。聴感／loopback無音区間の測定ではない。既存native_caption_graphics_recovery_preserves_image_and_video_stateも明示実行し、再生中／停止中のSeekと同一window復旧でD3D11VA表示・CPU転送0・adapter一致を確認した。保持tabの一括復旧を試したものではない。
+
+最終session32523のfmt／Clippy／workspace337 tests／上記実機2 tests／release buildが成功。通常suiteではopt-in6件をignoredとし、そのうち2件を別に明示実行した。依存・vendor・installer変更なし。
+
 ### 読み込み済み画像tabの状態保持（2026-09-10 01:45 JST）
 
 画像Aを回転・拡大・選択し、画像Bを新しいtabで開いて戻る。Aの画素・texture・viewと編集を保持し、Bの読書設定も独立して復元する。自動回帰ではロード後に所有BMP fixtureを削除して再openなし／Arcとtexture ID一致／追加uploadなしを検証する。処理中resizeの元Arc保持・旧世代拒否・Undo、device世代差、読書の同一Shell refreshと隣接変更も検証する。

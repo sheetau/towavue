@@ -1175,6 +1175,14 @@ towavue/
 - 960×576の実captureで二枚の接続点はx=480、画像の上下はy=32..545でgapなし。三枚でも中央揃えを維持。試験windowはUIA Closeで通常終了0、stderrは空。生成原本を保存・変更せず、OS設定も変更しない。ignoredの`target/tmp/image-viewport-20260909/reading-pagination/`へidentity／captures／exitを保持する。
 - 最終reviewで新commandのregistry順を末尾へ移し、既存custom bindingの優先を保持する回帰を追加。描画・loader・navigationは実試験と同じ。最終release ac8ce593、fmt／all-target Clippy／全291 tests通過、四件の実機専用testはignoredを維持。今回はその四件を再実行していない。実OSの混在DPI、物理keyboard全layout、cursor固定dragや高速移動の性能達成はこの証拠から主張しない。
 
+### Readingボタンのcursor固定drag（2026-09-09 19:22 JST）
+
+- 読書ボタンは28×24 logical pxを保ち、Toggle状態と操作説明を公開する。clickはmode切替、dragは最初の主軸を固定して上下＝表示枚数、左右＝先頭枚数。相対移動を開始時のUI密度で換算し24 unitsで一段階、releaseで確定する。非readingからもpreviewでき、Escape／focus喪失／resize／DPI変更／離脱／overlayでは開始前へ戻す。runtimeのUI-thread専用RAII lockがwindowを保持し、解放してから復元・別操作へ進む。
+- 新規二testsで100／125／200%の相対移動、主軸固定、限界と逆方向、開始mode／設定保持、buttonのclick/drag判別と取消後releaseの誤clickなし、編集保持とcommand／guard取消を確認する。未decode時のstatus枚数も検査する。実cursorはheadless testから取得しない。
+- Windows 11、通常release 9c007695、所有PID 52228/start 10:14:02.5932372Z。上下で2→4→2、左で先頭4→2、右のEscape取消、最小化でのfocus喪失とresizeを確認。GetClipCursor/GetCursorPosでgesture中の1×1固定範囲と不動の位置、release／取消／非focus時の元の5560×1920 desktop範囲への復帰を観測。最初のUIA検査はInvokeを要求して失敗したが、公開patternは状態付きbuttonのToggleであり、後続試験でToggleを使用する。試験helperはresize後の固定座標をやめ、所有UIA buttonの実boundsから押下点を取る。
+- drag後のRightがbutton focusへ消費される点を検出し、開始時にwidget focusを外して閲覧へ戻す。修正版d9818f29、所有PID 36092/start 10:17:33.4992744Zで、回転編集→非readingから上drag→Right→未保存確認、Cancel／Undoを検証。fullscreenで左drag／右Escape／drag中UIA Toggle、通常へ戻ってfocus喪失による元の非reading modeへの復元を確認。固定点は通常(150,691)、fullscreen(54,1065)で相対移動中に変化しない。
+- 両windowはUIA Closeで正常終了0、stderrは空。生成番号PNGと設定scopeを分離し、原本保存・OS設定変更はない。ignoredの`target/tmp/image-viewport-20260909/reading-drag*`へidentity／画面／exitを保持する。最終release b51cf151は未decode／error時もstatus枚数を残す変更を加えたもの。最終fmt／all-target Clippy／全293 tests通過、実機専用四testsはignoredのまま。物理mouse／keyboard、実OS混在DPIの全matrixは未検証であり、この実注入入力と同一視しない。
+
 ## 8. UI/UX変更の判断基準
 
 - 実装済みcommandの入口はmenu、palette、shortcut、gridで同じ`CommandId`を共有する。入口ごとに別logicを作らない。

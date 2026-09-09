@@ -10,6 +10,7 @@ mod grid;
 mod menu;
 mod palette;
 mod playlist;
+mod reading_input;
 mod seekbar;
 mod selection;
 mod shortcuts;
@@ -131,6 +132,7 @@ impl PlaybackClock {
 #[derive(Clone, PartialEq)]
 enum UiAction {
     Command(CommandId),
+    BeginReadingDrag(egui::Pos2, egui::Vec2),
     NativeCaption(CaptionAction),
     ActivateTab(TabId),
     ReorderTab(TabId, usize),
@@ -563,6 +565,8 @@ struct Application<N> {
     image_viewport: egui::Vec2,
     view_drag: Option<ViewDrag>,
     reading_mode: bool,
+    reading_drag: Option<reading_input::ReadingDrag>,
+    reading_cursor: Option<towavue_runtime_windows::PinnedCursor>,
     reading_settings: ReadingSettings,
     reading_pages: Vec<Result<ImagePresentation, String>>,
     preview_cache: PreviewCache,
@@ -693,6 +697,8 @@ where
             image_viewport: egui::Vec2::ZERO,
             view_drag: None,
             reading_mode: false,
+            reading_drag: None,
+            reading_cursor: None,
             reading_settings: ReadingSettings::default(),
             reading_pages: Vec::new(),
             preview_cache,
@@ -1398,6 +1404,7 @@ where
     fn render_frame(&mut self) {
         self.advance_media();
         if self.renderer.is_none() {
+            self.finish_reading_drag(true);
             self.show_native_fallback();
             return;
         }
@@ -1500,6 +1507,14 @@ where
         self.video_rect = None;
         let context = root.ctx().clone();
         let modal_blocked = self.modal_input_blocked();
+        if modal_blocked
+            || self.palette_open
+            || self.grid_open
+            || self.filmstrip_open
+            || egui::Popup::is_any_open(&context)
+        {
+            self.finish_reading_drag(true);
+        }
         // Decide before the menu can close itself with this same Escape event.
         if self.grid_open
             && !self.palette_open
@@ -1945,7 +1960,8 @@ where
     }
 
     fn cancel_view_drag(&mut self) -> bool {
-        let mut canceled_press = self.ui_context.as_ref().is_some_and(timeline_input::cancel);
+        let mut canceled_press = self.finish_reading_drag(true);
+        canceled_press |= self.ui_context.as_ref().is_some_and(timeline_input::cancel);
         if let Some(state) = &mut self.ui_state {
             // Commands and focus changes can precede the frame that would start the drag.
             state.egui_input_mut().events.retain(|event| {
@@ -2754,15 +2770,27 @@ where
                             .on_hover_text("Volume · wheel to adjust (playback and export)");
                         volume_targets.push(volume);
                     } else if self.media_kind == Some(MediaKind::Image) {
-                        if chrome::button(
-                            ui,
-                            chrome::Icon::Reading,
-                            &self.command_hint(CommandId::ToggleReadingMode, "Reading mode"),
-                        )
-                        .clicked()
+                        let label = self.command_hint(CommandId::ToggleReadingMode, "Reading mode");
+                        let response = ui.add_sized([28.0, 24.0],
+                            egui::Button::new(chrome::Icon::Reading.text()).frame(false)
+                                .sense(egui::Sense::click_and_drag())
+                                .selected(self.reading_mode));
+                        response.widget_info(|| egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button, ui.is_enabled(), &label));
+                        if response.drag_started_by(egui::PointerButton::Primary)
+                            && ui.input(|input| input.pointer.primary_down() && input.modifiers.is_none())
+                            && let Some((origin, position)) = ui.input(|input|
+                                input.pointer.press_origin().zip(input.pointer.interact_pos()))
                         {
+                            actions.push(UiAction::BeginReadingDrag(origin, position - origin));
+                        }
+                        if response.clicked() {
                             actions.push(UiAction::Command(CommandId::ToggleReadingMode));
                         }
+                        response.on_hover_ui(|ui| {
+                            ui.label(label);
+                            ui.label("Drag up/down: images per page\nDrag left/right: images on the first page\nRelease to keep; Escape to cancel");
+                        });
                         if self.image_view.selection.is_some()
                             && ui
                                 .selectable_label(self.image_view.crop_preview, "Crop preview")
@@ -2778,6 +2806,13 @@ where
                             FolderIntent::Refresh(_) => "Loading order".into(),
                         });
                     }
+                    if self.media_kind == Some(MediaKind::Image) && self.reading_mode {
+                        details.push(format!(
+                            "Reading {} · first {}",
+                            self.reading_settings.page_count,
+                            self.reading_settings.first_page_count
+                        ));
+                    }
                     if let Some(image) = &self.image {
                         let (width, height) = image.dimensions();
                         let zoom = match self.image_view.zoom {
@@ -2788,13 +2823,7 @@ where
                                 format!("{:.*}%", if scale < 0.1 { 2 } else { 0 }, scale * 100.0)
                             }
                         };
-                        if self.reading_mode {
-                            details.push(format!(
-                                "Reading {} · first {}",
-                                self.reading_settings.page_count,
-                                self.reading_settings.first_page_count
-                            ));
-                        } else {
+                        if !self.reading_mode {
                             details.push(zoom);
                         }
                         details.push(format!("{} {width}×{height}", image.decoded.format));
@@ -3180,6 +3209,9 @@ where
     }
 
     fn handle_ui_action(&mut self, action: UiAction) {
+        if !matches!(action, UiAction::BeginReadingDrag(..)) {
+            self.finish_reading_drag(true);
+        }
         if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             return;
         }
@@ -3199,6 +3231,7 @@ where
         }
         match action {
             UiAction::Command(command) => self.dispatch(command),
+            UiAction::BeginReadingDrag(position, delta) => self.begin_reading_drag(position, delta),
             UiAction::NativeCaption(action) => {
                 if !self.fullscreen
                     && let Some(caption) = &self.native_caption
@@ -4246,6 +4279,86 @@ where
         }
     }
 
+    fn begin_reading_drag(&mut self, position: egui::Pos2, delta: egui::Vec2) {
+        if self.reading_drag.is_some()
+            || self.media_kind != Some(MediaKind::Image)
+            || self.modal_input_blocked()
+            || self.palette_open
+            || self.grid_open
+            || self.filmstrip_open
+            || self
+                .ui_context
+                .as_ref()
+                .is_some_and(egui::Popup::is_any_open)
+        {
+            return;
+        }
+        let (Some(window), Some(context)) = (&self.window, &self.ui_context) else {
+            return;
+        };
+        let density = f64::from(context.pixels_per_point());
+        let cursor = match towavue_runtime_windows::PinnedCursor::new(
+            window.clone(),
+            (
+                f64::from(position.x) * density,
+                f64::from(position.y) * density,
+            ),
+        ) {
+            Ok(cursor) => cursor,
+            Err(error) => {
+                self.set_status(format!("Could not start reading drag: {error}"));
+                return;
+            }
+        };
+        self.cancel_view_drag();
+        self.cancel_shortcut_prefix();
+        // Pointer reading gestures return navigation keys to the viewer, not button focus.
+        if let Some(context) = &self.ui_context
+            && let Some(id) = context.memory(egui::Memory::focused)
+        {
+            context.memory_mut(|memory| memory.surrender_focus(id));
+        }
+        self.reading_cursor = Some(cursor);
+        self.reading_drag = Some(reading_input::ReadingDrag::new(
+            self.reading_settings,
+            self.reading_mode,
+            density,
+        ));
+        if !self.reading_mode {
+            self.reading_mode = true;
+            self.rebuild_reading_pages();
+        }
+        self.move_reading_drag((f64::from(delta.x) * density, f64::from(delta.y) * density));
+        self.request_redraw();
+    }
+
+    fn move_reading_drag(&mut self, delta: (f64, f64)) {
+        if let Some(drag) = &mut self.reading_drag {
+            drag.motion(delta);
+            if self.reading_settings != drag.settings {
+                self.reading_settings = drag.settings;
+                self.rebuild_reading_pages();
+                self.request_redraw();
+            }
+        }
+    }
+
+    fn finish_reading_drag(&mut self, cancel: bool) -> bool {
+        // Drop the UI-thread lock before rebuilding or entering another interaction.
+        self.reading_cursor = None;
+        let Some(drag) = self.reading_drag.take() else {
+            return false;
+        };
+        if cancel && (self.reading_settings != drag.before || self.reading_mode != drag.was_enabled)
+        {
+            self.reading_settings = drag.before;
+            self.reading_mode = drag.was_enabled;
+            self.rebuild_reading_pages();
+        }
+        self.request_redraw();
+        true
+    }
+
     fn navigate_image_boundary(&mut self, last: bool) {
         let (Some(snapshot), Some(path)) = (&self.folder_snapshot, &self.path) else {
             return;
@@ -4713,6 +4826,7 @@ where
     }
 
     fn handle_render_error(&mut self, error: RenderError) {
+        self.finish_reading_drag(true);
         let error = self
             .renderer
             .as_ref()
@@ -5660,6 +5774,33 @@ where
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
         }
+        if self.reading_drag.is_some() {
+            match &event {
+                WindowEvent::MouseInput {
+                    state: ElementState::Released,
+                    button: winit::event::MouseButton::Left,
+                    ..
+                } => {
+                    self.finish_reading_drag(false);
+                }
+                WindowEvent::KeyboardInput { event, .. }
+                    if event.state == ElementState::Pressed
+                        && event.logical_key == WinitKey::Named(NamedKey::Escape) =>
+                {
+                    self.finish_reading_drag(true);
+                    return;
+                }
+                WindowEvent::Focused(false)
+                | WindowEvent::CloseRequested
+                | WindowEvent::Resized(_)
+                | WindowEvent::ScaleFactorChanged { .. }
+                | WindowEvent::DroppedFile(_) => {
+                    self.finish_reading_drag(true);
+                }
+                WindowEvent::KeyboardInput { .. } | WindowEvent::MouseWheel { .. } => return,
+                _ => {}
+            }
+        }
         if matches!(event, WindowEvent::Focused(false)) {
             self.cancel_view_drag();
         }
@@ -5761,6 +5902,25 @@ where
             WindowEvent::RedrawRequested => self.render_frame(),
             _ if consumed => self.request_redraw(),
             _ => {}
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _: &ActiveEventLoop,
+        _: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        if self.reading_drag.is_some() {
+            if !self
+                .window
+                .as_ref()
+                .is_some_and(|window| window.has_focus())
+            {
+                self.finish_reading_drag(true);
+            } else if let winit::event::DeviceEvent::MouseMotion { delta } = event {
+                self.move_reading_drag(delta);
+            }
         }
     }
 
@@ -10223,6 +10383,153 @@ mod tests {
             );
             app.resolve_guard(GuardDecision::Cancel);
             assert_eq!(app.path.as_ref(), Some(&source));
+        }
+    }
+
+    #[test]
+    fn reading_button_drag_cancels_without_clicking_or_changing_edits() {
+        let Some(root) = isolated_test_root(
+            "tests::reading_button_drag_cancels_without_clicking_or_changing_edits",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let path = root.join("page.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let edits = app.edits.clone();
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let mut time = 0.0;
+        let mut draw = |app: &mut Application<_>, events| {
+            time += 0.1;
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    events,
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ui| {
+                    app.draw_status_bar(ui, &mut actions, &mut Vec::new());
+                },
+            );
+            if app.reading_mode {
+                assert!(
+                    output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.text().contains("Reading "))),
+                    "counts remain visible before any image can be decoded"
+                );
+            }
+            actions
+        };
+        let origin = egui::pos2(20.0, 284.0);
+        for _ in 0..2 {
+            draw(&mut app, vec![]);
+        }
+        draw(
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(origin),
+                egui::Event::PointerButton {
+                    pos: origin,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let actions = draw(
+            &mut app,
+            vec![egui::Event::PointerMoved(origin - egui::vec2(0.0, 25.0))],
+        );
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action, UiAction::BeginReadingDrag(..)))
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, UiAction::Command(_)))
+        );
+        // Inject only the model: this headless test must never acquire the real cursor.
+        app.reading_drag = Some(reading_input::ReadingDrag::new(
+            app.reading_settings,
+            false,
+            1.0,
+        ));
+        app.reading_mode = true;
+        app.move_reading_drag((0.0, -25.0));
+        assert_eq!(app.reading_settings.page_count, 3);
+        draw(&mut app, vec![]);
+        assert!(app.finish_reading_drag(true));
+        assert!(!app.reading_mode);
+        assert_eq!(app.reading_settings, ReadingSettings::default());
+        let actions = draw(
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(origin),
+                egui::Event::PointerButton {
+                    pos: origin,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        assert!(
+            actions.is_empty(),
+            "release after cancellation must not toggle reading"
+        );
+        assert_eq!(app.path.as_ref(), Some(&path));
+        assert_eq!(app.edits, edits);
+        for cancel in [false, true] {
+            app.reading_drag = Some(reading_input::ReadingDrag::new(
+                ReadingSettings::default(),
+                true,
+                1.0,
+            ));
+            app.reading_mode = true;
+            app.move_reading_drag((0.0, -48.0));
+            app.finish_reading_drag(cancel);
+            assert_eq!(app.reading_settings.page_count, if cancel { 2 } else { 4 });
+            assert!(app.reading_mode);
+            assert_eq!(app.edits, edits);
+            assert!(app.reading_cursor.is_none());
+        }
+        for overlay in 0..4 {
+            app.reading_drag = Some(reading_input::ReadingDrag::new(
+                ReadingSettings::default(),
+                true,
+                1.0,
+            ));
+            app.move_reading_drag((-24.0, 0.0));
+            match overlay {
+                0 => app.dispatch(CommandId::ToggleCommandPalette),
+                1 => {
+                    app.request_guarded(GuardedAction::Exit);
+                }
+                2 => {
+                    app.cancel_view_drag();
+                }
+                _ => app.handle_ui_action(UiAction::Command(CommandId::ToggleGridMenu)),
+            }
+            assert!(app.reading_drag.is_none());
+            assert_eq!(app.reading_settings, ReadingSettings::default());
+            assert_eq!(app.edits, edits);
+            app.pending_guard = None;
+            app.palette_open = false;
+            app.grid_open = false;
         }
     }
 

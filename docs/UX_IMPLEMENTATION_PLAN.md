@@ -28,7 +28,7 @@
 | U11 | 選択線は反転色1pxのみ、不要なgrip／shadow／暗幕なし | 未完。現在のselection描画とkeyboard／UIA hit領域を分離して改善する |
 | U12 | compact seekのhoverつまみを両端内に収め、非hoverは全幅1px | 対応済み。つまみ半径を除いた移動区間を描画・hover・releaseで共有。100／125／200%の自動描画・座標回帰と通常releaseの画像両端表示を確認。実OSの混在DPIは未検証 |
 | I01 | Fitの余分な8px余白を除き、Cover表示command／shortcutを追加 | 対応済み。core/image.rsのCover、共有CoverWindow commandとShift+C、main.rsのviewport。3新規回帰と通常releaseの960×576画素比較によりFit全幅／Cover全領域・bar非侵入を確認。下記実績参照 |
-| I02 | 読書modeは隙間なし連結、重複しない見開き送り、先頭枚数offset、枚数／offset drag＋shortcut | ページ分割／先頭枚数／共有shortcutを実装。Shell画像順の固定範囲を本画像・seek preview・左右送りで共用し、active/edit対象を保持。実windowで1–2→3–4→5–6、先頭1、個別移動、設定変更、dirty guard／Cancelとhoverを確認。cursor固定dragの実装・所有／取消検証が残る |
+| I02 | 読書modeは隙間なし連結、重複しない見開き送り、先頭枚数offset、枚数／offset drag＋shortcut | 対応済み。8837892の固定ページ分割にcursor固定dragを追加。上下／左右の主軸を固定し、release確定・Escape／focus／resize／離脱／overlay取消で解放・復元する。active/edit対象保持、drag直後の左右送り、Windows 11の通常／fullscreenとUIA Toggle、1px固定範囲から元のdesktop範囲へ戻ることを確認。100／125／200%の相対移動は自動回帰、実OS混在DPIは最終matrixで継続 |
 | I03 | 高速な画像移動、decode／表示分離、取消、先読み・段階表示の適切な採用 | 一部実装。latest-only decode＋8枚／256 MiB CPU/GPU cache。初回／連続移動の測定と黒いloadingを減らす改善は未完。Shell順と画質を偽らない |
 | I04 | 画像の移動keyと端点・複数枚jump、reading時の役割 | 左右／Home／Endは実装済み、今回のreading変更と草案alias／jumpは要照合。既存custom bindingとCtrl+左右の同種移動を黙って奪わない |
 | I05 | 画像／選択範囲のclipboard copy、resize/resample、interpolation | 未完。現在のclipboardは文字のみ。編集後画像・alpha・元file保護とnearest表示を検証する |

@@ -96,7 +96,7 @@ cargo run -p towavue-app -- path\to\media.mp4
 
 標準shortcutはSpaceでpause/resume（再生終了後は先頭から再開）、左右矢印で前/次の画像へ移動（動画・音声では5秒Seek）、Home/Endでfolderの最初/最後の画像へ移動、Ctrl+左右で同種media移動、Alt+左右で全種media移動、Fでfilmstrip、Ctrl+Shift+Pでcommand paletteです。画像移動はShell順で、reading modeの左右は重複しない見開き単位、Ctrl+左右は一枚単位です。Home/Endは同じ端点画像へ移動し、未保存編集があれば確認します。すでに端点の場合は再読み込みしません。設定は初回起動時に`%APPDATA%\towavue\shortcuts.conf`へ生成され、`Ctrl+K Ctrl+S`のようなprefix shortcutも指定できます。画像用キーは`previous_image` / `next_image` / `first_image` / `last_image`で変更でき、既存設定fileへ追記しなくても新しい既定値を利用します。menuまたは同shortcutのReload commandで再読込します。
 
-Reading mode（B）は初期状態で1–2、3–4…と連結表示します。Ctrl+[／Ctrl+]で表示枚数（2～10）、Ctrl+Shift+左右で先頭ページの枚数（1～表示枚数）を調整できます。先頭1枚なら1、2–3、4–5…となり、途中の画像を開くとその画像を含む見開きを表示します。設定変更で編集中の画像は切り替わりません。statusに設定枚数を表示し、seek hoverも同じ見開きをpreviewします。ボタンのカーソル固定dragはまだ未実装です。
+Reading mode（B）は初期状態で1–2、3–4…と連結表示します。Ctrl+[／Ctrl+]で表示枚数（2～10）、Ctrl+Shift+左右で先頭ページの枚数（1～表示枚数）を調整できます。先頭1枚なら1、2–3、4–5…となり、途中の画像を開くとその画像を含む見開きを表示します。設定変更で編集中の画像は切り替わりません。statusに設定枚数を表示し、seek hoverも同じ見開きをpreviewします。読書ボタンの上下dragでも表示枚数、左右dragで先頭枚数を調整できます。drag中はカーソルを押下位置へ固定し、離すと確定、Escapeやfocus喪失で開始前の設定・modeへ戻ります。clickは従来どおりmode切替です。
 
 prefixの続きは1秒以内に入力します。Escape、click、別commandやwindowへのfocus移動で待ちを解除し、途中から戻ったkeyを前のprefixへつなげません。
 

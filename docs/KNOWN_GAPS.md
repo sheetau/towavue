@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+新goalの残件は[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)へ整理した。通常画像Fitの8px余白とCover表示はI01で対応したが、native caption controls、font／icon／bar配置、tabごとの背景再生・状態保持、読書modeの非重複送り／offset、timelineの選択編集とrepeat／shuffle等は引き続き未完である。新しい台帳は過去の「このsliceには含めない」を永久的な却下とは扱わない。
+
 2026-09-09の通常release f91b4498では、120秒1080p H.264の先頭にkeyframeが1枚だけの生成素材で、4条件各100回Seekのp95が872.539～979.008msとなり、300ms目標を超えた。同じ生成条件を2秒間隔keyframeにした対照では40.242～108.103ms。長GOPの待ち時間は未解決であり、対照側の合格を全素材へ一般化しない。[動画保存・Seek比較の条件と範囲](DEVELOPMENT.md#新しい通常releaseの動画保存とseek条件比較2026-09-09-1410-jst)を参照。同じ本体の30分4K再生は107771 framesすべて表示・drop／CPU transfer 0、drift p95 4.812ms／最大17.349msで通過したが、単一基準機／素材の結果である。5分以降のprivateは224.23～240.14MiBで、リーク不在や実環境matrixの証明ではない。詳細はDEVELOPMENTの14:57記録を参照。
 
 ### 操作とpreviewの不一致

@@ -390,6 +390,8 @@ rateは0.25～4倍のedit値を再生・exportで共有する。音声は固定F
 
 ### H1 image loading
 
+通常画像のFitはvideo／readingと同じmedia viewport全体を使い、追加の8px余白を設けない。縦横比の違いによるletterboxは保持する。Coverは既定Shift+Cの画像専用commandとしてmenu／palette／custom bindingへ公開し、viewportを覆う二軸比率の大きい方を使う。Fit同様resizeに追従し、panを中央へ戻すが選択・crop preview・編集・sourceは変更しない。寸法は回転／crop preview後、倍率はphysical pixel基準とする。readingは見開き全体のFitを維持するためCoverを無効化する。手動zoomへ移れば既存のCustom倍率・上限を使う。
+
 Fitは通常画像・reading pageとも表示領域に入る比率をそのまま使い、2%などの縮小下限を課さない。手動zoomの下限は既存2%と長辺1 physical pixel相当の小さい方、上限は既存64倍を維持する。大きい画像のFitからzoomを始めても2%へ飛ばず、Custom倍率はwindow resizeで変わらない。これは表示倍率の変更で、decode寸法・texture上限・source pixelは変更しない。
 
 画像のActual/100%はsourceの1 pixelを画面の1 physical pixelへ対応させ、Customの倍率も同じ基準にする。appは現在のegui pixels-per-pointでviewportをphysical寸法へ変換してcoreのscale/zoomへ渡し、描画時にlogical寸法へ戻す。Fitは現在のmedia領域、keyboard/menuのzoomは直近表示viewportと編集・crop preview後の寸法を使い、固定window寸法や未編集source寸法を使わない。panとpointer補正はlogical座標のままとし、selection・履歴・source fileは変えない。OS DPI設定の変更や新しいUI scale設定は追加しない。

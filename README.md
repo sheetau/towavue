@@ -21,6 +21,8 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 
 ownerの2026-09-09の指定により、現在は見た目・操作感・安定性のブラッシュアップを優先し、公開配布は行いません。Windows 10をowner環境へ導入せず、仮想環境で合理的に確認できなければ実機確認は省略し、未検証として記録します。公開作業やWindows 10実機の用意を、現在の改善作業の停止理由にはしません。
 
+新しい機能・UI改善goalの対象と進捗は[UX_IMPLEMENTATION_PLAN](docs/UX_IMPLEMENTATION_PLAN.md)で管理します。通常画像のFitから余分な8pxの余白を除き、Shift+C／View menu／command paletteへCover表示を追加しました。Coverは縦横比を保って表示領域を覆い、画面外の部分は表示しませんが、画像の切り抜き編集や保存は行いません。Shift+WでFitへ戻せます。reading modeでは見開き全体のFitを維持します。
+
 固定開発FFmpegには、LGPLという自己表示だけでは扱えないGPL推移依存が見つかりました。このbinaryは配布候補から外し、機能を保つ[再buildと検証](docs/FFMPEG_REBUILD.md)を進めます。現行の開発用fileや本体のライセンスは変更していません。
 
 preview／保存用の補助exeは本体と同じフォルダーを優先します。ffmpeg.exe／ffprobe.exeが片方でもあれば同じ配置だけを使い、不足を別のFFmpegで補いません。両方ともない開発配置では下記のFFMPEG_DIR/binを使います。PATH上の別版への自動切替は行わず、欠落時は必要なpathをエラーに表示します。この処理の検証は、Setup.exeの完成や同梱物の配布承認ではありません。

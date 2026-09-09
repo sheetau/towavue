@@ -85,6 +85,7 @@ impl UnitRect {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ZoomMode {
     Fit,
+    Cover,
     Actual,
     Custom(f32),
 }
@@ -113,6 +114,14 @@ impl ImageViewState {
     pub fn scale(self, image_size: (u32, u32), viewport_size: (f32, f32)) -> f32 {
         match self.zoom {
             ZoomMode::Fit => fit_scale(image_size, viewport_size),
+            ZoomMode::Cover => {
+                if image_size.0 == 0 || image_size.1 == 0 {
+                    return 1.0;
+                }
+                (viewport_size.0 / image_size.0 as f32)
+                    .max(viewport_size.1 / image_size.1 as f32)
+                    .max(0.0)
+            }
             ZoomMode::Actual => 1.0,
             ZoomMode::Custom(scale) => scale.clamp(minimum_zoom(image_size), 64.0),
         }
@@ -131,6 +140,11 @@ impl ImageViewState {
 
     pub fn actual_size(&mut self) {
         self.zoom = ZoomMode::Actual;
+        self.pan = (0.0, 0.0);
+    }
+
+    pub fn cover(&mut self) {
+        self.zoom = ZoomMode::Cover;
         self.pan = (0.0, 0.0);
     }
 
@@ -199,6 +213,35 @@ impl ReadingSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cover_fills_both_axes_and_tracks_resize_without_editing_selection() {
+        let mut view = ImageViewState {
+            pan: (10.0, -20.0),
+            selection: Some(UnitRect::FULL),
+            crop_preview: true,
+            ..Default::default()
+        };
+        view.cover();
+        assert_eq!(view.pan, (0.0, 0.0));
+        assert_eq!(view.selection, Some(UnitRect::FULL));
+        assert!(view.crop_preview);
+        for size in [(400, 200), (200, 400), (16_384, 512), (1, 1)] {
+            for viewport in [(800.0, 600.0), (222.0, 464.0), (0.0, 0.0)] {
+                let scale = view.scale(size, viewport);
+                let width = size.0 as f32 * scale;
+                let height = size.1 as f32 * scale;
+                assert!(width >= viewport.0 - 0.001 && height >= viewport.1 - 0.001);
+                assert!((width - viewport.0).abs() < 0.001 || (height - viewport.1).abs() < 0.001);
+            }
+        }
+        assert_eq!(view.scale((0, 10), (800.0, 600.0)), 1.0);
+        let covered = view.scale((400, 200), (800.0, 600.0));
+        view.zoom_by(1.25, (400, 200), (800.0, 600.0));
+        assert_eq!(view.zoom, ZoomMode::Custom(covered * 1.25));
+        view.fit();
+        assert_eq!(view.scale((400, 200), (800.0, 600.0)), 2.0);
+    }
 
     #[test]
     fn fit_keeps_large_images_inside_small_and_reading_viewports() {

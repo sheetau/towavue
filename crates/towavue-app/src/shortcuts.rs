@@ -60,6 +60,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::ZoomOut, "Minus"),
         (CommandId::ActualSize, "Ctrl+H"),
         (CommandId::FitToWindow, "Shift+W"),
+        (CommandId::CoverWindow, "Shift+C"),
         (CommandId::ClearSelection, "Escape"),
         (CommandId::SelectAll, "Ctrl+A"),
         (CommandId::ToggleCropPreview, "Ctrl+Shift+Y"),
@@ -153,6 +154,53 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 mod tests {
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn cover_is_single_image_only_and_uses_customizable_bindings() {
+        let mut bindings = defaults();
+        let key = "Shift+C".parse::<KeySequence>().expect("cover key");
+        for (kind, reading, enabled) in [
+            (Some(MediaKind::Image), false, true),
+            (Some(MediaKind::Image), true, false),
+            (Some(MediaKind::Video), false, false),
+            (Some(MediaKind::Audio), false, false),
+            (None, false, false),
+        ] {
+            assert_eq!(
+                bindings.resolve(
+                    key.strokes(),
+                    CommandContext {
+                        media_kind: kind,
+                        reading_mode: reading,
+                        ..Default::default()
+                    }
+                ),
+                if enabled {
+                    ShortcutMatch::Command(CommandId::CoverWindow)
+                } else {
+                    ShortcutMatch::None
+                }
+            );
+        }
+        let context = CommandContext {
+            media_kind: Some(MediaKind::Image),
+            ..Default::default()
+        };
+        let custom = "Ctrl+K C".parse::<KeySequence>().expect("custom cover");
+        bindings.set(CommandId::CoverWindow, custom.clone());
+        assert_eq!(
+            bindings.resolve(key.strokes(), context),
+            ShortcutMatch::None
+        );
+        assert_eq!(
+            bindings.resolve(custom.strokes(), context),
+            ShortcutMatch::Command(CommandId::CoverWindow)
+        );
+        assert_eq!(
+            parse(&serialize(&bindings), defaults()).expect("round trip"),
+            bindings
+        );
+    }
 
     #[test]
     fn select_all_is_visual_only_and_keeps_custom_bindings() {

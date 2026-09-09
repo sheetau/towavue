@@ -1750,9 +1750,7 @@ where
         };
         let texture = image.texture.id();
         let mut transform = self.visual_transform(image.dimensions());
-        let viewport = ui
-            .max_rect()
-            .shrink(if self.fullscreen { 0.0 } else { 8.0 });
+        let viewport = ui.max_rect();
         let region = self.image_view.preview_region();
         transform.crop(region);
         let image_size = (transform.size.0 as u32, transform.size.1 as u32);
@@ -2720,6 +2718,7 @@ where
                         let (width, height) = image.dimensions();
                         let zoom = match self.image_view.zoom {
                             ZoomMode::Fit => "Fit".into(),
+                            ZoomMode::Cover => "Cover".into(),
                             ZoomMode::Actual => "100%".into(),
                             ZoomMode::Custom(scale) => {
                                 format!("{:.*}%", if scale < 0.1 { 2 } else { 0 }, scale * 100.0)
@@ -3293,6 +3292,12 @@ where
             CommandId::FitToWindow => {
                 self.image_view.fit();
                 self.request_redraw();
+            }
+            CommandId::CoverWindow => {
+                if self.media_kind == Some(MediaKind::Image) && !self.reading_mode {
+                    self.image_view.cover();
+                    self.request_redraw();
+                }
             }
             CommandId::ClearSelection => {
                 self.image_view.selection = None;
@@ -6867,7 +6872,7 @@ mod tests {
                 .bounds()
                 .expect("edge bounds");
             assert!(
-                bounds.x0 >= 8.0 && bounds.x1 <= 952.0 && bounds.y0 >= 40.0 && bounds.y1 <= 538.0,
+                bounds.x0 >= 0.0 && bounds.x1 <= 960.0 && bounds.y0 >= 32.0 && bounds.y1 <= 546.0,
                 "focused edge {index} outside viewport: {bounds:?}"
             );
             assert_eq!(tree.focus, ids[index]);
@@ -6876,7 +6881,7 @@ mod tests {
         visible(&frame(&mut app, vec![]), 0);
         assert_eq!(
             app.image_view.pan,
-            (338.0, 0.0),
+            (330.0, 0.0),
             "move only enough to reveal the focused handle"
         );
         for index in [1, 2, 3, 0] {
@@ -8656,6 +8661,129 @@ mod tests {
             assert!(!app.fullscreen);
             assert!(app.timeline_open);
         }
+    }
+
+    #[test]
+    fn image_fit_and_cover_use_the_full_media_viewport_without_changing_edits() {
+        let Some(root) = isolated_test_root(
+            "tests::image_fit_and_cover_use_the_full_media_viewport_without_changing_edits",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let context = egui::Context::default();
+        app.ui_context = Some(context.clone());
+        let path = root.join("image.png");
+        app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.image = Some(
+            ImagePresentation::from_decoded(
+                &context,
+                &path,
+                DecodedImage {
+                    format: "test",
+                    frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                        width: 400,
+                        height: 200,
+                        rgba: vec![255; 400 * 200 * 4],
+                        delay: Duration::ZERO,
+                    }],
+                }
+                .into(),
+            )
+            .expect("texture"),
+        );
+        let texture = app.image.as_ref().expect("image").texture.id();
+        for rotated in [false, true] {
+            if rotated {
+                app.push_edit(EditOperation::RotateClockwise);
+            }
+            let tab = app.tabs.active().expect("tab").id;
+            let history = app.edits.entry(tab).or_default().operations().to_vec();
+            for preview in [false, true] {
+                app.image_view.selection = Some(UnitRect {
+                    min: UnitPoint { x: 0.0, y: 0.0 },
+                    max: UnitPoint { x: 0.5, y: 1.0 },
+                });
+                app.image_view.crop_preview = preview;
+                for fullscreen in [false, true] {
+                    app.fullscreen = fullscreen;
+                    for density in [1.0, 1.25, 2.0] {
+                        for command in [CommandId::FitToWindow, CommandId::CoverWindow] {
+                            app.image_view.pan = (50.0, -30.0);
+                            app.dispatch(command);
+                            assert_eq!(app.image_view.pan, (0.0, 0.0));
+                            // Reuse the selected mode through a resize, without dispatching it again.
+                            for size in [egui::vec2(800.0, 600.0), egui::vec2(600.0, 800.0)] {
+                                let mut output = egui::FullOutput::default();
+                                for _ in 0..3 {
+                                    let mut input = egui::RawInput {
+                                        screen_rect: Some(egui::Rect::from_min_size(
+                                            egui::Pos2::ZERO,
+                                            size / density,
+                                        )),
+                                        ..Default::default()
+                                    };
+                                    input
+                                        .viewports
+                                        .get_mut(&egui::ViewportId::ROOT)
+                                        .expect("viewport")
+                                        .native_pixels_per_point = Some(density);
+                                    output = context
+                                        .run_ui(input, |ui| app.draw_ui(ui, &mut Vec::new()));
+                                }
+                                let (bounds, clip) = output
+                                    .shapes
+                                    .iter()
+                                    .find_map(|shape| match &shape.shape {
+                                        egui::Shape::Mesh(mesh) if mesh.texture_id == texture => {
+                                            Some((mesh.calc_bounds(), shape.clip_rect))
+                                        }
+                                        _ => None,
+                                    })
+                                    .expect("image mesh");
+                                let viewport = egui::Rect::from_min_max(
+                                    egui::pos2(0.0, if fullscreen { 0.0 } else { 32.0 }),
+                                    egui::pos2(
+                                        size.x / density,
+                                        size.y / density - if fullscreen { 0.0 } else { 30.0 },
+                                    ),
+                                );
+                                assert!(
+                                    (clip.min - viewport.min).length() < 0.01
+                                        && (clip.max - viewport.max).length() < 0.01,
+                                    "unexpected image margin: {clip:?} versus {viewport:?}"
+                                );
+                                assert!((bounds.center() - viewport.center()).length() < 0.01);
+                                let mut transform = app.visual_transform((400, 200));
+                                transform.crop(app.image_view.preview_region());
+                                let ratios = viewport.size()
+                                    / egui::vec2(transform.size.0, transform.size.1);
+                                let scale = if command == CommandId::CoverWindow {
+                                    ratios.max_elem()
+                                } else {
+                                    ratios.min_elem()
+                                };
+                                assert!(
+                                    (bounds.size()
+                                        - egui::vec2(transform.size.0, transform.size.1) * scale)
+                                        .length()
+                                        < 0.01
+                                );
+                                assert_eq!(app.edits[&tab].operations(), history);
+                                assert_eq!(app.image_view.crop_preview, preview);
+                                assert_eq!(app.image_view.selection.expect("selection").max.x, 0.5);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        app.image_view.fit();
+        app.reading_mode = true;
+        app.dispatch(CommandId::CoverWindow);
+        assert_eq!(app.image_view.zoom, ZoomMode::Fit);
     }
 
     #[test]

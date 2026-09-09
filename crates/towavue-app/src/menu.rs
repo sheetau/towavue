@@ -36,7 +36,14 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             &[PreviousMedia, NextMedia, PreviousSameKind, NextSameKind],
             &[PreviousImage, NextImage, FirstImage, LastImage],
             &[PreviousTab, NextTab],
-            &[ZoomIn, ZoomOut, ActualSize, FitToWindow, ToggleCropPreview],
+            &[
+                ZoomIn,
+                ZoomOut,
+                ActualSize,
+                FitToWindow,
+                CoverWindow,
+                ToggleCropPreview,
+            ],
             &[
                 ToggleReadingMode,
                 IncreaseReadingPages,

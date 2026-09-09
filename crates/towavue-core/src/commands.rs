@@ -59,6 +59,7 @@ pub enum CommandId {
     NextImage,
     FirstImage,
     LastImage,
+    CoverWindow,
 }
 
 impl CommandId {
@@ -84,6 +85,7 @@ impl CommandId {
             Self::ZoomOut => "zoom_out",
             Self::ActualSize => "actual_size",
             Self::FitToWindow => "fit_to_window",
+            Self::CoverWindow => "cover_window",
             Self::ClearSelection => "clear_selection",
             Self::SelectAll => "select_all",
             Self::ToggleCropPreview => "toggle_crop_preview",
@@ -295,6 +297,7 @@ impl CommandDefinition {
     pub fn is_enabled(self, context: CommandContext) -> bool {
         (!self.requires_reading_mode || context.reading_mode)
             && (self.id != CommandId::SelectAll || !context.reading_mode)
+            && (self.id != CommandId::CoverWindow || !context.reading_mode)
             && (self.media_kinds.is_empty()
                 || context
                     .media_kind
@@ -341,6 +344,11 @@ const COMMANDS: &[CommandDefinition] = &[
     command(
         CommandId::FitToWindow,
         "Fit image to window",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::CoverWindow,
+        "Cover window with image",
         &[MediaKind::Image],
     ),
     command(

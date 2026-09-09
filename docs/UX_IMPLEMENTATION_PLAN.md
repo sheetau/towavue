@@ -38,7 +38,7 @@
 | V03 | timelineの時間選択・範囲再生・内外削除・連結、部分音量／速度、rubber-band | 未完。現在の単一区間trim gripは要求と異なる。非破壊区間model／source↔編集時刻／映像音声境界／Undo／export一致の設計が必要 |
 | V04 | 動画の閲覧／編集contextでshortcut競合を解消し誤編集を防ぐ | 未完。R/L回転、左右Seek、comma/period速度は存在。frame移動・J/L/K・長押し2倍と編集modeを一貫させる |
 | V05 | 動画のzoom・resizeと既存crop／rotate／flip／fullscreen | 一部実装。zoom／resizeは未完、単一device・preview/export一致を維持する |
-| A01 | 音声の自動次曲、repeat all／one／off、shuffleとbuttons | 未完。Shell playlist選曲はあるがEOFで停止。履歴／再生順／dirty guard／tab状態保持との結合を検証する |
+| A01 | 音声の自動次曲、repeat all／one／off、shuffleとbuttons | 主要経路実装。tab別のShell順auto-next、repeat off／all／one、shuffle一巡、前後操作、status buttons／View／palette／音声Ctrl+R。曲末にShell順を非同期再取得し、初回取得前のtab切替にも対応。実WASAPIでactive／背景の次曲・loop・dirty guard・古い通知拒否・失敗隔離を検証。通常releaseでbuttons／shortcut／自然EOFの次曲を確認。modeのrestart永続化、gapless、手動選曲の独立した履歴stackは提供しない |
 | A02 | 音声timeline常時、動画共通の選択編集・音量／速度操作 | 一部実装。waveform／trimは存在、V03と共通の編集契約へ進める |
 | E01 | metadata書換、音声抽出、normalize、stereo／mono export | 未完。現在はmetadata copyと固定export。明示optionと非破壊保存・再openの一致が必要 |
 | M01 | logoの三方向menu gestureと最小限の状態表示 | 未完。クリック／keyboard menuとlogo描画は存在。閾値・角度・mouseup・取消を共有dispatchへ渡す |

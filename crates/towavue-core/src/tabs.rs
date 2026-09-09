@@ -103,6 +103,10 @@ impl TabSet {
         &self.tabs
     }
 
+    pub fn get_mut(&mut self, id: TabId) -> Option<&mut Tab> {
+        self.tabs.iter_mut().find(|tab| tab.id == id)
+    }
+
     pub fn active(&self) -> Option<&Tab> {
         let ActiveTab::Media(active) = self.active else {
             return None;

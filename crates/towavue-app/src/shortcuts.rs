@@ -77,6 +77,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::ApplyCrop, "Ctrl+Y"),
         (CommandId::CopyImage, "Ctrl+C"),
         (CommandId::ResizeImage, "Ctrl+R"),
+        (CommandId::CycleAudioRepeat, "Ctrl+R"),
         (CommandId::RotateClockwise, "R"),
         (CommandId::RotateCounterclockwise, "L"),
         (CommandId::FlipHorizontal, "H"),
@@ -568,7 +569,17 @@ mod tests {
             bindings.resolve(sequence.strokes(), image),
             ShortcutMatch::Command(CommandId::ResizeImage)
         );
-        for kind in [None, Some(MediaKind::Video), Some(MediaKind::Audio)] {
+        assert_eq!(
+            bindings.resolve(
+                sequence.strokes(),
+                CommandContext {
+                    media_kind: Some(MediaKind::Audio),
+                    ..image
+                }
+            ),
+            ShortcutMatch::Command(CommandId::CycleAudioRepeat)
+        );
+        for kind in [None, Some(MediaKind::Video)] {
             assert_eq!(
                 bindings.resolve(
                     sequence.strokes(),

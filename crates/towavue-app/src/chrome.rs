@@ -126,6 +126,67 @@ pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     response
 }
 
+#[derive(Clone, Copy)]
+pub enum AudioIcon {
+    Repeat,
+    RepeatOne,
+    Shuffle,
+}
+
+pub fn audio_button(ui: &mut Ui, icon: AudioIcon, selected: bool, label: &str) -> egui::Response {
+    let response = ui
+        .add_sized(
+            [28.0, 24.0],
+            egui::Button::new("").frame(false).selected(selected),
+        )
+        .on_hover_text(label);
+    let color = if selected { FOREGROUND } else { MUTED };
+    let center = response.rect.center();
+    let point = |x, y| center + egui::vec2(x, y);
+    let stroke = Stroke::new(1.4, color);
+    let paths = match icon {
+        AudioIcon::Shuffle => [
+            vec![point(-7.0, -5.0), point(7.0, 5.0)],
+            vec![point(-7.0, 5.0), point(7.0, -5.0)],
+        ],
+        _ => [
+            vec![point(-7.0, 1.0), point(-7.0, -5.0), point(7.0, -5.0)],
+            vec![point(7.0, -1.0), point(7.0, 5.0), point(-7.0, 5.0)],
+        ],
+    };
+    for path in paths {
+        ui.painter().add(egui::Shape::line(path, stroke));
+    }
+    ui.painter().add(egui::Shape::line(
+        vec![point(4.0, -8.0), point(7.0, -5.0), point(4.0, -2.0)],
+        stroke,
+    ));
+    if matches!(icon, AudioIcon::Shuffle) {
+        ui.painter().add(egui::Shape::line(
+            vec![point(4.0, 2.0), point(7.0, 5.0), point(4.0, 8.0)],
+            stroke,
+        ));
+    } else {
+        ui.painter().add(egui::Shape::line(
+            vec![point(-4.0, 2.0), point(-7.0, 5.0), point(-4.0, 8.0)],
+            stroke,
+        ));
+    }
+    if matches!(icon, AudioIcon::RepeatOne) {
+        ui.painter().text(
+            center,
+            egui::Align2::CENTER_CENTER,
+            "1",
+            egui::FontId::proportional(10.0),
+            color,
+        );
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    response
+}
+
 pub fn reading_button(ui: &mut Ui, enabled: bool, selected: bool) -> egui::Response {
     let response = ui
         .add_enabled_ui(enabled, |ui| {

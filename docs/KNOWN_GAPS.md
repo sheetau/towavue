@@ -6,7 +6,7 @@
 
 ## 1. 試用前に知るべき制約
 
-新goalの残件と各checkpointの実績は[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)で管理する。tabごとの背景再生は主要経路を実装したが、完全な状態保持、timelineの選択編集、repeat／shuffle等は引き続き未完である。tab context menu／一括close／path copy・Explorer表示／path-only reopenは実装したが、window間結合、keyboardからのcontext menu呼出しと全体focus／UIA監査は残る。新しい台帳は過去の「このsliceには含めない」を永久的な却下とは扱わない。
+新goalの残件と各checkpointの実績は[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)で管理する。tabごとの背景再生は主要経路を実装したが、完全な状態保持、timelineの選択編集等は引き続き未完である。音声の自動次曲／repeat／shuffleはA01で主要経路を実装した。tab context menu／一括close／path copy・Explorer表示／path-only reopenは実装したが、window間結合、keyboardからのcontext menu呼出しと全体focus／UIA監査は残る。新しい台帳は過去の「このsliceには含めない」を永久的な却下とは扱わない。
 
 U07の画像側では読み込み済みの画素・texture・zoom／pan／selection・読書設定／ページをtabごとに保持する。開いた画像のsnapshotはcloseまでpinするので、decode／texture cacheの256 MiBはprocess全体の上限ではない。未完了decodeは復帰時に再要求し、未完了resizeも元Arcから再処理する。playlist／表示中filmstripのscroll位置はtabごとに保持したが、全focus状態の保持は未完。動画・音声sessionの保持と背景再生は後続checkpointで接続した。device世代の違う復帰画像は再upload対象とするが、この保持経路の実GPU removal／混在DPI監査は未実施である。
 
@@ -157,7 +157,7 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 | J/K/L、frame step | 未実装。`,` / `.`はframe stepではなくrate変更 |
 | Live playback volume/rate | H1で実装。編集値を再生・exportで共有し、rateは0.25～4倍のピッチ維持 |
 | Track selection、delete、cut、range playback | 単一trimのrange playbackのみH1で実装。track selection、delete、cutは未実装 |
-| Repeat、shuffle | 未実装 |
+| Repeat、shuffle | 音声のoff／all／one、重複のないshuffle順、前後操作と自然EOF、背景自動送りを実装。未保存／export中の別曲への自動移動は停止。gaplessと再起動後のmode保存は保証しない |
 | Video zoom、fullscreen、resize/resample | fullscreenはH1でhardware/software共通のaspect-fitと復帰を確認。zoomとresize/resampleは未実装 |
 | Video crop/rotate/flipのlive preview | H1で同じdevice内のUV表示を実装。回転後のSAR・selection、Undo/Redoとexport照合を検証。trim live範囲再生とは別 |
 | Audio-only export、normalize、stereo/mono変換 | 未実装 |

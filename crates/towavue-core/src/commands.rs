@@ -72,6 +72,8 @@ pub enum CommandId {
     CopyImage,
     ResizeImage,
     ToggleImageInterpolation,
+    CycleAudioRepeat,
+    ToggleAudioShuffle,
 }
 
 impl CommandId {
@@ -142,6 +144,8 @@ impl CommandId {
             Self::LastImage => "last_image",
             Self::CopyImage => "copy_image",
             Self::ResizeImage => "resize_image",
+            Self::CycleAudioRepeat => "cycle_audio_repeat",
+            Self::ToggleAudioShuffle => "toggle_audio_shuffle",
             Self::ToggleImageInterpolation => "toggle_image_interpolation",
         }
     }
@@ -359,6 +363,16 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::NextTab, "Next tab", &[]),
     command(CommandId::PreviousTab, "Previous tab", &[]),
     command(CommandId::TogglePause, "Play or pause", PLAYABLE_MEDIA),
+    command(
+        CommandId::CycleAudioRepeat,
+        "Cycle audio repeat",
+        &[MediaKind::Audio],
+    ),
+    command(
+        CommandId::ToggleAudioShuffle,
+        "Toggle audio shuffle",
+        &[MediaKind::Audio],
+    ),
     command(CommandId::SeekBackward, "Seek backward", PLAYABLE_MEDIA),
     command(CommandId::SeekForward, "Seek forward", PLAYABLE_MEDIA),
     command(CommandId::PreviousMedia, "Previous media", ANY_MEDIA),

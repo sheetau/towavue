@@ -44,6 +44,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             &[ToggleFullscreen],
             &[ToggleImageInterpolation],
             &[TogglePause, SeekBackward, SeekForward],
+            &[CycleAudioRepeat, ToggleAudioShuffle],
             &[PreviousMedia, NextMedia, PreviousSameKind, NextSameKind],
             &[PreviousImage, NextImage, FirstImage, LastImage],
             &[PreviousTab, NextTab],

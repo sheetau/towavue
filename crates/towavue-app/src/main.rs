@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod audio_playback;
 mod chrome;
 mod cursor;
 mod filmstrip;
@@ -601,6 +602,7 @@ struct Application<N> {
     displayed_tab: Option<TabId>,
     retained_images: BTreeMap<TabId, RetainedImageTab>,
     retained_playback: BTreeMap<TabId, playback_tab::RetainedPlaybackTab>,
+    audio_queues: BTreeMap<TabId, audio_playback::AudioTab>,
     graphics_epoch: u64,
     restored_reading_pages: bool,
     closed_tabs: VecDeque<PathBuf>,
@@ -767,6 +769,7 @@ where
             displayed_tab: None,
             retained_images: BTreeMap::new(),
             retained_playback: BTreeMap::new(),
+            audio_queues: BTreeMap::new(),
             graphics_epoch: 0,
             restored_reading_pages: false,
             closed_tabs: VecDeque::new(),
@@ -1249,6 +1252,7 @@ where
         self.image_view = ImageViewState::default();
         self.path = Some(path.clone());
         self.media_kind = Some(kind);
+        self.ensure_audio_queue();
         self.pending_time = None;
         self.clock = None;
         self.decode_finished = false;
@@ -1348,9 +1352,12 @@ where
     }
 
     fn load_duration(&mut self, path: PathBuf) {
+        self.load_duration_for(path, self.media_generation);
+    }
+
+    fn load_duration_for(&mut self, path: PathBuf, generation: u64) {
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
-        let generation = self.media_generation;
         if let std::collections::btree_map::Entry::Vacant(entry) =
             self.duration_workers.entry(generation)
         {
@@ -1425,6 +1432,7 @@ where
     }
 
     fn apply_folder_snapshot(&mut self, snapshot: FolderSnapshot) {
+        self.sync_audio_snapshot(&snapshot);
         let previous_reading_paths = self.reading_request_paths();
         if self
             .folder_snapshot
@@ -1724,7 +1732,10 @@ where
             AppEvent::ImagePreview(path, generation, preview) => {
                 self.finish_image_preview(path, generation, preview)
             }
-            AppEvent::FolderReady => self.finish_folder_load(),
+            AppEvent::FolderReady => {
+                self.finish_folder_load();
+                self.finish_audio_folder_loads();
+            }
             AppEvent::FilmstripReady => {
                 if let Some(context) = &self.ui_context {
                     self.filmstrip.finish(context);
@@ -3469,14 +3480,17 @@ where
                             .media_duration
                             .map(|duration| format_time(MediaTime::ZERO.saturating_add(duration)))
                             .unwrap_or_else(|| "—".into());
-                        ui.label(
-                            RichText::new(format!(
-                                "{} / {duration}",
-                                format_time(self.current_position())
-                            ))
-                            .size(12.0)
-                            .color(chrome::MUTED),
-                        );
+                        let position = format_time(self.current_position());
+                        let time_label = if self.media_kind == Some(MediaKind::Audio) && ui.max_rect().width() < 340.0 {
+                            position
+                        } else { format!("{position} / {duration}") };
+                        let time_text = RichText::new(time_label).size(12.0).color(chrome::MUTED);
+                        if self.media_kind == Some(MediaKind::Audio) && ui.max_rect().width() < 340.0 {
+                            // Reserve four controls and their gaps before truncating a long clock.
+                            let time_width = (ui.available_width() - 148.0).max(0.0);
+                            ui.add_sized([time_width, 24.0], egui::Label::new(time_text).truncate())
+                                .on_hover_text(format!("{} / {duration}", format_time(self.current_position())));
+                        } else { ui.label(time_text); }
                         if chrome::button(
                             ui,
                             chrome::Icon::Waveform,
@@ -3500,6 +3514,9 @@ where
                             )
                             .on_hover_text("Volume · wheel to adjust (playback and export)");
                         volume_targets.push(volume);
+                        if self.media_kind == Some(MediaKind::Audio) {
+                            self.draw_audio_mode_buttons(ui, actions);
+                        }
                     } else if self.media_kind == Some(MediaKind::Image) {
                         let label = self.command_hint(CommandId::ToggleReadingMode, "Reading mode");
                         let enabled = self.reading_mode || !self.command_context().has_unsaved_edits;
@@ -4114,6 +4131,8 @@ where
             CommandId::NextMedia => self.navigate(true, false),
             CommandId::PreviousSameKind => self.navigate(false, true),
             CommandId::NextSameKind => self.navigate(true, true),
+            CommandId::CycleAudioRepeat => self.change_audio_mode(false),
+            CommandId::ToggleAudioShuffle => self.change_audio_mode(true),
             CommandId::PreviousImage => self.navigate_image(false),
             CommandId::NextImage => self.navigate_image(true),
             CommandId::FirstImage => self.navigate_image_boundary(false),
@@ -5210,6 +5229,7 @@ where
         let Some(removed) = self.tabs.close(id) else {
             return;
         };
+        self.audio_queues.remove(&id);
         if remember {
             if self.closed_tabs.len() == 32 {
                 self.closed_tabs.pop_front();
@@ -5307,6 +5327,10 @@ where
     }
 
     fn navigate(&mut self, forward: bool, same_kind: bool) {
+        if same_kind && self.media_kind == Some(MediaKind::Audio) {
+            self.navigate_audio(forward);
+            return;
+        }
         if self.media_kind == Some(MediaKind::Image) {
             self.image_navigation_forward = forward;
         }
@@ -5516,6 +5540,9 @@ where
         } else {
             PlaybackState::Playing
         };
+        if !paused && let Some(tab) = self.tabs.active() {
+            self.arm_audio_queue(tab.id);
+        }
         self.refresh_title();
         self.request_redraw();
     }
@@ -5869,6 +5896,7 @@ where
             && self.pending_time.is_none()
             && self.audio_drained
         {
+            let was_playing = self.state == PlaybackState::Playing;
             if let Some(end) = self.session.as_ref().and_then(PlaybackSession::range_end) {
                 if self.clock.is_none() {
                     let mut clock =
@@ -5885,6 +5913,9 @@ where
                 clock.set_paused(true);
             }
             self.state = PlaybackState::Ended;
+            if !was_playing {
+                self.suppress_paused_audio_eof();
+            }
             if !self.metrics_recorded {
                 if let Some(session) = &self.session {
                     let metrics = session.metrics();
@@ -6373,6 +6404,7 @@ where
         }
         self.check_eof();
         let now = Instant::now();
+        self.advance_audio_queues();
         let was_hidden = self.viewing_cursor.hidden;
         let pointer_ready = self
             .window

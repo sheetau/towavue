@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### 音声の自動次曲・リピート・シャッフル（2026-09-10 03:36 JST）
+
+音声folderの曲末ではShell順の次曲へ進み、Repeat offは末尾で止まる。下バーのrepeat buttonまたは音声Ctrl+Rでoff→all→one→off、shuffle buttonで重複のない一巡へ切り替える。View menu／paletteも同じcommandを使い、画像Ctrl+Rのresizeとはcontextで区別する。Ctrl+Left／Rightは音声の再生順を辿り、oneでも手動移動は同曲loopにしない。ボタンは選択状態を持つため、native UIAではInvokeではなくToggle patternも確認する。
+
+mode／順序はtab別で、画像を選んだままでも背景の自動送り／loopを続ける。初回のShell取得前に別tabへ移っても、音声tab専用providerが結果を受け取る。曲末の別曲選択前にも最新順を非同期で取得する。別曲のopenは新instanceにし、旧通知を拒否、履歴／export先／duration／waveformを初期化する。未保存または当該tabのexport中は別曲への自動移動を止め、手動移動は保存確認を通す。一時停止中のEOFと消費済みEOFは送らず、device generation交換だけで停止済みqueueを再開しない。実際の再生開始／loop開始で次のEOFを受け付ける。
+
+coreの4回帰はShell順・off/all/one・手動前後・空／単曲／消失path、40曲shuffleの一巡／重複なし／前後一致／更新、新規order取得前のshuffleを検証。app回帰はtab別mode・非編集・画像／動画での無効化、240/480/960pxと99時間表示でのbutton bounds、実AccessKit Click→共有commandを確認する。既存240pxの音量表示が新buttonで押し出される問題は、controlsを維持した時刻表示の省略／truncateで修正した。旧resize testの音声Ctrl+RがNoneという期待も新しいrepeat契約へ更新した。
+
+実WASAPI試験は生成した150ms無音WAVでactive／背景のEOF・次曲・one/all・末尾停止、paused EOF、active／背景のdirty保護、手動guard Cancel、旧instance通知拒否、初回Shell完了前のtab切替、列挙後に消えたpathを模したopen失敗の隔離／closeを確認する。最終session60578のfmt／Clippy／workspace346 tests／releaseが成功（app198/core46/runtime98/integration4、通常ignored8件）。新audio queueと既存背景device／native-captionのopt-in3件を明示実行してPASS。最終release563f950fdb2e627899fcc19ab4888c811fafce22cba25547ba297b51a643f971。
+
+通常release114d192c、audio-queue-native PID48344/start18:28:51.4657481Zで30秒無音WAV3曲を使用。Ctrl+Rでall／one、shuffleをpointerで有効化、UIA Toggleで無効化し、On状態とlabelを照合した。Ctrl+Rightでu-next、入力せず31秒待ちv-lastへの自然送りを確認。captures repeat-all／repeat-one／shuffle-on／manual-next／automatic-nextを保存し、shuffle-onを目視確認した。初回補助のInvokeはUnsupported Patternで、同じPIDのToggle patternを確認して継続した。通常Close終了0、launcher35499と操作13913 terminal、素材hash7b6bc70c不変、stderrはSoftware選択／正常metrics。native後の停止済みEOF／即時loop受付補強は最終回帰で確認し、通常画面の再trialとは区別する。gapless、独立した手動選曲履歴stack、modeのrestart永続化は提供しない。全goalの残件は維持する。
+
 ### 動画tab復帰直後の保持frame（2026-09-10 03:02 JST）
 
 動画を一時停止し、画像tabへ切り替えて戻る。最後に選んだ映像frameを保持して即時に描き、復帰decoderの最初のframeへ置き換える。同じ停止位置なら保持frameの時刻からdecodeするため、frame境界間のclockを切り上げて1コマ進めない。再生中に背景で進んだ場合は、保持frameから現在位置の新frameへ更新する。Seek／device交換は旧frameを解放し、復帰時の表示を新規presented count／Seek時間として二重計上しない。

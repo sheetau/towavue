@@ -24,7 +24,7 @@
 | U07 | tabごとの全表示／再生状態保持、背景音声・複数動画、非activeの表示負荷抑制 | 未完。現在はactive切替でsessionを再構築。単一device維持・session所有・audio共存・bounded resource／終了順の設計が必要 |
 | U08 | tab dragの連続性、window分離／結合、filmstripから分離、drop indicator | 一部実装。並べ替えと別processへのpath detachのみ。結合と状態移送を未完として扱う |
 | U09 | tab context menu、閉じる操作群、path copy／開く、reopen closed | 未完。sidebar／pin／preview-tab／追加button／未保存backupは要求外 |
-| U10 | tab hover／filmstrip／recent／seekの低解像度preview共用と速い表示 | 一部実装。filmstrip可視worker／metadata cache、seek区間cacheあり。tab hover、先行生成、共有・実遅延は未完 |
+| U10 | tab hover／filmstrip／recent／seekの低解像度preview共用と速い表示 | 一部実装。preview worker間で64件／16 MiBの低解像度RGBAを共有し、原寸読込後の240×160以内のpreviewもfilmstrip／画像seekへ供給。既読PNG＋GIFのfilmstrip初回観測301.356→84.384ms、warm再表示は約65～85msで明確な差なし。tab hover／recent UI、未訪問画像の先行生成、動画sheetとGPU texture共用は未完 |
 | U11 | 選択線は反転色1pxのみ、不要なgrip／shadow／暗幕なし | 未完。現在のselection描画とkeyboard／UIA hit領域を分離して改善する |
 | U12 | compact seekのhoverつまみを両端内に収め、非hoverは全幅1px | 対応済み。つまみ半径を除いた移動区間を描画・hover・releaseで共有。100／125／200%の自動描画・座標回帰と通常releaseの画像両端表示を確認。実OSの混在DPIは未検証 |
 | I01 | Fitの余分な8px余白を除き、Cover表示command／shortcutを追加 | 対応済み。core/image.rsのCover、共有CoverWindow commandとShift+C、main.rsのviewport。3新規回帰と通常releaseの960×576画素比較によりFit全幅／Cover全領域・bar非侵入を確認。下記実績参照 |

@@ -5,7 +5,7 @@ use std::thread;
 use std::time::SystemTime;
 
 use crate::image::{IMAGE_BYTE_LIMIT, decode_image_cancellable, decode_image_for_prefetch};
-use crate::{DecodedImage, ImageDecodeError, LatestTask};
+use crate::{DecodedImage, ImageDecodeError, LatestTask, PreviewCache};
 
 const CACHE_BYTE_LIMIT: usize = 256 * 1024 * 1024;
 
@@ -96,6 +96,7 @@ struct Mailbox {
     completed: Option<LoadedImages>,
     closed: bool,
     cache: Arc<Mutex<ImageCache>>,
+    previews: Option<PreviewCache>,
 }
 
 /// Latest-only foreground decoder with independent, bounded speculative decoding.
@@ -105,9 +106,18 @@ pub struct ImageLoader {
 }
 
 impl ImageLoader {
-    pub fn new(notify: impl Fn() + Send + 'static) -> Result<Self, std::io::Error> {
+    pub fn new(
+        previews: PreviewCache,
+        notify: impl Fn() + Send + 'static,
+    ) -> Result<Self, std::io::Error> {
         let prefetch_worker = LatestTask::new("towavue-image-prefetch")?;
-        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let shared = Arc::new((
+            Mutex::new(Mailbox {
+                previews: Some(previews),
+                ..Default::default()
+            }),
+            Condvar::new(),
+        ));
         let worker_shared = Arc::clone(&shared);
         thread::Builder::new()
             .name("towavue-images".into())
@@ -224,6 +234,7 @@ fn run_worker(
     let (mutex, ready) = &*shared;
     // Cache eviction may free large pixel allocations; never hold the UI mailbox lock there.
     let cache = Arc::clone(&mutex.lock().expect("image mailbox").cache);
+    let previews = mutex.lock().expect("image mailbox").previews.clone();
     loop {
         let (generation, paths) = {
             let mut mailbox = ready
@@ -269,6 +280,7 @@ fn run_worker(
                     );
                 }
             }
+            let preview = result.as_ref().ok().map(Arc::clone);
             {
                 let mut mailbox = mutex.lock().expect("image mailbox");
                 if mailbox.closed {
@@ -286,9 +298,17 @@ fn run_worker(
                         images: Vec::new(),
                     })
                     .images
-                    .push((path, result));
+                    .push((path.clone(), result));
             }
             notify();
+            if let Some(image) = preview
+                && let Some(previews) = &previews
+                && stamp.is_some()
+            {
+                previews.remember_image(&path, &image, &|| {
+                    is_current() && ImageStamp::read(&path) == stamp
+                });
+            }
         }
     }
 }

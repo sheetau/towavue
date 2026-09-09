@@ -1199,6 +1199,14 @@ towavue/
 - 通常release `b90eb04b3cd9cc62c98f5a66a475e55e28e464f2b049d912b1752deac59f825b`、所有PID35148/start10:58:51.0228078Zで、600×800 PNGと先読み対象外の6000×6000単一frame GIFを確認。reading切替後63.875msと157.992msのcaptureは左画像＋右Loading、最終captureは両画像を示す。これはcapture開始時刻の標本で、decode完了や物理表示の厳密な計測ではない。GIFは生成fixtureであり原PNGとの画質比較には使わない。正常終了0・stderr空、証跡はignored `target/tmp/image-viewport-20260909/incremental-reading/`。source hashはPNG `5f24c4ff`、GIF `bf55696f`。
 - fmt／all-target Clippy／全296 tests／release build通過。実機専用4 testsはignoredのままで成功扱いしない。未読込ページはactive比率で仮配置し実寸取得後に再配置する。低解像度preview／cold load／高速連打の黒い待機は別の残件。
 
+### 低解像度previewの共用と原寸画素の再利用（2026-09-09 20:13 JST）
+
+- PreviewCacheのclone間で64件／16 MiBのRGBAをLRU共有する。source metadataと種別／時刻／寸法の既存keyで照合し、memory hitはdisk PNG decodeと生成を省く。画像foreground公開後、最新generationとdecode時のfile stampが有効なら先頭frameから240×160以内のnearest previewを作る。元画像をcopy／再decode／disk encodeせず、filmstripと画像seekの既存keyへ登録する。animationのpreviewは先頭frame、orientationとalphaは元のdecode済み画素に従う。
+- 新規3 testsでLRU／件数／byte上限、worker共有・disk entry削除後のmemory hit・variant分離、実ImageLoaderからの全原寸画素保持と縮小全画素一致、取消／sample中のfile変更／削除での拒否を確認する。既存disk reuse testは新しいPreviewCacheで再読込し、memory hitだけでdisk検証を代用しない。保存失敗時にはmemory登録を控え、既存の保存再試行を保つ。初回の回帰がこの差を検出し、修正後は従来のcache耐障害性も通過した。
+- 通常release比較: baseline b90eb04b PID21644/start11:10:11.4327616Z、変更後 d3f0bb9d632970fbae770c39303f7d3adc0313835898acdfab5747184e2427f2 PID47376/start11:11:40.1155131Z。同じ600×800 PNGと6000×6000単一frame GIFを先にreadingで読み、normalへ戻してF。freshなapp preview-cacheでfilmstripのGIF領域pixelを観測する初回値301.356→68.286ms。続く4回はbaseline66.479/84.639/78.541/66.557ms、変更後65.990/66.617/83.975/68.085msで、warmの改善は主張しない。OS file cacheをflushしておらず、入力helper／描画／screen samplingを含む単一試行群で、未訪問画像やdecode単独の速度ではない。
+- 最初のbaseline PID34380ではPostMessageによる反復入力が観測条件を満たさず、その時間値は比較から除外した。同じprocessを維持してSendKeysへ変更後、warm5回65.498～83.052msで通常終了。cold条件はこの終了後に別の隔離caseで測る。三processともClose終了0・stderr空・source hashes不変（PNG5f24c4ff／GIFbf55696f）。最終cache directoryは空で、baseline cold後にはPNG2件。captureはサムネイルの比率・並びを確認し、nearestとFFmpeg縮小の全画素一致は主張しない。証跡とhelperはignoredのshared-preview-*。
+- 取消／sample中のsource変更のassertionを追加後、fmt／Clippy／全299 tests／release buildを再通過（session8879）。最終binary5007948d4ad401d4bc01c97d14c44d762199c6e8e8bddf03bb1e557bd4f03dd7、PID34256/start11:15:02.7158578Zも同条件で初回84.384ms、warm65.085/67.845/81.113/65.887ms。cache files0・stderr0bytes・Close終了0・source不変を確認した。実機専用4 testsはignoredのまま。原寸表示・編集・sourceとdevice設計は変更せず、未訪問preview先行生成、tab hover／recent、メイン画面の段階表示と動画sheetは残件。
+
 ## 8. UI/UX変更の判断基準
 
 - 実装済みcommandの入口はmenu、palette、shortcut、gridで同じ`CommandId`を共有する。入口ごとに別logicを作らない。

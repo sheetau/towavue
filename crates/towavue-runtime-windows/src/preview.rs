@@ -1,8 +1,10 @@
+use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use thiserror::Error;
@@ -12,6 +14,41 @@ use crate::Cancellation;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CACHE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
+const MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
+const IMAGE_PREVIEW_VARIANT: &str = "filmstrip-image-v4";
+
+#[derive(Default)]
+struct PreviewMemory {
+    entries: VecDeque<(String, PreviewImage)>,
+    bytes: usize,
+}
+
+impl PreviewMemory {
+    fn get(&mut self, key: &str) -> Option<PreviewImage> {
+        let index = self.entries.iter().position(|entry| entry.0 == key)?;
+        let entry = self.entries.remove(index)?;
+        let image = entry.1.clone();
+        self.entries.push_back(entry);
+        Some(image)
+    }
+
+    fn insert(&mut self, key: String, image: PreviewImage) {
+        if let Some(index) = self.entries.iter().position(|entry| entry.0 == key) {
+            let (_, previous) = self.entries.remove(index).expect("existing preview");
+            self.bytes -= previous.rgba.len();
+        }
+        let bytes = image.rgba.len();
+        if bytes > MEMORY_LIMIT_BYTES {
+            return;
+        }
+        while self.entries.len() >= 64 || self.bytes + bytes > MEMORY_LIMIT_BYTES {
+            let (_, oldest) = self.entries.pop_front().expect("preview to evict");
+            self.bytes -= oldest.rgba.len();
+        }
+        self.bytes += bytes;
+        self.entries.push_back((key, image));
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreviewImage {
@@ -54,6 +91,7 @@ pub enum PreviewError {
 pub struct PreviewCache {
     root: PathBuf,
     cancellation: Option<Cancellation>,
+    memory: Arc<Mutex<PreviewMemory>>,
 }
 
 impl PreviewCache {
@@ -73,6 +111,7 @@ impl PreviewCache {
         Ok(Self {
             root,
             cancellation: None,
+            memory: Arc::default(),
         })
     }
 
@@ -80,6 +119,7 @@ impl PreviewCache {
         Self {
             root: self.root.clone(),
             cancellation: Some(cancellation),
+            memory: Arc::clone(&self.memory),
         }
     }
 
@@ -118,7 +158,7 @@ impl PreviewCache {
         } else {
             let (version, filter) = if kind == MediaKind::Image {
                 (
-                    "filmstrip-image-v4",
+                    IMAGE_PREVIEW_VARIANT,
                     "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
                 )
             } else {
@@ -225,11 +265,20 @@ impl PreviewCache {
         generate: impl FnOnce() -> Result<Vec<u8>, PreviewError>,
     ) -> Result<PreviewImage, PreviewError> {
         self.check_cancelled()?;
+        let cached = self.memory.lock().expect("preview memory").get(&key);
+        if let Some(image) = cached {
+            self.check_cancelled()?;
+            return Ok(image);
+        }
         let path = self.root.join(format!("{key}.png"));
         if let Ok(bytes) = fs::read(&path)
             && let Ok(image) = decode_png(&bytes)
         {
             self.check_cancelled()?;
+            self.memory
+                .lock()
+                .expect("preview memory")
+                .insert(key, image.clone());
             return Ok(image);
         }
         let bytes = generate()?;
@@ -237,20 +286,77 @@ impl PreviewCache {
         self.check_cancelled()?;
         let temporary = self.root.join(format!("{key}.{}.tmp", std::process::id()));
         // Disk persistence is optional once valid pixels are available.
-        if let Err(error) = fs::create_dir_all(&self.root)
+        let stored = fs::create_dir_all(&self.root)
             .and_then(|()| fs::write(&temporary, &bytes))
             .and_then(|()| {
                 fs::rename(&temporary, &path).inspect_err(|_| {
                     let _ = fs::remove_file(&temporary);
                 })
-            })
-        {
+            });
+        if let Err(error) = &stored {
             eprintln!("towavue: could not store preview cache: {error}");
         }
         if let Err(error) = self.prune() {
             eprintln!("towavue: could not prune preview cache: {error}");
         }
+        self.check_cancelled()?;
+        if stored.is_ok() {
+            self.memory
+                .lock()
+                .expect("preview memory")
+                .insert(key, image.clone());
+        }
         Ok(image)
+    }
+
+    pub(crate) fn remember_image(
+        &self,
+        path: &Path,
+        decoded: &crate::DecodedImage,
+        current: &dyn Fn() -> bool,
+    ) {
+        if !current() {
+            return;
+        }
+        let Ok(key) = cache_key(path, IMAGE_PREVIEW_VARIANT) else {
+            return;
+        };
+        if self
+            .memory
+            .lock()
+            .expect("preview memory")
+            .get(&key)
+            .is_some()
+        {
+            return;
+        }
+        let Some(frame) = decoded.frames.first() else {
+            return;
+        };
+        let scale = (240.0 / f64::from(frame.width))
+            .min(160.0 / f64::from(frame.height))
+            .min(1.0);
+        let width = (f64::from(frame.width) * scale).round().max(1.0) as u32;
+        let height = (f64::from(frame.height) * scale).round().max(1.0) as u32;
+        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            let source_y = u64::from(y) * u64::from(frame.height) / u64::from(height);
+            for x in 0..width {
+                let source_x = u64::from(x) * u64::from(frame.width) / u64::from(width);
+                let index = ((source_y * u64::from(frame.width) + source_x) * 4) as usize;
+                rgba.extend_from_slice(&frame.rgba[index..index + 4]);
+            }
+        }
+        if current() && cache_key(path, IMAGE_PREVIEW_VARIANT).ok().as_ref() == Some(&key) {
+            self.memory.lock().expect("preview memory").insert(
+                key,
+                PreviewImage {
+                    width,
+                    height,
+                    rgba,
+                },
+            );
+        }
     }
 
     fn prune(&self) -> Result<(), PreviewError> {
@@ -466,6 +572,189 @@ fn decode_png(bytes: &[u8]) -> Result<PreviewImage, image::ImageError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn preview_memory_bounds_pixels_and_entries_and_keeps_recent_hits() {
+        use super::*;
+
+        let small = PreviewImage {
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4],
+        };
+        let mut memory = PreviewMemory::default();
+        for index in 0..64 {
+            memory.insert(index.to_string(), small.clone());
+        }
+        assert_eq!(memory.bytes, 256);
+        assert_eq!(memory.get("0"), Some(small.clone()));
+        memory.insert("64".into(), small.clone());
+        assert!(memory.get("1").is_none());
+        assert!(memory.get("0").is_some());
+        memory.insert("0".into(), small);
+        assert_eq!(memory.bytes, 256);
+        let large = PreviewImage {
+            width: 1024,
+            height: 1024,
+            rgba: vec![127; 4 * 1024 * 1024],
+        };
+        for index in 0..5 {
+            memory.insert(format!("large-{index}"), large.clone());
+        }
+        assert_eq!(memory.entries.len(), 4);
+        assert_eq!(memory.bytes, MEMORY_LIMIT_BYTES);
+        assert!(memory.get("large-0").is_none());
+        assert!(memory.get("large-1").is_some());
+        memory.insert(
+            "too-large".into(),
+            PreviewImage {
+                width: 4096,
+                height: 2048,
+                rgba: vec![0; 32 * 1024 * 1024],
+            },
+        );
+        assert_eq!(memory.bytes, MEMORY_LIMIT_BYTES);
+        assert!(memory.get("too-large").is_none());
+    }
+
+    #[test]
+    fn foreground_pixels_seed_shared_previews_without_decoding_again() {
+        use super::*;
+        use std::sync::mpsc;
+        use std::time::Instant;
+
+        let root =
+            std::env::temp_dir().join(format!("towavue-shared-preview-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("owned fixture directory");
+        let path = root.join("portrait.png");
+        let pixels = image::RgbaImage::from_fn(600, 800, |x, y| {
+            image::Rgba([x as u8, y as u8, 123, (x + y) as u8])
+        });
+        pixels.save(&path).expect("owned PNG");
+        let cache = PreviewCache::new(root.join("cache")).expect("cache");
+        let (sent, ready) = mpsc::channel();
+        let loader = crate::ImageLoader::new(cache.clone(), move || {
+            let _ = sent.send(());
+        })
+        .expect("loader");
+        let generation = loader.request(vec![path.clone()]);
+        ready
+            .recv_timeout(Duration::from_secs(5))
+            .expect("foreground published");
+        let loaded = loader.take_completed().expect("foreground image");
+        assert_eq!(loaded.generation, generation);
+        assert_eq!(
+            loaded.images[0].1.as_ref().expect("decoded").frames[0].rgba,
+            pixels.as_raw().as_slice()
+        );
+        let key = cache_key(&path, IMAGE_PREVIEW_VARIANT).expect("image key");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while cache.memory.lock().expect("memory").get(&key).is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "preview follows foreground publication"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let preview = cache
+            .clone()
+            .filmstrip(&path, MediaKind::Image)
+            .expect("shared preview");
+        assert_eq!((preview.image.width, preview.image.height), (120, 160));
+        for y in 0..160_u32 {
+            for x in 0..120_u32 {
+                let offset = ((y * 120 + x) * 4) as usize;
+                assert_eq!(
+                    &preview.image.rgba[offset..offset + 4],
+                    &pixels.get_pixel(x * 5, y * 5).0
+                );
+            }
+        }
+        assert!(
+            fs::read_dir(&cache.root)
+                .expect("cache directory")
+                .next()
+                .is_none(),
+            "no PNG encoding or companion process for seeded previews"
+        );
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        assert!(matches!(
+            cache
+                .cancellable(cancellation)
+                .filmstrip(&path, MediaKind::Image),
+            Err(PreviewError::Cancelled)
+        ));
+        let rejected =
+            PreviewCache::new(root.join("rejected-cache")).expect("separate empty cache");
+        let checks = std::cell::Cell::new(0);
+        let decoded = loaded.images[0].1.as_ref().expect("foreground pixels");
+        rejected.remember_image(&path, decoded, &|| {
+            checks.set(checks.get() + 1);
+            checks.get() == 1
+        });
+        assert_eq!(
+            checks.get(),
+            2,
+            "cancellation checked again before publication"
+        );
+        assert!(rejected.memory.lock().expect("memory").entries.is_empty());
+        checks.set(0);
+        rejected.remember_image(&path, decoded, &|| {
+            checks.set(checks.get() + 1);
+            if checks.get() == 2 {
+                fs::write(&path, b"changed source")
+                    .expect("change metadata during preview sampling");
+            }
+            true
+        });
+        assert!(rejected.memory.lock().expect("memory").entries.is_empty());
+        fs::remove_dir(&rejected.root).expect("remove empty rejection cache");
+        let changed = cache_key(&path, IMAGE_PREVIEW_VARIANT).expect("changed key");
+        assert_ne!(key, changed);
+        assert!(matches!(
+            cache.load_or_generate(changed, || Err(PreviewError::NoFrame)),
+            Err(PreviewError::NoFrame)
+        ));
+        drop(loader);
+        fs::remove_file(&path).expect("remove owned source");
+        assert!(matches!(
+            cache.filmstrip(&path, MediaKind::Image),
+            Err(PreviewError::Io(_))
+        ));
+        fs::remove_dir(&cache.root).expect("remove empty cache");
+        fs::remove_dir(root).expect("remove empty fixture directory");
+    }
+
+    #[test]
+    fn generated_preview_memory_is_shared_and_variants_do_not_collide() {
+        use super::*;
+
+        let root =
+            std::env::temp_dir().join(format!("towavue-preview-memory-{}", std::process::id()));
+        let cache = PreviewCache::new(root.clone()).expect("cache");
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(2, 1, image::Rgba([12, 34, 56, 78]))
+            .write_to(&mut png, image::ImageFormat::Png)
+            .expect("PNG bytes");
+        let expected = cache
+            .load_or_generate("first".into(), || Ok(png.into_inner()))
+            .expect("generate preview");
+        fs::remove_file(root.join("first.png"))
+            .expect("remove owned disk entry to prove memory reuse");
+        let shared = cache.cancellable(Cancellation::default());
+        assert_eq!(
+            shared
+                .load_or_generate("first".into(), || panic!("must use shared pixels"))
+                .expect("memory hit"),
+            expected
+        );
+        assert!(matches!(
+            shared.load_or_generate("other-variant".into(), || Err(PreviewError::NoFrame)),
+            Err(PreviewError::NoFrame)
+        ));
+        fs::remove_dir(root).expect("remove empty owned cache");
+    }
+
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use image::{ImageFormat, Rgb, RgbImage};
@@ -856,6 +1145,7 @@ mod tests {
         let cache = PreviewCache {
             root: PathBuf::from("must-not-create-cache"),
             cancellation: Some(cancellation),
+            memory: Arc::default(),
         };
         let missing = Path::new("must-not-open-media.mp4");
         assert!(matches!(
@@ -962,7 +1252,8 @@ mod tests {
         let generated = cache
             .thumbnail(&source, Duration::ZERO, 16)
             .expect("generate thumbnail");
-        let cached = cache
+        let cached = PreviewCache::new(cache.root.clone())
+            .expect("fresh memory cache")
             .thumbnail(&source, Duration::ZERO, 16)
             .expect("read cached thumbnail");
 

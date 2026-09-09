@@ -650,7 +650,9 @@ where
             .map_err(|error| format!("could not open preview cache: {error}"))?;
         let notify = Arc::new(notify);
         let image_notify = Arc::clone(&notify);
-        let image_loader = ImageLoader::new(move || image_notify(AppEvent::ImagesReady))?;
+        let image_loader = ImageLoader::new(preview_cache.clone(), move || {
+            image_notify(AppEvent::ImagesReady)
+        })?;
         let folder_notify = Arc::clone(&notify);
         let folder_order =
             FolderOrderProvider::with_notify(move || folder_notify(AppEvent::FolderReady))?;

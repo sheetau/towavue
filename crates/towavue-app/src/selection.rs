@@ -8,6 +8,52 @@ pub fn has_focus(context: &egui::Context) -> bool {
         .is_some_and(|id| context.memory(|memory| memory.has_focus(id)))
 }
 
+pub fn focus_hint(context: &egui::Context) -> Option<String> {
+    has_focus(context)
+        .then(|| {
+            context.data(|data| data.get_temp::<String>(Id::new("selection-value-description")))
+        })
+        .flatten()
+}
+
+#[cfg(test)]
+#[test]
+fn selection_paints_only_the_inverted_outline_and_reports_edge_focus_in_status() {
+    let context = crate::fonts::test_context();
+    let identity = Id::new("outline-focus-test");
+    let selected = UnitRect {
+        min: towavue_core::UnitPoint { x: 0.25, y: 0.25 },
+        max: towavue_core::UnitPoint { x: 0.75, y: 0.75 },
+    };
+    context.memory_mut(|memory| memory.request_focus(identity.with(0_usize)));
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        let rect = Rect::from_min_max(egui::pos2(20.0, 20.0), egui::pos2(420.0, 220.0));
+        crate::paint_selection(ui.painter(), rect, selected);
+        controls(
+            ui,
+            identity,
+            rect,
+            selected,
+            (400, 200),
+            MediaKind::Image,
+            true,
+        );
+    });
+    assert_eq!(
+        output.shapes.len(),
+        1,
+        "no shade, handles or extra focus rectangle"
+    );
+    assert!(matches!(output.shapes[0].shape, egui::Shape::Callback(_)));
+    assert!(
+        focus_hint(&context)
+            .expect("focused edge description")
+            .contains("Selection left (pixels): 100")
+    );
+    context.memory_mut(|memory| memory.surrender_focus(identity.with(0_usize)));
+    assert!(focus_hint(&context).is_none());
+}
+
 pub fn focus_first(context: &egui::Context, identity: Id) {
     context.memory_mut(|memory| memory.request_focus(identity.with(0_usize)));
     context.data_mut(|data| data.insert_temp(identity.with("reveal"), 0_usize));
@@ -124,7 +170,11 @@ pub fn controls(
                     });
                     if response.has_focus() && enabled {
                         ui.ctx().data_mut(|data| {
-                            data.insert_temp(Id::new("selection-value-focus"), response.id)
+                            data.insert_temp(Id::new("selection-value-focus"), response.id);
+                            data.insert_temp(
+                                Id::new("selection-value-description"),
+                                format!("{}: {} · Arrow keys adjust", labels[index], values[index]),
+                            );
                         });
                         ui.ctx().memory_mut(|memory| {
                             memory.set_focus_lock_filter(
@@ -136,12 +186,6 @@ pub fn controls(
                                 },
                             )
                         });
-                        ui.painter().rect_stroke(
-                            response.rect,
-                            1.0,
-                            (2.0, egui::Color32::WHITE),
-                            egui::StrokeKind::Outside,
-                        );
                     }
                     response
                 })

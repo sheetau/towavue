@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 選択枠の反転1pxと余分な装飾の除去（2026-09-10 06:17）
+
+画像／動画の1.5px白枠・7px grip・選択外の暗幕を除き、時間選択と共通の1物理px反転枠へ置換した。辺のhit範囲と数値操作はそのまま。画像の辺へkeyboard focusすると追加の四角ではなくstatusに辺名・pixel値を出す。runtime helperは物理pixelで丸めた4本の重ならないstripを、plain callback payloadとしてUIの同じdraw orderへ渡す。vendor rendererはfont atlasの白texelとinverse-destination blendを使い、alphaを保持し、後続normal meshのblendを必ず戻す。新しいshader・source readback・別deviceは本体へ追加していない。
+
+geometry回帰は100/125/150/200%と極小範囲で線幅・外周・角の一重描画を確認。最初の125%試験で論理座標の丸め誤差による角の重複を発見し、物理pixel上でstripを分割して修正した。app回帰はfocus中にもcallback一つだけで暗幕／gripがなく、status descriptionがfocus解除で消えることを確認。vendor readbackはWARPと実hardwareの両方で、元RGB17/83/149→238/172/106、alpha128保持、二重反転で復元、clip外不変、後続green meshが通常色になることを厳密比較した。hardware device生成不可の時だけ理由付きSKIPとし、今回は2件ともPASS。描画・pixel不一致はskipしない。
+
+最終session58444でworkspace／vendorのfmt、Clippy、workspace371 tests（app209/core53/runtime105/integration4）、vendor2 tests、app opt-in4件とreleaseが成功、SKIPなし。通常workspaceでは10件をignoredとして別計上している。releasef336aadaad6de20e41740ad345cf435d4697229b7d04c05c6a2cb2c290e77c33。依存version／lockfileは変えず、vendor patchの内容と検証方法を更新した。1552599のCI34404197760も成功。
+
+通常exe a4c7482eによる生成PNG10d123e8の試験は、owned PID53432／44480／41360／7884の各起動がforeground検証で入力前に中止した。毎回通常Closeで終了／PID消失を確認してから次へ進み、最後はowned HWNDを列挙して実main windowと別processのforegroundであることを確認した。変更したのは一時helperの対象handle復元・diagnosticだけで、前面の別processへkey／mouseを送らず、強制入力や観測timeoutを理由に再起動していない。最後もPID消失、live trialなし。helper exit1／app ExitCode取得不可、成功とはしない。通常windowの選択captureは作れていない。helperと生成PNGは専用tempに保持した。対話試験は保留し、実GPU offscreen readbackへ切り替えて検証したが、これは通常window／混在DPI／fullscreen focusの代替合格ではない。これらと複合時間編集のnative保存再open、全体のUX台帳は未完のまま維持する。
+
 ### 選択範囲の再生と通常範囲への復帰（2026-09-10 05:54）
 
 Shift+Space／Edit menu／command paletteのPlay selected timeで選択先頭から試聴する。Spaceで一時停止・再開、Escapeで選択を解除して通常範囲へ戻る。選択外Seek・選択変更・時間編集でも試聴範囲を解除する。履歴・全長・export対象は変えない。音声のRepeat off/all/oneでも範囲末尾で停止し、別tabに移っても自動次曲へ進まない。狭いtimelineでは端点／gainの文字と重ねず範囲再生の中央labelを省略し、statusとUIA descriptionで案内する。

@@ -3623,8 +3623,11 @@ where
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             ui.set_min_width(path_width);
+                            let selection_hint = (!self.modal_input_blocked()).then(|| selection::focus_hint(ui.ctx())).flatten();
                             let (text, color, tooltip) =
-                                if let Some((message, _)) = &self.status_message {
+                                if let Some(message) = selection_hint {
+                                    (message.clone(), chrome::FOREGROUND, message)
+                                } else if let Some((message, _)) = &self.status_message {
                                     (message.clone(), chrome::FOREGROUND, message.clone())
                                 } else if let Some(path) = &self.path {
                                     let parent = path
@@ -6909,48 +6912,10 @@ fn selection_edge(
 }
 
 fn paint_selection(painter: &egui::Painter, image_rect: egui::Rect, selection: UnitRect) {
-    let selected = selection_rect(image_rect, selection);
-    let shade = Color32::from_black_alpha(150);
-    for rect in [
-        egui::Rect::from_min_max(
-            image_rect.min,
-            egui::pos2(image_rect.right(), selected.top()),
-        ),
-        egui::Rect::from_min_max(
-            egui::pos2(image_rect.left(), selected.bottom()),
-            image_rect.max,
-        ),
-        egui::Rect::from_min_max(
-            egui::pos2(image_rect.left(), selected.top()),
-            egui::pos2(selected.left(), selected.bottom()),
-        ),
-        egui::Rect::from_min_max(
-            egui::pos2(selected.right(), selected.top()),
-            egui::pos2(image_rect.right(), selected.bottom()),
-        ),
-    ] {
-        if rect.is_positive() {
-            painter.rect_filled(rect, 0.0, shade);
-        }
-    }
-    painter.rect_stroke(
-        selected,
-        0.0,
-        egui::Stroke::new(1.5, Color32::WHITE),
-        egui::StrokeKind::Inside,
+    towavue_runtime_windows::paint_selection_outline(
+        painter,
+        selection_rect(image_rect, selection),
     );
-    for center in [
-        selected.left_center(),
-        selected.right_center(),
-        selected.center_top(),
-        selected.center_bottom(),
-    ] {
-        painter.rect_filled(
-            egui::Rect::from_center_size(center, egui::vec2(7.0, 7.0)),
-            1.0,
-            Color32::WHITE,
-        );
-    }
 }
 
 fn fitted_video_rect(viewport: egui::Rect, size: (u32, u32), pixel_aspect: f32) -> egui::Rect {

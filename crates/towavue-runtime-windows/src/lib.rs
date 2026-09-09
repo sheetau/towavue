@@ -21,6 +21,7 @@ mod preview;
 mod preview_loader;
 mod recent;
 mod renderer;
+mod selection_outline;
 mod shell;
 
 pub use recent::{RecentFiles, RecentUpdate};
@@ -50,6 +51,7 @@ pub use playback::{DecodePath, PlaybackError, PlaybackEvent, PlaybackMetrics, Pl
 pub use preview::{CachedImagePreview, MediaPreview, PreviewCache, PreviewError, PreviewImage};
 pub use preview_loader::{PreviewLoader, VISIBLE_PREVIEW_LIMIT};
 pub use renderer::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError};
+pub use selection_outline::paint_selection_outline;
 pub use shell::{
     FolderOrderError, FolderOrderProvider, canonical_shell_path, reveal_file, reveal_license_guide,
 };

@@ -1,4 +1,4 @@
-use egui::{Color32, Rect, Response, Ui};
+use egui::{Rect, Response, Ui};
 use towavue_core::{EditTimeline, MediaTime, TimeRange, TimelineEdit};
 
 mod adjustment;
@@ -170,14 +170,12 @@ pub(super) fn show(
         );
     }
     if let Some(range) = preview {
-        painter.rect_stroke(
+        towavue_runtime_windows::paint_selection_outline(
+            &painter,
             Rect::from_min_max(
                 egui::pos2(x_at(range.start()), rect.top() + 1.0),
                 egui::pos2(x_at(range.end()), rect.bottom() - 1.0),
             ),
-            0.0,
-            (1.0, Color32::WHITE),
-            egui::StrokeKind::Inside,
         );
     }
     painter.vline(x_at(head), rect.y_range(), (2.0, crate::chrome::FOREGROUND));

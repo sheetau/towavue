@@ -16,10 +16,21 @@ Local changes:
 - Pin the existing resolved dependencies; omit upstream examples/dev dependencies.
 - Add an offscreen WARP test comparing mixed linear/nearest output pixels and
   switching a texture's sampler through a partial update.
+- Recognize the plain `InvertMesh` paint-callback payload in tessellation order.
+  Opaque white geometry uses inverse-destination RGB blending and preserves
+  destination alpha. Every subsequent normal mesh restores ordinary blending.
+  Texture sampling, the existing UI pipeline and scissor clipping remain shared;
+  arbitrary GPU callbacks are still unsupported. No native handles are carried
+  in the payload.
+- Verify atlas-white inversion, overlapping inversion, clipping, alpha and
+  following ordinary meshes by exact readback on WARP and an owned offscreen
+  hardware device. Hardware creation failure reports an explicit skip; shader,
+  draw and pixel failures after creation fail the test.
 
-No public API or device ownership changes. Upstream buffer/texture upload and
-blending behavior otherwise remain unchanged. The existing context-zoom workaround
+The public marker is additive; native device ownership APIs are unchanged.
+Upstream buffer/texture upload and normal blending otherwise remain unchanged.
+The existing context-zoom workaround
 in towavue's runtime wrapper is still required.
 
 Run `cargo test -p egui-directx11 --lib --locked --offline` from the repository root.
-WARP validation does not qualify physical GPU drivers or mixed-DPI window behavior.
+Offscreen validation does not qualify interactive window or mixed-DPI behavior.

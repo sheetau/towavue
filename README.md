@@ -4,7 +4,7 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
-動画の下のSeekバーを上へドラッグするとtimelineが開きます。横へ動かし始めた場合は通常のSeekを続け、開閉はT／View menu／command paletteでも操作できます。音声timelineは全画面でも常時表示します。timeline上の横ドラッグで時間範囲を選択し、Deleteで選択部分を除去して前後をつなぎ、Ctrl+Yで選択部分だけを残せます。再生ヘッドのドラッグ・クリックはSeek、Ctrl+Aは時間全選択、I／Oは選択の開始／終了です。選択自体は編集ではなく、削除・切り抜きはUndo/Redo可能で元ファイルを変更しません。音量線の縦ドラッグで選択範囲（未選択なら全体）の音量を0～200%へ変更し、Alt＋選択範囲内の横ドラッグで長さを伸縮できます。Tabで音量・選択長へfocusして左右／Home／Endでも調整できます。Shift＋Spaceで選択範囲を再生し、Spaceで一時停止・再開、Escapeで通常範囲へ戻れます。選択末尾では次曲へ進まず停止し、選択外へのSeekや時間編集でも範囲再生を解除します。選択枠の描画や操作全体の仕上げは改善途中です。
+動画の下のSeekバーを上へドラッグするとtimelineが開きます。横へ動かし始めた場合は通常のSeekを続け、開閉はT／View menu／command paletteでも操作できます。音声timelineは全画面でも常時表示します。timeline上の横ドラッグで時間範囲を選択し、Deleteで選択部分を除去して前後をつなぎ、Ctrl+Yで選択部分だけを残せます。再生ヘッドのドラッグ・クリックはSeek、Ctrl+Aは時間全選択、I／Oは選択の開始／終了です。選択自体は編集ではなく、削除・切り抜きはUndo/Redo可能で元ファイルを変更しません。音量線の縦ドラッグで選択範囲（未選択なら全体）の音量を0～200%へ変更し、Alt＋選択範囲内の横ドラッグで長さを伸縮できます。Tabで音量・選択長へfocusして左右／Home／Endでも調整できます。Shift＋Spaceで選択範囲を再生し、Spaceで一時停止・再開、Escapeで通常範囲へ戻れます。選択末尾では次曲へ進まず停止し、選択外へのSeekや時間編集でも範囲再生を解除します。画像・動画・時間選択の枠は背景を反転する1物理pxの線へ揃え、選択外の暗幕と見た目のつまみを除きました。辺のドラッグ・数値操作は維持しています。通常ウィンドウと混在DPIを含む操作全体の仕上げは改善途中です。
 
 **M7: Advanced presentation and interactionまで完了しています。** M6までの閲覧・再生・非破壊編集基盤に、非同期waveform／thumbnail cache、timeline、メディア別grid menu、window外tab detach、hardware encode優先とfallback、HDR color-space能力判定を追加しました。source fileは直接変更せず、フォルダー内の移動順は同じフォルダーを開いているExplorerの実際のSort By状態を優先し、Explorerが閉じている場合もShell viewが解決した保存状態またはfolder templateを利用します。
 

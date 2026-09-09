@@ -40,6 +40,9 @@ pub fn bar() -> egui::Frame {
 }
 
 pub fn modal_heading(ui: &mut Ui, title: &str) {
+    if ui.ctx().content_rect().height() < 200.0 {
+        ui.spacing_mut().item_spacing.y = 2.0;
+    }
     ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
         node.set_role(egui::accesskit::Role::Dialog);
         node.set_label(title);
@@ -48,53 +51,45 @@ pub fn modal_heading(ui: &mut Ui, title: &str) {
     ui.heading(title);
 }
 
-pub fn button(ui: &mut Ui, glyph: &str, label: &str) -> egui::Response {
-    let painted = matches!(glyph, "≋" | "◫" | "Ⅱ");
+#[derive(Clone, Copy)]
+pub enum Icon {
+    Close,
+    Reading,
+    Minimize,
+    Maximize,
+    Restore,
+    CloseWindow,
+    Pause,
+    Play,
+    Waveform,
+    ExitFullscreen,
+}
+
+impl Icon {
+    pub fn text(self) -> egui::RichText {
+        let glyph = match self {
+            Self::Close => '\u{ea76}',
+            Self::Reading => '\u{eaa4}',
+            Self::CloseWindow => '\u{eab8}',
+            Self::Maximize => '\u{eab9}',
+            Self::Minimize => '\u{eaba}',
+            Self::Restore => '\u{eabb}',
+            Self::Pause => '\u{ead1}',
+            Self::Play => '\u{eb2c}',
+            Self::Waveform => '\u{eb31}',
+            Self::ExitFullscreen => '\u{eb4d}',
+        };
+        egui::RichText::new(glyph).font(crate::fonts::icon_font())
+    }
+}
+
+pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     let response = ui
-        .add_sized(
-            [28.0, 24.0],
-            egui::Button::new(egui::RichText::new(if painted { "" } else { glyph }).size(16.0))
-                .frame(false),
-        )
+        .add_sized([28.0, 24.0], egui::Button::new(icon.text()).frame(false))
         .on_hover_text(label);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
-    if painted {
-        let center = response.rect.center();
-        let color = if response.hovered() || response.has_focus() {
-            FOREGROUND
-        } else {
-            MUTED
-        };
-        let stroke = Stroke::new(1.0, color);
-        if glyph == "≋" {
-            for index in 0..7 {
-                let x = center.x - 6.0 + index as f32 * 2.0;
-                let height = [2.0, 4.0, 6.0, 3.0, 5.0, 4.0, 2.0][index];
-                ui.painter().line_segment(
-                    [
-                        egui::pos2(x, center.y - height),
-                        egui::pos2(x, center.y + height),
-                    ],
-                    stroke,
-                );
-            }
-        } else if glyph == "Ⅱ" {
-            for x in [-3.0, 3.0] {
-                ui.painter().line_segment(
-                    [center + egui::vec2(x, -5.0), center + egui::vec2(x, 5.0)],
-                    Stroke::new(2.0, color),
-                );
-            }
-        } else {
-            let rect = Rect::from_center_size(center, egui::vec2(14.0, 10.0));
-            ui.painter()
-                .rect_stroke(rect, 1.0, stroke, egui::StrokeKind::Inside);
-            ui.painter()
-                .line_segment([rect.center_top(), rect.center_bottom()], stroke);
-        }
-    }
     response
 }
 

@@ -17,7 +17,7 @@
 |---|---|---|
 | U01 | ネイティブ角丸・境界・caption controls、重くないwindow drag | 未完。現状はdecorationsなし＋egui controls。runtime内のnon-client境界設計と通常／最大化／fullscreen／DPI／Snapを確認する |
 | U02 | modalのnative利用をコード量・操作性で判断 | 要照合。通常egui、graphics故障時native。guardと入力・focus・保存取消を維持して判断を記録する |
-| U03 | Codicon、Figtree＋日本語UI font、数字の等幅 | 未完。現在は既定font＋Windows日本語fallbackと手描き／文字glyph。参照アプリのasset・ライセンス・tabular figuresを確認する |
+| U03 | Codicon、Figtree＋日本語UI font、数字の等幅 | 主対応済み。monapadのFigtree／Monaco Codiconを同梱、既存tnum字形を再生成可能な派生fontへ固定。Yu Gothic UI Regularのfaceを優先し、glyph・等幅・UI配置と実日本語画面を確認。今後追加する操作のiconとnative caption後の最終照合は継続 |
 | U04 | grayscale配色、barの2境界、logo／tabの中央揃え・左寄せ・一定padding | 一部対応。基本バー・共通widget状態色・clear色、logo／tab中央と左10px余白、timeline上へ移る2境界を実装・検証。overlay固有色／全media状態での最終照合、font/icon変更後の配置確認は残る |
 | U05 | 重い保存等の進捗はtoolbar下境界、軽い画像移動で点滅させない | 未完。現在はexport window／一時status。実際の進捗・取消・失敗との整合が必要 |
 | U06 | Welcome tab常在、Open file/folderと最近開いたfile | 一部実装。Welcome表示・Openは存在、recent永続化とtab identityは未完。履歴はpath参照に限定し未保存backupを加えない |
@@ -70,6 +70,14 @@ ownerの最新の明示指示により、16:48のcheckpoint後の待機指定は
 - 通常release 476aa84cのWindows 11実windowで、logo／tab label／close／window controlsのscreen中心yはすべて68（window内16）。背景RGB=(0,0,0)、active tab／title下境界=(24,24,24)、hover=(76,76,76)をPNG画素で確認。960×576・400×576、menu呼出し、palette検索／Escapeを確認した。
 - 生成H.264動画のTでtimelineを表示／解除。title境界はy=31、timeline上境界はy=450で#181818、旧status境界のy=545..547は黒。解除後は元のseek位置へ戻る。timeline hover thumbnailとtrim gripはまだ既存のままで、V01／V03の完了とはしない。
 - 両trialは正常終了0、生成PNG／MP4のhashは不変。証拠はignored `target/tmp/image-viewport-20260909/chrome-after/` と `chrome-timeline/`。実OS混在DPI・native captionは未検証であり、残件を完了扱いにしない。
+
+## U03 font／iconの検証実績（2026-09-09 17:24 JST）
+
+- monapadのFigtree Regular 1.000とMonaco 0.55.1のCodiconを元のhashで固定。Figtreeの既存tnum glyphへ数字cmapだけを変更し、fontTools 4.59.2の再生成／byte一致とadvance 623を検証。元file・派生file・ライセンス・変更説明をassetsへ保持し、通常build時のdownloadやfont処理を不要にした。
+- WindowsのYuGothM.ttcはface 0がYu Gothic Medium、face 1がYu Gothic UI Regular。後者を明示して選択する。日本語不足・Codicon未登録を隠さず、OS fontなしでも同梱font／iconを使える構成を回帰で確認。Hiragino Sans等の非標準fontを追加取得しない。
+- 固定eguiのhas_glyphはreplacementと同じfaceに属する実在glyphもfalseにするため、family順変更後の日本語testは実glyphのatlas領域が空でなくreplacementと異なることへ照合した。元ttcのcmapにも対象13文字が存在する。11／12／14／20pxで数字幅と時刻文字列幅の一致、使用する10 iconの収録を確認。
+- appのheadless UI testも同じ同梱fontへ切り替えた。新しい行高で240×150の確認見出しが1pxはみ出すケースを検出し、200px未満の確認画面の縦間隔を2pxへ詰めてbutton操作まで再検証。fullscreenの消えるclose glyphの期待値もCodiconへ更新。M0全285 tests通過、Clippy／format通過、実機依存3 testsはignored。
+- 通常release 442f37daで生成「日本語画像-0123456789.png」を表示。960×576／400×576、日本語名、Codicon、menu／palette、R→close確認→Escape Cancel→Undoを確認し、原本hash不変・正常終了0。中心yは従来のwindow内16を保持。証拠はignored `target/tmp/image-viewport-20260909/font-after/`。native caption・背景tab session等は未完のまま継続する。
 
 ## I01検証実績（2026-09-09 16:35 JST）
 

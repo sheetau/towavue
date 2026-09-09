@@ -2352,7 +2352,11 @@ where
                                         rect.max,
                                     );
                                     let close = tab_ui
-                                        .put(close_rect, egui::Button::new("×").frame(false))
+                                        .put(
+                                            close_rect,
+                                            egui::Button::new(chrome::Icon::Close.text())
+                                                .frame(false),
+                                        )
                                         .on_hover_text("Close tab");
                                     if response.hovered() || close.hovered() {
                                         ui.painter().set(
@@ -2443,19 +2447,27 @@ where
                     } else if response.drag_started() {
                         actions.push(UiAction::DragWindow);
                     }
-                    if chrome::button(ui, "−", "Minimize").clicked() {
+                    if chrome::button(ui, chrome::Icon::Minimize, "Minimize").clicked() {
                         actions.push(UiAction::Minimize);
                     }
                     let maximized = self
                         .window
                         .as_ref()
                         .is_some_and(|window| window.is_maximized());
-                    if chrome::button(ui, if maximized { "▣" } else { "□" }, "Maximize / restore")
-                        .clicked()
+                    if chrome::button(
+                        ui,
+                        if maximized {
+                            chrome::Icon::Restore
+                        } else {
+                            chrome::Icon::Maximize
+                        },
+                        "Maximize / restore",
+                    )
+                    .clicked()
                     {
                         actions.push(UiAction::Maximize);
                     }
-                    if chrome::button(ui, "×", "Close window").clicked() {
+                    if chrome::button(ui, chrome::Icon::CloseWindow, "Close window").clicked() {
                         actions.push(UiAction::CloseWindow);
                     }
                 });
@@ -2682,7 +2694,7 @@ where
                     if self.fullscreen {
                         let response = chrome::button(
                             ui,
-                            "▣",
+                            chrome::Icon::ExitFullscreen,
                             &self.command_hint(CommandId::ToggleFullscreen, "Exit fullscreen"),
                         );
                         if self.fullscreen_controls_focus_requested && response.enabled() {
@@ -2696,7 +2708,11 @@ where
                         let playing = self.state == PlaybackState::Playing;
                         if chrome::button(
                             ui,
-                            if playing { "Ⅱ" } else { "▶" },
+                            if playing {
+                                chrome::Icon::Pause
+                            } else {
+                                chrome::Icon::Play
+                            },
                             &self.command_hint(
                                 CommandId::TogglePause,
                                 if playing { "Pause" } else { "Play / replay" },
@@ -2720,7 +2736,7 @@ where
                         );
                         if chrome::button(
                             ui,
-                            "≋",
+                            chrome::Icon::Waveform,
                             &self.command_hint(CommandId::ToggleTimeline, "Waveform timeline"),
                         )
                         .clicked()
@@ -2744,7 +2760,7 @@ where
                     } else if self.media_kind == Some(MediaKind::Image) {
                         if chrome::button(
                             ui,
-                            "◫",
+                            chrome::Icon::Reading,
                             &self.command_hint(CommandId::ToggleReadingMode, "Reading mode"),
                         )
                         .clicked()
@@ -6000,7 +6016,7 @@ mod tests {
             generation: 1,
             captured_at: std::time::SystemTime::now(),
         });
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
         let popup_active = std::cell::Cell::new(false);
@@ -6119,7 +6135,7 @@ mod tests {
             .or_default()
             .push(EditOperation::RotateClockwise, MediaKind::Image);
         let history = app.edits[&tab].clone();
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         let frame = |app: &mut Application<_>, events| {
             let mut actions = Vec::new();
@@ -6242,7 +6258,7 @@ mod tests {
 
     #[test]
     fn accessibility_activation_and_actions_reach_existing_welcome_commands() {
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let mut state = egui_winit::State::new(
             context.clone(),
             egui::ViewportId::ROOT,
@@ -6313,7 +6329,7 @@ mod tests {
     #[test]
     fn accessibility_names_the_painted_menu_button() {
         let app = Application::new(None, |_| {}).expect("headless application");
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         let output = context.run_ui(egui::RawInput::default(), |ui| {
             app.draw_top_bar(ui, &mut Vec::new());
@@ -6334,7 +6350,7 @@ mod tests {
             return;
         };
         let app = Application::new(None, |_| {}).expect("headless application");
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         let frame = |events| {
             let mut actions = Vec::new();
@@ -6424,7 +6440,7 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         app.ui_context = Some(context.clone());
         let frame = |app: &mut Application<_>, events| {
@@ -6570,7 +6586,7 @@ mod tests {
 
     #[test]
     fn accessibility_output_rejects_removed_focus_without_changing_live_nodes() {
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         let removed = egui::Id::new("removed-menu-item");
         let mut output = context.run_ui(egui::RawInput::default(), |ui| {
@@ -6614,7 +6630,7 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         app.ui_context = Some(context.clone());
         let path = root.join("image.png");
@@ -7086,7 +7102,7 @@ mod tests {
         app.media_duration = Some(Duration::from_secs(10));
         app.state = PlaybackState::Paused;
         app.timeline_open = true;
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         app.ui_context = Some(context.clone());
         let frame = |app: &mut Application<_>, events| {
@@ -7309,7 +7325,7 @@ mod tests {
         let mut clock = PlaybackClock::new(MediaTime::from_nanoseconds(2_000_000_000), 1.0);
         clock.paused_at = Some(clock.wall_anchor);
         app.clock = Some(clock);
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         app.ui_context = Some(context.clone());
         let frame = |app: &mut Application<_>, events, disabled| {
@@ -7524,7 +7540,7 @@ mod tests {
                     kind: MediaKind::Audio,
                 },
             );
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         app.ui_context = Some(context.clone());
         let frame = |app: &mut Application<_>, events| {
@@ -7623,7 +7639,7 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
         for interruption in 0..8 {
-            let context = egui::Context::default();
+            let context = fonts::test_context();
             app.ui_context = Some(context.clone());
             app.timeline_open = true;
             let frame = |app: &mut Application<_>, events, focused, disabled| {
@@ -7748,7 +7764,7 @@ mod tests {
                 egui::PointerButton::Extra2,
             ] {
                 for drag in [false, true] {
-                    let context = egui::Context::default();
+                    let context = fonts::test_context();
                     let mut frame = |events| {
                         let mut actions = Vec::new();
                         let _ = context.run_ui(
@@ -7844,7 +7860,7 @@ mod tests {
         let history = app.edits[&tab].clone();
         let position = app.current_position();
         let generation = app.generation;
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let mut frame = |size, events| {
             let mut actions = Vec::new();
             let _ = context.run_ui(
@@ -7913,7 +7929,7 @@ mod tests {
         app.path = Some(root.join("c.png"));
         app.media_kind = Some(MediaKind::Image);
         app.state = PlaybackState::Paused;
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         let frame = |app: &mut Application<_>, events| {
             let mut actions = Vec::new();
@@ -8039,7 +8055,7 @@ mod tests {
             (egui::pos2(-20.0, 90.0), false, Some(UiAction::DetachTab(a))),
         ] {
             app.tabs = original.clone();
-            let context = egui::Context::default();
+            let context = fonts::test_context();
             let button = |pressed, pos| egui::Event::PointerButton {
                 pos,
                 button: egui::PointerButton::Primary,
@@ -8117,7 +8133,7 @@ mod tests {
                     app.tabs.activate(first);
                     app.timeline_open = timeline;
                     app.media_kind = Some(MediaKind::Video);
-                    let context = egui::Context::default();
+                    let context = fonts::test_context();
                     context.enable_accesskit();
                     context.global_style_mut(chrome::style);
                     let mut output = egui::FullOutput::default();
@@ -8231,7 +8247,7 @@ mod tests {
             })
             .collect();
         let generation = app.media_generation;
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.global_style_mut(crate::chrome::style);
         let time = std::cell::Cell::new(0.0);
         let frame = |app: &Application<_>, width, events| {
@@ -8330,7 +8346,7 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
-        app.ui_context = Some(egui::Context::default());
+        app.ui_context = Some(fonts::test_context());
         app.fullscreen = true;
         app.state = PlaybackState::Paused;
         for kind in [
@@ -8486,7 +8502,7 @@ mod tests {
             (3, false, egui::Key::Enter, GuardDecision::Cancel),
             (1, true, egui::Key::Space, GuardDecision::Cancel),
         ] {
-            let context = egui::Context::default();
+            let context = fonts::test_context();
             let run = |events| {
                 let mut actions = Vec::new();
                 let _ = context.run_ui(
@@ -8536,7 +8552,7 @@ mod tests {
         ) else {
             return;
         };
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         let mut app = Application::new(None, |_| {}).expect("headless application");
         app.path = Some(PathBuf::from(format!(
@@ -8701,7 +8717,7 @@ mod tests {
         ) else {
             return;
         };
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let mut app = Application::new(None, |_| {}).expect("headless application");
         std::fs::write(root.join("image.png"), []).expect("media placeholder");
         app.open_external(root.join("image.png"), false);
@@ -8840,7 +8856,7 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         app.ui_context = Some(context.clone());
         let path = root.join("image.png");
         app.tabs.open_new(path.clone(), MediaKind::Image);
@@ -8963,7 +8979,7 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         app.ui_context = Some(context.clone());
         app.fullscreen = true;
         app.media_kind = Some(MediaKind::Image);
@@ -9210,7 +9226,7 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let path = root.join("image.png");
         app.path = Some(path.clone());
         app.media_kind = Some(MediaKind::Image);
@@ -9252,7 +9268,7 @@ mod tests {
                     |ui| app.draw_ui(ui, &mut Vec::new()),
                 );
             }
-            let has_close = output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "×"));
+            let has_close = output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "\u{eab8}"));
             assert_eq!(has_close, !fullscreen);
             assert_eq!(app.fullscreen_controls_visible, controls);
             let image_rect = output
@@ -9290,7 +9306,7 @@ mod tests {
                     ([240, 144], 96.0),
                     ([24, 400], 96.0),
                 ] {
-                    let context = egui::Context::default();
+                    let context = fonts::test_context();
                     context.set_pixels_per_point(pixels_per_point);
                     context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
                     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, screen_size);
@@ -9402,7 +9418,7 @@ mod tests {
             height: 1,
             rgba: vec![255; 4],
         };
-        app.ui_context = Some(egui::Context::default());
+        app.ui_context = Some(fonts::test_context());
         for result in [Err("old failure".into()), Ok(preview.clone())] {
             app.handle_app_event(AppEvent::Thumbnail(
                 path.clone(),
@@ -9483,7 +9499,7 @@ mod tests {
             generation: 1,
             captured_at: std::time::SystemTime::now(),
         });
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
         let mut time = 0.0;
         let mut draw = |app: &mut Application<_>, events| {
@@ -9625,7 +9641,7 @@ mod tests {
                     app.shortcuts
                         .set(command, binding.parse().expect("custom binding"));
                 }
-                let context = egui::Context::default();
+                let context = fonts::test_context();
                 context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
                 app.media_duration = Some(Duration::from_secs(30));
                 let pos = egui::pos2(x, 284.0);
@@ -9685,7 +9701,7 @@ mod tests {
         app.path = Some(root.join("audio.wav"));
         app.media_kind = Some(MediaKind::Audio);
         for width in [240.0, 480.0, 960.0] {
-            let context = egui::Context::default();
+            let context = fonts::test_context();
             let mut frame = |events| {
                 let mut actions = Vec::new();
                 let output = context.run_ui(
@@ -9796,7 +9812,7 @@ mod tests {
         let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
         app.path = Some(root.join("audio.wav"));
         app.media_kind = Some(MediaKind::Audio);
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let point = egui::pos2(100.0, 100.0);
         let wheel = |unit, delta, modifiers| egui::Event::MouseWheel {
             unit,
@@ -10317,7 +10333,7 @@ mod tests {
         app.media_kind = Some(MediaKind::Image);
         app.path = Some(root.join("image.png"));
         app.state = PlaybackState::Paused;
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         app.ui_context = Some(context.clone());
         let frame = |app: &mut Application<_>, events, focused| {
@@ -10438,7 +10454,7 @@ mod tests {
             generation: 1,
             captured_at: std::time::SystemTime::now(),
         });
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let frame = |app: &mut Application<_>, events, focused| {
             let mut actions = Vec::new();
             let _ = context.run_ui(
@@ -10537,7 +10553,7 @@ mod tests {
         let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
         app.path = Some(path);
         app.media_kind = Some(MediaKind::Image);
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         app.ui_context = Some(context.clone());
         let focus_button = || {
             let _ = context.run_ui(egui::RawInput::default(), |ui| {
@@ -10640,7 +10656,7 @@ mod tests {
             app.pending_guard = None;
         }
         app.filmstrip_open = false;
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.memory_mut(|memory| memory.request_focus(egui::Id::new("focused control")));
         app.ui_context = Some(context);
         assert!(
@@ -10864,7 +10880,7 @@ mod tests {
             generation: 1,
             captured_at: std::time::SystemTime::now(),
         });
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         app.ui_context = Some(context.clone());
         let popup = std::cell::Cell::new(false);
@@ -10979,7 +10995,7 @@ mod tests {
             generation: 1,
             captured_at: std::time::SystemTime::now(),
         });
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         app.ui_context = Some(context.clone());
         let frame = |app: &mut Application<_>, events| {
@@ -11122,7 +11138,7 @@ mod tests {
         let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
         app.path = Some(path);
         app.media_kind = Some(MediaKind::Image);
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         context.enable_accesskit();
         app.ui_context = Some(context.clone());
         let mut time = 0.0;
@@ -11226,7 +11242,7 @@ mod tests {
                 egui::vec2(320.0, 200.0),
             ] {
                 app.grid_open = true;
-                let context = egui::Context::default();
+                let context = fonts::test_context();
                 let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
                 let mut output = egui::FullOutput::default();
                 for frame in 0..5 {
@@ -11299,7 +11315,7 @@ mod tests {
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
         app.media_kind = Some(MediaKind::Image);
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let mut time = 0.0;
         for open in [false, true, false] {
             app.grid_open = open;
@@ -11989,7 +12005,7 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let _ = context.run_ui(Default::default(), |ui| {
             ui.label("Recovery glyphs");
         });
@@ -12054,7 +12070,7 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         app.image = Some(
             app.image_texture_cache
                 .load(
@@ -12227,7 +12243,7 @@ mod tests {
 
     #[test]
     fn animation_catches_up_after_a_long_deadline_gap() {
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let decoded = Arc::new(DecodedImage {
             format: "GIF",
             frames: [10, 20, 30]
@@ -12260,7 +12276,7 @@ mod tests {
 
     #[test]
     fn animation_deadlines_match_framewise_advancement_at_cycle_boundaries() {
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let decoded = Arc::new(DecodedImage {
             format: "GIF",
             frames: [10_000_001, 20_000_003, 30_000_007]
@@ -12442,7 +12458,7 @@ mod tests {
             let _ = notify.send(event);
         })
         .expect("headless application");
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         app.ui_context = Some(context.clone());
         app.tabs.open_new(broken.clone(), MediaKind::Image);
         app.folder_snapshot = Some(FolderSnapshot {
@@ -12524,7 +12540,7 @@ mod tests {
 
     #[test]
     fn image_texture_cache_reuses_only_shared_static_decodes_within_its_limits() {
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let make_image = |value| {
             Arc::new(DecodedImage {
                 format: "PNG",
@@ -12617,7 +12633,7 @@ mod tests {
 
     #[test]
     fn image_texture_creation_obeys_configured_device_limit_without_panicking() {
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let decoded = DecodedImage {
             format: "PNG",
             frames: vec![towavue_runtime_windows::DecodedImageFrame {
@@ -12667,7 +12683,7 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let make_page = |width, height| {
             ImagePresentation::from_decoded(
                 &context,
@@ -13208,7 +13224,7 @@ mod tests {
         let end = egui::pos2(300.0, 300.0);
         for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary] {
             for interruption in 0..3 {
-                let context = egui::Context::default();
+                let context = fonts::test_context();
                 app.ui_state = Some(egui_winit::State::new(
                     context.clone(),
                     egui::ViewportId::ROOT,
@@ -13336,7 +13352,7 @@ mod tests {
         let end = egui::pos2(300.0, 300.0);
         for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary] {
             for blocked in 0..5 {
-                let context = egui::Context::default();
+                let context = fonts::test_context();
                 app.image_view.selection = None;
                 app.image_view.pan = (10.0, 20.0);
                 let event = |pressed, pos| egui::Event::PointerButton {
@@ -13444,7 +13460,7 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
         for interruption in 0..5 {
-            let context = egui::Context::default();
+            let context = fonts::test_context();
             app.image_view.pan = (10.0, 20.0);
             let frame = |app: &mut Application<_>, events, focused| {
                 let _ = context.run_ui(
@@ -13533,7 +13549,7 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
         for interruption in 0..9 {
-            let context = egui::Context::default();
+            let context = fonts::test_context();
             app.image_view.selection = original;
             let frame = |app: &mut Application<_>, events, focused| {
                 let _ = context.run_ui(
@@ -13682,7 +13698,7 @@ mod tests {
                         Some(rectangle(100, 100, 200, 200)),
                     ),
                 ] {
-                    let context = egui::Context::default();
+                    let context = fonts::test_context();
                     app.media_kind = Some(kind);
                     app.view_drag = None;
                     app.image_view.selection = initial.map(|crop| crop.unit_rect((400, 400)));
@@ -13753,7 +13769,7 @@ mod tests {
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
         app.media_kind = Some(MediaKind::Image);
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0));
         let button = |pressed, at| egui::Event::PointerButton {
             pos: egui::pos2(at, at),
@@ -13896,7 +13912,7 @@ mod tests {
             app.seek_latencies.push(Duration::from_millis(20));
             app.drift_samples.push(Duration::from_millis(2));
             app.image_view.zoom = towavue_core::ZoomMode::Custom(2.5);
-            let context = egui::Context::default();
+            let context = fonts::test_context();
             let texture = context.load_texture(
                 "closed preview",
                 egui::ColorImage::new([1, 1], vec![Color32::WHITE]),
@@ -14016,7 +14032,7 @@ mod tests {
         assert_ne!(app.media_generation, old);
         app.status_message = None;
         app.waveform_loading = true;
-        app.ui_context = Some(egui::Context::default());
+        app.ui_context = Some(fonts::test_context());
         let preview = towavue_runtime_windows::PreviewImage {
             width: 1,
             height: 1,
@@ -14185,7 +14201,7 @@ mod tests {
         app.media_kind = Some(MediaKind::Video);
         app.fail("Unsupported orientation fixture".into());
         app.status_message = None;
-        let context = egui::Context::default();
+        let context = fonts::test_context();
         for fullscreen in [false, true] {
             app.fullscreen = fullscreen;
             let output = context.run_ui(

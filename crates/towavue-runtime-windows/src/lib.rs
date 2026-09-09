@@ -8,6 +8,7 @@ mod dialog;
 mod export;
 mod fonts;
 mod image;
+mod image_clipboard;
 mod image_loader;
 mod input;
 mod latest_task;
@@ -37,6 +38,7 @@ pub use dialog::{
 pub use export::{ExportError, ExportEvent, ExportJob, ExportOutcome, ExportRequest, export_media};
 pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
+pub use image_clipboard::{ImageCopyJob, ImageCopyRequest};
 pub use image_loader::{ImageLoader, LoadedImages};
 pub use input::configure_mouse_input;
 pub use latest_task::LatestTask;

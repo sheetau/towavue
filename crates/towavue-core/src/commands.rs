@@ -69,6 +69,7 @@ pub enum CommandId {
     ReopenClosedTab,
     CopyFilePath,
     RevealFile,
+    CopyImage,
 }
 
 impl CommandId {
@@ -137,6 +138,7 @@ impl CommandId {
             Self::NextImage => "next_image",
             Self::FirstImage => "first_image",
             Self::LastImage => "last_image",
+            Self::CopyImage => "copy_image",
         }
     }
 }
@@ -515,6 +517,11 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::ReopenClosedTab, "Reopen closed tab", &[]),
     command(CommandId::CopyFilePath, "Copy file path", ANY_MEDIA),
     command(CommandId::RevealFile, "Reveal in File Explorer", ANY_MEDIA),
+    command(
+        CommandId::CopyImage,
+        "Copy image or selection",
+        &[MediaKind::Image],
+    ),
 ];
 
 const fn command(

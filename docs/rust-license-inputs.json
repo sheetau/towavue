@@ -1,6 +1,6 @@
 {
   "scope": "Windows x86_64-pc-windows-msvc normal and build dependency closure of towavue-app; excludes dev-only edges; not a linked-runtime SBOM or completed legal review",
-  "cargo_lock_sha256": "482d928bc732db194d3eef577e95f92c7239c9815720c0bfe5948d2868863e3d",
+  "cargo_lock_sha256": "5f4a8cff2195cf57db5d873a8be0c10f4936f507f0b66f7ce63b3ce3b1d3014b",
   "method": "cargo metadata --locked --offline --format-version 1 --filter-platform x86_64-pc-windows-msvc; traverse normal/build edges from towavue-app. All 146 cached .crate archive SHA256 values match Cargo.lock. Raw tar entry bytes match 264 local root notice files, four font notices and 13 .cargo_vcs_info.json files. Root notice discovery is not exhaustive notice coverage.",
   "packages": [
     {"name":"accesskit","version":"0.24.1","declared_license":"MIT OR Apache-2.0","crate_sha256":"d3b7f7f85a7e5f68090000ed7622545829afd484d210358702ae4cb97dd0c320","local_root_notice_files":[]},

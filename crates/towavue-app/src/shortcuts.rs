@@ -75,6 +75,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::Undo, "Ctrl+Z"),
         (CommandId::Redo, "Ctrl+Shift+Z"),
         (CommandId::ApplyCrop, "Ctrl+Y"),
+        (CommandId::CopyImage, "Ctrl+C"),
         (CommandId::RotateClockwise, "R"),
         (CommandId::RotateCounterclockwise, "L"),
         (CommandId::FlipHorizontal, "H"),

@@ -2661,6 +2661,7 @@ version = "0.0.0"
 name = "towavue-runtime-windows"
 version = "0.0.0"
 dependencies = [
+ "arboard",
  "egui",
  "egui-directx11",
  "ffmpeg-next",

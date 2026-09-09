@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### 画像／選択範囲のclipboard copy（2026-09-09 22:12 JST）
+
+通常releasef2d6d61d、Windows 11の所有windowでCtrl+Cを実行し、clipboard PNGを全画素比較した。600×800の原画像、Rで回転した800×600、UIAでleft100／right650を指定した550×600 selectionは参照と完全一致。dirty状態・selectionを保持し、palette検索欄でCtrl+A／Ctrl+Cすると画像ではなく指定した文字列をcopyした。最後にUndoして正常終了0・stderr空、原PNGのhash5f24c4ff不変。生成mediaとcaptureはGit対象外。
+
+OS clipboardを書き換える次のtestは通常suiteではignoreする。明示実行し、alpha0／1／127／255を含むstraight RGBA16bytesが、worker終了後もPNG形式経由で完全一致することを確認した。
+
+```powershell
+cargo test -p towavue-runtime-windows image_clipboard_round_trip_preserves_transparent_rgba_after_worker_exit -- --ignored --nocapture
+```
+
+未読込画像はcopyせず案内し、同時copyは一件に限定する。生成RGBAは512 MiB以内だが、decoder保持・PNG encoder・OS clipboardを含むprocess全体のmemory上限ではない。アニメのframe番号をsnapshotする自動回帰はあるが、多数の外部貼付先・DIBV5だけを使う旧アプリ・大画像copy中の実終了matrixは未完。resize／resample／interpolationは別の残件。
+
 ### 読書中の編集禁止とfilled icon（2026-09-09 21:59 JST）
 
 通常release800bab26、Windows 11の所有windowでR→未保存→B不成立とdisabled読書button、Undo→B→読書状態を確認。Rは読書配置変更として働き、編集は作らない。別のclean画像を読書表示してから未保存tabへ戻ると、編集を保持してreadingがOffになる。別試行ではR→UndoでRedo可能な履歴を作り、B→Ctrl+Shift+Zではcleanを維持、Bで解除して同じRedoを入力するとdirtyになることを確認した。Ctrl+YはcropでありRedo試験には数えない。

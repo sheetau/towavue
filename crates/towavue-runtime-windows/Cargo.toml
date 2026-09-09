@@ -8,6 +8,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+arboard = { version = "=3.6.1", default-features = false, features = ["image-data"] }
 egui = "=0.35.0"
 egui-directx11 = "=0.13.0"
 ffmpeg-next = { version = "=9.0.0", default-features = false, features = [

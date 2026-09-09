@@ -166,6 +166,7 @@ enum AppEvent {
     LicenseGuideRevealed(std::io::Result<PathBuf>),
     FileRevealed(std::io::Result<PathBuf>),
     RecentFilesReady,
+    ImageCopied(Result<(u32, u32), String>),
     Export(ExportEvent),
     Playback(u64, PlaybackEvent),
     Duration(PathBuf, u64, Result<Duration, String>),
@@ -566,6 +567,7 @@ struct Application<N> {
     closed_tabs: VecDeque<PathBuf>,
     recent_files: Option<towavue_runtime_windows::RecentFiles>,
     recent_paths: Vec<PathBuf>,
+    image_copy: Option<towavue_runtime_windows::ImageCopyJob>,
     edits: BTreeMap<TabId, EditHistory>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
@@ -709,6 +711,7 @@ where
             closed_tabs: VecDeque::new(),
             recent_files: None,
             recent_paths: Vec::new(),
+            image_copy: None,
             edits: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
@@ -1432,6 +1435,13 @@ where
                     }
                     self.request_redraw();
                 }
+            }
+            AppEvent::ImageCopied(result) => {
+                self.image_copy = None;
+                self.set_status(match result {
+                    Ok((width, height)) => format!("Copied image {width} × {height} px"),
+                    Err(error) => format!("Could not copy image: {error}"),
+                });
             }
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(generation, event) if generation == self.media_generation => {
@@ -3766,6 +3776,26 @@ where
                 }
                 self.request_redraw();
             }
+            CommandId::CopyImage => {
+                if self.image_copy.is_some() {
+                    self.set_status("Image copy is already in progress".into());
+                    return;
+                }
+                let Some(request) = self.image_copy_request() else {
+                    self.set_status("Wait for the full image to load before copying".into());
+                    return;
+                };
+                let notify = Arc::clone(&self.notify);
+                match towavue_runtime_windows::ImageCopyJob::start(request, move |result| {
+                    notify(AppEvent::ImageCopied(result));
+                }) {
+                    Ok(job) => {
+                        self.image_copy = Some(job);
+                        self.set_status("Copying image…".into());
+                    }
+                    Err(error) => self.set_status(format!("Could not start image copy: {error}")),
+                }
+            }
             CommandId::ToggleCropPreview => {
                 if self.image_view.selection.is_some() {
                     self.image_view.crop_preview = !self.image_view.crop_preview;
@@ -3904,6 +3934,23 @@ where
                 });
             }
         }
+    }
+
+    fn image_copy_request(&self) -> Option<towavue_runtime_windows::ImageCopyRequest> {
+        let image = self.image.as_ref()?;
+        let frame = image.decoded.frames.get(image.frame_index)?;
+        let mut transform = self.visual_transform((frame.width, frame.height));
+        if !self.reading_mode
+            && let Some(selection) = self.image_view.selection
+        {
+            transform.crop(selection);
+        }
+        Some(towavue_runtime_windows::ImageCopyRequest {
+            image: Arc::clone(&image.decoded),
+            frame_index: image.frame_index,
+            source_uv: transform.uv,
+            size: (transform.size.0 as u32, transform.size.1 as u32),
+        })
     }
 
     fn crop_selection(&mut self, source_size: (u32, u32)) {
@@ -14373,6 +14420,79 @@ mod tests {
             Some(SelectionDrag::Left)
         ));
         assert!(selection_edge(egui::pos2(50.0, 50.0), image, selection).is_none());
+    }
+
+    #[test]
+    fn image_copy_snapshot_uses_edited_selection_not_zoom_or_preview_pixels() {
+        use towavue_runtime_windows::DecodedImageFrame;
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        let context = fonts::test_context();
+        let path = PathBuf::from("copy.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Image);
+        let decoded = Arc::new(DecodedImage {
+            format: "test",
+            frames: vec![
+                DecodedImageFrame {
+                    width: 4,
+                    height: 3,
+                    rgba: vec![31; 48],
+                    delay: Duration::ZERO,
+                },
+                DecodedImageFrame {
+                    width: 4,
+                    height: 3,
+                    rgba: vec![17; 48],
+                    delay: Duration::ZERO,
+                },
+            ],
+        });
+        app.image = Some(ImagePresentation {
+            decoded: Arc::clone(&decoded),
+            frame_index: 1,
+            next_frame_at: None,
+            texture: context.load_texture(
+                "copy-test",
+                color_image(&decoded.frames[0]),
+                TextureOptions::LINEAR,
+            ),
+        });
+        app.push_visual_edit(EditOperation::Crop(PixelCrop {
+            x: 1,
+            y: 0,
+            width: 2,
+            height: 3,
+        }));
+        app.push_visual_edit(EditOperation::RotateClockwise);
+        app.image_view.selection = Some(UnitRect {
+            min: UnitPoint { x: 0.0, y: 0.0 },
+            max: UnitPoint {
+                x: 2.0 / 3.0,
+                y: 1.0,
+            },
+        });
+        app.image_view.crop_preview = true;
+        app.image_view.zoom = ZoomMode::Custom(7.0);
+        let history = app.edits.clone();
+        let request = app.image_copy_request().expect("snapshot");
+        assert!(Arc::ptr_eq(&request.image, &decoded));
+        assert_eq!(request.frame_index, 1);
+        assert_eq!(request.size, (2, 2));
+        assert_eq!(request.source_uv[0], UnitPoint { x: 0.25, y: 1.0 });
+        assert!((request.source_uv[1].y - 1.0 / 3.0).abs() < 0.0001);
+        assert_eq!(app.edits, history);
+        assert_eq!(app.tabs.active().expect("tab").id, tab);
+        app.reading_mode = true;
+        assert_eq!(
+            app.image_copy_request().expect("reading active file").size,
+            (3, 2)
+        );
+        app.image = None;
+        assert!(
+            app.image_copy_request().is_none(),
+            "low resolution previews cannot be copied"
+        );
     }
 
     #[test]

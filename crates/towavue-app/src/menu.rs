@@ -24,6 +24,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         "Edit",
         &[
             &[Undo, Redo],
+            &[CopyImage],
             &[SelectAll, ApplyCrop, ClearSelection],
             &[
                 RotateClockwise,

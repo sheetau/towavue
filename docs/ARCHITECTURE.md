@@ -126,6 +126,12 @@ tab bar内のprimary dragは挿入位置だけを表示し、release時に一度
 
 active tabのidentity・bar内index・tab幅または表示幅が変わった場合は、そのtab全体が見えるまで必要最小限の横scrollを行う。同じ状態の描画では手動scrollを保持する。追従はUIのscroll状態だけを変え、media load・選択・編集・並べ替えを発生させない。
 
+### I05 image clipboard
+
+Copy image（Ctrl+C）はactive画像の現在frameを原寸で取得し、表示と同じ順序のcrop／90度回転／反転を反映する。通常画像にselectionがあれば、その編集後座標の領域だけをcopyする。zoom／pan／crop previewの表示倍率や低解像度previewはコピー画素へ適用しない。readingではactive画像だけを対象にし、隠れたselectionや見開き全体はcopyしない。文字入力のcopyは引き続き優先する。
+
+appは既存ImageTransformから整数出力寸法とsource UV、decode済み画像のArcとframe indexをsnapshotし、runtimeの一件のcopy workerへ渡す。workerでstraight RGBAを作り、PNG／DIBV5対応の既存固定arboardへ渡す。egui-winitのColor32画素直渡しによる透過色のpremultiply混同を避け、alphaを含む画素を保持する。処理中の追加copyはqueueせず案内し、失敗はstatusへ通知する。tab移動後も明示的に要求したsnapshotのcopyは完了できる。終了時は作成中の画素処理を取消・joinし、OSへのpublish開始後は完了を待つ。source、編集履歴、選択、再生位置、保存先を変更せず、copy結果を自動保存しない。
+
 ### H1 Welcome entry
 
 mediaがない時は中央の最大660 logical pxの左揃えcolumnへwordmark、START、Open file/folder、RECENT、drop案内をまとめる。狭いwindowでは余白を縮め、縦scrollで操作を残す。Openは既存CommandIdとnative pickerを使い、shortcut表示は現在のbindingsから求める。上部のWelcomeはU06で非mediaの安定したtab identityへ更新した。唯一のWelcomeのcloseはno-opで、初回Openでmedia tabへ置き換わる。recent履歴とpreviewの契約は下記U06に従い、session復元は追加しない。

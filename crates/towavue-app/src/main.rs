@@ -33,11 +33,11 @@ use towavue_core::{
     TabTarget, UnitPoint, UnitRect, ZoomMode, command_definitions,
 };
 use towavue_runtime_windows::{
-    AudioOutputEvent, DecodedImage, DialogError, ExportError, ExportEvent, ExportJob,
-    ExportRequest, FileDialogKind, FolderOrderProvider, FolderWatcher, FrameRenderer, ImageLoader,
-    LatestTask, PlaybackEvent, PlaybackSession, PreviewCache, PromptButtons, PromptResponse,
-    RenderError, canonical_shell_path, configure_mouse_input, cursor_position_in_window, pick_path,
-    reveal_license_guide, show_prompt,
+    AudioOutputEvent, CaptionAction, DecodedImage, DialogError, ExportError, ExportEvent,
+    ExportJob, ExportRequest, FileDialogKind, FolderOrderProvider, FolderWatcher, FrameRenderer,
+    ImageLoader, LatestTask, NativeCaption, PlaybackEvent, PlaybackSession, PreviewCache,
+    PromptButtons, PromptResponse, RenderError, canonical_shell_path, configure_mouse_input,
+    cursor_position_in_window, pick_path, reveal_license_guide, show_prompt,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -130,12 +130,8 @@ impl PlaybackClock {
 
 #[derive(Clone, PartialEq)]
 enum UiAction {
-    Minimize,
-    Maximize,
-    CloseWindow,
-    DragWindow,
-    ResizeWindow(winit::window::ResizeDirection),
     Command(CommandId),
+    NativeCaption(CaptionAction),
     ActivateTab(TabId),
     ReorderTab(TabId, usize),
     TrimEndpoint(TabId, EditOperation),
@@ -532,6 +528,7 @@ struct Application<N> {
     notify: Arc<N>,
     event_loop_proxy: Option<EventLoopProxy<AppEvent>>,
     window: Option<Arc<Window>>,
+    native_caption: Option<NativeCaption>,
     fullscreen: bool,
     fullscreen_controls_visible: bool,
     fullscreen_controls_focus_requested: bool,
@@ -661,6 +658,7 @@ where
             notify,
             event_loop_proxy: None,
             window: None,
+            native_caption: None,
             fullscreen: false,
             fullscreen_controls_visible: false,
             fullscreen_controls_focus_requested: false,
@@ -756,9 +754,10 @@ where
             .with_inner_size(LogicalSize::new(960, 576))
             .with_min_inner_size(LogicalSize::new(480, 300))
             .with_visible(false)
-            .with_decorations(false);
+            .with_decorations(true);
         let window = Arc::new(event_loop.create_window(attributes)?);
-        let mut renderer = FrameRenderer::new(&window)?;
+        let native_caption = NativeCaption::new(window.clone())?;
+        let mut renderer = FrameRenderer::with_native_caption(&native_caption)?;
         let size = window.inner_size();
         renderer.resize_surface(size.width, size.height)?;
         let context = egui::Context::default();
@@ -784,6 +783,7 @@ where
         );
         window.set_visible(true);
         self.window = Some(window);
+        self.native_caption = Some(native_caption);
         self.renderer = Some(renderer);
         self.ui_context = Some(context);
         self.ui_state = Some(state);
@@ -1398,11 +1398,17 @@ where
         let (Some(window), Some(context)) = (self.window.as_ref(), self.ui_context.clone()) else {
             return;
         };
-        let input = self
+        let mut input = self
             .ui_state
             .as_mut()
             .expect("UI state exists")
             .take_egui_input(window);
+        if let Some(caption) = &self.native_caption {
+            input.safe_area_insets = Some(egui::SafeAreaInsets(egui::epaint::MarginF32 {
+                top: caption.top_inset() / (window.scale_factor() as f32 * context.zoom_factor()),
+                ..Default::default()
+            }));
+        }
         let mut actions = Vec::new();
         let mut output = context.run_ui(input, |ui| {
             self.draw_ui(ui, &mut actions);
@@ -2194,11 +2200,11 @@ where
     }
 
     fn draw_top_bar(&self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        let window_rect = root.max_rect();
         let return_to_tab = root.ctx().data_mut(|data| {
             data.remove_temp::<bool>("filmstrip-return-tab".into())
                 .unwrap_or(false)
         });
-        let window_rect = root.max_rect();
         egui::Panel::top("tabs")
             .exact_size(chrome::TITLE_HEIGHT)
             .frame(chrome::bar())
@@ -2241,7 +2247,9 @@ where
                     });
                     menu.response.on_hover_text("towavue menu");
 
-                    let controls_width = 98.0;
+                    let controls_width = self.native_caption.as_ref().map_or(154.0, |caption| {
+                        caption.controls_width() / ui.ctx().pixels_per_point()
+                    });
                     let strip_width = (ui.available_width() - controls_width - 56.0).max(80.0);
                     let width = chrome::tab_width(strip_width, self.tabs.tabs().len());
                     egui::ScrollArea::horizontal()
@@ -2421,12 +2429,12 @@ where
                                 }
                             });
                         });
-                    let (drag_rect, response) = ui.allocate_exact_size(
+                    let (drag_rect, _) = ui.allocate_exact_size(
                         egui::vec2(
                             (ui.available_width() - controls_width).max(20.0),
                             chrome::TAB_HEIGHT,
                         ),
-                        egui::Sense::click_and_drag(),
+                        egui::Sense::hover(),
                     );
                     if self.tabs.tabs().is_empty() {
                         let welcome_rect = egui::Rect::from_min_size(
@@ -2442,58 +2450,19 @@ where
                             chrome::FOREGROUND,
                         );
                     }
-                    if response.double_clicked() {
-                        actions.push(UiAction::Maximize);
-                    } else if response.drag_started() {
-                        actions.push(UiAction::DragWindow);
-                    }
-                    if chrome::button(ui, chrome::Icon::Minimize, "Minimize").clicked() {
-                        actions.push(UiAction::Minimize);
-                    }
-                    let maximized = self
-                        .window
-                        .as_ref()
-                        .is_some_and(|window| window.is_maximized());
-                    if chrome::button(
-                        ui,
-                        if maximized {
-                            chrome::Icon::Restore
-                        } else {
-                            chrome::Icon::Maximize
-                        },
-                        "Maximize / restore",
-                    )
-                    .clicked()
-                    {
-                        actions.push(UiAction::Maximize);
-                    }
-                    if chrome::button(ui, chrome::Icon::CloseWindow, "Close window").clicked() {
-                        actions.push(UiAction::CloseWindow);
+                    if let Some(caption) = &self.native_caption {
+                        actions.extend(
+                            chrome::caption_accessibility(ui, &caption.accessible_buttons())
+                                .into_iter()
+                                .map(UiAction::NativeCaption),
+                        );
+                        caption.set_drag_region(
+                            ui.is_enabled()
+                                .then_some(drag_rect * ui.ctx().pixels_per_point()),
+                        );
                     }
                 });
             });
-        if !self
-            .window
-            .as_ref()
-            .is_some_and(|window| window.is_maximized())
-            && let Some(position) = root.input(|input| input.pointer.hover_pos())
-            && let Some(direction) = chrome::resize_edge(window_rect, position)
-        {
-            root.ctx().set_cursor_icon(match direction {
-                winit::window::ResizeDirection::North | winit::window::ResizeDirection::South => {
-                    egui::CursorIcon::ResizeVertical
-                }
-                winit::window::ResizeDirection::East | winit::window::ResizeDirection::West => {
-                    egui::CursorIcon::ResizeHorizontal
-                }
-                winit::window::ResizeDirection::NorthWest
-                | winit::window::ResizeDirection::SouthEast => egui::CursorIcon::ResizeNwSe,
-                _ => egui::CursorIcon::ResizeNeSw,
-            });
-            if root.input(|input| input.pointer.primary_pressed()) {
-                actions.push(UiAction::ResizeWindow(direction));
-            }
-        }
     }
 
     fn draw_grid_menu(&mut self, context: &egui::Context, actions: &mut Vec<UiAction>) {
@@ -3193,28 +3162,15 @@ where
             return;
         }
         match action {
-            UiAction::Minimize => {
-                if let Some(window) = &self.window {
-                    window.set_minimized(true);
-                }
-            }
-            UiAction::Maximize => {
-                if let Some(window) = &self.window {
-                    window.set_maximized(!window.is_maximized());
-                }
-            }
-            UiAction::CloseWindow => self.request_guarded(GuardedAction::Exit),
-            UiAction::DragWindow => {
-                if let Some(window) = &self.window {
-                    let _ = window.drag_window();
-                }
-            }
-            UiAction::ResizeWindow(direction) => {
-                if let Some(window) = &self.window {
-                    let _ = window.drag_resize_window(direction);
-                }
-            }
             UiAction::Command(command) => self.dispatch(command),
+            UiAction::NativeCaption(action) => {
+                if !self.fullscreen
+                    && let Some(caption) = &self.native_caption
+                    && let Err(error) = caption.invoke(action)
+                {
+                    self.set_status(format!("Could not perform window action: {error}"));
+                }
+            }
             UiAction::ActivateTab(id) => self.activate_tab(id),
             UiAction::ReorderTab(id, gap) => {
                 self.tabs.reorder(id, gap);
@@ -4516,7 +4472,10 @@ where
             self.fail("window was unavailable during graphics recovery".to_owned());
             return;
         };
-        let mut renderer = match FrameRenderer::new(window) {
+        let mut renderer = match self.native_caption.as_ref().map_or_else(
+            || FrameRenderer::new(window),
+            FrameRenderer::with_native_caption,
+        ) {
             Ok(renderer) => renderer,
             Err(error) => {
                 self.fail_graphics_recovery(
@@ -4808,6 +4767,9 @@ where
             return;
         }
         self.fullscreen = enabled;
+        if let Some(caption) = &self.native_caption {
+            caption.set_fullscreen(enabled);
+        }
         self.fullscreen_controls_visible = false;
         self.fullscreen_controls_focus_requested = false;
         self.fullscreen_controls_keyboard = false;
@@ -6181,7 +6143,7 @@ mod tests {
                     .iter()
                     .any(|(_, node)| node.label() == Some("Search commands"))
             );
-            for label in ["towavue menu", "Reading mode (B)", "Close window"] {
+            for label in ["towavue menu", "Reading mode (B)", "Close tab: image.png"] {
                 let (id, node) = tree
                     .nodes
                     .iter()
@@ -6233,7 +6195,7 @@ mod tests {
         );
         app.palette_open = false;
         for _ in 0..5 {
-            for label in ["Close window", "Cancel"] {
+            for label in ["Close tab: image.png", "Cancel"] {
                 let (tree, _) = frame(&mut app, vec![]);
                 let target = tree
                     .nodes
@@ -6249,7 +6211,7 @@ mod tests {
                 assert!(tree.nodes.iter().any(|(id, _)| *id == tree.focus));
                 assert_eq!(actions.len(), 1, "one {label} action per cycle");
                 app.handle_ui_action(actions[0].clone());
-                assert_eq!(app.pending_guard.is_some(), label == "Close window");
+                assert_eq!(app.pending_guard.is_some(), label == "Close tab: image.png");
                 assert!(!app.exit_requested);
                 assert_eq!(app.edits[&tab], history);
             }
@@ -6344,12 +6306,13 @@ mod tests {
 
     #[test]
     fn menu_escape_returns_to_logo_for_keyboard_reopening() {
-        let Some(_root) =
+        let Some(root) =
             isolated_test_root("tests::menu_escape_returns_to_logo_for_keyboard_reopening")
         else {
             return;
         };
-        let app = Application::new(None, |_| {}).expect("headless application");
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.tabs.open_new(root.join("image.png"), MediaKind::Image);
         let context = fonts::test_context();
         context.enable_accesskit();
         let frame = |events| {
@@ -8459,7 +8422,7 @@ mod tests {
             // Isolate first-run configuration without changing this test process's environment.
             let result =
                 std::process::Command::new(std::env::current_exe().expect("test executable"))
-                    .args(["--exact", test_name, "--nocapture"])
+                    .args(["--exact", test_name, "--nocapture", "--include-ignored"])
                     .env(TEST_ROOT, &root)
                     .env("APPDATA", root.join("config"))
                     .env("LOCALAPPDATA", root.join("local"))
@@ -9228,6 +9191,7 @@ mod tests {
         let mut app = Application::new(None, |_| {}).expect("headless application");
         let context = fonts::test_context();
         let path = root.join("image.png");
+        app.tabs.open_new(path.clone(), MediaKind::Image);
         app.path = Some(path.clone());
         app.media_kind = Some(MediaKind::Image);
         app.image = Some(
@@ -9268,8 +9232,8 @@ mod tests {
                     |ui| app.draw_ui(ui, &mut Vec::new()),
                 );
             }
-            let has_close = output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "\u{eab8}"));
-            assert_eq!(has_close, !fullscreen);
+            let has_tab = output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "\u{ea76}"));
+            assert_eq!(has_tab, !fullscreen);
             assert_eq!(app.fullscreen_controls_visible, controls);
             let image_rect = output
                 .shapes
@@ -12060,6 +12024,210 @@ mod tests {
         assert_eq!(image.frame_index, 1);
         assert_eq!(image.next_frame_at, deadline);
         assert!(app.reading_pages[0].is_err());
+    }
+
+    #[test]
+    #[ignore = "requires H264 D3D11VA, a Windows desktop and the default WASAPI endpoint (muted)"]
+    fn native_caption_graphics_recovery_preserves_image_and_video_state() {
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        fn present_video<N: Fn(AppEvent) + Send + Sync + 'static>(
+            app: &mut Application<N>,
+            notifications: &std::sync::mpsc::Receiver<AppEvent>,
+        ) {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                for event in notifications.try_iter() {
+                    app.handle_app_event(event);
+                }
+                app.poll_audio();
+                assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
+                assert!(app.renderer.is_some());
+                app.render_frame();
+                assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
+                let metrics = app.session.as_ref().expect("video session").metrics();
+                if metrics.presented_frame_count > 0 {
+                    assert!(
+                        metrics.hardware_frame_count > 0,
+                        "this trial requires D3D11VA"
+                    );
+                    assert_eq!(metrics.cpu_transfer_count, 0);
+                    assert_eq!(
+                        metrics.adapter_luid,
+                        app.renderer
+                            .as_ref()
+                            .expect("renderer")
+                            .graphics_device()
+                            .adapter_luid()
+                    );
+                    eprintln!("Native caption recovery frame: {metrics:?}");
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "video did not present after recovery"
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+        let Some(root) = isolated_test_root(
+            "tests::native_caption_graphics_recovery_preserves_image_and_video_state",
+        ) else {
+            return;
+        };
+        struct Trial {
+            root: PathBuf,
+            completed: bool,
+        }
+        impl ApplicationHandler for Trial {
+            fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+                let window = Arc::new(
+                    event_loop
+                        .create_window(
+                            Window::default_attributes()
+                                .with_visible(false)
+                                .with_inner_size(winit::dpi::PhysicalSize::new(640, 400)),
+                        )
+                        .expect("hidden native window"),
+                );
+                let caption = NativeCaption::new(window.clone()).expect("caption");
+                let mut renderer =
+                    FrameRenderer::with_native_caption(&caption).expect("hardware D3D11 surface");
+                let size = window.inner_size();
+                renderer
+                    .resize_surface(size.width, size.height)
+                    .expect("initial surface");
+                let context = fonts::test_context();
+                let state = egui_winit::State::new(
+                    context.clone(),
+                    egui::ViewportId::ROOT,
+                    &window,
+                    Some(window.scale_factor() as f32),
+                    window.theme(),
+                    Some(renderer.max_texture_side()),
+                );
+                let (notify, notifications) = std::sync::mpsc::channel();
+                let mut app = Application::new(None, move |event| {
+                    let _ = notify.send(event);
+                })
+                .expect("isolated application");
+                let path = self.root.join("memory-only-image.png");
+                let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+                app.edits.insert(tab, EditHistory::default());
+                app.path = Some(path.clone());
+                app.media_kind = Some(MediaKind::Image);
+                app.state = PlaybackState::Paused;
+                app.image = Some(
+                    app.image_texture_cache
+                        .load(
+                            &context,
+                            &path,
+                            Arc::new(DecodedImage {
+                                format: "PNG",
+                                frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                                    width: 2,
+                                    height: 1,
+                                    rgba: vec![255, 0, 0, 255, 0, 0, 255, 255],
+                                    delay: Duration::ZERO,
+                                }],
+                            }),
+                        )
+                        .expect("in-memory image"),
+                );
+                app.window = Some(window.clone());
+                app.native_caption = Some(caption);
+                app.renderer = Some(renderer);
+                app.ui_context = Some(context.clone());
+                app.ui_state = Some(state);
+                app.push_edit(EditOperation::RotateClockwise);
+                let image_id = app.image.as_ref().expect("image").texture.id();
+                let decoded = app.image.as_ref().expect("image").decoded.clone();
+                let history = app.edits[&tab].clone();
+                app.render_frame();
+                assert!(app.playback_error.is_none());
+                for (width, height) in [(480, 300), (960, 576), (640, 400)] {
+                    let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+                    let size = window.inner_size();
+                    app.renderer
+                        .as_mut()
+                        .expect("surface")
+                        .resize_surface(size.width, size.height)
+                        .expect("resize");
+                    app.render_frame();
+                    app.recover_graphics_device(MediaTime::ZERO);
+                    assert!(
+                        app.renderer.is_some(),
+                        "{}",
+                        app.playback_error.as_deref().unwrap_or("missing renderer")
+                    );
+                    assert!(app.restore_ui_textures);
+                    assert!(app.image_texture_cache.entries.is_empty());
+                    assert_eq!(app.edits[&tab], history);
+                    assert_eq!(app.image.as_ref().expect("image").texture.id(), image_id);
+                    assert!(Arc::ptr_eq(
+                        &app.image.as_ref().expect("image").decoded,
+                        &decoded
+                    ));
+                    assert!(Arc::ptr_eq(app.window.as_ref().expect("window"), &window));
+                    assert!(app.native_caption.is_some());
+                    app.render_frame();
+                    assert!(!app.restore_ui_textures, "replacement surface must render");
+                    assert!(app.playback_error.is_none());
+                    assert!(app.native_prompt.is_none());
+                }
+                let video = Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../tests/generated/m1/h264-aac.mp4")
+                    .canonicalize()
+                    .expect("generated M1 fixture");
+                let video_tab = app.tabs.open_new(video.clone(), MediaKind::Video);
+                let mut video_history = EditHistory::default();
+                assert!(video_history.push(EditOperation::SetVolume(0.0), MediaKind::Video));
+                assert!(video_history.push(EditOperation::RotateClockwise, MediaKind::Video));
+                app.edits.insert(video_tab, video_history.clone());
+                app.load_path(video, MediaKind::Video);
+                for paused in [false, true] {
+                    if paused {
+                        app.toggle_pause();
+                    }
+                    let target = media_time(Duration::from_millis(500));
+                    app.seek_to(target);
+                    present_video(&mut app, &notifications);
+                    let old_generation = app.generation;
+                    let state = app.state;
+                    assert_eq!(state == PlaybackState::Paused, paused);
+                    app.recover_graphics_device(target);
+                    assert!(app.renderer.is_some());
+                    assert_eq!(app.generation, old_generation.next());
+                    assert_eq!(app.state, state);
+                    assert_eq!(app.session.as_ref().expect("session").target(), target);
+                    assert_eq!(app.edits[&tab], history);
+                    assert_eq!(app.edits[&video_tab], video_history);
+                    present_video(&mut app, &notifications);
+                    assert_eq!(app.state, state);
+                    assert!(app.video_rect.is_some());
+                    assert!(app.session.as_ref().expect("WASAPI session").has_audio());
+                    assert!(app.native_caption.is_some());
+                    assert!(Arc::ptr_eq(app.window.as_ref().expect("window"), &window));
+                    assert!(!app.restore_ui_textures);
+                    assert!(app.native_prompt.is_none());
+                }
+                drop(app);
+                self.completed = true;
+                event_loop.exit();
+            }
+            fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+        }
+        let event_loop = EventLoop::builder()
+            .with_any_thread(true)
+            .build()
+            .expect("isolated event loop");
+        let mut trial = Trial {
+            root,
+            completed: false,
+        };
+        event_loop
+            .run_app(&mut trial)
+            .expect("hidden recovery trial");
+        assert!(trial.completed);
     }
 
     #[test]

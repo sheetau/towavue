@@ -232,6 +232,14 @@ Explorerからのfile dropはwinitのowned path eventで受け、既存のextern
 
 ### H1 compact window shell
 
+U01のnative caption実装は、runtime内のDWM frameと同一UI threadのsubclassへ限定する。caption buttonsはDWMへ任せ、appは実際のbutton boundsを避けてtab barを描く。closeはwinitのCloseRequestedから従来のguardへ渡す。Flip Modelとnative frame描画を同じHWNDへ混在させるとbuttonsが見えないため、同じdevice／swap chainを入力透過のchild surfaceへ置き、親のcaption領域を残す。GPU device・decode経路・CPU transfer契約を変えず、native handleはruntime内だけで所有する。主要経路のcheckpointと、混在DPI・物理入力などを含むU01全体の完了判定は区別する。
+
+captionとchild surfaceはRcでUI threadへ限定し、親windowを保持する。subclassの追加参照は解除またはnative破棄時に解放し、rendererはswap chainをchild HWNDより先に破棄する。childはHTTRANSPARENTを返し、標準STATIC classの背景描画を抑止する。これを残すと最大化・復元後にcaption背後が白くなる実例があった。親のGDI描画は露出したcaption背景だけを担当する。追加GPU device・CPU転送・別threadは作らない。
+
+最大化時もNCCALCSIZEの上端non-client insetは0とする。上端へnative border幅を残すと、DWMのglyphが見えても最大化中のbutton hit testが失敗した。画面外の上端はeguiのsafe areaとして除外し、現在のwindow scaleとUI zoomで換算する。これは[Microsoftのcustom frame契約](https://learn.microsoft.com/en-us/windows/win32/dwm/customframe)と、同条件を説明する[Chromiumの実装記録](https://chromium.googlesource.com/chromium/src/+/8a0dac94cf639d40c0c00557bf9eb5338ae82146/ui/views/win/hwnd_message_handler.cc)を踏まえた実測対応である。通常／最大化／復元とPNG・短いhardware動画、pointerによる連続resize、画像と再生／一時停止動画のgraphics復旧を確認した。native system menuも所有threadの標準popupとして表示を確認したが、混在DPIと物理keyboardの確認は残る。Snap候補は基準機の設定で無効なため表示未検証とし、設定を勝手に変えない。
+
+固定AccessKit adapterはnative captionの子要素をtreeへ含めないため、[TITLEBARINFOEX](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-titlebarinfoex)が返す各buttonの実bounds・状態をruntimeから値として渡し、appで操作名とClick actionだけを補う。DWMの描画・native pointer hit・hoverを変えず、eguiのbutton描画・不可視hit領域・Tab focus停止点は追加しない。UIA Clickは通常のUI action guardを通してruntimeへ渡し、同じwindowへのWM_SYSCOMMANDをqueueする。Closeは通常のCloseRequestedから未保存確認へ進む。modal中はdisabledかつClick非公開、fullscreenではnode自体を出さず、遅れて来た要求もappで拒否する。native windowを破棄する別の終了経路は設けない。
+
 UX改善ではchromeの共通色を背景#000、通常text/icon #808080、active/focus/progress #fff、境界/active tab #181818、hover #4C4C4Cへ揃える。mediaのletterbox clearも黒とする。32px title bar／30px status barを基準に内容を上下中央へ配置し、26px tab／28px幅logo buttonの高さを文字の有無から独立させる。tab名は左10pxの余白と右24pxのclose領域を持ち、hover背景はtab全体へ描く。通常のバー境界はtitle下とstatus上、timeline表示中は後者をtimeline上へ移し、timeline/status間の線を出さない。既存のwidget identity、menu／tab／resize入力、dirty guardは維持する。native caption、font/icon資産、選択線とtimeline編集modelは台帳の別項目として継続する。
 
 音声playlistはShell snapshotの音声だけを元の順で番号付き表示し、32 logical pxの行全体を選曲対象とする。見出しは省き、現在曲を明るく、他の曲を控えめに表示する。長いfilenameは一行に省略し、行hoverで全文を示す。ScrollAreaは可視行だけを描画し、選曲は既存のNavigate guardへ渡す。曲ごとのduration probeや新しい再生方式は追加しない。
@@ -248,7 +256,7 @@ tab操作でactive identityが変わらない場合はmediaを再loadしない�
 
 UI本文は同梱Figtree Regularを先頭に使う。固定eguiのfont backendはOpenType featureを選択しないため、元fontが持つtnum数字glyphを既定cmapへ固定した派生fontを、pin済み再生成scriptで作る。数字以外の字形・metricsを変えず、元fontとライセンス・変更説明も保持する。専用Codicon familyをicon widgetだけへ指定し、一般textのprivate-use文字をiconとして解釈しない。日本語はruntimeがWindows Fonts内のYuGothM.ttcのface 1（Yu Gothic UI Regular）、Meiryo、MS Gothicの順で読める一つのfontとface indexを返し、Figtreeとegui既定fallbackの間へ登録する。コード等のMonospaceは既定Latin fontを維持する。日本語fontは同梱・download・OS設定変更せず、ない環境でもFigtree/Codiconを導入し診断を残す。Windowsに通常存在しないHiragino Sansを取得・同梱しない。
 
-上部は32 logical pxの単一title/tab bar、下部は30 logical pxのstatus barとし、暗いneutral色でmedia領域を優先する。appはdecorationsなしのwinit windowにlogo menu・tab・window controlsを描画し、移動・resize・minimize・maximizeはwinitのWindows操作へ委ねる。window closeは既存のdirty/export guardを必ず通す。tab幅は等分、最大160 px・最小72 pxとし、収まらない場合は横scrollする。path/名前は省略表示と全文tooltipを使い、右側の状態表示へ専用領域を確保する。menuの方向gestureとtab reorderはこの変更には含めない。
+上部は32 logical pxの単一title/tab bar、下部は30 logical pxのstatus barとし、暗いneutral色でmedia領域を優先する。U01以前はdecorationsなしのwinit windowにwindow controlsも描画していたが、現在は上記native caption構成を検証中である。window closeは既存のdirty/export guardを必ず通す。tab幅は等分、最大160 px・最小72 pxとし、収まらない場合は横scrollする。path/名前は省略表示と全文tooltipを使い、右側の状態表示へ専用領域を確保する。menuの方向gestureとtab reorderの要求・進捗はUX台帳に従う。
 
 logo menuはFile / Edit / Viewの3分類とし、app内の固定配置で関連commandを区切る。全registry commandを一箇所ずつ配置し、title・有効条件・現在のcustom shortcutは既存registry/bindingsから取得する。shortcutは右揃え、縦に収まらないsubmenuはwindow内でscrollする。commandのdispatch・dirty guardは変更せず、分類のために新commandやruntime処理は追加しない。方向drag gestureは引き続き対象外とする。
 

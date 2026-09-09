@@ -200,6 +200,7 @@ pub struct FrameRenderer {
     software_blitter: SoftwareBlitter,
     ui_renderer: egui_directx11::Renderer,
     hdr_tone_mapping_active: bool,
+    caption_surface: Option<crate::caption::CaptionSurface>,
 }
 
 impl FrameRenderer {
@@ -212,6 +213,18 @@ impl FrameRenderer {
             return Err(RenderError::UnsupportedWindow);
         };
         let hwnd = HWND(handle.hwnd.get() as *mut _);
+        Self::for_handle(hwnd, None)
+    }
+
+    pub fn with_native_caption(caption: &crate::NativeCaption) -> Result<Self, RenderError> {
+        let surface = crate::caption::CaptionSurface::new(caption)?;
+        Self::for_handle(surface.handle, Some(surface))
+    }
+
+    fn for_handle(
+        hwnd: HWND,
+        caption_surface: Option<crate::caption::CaptionSurface>,
+    ) -> Result<Self, RenderError> {
         let description = DXGI_SWAP_CHAIN_DESC {
             BufferDesc: DXGI_MODE_DESC {
                 Width: 1,
@@ -286,6 +299,7 @@ impl FrameRenderer {
             software_blitter,
             ui_renderer,
             hdr_tone_mapping_active: false,
+            caption_surface,
         })
     }
 
@@ -652,6 +666,9 @@ impl FrameRenderer {
     }
 
     pub fn resize_surface(&mut self, width: u32, height: u32) -> Result<(), RenderError> {
+        if let Some(surface) = &self.caption_surface {
+            surface.resize(width, height)?;
+        }
         if width == 0 || height == 0 {
             return Ok(());
         }

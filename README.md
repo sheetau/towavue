@@ -23,7 +23,9 @@ ownerの2026-09-09の指定により、現在は見た目・操作感・安定�
 
 新しい機能・UI改善goalの対象と進捗は[UX_IMPLEMENTATION_PLAN](docs/UX_IMPLEMENTATION_PLAN.md)で管理します。通常画像のFitから余分な8pxの余白を除き、Shift+C／View menu／command paletteへCover表示を追加しました。Coverは縦横比を保って表示領域を覆い、画面外の部分は表示しませんが、画像の切り抜き編集や保存は行いません。Shift+WでFitへ戻せます。reading modeでは見開き全体のFitを維持します。
 
-上部のロゴ・タブ・window controlsと下部の内容を上下中央へ揃え、タブ名は一定の左余白で表示します。基本バー・画像余白は黒、active tab／境界は#181818、hoverは#4C4C4Cへ統一しました。timelineを開くと下側の境界はtimeline上へ移り、statusとの間には線を残しません。ネイティブcaption controlsは引き続き改善台帳の残件です。
+上部のロゴ・タブと下部の内容を上下中央へ揃え、タブ名は一定の左余白で表示します。基本バー・画像余白は黒、active tab／境界は#181818、hoverは#4C4C4Cへ統一しました。timelineを開くと下側の境界はtimeline上へ移り、statusとの間には線を残しません。
+
+開発版の角丸・境界・右上のwindow controlsはWindows標準の描画を使い、独自のタイトルバーを追加せずtab barと並べます。空白部分のdrag／double-click、端のresizeもWindowsへ渡します。支援技術からのwindow操作と未保存確認、画像・動画の描画復旧をWindows 11基準機で確認しました。混在DPI・物理keyboardの追加確認は残り、Snap候補は基準機の設定で無効なため表示未検証です。OS設定は変更していません。
 
 UI本文には数字を等幅にしたFigtree、一般の操作iconにはCodiconを同梱しました。日本語はWindowsのYu Gothic UIを優先し、ない場合はMeiryo等へfallbackします。OSへのfontインストールや設定変更は行いません。[fontの出典・ライセンス・再生成方法](crates/towavue-app/assets/fonts/README.md)も保存しています。
 

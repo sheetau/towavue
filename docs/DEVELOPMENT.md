@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### Native captionの描画復旧回帰（2026-09-09）
+
+通常のM0 checksに加え、H264のD3D11VA・Windows desktop・既定WASAPI endpointが使える環境で以下を実行できる。通常suiteでは能力依存のため明示的にignoreされる。M1生成fixtureが必要で、音声はsession内の0%設定とし、OS音量を変更しない。
+
+```powershell
+cargo test -p towavue-app native_caption_graphics_recovery_preserves_image_and_video_state -- --ignored --nocapture
+```
+
+非表示の所有windowで画像のresize／device再作成を3回、動画の再生中／一時停止中の再作成を各1回行う。画像texture・編集の保持、動画のgeneration更新・500msへの復旧・再生状態保持、同一adapterのhardware frame描画・CPU転送0を検査する。基準機では成功した。実device切断の再現、長時間再生、Snap・混在DPI・物理keyboard操作をこのtestで確認したとは扱わない。
+
 ### 新しい通常releaseの30分4K再生（2026-09-09 14:57 JST）
 
 設定／cache耐障害性を含む通常release f91b4498（source c277ceb）を、下記の代表保存／Seekと同じ隣接runtimeで測定した。既存 `m3-4k60-30m.mp4` はSHA256 `fee0e738e7149225a7b4dea02cda75aae6873288cbe5a1077b101829adfd0c10`、1501066596 bytes、3840×2160 H.264/AAC。終了後のprobeでもvideo duration 1800.005729秒、107771 frames、format duration 1800.009063秒を確認した。起動前にhashを読んだ試験であり、cold-storage条件ではない。

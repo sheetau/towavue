@@ -2,6 +2,7 @@
 
 mod audio;
 mod cancellation;
+mod caption;
 mod decode;
 mod dialog;
 mod export;
@@ -23,6 +24,7 @@ mod waveform;
 
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};
 pub use cancellation::Cancellation;
+pub use caption::{CaptionAction, CaptionButton, NativeCaption};
 pub use decode::{AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, VideoFrame};
 pub use dialog::{
     DialogError, FileDialogKind, PromptButtons, PromptResponse, cursor_position_in_window,

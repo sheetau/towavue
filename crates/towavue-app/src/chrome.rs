@@ -1,5 +1,44 @@
 use egui::{Color32, Pos2, Rect, Stroke, Ui};
-use winit::window::ResizeDirection;
+use towavue_runtime_windows::{CaptionAction, CaptionButton};
+
+pub fn caption_accessibility(ui: &Ui, buttons: &[CaptionButton]) -> Vec<CaptionAction> {
+    let mut actions = Vec::new();
+    for button in buttons {
+        let id = egui::Id::new(("native-caption", button.action));
+        let enabled = ui.is_enabled() && button.enabled;
+        let bounds = button.bounds / ui.ctx().pixels_per_point();
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(egui::accesskit::Role::Button);
+            node.set_label(button.label);
+            node.set_bounds(egui::accesskit::Rect::new(
+                bounds.left().into(),
+                bounds.top().into(),
+                bounds.right().into(),
+                bounds.bottom().into(),
+            ));
+            if enabled {
+                node.add_action(egui::accesskit::Action::Click);
+            } else {
+                node.set_disabled();
+            }
+        });
+        // Semantic proxies only: DWM keeps all drawing and native pointer handling.
+        // Do not add invisible egui hit targets or keyboard focus stops.
+        ui.input_mut(|input| {
+            input.consume_accesskit_action_requests(id, |request| {
+                if request.action == egui::accesskit::Action::Click {
+                    if enabled {
+                        actions.push(button.action);
+                    }
+                    true
+                } else {
+                    false
+                }
+            });
+        });
+    }
+    actions
+}
 
 pub const BACKGROUND: Color32 = Color32::BLACK;
 pub const MUTED: Color32 = Color32::from_gray(128);
@@ -55,10 +94,6 @@ pub fn modal_heading(ui: &mut Ui, title: &str) {
 pub enum Icon {
     Close,
     Reading,
-    Minimize,
-    Maximize,
-    Restore,
-    CloseWindow,
     Pause,
     Play,
     Waveform,
@@ -70,10 +105,6 @@ impl Icon {
         let glyph = match self {
             Self::Close => '\u{ea76}',
             Self::Reading => '\u{eaa4}',
-            Self::CloseWindow => '\u{eab8}',
-            Self::Maximize => '\u{eab9}',
-            Self::Minimize => '\u{eaba}',
-            Self::Restore => '\u{eabb}',
             Self::Pause => '\u{ead1}',
             Self::Play => '\u{eb2c}',
             Self::Waveform => '\u{eb31}',
@@ -152,27 +183,83 @@ pub fn logo(ui: &Ui, rect: Rect) {
     }
 }
 
-pub fn resize_edge(rect: Rect, position: Pos2) -> Option<ResizeDirection> {
-    let left = position.x < rect.left() + 5.0;
-    let right = position.x > rect.right() - 5.0;
-    let top = position.y < rect.top() + 5.0;
-    let bottom = position.y > rect.bottom() - 5.0;
-    match (left, right, top, bottom) {
-        (true, _, true, _) => Some(ResizeDirection::NorthWest),
-        (_, true, true, _) => Some(ResizeDirection::NorthEast),
-        (true, _, _, true) => Some(ResizeDirection::SouthWest),
-        (_, true, _, true) => Some(ResizeDirection::SouthEast),
-        (true, _, _, _) => Some(ResizeDirection::West),
-        (_, true, _, _) => Some(ResizeDirection::East),
-        (_, _, true, _) => Some(ResizeDirection::North),
-        (_, _, _, true) => Some(ResizeDirection::South),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_caption_semantics_follow_bounds_and_guard_without_custom_widgets() {
+        use egui::accesskit::{Action, ActionRequest, Role, TreeId};
+        for density in [1.0, 1.25, 2.0] {
+            for (ui_enabled, native_enabled) in [(true, true), (false, true), (true, false)] {
+                let context = egui::Context::default();
+                context.enable_accesskit();
+                context.set_pixels_per_point(density);
+                let button = CaptionButton {
+                    action: CaptionAction::Close,
+                    label: "Close window",
+                    bounds: Rect::from_min_max(egui::pos2(800.0, 1.0), egui::pos2(847.0, 31.0)),
+                    enabled: native_enabled,
+                };
+                let id = egui::Id::new(("native-caption", button.action));
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(960.0, 576.0))),
+                    events: vec![egui::Event::AccessKitActionRequest(ActionRequest {
+                        action: Action::Click,
+                        target_tree: TreeId::ROOT,
+                        target_node: id.accesskit_id(),
+                        data: None,
+                    })],
+                    ..Default::default()
+                };
+                let mut actions = Vec::new();
+                let output = context.run_ui(input, |ui| {
+                    if !ui_enabled {
+                        ui.disable();
+                    }
+                    actions = caption_accessibility(ui, std::slice::from_ref(&button));
+                    assert!(
+                        !ui.input(|input| input.has_accesskit_action_request(id, Action::Click))
+                    );
+                });
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .expect("native semantics");
+                let node = &tree
+                    .nodes
+                    .iter()
+                    .find(|(node, _)| *node == id.accesskit_id())
+                    .expect("button")
+                    .1;
+                let enabled = ui_enabled && native_enabled;
+                assert_eq!(node.role(), Role::Button);
+                assert_eq!(node.label(), Some("Close window"));
+                assert_eq!(node.is_disabled(), !enabled);
+                assert_eq!(node.supports_action(Action::Click), enabled);
+                assert!(!node.supports_action(Action::Focus));
+                assert_eq!(
+                    node.bounds().expect("bounds").x0,
+                    f64::from(800.0 / density)
+                );
+                assert_eq!(
+                    actions,
+                    if enabled {
+                        vec![CaptionAction::Close]
+                    } else {
+                        vec![]
+                    }
+                );
+                assert!(
+                    output
+                        .shapes
+                        .iter()
+                        .all(|shape| matches!(shape.shape, egui::Shape::Noop))
+                );
+                assert!(context.memory(|memory| memory.focused()).is_none());
+            }
+        }
+    }
 
     #[test]
     fn tab_gaps_follow_centers_and_clip_scrolled_indicators() {
@@ -204,19 +291,9 @@ mod tests {
     }
 
     #[test]
-    fn tabs_share_width_and_resize_only_uses_the_window_edge() {
+    fn tabs_share_width_with_a_bounded_minimum() {
         assert_eq!(tab_width(600.0, 4), 150.0);
         assert_eq!(tab_width(600.0, 1), 160.0);
         assert_eq!(tab_width(300.0, 10), 72.0);
-        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(960.0, 576.0));
-        assert_eq!(
-            resize_edge(rect, egui::pos2(1.0, 1.0)),
-            Some(ResizeDirection::NorthWest)
-        );
-        assert_eq!(
-            resize_edge(rect, egui::pos2(959.0, 575.0)),
-            Some(ResizeDirection::SouthEast)
-        );
-        assert_eq!(resize_edge(rect, egui::pos2(400.0, 15.0)), None);
     }
 }

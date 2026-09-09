@@ -27,7 +27,7 @@ pub fn show(
             let dragging = drag.dragging && !drag.released;
             let active = response.hovered() || response.has_focus() || dragging;
             let progress = if dragging {
-                drag.position.map_or(progress, |p| ratio(rect, p.x))
+                drag.position.map_or(progress, |p| compact_ratio(rect, p.x))
             } else {
                 progress
             };
@@ -36,8 +36,9 @@ pub fn show(
             } else {
                 1.0 / context.pixels_per_point()
             };
-            let track = Rect::from_center_size(rect.center(), egui::vec2(rect.width(), height));
-            let x = egui::lerp(rect.x_range(), progress.clamp(0.0, 1.0));
+            let travel = if active { compact_travel(rect) } else { rect };
+            let track = Rect::from_center_size(rect.center(), egui::vec2(travel.width(), height));
+            let x = egui::lerp(travel.x_range(), progress.clamp(0.0, 1.0));
             ui.painter().rect_filled(track, 0.0, Color32::from_gray(55));
             ui.painter().rect_filled(
                 Rect::from_min_max(track.min, egui::pos2(x, track.bottom())),
@@ -47,7 +48,7 @@ pub fn show(
             if active {
                 ui.painter().circle_filled(
                     egui::pos2(x, rect.center().y),
-                    4.0,
+                    compact_radius(rect),
                     Color32::from_gray(230),
                 );
             }
@@ -172,6 +173,19 @@ pub fn ratio(rect: Rect, x: f32) -> f32 {
     ((x - rect.left()) / rect.width().max(1.0)).clamp(0.0, 1.0)
 }
 
+fn compact_radius(rect: Rect) -> f32 {
+    (rect.width() * 0.5).clamp(0.0, 4.0)
+}
+
+fn compact_travel(rect: Rect) -> Rect {
+    rect.shrink2(egui::vec2(compact_radius(rect), 0.0))
+}
+
+pub fn compact_ratio(rect: Rect, x: f32) -> f32 {
+    let travel = compact_travel(rect);
+    ((x - travel.left()) / travel.width().max(f32::EPSILON)).clamp(0.0, 1.0)
+}
+
 pub fn preview_tooltip(response: &Response, ratio: f32) -> egui::Tooltip<'static> {
     let anchor = egui::pos2(
         egui::lerp(response.rect.x_range(), ratio),
@@ -195,6 +209,100 @@ pub fn item_index(ratio: f32, count: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_endpoints_match_handle_centers_without_changing_timeline_coordinates() {
+        let rect = Rect::from_min_max(egui::pos2(20.0, 10.0), egui::pos2(220.0, 22.0));
+        for (x, expected) in [
+            (0.0, 0.0),
+            (20.0, 0.0),
+            (24.0, 0.0),
+            (120.0, 0.5),
+            (216.0, 1.0),
+            (220.0, 1.0),
+            (240.0, 1.0),
+        ] {
+            assert_eq!(compact_ratio(rect, x), expected);
+        }
+        assert_eq!(ratio(rect, 24.0), 0.02);
+        for width in [0.0, 1.0, 4.0, 8.0, 8.25, 8.5, 16.0, 500.0] {
+            let rect = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 12.0));
+            let travel = compact_travel(rect);
+            assert!(travel.width() >= 0.0);
+            assert!(compact_ratio(rect, 0.0).is_finite());
+            for value in [0.0, 0.5, 1.0] {
+                let x = egui::lerp(travel.x_range(), value);
+                assert!(x - compact_radius(rect) >= 0.0);
+                assert!(x + compact_radius(rect) <= width);
+                if travel.width() > 0.0 {
+                    assert!((compact_ratio(rect, x) - value).abs() < 0.00001);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn compact_handle_stays_inside_while_idle_progress_uses_full_width() {
+        for density in [1.0, 1.25, 2.0] {
+            for value in [0.0, 0.5, 1.0] {
+                for active in [false, true] {
+                    let context = Context::default();
+                    let status =
+                        Rect::from_min_max(egui::pos2(0.0, 270.0), egui::pos2(500.0, 300.0));
+                    let mut output = egui::FullOutput::default();
+                    for frame in 0..3 {
+                        let mut input = egui::RawInput {
+                            time: Some(frame as f64),
+                            screen_rect: Some(Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(500.0, 300.0),
+                            )),
+                            events: vec![egui::Event::PointerMoved(egui::pos2(
+                                250.0,
+                                if active { 270.0 } else { 100.0 },
+                            ))],
+                            ..Default::default()
+                        };
+                        input
+                            .viewports
+                            .get_mut(&egui::ViewportId::ROOT)
+                            .expect("viewport")
+                            .native_pixels_per_point = Some(density);
+                        output = context.run_ui(input, |_| {
+                            show(&context, status, value, None, true);
+                        });
+                    }
+                    let circle = output.shapes.iter().find_map(|shape| match &shape.shape {
+                        egui::Shape::Circle(circle) => Some(circle),
+                        _ => None,
+                    });
+                    if active {
+                        let circle = circle.expect("hover handle");
+                        assert_eq!(circle.center.x, 4.0 + 492.0 * value);
+                        assert!(circle.center.x - circle.radius >= 0.0);
+                        assert!(circle.center.x + circle.radius <= 500.0);
+                        let hit =
+                            Rect::from_min_max(egui::pos2(0.0, 264.0), egui::pos2(500.0, 276.0));
+                        assert!((compact_ratio(hit, circle.center.x) - value).abs() < 0.00001);
+                    } else {
+                        assert!(circle.is_none());
+                        let track = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Rect(rect) if rect.fill == Color32::from_gray(55) => {
+                                    Some(rect.rect)
+                                }
+                                _ => None,
+                            })
+                            .expect("idle track");
+                        assert_eq!(track.x_range(), status.x_range());
+                        assert!((track.height() * density - 1.0).abs() < 0.0001);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn direct_value_cancels_pending_pointer_release() {

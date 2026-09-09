@@ -2854,8 +2854,10 @@ where
                 enabled,
             );
             if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
-                let target =
-                    seekbar::item_index(seekbar::ratio(response.rect, pointer.x), images.len());
+                let target = seekbar::item_index(
+                    seekbar::compact_ratio(response.rect, pointer.x),
+                    images.len(),
+                );
                 if !self.filmstrip_open
                     && !self.palette_open
                     && !self.grid_open
@@ -2882,7 +2884,7 @@ where
                     self.image_seek_preview_active = true;
                     self.filmstrip.show_seek_preview(
                         &response,
-                        seekbar::ratio(response.rect, pointer.x),
+                        seekbar::compact_ratio(response.rect, pointer.x),
                         &paths,
                         &format!(
                             "{position} / {}  {}",
@@ -2895,7 +2897,10 @@ where
             }
             if let Some(target) = value.map(|value| value.round() as usize - 1).or_else(|| {
                 commit.map(|pointer| {
-                    seekbar::item_index(seekbar::ratio(response.rect, pointer.x), images.len())
+                    seekbar::item_index(
+                        seekbar::compact_ratio(response.rect, pointer.x),
+                        images.len(),
+                    )
                 })
             }) && target != index
             {
@@ -2925,13 +2930,13 @@ where
             enabled,
         );
         if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
-            let ratio = seekbar::ratio(response.rect, pointer.x);
+            let ratio = seekbar::compact_ratio(response.rect, pointer.x);
             self.draw_seek_preview(&response, ratio, duration);
         }
         if let Some(value) = value {
             actions.push(UiAction::Seek(media_time(Duration::from_secs_f64(value))));
         } else if let Some(pointer) = commit {
-            let ratio = seekbar::ratio(response.rect, pointer.x);
+            let ratio = seekbar::compact_ratio(response.rect, pointer.x);
             actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
         }
     }

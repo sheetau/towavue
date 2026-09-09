@@ -286,6 +286,8 @@ modal入力を保護している間は背景rootのwidgetを無効化し、既�
 
 ### H1 seek bar and command palette
 
+compact seekの操作中は、左右に半径4 logical px（幅が足りなければ幅の半分）の余白を設けた範囲をつまみ中心の移動区間にする。hover／drag候補・release確定も同じ区間から値へ変換し、端の余白は先頭／末尾へclampする。非hover／非focus／非drag時の1 physical px進捗線は従来どおり全幅を使う。hit領域・keyboard／UIA値・取消と一回確定の契約は維持し、timelineの時間座標へこの余白を適用しない。
+
 H1のWindows accessibilityは固定egui-winitのAccessKit adapterを使い、windowを初めて表示する前に接続する。初期tree要求時だけeguiのtree生成を有効にし、actionは対象windowを照合して既存event loop/egui入力へ渡し、既存platform outputでtree更新を返す。appにCOM pointerや独自UI Automation providerを追加せず、支援技術がない通常idleでtree生成や新しいpollを強制しない。標準widgetと既存の意味情報から接続を検証し、custom widgetやscreen reader全体の対応をbridgeの存在だけで宣言しない。
 
 compact seek barとtimelineの再生位置を、source秒の0～duration、画像位置をShell順の画像だけの1～件数を範囲に持つSliderとして公開する。現在値・範囲・stepとSetValue/Increment/Decrementを既存egui出力へ加え、有限の数値だけを範囲内へ制限する。画像の小数は最寄りの位置へ丸める。値変更は既存Seekまたはguard付きOpenMediaへ一回だけ渡し、古いpointer dragを解除する。modal中は部品の公開状態と処理の両方を無効化する。focus中の左右/Home/Endは5秒または1画像の値操作、Tabはfocus移動に使い、それ以外の現在のshortcut/prefixは既存command経路を保つ。合成されたfocus復帰keyからこの追加経路を実行しない。値eventは順番を保って消費し、破棄されたlayout passから再実行しない。focus時のhandle/枠以外の描画や、trim編集・保存・再生時計は変更しない。

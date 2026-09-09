@@ -26,7 +26,7 @@
 | U09 | tab context menu、閉じる操作群、path copy／開く、reopen closed | 未完。sidebar／pin／preview-tab／追加button／未保存backupは要求外 |
 | U10 | tab hover／filmstrip／recent／seekの低解像度preview共用と速い表示 | 一部実装。filmstrip可視worker／metadata cache、seek区間cacheあり。tab hover、先行生成、共有・実遅延は未完 |
 | U11 | 選択線は反転色1pxのみ、不要なgrip／shadow／暗幕なし | 未完。現在のselection描画とkeyboard／UIA hit領域を分離して改善する |
-| U12 | compact seekのhoverつまみを両端内に収め、非hoverは全幅1px | 未完。現状は中心が端へ来るため半分はみ出す。描画とpointer→値の対応・DPIを検証する |
+| U12 | compact seekのhoverつまみを両端内に収め、非hoverは全幅1px | 対応済み。つまみ半径を除いた移動区間を描画・hover・releaseで共有。100／125／200%の自動描画・座標回帰と通常releaseの画像両端表示を確認。実OSの混在DPIは未検証 |
 | I01 | Fitの余分な8px余白を除き、Cover表示command／shortcutを追加 | 対応済み。core/image.rsのCover、共有CoverWindow commandとShift+C、main.rsのviewport。3新規回帰と通常releaseの960×576画素比較によりFit全幅／Cover全領域・bar非侵入を確認。下記実績参照 |
 | I02 | 読書modeは隙間なし連結、重複しない見開き送り、先頭枚数offset、枚数／offset drag＋shortcut | 一部実装。連結配置とhover見開きは存在、現在の一枚送り・offset不在は未完。cursor固定dragの所有／取消も検証する |
 | I03 | 高速な画像移動、decode／表示分離、取消、先読み・段階表示の適切な採用 | 一部実装。latest-only decode＋8枚／256 MiB CPU/GPU cache。初回／連続移動の測定と黒いloadingを減らす改善は未完。Shell順と画質を偽らない |
@@ -46,12 +46,21 @@
 
 ## 実装順
 
+2026-09-09 16:48の区切り依頼により、U12 checkpoint後は以下へ自動着手せず、ownerの次のgoal設定・作業指示を待つ。台帳の残件は削除しない。
+
 1. I01の画像viewportを実装・検証し、U04／U12など画面の寸法・操作境界を整える。native caption（U01）、font/icon（U03）は独立して設計・導入する。
 2. I02～I05、U06／U09／U10の閲覧flowを実装し、連続操作を測定する。
 3. U07のtab/session所有を確立してU08とA01へ進む。複数sessionのdevice・音声・終了契約を実証する。
 4. V03の編集modelと時間軸を確立し、V01／V04／A02／E01へ接続する。他の未完項目も台帳から落とさず、操作・外観・性能の最終照合まで進める。
 
 この順序は小さな項目だけでgoalを完了するための縮小ではない。各行の未完／要照合が残る間はgoal全体を完了扱いにしない。
+
+## U12検証実績（2026-09-09 16:48 JST）
+
+- compact seekのactive表示では半径4 logical pxを両端へ確保し、pointer候補・確定値も同じ移動区間へ対応させる。極小幅では半径を縮め、1px未満の移動区間も端点へ正しく対応させる。非activeは全幅1 physical pxを維持し、timelineの座標変換は変更しない。
+- 新規2 testsで端点・中央・範囲外・極小幅、100／125／200%密度のhover描画とidle全幅を確認。既存のUIA値変更・release取消を含め、fmt／Clippy／全283 tests通過。実機依存3 testsはignoredのまま。
+- 通常release e41427a3、生成PNG二枚、960×576のWindows 11実windowでUIA画像位置1／2を確認。つまみの明るい画素は先頭x=0..7、末尾x=952..959、両方y=542..549でwindow内。正常終了0、生成原本のhashは不変。最初のforeground拒否では入力せず、同じ所有windowのslider focus後に確認した。
+- 証拠はignored `target/tmp/image-viewport-20260909/seek-handoff/`。実画面は100%・画像位置での確認であり、動画の実pointer操作やOS混在DPIを新たに実証したものではない。配布成果物の更新・実インストールは行わない。
 
 ## I01検証実績（2026-09-09 16:35 JST）
 

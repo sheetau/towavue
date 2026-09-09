@@ -49,6 +49,11 @@ pub(super) fn position(
         .or(pending_time)
         .or_else(|| session.map(PlaybackSession::target))
         .unwrap_or(MediaTime::ZERO);
+    let duration = if session.is_some_and(|session| session.timeline().is_some()) {
+        None
+    } else {
+        duration
+    };
     let position = duration
         .filter(|duration| !duration.is_zero())
         .map_or(position, |duration| position.min(media_time(duration)));
@@ -71,6 +76,9 @@ impl RetainedPlaybackTab {
     }
 
     fn end(&self) -> Option<MediaTime> {
+        if let Some(plan) = self.session.as_ref().and_then(PlaybackSession::timeline) {
+            return Some(plan.duration());
+        }
         let duration = self
             .duration
             .filter(|duration| !duration.is_zero())

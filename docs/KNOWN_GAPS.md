@@ -6,9 +6,9 @@
 
 ## 1. 試用前に知るべき制約
 
-2026-09-10: V03の再生engineは区間planを保持し、編集時間でのSeek・映像PTS・音声clock、局所gain／tempoと同じ出力での区間送り、非表示video／復旧／空timelineを扱える。通常appの編集履歴・duration表示・waveform・選択UIはまだ未接続。音声は初期Seek後を一続きでdecodeするため、長い削除区間の通過負荷、初期Seekの粗いPTS位相、極小区間の音質・tail補正を含む実用性能の確認が残る。短い生成素材のsample一致とWASAPI worker保持だけで、全素材のseamless再生を保証しない。
+2026-09-10: V03の再生engineと通常appの編集履歴／Undo/Redo・Seek・duration表示・waveform時間軸を接続した。元より長い編集の背景EOF、全削除／復元、UIA Seekも検証。新しい選択UI／rubber-band／編集commandはまだ未公開で、試験から履歴を投入して接続を確認した段階。波形は元のoverviewを区間別に再配置・gain変形する方式で、tempo後PCMの精密波形ではない。音声は初期Seek後を一続きでdecodeするため、長い削除区間の通過負荷、初期Seekの粗いPTS位相、極小区間の音質・tail補正を含む実用性能の確認が残る。短い生成素材のsample一致とWASAPI worker保持だけで、全素材のseamless再生を保証しない。
 
-2026-09-10: V03の単一source区間modelと保存backendを追加した。削除による前後連結、Keep、部分音量／伸縮、履歴からの復元を表現できるが、まだ通常UIの新しい操作としては使えない。再生・clock・waveformの編集時間軸、時間選択／rubber-band・shortcut・UIAを接続してから公開する。有限durationが必要で、全範囲削除はUndo可能な空timelineとして保持し、空mediaのexportは拒否する。動画のframe量子化、atempoのtail補正、長い履歴の負荷・継ぎ目の音質を含む最終確認は残る。
+2026-09-10: V03の単一source区間modelと保存backendは削除による前後連結、Keep、部分音量／伸縮、履歴からの復元を扱う。時間選択／rubber-band・shortcut・編集UIAの接続と実操作／保存再openの検証が残る。有限durationが必要で、全範囲削除はUndo可能な空timelineとして保持し、空mediaのexportは拒否する。動画のframe量子化、atempoのtail補正、長い履歴の負荷・継ぎ目の音質を含む最終確認は残る。
 
 2026-09-10: 動画の上drag展開／専用timeline button除去／timeline thumbnail廃止（V01）と音声のfullscreenを含む常時timeline（A02表示部分）を実装した。横Seekの初動固定、取消／複数pass、位置・履歴保持を回帰と通常releaseで確認。時間範囲選択・rubber-band・複数区間／部分音量・速度（V03）、先行thumbnail sheet（V02）は未完で、既存trim gripを完成仕様とは扱わない。
 

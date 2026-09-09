@@ -21,6 +21,7 @@ mod selection;
 mod shortcuts;
 mod tab_menu;
 mod tab_preview;
+mod timeline_edit;
 mod timeline_input;
 mod trim;
 mod welcome;
@@ -1793,6 +1794,7 @@ where
                     match result {
                         Ok(duration) => {
                             self.media_duration = Some(duration);
+                            self.sync_playback_edits();
                             self.request_redraw();
                         }
                         Err(error) => self.set_status(format!("Duration unavailable: {error}")),
@@ -2155,6 +2157,7 @@ where
             self.path.as_deref(),
             position,
             self.media_duration,
+            self.session.as_ref().and_then(PlaybackSession::timeline),
         );
         if self.fullscreen {
             self.tab_preview.clear();
@@ -3478,7 +3481,7 @@ where
                             actions.push(UiAction::Command(CommandId::TogglePause));
                         }
                         let duration = self
-                            .media_duration
+                            .playback_duration()
                             .map(|duration| format_time(MediaTime::ZERO.saturating_add(duration)))
                             .unwrap_or_else(|| "—".into());
                         let position = format_time(self.current_position());
@@ -3751,7 +3754,10 @@ where
         {
             return;
         }
-        let Some(duration) = self.media_duration.filter(|duration| !duration.is_zero()) else {
+        let Some(duration) = self
+            .playback_duration()
+            .filter(|duration| !duration.is_zero())
+        else {
             return;
         };
         let progress = (self.current_position().as_seconds_f64() / duration.as_secs_f64())
@@ -3785,13 +3791,24 @@ where
 
     fn draw_seek_preview(&mut self, response: &egui::Response, ratio: f32, duration: Duration) {
         let bucket = ((ratio * 20.0).floor() as u64).min(19);
+        let sample = duration.mul_f64((bucket as f64 + 0.5) / 20.0);
+        let (bucket, sample) = self
+            .session
+            .as_ref()
+            .and_then(PlaybackSession::timeline)
+            .and_then(|plan| plan.source_time(media_time(sample)))
+            .map_or((bucket, sample), |source| {
+                // Source-time keys cannot collide with the legacy twenty bucket indices.
+                let nanos = source.as_nanoseconds() as u64;
+                (nanos | (1 << 63), Duration::from_nanos(nanos))
+            });
         if self.media_kind == Some(MediaKind::Video)
             && self
                 .hover_thumbnail
                 .as_ref()
                 .is_none_or(|(cached, _)| *cached != bucket)
         {
-            self.load_hover_thumbnail(duration.mul_f64((bucket as f64 + 0.5) / 20.0), bucket);
+            self.load_hover_thumbnail(sample, bucket);
         }
         seekbar::preview_tooltip(response, ratio).show(|ui| {
             if let Some((cached, texture)) = &self.hover_thumbnail
@@ -3830,12 +3847,29 @@ where
             .show(root, |ui| {
                 let rect = ui.available_rect_before_wrap();
                 if let Some(waveform) = &self.waveform {
-                    ui.painter().image(
-                        waveform.id(),
-                        rect,
-                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                        Color32::from_white_alpha(150),
-                    );
+                    if let Some(plan) = self.session.as_ref().and_then(PlaybackSession::timeline) {
+                        let painter = ui.painter().with_clip_rect(rect);
+                        for (destination, uv) in timeline_edit::waveform_regions(
+                            rect,
+                            self.media_duration.unwrap_or_default(),
+                            plan,
+                            self.edit_state().volume,
+                        ) {
+                            painter.image(
+                                waveform.id(),
+                                destination,
+                                uv,
+                                Color32::from_white_alpha(150),
+                            );
+                        }
+                    } else {
+                        ui.painter().image(
+                            waveform.id(),
+                            rect,
+                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                            Color32::from_white_alpha(150),
+                        );
+                    }
                 } else {
                     ui.painter().text(
                         rect.center(),
@@ -3846,7 +3880,7 @@ where
                     );
                 }
                 let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
-                let duration = self.media_duration.unwrap_or_default();
+                let duration = self.playback_duration().unwrap_or_default();
                 if duration.is_zero() {
                     return;
                 }
@@ -3857,21 +3891,29 @@ where
                     .vline(x, rect.y_range(), (2.0, chrome::FOREGROUND));
                 let edit = self.edit_state();
                 let tab = self.tabs.active().map(|tab| tab.id);
-                let trim_operations = trim::timeline(
-                    ui,
-                    rect,
-                    &edit,
-                    media_time(duration),
-                    self.state == PlaybackState::Paused
-                        && !edit.playback_range().contains(self.current_position()),
-                    ui.id().with(("trim-controls", tab, self.path.as_ref())),
-                    ui.id().with((
-                        tab,
-                        self.generation,
-                        edit.trim_start.map(MediaTime::as_nanoseconds),
-                        edit.trim_end.map(MediaTime::as_nanoseconds),
-                    )),
-                );
+                let trim_operations = if self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.timeline().is_some())
+                {
+                    Vec::new()
+                } else {
+                    trim::timeline(
+                        ui,
+                        rect,
+                        &edit,
+                        media_time(duration),
+                        self.state == PlaybackState::Paused
+                            && !edit.playback_range().contains(self.current_position()),
+                        ui.id().with(("trim-controls", tab, self.path.as_ref())),
+                        ui.id().with((
+                            tab,
+                            self.generation,
+                            edit.trim_start.map(MediaTime::as_nanoseconds),
+                            edit.trim_end.map(MediaTime::as_nanoseconds),
+                        )),
+                    )
+                };
                 if let Some(tab) = tab {
                     actions.extend(
                         trim_operations
@@ -4612,6 +4654,10 @@ where
     }
 
     fn push_edit(&mut self, operation: EditOperation) {
+        if matches!(operation, EditOperation::Timeline(_)) && !self.prepare_timeline_edit(operation)
+        {
+            return;
+        }
         if matches!(
             operation,
             EditOperation::SetTrimStart(_) | EditOperation::SetTrimEnd(_)
@@ -4647,6 +4693,10 @@ where
     }
 
     fn prepare_trim_edit(&mut self, operation: EditOperation) -> bool {
+        if self.history_timeline().is_ok_and(|plan| plan.is_some()) {
+            self.set_status("Use a timeline selection to keep or delete time".into());
+            return false;
+        }
         if !self
             .media_kind
             .is_some_and(|kind| operation.applies_to(kind))
@@ -4709,16 +4759,6 @@ where
             self.image_view.fit();
             self.refresh_title();
             self.request_redraw();
-        }
-    }
-
-    fn sync_playback_edits(&mut self) {
-        let state = self.edit_state();
-        if let Some(session) = &mut self.session {
-            session.set_volume(state.volume);
-            if session.rate() != state.rate || session.range() != state.playback_range() {
-                self.seek_to(self.current_position());
-            }
         }
     }
 
@@ -5504,11 +5544,15 @@ where
         let Some(next) = self.state.after_play_pause() else {
             return;
         };
-        let range = self.edit_state().playback_range();
+        let range = self.playback_range();
+        if range.end == Some(MediaTime::ZERO) {
+            self.set_status("The timeline is empty; Undo restores deleted time".into());
+            return;
+        }
         let position = self.current_position();
         let restart = next == PlaybackState::Playing
             && (self.state == PlaybackState::Ended
-                || self.media_duration.is_some_and(|duration| {
+                || self.playback_duration().is_some_and(|duration| {
                     !duration.is_zero() && position >= media_time(duration)
                 }));
         let target = if restart {
@@ -5565,23 +5609,45 @@ where
     }
 
     fn seek_to(&mut self, target: MediaTime) {
-        let end = self
-            .media_duration
-            .filter(|duration| !duration.is_zero())
-            .map(media_time);
+        let plan = match self.history_timeline() {
+            Ok(plan) => plan,
+            Err(error) => {
+                self.set_status(error.into());
+                return;
+            }
+        };
+        let end = plan
+            .as_ref()
+            .map(towavue_core::EditTimeline::duration)
+            .or_else(|| {
+                self.media_duration
+                    .filter(|duration| !duration.is_zero())
+                    .map(media_time)
+            });
         let target = end
             .map_or(target, |end| target.min(end))
             .max(MediaTime::ZERO);
         let started = Instant::now();
         self.pending_seek_started = None;
         let edit = self.edit_state();
-        let range = edit.playback_range();
+        let range = plan.as_ref().map_or_else(
+            || edit.playback_range(),
+            |plan| towavue_core::PlaybackRange {
+                start: MediaTime::ZERO,
+                end: Some(plan.duration()),
+            },
+        );
+        let edited = plan.is_some();
         let Some(session) = self.session.as_mut() else {
             return;
         };
         let pause =
             self.state == PlaybackState::Ended || end == Some(target) || !range.contains(target);
-        match session.seek_with_edits(target, edit.rate, range, pause) {
+        let result = match plan {
+            Some(plan) => session.seek_with_timeline(target, edit.rate, plan, pause),
+            None => session.seek_with_edits(target, edit.rate, range, pause),
+        };
+        match result {
             Ok(generation) => {
                 if pause {
                     self.state = PlaybackState::Paused;
@@ -5594,7 +5660,9 @@ where
                 self.metrics_recorded = false;
                 self.pending_seek_started =
                     (self.media_kind == Some(MediaKind::Video)).then_some(started);
-                self.set_status(if range.contains(target) {
+                self.set_status(if end == Some(MediaTime::ZERO) {
+                    "Empty timeline · Undo restores deleted time".into()
+                } else if edited || range.contains(target) {
                     format!("Position {:.3}s", target.as_seconds_f64())
                 } else {
                     "Outside trim · paused source preview; Play returns to trim start".into()

@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 編集時間軸とapp履歴・表示の接続（2026-09-10）
+
+最終session94715でfmt／Clippy／workspace364 tests（app205/core53/runtime102/integration4）／releaseが成功。通常ignored10件のうちapp全4件を明示実行してすべてPASS、SKIPなし。release5d9f00c85bc5b737bf531656d18aa1e8db16110a0f4c9b5441cd3daa9d24abe2。前回78bb232のCI34397090819も成功。通常releaseでの新編集gesture試用はまだ行っていない。
+
+appの編集候補を履歴へ追加する前に検証し、無効な範囲／gain／stretchならRedo枝も保持する。編集・Undo/Redoでは元のsource位置を新しい時間軸へ対応付け、削除した位置は次の区間／編集EOFへ移す。status・Seek・CTI・背景EOFは編集長を使い、source長はmetadata／waveform用に保持。全削除で再生を開始せず、Undoで先頭へ復帰する。波形は元overviewの残存UVを編集長と局所×master gainで描き、compact／tab previewも編集時刻からsource時刻へ変換する。精密なtempo後波形や新しい選択UIの完成ではない。
+
+生成したvideo-only H.264と明示実行の無音WASAPI付きH.264/AACで、2秒sourceを削除・伸縮して4秒にし、3.5秒Seek、Undo/Redo位置、無効編集時の枝保持、master音量でgeneration不変、4倍背景再生の自然EOF4秒、空planのtab往復／復元を確認した。egui描画でstatus00:03 / 00:04、UIA slider上限4秒と3.25秒SetValue、波形3区間のsource UV、mute／empty時の波形なしを確認。独立回帰は削除位置の対応、waveformの区間幅／gain／mute、tab previewのedited bucketからsourceへの変換を検証。新しい選択編集は試験から履歴へ投入しており、通常releaseでのユーザー編集操作は次の工程。
+
 ### 編集時間軸の再生engine（2026-09-10）
 
 最終session71209でfmt／Clippy／workspace360 tests（app201/core53/runtime102/integration4）／releaseが成功。通常ignored9件のうち新しいruntime WASAPI1件とapp全3件を明示実行してすべてPASS、SKIPなし。旧video非表示／音声継続試験も先行session71665でPASS。最終release8c295d7c6d0690caee60c97e1b14a87340e14253e4ba1cb9c4e67fbb00394c08。前回3f1cf36のCI34394210903は成功。以下は再生engineの検証であり、通常UIから編集できるようになったという意味ではない。

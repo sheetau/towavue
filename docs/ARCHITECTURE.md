@@ -14,6 +14,8 @@ V03再生の接続契約: sessionはimmutableな区間planを保持し、target�
 
 timeline内にはhover thumbnailを表示・生成せず、compact video seekのpreviewは維持する。既存の単一区間trim gripは暫定編集UIであり、時間選択／rubber-band／複数区間model（V03）の実装とは扱わない。入力取消・所有権、tab別panel高さ、編集履歴と再生位置は表示変更だけでは変えない。
 
+V03 app接続契約（2026-09-10）: source duration／waveform textureは入力のmetadataとして保持し、active／backgroundの位置・EOFとstatus／Seek／timelineの長さはsessionの編集planを使う。編集履歴をpushする前にcandidate全体を検証し、無効な操作ではUndo/Redo枝も変更しない。plan変更とUndo/Redoでは旧位置をsourceへ戻して新planへ対応付け、削除された位置は次の残存区間、残存tailより後は編集EOFへ移す。空planからの復元は先頭へ戻す。master音量だけなら再生を再作成せず、master速度は編集軸の長さを変えない。元波形のUVを残存source区間ごとに切り出して編集長・局所×master gainに合わせて描き、panel内へclipする。これは元波形のoverviewで、tempo後のPCMから再計算した精密波形ではない。previewは編集時間でsampleを選んでsourceへ対応付ける。新plan上で旧source trimの追加・grip表示は行わない。選択／rubber-band／編集commandのUI公開は次の接続工程であり、未編集状態の暫定trimを完成仕様とはしない。
+
 ## 1. 目的と優先順位
 
 towavueはWindows向けの画像・動画・音声ビューア兼プレイヤーである。設計上の優先順位は次のとおり。

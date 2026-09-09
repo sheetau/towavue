@@ -18,7 +18,6 @@ pub struct Target {
 struct LastPosition {
     path: PathBuf,
     position: Duration,
-    duration: Option<Duration>,
 }
 
 pub struct TabPreview {
@@ -46,6 +45,7 @@ impl TabPreview {
         path: Option<&Path>,
         position: Duration,
         duration: Option<Duration>,
+        timeline: Option<&towavue_core::EditTimeline>,
     ) {
         self.positions
             .retain(|id, _| tabs.tabs().iter().any(|tab| tab.id == *id));
@@ -53,12 +53,20 @@ impl TabPreview {
             && Some(tab.target.current_path()) == path
             && tab.target.media_kind() == MediaKind::Video
         {
+            let position = if let Some(plan) = timeline {
+                let duration = Duration::from_nanos(plan.duration().as_nanoseconds() as u64);
+                plan.source_time(crate::media_time(sample_time(position, Some(duration))))
+                    .map_or(Duration::ZERO, |source| {
+                        Duration::from_nanos(source.as_nanoseconds() as u64)
+                    })
+            } else {
+                sample_time(position, duration)
+            };
             self.positions.insert(
                 tab.id,
                 LastPosition {
                     path: tab.target.current_path().to_owned(),
                     position,
-                    duration,
                 },
             );
         }
@@ -70,9 +78,7 @@ impl TabPreview {
             .positions
             .get(&tab.id)
             .filter(|last| last.path == path)
-            .map_or(Duration::ZERO, |last| {
-                sample_time(last.position, last.duration)
-            });
+            .map_or(Duration::ZERO, |last| last.position);
         Target {
             tab: tab.id,
             path,
@@ -226,9 +232,16 @@ mod tests {
             Some(Path::new("video.mp4")),
             Duration::from_secs(37),
             Some(duration),
+            None,
         );
         tabs.open_new("image.png".into(), MediaKind::Image);
-        preview.record(&tabs, Some(Path::new("image.png")), Duration::ZERO, None);
+        preview.record(
+            &tabs,
+            Some(Path::new("image.png")),
+            Duration::ZERO,
+            None,
+            None,
+        );
         assert_eq!(
             preview.target(&tabs.tabs()[0]).position,
             Duration::from_millis(37500)
@@ -249,6 +262,7 @@ mod tests {
             Some(Path::new("stale.mp4")),
             Duration::from_secs(50),
             Some(duration),
+            None,
         );
         assert_eq!(
             preview.target(tabs.active().expect("active")).position,
@@ -258,6 +272,30 @@ mod tests {
             tabs, active,
             "recording a preview does not activate or modify tabs"
         );
+    }
+
+    #[test]
+    fn edited_preview_samples_in_edited_time_then_maps_to_the_source() {
+        use towavue_core::{EditTimeline, MediaTime, PlaybackRange, TimeRange, TimelineEdit};
+        let time = |seconds: i64| MediaTime::from_nanoseconds(seconds * 1_000_000_000);
+        let mut plan = EditTimeline::new(time(100), PlaybackRange::default()).expect("plan");
+        assert!(plan.apply(TimelineEdit::Delete(
+            TimeRange::new(time(20), time(60)).expect("range")
+        )));
+        let mut preview = TabPreview::new().expect("worker");
+        let mut tabs = TabSet::default();
+        tabs.open_new("edited.mp4".into(), MediaKind::Video);
+        preview.record(
+            &tabs,
+            Some(Path::new("edited.mp4")),
+            Duration::from_secs(30),
+            Some(Duration::from_secs(100)),
+            Some(&plan),
+        );
+        let target = preview.target(tabs.active().expect("tab"));
+        assert_eq!(target.position, Duration::from_millis(71500));
+        tabs.open_new("other.png".into(), MediaKind::Image);
+        assert_eq!(preview.target(&tabs.tabs()[0]), target);
     }
 
     #[test]

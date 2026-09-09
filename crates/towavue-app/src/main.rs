@@ -305,6 +305,7 @@ struct RetainedImageTab {
     reading_mode: bool,
     reading_settings: ReadingSettings,
     filmstrip_open: bool,
+    filmstrip_view: filmstrip::View,
     timeline_open: bool,
     image: Option<ImagePresentation>,
     reading_pages: Vec<Result<ImagePresentation, String>>,
@@ -1025,6 +1026,7 @@ where
                 reading_mode: self.reading_mode,
                 reading_settings: self.reading_settings,
                 filmstrip_open: self.filmstrip_open,
+                filmstrip_view: self.filmstrip.take_view(),
                 timeline_open: self.timeline_open,
                 image: self.image.take(),
                 reading_pages: std::mem::take(&mut self.reading_pages),
@@ -1047,6 +1049,7 @@ where
         self.reading_mode = saved.reading_mode && !self.command_context().has_unsaved_edits;
         self.reading_settings = saved.reading_settings;
         self.filmstrip_open = saved.filmstrip_open;
+        self.filmstrip.restore_view(saved.filmstrip_view);
         self.timeline_open = saved.timeline_open;
         self.image = saved.image;
         self.reading_pages = saved.reading_pages;
@@ -1088,6 +1091,7 @@ where
         }
         let position = self.current_position();
         self.cancel_view_drag();
+        self.playlist.suspend();
         let mut clock = self
             .clock
             .take()
@@ -1108,6 +1112,7 @@ where
             view: self.image_view,
             timeline_open: self.timeline_open,
             filmstrip_open: self.filmstrip_open,
+            filmstrip_view: self.filmstrip.take_view(),
             playlist: std::mem::take(&mut self.playlist),
             folder_snapshot: self.folder_snapshot.take(),
             error: self.playback_error.take(),
@@ -1153,6 +1158,7 @@ where
         self.timeline_open = saved.timeline_open;
         self.filmstrip_open = saved.filmstrip_open;
         self.playlist = saved.playlist;
+        self.filmstrip.restore_view(saved.filmstrip_view);
         self.folder_snapshot = saved.folder_snapshot;
         self.playback_error = saved.error;
         self.status_message = saved.status;
@@ -1420,7 +1426,15 @@ where
 
     fn apply_folder_snapshot(&mut self, snapshot: FolderSnapshot) {
         let previous_reading_paths = self.reading_request_paths();
-        self.filmstrip.clear();
+        if self
+            .folder_snapshot
+            .as_ref()
+            .is_some_and(|previous| previous.items == snapshot.items)
+        {
+            self.filmstrip.clear_previews();
+        } else {
+            self.filmstrip.clear();
+        }
         let current_path = self.path.clone();
         let current_identity = current_path.as_deref().and_then(|path| {
             self.folder_snapshot
@@ -3791,7 +3805,7 @@ where
             return;
         }
         let max_height = root.available_height() * 0.6;
-        egui::Panel::bottom("timeline")
+        egui::Panel::bottom(self.timeline_panel_id())
             .default_size(96.0)
             .size_range(64.0_f32.min(max_height)..=max_height)
             .resizable(true)
@@ -3878,6 +3892,13 @@ where
                 let ratio = ((position.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                 self.draw_seek_preview(&response, ratio, duration);
             });
+    }
+
+    fn timeline_panel_id(&self) -> egui::Id {
+        self.tabs.active().map_or_else(
+            || egui::Id::new("timeline"),
+            |tab| egui::Id::new(("timeline", tab.id)),
+        )
     }
 
     fn draw_audio_playlist(&mut self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
@@ -5199,6 +5220,11 @@ where
         self.tab_preview.clear();
         self.edits.remove(&id);
         self.retained_images.remove(&id);
+        if let Some(context) = &self.ui_context {
+            context.data_mut(|data| {
+                data.remove::<egui::containers::panel::PanelState>(egui::Id::new(("timeline", id)))
+            });
+        }
         if let Some(saved) = self.retained_playback.remove(&id) {
             self.duration_workers.remove(&saved.instance);
         }
@@ -5757,7 +5783,7 @@ where
         self.restore_ui_textures = true;
         self.playback_error = None;
         self.refresh_title();
-        self.filmstrip.clear();
+        self.filmstrip.clear_previews();
         self.waveform = None;
         self.hover_thumbnail = None;
         if self.timeline_open {
@@ -9132,7 +9158,7 @@ mod tests {
         let position = app.current_position();
         let generation = app.generation;
         let context = fonts::test_context();
-        let mut frame = |size, events| {
+        let frame = |app: &mut Application<_>, size, events| {
             let mut actions = Vec::new();
             let _ = context.run_ui(
                 egui::RawInput {
@@ -9143,15 +9169,15 @@ mod tests {
                 |ui| app.draw_ui(ui, &mut actions),
             );
             assert!(actions.is_empty(), "resize must not seek or edit");
-            egui::containers::panel::PanelState::load(&context, egui::Id::new("timeline"))
+            egui::containers::panel::PanelState::load(&context, app.timeline_panel_id())
                 .expect("timeline panel")
                 .outer_rect
         };
         let size = egui::vec2(960.0, 576.0);
         for _ in 0..3 {
-            frame(size, vec![]);
+            frame(&mut app, size, vec![]);
         }
-        let before = frame(size, vec![]);
+        let before = frame(&mut app, size, vec![]);
         let start = before.center_top();
         let end = start - egui::vec2(0.0, 90.0);
         let button = |pos, pressed| egui::Event::PointerButton {
@@ -9167,17 +9193,27 @@ mod tests {
             vec![egui::Event::PointerMoved(end)],
             vec![button(end, false)],
         ] {
-            frame(size, events);
+            frame(&mut app, size, events);
         }
-        let after = frame(size, vec![]);
+        let after = frame(&mut app, size, vec![]);
+        let other = app.tabs.open_new(root.join("other.mp4"), MediaKind::Video);
+        let other_panel = app.timeline_panel_id();
+        let other_rect = frame(&mut app, size, vec![]);
+        assert!((other_rect.height() - 96.0).abs() <= 1.0);
+        assert!(app.tabs.activate(tab));
+        let restored = frame(&mut app, size, vec![]);
+        assert!((restored.height() - after.height()).abs() <= 1.0);
+        app.ui_context = Some(context.clone());
+        app.remove_tab(other, false);
+        assert!(egui::containers::panel::PanelState::load(&context, other_panel).is_none());
         assert!(
             after.height() > before.height() + 70.0,
             "{before:?} -> {after:?}"
         );
         for _ in 0..3 {
-            frame(egui::vec2(240.0, 150.0), vec![]);
+            frame(&mut app, egui::vec2(240.0, 150.0), vec![]);
         }
-        let small = frame(egui::vec2(240.0, 150.0), vec![]);
+        let small = frame(&mut app, egui::vec2(240.0, 150.0), vec![]);
         assert!(small.height() <= 54.0, "small panel: {small:?}");
         assert!(small.top() >= 64.0, "keep a media viewport: {small:?}");
         assert_eq!(app.edits[&tab], history);

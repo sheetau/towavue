@@ -14,6 +14,12 @@ const HEIGHT: f32 = 118.0;
 
 type Preview = Result<(TextureHandle, Option<Duration>), String>;
 
+#[derive(Default)]
+pub struct View {
+    focus: Option<PathBuf>,
+    offset: f32,
+}
+
 pub struct Filmstrip {
     loader: PreviewLoader,
     generation: u64,
@@ -21,6 +27,7 @@ pub struct Filmstrip {
     previews: HashMap<PathBuf, Preview>,
     focus: Option<PathBuf>,
     focus_requested: bool,
+    scroll_offset: f32,
 }
 
 impl Filmstrip {
@@ -32,17 +39,39 @@ impl Filmstrip {
             previews: HashMap::new(),
             focus: None,
             focus_requested: false,
+            scroll_offset: 0.0,
         })
     }
 
     pub fn clear(&mut self) {
         self.focus_requested = false;
-        if !self.visible.is_empty() || self.focus.is_some() {
+        self.focus = None;
+        self.scroll_offset = 0.0;
+        self.clear_previews();
+    }
+
+    pub fn clear_previews(&mut self) {
+        if !self.visible.is_empty() {
             self.generation = self.loader.request(Vec::new());
             self.visible.clear();
             self.previews.clear();
-            self.focus = None;
         }
+    }
+
+    pub fn take_view(&mut self) -> View {
+        self.clear_previews();
+        self.focus_requested = false;
+        View {
+            focus: self.focus.take(),
+            offset: std::mem::take(&mut self.scroll_offset),
+        }
+    }
+
+    pub fn restore_view(&mut self, view: View) {
+        self.clear_previews();
+        self.focus_requested = false;
+        self.focus = view.focus;
+        self.scroll_offset = view.offset;
     }
 
     pub fn focus_current(&mut self) {
@@ -176,13 +205,14 @@ impl Filmstrip {
                 ui.style_mut().always_scroll_the_only_direction = true;
                 let mut scroll = egui::ScrollArea::horizontal()
                     .id_salt("filmstrip-scroll")
+                    .horizontal_scroll_offset(self.scroll_offset)
                     .auto_shrink([false, false])
                     .max_height(HEIGHT)
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
                 if recenter || self.focus_requested {
                     scroll = scroll.horizontal_scroll_offset(selected.unwrap_or(0) as f32 * STEP);
                 }
-                scroll.show_viewport(ui, |ui, viewport| {
+                let output = scroll.show_viewport(ui, |ui, viewport| {
                     let padding = ((screen.width() - STEP) / 2.0).max(0.0);
                     let origin = ui.min_rect().min;
                     ui.set_min_size(egui::vec2(
@@ -300,6 +330,7 @@ impl Filmstrip {
                         response.on_hover_text(tooltip);
                     }
                 });
+                self.scroll_offset = output.state.offset.x;
             });
         self.set_visible(wanted);
     }
@@ -1114,6 +1145,19 @@ mod tests {
         }
         assert_ne!(filmstrip.visible, before_scroll);
         assert_eq!(filmstrip.focus.as_ref(), Some(&snapshot.items[30_000].path));
+        let retained_visible = filmstrip.visible.clone();
+        let retained_offset = filmstrip.scroll_offset;
+        let retained_view = filmstrip.take_view();
+        frame(&mut filmstrip, 5000, Vec::new());
+        assert_ne!(filmstrip.scroll_offset, retained_offset);
+        filmstrip.restore_view(retained_view);
+        frame(&mut filmstrip, 30_000, Vec::new());
+        assert_eq!(filmstrip.scroll_offset, retained_offset);
+        assert_eq!(filmstrip.visible, retained_visible);
+        filmstrip.clear_previews();
+        frame(&mut filmstrip, 30_000, Vec::new());
+        assert_eq!(filmstrip.scroll_offset, retained_offset);
+        assert_eq!(filmstrip.visible, retained_visible);
         filmstrip
             .previews
             .insert(snapshot.items[30_000].path.clone(), Err("fixture".into()));

@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### タブ別scroll位置とtimeline高さ（2026-09-10 02:38 JST）
+
+playlistを現在曲から離れた場所までscrollし、別の音声tabを見てから戻る。元の縦位置を復元し、別tabのscroll位置を流用しない。表示中filmstripも横位置を画像／再生tabへ保持し、同じShell一覧のrefreshでは現在項目へ戻さない。別tabのtimelineを広げても各tabの高さは独立する。closeは対応panel stateを解放する。
+
+回帰は同じegui contextでplaylistの1280／2560pxを独立復元して描画行を確認する。大きなfilmstripの実wheel後のoffset／可視path集合を別view往復とpreview clear後も比較する。timelineは実pointer dragで90px拡大、別tabは初期96px、復帰は拡大後と1px以内で一致し、closeでPanelStateが消える。window縮小時のclamp・編集／再生位置無変更も再確認した。旧testが共通timeline IDを直接参照していた箇所は新しいtab IDへ更新した。
+
+通常releasefe24c81f、scroll-state-native PID46276/start17:36:22.6035953Z。生成した81件の短い無音WAVの一覧でwheel後、別folderの音声tabへ往復。UIAの可視行13. track-11.wav～27. track-25.wavが前後で一致し、captureでも復帰位置を確認した。Endedを維持、通常Close終了0、launcher18309 terminal。stderrは通常decode／metricsだけ。dialog helperは所有PID確認後の前面化を追加し、今回は標準helperのまま完了した。nativeのfilmstrip／timeline追加試験と全focus監査はこのtrialの証拠に含めない。
+
+session24646のfmt／Clippy／workspace340 tests／releaseが成功、opt-in7件は通常suiteでignored。依存・runtime変更なし。全goal台帳と残りのU07映像復帰／focus／resource監査を維持する。
+
 ### 通常UIのtab別sessionと背景再生（2026-09-10 02:25 JST）
 
 音声を再生して画像tabへ移り、戻っても先頭から再生し直さないことを確認する。一時停止位置、動画のzoom／selection、timeline開閉・取得済みwaveformもtabに保持する。終端が既知の非active動画はdecode停止、未知の動画はclockに合わせてqueueを処理し、音声と無音動画の背景EOFを扱う。終了後に自動で次曲へ進む機能はまだ別の残件である。映像の復帰時は入力を再openするためframe待機があり、全UI状態保持の完成とはしない。

@@ -8,13 +8,19 @@ pub struct Playlist {
     focus: Option<(PathBuf, usize)>,
     keyboard_focus: Option<(PathBuf, egui::Id)>,
     wheel: crate::wheel_input::Scroll,
+    scroll_offset: f32,
 }
 
 impl Playlist {
+    pub fn suspend(&mut self) {
+        self.wheel.clear();
+    }
+
     pub fn clear(&mut self) {
         self.focus = None;
         self.keyboard_focus = None;
         self.wheel.clear();
+        self.scroll_offset = 0.0;
     }
 
     pub fn show(
@@ -86,9 +92,9 @@ impl Playlist {
                 .as_ref()
                 .map(|(path, index)| (path.as_path(), *index))
                 != focus;
-            let scroll_id = ui.make_persistent_id(egui::IdSalt::new("audio_playlist"));
             let mut scroll = egui::ScrollArea::vertical()
                 .id_salt("audio_playlist")
+                .vertical_scroll_offset(self.scroll_offset)
                 .scroll_source(egui::scroll_area::ScrollSource {
                     mouse_wheel: false,
                     ..Default::default()
@@ -97,8 +103,7 @@ impl Playlist {
             if changed || reveal.is_some() {
                 self.wheel.clear();
                 if let Some(index) = reveal.or_else(|| focus.map(|(_, index)| index)) {
-                    let offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
-                        .map_or(0.0, |state| state.offset.y);
+                    let offset = self.scroll_offset;
                     let top = index as f32 * 32.0;
                     let height = ui.available_height();
                     let offset = if top < offset {
@@ -120,12 +125,11 @@ impl Playlist {
                     allow_wheel,
                 );
                 if delta.y != 0.0 {
-                    let offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
-                        .map_or(0.0, |state| state.offset.y);
+                    let offset = self.scroll_offset;
                     scroll = scroll.vertical_scroll_offset((offset - delta.y).max(0.0));
                 }
             }
-            scroll.show_rows(ui, 32.0, items.len(), |ui, rows| {
+            let output = scroll.show_rows(ui, 32.0, items.len(), |ui, rows| {
                 for index in rows {
                     let item = items[index];
                     let selected = current == Some(item.path.as_path());
@@ -170,6 +174,7 @@ impl Playlist {
                     }
                 }
             });
+            self.scroll_offset = output.state.offset.y;
         });
         chosen
     }
@@ -750,6 +755,56 @@ mod tests {
             generation: 1,
             captured_at: SystemTime::now(),
         }
+    }
+
+    #[test]
+    fn retained_lists_restore_their_own_scroll_in_the_same_ui() {
+        let context = egui::Context::default();
+        let snapshot = snapshot(200);
+        let current = snapshot.items[0].path.clone();
+        let frame = |playlist: &mut Playlist| {
+            context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 240.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    playlist.show(ui, Some(&snapshot), Some(&current), true);
+                },
+            )
+        };
+        let mut first = Playlist::default();
+        let mut second = Playlist::default();
+        for _ in 0..3 {
+            frame(&mut first);
+        }
+        first.scroll_offset = 1280.0;
+        let before = frame(&mut first);
+        first.suspend();
+        assert!(
+            texts(&before)
+                .iter()
+                .any(|text| text.galley.job.text == "41. track-40.wav")
+        );
+        for _ in 0..3 {
+            frame(&mut second);
+        }
+        assert_eq!(second.scroll_offset, 0.0);
+        let after = frame(&mut first);
+        assert_eq!(first.scroll_offset, 1280.0);
+        assert!(
+            texts(&after)
+                .iter()
+                .any(|text| text.galley.job.text == "41. track-40.wav")
+        );
+        second.scroll_offset = 2560.0;
+        frame(&mut second);
+        frame(&mut first);
+        frame(&mut second);
+        assert_eq!(second.scroll_offset, 2560.0);
+        first.clear();
+        frame(&mut first);
+        assert_eq!(first.scroll_offset, 0.0);
     }
 
     fn texts(output: &egui::FullOutput) -> Vec<&egui::epaint::TextShape> {

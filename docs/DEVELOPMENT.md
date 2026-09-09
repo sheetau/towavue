@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 押している間だけ2倍速（2026-09-10 07:37、V04部分実装）
+
+動画の視聴面、または動画・音声共通の再生ボタンを動かさず400ms押すと、押している間だけ2倍速になる。元が一時停止ならその間だけ再生し、離すと元の速度と停止状態に戻る。短い再生ボタンのクリックは従来どおり。動画編集中の映像面は範囲選択を優先する。移動・Escapeなどのキー・focus/pointer喪失・resize・別command・Seek・編集・tab切替・modalで取消す。終端では元速度へ戻して停止し、一時停止からの試聴では次曲を始めない。
+
+一時倍速は履歴や保存設定ではない。1.25倍などの既存速度、Delete/stretch後の編集時間軸、選択再生範囲を保持する。別tabで2倍速のまま再生し続けることもない。表示は通常statusとfullscreen messageに出す。既存pipelineを現在位置から再開するため、長GOPでの待ちや切替時の音の途切れを無くす実装ではなく、応答性と任意素材の音質評価は継続する。
+
+入力2件、hidden-window動画1件、無音WASAPIの明示opt-in1件を追加。通常buttonと動画面、400ms判定、複数pass、短click／長hold、取消後release、native release、閲覧／編集／fullscreen、編集plan・履歴・元速度/pause・tab・EOFを確認した。速度切替中にframeがないと動画面のreleaseを取り逃す問題をこの回帰で修正した。session71075でfmt／Clippy／workspace385件と追加5件、release成功。通常ignored11件は別計上。release SHA256 f7064887b9ac1ea5af19a9bef632793d889e2a0e820efd19af799e7ae6ba1ed7。通常windowの物理入力・外観、mixed-DPI、長GOP応答性、音声のframe相当操作と全UX台帳の残件は未完のまま継続する。
+
 ### 動画の実フレーム移動（2026-09-10 07:15、V04部分実装）
 
 動画を表示して `,`／`.` で前／次のフレームへ移動すると、一時停止する。View menuやcommand paletteのPrevious/Next video frameも同じ操作。基準は表示中の実PTSで、固定fpsから換算しない。Delete／stretchした時間軸でも残っている前後フレームへ移動する。連続入力は最大32操作まで順番に処理し、Seek・別command・編集・tab切替・focus喪失・pointer pressで取消す。現在位置のフレームがまだ届いていない場合は待機案内を出す。速度変更は `Ctrl+,`／`Ctrl+.`、音声のframe相当操作と長押し2倍速は未実装。

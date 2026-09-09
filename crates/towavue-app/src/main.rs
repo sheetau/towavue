@@ -9,6 +9,7 @@ mod filmstrip;
 mod fonts;
 mod frame_step;
 mod grid;
+mod hold_speed;
 mod menu;
 mod palette;
 mod playback_tab;
@@ -143,6 +144,7 @@ impl PlaybackClock {
 
 #[derive(Clone, PartialEq)]
 enum UiAction {
+    HoldSpeed(u64, PlaybackGeneration, hold_speed::Action),
     Command(CommandId),
     BeginReadingDrag(egui::Pos2, egui::Vec2),
     NativeCaption(CaptionAction),
@@ -663,6 +665,7 @@ struct Application<N> {
     waveform_worker: LatestTask,
     thumbnail_worker: LatestTask,
     frame_steps: frame_step::FrameSteps,
+    held_speed: Option<hold_speed::Held>,
     timeline_open: bool,
     waveform: Option<TextureHandle>,
     media_duration: Option<Duration>,
@@ -834,6 +837,7 @@ where
             waveform_worker: LatestTask::new("towavue-waveform")?,
             thumbnail_worker: LatestTask::new("towavue-thumbnail")?,
             frame_steps: frame_step::FrameSteps::new()?,
+            held_speed: None,
             timeline_open: false,
             waveform: None,
             media_duration: None,
@@ -1211,6 +1215,7 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.cancel_hold_speed();
         self.cancel_frame_steps();
         self.retain_image_tab();
         self.retain_playback_tab();
@@ -2144,6 +2149,7 @@ where
             || self.filmstrip_open
             || egui::Popup::is_any_open(&context)
         {
+            self.cancel_hold_speed();
             self.finish_reading_drag(true);
         }
         // Decide before the menu can close itself with this same Escape event.
@@ -2236,7 +2242,7 @@ where
                             });
                     }
                 } else if self.media_kind == Some(MediaKind::Video) {
-                    self.draw_video_edit_overlay(ui, &mut volume_targets);
+                    self.draw_video_edit_overlay(ui, &mut volume_targets, actions);
                 }
             });
         if let Some(rect) = status_rect {
@@ -2246,7 +2252,7 @@ where
         self.volume_wheel(&context, &volume_targets, actions);
         if self.fullscreen
             && let Some((message, started)) = &self.status_message
-            && started.elapsed() < STATUS_MESSAGE_DURATION
+            && (started.elapsed() < STATUS_MESSAGE_DURATION || self.held_speed.is_some())
         {
             egui::Area::new("fullscreen-status".into())
                 .anchor(Align2::CENTER_TOP, [0.0, 12.0])
@@ -2254,7 +2260,11 @@ where
                 .show(&context, |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                         ui.set_max_width((context.content_rect().width() - 32.0).max(100.0));
-                        ui.label(message);
+                        ui.label(if self.held_speed.is_some() {
+                            "2× while held · release to restore playback"
+                        } else {
+                            message
+                        });
                     });
                 });
         }
@@ -2552,12 +2562,23 @@ where
         &mut self,
         ui: &mut egui::Ui,
         volume_targets: &mut Vec<egui::Response>,
+        actions: &mut Vec<UiAction>,
     ) {
         let Some((width, height, pixel_aspect)) = self
             .session
             .as_ref()
             .and_then(PlaybackSession::video_geometry)
         else {
+            // A speed change restarts decode. Keep the held surface reachable
+            // until its replacement frame arrives, including the release.
+            if !self.visual_selection_enabled() {
+                let response = ui.interact(
+                    ui.max_rect(),
+                    ui.id().with("video-edit-surface"),
+                    egui::Sense::click_and_drag(),
+                );
+                self.hold_response(&response, actions);
+            }
             return;
         };
         let transform = self.visual_transform((width, height));
@@ -2575,6 +2596,7 @@ where
         volume_targets.push(response.clone());
         self.update_selection(&response, viewport, size, shift, pointer);
         if !self.visual_selection_enabled() {
+            self.hold_response(&response, actions);
             selection::release_focus(ui.ctx());
             return;
         }
@@ -2663,7 +2685,8 @@ where
     }
 
     fn cancel_view_drag(&mut self) -> bool {
-        let mut canceled_press = self.finish_reading_drag(true);
+        let mut canceled_press = self.cancel_hold_speed();
+        canceled_press |= self.finish_reading_drag(true);
         canceled_press |= self.ui_context.as_ref().is_some_and(timeline_input::cancel);
         if let Some(state) = &mut self.ui_state {
             // Commands and focus changes can precede the frame that would start the drag.
@@ -3511,7 +3534,7 @@ where
                     }
                     if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
                         let playing = self.state == PlaybackState::Playing;
-                        if chrome::button(
+                        let play = chrome::button(
                             ui,
                             if playing {
                                 chrome::Icon::Pause
@@ -3522,9 +3545,9 @@ where
                                 CommandId::TogglePause,
                                 if playing { "Pause" } else { "Play / replay" },
                             ),
-                        )
-                        .clicked()
-                        {
+                        );
+                        let held = self.hold_response(&play, actions);
+                        if play.clicked() && !held {
                             actions.push(UiAction::Command(CommandId::TogglePause));
                         }
                         let duration = self
@@ -3617,7 +3640,7 @@ where
                         details.push(format!("{} {width}×{height} · {}", image.decoded.format, if self.nearest_images { "Nearest" } else { "Smooth" }));
                     } else if self.session.is_some() {
                         let edit = self.edit_state();
-                        details.push(format!("{:.2}×", edit.rate));
+                        details.push(if self.held_speed.is_some() { "2× while held".into() } else { format!("{:.2}×", edit.rate) });
                         if edit.trim_start.is_some() || edit.trim_end.is_some() {
                             details.push("Trim (T)".into());
                         }
@@ -4063,6 +4086,9 @@ where
                 {
                     self.set_status(format!("Could not perform window action: {error}"));
                 }
+            }
+            UiAction::HoldSpeed(media, generation, action) => {
+                self.handle_hold_speed(media, generation, action)
             }
             UiAction::ActivateTab(id) => self.activate_tab(id),
             UiAction::TabCommand(id, command) => self.dispatch_tab_command(id, command),
@@ -4728,6 +4754,7 @@ where
     }
 
     fn push_edit(&mut self, operation: EditOperation) {
+        self.cancel_hold_speed();
         self.cancel_frame_steps();
         if matches!(operation, EditOperation::Timeline(_)) && !self.prepare_timeline_edit(operation)
         {
@@ -4836,6 +4863,7 @@ where
     }
 
     fn undo_edit(&mut self, redo: bool) {
+        self.cancel_hold_speed();
         self.cancel_frame_steps();
         let Some(id) = self.tabs.active().map(|tab| tab.id) else {
             return;
@@ -5214,6 +5242,7 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        self.cancel_hold_speed();
         self.cancel_frame_steps();
         if self.resize_dialog.is_some() {
             self.set_status("Apply or cancel image resize before leaving.".into());
@@ -5724,6 +5753,7 @@ where
     }
 
     fn seek_to(&mut self, target: MediaTime) {
+        self.cancel_hold_speed();
         self.cancel_frame_steps();
         if self
             .playback_selection
@@ -6103,7 +6133,8 @@ where
             && self.pending_time.is_none()
             && self.audio_drained
         {
-            let was_playing = self.state == PlaybackState::Playing;
+            let was_playing = self.state == PlaybackState::Playing
+                && !self.held_speed.as_ref().is_some_and(|held| held.was_paused);
             if let Some(end) = playback_tab::end(self.session.as_ref(), self.media_duration) {
                 if self.clock.is_none() {
                     let mut clock =
@@ -6120,6 +6151,7 @@ where
                 clock.set_paused(true);
             }
             self.state = PlaybackState::Ended;
+            self.cancel_hold_speed();
             if self.playback_selection.is_some() {
                 self.set_status(
                     "Selection ended · Shift+Space restarts · Escape returns to full range".into(),
@@ -6150,6 +6182,7 @@ where
     }
 
     fn handle_render_error(&mut self, error: RenderError) {
+        self.cancel_hold_speed();
         self.finish_reading_drag(true);
         let error = self
             .renderer
@@ -6169,6 +6202,7 @@ where
     }
 
     fn fail(&mut self, error: String) {
+        self.cancel_hold_speed();
         self.cancel_frame_steps();
         self.pending_seek_started = None;
         eprintln!("towavue: {error}");
@@ -7098,6 +7132,48 @@ where
     ) {
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
+        }
+        if matches!(
+            &event,
+            WindowEvent::Focused(false)
+                | WindowEvent::CursorLeft { .. }
+                | WindowEvent::Resized(_)
+                | WindowEvent::ScaleFactorChanged { .. }
+                | WindowEvent::KeyboardInput {
+                    event: KeyEvent {
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                    ..
+                }
+        ) {
+            let cancelled = self.cancel_hold_speed();
+            if cancelled
+                && matches!(
+                    &event,
+                    WindowEvent::KeyboardInput {
+                        event: KeyEvent {
+                            logical_key: WinitKey::Named(NamedKey::Escape),
+                            ..
+                        },
+                        ..
+                    }
+                )
+            {
+                return;
+            }
+        }
+        if self.held_speed.is_some()
+            && matches!(
+                &event,
+                WindowEvent::MouseInput {
+                    state: ElementState::Released,
+                    button: winit::event::MouseButton::Left,
+                    ..
+                }
+            )
+        {
+            self.cancel_hold_speed();
         }
         if self.reading_drag.is_some() {
             match &event {

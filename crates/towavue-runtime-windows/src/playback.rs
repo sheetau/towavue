@@ -243,6 +243,18 @@ impl PlaybackSession {
         self.rate
     }
 
+    /// Change transport speed without replacing the edit plan or audition bounds.
+    pub fn set_rate_at(
+        &mut self,
+        target: MediaTime,
+        rate: f32,
+        paused: bool,
+    ) -> Result<PlaybackGeneration, PlaybackError> {
+        self.rate = rate.clamp(0.25, 4.0).max(0.25);
+        self.paused = paused;
+        self.seek(target)
+    }
+
     pub fn range(&self) -> PlaybackRange {
         self.range
     }

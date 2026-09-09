@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### 読書中の編集禁止とfilled icon（2026-09-09 21:59 JST）
+
+通常release800bab26、Windows 11の所有windowでR→未保存→B不成立とdisabled読書button、Undo→B→読書状態を確認。Rは読書配置変更として働き、編集は作らない。別のclean画像を読書表示してから未保存tabへ戻ると、編集を保持してreadingがOffになる。別試行ではR→UndoでRedo可能な履歴を作り、B→Ctrl+Shift+Zではcleanを維持、Bで解除して同じRedoを入力するとdirtyになることを確認した。Ctrl+YはcropでありRedo試験には数えない。
+
+outline／filledのcaptureを画素測定すると同じx13..26・y555..566の範囲に収まり、明るい画素は68→168となる。buttonのhit範囲は28×24を維持。2試行とも通常終了0・stderr空、生成PNGのhash5f24c4ff不変。自動回帰は共有command有効性、dirty開始拒否、Undo/Redo履歴保護、dirty tabへの復帰、icon contour一致を含み、全体320 passed／機器依存4 ignored。物理keyboard・混在DPI・全screen readerの確認ではない。
+
 ### Welcomeとrecent paths（2026-09-09 21:47 JST）
 
 fileなし起動でWelcome tabとSTART／RECENTを表示する。PNG／MP4／WAVを開いて全tabを閉じると、thumbnail／waveform・duration付き履歴から再Openできる。正常終了後の再起動でも直近40件のpath参照を復元する。履歴を`%APPDATA%\towavue\recent-files.txt`へ保存するが、未保存編集や再生状態は保存しない。破損履歴は保持し、警告とwindow内の一覧で継続する。

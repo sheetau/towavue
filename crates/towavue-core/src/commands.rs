@@ -301,6 +301,7 @@ pub struct CommandContext {
     pub palette_open: bool,
     pub filmstrip_open: bool,
     pub reading_mode: bool,
+    pub has_unsaved_edits: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -313,9 +314,25 @@ pub struct CommandDefinition {
 
 impl CommandDefinition {
     pub fn is_enabled(self, context: CommandContext) -> bool {
+        let image_reading = context.media_kind == Some(MediaKind::Image) && context.reading_mode;
         (!self.requires_reading_mode || context.reading_mode)
-            && (self.id != CommandId::SelectAll || !context.reading_mode)
-            && (self.id != CommandId::CoverWindow || !context.reading_mode)
+            && (self.id != CommandId::ToggleReadingMode
+                || context.reading_mode
+                || !context.has_unsaved_edits)
+            && (!image_reading
+                || !matches!(
+                    self.id,
+                    CommandId::SelectAll
+                        | CommandId::CoverWindow
+                        | CommandId::ToggleCropPreview
+                        | CommandId::ApplyCrop
+                        | CommandId::RotateClockwise
+                        | CommandId::RotateCounterclockwise
+                        | CommandId::FlipHorizontal
+                        | CommandId::FlipVertical
+                        | CommandId::Undo
+                        | CommandId::Redo
+                ))
             && (self.media_kinds.is_empty()
                 || context
                     .media_kind
@@ -638,6 +655,73 @@ mod tests {
             reading_mode: true,
             ..CommandContext::default()
         }));
+    }
+
+    #[test]
+    fn reading_blocks_dirty_entry_and_image_edits_but_not_other_media() {
+        let enabled = |id, context| {
+            command_definitions()
+                .iter()
+                .find(|definition| definition.id == id)
+                .expect("command")
+                .is_enabled(context)
+        };
+        let mut context = CommandContext {
+            media_kind: Some(MediaKind::Image),
+            has_unsaved_edits: true,
+            ..Default::default()
+        };
+        assert!(!enabled(CommandId::ToggleReadingMode, context));
+        context.has_unsaved_edits = false;
+        assert!(enabled(CommandId::ToggleReadingMode, context));
+        context.reading_mode = true;
+        context.has_unsaved_edits = true;
+        assert!(
+            enabled(CommandId::ToggleReadingMode, context),
+            "exiting remains possible"
+        );
+        for id in [
+            CommandId::Undo,
+            CommandId::Redo,
+            CommandId::ApplyCrop,
+            CommandId::RotateClockwise,
+            CommandId::RotateCounterclockwise,
+            CommandId::FlipHorizontal,
+            CommandId::FlipVertical,
+            CommandId::SelectAll,
+            CommandId::ToggleCropPreview,
+            CommandId::CoverWindow,
+        ] {
+            assert!(!enabled(id, context), "{id:?}");
+            assert!(
+                enabled(
+                    id,
+                    CommandContext {
+                        reading_mode: false,
+                        ..context
+                    }
+                ),
+                "{id:?}"
+            );
+        }
+        for id in [
+            CommandId::NextImage,
+            CommandId::IncreaseReadingPages,
+            CommandId::Save,
+        ] {
+            assert!(enabled(id, context), "{id:?}");
+        }
+        context.media_kind = Some(MediaKind::Video);
+        for id in [
+            CommandId::Undo,
+            CommandId::RotateClockwise,
+            CommandId::SelectAll,
+        ] {
+            assert!(
+                enabled(id, context),
+                "image preference must not block video {id:?}"
+            );
+        }
     }
 
     #[test]

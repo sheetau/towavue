@@ -977,6 +977,9 @@ where
         self.drift_samples.clear();
         self.refresh_folder_snapshot();
         if kind == MediaKind::Image {
+            if self.command_context().has_unsaved_edits {
+                self.reading_mode = false;
+            }
             self.state = PlaybackState::Loading;
             self.rebuild_reading_pages();
             self.refresh_title();
@@ -3093,12 +3096,10 @@ where
                         volume_targets.push(volume);
                     } else if self.media_kind == Some(MediaKind::Image) {
                         let label = self.command_hint(CommandId::ToggleReadingMode, "Reading mode");
-                        let response = ui.add_sized([28.0, 24.0],
-                            egui::Button::new(chrome::Icon::Reading.text()).frame(false)
-                                .sense(egui::Sense::click_and_drag())
-                                .selected(self.reading_mode));
+                        let enabled = self.reading_mode || !self.command_context().has_unsaved_edits;
+                        let response = chrome::reading_button(ui, enabled, self.reading_mode);
                         response.widget_info(|| egui::WidgetInfo::labeled(
-                            egui::WidgetType::Button, ui.is_enabled(), &label));
+                            egui::WidgetType::Button, response.enabled(), &label));
                         if response.drag_started_by(egui::PointerButton::Primary)
                             && ui.input(|input| input.pointer.primary_down() && input.modifiers.is_none())
                             && let Some((origin, position)) = ui.input(|input|
@@ -3112,8 +3113,8 @@ where
                         response.on_hover_ui(|ui| {
                             ui.label(label);
                             ui.label("Drag up/down: images per page\nDrag left/right: images on the first page\nRelease to keep; Escape to cancel");
-                        });
-                        if self.image_view.selection.is_some()
+                        }).on_disabled_hover_text("Save or undo unsaved edits before entering reading mode");
+                        if !self.reading_mode && self.image_view.selection.is_some()
                             && ui
                                 .selectable_label(self.image_view.crop_preview, "Crop preview")
                                 .clicked()
@@ -3610,6 +3611,11 @@ where
         if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             return;
         }
+        if !command_definitions().iter().any(|definition| {
+            definition.id == command && definition.is_enabled(self.command_context())
+        }) {
+            return;
+        }
         if command == CommandId::ToggleFilmstrip && !self.filmstrip_open {
             let focus = if self.palette_open || self.grid_open {
                 self.command_overlay_return_focus
@@ -3735,7 +3741,7 @@ where
                 self.request_redraw();
             }
             CommandId::SelectAll => {
-                if self.reading_mode {
+                if self.media_kind == Some(MediaKind::Image) && self.reading_mode {
                     return;
                 }
                 let size = match self.media_kind {
@@ -4707,6 +4713,7 @@ where
     fn begin_reading_drag(&mut self, position: egui::Pos2, delta: egui::Vec2) {
         if self.reading_drag.is_some()
             || self.media_kind != Some(MediaKind::Image)
+            || self.command_context().has_unsaved_edits
             || self.modal_input_blocked()
             || self.palette_open
             || self.grid_open
@@ -5362,6 +5369,10 @@ where
             palette_open: self.palette_open,
             filmstrip_open: self.filmstrip_open,
             reading_mode: self.reading_mode,
+            has_unsaved_edits: self
+                .tabs
+                .active()
+                .is_some_and(|tab| self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty)),
         }
     }
 
@@ -10814,6 +10825,63 @@ mod tests {
     }
 
     #[test]
+    fn reading_entry_and_edit_dispatch_share_dirty_and_read_only_guards() {
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        let path = PathBuf::from("reading-guard.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.dispatch(CommandId::RotateClockwise);
+        let dirty = app.edits.clone();
+        app.dispatch(CommandId::ToggleReadingMode);
+        assert!(!app.reading_mode);
+        app.begin_reading_drag(egui::Pos2::ZERO, egui::vec2(0.0, -48.0));
+        assert!(!app.reading_mode && app.reading_cursor.is_none() && app.reading_drag.is_none());
+        assert_eq!(app.edits, dirty);
+        app.edits.get_mut(&tab).expect("history").mark_saved();
+        app.dispatch(CommandId::ToggleReadingMode);
+        assert!(app.reading_mode);
+        let saved = app.edits.clone();
+        for command in [
+            CommandId::RotateClockwise,
+            CommandId::RotateCounterclockwise,
+            CommandId::FlipHorizontal,
+            CommandId::FlipVertical,
+            CommandId::ApplyCrop,
+            CommandId::Undo,
+            CommandId::Redo,
+            CommandId::SelectAll,
+            CommandId::ToggleCropPreview,
+        ] {
+            app.handle_ui_action(UiAction::Command(command));
+            assert_eq!(app.edits, saved, "{command:?}");
+            assert!(app.image_view.selection.is_none());
+            assert!(!app.image_view.crop_preview);
+        }
+        app.dispatch(CommandId::ToggleReadingMode);
+        app.dispatch(CommandId::Undo);
+        assert!(!app.reading_mode && app.command_context().has_unsaved_edits);
+        app.edits.get_mut(&tab).expect("history").mark_saved();
+        app.dispatch(CommandId::ToggleReadingMode);
+        let before_redo = app.edits.clone();
+        app.dispatch(CommandId::Redo);
+        assert_eq!(
+            app.edits, before_redo,
+            "available redo is blocked during reading"
+        );
+        app.dispatch(CommandId::ToggleReadingMode);
+        app.dispatch(CommandId::Redo);
+        assert!(app.command_context().has_unsaved_edits);
+        // Returning to an already dirty tab must leave reading without discarding it.
+        let dirty = app.edits.clone();
+        app.reading_mode = true;
+        app.load_path(path, MediaKind::Image);
+        assert!(!app.reading_mode);
+        assert_eq!(app.edits, dirty);
+        assert_eq!(app.tabs.active().expect("active tab").id, tab);
+    }
+
+    #[test]
     fn reading_button_drag_cancels_without_clicking_or_changing_edits() {
         let Some(root) = isolated_test_root(
             "tests::reading_button_drag_cancels_without_clicking_or_changing_edits",
@@ -10829,6 +10897,7 @@ mod tests {
             .entry(tab)
             .or_default()
             .push(EditOperation::RotateClockwise, MediaKind::Image);
+        app.edits.get_mut(&tab).expect("history").mark_saved();
         let edits = app.edits.clone();
         let context = fonts::test_context();
         app.ui_context = Some(context.clone());
@@ -13999,6 +14068,7 @@ mod tests {
         assert_eq!(app.reading_pages.len(), 2);
         assert_eq!(app.path, anchor);
         assert_eq!(app.edits, edits);
+        app.dispatch(CommandId::ToggleReadingMode);
         app.dispatch(CommandId::Undo);
         app.dispatch(CommandId::CloseTab);
         assert!(app.tabs.tabs().is_empty() && app.path.is_none());

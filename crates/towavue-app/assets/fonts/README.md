@@ -36,6 +36,6 @@ Run from the repository root. Ordinary Cargo builds need no Python, font tooling
 - Codepoint names come from that same Monaco package's `codiconsLibrary.js`.
 - Retain [Monaco's MIT notice](LICENSE-Monaco.txt) and the upstream [Codicons artwork license](LICENSE-Codicons.txt), CC BY 4.0, including its Git logo attribution and CC BY 3.0 link. The Codicons license was retrieved at commit `1c47ab36a4bb845c437866405c2fa67b8ca0fe36`.
 
-The app selects a named Codicon family only for icon widgets. It does not add Codicon as a general text fallback or modify the font. The logo remains the owner's custom vector. Current caption glyphs are temporary until the separately tracked native-caption implementation replaces the custom controls; changing their font does not fulfill that requirement.
+The app selects a named Codicon family only for icon widgets. It does not add Codicon as a general text fallback or modify the font. The reading button uses book-derived vector page contours in `chrome.rs`, adapted from the Codicon book outline into matching outlined/filled states; preserve the same attribution and CC BY 4.0 notice for this derivative. The reference is `src/icons/book.svg` at the Codicons commit above. The logo remains the owner's custom vector. Caption controls now use native Windows drawing.
 
 Keep these notices, provenance and Figtree modification statement with any future package containing these assets. The older qualified local Setup and its material bindings have not been rebuilt or approved for this newer executable.

@@ -140,7 +140,9 @@ selectionは元画像に対する正規化矩形として保持し、表示scale
 
 H1ではShift付き選択の画像端制約を、片方の軸だけの切り詰めではなく共通の最大寸法で適用する。正方形作成は押下点を保持し、比率付き辺resizeは反対側の辺と直交方向の中心を保持して、どちらかが画像端に達したところで拡大を止める。比率はdrag開始前の範囲から求め、一時的に幅/高さがzeroになっても失わない。通常drag、取消、release時の既存pixel整列、crop/exportの規則は変更しない。整数pixel/動画偶数pixelへの最終整列による丸めは残る。
 
-reading modeは表示専用で、同じ`FolderSnapshot`から現在画像以降の画像だけをShell view順のまま2～10 page取得する。横・縦配置と表示順反転はpresentation状態だけを変更し、個別画像のselectionや編集状態を作らない。
+reading modeは表示専用で、同じ`FolderSnapshot`から画像だけをShell view順のまま2～10 page取得する。下記の固定見開き分割を使い、横・縦配置と表示順反転はpresentation状態だけを変更し、個別画像のselectionや編集状態を作らない。
+
+2026-09-09 follow-up追記に合わせ、未保存編集のあるactive画像ではclick／drag／commandによるreading開始を無効にする。reading中の画像編集（回転・反転・crop・Undo/Redo）とselection/crop previewを共有command contextで無効にする。保存済みの編集は表示に反映したままでよく、履歴を削除しない。別の未保存画像tabへの移動は拒否せず、その画像のload時にreadingを解除して編集を保持する。従来のdirty anchorからのreading許可はこの契約で置き換える。readingの枚数・配置設定、閲覧navigation、mode解除は引き続き利用できる。
 
 H1のreading表示は横並びで高さ、縦並びで幅を揃え、各画像の縦横比を保って隙間なく連結する。連結した全体をmedia領域へaspect-fitして中央に置き、外周の固定余白は加えない。反転は並び順だけを変える。読込失敗pageは正方形の場所を残し、後続pageを詰めて順序を偽らない。folder seekのreading previewにも同じ配置を使うため、画像用filmstrip cacheはpaddingなしの縮小画像を保持する。動画/音声preview、読み込み件数・worker・cache上限、page送り・編集状態は変更しない。
 

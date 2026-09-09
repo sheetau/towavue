@@ -95,7 +95,6 @@ pub enum Icon {
     OpenFile,
     OpenFolder,
     Close,
-    Reading,
     Pause,
     Play,
     Waveform,
@@ -108,7 +107,6 @@ impl Icon {
             Self::OpenFile => '\u{eaee}',
             Self::OpenFolder => '\u{eaf7}',
             Self::Close => '\u{ea76}',
-            Self::Reading => '\u{eaa4}',
             Self::Pause => '\u{ead1}',
             Self::Play => '\u{eb2c}',
             Self::Waveform => '\u{eb31}',
@@ -125,6 +123,58 @@ pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
+    response
+}
+
+pub fn reading_button(ui: &mut Ui, enabled: bool, selected: bool) -> egui::Response {
+    let response = ui
+        .add_enabled_ui(enabled, |ui| {
+            ui.add_sized(
+                [28.0, 24.0],
+                egui::Button::new("")
+                    .frame(false)
+                    .sense(egui::Sense::click_and_drag())
+                    .selected(selected),
+            )
+        })
+        .inner;
+    let color = if response.enabled() {
+        FOREGROUND
+    } else {
+        MUTED
+    };
+    let origin = response.rect.center() - egui::vec2(8.0, 8.0);
+    // Codicon book-derived page contours; both states retain the same outline and spine.
+    for mirrored in [false, true] {
+        let point = |x: f32, y: f32| origin + egui::vec2(if mirrored { 16.0 - x } else { x }, y);
+        let mut points = vec![point(2.5, 2.5), point(6.0, 2.5)];
+        for curve in [
+            [(6.0, 2.5), (7.1, 2.5), (7.5, 3.4), (7.5, 4.5)],
+            [(7.5, 11.5), (7.5, 12.6), (7.1, 13.5), (6.0, 13.5)],
+            [(2.5, 13.5), (1.9, 13.5), (1.5, 13.1), (1.5, 12.5)],
+            [(1.5, 3.5), (1.5, 2.9), (1.9, 2.5), (2.5, 2.5)],
+        ] {
+            points.extend(
+                egui::epaint::CubicBezierShape::from_points_stroke(
+                    curve.map(|(x, y)| point(x, y)),
+                    false,
+                    Color32::TRANSPARENT,
+                    Stroke::NONE,
+                )
+                .flatten(Some(0.05)),
+            );
+        }
+        ui.painter().add(egui::epaint::PathShape {
+            points,
+            closed: true,
+            fill: if selected {
+                color
+            } else {
+                Color32::TRANSPARENT
+            },
+            stroke: Stroke::new(1.0, color).into(),
+        });
+    }
     response
 }
 
@@ -189,6 +239,41 @@ pub fn logo(ui: &Ui, rect: Rect) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reading_icon_keeps_its_contours_and_only_fills_when_selected() {
+        let context = egui::Context::default();
+        let mut states = Vec::new();
+        for selected in [false, true] {
+            let output = context.run_ui(Default::default(), |ui| {
+                let response = super::reading_button(ui, true, selected);
+                assert_eq!(response.rect.size(), egui::vec2(28.0, 24.0));
+            });
+            let pages: Vec<_> = output
+                .shapes
+                .into_iter()
+                .filter_map(|shape| {
+                    if let egui::Shape::Path(path) = shape.shape {
+                        Some(path)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(pages.len(), 2);
+            assert!(pages.iter().all(|page| page.fill
+                == if selected {
+                    super::FOREGROUND
+                } else {
+                    egui::Color32::TRANSPARENT
+                }));
+            states.push(pages);
+        }
+        for (outline, filled) in states[0].iter().zip(&states[1]) {
+            assert_eq!(outline.points, filled.points);
+            assert_eq!(outline.stroke, filled.stroke);
+        }
+    }
+
     use super::*;
 
     #[test]

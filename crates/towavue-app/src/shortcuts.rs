@@ -291,10 +291,10 @@ mod tests {
                 bindings
             );
             bindings = defaults();
-            bindings.set(CommandId::Undo, key.clone());
+            bindings.set(CommandId::NextImage, key.clone());
             assert_eq!(
                 bindings.resolve(key.strokes(), context),
-                ShortcutMatch::Command(CommandId::Undo),
+                ShortcutMatch::Command(CommandId::NextImage),
                 "existing custom commands retain priority over new defaults"
             );
             bindings = defaults();

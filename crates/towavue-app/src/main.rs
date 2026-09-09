@@ -147,6 +147,12 @@ enum UiAction {
     TabCommand(TabId, CommandId),
     ReorderTab(TabId, usize),
     TimeSelection(TabId, PlaybackGeneration, Option<towavue_core::TimeRange>),
+    TimeAdjustment(
+        TabId,
+        PlaybackGeneration,
+        Option<towavue_core::TimeRange>,
+        towavue_core::TimelineEdit,
+    ),
     Volume(TabId, f32),
     CloseTab(TabId),
     DetachTab(TabId),
@@ -3886,7 +3892,7 @@ where
                     );
                 }
                 let response = ui.allocate_rect(rect, egui::Sense::click_and_drag())
-                    .on_hover_text("Drag to select time · drag the playhead to seek · Delete removes selection · Ctrl+Y keeps selection");
+                    .on_hover_text("Drag to select time · drag playhead to seek · drag volume line up/down · Alt+drag selection to stretch · Delete removes · Ctrl+Y keeps");
                 let duration = self.playback_duration().unwrap_or_default();
                 if duration.is_zero() {
                     return;
@@ -3899,6 +3905,7 @@ where
                     media_time(duration),
                     self.current_position(),
                     self.time_selection,
+                    self.session.as_ref().and_then(PlaybackSession::timeline),
                     enabled,
                 );
                 if let Some(tab) = self.tabs.active()
@@ -3908,6 +3915,11 @@ where
                 }
                 if let Some(target) = result.seek {
                     actions.push(UiAction::Seek(target));
+                }
+                if let Some(tab) = self.tabs.active()
+                    && let Some(edit) = result.edit
+                {
+                    actions.push(UiAction::TimeAdjustment(tab.id, self.generation, self.time_selection, edit));
                 }
             });
     }
@@ -4025,6 +4037,17 @@ where
                 {
                     self.time_selection = selection;
                     self.request_redraw();
+                }
+            }
+            UiAction::TimeAdjustment(id, generation, selection, edit) => {
+                if !self.modal_input_blocked()
+                    && self.timeline_is_visible()
+                    && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted)
+                    && self.generation == generation
+                    && self.time_selection == selection
+                    && self.tabs.active().is_some_and(|tab| tab.id == id)
+                {
+                    self.push_edit(EditOperation::Timeline(edit));
                 }
             }
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
@@ -4660,11 +4683,33 @@ where
             return;
         };
         if self.edits.entry(tab.id).or_default().push(operation, kind) {
+            let retained_selection = match (operation, self.time_selection) {
+                (
+                    EditOperation::Timeline(towavue_core::TimelineEdit::SetVolume(_, _)),
+                    selection,
+                ) => selection,
+                (
+                    EditOperation::Timeline(towavue_core::TimelineEdit::Stretch(range, duration)),
+                    Some(selection),
+                ) if selection == range => towavue_core::TimeRange::new(
+                    range.start(),
+                    MediaTime::from_nanoseconds(
+                        range
+                            .start()
+                            .as_nanoseconds()
+                            .saturating_add(duration.as_nanoseconds()),
+                    ),
+                ),
+                _ => None,
+            };
             if matches!(operation, EditOperation::Timeline(_)) {
                 self.time_selection = None;
             }
             self.refresh_image_edits();
             self.sync_playback_edits();
+            if retained_selection.is_some() {
+                self.time_selection = retained_selection;
+            }
             self.set_status(match operation {
                 EditOperation::SetVolume(_) => format!(
                     "Volume {:.0}% · playback and export (source unchanged)",

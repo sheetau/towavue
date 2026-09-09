@@ -249,10 +249,34 @@ fn run_app_trial(root: PathBuf, audio: bool) {
             }
             app.undo_edit(false);
             assert_eq!(app.current_position(), time(700));
-            app.push_edit(EditOperation::Timeline(TimelineEdit::Stretch(
-                range(500, 1000),
-                time(1000),
-            )));
+            app.time_selection = Some(range(500, 1000));
+            app.handle_ui_action(UiAction::TimeAdjustment(
+                tab,
+                app.generation,
+                app.time_selection,
+                TimelineEdit::SetVolume(range(500, 1000), 0.5),
+            ));
+            assert_eq!(app.current_position(), time(700));
+            assert_eq!(app.time_selection, Some(range(500, 1000)));
+            assert_eq!(
+                app.session
+                    .as_ref()
+                    .expect("session")
+                    .timeline()
+                    .expect("gain plan")
+                    .spans()[1]
+                    .volume(),
+                0.5
+            );
+            app.undo_edit(false);
+            app.time_selection = Some(range(500, 1000));
+            app.handle_ui_action(UiAction::TimeAdjustment(
+                tab,
+                app.generation,
+                app.time_selection,
+                TimelineEdit::Stretch(range(500, 1000), time(1000)),
+            ));
+            assert_eq!(app.time_selection, Some(range(500, 1500)));
             assert_eq!(app.current_position(), time(900));
             app.push_edit(EditOperation::Timeline(TimelineEdit::Stretch(
                 range(0, 2000),

@@ -4,13 +4,21 @@
 
 ## 1. 最初に試す
 
+### 部分音量rubber-bandとAlt stretch（2026-09-10 05:39）
+
+音声／表示中の動画timelineに局所gainの横線を追加した。CTIを優先し、線上の初動が縦なら音量、横なら範囲選択。選択内（未選択なら全体）を0～200%へ設定し、最低位置はmute。Alt＋選択内のdragは開始端を固定した伸縮で、選択内の各区間が局所0.25～4倍を保つ範囲へ制限する。数値focusはTabで辿り、左右／Home／End、UIA SetValueも使える。混在gainは先頭値とMixedを表示し、明示指定で統一。pointer previewは線・枠・数値だけ、releaseで一度だけ編集し、取消では追加しない。gain後の範囲保持、stretch後の端点更新、Undo/Redoは実sessionでも確認した。
+
+最終session63132でfmt／Clippy／workspace366 tests（app207/core53/runtime102/integration4）とrelease成功。通常ignored10件のうちapp全4件を明示実行してPASS、SKIPなし。5件の新規回帰でbatch／複数pass・press修飾key保持・初動方向固定・取消・区間速度制限／無効値・混在gainとkeyboardを検証し、既存UIA／実session試験に調整action、選択保持、stale／modal拒否、Undoを追加した。最初の試験でUndo後のredo枝を含むhistory全体を誤比較したため、適用中operationsの比較へ修正した。test-only unwrapを既存Clippy規約へ修正。最終release213f619babd90e29aa9bd5ae2681d2ad07caab7de0ce34c54497fa11002832b0。a82a03eのCI34400652520も成功。
+
+通常release967d1728、専用tempの2秒video-only source33fcc1ad、owned PID36184で、実pointerの0.5～1.5秒選択→音量線で0%→UIAで50%→Alt dragで全長2.5秒／選択末尾2秒→Ctrl+Zで全長2秒を確認。muted／stretched captureを目視した。元source不変、D3D11VA／CPU transfer0、Close→Discardで正常に閉じPID消失、helper exit0。app ExitCodeは取得できず0とは断言しない。UIA SetFocusの拒否はあったが実foreground確認に成功したowned windowだけへ送信した。最終再build前に追加したのは方向固定の回帰testのみで、本試験は最終hashの再試行ではない。設定・生成file・captureは専用temp内に保持、live trialなし。音量の可聴比較・物理loopback・seam品質の保証ではない。範囲再生、difference枠、全focus/styleとnative保存再openの最終監査は残る。
+
 ### 時間範囲選択とDelete／Keep（2026-09-10）
 
-音声／展開した動画timelineの旧trim gripを除去し、CTI付近のdragはSeek、それ以外のdragは範囲選択、clickはSeekと選択解除にした。選択はtab状態で、Delete／Ctrl+Yだけが編集を追加する。I／Oの旧command IDは選択端点へ変更、Ctrl+Aは時間全選択。UIA端点の同時設定、modal／古いgeneration／別tabの拒否、取消後の新しいpress、入力batch／複数passでも一度だけcommitする回帰を追加。元trimのbackend検証は保持し、廃止したgrip専用7件の試験を除去、選択・文脈に関する4件を追加した。一般Deleteキーが未対応だったためparser／表示／Win32入力変換も接続。旧「全track dragでSeek」の試験と、tabなしのfixtureを新しい所有権へ更新した。
+音声／展開した動画timelineの旧trim gripを除去し、CTI付近のdragはSeek、それ以外のdragは範囲選択、clickはSeekと選択解除にした。このcheckpointの選択はtab状態で、Delete／Ctrl+Yが編集を追加する。I／Oの旧command IDは選択端点へ変更、Ctrl+Aは時間全選択。UIA端点の同時設定、modal／古いgeneration／別tabの拒否、取消後の新しいpress、入力batch／複数passでも一度だけcommitする回帰を追加。元trimのbackend検証は保持し、廃止したgrip専用7件の試験を除去、選択・文脈に関する4件を追加した。一般Deleteキーが未対応だったためparser／表示／Win32入力変換も接続。旧「全track dragでSeek」の試験と、tabなしのfixtureを新しい所有権へ更新した。
 
 session40939でfmt／Clippy／workspace361 tests（app202/core53/runtime102/integration4）とrelease成功、通常ignored10件のうちapp全4件を明示実行してPASS、SKIPなし。2秒video-onlyと無音WASAPI付きH.264/AACの実sessionで通常Delete／Keep shortcut、Undo、編集長・背景EOFと選択保持を確認。UIで作ったDelete→Keep履歴をMP4へexport／再decodeし、元sourceのplan選択とframe数一致。release405a87b28e577b45f046957a27487296a3e16221871e9173b750b9ac8aea2b09、前回42688f9のCI34398563716成功。
 
-通常releaseのowned試験PID32280、2秒video-only source33fcc1ada82041c377e2a99368f038f163a1ae632baf54f5710d0bb17b1c4e30で、実pointerが0.5～1.5秒を選択、Delete後のUIA最大値1秒、Ctrl+Z後2秒、UIAで再選択→Ctrl+Y後1秒。selected／kept captureを目視し、白い枠と端点、保持後のsource0.5秒frameを確認。先行PID41564は一時handle／foreground確認で入力せず中断、最新handleへ接続し直して通常close。最終試験もClose→Discardで終了し両PID消失、helper終了0。appのExitCode値はhelperから取得できず、0とは宣言しない。UIA SetFocusは一部拒否されたが、各入力前の実foreground一致を確認して送った。入力・設定・生成fileは専用temp内だけ、成功した操作はforegroundを確認したowned windowに限定した。rubber-band／部分stretch／範囲再生／difference枠などは未完。
+通常releaseのowned試験PID32280、2秒video-only source33fcc1ada82041c377e2a99368f038f163a1ae632baf54f5710d0bb17b1c4e30で、実pointerが0.5～1.5秒を選択、Delete後のUIA最大値1秒、Ctrl+Z後2秒、UIAで再選択→Ctrl+Y後1秒。selected／kept captureを目視し、白い枠と端点、保持後のsource0.5秒frameを確認。先行PID41564は一時handle／foreground確認で入力せず中断、最新handleへ接続し直して通常close。最終試験もClose→Discardで終了し両PID消失、helper終了0。appのExitCode値はhelperから取得できず、0とは宣言しない。UIA SetFocusは一部拒否されたが、各入力前の実foreground一致を確認して送った。入力・設定・生成fileは専用temp内だけ、成功した操作はforegroundを確認したowned windowに限定した。このcheckpoint時点ではrubber-band／部分stretch／範囲再生／difference枠などは未完。
 
 ### 編集時間軸とapp履歴・表示の接続（2026-09-10）
 

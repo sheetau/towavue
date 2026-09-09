@@ -11,6 +11,8 @@ struct Active {
     id: Id,
     kind: Kind,
     origin: Pos2,
+    modifiers: egui::Modifiers,
+    direction: Option<egui::Vec2>,
     dragging: bool,
     opens_timeline: Option<bool>,
 }
@@ -20,6 +22,7 @@ impl Active {
         let delta = position - self.origin;
         if delta.length() > threshold {
             self.dragging = true;
+            self.direction.get_or_insert(delta);
             if self.kind == Kind::VideoSeek && self.opens_timeline.is_none() {
                 self.opens_timeline = Some(delta.y < 0.0 && -delta.y > delta.x.abs());
             }
@@ -38,6 +41,8 @@ struct State {
 pub struct Drag {
     pub started: bool,
     pub origin: Option<Pos2>,
+    pub modifiers: egui::Modifiers,
+    pub direction: Option<egui::Vec2>,
     pub position: Option<Pos2>,
     pub released: bool,
     pub dragging: bool,
@@ -109,13 +114,13 @@ fn update(response: &Response, kind: Kind) -> Drag {
                 pos,
                 button: PointerButton::Primary,
                 pressed: true,
-                ..
-            } => Some((index, *pos)),
+                modifiers,
+            } => Some((index, *pos, *modifiers)),
             _ => None,
         });
     let mut first_event = 0;
     let mut started = false;
-    if let Some((index, origin)) = press
+    if let Some((index, origin, modifiers)) = press
         && state.claimed_frame != Some(frame)
         && response.interact_rect.contains(origin)
         && context.layer_id_at(origin) == Some(response.layer_id)
@@ -124,6 +129,8 @@ fn update(response: &Response, kind: Kind) -> Drag {
             id: response.id,
             kind,
             origin,
+            modifiers,
+            direction: None,
             dragging: false,
             opens_timeline: None,
         });
@@ -137,6 +144,7 @@ fn update(response: &Response, kind: Kind) -> Drag {
     };
     if let Some(mut active) = state.active.filter(|active| active.id == response.id) {
         result.origin = Some(active.origin);
+        result.modifiers = active.modifiers;
         let threshold = context.options(|options| options.input_options.max_click_dist);
         for event in &events[first_event..] {
             match event {
@@ -157,6 +165,7 @@ fn update(response: &Response, kind: Kind) -> Drag {
         }
         active.dragging |= decided_drag;
         result.dragging = active.dragging;
+        result.direction = active.direction;
         if active.opens_timeline == Some(true) {
             state.active = None;
             state.claimed_frame = Some(frame);
@@ -213,6 +222,8 @@ mod tests {
                     id: Id::new("test"),
                     kind,
                     origin,
+                    modifiers: egui::Modifiers::NONE,
+                    direction: None,
                     dragging: false,
                     opens_timeline: None,
                 };

@@ -1,10 +1,22 @@
 use egui::{Color32, Rect, Response, Ui};
-use towavue_core::{MediaTime, TimeRange};
+use towavue_core::{EditTimeline, MediaTime, TimeRange, TimelineEdit};
+
+mod adjustment;
+
+#[derive(Clone, Copy)]
+enum Gesture {
+    Seek,
+    Select,
+    Band(TimeRange, f32),
+    Gain(TimeRange, f32),
+    Stretch(TimeRange),
+}
 
 #[derive(Default)]
 pub(super) struct Output {
     pub selection: Option<Option<TimeRange>>,
     pub seek: Option<MediaTime>,
+    pub edit: Option<TimelineEdit>,
 }
 
 pub(super) fn show(
@@ -13,6 +25,7 @@ pub(super) fn show(
     duration: MediaTime,
     position: MediaTime,
     selection: Option<TimeRange>,
+    plan: Option<&EditTimeline>,
     enabled: bool,
 ) -> Output {
     let rect = response.rect;
@@ -32,6 +45,8 @@ pub(super) fn show(
     let mut output = Output::default();
     let mut preview = selection;
     let mut head = position;
+    let bands = adjustment::bands(duration, plan);
+    let mut gain_preview = None;
     let drag = if enabled {
         crate::timeline_input::seek_drag(response)
     } else {
@@ -40,22 +55,81 @@ pub(super) fn show(
     };
     let mode_id = response.id.with("time-selection-mode");
     if let (Some(origin), Some(pointer)) = (drag.origin, drag.position) {
+        let choose = || {
+            let selected = selection
+                .filter(|range| at(origin.x) >= range.start() && at(origin.x) <= range.end());
+            if drag.modifiers.alt && !drag.modifiers.ctrl && !drag.modifiers.shift {
+                return selected.map_or(Gesture::Select, Gesture::Stretch);
+            }
+            if (origin.x - x_at(position)).abs() <= 8.0 {
+                return Gesture::Seek;
+            }
+            let gain = adjustment::gain_at(&bands, at(origin.x));
+            if !drag.modifiers.any()
+                && (selection.is_none() || selected.is_some())
+                && (origin.y - adjustment::gain_y(rect, gain)).abs() <= 4.0
+                && let Some(range) = selection.or_else(|| TimeRange::new(MediaTime::ZERO, duration))
+            {
+                return Gesture::Band(range, gain);
+            }
+            Gesture::Select
+        };
         if drag.started {
-            ui.ctx().data_mut(|data| {
-                data.insert_temp(mode_id, (origin.x - x_at(position)).abs() <= 8.0)
-            });
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(mode_id, choose()));
         }
-        let seek = ui.ctx().data_mut(|data| {
-            *data.get_temp_mut_or_insert_with(mode_id, || (origin.x - x_at(position)).abs() <= 8.0)
-        });
-        if drag.dragging && !seek {
+        let mut mode = ui
+            .ctx()
+            .data_mut(|data| *data.get_temp_mut_or_insert_with(mode_id, choose));
+        if let Gesture::Band(range, gain) = mode
+            && let Some(direction) = drag.direction
+        {
+            mode = if direction.y.abs() > direction.x.abs() {
+                Gesture::Gain(range, gain)
+            } else {
+                Gesture::Select
+            };
+            ui.ctx().data_mut(|data| data.insert_temp(mode_id, mode));
+        }
+        if drag.dragging && matches!(mode, Gesture::Gain(..) | Gesture::Stretch(_)) {
+            let edit = match mode {
+                Gesture::Gain(range, original) => {
+                    let gain = (original
+                        - (pointer.y - origin.y) * 2.0 / adjustment::gain_height(rect))
+                    .clamp(0.0, 2.0);
+                    gain_preview = Some((range, gain));
+                    TimelineEdit::SetVolume(range, gain)
+                }
+                Gesture::Stretch(range) => {
+                    let limits = adjustment::stretch_limits(range, plan);
+                    let seconds = (range.duration().as_seconds_f64()
+                        + f64::from(pointer.x - origin.x) / f64::from(rect.width()) * seconds)
+                        .clamp(*limits.start(), *limits.end());
+                    let length = crate::media_time(std::time::Duration::from_secs_f64(seconds));
+                    preview = TimeRange::new(
+                        range.start(),
+                        MediaTime::from_nanoseconds(
+                            range
+                                .start()
+                                .as_nanoseconds()
+                                .saturating_add(length.as_nanoseconds()),
+                        ),
+                    );
+                    TimelineEdit::Stretch(range, length)
+                }
+                _ => unreachable!(),
+            };
+            if drag.released && adjustment::changes_plan(duration, plan, edit) {
+                output.edit = Some(edit);
+            }
+        } else if drag.dragging && matches!(mode, Gesture::Select) {
             let a = at(origin.x);
             let b = at(pointer.x);
             preview = TimeRange::new(a.min(b), a.max(b));
             if drag.released {
                 output.selection = Some(preview);
             }
-        } else {
+        } else if matches!(mode, Gesture::Seek | Gesture::Select | Gesture::Band(..)) {
             head = at(pointer.x);
             if drag.released {
                 output.seek = Some(head);
@@ -65,10 +139,10 @@ pub(super) fn show(
             }
         }
         if drag.released {
-            ui.ctx().data_mut(|data| data.remove::<bool>(mode_id));
+            ui.ctx().data_mut(|data| data.remove::<Gesture>(mode_id));
         }
     } else {
-        ui.ctx().data_mut(|data| data.remove::<bool>(mode_id));
+        ui.ctx().data_mut(|data| data.remove::<Gesture>(mode_id));
     }
     if let Some(value) = crate::seekbar::value_input(
         response,
@@ -81,6 +155,20 @@ pub(super) fn show(
         output.seek = Some(crate::media_time(std::time::Duration::from_secs_f64(value)));
     }
     let painter = ui.painter().with_clip_rect(rect);
+    adjustment::paint(&painter, rect, &bands, gain_preview, &x_at);
+    if preview != selection
+        && drag.dragging
+        && gain_preview.is_none()
+        && let Some(range) = preview
+    {
+        painter.text(
+            rect.center_top() + egui::vec2(0.0, 2.0),
+            egui::Align2::CENTER_TOP,
+            format!("Length {:.3}s", range.duration().as_seconds_f64()),
+            egui::FontId::proportional(11.0),
+            crate::chrome::FOREGROUND,
+        );
+    }
     if let Some(range) = preview {
         painter.rect_stroke(
             Rect::from_min_max(
@@ -161,6 +249,12 @@ pub(super) fn show(
             }
         }
     }
+    if output.edit.is_none()
+        && output.selection.is_none()
+        && !crate::timeline_input::is_active(ui.ctx())
+    {
+        output.edit = adjustment::values(ui, response, duration, selection, plan, enabled);
+    }
     output
 }
 
@@ -193,8 +287,16 @@ mod tests {
                     "time-selection-test".into(),
                     egui::Sense::click_and_drag(),
                 );
-                let result = show(ui, &response, time(10.0), time(0.0), selection, enabled);
-                if result.seek.is_some() || result.selection.is_some() {
+                let result = show(
+                    ui,
+                    &response,
+                    time(10.0),
+                    time(0.0),
+                    selection,
+                    None,
+                    enabled,
+                );
+                if result.seek.is_some() || result.selection.is_some() || result.edit.is_some() {
                     results.push(result);
                 }
                 if context.current_pass_index() == 0 {
@@ -316,6 +418,183 @@ mod tests {
     }
 
     #[test]
+    fn gain_and_stretch_commit_once_and_keep_press_modifiers() {
+        let selected = TimeRange::new(time(2.5), time(7.5));
+        for batched in [false, true] {
+            for (selection, stretch) in [(None, false), (selected, false), (selected, true)] {
+                let context = egui::Context::default();
+                frame(&context, vec![], true, selection);
+                let origin = egui::pos2(220.0, if stretch { 70.0 } else { 80.0 });
+                let end = if stretch {
+                    origin + egui::vec2(80.0, 40.0)
+                } else {
+                    origin + egui::vec2(10.0, 80.0)
+                };
+                let press = egui::Event::PointerButton {
+                    pos: origin,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: if stretch {
+                        egui::Modifiers::ALT
+                    } else {
+                        egui::Modifiers::NONE
+                    },
+                };
+                let release = egui::Event::PointerButton {
+                    pos: end,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                let events = vec![press, egui::Event::PointerMoved(end), release];
+                let results = if batched {
+                    frame(&context, events, true, selection)
+                } else {
+                    assert!(frame(&context, vec![events[0].clone()], true, selection).is_empty());
+                    assert!(frame(&context, vec![events[1].clone()], true, selection).is_empty());
+                    frame(&context, vec![events[2].clone()], true, selection)
+                };
+                assert_eq!(results.len(), 1);
+                let range = selection
+                    .unwrap_or_else(|| TimeRange::new(time(0.0), time(10.0)).expect("whole range"));
+                assert_eq!(
+                    results[0].edit,
+                    Some(if stretch {
+                        TimelineEdit::Stretch(range, time(7.0))
+                    } else {
+                        TimelineEdit::SetVolume(range, 0.0)
+                    })
+                );
+                assert!(results[0].seek.is_none() && results[0].selection.is_none());
+                assert!(frame(&context, vec![], true, selection).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn adjustment_cancellation_never_commits_or_changes_selection() {
+        let selected = TimeRange::new(time(2.5), time(7.5));
+        for stretch in [false, true] {
+            for interruption in 0..4 {
+                let context = egui::Context::default();
+                frame(&context, vec![], true, selected);
+                let origin = egui::pos2(220.0, 80.0);
+                frame(
+                    &context,
+                    vec![egui::Event::PointerButton {
+                        pos: origin,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: if stretch {
+                            egui::Modifiers::ALT
+                        } else {
+                            egui::Modifiers::NONE
+                        },
+                    }],
+                    true,
+                    selected,
+                );
+                assert!(
+                    frame(
+                        &context,
+                        vec![egui::Event::PointerMoved(origin + egui::vec2(80.0, 25.0))],
+                        true,
+                        selected
+                    )
+                    .is_empty()
+                );
+                match interruption {
+                    0 => {
+                        crate::timeline_input::cancel(&context);
+                    }
+                    1 => {
+                        frame(&context, vec![], false, selected);
+                    }
+                    2 => {
+                        frame(
+                            &context,
+                            vec![egui::Event::WindowFocused(false)],
+                            true,
+                            selected,
+                        );
+                    }
+                    _ => {
+                        frame(
+                            &context,
+                            vec![egui::Event::Key {
+                                key: egui::Key::Escape,
+                                physical_key: None,
+                                pressed: true,
+                                repeat: false,
+                                modifiers: egui::Modifiers::NONE,
+                            }],
+                            true,
+                            selected,
+                        );
+                    }
+                }
+                assert!(frame(&context, vec![button(300.0, false)], true, selected).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn volume_line_locks_first_direction_but_horizontal_drags_still_select() {
+        for vertical in [false, true] {
+            let context = egui::Context::default();
+            frame(&context, vec![], true, None);
+            let origin = egui::pos2(120.0, 80.0);
+            let end = egui::pos2(320.0, 108.0);
+            let results = frame(
+                &context,
+                vec![
+                    egui::Event::PointerButton {
+                        pos: origin,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::PointerMoved(
+                        origin
+                            + if vertical {
+                                egui::vec2(0.0, 20.0)
+                            } else {
+                                egui::vec2(20.0, 0.0)
+                            },
+                    ),
+                    egui::Event::PointerMoved(end),
+                    egui::Event::PointerButton {
+                        pos: end,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                true,
+                None,
+            );
+            assert_eq!(results.len(), 1);
+            if vertical {
+                assert_eq!(
+                    results[0].edit,
+                    Some(TimelineEdit::SetVolume(
+                        TimeRange::new(time(0.0), time(10.0)).expect("whole range"),
+                        0.0
+                    ))
+                );
+                assert!(results[0].selection.is_none());
+            } else {
+                assert_eq!(
+                    results[0].selection,
+                    Some(TimeRange::new(time(2.5), time(7.5)))
+                );
+                assert!(results[0].edit.is_none());
+            }
+            assert!(results[0].seek.is_none());
+        }
+    }
+
+    #[test]
     fn accessible_endpoints_select_without_editing_and_guard_stale_or_modal_actions() {
         use crate::*;
         let Some(root) = crate::tests::isolated_test_root(
@@ -379,6 +658,61 @@ mod tests {
         }
         let selected = app.time_selection;
         assert!(app.edits.is_empty());
+        let (_, actions) = draw(&mut app, vec![event("Local volume (%)", 50.0)]);
+        assert!(
+            matches!(actions.as_slice(), [UiAction::TimeAdjustment(_, _, _, TimelineEdit::SetVolume(_, gain))] if *gain == 0.5)
+        );
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+        assert_eq!(app.time_selection, selected);
+        let plan = app.edits[&tab].timeline(time(10.0)).expect("gain plan");
+        assert_eq!(
+            plan.spans()
+                .iter()
+                .map(|span| span.volume())
+                .collect::<Vec<_>>(),
+            vec![1.0, 0.5, 1.0]
+        );
+        let history = app.edits[&tab].clone();
+        let edit = TimelineEdit::Stretch(selected.expect("selection"), time(8.0));
+        for (id, generation, selection) in [
+            (tab, app.generation.next(), selected),
+            (tab, app.generation, None),
+        ] {
+            app.handle_ui_action(UiAction::TimeAdjustment(id, generation, selection, edit));
+            assert_eq!(app.edits[&tab], history);
+        }
+        app.pending_guard = Some(GuardedAction::CloseTab(tab));
+        app.handle_ui_action(UiAction::TimeAdjustment(
+            tab,
+            app.generation,
+            selected,
+            edit,
+        ));
+        assert_eq!(app.edits[&tab], history);
+        app.pending_guard = None;
+        let (_, actions) = draw(&mut app, vec![event("Selected duration (seconds)", 8.0)]);
+        assert!(
+            matches!(actions.as_slice(), [UiAction::TimeAdjustment(_, _, _, TimelineEdit::Stretch(_, length))] if *length == time(8.0))
+        );
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+        assert_eq!(app.time_selection, TimeRange::new(time(3.0), time(11.0)));
+        assert_eq!(
+            app.edits[&tab]
+                .timeline(time(10.0))
+                .expect("stretch plan")
+                .duration(),
+            time(14.0)
+        );
+        app.undo_edit(false);
+        assert_eq!(app.edits[&tab].operations(), history.operations());
+        app.undo_edit(false);
+        app.time_selection = selected;
+        // Undo keeps its redo branch; the following guard checks must not mutate it.
+        let history = app.edits[&tab].clone();
         let stale = UiAction::TimeSelection(tab, app.generation.next(), None);
         app.handle_ui_action(stale);
         assert_eq!(app.time_selection, selected);
@@ -386,7 +720,7 @@ mod tests {
         app.handle_ui_action(UiAction::TimeSelection(tab, app.generation, None));
         app.dispatch(CommandId::DeleteTimeSelection);
         assert_eq!(app.time_selection, selected);
-        assert!(app.edits.is_empty());
+        assert_eq!(app.edits[&tab], history);
         app.pending_guard = None;
         app.process_shortcut("Delete".parse().expect("key"));
         let plan = app.edits[&tab].timeline(time(10.0)).expect("deleted plan");

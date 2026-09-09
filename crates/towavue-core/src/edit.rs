@@ -58,6 +58,7 @@ impl PlaybackRange {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EditOperation {
+    Timeline(crate::TimelineEdit),
     Resize(ImageResize),
     Crop(PixelCrop),
     RotateClockwise,
@@ -73,6 +74,7 @@ pub enum EditOperation {
 impl EditOperation {
     pub fn applies_to(self, kind: MediaKind) -> bool {
         match self {
+            Self::Timeline(_) => matches!(kind, MediaKind::Video | MediaKind::Audio),
             Self::Resize(_) => kind == MediaKind::Image,
             Self::Crop(_)
             | Self::RotateClockwise
@@ -124,7 +126,7 @@ impl EditState {
         let mut state = Self::default();
         for operation in operations {
             match *operation {
-                EditOperation::Crop(_) | EditOperation::Resize(_) => {}
+                EditOperation::Crop(_) | EditOperation::Resize(_) | EditOperation::Timeline(_) => {}
                 EditOperation::RotateClockwise => {
                     state.quarter_turns = (state.quarter_turns + 1) % 4;
                 }
@@ -171,6 +173,10 @@ impl Default for EditHistory {
 }
 
 impl EditHistory {
+    pub fn timeline(&self, source_duration: MediaTime) -> Option<crate::EditTimeline> {
+        crate::EditTimeline::from_operations(source_duration, self.operations())
+    }
+
     pub fn push(&mut self, operation: EditOperation, kind: MediaKind) -> bool {
         if !operation.applies_to(kind) {
             return false;

@@ -541,7 +541,8 @@ impl ImageTransform {
                 EditOperation::SetTrimStart(_)
                 | EditOperation::SetTrimEnd(_)
                 | EditOperation::SetVolume(_)
-                | EditOperation::SetRate(_) => {}
+                | EditOperation::SetRate(_)
+                | EditOperation::Timeline(_) => {}
             }
         }
         transform

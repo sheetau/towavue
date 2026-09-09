@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10: V03の単一source区間modelと保存backendを追加した。削除による前後連結、Keep、部分音量／伸縮、履歴からの復元を表現できるが、まだ通常UIの新しい操作としては使えない。再生・clock・waveformの編集時間軸、時間選択／rubber-band・shortcut・UIAを接続してから公開する。有限durationが必要で、全範囲削除はUndo可能な空timelineとして保持し、空mediaのexportは拒否する。動画のframe量子化、atempoのtail補正、長い履歴の負荷・継ぎ目の音質を含む最終確認は残る。
+
 2026-09-10: 動画の上drag展開／専用timeline button除去／timeline thumbnail廃止（V01）と音声のfullscreenを含む常時timeline（A02表示部分）を実装した。横Seekの初動固定、取消／複数pass、位置・履歴保持を回帰と通常releaseで確認。時間範囲選択・rubber-band・複数区間／部分音量・速度（V03）、先行thumbnail sheet（V02）は未完で、既存trim gripを完成仕様とは扱わない。
 
 新goalの残件と各checkpointの実績は[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)で管理する。tabごとの背景再生は主要経路を実装したが、完全な状態保持、timelineの選択編集等は引き続き未完である。音声の自動次曲／repeat／shuffleはA01で主要経路を実装した。tab context menu／一括close／path copy・Explorer表示／path-only reopenは実装したが、window間結合、keyboardからのcontext menu呼出しと全体focus／UIA監査は残る。新しい台帳は過去の「このsliceには含めない」を永久的な却下とは扱わない。

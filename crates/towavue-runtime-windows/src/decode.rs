@@ -1188,7 +1188,7 @@ fn check_cancelled(cancelled: &(dyn Fn() -> bool + Sync)) -> Result<(), DecodeEr
     }
 }
 
-fn input_origin(input: &format::context::Input) -> i64 {
+pub(crate) fn input_origin(input: &format::context::Input) -> i64 {
     // The owning input is immutably borrowed on its current thread. Read only the
     // initialized scalar; no pointer escapes or concurrent demux access occurs.
     let start = unsafe { (*input.as_ptr()).start_time };

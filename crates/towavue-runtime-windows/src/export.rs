@@ -81,6 +81,8 @@ pub enum ExportError {
     SameAsSource,
     #[error("trim times must be non-negative and start must be earlier than end")]
     InvalidTrim,
+    #[error("timeline edits require a known duration and valid nonempty source intervals")]
+    InvalidTimeline,
     #[error("could not start FFmpeg export: {0}")]
     Start(#[source] std::io::Error),
     #[error("FFmpeg export failed: {0}")]
@@ -108,9 +110,33 @@ fn export_cancellable(
         return Err(ExportError::InvalidTrim);
     }
     check_cancelled(cancelled)?;
-    let streams = ExportStreams::probe(request)?;
+    let mut streams = ExportStreams::probe(request)?;
+    if request
+        .operations
+        .iter()
+        .any(|operation| matches!(operation, EditOperation::Timeline(_)))
+    {
+        if request.kind == MediaKind::Image {
+            return Err(ExportError::InvalidTimeline);
+        }
+        streams.timeline = Some(
+            towavue_core::EditTimeline::from_operations(
+                streams.duration.ok_or(ExportError::InvalidTimeline)?,
+                &request.operations,
+            )
+            .ok_or(ExportError::InvalidTimeline)?,
+        );
+        if streams
+            .timeline
+            .as_ref()
+            .is_some_and(|timeline| timeline.spans().is_empty())
+        {
+            return Err(ExportError::InvalidTimeline);
+        }
+    }
     let trimmed_kind =
-        (state.trim_start.is_some() || state.trim_end.is_some()).then_some(request.kind);
+        (state.trim_start.is_some() || state.trim_end.is_some() || streams.timeline.is_some())
+            .then_some(request.kind);
     let staging = StagedExport::new(&request.target)?;
     let staged_request = ExportRequest {
         target: staging.output.clone(),
@@ -120,7 +146,7 @@ fn export_cancellable(
     if request.hardware_encode && hardware_encode_supported_target(request) {
         let hardware = run_ffmpeg(
             &executable,
-            ffmpeg_arguments(&staged_request, true, &streams),
+            staging.arguments(&staged_request, true, &streams)?,
             cancelled,
             progress,
         )?;
@@ -133,7 +159,7 @@ fn export_cancellable(
     }
     let output = run_ffmpeg(
         &executable,
-        ffmpeg_arguments(&staged_request, false, &streams),
+        staging.arguments(&staged_request, false, &streams)?,
         cancelled,
         progress,
     )?;
@@ -165,6 +191,26 @@ struct StagedExport {
 }
 
 impl StagedExport {
+    fn arguments(
+        &self,
+        request: &ExportRequest,
+        hardware: bool,
+        streams: &ExportStreams,
+    ) -> Result<Vec<String>, ExportError> {
+        let mut arguments = ffmpeg_arguments(request, hardware, streams);
+        if let Some(index) = arguments
+            .iter()
+            .position(|argument| argument == "-filter_complex")
+        {
+            // A selection history can exceed Windows' command-line limit; keep the graph in staging.
+            let path = self.directory.join("timeline-filter.txt");
+            fs::write(&path, &arguments[index + 1]).map_err(ExportError::Output)?;
+            arguments[index] = "-/filter_complex".into();
+            arguments[index + 1] = path.display().to_string();
+        }
+        Ok(arguments)
+    }
+
     fn new(target: &Path) -> Result<Self, ExportError> {
         static NEXT_ID: AtomicU64 = AtomicU64::new(0);
         let target = std::path::absolute(target).map_err(ExportError::Output)?;
@@ -238,6 +284,7 @@ impl StagedExport {
 impl Drop for StagedExport {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.output);
+        let _ = fs::remove_file(self.directory.join("timeline-filter.txt"));
         let _ = fs::remove_dir(&self.directory);
     }
 }
@@ -324,6 +371,8 @@ fn run_ffmpeg(
 struct ExportStreams {
     video: Option<(usize, ffmpeg::Rational)>,
     audio: Option<(usize, ffmpeg::Rational)>,
+    duration: Option<towavue_core::MediaTime>,
+    timeline: Option<towavue_core::EditTimeline>,
 }
 
 impl ExportStreams {
@@ -352,7 +401,27 @@ impl ExportStreams {
                     ))
                 })
                 .transpose()?;
-            Ok(Self { video, audio })
+            let duration = input.duration();
+            let duration = if input
+                .format()
+                .name()
+                .split(',')
+                .any(|name| matches!(name, "matroska" | "webm"))
+            {
+                duration.checked_sub(crate::decode::input_origin(&input))
+            } else {
+                Some(duration)
+            };
+            let duration = duration
+                .filter(|duration| *duration > 0)
+                .and_then(|duration| duration.checked_mul(1000))
+                .map(towavue_core::MediaTime::from_nanoseconds);
+            Ok(Self {
+                video,
+                audio,
+                duration,
+                timeline: None,
+            })
         };
         probe().map_err(|error| {
             ExportError::Failed(format!("could not inspect export streams: {error}"))
@@ -380,6 +449,23 @@ fn ffmpeg_arguments(
         "-map_metadata".into(),
         "0".into(),
     ];
+    if let Some(timeline) = &streams.timeline {
+        arguments.extend([
+            "-copyts".into(),
+            "-start_at_zero".into(),
+            "-filter_complex".into(),
+            timeline_filters(request, streams, timeline, hardware),
+        ]);
+        if streams.video.is_some() {
+            arguments.extend(["-map".into(), "[outv]".into()]);
+        }
+        if streams.audio.is_some() {
+            arguments.extend(["-map".into(), "[outa]".into()]);
+        }
+        arguments.extend(codec_arguments(request, hardware));
+        arguments.push(request.target.display().to_string());
+        return arguments;
+    }
     if streams.video.is_some() || streams.audio.is_some() {
         if state.trim_start.is_some() || state.trim_end.is_some() {
             arguments.push("-copyts".into());
@@ -426,6 +512,98 @@ fn ffmpeg_arguments(
     arguments.extend(codecs);
     arguments.push(request.target.display().to_string());
     arguments
+}
+
+fn timeline_filters(
+    request: &ExportRequest,
+    streams: &ExportStreams,
+    timeline: &towavue_core::EditTimeline,
+    hardware: bool,
+) -> String {
+    let master = EditState::from_operations(&request.operations);
+    let count = timeline.spans().len();
+    let mut filters = Vec::new();
+    for (stream, prefix, split) in [
+        (streams.video, "v", "split"),
+        (streams.audio, "a", "asplit"),
+    ] {
+        if let Some((index, _)) = stream {
+            let outputs = (0..count)
+                .map(|part| format!("[{prefix}s{part}]"))
+                .collect::<String>();
+            filters.push(format!("[0:{index}]{split}={count}{outputs}"));
+        }
+    }
+    let mut inputs = String::new();
+    let mut edited_ns = 0_i64;
+    for (index, span) in timeline.spans().iter().enumerate() {
+        let state = EditState {
+            trim_start: Some(span.source().start()),
+            trim_end: Some(span.source().end()),
+            ..Default::default()
+        };
+        if let Some((_, time_base)) = streams.video {
+            let trim = trim_filter("trim", &state, time_base).expect("validated timeline interval");
+            filters.push(format!(
+                "[vs{index}]{trim},setpts=(PTS-STARTPTS)*{}/{}/{:.9}[v{index}]",
+                span.duration().as_nanoseconds(),
+                span.source().duration().as_nanoseconds(),
+                master.rate
+            ));
+            inputs.push_str(&format!("[v{index}]"));
+        }
+        if let Some((_, time_base)) = streams.audio {
+            let mut audio = vec![
+                trim_filter("atrim", &state, time_base).expect("validated timeline interval"),
+                "asetpts=PTS-STARTPTS".into(),
+            ];
+            let rate = span.rate() * f64::from(master.rate);
+            if rate != 1.0 {
+                audio.extend(tempo_filters(rate, 9));
+            }
+            let volume = f64::from(span.volume()) * f64::from(master.volume);
+            if volume != 1.0 {
+                audio.push(format!("volume={volume:.9}"));
+            }
+            // atempo may produce a short tail. Keep every join on the planned sample axis.
+            let sample_at = |ns: i64| {
+                (ns as f64 / 1_000_000_000.0 / f64::from(master.rate)
+                    * f64::from(time_base.denominator()))
+                .ceil() as u64
+            };
+            let samples =
+                sample_at(edited_ns + span.duration().as_nanoseconds()) - sample_at(edited_ns);
+            audio.push(format!("apad=whole_len={samples}"));
+            audio.push(format!("atrim=end_sample={samples}"));
+            filters.push(format!("[as{index}]{}[a{index}]", audio.join(",")));
+            inputs.push_str(&format!("[a{index}]"));
+        }
+        edited_ns += span.duration().as_nanoseconds();
+    }
+    let video = usize::from(streams.video.is_some());
+    let audio = usize::from(streams.audio.is_some());
+    let outputs = format!(
+        "{}{}",
+        if video == 1 { "[joinedv]" } else { "" },
+        if audio == 1 { "[outa]" } else { "" }
+    );
+    filters.push(format!(
+        "{inputs}concat=n={count}:v={video}:a={audio}{outputs}"
+    ));
+    if video == 1 {
+        let mut visual = visual_filters(&request.operations);
+        if codec_arguments(request, hardware)
+            .iter()
+            .any(|codec| codec == "libopenh264")
+        {
+            visual.push("copy".into());
+        }
+        if visual.is_empty() {
+            visual.push("null".into());
+        }
+        filters.push(format!("[joinedv]{}[outv]", visual.join(",")));
+    }
+    filters.join(";")
 }
 
 fn codec_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
@@ -489,7 +667,8 @@ pub(crate) fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
             EditOperation::SetTrimStart(_)
             | EditOperation::SetTrimEnd(_)
             | EditOperation::SetVolume(_)
-            | EditOperation::SetRate(_) => None,
+            | EditOperation::SetRate(_)
+            | EditOperation::Timeline(_) => None,
         })
         .collect()
 }
@@ -546,7 +725,11 @@ fn trim_filter(name: &str, state: &EditState, time_base: ffmpeg::Rational) -> Op
     }
 }
 
-fn atempo_filters(mut rate: f32) -> Vec<String> {
+fn atempo_filters(rate: f32) -> Vec<String> {
+    tempo_filters(f64::from(rate), 4)
+}
+
+fn tempo_filters(mut rate: f64, precision: usize) -> Vec<String> {
     let mut filters = Vec::new();
     while rate < 0.5 {
         filters.push("atempo=0.5000".into());
@@ -556,7 +739,7 @@ fn atempo_filters(mut rate: f32) -> Vec<String> {
         filters.push("atempo=2.0000".into());
         rate /= 2.0;
     }
-    filters.push(format!("atempo={rate:.4}"));
+    filters.push(format!("atempo={rate:.precision$}"));
     filters
 }
 
@@ -569,6 +752,10 @@ fn same_path(left: &Path, right: &Path) -> bool {
     };
     normalize(left) == normalize(right)
 }
+
+#[cfg(test)]
+#[path = "export_timeline_tests.rs"]
+mod timeline_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1015,6 +1202,7 @@ mod tests {
         let streams = ExportStreams {
             video: Some((0, ffmpeg::Rational(1, 1000))),
             audio: Some((1, ffmpeg::Rational(1, 48000))),
+            ..Default::default()
         };
         let arguments = ffmpeg_arguments(&request, false, &streams).join(" ");
 

@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 時間区間編集と保存backend（2026-09-10）
+
+最終session15959でfmt／Clippy／workspace358 tests／releaseが成功（app201/core53/runtime100/integration4、通常ignored8件は今回明示再実行せず）。releasebe0eada8c96822f2ae9385ff81446bfa575d697a97da87cc11c0555d862ec02e。前回1278918のCI34391955269も成功。今回の変更はbackend段階で、native UIの新しい選択編集を検証したという意味ではない。
+
+V03の基盤としてcoreの`TimeRange`／`EditTimeline`／`TimelineEdit`を追加した。有限source長と旧source trimから初期区間を作り、各操作直前の編集時間でKeep／Delete／SetVolume／Stretchを適用する。整数nsで範囲と表示長を保持し、source↔編集時刻を対応付ける。joinは後続区間を採用し、同一速度／音量の隣接sourceは統合。入力無効・overflowは原子的に拒否し、全削除はUndo可能な空timelineへ移る。空mediaのexportは拒否する。通常UIにはまだcommandを追加しておらず、旧trim gripの置き換えと編集後の再生を次工程にする。
+
+core7 testsは履歴／saved cursor／Undo/Redoと分岐、離散source列の独立参照による繰返し削除、境界対応、部分音量／伸縮配分、無効値・i64上限・丸め・不要区間統合を検証。runtimeは生成2秒／20fpsの色frameと48kHz PCM、5秒offset MKV、video-onlyを用いる。Delete(0.5..1.0)→Keep(0.25..1.25)の出力20 framesを元のframe5..10＋20..35へ照合し、再encode色差4以内。音声48000 framesは参照した元PCMと全bytes一致し、局所muteも所定sampleだけzero。局所gain×master gainは16bit PCMの1LSB以内、局所Stretchの1.5秒／72000 framesとmaster速度の24000 frames、変更しない前後sampleの一致を確認する。
+
+export graphはstaging fileで渡す。400個の交互gain区間でgraphが32768文字を超えても引数は2048未満、終了後のstaging回収を検証。進捗callbackで取消したexportと全削除の拒否では既存target／sourceを保持する。新graph fileの削除漏れを試験で発見しDropへ回収を追加、長いgraph試験の当初200区間が上限未満だったため400区間へ修正した。これはnative UI試験ではなく、実FFmpegの保存・再decodeを含むbackend回帰である。再生／waveform／選択UI／rubber-band／端点量子化や音質の全組合せは未完。
+
 ### 動画の上drag展開・音声timeline常設（2026-09-10）
 
 動画compact seekを上へ引くと位置を変えずtimelineを開く。click許容距離を初めて超える時の上優勢で判定し、横／下が先なら後から上へ引いてもrelease時Seekを維持する。T／View／paletteで動画のみ開閉し、fullscreenからの展開は通常windowへ戻る。音声はfullscreenでもtimeline／statusが常設で、T・compact seek・専用timeline buttonなし。timeline内にはhover thumbnailを要求・表示しない。既存trim gripやtab別resize高さは維持し、V03の選択編集は別の残件とする。

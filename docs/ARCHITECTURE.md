@@ -2,6 +2,12 @@
 
 ## H1: timeline表示とcompact seekのgesture（2026-09-10）
 
+V03の移行契約: 一つのsourceの半開区間列を編集後の時間軸へ並べる。Keep／Delete／部分音量／Stretchは、そのoperation直前の編集時間で選択を解釈し、source時刻には履歴を順に再生して対応付ける。joinの時刻は後続区間、EOFは最終source端点へ対応する。区間の表示長は整数nsで保持し、選択stretchは各区間の相対速度を維持して指定した総時間へ配分する。source境界も整数計算し、無効値／overflowは原子的に拒否する。全削除は空timelineとして保持し、Undoで復元できる。空timelineは再生対象時刻を持たず、空mediaのexportは開始せず拒否する。局所音量は0～200%、局所速度は0.25～4倍。既存の全体音量／速度は最後のmaster調整として維持する。
+
+旧trim履歴はsource上の初期区間として解釈し、その後に新しい区間編集を適用する。UIを新モデルへ接続する時には旧trim gripから時間選択へ置き換え、以降の切り詰めはKeep操作に統一する。保存は同じ区間列から選択streamを切り出し、timestampを零起点へ揃えて連結する。段階移行中は再生と保存の契約が揃うまで新しい区間編集commandをUIに公開しない。これはV03完了ではなく、選択UI・再生・waveform時間軸・export一致までが実装対象である。
+
+現在のcore planはsource順の非重複区間を保ち、同じ速度／音量の隣接source区間を統合する。exportは選択したvideo/audio streamのみをsplit→半開trim→局所処理→concatへ渡す。音声の予定境界は編集時間からsample数へ変換し、atempoの端数・短いtailはtrim／無音padで揃える。音質・seamless再生をこれだけで保証するものではない。長いfilter graphはWindowsのcommand-line上限を避けて一時staging内のUTF-8 fileへ置き、成功／失敗／取消の全経路で回収する。source duration不明、無効な範囲、空の編集結果はexportを開始せず拒否する。
+
 動画はcompact seekのpress後、click許容距離を初めて越える方向で操作を固定する。上方向が横方向より大きければtimelineを開き、Seekは発行しない。横／下が先なら従来のrelease時Seekを維持し、途中から上へ動かしても開閉へ変えない。T／View menu／paletteは動画timelineの開閉に共用し、専用status buttonは置かない。fullscreenからの展開はfullscreenを終了する。音声timelineはfullscreenでも常時表示し、音声の開閉commandとcompact seekは提供しない。
 
 timeline内にはhover thumbnailを表示・生成せず、compact video seekのpreviewは維持する。既存の単一区間trim gripは暫定編集UIであり、時間選択／rubber-band／複数区間model（V03）の実装とは扱わない。入力取消・所有権、tab別panel高さ、編集履歴と再生位置は表示変更だけでは変えない。

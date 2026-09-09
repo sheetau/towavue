@@ -8,6 +8,8 @@
 
 新goalの残件と各checkpointの実績は[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)で管理する。tabごとの背景再生・完全な状態保持、timelineの選択編集、repeat／shuffle等は引き続き未完である。tab context menu／一括close／path copy・Explorer表示／path-only reopenは実装したが、window間結合、keyboardからのcontext menu呼出しと全体focus／UIA監査は残る。新しい台帳は過去の「このsliceには含めない」を永久的な却下とは扱わない。
 
+U07の画像側では読み込み済みの画素・texture・zoom／pan／selection・読書設定／ページをtabごとに保持する。開いた画像のsnapshotはcloseまでpinするので、decode／texture cacheの256 MiBはprocess全体の上限ではない。未完了decodeは復帰時に再要求し、未完了resizeも元Arcから再処理する。一覧のscroll／focus、動画・音声sessionの保持と背景再生は未完。device世代の違う復帰画像は再upload対象とするが、この保持経路の実GPU removal／混在DPI監査は未実施である。
+
 2026-09-09の通常release f91b4498では、120秒1080p H.264の先頭にkeyframeが1枚だけの生成素材で、4条件各100回Seekのp95が872.539～979.008msとなり、300ms目標を超えた。同じ生成条件を2秒間隔keyframeにした対照では40.242～108.103ms。長GOPの待ち時間は未解決であり、対照側の合格を全素材へ一般化しない。[動画保存・Seek比較の条件と範囲](DEVELOPMENT.md#新しい通常releaseの動画保存とseek条件比較2026-09-09-1410-jst)を参照。同じ本体の30分4K再生は107771 framesすべて表示・drop／CPU transfer 0、drift p95 4.812ms／最大17.349msで通過したが、単一基準機／素材の結果である。5分以降のprivateは224.23～240.14MiBで、リーク不在や実環境matrixの証明ではない。詳細はDEVELOPMENTの14:57記録を参照。
 
 ### 操作とpreviewの不一致

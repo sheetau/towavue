@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 読み込み済み画像tabの状態保持（2026-09-10 01:45 JST）
+
+画像Aを回転・拡大・選択し、画像Bを新しいtabで開いて戻る。Aの画素・texture・viewと編集を保持し、Bの読書設定も独立して復元する。自動回帰ではロード後に所有BMP fixtureを削除して再openなし／Arcとtexture ID一致／追加uploadなしを検証する。処理中resizeの元Arc保持・旧世代拒否・Undo、device世代差、読書の同一Shell refreshと隣接変更も検証する。
+
+Windows11通常release c7040c61、retained-image-tabs-native PID38380/start16:38:44.2279434Zで、Aの回転・100%・選択left100/right650をtab往復後も保持。復帰後のclipboard550×600は参照と全330000画素一致、Bの読書Onも別tabの編集と独立して戻る。画面領域比較の差132画素は選択端のfocus表示であり、全画面一致とはしない。別tabの一時寸法statusが残る問題をこのtrialで発見し、statusと元期限もsnapshotへ追加した。最終release5f61e5f2、retained-image-tabs-final PID49344/start16:42:50.1348206ZではAへ戻った100%／PNG600×800をcaptureで確認し、Bの16×16表示は残らない。両window通常終了0・stderr空。source hashes不変、所有trial artifactsはignoredに保持する。
+
+最終fmt／Clippy／workspace335 testsとrenderer WARP1 testが成功、通常suiteのopt-in5件はignored。動画／音声session、背景再生、一覧scroll／focusと保持画像の実device removal／混在DPIは未検証または未実装で、U07全体を完了とはしない。開いている画像はcloseまでpinするため、tab数に応じてCPU／GPU memoryを使う。
+
 ### 表示専用Smooth／Nearest切替（2026-09-10 01:21 JST）
 
 View menuまたはpaletteで`nearest`を検索して切り替える。初期値はSmoothで、window内では画像移動・最後のtab close後も保持し、再起動時は戻す。編集・選択・zoom・copy／exportは不変、原寸画像・animation・読書へ適用する。低解像度previewとUI文字はSmoothのまま。初期keyは設けず、設定名`toggle_image_interpolation`でcustom binding可能。

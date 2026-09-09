@@ -296,6 +296,27 @@ struct ImagePreviewPresentation {
     source_size: (u32, u32),
 }
 
+struct RetainedImageTab {
+    path: PathBuf,
+    view: ImageViewState,
+    reading_mode: bool,
+    reading_settings: ReadingSettings,
+    filmstrip_open: bool,
+    timeline_open: bool,
+    image: Option<ImagePresentation>,
+    reading_pages: Vec<Result<ImagePresentation, String>>,
+    folder_snapshot: Option<FolderSnapshot>,
+    source: Option<Arc<DecodedImage>>,
+    operations: Option<Vec<EditOperation>>,
+    materialized: bool,
+    error: Option<String>,
+    resume_loading: bool,
+    resume_editing: bool,
+    state: PlaybackState,
+    graphics_epoch: u64,
+    status_message: Option<(String, Instant)>,
+}
+
 struct ImageTextureCache {
     entries: VecDeque<ImagePresentation>,
     byte_limit: usize,
@@ -573,6 +594,10 @@ struct Application<N> {
     folder_snapshot: Option<FolderSnapshot>,
     folder_watcher: Option<(PathBuf, FolderWatcher)>,
     tabs: TabSet,
+    displayed_tab: Option<TabId>,
+    retained_images: BTreeMap<TabId, RetainedImageTab>,
+    graphics_epoch: u64,
+    restored_reading_pages: bool,
     closed_tabs: VecDeque<PathBuf>,
     recent_files: Option<towavue_runtime_windows::RecentFiles>,
     recent_paths: Vec<PathBuf>,
@@ -725,6 +750,10 @@ where
             folder_snapshot: None,
             folder_watcher: None,
             tabs: TabSet::default(),
+            displayed_tab: None,
+            retained_images: BTreeMap::new(),
+            graphics_epoch: 0,
+            restored_reading_pages: false,
             closed_tabs: VecDeque::new(),
             recent_files: None,
             recent_paths: Vec::new(),
@@ -957,7 +986,83 @@ where
         self.request_redraw();
     }
 
+    fn retain_image_tab(&mut self) {
+        let (Some(id), Some(path)) = (self.displayed_tab, self.path.as_ref()) else {
+            return;
+        };
+        if self.media_kind != Some(MediaKind::Image)
+            || !self
+                .tabs
+                .tabs()
+                .iter()
+                .any(|tab| tab.id == id && tab.target.current_path() == path)
+            || self.tabs.active().is_some_and(|tab| tab.id == id)
+        {
+            return;
+        }
+        self.cancel_view_drag();
+        let path = self.path.clone().expect("displayed image path");
+        self.retained_images.insert(
+            id,
+            RetainedImageTab {
+                path,
+                view: self.image_view,
+                reading_mode: self.reading_mode,
+                reading_settings: self.reading_settings,
+                filmstrip_open: self.filmstrip_open,
+                timeline_open: self.timeline_open,
+                image: self.image.take(),
+                reading_pages: std::mem::take(&mut self.reading_pages),
+                folder_snapshot: self.folder_snapshot.take(),
+                source: self.image_edit_source.take(),
+                operations: self.image_edit_operations.take(),
+                materialized: self.image_materialized,
+                error: self.image_error.take(),
+                resume_loading: self.image_loading,
+                resume_editing: self.image_edit_pending,
+                state: self.state,
+                graphics_epoch: self.graphics_epoch,
+                status_message: self.status_message.take(),
+            },
+        );
+    }
+
+    fn restore_image_tab(&mut self, saved: RetainedImageTab) {
+        self.image_view = saved.view;
+        self.reading_mode = saved.reading_mode && !self.command_context().has_unsaved_edits;
+        self.reading_settings = saved.reading_settings;
+        self.filmstrip_open = saved.filmstrip_open;
+        self.timeline_open = saved.timeline_open;
+        self.image = saved.image;
+        self.reading_pages = saved.reading_pages;
+        self.folder_snapshot = saved.folder_snapshot;
+        self.image_edit_source = saved.source;
+        self.image_edit_operations = saved.operations;
+        self.image_materialized = saved.materialized;
+        self.image_error = saved.error;
+        self.state = saved.state;
+        self.status_message = saved.status_message;
+        self.restore_ui_textures |= saved.graphics_epoch != self.graphics_epoch;
+        self.restored_reading_pages = self.reading_mode && !saved.resume_loading;
+        if saved.resume_loading {
+            self.rebuild_reading_pages();
+        }
+        if saved.resume_editing {
+            self.image_edit_operations = None;
+            self.refresh_image_edits();
+        }
+        self.refresh_title();
+        self.request_redraw();
+    }
+
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.retain_image_tab();
+        self.displayed_tab = self.tabs.active().map(|tab| tab.id);
+        let saved = self
+            .displayed_tab
+            .and_then(|id| self.retained_images.remove(&id))
+            .filter(|saved| kind == MediaKind::Image && saved.path == path);
+        self.restored_reading_pages = false;
         self.reset_image_edits();
         if let Some(recent) = &self.recent_files {
             recent.record(path.clone());
@@ -1007,6 +1112,10 @@ where
         self.drift_samples.clear();
         self.refresh_folder_snapshot();
         if kind == MediaKind::Image {
+            if let Some(saved) = saved {
+                self.restore_image_tab(saved);
+                return;
+            }
             if self.command_context().has_unsaved_edits {
                 self.reading_mode = false;
             }
@@ -1152,6 +1261,7 @@ where
     }
 
     fn apply_folder_snapshot(&mut self, snapshot: FolderSnapshot) {
+        let previous_reading_paths = self.reading_request_paths();
         self.filmstrip.clear();
         let current_path = self.path.clone();
         let current_identity = current_path.as_deref().and_then(|path| {
@@ -1182,25 +1292,17 @@ where
                 self.rebuild_reading_pages();
             }
         }
-        if self.reading_mode && self.media_kind == Some(MediaKind::Image) {
+        let retained_pages_match = std::mem::take(&mut self.restored_reading_pages)
+            && previous_reading_paths == self.reading_request_paths();
+        if self.reading_mode && self.media_kind == Some(MediaKind::Image) && !retained_pages_match {
             self.rebuild_reading_pages();
         }
         self.prefetch_next_image();
     }
 
-    fn rebuild_reading_pages(&mut self) {
-        self.clear_image_previews();
-        self.reading_pages.clear();
-        self.image_generation = self.image_loader.request(Vec::new());
-        self.image_loading = false;
-        if self.media_kind != Some(MediaKind::Image) {
-            return;
-        }
-        if !self.reading_mode && self.image.is_some() {
-            return;
-        }
-        let Some(path) = self.path.as_ref() else {
-            return;
+    fn reading_request_paths(&self) -> Vec<PathBuf> {
+        let Some(path) = &self.path else {
+            return Vec::new();
         };
         let mut paths = vec![path.clone()];
         if self.reading_mode
@@ -1219,6 +1321,24 @@ where
                     .filter(|item| &item.path != path)
                     .map(|item| item.path.clone()),
             );
+        }
+        paths
+    }
+
+    fn rebuild_reading_pages(&mut self) {
+        self.clear_image_previews();
+        self.reading_pages.clear();
+        self.image_generation = self.image_loader.request(Vec::new());
+        self.image_loading = false;
+        if self.media_kind != Some(MediaKind::Image) {
+            return;
+        }
+        if !self.reading_mode && self.image.is_some() {
+            return;
+        }
+        let paths = self.reading_request_paths();
+        if paths.is_empty() {
+            return;
         }
         self.image_error = None;
         self.image_loading = true;
@@ -4869,6 +4989,7 @@ where
         }
         self.tab_preview.clear();
         self.edits.remove(&id);
+        self.retained_images.remove(&id);
         self.export_paths.remove(&id);
         if !was_active {
             self.request_redraw();
@@ -4883,6 +5004,7 @@ where
             self.load_path(path, kind);
         } else {
             self.session.take();
+            self.displayed_tab = None;
             self.playback_error = None;
             self.reset_image_edits();
             self.image_generation = self.image_loader.request(Vec::new());
@@ -5368,6 +5490,7 @@ where
     }
 
     fn recover_graphics_device(&mut self, position: MediaTime) {
+        self.graphics_epoch = self.graphics_epoch.wrapping_add(1);
         self.tab_preview.clear();
         self.clear_image_previews();
         self.image_texture_cache.entries.clear();
@@ -14871,6 +14994,273 @@ mod tests {
         assert_eq!(transform.size, (30.0, 20.0));
         assert_eq!(transform.uv[0], UnitPoint { x: 0.25, y: 1.0 });
         assert_eq!(transform.uv[2], UnitPoint { x: 0.75, y: 0.0 });
+    }
+
+    #[test]
+    fn image_tabs_restore_loaded_pixels_and_views_without_reopening_the_source() {
+        let Some(root) = isolated_test_root(
+            "tests::image_tabs_restore_loaded_pixels_and_views_without_reopening_the_source",
+        ) else {
+            return;
+        };
+        let mut bitmap = vec![0_u8; 62];
+        bitmap[..2].copy_from_slice(b"BM");
+        bitmap[2..6].copy_from_slice(&62_u32.to_le_bytes());
+        bitmap[10..14].copy_from_slice(&54_u32.to_le_bytes());
+        bitmap[14..18].copy_from_slice(&40_u32.to_le_bytes());
+        bitmap[18..22].copy_from_slice(&2_u32.to_le_bytes());
+        bitmap[22..26].copy_from_slice(&1_u32.to_le_bytes());
+        bitmap[26..28].copy_from_slice(&1_u16.to_le_bytes());
+        bitmap[28..30].copy_from_slice(&24_u16.to_le_bytes());
+        bitmap[34..38].copy_from_slice(&8_u32.to_le_bytes());
+        bitmap[54..].copy_from_slice(&[0, 0, 255, 0, 255, 0, 0, 0]);
+        let first_path = root.join("first.bmp");
+        let second_path = root.join("second.bmp");
+        std::fs::write(&first_path, &bitmap).expect("first fixture");
+        std::fs::write(&second_path, &bitmap).expect("second fixture");
+        let (sender, events) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            let _ = sender.send(event);
+        })
+        .expect("app");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let wait = |app: &mut Application<_>| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.image_loading {
+                app.handle_app_event(
+                    events
+                        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        .expect("image ready"),
+                );
+            }
+            assert!(app.image.is_some() && app.image_error.is_none());
+        };
+        app.open_external(first_path.clone(), true);
+        wait(&mut app);
+        let first = app.tabs.active().expect("first tab").id;
+        let decoded = app.image.as_ref().expect("first image").decoded.clone();
+        let texture = app.image.as_ref().expect("first image").texture.id();
+        app.push_visual_edit(EditOperation::RotateClockwise);
+        app.image_view.zoom = ZoomMode::Custom(7.0);
+        app.image_view.pan = (12.0, -9.0);
+        app.image_view.selection = Some(UnitRect::FULL);
+        app.filmstrip_open = true;
+        app.reading_settings.page_count = 4;
+        let first_view = app.image_view;
+        let first_edits = app.edits[&first].clone();
+        app.set_status("First image status".into());
+        app.open_external(second_path.clone(), true);
+        wait(&mut app);
+        let second = app.tabs.active().expect("second tab").id;
+        let second_texture = app.image.as_ref().expect("second image").texture.id();
+        app.image_view.zoom = ZoomMode::Custom(2.0);
+        app.filmstrip_open = false;
+        app.reading_settings.page_count = 2;
+        let second_view = app.image_view;
+        app.set_status("Second image status".into());
+        assert_eq!(app.retained_images.len(), 1);
+        std::fs::remove_file(&first_path).expect("remove owned source to prove no reopen");
+        let _ = context.tex_manager().write().take_delta();
+        app.activate_tab(first);
+        assert!(!app.image_loading && !app.restore_ui_textures);
+        assert_eq!(
+            app.image.as_ref().expect("retained image").texture.id(),
+            texture
+        );
+        assert!(Arc::ptr_eq(
+            &app.image.as_ref().expect("retained image").decoded,
+            &decoded
+        ));
+        assert_eq!(app.image_view, first_view);
+        assert_eq!(app.edits[&first], first_edits);
+        assert_eq!(
+            app.status_message.as_ref().expect("first status").0,
+            "First image status"
+        );
+        assert!(app.filmstrip_open);
+        assert_eq!(app.reading_settings.page_count, 4);
+        assert!(context.tex_manager().write().take_delta().set.is_empty());
+        app.activate_tab(second);
+        assert_eq!(
+            app.image
+                .as_ref()
+                .expect("second retained image")
+                .texture
+                .id(),
+            second_texture
+        );
+        assert_eq!(app.image_view, second_view);
+        assert!(!app.filmstrip_open);
+        assert_eq!(app.reading_settings.page_count, 2);
+        app.remove_tab(first, false);
+        assert!(!app.retained_images.contains_key(&first));
+        app.remove_tab(second, false);
+        assert!(app.retained_images.is_empty() && app.displayed_tab.is_none());
+    }
+
+    #[test]
+    fn retained_image_edit_restarts_from_original_and_rejects_other_tab_results() {
+        use towavue_core::{ImageResize, ResampleFilter};
+        use towavue_runtime_windows::DecodedImageFrame;
+        let (sender, events) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            let _ = sender.send(event);
+        })
+        .expect("app");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let first_path = PathBuf::from("retained-first.png");
+        let first = app.tabs.open_new(first_path.clone(), MediaKind::Image);
+        app.displayed_tab = Some(first);
+        app.path = Some(first_path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        let source = Arc::new(DecodedImage {
+            format: "test",
+            frames: vec![DecodedImageFrame {
+                width: 2,
+                height: 2,
+                rgba: vec![255; 16],
+                delay: Duration::ZERO,
+            }],
+        });
+        app.image = Some(
+            ImagePresentation::from_decoded(&context, &first_path, source.clone()).expect("image"),
+        );
+        app.push_visual_edit(EditOperation::Resize(
+            ImageResize::new(4, 4, ResampleFilter::Nearest).expect("size"),
+        ));
+        let stale_generation = app.image_edit_generation;
+        let second_path = PathBuf::from("retained-second.png");
+        let second = app.tabs.open_new(second_path.clone(), MediaKind::Image);
+        app.load_path(second_path.clone(), MediaKind::Image);
+        app.image_generation = app.image_loader.request(Vec::new());
+        app.image_loading = false;
+        app.image = Some(
+            ImagePresentation::from_decoded(&context, &second_path, source.clone())
+                .expect("second"),
+        );
+        app.finish_image_edits(stale_generation, Err("wrong tab".into()));
+        assert!(app.image_error.is_none());
+        app.graphics_epoch += 1;
+        app.restore_ui_textures = false;
+        app.activate_tab(first);
+        assert!(app.restore_ui_textures && app.image_edit_pending);
+        assert!(Arc::ptr_eq(
+            app.image_edit_source.as_ref().expect("original retained"),
+            &source
+        ));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.image_edit_pending {
+            app.handle_app_event(
+                events
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .expect("resized result"),
+            );
+        }
+        assert!(app.image_materialized && app.image_error.is_none());
+        assert_eq!(app.image.as_ref().expect("resized").dimensions(), (4, 4));
+        app.undo_edit(false);
+        assert!(Arc::ptr_eq(
+            &app.image.as_ref().expect("undo").decoded,
+            &source
+        ));
+        app.activate_tab(second);
+        app.tabs
+            .active_mut()
+            .expect("second tab")
+            .target
+            .set_current_path(PathBuf::from("new-source.png"), MediaKind::Image);
+        app.load_path(PathBuf::from("new-source.png"), MediaKind::Image);
+        assert!(
+            app.image.is_none(),
+            "navigation in a tab must not restore its prior source"
+        );
+    }
+
+    #[test]
+    fn retained_reading_pages_survive_unchanged_shell_refresh_but_follow_new_neighbors() {
+        use towavue_core::{FolderMediaItem, ReadingAxis, ShellIdentity};
+        use towavue_runtime_windows::DecodedImageFrame;
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let paths = ["reading-a.png", "reading-b.png", "reading-c.png"].map(PathBuf::from);
+        let snapshot = FolderSnapshot {
+            folder_identity: ShellIdentity::new(vec![0]),
+            folder_path: PathBuf::new(),
+            items: paths
+                .iter()
+                .enumerate()
+                .map(|(index, path)| FolderMediaItem {
+                    identity: ShellIdentity::new(vec![index as u8]),
+                    path: path.clone(),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: Vec::new(),
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::UNIX_EPOCH,
+        };
+        let decoded = Arc::new(DecodedImage {
+            format: "test",
+            frames: vec![DecodedImageFrame {
+                width: 2,
+                height: 2,
+                rgba: vec![255; 16],
+                delay: Duration::ZERO,
+            }],
+        });
+        let first = app.tabs.open_new(paths[0].clone(), MediaKind::Image);
+        app.displayed_tab = Some(first);
+        app.path = Some(paths[0].clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.folder_snapshot = Some(snapshot.clone());
+        app.reading_mode = true;
+        app.reading_settings.axis = ReadingAxis::Vertical;
+        app.reading_settings.reversed = true;
+        app.image = Some(
+            ImagePresentation::from_decoded(&context, &paths[0], decoded.clone())
+                .expect("active page"),
+        );
+        let page = ImagePresentation::from_decoded(&context, &paths[1], decoded).expect("neighbor");
+        let neighbor_texture = page.texture.id();
+        app.reading_pages.push(Ok(page));
+        let second_path = PathBuf::from("other.png");
+        app.tabs.open_new(second_path.clone(), MediaKind::Image);
+        app.load_path(second_path, MediaKind::Image);
+        app.reading_mode = false;
+        app.reading_settings = ReadingSettings::default();
+        app.activate_tab(first);
+        assert!(app.reading_mode && !app.image_loading);
+        assert_eq!(app.reading_settings.axis, ReadingAxis::Vertical);
+        assert!(app.reading_settings.reversed);
+        let generation = app.image_generation;
+        app.apply_folder_snapshot(snapshot.clone());
+        assert_eq!(
+            app.image_generation, generation,
+            "unchanged refresh must not reload retained pages"
+        );
+        assert_eq!(
+            app.reading_pages[0]
+                .as_ref()
+                .expect("retained neighbor")
+                .texture
+                .id(),
+            neighbor_texture
+        );
+        let mut changed = snapshot;
+        changed.items.swap(1, 2);
+        app.apply_folder_snapshot(changed);
+        assert!(
+            app.image_loading && app.image_generation != generation,
+            "new Shell neighbor requires its page"
+        );
+        assert_eq!(
+            app.reading_request_paths(),
+            vec![paths[0].clone(), paths[2].clone()]
+        );
     }
 
     #[test]

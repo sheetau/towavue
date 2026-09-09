@@ -1952,7 +1952,7 @@ where
             && self
                 .session
                 .as_ref()
-                .is_some_and(|session| session.video_geometry().is_none());
+                .is_some_and(PlaybackSession::video_refresh_pending);
         video_frame_due(presentation_time, deadline, paused_preview)
     }
 
@@ -5940,7 +5940,13 @@ where
     }
 
     fn record_seek_presentation(&mut self, media_drawn: bool) {
-        if media_drawn && let Some(started) = self.pending_seek_started.take() {
+        if media_drawn
+            && !self
+                .session
+                .as_ref()
+                .is_some_and(PlaybackSession::video_refresh_pending)
+            && let Some(started) = self.pending_seek_started.take()
+        {
             let latency = started.elapsed();
             self.seek_latencies.push(latency);
             eprintln!(

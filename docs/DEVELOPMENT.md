@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 動画tab復帰直後の保持frame（2026-09-10 03:02 JST）
+
+動画を一時停止し、画像tabへ切り替えて戻る。最後に選んだ映像frameを保持して即時に描き、復帰decoderの最初のframeへ置き換える。同じ停止位置なら保持frameの時刻からdecodeするため、frame境界間のclockを切り上げて1コマ進めない。再生中に背景で進んだ場合は、保持frameから現在位置の新frameへ更新する。Seek／device交換は旧frameを解放し、復帰時の表示を新規presented count／Seek時間として二重計上しない。
+
+runtime回帰は同じRGBA bufferの保持、17msの停止clockでも0ms frameの維持、非表示decode停止、復帰後の全PTS／画素、背景EOFの終端frameをlate-dropしないこと、Seek／device交換の解放を確認する。app回帰は508msの停止、実D3D11 rendererの保持frame描画／Present、別tab往復、fresh-frame置換、metrics／Seek標本、復旧での旧surface破棄を確認する。追加した描画helperは当初surface sizingを欠いて失敗し、実rendererのresize_surface初期化を加えた。これは試験setupの訂正である。
+
+最終session66689のfmt／Clippy／workspace340 tests／releaseが成功。通常ignoredの7件とは別に、appのnative-caption／背景音声device復旧2件とruntimeのWASAPI visibility1件を明示実行し、PASSを確認した。release46fa81dc0499d5d2aebee0a2e0dcb6ce67df130b483e4cdf18cd8eb2d530834a。実画面試験後に、fresh frame前の高速往復でも停止位置とframeの対応を保持する小修正と回帰を追加し、全checks／実device opt-inを再実行した。hardware frameはsurface poolをpinし得るので、frame数だけでGPU保持量の上限を保証しない。
+
+通常release426580eaのheld-frame-native PID55052/start17:59:48.2923479Zで生成した60秒video-only MP4を停止し、PNGへ往復。00:00:00.667／frame20を維持し、画面内x8..951／y40..535の468224画素が前後で全一致した。capture確認済み、通常Close終了0、launcher6015 terminal、stderrはD3D11VA選択2件だけ。通常captureは復帰後の一致を示し、最初のPresent待ち時間の測定ではない。Open補助の5秒観察ではdialogが見つからなかったが、同じPIDのdialogを後から確認し、所有権・前面・入力値を照合して操作を継続した。Openが通常Buttonではない点も補助側で修正。app再起動・無関係なwindow入力は行わず、素材／captures／補助はignoredのtarget/tmpに残す。
+
 ### 非表示動画の入力保持（2026-09-10 02:50 JST）
 
 既知終端の動画tabを隠すと映像worker／queue／frameは解放するが、開いたFFmpeg入力はsessionへ戻す。復帰・Seek・device交換では同じ映像入力を使い、D3D11VA失敗時のsoftware fallbackも開き直さない。非表示中のdecode停止と音声worker／clockは維持する。復帰時のdecoder再構築・Seek・最初のframe待機はまだ残る。

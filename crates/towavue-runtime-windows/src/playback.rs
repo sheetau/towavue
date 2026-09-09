@@ -126,6 +126,8 @@ pub struct PlaybackSession {
     pending_video: Option<PresentationFrame>,
     current_video: Option<PresentationFrame>,
     current_video_unpresented: bool,
+    video_refresh_pending: bool,
+    retained_video_position: Option<MediaTime>,
     audio: Option<AudioOutput>,
     video_thread: Option<JoinHandle<Option<decode::ParallelInput>>>,
     video_input: Option<decode::ParallelInput>,
@@ -172,6 +174,8 @@ impl PlaybackSession {
             pending_video: None,
             current_video: None,
             current_video_unpresented: false,
+            video_refresh_pending: true,
+            retained_video_position: None,
             audio: None,
             video_thread: None,
             video_input: None,
@@ -408,18 +412,22 @@ impl PlaybackSession {
         self.decode_cancel.store(true, Ordering::Relaxed);
         // Release the bounded audio receiver before joining its producer.
         self.audio.take();
-        self.stop_video();
+        self.stop_video(false);
         if let Some(thread) = self.audio_thread.take() {
             let _ = thread.join();
         }
     }
 
-    fn stop_video(&mut self) {
+    fn stop_video(&mut self, retain_frame: bool) {
         self.video_generation = self.video_generation.next();
         self.video_cancel.store(true, Ordering::Relaxed);
         self.pending_video.take();
-        self.current_video.take();
+        if !retain_frame {
+            self.current_video.take();
+            self.retained_video_position = None;
+        }
         self.current_video_unpresented = false;
+        self.video_refresh_pending = true;
         self.video_rx.take();
         if let Some(thread) = self.video_thread.take() {
             self.video_input = thread.join().ok().flatten();
@@ -436,11 +444,26 @@ impl PlaybackSession {
         if self.video_visible == visible {
             return Ok(());
         }
-        self.stop_video();
+        if !visible {
+            if !self.video_refresh_pending && self.current_video.is_some() {
+                self.retained_video_position = Some(position);
+            } else if self.retained_video_position != Some(position) {
+                self.retained_video_position = None;
+            }
+        }
+        let target = if visible && self.paused && self.retained_video_position == Some(position) {
+            // Preserve the exact paused frame, even when its timestamp differs from the clock.
+            self.current_video
+                .as_ref()
+                .map_or(position, PresentationFrame::presentation_time)
+        } else {
+            position
+        };
+        self.stop_video(true);
         self.completion.restart_video();
         self.video_visible = false;
         if visible {
-            self.start_video(position.max(MediaTime::ZERO))?;
+            self.start_video(target.max(MediaTime::ZERO))?;
             self.video_visible = true;
         }
         Ok(())
@@ -466,7 +489,13 @@ impl PlaybackSession {
         };
         self.current_video = Some(frame);
         self.current_video_unpresented = true;
+        self.video_refresh_pending = false;
         true
+    }
+
+    /// A retained frame is drawable, but is not the result for the resumed position.
+    pub fn video_refresh_pending(&self) -> bool {
+        self.video_refresh_pending
     }
 
     pub fn video_geometry(&self) -> Option<(u32, u32, f32)> {
@@ -515,7 +544,7 @@ impl PlaybackSession {
         let mut dropped = 0;
         while let Some(time) = self.pending_video_time() {
             // Only terminal source preview may precede the seek target.
-            if time >= cutoff || (time < self.video_target && self.current_video.is_none()) {
+            if time >= cutoff || (time < self.video_target && self.video_refresh_pending) {
                 break;
             }
             self.pending_video.take();
@@ -771,13 +800,21 @@ mod tests {
         let generation = session.generation();
         let old_video_generation = session.video_generation;
         assert_eq!(wait_for_video(&mut session), MediaTime::ZERO);
+        assert!(session.advance_pending());
+        let Some(PresentationFrame::Software(first)) = &session.current_video else {
+            panic!("WARP software frame");
+        };
+        let first_pixels = first.rgba.as_ptr();
+        let geometry = session.video_geometry();
+        assert!(!session.video_refresh_pending());
+        let between_frames = MediaTime::from_nanoseconds(17_000_000);
         thread::sleep(Duration::from_millis(50));
         assert!(
             session.metrics().cpu_transfer_count <= 4,
             "bounded output queue"
         );
         session
-            .set_video_visible(false, MediaTime::ZERO)
+            .set_video_visible(false, between_frames)
             .expect("hide");
         assert!(session.video_thread.is_none() && session.video_rx.is_none());
         assert!(
@@ -787,13 +824,47 @@ mod tests {
         // Any path reopen from this point would fail; the open input must suffice.
         session.path = path.with_extension("absent");
         assert!(!session.path.exists());
-        assert!(session.pending_video_time().is_none() && session.video_geometry().is_none());
+        assert!(session.pending_video_time().is_none());
+        assert_eq!(session.video_geometry(), geometry);
+        assert!(session.video_refresh_pending() && !session.current_video_unpresented);
         let hidden_count = session.metrics().cpu_transfer_count;
         thread::sleep(Duration::from_millis(50));
         assert_eq!(session.metrics().cpu_transfer_count, hidden_count);
+        session.set_paused(true).expect("pause behind another tab");
+        session
+            .set_video_visible(true, between_frames)
+            .expect("return to the same paused clock");
+        let Some(PresentationFrame::Software(retained)) = &session.current_video else {
+            panic!("retained frame");
+        };
+        assert_eq!(
+            retained.rgba.as_ptr(),
+            first_pixels,
+            "no copy or blank on return"
+        );
+        session
+            .set_video_visible(false, between_frames)
+            .expect("hide before fresh frame");
+        session
+            .set_video_visible(true, between_frames)
+            .expect("rapid paused return");
+        assert_eq!(
+            wait_for_video(&mut session),
+            MediaTime::ZERO,
+            "no one-frame step from a between-frame clock"
+        );
+        session.advance_pending();
+        session
+            .set_video_visible(false, between_frames)
+            .expect("hide paused frame again");
         let target = MediaTime::from_nanoseconds(1_000_000_000);
         session.set_paused(true).expect("pause");
         session.set_video_visible(true, target).expect("show");
+        let Some(PresentationFrame::Software(retained)) = &session.current_video else {
+            panic!("retained frame");
+        };
+        assert_eq!(retained.presentation_time, MediaTime::ZERO);
+        assert!(session.video_refresh_pending());
         assert_eq!(session.generation(), generation);
         assert!(!session.accepts_event(&PlaybackEvent::VideoReady(old_video_generation)));
         assert!(!session.accepts_event(&PlaybackEvent::VideoFailed(
@@ -831,6 +902,7 @@ mod tests {
         })
         .expect("reference decode");
         assert_eq!(observed, expected);
+        assert!(!session.video_refresh_pending());
         assert!(events.try_iter().all(|event| !matches!(
             event,
             PlaybackEvent::Failed(..)
@@ -870,10 +942,38 @@ mod tests {
             )
             .expect("recover with retained input");
         assert!(session.video_thread.is_none());
+        assert!(
+            session.video_geometry().is_none(),
+            "old device frame released"
+        );
         session
             .set_video_visible(true, MediaTime::ZERO)
             .expect("return after recovery");
         assert_eq!(wait_for_video(&mut session), MediaTime::ZERO);
+        session.advance_pending();
+        let end = MediaTime::from_nanoseconds(3_000_000_000);
+        session
+            .set_video_visible(false, MediaTime::ZERO)
+            .expect("hide first frame");
+        session
+            .set_video_visible(true, end)
+            .expect("return after background EOF");
+        assert!(wait_for_video(&mut session) < end);
+        assert_eq!(
+            session.drop_video_before(end),
+            0,
+            "retain terminal replacement despite old preview"
+        );
+        session.advance_pending();
+        assert!(!session.video_refresh_pending());
+        let Some(PresentationFrame::Software(terminal)) = &session.current_video else {
+            panic!("terminal frame");
+        };
+        let last = expected.last().expect("reference terminal");
+        assert_eq!(terminal.presentation_time, last.0);
+        assert_eq!(terminal.rgba, last.1);
+        session.seek(MediaTime::ZERO).expect("seek clears preview");
+        assert!(session.video_geometry().is_none() && session.video_refresh_pending());
         drop(session);
         std::fs::remove_file(path).expect("remove owned video-only fixture");
     }

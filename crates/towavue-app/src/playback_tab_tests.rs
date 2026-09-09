@@ -2,6 +2,27 @@ use super::*;
 use std::sync::mpsc;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+fn draw_video<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
+    let renderer = app.renderer.as_mut().expect("renderer");
+    renderer
+        .resize_surface(320, 240)
+        .expect("size owned test surface");
+    renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
+    assert!(
+        app.session
+            .as_mut()
+            .expect("video session")
+            .draw_current(
+                renderer,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 96.0)),
+                app.video_uv,
+            )
+            .expect("draw retained video on the shared device")
+    );
+    renderer.present_surface().expect("present video");
+    app.record_seek_presentation(true);
+}
+
 fn service<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
     events: &mpsc::Receiver<AppEvent>,
@@ -146,8 +167,19 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
                 app.media_duration.is_some() && app.pending_time.is_some()
             });
             app.toggle_pause();
-            app.seek_to(media_time(Duration::from_millis(500)));
+            app.seek_to(media_time(Duration::from_millis(508)));
             wait(&mut app, &events, |app| app.pending_time.is_some());
+            assert!(app.frame_is_due());
+            app.advance_media();
+            draw_video(&mut app);
+            let first_geometry = app.session.as_ref().expect("first video").video_geometry();
+            let first_presented = app
+                .session
+                .as_ref()
+                .expect("first video")
+                .metrics()
+                .presented_frame_count;
+            assert!(first_geometry.is_some());
             app.image_view.zoom = ZoomMode::Custom(2.0);
             app.image_view.selection = Some(UnitRect::FULL);
             let view = app.image_view;
@@ -245,7 +277,55 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
             assert!(app.playback_error.is_none());
             assert_eq!(app.tabs.active().expect("image remains active").id, image);
             app.activate_tab(first);
+            if !self.audio {
+                let session = app.session.as_ref().expect("restored video");
+                assert_eq!(
+                    session.video_geometry(),
+                    first_geometry,
+                    "immediate return geometry"
+                );
+                assert!(session.video_refresh_pending());
+                let latency_count = app.seek_latencies.len();
+                app.pending_seek_started = Some(Instant::now());
+                draw_video(&mut app);
+                assert_eq!(
+                    app.session
+                        .as_ref()
+                        .expect("restored video")
+                        .metrics()
+                        .presented_frame_count,
+                    first_presented
+                );
+                assert_eq!(
+                    app.seek_latencies.len(),
+                    latency_count,
+                    "old frame is not a Seek result"
+                );
+                assert!(app.pending_seek_started.is_some());
+            } else {
+                assert!(
+                    app.session
+                        .as_ref()
+                        .expect("recovered video")
+                        .video_geometry()
+                        .is_none(),
+                    "device recovery discards retained surface"
+                );
+            }
             wait(&mut app, &events, |app| app.pending_time.is_some());
+            assert!(
+                app.frame_is_due(),
+                "paused return accepts a new frame beyond its clock"
+            );
+            app.advance_media();
+            assert!(
+                !app.session
+                    .as_ref()
+                    .expect("fresh video")
+                    .video_refresh_pending()
+            );
+            draw_video(&mut app);
+            assert!(app.pending_seek_started.is_none());
             assert_eq!(app.media_generation, first_instance);
             assert_eq!(app.image_view, view);
             assert_eq!(app.state, PlaybackState::Paused);

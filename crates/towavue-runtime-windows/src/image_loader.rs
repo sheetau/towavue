@@ -11,6 +11,8 @@ const CACHE_BYTE_LIMIT: usize = 256 * 1024 * 1024;
 
 pub struct LoadedImages {
     pub generation: u64,
+    pub first_index: usize,
+    pub total: usize,
     pub images: Vec<(PathBuf, Result<Arc<DecodedImage>, ImageDecodeError>)>,
 }
 
@@ -242,8 +244,8 @@ fn run_worker(
             !mailbox.closed && mailbox.generation == generation
         };
         let mut remaining = IMAGE_BYTE_LIMIT;
-        let mut images = Vec::new();
-        for path in paths {
+        let total = paths.len();
+        for (index, path) in paths.into_iter().enumerate() {
             if !is_current() {
                 break;
             }
@@ -267,21 +269,25 @@ fn run_worker(
                     );
                 }
             }
-            images.push((path, result));
-        }
-        let publish = {
-            let mut mailbox = mutex.lock().expect("image mailbox");
-            if mailbox.closed {
-                return;
+            {
+                let mut mailbox = mutex.lock().expect("image mailbox");
+                if mailbox.closed {
+                    return;
+                }
+                if mailbox.generation != generation {
+                    break;
+                }
+                mailbox
+                    .completed
+                    .get_or_insert_with(|| LoadedImages {
+                        generation,
+                        first_index: index,
+                        total,
+                        images: Vec::new(),
+                    })
+                    .images
+                    .push((path, result));
             }
-            if mailbox.generation != generation {
-                false
-            } else {
-                mailbox.completed = Some(LoadedImages { generation, images });
-                true
-            }
-        };
-        if publish {
             notify();
         }
     }
@@ -609,7 +615,12 @@ mod tests {
         ready_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("result");
+        ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("second page result");
         let result = loader.take_completed().expect("pages");
+        assert_eq!(result.first_index, 0);
+        assert_eq!(result.total, 2);
         assert!(result.images[0].1.is_ok());
         assert!(matches!(
             result.images[1].1,
@@ -623,6 +634,72 @@ mod tests {
         assert!(loader.take_completed().is_none());
         drop(loader);
         worker.join().expect("worker exits on close");
+    }
+
+    #[test]
+    fn publishes_each_page_before_the_next_decode_and_cancels_partial_results() {
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let loader = ImageLoader {
+            shared: Arc::clone(&shared),
+            prefetch_worker: LatestTask::new("incremental-test-prefetch").expect("prefetch worker"),
+        };
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            run_worker(
+                shared,
+                || {
+                    ready_tx.send(()).expect("notify");
+                },
+                |path, budget, _| {
+                    if path == Path::new("second.png") {
+                        assert_eq!(budget, IMAGE_BYTE_LIMIT - 4);
+                        started_tx.send(()).expect("second started");
+                        resume_rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .expect("release decode");
+                    }
+                    Ok((*pixel(1)).clone())
+                },
+            )
+        });
+        for cancel in [false, true] {
+            let generation = loader.request(vec!["first.png".into(), "second.png".into()]);
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("second decode blocked");
+            ready_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("first page already published");
+            let first = loader.take_completed().expect("partial result");
+            assert_eq!(first.generation, generation);
+            assert_eq!(first.first_index, 0);
+            assert_eq!(first.total, 2);
+            assert_eq!(first.images.len(), 1);
+            assert_eq!(first.images[0].0, Path::new("first.png"));
+            let current = if cancel {
+                loader.request(vec!["latest.png".into()])
+            } else {
+                generation
+            };
+            resume_tx.send(()).expect("release second");
+            ready_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("next result");
+            let next = loader.take_completed().expect("next chunk");
+            assert_eq!(next.generation, current);
+            assert_eq!(next.first_index, usize::from(!cancel));
+            assert_eq!(next.total, if cancel { 1 } else { 2 });
+            assert_eq!(next.images.len(), 1);
+            assert_eq!(
+                next.images[0].0,
+                Path::new(if cancel { "latest.png" } else { "second.png" })
+            );
+        }
+        drop(loader);
+        worker.join().expect("worker exits");
+        assert!(ready_rx.try_recv().is_err());
     }
 
     #[test]

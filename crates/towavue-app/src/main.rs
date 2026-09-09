@@ -1144,49 +1144,57 @@ where
         let Some(result) = self.image_loader.take_completed() else {
             return;
         };
-        if result.generation != self.image_generation {
+        self.apply_loaded_images(result);
+    }
+
+    fn apply_loaded_images(&mut self, result: towavue_runtime_windows::LoadedImages) {
+        if result.generation != self.image_generation
+            || !self.image_loading
+            || (result.first_index != 0 && result.first_index != self.reading_pages.len() + 1)
+        {
             return;
         }
         let Some(context) = self.ui_context.clone() else {
             return;
         };
-        self.image_loading = false;
-        let mut images = result.images.into_iter();
-        let Some((path, decoded)) = images.next() else {
-            return;
-        };
-        if self.path.as_ref() != Some(&path) {
-            return;
-        }
-        match decoded
-            .map_err(|error| error.to_string())
-            .and_then(|decoded| self.image_texture_cache.load(&context, &path, decoded))
+        if result.images.is_empty()
+            || (result.first_index == 0 && self.path.as_ref() != Some(&result.images[0].0))
         {
-            Ok(image) => {
-                let (width, height) = image.dimensions();
-                self.set_status(format!(
-                    "{} · {width} × {height} · {} frame(s)",
-                    image.decoded.format,
-                    image.decoded.frames.len()
-                ));
-                self.image = Some(image);
-                self.image_error = None;
-                self.state = PlaybackState::Paused;
-            }
-            Err(error) => {
-                self.image = None;
-                self.image_error = Some(error.clone());
-                self.fail(error);
-            }
+            return;
         }
-        self.reading_pages = images
-            .map(|(path, decoded)| {
-                decoded
-                    .map_err(|error| error.to_string())
-                    .and_then(|decoded| self.image_texture_cache.load(&context, &path, decoded))
-                    .map_err(|error| format!("{}: {error}", display_name(&path)))
-            })
-            .collect();
+        self.image_loading = result.first_index + result.images.len() < result.total;
+        let mut images = result.images.into_iter();
+        if result.first_index == 0 {
+            let (path, decoded) = images.next().expect("nonempty first chunk");
+            match decoded
+                .map_err(|error| error.to_string())
+                .and_then(|decoded| self.image_texture_cache.load(&context, &path, decoded))
+            {
+                Ok(image) => {
+                    let (width, height) = image.dimensions();
+                    self.set_status(format!(
+                        "{} · {width} × {height} · {} frame(s)",
+                        image.decoded.format,
+                        image.decoded.frames.len()
+                    ));
+                    self.image = Some(image);
+                    self.image_error = None;
+                    self.state = PlaybackState::Paused;
+                }
+                Err(error) => {
+                    self.image = None;
+                    self.image_error = Some(error.clone());
+                    self.fail(error);
+                }
+            }
+            self.reading_pages.clear();
+        }
+        self.reading_pages.extend(images.map(|(path, decoded)| {
+            decoded
+                .map_err(|error| error.to_string())
+                .and_then(|decoded| self.image_texture_cache.load(&context, &path, decoded))
+                .map_err(|error| format!("{}: {error}", display_name(&path)))
+        }));
         self.prefetch_next_image();
         self.refresh_title();
         self.request_redraw();
@@ -1615,7 +1623,7 @@ where
                     self.draw_audio_playlist(ui, actions);
                 } else if self.media_kind == Some(MediaKind::Image) {
                     self.draw_image(ui);
-                    if self.image_loading {
+                    if self.image_loading && !self.reading_mode && self.image.is_none() {
                         egui::Area::new("image-loading".into())
                             .fixed_pos(ui.max_rect().center_top() + egui::vec2(-65.0, 12.0))
                             .interactable(false)
@@ -2225,35 +2233,47 @@ where
         let mut pages: Vec<_> = self
             .reading_pages
             .iter()
-            .map(|page| page.as_ref())
+            .map(|page| Some(page.as_ref()))
             .collect();
-        if let Some(first) = first {
-            let index = self
+        if first.is_some() || self.image_loading {
+            let (index, count) = self
                 .folder_snapshot
                 .as_ref()
                 .zip(self.path.as_ref())
                 .and_then(|(snapshot, path)| {
-                    snapshot
-                        .reading_items(
-                            path,
-                            ReadingSettings {
-                                reversed: false,
-                                ..self.reading_settings
-                            },
-                        )
+                    let items = snapshot.reading_items(
+                        path,
+                        ReadingSettings {
+                            reversed: false,
+                            ..self.reading_settings
+                        },
+                    );
+                    items
                         .iter()
                         .position(|item| &item.path == path)
+                        .map(|index| (index, items.len()))
                 })
-                .unwrap_or(0);
+                .unwrap_or((0, 1));
+            if self.image_loading {
+                pages.resize(count.saturating_sub(1), None);
+            }
             pages.insert(index.min(pages.len()), first);
         }
         if pages.is_empty() {
             ui.centered_and_justified(|ui| ui.label("No image pages available"));
             return;
         }
+        let pending_size = self
+            .image
+            .as_ref()
+            .map_or(egui::Vec2::splat(1.0), |image| image.texture.size_vec2());
         let sizes: Vec<_> = pages
             .iter()
-            .map(|page| page.map_or(egui::Vec2::splat(1.0), |image| image.texture.size_vec2()))
+            .map(|page| {
+                page.map_or(pending_size, |page| {
+                    page.map_or(egui::Vec2::splat(1.0), |image| image.texture.size_vec2())
+                })
+            })
             .collect();
         let rects = reading_page_rects(
             viewport,
@@ -2264,11 +2284,16 @@ where
         let painter = ui.painter_at(viewport);
         for (image, page) in pages.into_iter().zip(rects) {
             let image = match image {
-                Ok(image) => image,
-                Err(error) => {
+                Some(Ok(image)) => image,
+                other => {
+                    let label = match other {
+                        Some(Err(error)) => error.as_str(),
+                        None => "Loading…",
+                        Some(Ok(_)) => unreachable!(),
+                    };
                     ui.scope_builder(egui::UiBuilder::new().max_rect(page), |ui| {
                         ui.set_clip_rect(page);
-                        ui.centered_and_justified(|ui| ui.label(error));
+                        ui.centered_and_justified(|ui| ui.label(label));
                     });
                     continue;
                 }
@@ -13109,6 +13134,130 @@ mod tests {
             frame.rgba[3] = 0;
             compare(&frame);
         }
+    }
+
+    #[test]
+    fn incremental_reading_pages_preserve_active_image_and_reject_stale_chunks() {
+        use towavue_runtime_windows::{DecodedImageFrame, ImageDecodeError, LoadedImages};
+
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let paths: Vec<PathBuf> = ["first.png", "active.png", "last.png"]
+            .map(PathBuf::from)
+            .into();
+        app.path = Some(paths[1].clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.reading_mode = true;
+        app.reading_settings.page_count = 3;
+        app.reading_settings.first_page_count = 3;
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![0]),
+            folder_path: PathBuf::new(),
+            items: paths
+                .iter()
+                .enumerate()
+                .map(|(index, path)| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![index as u8]),
+                    path: path.clone(),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: Vec::new(),
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::UNIX_EPOCH,
+        });
+        app.image_generation = app.image_loader.request(Vec::new());
+        app.image_loading = true;
+        let generation = app.image_generation;
+        let decoded = Arc::new(DecodedImage {
+            format: "GIF",
+            frames: vec![
+                DecodedImageFrame {
+                    width: 2,
+                    height: 1,
+                    rgba: vec![255; 8],
+                    delay: Duration::from_secs(1),
+                };
+                2
+            ],
+        });
+        app.apply_loaded_images(LoadedImages {
+            generation,
+            first_index: 0,
+            total: 3,
+            images: vec![(paths[1].clone(), Ok(decoded.clone()))],
+        });
+        assert!(app.image_loading);
+        assert!(app.reading_pages.is_empty());
+        let next_frame_at = Some(Instant::now() + Duration::from_secs(60));
+        let image = app.image.as_mut().expect("active page visible immediately");
+        image.frame_index = 1;
+        image.next_frame_at = next_frame_at;
+        let texture = image.texture.id();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.draw_reading_pages(ui),
+        );
+        let active_rect = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id == texture => Some(mesh.calc_bounds()),
+                _ => None,
+            })
+            .expect("active page drawn while neighbors are pending");
+        assert!((active_rect.center().x - 450.0).abs() < 1.0);
+        assert_eq!(
+            output
+                .shapes
+                .iter()
+                .filter(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.text() == "Loading…"
+                ))
+                .count(),
+            2
+        );
+        let error_chunk = |generation, first_index, path: &PathBuf| LoadedImages {
+            generation,
+            first_index,
+            total: 3,
+            images: vec![(path.clone(), Err(ImageDecodeError::UnknownFormat))],
+        };
+        app.apply_loaded_images(error_chunk(generation + 1, 1, &paths[0]));
+        app.apply_loaded_images(error_chunk(generation, 2, &paths[2]));
+        app.apply_loaded_images(error_chunk(generation, 0, &paths[0]));
+        assert!(app.image_loading && app.reading_pages.is_empty());
+        app.apply_loaded_images(error_chunk(generation, 1, &paths[0]));
+        assert!(app.image_loading);
+        assert!(matches!(&app.reading_pages[0], Err(error) if error.starts_with("first.png:")));
+        app.apply_loaded_images(LoadedImages {
+            generation,
+            first_index: 2,
+            total: 3,
+            images: vec![(paths[2].clone(), Ok(decoded.clone()))],
+        });
+        assert!(!app.image_loading);
+        assert_eq!(app.reading_pages.len(), 2);
+        assert!(app.reading_pages[1].is_ok());
+        let image = app.image.as_ref().expect("active image retained");
+        assert_eq!(image.texture.id(), texture);
+        assert!(Arc::ptr_eq(&image.decoded, &decoded));
+        assert_eq!(image.frame_index, 1);
+        assert_eq!(image.next_frame_at, next_frame_at);
+        assert_eq!(app.state, PlaybackState::Paused);
+        app.image_generation = app.image_loader.request(Vec::new());
+        app.image_loading = true;
+        app.reading_pages.clear();
+        app.apply_loaded_images(error_chunk(generation, 1, &paths[0]));
+        assert!(app.image_loading && app.reading_pages.is_empty());
     }
 
     #[test]

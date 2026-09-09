@@ -1192,6 +1192,13 @@ towavue/
 - 同じ最終binaryのPID 49800では、31組のRight down/upを5ms間隔で送った後、六画像中の正しい最終対象01-large.png/2 of 6へ583.017msで落ち着き通常終了した。これは投入開始からtitle完了までで、31枚すべての表示を意味しない。最初のprobeはPowerShellのUnicode literal解釈、次は試験helperによるvalue-widget focus再取得で条件を満たさず、時間値として除外した。同じprocessで、取消したreading pointer gestureによりviewerへfocusを戻し、Home→連打を一続きで実行して検証した。timeoutだけでappを再起動していない。
 - 所有試験はすべて正常終了0、stderr空、原本保存・OS設定変更なし。ignoredの`target/tmp/image-viewport-20260909/image-prefetch-*`にidentity／profile JSON／capture／exitを保持する。最終fmt／all-target Clippy／全294 tests通過、実機専用四testsはignoredのまま。初回起動／cold storage、GPU upload、見開き全画像待ち、連打中のblack loadingとpreview共用はI03/U10の残件で、IrfanViewとの比較達成は主張しない。
 
+### 見開きページの逐次公開（2026-09-09 19:59 JST）
+
+- foreground workerはページごとに公開する。未受取の連続ページを一つのmailboxにまとめ、generation・開始index・全件数をappへ渡す。appはactive画像を最初に受け取り、後続chunkで隣ページだけを追加する。全体512 MiBの予算は分割しても共通。先読みは全件受取後に開始する。
+- channelで2ページ目を止め、1ページ目の先行公開・次のindex・要求切替後の遅い旧結果の破棄を検証する。既存budget testは2通知を待って未受取chunkの合流を確認する。app回帰はShell中央のactive画像と左右のLoading、順序不整合／旧世代／別primary pathの拒否、後続errorと成功、active texture・共有画素・animation frame／期限の維持を検証する。既存の壊れたページからの移動・復旧も通過。
+- 通常release `b90eb04b3cd9cc62c98f5a66a475e55e28e464f2b049d912b1752deac59f825b`、所有PID35148/start10:58:51.0228078Zで、600×800 PNGと先読み対象外の6000×6000単一frame GIFを確認。reading切替後63.875msと157.992msのcaptureは左画像＋右Loading、最終captureは両画像を示す。これはcapture開始時刻の標本で、decode完了や物理表示の厳密な計測ではない。GIFは生成fixtureであり原PNGとの画質比較には使わない。正常終了0・stderr空、証跡はignored `target/tmp/image-viewport-20260909/incremental-reading/`。source hashはPNG `5f24c4ff`、GIF `bf55696f`。
+- fmt／all-target Clippy／全296 tests／release build通過。実機専用4 testsはignoredのままで成功扱いしない。未読込ページはactive比率で仮配置し実寸取得後に再配置する。低解像度preview／cold load／高速連打の黒い待機は別の残件。
+
 ## 8. UI/UX変更の判断基準
 
 - 実装済みcommandの入口はmenu、palette、shortcut、gridで同じ`CommandId`を共有する。入口ごとに別logicを作らない。

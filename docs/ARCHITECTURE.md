@@ -32,6 +32,8 @@ UIのdraw order内にplain meshのInvertMesh callbackを置き、vendor renderer
 
 ## 1. 目的と優先順位
 
+H1/V04（2026-09-10）: 動画のvisual selection／crop／90度回転／flipは、実際にtimelineが表示されている状態に限定する。menu／palette／grid／custom shortcutは共通CommandDefinition判定を通し、pointer／keyboard／UIAの選択操作にも同じ可視条件を適用する。fullscreenで隠れたtimelineは編集contextではない。閉じる際は進行中の選択dragを取消し、辺focusを解放するが、確定選択と編集結果は保持し、枠は編集contextへ戻るまで表示しない。視聴中のSeek／音量／master速度／再生／保存は維持し、明示的なUndo/Redoも修正を戻せるよう有効とする。画像と音声のcontextは変えない。無効な選択処理を毎frame呼ぶだけでcompact seek gestureを取消してはならない。J/K/L、frame移動、長押し速度の実装・最終操作検証まではV04未完。
+
 towavueはWindows向けの画像・動画・音声ビューア兼プレイヤーである。設計上の優先順位は次のとおり。
 
 1. 正確で安定した再生、Seek、同期

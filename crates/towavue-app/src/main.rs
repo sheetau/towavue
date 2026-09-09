@@ -25,6 +25,8 @@ mod time_selection;
 mod timeline_edit;
 mod timeline_input;
 mod trim;
+#[cfg(test)]
+mod video_context_tests;
 mod welcome;
 mod wheel_input;
 
@@ -2562,6 +2564,10 @@ where
         let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
         volume_targets.push(response.clone());
         self.update_selection(&response, viewport, size, shift, pointer);
+        if !self.visual_selection_enabled() {
+            selection::release_focus(ui.ctx());
+            return;
+        }
         if let Some(selection) = self.image_view.selection {
             paint_selection(&ui.painter_at(viewport), viewport, selection);
             self.selection_controls(ui, viewport, size);
@@ -2577,6 +2583,10 @@ where
     }
 
     fn selection_controls(&mut self, ui: &mut egui::Ui, rect: egui::Rect, size: (u32, u32)) {
+        if !self.visual_selection_enabled() {
+            selection::release_focus(ui.ctx());
+            return;
+        }
         let (Some(selected), Some(kind)) = (self.image_view.selection, self.media_kind) else {
             return;
         };
@@ -2715,6 +2725,10 @@ where
         }
     }
 
+    fn visual_selection_enabled(&self) -> bool {
+        self.media_kind != Some(MediaKind::Video) || self.timeline_is_visible()
+    }
+
     fn update_selection(
         &mut self,
         response: &egui::Response,
@@ -2723,6 +2737,12 @@ where
         square: bool,
         pointer: Option<egui::Pos2>,
     ) {
+        if !self.visual_selection_enabled() {
+            if matches!(self.view_drag, Some(ViewDrag::Selection { .. })) {
+                self.cancel_view_drag();
+            }
+            return;
+        }
         if !self.view_drag_allowed(&response.ctx) {
             return;
         }
@@ -4470,6 +4490,11 @@ where
                     self.timeline_open = true;
                 } else {
                     self.timeline_open = !self.timeline_open;
+                }
+                if !self.visual_selection_enabled()
+                    && let Some(context) = &self.ui_context
+                {
+                    selection::release_focus(context);
                 }
                 if self.timeline_open && self.waveform.is_none() {
                     self.load_waveform();
@@ -6242,6 +6267,12 @@ where
             return;
         }
         self.fullscreen = enabled;
+        if !self.visual_selection_enabled() {
+            self.cancel_view_drag();
+            if let Some(context) = &self.ui_context {
+                selection::release_focus(context);
+            }
+        }
         if let Some(caption) = &self.native_caption {
             caption.set_fullscreen(enabled);
         }
@@ -16070,6 +16101,7 @@ mod tests {
         assert_eq!(app.edits[&tab].operations().len(), 1);
         let video = app.tabs.open_new(root.join("video.mp4"), MediaKind::Video);
         app.media_kind = Some(MediaKind::Video);
+        app.timeline_open = true;
         app.image_view.selection = Some(selection);
         app.crop_selection((160, 96));
         assert!(!app.edits.contains_key(&video));
@@ -16624,6 +16656,7 @@ mod tests {
                     let context = fonts::test_context();
                     app.media_kind = Some(kind);
                     app.view_drag = None;
+                    app.timeline_open = kind == MediaKind::Video;
                     app.image_view.selection = initial.map(|crop| crop.unit_rect((400, 400)));
                     app.image_view.crop_preview = false;
                     let button = |pressed, pos| egui::Event::PointerButton {
@@ -17322,6 +17355,7 @@ mod tests {
         let tab = app.tabs.open_new(source.clone(), MediaKind::Video);
         app.media_kind = Some(MediaKind::Video);
         app.state = PlaybackState::Paused;
+        app.timeline_open = true;
         let generation = app.generation;
         app.dispatch(CommandId::RotateClockwise);
         app.dispatch(CommandId::FlipHorizontal);

@@ -337,6 +337,17 @@ impl CommandDefinition {
     pub fn is_enabled(self, context: CommandContext) -> bool {
         let image_reading = context.media_kind == Some(MediaKind::Image) && context.reading_mode;
         (!self.requires_reading_mode || context.reading_mode)
+            && (context.media_kind != Some(MediaKind::Video)
+                || context.timeline_open
+                || !matches!(
+                    self.id,
+                    CommandId::SelectAll
+                        | CommandId::ApplyCrop
+                        | CommandId::RotateClockwise
+                        | CommandId::RotateCounterclockwise
+                        | CommandId::FlipHorizontal
+                        | CommandId::FlipVertical
+                ))
             && (!matches!(
                 self.id,
                 CommandId::DeleteTimeSelection
@@ -527,7 +538,7 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::ExportAs, "Export as", ANY_MEDIA),
     command(
         CommandId::ToggleTimeline,
-        "Toggle video timeline",
+        "Toggle video editing timeline",
         &[MediaKind::Video],
     ),
     command(CommandId::ToggleGridMenu, "Toggle grid menu", ANY_MEDIA),
@@ -698,6 +709,69 @@ mod tests {
     }
 
     #[test]
+    fn video_visual_commands_require_the_timeline_but_viewing_and_recovery_do_not() {
+        for kind in [MediaKind::Image, MediaKind::Video] {
+            for timeline_open in [false, true] {
+                let context = CommandContext {
+                    media_kind: Some(kind),
+                    timeline_open,
+                    ..Default::default()
+                };
+                for id in [
+                    CommandId::SelectAll,
+                    CommandId::ApplyCrop,
+                    CommandId::RotateClockwise,
+                    CommandId::RotateCounterclockwise,
+                    CommandId::FlipHorizontal,
+                    CommandId::FlipVertical,
+                ] {
+                    let definition = command_definitions()
+                        .iter()
+                        .find(|d| d.id == id)
+                        .expect("visual command");
+                    assert_eq!(
+                        definition.is_enabled(context),
+                        kind == MediaKind::Image || timeline_open,
+                        "{id:?} {context:?}"
+                    );
+                }
+                for id in [
+                    CommandId::Undo,
+                    CommandId::Redo,
+                    CommandId::Save,
+                    CommandId::ClearSelection,
+                ] {
+                    assert!(
+                        command_definitions()
+                            .iter()
+                            .find(|d| d.id == id)
+                            .expect("recovery command")
+                            .is_enabled(context)
+                    );
+                }
+                if kind == MediaKind::Video {
+                    for id in [
+                        CommandId::TogglePause,
+                        CommandId::SeekBackward,
+                        CommandId::SeekForward,
+                        CommandId::VolumeUp,
+                        CommandId::RateUp,
+                        CommandId::ToggleFullscreen,
+                    ] {
+                        assert!(
+                            command_definitions()
+                                .iter()
+                                .find(|d| d.id == id)
+                                .expect("viewing command")
+                                .is_enabled(context)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn media_commands_obey_the_active_context() {
         let pause = command_definitions()
             .iter()
@@ -790,6 +864,7 @@ mod tests {
             assert!(enabled(id, context), "{id:?}");
         }
         context.media_kind = Some(MediaKind::Video);
+        context.timeline_open = true;
         for id in [
             CommandId::Undo,
             CommandId::RotateClockwise,

@@ -16,6 +16,12 @@ pub fn focus_hint(context: &egui::Context) -> Option<String> {
         .flatten()
 }
 
+pub fn release_focus(context: &egui::Context) {
+    if let Some(id) = context.data(|data| data.get_temp::<Id>(Id::new("selection-value-focus"))) {
+        context.memory_mut(|memory| memory.surrender_focus(id));
+    }
+}
+
 #[cfg(test)]
 #[test]
 fn selection_paints_only_the_inverted_outline_and_reports_edge_focus_in_status() {

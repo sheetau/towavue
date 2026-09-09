@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 動画の視聴／visual編集contextを分離（2026-09-10 06:33）
+
+T／View menuのToggle video editing timelineでtimelineを開いた時だけ、動画面の範囲選択・辺の数値調整・crop・回転・flipを受け付ける。閉じる／fullscreenでは枠と辺操作を隠し、進行中の選択dragを取消すが、確定選択と既存編集は保持する。再生・Seek・master音量／速度・保存・Undo/Redoは視聴時にも使える。J/K/L・frame移動・長押し2倍は未実装のまま。
+
+coreの可否matrixとapp3回帰で、共通dispatch／default shortcut、古いUIA SetValue、辺focus解放、fullscreen／通常復帰、同じpointer列の可否を確認した。レビューで、毎frameの選択取消がcompact seekまで止める問題を検出。Seekと動画面を同じframeで処理する回帰を先に失敗させ、実際に残ったselection dragだけ取消すよう修正し成功した。旧仕様に依存して失敗した5テストは、動画編集のsetupでtimelineを開くか非表示時の無効を期待するよう更新し、crop／export画素の期待値は変えていない。
+
+最終session61596: fmt／Clippy／workspace375件（app212/core54/runtime105/integration4）、appの追加4件、releaseすべて終了0。通常runのignored10件は別計上、追加4件は全PASS。release SHA256 c49b6a00e536d4c901538a778620e965488bacb2c05ce953c9d4afa3272d71e7。前turnの通常window foreground制限を回避・再試行しておらず、本変更の実window入力／見た目は未検証。自動回帰をその代替合格とはしない。
+
+前checkpoint24afaddのCI34406679035は、vendor patch文書／renderer source更新後のnotice台帳hashが古いままのため失敗した。実ファイルを照合して2つのSHA256だけ更新し、既存の146 package notice試験で決定的生成／欠落・改変拒否／既存出力保持を確認した（session77577終了0）。依存・license本文・検証条件は変更せず、公開準備は再開しない。
+
 ### 選択枠の反転1pxと余分な装飾の除去（2026-09-10 06:17）
 
 画像／動画の1.5px白枠・7px grip・選択外の暗幕を除き、時間選択と共通の1物理px反転枠へ置換した。辺のhit範囲と数値操作はそのまま。画像の辺へkeyboard focusすると追加の四角ではなくstatusに辺名・pixel値を出す。runtime helperは物理pixelで丸めた4本の重ならないstripを、plain callback payloadとしてUIの同じdraw orderへ渡す。vendor rendererはfont atlasの白texelとinverse-destination blendを使い、alphaを保持し、後続normal meshのblendを必ず戻す。新しいshader・source readback・別deviceは本体へ追加していない。

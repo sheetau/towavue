@@ -328,6 +328,7 @@ mod tests {
                     CommandContext {
                         media_kind: kind,
                         reading_mode: reading,
+                        timeline_open: true,
                         ..Default::default()
                     }
                 ),
@@ -412,6 +413,17 @@ mod tests {
                         assert_eq!(
                             bindings.resolve(
                                 "Ctrl+Y".parse::<KeySequence>().expect("crop").strokes(),
+                                context
+                            ),
+                            ShortcutMatch::None
+                        );
+                    } else if kind == MediaKind::Video && !has_time_selection {
+                        assert_eq!(
+                            bindings.resolve(
+                                "Ctrl+Y"
+                                    .parse::<KeySequence>()
+                                    .expect("visual crop")
+                                    .strokes(),
                                 context
                             ),
                             ShortcutMatch::Command(CommandId::ApplyCrop)

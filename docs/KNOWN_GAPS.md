@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10: 動画のvisual選択・crop・回転・flipをtimeline表示中へ制限した。閉じる／全画面で編集結果は維持し、枠と辺操作は隠す。視聴・保存・Undo/Redoは維持する。新しいpointer／UIA／shortcut／全画面context回帰と既存の動画export画素照合は成功したが、この変更の通常windowでの操作確認は未実施。J/K/L、frame移動、長押し2倍速はまだ未実装。
+
 2026-09-10: 旧trim gripを時間範囲選択へ置き換えた。横dragで範囲、CTI drag／clickでSeek、Deleteで前後連結、Ctrl+Yで範囲だけ保持、Ctrl+A／I／O／UIA端点とUndo/Redoを接続。通常releaseの実drag・Delete・Undo・Keepも確認した。部分音量rubber-band／Alt+drag stretch、数値UIA・keyboardも接続し、通常releaseで部分mute／50%／伸長／Undoを確認した。Shift+Spaceで選択範囲だけの再生も接続し、範囲末尾停止・通常範囲復帰・背景／audio queue保持を確認した。画像／動画／時間選択の枠を背景RGB反転の1物理pxへ統一し、画像の暗幕・gripを除いた。WARP／実GPUの厳密readbackは成功したが、通常window・混在DPI・全focus/style監査はまだ残る。波形は精密なtempo後PCMではなく元overviewを再配置する。
 
 2026-09-10: V03の再生engineと通常appの編集履歴／Undo/Redo・Seek・duration表示・waveform時間軸を接続した。元より長い編集の背景EOF、全削除／復元、UIA Seekも検証。選択・Delete／Keepは通常UIへ接続済みで、rubber-band／部分stretch操作も接続済みで、範囲再生も一時的な上限として接続した。波形は元のoverviewを区間別に再配置・gain変形する方式で、tempo後PCMの精密波形ではない。音声は初期Seek後を一続きでdecodeするため、長い削除区間の通過負荷、初期Seekの粗いPTS位相、極小区間の音質・tail補正を含む実用性能の確認が残る。短い生成素材のsample一致とWASAPI worker保持だけで、全素材のseamless再生を保証しない。

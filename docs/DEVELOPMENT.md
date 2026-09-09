@@ -1183,6 +1183,15 @@ towavue/
 - drag後のRightがbutton focusへ消費される点を検出し、開始時にwidget focusを外して閲覧へ戻す。修正版d9818f29、所有PID 36092/start 10:17:33.4992744Zで、回転編集→非readingから上drag→Right→未保存確認、Cancel／Undoを検証。fullscreenで左drag／右Escape／drag中UIA Toggle、通常へ戻ってfocus喪失による元の非reading modeへの復元を確認。固定点は通常(150,691)、fullscreen(54,1065)で相対移動中に変化しない。
 - 両windowはUIA Closeで正常終了0、stderrは空。生成番号PNGと設定scopeを分離し、原本保存・OS設定変更はない。ignoredの`target/tmp/image-viewport-20260909/reading-drag*`へidentity／画面／exitを保持する。最終release b51cf151は未decode／error時もstatus枚数を残す変更を加えたもの。最終fmt／all-target Clippy／全293 tests通過、実機専用四testsはignoredのまま。物理mouse／keyboard、実OS混在DPIの全matrixは未検証であり、この実注入入力と同一視しない。
 
+### 画像の一件先読みとforeground優先（2026-09-09 19:46 JST）
+
+- foregroundの最新要求workerを保ち、別のlatest-only workerで移動方向の隣一件を先読みする。readingでは隣見開き先頭だけが対象。共有CPU cacheは従来の8件／256 MiB、cache lockとUI mailboxは分離する。foreground要求はbackground codec／cache evictionの完了をUIで待たず、古い先読みを取り消す。先読みの静止画上限は256 MiB、GIF/AVIF/PNG・WebP animationはskipし、同じorientation／RGBA変換を使う。画質・GPU経路・未保存編集は変更しない。
+- 新規worker回帰で先読みcodecをchannelで止めたままforegroundを完了させ、cache lock保持中にもUI requestが戻ることを確認する。取消済み結果の不使用、次の先読みArcをforegroundがdecodeなしで再利用すること、file変更時の再decode、先読みがappの表示完了結果を発行しないことを検証する。既存のformat testは静止画全画素をforegroundと照合し、GIFはRGBA budget zeroでもframe収集せずskipする。Shell非filename順・reading offset・前後方向も既存navigation回帰へ追加する。
+- 通常release、同じ生成6000×6000 PNG五枚、960×576。初回小画像からRightを一回ずつ送り、titleの対象名＋Pausedを2ms間隔で確認し、各sample後600ms待つ。baseline b51cf151/PID 48892は218.565／220.113／232.644ms（最小／中央値／最大）、最終257d8cb8/PID 39380/start 10:39:27.5765921Zは30.606／31.840／33.130ms。途中版c8d435edでも31.645／31.743／32.585msだったが最終値と混ぜない。起動前storage cacheの破棄はしておらず、Present／DWM／物理入力のlatency測定でもない。
+- title時点のprivate memoryはbaseline672.39～1129.35 MiB、最終634.66～1162.16 MiBの瞬間値。cache上限をprocess全体やpeak memoryへ読み替えない。baseline/finalの画像領域264,196画素を比べるとseek overlayと重なる末尾二行1,028画素のみ異なり、それを除く263,168画素は完全一致。overlay条件が揃わない二行まで一致扱いにしない。大PNG五枚のsource hashはすべて7456e01d、小画像5f24c4ffで不変。
+- 同じ最終binaryのPID 49800では、31組のRight down/upを5ms間隔で送った後、六画像中の正しい最終対象01-large.png/2 of 6へ583.017msで落ち着き通常終了した。これは投入開始からtitle完了までで、31枚すべての表示を意味しない。最初のprobeはPowerShellのUnicode literal解釈、次は試験helperによるvalue-widget focus再取得で条件を満たさず、時間値として除外した。同じprocessで、取消したreading pointer gestureによりviewerへfocusを戻し、Home→連打を一続きで実行して検証した。timeoutだけでappを再起動していない。
+- 所有試験はすべて正常終了0、stderr空、原本保存・OS設定変更なし。ignoredの`target/tmp/image-viewport-20260909/image-prefetch-*`にidentity／profile JSON／capture／exitを保持する。最終fmt／all-target Clippy／全294 tests通過、実機専用四testsはignoredのまま。初回起動／cold storage、GPU upload、見開き全画像待ち、連打中のblack loadingとpreview共用はI03/U10の残件で、IrfanViewとの比較達成は主張しない。
+
 ## 8. UI/UX変更の判断基準
 
 - 実装済みcommandの入口はmenu、palette、shortcut、gridで同じ`CommandId`を共有する。入口ごとに別logicを作らない。

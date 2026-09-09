@@ -559,6 +559,7 @@ struct Application<N> {
     image_loader: ImageLoader,
     image_generation: u64,
     image_loading: bool,
+    image_navigation_forward: bool,
     image_error: Option<String>,
     playback_error: Option<String>,
     image_view: ImageViewState,
@@ -691,6 +692,7 @@ where
             image_loader,
             image_generation: 0,
             image_loading: false,
+            image_navigation_forward: true,
             image_error: None,
             playback_error: None,
             image_view: ImageViewState::default(),
@@ -1098,6 +1100,7 @@ where
         if self.reading_mode && self.media_kind == Some(MediaKind::Image) {
             self.rebuild_reading_pages();
         }
+        self.prefetch_next_image();
     }
 
     fn rebuild_reading_pages(&mut self) {
@@ -1184,8 +1187,45 @@ where
                     .map_err(|error| format!("{}: {error}", display_name(&path)))
             })
             .collect();
+        self.prefetch_next_image();
         self.refresh_title();
         self.request_redraw();
+    }
+
+    fn prefetch_next_image(&self) {
+        if self.media_kind != Some(MediaKind::Image) || self.image_loading || self.image.is_none() {
+            return;
+        }
+        if let Some(path) = self.image_prefetch_path() {
+            self.image_loader.prefetch(path);
+        }
+    }
+
+    fn image_prefetch_path(&self) -> Option<PathBuf> {
+        let snapshot = self.folder_snapshot.as_ref()?;
+        let path = self.path.as_ref()?;
+        let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
+        let current = images.iter().position(|item| &item.path == path)?;
+        let target = if self.reading_mode {
+            let next = self.reading_settings.adjacent_spread(
+                current,
+                images.len(),
+                self.image_navigation_forward,
+            )?;
+            if self
+                .reading_settings
+                .spread(current, images.len())
+                .contains(&next)
+            {
+                return None;
+            }
+            next
+        } else if self.image_navigation_forward {
+            (current + 1) % images.len()
+        } else {
+            (current + images.len() - 1) % images.len()
+        };
+        (target != current).then(|| images[target].path.clone())
     }
 
     fn watch_folder(&mut self, folder: &Path) {
@@ -4228,6 +4268,9 @@ where
     }
 
     fn navigate(&mut self, forward: bool, same_kind: bool) {
+        if self.media_kind == Some(MediaKind::Image) {
+            self.image_navigation_forward = forward;
+        }
         let (Some(snapshot), Some(path), Some(kind)) = (
             self.folder_snapshot.as_ref(),
             self.path.as_ref(),
@@ -4253,6 +4296,7 @@ where
     }
 
     fn navigate_image(&mut self, forward: bool) {
+        self.image_navigation_forward = forward;
         if !self.reading_mode {
             self.navigate(forward, true);
             return;
@@ -10594,6 +10638,9 @@ mod tests {
                     app.dispatch(command);
                     assert!(matches!(&app.pending_guard,
                         Some(GuardedAction::Navigate(target_path)) if *target_path == root.join(names[target])));
+                    if matches!(command, CommandId::NextImage | CommandId::PreviousImage) {
+                        assert_eq!(app.image_prefetch_path(), Some(root.join(names[target])));
+                    }
                     app.resolve_guard(GuardDecision::Cancel);
                     assert_eq!(app.path.as_ref(), Some(&path));
                     assert_eq!(app.media_generation, generation);

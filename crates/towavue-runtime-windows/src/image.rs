@@ -65,6 +65,34 @@ pub fn decode_image(path: &Path) -> Result<DecodedImage, ImageDecodeError> {
 
 pub(crate) const IMAGE_BYTE_LIMIT: usize = 512 * 1024 * 1024;
 
+pub(crate) fn decode_image_for_prefetch(
+    path: &Path,
+    byte_limit: usize,
+    is_current: &dyn Fn() -> bool,
+) -> Result<Option<DecodedImage>, ImageDecodeError> {
+    check_current(is_current)?;
+    let reader = image::ImageReader::open(path)
+        .map_err(ImageDecodeError::Open)?
+        .with_guessed_format()
+        .map_err(ImageDecodeError::Open)?;
+    let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
+    let skip = match format {
+        ImageFormat::Gif | ImageFormat::Avif => true,
+        ImageFormat::Png => PngDecoder::new(open(path)?)?.is_apng()?,
+        ImageFormat::WebP => WebPDecoder::new(open(path)?)?.has_animation(),
+        _ => false,
+    };
+    if skip {
+        return Ok(None);
+    }
+    let frame = static_frame(reader, byte_limit)?;
+    check_current(is_current)?;
+    Ok(Some(DecodedImage {
+        format: format_name(format),
+        frames: vec![frame],
+    }))
+}
+
 pub(crate) fn decode_image_cancellable(
     path: &Path,
     byte_limit: usize,
@@ -317,6 +345,12 @@ mod tests {
 
             let decoded = decode_image(&path)
                 .unwrap_or_else(|error| panic!("decode {format:?} fixture: {error}"));
+            assert_eq!(
+                decode_image_for_prefetch(&path, IMAGE_BYTE_LIMIT, &|| true)
+                    .expect("prefetch fixture")
+                    .expect("static prefetch"),
+                decoded
+            );
             fs::remove_file(path).expect("remove static fixture");
 
             assert_eq!(decoded.dimensions(), (3, 2), "format {format:?}");
@@ -345,6 +379,12 @@ mod tests {
         drop(encoder);
 
         let decoded = decode_image(&path).expect("decode GIF fixture");
+        assert!(
+            decode_image_for_prefetch(&path, 0, &|| true)
+                .expect("skip animated prefetch")
+                .is_none(),
+            "speculation must not collect animation frames"
+        );
         assert!(
             matches!(
                 decode_image_cancellable(&path, 8, &|| true),

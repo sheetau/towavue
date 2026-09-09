@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### 通常UIのtab別sessionと背景再生（2026-09-10 02:25 JST）
+
+音声を再生して画像tabへ移り、戻っても先頭から再生し直さないことを確認する。一時停止位置、動画のzoom／selection、timeline開閉・取得済みwaveformもtabに保持する。終端が既知の非active動画はdecode停止、未知の動画はclockに合わせてqueueを処理し、音声と無音動画の背景EOFを扱う。終了後に自動で次曲へ進む機能はまだ別の残件である。映像の復帰時は入力を再openするためframe待機があり、全UI状態保持の完成とはしない。
+
+playback_tab_testsの通常2件は実video-only fileを使い、500msの停止位置／zoom／selection、独立した時計、既知・未知の背景終端、読み込みIDの復元と採番の非再利用、古い通知・背景faultの隔離、closeでのsession／長さworker解放を確認する。新しいopt-in試験では実WASAPIをmuteにし、動画2件＋音声1件を画像の裏に保持してclock／終端・停止位置・同一新deviceへの全session復旧を確認した。いずれもPASSまで到達しており、環境欠落のSKIPではない。既存のnative caption描画復旧testも再実行しD3D11VA表示／CPU転送0を確認したが、物理device removal・endpoint欠落と復旧失敗の全組合せを認定するものではない。
+
+通常release9680d7b8、background-playback-native PID36112/start17:18:13.6905268Z。生成した60秒の無音WAVをOpenして画像へ切替、音声へ戻ると00:00→00:19でPlayingを維持。一時停止後の往復では00:19とPausedを保持した。UIA名／再生位置と所有windowのcaptureで確認し、通常Close終了0、launcher16214もterminal。stderrはSoftware decode pathの通常通知だけ。元PNGのhash5f24c4ffは不変、WAV最終hashc2556350を記録。音声の聴感／loopback連続性試験ではない。
+
+Open helperは最初にdialog前面化の確認で止まったが、同じprocessの所有dialogを再確認して前面化・filename readback・Open buttonのpointer fallbackで完了した。UIA provider初期化／Invoke非対応／tab名の誤指定は試験手順の失敗として区別し、appを再起動していない。capture表示上はplaylist行が消えたように見えたが、保存PNGの行領域は両方nonblack4864／bright250画素で同じ、UIAにも1. tone.wavがあるため欠落bugとは扱わない。
+
+最終fmt／Clippy／workspace339 testsが成功、通常suiteのopt-in7件はignored。そのうち新しい複数session試験と既存native caption試験の2件を明示実行した。最後のnative後は背景fault隔離のtest追加だけでproduction変更なし。全goal台帳と、scroll／focus・復帰待機・resource予算等のU07残件を維持する。
+
 ### 背景再生に向けた映像／音声worker分離（2026-09-10 02:03 JST、tab接続前）
 
 runtimeのset_video_visibleで映像queueとworkerだけを停止し、現在source位置から復帰できる。音声feed／WASAPI outputは同じworkerとclockを保持する。通常UIのtab切替には未接続なので、音声を流したまま画像tabを見る操作はまだ完成していない。映像入力は復帰時に再openし、再openなしの完全状態保持・復帰表示・hidden終端・複数sessionのdevice復旧を別途検証する。

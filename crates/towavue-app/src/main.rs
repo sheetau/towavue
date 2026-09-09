@@ -9,6 +9,9 @@ mod fonts;
 mod grid;
 mod menu;
 mod palette;
+mod playback_tab;
+#[cfg(test)]
+mod playback_tab_tests;
 mod playlist;
 mod reading_input;
 mod resize;
@@ -596,6 +599,7 @@ struct Application<N> {
     tabs: TabSet,
     displayed_tab: Option<TabId>,
     retained_images: BTreeMap<TabId, RetainedImageTab>,
+    retained_playback: BTreeMap<TabId, playback_tab::RetainedPlaybackTab>,
     graphics_epoch: u64,
     restored_reading_pages: bool,
     closed_tabs: VecDeque<PathBuf>,
@@ -639,7 +643,7 @@ struct Application<N> {
     reading_settings: ReadingSettings,
     reading_pages: Vec<Result<ImagePresentation, String>>,
     preview_cache: PreviewCache,
-    duration_worker: LatestTask,
+    duration_workers: BTreeMap<u64, LatestTask>,
     waveform_worker: LatestTask,
     thumbnail_worker: LatestTask,
     timeline_open: bool,
@@ -647,6 +651,7 @@ struct Application<N> {
     media_duration: Option<Duration>,
     hover_thumbnail: Option<(u64, TextureHandle)>,
     media_generation: u64,
+    media_sequence: u64,
     failed_thumbnails: BTreeSet<u64>,
     waveform_loading: bool,
     thumbnail_loading: Option<u64>,
@@ -689,6 +694,14 @@ struct Application<N> {
     guard_return_focus: Option<(TabId, egui::Id)>,
     exit_requested: bool,
     prefer_hardware_encode: bool,
+}
+
+impl<N> Drop for Application<N> {
+    fn drop(&mut self) {
+        // Join every media pipeline before releasing the shared renderer/device surface.
+        self.session.take();
+        self.retained_playback.clear();
+    }
 }
 
 impl<N> Application<N>
@@ -752,6 +765,7 @@ where
             tabs: TabSet::default(),
             displayed_tab: None,
             retained_images: BTreeMap::new(),
+            retained_playback: BTreeMap::new(),
             graphics_epoch: 0,
             restored_reading_pages: false,
             closed_tabs: VecDeque::new(),
@@ -796,7 +810,7 @@ where
             reading_settings: ReadingSettings::default(),
             reading_pages: Vec::new(),
             preview_cache,
-            duration_worker: LatestTask::new("towavue-duration")?,
+            duration_workers: BTreeMap::new(),
             waveform_worker: LatestTask::new("towavue-waveform")?,
             thumbnail_worker: LatestTask::new("towavue-thumbnail")?,
             timeline_open: false,
@@ -804,6 +818,7 @@ where
             media_duration: None,
             hover_thumbnail: None,
             media_generation: 0,
+            media_sequence: 0,
             failed_thumbnails: BTreeSet::new(),
             waveform_loading: false,
             thumbnail_loading: None,
@@ -1055,9 +1070,136 @@ where
         self.request_redraw();
     }
 
+    fn retain_playback_tab(&mut self) {
+        let (Some(id), Some(path), Some(kind)) =
+            (self.displayed_tab, self.path.as_ref(), self.media_kind)
+        else {
+            return;
+        };
+        if !matches!(kind, MediaKind::Video | MediaKind::Audio)
+            || !self
+                .tabs
+                .tabs()
+                .iter()
+                .any(|tab| tab.id == id && tab.target.current_path() == path)
+            || self.tabs.active().is_some_and(|tab| tab.id == id)
+        {
+            return;
+        }
+        let position = self.current_position();
+        self.cancel_view_drag();
+        let mut clock = self
+            .clock
+            .take()
+            .unwrap_or_else(|| PlaybackClock::new(position, self.playback_rate()));
+        clock.set_paused(self.state != PlaybackState::Playing);
+        let mut saved = playback_tab::RetainedPlaybackTab {
+            path: self.path.clone().expect("displayed path"),
+            kind,
+            instance: self.media_generation,
+            session: self.session.take(),
+            clock: Some(clock),
+            state: self.state,
+            audio_drained: self.audio_drained,
+            decode_finished: self.decode_finished,
+            pending_time: self.pending_time.take(),
+            duration: self.media_duration,
+            waveform: self.waveform.take(),
+            view: self.image_view,
+            timeline_open: self.timeline_open,
+            filmstrip_open: self.filmstrip_open,
+            playlist: std::mem::take(&mut self.playlist),
+            folder_snapshot: self.folder_snapshot.take(),
+            error: self.playback_error.take(),
+            status: self.status_message.take(),
+            seek_latencies: std::mem::take(&mut self.seek_latencies),
+            drift_samples: std::mem::take(&mut self.drift_samples),
+            metrics_recorded: self.metrics_recorded,
+            graphics_epoch: self.graphics_epoch,
+            recovery_position: None,
+            video_suspended: false,
+        };
+        saved.poll();
+        self.retained_playback.insert(id, saved);
+    }
+
+    fn restore_playback_tab(&mut self, mut saved: playback_tab::RetainedPlaybackTab) {
+        saved.poll();
+        let position = saved.position();
+        if saved.video_suspended {
+            if let Some(session) = &mut saved.session
+                && let Err(error) = session.set_video_visible(true, position)
+            {
+                saved.fail(error.to_string());
+            }
+            saved.pending_time = None;
+            saved.decode_finished = false;
+        }
+        self.media_generation = saved.instance;
+        self.session = saved.session;
+        if let Some(session) = &self.session {
+            self.generation = session.generation();
+        }
+        self.clock = saved.clock;
+        self.state = saved.state;
+        self.audio_drained = saved.audio_drained;
+        self.decode_finished = saved.decode_finished;
+        self.pending_time = saved.pending_time;
+        self.media_duration = saved.duration;
+        self.waveform = (saved.graphics_epoch == self.graphics_epoch)
+            .then_some(saved.waveform)
+            .flatten();
+        self.image_view = saved.view;
+        self.timeline_open = saved.timeline_open;
+        self.filmstrip_open = saved.filmstrip_open;
+        self.playlist = saved.playlist;
+        self.folder_snapshot = saved.folder_snapshot;
+        self.playback_error = saved.error;
+        self.status_message = saved.status;
+        self.seek_latencies = saved.seek_latencies;
+        self.drift_samples = saved.drift_samples;
+        self.metrics_recorded = saved.metrics_recorded;
+        if self.media_duration.is_none() {
+            self.load_duration(saved.path);
+        }
+        if self.timeline_open && self.waveform.is_none() {
+            self.load_waveform();
+        }
+        self.load_next_frame();
+        self.refresh_title();
+        self.request_redraw();
+    }
+
+    fn next_media_instance(&mut self) {
+        self.media_sequence = self
+            .media_sequence
+            .max(self.media_generation)
+            .wrapping_add(1);
+        self.media_generation = self.media_sequence;
+    }
+
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
         self.retain_image_tab();
+        self.retain_playback_tab();
+        if !self
+            .retained_playback
+            .values()
+            .any(|saved| saved.instance == self.media_generation)
+        {
+            self.duration_workers.remove(&self.media_generation);
+        }
         self.displayed_tab = self.tabs.active().map(|tab| tab.id);
+        let saved_playback = self
+            .displayed_tab
+            .and_then(|id| self.retained_playback.remove(&id))
+            .and_then(|saved| {
+                if saved.path == path && saved.kind == kind {
+                    Some(saved)
+                } else {
+                    self.duration_workers.remove(&saved.instance);
+                    None
+                }
+            });
         let saved = self
             .displayed_tab
             .and_then(|id| self.retained_images.remove(&id))
@@ -1092,8 +1234,7 @@ where
         self.waveform = None;
         self.media_duration = None;
         self.hover_thumbnail = None;
-        self.media_generation = self.media_generation.wrapping_add(1);
-        self.duration_worker.clear();
+        self.next_media_instance();
         self.waveform_worker.clear();
         self.thumbnail_worker.clear();
         self.failed_thumbnails.clear();
@@ -1111,6 +1252,10 @@ where
         self.seek_latencies.clear();
         self.drift_samples.clear();
         self.refresh_folder_snapshot();
+        if let Some(saved) = saved_playback {
+            self.restore_playback_tab(saved);
+            return;
+        }
         if kind == MediaKind::Image {
             if let Some(saved) = saved {
                 self.restore_image_tab(saved);
@@ -1200,7 +1345,20 @@ where
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
         let generation = self.media_generation;
-        self.duration_worker.submit(move |cancellation| {
+        if let std::collections::btree_map::Entry::Vacant(entry) =
+            self.duration_workers.entry(generation)
+        {
+            match LatestTask::new("towavue-duration") {
+                Ok(worker) => {
+                    entry.insert(worker);
+                }
+                Err(error) => {
+                    self.set_status(format!("Duration worker unavailable: {error}"));
+                    return;
+                }
+            }
+        }
+        self.duration_workers[&generation].submit(move |cancellation| {
             let cache = cache.cancellable(cancellation);
             let result = cache.duration(&path).map_err(|error| error.to_string());
             notify(AppEvent::Duration(path, generation, result));
@@ -1596,18 +1754,36 @@ where
                 self.finish_image_edits(generation, result)
             }
             AppEvent::Export(event) => self.handle_export_event(event),
-            AppEvent::Playback(generation, event) if generation == self.media_generation => {
-                self.handle_playback_event(event);
+            AppEvent::Playback(generation, event) => {
+                if generation == self.media_generation {
+                    self.handle_playback_event(event);
+                } else {
+                    self.handle_background_playback(generation, event);
+                }
             }
-            AppEvent::Duration(path, generation, result)
-                if self.path.as_ref() == Some(&path) && generation == self.media_generation =>
-            {
-                match result {
-                    Ok(duration) => {
-                        self.media_duration = Some(duration);
-                        self.request_redraw();
+            AppEvent::Duration(path, generation, result) => {
+                self.duration_workers.remove(&generation);
+                if self.path.as_ref() == Some(&path) && generation == self.media_generation {
+                    match result {
+                        Ok(duration) => {
+                            self.media_duration = Some(duration);
+                            self.request_redraw();
+                        }
+                        Err(error) => self.set_status(format!("Duration unavailable: {error}")),
                     }
-                    Err(error) => self.set_status(format!("Duration unavailable: {error}")),
+                } else if let Some(saved) = self
+                    .retained_playback
+                    .values_mut()
+                    .find(|saved| saved.instance == generation && saved.path == path)
+                {
+                    match result {
+                        Ok(duration) => saved.duration = Some(duration),
+                        Err(error) => {
+                            saved.status =
+                                Some((format!("Duration unavailable: {error}"), Instant::now()))
+                        }
+                    }
+                    saved.poll();
                 }
             }
             AppEvent::Waveform(path, generation, result)
@@ -1662,10 +1838,34 @@ where
                     self.request_redraw();
                 }
             }
-            AppEvent::Playback(_, _)
-            | AppEvent::Duration(_, _, _)
-            | AppEvent::Waveform(_, _, _)
-            | AppEvent::Thumbnail(_, _, _, _) => {}
+            AppEvent::Waveform(_, _, _) | AppEvent::Thumbnail(_, _, _, _) => {}
+        }
+    }
+
+    fn handle_background_playback(&mut self, instance: u64, event: PlaybackEvent) {
+        let Some(saved) = self
+            .retained_playback
+            .values_mut()
+            .find(|saved| saved.instance == instance)
+        else {
+            return;
+        };
+        if !saved
+            .session
+            .as_ref()
+            .is_some_and(|session| session.accepts_event(&event))
+        {
+            return;
+        }
+        match event {
+            PlaybackEvent::DeviceRemoved(_, reason) => {
+                eprintln!("towavue: recovering background D3D11 device: {reason}");
+                self.recover_graphics_device(self.current_position());
+            }
+            PlaybackEvent::Failed(_, error) | PlaybackEvent::VideoFailed(_, error) => {
+                saved.fail(error)
+            }
+            _ => saved.poll(),
         }
     }
 
@@ -4999,6 +5199,9 @@ where
         self.tab_preview.clear();
         self.edits.remove(&id);
         self.retained_images.remove(&id);
+        if let Some(saved) = self.retained_playback.remove(&id) {
+            self.duration_workers.remove(&saved.instance);
+        }
         self.export_paths.remove(&id);
         if !was_active {
             self.request_redraw();
@@ -5029,8 +5232,8 @@ where
             self.waveform = None;
             self.media_duration = None;
             self.hover_thumbnail = None;
-            self.media_generation = self.media_generation.wrapping_add(1);
-            self.duration_worker.clear();
+            self.next_media_instance();
+            self.duration_workers.clear();
             self.waveform_worker.clear();
             self.thumbnail_worker.clear();
             self.failed_thumbnails.clear();
@@ -5509,6 +5712,9 @@ where
         if let Some(session) = &mut self.session {
             session.suspend_for_graphics_recovery();
         }
+        for saved in self.retained_playback.values_mut() {
+            saved.suspend_for_recovery();
+        }
         if let Some(renderer) = self.renderer.take() {
             renderer.release_surface();
         }
@@ -5541,6 +5747,9 @@ where
             return;
         }
         let graphics_device = renderer.graphics_device();
+        for saved in self.retained_playback.values_mut() {
+            saved.recover(graphics_device.clone(), self.graphics_epoch);
+        }
         if let Some(context) = &self.ui_context {
             context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
         }
@@ -5619,25 +5828,13 @@ where
     }
 
     fn current_position(&self) -> MediaTime {
-        let position = self
-            .audio_master_position()
-            .or_else(|| self.clock.as_ref().map(PlaybackClock::position))
-            .or_else(|| {
-                self.session
-                    .as_ref()
-                    .and_then(PlaybackSession::audio_position)
-            })
-            .or(self.pending_time)
-            .or_else(|| self.session.as_ref().map(PlaybackSession::target))
-            .unwrap_or(MediaTime::ZERO);
-        let position = self
-            .media_duration
-            .filter(|duration| !duration.is_zero())
-            .map_or(position, |duration| position.min(media_time(duration)));
-        self.session
-            .as_ref()
-            .and_then(PlaybackSession::range_end)
-            .map_or(position, |end| position.min(end))
+        playback_tab::position(
+            self.session.as_ref(),
+            self.clock.as_ref(),
+            self.audio_drained,
+            self.pending_time,
+            self.media_duration,
+        )
     }
 
     fn check_eof(&mut self) {
@@ -6139,6 +6336,9 @@ where
             return;
         }
         self.poll_audio();
+        for saved in self.retained_playback.values_mut() {
+            saved.poll();
+        }
         self.check_eof();
         let now = Instant::now();
         let was_hidden = self.viewing_cursor.hidden;
@@ -6209,6 +6409,9 @@ where
                     Instant::now()
                 };
                 let due_at = self.ui_repaint_at.map_or(due_at, |ui| due_at.min(ui));
+                let due_at = self
+                    .background_wakeup(Instant::now())
+                    .map_or(due_at, |background| due_at.min(background));
                 if due_at <= Instant::now() {
                     window.request_redraw();
                     event_loop.set_control_flow(ControlFlow::Wait);
@@ -6234,6 +6437,13 @@ where
         }
     }
 
+    fn background_wakeup(&self, now: Instant) -> Option<Instant> {
+        self.retained_playback
+            .values()
+            .any(playback_tab::RetainedPlaybackTab::needs_poll)
+            .then_some(now + AUDIO_EVENT_POLL_INTERVAL)
+    }
+
     fn idle_wakeup(&self, now: Instant) -> Option<Instant> {
         let next_image_frame = self
             .image
@@ -6255,6 +6465,7 @@ where
             .map(|(_, shown)| *shown + STATUS_MESSAGE_DURATION);
         let prefix_expiry = self.prefix_started.map(|started| started + PREFIX_TIMEOUT);
         [
+            self.background_wakeup(now),
             folder_poll,
             next_image_frame,
             self.ui_repaint_at,
@@ -9501,7 +9712,7 @@ mod tests {
         assert_eq!(app.viewing_cursor.deadline, None);
     }
 
-    fn isolated_test_root(test_name: &str) -> Option<PathBuf> {
+    pub(super) fn isolated_test_root(test_name: &str) -> Option<PathBuf> {
         const TEST_ROOT: &str = "TOWAVUE_APP_TEST_ROOT";
         let Some(root) = std::env::var_os(TEST_ROOT) else {
             static NEXT_ROOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -12811,7 +13022,10 @@ mod tests {
         assert!(app.pending_folder.is_none());
         assert_eq!(app.path, Some(source));
         assert_eq!(
-            app.folder_snapshot.expect("Shell snapshot").folder_path,
+            app.folder_snapshot
+                .as_ref()
+                .expect("Shell snapshot")
+                .folder_path,
             folder
         );
     }

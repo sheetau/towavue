@@ -126,7 +126,15 @@ tab bar内のprimary dragは挿入位置だけを表示し、release時に一度
 
 active tabのidentity・bar内index・tab幅または表示幅が変わった場合は、そのtab全体が見えるまで必要最小限の横scrollを行う。同じ状態の描画では手動scrollを保持する。追従はUIのscroll状態だけを変え、media load・選択・編集・並べ替えを発生させない。
 
-### I05 image clipboard
+### I05 resize/resample contract
+
+Resizeは画像専用の非破壊EditOperationとし、指定幅・高さとNearest／Bilinear／Bicubic／Lanczosを履歴順に保持する。各辺1～16384、RGBA出力は一枚512 MiB以内とし、animation全frameの処理結果も合計512 MiB以内に制限する。source decodeや原本fileを置き換えず、Undo/Redoで復帰できる。表示zoom／nearest表示の選択は別のpresentation設定であり、Resize履歴へ混ぜない。
+
+Resizeを含む画像のmaterializationはruntimeのFFmpeg filter graphで行い、exportと同じvisual filter列を使う。crop／回転／反転／複数Resizeの順序を潰さず、Nearest以外は16-bit planar RGBAのpremultiply→scale→unpremultiplyを通して透明画素の色のにじみを抑える。Nearestはstraight RGBAを保持する。最終RGBAのstrideを正規化して返し、FFmpeg frameやgraphをappへ渡さない。表示／copy／exportの画素一致を透明PNGと編集順序で検証してからUI経路を完成扱いにする。
+
+現段階はcore履歴型／runtime処理／exportの共通filterと回帰のみ実装済みで、Ctrl+Rと画面への接続は未完。接続時はoriginal decodeのArcをUndo用に保持し、最新のpath／編集列だけに処理結果を採用する。Resizeを単なるUV座標と表示寸法の変更で代用せず、materialize済みのframeを描く際に同じ編集を二重適用しない。copyも処理済み画素とその座標のselectionを使う。非同期処理中・失敗・Undo・tab切替・描画復旧とanimationのframe/delayを検証する。
+
+### I05 image clipboard behavior
 
 Copy image（Ctrl+C）はactive画像の現在frameを原寸で取得し、表示と同じ順序のcrop／90度回転／反転を反映する。通常画像にselectionがあれば、その編集後座標の領域だけをcopyする。zoom／pan／crop previewの表示倍率や低解像度previewはコピー画素へ適用しない。readingではactive画像だけを対象にし、隠れたselectionや見開き全体はcopyしない。文字入力のcopyは引き続き優先する。
 

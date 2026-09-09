@@ -458,10 +458,26 @@ fn codec_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
     codecs.iter().map(|argument| (*argument).into()).collect()
 }
 
-fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
+pub(crate) fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
     operations
         .iter()
         .filter_map(|operation| match *operation {
+            EditOperation::Resize(resize) => {
+                use towavue_core::ResampleFilter;
+                let (width, height) = resize.size();
+                let flags = match resize.filter {
+                    ResampleFilter::Nearest => "neighbor",
+                    ResampleFilter::Bilinear => "bilinear",
+                    ResampleFilter::Bicubic => "bicubic",
+                    ResampleFilter::Lanczos => "lanczos",
+                };
+                let scale = format!("scale={width}:{height}:flags={flags}");
+                Some(if resize.filter == ResampleFilter::Nearest {
+                    format!("format=rgba,{scale},format=rgba")
+                } else {
+                    format!("format=gbrap16le,premultiply=inplace=1,{scale},unpremultiply=inplace=1,format=rgba")
+                })
+            }
             EditOperation::Crop(region) => Some(format!(
                 "crop={}:{}:{}:{}:exact=1",
                 region.width, region.height, region.x, region.y

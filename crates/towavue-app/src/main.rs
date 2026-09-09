@@ -486,6 +486,10 @@ impl ImageTransform {
         };
         for operation in operations {
             match *operation {
+                EditOperation::Resize(resize) => {
+                    let (width, height) = resize.size();
+                    transform.size = (width as f32, height as f32);
+                }
                 EditOperation::Crop(region) => transform.crop_pixels(region),
                 EditOperation::RotateClockwise => {
                     transform.uv.rotate_right(1);

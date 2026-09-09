@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### Resize/resample共通処理の回帰（2026-09-09 22:23 JST、UI接続前）
+
+coreの有界ImageResize履歴とruntimeのrender_image_edits、exportの共通filter列を追加した。4補間でcrop→resize→回転／反転→crop→resize→反転を実行し、透明PNGのmaterialized RGBAと実FFmpeg書き出し後の6×8 RGBAが完全一致する。非nearestの補間では、完全透明な赤と不透明な青の境界で、中間alphaへ赤が混入しないことも検証する。Nearestのstraight RGBA、frame delay保持、取消・不正寸法・crop拒否、Undo/Redoのsaved cursorも回帰に含む。
+
+Ctrl+Rのダイアログ、非同期の画面反映、処理済み画像のcopy、nearest表示の設定はまだ未実装で、現時点の通常UIからResizeを追加する入口はない。このruntime検証だけでI05や実操作を完了とはしない。次はoriginal decodeの保持と世代検査、二重編集を防ぐ画面／clipboard接続を実装する。
+
 ### 画像／選択範囲のclipboard copy（2026-09-09 22:12 JST）
 
 通常releasef2d6d61d、Windows 11の所有windowでCtrl+Cを実行し、clipboard PNGを全画素比較した。600×800の原画像、Rで回転した800×600、UIAでleft100／right650を指定した550×600 selectionは参照と完全一致。dirty状態・selectionを保持し、palette検索欄でCtrl+A／Ctrl+Cすると画像ではなく指定した文字列をcopyした。最後にUndoして正常終了0・stderr空、原PNGのhash5f24c4ff不変。生成mediaとcaptureはGit対象外。

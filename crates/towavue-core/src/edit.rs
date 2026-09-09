@@ -1,5 +1,40 @@
 use crate::{MediaKind, MediaTime, PixelCrop};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResampleFilter {
+    Nearest,
+    Bilinear,
+    Bicubic,
+    Lanczos,
+}
+
+/// A bounded raster edit, distinct from display zoom.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageResize {
+    width: u32,
+    height: u32,
+    pub filter: ResampleFilter,
+}
+
+impl ImageResize {
+    pub fn new(width: u32, height: u32, filter: ResampleFilter) -> Option<Self> {
+        (width > 0
+            && height > 0
+            && width <= 16384
+            && height <= 16384
+            && u64::from(width) * u64::from(height) <= 128 * 1024 * 1024)
+            .then_some(Self {
+                width,
+                height,
+                filter,
+            })
+    }
+
+    pub fn size(self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+}
+
 /// A source-time half-open playback interval; no end means natural EOF.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PlaybackRange {
@@ -23,6 +58,7 @@ impl PlaybackRange {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EditOperation {
+    Resize(ImageResize),
     Crop(PixelCrop),
     RotateClockwise,
     RotateCounterclockwise,
@@ -37,6 +73,7 @@ pub enum EditOperation {
 impl EditOperation {
     pub fn applies_to(self, kind: MediaKind) -> bool {
         match self {
+            Self::Resize(_) => kind == MediaKind::Image,
             Self::Crop(_)
             | Self::RotateClockwise
             | Self::RotateCounterclockwise
@@ -87,7 +124,7 @@ impl EditState {
         let mut state = Self::default();
         for operation in operations {
             match *operation {
-                EditOperation::Crop(_) => {}
+                EditOperation::Crop(_) | EditOperation::Resize(_) => {}
                 EditOperation::RotateClockwise => {
                     state.quarter_turns = (state.quarter_turns + 1) % 4;
                 }
@@ -192,6 +229,35 @@ impl EditHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resize_is_bounded_image_only_and_preserves_saved_history() {
+        for (width, height) in [
+            (0, 1),
+            (1, 0),
+            (16385, 1),
+            (16384, 16384),
+            (u32::MAX, u32::MAX),
+        ] {
+            assert!(ImageResize::new(width, height, ResampleFilter::Lanczos).is_none());
+        }
+        let operation = EditOperation::Resize(
+            ImageResize::new(800, 600, ResampleFilter::Lanczos).expect("valid dimensions"),
+        );
+        let mut history = EditHistory::default();
+        assert!(!history.push(operation, MediaKind::Video));
+        assert!(!history.push(operation, MediaKind::Audio));
+        assert!(history.push(operation, MediaKind::Image));
+        history.mark_saved();
+        assert!(history.push(EditOperation::RotateClockwise, MediaKind::Image));
+        assert!(history.undo());
+        assert_eq!(history.operations(), &[operation]);
+        assert!(!history.is_dirty());
+        assert!(history.undo());
+        assert!(history.is_dirty());
+        assert!(history.redo());
+        assert!(!history.is_dirty());
+    }
 
     #[test]
     fn trim_playback_keeps_source_time_and_restarts_outside_half_open_range() {

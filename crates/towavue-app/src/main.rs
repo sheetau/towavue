@@ -21,6 +21,7 @@ mod reading_input;
 mod resize;
 mod seekbar;
 mod selection;
+mod selection_aspect;
 mod shortcuts;
 mod tab_menu;
 mod tab_preview;
@@ -4169,6 +4170,13 @@ where
                 command,
                 CommandId::ResizeImage
                     | CommandId::SelectAll
+                    | CommandId::SelectAspectSquare
+                    | CommandId::SelectAspectFourThree
+                    | CommandId::SelectAspectThreeFour
+                    | CommandId::SelectAspectThreeTwo
+                    | CommandId::SelectAspectTwoThree
+                    | CommandId::SelectAspectSixteenNine
+                    | CommandId::SelectAspectNineSixteen
                     | CommandId::ApplyCrop
                     | CommandId::ToggleCropPreview
                     | CommandId::ToggleReadingMode
@@ -4365,6 +4373,13 @@ where
                 }
                 self.request_redraw();
             }
+            CommandId::SelectAspectSquare => self.select_aspect((1, 1)),
+            CommandId::SelectAspectFourThree => self.select_aspect((4, 3)),
+            CommandId::SelectAspectThreeFour => self.select_aspect((3, 4)),
+            CommandId::SelectAspectThreeTwo => self.select_aspect((3, 2)),
+            CommandId::SelectAspectTwoThree => self.select_aspect((2, 3)),
+            CommandId::SelectAspectSixteenNine => self.select_aspect((16, 9)),
+            CommandId::SelectAspectNineSixteen => self.select_aspect((9, 16)),
             CommandId::ToggleImageInterpolation => {
                 self.nearest_images = !self.nearest_images;
                 self.set_status(format!(

@@ -10,6 +10,45 @@ pub struct PixelCrop {
 }
 
 impl PixelCrop {
+    /// Centers a display-aspect preset, then snaps it to the existing media pixel grid.
+    pub fn centered_aspect(
+        size: (u32, u32),
+        kind: MediaKind,
+        aspect: (u32, u32),
+        pixel_aspect: f32,
+    ) -> Option<Self> {
+        if size.0 == 0
+            || size.1 == 0
+            || aspect.0 == 0
+            || aspect.1 == 0
+            || !pixel_aspect.is_finite()
+            || pixel_aspect <= 0.0
+        {
+            return None;
+        }
+        let source = f64::from(size.0) * f64::from(pixel_aspect) / f64::from(size.1);
+        let target = f64::from(aspect.0) / f64::from(aspect.1);
+        let (width, height) = if source > target {
+            (target / source, 1.0)
+        } else {
+            (1.0, source / target)
+        };
+        Self::from_selection(
+            UnitRect {
+                min: UnitPoint {
+                    x: ((1.0 - width) * 0.5) as f32,
+                    y: ((1.0 - height) * 0.5) as f32,
+                },
+                max: UnitPoint {
+                    x: ((1.0 + width) * 0.5) as f32,
+                    y: ((1.0 + height) * 0.5) as f32,
+                },
+            },
+            size,
+            kind,
+        )
+    }
+
     pub fn from_selection(region: UnitRect, size: (u32, u32), kind: MediaKind) -> Option<Self> {
         let step = match kind {
             MediaKind::Image => 1,
@@ -57,6 +96,92 @@ impl PixelCrop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aspect_presets_fit_center_and_snap_on_image_and_video_pixel_grids() {
+        for size in [
+            (1, 1),
+            (7, 9),
+            (201, 111),
+            (640, 360),
+            (4000, 3000),
+            (3000, 4000),
+            (16384, 16384),
+        ] {
+            for kind in [MediaKind::Image, MediaKind::Video] {
+                let step = if kind == MediaKind::Video { 2 } else { 1 };
+                for aspect in [(1, 1), (4, 3), (3, 4), (3, 2), (2, 3), (16, 9), (9, 16)] {
+                    for sar in [0.5, 1.0, 1.3333334, 2.0] {
+                        let crop = PixelCrop::centered_aspect(size, kind, aspect, sar);
+                        if size.0 < step || size.1 < step {
+                            assert!(crop.is_none());
+                            continue;
+                        }
+                        let crop = crop.expect("valid aspect");
+                        assert!(crop.width >= step && crop.height >= step);
+                        assert!(crop.x + crop.width <= size.0 && crop.y + crop.height <= size.1);
+                        assert_eq!((crop.x | crop.y | crop.width | crop.height) % step, 0);
+                        assert!(
+                            (2 * i64::from(crop.x) + i64::from(crop.width) - i64::from(size.0))
+                                .abs()
+                                <= i64::from(step)
+                        );
+                        assert!(
+                            (2 * i64::from(crop.y) + i64::from(crop.height) - i64::from(size.1))
+                                .abs()
+                                <= i64::from(step)
+                        );
+                        let ratio = f64::from(aspect.0) / f64::from(aspect.1) / f64::from(sar);
+                        assert!(
+                            (f64::from(crop.width) - ratio * f64::from(crop.height)).abs()
+                                <= f64::from(step) * (1.0 + ratio),
+                            "{size:?} {aspect:?} sar={sar} {crop:?}"
+                        );
+                        assert!(
+                            crop.width == size.0 / step * step
+                                || crop.height == size.1 / step * step
+                        );
+                        assert_eq!(
+                            PixelCrop::from_selection(crop.unit_rect(size), size, kind),
+                            Some(crop)
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            PixelCrop::centered_aspect((640, 360), MediaKind::Image, (1, 1), 1.0),
+            Some(PixelCrop {
+                x: 140,
+                y: 0,
+                width: 360,
+                height: 360
+            })
+        );
+        assert_eq!(
+            PixelCrop::centered_aspect((720, 576), MediaKind::Video, (4, 3), 16.0 / 15.0),
+            Some(PixelCrop {
+                x: 0,
+                y: 0,
+                width: 720,
+                height: 576
+            })
+        );
+        for sar in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert!(
+                PixelCrop::centered_aspect((640, 360), MediaKind::Image, (1, 1), sar).is_none()
+            );
+        }
+        for (size, aspect) in [
+            ((0, 1), (1, 1)),
+            ((1, 0), (1, 1)),
+            ((10, 10), (0, 1)),
+            ((10, 10), (1, 0)),
+        ] {
+            assert!(PixelCrop::centered_aspect(size, MediaKind::Image, aspect, 1.0).is_none());
+        }
+        assert!(PixelCrop::centered_aspect((640, 360), MediaKind::Audio, (1, 1), 1.0).is_none());
+    }
 
     #[test]
     fn pixel_crop_snaps_edges_and_keeps_tiny_regions_inside_the_image() {

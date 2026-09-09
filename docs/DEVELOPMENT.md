@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 比率から選択範囲を作る（2026-09-10 08:13、I06部分実装）
+
+Edit menuのSelect aspect ratio、またはCtrl+Kの後に1～7で、1:1／4:3／3:4／3:2／2:3／16:9／9:16の中央選択を作る。現在の編集後寸法を使い、動画ではSARとorientation／回転も反映する。画像1px／動画2pxの格子へ丸めるため、比率は画素単位の近似になる。選択自体は非編集で、既存のShift辺resize・copy・crop・Undo/Redoにつながる。動画はtimeline表示中のみ有効で、時間選択を解除してCtrl+Yのvisual cropを優先する。未読込・resample待機・reading・modalは変更しない。既存customキー／prefixとの競合では暗黙preset bindingを除外し、設定を自動書換えしない。
+
+coreの全7比率×寸法×pixel格子×SARで内接・中心・丸め・再変換を確認した。appでは全preset、回転後寸法、materialized画像の二重変換防止、focus、dirty履歴・zoom保持、未読込／reading／resample／guard拒否を回帰確認。PNGを回転してsquare cropし、export・再decodeの全6400画素が元の対応画素と一致、原本も不変。hidden windowのSAR1.5動画で視聴context拒否・時間選択解除・全回転後preset・Ctrl+Y crop・Undo/RedoがPASSした。通常windowの物理入力／appearanceや、任意素材の動画export比率までの認定ではない。
+
+menuの300px高試験を比率7項目にも拡張し、初回submenuで最初の下矢印が落ちる不具合を再現した。前回項目一覧がないpassでは移動要求を項目収集後へ引き継ぎ、画像jump20項目とpreset7項目の連続到達・scroll・Enterを通した。初回テストのcopy request field、回転による既存Fit復帰、動画のadvance_media呼出し不足はfixture側を修正した。
+
+最終session53167でfmt check／Clippy／workspace396（app229／core55／runtime108／integration4）、app opt-in5件、Release buildがterminal exit0。opt-inは全PASS／SKIPなし、通常ignored11件とは別。Release SHA-256は`f0fa8c93d44ba239b934b0115639e6dbfaa1973d74c3cc38a38cf6e979d5a4a1`。前checkpoint526f694のCI34414832051は成功。自由回転とUX台帳全体は引き続き未完であり、ローンチは再開しない。
+
 ### 画像の追加キーと枚数ジャンプ（2026-09-10 07:57、I04／I06部分実装）
 
 画像はLeft／PageUp／Backspace／Aが前、Right／PageDown／Space／Dが次。読書中は同じキーで見開き単位に進む。Ctrl+1～0で画像ファイル数の1～10枚先、Shift併用で手前へ移り、端では停止する。Ctrl+Space／Ctrl+Backspaceは5枚、Ctrl+左右は従来の同種一枚を維持する。読書のR／Lは縦横配置、H／Vは並び順のみを変える。Image jump menu／paletteにも各枚数を用意した。

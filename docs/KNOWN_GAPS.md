@@ -6,7 +6,9 @@
 
 ## 1. 試用前に知るべき制約
 
-2026-09-10: I04の画像移動aliasと1～10枚jump、I06のreading L／V aliasを実装した。Shell順・画像枚数・端点停止・見開き・dirty guard・設定互換と実画像の読込を自動回帰で確認。新Image jump menuも全20項目のfocus／scroll／dispatchを確認した。Ctrl+左右だけは既存の同種一枚移動を維持する。Ctrl+Shift+数字は上段物理数字を補助的に使い、custom記号が優先する。通常windowの物理入力・全keyboard layout／IMEでの最終確認、I06のpreset／自由回転は未完である。
+2026-09-10: I06の比率選択プリセット7種を接続。表示比率で中央に選択を作り、画像1px／動画2pxへ丸めるため、極小画像や非正方形ピクセルでは指定比率から丸め誤差が生じる。動画cropの既存16×16最低寸法は維持する。時間選択解除に伴い範囲再生も通常再生へ戻す。これは永続する比率lockではなく、既存のShift辺resizeで比率を保持する。画像の保存／再読込画素、動画SAR／回転／cropと履歴の回帰は成功。通常windowでの最終操作確認と自由回転は未完。
+
+2026-09-10: I04の画像移動aliasと1～10枚jump、I06のreading L／V aliasを実装した。Shell順・画像枚数・端点停止・見開き・dirty guard・設定互換と実画像の読込を自動回帰で確認。新Image jump menuも全20項目のfocus／scroll／dispatchを確認した。Ctrl+左右だけは既存の同種一枚移動を維持する。Ctrl+Shift+数字は上段物理数字を補助的に使い、custom記号が優先する。通常windowの物理入力・全keyboard layout／IMEでの最終確認、I06の自由回転は未完である。
 
 2026-09-10: 動画のcomma／periodを非同期の前後実PTS移動へ接続した。最大32操作の順序・取消・tab／世代・一時停止した正確な表示・Delete／stretch区間をhidden-windowで回帰確認。BフレームのSeekが後のkeyframeを選ぶ問題を実際に再現し、key packetのPTS確認と前GOPへの移動で修正した。全参照PTS／画素・複数stream・TSを照合。速度はCtrl+comma／Ctrl+periodへ移し、旧標準だけを設定移行する。長GOP／高解像度での応答性、音声側のframe相当操作、通常windowでの最終確認は未完。探索はsoftware codecを使い、readbackや追加deviceは作らない。
 

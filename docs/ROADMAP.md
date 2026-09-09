@@ -8,6 +8,8 @@
 
 2026-09-10 画像操作checkpoint: I04のPageUp／PageDown等の追加キーと1～10枚jump、I06のreading L／Vを共有commandへ接続。Shell順・読書・未保存確認・設定互換とmenu全項目を回帰確認する。Ctrl+左右は採用済みの一枚移動を維持。通常window入力／IME、preset／自由回転を含む台帳の全残件は継続し、goal全体の完了とはしない。
 
+2026-09-10 08:12 比率選択checkpoint: I06のpreset7種を画像と編集contextの動画へ接続。編集後寸法・SAR・画素格子・custom prefix・非編集・時間選択との分離、PNGの保存／再読込画素と実動画のcrop／Undo/Redoを回帰確認。新menu監査で再現した初回矢印欠落も修正する。自由回転、通常windowの最終操作確認と台帳全体は未完。
+
 2026-09-09 16:48追記: ownerの最新の区切り・push依頼に従い、進行中だったcompact seek端点修正だけを検証してcheckpointに含める。ローンチ準備は再開せず、このcheckpoint後は次の機能・UI実装へ自動着手しない。既存の改善台帳は残件として保持し、次のgoal設定・作業指示を待つ。goal全体の完了を意味しない。
 
 2026-09-09 新goal: ownerが草案とfollow-upに基づく機能・操作・UI改善を指定した。[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)の台帳へ要求・既存実装・残件を対応付け、H1内で順次実装・検証する。下記の「新goal待ち」は解消したが、ローンチ準備の停止は維持する。

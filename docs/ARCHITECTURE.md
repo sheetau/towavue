@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## I06: アスペクト比の選択プリセット（2026-09-10）
+
+1:1／4:3／3:4／3:2／2:3／16:9／9:16を共通command・Edit menu・palette・変更可能なprefix shortcut（Ctrl+Kの後に1～7）へ公開する。現在の編集後画像に内接する中央の最大矩形を作り、既存のimage1px／video2px格子へ丸める。動画はorientation／回転後のsample aspect ratioを含む表示比率で解釈するため、整数格子による比率・中心の誤差は許容する。極小／非対応寸法では無効な矩形を作らない。
+
+画像のreading／原寸未読込／resample待機、音声、動画のtimeline非表示では実行しない。成功時だけ以前のvisual選択とcrop previewを置換し、時間範囲選択を解除してCtrl+Yをvisual cropへ渡す。既存の辺focus・移動・Shift比率保持resizeを使い、持続する比率lock／設定／新dialogは追加しない。選択自体は非編集で、tab保持・取消・コピー・実crop・Undo/Redoは従来の経路へ接続する。新しい暗黙prefixが宣言済みcustomキー／prefixと競合する場合は追加せず、明示した新commandは既存の優先規則に従う。
+
+menuの初回表示passでは前回の有効項目一覧がまだない場合がある。直後の上下矢印は項目収集後へ引き継ぎ、初期focusから一段だけ移動する。項目がない場合は実行せず、既存のscroll／submenu／Enter取消規則を維持する。
+
 ## H1: timeline表示とcompact seekのgesture（2026-09-10）
 
 V04一時倍速契約（2026-09-10）: 動画の視聴面（visual編集contextを除く）と、動画／音声共通のPlay/Pause buttonで、主buttonを移動なしに400ms保持すると絶対値のmaster2倍速で再生する。元が一時停止なら保持中だけ再生し、release／移動／キー／focus・pointer喪失／resize／別command／Seek／編集／tab切替／modalで元の速度とpause状態へ戻す。EOFでは速度を戻してEndedを保ち、一時停止からの試聴終了は次曲へ送らない。短いbutton clickは既存TogglePauseで、長押しや取消済みpressのreleaseからclickを発生させない。保持中の2倍速をstatusとfullscreen messageで明示する。

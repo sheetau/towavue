@@ -124,6 +124,13 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::JumpImagesForward8, "Ctrl+8"),
         (CommandId::JumpImagesForward9, "Ctrl+9"),
         (CommandId::JumpImagesForward10, "Ctrl+0"),
+        (CommandId::SelectAspectSquare, "Ctrl+K 1"),
+        (CommandId::SelectAspectFourThree, "Ctrl+K 2"),
+        (CommandId::SelectAspectThreeFour, "Ctrl+K 3"),
+        (CommandId::SelectAspectThreeTwo, "Ctrl+K 4"),
+        (CommandId::SelectAspectTwoThree, "Ctrl+K 5"),
+        (CommandId::SelectAspectSixteenNine, "Ctrl+K 6"),
+        (CommandId::SelectAspectNineSixteen, "Ctrl+K 7"),
     ] {
         bindings.set(
             command,
@@ -231,19 +238,32 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             "Ctrl+Y".parse().expect("migration shortcut is valid"),
         );
     }
-    // New jump defaults must not shadow a previously configured command or
-    // prefix. Explicit jump declarations retain the usual conflict rules.
-    let contexts = [false, true].map(|reading_mode| towavue_core::CommandContext {
-        media_kind: Some(towavue_core::MediaKind::Image),
-        reading_mode,
-        ..Default::default()
-    });
+    // New defaults must not shadow a previously configured command or prefix.
+    // Explicit declarations retain the usual conflict rules.
     for definition in towavue_core::command_definitions()
         .iter()
         .filter(|definition| {
-            definition.id.as_str().starts_with("jump_images_") && !declared.contains(&definition.id)
+            (definition.id.as_str().starts_with("jump_images_")
+                || definition.id.as_str().starts_with("select_aspect_"))
+                && !declared.contains(&definition.id)
         })
     {
+        let contexts: Vec<_> = [
+            towavue_core::MediaKind::Image,
+            towavue_core::MediaKind::Video,
+        ]
+        .into_iter()
+        .flat_map(|kind| {
+            [false, true].map(move |reading_mode| towavue_core::CommandContext {
+                media_kind: Some(kind),
+                reading_mode,
+                timeline_open: kind == towavue_core::MediaKind::Video,
+                has_time_selection: true,
+                ..Default::default()
+            })
+        })
+        .filter(|context| definition.is_enabled(*context))
+        .collect();
         let kept: Vec<_> = bindings
             .all(definition.id)
             .iter()
@@ -291,6 +311,90 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 mod tests {
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn aspect_preset_prefixes_are_contextual_and_preserve_existing_configuration() {
+        let default = defaults();
+        let presets: Vec<_> = towavue_core::command_definitions()
+            .iter()
+            .filter(|definition| definition.id.as_str().starts_with("select_aspect_"))
+            .collect();
+        for (index, definition) in presets.iter().enumerate() {
+            let key: KeySequence = format!("Ctrl+K {}", index + 1).parse().expect("preset");
+            for kind in [
+                None,
+                Some(MediaKind::Image),
+                Some(MediaKind::Video),
+                Some(MediaKind::Audio),
+            ] {
+                for reading_mode in [false, true] {
+                    for timeline_open in [false, true] {
+                        let context = CommandContext {
+                            media_kind: kind,
+                            reading_mode,
+                            timeline_open,
+                            has_time_selection: true,
+                            ..Default::default()
+                        };
+                        let enabled = kind == Some(MediaKind::Image) && !reading_mode
+                            || kind == Some(MediaKind::Video) && timeline_open;
+                        assert_eq!(definition.is_enabled(context), enabled);
+                        assert_eq!(
+                            default.resolve(key.strokes(), context),
+                            if enabled {
+                                ShortcutMatch::Command(definition.id)
+                            } else {
+                                ShortcutMatch::None
+                            }
+                        );
+                    }
+                }
+            }
+        }
+        let image = CommandContext {
+            media_kind: Some(MediaKind::Image),
+            ..Default::default()
+        };
+        let video = CommandContext {
+            media_kind: Some(MediaKind::Video),
+            timeline_open: true,
+            has_time_selection: true,
+            ..Default::default()
+        };
+        for (command, context) in [("toggle_filmstrip", image), ("keep_time_selection", video)] {
+            for key in ["Ctrl+K", "Ctrl+K 1", "Ctrl+K 1 F"] {
+                let bindings = parse(&format!("{command} = {key}\n"), defaults()).expect("custom");
+                assert_eq!(
+                    bindings.resolve(key.parse::<KeySequence>().expect("key").strokes(), context),
+                    ShortcutMatch::Command(command.parse().expect("id"))
+                );
+                assert_eq!(
+                    parse(&serialize(&bindings), defaults()).expect("round trip"),
+                    bindings
+                );
+                assert!(bindings.get(CommandId::SelectAspectSquare).is_none());
+            }
+        }
+        let custom = parse("select_aspect_1_1 = Ctrl+Q\n", defaults()).expect("custom preset");
+        assert_eq!(
+            custom.resolve(
+                "Ctrl+Q".parse::<KeySequence>().expect("key").strokes(),
+                image
+            ),
+            ShortcutMatch::Command(CommandId::SelectAspectSquare)
+        );
+        assert_eq!(
+            custom.resolve(
+                "Ctrl+K 1".parse::<KeySequence>().expect("key").strokes(),
+                image
+            ),
+            ShortcutMatch::None
+        );
+        assert_eq!(
+            parse(&serialize(&custom), defaults()).expect("round trip"),
+            custom
+        );
+    }
 
     #[test]
     fn image_aliases_and_numbered_jumps_respect_media_and_reading_contexts() {

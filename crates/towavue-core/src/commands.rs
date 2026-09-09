@@ -99,6 +99,13 @@ pub enum CommandId {
     JumpImagesForward8,
     JumpImagesForward9,
     JumpImagesForward10,
+    SelectAspectSquare,
+    SelectAspectFourThree,
+    SelectAspectThreeFour,
+    SelectAspectThreeTwo,
+    SelectAspectTwoThree,
+    SelectAspectSixteenNine,
+    SelectAspectNineSixteen,
 }
 
 impl CommandId {
@@ -196,6 +203,13 @@ impl CommandId {
             Self::JumpImagesForward8 => "jump_images_forward_8",
             Self::JumpImagesForward9 => "jump_images_forward_9",
             Self::JumpImagesForward10 => "jump_images_forward_10",
+            Self::SelectAspectSquare => "select_aspect_1_1",
+            Self::SelectAspectFourThree => "select_aspect_4_3",
+            Self::SelectAspectThreeFour => "select_aspect_3_4",
+            Self::SelectAspectThreeTwo => "select_aspect_3_2",
+            Self::SelectAspectTwoThree => "select_aspect_2_3",
+            Self::SelectAspectSixteenNine => "select_aspect_16_9",
+            Self::SelectAspectNineSixteen => "select_aspect_9_16",
             Self::ToggleImageInterpolation => "toggle_image_interpolation",
         }
     }
@@ -397,6 +411,13 @@ impl CommandDefinition {
                 || !matches!(
                     self.id,
                     CommandId::SelectAll
+                        | CommandId::SelectAspectSquare
+                        | CommandId::SelectAspectFourThree
+                        | CommandId::SelectAspectThreeFour
+                        | CommandId::SelectAspectThreeTwo
+                        | CommandId::SelectAspectTwoThree
+                        | CommandId::SelectAspectSixteenNine
+                        | CommandId::SelectAspectNineSixteen
                         | CommandId::ApplyCrop
                         | CommandId::RotateClockwise
                         | CommandId::RotateCounterclockwise
@@ -421,6 +442,13 @@ impl CommandDefinition {
                 || !matches!(
                     self.id,
                     CommandId::SelectAll
+                        | CommandId::SelectAspectSquare
+                        | CommandId::SelectAspectFourThree
+                        | CommandId::SelectAspectThreeFour
+                        | CommandId::SelectAspectThreeTwo
+                        | CommandId::SelectAspectTwoThree
+                        | CommandId::SelectAspectSixteenNine
+                        | CommandId::SelectAspectNineSixteen
                         | CommandId::CoverWindow
                         | CommandId::ToggleCropPreview
                         | CommandId::ApplyCrop
@@ -767,6 +795,41 @@ const COMMANDS: &[CommandDefinition] = &[
         CommandId::JumpImagesForward10,
         "Jump forward 10 images",
         &[MediaKind::Image],
+    ),
+    command(
+        CommandId::SelectAspectSquare,
+        "Select 1:1 aspect ratio",
+        &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::SelectAspectFourThree,
+        "Select 4:3 aspect ratio",
+        &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::SelectAspectThreeFour,
+        "Select 3:4 aspect ratio",
+        &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::SelectAspectThreeTwo,
+        "Select 3:2 aspect ratio",
+        &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::SelectAspectTwoThree,
+        "Select 2:3 aspect ratio",
+        &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::SelectAspectSixteenNine,
+        "Select 16:9 aspect ratio",
+        &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::SelectAspectNineSixteen,
+        "Select 9:16 aspect ratio",
+        &[MediaKind::Image, MediaKind::Video],
     ),
 ];
 

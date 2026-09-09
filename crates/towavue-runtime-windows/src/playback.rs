@@ -641,6 +641,12 @@ impl PlaybackSession {
         self.video_refresh_pending
     }
 
+    pub fn current_video_time(&self) -> Option<MediaTime> {
+        self.current_video
+            .as_ref()
+            .map(PresentationFrame::presentation_time)
+    }
+
     pub fn video_geometry(&self) -> Option<(u32, u32, f32)> {
         Some(match self.current_video.as_ref()? {
             PresentationFrame::Software(frame) => (frame.width, frame.height, frame.pixel_aspect),

@@ -1030,9 +1030,99 @@ fn seek_input(
     if video && let Some(point) = transport_seek_point(input, target, cancelled)? {
         return seek_byte_position(input, point.position);
     }
+    if video
+        && input.format().name() != "mpegts"
+        && let Some(stream) = input.streams().best(Type::Video)
+    {
+        let (index, time_base) = (stream.index(), stream.time_base());
+        return seek_video_stream(
+            input,
+            index,
+            time_base,
+            input_origin(input),
+            target,
+            cancelled,
+        );
+    }
     let timestamp_microseconds =
         (target.as_nanoseconds() / 1_000).saturating_add(input_origin(input));
     input.seek(timestamp_microseconds, ..timestamp_microseconds)?;
+    Ok(())
+}
+
+fn seek_video_stream(
+    input: &mut format::context::Input,
+    index: usize,
+    time_base: Rational,
+    origin: i64,
+    target: MediaTime,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<(), DecodeError> {
+    check_cancelled(cancelled)?;
+    if target <= MediaTime::ZERO {
+        return Ok(());
+    }
+    if input.format().name() == "mpegts" {
+        return seek_input(input, target, true, cancelled);
+    }
+    let timestamp = target
+        .as_nanoseconds()
+        .rescale_with(Rational(1, 1_000_000_000), time_base, Rounding::Down)
+        .saturating_add(origin.rescale(ffmpeg::rescale::TIME_BASE, time_base));
+    let origin_tick = origin.rescale(ffmpeg::rescale::TIME_BASE, time_base);
+    let mut seek = timestamp;
+    loop {
+        check_cancelled(cancelled)?;
+        seek_video_packet(input, index, seek)?;
+        let mut earlier = None;
+        for (stream, packet) in input.packets() {
+            check_cancelled(cancelled)?;
+            if stream.index() != index || !packet.is_key() {
+                continue;
+            }
+            // Container indexes can use DTS. A future I picture's DTS may be
+            // before the requested B picture, which still needs the prior GOP.
+            if packet.pts().is_some_and(|pts| pts > timestamp) && seek > origin_tick {
+                earlier = Some(
+                    packet
+                        .dts()
+                        .unwrap_or(seek)
+                        .min(seek)
+                        .saturating_sub(1)
+                        .max(origin_tick),
+                );
+            }
+            break;
+        }
+        if let Some(earlier) = earlier {
+            seek = earlier;
+        } else {
+            check_cancelled(cancelled)?;
+            // Packet inspection consumes input; restore the validated start.
+            return seek_video_packet(input, index, seek);
+        }
+    }
+}
+
+fn seek_video_packet(
+    input: &mut format::context::Input,
+    index: usize,
+    timestamp: i64,
+) -> Result<(), DecodeError> {
+    // Exclusive input ownership on this thread, no borrowed packets. Decoder
+    // workers start after Seek; query decoders have received no data. FFmpeg
+    // flushes demux/parser state here. No native pointer escapes this call.
+    let result = unsafe {
+        ffmpeg::ffi::av_seek_frame(
+            input.as_mut_ptr(),
+            index as i32,
+            timestamp,
+            ffmpeg::ffi::AVSEEK_FLAG_BACKWARD,
+        )
+    };
+    if result < 0 {
+        return Err(ffmpeg::Error::from(result).into());
+    }
     Ok(())
 }
 

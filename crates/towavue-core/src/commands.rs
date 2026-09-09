@@ -77,6 +77,8 @@ pub enum CommandId {
     ToggleImageInterpolation,
     CycleAudioRepeat,
     ToggleAudioShuffle,
+    PreviousVideoFrame,
+    NextVideoFrame,
 }
 
 impl CommandId {
@@ -152,6 +154,8 @@ impl CommandId {
             Self::ResizeImage => "resize_image",
             Self::CycleAudioRepeat => "cycle_audio_repeat",
             Self::ToggleAudioShuffle => "toggle_audio_shuffle",
+            Self::PreviousVideoFrame => "previous_video_frame",
+            Self::NextVideoFrame => "next_video_frame",
             Self::ToggleImageInterpolation => "toggle_image_interpolation",
         }
     }
@@ -604,6 +608,16 @@ const COMMANDS: &[CommandDefinition] = &[
         CommandId::ToggleImageInterpolation,
         "Toggle image interpolation (smooth / nearest)",
         &[MediaKind::Image],
+    ),
+    command(
+        CommandId::PreviousVideoFrame,
+        "Previous video frame",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::NextVideoFrame,
+        "Next video frame",
+        &[MediaKind::Video],
     ),
 ];
 

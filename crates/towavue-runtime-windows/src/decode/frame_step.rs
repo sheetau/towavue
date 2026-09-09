@@ -84,7 +84,7 @@ fn scan(
         .decoder()
         .video()?;
     let origin = input_origin(&input);
-    seek_selected_stream(
+    seek_video_stream(
         &mut input,
         config.index,
         config.time_base,
@@ -143,43 +143,6 @@ fn scan(
     decoder.send_eof()?;
     receive(&mut decoder)?;
     Ok(candidate)
-}
-
-fn seek_selected_stream(
-    input: &mut format::context::Input,
-    index: usize,
-    time_base: Rational,
-    origin: i64,
-    target: MediaTime,
-    cancelled: &(dyn Fn() -> bool + Sync),
-) -> Result<(), DecodeError> {
-    check_cancelled(cancelled)?;
-    if target <= MediaTime::ZERO {
-        return Ok(());
-    }
-    if input.format().name() == "mpegts" {
-        return seek_input(input, target, true, cancelled);
-    }
-    let timestamp = target
-        .as_nanoseconds()
-        .rescale_with(Rational(1, 1_000_000_000), time_base, Rounding::Down)
-        .saturating_add(origin.rescale(ffmpeg::rescale::TIME_BASE, time_base));
-    // The input and selected stream index belong exclusively to this query.
-    // No packets are borrowed; the fresh decoder has not received any data.
-    // Explicit stream units prevent another video stream's keyframes deciding
-    // where this decoder starts. No native pointer escapes the call.
-    let result = unsafe {
-        ffmpeg::ffi::av_seek_frame(
-            input.as_mut_ptr(),
-            index as i32,
-            timestamp,
-            ffmpeg::ffi::AVSEEK_FLAG_BACKWARD,
-        )
-    };
-    if result < 0 {
-        return Err(ffmpeg::Error::from(result).into());
-    }
-    Ok(())
 }
 
 #[cfg(test)]

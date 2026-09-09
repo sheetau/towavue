@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 動画の実フレーム移動（2026-09-10 07:15、V04部分実装）
+
+動画を表示して `,`／`.` で前／次のフレームへ移動すると、一時停止する。View menuやcommand paletteのPrevious/Next video frameも同じ操作。基準は表示中の実PTSで、固定fpsから換算しない。Delete／stretchした時間軸でも残っている前後フレームへ移動する。連続入力は最大32操作まで順番に処理し、Seek・別command・編集・tab切替・focus喪失・pointer pressで取消す。現在位置のフレームがまだ届いていない場合は待機案内を出す。速度変更は `Ctrl+,`／`Ctrl+.`、音声のframe相当操作と長押し2倍速は未実装。
+
+新しい設定headerは `# towavue shortcuts v3`。旧形式／v2の単独・標準の速度comma/periodだけ移行し、変更済み・複数キーは保持する。commaを速度へ明示的に戻したい場合はv3 headerと `rate_down = ,` を使う。主キー同士の既存exact／prefix優先規則は変更せず、新frame commandより既存commandを先に解決する。設定fileを自動で書き換えない。
+
+hidden-window回帰でVFRの前後表示、連打、32操作制限、端点、古い要求／tab／世代／modalの拒否、削除・伸縮後の全フレーム往復と履歴保持を確認した。最初は編集時刻0.84秒に対し1.02秒を表示する不具合を再現。再生だけでも元PTS0.44秒に0.56秒を表示し、B pictureが必要とする前GOPをSeekが飛ばしていた。key packetのPTS/DTSを確認して必要なら前GOPへ戻す共有処理で修正した。探索の標本確認も全PTS／隣接nsへ増やし、VFR MP4・MKV・TSの各Seekで参照decodeと全RGBA画素を一致確認した。
+
+最終session34528: fmt check／Clippy／workspace382件（app216/core54/runtime108/integration4）とrelease終了0。別途app opt-in4件も全て成功し、既存H264 D3D11VA復旧はCPU transfers0。通常ignored10件は別計上。release SHA256 a138c82c8f436dbdf25de257b5c35ef64579371684c8c94b45db64e1aaf30b61。8fad994のCI34409567770成功。通常windowでの物理入力・見た目・混在DPI、高解像度／長GOP応答性、音声frame契約は今回の合格範囲ではなく残件。全UX goalは継続する。
+
 ### 実PTSに基づく前後フレーム探索（2026-09-10 06:52、UI未接続）
 
 最終境界監査: 各編集spanの境界ちょうど／前後1nsを照合対象へ追加し、session80922でfmt／Clippy／全380件を再実行、終了0。release検証後の追加はtestのみで、本体byteは下記のまま。

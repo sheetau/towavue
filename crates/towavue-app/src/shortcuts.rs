@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 
 const MULTI_BINDING_HEADER: &str = "# towavue shortcuts v2";
+const FRAME_BINDING_HEADER: &str = "# towavue shortcuts v3";
 
 pub fn load() -> Result<(ShortcutBindings, PathBuf), String> {
     let path = config_path()?;
@@ -92,8 +93,10 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::VolumeDown, "Down"),
         (CommandId::VolumeUp, "Up"),
         (CommandId::ToggleMute, "M"),
-        (CommandId::RateDown, ","),
-        (CommandId::RateUp, "."),
+        (CommandId::RateDown, "Ctrl+,"),
+        (CommandId::RateUp, "Ctrl+."),
+        (CommandId::PreviousVideoFrame, ","),
+        (CommandId::NextVideoFrame, "."),
         (CommandId::ResetRate, "/"),
         (CommandId::Save, "Ctrl+S"),
         (CommandId::ExportAs, "Ctrl+Shift+S"),
@@ -117,7 +120,8 @@ pub fn defaults() -> ShortcutBindings {
 }
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
-    let legacy = !text.lines().any(|line| line.trim() == MULTI_BINDING_HEADER);
+    let frame_bindings = text.lines().any(|line| line.trim() == FRAME_BINDING_HEADER);
+    let legacy = !frame_bindings && !text.lines().any(|line| line.trim() == MULTI_BINDING_HEADER);
     let standard = defaults();
     let has_apply_crop = text
         .lines()
@@ -156,6 +160,15 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         if inherit {
             sequences = standard.all(command).to_vec();
         }
+        if !frame_bindings
+            && sequences.len() == 1
+            && matches!(
+                (command, sequences[0].to_string().as_str()),
+                (CommandId::RateDown, ",") | (CommandId::RateUp, ".")
+            )
+        {
+            sequences = standard.all(command).to_vec();
+        }
         bindings.set(command, sequences[0].clone());
         for sequence in sequences.into_iter().skip(1) {
             bindings.add(command, sequence);
@@ -180,7 +193,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
 
 fn serialize(bindings: &ShortcutBindings) -> String {
     let mut output = format!(
-        "{MULTI_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
+        "{FRAME_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
     );
     for (command, _) in bindings.iter() {
         output.push_str(command.as_str());
@@ -202,6 +215,80 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 mod tests {
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn frame_bindings_migrate_old_speed_defaults_but_preserve_custom_settings() {
+        for header in ["", MULTI_BINDING_HEADER] {
+            let text = format!("{header}\nrate_down = ,\nrate_up = .\n");
+            assert_eq!(
+                parse(&text, defaults()).expect("old speed defaults"),
+                defaults()
+            );
+        }
+        let video = CommandContext {
+            media_kind: Some(MediaKind::Video),
+            ..Default::default()
+        };
+        for (key, command) in [
+            (",", CommandId::PreviousVideoFrame),
+            (".", CommandId::NextVideoFrame),
+            ("Ctrl+,", CommandId::RateDown),
+            ("Ctrl+.", CommandId::RateUp),
+        ] {
+            let sequence = key.parse::<KeySequence>().expect("key");
+            assert_eq!(
+                defaults().resolve(sequence.strokes(), video),
+                ShortcutMatch::Command(command)
+            );
+        }
+        for kind in [None, Some(MediaKind::Image), Some(MediaKind::Audio)] {
+            let context = CommandContext {
+                media_kind: kind,
+                ..Default::default()
+            };
+            for key in [",", "."] {
+                assert_eq!(
+                    defaults().resolve(key.parse::<KeySequence>().expect("key").strokes(), context),
+                    ShortcutMatch::None
+                );
+            }
+        }
+        for text in [
+            format!("{FRAME_BINDING_HEADER}\nrate_down = ,\n"),
+            format!("{MULTI_BINDING_HEADER}\nrate_down = , | Ctrl+Q\n"),
+        ] {
+            let custom = parse(&text, defaults()).expect("custom comma");
+            assert_eq!(
+                custom.resolve(",".parse::<KeySequence>().expect("key").strokes(), video),
+                ShortcutMatch::Command(CommandId::RateDown)
+            );
+            assert_eq!(
+                parse(&serialize(&custom), defaults()).expect("round trip"),
+                custom
+            );
+        }
+        let custom = parse("rate_down = Q\nrate_up = W\n", defaults()).expect("custom speed");
+        assert_eq!(
+            custom
+                .get(CommandId::RateDown)
+                .expect("binding")
+                .to_string(),
+            "Q"
+        );
+        assert_eq!(
+            custom.get(CommandId::RateUp).expect("binding").to_string(),
+            "W"
+        );
+        let mut custom = defaults();
+        custom.set(
+            CommandId::PreviousVideoFrame,
+            ", F".parse().expect("custom prefix"),
+        );
+        assert_eq!(
+            custom.resolve(",".parse::<KeySequence>().expect("key").strokes(), video),
+            ShortcutMatch::Prefix
+        );
+    }
 
     #[test]
     fn transport_alternatives_respect_context_main_bindings_and_prefixes() {

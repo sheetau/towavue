@@ -7,6 +7,7 @@ mod chrome;
 mod cursor;
 mod filmstrip;
 mod fonts;
+mod frame_step;
 mod grid;
 mod menu;
 mod palette;
@@ -167,6 +168,7 @@ enum UiAction {
 }
 
 enum AppEvent {
+    FrameStep(u64, Result<Option<MediaTime>, String>),
     Accessibility(accesskit_winit::Event),
     ImagesReady,
     ImagePreview(PathBuf, u64, towavue_runtime_windows::CachedImagePreview),
@@ -660,6 +662,7 @@ struct Application<N> {
     duration_workers: BTreeMap<u64, LatestTask>,
     waveform_worker: LatestTask,
     thumbnail_worker: LatestTask,
+    frame_steps: frame_step::FrameSteps,
     timeline_open: bool,
     waveform: Option<TextureHandle>,
     media_duration: Option<Duration>,
@@ -830,6 +833,7 @@ where
             duration_workers: BTreeMap::new(),
             waveform_worker: LatestTask::new("towavue-waveform")?,
             thumbnail_worker: LatestTask::new("towavue-thumbnail")?,
+            frame_steps: frame_step::FrameSteps::new()?,
             timeline_open: false,
             waveform: None,
             media_duration: None,
@@ -1207,6 +1211,7 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.cancel_frame_steps();
         self.retain_image_tab();
         self.retain_playback_tab();
         if !self
@@ -1730,6 +1735,7 @@ where
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::FrameStep(serial, result) => self.finish_frame_step(serial, result),
             AppEvent::Accessibility(event) => {
                 if self.window.as_ref().map(|window| window.id()) == Some(event.window_id)
                     && let Some(state) = self.ui_state.as_mut()
@@ -1986,6 +1992,10 @@ where
                 .session
                 .as_ref()
                 .is_some_and(PlaybackSession::video_refresh_pending);
+        if self.state == PlaybackState::Paused && self.frame_steps.holds_frame() && !paused_preview
+        {
+            return false;
+        }
         video_frame_due(presentation_time, deadline, paused_preview)
     }
 
@@ -4116,6 +4126,12 @@ where
     }
 
     fn dispatch(&mut self, command: CommandId) {
+        if !matches!(
+            command,
+            CommandId::PreviousVideoFrame | CommandId::NextVideoFrame
+        ) {
+            self.cancel_frame_steps();
+        }
         self.cancel_shortcut_prefix();
         self.cancel_view_drag();
         if self.modal_input_blocked() {
@@ -4200,6 +4216,8 @@ where
             CommandId::NextSameKind => self.navigate(true, true),
             CommandId::CycleAudioRepeat => self.change_audio_mode(false),
             CommandId::ToggleAudioShuffle => self.change_audio_mode(true),
+            CommandId::PreviousVideoFrame => self.step_video_frame(false),
+            CommandId::NextVideoFrame => self.step_video_frame(true),
             CommandId::PreviousImage => self.navigate_image(false),
             CommandId::NextImage => self.navigate_image(true),
             CommandId::FirstImage => self.navigate_image_boundary(false),
@@ -4710,6 +4728,7 @@ where
     }
 
     fn push_edit(&mut self, operation: EditOperation) {
+        self.cancel_frame_steps();
         if matches!(operation, EditOperation::Timeline(_)) && !self.prepare_timeline_edit(operation)
         {
             return;
@@ -4817,6 +4836,7 @@ where
     }
 
     fn undo_edit(&mut self, redo: bool) {
+        self.cancel_frame_steps();
         let Some(id) = self.tabs.active().map(|tab| tab.id) else {
             return;
         };
@@ -5194,6 +5214,7 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        self.cancel_frame_steps();
         if self.resize_dialog.is_some() {
             self.set_status("Apply or cancel image resize before leaving.".into());
             return;
@@ -5382,6 +5403,7 @@ where
         } else {
             self.session.take();
             self.displayed_tab = None;
+            self.cancel_frame_steps();
             self.playback_error = None;
             self.reset_image_edits();
             self.image_generation = self.image_loader.request(Vec::new());
@@ -5702,6 +5724,7 @@ where
     }
 
     fn seek_to(&mut self, target: MediaTime) {
+        self.cancel_frame_steps();
         if self
             .playback_selection
             .is_some_and(|range| target < range.start() || target > range.end())
@@ -5791,6 +5814,7 @@ where
     }
 
     fn fail_graphics_recovery(&mut self, position: MediaTime, state: PlaybackState, error: String) {
+        self.cancel_frame_steps();
         let mut clock = PlaybackClock::new(position, self.playback_rate());
         clock.paused_at = Some(clock.wall_anchor);
         self.clock = Some(clock);
@@ -6145,6 +6169,7 @@ where
     }
 
     fn fail(&mut self, error: String) {
+        self.cancel_frame_steps();
         self.pending_seek_started = None;
         eprintln!("towavue: {error}");
         self.playback_error = Some(error.clone());
@@ -7112,6 +7137,7 @@ where
                     ..
                 }
         ) {
+            self.cancel_frame_steps();
             self.cancel_shortcut_prefix();
         }
         if matches!(

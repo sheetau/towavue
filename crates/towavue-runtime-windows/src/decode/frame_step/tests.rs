@@ -16,7 +16,7 @@ fn adjacent_pts_match_full_decode_for_vfr_b_frames_and_transport_origins() {
     let ffmpeg = std::path::PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
         .join("bin/ffmpeg.exe");
     for (extension, codec) in [("mp4", "mpeg4"), ("mkv", "ffv1"), ("ts", "mpeg2video")] {
-        let path = root.join(format!("vfr.{extension}"));
+        let path = root.join(format!("{codec}.{extension}"));
         let mut command = std::process::Command::new(&ffmpeg);
         command.args([
             "-v",
@@ -66,9 +66,11 @@ fn adjacent_pts_match_full_decode_for_vfr_b_frames_and_transport_origins() {
             );
         }
         let mut reference = Vec::new();
+        let mut pixels = Vec::new();
         decode_file(&path, |output| {
             if let DecodeOutput::Video(frame) = output {
                 reference.push(frame.presentation_time);
+                pixels.push(frame.rgba.to_vec());
             }
             true
         })
@@ -82,6 +84,38 @@ fn adjacent_pts_match_full_decode_for_vfr_b_frames_and_transport_origins() {
             "fixture is actually VFR"
         );
         verify(&path, &reference, None);
+        let mut playback = ParallelInput::open(&path, &|| false).expect("playback input");
+        for (index, target) in reference.iter().enumerate() {
+            let mut first = None;
+            let mut first_pixels = None;
+            playback
+                .decode_software(
+                    *target,
+                    None,
+                    Some(DecodeStream::Video),
+                    &|| false,
+                    |output| {
+                        if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) =
+                            output
+                        {
+                            first.get_or_insert(frame.presentation_time);
+                            first_pixels.get_or_insert_with(|| frame.rgba.to_vec());
+                        }
+                        true
+                    },
+                )
+                .expect("playback seek");
+            assert_eq!(
+                first,
+                Some(*target),
+                "{extension} playback exact target {target:?}"
+            );
+            assert_eq!(
+                first_pixels.as_deref(),
+                Some(pixels[index].as_slice()),
+                "{codec} exact seek pixels at {target:?}"
+            );
+        }
         let mut plan =
             EditTimeline::new(time(2_000_000_000), PlaybackRange::default()).expect("plan");
         assert!(plan.apply(TimelineEdit::Delete(
@@ -193,10 +227,8 @@ fn frame_query_uses_the_selected_stream_and_handles_empty_edits() {
 
 fn verify(path: &Path, reference: &[MediaTime], plan: Option<&EditTimeline>) {
     let mut targets = vec![MediaTime::ZERO, time(1_999_999_999)];
-    for (index, pts) in reference.iter().enumerate() {
-        if index % 3 == 0 || index + 1 == reference.len() {
-            targets.extend([*pts, time(pts.as_nanoseconds() + 1)]);
-        }
+    for pts in reference {
+        targets.extend([*pts, time(pts.as_nanoseconds() + 1)]);
     }
     if let Some(plan) = plan {
         let mut boundary = 0_i64;

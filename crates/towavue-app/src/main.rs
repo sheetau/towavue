@@ -662,6 +662,7 @@ struct Application<N> {
     waveform: Option<TextureHandle>,
     media_duration: Option<Duration>,
     time_selection: Option<towavue_core::TimeRange>,
+    playback_selection: Option<towavue_core::TimeRange>,
     hover_thumbnail: Option<(u64, TextureHandle)>,
     media_generation: u64,
     media_sequence: u64,
@@ -831,6 +832,7 @@ where
             waveform: None,
             media_duration: None,
             time_selection: None,
+            playback_selection: None,
             hover_thumbnail: None,
             media_generation: 0,
             media_sequence: 0,
@@ -1126,6 +1128,7 @@ where
             view: self.image_view,
             timeline_open: self.timeline_open,
             time_selection: self.time_selection,
+            playback_selection: self.playback_selection,
             filmstrip_open: self.filmstrip_open,
             filmstrip_view: self.filmstrip.take_view(),
             playlist: std::mem::take(&mut self.playlist),
@@ -1172,6 +1175,7 @@ where
         self.image_view = saved.view;
         self.timeline_open = saved.kind == MediaKind::Audio || saved.timeline_open;
         self.time_selection = saved.time_selection;
+        self.playback_selection = saved.playback_selection;
         self.filmstrip_open = saved.filmstrip_open;
         self.playlist = saved.playlist;
         self.filmstrip.restore_view(saved.filmstrip_view);
@@ -1256,6 +1260,7 @@ where
         self.waveform = None;
         self.media_duration = None;
         self.time_selection = None;
+        self.playback_selection = None;
         self.hover_thumbnail = None;
         self.next_media_instance();
         self.waveform_worker.clear();
@@ -3892,7 +3897,7 @@ where
                     );
                 }
                 let response = ui.allocate_rect(rect, egui::Sense::click_and_drag())
-                    .on_hover_text("Drag to select time · drag playhead to seek · drag volume line up/down · Alt+drag selection to stretch · Delete removes · Ctrl+Y keeps");
+                    .on_hover_text("Drag to select time · Shift+Space plays selection · drag playhead to seek · drag volume line up/down · Alt+drag selection to stretch · Delete removes · Ctrl+Y keeps");
                 let duration = self.playback_duration().unwrap_or_default();
                 if duration.is_zero() {
                     return;
@@ -3908,6 +3913,13 @@ where
                     self.session.as_ref().and_then(PlaybackSession::timeline),
                     enabled,
                 );
+                if self.playback_selection.is_some() {
+                    ui.ctx().accesskit_node_builder(response.id, |node| node.set_description("Selection playback; Space pauses or resumes, Escape returns to full range"));
+                }
+                if self.playback_selection.is_some() && rect.width() >= 440.0 {
+                    ui.painter().with_clip_rect(rect).text(rect.center_top() + egui::vec2(0.0, 2.0), Align2::CENTER_TOP,
+                        "Selection playback", egui::FontId::proportional(11.0), chrome::FOREGROUND);
+                }
                 if let Some(tab) = self.tabs.active()
                     && let Some(selection) = result.selection
                 {
@@ -4035,7 +4047,7 @@ where
                             .is_some_and(|duration| range.end() <= media_time(duration))
                     })
                 {
-                    self.time_selection = selection;
+                    self.set_time_selection(selection);
                     self.request_redraw();
                 }
             }
@@ -4226,16 +4238,17 @@ where
                 }
             }
             CommandId::ClearSelection => {
-                self.time_selection = None;
+                self.set_time_selection(None);
                 self.image_view.selection = None;
                 self.image_view.crop_preview = false;
                 self.request_redraw();
             }
             CommandId::SelectAll => {
                 if self.timeline_is_visible() {
-                    self.time_selection = self.playback_duration().and_then(|duration| {
+                    let selection = self.playback_duration().and_then(|duration| {
                         towavue_core::TimeRange::new(MediaTime::ZERO, media_time(duration))
                     });
+                    self.set_time_selection(selection);
                     self.request_redraw();
                     return;
                 }
@@ -4388,6 +4401,7 @@ where
             CommandId::SetTrimEnd => {
                 self.set_time_selection_endpoint(false);
             }
+            CommandId::PlayTimeSelection => self.play_time_selection(),
             CommandId::DeleteTimeSelection | CommandId::KeepTimeSelection => {
                 if let Some(range) = self.time_selection {
                     self.push_edit(EditOperation::Timeline(
@@ -5355,6 +5369,7 @@ where
             self.waveform = None;
             self.media_duration = None;
             self.time_selection = None;
+            self.playback_selection = None;
             self.hover_thumbnail = None;
             self.next_media_instance();
             self.duration_workers.clear();
@@ -5625,6 +5640,16 @@ where
         if !paused && let Some(tab) = self.tabs.active() {
             self.arm_audio_queue(tab.id);
         }
+        if self.playback_selection.is_some() {
+            self.set_status(
+                if paused {
+                    "Selected time paused · Space resumes · Escape returns to full range"
+                } else {
+                    "Playing selected time · Space pauses · Escape returns to full range"
+                }
+                .into(),
+            );
+        }
         self.refresh_title();
         self.request_redraw();
     }
@@ -5649,6 +5674,12 @@ where
     }
 
     fn seek_to(&mut self, target: MediaTime) {
+        if self
+            .playback_selection
+            .is_some_and(|range| target < range.start() || target > range.end())
+        {
+            self.playback_selection = None;
+        }
         let plan = match self.history_timeline() {
             Ok(plan) => plan,
             Err(error) => {
@@ -5656,13 +5687,17 @@ where
                 return;
             }
         };
-        let end = plan
-            .as_ref()
-            .map(towavue_core::EditTimeline::duration)
+        let end = self
+            .playback_selection
+            .map(towavue_core::TimeRange::end)
             .or_else(|| {
-                self.media_duration
-                    .filter(|duration| !duration.is_zero())
-                    .map(media_time)
+                plan.as_ref()
+                    .map(towavue_core::EditTimeline::duration)
+                    .or_else(|| {
+                        self.media_duration
+                            .filter(|duration| !duration.is_zero())
+                            .map(media_time)
+                    })
             });
         let target = end
             .map_or(target, |end| target.min(end))
@@ -5670,11 +5705,19 @@ where
         let started = Instant::now();
         self.pending_seek_started = None;
         let edit = self.edit_state();
-        let range = plan.as_ref().map_or_else(
-            || edit.playback_range(),
-            |plan| towavue_core::PlaybackRange {
-                start: MediaTime::ZERO,
-                end: Some(plan.duration()),
+        let range = self.playback_selection.map_or_else(
+            || {
+                plan.as_ref().map_or_else(
+                    || edit.playback_range(),
+                    |plan| towavue_core::PlaybackRange {
+                        start: MediaTime::ZERO,
+                        end: Some(plan.duration()),
+                    },
+                )
+            },
+            |range| towavue_core::PlaybackRange {
+                start: range.start(),
+                end: Some(range.end()),
             },
         );
         let edited = plan.is_some();
@@ -5684,7 +5727,13 @@ where
         let pause =
             self.state == PlaybackState::Ended || end == Some(target) || !range.contains(target);
         let result = match plan {
-            Some(plan) => session.seek_with_timeline(target, edit.rate, plan, pause),
+            Some(plan) => session.seek_with_timeline_selection(
+                target,
+                edit.rate,
+                plan,
+                self.playback_selection,
+                pause,
+            ),
             None => session.seek_with_edits(target, edit.rate, range, pause),
         };
         match result {
@@ -6003,7 +6052,7 @@ where
             && self.audio_drained
         {
             let was_playing = self.state == PlaybackState::Playing;
-            if let Some(end) = self.session.as_ref().and_then(PlaybackSession::range_end) {
+            if let Some(end) = playback_tab::end(self.session.as_ref(), self.media_duration) {
                 if self.clock.is_none() {
                     let mut clock =
                         PlaybackClock::new(self.current_position(), self.playback_rate());
@@ -6019,6 +6068,11 @@ where
                 clock.set_paused(true);
             }
             self.state = PlaybackState::Ended;
+            if self.playback_selection.is_some() {
+                self.set_status(
+                    "Selection ended · Shift+Space restarts · Escape returns to full range".into(),
+                );
+            }
             if !was_playing {
                 self.suppress_paused_audio_eof();
             }
@@ -6652,9 +6706,7 @@ where
                 && self.pending_time.is_none()
                 && self.audio_drained)
                 .then(|| {
-                    self.session
-                        .as_ref()
-                        .and_then(PlaybackSession::range_end)
+                    playback_tab::end(self.session.as_ref(), self.media_duration)
                         .and_then(|end| self.clock.as_ref().map(|clock| clock.due_at(end)))
                 })
                 .flatten(),

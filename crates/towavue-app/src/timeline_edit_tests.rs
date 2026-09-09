@@ -112,6 +112,36 @@ fn app_timeline_history_seek_background_duration_and_empty_round_trip() {
 }
 
 #[test]
+fn full_playback_eof_waits_for_known_duration_after_the_last_frame() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "timeline_edit::tests::full_playback_eof_waits_for_known_duration_after_the_last_frame",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.media_kind = Some(MediaKind::Video);
+    app.media_duration = Some(Duration::from_secs(2));
+    app.state = PlaybackState::Playing;
+    app.decode_finished = true;
+    app.audio_drained = true;
+    let mut clock = PlaybackClock::new(time(1950), 1.0);
+    clock.set_paused(true);
+    app.clock = Some(clock);
+    app.check_eof();
+    assert_eq!(
+        app.state,
+        PlaybackState::Playing,
+        "EOF frame does not consume its display duration"
+    );
+    let mut clock = PlaybackClock::new(time(2000), 1.0);
+    clock.set_paused(true);
+    app.clock = Some(clock);
+    app.check_eof();
+    assert_eq!(app.state, PlaybackState::Ended);
+    assert_eq!(app.current_position(), time(2000));
+}
+
+#[test]
 #[ignore = "requires a live Windows shared-mode audio endpoint; generated media plays muted"]
 fn edited_audio_video_history_keeps_clock_and_background_eof_in_edited_time() {
     let Some(root) = crate::tests::isolated_test_root(
@@ -203,6 +233,20 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                 Some(range(500, 1000)),
             ));
             assert!(!app.edits[&tab].is_dirty(), "selection is not an edit");
+            app.process_shortcut("Shift+Space".parse().expect("play selection"));
+            assert_eq!(app.state, PlaybackState::Playing);
+            assert_eq!(app.playback_selection, Some(range(500, 1000)));
+            assert_eq!(
+                app.session.as_ref().expect("session").range_end(),
+                Some(time(1000))
+            );
+            assert_eq!(app.playback_duration(), Some(Duration::from_secs(2)));
+            assert!(!app.edits[&tab].is_dirty(), "audition is not an edit");
+            app.toggle_pause();
+            app.set_time_selection(None);
+            assert!(app.playback_selection.is_none());
+            app.seek_to(time(1200));
+            app.set_time_selection(Some(range(500, 1000)));
             app.process_shortcut("Delete".parse().expect("Delete key"));
             assert!(app.time_selection.is_none());
             assert_eq!(app.current_position(), time(700));
@@ -461,6 +505,58 @@ fn run_app_trial(root: PathBuf, audio: bool) {
             app.seek_to(time(9000));
             assert_eq!(app.current_position(), time(4000));
             assert!(app.playback_error.is_none());
+            let history = app.edits[&tab].clone();
+            let plan = app.history_timeline().expect("history");
+            app.set_time_selection(Some(range(1000, 2000)));
+            app.process_shortcut("Shift+Space".parse().expect("selection playback"));
+            assert_eq!(app.state, PlaybackState::Playing);
+            assert_eq!(app.playback_selection, app.time_selection);
+            assert_eq!(
+                app.session.as_ref().expect("session").timeline(),
+                plan.as_ref()
+            );
+            app.activate_tab(other);
+            let saved = app
+                .retained_playback
+                .get_mut(&tab)
+                .expect("background selection");
+            assert_eq!(saved.playback_selection, Some(range(1000, 2000)));
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while saved.state == PlaybackState::Playing {
+                saved.poll();
+                assert!(Instant::now() < deadline, "selection background EOF");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(saved.state, PlaybackState::Ended);
+            assert_eq!(saved.position(), time(2000));
+            app.activate_tab(tab);
+            assert_eq!(app.playback_duration(), Some(Duration::from_secs(4)));
+            assert_eq!(app.playback_selection, Some(range(1000, 2000)));
+            app.process_shortcut("Escape".parse().expect("clear selection"));
+            assert!(app.playback_selection.is_none() && app.time_selection.is_none());
+            assert_eq!(app.current_position(), time(2000));
+            assert_eq!(
+                app.session.as_ref().expect("session").range_end(),
+                Some(time(4000))
+            );
+            assert_eq!(app.edits[&tab], history);
+            app.set_time_selection(Some(range(1000, 2000)));
+            app.play_time_selection();
+            app.seek_to(time(3000));
+            assert!(
+                app.playback_selection.is_none(),
+                "seeking outside leaves audition mode"
+            );
+            app.set_time_selection(Some(range(1000, 2000)));
+            app.play_time_selection();
+            app.push_edit(EditOperation::Timeline(TimelineEdit::SetVolume(
+                range(1000, 2000),
+                0.75,
+            )));
+            assert!(
+                app.playback_selection.is_none(),
+                "editing ends audition mode"
+            );
             drop(app);
             self.completed = true;
             eprintln!(

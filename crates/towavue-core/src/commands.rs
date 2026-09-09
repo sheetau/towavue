@@ -39,6 +39,7 @@ pub enum CommandId {
     ApplyCrop,
     DeleteTimeSelection,
     KeepTimeSelection,
+    PlayTimeSelection,
     RotateClockwise,
     RotateCounterclockwise,
     FlipHorizontal,
@@ -124,6 +125,7 @@ impl CommandId {
             Self::ApplyCrop => "apply_crop",
             Self::DeleteTimeSelection => "delete_time_selection",
             Self::KeepTimeSelection => "keep_time_selection",
+            Self::PlayTimeSelection => "play_time_selection",
             Self::RotateClockwise => "rotate_clockwise",
             Self::RotateCounterclockwise => "rotate_counterclockwise",
             Self::FlipHorizontal => "flip_horizontal",
@@ -337,7 +339,9 @@ impl CommandDefinition {
         (!self.requires_reading_mode || context.reading_mode)
             && (!matches!(
                 self.id,
-                CommandId::DeleteTimeSelection | CommandId::KeepTimeSelection
+                CommandId::DeleteTimeSelection
+                    | CommandId::KeepTimeSelection
+                    | CommandId::PlayTimeSelection
             ) || (context.timeline_open && context.has_time_selection))
             && (!matches!(self.id, CommandId::SetTrimStart | CommandId::SetTrimEnd)
                 || context.timeline_open)
@@ -381,6 +385,11 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::NextTab, "Next tab", &[]),
     command(CommandId::PreviousTab, "Previous tab", &[]),
     command(CommandId::TogglePause, "Play or pause", PLAYABLE_MEDIA),
+    command(
+        CommandId::PlayTimeSelection,
+        "Play selected time",
+        PLAYABLE_MEDIA,
+    ),
     command(
         CommandId::CycleAudioRepeat,
         "Cycle audio repeat",

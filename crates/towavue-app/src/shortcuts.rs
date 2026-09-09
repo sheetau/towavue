@@ -44,6 +44,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::NextTab, "Ctrl+Tab"),
         (CommandId::PreviousTab, "Ctrl+Shift+Tab"),
         (CommandId::TogglePause, "Space"),
+        (CommandId::PlayTimeSelection, "Shift+Space"),
         (CommandId::SeekBackward, "Left"),
         (CommandId::SeekForward, "Right"),
         (CommandId::PreviousImage, "Left"),
@@ -374,6 +375,20 @@ mod tests {
                         ..Default::default()
                     };
                     let enabled = kind != MediaKind::Image && timeline_open && has_time_selection;
+                    assert_eq!(
+                        bindings.resolve(
+                            "Shift+Space"
+                                .parse::<KeySequence>()
+                                .expect("selection play")
+                                .strokes(),
+                            context
+                        ),
+                        if enabled {
+                            ShortcutMatch::Command(CommandId::PlayTimeSelection)
+                        } else {
+                            ShortcutMatch::None
+                        }
+                    );
                     assert_eq!(
                         bindings.resolve(
                             "Delete".parse::<KeySequence>().expect("delete").strokes(),

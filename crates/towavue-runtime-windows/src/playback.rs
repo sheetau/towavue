@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 
 use thiserror::Error;
-use towavue_core::{EditTimeline, MediaTime, PlaybackGeneration, PlaybackRange};
+use towavue_core::{EditTimeline, MediaTime, PlaybackGeneration, PlaybackRange, TimeRange};
 
 #[path = "playback_timeline.rs"]
 mod timeline;
@@ -112,6 +112,8 @@ impl PresentationFrame {
 
 #[derive(Debug, Error)]
 pub enum PlaybackError {
+    #[error("the playback selection exceeds the edited timeline")]
+    InvalidSelection,
     #[error("media probing failed: {0}")]
     Probe(#[from] decode::DecodeError),
     #[error("audio output failed: {0}")]
@@ -226,7 +228,11 @@ impl PlaybackSession {
         self.target = self
             .timeline
             .as_ref()
-            .map_or(target, |plan| target.min(plan.duration()))
+            .map_or(target, |plan| {
+                target
+                    .min(self.range.end.unwrap_or(plan.duration()))
+                    .max(self.range.start)
+            })
             .max(MediaTime::ZERO);
         self.metrics.reset();
         self.start_pipeline()?;
@@ -247,7 +253,12 @@ impl PlaybackSession {
 
     pub fn range_end(&self) -> Option<MediaTime> {
         if let Some(plan) = &self.timeline {
-            return Some(plan.duration());
+            return Some(
+                self.range
+                    .end
+                    .unwrap_or(plan.duration())
+                    .min(plan.duration()),
+            );
         }
         self.range
             .contains(self.target)
@@ -282,10 +293,25 @@ impl PlaybackSession {
         plan: EditTimeline,
         pause: bool,
     ) -> Result<PlaybackGeneration, PlaybackError> {
+        self.seek_with_timeline_selection(target, rate, plan, None, pause)
+    }
+
+    /// Limit playback without trimming the retained plan or changing its edited coordinates.
+    pub fn seek_with_timeline_selection(
+        &mut self,
+        target: MediaTime,
+        rate: f32,
+        plan: EditTimeline,
+        selection: Option<TimeRange>,
+        pause: bool,
+    ) -> Result<PlaybackGeneration, PlaybackError> {
+        if selection.is_some_and(|range| range.end() > plan.duration()) {
+            return Err(PlaybackError::InvalidSelection);
+        }
         self.rate = rate.clamp(0.25, 4.0).max(0.25);
         self.range = PlaybackRange {
-            start: MediaTime::ZERO,
-            end: Some(plan.duration()),
+            start: selection.map_or(MediaTime::ZERO, TimeRange::start),
+            end: Some(selection.map_or(plan.duration(), TimeRange::end)),
         };
         self.timeline = Some(Arc::new(plan));
         self.paused |= pause;
@@ -304,7 +330,11 @@ impl PlaybackSession {
         self.target = self
             .timeline
             .as_ref()
-            .map_or(target, |plan| target.min(plan.duration()))
+            .map_or(target, |plan| {
+                target
+                    .min(self.range.end.unwrap_or(plan.duration()))
+                    .max(self.range.start)
+            })
             .max(MediaTime::ZERO);
         self.metrics.reset();
         self.start_pipeline()?;
@@ -387,6 +417,7 @@ impl PlaybackSession {
                                 &path,
                                 &plan,
                                 target,
+                                end,
                                 rate,
                                 format,
                                 &cancelled,
@@ -425,7 +456,11 @@ impl PlaybackSession {
         let target = self
             .timeline
             .as_ref()
-            .map_or(target, |plan| target.min(plan.duration()))
+            .map_or(target, |plan| {
+                target
+                    .min(self.range.end.unwrap_or(plan.duration()))
+                    .max(self.range.start)
+            })
             .max(MediaTime::ZERO);
         self.video_target = target;
         self.completion.restart_video();
@@ -452,7 +487,7 @@ impl PlaybackSession {
                         })?);
                     }
                     if let Some(plan) = timeline {
-                        for segment in timeline::segments(&plan, target, true) {
+                        for segment in timeline::segments(&plan, target, true, end) {
                             run_video_decode(
                                 input.as_mut().expect("opened video input"),
                                 &graphics_device,

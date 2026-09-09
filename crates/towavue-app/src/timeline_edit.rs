@@ -2,6 +2,41 @@ use super::*;
 use towavue_core::{EditTimeline, PlaybackRange};
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn set_time_selection(&mut self, selection: Option<towavue_core::TimeRange>) {
+        if self.time_selection != selection {
+            let position = self.current_position();
+            self.time_selection = selection;
+            if self.playback_selection.take().is_some() {
+                self.seek_to(position);
+            }
+        }
+        self.request_redraw();
+    }
+
+    pub(super) fn play_time_selection(&mut self) {
+        let Some(range) = self.time_selection else {
+            return;
+        };
+        if self.session.is_none()
+            || matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted)
+            || !self
+                .playback_duration()
+                .is_some_and(|duration| range.end() <= media_time(duration))
+        {
+            return;
+        }
+        self.playback_selection = Some(range);
+        self.seek_to(range.start());
+        if matches!(self.state, PlaybackState::Paused | PlaybackState::Ended) {
+            self.toggle_pause();
+        }
+        if self.state == PlaybackState::Playing {
+            self.set_status(
+                "Playing selected time · Space pauses · Escape returns to full range".into(),
+            );
+        }
+    }
+
     pub(super) fn set_time_selection_endpoint(&mut self, start: bool) {
         let Some(duration) = self.playback_duration().map(media_time) else {
             return;
@@ -20,8 +55,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             )
         };
         if let Some(range) = towavue_core::TimeRange::new(a, b) {
-            self.time_selection = Some(range);
-            self.request_redraw();
+            self.set_time_selection(Some(range));
         }
     }
     pub(super) fn history_timeline(&self) -> Result<Option<EditTimeline>, &'static str> {
@@ -67,6 +101,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn playback_range(&self) -> PlaybackRange {
+        if let Some(range) = self.playback_selection {
+            return PlaybackRange {
+                start: range.start(),
+                end: Some(range.end()),
+            };
+        }
         self.session
             .as_ref()
             .filter(|session| session.timeline().is_some())
@@ -96,10 +136,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         } else {
             position
         };
-        let range_changed = plan.is_none() && session.range() != state.playback_range();
+        let range_changed = plan.is_none()
+            && self.playback_selection.is_none()
+            && session.range() != state.playback_range();
         if changed || range_changed || session.rate() != state.rate {
             if changed {
                 self.time_selection = None;
+                self.playback_selection = None;
                 self.thumbnail_worker.clear();
                 self.thumbnail_loading = None;
                 self.hover_thumbnail = None;

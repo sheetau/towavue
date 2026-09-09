@@ -209,6 +209,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let active = self.tabs.active().map(|tab| tab.id);
         let ids: Vec<_> = self.audio_queues.keys().copied().collect();
         for id in ids {
+            if if active == Some(id) {
+                self.playback_selection.is_some()
+            } else {
+                self.retained_playback
+                    .get(&id)
+                    .is_some_and(|saved| saved.playback_selection.is_some())
+            } {
+                continue;
+            }
             let (state, instance, generation, path) = if active == Some(id) {
                 if self.media_kind != Some(MediaKind::Audio) || self.modal_input_blocked() {
                     continue;
@@ -327,6 +336,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             saved.clock = None;
             saved.duration = None;
             saved.time_selection = None;
+            saved.playback_selection = None;
             saved.waveform = None;
             saved.pending_time = None;
             saved.audio_drained = true;
@@ -651,6 +661,45 @@ mod tests {
                     .map(|item| item.path.clone())
                     .collect();
                 assert_eq!(paths.len(), 3);
+                wait(&mut app, &events, |app| app.media_duration.is_some());
+                let audition_path = app.path.clone();
+                let audition_instance = app.media_generation;
+                let selected = towavue_core::TimeRange::new(
+                    media_time(Duration::from_millis(20)),
+                    media_time(Duration::from_millis(80)),
+                )
+                .expect("audition range");
+                app.set_time_selection(Some(selected));
+                for _ in 0..3 {
+                    app.process_shortcut("Shift+Space".parse().expect("play selected time"));
+                    wait(&mut app, &events, |app| app.state == PlaybackState::Ended);
+                    advance(&mut app, &events);
+                    assert_eq!(
+                        app.path, audition_path,
+                        "selection EOF must not advance or repeat"
+                    );
+                    assert_eq!(app.media_generation, audition_instance);
+                    assert_eq!(app.state, PlaybackState::Ended);
+                    assert_eq!(app.current_position(), selected.end());
+                    app.dispatch(CommandId::CycleAudioRepeat);
+                }
+                app.play_time_selection();
+                app.open_external(self.0.join("image.bmp"), true);
+                let audition_image = app.tabs.active().expect("image").id;
+                wait(&mut app, &events, |app| {
+                    app.retained_playback[&audio].state == PlaybackState::Ended
+                });
+                advance(&mut app, &events);
+                assert_eq!(
+                    app.retained_playback[&audio].path,
+                    audition_path.clone().expect("audio path")
+                );
+                assert_eq!(app.retained_playback[&audio].position(), selected.end());
+                app.activate_tab(audio);
+                app.process_shortcut("Escape".parse().expect("leave audition"));
+                assert!(app.playback_selection.is_none());
+                assert!(!app.command_context().has_unsaved_edits);
+                app.request_guarded(GuardedAction::CloseTab(audition_image));
                 app.navigate_to_unchecked(paths[0].clone());
                 wait(&mut app, &events, |app| app.state == PlaybackState::Ended);
                 let old_instance = app.media_generation;

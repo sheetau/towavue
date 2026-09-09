@@ -4,13 +4,23 @@
 
 ## 1. 最初に試す
 
+### 選択範囲の再生と通常範囲への復帰（2026-09-10 05:54）
+
+Shift+Space／Edit menu／command paletteのPlay selected timeで選択先頭から試聴する。Spaceで一時停止・再開、Escapeで選択を解除して通常範囲へ戻る。選択外Seek・選択変更・時間編集でも試聴範囲を解除する。履歴・全長・export対象は変えない。音声のRepeat off/all/oneでも範囲末尾で停止し、別tabに移っても自動次曲へ進まない。狭いtimelineでは端点／gainの文字と重ねず範囲再生の中央labelを省略し、statusとUIA descriptionで案内する。
+
+runtime2件を追加し、選択内の元映像画素と編集PTS、join／伸縮区間途中の終端、末尾preview・WARP device交換・無効範囲拒否と全体復帰を検証。音声は0.25/1/4倍で予定sample数、1024-frame chunk上限、選択開始の同一PCMを確認。既存app試験を通常shortcut、履歴不変、背景範囲EOF、Escape・範囲外Seek・編集解除へ拡張。実WASAPI queue試験はrepeat3種と背景音声の次曲抑止を追加。最終session28601でfmt／Clippy／workspace369 tests（app208/core53/runtime104/integration4）／release成功、app opt-in4件もPASS、SKIPなし。c2c11cdのCI34402503989成功。
+
+最初の通常release4c976659、owned PID55072は選択1.5秒停止・pause/resumeに成功したが、全体再生へ戻ると1.9678258秒でEndedになりhelperが失敗した。PIDは通常closeで消失を確認。既存active EOFが最終frame開始で時計を止め、背景EOFはmetadataまで進める違いを発見し、両方を共通の終了時刻へ揃えた。期限wakeupと回帰を追加し、上記の全検証を再実行した。
+
+最終release27d0d5e40d1b5537a676680814a837bbac6b2daf401c4b679df9638be1b96067、owned PID39852、専用tempの2秒video-only fixture33fcc1adで、実dragの0.5～1.5秒選択→Shift+Space→1.5秒停止（全長2秒）→再試聴中0.8106346秒で220msのpause不変→resume→1.5秒→Escape／Space→全体2秒でEndedを確認。selection-ended／full-ended captureを目視、sourceのframe44／59と案内・選択の解除を確認。dirtyにならずsource SHA256不変、通常close後PID消失、helper exit0。app ExitCode値は取得できず0とは宣言しない。UIA SetFocus拒否はあったが各input前に実foregroundを照合しowned windowに限定した。D3D11VA、CPU transfer0／drop0。両試験の設定・生成file・captureはtempへ保持、live trialなし。native試験はvideo-onlyで、可聴loopback／全素材seam品質の証明ではない。difference枠・全focus/style・native保存再openの総合監査と他のUX台帳は引き続き残る。
+
 ### 部分音量rubber-bandとAlt stretch（2026-09-10 05:39）
 
 音声／表示中の動画timelineに局所gainの横線を追加した。CTIを優先し、線上の初動が縦なら音量、横なら範囲選択。選択内（未選択なら全体）を0～200%へ設定し、最低位置はmute。Alt＋選択内のdragは開始端を固定した伸縮で、選択内の各区間が局所0.25～4倍を保つ範囲へ制限する。数値focusはTabで辿り、左右／Home／End、UIA SetValueも使える。混在gainは先頭値とMixedを表示し、明示指定で統一。pointer previewは線・枠・数値だけ、releaseで一度だけ編集し、取消では追加しない。gain後の範囲保持、stretch後の端点更新、Undo/Redoは実sessionでも確認した。
 
 最終session63132でfmt／Clippy／workspace366 tests（app207/core53/runtime102/integration4）とrelease成功。通常ignored10件のうちapp全4件を明示実行してPASS、SKIPなし。5件の新規回帰でbatch／複数pass・press修飾key保持・初動方向固定・取消・区間速度制限／無効値・混在gainとkeyboardを検証し、既存UIA／実session試験に調整action、選択保持、stale／modal拒否、Undoを追加した。最初の試験でUndo後のredo枝を含むhistory全体を誤比較したため、適用中operationsの比較へ修正した。test-only unwrapを既存Clippy規約へ修正。最終release213f619babd90e29aa9bd5ae2681d2ad07caab7de0ce34c54497fa11002832b0。a82a03eのCI34400652520も成功。
 
-通常release967d1728、専用tempの2秒video-only source33fcc1ad、owned PID36184で、実pointerの0.5～1.5秒選択→音量線で0%→UIAで50%→Alt dragで全長2.5秒／選択末尾2秒→Ctrl+Zで全長2秒を確認。muted／stretched captureを目視した。元source不変、D3D11VA／CPU transfer0、Close→Discardで正常に閉じPID消失、helper exit0。app ExitCodeは取得できず0とは断言しない。UIA SetFocusの拒否はあったが実foreground確認に成功したowned windowだけへ送信した。最終再build前に追加したのは方向固定の回帰testのみで、本試験は最終hashの再試行ではない。設定・生成file・captureは専用temp内に保持、live trialなし。音量の可聴比較・物理loopback・seam品質の保証ではない。範囲再生、difference枠、全focus/styleとnative保存再openの最終監査は残る。
+通常release967d1728、専用tempの2秒video-only source33fcc1ad、owned PID36184で、実pointerの0.5～1.5秒選択→音量線で0%→UIAで50%→Alt dragで全長2.5秒／選択末尾2秒→Ctrl+Zで全長2秒を確認。muted／stretched captureを目視した。元source不変、D3D11VA／CPU transfer0、Close→Discardで正常に閉じPID消失、helper exit0。app ExitCodeは取得できず0とは断言しない。UIA SetFocusの拒否はあったが実foreground確認に成功したowned windowだけへ送信した。最終再build前に追加したのは方向固定の回帰testのみで、本試験は最終hashの再試行ではない。設定・生成file・captureは専用temp内に保持、live trialなし。音量の可聴比較・物理loopback・seam品質の保証ではない。このcheckpoint時点では範囲再生、difference枠、全focus/styleとnative保存再openの最終監査は残る。
 
 ### 時間範囲選択とDelete／Keep（2026-09-10）
 

@@ -34,7 +34,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
                 FlipVertical,
             ],
             &[SetTrimStart, SetTrimEnd],
-            &[DeleteTimeSelection, KeepTimeSelection],
+            &[DeleteTimeSelection, KeepTimeSelection, PlayTimeSelection],
             &[VolumeDown, VolumeUp, ToggleMute],
             &[RateDown, RateUp, ResetRate],
         ],

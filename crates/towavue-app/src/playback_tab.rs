@@ -20,6 +20,7 @@ pub(super) struct RetainedPlaybackTab {
     pub view: ImageViewState,
     pub timeline_open: bool,
     pub time_selection: Option<towavue_core::TimeRange>,
+    pub playback_selection: Option<towavue_core::TimeRange>,
     pub filmstrip_open: bool,
     pub filmstrip_view: crate::filmstrip::View,
     pub playlist: playlist::Playlist,
@@ -32,6 +33,24 @@ pub(super) struct RetainedPlaybackTab {
     pub graphics_epoch: u64,
     pub recovery_position: Option<MediaTime>,
     pub video_suspended: bool,
+}
+
+pub(super) fn end(
+    session: Option<&PlaybackSession>,
+    duration: Option<Duration>,
+) -> Option<MediaTime> {
+    let duration = session
+        .and_then(PlaybackSession::timeline)
+        .map(|plan| plan.duration())
+        .or_else(|| {
+            duration
+                .filter(|duration| !duration.is_zero())
+                .map(media_time)
+        });
+    match (duration, session.and_then(PlaybackSession::range_end)) {
+        (Some(duration), Some(end)) => Some(duration.min(end)),
+        (duration, end) => duration.or(end),
+    }
 }
 
 pub(super) fn position(
@@ -77,20 +96,7 @@ impl RetainedPlaybackTab {
     }
 
     fn end(&self) -> Option<MediaTime> {
-        if let Some(plan) = self.session.as_ref().and_then(PlaybackSession::timeline) {
-            return Some(plan.duration());
-        }
-        let duration = self
-            .duration
-            .filter(|duration| !duration.is_zero())
-            .map(media_time);
-        match (
-            duration,
-            self.session.as_ref().and_then(PlaybackSession::range_end),
-        ) {
-            (Some(duration), Some(trim)) => Some(duration.min(trim)),
-            (duration, trim) => duration.or(trim),
-        }
+        end(self.session.as_ref(), self.duration)
     }
 
     pub fn fail(&mut self, error: String) {
@@ -191,6 +197,12 @@ impl RetainedPlaybackTab {
         if finished {
             self.anchor(self.end().unwrap_or(position), true);
             self.state = PlaybackState::Ended;
+            if self.playback_selection.is_some() {
+                self.status = Some((
+                    "Selection ended · Shift+Space restarts · Escape returns to full range".into(),
+                    Instant::now(),
+                ));
+            }
             if let Err(error) = self.session.as_mut().expect("session").set_paused(true) {
                 self.fail(error.to_string());
             }

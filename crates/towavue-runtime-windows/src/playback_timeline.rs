@@ -12,15 +12,16 @@ pub(super) struct Segment {
     source: TimeRange,
     start: MediaTime,
     duration: MediaTime,
+    stop: MediaTime,
     volume: f32,
 }
 
 impl Segment {
     pub(super) fn source_end(self) -> MediaTime {
-        self.source.end()
+        self.source_target(self.stop)
     }
     fn end(self) -> MediaTime {
-        MediaTime::from_nanoseconds(self.start.as_nanoseconds() + self.duration.as_nanoseconds())
+        self.stop
     }
     pub(super) fn source_target(self, edited: MediaTime) -> MediaTime {
         let local =
@@ -48,22 +49,26 @@ pub(super) fn segments(
     plan: &EditTimeline,
     target: MediaTime,
     terminal_frame: bool,
+    end: Option<MediaTime>,
 ) -> Vec<Segment> {
     let mut start = 0_i64;
+    let end = end.unwrap_or(plan.duration()).min(plan.duration());
     plan.spans()
         .iter()
-        .enumerate()
-        .filter_map(|(index, span)| {
+        .filter_map(|span| {
             let segment = Segment {
                 source: span.source(),
                 start: MediaTime::from_nanoseconds(start),
                 duration: span.duration(),
+                stop: MediaTime::from_nanoseconds(start + span.duration().as_nanoseconds())
+                    .min(end),
                 volume: span.volume(),
             };
             start += span.duration().as_nanoseconds();
-            (segment.end() > target
-                || (terminal_frame && index + 1 == plan.spans().len() && target == plan.duration()))
-            .then_some(segment)
+            (segment.start < end
+                && (segment.end() > target
+                    || (terminal_frame && segment.end() == target && target == end)))
+                .then_some(segment)
         })
         .collect()
 }
@@ -73,18 +78,19 @@ pub(super) fn decode_audio(
     path: &Path,
     plan: &EditTimeline,
     target: MediaTime,
+    end: Option<MediaTime>,
     master_rate: f32,
     format: AudioFormat,
     cancelled: &AtomicBool,
     mut emit: impl FnMut(AudioChunk) -> bool,
 ) -> Result<(), DecodeError> {
     let cancelled = || cancelled.load(Ordering::Relaxed);
-    let segments = segments(plan, target, false);
+    let segments = segments(plan, target, false, end);
     let Some(first) = segments.first() else {
         return Ok(());
     };
     let source_start = first.source_target(target);
-    let source_end = segments.last().expect("nonempty segments").source.end();
+    let source_end = segments.last().expect("nonempty segments").source_end();
     let sample_at = |time: MediaTime| {
         (time.as_seconds_f64() / f64::from(master_rate) * f64::from(format.sample_rate)).ceil()
             as u64
@@ -124,7 +130,7 @@ pub(super) fn decode_audio(
                 decode::clip_audio_chunk(
                     &mut part,
                     segment.source_target(target),
-                    Some(segment.source.end()),
+                    Some(segment.source_end()),
                 );
                 if part.frames > 0 {
                     tempo
@@ -132,7 +138,7 @@ pub(super) fn decode_audio(
                         .expect("tempo")
                         .push(&part.bytes, &mut queue)?;
                 }
-                end >= segment.source.end()
+                end >= segment.source_end()
             } else {
                 true
             };

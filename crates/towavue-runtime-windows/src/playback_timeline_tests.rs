@@ -307,6 +307,7 @@ fn edited_audio_has_export_equivalent_samples_bounded_chunks_and_cancellation() 
             &path,
             &plan,
             MediaTime::ZERO,
+            None,
             rate,
             format,
             &AtomicBool::new(false),
@@ -361,6 +362,7 @@ fn edited_audio_has_export_equivalent_samples_bounded_chunks_and_cancellation() 
             &path,
             &plan,
             target,
+            None,
             1.0,
             format,
             &AtomicBool::new(false),
@@ -379,12 +381,152 @@ fn edited_audio_has_export_equivalent_samples_bounded_chunks_and_cancellation() 
         assert_eq!(first, (frames > 0).then_some(target));
     }
     let mut chunks = 0;
-    let result = timeline::decode_audio(&path, &plan, time(750), 1.0, format, &cancelled, |_| {
-        chunks += 1;
-        cancelled.store(true, Ordering::Relaxed);
-        true
-    });
+    let result = timeline::decode_audio(
+        &path,
+        &plan,
+        time(750),
+        None,
+        1.0,
+        format,
+        &cancelled,
+        |_| {
+            chunks += 1;
+            cancelled.store(true, Ordering::Relaxed);
+            true
+        },
+    );
     assert!(matches!(result, Err(decode::DecodeError::ConsumerClosed)));
     assert_eq!(chunks, 1);
+    fs::remove_dir_all(directory).expect("remove owned fixture");
+}
+
+#[test]
+fn selection_bounds_decode_without_rebasing_or_mutating_the_edited_plan() {
+    let (directory, path) = fixture(false);
+    let plan = plan();
+    let mut session = PlaybackSession::open(
+        &path,
+        GraphicsDevice::warp_for_test().expect("WARP"),
+        0.0,
+        1.0,
+        PlaybackRange::default(),
+        |_| {},
+    )
+    .expect("session");
+    session
+        .seek_with_timeline(time(0), 1.0, plan.clone(), true)
+        .expect("plan");
+    let expected = drain_video(&mut session);
+    for selected in [range(200, 400), range(375, 1237), range(500, 1500)] {
+        session
+            .seek_with_timeline_selection(selected.start(), 1.0, plan.clone(), Some(selected), true)
+            .expect("selection");
+        assert_eq!(session.timeline(), Some(&plan));
+        assert_eq!(session.range_end(), Some(selected.end()));
+        let reference: Vec<_> = expected
+            .iter()
+            .filter(|(time, _)| *time >= selected.start() && *time < selected.end())
+            .cloned()
+            .collect();
+        assert!(
+            drain_video(&mut session) == reference,
+            "selected original frames with unchanged edited PTS"
+        );
+        session.seek(time(9000)).expect("selection EOF");
+        assert_eq!(session.target(), selected.end());
+        assert!(
+            drain_video(&mut session)
+                == vec![reference.last().expect("last selected frame").clone()],
+            "terminal selection preview"
+        );
+        session
+            .replace_graphics_device(
+                GraphicsDevice::warp_for_test().expect("replacement"),
+                time(0),
+            )
+            .expect("selection recovery");
+        assert_eq!(session.target(), selected.start());
+        assert_eq!(session.timeline(), Some(&plan));
+        assert!(
+            drain_video(&mut session) == reference,
+            "recovery retains selection bounds"
+        );
+    }
+    let generation = session.generation();
+    assert!(matches!(
+        session.seek_with_timeline_selection(
+            time(0),
+            1.0,
+            plan.clone(),
+            Some(range(0, 9000)),
+            false
+        ),
+        Err(PlaybackError::InvalidSelection)
+    ));
+    assert_eq!(session.generation(), generation);
+    session
+        .seek_with_timeline(time(0), 1.0, plan.clone(), true)
+        .expect("restore whole plan");
+    assert_eq!(session.range_end(), Some(plan.duration()));
+    assert!(drain_video(&mut session) == expected);
+    drop(session);
+    fs::remove_dir_all(directory).expect("remove owned fixture");
+}
+
+#[test]
+fn selected_audio_stops_at_planned_samples_inside_a_stretched_span() {
+    let (directory, path) = fixture(true);
+    let plan = plan();
+    let selected = range(375, 1237);
+    let format = AudioFormat {
+        sample_rate: 48000,
+        channels: 2,
+    };
+    for rate in [0.25, 1.0, 4.0] {
+        let mut count = 0;
+        let mut samples = Vec::new();
+        timeline::decode_audio(
+            &path,
+            &plan,
+            selected.start(),
+            Some(selected.end()),
+            rate,
+            format,
+            &AtomicBool::new(false),
+            |chunk| {
+                assert!(
+                    chunk.presentation_time >= selected.start()
+                        && chunk.presentation_time < selected.end()
+                );
+                assert!(chunk.frames <= 1024);
+                count += chunk.frames;
+                samples.extend(chunk.bytes);
+                true
+            },
+        )
+        .expect("selected audio");
+        let at =
+            |time: MediaTime| (time.as_seconds_f64() / f64::from(rate) * 48000.0).ceil() as usize;
+        assert_eq!(count, at(selected.end()) - at(selected.start()));
+        let mut reference = Vec::new();
+        timeline::decode_audio(
+            &path,
+            &plan,
+            selected.start(),
+            None,
+            rate,
+            format,
+            &AtomicBool::new(false),
+            |chunk| {
+                reference.extend(chunk.bytes);
+                true
+            },
+        )
+        .expect("same seek reference");
+        assert!(
+            samples[..1024] == reference[..1024],
+            "selection stop does not rebase its initial PCM"
+        );
+    }
     fs::remove_dir_all(directory).expect("remove owned fixture");
 }

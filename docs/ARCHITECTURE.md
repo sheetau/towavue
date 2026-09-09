@@ -456,6 +456,8 @@ Saveはruntime所有の単一background export jobへimmutableなsource・target
 
 FFmpegはtargetと同じfilesystemの専用一時directoryへ出力する。成功・非空output・cancel未要求を確認してからrenameでtargetを置換し、失敗・cancelでは既存targetを変更しない。runtimeはFFmpegの進捗pipeとdiagnostic pipeをdrainし、cancel時には子processを終了・回収して一時outputを片付ける。hardware fallbackも同じ一時output内で行う。sourceと同一pathの拒否は維持する。
 
+U10のtab hoverはtab名の直下へ低解像度previewとpathを表示し、hover自体ではactivate／Seek／編集／focus変更を行わない。画像・音声はfilmstripと同じPreviewCache、動画はseek hoverと同じ240px・20区間中央のthumbnail keyを使う。現在tabの動画は現在位置、非active tabは最後に描画したpath／位置／durationの記録から区間を選ぶ。未観測の動画は0秒を使う。この記録はpreview専用で、U07の再生位置復元・background session保持ではない。専用latest-only worker一つが取得し、世代・tab ID・path・区間が一致する結果だけを一時textureへ変換する。hover離脱、drag／button押下、menu／modal／別overlay、fullscreen、media切替、close、graphics復旧で取消／表示破棄する。失敗はNo previewとpathを示し、同じhover中の毎frame再生成は行わない。tooltipの通常delay前からhover対象だけを取得するが、全tabの先行生成や原寸／編集済みframeの生成は追加しない。
+
 ### M7 advanced presentation and interaction
 
 preview cacheはruntimeがFFmpeg / FFprobeの子processとdisk I/Oを所有し、appへowned RGBA画像とdurationだけを返す。cache keyは正規化path、file size、更新時刻、preview種別と寸法から作り、`%LOCALAPPDATA%\towavue\preview-cache`を64 MiB以内へ古い順に削減する。waveform、duration、hover thumbnailは専用workerで生成し、path付きeventをappへ返すため、古いtabの結果を現在のtabへ適用せずUI threadもblockしない。

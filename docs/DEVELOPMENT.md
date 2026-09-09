@@ -1214,6 +1214,13 @@ towavue/
 - 同じ3画像（600×800 PNG、各6000×6000単一frame GIF2枚）でRight→Right→Homeと500ms間隔で開き、256 MiB原寸cacheから1枚目のGIFを追い出してからRightで戻る。baseline5007948d PID42992/start11:26:07.6762915Zは32.097/119.527msにLoading＋黒、165.957/214.075msはtitle Pausedでも画面の標本は黒、260.476msで緑pixel。変更後9d29d5afcadbd34162cfe7a3b9862a503bf2fb53503a42a8a8db9f2f68683c25 PID11552/start11:27:53.9813054Zは35.877/91.742msにLoading＋低解像度画像、その後原寸へ切替。titleとcaptureは別時点の標本で、実完了時刻を厳密に示す値ではない。全量decodeを速めた比較やcold storage／未訪問画像の結果ではない。
 - 最終原寸captureの514×514領域を比較し、seek overlayが重なる下5行に1046差分、それ以外の261626画素は一致。previewの近似画素を原寸一致として数えない。両viewerは通常Closeで終了0・stderr空、source hashes不変（PNG5f24c4ff、両GIFbf55696f）。ignoredのprogressive-preview-before/afterにidentity／samples／10 captures／final／exitを保持。元寸法不明・未cache画像のpreview先行生成と黒い待機、tab/recent/video previewの残件は継続する。
 
+### タブ直下の共有preview（2026-09-09 20:51 JST）
+
+- U10: hover対象だけをlatest-only workerで取得し、画像／音声はfilmstrip、動画はseekの240px・20区間中央のcacheを共用する。tab ID／path／世代／区間一致で一時textureを受理する。現在動画は現在位置、非active動画は最後に描画した位置から選ぶ。これはU07のsession保持ではない。hoverでactivate／Seek／編集を行わず、離脱・押下・overlay・fullscreen・切替・復旧で取消する。同じhoverのerrorを毎frame再試行しない。
+- 新規回帰3件で区間境界／path変更、latest結果／古い結果拒否／失敗再試行抑制、dirty tabでの画像とpathの直下描画／無操作／離脱・palette・grid・filmstrip取消を確認。最初の描画testは画像shapeをMeshと仮定して失敗したため、固定eguiが実際に返すtexture付きRectを検証するよう修正。fmt／all-target Clippy／全303 tests通過、実機専用4 testsはignoredのまま。release buildも通過。
+- Windows 11の通常release7b465a6bf7c8c3659cd2e5633cb765afd3c6ecee988c984f3832b90276970fd3、PID29444/start11:42:50.6500749Z。同じ実windowでPNG→MP4→WAVをOpenし、画像・動画・waveformとpathがtab直下へ出ることをcapture。動画再生中は約2秒区間、音声再生中に非active動画へhoverすると約14秒区間を表示し、active tone.wavのまま。非active画像にも元画像previewが出る。原寸や編集済み映像のプレビューではない。
+- Open dialogのOpen buttonにInvokePatternがなくhelperが止まった際は、同じPID／所有dialogを維持して、そのbuttonの実boundsへclickして再開。appの失敗や再起動として扱わない。通常Closeは終了0（launcher81857）、stderr170bytesはdecode-path選択と最終session統計の3行。保存操作は行わず、PNG hash5f24c4ffは起動前後一致。MP4/WAVの終了時hashは36179a1f／0e0cd597で、開始時との比較は未取得。identity／5 captures／exit／logsはignoredのtab-hover-nativeに保持。native後のsource追加はoverlay回帰testのみ。recent UI／未訪問先行生成／動画sheet／GPU texture共用は残件。
+
 ## 8. UI/UX変更の判断基準
 
 - 実装済みcommandの入口はmenu、palette、shortcut、gridで同じ`CommandId`を共有する。入口ごとに別logicを作らない。

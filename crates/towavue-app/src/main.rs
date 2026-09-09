@@ -14,6 +14,7 @@ mod reading_input;
 mod seekbar;
 mod selection;
 mod shortcuts;
+mod tab_preview;
 mod timeline_input;
 mod trim;
 mod welcome;
@@ -153,6 +154,11 @@ enum AppEvent {
     ImagePreview(PathBuf, u64, towavue_runtime_windows::CachedImagePreview),
     FolderReady,
     FilmstripReady,
+    TabPreview(
+        tab_preview::Target,
+        u64,
+        Result<towavue_runtime_windows::PreviewImage, String>,
+    ),
     DialogFinished(Result<Option<PathBuf>, DialogError>),
     PromptFinished(Result<PromptResponse, DialogError>),
     LicenseGuideRevealed(std::io::Result<PathBuf>),
@@ -619,6 +625,7 @@ struct Application<N> {
     filmstrip_open: bool,
     filmstrip_return_focus: Option<(u64, egui::Id)>,
     filmstrip: filmstrip::Filmstrip,
+    tab_preview: tab_preview::TabPreview,
     playlist: playlist::Playlist,
     image_seek_preview_active: bool,
     grid_open: bool,
@@ -758,6 +765,7 @@ where
             filmstrip_open: false,
             filmstrip_return_focus: None,
             filmstrip,
+            tab_preview: tab_preview::TabPreview::new()?,
             playlist: playlist::Playlist::default(),
             image_seek_preview_active: false,
             grid_open: false,
@@ -898,6 +906,7 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.tab_preview.clear();
         self.clear_image_previews();
         self.guard_return_focus = None;
         self.playlist.clear();
@@ -1348,6 +1357,17 @@ where
                 }
             }
             AppEvent::ImagesReady => self.finish_image_load(),
+            AppEvent::TabPreview(target, generation, result) => {
+                if self
+                    .tabs
+                    .tabs()
+                    .iter()
+                    .any(|tab| tab.id == target.tab && tab.target.current_path() == target.path)
+                    && let Some(context) = &self.ui_context
+                {
+                    self.tab_preview.finish(context, target, generation, result);
+                }
+            }
             AppEvent::ImagePreview(path, generation, preview) => {
                 self.finish_image_preview(path, generation, preview)
             }
@@ -1686,7 +1706,15 @@ where
         }
         wheel_input::begin_frame(&context);
         let mut volume_targets = Vec::new();
+        let position = Duration::from_secs_f64(self.current_position().as_seconds_f64().max(0.0));
+        self.tab_preview.record(
+            &self.tabs,
+            self.path.as_deref(),
+            position,
+            self.media_duration,
+        );
         let status_rect = if self.fullscreen {
+            self.tab_preview.clear();
             None
         } else {
             self.draw_top_bar(root, actions);
@@ -2440,7 +2468,14 @@ where
         }
     }
 
-    fn draw_top_bar(&self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+    fn draw_top_bar(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        let mut preview_target = None;
+        let preview_allowed = !self.modal_input_blocked()
+            && !self.palette_open
+            && !self.grid_open
+            && !self.filmstrip_open
+            && !egui::Popup::is_any_open(root.ctx())
+            && root.input(|input| input.focused && !input.pointer.any_down());
         let window_rect = root.max_rect();
         let return_to_tab = root.ctx().data_mut(|data| {
             data.remove_temp::<bool>("filmstrip-return-tab".into())
@@ -2559,26 +2594,29 @@ where
                                         egui::Stroke::NONE;
                                     tab_ui.visuals_mut().widgets.active.bg_stroke =
                                         egui::Stroke::NONE;
-                                    let response = tab_ui
-                                        .put(
-                                            label_rect,
-                                            egui::Button::new((
-                                                if active {
-                                                    RichText::new(label).color(chrome::FOREGROUND)
-                                                } else {
-                                                    RichText::new(label)
-                                                },
-                                                egui::Atom::grow(),
-                                            ))
-                                            .fill(Color32::TRANSPARENT)
-                                            .stroke(egui::Stroke::NONE)
-                                            .gap(0.0)
-                                            .truncate()
-                                            .sense(egui::Sense::click_and_drag()),
-                                        )
-                                        .on_hover_text(
-                                            tab.target.current_path().display().to_string(),
-                                        );
+                                    let response = tab_ui.put(
+                                        label_rect,
+                                        egui::Button::new((
+                                            if active {
+                                                RichText::new(label).color(chrome::FOREGROUND)
+                                            } else {
+                                                RichText::new(label)
+                                            },
+                                            egui::Atom::grow(),
+                                        ))
+                                        .fill(Color32::TRANSPARENT)
+                                        .stroke(egui::Stroke::NONE)
+                                        .gap(0.0)
+                                        .truncate()
+                                        .sense(egui::Sense::click_and_drag()),
+                                    );
+                                    if preview_allowed {
+                                        let target = self.tab_preview.target(tab);
+                                        if response.hovered() {
+                                            preview_target = Some(target.clone());
+                                        }
+                                        self.tab_preview.show(&response, &target);
+                                    }
                                     if response.clicked() {
                                         actions.push(UiAction::ActivateTab(tab.id));
                                     }
@@ -2704,6 +2742,11 @@ where
                     }
                 });
             });
+        self.tab_preview.request(
+            preview_target,
+            &self.preview_cache,
+            Arc::clone(&self.notify),
+        );
     }
 
     fn draw_grid_menu(&mut self, context: &egui::Context, actions: &mut Vec<UiAction>) {
@@ -4847,6 +4890,7 @@ where
     }
 
     fn recover_graphics_device(&mut self, position: MediaTime) {
+        self.tab_preview.clear();
         self.clear_image_previews();
         self.image_texture_cache.entries.clear();
         let state = self.state;
@@ -6727,7 +6771,7 @@ mod tests {
 
     #[test]
     fn accessibility_names_the_painted_menu_button() {
-        let app = Application::new(None, |_| {}).expect("headless application");
+        let mut app = Application::new(None, |_| {}).expect("headless application");
         let context = fonts::test_context();
         context.enable_accesskit();
         let output = context.run_ui(egui::RawInput::default(), |ui| {
@@ -6752,7 +6796,7 @@ mod tests {
         app.tabs.open_new(root.join("image.png"), MediaKind::Image);
         let context = fonts::test_context();
         context.enable_accesskit();
-        let frame = |events| {
+        let mut frame = |events| {
             let mut actions = Vec::new();
             let output = context.run_ui(
                 egui::RawInput {
@@ -8650,7 +8694,7 @@ mod tests {
         let context = fonts::test_context();
         context.global_style_mut(crate::chrome::style);
         let time = std::cell::Cell::new(0.0);
-        let frame = |app: &Application<_>, width, events| {
+        let frame = |app: &mut Application<_>, width, events| {
             time.set(time.get() + 1.0 / 60.0);
             let output = context.run_ui(
                 egui::RawInput {
@@ -8686,7 +8730,7 @@ mod tests {
                 })
                 .expect("active tab rectangle")
         };
-        let settle = |app: &Application<_>, width| {
+        let settle = |app: &mut Application<_>, width| {
             for _ in 0..90 {
                 frame(app, width, vec![]);
             }
@@ -8698,11 +8742,11 @@ mod tests {
                 "active {rect:?} outside {clip:?}"
             );
         };
-        visible(settle(&app, 480.0));
+        visible(settle(&mut app, 480.0));
         app.tabs.activate(tabs[0]);
-        visible(settle(&app, 480.0));
+        visible(settle(&mut app, 480.0));
         frame(
-            &app,
+            &mut app,
             480.0,
             vec![
                 egui::Event::PointerMoved(egui::pos2(80.0, 14.0)),
@@ -8714,24 +8758,24 @@ mod tests {
                 },
             ],
         );
-        let manual = settle(&app, 480.0);
+        let manual = settle(&mut app, 480.0);
         assert!(
             manual.0.right() < manual.1.left(),
             "manual scroll can leave the current tab offscreen"
         );
         assert_eq!(
-            settle(&app, 480.0),
+            settle(&mut app, 480.0),
             manual,
             "idle frames retain the user's position"
         );
         app.tabs.activate(tabs[11]);
-        visible(settle(&app, 480.0));
-        visible(settle(&app, 960.0));
-        visible(settle(&app, 480.0));
+        visible(settle(&mut app, 480.0));
+        visible(settle(&mut app, 960.0));
+        visible(settle(&mut app, 480.0));
         app.tabs.reorder(tabs[11], 0);
-        visible(settle(&app, 480.0));
+        visible(settle(&mut app, 480.0));
         let last = app.tabs.open_new(root.join("new.png"), MediaKind::Image);
-        visible(settle(&app, 480.0));
+        visible(settle(&mut app, 480.0));
         assert_eq!(app.tabs.active().expect("active tab").id, last);
         assert_eq!(app.media_generation, generation);
         assert!(app.edits.is_empty());

@@ -1,20 +1,42 @@
 use egui::{Color32, Pos2, Rect, Stroke, Ui};
 use winit::window::ResizeDirection;
 
-pub const BACKGROUND: Color32 = Color32::from_rgb(8, 8, 8);
-pub const MUTED: Color32 = Color32::from_rgb(145, 145, 145);
+pub const BACKGROUND: Color32 = Color32::BLACK;
+pub const MUTED: Color32 = Color32::from_gray(128);
+pub const FOREGROUND: Color32 = Color32::WHITE;
+pub const BORDER: Color32 = Color32::from_gray(24);
+pub const HOVER: Color32 = Color32::from_gray(76);
+pub const TITLE_HEIGHT: f32 = 32.0;
+pub const STATUS_HEIGHT: f32 = 30.0;
+pub const TAB_HEIGHT: f32 = 26.0;
+pub const TAB_CLOSE_WIDTH: f32 = 24.0;
+pub const TAB_PADDING: f32 = 10.0;
 
 pub fn style(style: &mut egui::Style) {
     style.visuals.panel_fill = BACKGROUND;
-    style.visuals.selection.bg_fill = Color32::from_gray(38);
-    style.visuals.selection.stroke = Stroke::new(1.0, Color32::from_gray(225));
+    style.visuals.selection.bg_fill = HOVER;
+    style.visuals.selection.stroke = Stroke::new(1.0, FOREGROUND);
+    style.visuals.hyperlink_color = FOREGROUND;
+    for (visuals, foreground, background) in [
+        (&mut style.visuals.widgets.noninteractive, MUTED, BORDER),
+        (&mut style.visuals.widgets.inactive, MUTED, BORDER),
+        (&mut style.visuals.widgets.hovered, FOREGROUND, HOVER),
+        (&mut style.visuals.widgets.active, FOREGROUND, HOVER),
+        (&mut style.visuals.widgets.open, FOREGROUND, HOVER),
+    ] {
+        visuals.fg_stroke.color = foreground;
+        visuals.bg_fill = background;
+        visuals.weak_bg_fill = background;
+        visuals.bg_stroke.color = BORDER;
+        visuals.expansion = 0.0;
+    }
     style.spacing.button_padding = egui::vec2(6.0, 3.0);
 }
 
 pub fn bar() -> egui::Frame {
     egui::Frame::NONE
         .fill(BACKGROUND)
-        .inner_margin(egui::Margin::symmetric(6, 2))
+        .inner_margin(egui::Margin::symmetric(6, 3))
 }
 
 pub fn modal_heading(ui: &mut Ui, title: &str) {
@@ -40,7 +62,12 @@ pub fn button(ui: &mut Ui, glyph: &str, label: &str) -> egui::Response {
     });
     if painted {
         let center = response.rect.center();
-        let stroke = Stroke::new(1.0, MUTED);
+        let color = if response.hovered() || response.has_focus() {
+            FOREGROUND
+        } else {
+            MUTED
+        };
+        let stroke = Stroke::new(1.0, color);
         if glyph == "≋" {
             for index in 0..7 {
                 let x = center.x - 6.0 + index as f32 * 2.0;
@@ -57,7 +84,7 @@ pub fn button(ui: &mut Ui, glyph: &str, label: &str) -> egui::Response {
             for x in [-3.0, 3.0] {
                 ui.painter().line_segment(
                     [center + egui::vec2(x, -5.0), center + egui::vec2(x, 5.0)],
-                    Stroke::new(2.0, MUTED),
+                    Stroke::new(2.0, color),
                 );
             }
         } else {
@@ -90,7 +117,7 @@ pub fn tab_drop_gap(tabs: &[Rect], strip: Rect, pointer: Pos2) -> Option<(usize,
 pub fn logo(ui: &Ui, rect: Rect) {
     let rect = Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0));
     let point = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (16.0 / 27.68);
-    let stroke = Stroke::new(1.1, Color32::from_gray(225));
+    let stroke = Stroke::new(1.1, FOREGROUND);
     for (a, b) in [
         ((2.17, 2.17), (10.21, 10.21)),
         ((2.17, 25.5), (10.21, 17.47)),

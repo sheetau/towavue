@@ -18,7 +18,7 @@
 | U01 | ネイティブ角丸・境界・caption controls、重くないwindow drag | 未完。現状はdecorationsなし＋egui controls。runtime内のnon-client境界設計と通常／最大化／fullscreen／DPI／Snapを確認する |
 | U02 | modalのnative利用をコード量・操作性で判断 | 要照合。通常egui、graphics故障時native。guardと入力・focus・保存取消を維持して判断を記録する |
 | U03 | Codicon、Figtree＋日本語UI font、数字の等幅 | 未完。現在は既定font＋Windows日本語fallbackと手描き／文字glyph。参照アプリのasset・ライセンス・tabular figuresを確認する |
-| U04 | grayscale配色、barの2境界、logo／tabの中央揃え・左寄せ・一定padding | 未完。chrome.rsとmain.rsに現在色／寸法。黒／白／#808080／#181818／#4C4C4Cへ一貫した役割を与え、狭幅でも測定する |
+| U04 | grayscale配色、barの2境界、logo／tabの中央揃え・左寄せ・一定padding | 一部対応。基本バー・共通widget状態色・clear色、logo／tab中央と左10px余白、timeline上へ移る2境界を実装・検証。overlay固有色／全media状態での最終照合、font/icon変更後の配置確認は残る |
 | U05 | 重い保存等の進捗はtoolbar下境界、軽い画像移動で点滅させない | 未完。現在はexport window／一時status。実際の進捗・取消・失敗との整合が必要 |
 | U06 | Welcome tab常在、Open file/folderと最近開いたfile | 一部実装。Welcome表示・Openは存在、recent永続化とtab identityは未完。履歴はpath参照に限定し未保存backupを加えない |
 | U07 | tabごとの全表示／再生状態保持、背景音声・複数動画、非activeの表示負荷抑制 | 未完。現在はactive切替でsessionを再構築。単一device維持・session所有・audio共存・bounded resource／終了順の設計が必要 |
@@ -46,7 +46,7 @@
 
 ## 実装順
 
-2026-09-09 16:48の区切り依頼により、U12 checkpoint後は以下へ自動着手せず、ownerの次のgoal設定・作業指示を待つ。台帳の残件は削除しない。
+ownerの最新の明示指示により、16:48のcheckpoint後の待機指定は失効し、既存goalの以下の実装順を再開する。台帳の全残件を維持する。
 
 1. I01の画像viewportを実装・検証し、U04／U12など画面の寸法・操作境界を整える。native caption（U01）、font/icon（U03）は独立して設計・導入する。
 2. I02～I05、U06／U09／U10の閲覧flowを実装し、連続操作を測定する。
@@ -61,6 +61,15 @@
 - 新規2 testsで端点・中央・範囲外・極小幅、100／125／200%密度のhover描画とidle全幅を確認。既存のUIA値変更・release取消を含め、fmt／Clippy／全283 tests通過。実機依存3 testsはignoredのまま。
 - 通常release e41427a3、生成PNG二枚、960×576のWindows 11実windowでUIA画像位置1／2を確認。つまみの明るい画素は先頭x=0..7、末尾x=952..959、両方y=542..549でwindow内。正常終了0、生成原本のhashは不変。最初のforeground拒否では入力せず、同じ所有windowのslider focus後に確認した。
 - 証拠はignored `target/tmp/image-viewport-20260909/seek-handoff/`。実画面は100%・画像位置での確認であり、動画の実pointer操作やOS混在DPIを新たに実証したものではない。配布成果物の更新・実インストールは行わない。
+
+## U04基本バーの検証実績（2026-09-09 17:05 JST）
+
+- 文字由来のmenu寸法と、18pxの仮の高さへ縮む横scroll内のrowを固定26px基準へ変更。title 32px／status 30pxの内容を上下中央へ揃え、tab label左10px・close領域24pxを保持する。既存Button／MenuButtonと明示tab identityを使い、独自の入力providerやUI frameworkを追加しない。
+- 新規実UI回帰は320／480／960 logical px × 100／125／200% × timeline有無で、UIA node boundsと実text shape、full-width境界2本を照合。先行実装ではtabがy=7..33へずれることを検出し、scroll内rowの中央配置まで直した。UIA nodeの座標はroot transform前のlogical値であり、試験側の二重DPI除算も修正。
+- 共通styleの色を変更する際、枠の太さまで変えるとpalette行の左右揃えが崩れることを既存回帰が検出した。元のstroke幅を維持して色だけ更新し、palette・menu・tab reorder／auto-scroll／focus／UIA回帰を含めM0全284 testsとClippy／formatを通過。実機依存3 testsはignoredとして区別。
+- 通常release 476aa84cのWindows 11実windowで、logo／tab label／close／window controlsのscreen中心yはすべて68（window内16）。背景RGB=(0,0,0)、active tab／title下境界=(24,24,24)、hover=(76,76,76)をPNG画素で確認。960×576・400×576、menu呼出し、palette検索／Escapeを確認した。
+- 生成H.264動画のTでtimelineを表示／解除。title境界はy=31、timeline上境界はy=450で#181818、旧status境界のy=545..547は黒。解除後は元のseek位置へ戻る。timeline hover thumbnailとtrim gripはまだ既存のままで、V01／V03の完了とはしない。
+- 両trialは正常終了0、生成PNG／MP4のhashは不変。証拠はignored `target/tmp/image-viewport-20260909/chrome-after/` と `chrome-timeline/`。実OS混在DPI・native captionは未検証であり、残件を完了扱いにしない。
 
 ## I01検証実績（2026-09-09 16:35 JST）
 

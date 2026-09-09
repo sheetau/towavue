@@ -1426,7 +1426,7 @@ where
                 && !self.audio_drained,
         );
         let renderer = self.renderer.as_mut().expect("renderer exists");
-        let media_result = renderer.clear([0.025, 0.025, 0.03, 1.0]).and_then(|()| {
+        let media_result = renderer.clear([0.0, 0.0, 0.0, 1.0]).and_then(|()| {
             if let (Some(session), Some(rect)) = (&mut self.session, self.video_rect) {
                 session.draw_current(renderer, rect * context.pixels_per_point(), self.video_uv)
             } else {
@@ -2200,16 +2200,22 @@ where
         });
         let window_rect = root.max_rect();
         egui::Panel::top("tabs")
-            .exact_size(32.0)
+            .exact_size(chrome::TITLE_HEIGHT)
             .frame(chrome::bar())
             .show(root, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     ui.visuals_mut().widgets.inactive.weak_bg_fill = chrome::BACKGROUND;
                     let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
-                    let menu = ui.menu_button("    ", |ui| {
+                    let (response, inner) = egui::containers::menu::MenuButton::from_button(
+                        egui::Button::new("")
+                            .min_size(egui::vec2(28.0, chrome::TAB_HEIGHT))
+                            .stroke(egui::Stroke::NONE),
+                    )
+                    .ui(ui, |ui| {
                         menu::show(ui, self.command_context(), &self.shortcuts)
                     });
+                    let menu = egui::InnerResponse::new(inner.map(|inner| inner.inner), response);
                     if return_to_tab && self.tabs.active().is_none() {
                         menu.response.request_focus();
                     }
@@ -2241,8 +2247,10 @@ where
                     egui::ScrollArea::horizontal()
                         .id_salt("tab-strip")
                         .max_width(strip_width)
+                        .max_height(chrome::TAB_HEIGHT)
+                        .auto_shrink([true, false])
                         .show(ui, |ui| {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_centered(|ui| {
                                 let mut tab_rects = Vec::new();
                                 let mut dragged = None;
                                 for (index, tab) in self.tabs.tabs().iter().enumerate() {
@@ -2251,7 +2259,7 @@ where
                                     let dirty =
                                         self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty);
                                     let (rect, _) = ui.allocate_exact_size(
-                                        egui::vec2(width, 26.0),
+                                        egui::vec2(width, chrome::TAB_HEIGHT),
                                         egui::Sense::hover(),
                                     );
                                     tab_rects.push(rect);
@@ -2268,11 +2276,20 @@ where
                                         if changed {
                                             ui.scroll_to_rect(rect, None);
                                         }
-                                        ui.painter().rect_filled(rect, 3.0, Color32::from_gray(28));
                                     }
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        3.0,
+                                        if active {
+                                            chrome::BORDER
+                                        } else {
+                                            chrome::BACKGROUND
+                                        },
+                                    );
+                                    let hover_background = ui.painter().add(egui::Shape::Noop);
                                     let label_rect = egui::Rect::from_min_max(
                                         rect.min,
-                                        rect.max - egui::vec2(24.0, 0.0),
+                                        rect.max - egui::vec2(chrome::TAB_CLOSE_WIDTH, 0.0),
                                     );
                                     let label = format!(
                                         "{}{}",
@@ -2285,17 +2302,28 @@ where
                                             .id(ui.id().with(("media-tab", tab.id)))
                                             .max_rect(rect),
                                     );
+                                    tab_ui.spacing_mut().button_padding =
+                                        egui::vec2(chrome::TAB_PADDING, 0.0);
+                                    tab_ui.visuals_mut().widgets.inactive.bg_stroke =
+                                        egui::Stroke::NONE;
+                                    tab_ui.visuals_mut().widgets.hovered.bg_stroke =
+                                        egui::Stroke::NONE;
+                                    tab_ui.visuals_mut().widgets.active.bg_stroke =
+                                        egui::Stroke::NONE;
                                     let response = tab_ui
                                         .put(
                                             label_rect,
-                                            egui::Button::new(RichText::new(label).color(
+                                            egui::Button::new((
                                                 if active {
-                                                    Color32::from_gray(230)
+                                                    RichText::new(label).color(chrome::FOREGROUND)
                                                 } else {
-                                                    chrome::MUTED
+                                                    RichText::new(label)
                                                 },
+                                                egui::Atom::grow(),
                                             ))
-                                            .frame(false)
+                                            .fill(Color32::TRANSPARENT)
+                                            .stroke(egui::Stroke::NONE)
+                                            .gap(0.0)
                                             .truncate()
                                             .sense(egui::Sense::click_and_drag()),
                                         )
@@ -2314,15 +2342,32 @@ where
                                     if response.dragged_by(egui::PointerButton::Primary)
                                         || response.drag_stopped_by(egui::PointerButton::Primary)
                                     {
-                                        dragged = Some((tab.id, response));
+                                        dragged = Some((tab.id, response.clone()));
                                     }
                                     let close_rect = egui::Rect::from_min_max(
-                                        egui::pos2(rect.right() - 24.0, rect.top()),
+                                        egui::pos2(
+                                            rect.right() - chrome::TAB_CLOSE_WIDTH,
+                                            rect.top(),
+                                        ),
                                         rect.max,
                                     );
                                     let close = tab_ui
                                         .put(close_rect, egui::Button::new("×").frame(false))
                                         .on_hover_text("Close tab");
+                                    if response.hovered() || close.hovered() {
+                                        ui.painter().set(
+                                            hover_background,
+                                            egui::Shape::rect_filled(rect, 3.0, chrome::HOVER),
+                                        );
+                                    }
+                                    if response.has_focus() || close.has_focus() {
+                                        ui.painter().rect_stroke(
+                                            rect,
+                                            3.0,
+                                            ui.visuals().selection.stroke,
+                                            egui::StrokeKind::Inside,
+                                        );
+                                    }
                                     close.widget_info(|| {
                                         egui::WidgetInfo::labeled(
                                             egui::WidgetType::Button,
@@ -2355,7 +2400,7 @@ where
                                                     egui::pos2(x, strip.top()),
                                                     egui::pos2(x, strip.bottom()),
                                                 ],
-                                                egui::Stroke::new(2.0, Color32::from_gray(225)),
+                                                egui::Stroke::new(2.0, chrome::FOREGROUND),
                                             );
                                             if response
                                                 .drag_stopped_by(egui::PointerButton::Primary)
@@ -2373,7 +2418,10 @@ where
                             });
                         });
                     let (drag_rect, response) = ui.allocate_exact_size(
-                        egui::vec2((ui.available_width() - controls_width).max(20.0), 26.0),
+                        egui::vec2(
+                            (ui.available_width() - controls_width).max(20.0),
+                            chrome::TAB_HEIGHT,
+                        ),
                         egui::Sense::click_and_drag(),
                     );
                     if self.tabs.tabs().is_empty() {
@@ -2381,14 +2429,13 @@ where
                             drag_rect.min,
                             egui::vec2(drag_rect.width().min(150.0), drag_rect.height()),
                         );
-                        ui.painter()
-                            .rect_filled(welcome_rect, 3.0, Color32::from_gray(28));
+                        ui.painter().rect_filled(welcome_rect, 3.0, chrome::BORDER);
                         ui.painter().text(
-                            welcome_rect.left_center() + egui::vec2(10.0, 0.0),
+                            welcome_rect.left_center() + egui::vec2(chrome::TAB_PADDING, 0.0),
                             Align2::LEFT_CENTER,
                             "Welcome",
                             egui::FontId::proportional(12.0),
-                            chrome::MUTED,
+                            chrome::FOREGROUND,
                         );
                     }
                     if response.double_clicked() {
@@ -2622,10 +2669,15 @@ where
         volume_targets: &mut Vec<egui::Response>,
     ) -> egui::Rect {
         egui::Panel::bottom("status")
-            .exact_size(30.0)
+            .exact_size(chrome::STATUS_HEIGHT)
+            .show_separator_line(
+                self.fullscreen
+                    || !self.timeline_open
+                    || !matches!(self.media_kind, Some(MediaKind::Video | MediaKind::Audio)),
+            )
             .frame(chrome::bar())
             .show(root, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     if self.fullscreen {
                         let response = chrome::button(
@@ -2766,11 +2818,7 @@ where
                             ui.set_min_width(path_width);
                             let (text, color, tooltip) =
                                 if let Some((message, _)) = &self.status_message {
-                                    (
-                                        message.clone(),
-                                        Color32::from_rgb(216, 205, 167),
-                                        message.clone(),
-                                    )
+                                    (message.clone(), chrome::FOREGROUND, message.clone())
                                 } else if let Some(path) = &self.path {
                                     let parent = path
                                         .parent()
@@ -3009,7 +3057,7 @@ where
                     .clamp(0.0, 1.0) as f32;
                 let x = egui::lerp(rect.x_range(), progress);
                 ui.painter()
-                    .vline(x, rect.y_range(), (2.0, Color32::LIGHT_BLUE));
+                    .vline(x, rect.y_range(), (2.0, chrome::FOREGROUND));
                 let edit = self.edit_state();
                 let tab = self.tabs.active().map(|tab| tab.id);
                 let trim_operations = trim::timeline(
@@ -8053,6 +8101,122 @@ mod tests {
     }
 
     #[test]
+    fn chrome_aligns_tabs_and_keeps_only_two_panel_boundaries() {
+        let Some(root) =
+            isolated_test_root("tests::chrome_aligns_tabs_and_keeps_only_two_panel_boundaries")
+        else {
+            return;
+        };
+        for width in [320.0, 480.0, 960.0] {
+            for density in [1.0, 1.25, 2.0] {
+                for timeline in [false, true] {
+                    let mut app = Application::new(None, |_| {}).expect("headless app");
+                    let first = app.tabs.open_new(root.join("a.png"), MediaKind::Image);
+                    app.tabs
+                        .open_new(root.join("a-much-longer-name.png"), MediaKind::Image);
+                    app.tabs.activate(first);
+                    app.timeline_open = timeline;
+                    app.media_kind = Some(MediaKind::Video);
+                    let context = egui::Context::default();
+                    context.enable_accesskit();
+                    context.global_style_mut(chrome::style);
+                    let mut output = egui::FullOutput::default();
+                    for frame in 0..4 {
+                        let mut input = egui::RawInput {
+                            time: Some(frame as f64),
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width, 300.0),
+                            )),
+                            ..Default::default()
+                        };
+                        input
+                            .viewports
+                            .get_mut(&egui::ViewportId::ROOT)
+                            .expect("viewport")
+                            .native_pixels_per_point = Some(density);
+                        output = context.run_ui(input, |ui| {
+                            let mut actions = Vec::new();
+                            app.draw_top_bar(ui, &mut actions);
+                            app.draw_status_bar(ui, &mut actions, &mut Vec::new());
+                            app.draw_timeline(ui, &mut actions);
+                            assert!(actions.is_empty());
+                        });
+                    }
+                    let tree = output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree");
+                    let bounds = |label| {
+                        let rect = tree
+                            .nodes
+                            .iter()
+                            .find(|(_, node)| node.label() == Some(label))
+                            .unwrap_or_else(|| panic!("missing widget {label}"))
+                            .1
+                            .bounds()
+                            .expect("bounds");
+                        egui::Rect::from_min_max(
+                            egui::pos2(rect.x0 as f32, rect.y0 as f32),
+                            egui::pos2(rect.x1 as f32, rect.y1 as f32),
+                        )
+                    };
+                    let logo = bounds("towavue menu");
+                    let label = bounds("a.png");
+                    let close = bounds("Close tab: a.png");
+                    assert!((logo.width() - 28.0).abs() < 0.01, "{logo:?}");
+                    for rect in [logo, label, close] {
+                        assert!((rect.center().y - 16.0).abs() <= 1.0 / density, "{rect:?}");
+                        assert!((rect.height() - chrome::TAB_HEIGHT).abs() <= 1.0 / density);
+                    }
+                    assert!((close.width() - chrome::TAB_CLOSE_WIDTH).abs() < 0.01);
+                    assert!((label.right() - close.left()).abs() < 0.01);
+                    let text = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.text() == "a.png" => Some(text),
+                            _ => None,
+                        })
+                        .expect("tab label paint");
+                    assert!(
+                        (text.pos.x - label.left() - chrome::TAB_PADDING).abs() <= 1.0 / density,
+                        "text {:?}, label {label:?}",
+                        text.pos
+                    );
+                    assert!(
+                        (text.pos.y + text.galley.size().y * 0.5 - 16.0).abs() <= 1.0 / density
+                    );
+                    let borders: Vec<_> = output
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::LineSegment { points, stroke }
+                                if stroke.color == chrome::BORDER
+                                    && points[0].x == 0.0
+                                    && points[1].x == width
+                                    && points[0].y == points[1].y =>
+                            {
+                                Some(points[0].y)
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    assert_eq!(borders.len(), 2, "timeline={timeline}, borders={borders:?}");
+                    assert!((borders[0] - 32.0).abs() <= 1.0);
+                    assert!(borders[1] > 32.0);
+                    if timeline {
+                        assert!(borders[1] < 260.0);
+                    } else {
+                        assert!((borders[1] - 270.0).abs() <= 1.0);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn overflowing_tab_bar_reveals_active_changes_but_preserves_manual_scroll() {
         let Some(root) = isolated_test_root(
             "tests::overflowing_tab_bar_reveals_active_changes_but_preserves_manual_scroll",
@@ -8096,7 +8260,7 @@ mod tests {
                 .iter()
                 .find_map(|shape| match &shape.shape {
                     egui::Shape::Rect(rect)
-                        if rect.fill == Color32::from_gray(28)
+                        if rect.fill == chrome::BORDER
                             && rect.rect.width() >= 70.0
                             && rect.rect.top() < 32.0 =>
                     {

@@ -23,6 +23,8 @@ ownerの2026-09-09の指定により、現在は見た目・操作感・安定�
 
 新しい機能・UI改善goalの対象と進捗は[UX_IMPLEMENTATION_PLAN](docs/UX_IMPLEMENTATION_PLAN.md)で管理します。通常画像のFitから余分な8pxの余白を除き、Shift+C／View menu／command paletteへCover表示を追加しました。Coverは縦横比を保って表示領域を覆い、画面外の部分は表示しませんが、画像の切り抜き編集や保存は行いません。Shift+WでFitへ戻せます。reading modeでは見開き全体のFitを維持します。
 
+上部のロゴ・タブ・window controlsと下部の内容を上下中央へ揃え、タブ名は一定の左余白で表示します。基本バー・画像余白は黒、active tab／境界は#181818、hoverは#4C4C4Cへ統一しました。timelineを開くと下側の境界はtimeline上へ移り、statusとの間には線を残しません。ネイティブcaption controlsと指定font／iconの導入は引き続き改善台帳の残件です。
+
 固定開発FFmpegには、LGPLという自己表示だけでは扱えないGPL推移依存が見つかりました。このbinaryは配布候補から外し、機能を保つ[再buildと検証](docs/FFMPEG_REBUILD.md)を進めます。現行の開発用fileや本体のライセンスは変更していません。
 
 preview／保存用の補助exeは本体と同じフォルダーを優先します。ffmpeg.exe／ffprobe.exeが片方でもあれば同じ配置だけを使い、不足を別のFFmpegで補いません。両方ともない開発配置では下記のFFMPEG_DIR/binを使います。PATH上の別版への自動切替は行わず、欠落時は必要なpathをエラーに表示します。この処理の検証は、Setup.exeの完成や同梱物の配布承認ではありません。

@@ -232,6 +232,8 @@ Explorerからのfile dropはwinitのowned path eventで受け、既存のextern
 
 ### H1 compact window shell
 
+UX改善ではchromeの共通色を背景#000、通常text/icon #808080、active/focus/progress #fff、境界/active tab #181818、hover #4C4C4Cへ揃える。mediaのletterbox clearも黒とする。32px title bar／30px status barを基準に内容を上下中央へ配置し、26px tab／28px幅logo buttonの高さを文字の有無から独立させる。tab名は左10pxの余白と右24pxのclose領域を持ち、hover背景はtab全体へ描く。通常のバー境界はtitle下とstatus上、timeline表示中は後者をtimeline上へ移し、timeline/status間の線を出さない。既存のwidget identity、menu／tab／resize入力、dirty guardは維持する。native caption、font/icon資産、選択線とtimeline編集modelは台帳の別項目として継続する。
+
 音声playlistはShell snapshotの音声だけを元の順で番号付き表示し、32 logical pxの行全体を選曲対象とする。見出しは省き、現在曲を明るく、他の曲を控えめに表示する。長いfilenameは一行に省略し、行hoverで全文を示す。ScrollAreaは可視行だけを描画し、選曲は既存のNavigate guardへ渡す。曲ごとのduration probeや新しい再生方式は追加しない。
 
 filmstrip・palette・grid・menu popup・modal中は音声playlistのUiを無効化し、wheelだけでなくpointer、keyboard focus、UIA操作とhover tooltipも背景へ通さない。opacityは元の値を保ち、暗幕による既存の見た目を重ねて減光しない。行のID・位置・Shell順を保持し、overlay自身やtitle/statusの操作へ無効化を広げない。閉じた後は同じ行を再度有効にする。

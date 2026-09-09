@@ -1,5 +1,5 @@
 use crate::timeline_input;
-use egui::{Color32, Context, Rect, Response};
+use egui::{Context, Rect, Response};
 
 pub fn show(
     context: &Context,
@@ -39,17 +39,25 @@ pub fn show(
             let travel = if active { compact_travel(rect) } else { rect };
             let track = Rect::from_center_size(rect.center(), egui::vec2(travel.width(), height));
             let x = egui::lerp(travel.x_range(), progress.clamp(0.0, 1.0));
-            ui.painter().rect_filled(track, 0.0, Color32::from_gray(55));
+            ui.painter().rect_filled(
+                track,
+                0.0,
+                if active {
+                    crate::chrome::HOVER
+                } else {
+                    crate::chrome::BORDER
+                },
+            );
             ui.painter().rect_filled(
                 Rect::from_min_max(track.min, egui::pos2(x, track.bottom())),
                 0.0,
-                Color32::from_gray(190),
+                crate::chrome::FOREGROUND,
             );
             if active {
                 ui.painter().circle_filled(
                     egui::pos2(x, rect.center().y),
                     compact_radius(rect),
-                    Color32::from_gray(230),
+                    crate::chrome::FOREGROUND,
                 );
             }
             (
@@ -290,7 +298,7 @@ mod tests {
                             .shapes
                             .iter()
                             .find_map(|shape| match &shape.shape {
-                                egui::Shape::Rect(rect) if rect.fill == Color32::from_gray(55) => {
+                                egui::Shape::Rect(rect) if rect.fill == crate::chrome::BORDER => {
                                     Some(rect.rect)
                                 }
                                 _ => None,

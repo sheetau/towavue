@@ -19,34 +19,49 @@ const IMAGE_PREVIEW_VARIANT: &str = "filmstrip-image-v4";
 
 #[derive(Default)]
 struct PreviewMemory {
-    entries: VecDeque<(String, PreviewImage)>,
+    entries: VecDeque<PreviewEntry>,
     bytes: usize,
+}
+
+struct PreviewEntry {
+    key: String,
+    image: PreviewImage,
+    source_size: Option<(u32, u32)>,
+}
+
+pub struct CachedImagePreview {
+    pub image: PreviewImage,
+    pub source_size: (u32, u32),
 }
 
 impl PreviewMemory {
     fn get(&mut self, key: &str) -> Option<PreviewImage> {
-        let index = self.entries.iter().position(|entry| entry.0 == key)?;
+        let index = self.entries.iter().position(|entry| entry.key == key)?;
         let entry = self.entries.remove(index)?;
-        let image = entry.1.clone();
+        let image = entry.image.clone();
         self.entries.push_back(entry);
         Some(image)
     }
 
     fn insert(&mut self, key: String, image: PreviewImage) {
-        if let Some(index) = self.entries.iter().position(|entry| entry.0 == key) {
-            let (_, previous) = self.entries.remove(index).expect("existing preview");
-            self.bytes -= previous.rgba.len();
+        if let Some(index) = self.entries.iter().position(|entry| entry.key == key) {
+            let previous = self.entries.remove(index).expect("existing preview");
+            self.bytes -= previous.image.rgba.len();
         }
         let bytes = image.rgba.len();
         if bytes > MEMORY_LIMIT_BYTES {
             return;
         }
         while self.entries.len() >= 64 || self.bytes + bytes > MEMORY_LIMIT_BYTES {
-            let (_, oldest) = self.entries.pop_front().expect("preview to evict");
-            self.bytes -= oldest.rgba.len();
+            let oldest = self.entries.pop_front().expect("preview to evict");
+            self.bytes -= oldest.image.rgba.len();
         }
         self.bytes += bytes;
-        self.entries.push_back((key, image));
+        self.entries.push_back(PreviewEntry {
+            key,
+            image,
+            source_size: None,
+        });
     }
 }
 
@@ -321,18 +336,16 @@ impl PreviewCache {
         let Ok(key) = cache_key(path, IMAGE_PREVIEW_VARIANT) else {
             return;
         };
-        if self
-            .memory
-            .lock()
-            .expect("preview memory")
-            .get(&key)
-            .is_some()
-        {
-            return;
-        }
         let Some(frame) = decoded.frames.first() else {
             return;
         };
+        {
+            let mut memory = self.memory.lock().expect("preview memory");
+            if let Some(entry) = memory.entries.iter_mut().find(|entry| entry.key == key) {
+                entry.source_size = Some((frame.width, frame.height));
+                return;
+            }
+        }
         let scale = (240.0 / f64::from(frame.width))
             .min(160.0 / f64::from(frame.height))
             .min(1.0);
@@ -348,7 +361,8 @@ impl PreviewCache {
             }
         }
         if current() && cache_key(path, IMAGE_PREVIEW_VARIANT).ok().as_ref() == Some(&key) {
-            self.memory.lock().expect("preview memory").insert(
+            let mut memory = self.memory.lock().expect("preview memory");
+            memory.insert(
                 key,
                 PreviewImage {
                     width,
@@ -356,7 +370,32 @@ impl PreviewCache {
                     rgba,
                 },
             );
+            memory
+                .entries
+                .back_mut()
+                .expect("bounded image preview")
+                .source_size = Some((frame.width, frame.height));
         }
+    }
+
+    pub fn cached_image(&self, path: &Path) -> Result<Option<CachedImagePreview>, PreviewError> {
+        self.check_cancelled()?;
+        let key = cache_key(path, IMAGE_PREVIEW_VARIANT)?;
+        let preview = {
+            let mut memory = self.memory.lock().expect("preview memory");
+            let size = memory
+                .entries
+                .iter()
+                .find(|entry| entry.key == key)
+                .and_then(|entry| entry.source_size);
+            size.and_then(|source_size| {
+                memory
+                    .get(&key)
+                    .map(|image| CachedImagePreview { image, source_size })
+            })
+        };
+        self.check_cancelled()?;
+        Ok(preview)
     }
 
     fn prune(&self) -> Result<(), PreviewError> {
@@ -660,6 +699,12 @@ mod tests {
             .filmstrip(&path, MediaKind::Image)
             .expect("shared preview");
         assert_eq!((preview.image.width, preview.image.height), (120, 160));
+        let loading = cache
+            .cached_image(&path)
+            .expect("metadata lookup")
+            .expect("source-sized preview");
+        assert_eq!(loading.source_size, (600, 800));
+        assert_eq!(loading.image, preview.image);
         for y in 0..160_u32 {
             for x in 0..120_u32 {
                 let offset = ((y * 120 + x) * 4) as usize;
@@ -711,6 +756,12 @@ mod tests {
         fs::remove_dir(&rejected.root).expect("remove empty rejection cache");
         let changed = cache_key(&path, IMAGE_PREVIEW_VARIANT).expect("changed key");
         assert_ne!(key, changed);
+        assert!(
+            cache
+                .cached_image(&path)
+                .expect("changed file lookup")
+                .is_none()
+        );
         assert!(matches!(
             cache.load_or_generate(changed, || Err(PreviewError::NoFrame)),
             Err(PreviewError::NoFrame)
@@ -1288,6 +1339,24 @@ mod tests {
                 .filmstrip(&source, MediaKind::Image)
                 .expect("cache card after releasing contention")
                 .image
+        );
+        assert!(
+            cache
+                .cached_image(&source)
+                .expect("known thumbnail")
+                .is_none(),
+            "unknown source dimensions cannot be used as an original-size preview"
+        );
+        let decoded = crate::decode_image(&source).expect("original dimensions");
+        cache.remember_image(&source, &decoded, &|| true);
+        let upgraded = cache
+            .cached_image(&source)
+            .expect("lookup")
+            .expect("upgraded source size");
+        assert_eq!(upgraded.source_size, (32, 16));
+        assert_eq!(
+            upgraded.image, card.image,
+            "reuse existing thumbnail pixels when adding dimensions"
         );
         assert!(
             card.image

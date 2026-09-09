@@ -1207,6 +1207,13 @@ towavue/
 - 最初のbaseline PID34380ではPostMessageによる反復入力が観測条件を満たさず、その時間値は比較から除外した。同じprocessを維持してSendKeysへ変更後、warm5回65.498～83.052msで通常終了。cold条件はこの終了後に別の隔離caseで測る。三processともClose終了0・stderr空・source hashes不変（PNG5f24c4ff／GIFbf55696f）。最終cache directoryは空で、baseline cold後にはPNG2件。captureはサムネイルの比率・並びを確認し、nearestとFFmpeg縮小の全画素一致は主張しない。証跡とhelperはignoredのshared-preview-*。
 - 取消／sample中のsource変更のassertionを追加後、fmt／Clippy／全299 tests／release buildを再通過（session8879）。最終binary5007948d4ad401d4bc01c97d14c44d762199c6e8e8bddf03bb1e557bd4f03dd7、PID34256/start11:15:02.7158578Zも同条件で初回84.384ms、warm65.085/67.845/81.113/65.887ms。cache files0・stderr0bytes・Close終了0・source不変を確認した。実機専用4 testsはignoredのまま。原寸表示・編集・sourceとdevice設計は変更せず、未訪問preview先行生成、tab hover／recent、メイン画面の段階表示と動画sheetは残件。
 
+### 原寸読込中の共有プレビュー表示（2026-09-09 20:28 JST）
+
+- PreviewMemoryのentryへorientation適用後の元寸法を付け、foreground decode時に登録／既存thumbnailへ追加する。`cached_image`はmetadata付きkeyと元寸法の両方がある場合だけ返し、disk生成や原寸decodeを追加しない。appの専用latest-only workerは要求中のpathだけを照合し、世代付き結果を別の一時textureへ渡す。主decode workerやUIのfile I/Oは待たない。原寸結果の成功／失敗でそのpathを対象から外し、切替／close／復旧で取消と世代更新を行う。
+- 通常画像は元寸法から既存zoom・pixel crop・rotateのmeshを計算し、previewではselection dragを受け付けない。readingはShell順の未読込slotにのみ差し込み、原寸／errorで置換する。新規app回帰はFit／Cover／Actual／Custom×100/125/200%で原寸とpreviewの頂点・UV・clipを比較し、crop／rotate履歴、実pointer dragの無視、古い世代／対象外path／原寸error後のpreview拒否を確認する。既存reading回帰に左右順とerror後の拒否、runtime回帰に元寸法の有無・既存pixelを保つ寸法追加・metadata失効を追加。testのconstructor名の誤記だけを修正し、fmt／Clippy／全300 tests／release buildを通過（session89539）。実機専用4 testsはignoredのまま。
+- 同じ3画像（600×800 PNG、各6000×6000単一frame GIF2枚）でRight→Right→Homeと500ms間隔で開き、256 MiB原寸cacheから1枚目のGIFを追い出してからRightで戻る。baseline5007948d PID42992/start11:26:07.6762915Zは32.097/119.527msにLoading＋黒、165.957/214.075msはtitle Pausedでも画面の標本は黒、260.476msで緑pixel。変更後9d29d5afcadbd34162cfe7a3b9862a503bf2fb53503a42a8a8db9f2f68683c25 PID11552/start11:27:53.9813054Zは35.877/91.742msにLoading＋低解像度画像、その後原寸へ切替。titleとcaptureは別時点の標本で、実完了時刻を厳密に示す値ではない。全量decodeを速めた比較やcold storage／未訪問画像の結果ではない。
+- 最終原寸captureの514×514領域を比較し、seek overlayが重なる下5行に1046差分、それ以外の261626画素は一致。previewの近似画素を原寸一致として数えない。両viewerは通常Closeで終了0・stderr空、source hashes不変（PNG5f24c4ff、両GIFbf55696f）。ignoredのprogressive-preview-before/afterにidentity／samples／10 captures／final／exitを保持。元寸法不明・未cache画像のpreview先行生成と黒い待機、tab/recent/video previewの残件は継続する。
+
 ## 8. UI/UX変更の判断基準
 
 - 実装済みcommandの入口はmenu、palette、shortcut、gridで同じ`CommandId`を共有する。入口ごとに別logicを作らない。

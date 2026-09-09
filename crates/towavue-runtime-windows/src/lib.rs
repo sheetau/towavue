@@ -40,7 +40,7 @@ pub use latest_task::LatestTask;
 pub use orientation::VideoOrientation;
 pub use pinned_cursor::PinnedCursor;
 pub use playback::{DecodePath, PlaybackError, PlaybackEvent, PlaybackMetrics, PlaybackSession};
-pub use preview::{MediaPreview, PreviewCache, PreviewError, PreviewImage};
+pub use preview::{CachedImagePreview, MediaPreview, PreviewCache, PreviewError, PreviewImage};
 pub use preview_loader::{PreviewLoader, VISIBLE_PREVIEW_LIMIT};
 pub use renderer::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError};
 pub use shell::{

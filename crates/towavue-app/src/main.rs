@@ -150,6 +150,7 @@ enum UiAction {
 enum AppEvent {
     Accessibility(accesskit_winit::Event),
     ImagesReady,
+    ImagePreview(PathBuf, u64, towavue_runtime_windows::CachedImagePreview),
     FolderReady,
     FilmstripReady,
     DialogFinished(Result<Option<PathBuf>, DialogError>),
@@ -272,6 +273,11 @@ struct ImagePresentation {
     texture: TextureHandle,
     frame_index: usize,
     next_frame_at: Option<Instant>,
+}
+
+struct ImagePreviewPresentation {
+    texture: TextureHandle,
+    source_size: (u32, u32),
 }
 
 struct ImageTextureCache {
@@ -557,6 +563,10 @@ struct Application<N> {
     image: Option<ImagePresentation>,
     image_texture_cache: ImageTextureCache,
     image_loader: ImageLoader,
+    image_preview_worker: LatestTask,
+    image_preview_generation: u64,
+    pending_image_previews: BTreeSet<PathBuf>,
+    image_previews: BTreeMap<PathBuf, ImagePreviewPresentation>,
     image_generation: u64,
     image_loading: bool,
     image_navigation_forward: bool,
@@ -691,6 +701,10 @@ where
             media_kind: None,
             image: None,
             image_texture_cache: ImageTextureCache::new(256 * 1024 * 1024),
+            image_preview_worker: LatestTask::new("towavue-image-preview")?,
+            image_preview_generation: 0,
+            pending_image_previews: BTreeSet::new(),
+            image_previews: BTreeMap::new(),
             image_loader,
             image_generation: 0,
             image_loading: false,
@@ -884,6 +898,7 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.clear_image_previews();
         self.guard_return_focus = None;
         self.playlist.clear();
         self.cancel_view_drag();
@@ -1106,6 +1121,7 @@ where
     }
 
     fn rebuild_reading_pages(&mut self) {
+        self.clear_image_previews();
         self.reading_pages.clear();
         self.image_generation = self.image_loader.request(Vec::new());
         self.image_loading = false;
@@ -1138,7 +1154,68 @@ where
         }
         self.image_error = None;
         self.image_loading = true;
-        self.image_generation = self.image_loader.request(paths);
+        self.image_generation = self.image_loader.request(paths.clone());
+        self.pending_image_previews = paths.iter().cloned().collect();
+        let generation = self.image_preview_generation;
+        let cache = self.preview_cache.clone();
+        let notify = Arc::clone(&self.notify);
+        self.image_preview_worker.submit(move |cancellation| {
+            let cache = cache.cancellable(cancellation.clone());
+            for path in paths {
+                if cancellation.is_cancelled() {
+                    return;
+                }
+                if let Ok(Some(preview)) = cache.cached_image(&path)
+                    && !cancellation.is_cancelled()
+                {
+                    notify(AppEvent::ImagePreview(path, generation, preview));
+                }
+            }
+        });
+        self.request_redraw();
+    }
+
+    fn clear_image_previews(&mut self) {
+        self.image_preview_worker.clear();
+        self.image_preview_generation = self.image_preview_generation.wrapping_add(1);
+        self.pending_image_previews.clear();
+        self.image_previews.clear();
+    }
+
+    fn finish_image_preview(
+        &mut self,
+        path: PathBuf,
+        generation: u64,
+        preview: towavue_runtime_windows::CachedImagePreview,
+    ) {
+        if generation != self.image_preview_generation
+            || !self.image_loading
+            || !self.pending_image_previews.contains(&path)
+        {
+            return;
+        }
+        let Some(context) = &self.ui_context else {
+            return;
+        };
+        let image = preview.image;
+        let limit = context.input(|input| input.max_texture_side);
+        if image.width as usize > limit || image.height as usize > limit {
+            return;
+        }
+        self.image_previews.insert(
+            path.clone(),
+            ImagePreviewPresentation {
+                texture: context.load_texture(
+                    format!("loading-preview:{}", path.display()),
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [image.width as usize, image.height as usize],
+                        &image.rgba,
+                    ),
+                    TextureOptions::LINEAR,
+                ),
+                source_size: preview.source_size,
+            },
+        );
         self.request_redraw();
     }
 
@@ -1165,6 +1242,10 @@ where
             return;
         }
         self.image_loading = result.first_index + result.images.len() < result.total;
+        for (path, _) in &result.images {
+            self.pending_image_previews.remove(path);
+            self.image_previews.remove(path);
+        }
         let mut images = result.images.into_iter();
         if result.first_index == 0 {
             let (path, decoded) = images.next().expect("nonempty first chunk");
@@ -1197,6 +1278,9 @@ where
                 .and_then(|decoded| self.image_texture_cache.load(&context, &path, decoded))
                 .map_err(|error| format!("{}: {error}", display_name(&path)))
         }));
+        if !self.image_loading {
+            self.clear_image_previews();
+        }
         self.prefetch_next_image();
         self.refresh_title();
         self.request_redraw();
@@ -1264,6 +1348,9 @@ where
                 }
             }
             AppEvent::ImagesReady => self.finish_image_load(),
+            AppEvent::ImagePreview(path, generation, preview) => {
+                self.finish_image_preview(path, generation, preview)
+            }
             AppEvent::FolderReady => self.finish_folder_load(),
             AppEvent::FilmstripReady => {
                 if let Some(context) = &self.ui_context {
@@ -1823,6 +1910,30 @@ where
             return;
         }
         let Some(image) = self.image.as_ref() else {
+            if let Some(preview) = self
+                .path
+                .as_ref()
+                .and_then(|path| self.image_previews.get(path))
+            {
+                let viewport = ui.max_rect();
+                let mut transform = self.visual_transform(preview.source_size);
+                transform.crop(self.image_view.preview_region());
+                let pixels_per_point = ui.ctx().pixels_per_point();
+                let scale = self.image_view.scale(
+                    (transform.size.0 as u32, transform.size.1 as u32),
+                    (viewport.size() * pixels_per_point).into(),
+                ) / pixels_per_point;
+                let rect = egui::Rect::from_center_size(
+                    viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1),
+                    egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
+                );
+                ui.painter_at(viewport)
+                    .add(egui::Shape::mesh(transformed_image_mesh(
+                        preview.texture.id(),
+                        rect,
+                        transform,
+                    )));
+            }
             return;
         };
         let texture = image.texture.id();
@@ -2230,36 +2341,56 @@ where
         let first = self
             .image
             .as_ref()
-            .map(Ok)
+            .map(|image| Ok((&image.texture, image.texture.size_vec2())))
             .or_else(|| self.image_error.as_ref().map(Err));
         let mut pages: Vec<_> = self
             .reading_pages
             .iter()
-            .map(|page| Some(page.as_ref()))
+            .map(|page| {
+                Some(
+                    page.as_ref()
+                        .map(|image| (&image.texture, image.texture.size_vec2())),
+                )
+            })
             .collect();
+        let ordered = self
+            .folder_snapshot
+            .as_ref()
+            .zip(self.path.as_ref())
+            .map(|(snapshot, path)| {
+                snapshot.reading_items(
+                    path,
+                    ReadingSettings {
+                        reversed: false,
+                        ..self.reading_settings
+                    },
+                )
+            })
+            .unwrap_or_default();
         if first.is_some() || self.image_loading {
-            let (index, count) = self
-                .folder_snapshot
-                .as_ref()
-                .zip(self.path.as_ref())
-                .and_then(|(snapshot, path)| {
-                    let items = snapshot.reading_items(
-                        path,
-                        ReadingSettings {
-                            reversed: false,
-                            ..self.reading_settings
-                        },
-                    );
-                    items
-                        .iter()
-                        .position(|item| &item.path == path)
-                        .map(|index| (index, items.len()))
-                })
-                .unwrap_or((0, 1));
+            let index = ordered
+                .iter()
+                .position(|item| Some(&item.path) == self.path.as_ref())
+                .unwrap_or(0);
+            let count = ordered.len().max(1);
             if self.image_loading {
                 pages.resize(count.saturating_sub(1), None);
             }
             pages.insert(index.min(pages.len()), first);
+        }
+        for (index, page) in pages.iter_mut().enumerate() {
+            let path = ordered
+                .get(index)
+                .map(|item| &item.path)
+                .or_else(|| self.path.as_ref().filter(|_| index == 0));
+            if page.is_none()
+                && let Some(preview) = path.and_then(|path| self.image_previews.get(path))
+            {
+                *page = Some(Ok((
+                    &preview.texture,
+                    egui::vec2(preview.source_size.0 as f32, preview.source_size.1 as f32),
+                )));
+            }
         }
         if pages.is_empty() {
             ui.centered_and_justified(|ui| ui.label("No image pages available"));
@@ -2273,7 +2404,7 @@ where
             .iter()
             .map(|page| {
                 page.map_or(pending_size, |page| {
-                    page.map_or(egui::Vec2::splat(1.0), |image| image.texture.size_vec2())
+                    page.map_or(egui::Vec2::splat(1.0), |image| image.1)
                 })
             })
             .collect();
@@ -2301,7 +2432,7 @@ where
                 }
             };
             painter.image(
-                image.texture.id(),
+                image.0.id(),
                 page,
                 egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                 Color32::WHITE,
@@ -4239,6 +4370,7 @@ where
             self.image_error = None;
             self.image = None;
             self.reading_pages.clear();
+            self.clear_image_previews();
             self.path = None;
             self.playlist.clear();
             self.media_kind = None;
@@ -4715,6 +4847,7 @@ where
     }
 
     fn recover_graphics_device(&mut self, position: MediaTime) {
+        self.clear_image_previews();
         self.image_texture_cache.entries.clear();
         let state = self.state;
         self.queued_recovery = None;
@@ -13139,6 +13272,168 @@ mod tests {
     }
 
     #[test]
+    fn loading_preview_matches_source_geometry_and_rejects_late_results() {
+        use towavue_runtime_windows::{CachedImagePreview, PreviewImage};
+
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let path = PathBuf::from("preview-source.png");
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.image_loading = true;
+        app.state = PlaybackState::Loading;
+        app.pending_image_previews.insert(path.clone());
+        let generation = app.image_preview_generation;
+        let preview = || CachedImagePreview {
+            image: PreviewImage {
+                width: 3,
+                height: 4,
+                rgba: vec![255; 48],
+            },
+            source_size: (600, 800),
+        };
+        app.finish_image_preview(path.clone(), generation + 1, preview());
+        app.finish_image_preview(PathBuf::from("unrequested.png"), generation, preview());
+        assert!(app.image_previews.is_empty());
+        app.finish_image_preview(path.clone(), generation, preview());
+        assert!(app.image.is_none());
+        assert_eq!(app.state, PlaybackState::Loading);
+        let preview_texture = app.image_previews[&path].texture.id();
+        let full = ImagePresentation::from_decoded(
+            &context,
+            &path,
+            Arc::new(DecodedImage {
+                format: "PNG",
+                frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                    width: 600,
+                    height: 800,
+                    rgba: vec![255; 600 * 800 * 4],
+                    delay: Duration::ZERO,
+                }],
+            }),
+        )
+        .expect("full texture");
+        for edited in [false, true] {
+            if edited {
+                app.push_edit(EditOperation::Crop(PixelCrop {
+                    x: 60,
+                    y: 80,
+                    width: 300,
+                    height: 400,
+                }));
+                app.push_edit(EditOperation::RotateClockwise);
+            }
+            let history = app.edits.entry(tab).or_default().operations().to_vec();
+            for zoom in [
+                towavue_core::ZoomMode::Fit,
+                towavue_core::ZoomMode::Cover,
+                towavue_core::ZoomMode::Actual,
+                towavue_core::ZoomMode::Custom(1.7),
+            ] {
+                app.image_view.zoom = zoom;
+                app.image_view.pan = (11.0, -7.0);
+                for density in [1.0, 1.25, 2.0] {
+                    let mut input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(900.0, 600.0),
+                        )),
+                        ..Default::default()
+                    };
+                    input
+                        .viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .expect("viewport")
+                        .native_pixels_per_point = Some(density);
+                    let mut meshes = Vec::new();
+                    for original in [true, false] {
+                        app.image = original.then(|| full.clone());
+                        let id = if original {
+                            full.texture.id()
+                        } else {
+                            preview_texture
+                        };
+                        let mut output = egui::FullOutput::default();
+                        for _ in 0..2 {
+                            output = context.run_ui(input.clone(), |ui| app.draw_image(ui));
+                        }
+                        let mesh = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Mesh(mesh) if mesh.texture_id == id => Some((
+                                    shape.clip_rect,
+                                    mesh.vertices
+                                        .iter()
+                                        .map(|vertex| (vertex.pos, vertex.uv))
+                                        .collect::<Vec<_>>(),
+                                )),
+                                _ => None,
+                            })
+                            .expect("image surface");
+                        meshes.push(mesh);
+                    }
+                    assert_eq!(
+                        meshes[0], meshes[1],
+                        "preview must use original pixel coordinates for zoom and edits"
+                    );
+                }
+            }
+            assert_eq!(app.edits[&tab].operations(), history);
+            assert!(app.image_view.selection.is_none() && app.view_drag.is_none());
+        }
+        let _ = context.run_ui(
+            egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(egui::pos2(450.0, 300.0)),
+                    egui::Event::PointerButton {
+                        pos: egui::pos2(450.0, 300.0),
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::PointerMoved(egui::pos2(550.0, 400.0)),
+                    egui::Event::PointerButton {
+                        pos: egui::pos2(550.0, 400.0),
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ui| app.draw_image(ui),
+        );
+        assert!(
+            app.image_view.selection.is_none() && app.view_drag.is_none(),
+            "loading pixels do not accept selection drags"
+        );
+        app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+            generation: app.image_generation,
+            first_index: 0,
+            total: 1,
+            images: vec![(
+                path.clone(),
+                Err(towavue_runtime_windows::ImageDecodeError::UnknownFormat),
+            )],
+        });
+        assert_eq!(app.state, PlaybackState::Faulted);
+        assert!(app.image_error.is_some() && !app.image_loading);
+        app.finish_image_preview(path.clone(), generation, preview());
+        assert!(
+            app.image_previews.is_empty(),
+            "a full result removes preview eligibility"
+        );
+        app.pending_image_previews.insert(path.clone());
+        app.clear_image_previews();
+        app.finish_image_preview(path, generation, preview());
+        assert!(app.image_previews.is_empty() && app.pending_image_previews.is_empty());
+        assert!(app.image.is_none(), "preview never becomes original pixels");
+    }
+
+    #[test]
     fn incremental_reading_pages_preserve_active_image_and_reject_stale_chunks() {
         use towavue_runtime_windows::{DecodedImageFrame, ImageDecodeError, LoadedImages};
 
@@ -13172,6 +13467,7 @@ mod tests {
         });
         app.image_generation = app.image_loader.request(Vec::new());
         app.image_loading = true;
+        app.pending_image_previews = paths.iter().cloned().collect();
         let generation = app.image_generation;
         let decoded = Arc::new(DecodedImage {
             format: "GIF",
@@ -13233,11 +13529,51 @@ mod tests {
             total: 3,
             images: vec![(path.clone(), Err(ImageDecodeError::UnknownFormat))],
         };
+        let preview_generation = app.image_preview_generation;
+        let preview = || towavue_runtime_windows::CachedImagePreview {
+            image: towavue_runtime_windows::PreviewImage {
+                width: 2,
+                height: 1,
+                rgba: vec![255; 8],
+            },
+            source_size: (200, 100),
+        };
+        app.finish_image_preview(paths[0].clone(), preview_generation, preview());
+        let preview_texture = app.image_previews[&paths[0]].texture.id();
+        for reversed in [false, true] {
+            app.reading_settings.reversed = reversed;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.draw_reading_pages(ui),
+            );
+            let preview_rect = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == preview_texture => {
+                        Some(mesh.calc_bounds())
+                    }
+                    _ => None,
+                })
+                .expect("pending page preview visible");
+            assert_eq!(preview_rect.center().x > 450.0, reversed);
+        }
         app.apply_loaded_images(error_chunk(generation + 1, 1, &paths[0]));
         app.apply_loaded_images(error_chunk(generation, 2, &paths[2]));
         app.apply_loaded_images(error_chunk(generation, 0, &paths[0]));
         assert!(app.image_loading && app.reading_pages.is_empty());
         app.apply_loaded_images(error_chunk(generation, 1, &paths[0]));
+        app.finish_image_preview(paths[0].clone(), preview_generation, preview());
+        assert!(
+            !app.image_previews.contains_key(&paths[0]),
+            "late preview cannot cover an error"
+        );
         assert!(app.image_loading);
         assert!(matches!(&app.reading_pages[0], Err(error) if error.starts_with("first.png:")));
         app.apply_loaded_images(LoadedImages {

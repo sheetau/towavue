@@ -424,7 +424,11 @@ status barの再生・waveform timeline・reading mode・fullscreen解除button�
 
 egui-winitは修飾付きTabも消費するため、Tab eventのうち現在の有効bindingまたはprefixに一致するものを先に共有shortcut処理へ渡す。通常のbutton focus中も修飾付きTabは使えるが、menu・palette・grid・modalではUI入力を優先する。未割当のTabと通常controlのTab/Shift+Tab focus移動は維持する。filmstrip固有の項目移動はCtrl/Alt/Windows keyなしのTab/Shift+Tabだけとし、Ctrl+Tab等を奪わない。固定aliasや新commandは追加しない。
 
-画像の標準Left/Rightは画像専用Previous image / Next image commandへ解決する。通常表示では共有Shell snapshotの画像順を一枚ずつ、reading modeでは重複しない見開き単位で移動し、既存のdirty/export guardを通す。動画・音声では従来の5秒Seekを維持し、Ctrl+左右の同種移動も一枚単位のまま変更しない。commandはmenu・palette・shortcuts.confから利用でき、設定で変更したキーとは別の固定aliasを設けない。新しい既定bindingと既存commandのcustom bindingが同じキーの場合は、従来のregistry順による既存command優先を維持する。数指定jumpは未実装。
+画像の標準Left/Rightは画像専用Previous image / Next image commandへ解決する。通常表示では共有Shell snapshotの画像順を一枚ずつ、reading modeでは重複しない見開き単位で移動し、既存のdirty/export guardを通す。動画・音声では従来の5秒Seekを維持し、Ctrl+左右の同種移動も一枚単位のまま変更しない。commandはmenu・palette・shortcuts.confから利用でき、設定で変更したキーとは別の固定aliasを設けない。新しい既定bindingと既存commandのcustom bindingが同じキーの場合は、従来のregistry順による既存command優先を維持する。
+
+I04／I06追加binding契約（2026-09-10）: Previous imageにPageUp／Backspace／A、Next imageにPageDown／Space／D、reading配置切替にL、reading順反転にVを追加する。既存の主キー／prefix優先とcontext判定を使い、画像のSpaceから再生操作は呼ばない。各方向1～10枚を画像専用の個別commandとして登録し、menu／palette／grid／設定で同じdispatchを使う。Ctrl+1～0は先へ1～10枚、Shift併用は手前、Ctrl+Space／Ctrl+Backspaceは5枚。共有Shell snapshotの画像ファイル数で数え、reading中も同じ枚数の対象画像を含む見開きへ移る。jumpは端でclampし、同じpathはguard／reloadを始めない。通常移動の循環、既存Ctrl+左右の一枚移動は維持し、草案のCtrl+左右＝5枚だけは採用済み契約を優先する。別snapshot取得・ソート・編集操作は追加しない。
+
+新生成設定はv4。v4以前の単独・未変更のLeft／Right／R／Hだけ画像／reading追加bindingを補い、custom／複数指定とv4の明示単独指定は保持する。既存J/K/L・comma速度の限定移行も保持し、fileは自動書換えしない。未宣言の新jump bindingが画像で有効になる宣言済みcommandのキー／prefixと重なる場合、その暗黙bindingだけ除く。明示jumpの競合は従来の主キーexact／prefix規則に従う。Ctrl+Shift+上段数字はShift後の記号に対応する有効なcustomキー／prefixがなければ物理数字を使う。非画像・Alt／Windows併用は変換しない。入力欄と既存modal／menu／focus入力保護を通し、PageUp／PageDown／Backspaceは通常widgetの入力を先取りしない。
 
 Readingの分割はShell snapshotから画像だけを取り出した順序の先頭を基準とする。表示枚数は既存の2～10、先頭ページ枚数は1～表示枚数。初期値は両方2で1–2／3–4となり、先頭1なら1／2–3／4–5となる。表示枚数の増加時は、先頭が満杯なら同じ枚数へ追従し、短い先頭は維持する。減少時は先頭を新しい上限まで制限する。現在画像を含む見開きを表示し、設定変更・表示反転でactive pathや編集対象を暗黙に先頭へ変更しない。隣ページへの移動はその先頭画像へ、末尾／先頭からは循環する。全画像が同じ見開きに収まる場合は移動・再読込・未保存確認を行わない。Home/Endは従来どおり端点の画像を選び、その画像を含む見開きを表示する。
 

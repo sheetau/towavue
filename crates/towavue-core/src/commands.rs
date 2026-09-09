@@ -79,6 +79,26 @@ pub enum CommandId {
     ToggleAudioShuffle,
     PreviousVideoFrame,
     NextVideoFrame,
+    JumpImagesBackward1,
+    JumpImagesBackward2,
+    JumpImagesBackward3,
+    JumpImagesBackward4,
+    JumpImagesBackward5,
+    JumpImagesBackward6,
+    JumpImagesBackward7,
+    JumpImagesBackward8,
+    JumpImagesBackward9,
+    JumpImagesBackward10,
+    JumpImagesForward1,
+    JumpImagesForward2,
+    JumpImagesForward3,
+    JumpImagesForward4,
+    JumpImagesForward5,
+    JumpImagesForward6,
+    JumpImagesForward7,
+    JumpImagesForward8,
+    JumpImagesForward9,
+    JumpImagesForward10,
 }
 
 impl CommandId {
@@ -156,6 +176,26 @@ impl CommandId {
             Self::ToggleAudioShuffle => "toggle_audio_shuffle",
             Self::PreviousVideoFrame => "previous_video_frame",
             Self::NextVideoFrame => "next_video_frame",
+            Self::JumpImagesBackward1 => "jump_images_backward_1",
+            Self::JumpImagesBackward2 => "jump_images_backward_2",
+            Self::JumpImagesBackward3 => "jump_images_backward_3",
+            Self::JumpImagesBackward4 => "jump_images_backward_4",
+            Self::JumpImagesBackward5 => "jump_images_backward_5",
+            Self::JumpImagesBackward6 => "jump_images_backward_6",
+            Self::JumpImagesBackward7 => "jump_images_backward_7",
+            Self::JumpImagesBackward8 => "jump_images_backward_8",
+            Self::JumpImagesBackward9 => "jump_images_backward_9",
+            Self::JumpImagesBackward10 => "jump_images_backward_10",
+            Self::JumpImagesForward1 => "jump_images_forward_1",
+            Self::JumpImagesForward2 => "jump_images_forward_2",
+            Self::JumpImagesForward3 => "jump_images_forward_3",
+            Self::JumpImagesForward4 => "jump_images_forward_4",
+            Self::JumpImagesForward5 => "jump_images_forward_5",
+            Self::JumpImagesForward6 => "jump_images_forward_6",
+            Self::JumpImagesForward7 => "jump_images_forward_7",
+            Self::JumpImagesForward8 => "jump_images_forward_8",
+            Self::JumpImagesForward9 => "jump_images_forward_9",
+            Self::JumpImagesForward10 => "jump_images_forward_10",
             Self::ToggleImageInterpolation => "toggle_image_interpolation",
         }
     }
@@ -194,6 +234,9 @@ pub enum Key {
     Home,
     End,
     Delete,
+    PageUp,
+    PageDown,
+    Backspace,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -271,6 +314,9 @@ impl fmt::Display for KeyStroke {
             Key::Home => formatter.write_str("Home"),
             Key::End => formatter.write_str("End"),
             Key::Delete => formatter.write_str("Delete"),
+            Key::PageUp => formatter.write_str("PageUp"),
+            Key::PageDown => formatter.write_str("PageDown"),
+            Key::Backspace => formatter.write_str("Backspace"),
         }
     }
 }
@@ -303,6 +349,9 @@ impl FromStr for KeyStroke {
                 "tab" if key.is_none() => key = Some(Key::Tab),
                 "escape" | "esc" if key.is_none() => key = Some(Key::Escape),
                 "delete" | "del" if key.is_none() => key = Some(Key::Delete),
+                "pageup" | "pgup" if key.is_none() => key = Some(Key::PageUp),
+                "pagedown" | "pgdn" if key.is_none() => key = Some(Key::PageDown),
+                "backspace" if key.is_none() => key = Some(Key::Backspace),
                 "f11" if key.is_none() => key = Some(Key::F11),
                 "home" if key.is_none() => key = Some(Key::Home),
                 "end" if key.is_none() => key = Some(Key::End),
@@ -619,6 +668,106 @@ const COMMANDS: &[CommandDefinition] = &[
         "Next video frame",
         &[MediaKind::Video],
     ),
+    command(
+        CommandId::JumpImagesBackward1,
+        "Jump backward 1 image",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesBackward2,
+        "Jump backward 2 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesBackward3,
+        "Jump backward 3 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesBackward4,
+        "Jump backward 4 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesBackward5,
+        "Jump backward 5 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesBackward6,
+        "Jump backward 6 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesBackward7,
+        "Jump backward 7 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesBackward8,
+        "Jump backward 8 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesBackward9,
+        "Jump backward 9 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesBackward10,
+        "Jump backward 10 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesForward1,
+        "Jump forward 1 image",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesForward2,
+        "Jump forward 2 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesForward3,
+        "Jump forward 3 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesForward4,
+        "Jump forward 4 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesForward5,
+        "Jump forward 5 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesForward6,
+        "Jump forward 6 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesForward7,
+        "Jump forward 7 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesForward8,
+        "Jump forward 8 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesForward9,
+        "Jump forward 9 images",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::JumpImagesForward10,
+        "Jump forward 10 images",
+        &[MediaKind::Image],
+    ),
 ];
 
 const fn command(
@@ -662,6 +811,10 @@ pub enum ShortcutMatch {
 }
 
 impl ShortcutBindings {
+    pub fn remove(&mut self, command: CommandId) {
+        self.0.remove(&command);
+    }
+
     pub fn set(&mut self, command: CommandId, sequence: KeySequence) {
         self.0.insert(command, vec![sequence]);
     }

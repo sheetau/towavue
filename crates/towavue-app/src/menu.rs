@@ -75,6 +75,35 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             ],
         ],
     ),
+    (
+        "Image jump",
+        &[
+            &[
+                JumpImagesBackward1,
+                JumpImagesBackward2,
+                JumpImagesBackward3,
+                JumpImagesBackward4,
+                JumpImagesBackward5,
+                JumpImagesBackward6,
+                JumpImagesBackward7,
+                JumpImagesBackward8,
+                JumpImagesBackward9,
+                JumpImagesBackward10,
+            ],
+            &[
+                JumpImagesForward1,
+                JumpImagesForward2,
+                JumpImagesForward3,
+                JumpImagesForward4,
+                JumpImagesForward5,
+                JumpImagesForward6,
+                JumpImagesForward7,
+                JumpImagesForward8,
+                JumpImagesForward9,
+                JumpImagesForward10,
+            ],
+        ],
+    ),
     ("Help", &[&[ShowLicenses]]),
 ];
 
@@ -347,6 +376,8 @@ mod tests {
         );
         assert!(text_position(&frame(vec![]).0, "File").is_none());
         assert!(click(&mut frame, egui::pos2(20.0, 15.0)).is_empty());
+        // File -> Help -> Image jump -> View.
+        frame(vec![key(egui::Key::ArrowUp, false)]);
         frame(vec![key(egui::Key::ArrowUp, false)]);
         frame(vec![key(egui::Key::ArrowUp, false)]);
         frame(vec![key(egui::Key::ArrowRight, false)]);
@@ -490,11 +521,89 @@ mod tests {
     }
 
     #[test]
+    fn image_jump_menu_scrolls_through_every_count_and_dispatches_the_selected_command() {
+        let context = egui::Context::default();
+        let shortcuts = crate::shortcuts::defaults();
+        let mut time = 0.0;
+        let mut frame = |events| {
+            let mut chosen = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(640.0, 300.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.menu_button("Menu", |ui| {
+                        if let Some(command) = show(
+                            ui,
+                            CommandContext {
+                                media_kind: Some(towavue_core::MediaKind::Image),
+                                ..Default::default()
+                            },
+                            &shortcuts,
+                        ) {
+                            chosen.push(command);
+                        }
+                    });
+                    assert!(!ui.button("Background action").clicked());
+                },
+            );
+            time += 0.1;
+            (output, chosen)
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for _ in 0..3 {
+            frame(vec![]);
+        }
+        assert!(click(&mut frame, egui::pos2(20.0, 15.0)).is_empty());
+        for _ in 0..3 {
+            frame(vec![key(egui::Key::ArrowDown)]);
+        }
+        frame(vec![key(egui::Key::ArrowRight)]);
+        for (index, definition) in command_definitions()
+            .iter()
+            .filter(|definition| definition.id.as_str().starts_with("jump_images_"))
+            .enumerate()
+        {
+            if index != 0 {
+                frame(vec![key(egui::Key::ArrowDown)]);
+            }
+            for _ in 0..15 {
+                assert!(frame(vec![]).1.is_empty());
+            }
+            let (output, chosen) = frame(vec![]);
+            assert!(chosen.is_empty());
+            let position =
+                text_position(&output, definition.title).expect("focused jump is visible");
+            let focused = context.memory(|memory| memory.focused()).expect("focus");
+            let response = context.read_response(focused).expect("response");
+            let rect = context
+                .layer_transform_to_global(response.layer_id)
+                .unwrap_or_default()
+                * response.rect;
+            assert!(rect.contains(position), "{} has focus", definition.title);
+        }
+        assert_eq!(frame(vec![key(egui::Key::Enter)]).1, [JumpImagesForward10]);
+        assert!(text_position(&frame(vec![]).0, "Image jump").is_none());
+    }
+
+    #[test]
     fn every_registered_command_has_exactly_one_menu_location() {
         let mut placed = BTreeSet::new();
         assert_eq!(
             MENUS.iter().map(|(title, _)| *title).collect::<Vec<_>>(),
-            ["File", "Edit", "View", "Help"]
+            ["File", "Edit", "View", "Image jump", "Help"]
         );
         for (_, groups) in MENUS {
             assert!(!groups.is_empty());

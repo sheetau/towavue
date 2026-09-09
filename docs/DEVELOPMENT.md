@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 画像の追加キーと枚数ジャンプ（2026-09-10 07:57、I04／I06部分実装）
+
+画像はLeft／PageUp／Backspace／Aが前、Right／PageDown／Space／Dが次。読書中は同じキーで見開き単位に進む。Ctrl+1～0で画像ファイル数の1～10枚先、Shift併用で手前へ移り、端では停止する。Ctrl+Space／Ctrl+Backspaceは5枚、Ctrl+左右は従来の同種一枚を維持する。読書のR／Lは縦横配置、H／Vは並び順のみを変える。Image jump menu／paletteにも各枚数を用意した。
+
+旧設定の未変更Left／Right／R／Hだけaliasを補うv4限定移行を追加。customキー／prefixと重なる暗黙jumpは除き、明示jumpは既存の競合規則へ従う。設定ファイルを自動書換えしない。Ctrl+Shift+上段数字の記号変換を補助し、明示custom記号・prefixと入力欄を優先する。
+
+生成BMP12枚を非自然順のShell snapshotで実際に非同期読込し、前後jump・端点no-reload・画素・active tab・reading見開きを確認した。別の混在media snapshotでは全20方向／枚数とdirty Cancel・履歴不変を照合。追加キー／全上段数字／media context／旧設定・custom・再読込・text focusを回帰確認し、300px高のmenuで全20項目のscroll／focus／Enterも通過した。既存menu testの固定4カテゴリと再Openの移動数は新カテゴリに合わせて更新した。
+
+session37119でfmt／Clippy／workspace全392 tests（app226／core54／runtime108／integration4）とRelease buildがterminal exit0。普通実行のignored11件はこの数に含めない。別実行のapp opt-in5件も全PASS、SKIPなし。既存のH264 D3D11VA復旧はCPU transfer 0、無音WASAPIの背景再生・queue・編集・長押し復帰も維持した。Release SHA-256は`f771a61fffc8bb467b3d3af0f5062353e6186876bda48a9dccebc17167c3cfd5`。通常windowへの物理入力、keyboard layout／IME全組合せは未認定。ローンチ作業は再開せず、I06のpreset／自由回転とUX台帳全体を継続する。
+
 ### 押している間だけ2倍速（2026-09-10 07:37、V04部分実装）
 
 動画の視聴面、または動画・音声共通の再生ボタンを動かさず400ms押すと、押している間だけ2倍速になる。元が一時停止ならその間だけ再生し、離すと元の速度と停止状態に戻る。短い再生ボタンのクリックは従来どおり。動画編集中の映像面は範囲選択を優先する。移動・Escapeなどのキー・focus/pointer喪失・resize・別command・Seek・編集・tab切替・modalで取消す。終端では元速度へ戻して停止し、一時停止からの試聴では次曲を始めない。

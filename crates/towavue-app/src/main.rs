@@ -10,6 +10,7 @@ mod fonts;
 mod frame_step;
 mod grid;
 mod hold_speed;
+mod image_navigation;
 mod menu;
 mod palette;
 mod playback_tab;
@@ -4244,6 +4245,26 @@ where
             CommandId::ToggleAudioShuffle => self.change_audio_mode(true),
             CommandId::PreviousVideoFrame => self.step_video_frame(false),
             CommandId::NextVideoFrame => self.step_video_frame(true),
+            CommandId::JumpImagesBackward1 => self.jump_images(-1),
+            CommandId::JumpImagesBackward2 => self.jump_images(-2),
+            CommandId::JumpImagesBackward3 => self.jump_images(-3),
+            CommandId::JumpImagesBackward4 => self.jump_images(-4),
+            CommandId::JumpImagesBackward5 => self.jump_images(-5),
+            CommandId::JumpImagesBackward6 => self.jump_images(-6),
+            CommandId::JumpImagesBackward7 => self.jump_images(-7),
+            CommandId::JumpImagesBackward8 => self.jump_images(-8),
+            CommandId::JumpImagesBackward9 => self.jump_images(-9),
+            CommandId::JumpImagesBackward10 => self.jump_images(-10),
+            CommandId::JumpImagesForward1 => self.jump_images(1),
+            CommandId::JumpImagesForward2 => self.jump_images(2),
+            CommandId::JumpImagesForward3 => self.jump_images(3),
+            CommandId::JumpImagesForward4 => self.jump_images(4),
+            CommandId::JumpImagesForward5 => self.jump_images(5),
+            CommandId::JumpImagesForward6 => self.jump_images(6),
+            CommandId::JumpImagesForward7 => self.jump_images(7),
+            CommandId::JumpImagesForward8 => self.jump_images(8),
+            CommandId::JumpImagesForward9 => self.jump_images(9),
+            CommandId::JumpImagesForward10 => self.jump_images(10),
             CommandId::PreviousImage => self.navigate_image(false),
             CommandId::NextImage => self.navigate_image(true),
             CommandId::FirstImage => self.navigate_image_boundary(false),
@@ -6494,6 +6515,9 @@ where
                         | Key::Home
                         | Key::End
                         | Key::Escape
+                        | Key::PageUp
+                        | Key::PageDown
+                        | Key::Backspace
                 ))
                 && self
                     .shortcuts
@@ -6622,7 +6646,11 @@ where
     }
 
     fn key_stroke(&self, event: &KeyEvent) -> Option<KeyStroke> {
-        let (key, shift_consumed) = match &event.logical_key {
+        self.key_stroke_for(&event.logical_key, event.physical_key)
+    }
+
+    fn key_stroke_for(&self, logical: &WinitKey, physical: PhysicalKey) -> Option<KeyStroke> {
+        let (key, shift_consumed) = match logical {
             WinitKey::Character(value) if value.chars().count() == 1 => {
                 let character = value.chars().next()?.to_ascii_lowercase();
                 (Key::Character(character), character == '+')
@@ -6638,17 +6666,23 @@ where
             WinitKey::Named(NamedKey::Home) => (Key::Home, false),
             WinitKey::Named(NamedKey::End) => (Key::End, false),
             WinitKey::Named(NamedKey::Delete) => (Key::Delete, false),
+            WinitKey::Named(NamedKey::PageUp) => (Key::PageUp, false),
+            WinitKey::Named(NamedKey::PageDown) => (Key::PageDown, false),
+            WinitKey::Named(NamedKey::Backspace) => (Key::Backspace, false),
             _ => return None,
         };
-        Some(KeyStroke {
-            modifiers: Modifiers {
-                control: self.modifiers.control_key(),
-                alt: self.modifiers.alt_key(),
-                shift: self.modifiers.shift_key() && !shift_consumed,
-                logo: self.modifiers.super_key(),
+        Some(self.shifted_image_digit(
+            physical,
+            KeyStroke {
+                modifiers: Modifiers {
+                    control: self.modifiers.control_key(),
+                    alt: self.modifiers.alt_key(),
+                    shift: self.modifiers.shift_key() && !shift_consumed,
+                    logo: self.modifiers.super_key(),
+                },
+                key,
             },
-            key,
-        })
+        ))
     }
 
     fn schedule(&mut self, event_loop: &ActiveEventLoop) {
@@ -12357,6 +12391,9 @@ mod tests {
             "End",
             "Escape",
             "Shift+Space",
+            "PageUp",
+            "PageDown",
+            "Backspace",
         ] {
             assert!(!app.owns_focused_shortcut(&stroke(key)), "UI owns {key}");
         }
@@ -12403,6 +12440,23 @@ mod tests {
         assert!(context.text_edit_focused());
         assert!(!app.owns_focused_shortcut(&stroke("K")));
         assert!(!app.owns_focused_shortcut(&stroke("Ctrl+K")));
+        for key in [
+            "PageUp",
+            "PageDown",
+            "Space",
+            "Backspace",
+            "Ctrl+Space",
+            "Ctrl+Backspace",
+            "Ctrl+3",
+            "Ctrl+Shift+3",
+            "A",
+            "D",
+        ] {
+            assert!(
+                !app.owns_focused_shortcut(&stroke(key)),
+                "text editing owns {key}"
+            );
+        }
     }
 
     #[test]

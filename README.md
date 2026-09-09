@@ -112,9 +112,13 @@ cargo test --workspace --all-targets
 cargo run -p towavue-app -- path\to\media.mp4
 ```
 
-標準shortcutはSpaceでpause/resume（再生終了後は先頭から再開）、左右矢印で前/次の画像へ移動（動画・音声では5秒Seek）、Home/Endでfolderの最初/最後の画像へ移動、Ctrl+左右で同種media移動、Alt+左右で全種media移動、Fでfilmstrip、Ctrl+Shift+Pでcommand paletteです。画像移動はShell順で、reading modeの左右は重複しない見開き単位、Ctrl+左右は一枚単位です。Home/Endは同じ端点画像へ移動し、未保存編集があれば確認します。すでに端点の場合は再読み込みしません。設定は初回起動時に`%APPDATA%\towavue\shortcuts.conf`へ生成され、`Ctrl+K Ctrl+S`のようなprefix shortcutも指定できます。画像用キーは`previous_image` / `next_image` / `first_image` / `last_image`で変更でき、既存設定fileへ追記しなくても新しい既定値を利用します。menuまたは同shortcutのReload commandで再読込します。
+標準shortcutは画像でLeft／PageUp／Backspace／Aが前、Right／PageDown／Space／Dが次です。動画・音声ではSpaceでpause/resume（再生終了後は先頭から再開）、左右矢印で5秒Seekを維持します。Home/Endはfolderの最初/最後の画像、Ctrl+左右は同種media一枚、Alt+左右は全種media、Fはfilmstrip、Ctrl+Shift+Pはcommand paletteです。画像はShell順で移動し、reading modeの通常移動キーは重複しない見開き単位です。
 
-Reading mode（B）は初期状態で1–2、3–4…と連結表示します。Ctrl+[／Ctrl+]で表示枚数（2～10）、Ctrl+Shift+左右で先頭ページの枚数（1～表示枚数）を調整できます。先頭1枚なら1、2–3、4–5…となり、途中の画像を開くとその画像を含む見開きを表示します。設定変更で編集中の画像は切り替わりません。statusに設定枚数を表示し、seek hoverも同じ見開きをpreviewします。読書ボタンの上下dragでも表示枚数、左右dragで先頭枚数を調整できます。drag中はカーソルを押下位置へ固定し、離すと確定、Escapeやfocus喪失で開始前の設定・modeへ戻ります。clickは従来どおりmode切替です。
+画像の`Ctrl+1～0`は1～10枚先（0＝10）、Shift併用は手前へジャンプします。`Ctrl+Space`／`Ctrl+Backspace`は5枚先／手前です。画像ファイルだけを数え、読書中も見開き数ではなく枚数で数えます。通常の前後移動は循環しますが、数字／5枚ジャンプは端で止まります。Home/Endと同様、同じ端点なら再読み込みせず、移動先が変わる場合は未保存編集を確認します。各枚数の操作はImage jump menuとpaletteでも選べます。
+
+設定は初回起動時に`%APPDATA%\towavue\shortcuts.conf`へ生成され、`Ctrl+K Ctrl+S`のようなprefixも指定できます。画像用キーは`previous_image`／`next_image`／`first_image`／`last_image`と`jump_images_forward_1`～`10`／`jump_images_backward_1`～`10`で変更できます。v4以前の未変更の画像・読書キーには追加キーを補いますが、変更済み設定は保持し、ファイルを自動書換えしません。既存のcustomキー／prefixと競合する暗黙のジャンプキーは追加しません。Ctrl+Shift+数字は上段数字キーを認識し、明示した記号キーの設定があればそちらを優先します。menuまたはReload shortcutで再読込します。
+
+Reading mode（B）は初期状態で1–2、3–4…と連結表示します。Ctrl+[／Ctrl+]で表示枚数（2～10）、Ctrl+Shift+左右で先頭ページの枚数（1～表示枚数）を調整できます。先頭1枚なら1、2–3、4–5…となり、途中の画像を開くとその画像を含む見開きを表示します。R／Lで縦横配置を切替え、H／Vで並び順を反転します（画像の編集ではありません）。設定変更で編集中の画像は切り替わりません。statusに設定枚数を表示し、seek hoverも同じ見開きをpreviewします。読書ボタンの上下dragでも表示枚数、左右dragで先頭枚数を調整できます。drag中はカーソルを押下位置へ固定し、離すと確定、Escapeやfocus喪失で開始前の設定・modeへ戻ります。clickは従来どおりmode切替です。
 
 未保存編集のある画像では読書モードを開始できません。保存またはUndoで未保存状態を解消すると開始できます。読書中は回転・反転・crop・Undo/Redoを無効にし、有効中の本アイコンは同じ輪郭の塗りつぶし表示になります。別の未保存画像tabへ戻る場合は、編集を残したまま通常表示へ戻します。
 

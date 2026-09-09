@@ -6,6 +6,7 @@ use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 
 const MULTI_BINDING_HEADER: &str = "# towavue shortcuts v2";
 const FRAME_BINDING_HEADER: &str = "# towavue shortcuts v3";
+const IMAGE_BINDING_HEADER: &str = "# towavue shortcuts v4";
 
 pub fn load() -> Result<(ShortcutBindings, PathBuf), String> {
     let path = config_path()?;
@@ -103,6 +104,26 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::ToggleTimeline, "T"),
         (CommandId::ToggleGridMenu, "G"),
         (CommandId::ToggleHardwareEncode, "Ctrl+Shift+E"),
+        (CommandId::JumpImagesBackward1, "Ctrl+Shift+1"),
+        (CommandId::JumpImagesBackward2, "Ctrl+Shift+2"),
+        (CommandId::JumpImagesBackward3, "Ctrl+Shift+3"),
+        (CommandId::JumpImagesBackward4, "Ctrl+Shift+4"),
+        (CommandId::JumpImagesBackward5, "Ctrl+Shift+5"),
+        (CommandId::JumpImagesBackward6, "Ctrl+Shift+6"),
+        (CommandId::JumpImagesBackward7, "Ctrl+Shift+7"),
+        (CommandId::JumpImagesBackward8, "Ctrl+Shift+8"),
+        (CommandId::JumpImagesBackward9, "Ctrl+Shift+9"),
+        (CommandId::JumpImagesBackward10, "Ctrl+Shift+0"),
+        (CommandId::JumpImagesForward1, "Ctrl+1"),
+        (CommandId::JumpImagesForward2, "Ctrl+2"),
+        (CommandId::JumpImagesForward3, "Ctrl+3"),
+        (CommandId::JumpImagesForward4, "Ctrl+4"),
+        (CommandId::JumpImagesForward5, "Ctrl+5"),
+        (CommandId::JumpImagesForward6, "Ctrl+6"),
+        (CommandId::JumpImagesForward7, "Ctrl+7"),
+        (CommandId::JumpImagesForward8, "Ctrl+8"),
+        (CommandId::JumpImagesForward9, "Ctrl+9"),
+        (CommandId::JumpImagesForward10, "Ctrl+0"),
     ] {
         bindings.set(
             command,
@@ -113,6 +134,16 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::SeekBackward, "J"),
         (CommandId::TogglePause, "K"),
         (CommandId::SeekForward, "L"),
+        (CommandId::PreviousImage, "PageUp"),
+        (CommandId::PreviousImage, "Backspace"),
+        (CommandId::PreviousImage, "A"),
+        (CommandId::NextImage, "PageDown"),
+        (CommandId::NextImage, "Space"),
+        (CommandId::NextImage, "D"),
+        (CommandId::ToggleReadingAxis, "L"),
+        (CommandId::ReverseReadingOrder, "V"),
+        (CommandId::JumpImagesForward5, "Ctrl+Space"),
+        (CommandId::JumpImagesBackward5, "Ctrl+Backspace"),
     ] {
         bindings.add(command, key.parse().expect("built-in alternative"));
     }
@@ -120,7 +151,10 @@ pub fn defaults() -> ShortcutBindings {
 }
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
-    let frame_bindings = text.lines().any(|line| line.trim() == FRAME_BINDING_HEADER);
+    let mut declared = std::collections::BTreeSet::new();
+    let image_bindings = text.lines().any(|line| line.trim() == IMAGE_BINDING_HEADER);
+    let frame_bindings =
+        image_bindings || text.lines().any(|line| line.trim() == FRAME_BINDING_HEADER);
     let legacy = !frame_bindings && !text.lines().any(|line| line.trim() == MULTI_BINDING_HEADER);
     let standard = defaults();
     let has_apply_crop = text
@@ -138,6 +172,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .trim()
             .parse::<CommandId>()
             .map_err(|_| format!("unknown command on shortcuts.conf line {}", index + 1))?;
+        declared.insert(command);
         let parts = if legacy {
             vec![sequence]
         } else {
@@ -150,12 +185,20 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .map_err(|_| format!("invalid shortcut on shortcuts.conf line {}", index + 1))?;
         // Old generated files listed every default. Preserve new alternatives
         // only for unchanged defaults; custom bindings remain exact replacements.
-        let inherit = legacy
-            && sequences.len() == 1
+        let inherit = (legacy
             && matches!(
                 command,
                 CommandId::SeekBackward | CommandId::SeekForward | CommandId::TogglePause
             )
+            || !image_bindings
+                && matches!(
+                    command,
+                    CommandId::PreviousImage
+                        | CommandId::NextImage
+                        | CommandId::ToggleReadingAxis
+                        | CommandId::ReverseReadingOrder
+                ))
+            && sequences.len() == 1
             && standard.get(command) == sequences.first();
         if inherit {
             sequences = standard.all(command).to_vec();
@@ -188,12 +231,45 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             "Ctrl+Y".parse().expect("migration shortcut is valid"),
         );
     }
+    // New jump defaults must not shadow a previously configured command or
+    // prefix. Explicit jump declarations retain the usual conflict rules.
+    let contexts = [false, true].map(|reading_mode| towavue_core::CommandContext {
+        media_kind: Some(towavue_core::MediaKind::Image),
+        reading_mode,
+        ..Default::default()
+    });
+    for definition in towavue_core::command_definitions()
+        .iter()
+        .filter(|definition| {
+            definition.id.as_str().starts_with("jump_images_") && !declared.contains(&definition.id)
+        })
+    {
+        let kept: Vec<_> = bindings
+            .all(definition.id)
+            .iter()
+            .filter(|candidate| {
+                !towavue_core::command_definitions().iter().any(|other| {
+                    declared.contains(&other.id)
+                        && contexts.iter().any(|context| other.is_enabled(*context))
+                        && bindings.all(other.id).iter().any(|bound| {
+                            bound.strokes().starts_with(candidate.strokes())
+                                || candidate.strokes().starts_with(bound.strokes())
+                        })
+                })
+            })
+            .cloned()
+            .collect();
+        bindings.remove(definition.id);
+        for sequence in kept {
+            bindings.add(definition.id, sequence);
+        }
+    }
     Ok(bindings)
 }
 
 fn serialize(bindings: &ShortcutBindings) -> String {
     let mut output = format!(
-        "{FRAME_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
+        "{IMAGE_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
     );
     for (command, _) in bindings.iter() {
         output.push_str(command.as_str());
@@ -215,6 +291,242 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 mod tests {
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn image_aliases_and_numbered_jumps_respect_media_and_reading_contexts() {
+        let bindings = defaults();
+        for reading_mode in [false, true] {
+            let context = CommandContext {
+                media_kind: Some(MediaKind::Image),
+                reading_mode,
+                ..Default::default()
+            };
+            for (keys, command) in [
+                (
+                    &["Left", "PageUp", "Backspace", "A"][..],
+                    CommandId::PreviousImage,
+                ),
+                (
+                    &["Right", "PageDown", "Space", "D"][..],
+                    CommandId::NextImage,
+                ),
+                (&["Ctrl+Space"][..], CommandId::JumpImagesForward5),
+                (&["Ctrl+Backspace"][..], CommandId::JumpImagesBackward5),
+                (&["Ctrl+Left"][..], CommandId::PreviousSameKind),
+                (&["Ctrl+Right"][..], CommandId::NextSameKind),
+                (
+                    &["L"][..],
+                    if reading_mode {
+                        CommandId::ToggleReadingAxis
+                    } else {
+                        CommandId::RotateCounterclockwise
+                    },
+                ),
+                (
+                    &["V"][..],
+                    if reading_mode {
+                        CommandId::ReverseReadingOrder
+                    } else {
+                        CommandId::FlipVertical
+                    },
+                ),
+            ] {
+                for key in keys {
+                    assert_eq!(
+                        bindings.resolve(
+                            key.parse::<KeySequence>()
+                                .expect("valid test binding")
+                                .strokes(),
+                            context
+                        ),
+                        ShortcutMatch::Command(command),
+                        "{key}, reading={reading_mode}"
+                    );
+                }
+            }
+            for count in 1..=10 {
+                for (direction, modifier) in [("forward", "Ctrl"), ("backward", "Ctrl+Shift")] {
+                    let command = format!("jump_images_{direction}_{count}")
+                        .parse::<CommandId>()
+                        .expect("valid test binding");
+                    let key = format!("{modifier}+{}", count % 10)
+                        .parse::<KeySequence>()
+                        .expect("valid test binding");
+                    assert_eq!(
+                        bindings.resolve(key.strokes(), context),
+                        ShortcutMatch::Command(command)
+                    );
+                    for media_kind in [None, Some(MediaKind::Video), Some(MediaKind::Audio)] {
+                        assert_eq!(
+                            bindings.resolve(
+                                key.strokes(),
+                                CommandContext {
+                                    media_kind,
+                                    ..context
+                                }
+                            ),
+                            ShortcutMatch::None
+                        );
+                    }
+                }
+            }
+        }
+        for media_kind in [Some(MediaKind::Video), Some(MediaKind::Audio)] {
+            let context = CommandContext {
+                media_kind,
+                ..Default::default()
+            };
+            assert_eq!(
+                bindings.resolve(
+                    "Space"
+                        .parse::<KeySequence>()
+                        .expect("valid test binding")
+                        .strokes(),
+                    context
+                ),
+                ShortcutMatch::Command(CommandId::TogglePause)
+            );
+            for key in [
+                "PageUp",
+                "PageDown",
+                "Backspace",
+                "A",
+                "D",
+                "Ctrl+Space",
+                "Ctrl+Backspace",
+            ] {
+                assert_eq!(
+                    bindings.resolve(
+                        key.parse::<KeySequence>()
+                            .expect("valid test binding")
+                            .strokes(),
+                        context
+                    ),
+                    ShortcutMatch::None
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn image_binding_migration_preserves_custom_replacements_and_round_trips() {
+        let old = "previous_image = Left\nnext_image = Right\ntoggle_reading_axis = R\nreverse_reading_order = H\n";
+        for header in ["", MULTI_BINDING_HEADER, FRAME_BINDING_HEADER] {
+            assert_eq!(
+                parse(&format!("{header}\n{old}"), defaults()).expect("valid test binding"),
+                defaults()
+            );
+        }
+        let current = parse(&format!("{IMAGE_BINDING_HEADER}\n{old}"), defaults())
+            .expect("valid test binding");
+        for command in [
+            CommandId::PreviousImage,
+            CommandId::NextImage,
+            CommandId::ToggleReadingAxis,
+            CommandId::ReverseReadingOrder,
+        ] {
+            assert_eq!(
+                current.all(command).len(),
+                1,
+                "explicit current-format single binding"
+            );
+        }
+        let custom = parse("previous_image = Q\nnext_image = Ctrl+K D\ntoggle_reading_axis = Ctrl+K L\nreverse_reading_order = Z\n", defaults()).expect("valid test binding");
+        assert_eq!(custom.all(CommandId::NextImage).len(), 1);
+        assert_eq!(
+            custom
+                .get(CommandId::NextImage)
+                .expect("valid test binding")
+                .to_string(),
+            "Ctrl+K D"
+        );
+        let multiple = parse(
+            &format!("{FRAME_BINDING_HEADER}\nnext_image = Right | Q\n"),
+            defaults(),
+        )
+        .expect("valid test binding");
+        assert_eq!(multiple.all(CommandId::NextImage).len(), 2);
+        for bindings in [defaults(), current, custom, multiple] {
+            assert_eq!(
+                parse(&serialize(&bindings), defaults()).expect("valid test binding"),
+                bindings
+            );
+        }
+    }
+
+    #[test]
+    fn implicit_image_jumps_and_aliases_do_not_shadow_custom_primary_keys_or_prefixes() {
+        let context = CommandContext {
+            media_kind: Some(MediaKind::Image),
+            ..Default::default()
+        };
+        for (key, command) in [
+            ("Ctrl+3", "toggle_filmstrip"),
+            ("Ctrl+Shift+2", "apply_crop"),
+            ("Ctrl+5", "undo"),
+            ("Ctrl+Space", "toggle_grid_menu"),
+            ("PageDown", "flip_vertical"),
+            ("A", "rotate_clockwise"),
+        ] {
+            for suffix in ["", " F"] {
+                let bindings = parse(&format!("{command} = {key}{suffix}\n"), defaults())
+                    .expect("valid test binding");
+                let sequence = key.parse::<KeySequence>().expect("valid test binding");
+                let expected = if suffix.is_empty() {
+                    ShortcutMatch::Command(command.parse().expect("valid test binding"))
+                } else {
+                    ShortcutMatch::Prefix
+                };
+                assert_eq!(
+                    bindings.resolve(sequence.strokes(), context),
+                    expected,
+                    "{key}{suffix}"
+                );
+                assert_eq!(
+                    parse(&serialize(&bindings), defaults()).expect("valid test binding"),
+                    bindings
+                );
+                assert_eq!(
+                    bindings.resolve(
+                        "Ctrl+0"
+                            .parse::<KeySequence>()
+                            .expect("valid test binding")
+                            .strokes(),
+                        context
+                    ),
+                    ShortcutMatch::Command(CommandId::JumpImagesForward10)
+                );
+            }
+        }
+        let custom = parse("rate_up = Ctrl+3\n", defaults()).expect("valid test binding");
+        assert_eq!(
+            custom.resolve(
+                "Ctrl+3"
+                    .parse::<KeySequence>()
+                    .expect("valid test binding")
+                    .strokes(),
+                context
+            ),
+            ShortcutMatch::Command(CommandId::JumpImagesForward3),
+            "playable-only bindings do not disable image jumps"
+        );
+        let explicit = parse(
+            "toggle_filmstrip = Ctrl+3 F\njump_images_forward_3 = Ctrl+3\n",
+            defaults(),
+        )
+        .expect("valid test binding");
+        assert_eq!(
+            explicit.resolve(
+                "Ctrl+3"
+                    .parse::<KeySequence>()
+                    .expect("valid test binding")
+                    .strokes(),
+                context
+            ),
+            ShortcutMatch::Command(CommandId::JumpImagesForward3),
+            "explicit conflicts keep existing primary-exact priority"
+        );
+    }
 
     #[test]
     fn frame_bindings_migrate_old_speed_defaults_but_preserve_custom_settings() {

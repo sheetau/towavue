@@ -106,7 +106,9 @@ Reading mode（B）は初期状態で1–2、3–4…と連結表示します。
 
 未保存編集のある画像では読書モードを開始できません。保存またはUndoで未保存状態を解消すると開始できます。読書中は回転・反転・crop・Undo/Redoを無効にし、有効中の本アイコンは同じ輪郭の塗りつぶし表示になります。別の未保存画像tabへ戻る場合は、編集を残したまま通常表示へ戻します。
 
-画像ではCtrl+C／Edit menuのCopy image or selectionで、編集後の原寸画像または選択範囲をクリップボードへコピーできます。回転・反転・cropと透過色を保持し、表示倍率や低解像度previewはコピーに使いません。アニメ画像は押した時点のframe、読書中は現在の画像fileだけを対象にします。文字入力中は通常の文字コピーを優先します。元file・編集・選択を変更せず、完了または失敗をstatusに表示します。resize/resampleはまだ未実装です。
+画像ではCtrl+C／Edit menuのCopy image or selectionで、編集後の原寸画像または選択範囲をクリップボードへコピーできます。回転・反転・cropと透過色を保持し、表示倍率や低解像度previewはコピーに使いません。アニメ画像は押した時点のframe、読書中は現在の画像fileだけを対象にします。文字入力中は通常の文字コピーを優先します。元file・編集・選択を変更せず、完了または失敗をstatusに表示します。
+
+Ctrl+R／Edit menuのResize / resample imageで幅・高さ、縦横比固定、Nearest／Bilinear／Bicubic／Lanczosを指定できます。Applyは一つの非破壊編集として追加し、Cancel／Escapeは履歴を変えません。原画像を保持して非同期処理し、Undo／Redoと保存・コピーへ反映します。処理中は待機表示となり、失敗時はUndoで復帰できます。各辺1～16384 pixel、処理結果はanimation全frame合計512 MiB以内（graphics deviceのtexture上限も適用）です。読書中の編集は無効です。表示zoom用のnearest切替は別機能として未実装です。
 
 prefixの続きは1秒以内に入力します。Escape、click、別commandやwindowへのfocus移動で待ちを解除し、途中から戻ったkeyを前のprefixへつなげません。
 

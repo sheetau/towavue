@@ -8,7 +8,7 @@
 
 coreの有界ImageResize履歴とruntimeのrender_image_edits、exportの共通filter列を追加した。4補間でcrop→resize→回転／反転→crop→resize→反転を実行し、透明PNGのmaterialized RGBAと実FFmpeg書き出し後の6×8 RGBAが完全一致する。非nearestの補間では、完全透明な赤と不透明な青の境界で、中間alphaへ赤が混入しないことも検証する。Nearestのstraight RGBA、frame delay保持、取消・不正寸法・crop拒否、Undo/Redoのsaved cursorも回帰に含む。
 
-Ctrl+Rのダイアログ、非同期の画面反映、処理済み画像のcopy、nearest表示の設定はまだ未実装で、現時点の通常UIからResizeを追加する入口はない。このruntime検証だけでI05や実操作を完了とはしない。次はoriginal decodeの保持と世代検査、二重編集を防ぐ画面／clipboard接続を実装する。
+後続checkpointでCtrl+Rのmodal、原画像保持・世代検査付き非同期表示、処理済み画像のcopyへ接続した。下記「画像resizeのUI接続」に実操作の証拠を記録する。表示用nearest設定と全I05の完了監査は残る。
 
 ### 画像／選択範囲のclipboard copy（2026-09-09 22:12 JST）
 
@@ -1261,6 +1261,15 @@ towavue/
 最終fmt／all-target Clippy／workspace全311 tests／release build通過（session82210）。実機専用4 testsはignoredのまま。group Save試験は実際のFFmpeg出力がPNGであることとsource bytesの不変、各完了後の次dirty guard／最終closeを確認する。
 
 ## 8. UI/UX変更の判断基準
+
+### 画像resizeのUI接続（2026-09-09）
+
+- Ctrl+R／共有menu／paletteから寸法・比率固定・4補間のmodalを開く。Applyは履歴へ一件追加、Cancelは無変更。元Arcを保持して最新世代だけを非同期materializeし、表示・copyでは編集を二重適用しない。最後のResizeをUndoすると元Arcへ戻る。処理中の寸法依存操作／copyと失敗時のstale copyを拒否する。
+- 回帰は実FFmpeg worker、crop後続、animation frame／delay／deadline、Cancel／背景操作、エラーからのUndo、古い履歴／path／closed tab結果、処理済みtextureの復旧データ、custom shortcutとreading禁止を確認。modalのkeyboard testはeguiのcommand modifierも指定する。固定TextEditがUIA SetValueを処理しないことを実機で見つけ、対象ID限定の処理と比率／無効値の回帰を追加した。
+- 通常release55ea7555、resize-uia-native PID13948/start13:41:43.8489708ZでUIA幅300→高さ400、Apply、Ctrl+C、Save Asを確認。保存PNGとclipboard PNGの120000画素が一致。Cancel／Escape、Undo時の600×800と元画像480000画素一致、Redoの300×400とsaved状態復帰、通常終了0を確認した。source hash5f24c4ffは不変、stderr空。先行resize-native PID54312もkeyboard入力で300×400・Undo・終了0を確認したが、修正前UIA SetValueの無反応は成功扱いにしない。native後の追加変更はtestのみ。
+- 所有native trialのidentity／画像／export／exitはignoredのimage-viewport-20260909/resize-*へ保持する。新たなインストール・配布なし。実GPU復旧と混在DPIのresize固有監査、表示用nearest切替、残りの全UX台帳は継続対象。
+
+### 共通判断基準
 
 - 実装済みcommandの入口はmenu、palette、shortcut、gridで同じ`CommandId`を共有する。入口ごとに別logicを作らない。
 - mediaを覆う常設UIを増やす前に、status、hover、一時overlay、command paletteで解決できるか検討する。

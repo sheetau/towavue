@@ -11,6 +11,7 @@ mod menu;
 mod palette;
 mod playlist;
 mod reading_input;
+mod resize;
 mod seekbar;
 mod selection;
 mod shortcuts;
@@ -148,6 +149,7 @@ enum UiAction {
     ResolveGuard(GuardDecision),
     CancelExport,
     DismissExportError,
+    FinishResize(Option<towavue_core::ImageResize>),
 }
 
 enum AppEvent {
@@ -167,6 +169,7 @@ enum AppEvent {
     FileRevealed(std::io::Result<PathBuf>),
     RecentFilesReady,
     ImageCopied(Result<(u32, u32), String>),
+    ImageEdited(u64, Result<DecodedImage, String>),
     Export(ExportEvent),
     Playback(u64, PlaybackEvent),
     Duration(PathBuf, u64, Result<Duration, String>),
@@ -572,6 +575,13 @@ struct Application<N> {
     recent_files: Option<towavue_runtime_windows::RecentFiles>,
     recent_paths: Vec<PathBuf>,
     image_copy: Option<towavue_runtime_windows::ImageCopyJob>,
+    image_edit_worker: towavue_runtime_windows::LatestTask,
+    image_edit_source: Option<Arc<DecodedImage>>,
+    image_edit_generation: u64,
+    image_edit_operations: Option<Vec<EditOperation>>,
+    image_edit_pending: bool,
+    image_materialized: bool,
+    resize_dialog: Option<resize::ResizeDialog>,
     edits: BTreeMap<TabId, EditHistory>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
@@ -716,6 +726,14 @@ where
             recent_files: None,
             recent_paths: Vec::new(),
             image_copy: None,
+            image_edit_worker: towavue_runtime_windows::LatestTask::new("towavue-image-edits")
+                .map_err(|error| error.to_string())?,
+            image_edit_source: None,
+            image_edit_generation: 0,
+            image_edit_operations: None,
+            image_edit_pending: false,
+            image_materialized: false,
+            resize_dialog: None,
             edits: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
@@ -936,6 +954,7 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.reset_image_edits();
         if let Some(recent) = &self.recent_files {
             recent.record(path.clone());
         }
@@ -1293,6 +1312,7 @@ where
         }
         let mut images = result.images.into_iter();
         if result.first_index == 0 {
+            self.reset_image_edits();
             let (path, decoded) = images.next().expect("nonempty first chunk");
             match decoded
                 .map_err(|error| error.to_string())
@@ -1316,6 +1336,7 @@ where
                 }
             }
             self.reading_pages.clear();
+            self.refresh_image_edits();
         }
         self.reading_pages.extend(images.map(|(path, decoded)| {
             decoded
@@ -1446,6 +1467,9 @@ where
                     Ok((width, height)) => format!("Copied image {width} × {height} px"),
                     Err(error) => format!("Could not copy image: {error}"),
                 });
+            }
+            AppEvent::ImageEdited(generation, result) => {
+                self.finish_image_edits(generation, result)
             }
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(generation, event) if generation == self.media_generation => {
@@ -1886,6 +1910,10 @@ where
             }
         } else if self.pending_guard.is_some() {
             self.draw_unsaved_guard(&context, actions);
+        } else if let Some(dialog) = &mut self.resize_dialog
+            && let Some(action) = dialog.show(&context)
+        {
+            actions.push(UiAction::FinishResize(action));
         }
         if context.input(|input| !input.raw.hovered_files.is_empty()) {
             let painter = context.layer_painter(egui::LayerId::new(
@@ -1994,6 +2022,22 @@ where
     }
 
     fn draw_image(&mut self, ui: &mut egui::Ui) {
+        if self.image_edit_pending {
+            ui.centered_and_justified(|ui| {
+                ui.label("Resampling image…");
+            });
+            return;
+        }
+        if self.image_edit_source.is_some()
+            && let Some(error) = &self.image_error
+        {
+            ui.centered_and_justified(|ui| {
+                ui.label(format!(
+                    "Could not resample image\n{error}\nUndo to restore the previous edit."
+                ));
+            });
+            return;
+        }
         if self.reading_mode {
             self.draw_reading_pages(ui);
             return;
@@ -3558,6 +3602,11 @@ where
                     self.pending_guard.is_some() && self.export_error.is_none()
                 }
                 UiAction::DismissExportError => self.export_error.is_some(),
+                UiAction::FinishResize(_) => {
+                    self.resize_dialog.is_some()
+                        && self.pending_guard.is_none()
+                        && self.export_error.is_none()
+                }
                 UiAction::CancelExport => {
                     self.active_export.is_some() && self.export_error.is_none()
                 }
@@ -3567,6 +3616,14 @@ where
             return;
         }
         match action {
+            UiAction::FinishResize(value) => {
+                if self.resize_dialog.take().is_some()
+                    && let Some(value) = value
+                {
+                    self.push_visual_edit(EditOperation::Resize(value));
+                }
+                self.request_redraw();
+            }
             UiAction::Command(command) => self.dispatch(command),
             UiAction::BeginReadingDrag(position, delta) => self.begin_reading_drag(position, delta),
             UiAction::NativeCaption(action) => {
@@ -3622,7 +3679,20 @@ where
     fn dispatch(&mut self, command: CommandId) {
         self.cancel_shortcut_prefix();
         self.cancel_view_drag();
-        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
+        if self.modal_input_blocked() {
+            return;
+        }
+        if self.image_edit_pending
+            && matches!(
+                command,
+                CommandId::ResizeImage
+                    | CommandId::SelectAll
+                    | CommandId::ApplyCrop
+                    | CommandId::ToggleCropPreview
+                    | CommandId::ToggleReadingMode
+            )
+        {
+            self.set_status("Wait for image resampling to finish".into());
             return;
         }
         if !command_definitions().iter().any(|definition| {
@@ -3778,6 +3848,26 @@ where
                 if let Some(context) = &self.ui_context {
                     selection::focus_first(context, self.selection_identity());
                 }
+                self.request_redraw();
+            }
+            CommandId::ResizeImage => {
+                let Some(image) = self.image.as_ref().filter(|_| self.image_error.is_none()) else {
+                    self.set_status("Wait for the full image to load before resizing".into());
+                    return;
+                };
+                let size = self.visual_transform(image.dimensions()).size;
+                self.resize_dialog = Some(resize::ResizeDialog::new((
+                    size.0.round() as u32,
+                    size.1.round() as u32,
+                )));
+                self.guard_return_focus = self.tabs.active().and_then(|tab| {
+                    self.ui_context
+                        .as_ref()
+                        .and_then(|context| context.memory(|memory| memory.focused()))
+                        .map(|focus| (tab.id, focus))
+                });
+                self.palette_open = false;
+                self.grid_open = false;
                 self.request_redraw();
             }
             CommandId::CopyImage => {
@@ -3941,6 +4031,9 @@ where
     }
 
     fn image_copy_request(&self) -> Option<towavue_runtime_windows::ImageCopyRequest> {
+        if self.image_edit_pending || self.image_error.is_some() {
+            return None;
+        }
         let image = self.image.as_ref()?;
         let frame = image.decoded.frames.get(image.frame_index)?;
         let mut transform = self.visual_transform((frame.width, frame.height));
@@ -3985,7 +4078,111 @@ where
         ));
     }
 
+    fn reset_image_edits(&mut self) {
+        self.image_edit_worker.clear();
+        self.image_edit_generation = self.image_edit_generation.wrapping_add(1);
+        self.image_edit_source = None;
+        self.image_edit_operations = None;
+        self.image_edit_pending = false;
+        self.image_materialized = false;
+        self.resize_dialog = None;
+    }
+
+    fn install_edited_image(&mut self, decoded: Arc<DecodedImage>) -> Result<(), String> {
+        let (Some(context), Some(path)) = (&self.ui_context, &self.path) else {
+            return Err("Image view is unavailable".into());
+        };
+        let mut image = ImagePresentation::from_decoded(context, path, decoded)?;
+        if let Some(previous) = &self.image {
+            image.frame_index = previous.frame_index.min(image.decoded.frames.len() - 1);
+            image.next_frame_at = previous.next_frame_at;
+            if image.frame_index != 0 {
+                image.texture.set(
+                    color_image(&image.decoded.frames[image.frame_index]),
+                    TextureOptions::LINEAR,
+                );
+            }
+        }
+        self.image = Some(image);
+        self.image_error = None;
+        Ok(())
+    }
+
+    fn refresh_image_edits(&mut self) {
+        if self.media_kind != Some(MediaKind::Image) {
+            return;
+        }
+        let operations = self
+            .tabs
+            .active()
+            .and_then(|tab| self.edits.get(&tab.id))
+            .map_or(&[][..], EditHistory::operations)
+            .to_vec();
+        if !operations
+            .iter()
+            .any(|operation| matches!(operation, EditOperation::Resize(_)))
+        {
+            if let Some(source) = self.image_edit_source.take() {
+                self.image_edit_worker.clear();
+                self.image_edit_generation = self.image_edit_generation.wrapping_add(1);
+                self.image_edit_pending = false;
+                self.image_materialized = false;
+                self.image_edit_operations = None;
+                if let Err(error) = self.install_edited_image(source) {
+                    self.image_error = Some(error);
+                }
+            }
+            return;
+        }
+        if self.image_edit_operations.as_ref() == Some(&operations) {
+            return;
+        }
+        let Some(source) = self
+            .image_edit_source
+            .clone()
+            .or_else(|| self.image.as_ref().map(|image| Arc::clone(&image.decoded)))
+        else {
+            return;
+        };
+        self.image_edit_source = Some(Arc::clone(&source));
+        self.image_edit_operations = Some(operations.clone());
+        self.image_edit_generation = self.image_edit_generation.wrapping_add(1);
+        let generation = self.image_edit_generation;
+        self.image_edit_pending = true;
+        self.image_error = None;
+        let notify = Arc::clone(&self.notify);
+        self.image_edit_worker.submit(move |cancel| {
+            let result = towavue_runtime_windows::render_image_edits(&source, &operations, &cancel);
+            if !cancel.is_cancelled() {
+                notify(AppEvent::ImageEdited(generation, result));
+            }
+        });
+    }
+
+    fn finish_image_edits(&mut self, generation: u64, result: Result<DecodedImage, String>) {
+        if generation != self.image_edit_generation || !self.image_edit_pending {
+            return;
+        }
+        self.image_edit_pending = false;
+        match result.and_then(|decoded| self.install_edited_image(Arc::new(decoded))) {
+            Ok(()) => {
+                self.image_materialized = true;
+                self.set_status("Image resampled (source unchanged)".into());
+            }
+            Err(error) => {
+                self.image_error = Some(error.clone());
+                self.set_status(format!(
+                    "Could not resample image: {error}. Undo to restore the previous edit."
+                ));
+            }
+        }
+        self.request_redraw();
+    }
+
     fn visual_transform(&self, size: (u32, u32)) -> ImageTransform {
+        if self.media_kind == Some(MediaKind::Image) && self.image_materialized {
+            return ImageTransform::new(size, &[]);
+        }
         let operations = self
             .tabs
             .active()
@@ -4022,6 +4219,7 @@ where
             return;
         };
         if self.edits.entry(tab.id).or_default().push(operation, kind) {
+            self.refresh_image_edits();
             self.sync_playback_edits();
             self.set_status(match operation {
                 EditOperation::SetVolume(_) => format!(
@@ -4093,6 +4291,7 @@ where
             .get_mut(&id)
             .is_some_and(|history| if redo { history.redo() } else { history.undo() });
         if changed {
+            self.refresh_image_edits();
             self.sync_playback_edits();
             let next = self.edit_state();
             if (previous.trim_start, previous.trim_end) != (next.trim_start, next.trim_end) {
@@ -4470,6 +4669,10 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        if self.resize_dialog.is_some() {
+            self.set_status("Apply or cancel image resize before leaving.".into());
+            return;
+        }
         if matches!(&action, GuardedAction::Navigate(path) if self.path.as_ref() == Some(path)) {
             return;
         }
@@ -4644,6 +4847,7 @@ where
         } else {
             self.session.take();
             self.playback_error = None;
+            self.reset_image_edits();
             self.image_generation = self.image_loader.request(Vec::new());
             self.image_loading = false;
             self.image_error = None;
@@ -5428,7 +5632,8 @@ where
     }
 
     fn modal_input_blocked(&self) -> bool {
-        self.pending_dialog.is_some()
+        self.resize_dialog.is_some()
+            || self.pending_dialog.is_some()
             || self.native_prompt.is_some()
             || self.pending_guard.is_some()
             || self.export_error.is_some()
@@ -5916,6 +6121,7 @@ where
             && !self.fullscreen_controls_visible
             && matches!(self.media_kind, Some(MediaKind::Image | MediaKind::Video))
             && !self.image_loading
+            && !self.image_edit_pending
             && self.image_error.is_none()
             && !self.reading_pages.iter().any(Result::is_err)
             && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted)
@@ -14517,6 +14723,184 @@ mod tests {
         assert_eq!(transform.size, (30.0, 20.0));
         assert_eq!(transform.uv[0], UnitPoint { x: 0.25, y: 1.0 });
         assert_eq!(transform.uv[2], UnitPoint { x: 0.75, y: 0.0 });
+    }
+
+    #[test]
+    fn resized_images_materialize_ordered_edits_and_restore_original_animation_on_undo() {
+        use towavue_core::{ImageResize, ResampleFilter};
+        use towavue_runtime_windows::DecodedImageFrame;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            let _ = sender.send(event);
+        })
+        .expect("app");
+        let context = fonts::test_context();
+        let path = PathBuf::from("resize.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.ui_context = Some(context.clone());
+        let source = Arc::new(DecodedImage {
+            format: "test",
+            frames: vec![
+                DecodedImageFrame {
+                    width: 4,
+                    height: 3,
+                    rgba: vec![127; 48],
+                    delay: Duration::from_millis(100),
+                },
+                DecodedImageFrame {
+                    width: 4,
+                    height: 3,
+                    rgba: vec![255; 48],
+                    delay: Duration::from_millis(200),
+                },
+            ],
+        });
+        let mut image =
+            ImagePresentation::from_decoded(&context, &path, source.clone()).expect("image");
+        image.frame_index = 1;
+        let deadline = image.next_frame_at;
+        app.image = Some(image);
+        app.push_visual_edit(EditOperation::RotateClockwise);
+        let resize = ImageResize::new(6, 8, ResampleFilter::Lanczos).expect("resize");
+        app.dispatch(CommandId::ResizeImage);
+        assert!(app.resize_dialog.is_some());
+        app.dispatch(CommandId::RotateClockwise);
+        app.handle_ui_action(UiAction::CloseTab(tab));
+        assert_eq!(app.tabs.active().expect("modal keeps tab").id, tab);
+        app.request_guarded(GuardedAction::Exit);
+        assert!(app.pending_guard.is_none());
+        assert_eq!(
+            app.edits[&tab].operations().len(),
+            1,
+            "modal blocks background edits"
+        );
+        app.handle_ui_action(UiAction::FinishResize(None));
+        assert_eq!(
+            app.edits[&tab].operations().len(),
+            1,
+            "cancel preserves history"
+        );
+        app.dispatch(CommandId::ResizeImage);
+        app.handle_ui_action(UiAction::FinishResize(Some(resize)));
+        assert!(app.image_edit_pending);
+        assert!(app.image_copy_request().is_none());
+        app.dispatch(CommandId::ApplyCrop);
+        let event = receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("processed frames");
+        app.handle_app_event(event);
+        assert!(!app.image_edit_pending && app.image_materialized);
+        let image = app.image.as_ref().expect("resized image");
+        assert_eq!(image.dimensions(), (6, 8));
+        assert_eq!(image.frame_index, 1);
+        assert_eq!(image.next_frame_at, deadline);
+        assert_eq!(image.decoded.frames[1].delay, Duration::from_millis(200));
+        assert_eq!(app.visual_transform(image.dimensions()).size, (6.0, 8.0));
+        let copy = app.image_copy_request().expect("processed copy");
+        assert!(Arc::ptr_eq(&copy.image, &image.decoded));
+        assert!(!Arc::ptr_eq(&copy.image, &source));
+        assert_eq!(copy.size, (6, 8));
+        assert_eq!(copy.source_uv, ImageTransform::new((6, 8), &[]).uv);
+        let _ = context.run_ui(Default::default(), |ui| {
+            ui.label("texture recovery fixture");
+        });
+        let restored_textures = app.restored_ui_textures(&context);
+        let (_, restored_image) = restored_textures
+            .iter()
+            .find(|(id, _)| *id == image.texture.id())
+            .expect("processed texture recovery data");
+        assert_eq!(restored_image.image.size(), [6, 8]);
+        app.push_visual_edit(EditOperation::Crop(PixelCrop {
+            x: 1,
+            y: 2,
+            width: 4,
+            height: 5,
+        }));
+        app.handle_app_event(
+            receiver
+                .recv_timeout(Duration::from_secs(10))
+                .expect("crop"),
+        );
+        assert_eq!(app.image.as_ref().expect("cropped").dimensions(), (4, 5));
+        app.undo_edit(false);
+        let stale_generation = app.image_edit_generation;
+        app.undo_edit(false);
+        assert!(!app.image_materialized && !app.image_edit_pending);
+        let restored = app.image.as_ref().expect("original");
+        assert!(Arc::ptr_eq(&restored.decoded, &source));
+        assert_eq!(restored.frame_index, 1);
+        assert_eq!(app.visual_transform(restored.dimensions()).size, (3.0, 4.0));
+        app.finish_image_edits(stale_generation, Err("stale result".into()));
+        assert!(app.image_error.is_none());
+        app.undo_edit(true);
+        let generation = app.image_edit_generation;
+        while app.image_edit_pending {
+            app.handle_app_event(
+                receiver
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("redo"),
+            );
+        }
+        assert!(app.image_materialized);
+        assert_eq!(app.image.as_ref().expect("redo image").dimensions(), (6, 8));
+        app.remove_tab(tab, false);
+        app.finish_image_edits(generation, Err("closed tab result".into()));
+        assert!(
+            app.image.is_none() && app.image_error.is_none() && app.image_edit_source.is_none()
+        );
+    }
+
+    #[test]
+    fn failed_image_resampling_disables_stale_copy_and_undo_recovers_source() {
+        use towavue_core::{ImageResize, ResampleFilter};
+        use towavue_runtime_windows::DecodedImageFrame;
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let context = fonts::test_context();
+        let path = PathBuf::from("resize-error.png");
+        app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.ui_context = Some(context.clone());
+        let source = Arc::new(DecodedImage {
+            format: "test",
+            frames: vec![DecodedImageFrame {
+                width: 2,
+                height: 2,
+                rgba: vec![255; 16],
+                delay: Duration::ZERO,
+            }],
+        });
+        app.image =
+            Some(ImagePresentation::from_decoded(&context, &path, source.clone()).expect("source"));
+        app.push_visual_edit(EditOperation::Resize(
+            ImageResize::new(4, 4, ResampleFilter::Nearest).expect("size"),
+        ));
+        app.finish_image_edits(
+            app.image_edit_generation,
+            Err("fixture processing error".into()),
+        );
+        assert!(app.image_error.is_some() && app.image_copy_request().is_none());
+        app.undo_edit(false);
+        assert!(app.image_error.is_none());
+        assert!(Arc::ptr_eq(
+            &app.image.as_ref().expect("restored").decoded,
+            &source
+        ));
+        assert_eq!(
+            app.image_copy_request().expect("restored copy").size,
+            (2, 2)
+        );
+        app.reading_mode = true;
+        app.dispatch(CommandId::ResizeImage);
+        assert!(app.resize_dialog.is_none());
+        app.reading_mode = false;
+        app.undo_edit(true);
+        let stale_generation = app.image_edit_generation;
+        app.load_path(PathBuf::from("missing-other.png"), MediaKind::Image);
+        app.finish_image_edits(stale_generation, Err("previous path result".into()));
+        assert!(app.image_error.is_none() && app.image_edit_source.is_none());
     }
 
     #[test]

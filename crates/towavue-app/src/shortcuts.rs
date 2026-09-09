@@ -76,6 +76,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::Redo, "Ctrl+Shift+Z"),
         (CommandId::ApplyCrop, "Ctrl+Y"),
         (CommandId::CopyImage, "Ctrl+C"),
+        (CommandId::ResizeImage, "Ctrl+R"),
         (CommandId::RotateClockwise, "R"),
         (CommandId::RotateCounterclockwise, "L"),
         (CommandId::FlipHorizontal, "H"),
@@ -548,6 +549,61 @@ mod tests {
                 .expect("reload binding")
                 .to_string(),
             "Ctrl+K Ctrl+R"
+        );
+    }
+
+    #[test]
+    fn resize_binding_is_image_only_and_custom_prefix_replaces_default() {
+        use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+        let bindings = defaults();
+        let sequence = bindings
+            .get(CommandId::ResizeImage)
+            .expect("default resize");
+        assert_eq!(sequence.to_string(), "Ctrl+R");
+        let image = CommandContext {
+            media_kind: Some(MediaKind::Image),
+            ..Default::default()
+        };
+        assert_eq!(
+            bindings.resolve(sequence.strokes(), image),
+            ShortcutMatch::Command(CommandId::ResizeImage)
+        );
+        for kind in [None, Some(MediaKind::Video), Some(MediaKind::Audio)] {
+            assert_eq!(
+                bindings.resolve(
+                    sequence.strokes(),
+                    CommandContext {
+                        media_kind: kind,
+                        ..image
+                    }
+                ),
+                ShortcutMatch::None
+            );
+        }
+        assert_eq!(
+            bindings.resolve(
+                sequence.strokes(),
+                CommandContext {
+                    reading_mode: true,
+                    ..image
+                }
+            ),
+            ShortcutMatch::None
+        );
+        let custom = parse("resize_image = Ctrl+K R\n", defaults()).expect("custom resize");
+        assert_eq!(
+            custom.resolve(sequence.strokes(), image),
+            ShortcutMatch::None
+        );
+        assert_eq!(
+            custom.resolve(
+                custom
+                    .get(CommandId::ResizeImage)
+                    .expect("prefix")
+                    .strokes(),
+                image
+            ),
+            ShortcutMatch::Command(CommandId::ResizeImage)
         );
     }
 

@@ -70,6 +70,7 @@ pub enum CommandId {
     CopyFilePath,
     RevealFile,
     CopyImage,
+    ResizeImage,
 }
 
 impl CommandId {
@@ -139,6 +140,7 @@ impl CommandId {
             Self::FirstImage => "first_image",
             Self::LastImage => "last_image",
             Self::CopyImage => "copy_image",
+            Self::ResizeImage => "resize_image",
         }
     }
 }
@@ -334,6 +336,7 @@ impl CommandDefinition {
                         | CommandId::FlipVertical
                         | CommandId::Undo
                         | CommandId::Redo
+                        | CommandId::ResizeImage
                 ))
             && (self.media_kinds.is_empty()
                 || context
@@ -522,6 +525,11 @@ const COMMANDS: &[CommandDefinition] = &[
         "Copy image or selection",
         &[MediaKind::Image],
     ),
+    command(
+        CommandId::ResizeImage,
+        "Resize / resample image",
+        &[MediaKind::Image],
+    ),
 ];
 
 const fn command(
@@ -698,6 +706,7 @@ mod tests {
             CommandId::SelectAll,
             CommandId::ToggleCropPreview,
             CommandId::CoverWindow,
+            CommandId::ResizeImage,
         ] {
             assert!(!enabled(id, context), "{id:?}");
             assert!(

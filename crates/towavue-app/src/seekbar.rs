@@ -7,7 +7,8 @@ pub fn show(
     progress: f32,
     parent: Option<egui::LayerId>,
     enabled: bool,
-) -> (Response, Option<egui::Pos2>) {
+    video: bool,
+) -> (Response, Option<egui::Pos2>, bool) {
     let area = egui::Area::new("compact-seek-bar".into());
     if let Some(parent) = parent {
         context.set_sublayer(parent, area.layer());
@@ -22,7 +23,11 @@ pub fn show(
                 egui::vec2(status.width(), 12.0),
                 egui::Sense::click_and_drag(),
             );
-            let drag = timeline_input::seek_drag(&response);
+            let drag = if video {
+                timeline_input::video_seek_drag(&response)
+            } else {
+                timeline_input::seek_drag(&response)
+            };
             let commit = if drag.released { drag.position } else { None };
             let dragging = drag.dragging && !drag.released;
             let active = response.hovered() || response.has_focus() || dragging;
@@ -63,6 +68,7 @@ pub fn show(
             (
                 response.on_hover_cursor(egui::CursorIcon::PointingHand),
                 commit,
+                drag.open_timeline,
             )
         })
         .inner
@@ -277,7 +283,7 @@ mod tests {
                             .expect("viewport")
                             .native_pixels_per_point = Some(density);
                         output = context.run_ui(input, |_| {
-                            show(&context, status, value, None, true);
+                            show(&context, status, value, None, true, false);
                         });
                     }
                     let circle = output.shapes.iter().find_map(|shape| match &shape.shape {
@@ -329,7 +335,7 @@ mod tests {
                     ..Default::default()
                 },
                 |_| {
-                    let (response, commit) = show(&context, status, 0.25, None, true);
+                    let (response, commit, _) = show(&context, status, 0.25, None, true, false);
                     let value = value_input(&response, "Position", 25.0, 0.0..=100.0, 5.0, true);
                     result = Some((response, commit, value));
                 },

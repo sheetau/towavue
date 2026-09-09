@@ -3,6 +3,7 @@ use egui::{Context, Id, PointerButton, Pos2, Response};
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Seek,
+    VideoSeek,
     Trim,
 }
 
@@ -12,6 +13,19 @@ struct Active {
     kind: Kind,
     origin: Pos2,
     dragging: bool,
+    opens_timeline: Option<bool>,
+}
+
+impl Active {
+    fn moved(&mut self, position: Pos2, threshold: f32) {
+        let delta = position - self.origin;
+        if delta.length() > threshold {
+            self.dragging = true;
+            if self.kind == Kind::VideoSeek && self.opens_timeline.is_none() {
+                self.opens_timeline = Some(delta.y < 0.0 && -delta.y > delta.x.abs());
+            }
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -27,6 +41,7 @@ pub struct Drag {
     pub position: Option<Pos2>,
     pub released: bool,
     pub dragging: bool,
+    pub open_timeline: bool,
 }
 
 fn state_id() -> Id {
@@ -77,6 +92,10 @@ pub fn seek_drag(response: &Response) -> Drag {
     update(response, Kind::Seek)
 }
 
+pub fn video_seek_drag(response: &Response) -> Drag {
+    update(response, Kind::VideoSeek)
+}
+
 pub fn trim_drag(response: &Response) -> Drag {
     update(response, Kind::Trim)
 }
@@ -124,6 +143,7 @@ fn update(response: &Response, kind: Kind) -> Drag {
             kind,
             origin,
             dragging: false,
+            opens_timeline: None,
         });
         state.claimed_frame = Some(frame);
         first_event = index + 1;
@@ -133,16 +153,14 @@ fn update(response: &Response, kind: Kind) -> Drag {
         let threshold = context.options(|options| options.input_options.max_click_dist);
         for event in &events[first_event..] {
             match event {
-                egui::Event::PointerMoved(pos) => {
-                    active.dragging |= active.origin.distance(*pos) > threshold
-                }
+                egui::Event::PointerMoved(pos) => active.moved(*pos, threshold),
                 egui::Event::PointerButton {
                     pos,
                     button: PointerButton::Primary,
                     pressed: false,
                     ..
                 } => {
-                    active.dragging |= active.origin.distance(*pos) > threshold;
+                    active.moved(*pos, threshold);
                     result.position = Some(*pos);
                     result.released = true;
                     break;
@@ -152,13 +170,23 @@ fn update(response: &Response, kind: Kind) -> Drag {
         }
         active.dragging |= decided_drag;
         result.dragging = active.dragging;
-        if result.released {
+        if active.opens_timeline == Some(true) {
+            state.active = None;
+            state.claimed_frame = Some(frame);
+            if context.dragged_id() == Some(active.id) {
+                context.stop_dragging();
+            }
+            result = Drag {
+                open_timeline: true,
+                ..Default::default()
+            };
+        } else if result.released {
             state.active = None;
         } else {
             result.position = pointer;
             state.active = Some(active);
         }
-    } else if kind == Kind::Seek
+    } else if matches!(kind, Kind::Seek | Kind::VideoSeek)
         && response.clicked()
         && press.is_none()
         && !events.iter().any(|event| {
@@ -182,6 +210,120 @@ fn update(response: &Response, kind: Kind) -> Drag {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn video_direction_is_locked_without_changing_other_seek_gestures() {
+        let origin = egui::pos2(100.0, 100.0);
+        for (delta, opens) in [
+            (egui::vec2(0.0, -20.0), true),
+            (egui::vec2(12.0, -20.0), true),
+            (egui::vec2(20.0, -12.0), false),
+            (egui::vec2(-20.0, -20.0), false),
+            (egui::vec2(0.0, 20.0), false),
+        ] {
+            for kind in [Kind::VideoSeek, Kind::Seek, Kind::Trim] {
+                let mut active = Active {
+                    id: Id::new("test"),
+                    kind,
+                    origin,
+                    dragging: false,
+                    opens_timeline: None,
+                };
+                active.moved(origin + egui::vec2(1.0, -1.0), 6.0);
+                assert!(!active.dragging);
+                assert_eq!(active.opens_timeline, None);
+                active.moved(origin + delta, 6.0);
+                assert!(active.dragging);
+                let expected = (kind == Kind::VideoSeek).then_some(opens);
+                assert_eq!(active.opens_timeline, expected);
+                active.moved(origin + egui::vec2(100.0, -100.0), 6.0);
+                assert_eq!(active.opens_timeline, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn upward_video_drag_opens_once_and_never_seeks_on_release_or_another_pass() {
+        for blocked in 0..5 {
+            for batched in [false, true] {
+                let context = Context::default();
+                let rect =
+                    egui::Rect::from_min_max(egui::pos2(20.0, 100.0), egui::pos2(420.0, 112.0));
+                let origin = egui::pos2(100.0, 106.0);
+                let end = origin - egui::vec2(0.0, 50.0);
+                let button = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    pressed,
+                    button: PointerButton::Primary,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                let mut open_count = 0;
+                let mut seek_count = 0;
+                let mut frame = |events, interrupt| {
+                    let mut passes = 0;
+                    let _ = context.run_ui(
+                        egui::RawInput {
+                            events,
+                            focused: !(interrupt && blocked == 2),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            if interrupt && blocked == 1 {
+                                ui.disable();
+                            }
+                            if interrupt && blocked == 3 {
+                                egui::Popup::open_id(ui.ctx(), "block".into());
+                            }
+                            let response =
+                                ui.interact(rect, "compact".into(), egui::Sense::click_and_drag());
+                            let drag = video_seek_drag(&response);
+                            open_count += usize::from(drag.open_timeline);
+                            seek_count += usize::from(drag.released);
+                            let background = ui.interact(
+                                rect.expand(100.0),
+                                "timeline".into(),
+                                egui::Sense::click_and_drag(),
+                            );
+                            seek_count += usize::from(seek_commit(&background).is_some());
+                            passes += 1;
+                            if passes == 1 {
+                                ui.ctx()
+                                    .request_discard("gesture is consumed across passes");
+                            }
+                        },
+                    );
+                };
+                frame(vec![egui::Event::PointerMoved(origin)], false);
+                let mut motion = vec![egui::Event::PointerMoved(end)];
+                if blocked == 4 {
+                    motion.push(egui::Event::Key {
+                        key: egui::Key::Escape,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    });
+                }
+                if batched {
+                    motion.insert(0, button(origin, true));
+                    motion.push(button(end, false));
+                    frame(motion, true);
+                } else {
+                    frame(vec![button(origin, true)], false);
+                    frame(motion, true);
+                    frame(vec![button(end, false)], true);
+                }
+                frame(vec![], true);
+                assert_eq!(
+                    open_count,
+                    usize::from(blocked == 0),
+                    "blocked={blocked}, batched={batched}"
+                );
+                assert_eq!(seek_count, 0);
+                assert!(!is_active(&context));
+            }
+        }
+    }
 
     #[test]
     fn batched_seek_uses_press_ownership_and_commits_once_across_layout_passes() {

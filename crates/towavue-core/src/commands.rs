@@ -488,7 +488,11 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::ResetRate, "Reset playback rate", PLAYABLE_MEDIA),
     command(CommandId::Save, "Save exported media", ANY_MEDIA),
     command(CommandId::ExportAs, "Export as", ANY_MEDIA),
-    command(CommandId::ToggleTimeline, "Toggle timeline", PLAYABLE_MEDIA),
+    command(
+        CommandId::ToggleTimeline,
+        "Toggle video timeline",
+        &[MediaKind::Video],
+    ),
     command(CommandId::ToggleGridMenu, "Toggle grid menu", ANY_MEDIA),
     command(
         CommandId::ToggleHardwareEncode,

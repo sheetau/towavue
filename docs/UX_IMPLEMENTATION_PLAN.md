@@ -33,13 +33,13 @@
 | I04 | 画像の移動keyと端点・複数枚jump、reading時の役割 | 左右／Home／Endは実装済み、今回のreading変更と草案alias／jumpは要照合。既存custom bindingとCtrl+左右の同種移動を黙って奪わない |
 | I05 | 画像／選択範囲のclipboard copy、resize/resample、interpolation | 主経路実装済み。Ctrl+Cの編集後frame／selection／透過RGBA、Ctrl+Rの寸法／比率／4補間／非同期処理／Undo/Redo／保存PNG一致を検証。View／paletteに表示専用Smooth／Nearestも追加し、画像・animation・読書・共有cache・復旧dataとcopy／履歴不変を回帰。固定rendererのtexture options無視をsource-only修正版で解消し、WARPの混在sampler／partial更新画素試験をCIに追加。実windowでもnearest領域246015画素が原色のみ、smoothの245692画素は中間色、copyは元16×16と一致。resize固有の実GPU復旧・混在DPIの追加監査は未完 |
 | I06 | preset aspect selection、自由回転、readingの回転／反転alias | 要照合。90度・反転・正方形／比率保持は存在。任意角度の境界／export契約と入力競合を別途決める |
-| V01 | seek上dragでtimelineを開く、専用buttonを除く、timeline中thumbnailなし | 未完。現在はT／button、timelineにもhover preview。Seek／selectionとのgesture判定を明確にする |
+| V01 | seek上dragでtimelineを開く、専用buttonを除く、timeline中thumbnailなし | 実装・検証済み。click閾値後の初動が上優勢なら展開のみ、横／下が先ならrelease時Seek。T／View／paletteは動画専用、fullscreenから展開時は通常windowへ戻る。専用buttonとtimelineのhover thumbnail生成／表示を除去。通常releaseで20秒を保持する上drag、横→上でもSeek維持を確認。V03の時間選択編集は別の未完事項 |
 | V02 | 区間低解像度previewの先行生成・即時hover、drag中も同じpreview表示 | 一部実装。20区間の遅延取得はあるが先行sheetと本画面scrubは未完。bounded生成、初期応答・長GOP負荷を測る |
 | V03 | timelineの時間選択・範囲再生・内外削除・連結、部分音量／速度、rubber-band | 未完。現在の単一区間trim gripは要求と異なる。非破壊区間model／source↔編集時刻／映像音声境界／Undo／export一致の設計が必要 |
 | V04 | 動画の閲覧／編集contextでshortcut競合を解消し誤編集を防ぐ | 未完。R/L回転、左右Seek、comma/period速度は存在。frame移動・J/L/K・長押し2倍と編集modeを一貫させる |
 | V05 | 動画のzoom・resizeと既存crop／rotate／flip／fullscreen | 一部実装。zoom／resizeは未完、単一device・preview/export一致を維持する |
 | A01 | 音声の自動次曲、repeat all／one／off、shuffleとbuttons | 主要経路実装。tab別のShell順auto-next、repeat off／all／one、shuffle一巡、前後操作、status buttons／View／palette／音声Ctrl+R。曲末にShell順を非同期再取得し、初回取得前のtab切替にも対応。実WASAPIでactive／背景の次曲・loop・dirty guard・古い通知拒否・失敗隔離を検証。通常releaseでbuttons／shortcut／自然EOFの次曲を確認。modeのrestart永続化、gapless、手動選曲の独立した履歴stackは提供しない |
-| A02 | 音声timeline常時、動画共通の選択編集・音量／速度操作 | 一部実装。waveform／trimは存在、V03と共通の編集契約へ進める |
+| A02 | 音声timeline常時、動画共通の選択編集・音量／速度操作 | 表示契約を実装・検証。音声timelineはfullscreenでも常設、Tでは閉じずcompact seek／専用buttonなし。通常releaseの全画面でも確認。既存waveform／trimからV03共通の選択編集・部分音量／速度へ進める |
 | E01 | metadata書換、音声抽出、normalize、stereo／mono export | 未完。現在はmetadata copyと固定export。明示optionと非破壊保存・再openの一致が必要 |
 | M01 | logoの三方向menu gestureと最小限の状態表示 | 未完。クリック／keyboard menuとlogo描画は存在。閾値・角度・mouseup・取消を共有dispatchへ渡す |
 | G01 | menu／palette／custom prefix／media別grid／dirty guard／Shell順 | 実装あり。追加commandの全入口と重なり・keyboard／IME／UIA・Undo／保存を変更ごとに再検証する |

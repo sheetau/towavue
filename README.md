@@ -4,6 +4,8 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
+動画の下のSeekバーを上へドラッグするとtimelineが開きます。横へ動かし始めた場合は通常のSeekを続け、開閉はT／View menu／command paletteでも操作できます。専用ボタンとtimeline内のhover thumbnailは外しました。音声timelineは全画面でも常時表示します。時間範囲の選択編集はまだ暫定のtrim gripで、複数区間編集などは改善途中です。
+
 **M7: Advanced presentation and interactionまで完了しています。** M6までの閲覧・再生・非破壊編集基盤に、非同期waveform／thumbnail cache、timeline、メディア別grid menu、window外tab detach、hardware encode優先とfallback、HDR color-space能力判定を追加しました。source fileは直接変更せず、フォルダー内の移動順は同じフォルダーを開いているExplorerの実際のSort By状態を優先し、Explorerが閉じている場合もShell viewが解決した保存状態またはfolder templateを利用します。
 
 TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメディア開始からの時刻へ揃えます。Matroskaの長さ表示と、TSのGOP途中Seek・thumbnailで映像が出ない問題をH1で修正しました。長いGOPのSeek中も再Seek・tab close・終了要求を処理境界で確認しますが、遅いstorageや進行中のFFmpeg callによる待ち時間をなくすものではありません。

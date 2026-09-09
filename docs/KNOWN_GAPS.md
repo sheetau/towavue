@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10: 動画の上drag展開／専用timeline button除去／timeline thumbnail廃止（V01）と音声のfullscreenを含む常時timeline（A02表示部分）を実装した。横Seekの初動固定、取消／複数pass、位置・履歴保持を回帰と通常releaseで確認。時間範囲選択・rubber-band・複数区間／部分音量・速度（V03）、先行thumbnail sheet（V02）は未完で、既存trim gripを完成仕様とは扱わない。
+
 新goalの残件と各checkpointの実績は[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)で管理する。tabごとの背景再生は主要経路を実装したが、完全な状態保持、timelineの選択編集等は引き続き未完である。音声の自動次曲／repeat／shuffleはA01で主要経路を実装した。tab context menu／一括close／path copy・Explorer表示／path-only reopenは実装したが、window間結合、keyboardからのcontext menu呼出しと全体focus／UIA監査は残る。新しい台帳は過去の「このsliceには含めない」を永久的な却下とは扱わない。
 
 U07の画像側では読み込み済みの画素・texture・zoom／pan／selection・読書設定／ページをtabごとに保持する。開いた画像のsnapshotはcloseまでpinするので、decode／texture cacheの256 MiBはprocess全体の上限ではない。未完了decodeは復帰時に再要求し、未完了resizeも元Arcから再処理する。playlist／表示中filmstripのscroll位置はtabごとに保持したが、全focus状態の保持は未完。動画・音声sessionの保持と背景再生は後続checkpointで接続した。device世代の違う復帰画像は再upload対象とするが、この保持経路の実GPU removal／混在DPI監査は未実施である。

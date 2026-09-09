@@ -97,7 +97,6 @@ pub enum Icon {
     Close,
     Pause,
     Play,
-    Waveform,
     ExitFullscreen,
 }
 
@@ -109,7 +108,6 @@ impl Icon {
             Self::Close => '\u{ea76}',
             Self::Pause => '\u{ead1}',
             Self::Play => '\u{eb2c}',
-            Self::Waveform => '\u{eb31}',
             Self::ExitFullscreen => '\u{eb4d}',
         };
         egui::RichText::new(glyph).font(crate::fonts::icon_font())

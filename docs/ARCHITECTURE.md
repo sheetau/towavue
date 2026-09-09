@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## H1: timeline表示とcompact seekのgesture（2026-09-10）
+
+動画はcompact seekのpress後、click許容距離を初めて越える方向で操作を固定する。上方向が横方向より大きければtimelineを開き、Seekは発行しない。横／下が先なら従来のrelease時Seekを維持し、途中から上へ動かしても開閉へ変えない。T／View menu／paletteは動画timelineの開閉に共用し、専用status buttonは置かない。fullscreenからの展開はfullscreenを終了する。音声timelineはfullscreenでも常時表示し、音声の開閉commandとcompact seekは提供しない。
+
+timeline内にはhover thumbnailを表示・生成せず、compact video seekのpreviewは維持する。既存の単一区間trim gripは暫定編集UIであり、時間選択／rubber-band／複数区間model（V03）の実装とは扱わない。入力取消・所有権、tab別panel高さ、編集履歴と再生位置は表示変更だけでは変えない。
+
 ## 1. 目的と優先順位
 
 towavueはWindows向けの画像・動画・音声ビューア兼プレイヤーである。設計上の優先順位は次のとおり。

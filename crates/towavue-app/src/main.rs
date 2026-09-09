@@ -1158,7 +1158,7 @@ where
             .then_some(saved.waveform)
             .flatten();
         self.image_view = saved.view;
-        self.timeline_open = saved.timeline_open;
+        self.timeline_open = saved.kind == MediaKind::Audio || saved.timeline_open;
         self.filmstrip_open = saved.filmstrip_open;
         self.playlist = saved.playlist;
         self.filmstrip.restore_view(saved.filmstrip_view);
@@ -2155,14 +2155,17 @@ where
             position,
             self.media_duration,
         );
-        let status_rect = if self.fullscreen {
+        if self.fullscreen {
             self.tab_preview.clear();
-            None
         } else {
             self.draw_top_bar(root, actions);
+        }
+        let status_rect = if !self.fullscreen || self.media_kind == Some(MediaKind::Audio) {
             let rect = self.draw_status_bar(root, actions, &mut volume_targets);
             self.draw_timeline(root, actions);
             Some(rect)
+        } else {
+            None
         };
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
@@ -3344,6 +3347,7 @@ where
     ) {
         let screen = context.content_rect();
         let eligible = self.fullscreen
+            && self.media_kind != Some(MediaKind::Audio)
             && !self.modal_input_blocked()
             && !self.palette_open
             && !self.grid_open
@@ -3436,11 +3440,7 @@ where
     ) -> egui::Rect {
         egui::Panel::bottom("status")
             .exact_size(chrome::STATUS_HEIGHT)
-            .show_separator_line(
-                self.fullscreen
-                    || !self.timeline_open
-                    || !matches!(self.media_kind, Some(MediaKind::Video | MediaKind::Audio)),
-            )
+            .show_separator_line(!self.timeline_is_visible())
             .frame(chrome::bar())
             .show(root, |ui| {
                 ui.horizontal_centered(|ui| {
@@ -3486,20 +3486,11 @@ where
                         } else { format!("{position} / {duration}") };
                         let time_text = RichText::new(time_label).size(12.0).color(chrome::MUTED);
                         if self.media_kind == Some(MediaKind::Audio) && ui.max_rect().width() < 340.0 {
-                            // Reserve four controls and their gaps before truncating a long clock.
-                            let time_width = (ui.available_width() - 148.0).max(0.0);
+                            // Reserve three controls and their gaps before truncating a long clock.
+                            let time_width = (ui.available_width() - 114.0).max(0.0);
                             ui.add_sized([time_width, 24.0], egui::Label::new(time_text).truncate())
                                 .on_hover_text(format!("{} / {duration}", format_time(self.current_position())));
                         } else { ui.label(time_text); }
-                        if chrome::button(
-                            ui,
-                            chrome::Icon::Waveform,
-                            &self.command_hint(CommandId::ToggleTimeline, "Waveform timeline"),
-                        )
-                        .clicked()
-                        {
-                            actions.push(UiAction::Command(CommandId::ToggleTimeline));
-                        }
                         let volume = ui
                             .add_sized(
                                 [40.0, 24.0],
@@ -3687,7 +3678,8 @@ where
                 0.0
             };
             let enabled = !self.modal_input_blocked();
-            let (response, commit) = seekbar::show(context, status, progress, parent, enabled);
+            let (response, commit, _) =
+                seekbar::show(context, status, progress, parent, enabled, false);
             let value = seekbar::value_input(
                 &response,
                 "Image position",
@@ -3752,7 +3744,7 @@ where
             }
             return;
         }
-        if (self.timeline_open && !self.fullscreen)
+        if self.timeline_is_visible()
             || self.session.is_none()
             || matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted)
         {
@@ -3764,7 +3756,12 @@ where
         let progress = (self.current_position().as_seconds_f64() / duration.as_secs_f64())
             .clamp(0.0, 1.0) as f32;
         let enabled = !self.modal_input_blocked();
-        let (response, commit) = seekbar::show(context, status, progress, parent, enabled);
+        let (response, commit, open_timeline) =
+            seekbar::show(context, status, progress, parent, enabled, true);
+        if open_timeline {
+            actions.push(UiAction::Command(CommandId::ToggleTimeline));
+            return;
+        }
         let value = seekbar::value_input(
             &response,
             "Playback position (seconds)",
@@ -3815,10 +3812,13 @@ where
         });
     }
 
+    fn timeline_is_visible(&self) -> bool {
+        self.media_kind == Some(MediaKind::Audio)
+            || (self.media_kind == Some(MediaKind::Video) && self.timeline_open && !self.fullscreen)
+    }
+
     fn draw_timeline(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
-        if !self.timeline_open
-            || !matches!(self.media_kind, Some(MediaKind::Video | MediaKind::Audio))
-        {
+        if !self.timeline_is_visible() {
             return;
         }
         let max_height = root.available_height() * 0.6;
@@ -3902,12 +3902,6 @@ where
                     let ratio = seekbar::ratio(rect, position.x);
                     actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
                 }
-                let Some(position) = response.interact_pointer_pos().or(response.hover_pos())
-                else {
-                    return;
-                };
-                let ratio = ((position.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-                self.draw_seek_preview(&response, ratio, duration);
             });
     }
 
@@ -4394,6 +4388,9 @@ where
                 self.export_current(true, None);
             }
             CommandId::ToggleTimeline => {
+                self.thumbnail_worker.clear();
+                self.thumbnail_loading = None;
+                self.hover_thumbnail = None;
                 if self.fullscreen {
                     self.set_fullscreen(false);
                     self.timeline_open = true;
@@ -6099,7 +6096,9 @@ where
                 self.fullscreen_was_maximized = false;
             }
         }
-        self.set_status(if enabled {
+        self.set_status(if enabled && self.media_kind == Some(MediaKind::Audio) {
+            "Fullscreen — Escape to return".into()
+        } else if enabled {
             "Fullscreen — Tab or bottom edge for controls · Escape to return".into()
         } else {
             "Windowed view".into()
@@ -8423,6 +8422,104 @@ mod tests {
     }
 
     #[test]
+    fn audio_timeline_is_permanent_and_video_timeline_has_no_thumbnail_requests() {
+        let stroke = |key: &str| key.parse::<KeyStroke>().expect("shortcut");
+        let Some(root) = isolated_test_root(
+            "tests::audio_timeline_is_permanent_and_video_timeline_has_no_thumbnail_requests",
+        ) else {
+            return;
+        };
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            for fullscreen in [false, true] {
+                for width in [240.0, 960.0] {
+                    let mut app = Application::new(None, |_| {}).expect("app");
+                    let path = root.join(if kind == MediaKind::Audio {
+                        "audio.wav"
+                    } else {
+                        "video.mp4"
+                    });
+                    let tab = app.tabs.open_new(path.clone(), kind);
+                    app.path = Some(path);
+                    app.media_kind = Some(kind);
+                    app.state = PlaybackState::Paused;
+                    app.media_duration = Some(Duration::from_secs(10));
+                    app.pending_time = Some(media_time(Duration::from_secs(2)));
+                    app.edits.insert(tab, EditHistory::default());
+                    let history = app.edits[&tab].clone();
+                    let generation = app.generation;
+                    app.set_fullscreen(fullscreen);
+                    if fullscreen && kind == MediaKind::Audio {
+                        assert_eq!(
+                            app.status_message.as_ref().expect("fullscreen hint").0,
+                            "Fullscreen — Escape to return"
+                        );
+                    }
+                    app.timeline_open = false;
+                    app.process_shortcut(stroke("T"));
+                    if kind == MediaKind::Audio {
+                        assert_eq!(
+                            app.fullscreen, fullscreen,
+                            "audio T must not leave fullscreen"
+                        );
+                        assert!(!app.timeline_open, "audio does not need a toggle flag");
+                    } else {
+                        assert!(!app.fullscreen);
+                        assert!(app.timeline_open);
+                    }
+                    assert!(app.timeline_is_visible());
+                    let context = fonts::test_context();
+                    context.enable_accesskit();
+                    app.ui_context = Some(context.clone());
+                    let mut pointer = None;
+                    for _ in 0..4 {
+                        let mut actions = Vec::new();
+                        let output = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(width, 300.0),
+                                )),
+                                events: pointer
+                                    .into_iter()
+                                    .map(egui::Event::PointerMoved)
+                                    .collect(),
+                                ..Default::default()
+                            },
+                            |ui| app.draw_ui(ui, &mut actions),
+                        );
+                        assert!(actions.is_empty());
+                        let tree = output.platform_output.accesskit_update.expect("tree");
+                        let sliders: Vec<_> = tree
+                            .nodes
+                            .iter()
+                            .filter(|(_, node)| node.label() == Some("Playback position (seconds)"))
+                            .collect();
+                        assert_eq!(sliders.len(), 1, "no duplicate compact seek");
+                        let bounds = sliders[0].1.bounds().expect("timeline bounds");
+                        assert!(bounds.height() > 30.0, "timeline instead of compact seek");
+                        pointer = Some(egui::pos2(
+                            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                        ));
+                        assert!(!tree.nodes.iter().any(|(_, node)| {
+                            node.label()
+                                .is_some_and(|name| name.contains("Waveform timeline"))
+                        }));
+                        assert!(app.thumbnail_loading.is_none());
+                        assert!(app.hover_thumbnail.is_none());
+                        assert!(!app.fullscreen_controls_visible);
+                    }
+                    app.process_shortcut(stroke("T"));
+                    assert_eq!(app.timeline_is_visible(), kind == MediaKind::Audio);
+                    assert_eq!(app.current_position(), media_time(Duration::from_secs(2)));
+                    assert_eq!(app.edits[&tab], history);
+                    assert_eq!(app.generation, generation);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn accessible_trim_values_preserve_targets_validation_and_undo() {
         let Some(root) = isolated_test_root(
             "tests::accessible_trim_values_preserve_targets_validation_and_undo",
@@ -8955,7 +9052,7 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
-        app.media_kind = Some(MediaKind::Audio);
+        app.media_kind = Some(MediaKind::Video);
         app.media_duration = Some(Duration::from_secs(10));
         app.state = PlaybackState::Paused;
         let start = egui::pos2(100.0, 250.0);
@@ -10952,14 +11049,6 @@ mod tests {
                 20.0,
                 CommandId::TogglePause,
                 "Play / replay",
-            ),
-            (
-                MediaKind::Audio,
-                PlaybackState::Paused,
-                false,
-                130.0,
-                CommandId::ToggleTimeline,
-                "Waveform timeline",
             ),
             (
                 MediaKind::Image,

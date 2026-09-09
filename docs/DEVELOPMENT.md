@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 動画の上drag展開・音声timeline常設（2026-09-10）
+
+動画compact seekを上へ引くと位置を変えずtimelineを開く。click許容距離を初めて超える時の上優勢で判定し、横／下が先なら後から上へ引いてもrelease時Seekを維持する。T／View／paletteで動画のみ開閉し、fullscreenからの展開は通常windowへ戻る。音声はfullscreenでもtimeline／statusが常設で、T・compact seek・専用timeline buttonなし。timeline内にはhover thumbnailを要求・表示しない。既存trim gripやtab別resize高さは維持し、V03の選択編集は別の残件とする。
+
+新回帰は方向固定・jitter・斜め・通常Seek／trimの不変、batched／分離release・複数layout pass・無効化／focus loss／popup／Escapeでの取消を検証する。実UIの240/960pxでAudio／Video・fullscreen・Tとslider数／高さを照合し、hoverでthumbnail workerを開始せず位置／履歴／generationを保持する。
+
+最終session42883はfmt／Clippy／workspace349 tests／release成功（app201/core46/runtime98/integration4、通常ignored8件は今回明示再実行していない）。release658ce94a4e006b1fa11800fb9aea62f55edb5499e7d08271fad35361d81f6776。前回0a690b6のCI34390186562はRust checks成功、installer fixtureのみNSIS downloadの45秒timeoutで失敗し、UI回帰とは分ける。
+
+通常release b4e2b37d、timeline-gesture-native PID51304/start18:50:01.0155214Zで、owned60秒video-only MP4の上dragは20秒→20秒・timeline高92px、横→上はrelease時36.333333433秒へSeek・compact高12px。音声30秒無音WAVはF11→Tでもtimeline高92pxとExit fullscreenを保持した。up／audio-fullscreen captureを目視確認、通常Close終了0・launcher15829 terminal、MP4 ef618364／WAV 7b6bc70c不変。動画に音声streamがないためwaveform unavailable表示は残る。実画面で音声向けfullscreen案内が古いことを発見し、常設controlsに合わせ文言を修正、回帰へ追加した。この文言修正はnative capture後。全goalとV02／V03等の未完事項は維持する。
+
 ### 音声の自動次曲・リピート・シャッフル（2026-09-10 03:36 JST）
 
 音声folderの曲末ではShell順の次曲へ進み、Repeat offは末尾で止まる。下バーのrepeat buttonまたは音声Ctrl+Rでoff→all→one→off、shuffle buttonで重複のない一巡へ切り替える。View menu／paletteも同じcommandを使い、画像Ctrl+Rのresizeとはcontextで区別する。Ctrl+Left／Rightは音声の再生順を辿り、oneでも手動移動は同曲loopにしない。ボタンは選択状態を持つため、native UIAではInvokeではなくToggle patternも確認する。

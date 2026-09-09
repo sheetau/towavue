@@ -2,9 +2,15 @@
 
 この文書はM7 checkpointとH1での改善を、これから人が触って改善するための基準として整理する。`concepts/concept.txt`は発想の参照元であり、ここに載っている項目も採用決定ではない。優先順位は実際の試用結果、再現性、利用頻度、architecture riskで更新する。
 
+2026-09-09のowner指定: 現在は未公開評価版のブラッシュアップを優先し、実際の公開配布は行わない。Windows 10はowner環境に導入せず、合理的な仮想環境検証が難しければ実機確認を省略可とする。対応確認済みとは宣言せず、これを現在のH1停止条件にはしない。下部の日付付き監査で「公開／Win10確認」を残件とした記録は過去の検証範囲であり、現在の優先順位は[ROADMAP](ROADMAP.md)の冒頭を正とする。
+
 ## 1. 試用前に知るべき制約
 
+2026-09-09の通常release f91b4498では、120秒1080p H.264の先頭にkeyframeが1枚だけの生成素材で、4条件各100回Seekのp95が872.539～979.008msとなり、300ms目標を超えた。同じ生成条件を2秒間隔keyframeにした対照では40.242～108.103ms。長GOPの待ち時間は未解決であり、対照側の合格を全素材へ一般化しない。[動画保存・Seek比較の条件と範囲](DEVELOPMENT.md#新しい通常releaseの動画保存とseek条件比較2026-09-09-1410-jst)を参照。同じ本体の30分4K再生は107771 framesすべて表示・drop／CPU transfer 0、drift p95 4.812ms／最大17.349msで通過したが、単一基準機／素材の結果である。5分以降のprivateは224.23～240.14MiBで、リーク不在や実環境matrixの証明ではない。詳細はDEVELOPMENTの14:57記録を参照。
+
 ### 操作とpreviewの不一致
+
+長GOP側の50秒Seekは同じFFmpeg単体のD3D11VAでも最初の1 frameまで836～936ms（3回）かかり、UI固有の遅延ではないことを確認した。app内部のprofileや最適化余地なしの証明ではない。従来の120 keyframeを持つ固定基準素材では、新本体の4条件各100回Seekがp95 30.411～103.126msで通過した。詳しくはDEVELOPMENTの14:22記録を参照。正確なframe選択を粗いkeyframe表示へ変更してはいない。
 
 - Shift付き正方形作成と比率保持resizeが画像端で長方形になる問題を修正した。両軸共通の上限で止め、resizeの固定辺・直交中心とdrag開始比率を保持する。縦横/全方向/zero縮小後の回帰と通常releaseを確認。確定時の整数/動画偶数pixel丸め、物理入力・DPI matrixの未検証は残る。
 - 映像より音声が長い素材で、再生中に音声だけの区間へSeekすると黒画面になる問題を修正した。最終映像をlate-frame dropから除外して保持し、音声clockは継続する。MP4/MKV・不均等なframe間隔の末尾画像照合と通常D3D11VA表示を確認。hover thumbnail/filmstripの空画像も最終選択frameの時刻へ一度だけ再生成し、通常windowと複数stream・TSの回帰で確認した。空preview時の追加decodeは長いGOPや遅いstorageに影響される。
@@ -50,7 +56,8 @@ UI上のcommand名は操作が即時反映される印象を与えるため、li
 
 - H1でRedrawRequestedの自己再予約と静止gridの連続描画を除いた。基準機の5秒間CPU時間は静止画・Welcomeで約5.9秒から計測分解能以下へ、音声再生で約5.9秒から0.47秒へ減少した。debug buildの単発process計測であり、GPU消費電力・release性能・長時間負荷を保証する値ではない。
 
-- installer、uninstaller、portable package、automatic update、file association、Explorer context menuはない。
+- [local評価用Setupとuninstaller](LOCAL_SETUP.md)は実装・生成済み。正確なinstaller sourceの同梱と展開後の再buildに加え、許可されたWindows 11基準機で実導入・更新・shortcut起動・保存と通常自己copyアンインストールを確認した。利用者file／設定と共有VCは保持。Windows 10、VC未導入環境、実製品の中断復旧などは未検証で、公開配布版はない。インストール不要のportable application package、automatic update、file association、Explorer context menuはない。
+- 実アンインストール後、NSISの一時自己copy約100 KBが試験TEMPに残る。本体／登録の削除成功とTEMP全消去は別の結果であり、次の再起動で消えるとは保証しない。更新用の復旧資料も意図的に保持する。詳細とupstreamの根拠はLOCAL_SETUPの実lifecycle記録を参照。
 - settings画面、recent files、session/tab復元、window位置・sizeの保存はない。
 - Explorerからのfile/folder dropはH1で実装した。複数fileは既存Open契約で開き、folderはShell順の先頭mediaを開く。folder要求は最新1件で、複数folderを一括展開するimport queueではない。virtual file、URL、app間tab結合は対象外。
 - export errorは確認するまで残る詳細modal、画像load errorは画像領域（readingでは該当page）、動画・音声のplayback errorはFaulted中の中央領域に表示する。壊れたMP4から正常動画をOpenし、元のerror tab、最後にWelcomeへ戻るflowを通常releaseで確認した。他のerrorは主に短時間のstatus messageとterminal diagnosticで、履歴、copy、詳細表示はない。
@@ -172,7 +179,7 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 - 現在tabの未保存確認Cancel後は、元の操作部へfocusを戻す。通常画像/動画の四辺、画像の実Save As取消→確認Cancelと、回帰での描画前再確認・隣tabへの古いfocus非復帰を確認した。全modal・全screen readerのfocus横断確認ではない。
 - 対応拡張子、file dialog filter、実decoder能力、export codec選択の関係を一つのcapability modelへ統一していない。拡張子を増やすだけでは対応完了にならない。
 - Loading、empty、error、unsupported capabilityのstate表現が各所のstatus textへ分散している。UX改善時には表示だけでなくstate transitionをcoreでtest可能にする余地がある。
-- 起動時のshortcut／grid記述ミス・読込／初回保存失敗は、その設定だけ既定値へ戻して継続し、原本を保持する。path／理由付きnative警告と修正後Reloadを接続した。隔離した設定fixtureで初期化・警告状態・復旧を回帰確認済みだが、通常windowでの警告表示／focus／操作継続は未確認。
+- 起動時のshortcut／grid記述ミス・読込／初回保存失敗は、その設定だけ既定値へ戻して継続し、原本を保持する。path／理由付きnative警告と修正後Reloadを接続した。隔離した設定fixtureの回帰に加え、通常release f91b4498で警告全文・背景操作の無効化・Enterでの解除・menu操作と修正後Reloadを確認した。cache保存先がfileで塞がれていても画像とfilmstripを表示し、そのfileの除去後は同じprocessでcache保存を再開した。全設定エラー種別の実画面・screen reader・混在DPIを保証するものではない。
 - duration・waveform・hover thumbnailはH1で各種類1本の常設worker、実行中1件＋最新待機1件へ制限した。media切替/closeでは未開始要求を破棄し、owned child processも取り消す。種類間の優先度制御や進行中のnative I/Oの強制中断はない。filmstripは可視集合の最新要求を別の単一workerで処理する。
 - hover thumbnailは現在表示用のtextureを一つ保持し、20区間のcacheを利用する。失敗した区間は同じload中に再試行せず、media切替/再openで失敗記録を消す。media load世代で旧結果を拒否する。
 - 映像2秒・音声30秒のH.264/AACで判明した音声先行蓄積/黒画面は、独立input/demuxと、映像確認後に一度だけ音声を開始する構成へ変更した。同じfileの通常releaseで表示60・drop 0・CPU transfers 0、停止Seekと300msの制御開始遅延、hardware成立前のsoftware fallback/成立後のfaultを確認した。二系統読取の通常releaseによる30分4K60再試験も107,746枚表示・25枚drop・CPU transfers 0で完走し、drift p95 4.806ms・最大37.785msだった。先頭10分のdrop率は保守的上限でも0.069589%で基準内。ただし基準機とこのfixtureの測定であり、低速storageや全codecの保証ではない。

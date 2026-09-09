@@ -2,14 +2,14 @@
 
 The collector joins the evaluated application's source snapshot and the fixed thirteen-kit catalog into one movable offline directory. It checks the actual executable and all 94 runtime files, but copies only source/notice materials. This is not Setup.exe, runtime adoption, public delivery or a complete linked SBOM.
 
-The current binding describes the [Help/palette material entry](DEVELOPMENT.md) build 195af870. The earlier app kit v1, catalog v10 and candidate materials v2 remain historical records for executable 03125262; they are not relabeled as the new build's sources. The installed-app path contract is `licenses/START-HERE.html`, selected in Explorer. It does not require every source archive to be installed locally.
+The current binding describes the resilience build f91b4498 after its [representative export, fixed Seek and 30-minute 4K qualification](DEVELOPMENT.md). Earlier materials for 195af870 and 03125262 remain historical records, not relabeled sources. The installed-app path contract is `licenses/START-HERE.html`, selected in Explorer. It does not require every source archive to be installed locally.
 
 ## Fixed inputs
 
-[candidate-material-inputs.json](candidate-material-inputs.json) pins catalog v11's inventory/completion marker and the application source ZIP. Candidate binary identities are read from the hash-checked catalog's existing app and FFmpeg manifests, not another handwritten list.
+[candidate-material-inputs.json](candidate-material-inputs.json) pins the refreshed catalog's inventory/completion marker and application source ZIP. Candidate binary identities are read from the hash-checked catalog's app and FFmpeg manifests, not another handwritten list.
 
-- Application: 10301952 bytes, SHA256 `195af8705605e678a9cbe97aa57a0cdb7cae5e34bf61ee6b60e528b933f93186`. Source snapshot `06588b672f0394fb7ac2c1832242c32f7688ca36` is the Help-entry checkpoint. This binding describes that recorded executable, not the later cache/configuration resilience changes in the current application source. Cargo manifests/lock and toolchain are unchanged. The association uses the recorded normal release build and source-tree comparison, not a bit-identical rebuild claim.
-- Application source ZIP: 1290025 bytes, SHA256 `2eb46e64e6c858fc09b8370e98683db57c0a70c1989d91136265eb03a479d2a3`. All 224 regular members are compared against the commit's Git blob identities; missing, duplicate or changed members fail. Two Git archives match exactly. The collector checks the pinned ZIP bytes and Git commit comment. No working-tree or untracked files enter the archive. This is application source, not the subsequently developed installer.
+- Application: 10319872 bytes, SHA256 `f91b4498172f71b734cb4a0c564c213d45a7696e9c27707d1769f4be8a064265`. Source snapshot `c277ceb9513c3842163e499c2a89cb109d988a42` includes cache/configuration resilience. Cargo manifests/lock and toolchain are unchanged. The association uses the recorded normal release build and source-tree comparison, not a bit-identical rebuild claim.
+- Application source ZIP: 1416448 bytes, SHA256 `ca58895273df30b126ef5a11af8e1534a5bd921b82cbc4dc8f2abc83dca96f92`. All 251 regular members are compared against the commit's Git blob identities; missing, duplicate or changed members fail. Two Git archives match exactly. The collector checks the pinned ZIP bytes and Git commit comment. No working-tree or untracked files enter the archive. It includes installer files at c277ceb, not the later uncommitted readable-recovery guidance or refreshed build inputs. The [local Setup](LOCAL_SETUP.md#exact-installer-build-sources) now includes its own exact installer-source ZIP without relabeling this application snapshot; actual installation and public delivery remain separate gates.
 - Runtime: 84 DLLs match the original package audit by name, size and hash; nine rebuilt FFmpeg files point to their source/build kit; scoped ZVBI points to its own patched-source kit, not the old package. Observed runtime import edges must resolve within the 94-file set. This does not re-inspect PE headers or prove every dynamic load or static dependency.
 - Catalog: all 2875 original files, including its inventory/completion marker, must match. Twelve native kits remain unchanged; app kit v2 changes only its candidate INPUTS/EVIDENCE, retaining nine original material files byte-for-byte. Historical scope statements within the kits are preserved; the new binding is the current candidate list.
 
@@ -18,14 +18,14 @@ The current binding describes the [Help/palette material entry](DEVELOPMENT.md) 
 From the repository, create the pinned application archive in a fresh local directory:
 
 ```powershell
-git -c core.autocrlf=false -c core.eol=lf archive --format=zip --prefix=towavue/ --output=path/to/towavue-source-06588b6.zip 06588b672f0394fb7ac2c1832242c32f7688ca36
+git -c core.autocrlf=false -c core.eol=lf archive --format=zip --prefix=towavue/ --output=path/to/towavue-source-c277ceb.zip c277ceb9513c3842163e499c2a89cb109d988a42
 ```
 
 Use a runtime input directory containing exactly the 94 names in `native-ffmpeg-materials-v1/RUNTIME.json`. A native build's full `prefix/bin` also has seven link libraries and ffplay.exe: it is not the selected runtime set. Copy the selected original files to a fresh staging directory and keep the build prefix unchanged. Do not add OS DLLs or the VC redistributable here.
 
 ```powershell
-.\scripts\prepare-candidate-materials.ps1 -Executable 'path/to/towavue.exe' -RuntimeDirectory 'path/to/selected-runtime' -CatalogDirectory 'target/native-material-catalog-v11' -ApplicationSource 'path/to/towavue-source-06588b6.zip' -OutputDirectory 'target/candidate-materials-v3'
-.\scripts\test-candidate-materials.ps1 -Executable 'path/to/towavue.exe' -RuntimeDirectory 'path/to/selected-runtime' -CatalogDirectory 'target/native-material-catalog-v11' -ApplicationSource 'path/to/towavue-source-06588b6.zip'
+.\scripts\prepare-candidate-materials.ps1 -Executable 'path/to/towavue.exe' -RuntimeDirectory 'path/to/selected-runtime' -CatalogDirectory 'path/to/refreshed-catalog' -ApplicationSource 'path/to/towavue-source-c277ceb.zip' -OutputDirectory 'path/to/fresh-candidate'
+.\scripts\test-candidate-materials.ps1 -Executable 'path/to/towavue.exe' -RuntimeDirectory 'path/to/selected-runtime' -CatalogDirectory 'path/to/refreshed-catalog' -ApplicationSource 'path/to/towavue-source-c277ceb.zip'
 ```
 
 Both scripts work from another current directory when called by absolute path. Output must be fresh and separate from inputs. A bad input never triggers download, repair, build or installation. The full catalog is validated before output, and each copied file is checked again. `INPUTS.json` is the final completion marker; interrupted copies remain incomplete.
@@ -38,6 +38,10 @@ The source ZIP contains the committed project, not a vendored offline Cargo cach
 
 ## Verification and remaining scope
 
+Current artifacts are under `target/tmp/f91-distribution-refresh-20260909`: `candidate/BINDING.json` is 149128 bytes/SHA256 `69bc3140ea385d141e4990b687aae3a4a287e8a8d5a9f6af1b0f1dce5bf1bacf`. The losslessly verified 2879-file companion `towavue-sources-f91b4498-69bc3140.zip` is 509638842 bytes/SHA256 `feba16ba1967f23dbfbd9ed59394d09fcc269098b5bb63dff59c2d9d8d27db4d`. Distribution approval remains false. The following older results describe their named artifacts, not these refreshed hashes.
+
+The refreshed candidate has 2879 files/844362218 bytes. Its focused suite passes all 251 committed source blobs, 95 binary bindings, 113 links, repeat/cwd, 102 missing/corrupt pairs and the existing scope/preservation checks (`candidate-material-test-eff2112461d540afb53c01e7fbd6e2c5`). The first run correctly exposed the obsolete 224-file test constant; it is updated to the verified 251-file source tree without weakening per-blob comparison. App and catalog suites pass, including 142 package/recipe missing/corrupt pairs and thirteen kit pairs; ZIP portability/partial-publication regressions pass too. Original 195af870 Setup and companion hashes remain unchanged. The refreshed guide's links are verified, not newly browser-rendered or installed-app-selection qualified.
+
 The focused tests pass all 224 source Git blobs, exact catalog preservation, 95 real-binary bindings, 113 local links, repeat/arbitrary cwd, 102 missing/corrupt input pairs, extra files, stale source commit, overlap/junction rejection and failure after catalog copy without a completion marker. Original input hashes and the first complete output are checked again afterward. Evidence is `target/tmp/candidate-material-test-bc867c58377743f2961149c4a247f456`. The refreshed app-kit and catalog suites also pass. Three live ignores remain unexecuted and provide no new hardware evidence.
 
 The local `target/candidate-materials-v3` contains 2879 files/844235795 bytes and matches the complete test output and actual-app trial copy file-for-file. `BINDING.json` SHA256 is `c68cad3486e730fafdcc32ce79936a85f2d65c4206c2dd87ac4067252541569a`; `START-HERE.html` is `cc6278f7648b0c1b9b34137b3b536a24e94da49ba2f58301e32e4f4feb355266`. Older v1 is diagnostic output with a corrected-later HTML link issue; v2 is the valid older-application binding. Neither replaces v3.
@@ -46,9 +50,9 @@ The Browser skill's selected browser blocked file-URL navigation. No alternative
 
 The specifically named native notice/data collection work is represented in the local catalog and the Help-entry app/source binding is refreshed. Keep historical reproduction/other-target limits, but do not reopen all permissive source as a universal rebuild gate. Same-release delivery and actual installer placement remain necessary. VC prerequisite lifecycle, actual Setup.exe, supported-Windows installation/update/removal, final runtime quality and owner acceptance remain separate. Publication/signing and distribution adoption are not implied by collection success.
 
-## Separate development preparation after the resilience fixes
+## Historical development preparation before qualification
 
-On 2026-09-09, prepare a separate, unqualified development set at `target/tmp/candidate-source-c277ceb-20260909`; do not replace the pins above. Executable `f91b4498172f71b734cb4a0c564c213d45a7696e9c27707d1769f4be8a064265` (10319872 bytes) contains both resilience fixes. Its recorded build source matches commit `c277ceb9513c3842163e499c2a89cb109d988a42`, including unchanged Cargo/toolchain inputs.
+Earlier on 2026-09-09, a separate, initially unqualified development set was prepared at `target/tmp/candidate-source-c277ceb-20260909` without replacing the then-current pins. Subsequent qualification and the current rebinding are recorded above. Executable `f91b4498172f71b734cb4a0c564c213d45a7696e9c27707d1769f4be8a064265` (10319872 bytes) contains both resilience fixes. Its recorded build source matches commit `c277ceb9513c3842163e499c2a89cb109d988a42`, including unchanged Cargo/toolchain inputs.
 
 `towavue-source-c277ceb.zip` is 1416448 bytes/SHA256 `ca58895273df30b126ef5a11af8e1534a5bd921b82cbc4dc8f2abc83dca96f92`. All 251 regular members equal their committed Git blobs; a second Git archive is byte-identical. This full repository snapshot also contains the current installer sources, but is not a rebuilt native-source companion or proof that an existing Setup delivers them. It does not contain a vendored Cargo cache.
 
@@ -69,4 +73,4 @@ The packer verifies lossless archival, not candidate legitimacy or license appro
 
 The local companion `target/distribution/towavue-sources-195af870-c68cad34.zip` has 2879 files, 509515254 bytes and SHA256 `1fa92321d044ffa380a76caf342a33a4507ca80aca0f620740b75859a02b5d20`. Every entry matches v3, including the 224-file application source ZIP and all native originals. A complete repeat with the final packer has the same SHA256. The initial direct legacy .NET CreateFromDirectory trial emitted 2875 backslash paths and was rejected; that `.partial` is diagnostic, not the companion. Cold PowerShell also required explicitly loading System.IO.Compression; the standalone test covers it.
 
-This approximately 510 MB companion is separate from the application's approximately 1.3 MB source ZIP. It is a local app/native material artifact, not a published release, an installer or a requirement to install 844 MB of source files. The final Setup must still provide the local notices and matching same-release companion access, plus its own installer/prerequisite materials.
+The current approximately 510 MB companion is separate from the application's approximately 1.4 MB source ZIP. It is a local app/native material artifact, not a published release, an installer or a requirement to install 844 MB of source files. The final Setup must still provide the local notices and matching same-release companion access, plus its own installer/prerequisite materials.

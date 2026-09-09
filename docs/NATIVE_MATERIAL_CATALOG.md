@@ -2,15 +2,15 @@
 
 取得済みの原本を一つのdirectoryから辿るための、offline review用catalog。**完成した配布資料・配布承認・公開済みsource取得先ではない。** アプリやDLL、インストーラーは生成しない。
 
-現行v11はHelp対応exeへ更新したapp-materials-v2を選ぶ。2875 files／842769539 bytesで、`FILES.json`のSHA256は`8a0fb5b2a8a9b8687f88d3e84a5b3101f2d40e9bb33f0c7f86ddd2dff8517c1f`。12 native kitsと本体の9原本は変えず、本体のidentity記録と集約先だけを更新する。旧v10は履歴として残す。以下の各版の数値はその時点の記録である。
+現行の固定情報は、評価済みf91b4498へ対応付けたapp-materials-v2を選ぶ。2875 files／842769539 bytesで、`FILES.json`のSHA256は`b88f1c6b624897e96fa39921a58710b6ed38f629c752198c99917b86b84f8c6c`。12 native kitsと本体の9原本は変えず、本体のidentity記録と集約先だけを更新する。旧v11までの出力は履歴として保持する。新出力は`target/tmp/f91-distribution-refresh-20260909/catalog`。以下の各版の数値はその時点の記録である。
 
 ## 生成と読み方
 
-検証済みkitを`target/distribution`へ用意した上で、未作成の出力先を指定する。入力directoryの内部や親へは出力しない。
+検証済みkitを新しい共通directoryへ用意した上で、未作成の出力先を指定する。旧`target/distribution/app-materials-v2`は旧本体用なので上書き・読み替えせず、更新済みkitを使う。入力directoryの内部や親へは出力しない。
 
 ```powershell
-.\scripts\prepare-native-material-catalog.ps1 -MaterialsDirectory 'target/distribution' -OutputDirectory 'target/native-material-catalog-v11'
-.\scripts\test-native-material-catalog.ps1 -MaterialsDirectory 'target/distribution'
+.\scripts\prepare-native-material-catalog.ps1 -MaterialsDirectory 'path/to/fresh-materials' -OutputDirectory 'path/to/fresh-catalog'
+.\scripts\test-native-material-catalog.ps1 -MaterialsDirectory 'path/to/fresh-materials'
 ```
 
 packageとrecipeの既定cacheは`vendor/msys2/packages-20260908`と`vendor/msys2/runtime-recipes-20260908`。別配置では`-PackageDirectory`と`-RecipeDirectory`を指定する。取得・install・recipe実行はせず、不足・改変cacheを上書き修復しない。

@@ -366,7 +366,11 @@ Function UpdateInstallation
   Call CallUpdate
   ${If} $UpdateResult != 0
     SetErrorLevel 5
-    Abort "Update or recovery stopped. See details. Retain the folder and recovery files; close file users and retry Setup."
+    DetailPrint "Keep the installation folder and recovery files."
+    DetailPrint "Close programs using these files."
+    DetailPrint "Click Cancel to close Setup, then run Setup again."
+    DetailPrint "Restore a pending update before trying a new update."
+    Abort "Update or recovery stopped. See the steps below."
   ${EndIf}
   ${If} $UpdateMode == "Rollback"
     DetailPrint "Previous installation restored. Run Setup again to retry the update."

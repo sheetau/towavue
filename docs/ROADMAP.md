@@ -2,6 +2,30 @@
 
 各milestoneは前のゲートを満たしてから開始する。新機能の数ではなく、観測可能な正しさを完了条件とする。
 
+## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
+
+2026-09-09 16:11追記: owner指定によりローンチ準備はここで停止し、検証済みcheckpointをpushして区切る。次の機能・UI改善の具体的なgoalはownerが別途設定するため、以下の候補を自動的に開始しない。ローンチ全体を完了扱いにはしない。
+
+M0～M7の実装とH1の主要な回帰修正、代表保存・固定Seek・30分4K・Windows 11上の実Setup lifecycleは検証済み。ここからは未公開評価版の見た目・操作感・安定性の仕上げを優先する。以下は以前の日付付き記録の公開／Windows 10必須gateより優先する現在の方針である。
+
+1. 草案と現在のWelcome／画像／動画／音声・menu／timeline／filmstripを同条件で比較し、残る外観・操作上の差を整理して必要な範囲だけ直す → verify: before/after実画面と同じ日常操作flow、関連回帰とM0 checks。草案全機能や無関係なrefactorを自動的に必須化しない。
+2. 既知の長GOP Seek遅延と大きい素材のOpen／preview応答を、既に通過した基準素材と区別して評価する → verify: 再現条件と測定、改善時は同条件比較。正確なframeを粗いkeyframe表示へ変えて達成扱いにしない。
+3. 利用者のブラッシュアップ要望を反映し、選択した日常flowに重大な不一致が残らないことを確認する → verify: 変更点・残る制約の明示、最終変更に対応した回帰／実画面確認。既存の媒体・native監査を変更なしに反復しない。
+
+公開配布は行わない。署名・公開・配布開始は別指示まで対象外で、公開前のclean-machine VCや追加installer認定作業は区別して管理する。Windows 10をowner環境へ入れず、合理的に用意できる仮想環境がなければ実機確認は省略可・未検証とする。既存CIは`windows-2022`であり、[標準GitHub-hosted runner](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)にWindows 10はない。別途Windows 10環境を用意した[self-hosted runner](https://docs.github.com/en/actions/reference/runners/self-hosted-runners)は可能だが、その構築や費用を暗黙に追加しない。他の物理device／混在DPI／支援技術も実施範囲を正しく記録し、未検証を合格としない。
+
+## 直近の実績
+
+2026-09-09 15:44、ownerが実インストールを許可した。Windows 11基準機の専用per-user配置へ4937a657 Setupを導入し、2b10319aへ実更新、shortcut起動・画像保存／再Open、通常Uninstall.exeの自己copy削除まで終了code 0で確認した。2708→2709 payload全一致、900 frames/drop 0、回転6144画素一致、利用者file／設定8件・共有VC保持、評価登録／shortcut削除を確認。復旧資料約42 MBとsentinelは保持し、M0全278 tests通過。実導入許可待ちは解消したが、Windows 10／VC未導入環境・実中断復旧・実入力／owner外観受入・公開判断は継続する。詳細と試験の範囲はLOCAL_SETUPの実lifecycle記録を参照。
+
+2026-09-09 15:25、評価Setupへ正確なinstaller source 22 filesとmanifestのZIPを同梱した。案内のlink／hash、明示配置／削除一覧と改変拒否4条件を検証し、展開したソースのbuilderを別cwdから実行して再構築に成功。2709 payload filesは全bytes一致し、Setup exe自体は別hashなので完全再現buildとはしない。本体f91b4498／runtime／companionは不変、M0全278 tests通過。実導入・更新・自己copy削除、VC／対応OS、実入力・owner外観受入と公開判断は未完了であり、次は実導入を許可された隔離環境が必要である。
+
+2026-09-09 15:11、評価済みf91b4498とsource c277cebへapp kit・catalog・companion・Setup固定情報を更新した。旧成果物と12 native kits／9本体原文は保持。新しいローカルSetupは4937a657、対応companionはfeba16ba。251 Git blobs、資料・link・欠落／改変拒否の回帰、95 binary／2708 payload paths／非installing検査、M0全278 testsが通過した。生成しただけで実導入／公開はしていない。次は現在のinstaller sourceを正確に提供できる資料化を進め、実環境lifecycle・owner受入・配布承認を別に確認する。
+
+2026-09-09 14:57、同じ通常release f91b4498で30分4K再生も完走した。Seekなしで全107771 frames表示、drop／CPU transfer 0、drift p95 4.812ms／最大17.349ms。通常終了code 0、原本／隣接95ファイル不変、終了後278 tests・format・Clippy通過。単一基準機での代表保存／固定Seek／長時間再生を直接確認した段階であり、長GOPの未達と実環境・owner受入・配布gateは残る。次は新本体のmatching source／資料／Setupを整備する。詳細はDEVELOPMENTの14:57記録を参照。
+
+2026-09-09 14:17、設定／cache耐障害性を含む通常release f91b4498で、代表PNG／WAV／MP4の保存と再Openを再確認した。PNG回転の6144画素、音声trim・速度・音量変更の307254 PCM samplesが参照と一致し、音声tab再利用時の二重編集は再現しなかった。動画は保存前後とも900表示・drop 0。Seekは2秒間隔keyframeの4条件各100回でp95 40.242～108.103msだが、先頭keyframeのみの120秒素材では872.539～979.008msで300ms目標未達。詳細・試験範囲はDEVELOPMENTの14:10／14:17記録を参照。長GOP評価、新本体の長時間4K、対応配布資料と実installer・対象環境・owner受入は未完了である。
+
 2026-09-07、H1の代表保存・再open監査で、cleanな音声folder tabの再利用時に保存済み編集が別sourceへ残る問題を修正した。同sourceとdirty編集の保護を回帰試験で保持し、通常releaseでPNGの画素一致、chirpのPCM一致、動画の4秒/120 framesと再openを確認した。詳細はDEVELOPMENTの14:28記録を参照。H1とlaunch全体は未完了である。
 
 2026-09-08、再生成native FFmpegと別targetの通常releaseで、4条件各100回のSeek、画像／音声／動画の保存と再openを再確認した。Seek p95は31.764～101.288msで300ms以内、PNG画素・chirp PCMは参照と一致した。全268 testsと必須check後、同じbinaryの30分4K60試験も完走した。107,771表示、drop／CPU transfer 0、drift p95 4.808ms・最大30.042msで基準内。5分以降のprivateは222.63～238.92 MiBで、旧15分付近の大きな増加は今回再現しなかったが、原因やリーク不在は未証明。通常終了とexe／source／DLL不変を確認した。配布監査ではZVBIの個別GPL表記と実DLLの対応関数を確認しており、性能合格だけで同梱を承認しない。配布材料／Setup.exe、実環境とowner受入を含むH1全体は継続する。
@@ -89,7 +113,7 @@ M0～M7で構築した技術sliceを開発版として人が操作し、日常fl
 
 2026-09-09、cache directoryの作成不能がアプリ初期化を失敗させる経路と、cache一時fileの使用中が正常なpreviewを破棄する経路を回帰で再現した。cache I/Oだけを補助処理へ変更し、原本・衝突fileの保持、生成／decode失敗・取消の伝達、保存先復旧後の再保存を確認する。実FFmpegのfilmstrip生成でもcache使用中／作成不能からの継続と復帰を検証した。最終通常binaryの実画面／性能と、新本体・source・Setupの対応付けは引き続き必要であり、旧195af870入り評価Setupへこの修正を含むとは扱わない。
 
-続いて、shortcutの一行の記述ミスでwindow作成前の初期化が失敗することを再現した。起動時だけ失敗した設定へ既定値を使い、原本保持・有効な側の設定保持・修正後Reloadと失敗時の現在値保持を回帰で確認する。path／理由と修正方法はnative OK警告へ接続し、通常windowの表示／focusは未検証として残す。APPDATA欠落やgraphics失敗まで成功扱いにせず、配布候補も未差し替えである。
+続いて、shortcutの一行の記述ミスでwindow作成前の初期化が失敗することを再現した。起動時だけ失敗した設定へ既定値を使い、原本保持・有効な側の設定保持・修正後Reloadと失敗時の現在値保持を回帰で確認する。ownerの画面操作許可後、通常release f91b4498と隔離設定でnative OK警告全文、背景の無効化、Enter解除とmenu／修正後Reloadを確認した。使えないcacheでもfilmstripを表示し、保存先復旧後は同じprocessで保存できた。全エラー種別・screen reader・DPIの確認ではない。APPDATA欠落やgraphics失敗まで成功扱いにせず、配布候補も未差し替えである。
 
 2026-09-07、ownerはmonapadと同様のインストーラーexeを選択した。配布形式の確認待ちは解消し、ARCHITECTURE §7へ反映した。H1の品質gateを維持し、配布準備は次の順序で進める。形式の決定だけを同梱物・公開の承認やlaunch完了としない。
 
@@ -126,6 +150,8 @@ schema 3の更新／Rollbackではuninstallerを先に退避し、本体はpaylo
 続いてlocal Setupへ配置外staging・確認付き更新とpending記録からの旧版復旧を接続した。親が変更前にleaseを解放し、childが通常取得・全体再検証する。復旧後はSetupの再実行で更新をやり直す。実NSIS app branchを生成text payload／GUID key／仮shortcutへ限定した試験で、更新・変更file拒否・登録中断・pending削除拒否・旧状態への復旧・再更新・削除を確認した。NSIS plugin directoryのSystem.dllがPowerShellのframework参照を遮る復旧失敗も再現・修正。実アプリ／VC導入、通常自己copy削除、対象OS・詳細progress／復旧UI・cleanup・同時source提供・最終品質とowner受入は未完了である。
 
 Setupの完了文面を新規導入・更新・旧版復旧に分け、3010の手動再起動案内を保持し、更新childの段階別診断を実行中のdetails logへ接続した。CIで出た短縮一時path由来の新uninstaller拒否をローカル再現し、caller sourceだけを正規化する。inventory名の別名拒否は維持する。実短縮TEMP/TMPでの生成Setup、復旧と再更新、表示値・模擬3010、32／64-bit transaction回帰は通過。実画面の表示／focus／読み上げ・詳細進捗と対象OS／VC／製品lifecycleなどのgateは残る。
+
+ownerの画面操作許可後、生成Setupで三種類の完了画面と失敗後の復旧を確認し、切れていた再試行案内を短い行へ分割した。さらに更新childを復旧記録保存直後で待機させ、設置file未変更・child待機中の時点で、その段階のログが実画面とUIAへ届くことを確認した。試験processの標準providerを読み込むとButton／Invokeも取得でき、Finishへfocusした同じSetupが終了0となる。実製品・VC導入、Windows 10・他DPI・screen reader、最終本体の品質と資料の再対応付けは別gateとして維持する。
 
 2026-09-08、既存preview／保存のhelper探索だけはH1の独立した修正として先に検証する。FFMPEG_DIRによる同梱版の上書きや、不足helperをPATH上の別版で埋め合わせる動作を防ぐ。第2段階のinstaller作成・runtime採用は第1段階の監査後のままとし、helper単体の検証でそのgateを通過扱いにしない。
 

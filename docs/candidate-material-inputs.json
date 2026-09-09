@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
   "scope": "Local material binding for the evaluated candidate, not runtime adoption, a complete linked SBOM or release approval.",
-  "application_source_commit": "06588b672f0394fb7ac2c1832242c32f7688ca36",
+  "application_source_commit": "c277ceb9513c3842163e499c2a89cb109d988a42",
   "application_source": {
-    "name": "towavue-source-06588b6.zip",
-    "bytes": 1290025,
-    "sha256": "2eb46e64e6c858fc09b8370e98683db57c0a70c1989d91136265eb03a479d2a3"
+    "name": "towavue-source-c277ceb.zip",
+    "bytes": 1416448,
+    "sha256": "ca58895273df30b126ef5a11af8e1534a5bd921b82cbc4dc8f2abc83dca96f92"
   },
   "catalog_files": 2875,
   "catalog_inventory": {
     "name": "FILES.json",
     "bytes": 669034,
-    "sha256": "8a0fb5b2a8a9b8687f88d3e84a5b3101f2d40e9bb33f0c7f86ddd2dff8517c1f"
+    "sha256": "b88f1c6b624897e96fa39921a58710b6ed38f629c752198c99917b86b84f8c6c"
   },
   "catalog_marker": {
     "name": "CATALOG.json",
     "bytes": 5908,
-    "sha256": "2a322f78ead5c51ab13865023c186947dc4b9aa34d46f0c41a6fe205ed913e20"
+    "sha256": "0b742279344bb836d3d67b75a305a2f6f6db9f19c509e19d426d22ab957f8a18"
   }
 }

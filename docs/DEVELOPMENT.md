@@ -4,6 +4,63 @@
 
 ## 1. 最初に試す
 
+### 新しい通常releaseの30分4K再生（2026-09-09 14:57 JST）
+
+設定／cache耐障害性を含む通常release f91b4498（source c277ceb）を、下記の代表保存／Seekと同じ隣接runtimeで測定した。既存 `m3-4k60-30m.mp4` はSHA256 `fee0e738e7149225a7b4dea02cda75aae6873288cbe5a1077b101829adfd0c10`、1501066596 bytes、3840×2160 H.264/AAC。終了後のprobeでもvideo duration 1800.005729秒、107771 frames、format duration 1800.009063秒を確認した。起動前にhashを読んだ試験であり、cold-storage条件ではない。
+
+PID 40576、開始UTC `2026-09-09T05:24:44.9190739Z`。隔離APPDATA／LOCALAPPDATA・別cwd・FFMPEG_DIRなし・System32-only PATH、直接FFmpeg DLL 6個の実load先も隣接配置だった。960×576の通常window、1倍、UIA有効、アプリ内だけ消音。起動からSeek／pause／再起動なしで観測し、準備も含め `seek_latency_ms` は0件。30秒ごとの監視session 68907は同じPID／開始時刻を追い、1802.871秒のsampleで自然Endedを観測してexit 0となった。再生中はビルドや重いprobeを行っていない。
+
+最終値はadapter `00000000:000146b5`、hardware **107771**／presented **107771**、drop **0**、CPU transfer **0**。全frame数が原本と一致するため、このrunには以前の303-frame差がない。全30分drop 0なので先頭10分も0%で0.1%未満。A/V driftはp95 **4.812ms**／最大 **17.349ms**で、40／100ms基準内。60 resource samplesのうち5分以降のPlaying 50点ではprivate **224.23～240.14MiB**、Endedで182.69MiB。最終累積CPU時間は311.14秒。単発の基準機試験であり、リーク不在・他codec・高負荷環境までの証明ではない。
+
+Endedの所有window画像で最終映像を確認し、試験用muteだけUndoしてcleanなEndedを保持、通常closeのexit **0**を保持した。最初の終了画面captureはforeground guardで拒否されたため、同じ所有UIA rootへfocusしてから再確認し、他windowのcaptureや試験再起動はしていない。原本と本体を含む隣接全95ファイルのhashは起動前後で不変。終了後にformat／全target Clippy／278 testsが通過し、live ignores 3件は未実行。ignored `target/tmp/f91-4k-soak-20260909` のidentity・resources・stderr・closure・REVIEWと最終画像に証拠を保持する。
+
+これでこの本体の代表保存／固定Seek／単一30分4K gateは直接確認できた。長GOPの300ms未達は残し、旧評価Setupや対応資料を新本体のものとして扱わない。次はmatching source／notices／companion／Setupの対応付けを更新する。実Windows環境の導入／更新／削除、physical input、owner外観受入と配布承認は引き続き別gateである。
+
+### 固定Seek基準とFFmpeg単体の長GOP比較（2026-09-09 14:22 JST）
+
+f91b4498の同じ隣接配置で、従来の `tests/generated/m1/m3-1080p-h264-120s.mp4`（124806895 bytes、SHA256 `dc645595a1165506bf5c3e685b14d7ea3b0116bbdfe74839e7da5834cf60da0c`、実keyframe 120枚）も測定した。前回と同じ5秒の左右Seekを各100回、毎回のPlaying／Pausedを確認して実行した。UIAなしPaused／Playing、UIAありPaused／Playingの順に、p95は30.411／103.126／31.610／101.089ms、最大72.001／111.079／36.819／107.646ms。全4条件が300ms以内で、終了code 0、原本／exe不変、各100件の番号・方向・raw値からのp95再計算を確認した。ignored `target/tmp/f91-seek-fixed-baseline-20260909` に各identity・log・samples・RESULTを保持する。
+
+長GOP側を別に調べるため、隣接FFmpeg単体でもD3D11VAで指定時刻へSeekし、最初の1 frameをnull出力した（`-hwaccel d3d11va -hwaccel_output_format d3d11 -ss <秒> -map 0:v:0 -an -frames:v 1 -f null -`）。同じ生成素材2本を交互に各3回測り、全18 processがexit 0、出力がd3d11の1 frameであることを確認した。以下はFFmpeg自身のbenchmark rtime範囲で、process起動・appのWASAPI／Presentを含む測定ではない。
+
+| Seek先 | 先頭keyframeのみ（ms） | 2秒間隔keyframe（ms） |
+|---|---:|---:|
+| 5秒 | 117～121 | 48～49 |
+| 25秒 | 435～547 | 48～50 |
+| 50秒 | 836～936 | 36～40 |
+
+raw log・process起動を含む別wall time・実行引数・素材hashはignored `target/tmp/f91-native-seek-cost-20260909/REVIEW.json` と各caseに保存した。これは長GOPの遅延がアプリなしでも再現する直接証拠であり、app内部の時間配分を計測したprofileではない。実装確認ではMP4にTS用の段階的keyframe探索は使わず、FFmpeg Seek後にdecodeされた目標前frameを除外している。終端Seekの最終frame保持と取消を維持する必要もあるため、この結果だけで不正確なkeyframe-only表示へ変えたり、decoder／thread構成を変更したりしない。固定基準の合格と長GOPの300ms未達を両方保持し、次はこの本体の30分4K試験へ進む。
+
+### 同じ通常releaseの画像／音声保存（2026-09-09 14:17 JST）
+
+下記のf91b4498本体を変更せず、同じ隣接runtime・隔離設定・別cwd・FFMPEG_DIRなし・System32-only PATHで画像／音声も確認した。生成した96×64 PNGを時計回りに回転して別名保存し、原本の `(x,y)` と保存物の `(height-1-y,x)` を独立したSystem.Drawing読込で照合した。全6144 ARGB画素が一致し、64×96の保存物を再Openしても二重回転せず、両tabはcleanだった。
+
+音声は48kHz mono PCM、20秒の生成chirp（先頭10秒は無音、信号振幅0.02）。起動後に所有windowへのSpaceで停止し、UIAのtrim端点を10／18秒、menuからrate 1.25×、下矢印でvolume 90%にした。端点のRangeValueと画面の範囲・速度・音量を確認して、同じ素材folderへ別名WAV保存した。出力はpcm_s16le、307254 samples、6.401125秒。独立に `atrim=start_sample=480000:end_sample=864000,asetpts=PTS-STARTPTS,atempo=1.25,volume=0.9` を適用した参照と、decodeした全614508 PCM bytesのSHA256 `23533c003687ac9bb8f930e87082886986b4a4813b39ce007ca6e2edda276c7c` が一致した。理想比率の6.4秒へ丸めた結果ではなく、同じtempo処理を通した実sample数である。
+
+native Openから同じfolderの保存物を開くと、clean音声tabを再利用して100%／1.00×／trimなしへ戻った。端点も0／6.401125秒で、保存済み編集を二重適用しなかった。再生再開から自然Endedまで進み、画面・statusを確認した。両試験とも原本とexeのhashが不変で、通常close後の終了を観測した。数値exit codeはobserverに残っていない。音声試験では6個の直接FFmpeg DLLの実load先も隣接配置だった。
+
+ignored `target/tmp/f91-image-export-20260909`／`f91-audio-export-20260909` に所有process identity・画面・出力・参照PCM、`f91-generated-media-20260909/IMAGE-AUDIO-REVIEW.json` に再照合と各hashを保持する。起動直後にまだwindowがない観測は同じPIDで再確認し、再起動していない。periodのkey messageだけではrateが変わらなかったため、実menuのInvokeを使った。物理文字keyやscreen readerの試験とは数えない。今回でこの本体の代表的な画像／音声／動画保存と再Openの証拠が揃ったが、全形式・長時間性能・実installer・対象環境と配布のgateは別に残る。
+
+### 新しい通常releaseの動画保存とSeek条件比較（2026-09-09 14:10 JST）
+
+設定／cache耐障害性を含む本体 `f91b4498172f71b734cb4a0c564c213d45a7696e9c27707d1769f4be8a064265`（10319872 bytes、source c277ceb）を、隣接runtime・FFMPEG_DIRなし・System32-only PATH・別cwd・隔離APPDATA／LOCALAPPDATAで確認した。直接使用するFFmpeg DLLの実load先も隣接配置である。ownerの素材や設定を使わず、生成test patternと無音AACだけを使用した。
+
+30秒1280×720/30fpsのH.264/AACを最後まで再生し、時計回り回転→Export as→保存物をOpenした。原本と保存物の再生はいずれも900 hardware frames／900 presented、drop／CPU transfer 0。A/V driftは原本p95 4.070ms・最大4.291ms、保存物p95 4.575ms・最大10.612msだった。保存物は720×1280、900 frames、映像／音声30秒で、全体decodeもexit 0。画面でも縦向き表示と二重回転がないことを確認し、原本hashは不変だった。終了済み再生の5.010秒観測ではCPU時間62.5ms、private 167.57 MiB。短い単発観測であり、長時間idle／4K負荷の合格ではない。本体の通常終了を観測したが、このobserverは数値exit codeを保持していない。
+
+120秒1080p/30fps素材では、各条件100回の5秒Seek（右10回→左10回を5組）を比較した。前のSeekの最初のPresent完了を待って次を送る。UIA有効／無効と初期Playing／Pausedを分け、所有PID・開始時刻・exeを照合したwindowへのkey messageだけを使用した。物理入力からの遅延測定ではない。既定のlibopenh264生成素材は先頭にkeyframeが1枚だけだったため、同じ生成条件へ `-g 60` だけ追加した2秒間隔の対照も測定した。
+
+| 条件（各100回） | 先頭keyframeのみ：p95 / 最大 ms | 2秒間隔keyframe：p95 / 最大 ms |
+|---|---:|---:|
+| UIAなし・初期Paused | 872.539 / 1093.984 | 47.658 / 85.594 |
+| UIAなし・初期Playing | 979.008 / 1091.255 | 98.607 / 111.088 |
+| UIAあり・初期Paused | 904.407 / 1039.567 | 40.242 / 71.525 |
+| UIAあり・初期Playing | 911.204 / 1171.186 | 108.103 / 111.502 |
+
+先頭keyframeのみの4条件は300ms目標をすべて超え、2秒間隔の4条件は通過した。対照素材では全key送信前のPlaying／Pausedも確認した。全8 processはexit 0、各100件の完了番号・方向と本体／素材hash不変を確認した。GOP間隔に依存する待ち時間を示す結果であり、長GOP側の失敗を取り消したり、全素材の性能合格へ広げたりしない。性能修正はこの試験では行っていない。
+
+初回helperの未対応F8設定は測定から除外した。続く空log読取のhelper失敗では同じprocessを保持し、再生準備／Seekを測定から分離して再開した。旧集計JSONのresume由来の配列wrapperは生資料として保持し、最終集計は各caseのraw samplesから再計算した。native Openのbuttonはobserver上でPaneのままだったため、所有dialogとnative Button classを確認した操作を使用した。これらを製品のクラッシュやscreen-reader合格とは扱わない。
+
+生資料はignored `target/tmp/f91-playback-smoke-20260909`、`f91-seek-matrix-20260909-v2`、`f91-seek-gop60-20260909`。`target/tmp/f91-generated-media-20260909/REVIEW.json`に本体・4素材のhashと8条件の再集計を保持する。原本動画SHA256 `49284be6626d416ffcf1f1e532c2c6408b0226f1e09a56e85b7c73c84c07fffc`、回転保存物 `1ca23f2b58a1ca497dd5e0f5ca1dce960ab5dff1746c4317531ab54081849b32`。画像／音声の代表保存、新本体の30分4K試験、長GOPの評価、最終本体に対応した配布資料と実installerの確認は残る。旧195af870入りSetupを差し替えず、配布承認も変更していない。
+
 ### ライセンス／ソース案内への入口（2026-09-09 01:21 JST）
 
 Help → Show licenses and sourcesとcommand paletteの`licenses`検索を追加した。runtimeの専用STA workerがexe隣の`licenses/START-HERE.html`をExplorerで選択し、HTMLやarchiveは実行しない。cwd／PATH／FFMPEG_DIRの別資料へfallbackせず、不足時は期待pathを通常statusに表示する。再生をFaultedにせず、重複要求は一件の処理中だけ抑える。Shellの選択操作は[MicrosoftのAPI契約](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shopenfolderandselectitems)に従い、STA内のPIDLを使用後に破棄する。

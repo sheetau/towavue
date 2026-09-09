@@ -1,13 +1,15 @@
 # 本体のライセンス・Rust・フォント資料
 
-固定済み候補195af870のtowavue.exeに対応するoffline review用kit。MIT／Apache-2.0の原文、Cargo.lock固定の146 normal／build dependenciesと埋込みfontの表示、Rust 1.98.0／MSVCの18原文を一つにまとめる。アプリ本体・Windows font・Microsoft runtimeはコピーしない。後続のcache／起動設定修正版f91b4498は[別の開発用source準備](CANDIDATE_MATERIALS.md)の段階であり、このkitをそのexeの対応付けへ読み替えない。
+固定済みローカル評価候補f91b4498のtowavue.exeに対応するoffline review用kit。MIT／Apache-2.0の原文、Cargo.lock固定の146 normal／build dependenciesと埋込みfontの表示、Rust 1.98.0／MSVCの18原文を一つにまとめる。アプリ本体・Windows font・Microsoft runtimeはコピーしない。cache／起動設定修正版の代表保存・Seek・30分4K確認後、[対応sourceと候補資料](CANDIDATE_MATERIALS.md)を更新する。旧195af870用kitはそのまま保持し、新しい出力先で生成する。配布承認ではない。
+
+新kitは11 files／3356087 bytes、tree SHA256 `f43ee3c2dfae09fc4cd746b787d899f8d5499bf56164cc3af61aa2c5406a0a70`。変更はINPUTS／EVIDENCEの本体identityだけで、9原本と依存・toolchainは不変である。
 
 ## 生成
 
 ```powershell
 .\scripts\prepare-rust-notices.ps1
 .\scripts\prepare-rust-runtime-notices.ps1 -Scope towavue
-.\scripts\prepare-app-materials.ps1 -RustNotices 'target/distribution/RUST-THIRD-PARTY-NOTICES.txt' -RuntimeNotices 'target/distribution/TOWAVUE-RUST-RUNTIME-NOTICES.zip' -Executable 'path/to/candidate/towavue.exe' -OutputDirectory 'target/distribution/app-materials-v2'
+.\scripts\prepare-app-materials.ps1 -RustNotices 'target/distribution/RUST-THIRD-PARTY-NOTICES.txt' -RuntimeNotices 'target/distribution/TOWAVUE-RUST-RUNTIME-NOTICES.zip' -Executable 'path/to/candidate/towavue.exe' -OutputDirectory 'path/to/fresh-materials/app-materials-v2'
 .\scripts\test-app-materials.ps1 -RustNotices 'target/distribution/RUST-THIRD-PARTY-NOTICES.txt' -RuntimeNotices 'target/distribution/TOWAVUE-RUST-RUNTIME-NOTICES.zip' -Executable 'path/to/candidate/towavue.exe'
 ```
 

@@ -510,6 +510,10 @@ M4ではName、Date modified、Date created、Size、Typeの昇順・降順、�
 
 ## 7. ライセンスと配布
 
+2026-09-09のowner指定により、現在のgoalは公開行為を含めず、未公開評価版の安定性・速度・操作感と草案の見た目の仕上げを継続する。署名・release公開・配布開始はownerの別指示まで実行しない。Windows 10の互換性目標は維持するがowner環境へOSを導入せず、合理的な仮想環境検証が難しければ実機確認を省略して未検証と記録する。Windows Server上のCI成功をWindows 10実機確認へ置き換えない。これらを理由に無関係なH1改善を停止しない。
+
+評価Setupには、そのbuildで使用したinstaller source／入力manifest／原ライセンス／再build手順を`licenses/INSTALLER-SOURCES.zip`として同梱する。既存のbuild-source一覧を再利用し、ZIP内の`SOURCES.json`、installed inventory、guideのsize／hashを対応させる。本体・native sourceの別companionをinstaller変更のために旧版から再定義せず、外部binary／toolchain入力は固定情報により別途照合する。ZIP自体も明示配置／削除一覧に含める。sourceからのSetup再構築は本体／native再buildや、実導入・公開完了の証明ではない。
+
 2026-09-07、ownerの指定により、初回配布はmonapadと同様のインストーラーexeとする。参照した[monapadの配布設定](https://github.com/sheetau/monapad/blob/1c765729dd1386077a3caffc67d45ed4a89506e0/package.json)はNSIS、oneClick=false、インストール先変更可である。towavueもインストール先を選べるSetup.exeを目標とし、インストール不要の単一実行file化は要求しない。Rust/native構成は維持し、Electronやmonapadの自動更新・file関連付けをこの指定から追加しない。
 
 必要なDLL・ffmpeg.exe・ffprobe.exeはインストール先へ配置し、利用者による開発用FFMPEG_DIR/PATHの設定を必要としない構成を計画する。これは配布方式の決定であり、同梱物の検証・再配布条件の確認・installer実装・clean-machine検証の完了ではない。署名・公開・課金は別途扱う。

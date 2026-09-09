@@ -2,14 +2,14 @@
   "schema_version": 1,
   "scope": "Local application Setup evaluation, not approved for publication or supported-Windows installation.",
   "companion": {
-    "name": "towavue-sources-195af870-c68cad34.zip",
-    "bytes": 509515254,
-    "sha256": "1fa92321d044ffa380a76caf342a33a4507ca80aca0f620740b75859a02b5d20"
+    "name": "towavue-sources-f91b4498-69bc3140.zip",
+    "bytes": 509638842,
+    "sha256": "feba16ba1967f23dbfbd9ed59394d09fcc269098b5bb63dff59c2d9d8d27db4d"
   },
   "binding": {
     "name": "BINDING.json",
     "bytes": 149128,
-    "sha256": "c68cad3486e730fafdcc32ce79936a85f2d65c4206c2dd87ac4067252541569a"
+    "sha256": "69bc3140ea385d141e4990b687aae3a4a287e8a8d5a9f6af1b0f1dce5bf1bacf"
   },
   "companion_files": 2879,
   "binary_files": 95,

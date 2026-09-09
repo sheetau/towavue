@@ -10,14 +10,16 @@ TSなど開始PTSが0でない素材も、表示・Seek・trim/exportはメデ�
 
 開発版では、preview cacheのフォルダー作成・保存に失敗しても、生成できたthumbnailやwaveformをそのまま利用します。保存先が使えるようになれば再試行します。メディア自体の生成・decode失敗や取消を成功扱いにするものではありません。
 
-- 対応予定OS: Windows 10 22H2以降
+- 対応予定OS: Windows 10 22H2以降（現時点の実機確認はWindows 11。Windows 10は未検証）
 - 対応予定アーキテクチャ: x86-64
 - Rust: 1.98.0 / Edition 2024 / MSVC ABI
 - ライセンス: MIT OR Apache-2.0
 - 配布予定: インストール先を選べるWindows用Setup.exe。現時点では未提供で、下記は開発版のビルド手順
 - installerの[安全性試験用Setup](docs/INSTALLER_FIXTURE.md)を実装しました。試験文書だけを配置・削除するfixtureで、本体のインストーラーではありません。
-- [本体入りのlocal評価用Setup](docs/LOCAL_SETUP.md)も組み立て可能です。実機への導入・更新・削除や公開前の確認は未完了で、配布版はまだありません。
+- [本体入りのlocal評価用Setup](docs/LOCAL_SETUP.md)も組み立て可能です。Windows 11の基準機で実導入・更新・起動／保存・通常アンインストールを確認しました。Windows 10やVC未導入環境などの確認と公開判断は残り、配布版はまだありません。
 - 次の工程: H1 human evaluation and UX stabilization。実際の利用flowを観察し、小さな検証可能な単位でUI/UXと機能の不一致を直す
+
+ownerの2026-09-09の指定により、現在は見た目・操作感・安定性のブラッシュアップを優先し、公開配布は行いません。Windows 10をowner環境へ導入せず、仮想環境で合理的に確認できなければ実機確認は省略し、未検証として記録します。公開作業やWindows 10実機の用意を、現在の改善作業の停止理由にはしません。
 
 固定開発FFmpegには、LGPLという自己表示だけでは扱えないGPL推移依存が見つかりました。このbinaryは配布候補から外し、機能を保つ[再buildと検証](docs/FFMPEG_REBUILD.md)を進めます。現行の開発用fileや本体のライセンスは変更していません。
 
@@ -88,7 +90,7 @@ cargo run -p towavue-app -- path\to\media.mp4
 
 prefixの続きは1秒以内に入力します。Escape、click、別commandやwindowへのfocus移動で待ちを解除し、途中から戻ったkeyを前のprefixへつなげません。
 
-開発版では、起動時にshortcut／grid設定を読めない場合、その設定だけ既定値で継続してpathと理由を警告します。既存fileは書き換えません。修正後はFile → Reload keyboard shortcutsで再読み込みでき、再読み込みの失敗時は現在の設定を保持します。native警告の実画面確認は未完了です。
+開発版では、起動時にshortcut／grid設定を読めない場合、その設定だけ既定値で継続してpathと理由を警告します。既存fileは書き換えません。修正後はFile → Reload keyboard shortcutsで再読み込みでき、再読み込みの失敗時は現在の設定を保持します。隔離した記述ミスの設定で、通常releaseの警告全文・解除後の操作・修正後Reloadを実画面で確認しました。全エラー種別・screen reader・混在DPIの確認ではありません。
 
 Ctrl+Tab／Ctrl+Shift+Tabでtabを前後に切り替えます。filmstripを開いている場合も、通常のTab／Shift+Tabによる項目移動と区別します。menu・palette・確認画面の入力を優先し、custom設定へ変更した後に元の既定キーを固定aliasとして残しません。
 

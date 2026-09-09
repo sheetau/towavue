@@ -49,6 +49,55 @@ Assert-True ($binding.files.Count -eq 95) 'Wrong binary count.'
 foreach ($file in $binding.files) { Assert-File (Join-Path $payload $file.name) $file }
 
 Add-Type -AssemblyName System.IO.Compression,System.IO.Compression.FileSystem
+$installerSourcePath = Join-Path $licenses 'INSTALLER-SOURCES.zip'
+Assert-True ($build.installer_sources.name -eq 'INSTALLER-SOURCES.zip') 'Missing installer source binding.'
+Assert-File $installerSourcePath $build.installer_sources
+function Assert-SourceArchive([string]$Path) {
+    $sources = @{}
+    foreach ($record in $inventory.build_sources) { $sources.Add($record.name,$record) }
+    $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        Assert-True ($zip.Entries.Count -eq $sources.Count + 1) 'Installer source coverage mismatch.'
+        $seen = @{}
+        foreach ($entry in $zip.Entries) {
+            Assert-True (-not $seen.ContainsKey($entry.FullName)) 'Duplicate installer source.'
+            $seen.Add($entry.FullName,$true)
+            if ($entry.FullName -eq 'SOURCES.json') {
+                $reader = [IO.StreamReader]::new($entry.Open(),[Text.Encoding]::UTF8)
+                try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+                Assert-True (($manifest | ConvertTo-Json -Depth 5 -Compress) -eq ($inventory.build_sources | ConvertTo-Json -Depth 5 -Compress)) 'Installer source manifest differs.'
+                continue
+            }
+            Assert-True ($sources.ContainsKey($entry.FullName)) 'Unknown installer source.'
+            $record = $sources[$entry.FullName]
+            $stream = $entry.Open()
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { $hash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','') }
+            finally { $sha.Dispose(); $stream.Dispose() }
+            Assert-True ($entry.Length -eq $record.bytes -and $hash -eq $record.sha256) 'Installer source bytes differ.'
+        }
+        Assert-True ($seen.ContainsKey('SOURCES.json')) 'Installer source manifest missing.'
+    }
+    finally { $zip.Dispose() }
+}
+Assert-SourceArchive $installerSourcePath
+foreach ($mutation in @('missing','changed','duplicate','manifest')) {
+    $changedArchive = Join-Path $trialRoot "sources-$mutation.zip"
+    Copy-Item -LiteralPath $installerSourcePath -Destination $changedArchive
+    $zip = [IO.Compression.ZipFile]::Open($changedArchive,[IO.Compression.ZipArchiveMode]::Update)
+    try {
+        $name = if ($mutation -eq 'manifest') { 'SOURCES.json' } else { 'packaging/windows/setup.nsi' }
+        if ($mutation -ne 'duplicate') { $zip.GetEntry($name).Delete() }
+        if ($mutation -ne 'missing') {
+            $writer = [IO.StreamWriter]::new($zip.CreateEntry($name).Open())
+            try { $writer.Write('[]') } finally { $writer.Dispose() }
+        }
+    }
+    finally { $zip.Dispose() }
+    $rejected = $false
+    try { Assert-SourceArchive $changedArchive } catch { $rejected = $true }
+    Assert-True $rejected "Invalid installer source archive accepted: $mutation"
+}
 $archive = [IO.Compression.ZipFile]::OpenRead($SourceCompanion)
 try {
     $selected = @{}
@@ -79,6 +128,7 @@ foreach ($link in $links) {
     Assert-True ($path.StartsWith($licenses + '\',[StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $path -PathType Leaf)) 'Guide link is missing or escapes installed licenses.'
 }
 Assert-True ($html.Contains($pins.companion.name) -and $html.Contains($pins.companion.sha256)) 'Source companion identity is not visible.'
+Assert-True ($html.Contains('href="INSTALLER-SOURCES.zip"') -and $html.Contains($build.installer_sources.sha256)) 'Installer source identity/link is not visible.'
 $include = Get-Content -LiteralPath (Join-Path $BuildDirectory 'payload.nsh') -Raw -Encoding UTF8
 $installed = [regex]::Matches($include,'(?m)^  File "\$\{TRIAL_ROOT\}\\payload\\([^"]+)"$')
 $removed = [regex]::Matches($include,'(?m)^  Delete "\$INSTDIR\\([^"]+)"$')
@@ -178,4 +228,5 @@ foreach ($file in $binding.files) { Assert-File (Join-Path $payload $file.name) 
 Assert-File $setup $build.setup
 Assert-File $SourceCompanion $pins.companion
 Write-Output "PASS: 95 binary hashes, $($selected.Count) original mappings/bytes, $($links.Count) local links, $($names.Count) explicit install/delete paths, eight input rejections, five non-installing Setup probes and read-only packaged prerequisite inspection. Evidence: $trialRoot"
+Write-Output "PASS: $($inventory.build_sources.Count) exact installer source files, source manifest, installed archive link/hash and four archive mutation refusals."
 Write-Output 'SKIP: actual application installation, native prerequisite UI/UAC/reboot and self-copy uninstall require an isolated supported-Windows environment. No application or redistributable was installed.'

@@ -138,6 +138,26 @@ foreach ($name in $updateSources) {
 }
 
 $utf8 = [Text.UTF8Encoding]::new($false)
+$buildSources = @('packaging/windows/setup.nsi','packaging/windows/operation-lock.ps1','packaging/windows/prerequisite.ps1','packaging/windows/registration.ps1','packaging/windows/registration-state.ps1','packaging/windows/UnicodeShellLink.cs','scripts/build-local-setup.ps1','scripts/get-vc-redist-status.ps1','scripts/vc-redist-state.ps1','docs/setup-inputs.json','docs/nsis-inputs.json','docs/vc-redist-inputs.json','LICENSE-MIT','LICENSE-APACHE','packaging/windows/SOURCES-README.txt')
+$buildSources = @(($buildSources + $updateSources) | Sort-Object -Unique)
+$sourceRecords = @($buildSources | ForEach-Object { Assert-NoLink (Join-Path $repositoryRoot $_); Get-Record (Join-Path $repositoryRoot $_) $_ })
+$installerSourcePath = Join-Path $licenses 'INSTALLER-SOURCES.zip'
+$sourceArchive = [IO.Compression.ZipFile]::Open($installerSourcePath,[IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($record in $sourceRecords) {
+        $entry = $sourceArchive.CreateEntry($record.name)
+        $entry.LastWriteTime = [DateTimeOffset]::new(2000,1,1,0,0,0,[TimeSpan]::Zero)
+        $source = [IO.File]::OpenRead((Join-Path $repositoryRoot $record.name))
+        $destination = $entry.Open()
+        try { $source.CopyTo($destination) } finally { $destination.Dispose(); $source.Dispose() }
+    }
+    $entry = $sourceArchive.CreateEntry('SOURCES.json')
+    $entry.LastWriteTime = [DateTimeOffset]::new(2000,1,1,0,0,0,[TimeSpan]::Zero)
+    $writer = [IO.StreamWriter]::new($entry.Open(),$utf8)
+    try { $writer.Write(($sourceRecords | ConvertTo-Json -Depth 5) + "`n") } finally { $writer.Dispose() }
+}
+finally { $sourceArchive.Dispose() }
+$installerSource = Get-Record $installerSourcePath 'INSTALLER-SOURCES.zip'
 $noticeFiles = @(Get-ChildItem -LiteralPath $licenses -File -Recurse -Force | ForEach-Object { $_.FullName.Substring($licenses.Length + 1).Replace('\','/') })
 [Array]::Sort($noticeFiles,[StringComparer]::Ordinal)
 $page = [Collections.Generic.List[string]]::new()
@@ -146,7 +166,8 @@ $page.Add('<p>Local evaluation only, not an approved or published release. towav
 $mit = @($companionEntries | Where-Object { $_.companion -eq 'catalog/materials/app-materials-v2/LICENSE-MIT' })[0].installed
 $apache = @($companionEntries | Where-Object { $_.companion -eq 'catalog/materials/app-materials-v2/LICENSE-APACHE' })[0].installed
 $page.Add('<p><a href="' + $mit + '">MIT</a> OR <a href="' + $apache + '">Apache-2.0</a> &middot; <a href="NSIS-COPYING.txt">NSIS notices</a> &middot; <a href="INSTALLED-FILES.json">Installed payload inventory</a></p>')
-$page.Add('<h2>Corresponding sources</h2><p>The complete application and native sources, patches, build instructions and original notices are in the separate companion <code>' + $manifest.companion.name + '</code> (' + $manifest.companion.bytes + ' bytes), SHA256 <code>' + $manifest.companion.sha256 + '</code>. Extract it into a separate folder and start with its START-HERE.html. This local evaluation has no public download URL. A public release must provide this matching companion alongside Setup. Installer sources are not in this older app/native companion; installer source delivery remains a release gate.</p>')
+$page.Add('<h2>Corresponding sources</h2><p>The complete application and native sources, patches, build instructions and original notices are in the separate companion <code>' + $manifest.companion.name + '</code> (' + $manifest.companion.bytes + ' bytes), SHA256 <code>' + $manifest.companion.sha256 + '</code>. Extract it into a separate folder and start with its START-HERE.html. This local evaluation has no public download URL. A public release must provide this matching companion alongside Setup.</p>')
+$page.Add('<p>The exact installer sources and build-input manifests are included in <a href="INSTALLER-SOURCES.zip">INSTALLER-SOURCES.zip</a> (' + $installerSource.bytes + ' bytes), SHA256 <code>' + $installerSource.sha256 + '</code>. Extract this ZIP separately and read packaging/windows/SOURCES-README.txt. SOURCES.json lists its original file identities. External app/runtime binaries, the companion, NSIS and the Microsoft package must be supplied separately; nothing is downloaded or installed by the build.</p>')
 $page.Add('<p>The companion-records folder below retains every non-source-archive original under short numbered names. Link labels and the installed inventory map each file to its original companion path. Upstream READMEs and inventories refer to the complete companion, including archives intentionally not installed here. Use the extracted companion for those references; do not interpret its FILES.json as this installed tree. The Rust runtime notice ZIP is retained. No license text has been shortened or replaced.</p>')
 $page.Add('<p>The shared Microsoft Visual C++ prerequisite is a separate Microsoft component. Its original installer displays its terms when required; towavue removal never removes the shared runtime. No app startup, browser launch or source download happens automatically.</p><h2>Component guides</h2><ul>')
 foreach ($entry in $companionEntries) {
@@ -166,9 +187,6 @@ $page.Add('</ul></details></html>')
 
 $records = @(Get-ChildItem -LiteralPath $payload -File -Recurse -Force | ForEach-Object { Get-Record $_.FullName $_.FullName.Substring($payload.Length + 1).Replace('\','/') })
 $records = @($records | Sort-Object name)
-$buildSources = @('packaging/windows/setup.nsi','packaging/windows/operation-lock.ps1','packaging/windows/prerequisite.ps1','packaging/windows/registration.ps1','packaging/windows/registration-state.ps1','packaging/windows/UnicodeShellLink.cs','scripts/build-local-setup.ps1','scripts/get-vc-redist-status.ps1','scripts/vc-redist-state.ps1','docs/setup-inputs.json','docs/nsis-inputs.json','docs/vc-redist-inputs.json')
-$buildSources = @(($buildSources + $updateSources) | Sort-Object -Unique)
-$sourceRecords = @($buildSources | ForEach-Object { Get-Record (Join-Path $repositoryRoot $_) $_ })
 $inventory = [ordered]@{schema_version=1;scope='Installed payload only; excludes this inventory itself, generated uninstaller and path-bound marker. Local evaluation, not release approval.';companion=$manifest.companion;companion_entries=@($companionEntries);build_sources=$sourceRecords;files=$records}
 $inventoryPath = Join-Path $licenses 'INSTALLED-FILES.json'
 [IO.File]::WriteAllText($inventoryPath,($inventory | ConvertTo-Json -Depth 8) + "`n",$utf8)
@@ -225,7 +243,7 @@ Assert-File $SourceCompanion $manifest.companion
 Assert-File $NsisArchive $nsis.archive
 $setup = Get-Record (Join-Path $OutputDirectory 'Setup-local.exe') 'Setup-local.exe'
 Assert-File (Join-Path $OutputDirectory 'operation-lock.ps1') @($sourceRecords | Where-Object { $_.name -eq 'packaging/windows/operation-lock.ps1' })[0]
-$result = [ordered]@{schema_version=1;scope='Compiled only; not installed, published or approved. Update and supported-Windows registration/lifecycle verification are pending.';setup=$setup;payload_files=$records.Count;payload_bytes=($records | Measure-Object bytes -Sum).Sum;source_companion=$manifest.companion}
+$result = [ordered]@{schema_version=1;scope='Compiled only; not installed, published or approved. Update and supported-Windows registration/lifecycle verification are pending.';setup=$setup;payload_files=$records.Count;payload_bytes=($records | Measure-Object bytes -Sum).Sum;source_companion=$manifest.companion;installer_sources=$installerSource}
 # Completion is recorded only after compilation and final input/staging verification.
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'BUILD.json'),($result | ConvertTo-Json -Depth 6) + "`n",$utf8)
 $result | ConvertTo-Json -Depth 6

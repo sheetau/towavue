@@ -5,7 +5,10 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 
 use thiserror::Error;
-use towavue_core::{MediaTime, PlaybackGeneration, PlaybackRange};
+use towavue_core::{EditTimeline, MediaTime, PlaybackGeneration, PlaybackRange};
+
+#[path = "playback_timeline.rs"]
+mod timeline;
 
 use crate::audio::{AudioOutput, AudioOutputError, AudioOutputEvent, AudioOutputSender};
 use crate::decode::{
@@ -146,6 +149,7 @@ pub struct PlaybackSession {
     volume: f32,
     rate: f32,
     range: PlaybackRange,
+    timeline: Option<Arc<EditTimeline>>,
 }
 
 impl PlaybackSession {
@@ -194,6 +198,7 @@ impl PlaybackSession {
             volume,
             rate: rate.clamp(0.25, 4.0).max(0.25),
             range,
+            timeline: None,
         };
         session.start_pipeline()?;
         Ok(session)
@@ -218,7 +223,11 @@ impl PlaybackSession {
     pub fn seek(&mut self, target: MediaTime) -> Result<PlaybackGeneration, PlaybackError> {
         self.stop_pipeline();
         self.generation = self.generation.next();
-        self.target = target.max(MediaTime::ZERO);
+        self.target = self
+            .timeline
+            .as_ref()
+            .map_or(target, |plan| target.min(plan.duration()))
+            .max(MediaTime::ZERO);
         self.metrics.reset();
         self.start_pipeline()?;
         Ok(self.generation)
@@ -237,6 +246,9 @@ impl PlaybackSession {
     }
 
     pub fn range_end(&self) -> Option<MediaTime> {
+        if let Some(plan) = &self.timeline {
+            return Some(plan.duration());
+        }
         self.range
             .contains(self.target)
             .then_some(self.range.end)
@@ -250,9 +262,32 @@ impl PlaybackSession {
         range: PlaybackRange,
         pause: bool,
     ) -> Result<PlaybackGeneration, PlaybackError> {
+        self.timeline = None;
         self.rate = rate.clamp(0.25, 4.0).max(0.25);
         self.range = range;
         // Seek may require pausing, but resuming remains an explicit control.
+        self.paused |= pause;
+        self.seek(target)
+    }
+
+    pub fn timeline(&self) -> Option<&EditTimeline> {
+        self.timeline.as_deref()
+    }
+
+    /// All positions and returned frame/audio timestamps use the edited axis while a plan is active.
+    pub fn seek_with_timeline(
+        &mut self,
+        target: MediaTime,
+        rate: f32,
+        plan: EditTimeline,
+        pause: bool,
+    ) -> Result<PlaybackGeneration, PlaybackError> {
+        self.rate = rate.clamp(0.25, 4.0).max(0.25);
+        self.range = PlaybackRange {
+            start: MediaTime::ZERO,
+            end: Some(plan.duration()),
+        };
+        self.timeline = Some(Arc::new(plan));
         self.paused |= pause;
         self.seek(target)
     }
@@ -266,7 +301,11 @@ impl PlaybackSession {
         self.adapter_luid = graphics_device.adapter_luid();
         self.graphics_device = graphics_device;
         self.generation = self.generation.next();
-        self.target = target.max(MediaTime::ZERO);
+        self.target = self
+            .timeline
+            .as_ref()
+            .map_or(target, |plan| target.min(plan.duration()))
+            .max(MediaTime::ZERO);
         self.metrics.reset();
         self.start_pipeline()?;
         Ok(self.generation)
@@ -278,16 +317,33 @@ impl PlaybackSession {
     }
 
     fn start_pipeline(&mut self) -> Result<(), PlaybackError> {
+        if self
+            .timeline
+            .as_ref()
+            .is_some_and(|plan| plan.spans().is_empty())
+        {
+            self.completion = Arc::new(DecodeCompletion::default());
+            self.completion.finish(DecodeCompletion::VIDEO);
+            self.completion.finish(DecodeCompletion::AUDIO);
+            self.video_refresh_pending = false;
+            (self.notify)(PlaybackEvent::DecodeFinished(self.generation));
+            return Ok(());
+        }
         let audio = self
             .audio_format
             .map(|format| {
                 let notify = Arc::clone(&self.notify);
                 let generation = self.generation;
-                AudioOutput::start_with_settings(
+                AudioOutput::start_with_rates(
                     format,
                     self.target,
                     self.volume,
                     self.rate,
+                    if self.timeline.is_some() {
+                        1.0
+                    } else {
+                        self.rate
+                    },
                     move || {
                         notify(PlaybackEvent::AudioReady(generation));
                     },
@@ -312,6 +368,9 @@ impl PlaybackSession {
             return Err(error);
         }
         if let Some(audio) = self.audio.as_ref().map(AudioOutput::sender) {
+            let timeline = self.timeline.clone();
+            let rate = self.rate;
+            let format = self.audio_format.expect("started audio output");
             let path = self.path.clone();
             let target = self.target;
             let end = self.range_end();
@@ -323,7 +382,22 @@ impl PlaybackSession {
                 .name("towavue-audio-feed".into())
                 .spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        run_audio_decode(&path, &audio, target, end, &cancelled)
+                        if let Some(plan) = timeline {
+                            timeline::decode_audio(
+                                &path,
+                                &plan,
+                                target,
+                                rate,
+                                format,
+                                &cancelled,
+                                |chunk| audio.push(chunk).is_ok(),
+                            )?;
+                            audio
+                                .finish()
+                                .map_err(|_| decode::DecodeError::ConsumerClosed)
+                        } else {
+                            run_audio_decode(&path, &audio, target, end, &cancelled)
+                        }
                     }))
                     .unwrap_or(Err(decode::DecodeError::WorkerPanicked));
                     if cancelled.load(Ordering::Relaxed) {
@@ -348,6 +422,11 @@ impl PlaybackSession {
     }
 
     fn start_video(&mut self, target: MediaTime) -> Result<(), PlaybackError> {
+        let target = self
+            .timeline
+            .as_ref()
+            .map_or(target, |plan| target.min(plan.duration()))
+            .max(MediaTime::ZERO);
         self.video_target = target;
         self.completion.restart_video();
         let (video_tx, video_rx) = mpsc::sync_channel(VIDEO_QUEUE_CAPACITY);
@@ -362,6 +441,7 @@ impl PlaybackSession {
         let cancelled = Arc::clone(&self.video_cancel);
         let completion = Arc::clone(&self.completion);
         let mut input = self.video_input.take();
+        let timeline = self.timeline.clone();
         let video_thread = thread::Builder::new()
             .name("towavue-video-feed".to_owned())
             .spawn(move || {
@@ -371,17 +451,36 @@ impl PlaybackSession {
                             cancelled.load(Ordering::Relaxed)
                         })?);
                     }
-                    run_video_decode(
-                        input.as_mut().expect("opened video input"),
-                        &graphics_device,
-                        &video_tx,
-                        &metrics,
-                        video_generation,
-                        target,
-                        end,
-                        &cancelled,
-                        notify.as_ref(),
-                    )
+                    if let Some(plan) = timeline {
+                        for segment in timeline::segments(&plan, target, true) {
+                            run_video_decode(
+                                input.as_mut().expect("opened video input"),
+                                &graphics_device,
+                                &video_tx,
+                                &metrics,
+                                video_generation,
+                                segment.source_target(target),
+                                Some(segment.source_end()),
+                                Some(segment),
+                                &cancelled,
+                                notify.as_ref(),
+                            )?;
+                        }
+                        Ok(())
+                    } else {
+                        run_video_decode(
+                            input.as_mut().expect("opened video input"),
+                            &graphics_device,
+                            &video_tx,
+                            &metrics,
+                            video_generation,
+                            target,
+                            end,
+                            None,
+                            &cancelled,
+                            notify.as_ref(),
+                        )
+                    }
                 })();
                 if cancelled.load(Ordering::Relaxed) {
                     return input;
@@ -441,6 +540,15 @@ impl PlaybackSession {
         visible: bool,
         position: MediaTime,
     ) -> Result<(), PlaybackError> {
+        if self
+            .timeline
+            .as_ref()
+            .is_some_and(|plan| plan.spans().is_empty())
+        {
+            self.video_visible = visible;
+            self.video_refresh_pending = false;
+            return Ok(());
+        }
         if self.video_visible == visible {
             return Ok(());
         }
@@ -633,6 +741,7 @@ fn run_video_decode(
     generation: PlaybackGeneration,
     target: MediaTime,
     end: Option<MediaTime>,
+    timeline: Option<timeline::Segment>,
     cancelled: &AtomicBool,
     notify: &(impl Fn(PlaybackEvent) + Sync + ?Sized),
 ) -> Result<(), decode::DecodeError> {
@@ -660,6 +769,7 @@ fn run_video_decode(
                         generation,
                         cancelled,
                         notify,
+                        timeline,
                     )
                 }
             }
@@ -689,6 +799,7 @@ fn run_video_decode(
                                 generation,
                                 cancelled,
                                 notify,
+                                timeline,
                             )
                         }
                         _ => unreachable!("video-only decoder emitted audio"),
@@ -701,12 +812,22 @@ fn run_video_decode(
 }
 
 fn send_video_frame(
-    frame: PresentationFrame,
+    mut frame: PresentationFrame,
     video_tx: &SyncSender<PresentationFrame>,
     generation: PlaybackGeneration,
     cancelled: &AtomicBool,
     notify: &(impl Fn(PlaybackEvent) + ?Sized),
+    timeline: Option<timeline::Segment>,
 ) -> bool {
+    if let Some(segment) = timeline {
+        let Some(time) = segment.edited_time(frame.presentation_time()) else {
+            return true;
+        };
+        match &mut frame {
+            PresentationFrame::Software(frame) => frame.presentation_time = time,
+            PresentationFrame::Hardware(frame) => frame.presentation_time = time,
+        }
+    }
     // stop_video drops the receiver before joining this bounded producer.
     if cancelled.load(Ordering::Relaxed) || video_tx.send(frame).is_err() {
         return false;
@@ -716,6 +837,10 @@ fn send_video_frame(
     }
     true
 }
+
+#[cfg(test)]
+#[path = "playback_timeline_tests.rs"]
+mod timeline_tests;
 
 #[cfg(test)]
 mod tests {

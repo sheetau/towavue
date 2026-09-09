@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 編集時間軸の再生engine（2026-09-10）
+
+最終session71209でfmt／Clippy／workspace360 tests（app201/core53/runtime102/integration4）／releaseが成功。通常ignored9件のうち新しいruntime WASAPI1件とapp全3件を明示実行してすべてPASS、SKIPなし。旧video非表示／音声継続試験も先行session71665でPASS。最終release8c295d7c6d0690caee60c97e1b14a87340e14253e4ba1cb9c4e67fbb00394c08。前回3f1cf36のCI34394210903は成功。以下は再生engineの検証であり、通常UIから編集できるようになったという意味ではない。
+
+PlaybackSessionにimmutableなtimeline planを保持し、`seek_with_timeline`で編集時間をtargetにする。映像は既存の入力・同一deviceを区間間で再利用してPTSを変換。音声は初期Seek後の一続きのdecodeから範囲を取り出し、局所速度×master速度を保存と共有したatempo chainで処理、局所gain／予定sample数へ揃える。一つのWASAPI出力へ最大1024 framesのchunkで送り、出力側はtempoを再適用せずclockだけmaster速度で進める。空planはaudio/videoを開始せず完了扱い、Undoやlegacy modeへの復帰も可能。まだ通常の選択UI／app履歴へ接続した機能ではない。
+
+WARP regressionは2秒20fps FFV1の元RGBAを独立にdecodeし、削除＋局所伸縮＋gainから得られる30 framesのPTS／全画素を比較。途中Seek、終端、削除したtailの直前、非表示／復帰、device交換、空plan／Undo／legacy復帰を確認。音声は0.25／1／4倍のmaster速度で保存したPCMと1LSB以内、正確なsample数、1024-frame上限、初期timestamp、途中／join／EOF Seekと取消を確認する。最初の区間別Seek実装ではsampleがずれたため一続きのdecodeへ変更し、exportも元channel構成を保つfloat tempo入力へ揃えた。
+
+新しい明示WASAPI試験（無音出力）ではmaster2倍の編集clock、pause中の位置、区間をまたぐoutput/feed threadとgenerationの同一性、video非表示中の自然drain、復旧後のframeを確認した。既存native-caption H.264 D3D11VA試験にもplanの0／750ms／編集終端と各device復旧を追加し、同一adapter・CPU transfers0で実frameをPresentした。初回の終端試験でframeが出なかったため、video-onlyのstart==endを端点直前のpreviewとして扱い、非empty trimの除外規則は維持した。初回の巨大RGBA assertion出力はbool比較へ修正し、画素比較自体は維持した。実入力UI試験・loopback音質・長い削除区間の負荷評価とは区別する。
+
 ### 時間区間編集と保存backend（2026-09-10）
 
 最終session15959でfmt／Clippy／workspace358 tests／releaseが成功（app201/core53/runtime100/integration4、通常ignored8件は今回明示再実行せず）。releasebe0eada8c96822f2ae9385ff81446bfa575d697a97da87cc11c0555d862ec02e。前回1278918のCI34391955269も成功。今回の変更はbackend段階で、native UIの新しい選択編集を検証したという意味ではない。

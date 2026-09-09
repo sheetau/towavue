@@ -556,6 +556,7 @@ fn timeline_filters(
             let mut audio = vec![
                 trim_filter("atrim", &state, time_base).expect("validated timeline interval"),
                 "asetpts=PTS-STARTPTS".into(),
+                "aformat=sample_fmts=flt".into(),
             ];
             let rate = span.rate() * f64::from(master.rate);
             if rate != 1.0 {
@@ -729,18 +730,8 @@ fn atempo_filters(rate: f32) -> Vec<String> {
     tempo_filters(f64::from(rate), 4)
 }
 
-fn tempo_filters(mut rate: f64, precision: usize) -> Vec<String> {
-    let mut filters = Vec::new();
-    while rate < 0.5 {
-        filters.push("atempo=0.5000".into());
-        rate /= 0.5;
-    }
-    while rate > 2.0 {
-        filters.push("atempo=2.0000".into());
-        rate /= 2.0;
-    }
-    filters.push(format!("atempo={rate:.precision$}"));
-    filters
+fn tempo_filters(rate: f64, precision: usize) -> Vec<String> {
+    crate::tempo::filters(rate, precision)
 }
 
 fn same_path(left: &Path, right: &Path) -> bool {

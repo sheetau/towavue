@@ -621,7 +621,13 @@ impl ParallelInput {
             }
         }
         self.started = true;
-        seek_input(input, minimum_time, video.is_some(), cancelled)?;
+        let seek_target =
+            if stream == Some(DecodeStream::Video) && maximum_time == Some(minimum_time) {
+                minimum_time.saturating_sub(Duration::from_nanos(1))
+            } else {
+                minimum_time
+            };
+        seek_input(input, seek_target, video.is_some(), cancelled)?;
         check_cancelled(cancelled)?;
         run_parallel_workers(
             input,
@@ -645,6 +651,7 @@ fn run_parallel_workers(
     emit: &mut impl FnMut(ParallelDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
     let origin = input_origin(input);
+    let terminal_preview = maximum_time == Some(minimum_time) && audio.is_none();
     let video_stream_index = video.as_ref().map(|video| match video {
         ParallelVideoConfig::Software(config) => config.index,
         ParallelVideoConfig::Hardware(config, _) => config.index,
@@ -779,9 +786,14 @@ fn run_parallel_workers(
                 emitted_video = true;
                 last_preroll_video = None;
                 accepted = emit(output);
-            } else if is_video && !finished && maximum_time.is_none() && !emitted_video {
+            } else if is_video
+                && !finished
+                && (maximum_time.is_none() || terminal_preview)
+                && !emitted_video
+            {
                 // Keep one owned software/native frame until a usable frame or EOF.
-                // Terminal source preview must not relax bounded trim filtering.
+                // A degenerate video interval previews its last frame before the end.
+                // Nonempty bounded trims still exclude all preroll.
                 last_preroll_video = Some(output);
             }
             if finished && accepted {

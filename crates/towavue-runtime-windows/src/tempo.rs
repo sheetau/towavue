@@ -10,9 +10,22 @@ pub(crate) struct AudioTempo {
 
 impl AudioTempo {
     pub(crate) fn new(sample_rate: u32, rate: f32) -> Result<Self, Error> {
-        let graph = if rate == 1.0 {
-            None
-        } else {
+        let factor = f64::from(rate).sqrt();
+        Self::from_chain(
+            sample_rate,
+            (rate != 1.0).then(|| format!("atempo={factor},atempo={factor}")),
+        )
+    }
+
+    pub(crate) fn timeline(sample_rate: u32, rate: f64) -> Result<Self, Error> {
+        Self::from_chain(
+            sample_rate,
+            (rate != 1.0).then(|| filters(rate, 9).join(",")),
+        )
+    }
+
+    fn from_chain(sample_rate: u32, chain: Option<String>) -> Result<Self, Error> {
+        let graph = if let Some(chain) = chain {
             ffmpeg_next::init()?;
             let mut graph = filter::Graph::new();
             graph.add(&filter::find("abuffer").ok_or(Error::FilterNotFound)?, "in",
@@ -22,13 +35,14 @@ impl AudioTempo {
                 "out",
                 "",
             )?;
-            let factor = f64::from(rate).sqrt();
-            graph
-                .output("in", 0)?
-                .input("out", 0)?
-                .parse(&format!("atempo={factor},atempo={factor},aformat=sample_fmts=flt:sample_rates={sample_rate}:channel_layouts=stereo"))?;
+            graph.output("in", 0)?.input("out", 0)?.parse(&format!(
+                "{},aformat=sample_fmts=flt:sample_rates={sample_rate}:channel_layouts=stereo",
+                chain
+            ))?;
             graph.validate()?;
             Some(graph)
+        } else {
+            None
         };
         Ok(Self {
             graph,
@@ -84,6 +98,20 @@ impl AudioTempo {
             }
         }
     }
+}
+
+pub(crate) fn filters(mut rate: f64, precision: usize) -> Vec<String> {
+    let mut filters = Vec::new();
+    while rate < 0.5 {
+        filters.push("atempo=0.5000".into());
+        rate /= 0.5;
+    }
+    while rate > 2.0 {
+        filters.push("atempo=2.0000".into());
+        rate /= 2.0;
+    }
+    filters.push(format!("atempo={rate:.precision$}"));
+    filters
 }
 
 #[cfg(test)]

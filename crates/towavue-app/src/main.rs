@@ -13978,6 +13978,44 @@ mod tests {
                     assert!(!app.restore_ui_textures);
                     assert!(app.native_prompt.is_none());
                 }
+                let mut timeline = towavue_core::EditTimeline::new(
+                    media_time(Duration::from_secs(2)),
+                    towavue_core::PlaybackRange::default(),
+                )
+                .expect("finite timeline");
+                assert!(
+                    timeline.apply(towavue_core::TimelineEdit::Delete(
+                        towavue_core::TimeRange::new(
+                            media_time(Duration::from_millis(500)),
+                            media_time(Duration::from_secs(1))
+                        )
+                        .expect("deleted interval"),
+                    ))
+                );
+                for target in [
+                    MediaTime::ZERO,
+                    media_time(Duration::from_millis(750)),
+                    timeline.duration(),
+                ] {
+                    app.generation = app
+                        .session
+                        .as_mut()
+                        .expect("session")
+                        .seek_with_timeline(target, 1.0, timeline.clone(), true)
+                        .expect("edited hardware seek");
+                    app.pending_time = Some(target);
+                    app.clock = None;
+                    app.state = PlaybackState::Paused;
+                    app.audio_drained = false;
+                    app.decode_finished = false;
+                    present_video(&mut app, &notifications);
+                    app.recover_graphics_device(target);
+                    assert_eq!(
+                        app.session.as_ref().expect("session").timeline(),
+                        Some(&timeline)
+                    );
+                    present_video(&mut app, &notifications);
+                }
                 drop(app);
                 self.completed = true;
                 event_loop.exit();

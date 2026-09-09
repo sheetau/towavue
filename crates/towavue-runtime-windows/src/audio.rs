@@ -120,6 +120,17 @@ impl AudioOutput {
         rate: f32,
         notify: impl Fn() + Send + 'static,
     ) -> Result<Self, AudioOutputError> {
+        Self::start_with_rates(format, media_anchor, volume, rate, rate, notify)
+    }
+
+    pub(crate) fn start_with_rates(
+        format: AudioFormat,
+        media_anchor: MediaTime,
+        volume: f32,
+        rate: f32,
+        tempo_rate: f32,
+        notify: impl Fn() + Send + 'static,
+    ) -> Result<Self, AudioOutputError> {
         if format.sample_rate == 0 || format.channels != 2 {
             return Err(AudioOutputError::UnsupportedFormat(
                 format.sample_rate,
@@ -154,6 +165,7 @@ impl AudioOutput {
                     &thread_position,
                     &thread_volume,
                     rate,
+                    tempo_rate,
                     audio_rx,
                     &control_rx,
                     &ready_tx,
@@ -256,6 +268,7 @@ fn run_audio_thread(
     position_nanoseconds: &AtomicI64,
     volume: &AtomicU32,
     rate: f32,
+    tempo_rate: f32,
     audio_rx: Receiver<AudioMessage>,
     control_rx: &Receiver<AudioControl>,
     ready_tx: &SyncSender<Result<(), AudioOutputError>>,
@@ -311,7 +324,7 @@ fn run_audio_thread(
         let event = client.set_get_eventhandle().map_err(wasapi_error)?;
         let render_client = client.get_audiorenderclient().map_err(wasapi_error)?;
         let clock = client.get_audioclock().map_err(wasapi_error)?;
-        let tempo = crate::tempo::AudioTempo::new(format.sample_rate, rate)?;
+        let tempo = crate::tempo::AudioTempo::new(format.sample_rate, tempo_rate)?;
         Ok::<_, AudioOutputError>((
             client,
             event,

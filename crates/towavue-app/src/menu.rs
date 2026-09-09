@@ -113,10 +113,7 @@ pub fn show(
                                 .iter()
                                 .find(|definition| definition.id == *id)
                                 .expect("menu command is registered");
-                            let shortcut = shortcuts
-                                .get(*id)
-                                .map(ToString::to_string)
-                                .unwrap_or_default();
+                            let shortcut = shortcuts.label(*id, context);
                             let response = ui.add_enabled(
                                 definition.is_enabled(context),
                                 egui::Button::new(definition.title).shortcut_text(shortcut),

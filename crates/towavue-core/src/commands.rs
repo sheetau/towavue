@@ -254,6 +254,7 @@ impl fmt::Display for KeyStroke {
         }
         match self.key {
             Key::Character('+') => formatter.write_str("Plus"),
+            Key::Character('|') => formatter.write_str("Pipe"),
             Key::Character(character) => write!(formatter, "{}", character.to_ascii_uppercase()),
             Key::Space => formatter.write_str("Space"),
             Key::ArrowLeft => formatter.write_str("Left"),
@@ -301,6 +302,7 @@ impl FromStr for KeyStroke {
                 "f11" if key.is_none() => key = Some(Key::F11),
                 "home" if key.is_none() => key = Some(Key::Home),
                 "end" if key.is_none() => key = Some(Key::End),
+                "pipe" if key.is_none() => key = Some(Key::Character('|')),
                 character if key.is_none() && character.chars().count() == 1 => {
                     key = character.chars().next().map(Key::Character)
                 }
@@ -636,7 +638,7 @@ pub fn command_definitions() -> &'static [CommandDefinition] {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ShortcutBindings(BTreeMap<CommandId, KeySequence>);
+pub struct ShortcutBindings(BTreeMap<CommandId, Vec<KeySequence>>);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ShortcutMatch {
@@ -647,39 +649,67 @@ pub enum ShortcutMatch {
 
 impl ShortcutBindings {
     pub fn set(&mut self, command: CommandId, sequence: KeySequence) {
-        self.0.insert(command, sequence);
+        self.0.insert(command, vec![sequence]);
+    }
+
+    pub fn add(&mut self, command: CommandId, sequence: KeySequence) {
+        let sequences = self.0.entry(command).or_default();
+        if !sequences.contains(&sequence) {
+            sequences.push(sequence);
+        }
     }
 
     pub fn get(&self, command: CommandId) -> Option<&KeySequence> {
-        self.0.get(&command)
+        self.all(command).first()
+    }
+
+    pub fn all(&self, command: CommandId) -> &[KeySequence] {
+        self.0.get(&command).map(Vec::as_slice).unwrap_or_default()
+    }
+
+    pub fn label(&self, command: CommandId, context: CommandContext) -> String {
+        self.all(command)
+            .iter()
+            .enumerate()
+            .filter(|(index, sequence)| {
+                *index == 0
+                    || self.resolve(sequence.strokes(), context) == ShortcutMatch::Command(command)
+            })
+            .map(|(_, sequence)| sequence.to_string())
+            .collect::<Vec<_>>()
+            .join(" / ")
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (CommandId, &KeySequence)> {
-        self.0
-            .iter()
-            .map(|(command, sequence)| (*command, sequence))
+        self.0.iter().filter_map(|(command, sequences)| {
+            sequences.first().map(|sequence| (*command, sequence))
+        })
     }
 
     pub fn resolve(&self, entered: &[KeyStroke], context: CommandContext) -> ShortcutMatch {
-        let mut prefix = false;
-        for definition in command_definitions()
-            .iter()
-            .filter(|definition| definition.is_enabled(context))
-        {
-            let Some(bound) = self.get(definition.id) else {
-                continue;
-            };
-            if bound.strokes() == entered {
-                return ShortcutMatch::Command(definition.id);
+        // Main bindings (including prefixes) win over alternatives. This keeps
+        // contextual video rotation and user-remapped commands ahead of L Seek.
+        for alternatives in [false, true] {
+            let mut prefix = false;
+            for definition in command_definitions()
+                .iter()
+                .filter(|definition| definition.is_enabled(context))
+            {
+                for (index, bound) in self.all(definition.id).iter().enumerate() {
+                    if (index > 0) != alternatives {
+                        continue;
+                    }
+                    if bound.strokes() == entered {
+                        return ShortcutMatch::Command(definition.id);
+                    }
+                    prefix |= bound.strokes().starts_with(entered);
+                }
             }
-            prefix |= bound.strokes().starts_with(entered);
+            if prefix {
+                return ShortcutMatch::Prefix;
+            }
         }
-
-        if prefix {
-            ShortcutMatch::Prefix
-        } else {
-            ShortcutMatch::None
-        }
+        ShortcutMatch::None
     }
 }
 

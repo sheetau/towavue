@@ -35,10 +35,7 @@ pub fn show(
                             (CommandId::OpenFile, "Open File…"),
                             (CommandId::OpenFolder, "Open Folder…"),
                         ] {
-                            let shortcut = shortcuts
-                                .get(command)
-                                .map(ToString::to_string)
-                                .unwrap_or_default();
+                            let shortcut = shortcuts.label(command, Default::default());
                             let icon = if command == CommandId::OpenFolder {
                                 chrome::Icon::OpenFolder
                             } else {

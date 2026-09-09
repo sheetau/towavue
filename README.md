@@ -4,7 +4,9 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
-動画の範囲選択・回転・反転・切り抜きは、timelineを表示している時だけ操作できます。T／View menuの「Toggle video editing timeline」で開閉します。timelineを閉じたり全画面にしても、編集結果と確定済みの選択は保持します。選択枠は編集中だけ表示し、途中のドラッグと辺の数値focusは解除します。音量・速度・Seek・再生停止・保存とUndo/Redoは視聴中も操作できます。J/K/L・フレーム移動・長押し2倍速は引き続き未対応です。
+動画・音声でJ／Lは5秒戻る／進む、Kは再生／一時停止です。左右矢印・Spaceも使えます。動画のtimeline表示中はLを反時計回りの回転へ渡し、Seekは右矢印を使います。画像のR/Lは変更していません。カスタム主キーとそのprefixを追加キーより優先します。
+
+動画の範囲選択・回転・反転・切り抜きは、timelineを表示している時だけ操作できます。T／View menuの「Toggle video editing timeline」で開閉します。timelineを閉じたり全画面にしても、編集結果と確定済みの選択は保持します。選択枠は編集中だけ表示し、途中のドラッグと辺の数値focusは解除します。音量・速度・Seek・再生停止・保存とUndo/Redoは視聴中も操作できます。フレーム移動・長押し2倍速は引き続き未対応です。
 
 動画の下のSeekバーを上へドラッグするとtimelineが開きます。横へ動かし始めた場合は通常のSeekを続け、開閉はT／View menu／command paletteでも操作できます。音声timelineは全画面でも常時表示します。timeline上の横ドラッグで時間範囲を選択し、Deleteで選択部分を除去して前後をつなぎ、Ctrl+Yで選択部分だけを残せます。再生ヘッドのドラッグ・クリックはSeek、Ctrl+Aは時間全選択、I／Oは選択の開始／終了です。選択自体は編集ではなく、削除・切り抜きはUndo/Redo可能で元ファイルを変更しません。音量線の縦ドラッグで選択範囲（未選択なら全体）の音量を0～200%へ変更し、Alt＋選択範囲内の横ドラッグで長さを伸縮できます。Tabで音量・選択長へfocusして左右／Home／Endでも調整できます。Shift＋Spaceで選択範囲を再生し、Spaceで一時停止・再開、Escapeで通常範囲へ戻れます。選択末尾では次曲へ進まず停止し、選択外へのSeekや時間編集でも範囲再生を解除します。画像・動画・時間選択の枠は背景を反転する1物理pxの線へ揃え、選択外の暗幕と見た目のつまみを除きました。辺のドラッグ・数値操作は維持しています。通常ウィンドウと混在DPIを含む操作全体の仕上げは改善途中です。
 
@@ -123,6 +125,8 @@ Ctrl+R／Edit menuのResize / resample imageで幅・高さ、縦横比固定、
 ドット絵の拡大時はView menuのToggle image interpolation、またはcommand paletteで`nearest`を検索して、Smooth／Nearest表示を切り替えられます。これは画面表示だけの設定で、編集・保存・コピーの画素は変えません。読書表示とanimationにも適用し、現在の方式はstatusに表示します。window内のファイル移動では保持しますが、再起動時はSmoothです。初期shortcutは割り当てず、`toggle_image_interpolation`に好みのキーを設定できます。読み込み中の低解像度previewやタブ等の小さなpreviewは引き続きSmoothです。
 
 prefixの続きは1秒以内に入力します。Escape、click、別commandやwindowへのfocus移動で待ちを解除し、途中から戻ったkeyを前のprefixへつなげません。
+
+複数キーを指定する新形式では、設定fileに `# towavue shortcuts v2` の行を追加し、例えば `seek_forward = Right | L`、`toggle_pause = Space | K` と書きます。最初が主キーで、以降は追加キーです。`seek_forward = Right` だけにすれば追加キーを外せます。prefixも `Right | Ctrl+K L` のように指定でき、縦棒のキー自体は `Pipe` と書きます。旧形式では標準のLeft／Right／Spaceを変更していない3コマンドにだけJ/K/Lを補い、変更済みのキーは保持します。既存fileを自動書換えせず、旧形式の縦棒キーもそのまま読み込みます。
 
 開発版では、起動時にshortcut／grid設定を読めない場合、その設定だけ既定値で継続してpathと理由を警告します。既存fileは書き換えません。修正後はFile → Reload keyboard shortcutsで再読み込みでき、再読み込みの失敗時は現在の設定を保持します。隔離した記述ミスの設定で、通常releaseの警告全文・解除後の操作・修正後Reloadを実画面で確認しました。全エラー種別・screen reader・混在DPIの確認ではありません。
 

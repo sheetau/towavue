@@ -145,10 +145,7 @@ impl CommandPalette {
                             ui.weak("No matching commands");
                         }
                         for (index, definition) in matches.iter().enumerate() {
-                            let shortcut = shortcuts
-                                .get(definition.id)
-                                .map(ToString::to_string)
-                                .unwrap_or_default();
+                            let shortcut = shortcuts.label(definition.id, commands);
                             let response = ui
                                 .add_enabled(
                                     enabled[index],

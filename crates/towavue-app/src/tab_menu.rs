@@ -58,10 +58,17 @@ pub fn show(
             let response = ui.add_enabled(
                 enabled,
                 egui::Button::new(definition.title).shortcut_text(
-                    shortcuts
-                        .get(*command)
-                        .map(ToString::to_string)
-                        .unwrap_or_default(),
+                    shortcuts.label(
+                        *command,
+                        towavue_core::CommandContext {
+                            media_kind: tabs
+                                .tabs()
+                                .iter()
+                                .find(|tab| tab.id == target)
+                                .map(|tab| tab.target.media_kind()),
+                            ..Default::default()
+                        },
+                    ),
                 ),
             );
             if enabled {

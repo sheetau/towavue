@@ -6229,10 +6229,12 @@ where
     }
 
     fn command_hint(&self, command: CommandId, title: &str) -> String {
-        self.shortcuts.get(command).map_or_else(
-            || title.to_owned(),
-            |sequence| format!("{title} ({sequence})"),
-        )
+        let keys = self.shortcuts.label(command, self.command_context());
+        if keys.is_empty() {
+            title.to_owned()
+        } else {
+            format!("{title} ({keys})")
+        }
     }
 
     fn command_context(&self) -> CommandContext {
@@ -15862,24 +15864,32 @@ mod tests {
                 app.renderer = Some(renderer);
                 app.load_path(self.0.clone(), MediaKind::Video);
                 assert_eq!(app.state, PlaybackState::Playing);
+                app.shortcuts = shortcuts::defaults();
                 let tab = app.tabs.open_new(self.0.clone(), MediaKind::Video);
                 let time = |seconds| media_time(Duration::from_secs(seconds));
                 for kind in [MediaKind::Video, MediaKind::Audio] {
                     app.media_kind = Some(kind);
-                    for forward in [false, true] {
+                    for (key, forward) in
+                        [("Left", false), ("J", false), ("Right", true), ("L", true)]
+                    {
                         app.seek_to(time(1));
                         app.state = PlaybackState::Ended;
                         let generation = app.generation;
-                        app.dispatch(if forward {
-                            CommandId::SeekForward
-                        } else {
-                            CommandId::SeekBackward
-                        });
+                        app.process_shortcut(key.parse().expect("transport shortcut"));
                         assert_eq!(app.generation, generation.next());
                         assert_eq!(app.state, PlaybackState::Paused);
                         assert_eq!(app.current_position(), time(if forward { 6 } else { 0 }));
                         assert!(!app.edits.contains_key(&tab));
                     }
+                    app.seek_to(time(1));
+                    app.process_shortcut("K".parse().expect("play"));
+                    assert_eq!(app.state, PlaybackState::Playing);
+                    app.process_shortcut("K".parse().expect("pause"));
+                    assert_eq!(app.state, PlaybackState::Paused);
+                    assert!(
+                        !app.edits.contains_key(&tab),
+                        "transport does not add edits"
+                    );
                 }
                 app.media_kind = Some(MediaKind::Video);
                 app.media_duration = Some(Duration::from_secs(2));

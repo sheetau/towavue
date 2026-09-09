@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 
+const MULTI_BINDING_HEADER: &str = "# towavue shortcuts v2";
+
 pub fn load() -> Result<(ShortcutBindings, PathBuf), String> {
     let path = config_path()?;
     load_from(&path).map(|bindings| (bindings, path))
@@ -104,10 +106,19 @@ pub fn defaults() -> ShortcutBindings {
             shortcut.parse().expect("built-in shortcut is valid"),
         );
     }
+    for (command, key) in [
+        (CommandId::SeekBackward, "J"),
+        (CommandId::TogglePause, "K"),
+        (CommandId::SeekForward, "L"),
+    ] {
+        bindings.add(command, key.parse().expect("built-in alternative"));
+    }
     bindings
 }
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
+    let legacy = !text.lines().any(|line| line.trim() == MULTI_BINDING_HEADER);
+    let standard = defaults();
     let has_apply_crop = text
         .lines()
         .any(|line| line.trim_start().starts_with("apply_crop"));
@@ -123,11 +134,32 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .trim()
             .parse::<CommandId>()
             .map_err(|_| format!("unknown command on shortcuts.conf line {}", index + 1))?;
-        let sequence = sequence
-            .trim()
-            .parse::<KeySequence>()
+        let parts = if legacy {
+            vec![sequence]
+        } else {
+            sequence.split('|').collect()
+        };
+        let mut sequences = parts
+            .into_iter()
+            .map(|part| part.trim().parse::<KeySequence>())
+            .collect::<Result<Vec<_>, _>>()
             .map_err(|_| format!("invalid shortcut on shortcuts.conf line {}", index + 1))?;
-        bindings.set(command, sequence);
+        // Old generated files listed every default. Preserve new alternatives
+        // only for unchanged defaults; custom bindings remain exact replacements.
+        let inherit = legacy
+            && sequences.len() == 1
+            && matches!(
+                command,
+                CommandId::SeekBackward | CommandId::SeekForward | CommandId::TogglePause
+            )
+            && standard.get(command) == sequences.first();
+        if inherit {
+            sequences = standard.all(command).to_vec();
+        }
+        bindings.set(command, sequences[0].clone());
+        for sequence in sequences.into_iter().skip(1) {
+            bindings.add(command, sequence);
+        }
     }
     if !has_apply_crop
         && bindings
@@ -147,13 +179,20 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
 }
 
 fn serialize(bindings: &ShortcutBindings) -> String {
-    let mut output = String::from(
-        "# One command per line. Separate prefix chords with a space.\n# Example: reload_shortcuts = Ctrl+K Ctrl+S\n",
+    let mut output = format!(
+        "{MULTI_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
     );
-    for (command, sequence) in bindings.iter() {
+    for (command, _) in bindings.iter() {
         output.push_str(command.as_str());
         output.push_str(" = ");
-        output.push_str(&sequence.to_string());
+        output.push_str(
+            &bindings
+                .all(command)
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" | "),
+        );
         output.push('\n');
     }
     output
@@ -163,6 +202,146 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 mod tests {
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn transport_alternatives_respect_context_main_bindings_and_prefixes() {
+        let mut bindings = defaults();
+        let resolve = |bindings: &ShortcutBindings, key: &str, kind, timeline_open| {
+            bindings.resolve(
+                key.parse::<KeySequence>().expect("key").strokes(),
+                CommandContext {
+                    media_kind: kind,
+                    timeline_open,
+                    ..Default::default()
+                },
+            )
+        };
+        for kind in [Some(MediaKind::Video), Some(MediaKind::Audio)] {
+            for timeline in [false, true] {
+                for (key, command) in [
+                    ("Left", CommandId::SeekBackward),
+                    ("J", CommandId::SeekBackward),
+                    ("Space", CommandId::TogglePause),
+                    ("K", CommandId::TogglePause),
+                    ("Right", CommandId::SeekForward),
+                    (
+                        "L",
+                        if kind == Some(MediaKind::Video) && timeline {
+                            CommandId::RotateCounterclockwise
+                        } else {
+                            CommandId::SeekForward
+                        },
+                    ),
+                ] {
+                    assert_eq!(
+                        resolve(&bindings, key, kind, timeline),
+                        ShortcutMatch::Command(command),
+                        "{key} {kind:?} {timeline}"
+                    );
+                }
+            }
+        }
+        for kind in [None, Some(MediaKind::Image)] {
+            for key in ["J", "K"] {
+                assert_eq!(resolve(&bindings, key, kind, false), ShortcutMatch::None);
+            }
+        }
+        assert_eq!(
+            resolve(&bindings, "L", Some(MediaKind::Image), false),
+            ShortcutMatch::Command(CommandId::RotateCounterclockwise)
+        );
+        let video = CommandContext {
+            media_kind: Some(MediaKind::Video),
+            ..Default::default()
+        };
+        assert_eq!(bindings.label(CommandId::SeekForward, video), "Right / L");
+        assert_eq!(
+            bindings.label(
+                CommandId::SeekForward,
+                CommandContext {
+                    timeline_open: true,
+                    ..video
+                }
+            ),
+            "Right"
+        );
+        bindings.set(
+            CommandId::ToggleFilmstrip,
+            "K F".parse().expect("custom prefix"),
+        );
+        assert_eq!(
+            resolve(&bindings, "K", video.media_kind, false),
+            ShortcutMatch::Prefix
+        );
+        assert_eq!(
+            resolve(&bindings, "K F", video.media_kind, false),
+            ShortcutMatch::Command(CommandId::ToggleFilmstrip)
+        );
+        bindings.set(CommandId::ToggleFilmstrip, "J".parse().expect("custom key"));
+        assert_eq!(
+            resolve(&bindings, "J", video.media_kind, false),
+            ShortcutMatch::Command(CommandId::ToggleFilmstrip)
+        );
+        bindings.set(CommandId::TogglePause, "P".parse().expect("replacement"));
+        assert_eq!(
+            resolve(&bindings, "K", video.media_kind, false),
+            ShortcutMatch::None
+        );
+        assert_eq!(
+            resolve(&bindings, "P", video.media_kind, false),
+            ShortcutMatch::Command(CommandId::TogglePause)
+        );
+    }
+
+    #[test]
+    fn alternate_configuration_migrates_only_unchanged_defaults_and_round_trips() {
+        let legacy = "seek_backward = Left\nseek_forward = Right\ntoggle_pause = Space\n";
+        assert_eq!(parse(legacy, defaults()).expect("old defaults"), defaults());
+        let custom = parse("seek_forward = N\ntoggle_pause = P\n", defaults()).expect("old custom");
+        assert_eq!(custom.all(CommandId::SeekForward).len(), 1);
+        assert_eq!(custom.all(CommandId::TogglePause).len(), 1);
+        let single = parse(
+            &format!("{MULTI_BINDING_HEADER}\nseek_forward = Right\n"),
+            defaults(),
+        )
+        .expect("explicit single");
+        assert_eq!(single.all(CommandId::SeekForward).len(), 1);
+        let multiple = parse(&format!("{MULTI_BINDING_HEADER}\nseek_forward = Right | Ctrl+K L | L\ntoggle_pause = K | Space\n"), defaults()).expect("alternatives");
+        assert_eq!(
+            parse(&serialize(&multiple), defaults()).expect("round trip"),
+            multiple
+        );
+        assert_eq!(
+            parse(&serialize(&defaults()), defaults()).expect("default round trip"),
+            defaults()
+        );
+        let duplicate = parse("seek_forward = N\nseek_forward = Right\n", defaults())
+            .expect("last declaration wins");
+        assert_eq!(
+            duplicate.all(CommandId::SeekForward),
+            defaults().all(CommandId::SeekForward)
+        );
+        for invalid in [
+            "seek_forward = Right |",
+            "toggle_pause = | K",
+            "seek_forward = Right || L",
+        ] {
+            assert!(parse(&format!("{MULTI_BINDING_HEADER}\n{invalid}"), defaults()).is_err());
+        }
+        for legacy in [
+            "toggle_pause = |",
+            "toggle_pause = Ctrl+|",
+            "toggle_pause = Ctrl+| P",
+            "toggle_pause = J | L",
+        ] {
+            let pipe = parse(legacy, defaults()).expect("legacy pipe key");
+            assert!(serialize(&pipe).contains("Pipe"));
+            assert_eq!(
+                parse(&serialize(&pipe), defaults()).expect("pipe round trip"),
+                pipe
+            );
+        }
+    }
 
     #[test]
     fn reopening_is_available_from_welcome_and_uses_custom_bindings() {

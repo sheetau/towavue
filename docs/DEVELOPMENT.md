@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### J/K/Lと複数ショートカットの接続（2026-09-10 06:41）
+
+J／Lを既存5秒Seek、Kを既存Play/Pauseへの追加bindingにした。左右矢印／Spaceも維持する。動画timeline表示中は主bindingのL回転を優先し、視聴中と音声ではL Seekになる。custom主bindingとそのprefixは追加bindingより先に解決する。menu／palette／status hintでは競合して使えない追加キーを省く。画像のR/Lとモーダル・文字入力・focusの既存入力経路は変更しない。
+
+設定は `# towavue shortcuts v2` の明示headerで新形式にし、`seek_forward = Right | L` のように代替を列挙できる。最初が主binding。単一指定への置換は追加bindingも消し、prefix列も保持する。旧形式の標準Left／Right／Spaceだけ追加J/K/Lを継承し、custom値は置換として尊重。既存fileは書換えない。旧形式で使える縦棒のliteral／prefixは従来どおり解釈し、新形式で縦棒keyを使う場合はPipe表記で往復する。
+
+2新規回帰で3媒体／timeline有無、main key／prefix競合、hint表示、置換／重複宣言／設定往復／無効な追加列／旧pipe互換を確認。既存のhidden-window動画session試験を、左右とJ/LのEOFからのSeek、Kの再生／一時停止、履歴非変更へ拡張した。これは生成video-only sourceに対してappの動画／音声contextを切り替える試験で、物理キーや任意音声素材の検証ではない。最終session86439: fmt／Clippy／workspace377件（app214/core54/runtime105/integration4）、app追加4件、release終了0。通常ignored10件は別計上。release SHA256 d4d0bb80f50c9b647ff2f77d0853b1407afe6e29676d4d52267abc8c6524b05b。前checkpoint7adbad2のCI34407662413は成功。通常windowへの入力は再試行せず、frame移動・長押し2倍、V03複合保存照合と他の全UX残件は未完のまま継続する。
+
 ### 動画の視聴／visual編集contextを分離（2026-09-10 06:33）
 
 T／View menuのToggle video editing timelineでtimelineを開いた時だけ、動画面の範囲選択・辺の数値調整・crop・回転・flipを受け付ける。閉じる／fullscreenでは枠と辺操作を隠し、進行中の選択dragを取消すが、確定選択と既存編集は保持する。再生・Seek・master音量／速度・保存・Undo/Redoは視聴時にも使える。J/K/L・frame移動・長押し2倍は未実装のまま。

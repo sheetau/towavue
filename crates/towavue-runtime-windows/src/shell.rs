@@ -45,17 +45,32 @@ pub enum FolderOrderError {
 pub fn reveal_license_guide(
     notify: impl FnOnce(std::io::Result<PathBuf>) + Send + 'static,
 ) -> std::io::Result<()> {
+    reveal_path(|| license_guide(&std::env::current_exe()?), notify)
+}
+
+/// Selects a path in Explorer without executing it or interpreting command-line syntax.
+pub fn reveal_file(
+    path: PathBuf,
+    notify: impl FnOnce(std::io::Result<PathBuf>) + Send + 'static,
+) -> std::io::Result<()> {
+    reveal_path(move || canonical_shell_path(&path), notify)
+}
+
+fn reveal_path(
+    resolve: impl FnOnce() -> std::io::Result<PathBuf> + Send + 'static,
+    notify: impl FnOnce(std::io::Result<PathBuf>) + Send + 'static,
+) -> std::io::Result<()> {
     thread::Builder::new()
-        .name("towavue-licenses-sta".into())
+        .name("towavue-reveal-sta".into())
         .spawn(move || {
             let result = (|| {
-                let guide = license_guide(&std::env::current_exe()?)?;
+                let guide = resolve()?;
                 // SAFETY: this fresh worker owns its STA. All PIDLs are created, borrowed and
                 // dropped on this thread before balancing initialization; none crosses to app.
                 unsafe { OleInitialize(None) }.map_err(std::io::Error::other)?;
                 let result = (|| {
                     let pidl = parse_path(&guide).ok_or_else(|| {
-                        std::io::Error::other("Windows could not resolve the license guide.")
+                        std::io::Error::other("Windows could not resolve the selected path.")
                     })?;
                     // SAFETY: the owned absolute PIDL stays live through the call. A zero item
                     // count selects this file in its parent; it does not execute the file.
@@ -676,6 +691,24 @@ unsafe fn pump_messages() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn missing_reveal_target_reports_failure_without_opening_explorer() {
+        let path = std::env::temp_dir()
+            .join(format!("towavue-missing-reveal-{}", std::process::id()))
+            .join("missing.png");
+        assert!(!path.exists());
+        let (sent, events) = std::sync::mpsc::channel();
+        super::reveal_file(path, move |result| {
+            sent.send(result).expect("result receiver");
+        })
+        .expect("worker");
+        assert!(
+            events
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("worker result")
+                .is_err()
+        );
+    }
     use super::*;
     use std::fs;
     use std::fs::OpenOptions;

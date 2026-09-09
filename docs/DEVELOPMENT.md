@@ -1221,6 +1221,15 @@ towavue/
 - Windows 11の通常release7b465a6bf7c8c3659cd2e5633cb765afd3c6ecee988c984f3832b90276970fd3、PID29444/start11:42:50.6500749Z。同じ実windowでPNG→MP4→WAVをOpenし、画像・動画・waveformとpathがtab直下へ出ることをcapture。動画再生中は約2秒区間、音声再生中に非active動画へhoverすると約14秒区間を表示し、active tone.wavのまま。非active画像にも元画像previewが出る。原寸や編集済み映像のプレビューではない。
 - Open dialogのOpen buttonにInvokePatternがなくhelperが止まった際は、同じPID／所有dialogを維持して、そのbuttonの実boundsへclickして再開。appの失敗や再起動として扱わない。通常Closeは終了0（launcher81857）、stderr170bytesはdecode-path選択と最終session統計の3行。保存操作は行わず、PNG hash5f24c4ffは起動前後一致。MP4/WAVの終了時hashは36179a1f／0e0cd597で、開始時との比較は未取得。identity／5 captures／exit／logsはignoredのtab-hover-nativeに保持。native後のsource追加はoverlay回帰testのみ。recent UI／未訪問先行生成／動画sheet／GPU texture共用は残件。
 
+### タブのcontext menu・一括close・path-only reopen（2026-09-09 21:11 JST）
+
+- tab IDを保持するcontext menuからclose／other／left／right／all、path copy、Explorer選択、reopenを共有CommandIdへ送る。File menu／palette／custom bindingはactiveを対象にする。groupはID集合を固定し、dirtyを一件ずつ確認してSave／Discard後に再評価。Cancelは残りを止め、処理済みclose／保存は戻さない。export対象を含むgroupは閉じない。window内32件のpath-only履歴をCtrl+Shift+Tで新規tabに開き、同folderの音声tabも置換しない。detachの除去は履歴に加えない。存在しないpathは通常のOpenエラーを表示して、その履歴一件を消費する。
+- 回帰はclose対象・並べ替え・stale ID、複数dirtyのCancel／Discard／実PNG保存continuation、export中の拒否、履歴上限／同folder音声／元source保護、inactive path copy／custom prefix／missing reveal workerを確認。tab menuの矢印を毎frame入力するとeguiのfocus traversalが選択を進め過ぎることを再現し、共通MenuKeyboardが要求した選択を次frameにも保持するよう修正。既存main menuのkeyboard／UIA回帰も維持する。初期testのmedia_kind未設定と、File menu追加後の旧期待順を修正した。
+- Windows11の通常release2c877d0dc9dbf45d202fb0786afa36843eb73fdd1c6c89ca8bc25c4145774b0e、PID48632/start12:04:00.6798206Z。PNG／MP4／WAVをOpenし、非active動画を右clickしてもactive音声のまま。Copy file pathのOS clipboardは所有MP4のpathと完全一致。右側／他tabのclose、menu／Ctrl+Shift+Tのreopen、画像回転のdirty guard Cancel／Discard、clean原本としてのreopen、全closeのWelcome／そこからのreopenをcaptureで確認。Explorerでは試験folderと選択PNG pathが一致した。試験folderのExplorer windowは残し、利用者windowを操作・閉鎖しない。
+- 一括SendKeysはshortcut／rotateを実行しなかったため、同じPIDを維持し、所有foregroundでCtrl・Shift・T等を100ms間隔のkey down/upにして確認した。UIA menu名の末尾spaceと実際のDiscard edits labelへhelperを合わせた。観察失敗をappの成功／hang／再起動と扱わない。通常Close終了0、PNG hash5f24c4ffは起動前後一致。stderrにはdecode選択・900frames/drop0の動画統計とAAC timestamp診断があり、空とはしない。ignoredのtab-actions-nativeにidentity／captures／exit／logsを保存。最後のnative後はtestのみ追加しproduction codeは不変。Shift+F10等の呼出しと全体focus／UIA監査、U06の常設Welcome tab／recent、U07の状態保持、U08の連続drag／結合は未完。
+
+最終fmt／all-target Clippy／workspace全311 tests／release build通過（session82210）。実機専用4 testsはignoredのまま。group Save試験は実際のFFmpeg出力がPNGであることとsource bytesの不変、各完了後の次dirty guard／最終closeを確認する。
+
 ## 8. UI/UX変更の判断基準
 
 - 実装済みcommandの入口はmenu、palette、shortcut、gridで同じ`CommandId`を共有する。入口ごとに別logicを作らない。

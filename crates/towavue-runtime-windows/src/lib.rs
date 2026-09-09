@@ -44,7 +44,7 @@ pub use preview::{CachedImagePreview, MediaPreview, PreviewCache, PreviewError, 
 pub use preview_loader::{PreviewLoader, VISIBLE_PREVIEW_LIMIT};
 pub use renderer::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError};
 pub use shell::{
-    FolderOrderError, FolderOrderProvider, canonical_shell_path, reveal_license_guide,
+    FolderOrderError, FolderOrderProvider, canonical_shell_path, reveal_file, reveal_license_guide,
 };
 pub use watch::{FolderWatchError, FolderWatcher};
 

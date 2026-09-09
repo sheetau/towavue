@@ -8,7 +8,15 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         &[
             &[OpenFile, OpenFolder],
             &[Save, ExportAs, ToggleHardwareEncode],
-            &[CloseTab],
+            &[CopyFilePath, RevealFile],
+            &[
+                CloseTab,
+                CloseOtherTabs,
+                CloseTabsLeft,
+                CloseTabsRight,
+                CloseAllTabs,
+                ReopenClosedTab,
+            ],
             &[ReloadShortcuts],
         ],
     ),
@@ -133,14 +141,15 @@ pub fn show(
     chosen
 }
 
-struct MenuKeyboard {
+pub(crate) struct MenuKeyboard {
     active: bool,
     left: bool,
     right: bool,
+    requested_focus: Option<egui::Id>,
 }
 
 impl MenuKeyboard {
-    fn begin(ui: &egui::Ui) -> Self {
+    pub(crate) fn begin(ui: &egui::Ui) -> Self {
         let (last_pass, items, selected) = ui
             .data(|data| {
                 data.get_temp::<(u64, Vec<egui::Id>, Option<egui::Id>)>(
@@ -159,6 +168,7 @@ impl MenuKeyboard {
             active,
             left: false,
             right: false,
+            requested_focus: None,
         };
         if !active {
             return result;
@@ -176,9 +186,7 @@ impl MenuKeyboard {
         result.left = left;
         result.right = right;
         // Egui installs focus locks only after a full focused frame; keep our selection across that gap.
-        if (left || right)
-            && let Some(id) = selected.filter(|id| items.contains(id))
-        {
+        if !reopened && let Some(id) = selected.filter(|id| items.contains(id)) {
             ui.memory_mut(|memory| memory.request_focus(id));
         }
         if (reopened || !ui.memory(|memory| items.iter().any(|id| memory.has_focus(*id))))
@@ -201,15 +209,21 @@ impl MenuKeyboard {
                 (current + 1) % items.len()
             };
             ui.memory_mut(|memory| memory.request_focus(items[next]));
+            result.requested_focus = Some(items[next]);
         }
         result
     }
 
-    fn finish(self, ui: &egui::Ui, items: Vec<egui::Id>) {
+    pub(crate) fn finish(self, ui: &egui::Ui, items: Vec<egui::Id>) {
         if self.active
             && egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item.is_none())
         {
             ui.memory_mut(|memory| {
+                // A newly focused button may also receive egui's queued arrow traversal.
+                // Retain our one-step result even when consecutive frames contain key events.
+                if let Some(id) = self.requested_focus.filter(|id| items.contains(id)) {
+                    memory.request_focus(id);
+                }
                 if !items.iter().any(|id| memory.has_focus(*id))
                     && let Some(id) = items.first()
                 {
@@ -229,7 +243,9 @@ impl MenuKeyboard {
             });
         }
         let pass = ui.ctx().cumulative_pass_nr();
-        let selected = ui.memory(|memory| items.iter().find(|id| memory.has_focus(**id)).copied());
+        let selected = self.requested_focus.or_else(|| {
+            ui.memory(|memory| items.iter().find(|id| memory.has_focus(**id)).copied())
+        });
         ui.data_mut(|data| {
             data.insert_temp(ui.id().with("keyboard-items"), (pass, items, selected))
         });
@@ -312,6 +328,7 @@ mod tests {
         navigate(egui::Key::ArrowRight, false, "Open file");
         navigate(egui::Key::ArrowDown, false, "Open folder");
         navigate(egui::Key::ArrowDown, false, "Close tab");
+        navigate(egui::Key::ArrowDown, false, "Reopen closed tab");
         navigate(egui::Key::ArrowDown, false, "Reload keyboard shortcuts");
         navigate(egui::Key::Tab, false, "Open file");
         navigate(egui::Key::ArrowLeft, false, "File");

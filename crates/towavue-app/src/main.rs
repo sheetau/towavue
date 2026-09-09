@@ -14,6 +14,7 @@ mod reading_input;
 mod seekbar;
 mod selection;
 mod shortcuts;
+mod tab_menu;
 mod tab_preview;
 mod timeline_input;
 mod trim;
@@ -39,7 +40,7 @@ use towavue_runtime_windows::{
     ExportJob, ExportRequest, FileDialogKind, FolderOrderProvider, FolderWatcher, FrameRenderer,
     ImageLoader, LatestTask, NativeCaption, PlaybackEvent, PlaybackSession, PreviewCache,
     PromptButtons, PromptResponse, RenderError, canonical_shell_path, configure_mouse_input,
-    cursor_position_in_window, pick_path, reveal_license_guide, show_prompt,
+    cursor_position_in_window, pick_path, reveal_file, reveal_license_guide, show_prompt,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -136,6 +137,7 @@ enum UiAction {
     BeginReadingDrag(egui::Pos2, egui::Vec2),
     NativeCaption(CaptionAction),
     ActivateTab(TabId),
+    TabCommand(TabId, CommandId),
     ReorderTab(TabId, usize),
     TrimEndpoint(TabId, EditOperation),
     Volume(TabId, f32),
@@ -162,6 +164,7 @@ enum AppEvent {
     DialogFinished(Result<Option<PathBuf>, DialogError>),
     PromptFinished(Result<PromptResponse, DialogError>),
     LicenseGuideRevealed(std::io::Result<PathBuf>),
+    FileRevealed(std::io::Result<PathBuf>),
     Export(ExportEvent),
     Playback(u64, PlaybackEvent),
     Duration(PathBuf, u64, Result<Duration, String>),
@@ -240,6 +243,7 @@ enum DialogIntent {
 #[derive(Clone)]
 enum GuardedAction {
     CloseTab(TabId),
+    CloseTabs(Vec<TabId>),
     DetachTab(TabId),
     Navigate(PathBuf),
     Exit,
@@ -558,6 +562,7 @@ struct Application<N> {
     folder_snapshot: Option<FolderSnapshot>,
     folder_watcher: Option<(PathBuf, FolderWatcher)>,
     tabs: TabSet,
+    closed_tabs: VecDeque<PathBuf>,
     edits: BTreeMap<TabId, EditHistory>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
@@ -698,6 +703,7 @@ where
             folder_snapshot: None,
             folder_watcher: None,
             tabs: TabSet::default(),
+            closed_tabs: VecDeque::new(),
             edits: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
@@ -1387,6 +1393,10 @@ where
                     Err(error) => error.to_string(),
                 });
             }
+            AppEvent::FileRevealed(result) => self.set_status(match result {
+                Ok(path) => format!("Selected in Explorer: {}", path.display()),
+                Err(error) => format!("Could not reveal file: {error}"),
+            }),
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(generation, event) if generation == self.media_generation => {
                 self.handle_playback_event(event);
@@ -2610,7 +2620,24 @@ where
                                         .truncate()
                                         .sense(egui::Sense::click_and_drag()),
                                     );
-                                    if preview_allowed {
+                                    if !self.modal_input_blocked()
+                                        && !self.palette_open
+                                        && !self.grid_open
+                                        && !self.filmstrip_open
+                                    {
+                                        response.context_menu(|ui| {
+                                            if let Some(command) = tab_menu::show(
+                                                ui,
+                                                &self.tabs,
+                                                tab.id,
+                                                !self.closed_tabs.is_empty(),
+                                                &self.shortcuts,
+                                            ) {
+                                                actions.push(UiAction::TabCommand(tab.id, command));
+                                            }
+                                        });
+                                    }
+                                    if preview_allowed && !egui::Popup::is_any_open(tab_ui.ctx()) {
                                         let target = self.tab_preview.target(tab);
                                         if response.hovered() {
                                             preview_target = Some(target.clone());
@@ -3482,6 +3509,7 @@ where
                 }
             }
             UiAction::ActivateTab(id) => self.activate_tab(id),
+            UiAction::TabCommand(id, command) => self.dispatch_tab_command(id, command),
             UiAction::ReorderTab(id, gap) => {
                 self.tabs.reorder(id, gap);
                 self.request_redraw();
@@ -3565,6 +3593,17 @@ where
             CommandId::CloseTab => {
                 if let Some(id) = self.tabs.active().map(|tab| tab.id) {
                     self.request_guarded(GuardedAction::CloseTab(id));
+                }
+            }
+            CommandId::ReopenClosedTab => self.reopen_closed_tab(),
+            CommandId::CloseOtherTabs
+            | CommandId::CloseTabsLeft
+            | CommandId::CloseTabsRight
+            | CommandId::CloseAllTabs
+            | CommandId::CopyFilePath
+            | CommandId::RevealFile => {
+                if let Some(id) = self.tabs.active().map(|tab| tab.id) {
+                    self.dispatch_tab_command(id, command);
                 }
             }
             CommandId::NextTab => self.cycle_tab(true),
@@ -4265,6 +4304,60 @@ where
         }
     }
 
+    fn reopen_closed_tab(&mut self) {
+        if self.modal_input_blocked() {
+            return;
+        }
+        if let Some(path) = self.closed_tabs.pop_back() {
+            self.open_external(path, true);
+        } else {
+            self.set_status("No closed tabs to reopen.".into());
+        }
+    }
+
+    fn dispatch_tab_command(&mut self, id: TabId, command: CommandId) {
+        if self.modal_input_blocked() {
+            return;
+        }
+        self.cancel_shortcut_prefix();
+        self.cancel_view_drag();
+        let Some(path) = self
+            .tabs
+            .tabs()
+            .iter()
+            .find(|tab| tab.id == id)
+            .map(|tab| tab.target.current_path().to_owned())
+        else {
+            return;
+        };
+        match command {
+            CommandId::ReopenClosedTab => self.reopen_closed_tab(),
+            CommandId::CopyFilePath => {
+                if let Some(context) = &self.ui_context {
+                    context.copy_text(path.display().to_string());
+                    self.set_status("File path copied.".into());
+                }
+            }
+            CommandId::RevealFile => {
+                let notify = Arc::clone(&self.notify);
+                if let Err(error) =
+                    reveal_file(path, move |result| notify(AppEvent::FileRevealed(result)))
+                {
+                    self.set_status(format!("Could not reveal file: {error}"));
+                }
+            }
+            CommandId::CloseTab => self.request_guarded(GuardedAction::CloseTab(id)),
+            CommandId::CloseOtherTabs
+            | CommandId::CloseTabsLeft
+            | CommandId::CloseTabsRight
+            | CommandId::CloseAllTabs => {
+                let ids = tab_menu::close_targets(&self.tabs, id, command);
+                self.request_guarded(GuardedAction::CloseTabs(ids));
+            }
+            _ => {}
+        }
+    }
+
     fn request_guarded(&mut self, action: GuardedAction) {
         if matches!(&action, GuardedAction::Navigate(path) if self.path.as_ref() == Some(path)) {
             return;
@@ -4282,6 +4375,7 @@ where
         if let Some(export) = &self.active_export {
             let affects_export = match &action {
                 GuardedAction::CloseTab(id) | GuardedAction::DetachTab(id) => *id == export.tab,
+                GuardedAction::CloseTabs(ids) => ids.contains(&export.tab),
                 GuardedAction::Navigate(_) => {
                     self.tabs.active().is_some_and(|tab| tab.id == export.tab)
                 }
@@ -4299,6 +4393,10 @@ where
             }
         }
         let dirty = match action {
+            GuardedAction::CloseTabs(ref ids) => ids.iter().copied().find(|id| {
+                self.tabs.tabs().iter().any(|tab| tab.id == *id)
+                    && self.edits.get(id).is_some_and(EditHistory::is_dirty)
+            }),
             GuardedAction::CloseTab(id) => self
                 .edits
                 .get(&id)
@@ -4359,6 +4457,21 @@ where
         self.guard_return_focus = None;
         match action {
             GuardedAction::CloseTab(id) => self.close_tab_unchecked(id),
+            GuardedAction::CloseTabs(mut ids) => {
+                if let Some(id) = ids.iter().copied().find(|id| {
+                    self.tabs.tabs().iter().any(|tab| tab.id == *id)
+                        && self.edits.get(id).is_some_and(EditHistory::is_dirty)
+                }) {
+                    // The guard approved only this dirty tab; ask again before discarding another.
+                    self.close_tab_unchecked(id);
+                    ids.retain(|other| *other != id);
+                    self.request_guarded(GuardedAction::CloseTabs(ids));
+                } else {
+                    for id in ids {
+                        self.close_tab_unchecked(id);
+                    }
+                }
+            }
             GuardedAction::DetachTab(id) => self.detach_tab_unchecked(id),
             GuardedAction::Navigate(path) => self.navigate_to_unchecked(path),
             GuardedAction::Exit => {
@@ -4382,16 +4495,28 @@ where
             .and_then(|executable| std::process::Command::new(executable).arg(&path).spawn())
             .map(|_| ());
         match result {
-            Ok(()) => self.close_tab_unchecked(id),
+            Ok(()) => self.remove_tab(id, false),
             Err(error) => self.set_status(format!("Could not detach tab: {error}")),
         }
     }
 
     fn close_tab_unchecked(&mut self, id: TabId) {
+        self.remove_tab(id, true);
+    }
+
+    fn remove_tab(&mut self, id: TabId, remember: bool) {
         let was_active = self.tabs.active().is_some_and(|tab| tab.id == id);
-        if self.tabs.close(id).is_none() {
+        let Some(removed) = self.tabs.close(id) else {
             return;
+        };
+        if remember {
+            if self.closed_tabs.len() == 32 {
+                self.closed_tabs.pop_front();
+            }
+            self.closed_tabs
+                .push_back(removed.target.current_path().to_owned());
         }
+        self.tab_preview.clear();
         self.edits.remove(&id);
         self.export_paths.remove(&id);
         if !was_active {

@@ -460,6 +460,8 @@ U10のtab hoverはtab名の直下へ低解像度previewとpathを表示し、hov
 
 ### M7 advanced presentation and interaction
 
+H1 U09のtab context menuは指したtab IDを保持し、表示だけではactiveを変更しない。close／other／left／right／allは選択時のtab ID一覧を固定し、既存の未保存Save／Discard／Cancelとexport中の保護を通す。各dirty tabを個別確認し、Cancelでは以後のcloseを止め、既に承認したclose／保存は戻さない。共通CommandIdをmenu／palette／shortcutからもdispatchし、これらの入口はactive tabを基準にする。閉じたtabはwindow内の最大32件のpath参照だけを保持し、Ctrl+Shift+Tで末尾から明示新規tabとして開く。編集／再生状態のbackupや永続化はしない。detachはclose履歴に含めない。path copyはOS clipboardへの文字出力、Explorer表示はruntimeのSTAでShell PIDLを解決して選択表示し、mediaを外部実行しない。
+
 preview cacheはruntimeがFFmpeg / FFprobeの子processとdisk I/Oを所有し、appへowned RGBA画像とdurationだけを返す。cache keyは正規化path、file size、更新時刻、preview種別と寸法から作り、`%LOCALAPPDATA%\towavue\preview-cache`を64 MiB以内へ古い順に削減する。waveform、duration、hover thumbnailは専用workerで生成し、path付きeventをappへ返すため、古いtabの結果を現在のtabへ適用せずUI threadもblockしない。
 
 I03/U10ではPreviewCacheのclone間で、decode済み低解像度RGBAを最大64件・16 MiBまで共有する。worker側で同じmetadata付きkeyを再計算し、memory hitならdisk PNGの再読込・再decode・補助process起動を省く。異なるsource／更新／preview種別／時刻／寸法は共用しない。取消をhit前後にも確認し、生成中はcache mutexを保持しない。window内だけのcacheであり、process全体のメモリ上限ではない。原寸画像のforeground公開後にも、同じgenerationとfile stampが有効なら最初のorientation適用済みframeから240×160以内のnearest previewを登録する。原寸画素列のcopyやdiskへのencodeは行わず、filmstripと画像seek previewが同じkeyを利用する。原寸表示・編集・保存の画質は変更しない。未訪問画像の初回生成、tab hover／recent UI、連打中の段階表示と動画sheet先行生成は別の残件とする。

@@ -62,6 +62,13 @@ pub enum CommandId {
     CoverWindow,
     IncreaseReadingFirstPage,
     DecreaseReadingFirstPage,
+    CloseOtherTabs,
+    CloseTabsLeft,
+    CloseTabsRight,
+    CloseAllTabs,
+    ReopenClosedTab,
+    CopyFilePath,
+    RevealFile,
 }
 
 impl CommandId {
@@ -71,6 +78,13 @@ impl CommandId {
             Self::OpenFolder => "open_folder",
             Self::ShowLicenses => "show_licenses",
             Self::CloseTab => "close_tab",
+            Self::CloseOtherTabs => "close_other_tabs",
+            Self::CloseTabsLeft => "close_tabs_left",
+            Self::CloseTabsRight => "close_tabs_right",
+            Self::CloseAllTabs => "close_all_tabs",
+            Self::ReopenClosedTab => "reopen_closed_tab",
+            Self::CopyFilePath => "copy_file_path",
+            Self::RevealFile => "reveal_file",
             Self::NextTab => "next_tab",
             Self::PreviousTab => "previous_tab",
             Self::TogglePause => "toggle_pause",
@@ -469,6 +483,21 @@ const COMMANDS: &[CommandDefinition] = &[
         "Show fewer images on the first reading page",
         &[MediaKind::Image],
     ),
+    command(CommandId::CloseOtherTabs, "Close other tabs", ANY_MEDIA),
+    command(
+        CommandId::CloseTabsLeft,
+        "Close tabs to the left",
+        ANY_MEDIA,
+    ),
+    command(
+        CommandId::CloseTabsRight,
+        "Close tabs to the right",
+        ANY_MEDIA,
+    ),
+    command(CommandId::CloseAllTabs, "Close all tabs", ANY_MEDIA),
+    command(CommandId::ReopenClosedTab, "Reopen closed tab", &[]),
+    command(CommandId::CopyFilePath, "Copy file path", ANY_MEDIA),
+    command(CommandId::RevealFile, "Reveal in File Explorer", ANY_MEDIA),
 ];
 
 const fn command(

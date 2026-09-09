@@ -40,6 +40,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::ToggleFullscreen, "F11"),
         (CommandId::OpenFolder, "Ctrl+Shift+O"),
         (CommandId::CloseTab, "Ctrl+W"),
+        (CommandId::ReopenClosedTab, "Ctrl+Shift+T"),
         (CommandId::NextTab, "Ctrl+Tab"),
         (CommandId::PreviousTab, "Ctrl+Shift+Tab"),
         (CommandId::TogglePause, "Space"),
@@ -156,6 +157,42 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 mod tests {
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn reopening_is_available_from_welcome_and_uses_custom_bindings() {
+        let mut bindings = defaults();
+        let sequence = "Ctrl+Shift+T".parse::<KeySequence>().expect("reopen key");
+        for media_kind in [
+            None,
+            Some(MediaKind::Image),
+            Some(MediaKind::Video),
+            Some(MediaKind::Audio),
+        ] {
+            assert_eq!(
+                bindings.resolve(
+                    sequence.strokes(),
+                    CommandContext {
+                        media_kind,
+                        ..Default::default()
+                    }
+                ),
+                ShortcutMatch::Command(CommandId::ReopenClosedTab)
+            );
+        }
+        bindings.set(
+            CommandId::ReopenClosedTab,
+            "Ctrl+K Ctrl+T".parse().expect("custom prefix"),
+        );
+        assert_eq!(
+            bindings.resolve(sequence.strokes(), CommandContext::default()),
+            ShortcutMatch::None
+        );
+        let sequence = "Ctrl+K Ctrl+T".parse::<KeySequence>().expect("custom key");
+        assert_eq!(
+            bindings.resolve(sequence.strokes(), CommandContext::default()),
+            ShortcutMatch::Command(CommandId::ReopenClosedTab)
+        );
+    }
 
     #[test]
     fn cover_is_single_image_only_and_uses_customizable_bindings() {

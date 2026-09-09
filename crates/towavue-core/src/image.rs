@@ -179,6 +179,7 @@ pub enum ReadingAxis {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ReadingSettings {
     pub page_count: usize,
+    pub first_page_count: usize,
     pub axis: ReadingAxis,
     pub reversed: bool,
 }
@@ -187,6 +188,7 @@ impl Default for ReadingSettings {
     fn default() -> Self {
         Self {
             page_count: 2,
+            first_page_count: 2,
             axis: ReadingAxis::Horizontal,
             reversed: false,
         }
@@ -195,11 +197,68 @@ impl Default for ReadingSettings {
 
 impl ReadingSettings {
     pub fn increase_pages(&mut self) {
+        let full_first_page = self.first_page_count == self.page_count;
         self.page_count = (self.page_count + 1).min(10);
+        if full_first_page {
+            self.first_page_count = self.page_count;
+        }
     }
 
     pub fn decrease_pages(&mut self) {
         self.page_count = self.page_count.saturating_sub(1).max(2);
+        self.first_page_count = self.first_page_count.clamp(1, self.page_count);
+    }
+
+    pub fn increase_first_page(&mut self) {
+        self.first_page_count = self.first_page_count.saturating_add(1).min(self.page_count);
+    }
+
+    pub fn decrease_first_page(&mut self) {
+        self.first_page_count = self.first_page_count.saturating_sub(1).max(1);
+    }
+
+    /// The fixed, non-overlapping spread containing this image in Shell image order.
+    pub fn spread(&self, image_index: usize, image_count: usize) -> std::ops::Range<usize> {
+        if image_count == 0 {
+            return 0..0;
+        }
+        let count = self.page_count.clamp(2, 10);
+        let first = self.first_page_count.clamp(1, count).min(image_count);
+        let index = image_index.min(image_count - 1);
+        if index < first {
+            return 0..first;
+        }
+        let start = first + (index - first) / count * count;
+        start..start.saturating_add(count).min(image_count)
+    }
+
+    pub fn adjacent_spread(
+        &self,
+        image_index: usize,
+        image_count: usize,
+        forward: bool,
+    ) -> Option<usize> {
+        if image_count == 0 {
+            return None;
+        }
+        let current = self.spread(image_index, image_count);
+        Some(if forward {
+            if current.end == image_count {
+                0
+            } else {
+                current.end
+            }
+        } else {
+            self.spread(
+                if current.start == 0 {
+                    image_count - 1
+                } else {
+                    current.start - 1
+                },
+                image_count,
+            )
+            .start
+        })
     }
 
     pub fn toggle_axis(&mut self) {
@@ -332,6 +391,54 @@ mod tests {
         );
         view.selection = Some(selection);
         assert_eq!(view.preview_region(), selection);
+    }
+
+    #[test]
+    fn reading_spreads_partition_every_image_and_navigation_is_reversible() {
+        for total in 0..35 {
+            for count in 2..=10 {
+                for first in 1..=count {
+                    let settings = ReadingSettings {
+                        page_count: count,
+                        first_page_count: first,
+                        ..Default::default()
+                    };
+                    let mut covered = Vec::new();
+                    let mut start = 0;
+                    while start < total {
+                        let range = settings.spread(start, total);
+                        assert_eq!(range.start, start);
+                        for index in range.clone() {
+                            assert_eq!(settings.spread(index, total), range);
+                        }
+                        covered.extend(range.clone());
+                        let next = settings
+                            .adjacent_spread(start, total, true)
+                            .expect("next spread");
+                        assert_eq!(settings.adjacent_spread(next, total, false), Some(start));
+                        start = range.end;
+                    }
+                    assert_eq!(covered, (0..total).collect::<Vec<_>>());
+                    if total == 0 {
+                        assert_eq!(settings.spread(usize::MAX, total), 0..0);
+                        assert_eq!(settings.adjacent_spread(0, total, true), None);
+                    }
+                }
+            }
+        }
+        let mut settings = ReadingSettings::default();
+        settings.decrease_first_page();
+        assert_eq!(settings.spread(0, 6), 0..1);
+        assert_eq!(settings.spread(2, 6), 1..3);
+        assert_eq!(settings.spread(5, 6), 5..6);
+        settings.increase_pages();
+        assert_eq!(settings.first_page_count, 1);
+        settings.increase_first_page();
+        assert_eq!(settings.first_page_count, 2);
+        settings.decrease_pages();
+        settings.increase_pages();
+        assert_eq!(settings.first_page_count, 3);
+        assert_eq!(settings.spread(usize::MAX, usize::MAX).end, usize::MAX);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::MediaKind;
+use crate::{MediaKind, ReadingSettings};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ShellIdentity(Vec<u8>);
@@ -81,19 +81,19 @@ impl FolderSnapshot {
     pub fn reading_items(
         &self,
         current_path: &Path,
-        count: usize,
-        reversed: bool,
+        settings: ReadingSettings,
     ) -> Vec<&FolderMediaItem> {
         let images = self.items_of_kind(MediaKind::Image).collect::<Vec<_>>();
         let Some(current) = images.iter().position(|item| item.path == current_path) else {
             return Vec::new();
         };
+        let range = settings.spread(current, images.len());
         let mut selected = images
             .into_iter()
-            .skip(current)
-            .take(count)
+            .skip(range.start)
+            .take(range.len())
             .collect::<Vec<_>>();
-        if reversed {
+        if settings.reversed {
             selected.reverse();
         }
         selected
@@ -167,7 +167,13 @@ mod tests {
         };
 
         let paths = snapshot
-            .reading_items(Path::new("one.jpg"), 2, true)
+            .reading_items(
+                Path::new("one.jpg"),
+                ReadingSettings {
+                    reversed: true,
+                    ..Default::default()
+                },
+            )
             .into_iter()
             .map(|item| item.path.as_path())
             .collect::<Vec<_>>();

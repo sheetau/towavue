@@ -1166,6 +1166,15 @@ towavue/
 - 試験間のforeground再取得は変換を中断しうるため、その途中結果を候補操作の成功証拠に含めない。最終の候補移動・確定/取消は、一続きのforeground確認済み入力列で検証した。
 - 両windowは正常終了。設定file・source・OS全体のIME設定は変更せず、captures/logsは`target/tmp/h1-compact-ime*`へ保持。これは注入keyによる現在のIME/layoutの確認であり、物理keyboard・別IME・実mixed-DPI matrixの代替ではない。
 
+### Readingの固定ページ分割と先頭枚数（2026-09-09 19:05 JST）
+
+- Shellの画像順を固定範囲へ分割し、左右の見開き送り、本画像とhover previewが同じ範囲を使う。途中の画像を開く・Ctrl+左右で個別移動する場合は、その画像をactive/edit対象として保持する。Ctrl+[／Ctrl+]で表示2～10枚、Ctrl+Shift+左右で先頭1～表示枚数。menu／paletteにも同じcommandを公開する。cursor固定dragはこのcheckpointには含めずI02の残件とする。
+- 自動回帰で総数0～34、表示2～10、先頭1～表示枚数の全組合せについて重複・欠落なしと前後循環を検証。appでは非filenameのShell順／別kind除外、見開き内の個別移動、dirty guard取消、破損した前の画像とactive画像の左右位置／反転、実loaderの循環・設定変更時の編集保持・上限で再読込しないことを確認する。新bindingのcontext、既存設定への既定値補完、custom chordと旧command優先も確認する。
+- 通常release 72390853、Windows 11の隔離window PID 46480/start 10:00:47.7682072Z、生成した240×400の色・番号付きPNG六枚。2番を開いてBを押すと1–2、Rightで3–4→5–6→1–2。先頭1へ変更すると1→2–3となり、Ctrl+Rightで3番がactiveでも2–3のまま。次は4–5。先頭2へ戻してもactiveは4を保持し3–4を表示する。表示3への変更は先頭も3へ追従する。
+- 通常表示で回転しreadingへ戻った後のRightで未保存確認、Escape Cancelで同じ4番と編集が残る。先頭3→2の変更でも4番とUnsavedを維持し、Undoでcleanへ戻る。hoverは1–2の低解像度previewと範囲labelを表示し、現在の3–5とactive4を変えない。paletteの`first reading`で新command二つとshortcutを確認。最初の`decrease first`はlabelと一致せず候補なしであり、登録欠落ではない。
+- 960×576の実captureで二枚の接続点はx=480、画像の上下はy=32..545でgapなし。三枚でも中央揃えを維持。試験windowはUIA Closeで通常終了0、stderrは空。生成原本を保存・変更せず、OS設定も変更しない。ignoredの`target/tmp/image-viewport-20260909/reading-pagination/`へidentity／captures／exitを保持する。
+- 最終reviewで新commandのregistry順を末尾へ移し、既存custom bindingの優先を保持する回帰を追加。描画・loader・navigationは実試験と同じ。最終release ac8ce593、fmt／all-target Clippy／全291 tests通過、四件の実機専用testはignoredを維持。今回はその四件を再実行していない。実OSの混在DPI、物理keyboard全layout、cursor固定dragや高速移動の性能達成はこの証拠から主張しない。
+
 ## 8. UI/UX変更の判断基準
 
 - 実装済みcommandの入口はmenu、palette、shortcut、gridで同じ`CommandId`を共有する。入口ごとに別logicを作らない。

@@ -60,6 +60,8 @@ pub enum CommandId {
     FirstImage,
     LastImage,
     CoverWindow,
+    IncreaseReadingFirstPage,
+    DecreaseReadingFirstPage,
 }
 
 impl CommandId {
@@ -92,6 +94,8 @@ impl CommandId {
             Self::ToggleReadingMode => "toggle_reading_mode",
             Self::IncreaseReadingPages => "increase_reading_pages",
             Self::DecreaseReadingPages => "decrease_reading_pages",
+            Self::IncreaseReadingFirstPage => "increase_reading_first_page",
+            Self::DecreaseReadingFirstPage => "decrease_reading_first_page",
             Self::ToggleReadingAxis => "toggle_reading_axis",
             Self::ReverseReadingOrder => "reverse_reading_order",
             Self::Undo => "undo",
@@ -453,6 +457,16 @@ const COMMANDS: &[CommandDefinition] = &[
     command(
         CommandId::LastImage,
         "Last image in folder",
+        &[MediaKind::Image],
+    ),
+    reading_command(
+        CommandId::IncreaseReadingFirstPage,
+        "Show more images on the first reading page",
+        &[MediaKind::Image],
+    ),
+    reading_command(
+        CommandId::DecreaseReadingFirstPage,
+        "Show fewer images on the first reading page",
         &[MediaKind::Image],
     ),
 ];

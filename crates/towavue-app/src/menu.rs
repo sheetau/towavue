@@ -48,6 +48,8 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
                 ToggleReadingMode,
                 IncreaseReadingPages,
                 DecreaseReadingPages,
+                IncreaseReadingFirstPage,
+                DecreaseReadingFirstPage,
                 ToggleReadingAxis,
                 ReverseReadingOrder,
             ],

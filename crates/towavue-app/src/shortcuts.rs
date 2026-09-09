@@ -67,6 +67,8 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::ToggleReadingMode, "B"),
         (CommandId::IncreaseReadingPages, "Ctrl+]"),
         (CommandId::DecreaseReadingPages, "Ctrl+["),
+        (CommandId::IncreaseReadingFirstPage, "Ctrl+Shift+Right"),
+        (CommandId::DecreaseReadingFirstPage, "Ctrl+Shift+Left"),
         (CommandId::ToggleReadingAxis, "R"),
         (CommandId::ReverseReadingOrder, "H"),
         (CommandId::Undo, "Ctrl+Z"),
@@ -199,6 +201,70 @@ mod tests {
         assert_eq!(
             parse(&serialize(&bindings), defaults()).expect("round trip"),
             bindings
+        );
+    }
+
+    #[test]
+    fn first_reading_page_shortcuts_are_contextual_and_customizable() {
+        let mut bindings = defaults();
+        for (command, key) in [
+            (CommandId::IncreaseReadingFirstPage, "Ctrl+Shift+Right"),
+            (CommandId::DecreaseReadingFirstPage, "Ctrl+Shift+Left"),
+        ] {
+            let key = key.parse::<KeySequence>().expect("default");
+            for kind in [
+                None,
+                Some(MediaKind::Image),
+                Some(MediaKind::Video),
+                Some(MediaKind::Audio),
+            ] {
+                for reading_mode in [false, true] {
+                    let context = CommandContext {
+                        media_kind: kind,
+                        reading_mode,
+                        ..Default::default()
+                    };
+                    assert_eq!(
+                        bindings.resolve(key.strokes(), context),
+                        if kind == Some(MediaKind::Image) && reading_mode {
+                            ShortcutMatch::Command(command)
+                        } else {
+                            ShortcutMatch::None
+                        }
+                    );
+                }
+            }
+            let custom = "Ctrl+K Y".parse::<KeySequence>().expect("custom");
+            bindings.set(command, custom.clone());
+            let context = CommandContext {
+                media_kind: Some(MediaKind::Image),
+                reading_mode: true,
+                ..Default::default()
+            };
+            assert_eq!(
+                bindings.resolve(key.strokes(), context),
+                ShortcutMatch::None
+            );
+            assert_eq!(
+                bindings.resolve(custom.strokes(), context),
+                ShortcutMatch::Command(command)
+            );
+            assert_eq!(
+                parse(&serialize(&bindings), defaults()).expect("round trip"),
+                bindings
+            );
+            bindings = defaults();
+            bindings.set(CommandId::Undo, key.clone());
+            assert_eq!(
+                bindings.resolve(key.strokes(), context),
+                ShortcutMatch::Command(CommandId::Undo),
+                "existing custom commands retain priority over new defaults"
+            );
+            bindings = defaults();
+        }
+        assert_eq!(
+            parse("# existing settings\n", defaults()).expect("old file"),
+            defaults()
         );
     }
 

@@ -1113,7 +1113,13 @@ where
         {
             paths.extend(
                 snapshot
-                    .reading_items(path, self.reading_settings.page_count, false)
+                    .reading_items(
+                        path,
+                        ReadingSettings {
+                            reversed: false,
+                            ..self.reading_settings
+                        },
+                    )
                     .into_iter()
                     .filter(|item| &item.path != path)
                     .map(|item| item.path.clone()),
@@ -2160,10 +2166,31 @@ where
             .as_ref()
             .map(Ok)
             .or_else(|| self.image_error.as_ref().map(Err));
-        let pages: Vec<_> = first
-            .into_iter()
-            .chain(self.reading_pages.iter().map(|page| page.as_ref()))
+        let mut pages: Vec<_> = self
+            .reading_pages
+            .iter()
+            .map(|page| page.as_ref())
             .collect();
+        if let Some(first) = first {
+            let index = self
+                .folder_snapshot
+                .as_ref()
+                .zip(self.path.as_ref())
+                .and_then(|(snapshot, path)| {
+                    snapshot
+                        .reading_items(
+                            path,
+                            ReadingSettings {
+                                reversed: false,
+                                ..self.reading_settings
+                            },
+                        )
+                        .iter()
+                        .position(|item| &item.path == path)
+                })
+                .unwrap_or(0);
+            pages.insert(index.min(pages.len()), first);
+        }
         if pages.is_empty() {
             ui.centered_and_justified(|ui| ui.label("No image pages available"));
             return;
@@ -2761,7 +2788,15 @@ where
                                 format!("{:.*}%", if scale < 0.1 { 2 } else { 0 }, scale * 100.0)
                             }
                         };
-                        details.push(zoom);
+                        if self.reading_mode {
+                            details.push(format!(
+                                "Reading {} · first {}",
+                                self.reading_settings.page_count,
+                                self.reading_settings.first_page_count
+                            ));
+                        } else {
+                            details.push(zoom);
+                        }
                         details.push(format!("{} {width}×{height}", image.decoded.format));
                     } else if self.session.is_some() {
                         let edit = self.edit_state();
@@ -2898,19 +2933,20 @@ where
                 {
                     let paths: Vec<_> = if self.reading_mode {
                         snapshot
-                            .reading_items(
-                                &images[target].path,
-                                self.reading_settings.page_count,
-                                self.reading_settings.reversed,
-                            )
+                            .reading_items(&images[target].path, self.reading_settings)
                             .into_iter()
                             .map(|item| item.path.clone())
                             .collect()
                     } else {
                         vec![images[target].path.clone()]
                     };
-                    let position = if paths.len() > 1 {
-                        format!("{}–{}", target + 1, target + paths.len())
+                    let spread = if self.reading_mode {
+                        self.reading_settings.spread(target, images.len())
+                    } else {
+                        target..target + 1
+                    };
+                    let position = if spread.len() > 1 {
+                        format!("{}–{}", spread.start + 1, spread.end)
                     } else {
                         (target + 1).to_string()
                     };
@@ -3264,8 +3300,10 @@ where
             CommandId::SeekForward => self.seek_relative(true),
             CommandId::PreviousMedia => self.navigate(false, false),
             CommandId::NextMedia => self.navigate(true, false),
-            CommandId::PreviousSameKind | CommandId::PreviousImage => self.navigate(false, true),
-            CommandId::NextSameKind | CommandId::NextImage => self.navigate(true, true),
+            CommandId::PreviousSameKind => self.navigate(false, true),
+            CommandId::NextSameKind => self.navigate(true, true),
+            CommandId::PreviousImage => self.navigate_image(false),
+            CommandId::NextImage => self.navigate_image(true),
             CommandId::FirstImage => self.navigate_image_boundary(false),
             CommandId::LastImage => self.navigate_image_boundary(true),
             CommandId::ToggleFilmstrip => {
@@ -3369,15 +3407,23 @@ where
                 self.rebuild_reading_pages();
                 self.request_redraw();
             }
-            CommandId::IncreaseReadingPages => {
-                self.reading_settings.increase_pages();
-                self.rebuild_reading_pages();
-                self.request_redraw();
-            }
-            CommandId::DecreaseReadingPages => {
-                self.reading_settings.decrease_pages();
-                self.rebuild_reading_pages();
-                self.request_redraw();
+            CommandId::IncreaseReadingPages
+            | CommandId::DecreaseReadingPages
+            | CommandId::IncreaseReadingFirstPage
+            | CommandId::DecreaseReadingFirstPage => {
+                let previous = self.reading_settings;
+                match command {
+                    CommandId::IncreaseReadingPages => self.reading_settings.increase_pages(),
+                    CommandId::DecreaseReadingPages => self.reading_settings.decrease_pages(),
+                    CommandId::IncreaseReadingFirstPage => {
+                        self.reading_settings.increase_first_page()
+                    }
+                    _ => self.reading_settings.decrease_first_page(),
+                }
+                if self.reading_settings != previous {
+                    self.rebuild_reading_pages();
+                    self.request_redraw();
+                }
             }
             CommandId::ToggleReadingAxis => {
                 self.reading_settings.toggle_axis();
@@ -4171,6 +4217,33 @@ where
             (current + paths.len() - 1) % paths.len()
         };
         self.request_guarded(GuardedAction::Navigate(paths[index].clone()));
+    }
+
+    fn navigate_image(&mut self, forward: bool) {
+        if !self.reading_mode {
+            self.navigate(forward, true);
+            return;
+        }
+        let (Some(snapshot), Some(path)) = (&self.folder_snapshot, &self.path) else {
+            return;
+        };
+        let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
+        let Some(current) = images.iter().position(|item| &item.path == path) else {
+            return;
+        };
+        if let Some(target) = self
+            .reading_settings
+            .adjacent_spread(current, images.len(), forward)
+        {
+            if self
+                .reading_settings
+                .spread(current, images.len())
+                .contains(&target)
+            {
+                return;
+            }
+            self.request_guarded(GuardedAction::Navigate(images[target].path.clone()));
+        }
     }
 
     fn navigate_image_boundary(&mut self, last: bool) {
@@ -9505,7 +9578,7 @@ mod tests {
                     .count();
                 if images == if reading { 2 } else { 1 } {
                     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-                        egui::Shape::Text(text) if text.galley.text().contains(if reading { "2–3 / 3  a-next.png" } else { "2 / 3  a-next.png" }))));
+                        egui::Shape::Text(text) if text.galley.text().contains(if reading { "1–2 / 3  a-next.png" } else { "2 / 3  a-next.png" }))));
                     break;
                 }
                 assert!(
@@ -10150,6 +10223,91 @@ mod tests {
             );
             app.resolve_guard(GuardDecision::Cancel);
             assert_eq!(app.path.as_ref(), Some(&source));
+        }
+    }
+
+    #[test]
+    fn reading_navigation_uses_fixed_spreads_without_losing_dirty_anchor() {
+        let Some(root) = isolated_test_root(
+            "tests::reading_navigation_uses_fixed_spreads_without_losing_dirty_anchor",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let names = ["z.png", "b.png", "a.png", "f.png", "e.png", "d.png"];
+        let tab = app.tabs.open_new(root.join(names[0]), MediaKind::Image);
+        app.media_kind = Some(MediaKind::Image);
+        app.reading_mode = true;
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let edits = app.edits.clone();
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: [
+                "z.png", "skip.mp4", "b.png", "a.png", "f.png", "e.png", "d.png",
+            ]
+            .into_iter()
+            .map(|name| towavue_core::FolderMediaItem {
+                identity: towavue_core::ShellIdentity::new(vec![]),
+                path: root.join(name),
+                kind: MediaKind::from_path(Path::new(name)).expect("kind"),
+            })
+            .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::UNIX_EPOCH,
+        });
+        for (first, next, previous) in [
+            (2, [2, 2, 4, 4, 0, 0], [4, 4, 0, 0, 2, 2]),
+            (1, [1, 3, 3, 5, 5, 0], [5, 0, 0, 1, 1, 3]),
+        ] {
+            app.reading_settings.first_page_count = first;
+            for (current, name) in names.iter().enumerate() {
+                let path = root.join(name);
+                app.path = Some(path.clone());
+                app.tabs
+                    .active_mut()
+                    .expect("tab")
+                    .target
+                    .set_current_path(path.clone(), MediaKind::Image);
+                let generation = app.media_generation;
+                for (command, target) in [
+                    (CommandId::NextImage, next[current]),
+                    (CommandId::PreviousImage, previous[current]),
+                    (CommandId::NextSameKind, (current + 1) % names.len()),
+                    (
+                        CommandId::PreviousSameKind,
+                        (current + names.len() - 1) % names.len(),
+                    ),
+                ] {
+                    app.dispatch(command);
+                    assert!(matches!(&app.pending_guard,
+                        Some(GuardedAction::Navigate(target_path)) if *target_path == root.join(names[target])));
+                    app.resolve_guard(GuardDecision::Cancel);
+                    assert_eq!(app.path.as_ref(), Some(&path));
+                    assert_eq!(app.media_generation, generation);
+                    assert_eq!(app.edits, edits);
+                }
+            }
+        }
+        app.folder_snapshot
+            .as_mut()
+            .expect("snapshot")
+            .items
+            .retain(|item| item.path == root.join(names[0]) || item.path == root.join(names[1]));
+        app.reading_settings = ReadingSettings::default();
+        app.path = Some(root.join(names[1]));
+        for command in [CommandId::NextImage, CommandId::PreviousImage] {
+            app.dispatch(command);
+            assert!(
+                app.pending_guard.is_none(),
+                "one spread does not navigate within itself"
+            );
+            assert_eq!(app.edits, edits);
         }
     }
 
@@ -12680,18 +12838,43 @@ mod tests {
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
             egui::Shape::Mesh(mesh) if mesh.texture_id == page
         )));
-        app.dispatch(CommandId::NextImage);
+        // Individual-file navigation still reaches either image within one reading spread.
+        app.dispatch(CommandId::NextSameKind);
         wait(&mut app);
         assert_eq!(app.path.as_ref(), Some(&good));
         assert_eq!(app.state, PlaybackState::Paused);
         assert!(app.image_error.is_none() && app.playback_error.is_none());
-        app.dispatch(CommandId::PreviousImage);
+        assert_eq!(app.reading_pages.len(), 1);
+        assert!(app.reading_pages[0].is_err());
+        for reversed in [false, true] {
+            app.reading_settings.reversed = reversed;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.draw_image(ui),
+            );
+            let rect = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == page => Some(mesh.calc_bounds()),
+                    _ => None,
+                })
+                .expect("second image remains visible beside the failed first image");
+            assert_eq!(rect.center().x < 480.0, reversed);
+        }
+        app.dispatch(CommandId::PreviousSameKind);
         wait(&mut app);
         assert_eq!(app.state, PlaybackState::Faulted);
         std::fs::write(&broken, &bitmap).expect("repair owned fixture");
-        app.dispatch(CommandId::NextImage);
+        app.dispatch(CommandId::NextSameKind);
         wait(&mut app);
-        app.dispatch(CommandId::PreviousImage);
+        app.dispatch(CommandId::PreviousSameKind);
         wait(&mut app);
         assert_eq!(app.path.as_ref(), Some(&broken));
         assert_eq!(app.state, PlaybackState::Paused);
@@ -12700,6 +12883,59 @@ mod tests {
             app.image.as_ref().expect("repaired image").decoded.frames[0].rgba,
             [255, 0, 0, 255, 0, 255, 0, 255]
         );
+        let mut paths = vec![broken.clone(), good.clone()];
+        for index in 3..=6 {
+            let path = root.join(format!("{index:02}.bmp"));
+            std::fs::write(&path, &bitmap).expect("additional page fixture");
+            app.folder_snapshot.as_mut().expect("snapshot").items.push(
+                towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![index]),
+                    path: path.clone(),
+                    kind: MediaKind::Image,
+                },
+            );
+            paths.push(path);
+        }
+        for (command, targets) in [
+            (CommandId::NextImage, vec![2, 4, 0]),
+            (CommandId::PreviousImage, vec![4, 2, 0]),
+        ] {
+            for target in targets {
+                app.dispatch(command);
+                wait(&mut app);
+                assert_eq!(app.path.as_ref(), Some(&paths[target]));
+                assert_eq!(app.reading_pages.len(), 1);
+                assert!(app.reading_pages[0].is_ok());
+            }
+        }
+        app.dispatch(CommandId::NextSameKind);
+        wait(&mut app);
+        let anchor = app.path.clone();
+        app.edits
+            .entry(app.tabs.active().expect("tab").id)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let edits = app.edits.clone();
+        app.dispatch(CommandId::DecreaseReadingFirstPage);
+        wait(&mut app);
+        assert_eq!(app.reading_settings.first_page_count, 1);
+        assert_eq!(app.path, anchor);
+        assert_eq!(app.edits, edits);
+        assert!(app.pending_guard.is_none());
+        let generation = app.image_generation;
+        app.dispatch(CommandId::DecreaseReadingFirstPage);
+        assert_eq!(
+            app.image_generation, generation,
+            "a setting at its limit must not reload"
+        );
+        app.dispatch(CommandId::IncreaseReadingPages);
+        wait(&mut app);
+        assert_eq!(app.reading_settings.page_count, 3);
+        assert_eq!(app.reading_settings.first_page_count, 1);
+        assert_eq!(app.reading_pages.len(), 2);
+        assert_eq!(app.path, anchor);
+        assert_eq!(app.edits, edits);
+        app.dispatch(CommandId::Undo);
         app.dispatch(CommandId::CloseTab);
         assert!(app.tabs.tabs().is_empty() && app.path.is_none());
         assert!(app.image.is_none() && app.image_error.is_none());

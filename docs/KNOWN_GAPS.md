@@ -6,7 +6,7 @@
 
 ## 1. 試用前に知るべき制約
 
-2026-09-10: 動画自由回転はcoreの寸法／SAR値とソフトウェアexport基盤まで実装した。square-pixel化、回転と偶数canvasへの黒いpadding、合成順序、初期geometry照合を実ファイルで回帰確認した。GPUの順序付きraster表示と操作UIは未接続で、appのvisual edit入口では拒否する。元SARの整数寸法への丸めと再サンプリング／再符号化があり、無損失ではない。HDR、途中でgeometryが変わる素材、全container／hardware encode／大画像性能は未認定。この保存基盤を動画自由回転全体の完成とはしない。
+2026-09-10: 動画自由回転はcoreの寸法／SAR値、ソフトウェアexport、同じGPU device上の順序付きraster表示基盤まで実装した。square-pixel化、回転と偶数canvasへの黒いpadding、合成順序、初期geometry照合を回帰確認した。操作UI・適用前予算検証・編集後geometryとの接続は未完で、appのvisual edit入口では拒否する。中間GPU payloadは512 MiBまでで、それ以外のdecode／driver領域は別。GPU previewと保存は補間実装が異なり、byte一致は保証しない。元SARの整数寸法への丸めと再サンプリング／再符号化があり、無損失ではない。HDR、途中でgeometryが変わる素材、全container／hardware encode／大画像性能は未認定。この基盤を動画自由回転全体の完成とはしない。
 
 2026-09-10: 画像自由回転のmenu／Ctrl+Shift+R／角度入力／slider／配置previewに加え、Alt＋画像上の左dragを接続した。Alt保持のmouse releaseだけ一件を確定し、キー先離し／Escape／focus喪失や0度は非編集。対象と世代を再確認する。previewは既存textureのmeshを回す近似で、最終画素の厳密なpreviewではない。dragは現在scaleを維持するため回転後の角がviewport外へ出る場合があり、全体配置は数値dialogで確認できる。通常windowの外観／操作、大画像／多数animation frame性能、alpha非対応形式や動画への接続は未完。非同期RGBA処理とPNG exportは同じfilter列を使う。任意角度はGBRAP8でalphaを乗算して補間するため画質変化はあり、無損失なのは90度単位の専用経路だけ。動画・音声への画像自由回転exportは明示拒否する。
 

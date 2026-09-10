@@ -14032,6 +14032,62 @@ mod tests {
                             .adapter_luid()
                     );
                     eprintln!("Native caption recovery frame: {metrics:?}");
+                    let renderer = app.renderer.as_mut().expect("renderer");
+                    let session = app.session.as_mut().expect("session");
+                    let (width, height, mut aspect) = session.video_geometry().expect("geometry");
+                    let mut size = (width, height);
+                    if session
+                        .video_orientation()
+                        .expect("orientation")
+                        .swaps_axes()
+                    {
+                        size = (height, width);
+                        aspect = 1.0 / aspect;
+                    }
+                    let first = towavue_core::VideoRotation::new(317, size, aspect)
+                        .expect("first rotation");
+                    let crop = towavue_core::PixelCrop {
+                        x: 2,
+                        y: 2,
+                        width: first.size().0 - 4,
+                        height: first.size().1 - 4,
+                    };
+                    let second =
+                        towavue_core::VideoRotation::new(-127, (crop.width, crop.height), 1.0)
+                            .expect("second rotation");
+                    let edits = [
+                        EditOperation::RotateVideo(first),
+                        EditOperation::Crop(crop),
+                        EditOperation::FlipHorizontal,
+                        EditOperation::RotateVideo(second),
+                    ];
+                    let target = session.target();
+                    let destination =
+                        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 96.0));
+                    let identity = towavue_runtime_windows::VideoOrientation::default().source_uv();
+                    assert!(
+                        session
+                            .draw_current_edited(renderer, destination, identity, &edits)
+                            .expect("ordered same-device hardware raster")
+                    );
+                    renderer.present_surface().expect("present raster");
+                    assert_eq!(session.metrics().cpu_transfer_count, 0);
+                    assert_eq!(
+                        session.metrics().presented_frame_count,
+                        metrics.presented_frame_count
+                    );
+                    assert_eq!(session.target(), target);
+                    assert!(
+                        session
+                            .draw_current(renderer, destination, identity)
+                            .expect("return to direct Video Processor")
+                    );
+                    renderer
+                        .present_surface()
+                        .expect("present direct video again");
+                    eprintln!(
+                        "PASS ordered hardware rotation/crop/rotation and direct-path return; CPU transfers 0"
+                    );
                     return;
                 }
                 assert!(

@@ -8,7 +8,13 @@ VideoRotationは操作直前のsample寸法とpixel aspect、square-pixel寸法�
 
 保存前にはbest video streamの寸法、container／codecの表示用SAR、display matrixの軸交換を解決し、操作列をたどって各回転の入力と照合する。FFmpegのav_guess_sample_aspect_ratioを、export workerが所有するinputと借用streamの寿命内で読み取り呼出しし、native pointerを外へ出さない。寸法／SAR不一致、範囲外crop、非video操作との混在は配置変更前に拒否する。frame途中で変わる寸法／SAR／orientationやHDRの品質認定は別残件である。
 
-表示側は既存の四隅UVだけでは回転後の黒いcanvasや、その後のcrop／再回転を保持できない。順序付きの中間raster処理を同じD3D11 device上へ接続する必要があり、まだ未実装。現段階ではappのvisual edit入口でVideoRotationを拒否し、command／dialog／dragへ公開しない。ソフトウェア保存の基盤テストをGPU表示、hardware encode品質、通常windowの操作確認の代用にはしない。
+表示側は既存の四隅UVだけでは回転後の黒いcanvasや、その後のcrop／再回転を保持できない。順序付きの中間raster処理を同じD3D11 device上へ接続したが、現段階ではappのvisual edit入口でVideoRotationを拒否し、command／dialog／dragへ公開しない。ソフトウェア保存の基盤テストをGPU表示、hardware encode品質、通常windowの操作確認の代用にはしない。
+
+GPU raster契約（2026-09-10）: runtimeのdraw_current_editedは現在frameの寸法／SAR／orientationから操作列を検証し、source orientation→crop／quarter turn／flip→square-pixel scale／自由回転／paddingを履歴順に描く。各回転の入力snapshot不一致、非video操作、無効cropは描画前にtyped errorへする。表示用UVは最終rasterに対する一時cropだけを表し、元frameのUVを二重適用しない。decode session・PTS・音声・履歴は変更しない。app UI側の事前検証と編集後geometry／selectionへの接続は次の残件。
+
+softwareは既存RGBA upload、hardwareは既存Video Processorの色変換／HDR能力判定後のRGBA textureを入力にする。中間textureは同じdeviceのGPU専用RGBA8・RTV／SRVとし、CPU readback／再uploadはしない。寸法が一致し直前のsourceと異なるslotを再利用し、同じ寸法の連続stageでも最大2枚。layoutが変わる時だけ旧poolを解放して再確保し、通常経路へ戻る時も解放する。所有する中間RGBA payloadは合計512 MiB、各辺はdevice上限以下とし、事前に超過を拒否する。source upload／Video Processor出力・decode pool・driverの保留resourceは別枠であり、process全体やGPU物理使用量の上限ではない。幅／高さの最大値を組み合わせた巨大な正方形textureは確保しない。
+
+各stageはscissor／blend／depth状態を初期化して全画素を描き、source／target viewをunbindしてから次へ進む。任意角度はpixel中心を逆写像し、exportと同じ1px境界拡張・黒背景・8bit切捨て補間を使うが、GPU浮動小数点／samplerとFFmpeg固定小数点／scaleの違いによりbyte一致は保証しない。offscreen WARPの限定fixtureで整数編集の全画素一致、自由回転／SAR／全8 orientationと合成順序の最大channel差3/255以内を確認する。readbackはcfg(test)だけに隔離する。hardwareの実行／復旧試験をHDR品質、全寸法・全角度の画質、通常window／性能認定の代用にはしない。未編集・既存UVだけの従来経路は維持する。
 
 ## I06: 自由回転の画像基盤（2026-09-10）
 

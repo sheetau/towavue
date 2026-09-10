@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### 動画の同一device GPU raster基盤（2026-09-10 11:22、I06 UI未接続）
+
+draw_current_editedをruntimeに追加し、現在frameのorientation／SARから編集列を検証して、RGBA uploadまたは既存Video Processor出力を同じD3D11 device内で順序付き描画する。crop／quarter turn／flip、square-pixel scale／自由回転／黒paddingを各stageにし、寸法別にtextureを再利用する。直前sourceとは別slotを選び、RGBA payload合計512 MiB・deviceの辺上限を超えるplanは描画前に拒否する。driver・decode・元RGBAは別枠。通常動画経路へ戻ると追加poolを解放する。CPU readbackはテストだけで、productionのhardware frameはGPU内に留まる。
+
+新規4 testsを`cargo test -p towavue-runtime-windows renderer::raster -- --nocapture`で実行できる。window不要のWARPで、整数編集はFFmpeg rawvideo pipeの全RGBAと一致。20種類の角度／SAR／奇数寸法（±0.1、±89.9／90／90.1、±179.9／180度を含む）、全8 metadata orientation→crop→SAR正規化→回転、回転→crop→flip→再回転→quarter turnを比較し、各channel差3/255以内を確認した。自由回転単体の黒canvas mask、source不変、空scissor解除、次frameでの画素残りなし、同一layoutのCOM texture identity、空planでのpool解放も検査する。純粋plan試験では1000操作の2slot再利用、細長い16384×16の軸交換、512 MiB境界と超過、誤ったsource／SAR／crop／kindをGPU確保せず検証する。この画素誤差は限定fixtureの観測であり、全素材の品質保証ではない。
+
+既存native-caption opt-inの実H264 D3D11VA試験へ回転→crop→flip→再回転、表示count／target不変、直接VP表示への復帰を追加。再生／停止・編集timeline Seek・同一windowでのdevice再作成前後を含む10回の表示がPASS、CPU transfers 0を維持した。app opt-in5件は全PASS／SKIPなし。通常windowへの外部入力は使わない。
+
+最終session69200でfmt check／Clippy／workspace423（app243／core59／runtime117／integration4）とReleaseが終了0。実環境opt-inはsession63969で5件成功、通常ignored11件は別計上。Release SHA-256は`ad0b3d7625c31027d2fa56147fe2ac98353ddcc3e8d734f88d558644abfed53b`。最初のtest filterがファイル名で0件だったためRust module名へ修正して4件の実行を確認し、Clippyのas_chunks指定もテストコードで修正した。
+
+通常appのcommand／dialog／dragはまだ動画自由回転へ接続しておらず、visual edit入口の拒否を維持する。次はUI側の適用前budget確認、編集後寸法／SAR／selection／crop previewとUndo/Redo、角度操作への接続。GPU浮動小数点／samplerとFFmpeg固定小数点／scaleによる差、HDR・dynamic geometry・全解像度性能・通常window認定とUX台帳全体を残件にする。先行2ce696bのCI34428111501は成功。依存・vendor・配布形式は変更しない。
+
 ### 動画自由回転のgeometry／保存基盤（2026-09-10 11:04、I06 UI未接続）
 
 このcheckpointは操作UIを増やさない。VideoRotationは操作直前の寸法／SARから圧縮表示軸を拡大してsquare pixelsへ丸め、回転のceil外接canvasと右／下最大1pxの偶数paddingを検証する。0度は正規化・paddingを含めて無操作。上限は各stage16384px・128M pixels。画像と同じ0.1度単位だが、画像の透明alpha契約ではなく動画のRGB8／黒余白／再符号化である。

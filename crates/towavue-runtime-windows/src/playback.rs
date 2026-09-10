@@ -679,12 +679,50 @@ impl PlaybackSession {
         destination: egui::Rect,
         uv: [towavue_core::UnitPoint; 4],
     ) -> Result<bool, RenderError> {
+        self.draw_current_plan(renderer, destination, uv, None)
+    }
+
+    /// Renders source orientation and ordered visual edits on the shared GPU device.
+    /// `uv` is a display-only crop of the final raster, not a source-space transform.
+    /// The caller fits `destination` using the edited dimensions and pixel aspect.
+    pub fn draw_current_edited(
+        &mut self,
+        renderer: &mut FrameRenderer,
+        destination: egui::Rect,
+        uv: [towavue_core::UnitPoint; 4],
+        operations: &[towavue_core::EditOperation],
+    ) -> Result<bool, RenderError> {
+        let Some((width, height, aspect)) = self.video_geometry() else {
+            return Ok(false);
+        };
+        let plan = crate::renderer::raster::Plan::new(
+            (width, height),
+            aspect,
+            self.video_orientation()
+                .expect("current frame has orientation"),
+            operations,
+            renderer.max_texture_side(),
+        )?;
+        self.draw_current_plan(renderer, destination, uv, Some(&plan))
+    }
+
+    fn draw_current_plan(
+        &mut self,
+        renderer: &mut FrameRenderer,
+        destination: egui::Rect,
+        uv: [towavue_core::UnitPoint; 4],
+        plan: Option<&crate::renderer::raster::Plan>,
+    ) -> Result<bool, RenderError> {
         let Some(frame) = self.current_video.as_ref() else {
             return Ok(false);
         };
         let result = match frame {
-            PresentationFrame::Software(frame) => renderer.draw_software(frame, destination, uv),
-            PresentationFrame::Hardware(frame) => renderer.draw_hardware(frame, destination, uv),
+            PresentationFrame::Software(frame) => {
+                renderer.draw_software(frame, destination, uv, plan)
+            }
+            PresentationFrame::Hardware(frame) => {
+                renderer.draw_hardware(frame, destination, uv, plan)
+            }
         };
         if let Err(error) = result {
             return match renderer.device_removed_reason() {

@@ -41,6 +41,9 @@ use windows::core::{BOOL, Interface, PCSTR, s};
 use crate::VideoFrame;
 use crate::decode::{HardwareVideoFrame, VideoTransfer};
 
+#[path = "video_raster.rs"]
+pub(crate) mod raster;
+
 /// A failure while creating or using the shared D3D11 renderer.
 #[derive(Debug, Error)]
 pub enum RenderError {
@@ -60,6 +63,10 @@ pub enum RenderError {
     InvalidHardwareFrame,
     #[error("the D3D11 Video Processor cannot tone-map this HDR frame to SDR")]
     HdrConversionUnsupported,
+    #[error("video edit dimensions, pixel aspect, or operation are invalid for this frame")]
+    InvalidVideoEdit,
+    #[error("video edit exceeds the device texture size or 512 MiB intermediate RGBA budget")]
+    VideoEditBudget,
 }
 
 /// Stable identifier of the DXGI adapter selected for the shared device.
@@ -233,6 +240,7 @@ pub struct FrameRenderer {
     video_processor: Option<VideoProcessorState>,
     software_texture: Option<(u32, u32, ID3D11Texture2D)>,
     edit_texture: Option<(u32, u32, ID3D11Texture2D)>,
+    video_raster: Option<raster::VideoRaster>,
     software_blitter: SoftwareBlitter,
     ui_renderer: egui_directx11::Renderer,
     hdr_tone_mapping_active: bool,
@@ -332,6 +340,7 @@ impl FrameRenderer {
             video_processor: None,
             software_texture: None,
             edit_texture: None,
+            video_raster: None,
             software_blitter,
             ui_renderer,
             hdr_tone_mapping_active: false,
@@ -370,6 +379,7 @@ impl FrameRenderer {
         frame: &VideoFrame,
         destination: egui::Rect,
         uv: [UnitPoint; 4],
+        plan: Option<&raster::Plan>,
     ) -> Result<(), RenderError> {
         if frame.width == 0 || frame.height == 0 {
             return Err(RenderError::InvalidFrame);
@@ -437,7 +447,7 @@ impl FrameRenderer {
                 0,
             );
         }
-        self.draw_software_texture(&texture, destination, uv)
+        self.draw_video_texture(&texture, destination, uv, plan)
     }
 
     pub(crate) fn draw_hardware(
@@ -445,11 +455,15 @@ impl FrameRenderer {
         frame: &HardwareVideoFrame,
         destination: egui::Rect,
         uv: [UnitPoint; 4],
+        plan: Option<&raster::Plan>,
     ) -> Result<(), RenderError> {
         if frame.width == 0 || frame.height == 0 {
             return Err(RenderError::InvalidFrame);
         }
         self.ensure_surface()?;
+        if plan.is_none() {
+            self.video_raster = None;
+        }
 
         let (texture_raw, array_slice) = frame
             .texture_and_slice()
@@ -457,13 +471,14 @@ impl FrameRenderer {
         // The AVFrame owns this COM reference for the duration of the call.
         let texture = unsafe { ID3D11Texture2D::from_raw_borrowed(&texture_raw) }
             .ok_or(RenderError::InvalidHardwareFrame)?;
-        let edited = uv
-            != [
-                UnitPoint { x: 0.0, y: 0.0 },
-                UnitPoint { x: 1.0, y: 0.0 },
-                UnitPoint { x: 1.0, y: 1.0 },
-                UnitPoint { x: 0.0, y: 1.0 },
-            ];
+        let edited = plan.is_some()
+            || uv
+                != [
+                    UnitPoint { x: 0.0, y: 0.0 },
+                    UnitPoint { x: 1.0, y: 0.0 },
+                    UnitPoint { x: 1.0, y: 1.0 },
+                    UnitPoint { x: 0.0, y: 1.0 },
+                ];
         let output = if edited {
             Some(self.prepare_edit_texture(frame.width, frame.height)?)
         } else {
@@ -485,7 +500,7 @@ impl FrameRenderer {
             output.as_ref(),
         )?;
         if let Some(output) = output {
-            self.draw_software_texture(&output, destination, uv)?;
+            self.draw_video_texture(&output, destination, uv, plan)?;
         }
         if frame.transfer != VideoTransfer::Sdr && !self.hdr_tone_mapping_active {
             self.hdr_tone_mapping_active = true;
@@ -494,6 +509,35 @@ impl FrameRenderer {
             );
         }
         Ok(())
+    }
+
+    fn draw_video_texture(
+        &mut self,
+        texture: &ID3D11Texture2D,
+        destination: egui::Rect,
+        uv: [UnitPoint; 4],
+        plan: Option<&raster::Plan>,
+    ) -> Result<(), RenderError> {
+        if let Some(plan) = plan {
+            if self.video_raster.is_none() {
+                self.video_raster = Some(raster::VideoRaster::new(&self.graphics_device.device)?);
+            }
+            let texture = self
+                .video_raster
+                .as_mut()
+                .expect("video raster initialized")
+                .draw(
+                    &self.graphics_device.device,
+                    &self.context,
+                    &self.software_blitter,
+                    texture,
+                    plan,
+                )?;
+            self.draw_software_texture(&texture, destination, uv)
+        } else {
+            self.video_raster = None;
+            self.draw_software_texture(texture, destination, uv)
+        }
     }
 
     fn prepare_edit_texture(

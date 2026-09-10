@@ -18,6 +18,8 @@
 
 2026-09-10 11:04 動画自由回転基盤checkpoint: VideoRotationのsource／SAR／square-pixel／外接寸法と偶数黒canvas、RGB8の順序付きsoftware exportを実装。全角度境界、独立filterによる合成画素、metadata orientationとtrim／rate／audio、既存target保護を回帰確認。次は同じ順序を単一deviceのGPU中間描画へ接続する。表示とUIは未完・app入口は未公開であり、H1／UX台帳全体は引き続き未完。
 
+2026-09-10 11:22 動画GPU raster checkpoint: runtimeの同一device表示入口と順序付きRGBA stage／寸法別再利用／512 MiB payload予算を実装。WARPで整数編集の全画素一致と自由回転／SAR／metadata orientation／合成順序、黒canvas・再利用・source不変を確認。次は動画の操作UI、適用前予算検証、編集後geometry／selection・preview／Undo/Redoへ接続する。通常app入口はまだ未公開であり、画質／HDR／全寸法性能・通常windowとH1／UX台帳全体は未完。
+
 2026-09-09 16:48追記: ownerの最新の区切り・push依頼に従い、進行中だったcompact seek端点修正だけを検証してcheckpointに含める。ローンチ準備は再開せず、このcheckpoint後は次の機能・UI実装へ自動着手しない。既存の改善台帳は残件として保持し、次のgoal設定・作業指示を待つ。goal全体の完了を意味しない。
 
 2026-09-09 新goal: ownerが草案とfollow-upに基づく機能・操作・UI改善を指定した。[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)の台帳へ要求・既存実装・残件を対応付け、H1内で順次実装・検証する。下記の「新goal待ち」は解消したが、ローンチ準備の停止は維持する。

@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 U01/U08 DPI-size checkpoint: custom captionで除去した標準枠がwinitのDPI resizeで再加算され、往復ごとにサイズが増える問題を修正。winit通知と位置を維持し、通常windowのclient寸法だけを旧／新DPIと実枠差で補正する。旧native回帰の1946×1223での失敗→修正後1920×1152、3台2周の端配置／サイズ保持を確認。可視3周で640×480↔1280×960、編集済み48,140画素一致、96／192 DPI各々で最大化／fullscreenから復帰。0acaaa8のCI34511626154は成功。最終全体チェックは通過したが、途中で既知のnative harness時刻逆行assertが再発したため、次に再現性を監査する。全DPI比率／最大化・fullscreen中のmonitor移動／全media／UIA・IME／style／latency・資源と全UX台帳は継続する。
+
 2026-09-11 U08 monitor-placement checkpoint: release点からmonitorの作業領域を選び、hidden配置後の実DPIで論理grabを再計算して位置をclampする。通常の手動移動とサイズ規則は変更しない。右端793pxのはみ出しと旧native回帰の失敗→修正後成功を確認。3台／96・192 DPIで端・中央、負座標／taskbar／過大windowの回帰、可視右端の閉じる領域・mixed-DPI移送・filmstrip右下と映像画素保持が通過。546f3dbのCI34509593269は成功。別件としてDPI往復で960×576→1946×1223→989×651へ増える既存サイズ問題を確認したため、次はcustom captionとwinitのDPI resizeを修正する。全UX台帳・全media／DPI比率／UIA・IME／style／latency・資源は継続する。
 
 2026-09-11 U08 filmstrip-position checkpoint: filmstrip外dropもrelease位置を無視していたため、浮遊カード左上を要求へ引き継ぎ、タブ分離と共通の座標変換で表示前に配置する。元tab／未保存編集は保持し、子は元ファイルを独立Openする。旧native位置回帰の失敗→修正後成功、3幅×3密度、非有限座標／stale／重複・失敗時保持を確認。可視の生成動画／PNG／無音WAVで位置／foreground、編集済み元動画と未編集子の画素一致、画像の均一色144点と音声終端を確認。1404496のCI34508201666は成功。mixed-DPI／monitor端／全media・codec／UIA・IME／style／latency・資源と全UX台帳は継続する。

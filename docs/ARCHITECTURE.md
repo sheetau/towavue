@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## U01/U08: custom captionのDPIサイズ保持（2026-09-11）
+
+通常の復元windowは、DPI変更前のclient寸法を旧DPIから新DPIへ倍率換算する。WM_NCCALCSIZEで通常枠をclient化しているため、winit 0.30.13のWM_DPICHANGEDが加算する標準枠の余白は実際のclientに不要である（[Microsoft custom frame](https://learn.microsoft.com/en-us/windows/win32/dwm/customframe)、[WM_DPICHANGED](https://learn.microsoft.com/en-us/windows/win32/hidpi/wm-dpichanged)）。runtimeのcaption subclassで前回DPIを保持し、winitの状態更新・ScaleFactorChanged通知・提案位置を通した後、実測client／outer差を使って寸法だけを補正する。位置・Z順・activationは変えず、描画ごとの補正や別deviceは追加しない。appはInnerSizeWriterで別の寸法を要求しない現行契約を前提とし、winit更新時はこの境界の回帰を再確認する。
+
+DPI記録はfullscreen／maximizedでも更新するが、それらの寸法へ通常windowの倍率補正は適用しない。DWM frameは通知処理後に更新する。同threadのCellと同期native呼出しに限定し、COM／HWNDはappへ渡さない。
+
+旧native回帰は1920×1152に対し1946×1223で失敗。修正後は3台を2周し、960×576→1920×1152→960×576、作業領域とgrab位置を保持した。異なるDPIのmonitorがない場合は専用のskip理由を報告する。可視の生成動画は3周で640×480→1280×960→640×480、往復前後の編集済み映像48,140画素が一致。96／192 DPIそれぞれで最大化／fullscreenからの復元寸法も確認した。fullscreen／maximizedのまま別DPIへ移す操作、全DPI比率／全media／latency・資源は未認定。
+
 ## U08: drop先monitorの作業領域とDPI（2026-09-11）
 
 画面端ではgrab位置の完全一致より、新windowの操作領域の可視性を優先する。tab／filmstripの要求はrelease点と論理grab offsetを別に保持し、sourceのUI densityでrelease点を物理screen座標へ変換する。monitorはwindow原点や矩形の最大重なりではなく、release点で選ぶ。runtimeの同期read-only境界でMonitorFromPoint／GetMonitorInfoWのrcWorkを取得し、負座標とtaskbar領域を扱う（[Microsoft MONITORINFO](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-monitorinfo)）。native handleはappへ渡さない。
@@ -8,7 +16,7 @@ hidden windowを選択monitor内へ一度配置して実際のDPI／サイズを
 
 可視の右端dropはclient (2833,231)、幅960で右端3000を793px超えた。修正後は(2040,231)へ収まり、閉じるボタン位置(2978,246)のOS hitを確認。左の192 DPIへは実cursor (-2220,277)からclient (-2420,132)、1946×1223を作業領域内へ配置し、200pxの横grab offsetを保持。主monitorのfilmstrip右下dropは(960,456)、960×576でtaskbar上の1032に収まる。大きい表示の4色点と、96 DPIの640×480へ揃えた編集済み48,140画素／未編集112,572画素も確認した。
 
-別件の未解決証拠：caption付きwindowを96→192→96 DPIへ動かすと、非表示native検証で960×576→1946×1223→989×651へ増えた。修正前の可視windowでも192 DPI時に1946×1223となるため、位置clampとは別の既存問題として追跡する。次はwinitのWM_DPICHANGEDのclient／outer調整とcustom captionの境界を確認する。全DPI比率／全media／HDR／UIA／IME／latency・資源の認定ではない。
+位置clamp時点で別件として確認した960×576→1946×1223→989×651のサイズ増加は、上記custom captionのDPI補正で対応した。ここに記録した大きい寸法は補正前の測定値である。全DPI比率／全media／HDR／UIA／IME／latency・資源の認定ではない。
 
 ## U08: filmstripから開くwindowの位置（2026-09-11）
 

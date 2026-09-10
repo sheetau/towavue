@@ -41,6 +41,7 @@ pub struct CaptionButton {
 struct CaptionState {
     fullscreen: Cell<bool>,
     drag: Cell<Option<egui::Rect>>,
+    dpi: Cell<u32>,
 }
 
 /// A UI-thread-owned DWM frame whose client title row is drawn by the application.
@@ -64,6 +65,8 @@ impl NativeCaption {
         let state = Rc::new(CaptionState {
             fullscreen: Cell::new(false),
             drag: Cell::new(None),
+            // SAFETY: live, same-thread window checked above; scalar query only.
+            dpi: Cell::new(unsafe { GetDpiForWindow(handle) }),
         });
         let callback_state = Rc::into_raw(state.clone());
         // SAFETY: the subclass owns one Rc reference, released on removal/destruction.
@@ -338,6 +341,41 @@ unsafe extern "system" fn caption_proc(
             if RemoveWindowSubclass(handle, Some(caption_proc), SUBCLASS_ID).as_bool() {
                 drop(Rc::from_raw(data as *const CaptionState));
             }
+        } else if message == WM_DPICHANGED {
+            let dpi = u32::from(wparam.0 as u16);
+            let previous_dpi = state.dpi.replace(dpi);
+            let fullscreen = state.fullscreen.get();
+            let mut client = RECT::default();
+            let size = (!fullscreen
+                && !IsZoomed(handle).as_bool()
+                && dpi != previous_dpi
+                && GetClientRect(handle, &mut client).is_ok())
+            .then(|| {
+                winit::dpi::PhysicalSize::new(client.right as u32, client.bottom as u32)
+                    .to_logical::<f64>(f64::from(previous_dpi) / 96.0)
+                    .to_physical::<u32>(f64::from(dpi) / 96.0)
+            });
+            // Keep winit's DPI state/events and suggested position. Its style-based
+            // resize adds standard-frame margins despite our WM_NCCALCSIZE override.
+            let result = DefSubclassProc(handle, message, wparam, lparam);
+            if let Some(size) = size {
+                let mut outer = RECT::default();
+                if GetWindowRect(handle, &mut outer).is_ok()
+                    && GetClientRect(handle, &mut client).is_ok()
+                {
+                    let _ = SetWindowPos(
+                        handle,
+                        None,
+                        0,
+                        0,
+                        outer.right - outer.left + size.width as i32 - client.right,
+                        outer.bottom - outer.top + size.height as i32 - client.bottom,
+                        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
+            }
+            extend_frame(handle, fullscreen);
+            return result;
         } else if message == WM_ERASEBKGND {
             let mut client = RECT::default();
             if GetClientRect(handle, &mut client).is_ok() {
@@ -378,10 +416,7 @@ unsafe extern "system" fn caption_proc(
                 (*(lparam.0 as *mut NCCALCSIZE_PARAMS)).rgrc[0].top = proposed_top;
                 return LRESULT(0);
             }
-            if matches!(
-                message,
-                WM_ACTIVATE | WM_DPICHANGED | WM_DWMCOMPOSITIONCHANGED
-            ) {
+            if matches!(message, WM_ACTIVATE | WM_DWMCOMPOSITIONCHANGED) {
                 extend_frame(handle, false);
             }
             if dwm_handled {

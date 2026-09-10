@@ -201,7 +201,14 @@ fn exercise_edge_placement(host: &mut WindowHost, event_loop: &ActiveEventLoop) 
     let window = app.window.as_ref().expect("window");
     let monitors: Vec<_> = window.available_monitors().collect();
     assert!(!monitors.is_empty());
-    for monitor in monitors {
+    let logical_size = window.inner_size().to_logical::<f64>(window.scale_factor());
+    if !monitors
+        .iter()
+        .any(|monitor| monitor.scale_factor() != window.scale_factor())
+    {
+        eprintln!("SKIP mixed-DPI size round trip: no monitor with a different DPI");
+    }
+    for monitor in monitors.iter().cycle().take(monitors.len() * 2) {
         let origin = monitor.position();
         let area = towavue_runtime_windows::monitor_work_area((origin.x + 10, origin.y + 10))
             .expect("work area");
@@ -216,6 +223,11 @@ fn exercise_edge_placement(host: &mut WindowHost, event_loop: &ActiveEventLoop) 
             let inner = window.inner_position().expect("inner position");
             let size = window.outer_size();
             let scale = window.scale_factor() as f32;
+            assert_eq!(
+                window.inner_size(),
+                logical_size.to_physical::<u32>(window.scale_factor()),
+                "DPI changes must not accumulate standard-frame margins"
+            );
             let requested = (
                 point.x - (anchor.x * scale).round() as i32 - (inner.x - position.x),
                 point.y - (anchor.y * scale).round() as i32 - (inner.y - position.y),

@@ -547,7 +547,16 @@ fn exercise_audio(host: &mut WindowHost, event_loop: &ActiveEventLoop, destinati
     );
     app.toggle_pause();
     assert_eq!(app.state, PlaybackState::Paused);
+    // Pause is queued to WASAPI, not acknowledged by toggle_pause. Match the
+    // runtime audio probe's settling interval, then prove stability before moving.
+    std::thread::sleep(Duration::from_millis(100));
     let position = app.current_position();
+    std::thread::sleep(Duration::from_millis(150));
+    assert_eq!(
+        app.current_position(),
+        position,
+        "audio must stop before transfer"
+    );
     let request = app.tab_detach_request(moved).expect("paused audio request");
     let detached = host
         .detach_tab(

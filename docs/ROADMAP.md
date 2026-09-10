@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 U07/U08 verification-clock checkpoint: native focus probeのRawInput時刻省略が仮想frame時間を実時計より先へ進めていた。旧コードで約8msの先行を直接検出し、hosted probeは通常描画と同じegui-winit時計へ統一、adapterを持たないrenderer-only fixtureは仮想時計を維持する。音声移送検証でもPause送信直後を停止完了と扱う競合を約13ms差で確認。既存runtime試験と同じ待機後に150msの停止継続を追加検査し、移送前後の完全一致は維持する。両修正後native hostは20回連続、全体チェックも通過。製品コード／UIの待機時間は変更しない。全体の無競合性・実操作のPause latencyの認定ではない。次は最大化／fullscreen状態でのmixed-DPI移動と通常caption操作を監査し、全UX台帳を継続する。
+
 2026-09-11 U01/U08 DPI-size checkpoint: custom captionで除去した標準枠がwinitのDPI resizeで再加算され、往復ごとにサイズが増える問題を修正。winit通知と位置を維持し、通常windowのclient寸法だけを旧／新DPIと実枠差で補正する。旧native回帰の1946×1223での失敗→修正後1920×1152、3台2周の端配置／サイズ保持を確認。可視3周で640×480↔1280×960、編集済み48,140画素一致、96／192 DPI各々で最大化／fullscreenから復帰。0acaaa8のCI34511626154は成功。最終全体チェックは通過したが、途中で既知のnative harness時刻逆行assertが再発したため、次に再現性を監査する。全DPI比率／最大化・fullscreen中のmonitor移動／全media／UIA・IME／style／latency・資源と全UX台帳は継続する。
 
 2026-09-11 U08 monitor-placement checkpoint: release点からmonitorの作業領域を選び、hidden配置後の実DPIで論理grabを再計算して位置をclampする。通常の手動移動とサイズ規則は変更しない。右端793pxのはみ出しと旧native回帰の失敗→修正後成功を確認。3台／96・192 DPIで端・中央、負座標／taskbar／過大windowの回帰、可視右端の閉じる領域・mixed-DPI移送・filmstrip右下と映像画素保持が通過。546f3dbのCI34509593269は成功。別件としてDPI往復で960×576→1946×1223→989×651へ増える既存サイズ問題を確認したため、次はcustom captionとwinitのDPI resizeを修正する。全UX台帳・全media／DPI比率／UIA・IME／style／latency・資源は継続する。

@@ -394,8 +394,16 @@ pub(crate) fn hardware_focus<N: Fn(AppEvent) + Send + Sync + 'static>(
         } else {
             vec![]
         };
+        // Hosted probes share the live redraw clock; renderer-only fixtures keep
+        // egui's simulated clock because they have no native input adapter.
+        let time = app.ui_state.as_mut().and_then(|state| {
+            state
+                .take_egui_input(app.window.as_ref().expect("window"))
+                .time
+        });
         let mut output = context.run_ui(
             egui::RawInput {
+                time,
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
                     egui::vec2(640.0, 480.0),
@@ -427,6 +435,17 @@ pub(crate) fn hardware_focus<N: Fn(AppEvent) + Send + Sync + 'static>(
             .render_ui(&context, output)
             .expect("render retained focus");
         renderer.present_surface().expect("present focus");
+        if let Some(state) = app.ui_state.as_mut() {
+            let native_time = state
+                .take_egui_input(app.window.as_ref().expect("window"))
+                .time
+                .expect("native clock");
+            assert!(
+                context.time() <= native_time,
+                "Focus probe advanced beyond the native clock: {} > {native_time}",
+                context.time()
+            );
+        }
     }
     eprintln!("PASS retained media focus: {label}, set={set}, native UI rendered without commands");
 }

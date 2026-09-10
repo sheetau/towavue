@@ -8,6 +8,10 @@ use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
 use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
+use windows::Win32::UI::Controls::{
+    TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TDF_ALLOW_DIALOG_CANCELLATION,
+    TDF_POSITION_RELATIVE_TO_WINDOW, TaskDialogIndirect,
+};
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::{
     FILEOPENDIALOGOPTIONS, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_OVERWRITEPROMPT,
@@ -15,8 +19,8 @@ use windows::Win32::UI::Shell::{
     IFileSaveDialog, SIGDN_FILESYSPATH,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, GetCursorPos, IDNO, IDOK, IDRETRY, IDYES, MB_DEFBUTTON2, MB_DEFBUTTON3,
-    MB_ICONWARNING, MB_OK, MB_RETRYCANCEL, MB_YESNOCANCEL, MessageBoxW,
+    GetClientRect, GetCursorPos, IDCANCEL, IDNO, IDOK, IDRETRY, IDYES, MB_DEFBUTTON2,
+    MB_DEFBUTTON3, MB_ICONWARNING, MB_OK, MB_RETRYCANCEL, MB_YESNOCANCEL, MessageBoxW,
 };
 use windows::core::{PCWSTR, w};
 
@@ -71,6 +75,7 @@ pub enum PromptButtons {
     Ok,
     RetryCancel,
     YesNoCancel,
+    ExportDiscardCancel { discard_all: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,10 +105,40 @@ pub fn show_prompt(
         move || {
             let _owner = owner;
             let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
+            if let PromptButtons::ExportDiscardCancel { discard_all } = buttons {
+                // SAFETY: this new worker owns its STA through the modal and releases it
+                // on the same thread, including errors. Native accessibility uses COM.
+                unsafe { OleInitialize(None) }?;
+                let _apartment = DialogApartment;
+                let choices = unsaved_prompt_buttons(discard_all);
+                let config = TASKDIALOGCONFIG {
+                    cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
+                    hwndParent: HWND(native_owner as *mut _),
+                    dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW,
+                    pszWindowTitle: w!("Unsaved edits - towavue"),
+                    pszMainInstruction: w!("Export edits before continuing?"),
+                    pszContent: PCWSTR(message.as_ptr()),
+                    cButtons: choices.len() as u32,
+                    pButtons: choices.as_ptr(),
+                    nDefaultButton: IDCANCEL.0,
+                    ..Default::default()
+                };
+                let mut result = IDCANCEL.0;
+                // SAFETY: the worker retains the owner, text, buttons and config until the
+                // synchronous native modal returns. Only the result crosses to the app thread;
+                // no native/COM/graphics resources or borrowed pointers leave this call.
+                unsafe { TaskDialogIndirect(&config, Some(&mut result), None, None) }?;
+                return Ok(match result {
+                    value if value == IDYES.0 => PromptResponse::Yes,
+                    value if value == IDNO.0 => PromptResponse::No,
+                    _ => PromptResponse::Cancel,
+                });
+            }
             let flags = match buttons {
                 PromptButtons::Ok => MB_OK,
                 PromptButtons::RetryCancel => MB_RETRYCANCEL | MB_DEFBUTTON2,
                 PromptButtons::YesNoCancel => MB_YESNOCANCEL | MB_DEFBUTTON3,
+                PromptButtons::ExportDiscardCancel { .. } => unreachable!("handled above"),
             } | MB_ICONWARNING;
             // The worker retains the HWND owner and UTF-16 buffer for the modal call.
             // MessageBox owns its native UI; no COM or graphics resources cross threads.
@@ -128,6 +163,27 @@ pub fn show_prompt(
         },
         notify,
     )
+}
+
+fn unsaved_prompt_buttons(discard_all: bool) -> [TASKDIALOG_BUTTON; 3] {
+    [
+        TASKDIALOG_BUTTON {
+            nButtonID: IDYES.0,
+            pszButtonText: w!("Export and continue"),
+        },
+        TASKDIALOG_BUTTON {
+            nButtonID: IDNO.0,
+            pszButtonText: if discard_all {
+                w!("Discard all edits and exit")
+            } else {
+                w!("Discard edits")
+            },
+        },
+        TASKDIALOG_BUTTON {
+            nButtonID: IDCANCEL.0,
+            pszButtonText: w!("Cancel"),
+        },
+    ]
 }
 
 fn start_dialog_worker<T: Send + 'static>(
@@ -312,6 +368,33 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn unsaved_prompt_buttons_use_explicit_actions_and_exit_scope() {
+        for all in [false, true] {
+            let buttons = unsaved_prompt_buttons(all);
+            assert_eq!(
+                buttons.map(|button| button.nButtonID),
+                [IDYES.0, IDNO.0, IDCANCEL.0]
+            );
+            assert_eq!(
+                buttons.map(|button| {
+                    let label = button.pszButtonText;
+                    // SAFETY: these labels are static, NUL-terminated w! literals.
+                    unsafe { label.to_string() }.expect("static label")
+                }),
+                [
+                    "Export and continue",
+                    if all {
+                        "Discard all edits and exit"
+                    } else {
+                        "Discard edits"
+                    },
+                    "Cancel",
+                ]
+            );
+        }
+    }
 
     #[test]
     fn audio_save_dialog_accepts_seven_types_unicode_name_and_preserves_overwrite_prompt_without_showing()

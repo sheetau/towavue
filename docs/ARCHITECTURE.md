@@ -1,5 +1,25 @@
 # towavue アーキテクチャ
 
+## U02: native modalの採用範囲（2026-09-11）
+
+草案の「可能ならnative、コード量と操作性で判断」を次のように採用する。すべてを独自UIまたはnativeへ統一すること自体は目的にしない。
+
+| 対象 | 採用と理由 |
+| --- | --- |
+| File／Folder／Save As | 既存のIFileDialogを維持。Shellの場所・形式選択と上書き確認を利用する |
+| 未保存確認、同windowのexportなし | TaskDialogIndirectで明示名の3ボタンを表示。OSが配置・Tab・既定Cancel・Escape／close・アクセシビリティを所有する。Exit時は全編集を破棄するボタン名を明示する |
+| 同windowのexport中のguard／継続保存の進捗 | eguiを維持。既存jobの進捗・cancel状態とSave無効化を直接反映し、native callbackや別threadへの進捗同期を増やさない |
+| 通常描画時のexport失敗 | eguiの有界ScrollAreaを維持。長い診断を表示しつつ狭いwindowでもOKを到達可能にする |
+| metadata／audio export／画像・動画resize／自由回転 | eguiを維持。検証・popup・非同期既存値・編集preview・世代取消を既存フォームと共有し、native controlの独自組立を増やさない |
+| graphics復旧不能／configuration警告 | 既存GPU非依存native promptを維持。未保存確認だけ同じTask Dialogへ移し、他の故障通知は既存MessageBoxを使う |
+| tooltip／メディアhover preview | eguiを維持。既存texture／UV・有界配置・入力所有権を使い、単純な文字tooltipのためだけのHWND管理を増やす利点がない |
+
+[TaskDialogIndirect](https://learn.microsoft.com/en-us/windows/win32/api/commctrl/nf-commctrl-taskdialogindirect)のCommon Controls v6要件を、appとruntime test hostのMSVC linker manifestへ埋め込む。新dependency、別配布ファイル、WinUI runtimeは追加しない。`MANIFESTDEPENDENCY`だけではRustの既定link設定でresourceが生成されなかったため、`MANIFEST:EMBED`も明示する。既存のwinit DPI初期化を変えず、native色・寸法を独自に再描画しない。
+
+runtimeの専用STA workerがownerのArcとUTF-16文字列・button配列をmodal終了まで保持する。appへ戻すのは既存の選択結果だけであり、COM／HWND／callback pointerを渡さない。[TASKDIALOGCONFIG](https://learn.microsoft.com/en-us/windows/win32/api/commctrl/ns-commctrl-taskdialogconfig)でowner中央配置と既定Cancelを指定し、既存のguard／file dialog／export継続へ接続する。通常native確認は可視window・exportなし・errorなしの場合に開始し、native promptとfile dialogの二重起動を拒否する。裏側のegui確認は描かない。非表示test hostとexport中の既存egui経路は維持する。確認の起動／worker失敗ではCancelとして編集を残し、statusへ理由を出す。自動再表示ループにしない。
+
+実Windows SDK UIAクライアントで96／192 DPIの3ボタンがButton型・Invoke対応と確認した。旧.NET UIAutomationでは同じnativeボタンがPane・patternなしと見えたため、その観測だけを実装欠陥の証拠にしない。一方で全クライアント互換とも主張しない。通常／全画面・Unicode長名・全倍率・故障時の実UI監査は引き続き必要。
+
 ## U11: fullscreen画像のselection focus（2026-09-11）
 
 画像の選択辺がfocusを持つ場合も、既存fullscreen controlsのkeyboard保持条件へ含める。status説明の表示に新しいoverlayを作らず、Exit fullscreenへのfocus要求も発生させない。既存のmodal・window focus・outside pressの優先順位を維持し、画像viewportと選択範囲は変えない。100／125／200%の全app frame回帰で4辺のUIA focus・説明・選択保持・modal抑制を確認。実UIAの96／192 DPIでも4辺を確認し、statusを除く2,016,000／3,942,400画素はfocus移動前後で一致した。音声では96／192 DPIの通常windowと192 DPIのfullscreenで1px反転枠を確認し、4数値対象のfocus前後でtimeline全画素が一致した。全比率・全UIAクライアント・全素材の監査とは区別する。
@@ -528,7 +548,7 @@ codec metadata、device、driverのいずれかがD3D11VAを成立させられ�
 
 appのmedia読み込み番号はwindow内の単調な採番元からopen（失敗を含む）と最後のtab closeごとに割り当て、再生callback・duration・waveform・hover thumbnailの結果へ付ける。保持した再生tabへ戻る時は元の番号を使い、採番元は巻き戻さない。再生通知はactiveまたは保持tabの番号へ配送し、close／path置換後の旧結果は破棄する。再生はその上でruntimeのaccepts_eventでstream世代を照合する。音声／全decode完了はSeek/recovery世代、映像の準備・decode path・device fault／VideoFailedは映像worker停止時にも進む独立世代を使う。全decode完了通知はwakeとして扱い、現在のruntime完了状態を再確認する。映像だけの復帰前にqueueへ入った完了／故障を、新しい映像へ誤適用しない。
 
-renderer再作成不能時は、GPUを使わない所有window付きnative確認を専用workerで表示する。Retryは失敗前のsource位置と再生/停止状態を使い、Cancelは編集を保持する。以後の終了要求はnativeのExport/Discard/Cancel確認から既存のSave As・background exportへ接続する。export失敗もnative通知にし、未保存編集を消さない。native確認とfile dialogは同時に一つだけとし、確認中の別操作を受け付けない。通常rendererがある場合のegui UIは変更しない。
+renderer再作成不能時は、GPUを使わない所有window付きnative確認を専用workerで表示する。Retryは失敗前のsource位置と再生/停止状態を使い、Cancelは編集を保持する。以後の終了要求はnativeのExport/Discard/Cancel確認から既存のSave As・background exportへ接続する。export失敗もnative通知にし、未保存編集を消さない。native確認とfile dialogは同時に一つだけとし、確認中の別操作を受け付けない。通常描画時の未保存確認については、上記2026-09-11 U02のnative採用契約が後継となる。
 
 native確認中にexportが完了した場合、保留された終了/移動は確認を閉じてから現在のdirty状態で再判定する。保存済みの旧tabへ再度保存を求めず、未保存tabが残ればそちらを確認する。file dialog・実行中export・未確認export errorがある間は継続せず、Cancelで取り消したguardを復活させない。
 

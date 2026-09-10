@@ -2338,6 +2338,16 @@ where
             self.show_native_fallback();
             return;
         }
+        if self.pending_guard.is_some()
+            && self.active_export.is_none()
+            && self.export_error.is_none()
+            && self
+                .window
+                .as_ref()
+                .is_some_and(|window| window.is_visible() == Some(true))
+        {
+            self.open_native_prompt(FallbackPrompt::Guard);
+        }
         let (Some(window), Some(context)) = (self.window.as_ref(), self.ui_context.clone()) else {
             return;
         };
@@ -2651,7 +2661,7 @@ where
             {
                 actions.push(UiAction::DismissExportError);
             }
-        } else if self.pending_guard.is_some() {
+        } else if self.pending_guard.is_some() && self.native_prompt.is_none() {
             self.draw_unsaved_guard(&context, actions);
         } else if self.audio_export_dialog.is_some() {
             self.show_audio_export_options(&context, actions);
@@ -6750,10 +6760,10 @@ where
             ),
             FallbackPrompt::Guard => {
                 let name = self.path.as_deref().map(display_name).unwrap_or_default();
-                let discard = if matches!(self.pending_guard, Some(GuardedAction::Exit)) {
-                    "discard ALL unsaved edits and exit"
-                } else { "discard this file's edits and continue" };
-                (format!("Graphics are unavailable. Unsaved edits: {name}\n\nYes: export this file before continuing.\nNo: {discard}.\nCancel: keep edits and stop this action.\n\nExport never overwrites the source."), PromptButtons::YesNoCancel)
+                (format!("{name}\n\nSource file unchanged. Cancel keeps your edits and stops this action."),
+                    PromptButtons::ExportDiscardCancel {
+                        discard_all: matches!(self.pending_guard, Some(GuardedAction::Exit)),
+                    })
             }
             FallbackPrompt::ExportError => (
                 format!("Export failed. Your edits are retained.\n\n{}", self.export_error.as_deref().unwrap_or_default()),
@@ -6769,7 +6779,17 @@ where
             notify(AppEvent::PromptFinished(result))
         }) {
             Ok(()) => self.native_prompt = Some(prompt),
-            Err(error) => eprintln!("towavue: native prompt failed: {error}"),
+            Err(error) => self.native_prompt_failed(prompt, error),
+        }
+    }
+
+    fn native_prompt_failed(&mut self, prompt: FallbackPrompt, error: DialogError) {
+        eprintln!("towavue: native prompt failed: {error}");
+        if matches!(prompt, FallbackPrompt::Guard) {
+            self.resolve_guard(GuardDecision::Cancel);
+            self.set_status(format!(
+                "Could not show the confirmation; edits kept: {error}"
+            ));
         }
     }
 
@@ -6781,7 +6801,7 @@ where
         let response = match result {
             Ok(response) => response,
             Err(error) => {
-                eprintln!("towavue: native prompt failed: {error}");
+                self.native_prompt_failed(prompt, error);
                 return;
             }
         };
@@ -14850,6 +14870,54 @@ mod tests {
                     source_bytes
                 );
             }
+        }
+    }
+
+    #[test]
+    fn native_guard_cancel_or_failure_keeps_edits_without_reopening_or_duplicate_modal() {
+        let Some(_root) = isolated_test_root(
+            "tests::native_guard_cancel_or_failure_keeps_edits_without_reopening_or_duplicate_modal",
+        ) else {
+            return;
+        };
+        for failure in [false, true] {
+            let context = fonts::test_context();
+            context.enable_accesskit();
+            let mut app = Application::new(None, |_| {}).expect("headless application");
+            let path = PathBuf::from("edited.png");
+            let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+            app.path = Some(path);
+            app.media_kind = Some(MediaKind::Image);
+            app.edits
+                .entry(tab)
+                .or_default()
+                .push(EditOperation::RotateClockwise, MediaKind::Image);
+            let edits = app.edits.clone();
+            app.pending_guard = Some(GuardedAction::Exit);
+            app.native_prompt = Some(FallbackPrompt::Guard);
+            assert!(app.modal_input_blocked());
+            let output = context.run_ui(egui::RawInput::default(), |ui| {
+                let mut actions = Vec::new();
+                app.draw_ui(ui, &mut actions);
+                assert!(actions.is_empty());
+            });
+            let tree = output.platform_output.accesskit_update.expect("tree");
+            assert!(
+                !tree
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.role() == egui::accesskit::Role::Dialog)
+            );
+            app.finish_native_prompt(if failure {
+                Err(DialogError::ThreadStopped)
+            } else {
+                Ok(PromptResponse::Cancel)
+            });
+            assert!(app.native_prompt.is_none() && app.pending_guard.is_none());
+            assert!(!app.modal_input_blocked() && !app.exit_requested);
+            assert_eq!(app.edits, edits);
+            assert_eq!(app.tabs.active().expect("retained tab").id, tab);
+            assert!(app.active_export.is_none() && app.pending_dialog.is_none());
         }
     }
 

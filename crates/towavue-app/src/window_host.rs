@@ -215,10 +215,20 @@ impl WindowHost {
         source: WindowKey,
         request: &tab_transfer::DetachRequest,
         visible: bool,
+        client_position: winit::dpi::PhysicalPosition<i32>,
     ) -> Result<WindowKey, String> {
         self.detach_tab_with(source, request, visible, |app, device| {
             app.start_on_device(event_loop, Some(device), false)
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+            let window = app.window.as_ref().expect("started window");
+            let inner = window.inner_position().map_err(|error| error.to_string())?;
+            let outer = window.outer_position().map_err(|error| error.to_string())?;
+            // Position the hidden client before publishing the transferred tab.
+            window.set_outer_position(winit::dpi::PhysicalPosition::new(
+                client_position.x - (inner.x - outer.x),
+                client_position.y - (inner.y - outer.y),
+            ));
+            Ok(())
         })
     }
 

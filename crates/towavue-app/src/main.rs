@@ -201,7 +201,7 @@ enum UiAction {
     ),
     Volume(TabId, f32),
     CloseTab(TabId),
-    DropTab(TabId, egui::Pos2),
+    DropTab(TabId, egui::Pos2, egui::Vec2),
     OpenMedia(PathBuf, bool),
     OpenWindow(PathBuf, u64),
     Seek(MediaTime),
@@ -688,7 +688,7 @@ struct Application<N> {
     window_key: Option<window_host::WindowKey>,
     playback_origin: Option<(window_host::WindowKey, u64)>,
     pending_window_open: Option<window_open::Request>,
-    pending_tab_drop: Option<(tab_transfer::DetachRequest, egui::Pos2)>,
+    pending_tab_drop: Option<(tab_transfer::DetachRequest, egui::Pos2, egui::Vec2)>,
     incoming_tab_pointer: Option<egui::Pos2>,
     hosted_graphics: bool,
     graphics_recovery_request: Option<window_host::GraphicsRecoveryRequest>,
@@ -4744,7 +4744,7 @@ where
                 }
             }
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
-            UiAction::DropTab(id, point) => self.request_tab_drop(id, point),
+            UiAction::DropTab(id, point, anchor) => self.request_tab_drop(id, point, anchor),
             UiAction::OpenWindow(path, generation) => {
                 self.request_filmstrip_window(path, generation)
             }
@@ -10538,7 +10538,11 @@ mod tests {
             (
                 egui::pos2(-20.0, 90.0),
                 false,
-                Some(UiAction::DropTab(a, egui::pos2(-20.0, 90.0))),
+                Some(UiAction::DropTab(
+                    a,
+                    egui::pos2(-20.0, 90.0),
+                    egui::vec2(70.0, 14.0),
+                )),
             ),
         ] {
             app.tabs = original.clone();

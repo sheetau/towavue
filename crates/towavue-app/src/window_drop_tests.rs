@@ -155,6 +155,60 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .expect("Welcome insertion");
     assert_eq!(host.windows[&welcome].tabs.tabs()[0].id, returned);
     assert_eq!(host.windows[&welcome].edits[&returned], edits);
+    let app = host.windows.get_mut(&welcome).expect("Welcome source");
+    for _ in 0..3 {
+        frame(app, true, vec![]);
+    }
+    let start = tab_drag::tests::label_center(app, returned);
+    let outside = egui::pos2(-40.0, 90.0);
+    let origin = app
+        .window
+        .as_ref()
+        .expect("window")
+        .inner_position()
+        .expect("origin");
+    let density = app.ui_context.as_ref().expect("context").pixels_per_point();
+    let expected = winit::dpi::PhysicalPosition::new(
+        origin.x + ((outside.x - start.x) * density).round() as i32,
+        origin.y + ((outside.y - start.y) * density).round() as i32,
+    );
+    frame(
+        app,
+        true,
+        vec![egui::Event::PointerMoved(start), pointer(start, true)],
+    );
+    frame(app, true, vec![egui::Event::PointerMoved(outside)]);
+    frame(app, true, vec![pointer(outside, false)]);
+    assert!(app.pending_tab_drop.is_some());
+    let previous: Vec<_> = host.windows.keys().copied().collect();
+    host.update_tab_drops_with(event_loop, false, |_, _, _| None);
+    let detached = *host
+        .windows
+        .keys()
+        .find(|key| !previous.contains(key))
+        .expect("detached window");
+    let app = &host.windows[&detached];
+    assert_eq!(
+        app.window
+            .as_ref()
+            .expect("window")
+            .inner_position()
+            .expect("position"),
+        expected,
+        "detached client must preserve the grabbed tab offset at the release point"
+    );
+    let moved = app.tabs.active().expect("detached tab").id;
+    assert_eq!(app.edits[&moved], edits);
+    assert!(Arc::ptr_eq(
+        &app.image.as_ref().expect("image").decoded,
+        &decoded
+    ));
+    assert!(host.windows[&welcome].tabs.tabs().is_empty());
+    host.windows
+        .get_mut(&detached)
+        .expect("detached")
+        .exit_requested = true;
+    host.remove_closed();
     assert_eq!(host.windows[&target].tabs.tabs(), target_tabs.tabs());
     host.windows
         .get_mut(&target)

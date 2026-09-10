@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U08: タブ分離時の位置保持（2026-09-11）
+
+外dropにはrelease座標と、先頭slotへ移した時のgrab offsetを引き継ぐ。sourceのclient原点とUI densityから新windowのclient原点を物理座標へ変換し、hidden HWNDのclient／outer差を補正して、state移送と表示の前に配置する。sourceの元tab indexやscroll量は新windowの位置へ持ち込まない。位置取得を含む初期化の失敗時は既存のrollback経路で新windowを片付け、元tabを保持する。結合側のOS topmost root照合とgap選択は変更しない。
+
+可視の生成動画で、release (973,246)に対し既定位置(234,234)へ開く旧挙動を確認した。修正後の先頭tabはgrab (100,15)を保つclient原点(873,231)、2番目tabはslot間の2pxを除いたgrab (98,15)に対応する(875,231)へ開く。未保存90度回転・foregroundと、640×480へ揃えた映像48,140画素の一致を確認。所有する別processの空windowで結合先を覆うと新windowへ分離し、覆いを外すと結合する。tab tooltipが重なったcaptureは全面画素一致の証拠に使わない。これは単一monitorでの確認であり、mixed-DPI／monitor端／全media／遅延・資源matrixは未完。
+
 ## U08: 可視の結合操作と末尾の空白drop（2026-09-11）
 
 incoming tabのdrop領域は、実際のtab stripに加えて、その右のnative window-drag空白まで含める。空白では末尾gapを選び、挿入線は可視stripの右端へ置く。caption controlsの予約幅は除外する。これはdrop判定だけの拡張であり、通常のnative drag hit region、local tab並べ替え、tab幅／scroll領域は変更しない。空白でのincoming hoverは端scrollを開始せず、既存のclipped strip内の端scrollは維持する。media／logo／caption／modalと古いlayoutの拒否を維持する。

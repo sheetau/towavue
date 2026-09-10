@@ -18,16 +18,16 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .is_some_and(|context| !egui::Popup::is_any_open(context))
     }
 
-    pub(crate) fn request_tab_drop(&mut self, id: TabId, point: egui::Pos2) {
+    pub(crate) fn request_tab_drop(&mut self, id: TabId, point: egui::Pos2, anchor: egui::Vec2) {
         if !self.hosted_graphics {
             self.request_guarded(GuardedAction::DetachTab(id));
             return;
         }
-        if !self.accepts_tab_drop() || !point.is_finite() {
+        if !self.accepts_tab_drop() || !point.is_finite() || !anchor.is_finite() {
             return;
         }
         match self.tab_detach_request(id) {
-            Ok(request) => self.pending_tab_drop = Some((request, point)),
+            Ok(request) => self.pending_tab_drop = Some((request, point, anchor)),
             Err(error) => self.set_status(format!("Could not move tab: {error}")),
         }
     }
@@ -67,6 +67,26 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 }
 
 impl WindowHost {
+    fn detached_client_position(
+        &self,
+        source: WindowKey,
+        point: egui::Pos2,
+        anchor: egui::Vec2,
+    ) -> Result<winit::dpi::PhysicalPosition<i32>, String> {
+        let app = self.windows.get(&source).ok_or("source window is closed")?;
+        let window = app.window.as_ref().ok_or("source window is not ready")?;
+        let origin = window.inner_position().map_err(|error| error.to_string())?;
+        let density = app
+            .ui_context
+            .as_ref()
+            .ok_or("source UI is not ready")?
+            .pixels_per_point();
+        Ok(winit::dpi::PhysicalPosition::new(
+            origin.x + ((point.x - anchor.x) * density).round() as i32,
+            origin.y + ((point.y - anchor.y) * density).round() as i32,
+        ))
+    }
+
     fn window_at_drop(
         &self,
         source: WindowKey,
@@ -123,7 +143,7 @@ impl WindowHost {
             .iter_mut()
             .filter_map(|(key, app)| app.pending_tab_drop.take().map(|request| (*key, request)))
             .collect();
-        for (source, (request, point)) in pending {
+        for (source, (request, point, anchor)) in pending {
             let result = if let Some((target, point)) = pick(self, source, point) {
                 self.merge_tab_drop(source, &request, target, point)
                     .map(|_| {
@@ -132,7 +152,10 @@ impl WindowHost {
                         }
                     })
             } else {
-                self.detach_tab(event_loop, source, &request, visible)
+                self.detached_client_position(source, point, anchor)
+                    .and_then(|position| {
+                        self.detach_tab(event_loop, source, &request, visible, position)
+                    })
                     .map(|_| ())
             };
             if let Err(error) = result

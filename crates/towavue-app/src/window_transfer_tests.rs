@@ -257,7 +257,11 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     host.windows
         .get_mut(&source)
         .expect("source")
-        .handle_ui_action(UiAction::DropTab(returned, egui::pos2(-20.0, 90.0)));
+        .handle_ui_action(UiAction::DropTab(
+            returned,
+            egui::pos2(-20.0, 90.0),
+            egui::vec2(100.0, 15.0),
+        ));
     host.update_tab_drops_with(event_loop, false, |_, _, _| None);
     assert_eq!(host.windows.len(), 3);
     let detached = *host
@@ -405,7 +409,11 @@ fn exercise_images(
     host.windows
         .get_mut(&source)
         .expect("source")
-        .handle_ui_action(UiAction::DropTab(id, egui::pos2(-20.0, 90.0)));
+        .handle_ui_action(UiAction::DropTab(
+            id,
+            egui::pos2(-20.0, 90.0),
+            egui::vec2(100.0, 15.0),
+        ));
     host.update_tab_drops_with(event_loop, false, |_, _, _| None);
     let detached = *host
         .windows
@@ -542,7 +550,13 @@ fn exercise_audio(host: &mut WindowHost, event_loop: &ActiveEventLoop, destinati
     let position = app.current_position();
     let request = app.tab_detach_request(moved).expect("paused audio request");
     let detached = host
-        .detach_tab(event_loop, destination, &request, false)
+        .detach_tab(
+            event_loop,
+            destination,
+            &request,
+            false,
+            winit::dpi::PhysicalPosition::new(100, 80),
+        )
         .expect("detach paused audio");
     let app = host.windows.get_mut(&detached).expect("detached audio");
     assert_eq!(app.state, PlaybackState::Paused);

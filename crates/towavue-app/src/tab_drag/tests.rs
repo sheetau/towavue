@@ -79,6 +79,50 @@ pub(crate) fn label_center<N>(app: &Application<N>, tab: TabId) -> egui::Pos2 {
 }
 
 #[test]
+fn detached_tabs_keep_the_grab_offset_in_the_first_slot() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::detached_tabs_keep_the_grab_offset_in_the_first_slot",
+    ) else {
+        return;
+    };
+    for width in [480.0, 960.0, 1440.0] {
+        for density in [1.0, 1.25, 2.0] {
+            for index in 0..3 {
+                let mut app = setup(&root);
+                app.ui_context
+                    .as_ref()
+                    .expect("context")
+                    .set_pixels_per_point(density);
+                let size = egui::vec2(width, 576.0);
+                for _ in 0..3 {
+                    frame(&mut app, size, true, vec![]);
+                }
+                let layout = state(&app);
+                let (tab, _, rect) = layout.widgets[index];
+                let strip = layout.strip.expect("strip");
+                let start = rect.intersect(strip).center();
+                let anchor = strip.min.to_vec2() + (start - rect.min);
+                let outside = egui::pos2(width + 80.0, 110.0);
+                let tabs = app.tabs.clone();
+                frame(&mut app, size, true, vec![pointer(start, true)]);
+                let (_, actions) = frame(
+                    &mut app,
+                    size,
+                    true,
+                    vec![egui::Event::PointerMoved(outside), pointer(outside, false)],
+                );
+                assert!(
+                    actions == vec![UiAction::DropTab(tab, outside, anchor)],
+                    "tab {index} at width {width}, density {density}"
+                );
+                assert_eq!(app.tabs, tabs);
+                assert!(frame(&mut app, size, true, vec![]).1.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
 fn incoming_tabs_show_clipped_gaps_and_reject_stale_layouts_without_activation() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_drag::tests::incoming_tabs_show_clipped_gaps_and_reject_stale_layouts_without_activation",
@@ -458,7 +502,7 @@ fn tab_drag_batched_move_release_still_commits_once() {
         true,
         vec![egui::Event::PointerMoved(outside), pointer(outside, false)],
     );
-    assert!(actions == vec![UiAction::DropTab(original[0].0, outside)]);
+    assert!(actions == vec![UiAction::DropTab(original[0].0, outside, start.to_vec2())]);
     assert!(frame(&mut app, size, true, vec![]).1.is_empty());
     // All three events may arrive between paints; the original press still owns the move.
     let (_, actions) = frame(

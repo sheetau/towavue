@@ -8,6 +8,7 @@ struct Drag {
     tab: TabId,
     widget: egui::Id,
     offset: egui::Vec2,
+    detached_anchor: egui::Vec2,
     origin: egui::Pos2,
     crossed: bool,
     tabs: Vec<(TabId, PathBuf)>,
@@ -106,6 +107,7 @@ impl Layout {
                 tab: *tab,
                 widget: *widget,
                 offset: origin - rect.min,
+                detached_anchor: strip.min.to_vec2() + (origin - rect.min),
                 origin,
                 crossed: false,
                 tabs: tabs.clone(),
@@ -224,6 +226,7 @@ impl Layout {
                         drag.tab,
                         ui.input(|input| input.pointer.interact_pos())
                             .expect("release point"),
+                        drag.detached_anchor,
                     ))
                 } else {
                     None

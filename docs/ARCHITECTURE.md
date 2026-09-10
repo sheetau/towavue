@@ -1,6 +1,10 @@
 # towavue アーキテクチャ
 
-## V05: 動画resize／resample採用契約（2026-09-10、接続作業中）
+## V05: 動画resize／resample採用契約（2026-09-10、UI接続済み）
+
+UI接続方針: 動画の回転・resizeでsource／tab／世代／orientation／編集列／device寸法上限のsnapshot照合を共有する。画像と寸法・比率・4filterの入力部品を共用し、動画だけは入力SARを含めた表示比率と偶数格子を使う。動画resize専用commandをtimeline内Ctrl+R／Edit menuへ追加し、既存custom bindingは維持する。右下の入力透過でない透明backdrop modalで全canvasのGPU previewを表示し、Apply前のsnapshot／budget照合、Cancel／identity非編集、focus復帰とUndo/Redoを回転と同じ契約にする。
+
+2026-09-10 13:23接続結果: 上記UIと共通snapshotを実装。linked寸法は入力SARを含む元の表示比率から最近傍2pxへ丸めるが、手入力の奇数寸法は黙って修正せずApplyを無効にする。初期寸法も偶数へ丸め、SAR正規化と実出力比率を表示する。古いdialog token・対象snapshotは破棄し、Cancel／identityはview・selection・履歴を変えない。有効なApplyだけ既存visual editへ渡し、表示をFitへ戻す。previewは確定済み編集の後ろへ一時ResizeVideoを付けた同一device rasterであり、描画passと同じframeのgeometry／UVを使う。共有filter候補はpointerだけでなくkeyboard／UIAの確定でも閉じる。通常window／mixed-DPI／全素材認定と全台帳の残件は保持する。
 
 動画の画素resizeは表示zoomと区別し、専用VideoResizeへ操作直前のsample寸法／SAR、指定出力寸法、補間方式を保持する。出力は指定どおりの偶数幅・高さ（各16～16384px、128M pixels以内）、SAR1とし、encoderの都合で黙ってpadding／cropしない。入力の奇数寸法は許可する。元がSAR1かつ同寸法なら補間方式によらず非編集とする。SARだけが異なる場合は同寸法でも表示比率変更として一件の編集になる。UIは元の表示比率を保持する設定を既定にし、丸め後の寸法と比率を表示してApply前に確認できるようにする。 同梱OpenH264の実exportで16px未満の拒否を確認したため、最小寸法は既存動画cropと同じ16pxへ揃える。
 

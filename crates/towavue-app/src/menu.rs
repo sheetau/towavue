@@ -25,7 +25,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         &[
             &[Undo, Redo],
             &[CopyImage],
-            &[ResizeImage],
+            &[ResizeImage, ResizeVideo],
             &[FreeRotateImage, FreeRotateVideo],
             &[SelectAll, ApplyCrop, ClearSelection],
             &[
@@ -575,9 +575,17 @@ mod tests {
             (
                 "Edit",
                 1,
-                2,
+                3,
                 "free_rotate_video",
                 FreeRotateVideo,
+                towavue_core::MediaKind::Video,
+            ),
+            (
+                "Edit",
+                1,
+                2,
+                "resize_video",
+                ResizeVideo,
                 towavue_core::MediaKind::Video,
             ),
         ] {

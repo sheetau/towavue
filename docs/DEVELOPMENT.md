@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### 動画resizeの操作UI（2026-09-10 13:23、V05 partial）
+
+timeline表示中のCtrl+R／Edit menu「Resize / resample video」で右下dialogを開く。幅・高さ／Keep aspect ratio／4filterを画像と共有し、動画では元のSARを含む表示比率と2px格子を使う。初期値は正方形ピクセル化した偶数寸法、連動辺は最近傍2pxへ丸め、手入力の奇数は拒否する。実出力寸法と比率を表示し、GPU budgetを含む検証失敗時はApply不可。previewは現在の履歴の後ろへ一時resizeを付けて全canvasをFit表示し、同じframeのgeometry／UVとGPU処理を使う。
+
+回転と共通のVideoEditSnapshotがtab／path／media・playback世代／frame寸法・SAR／orientation／履歴／device上限を検証する。古いtokenのactionは新dialogを閉じず、stale snapshotを取消する。Cancel／Escapeとidentityは選択・view・履歴を変えず、Applyだけ一件の履歴を作ってFitへ戻す。既存のmodal入力制限・離脱guard・focus復帰を使い、palette／grid経由でもoverlayを閉じてから表示する。Undo/Redoの事前GPU検証もresizeを含める。再生位置・世代・再生／停止は変更しない。
+
+新規3 testsと既存fixture拡張で、default SAR／odd寸法、linked幅・高さ、UIAによる4filter選択、寸法／GPU予算拒否、320×300でのEscape、timeline専用binding・custom prefix・設定往復・画像／音声のCtrl+R維持を検証。実FFV1 fixtureではCtrl+R・プレビュー／不正入力5件・Cancel／focus・overlay／古いtoken・Apply／Undo/Redo／identity・snapshot変更4件と保存再読込全5frameの96×64／SAR1・再生状態不変を確認。既存回転／crop後にresizeして合成する。実D3D11VAの復旧前後10点でも新UIのpreviewと取消が成功し、CPU transfer0を維持した。
+
+UIAのfilter選択後に候補が閉じない既存共有部品の挙動を再現し、selectableのclickedで明示closeして4方式の連続選択を回帰確認。最初の全体試験は新menu項目による既存keyboard試験の固定移動数の不一致を検出し、期待位置を更新してResizeVideo自身のEnter dispatchも追加した。最終session9078はfmt check／Clippy／workspace444（app253／core61／runtime126／integration4）、app opt-in5件、Releaseが終了0。SKIPなし、通常ignored12は別計上。Release SHA-256 `0056bb7195f2eb2850a86b9ab66768f480729bc4a9114cef8d5bc7f842aac540`。先行6e6a1c2のCI34436073797は成功。
+
+新しいunsafe／runtime／dependency／vendor／DLL変更、外部foreground入力／clipboard／配布・導入は行わない。これはhidden-owned-windowの実GPU/UIAとheadless入力の確認であり、通常windowの最終外観／物理入力・混在DPI／全素材品質／持続性能の認定ではない。全台帳の残件を保持し、次は草案の音声frame相当操作を現在の時間編集・Seek契約へ照合する。
+
 ### 動画resize／resampleのGPU基盤（2026-09-10 13:06、V05 UI未接続）
 
 横／縦のseparable GPU passを追加した。横中間はRGBA16 floatで負値とovershootを保ち、最終RGBA8でclampする。4filterの係数はsource／target長とfilter別に一度生成・uploadし、同一deviceのRG32 float textureを再利用する。geometry検証はspecだけを扱い、textureと係数payloadを合計512 MiBへ制限する。履歴変更時は旧poolを解放してから新規確保し、直前sourceとtargetを分離・pass後にunbindする。極端な縦横比では出力が許容寸法でも横中間の予算超過で拒否する。動画の操作UIは次の工程であり、このcheckpointではapp入口の拒否を維持する。

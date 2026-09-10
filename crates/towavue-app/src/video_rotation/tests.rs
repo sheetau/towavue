@@ -39,6 +39,7 @@ pub(crate) fn hardware_dialog_preview<N: Fn(AppEvent) + Send + Sync + 'static>(
     assert_eq!(app.generation, generation);
     drag_tests::preview_cancel(app);
     view_tests::exercise(app, false);
+    video_resize::tests::exercise(app, false);
     let size = app.window.as_ref().expect("owned window").inner_size();
     app.renderer
         .as_mut()
@@ -59,7 +60,7 @@ pub(crate) fn hardware_dialog_preview<N: Fn(AppEvent) + Send + Sync + 'static>(
     );
 }
 
-fn frame<N: Fn(AppEvent) + Send + Sync + 'static>(
+pub(crate) fn frame<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
     events: Vec<egui::Event>,
 ) -> egui::accesskit::TreeUpdate {
@@ -129,7 +130,7 @@ fn frame_input<N: Fn(AppEvent) + Send + Sync + 'static>(
     tree
 }
 
-fn node(tree: &egui::accesskit::TreeUpdate, label: &str) -> egui::accesskit::NodeId {
+pub(crate) fn node(tree: &egui::accesskit::TreeUpdate, label: &str) -> egui::accesskit::NodeId {
     tree.nodes
         .iter()
         .find(|(_, node)| node.label() == Some(label))
@@ -137,7 +138,7 @@ fn node(tree: &egui::accesskit::TreeUpdate, label: &str) -> egui::accesskit::Nod
         .unwrap_or_else(|| panic!("missing UIA node {label}"))
 }
 
-fn access(target_node: egui::accesskit::NodeId, value: Option<&str>) -> egui::Event {
+pub(crate) fn access(target_node: egui::accesskit::NodeId, value: Option<&str>) -> egui::Event {
     egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
         action: if value.is_some() {
             egui::accesskit::Action::SetValue
@@ -512,6 +513,7 @@ fn video_rotation_modal_previews_commits_crops_undoes_and_exports_without_changi
             assert_eq!(count, 5);
             drag_tests::exercise(&mut app);
             view_tests::exercise(&mut app, true);
+            video_resize::tests::exercise(&mut app, true);
             assert_eq!(
                 std::fs::read(&self.source).expect("unchanged source"),
                 bytes
@@ -572,20 +574,22 @@ fn video_angle_validation_and_compact_modal_keep_budget_failures_uncommittable()
     let mut tabs = TabSet::default();
     let mut dialog = VideoRotationDialog {
         token: 1,
-        tab: tabs.open_new(path.clone(), MediaKind::Video),
-        path,
-        media_generation: 0,
-        generation: PlaybackGeneration::default(),
-        source: (8, 6, 1.0),
-        orientation: VideoOrientation::default(),
-        max_side: 16384,
-        operations: vec![],
-        geometry: (8, 6, 1.0),
+        snapshot: video_edit::VideoEditSnapshot {
+            tab: tabs.open_new(path.clone(), MediaKind::Video),
+            path,
+            media_generation: 0,
+            generation: PlaybackGeneration::default(),
+            source: (8, 6, 1.0),
+            orientation: VideoOrientation::default(),
+            max_side: 16384,
+            operations: vec![],
+            geometry: (8, 6, 1.0),
+        },
         angle: "31.74".into(),
         first_frame: true,
     };
     assert_eq!(dialog.value().expect("rounded").tenths(), 317);
-    dialog.max_side = 8;
+    dialog.snapshot.max_side = 8;
     assert!(dialog.value().expect_err("budget").contains("budget"));
     dialog.angle = "0".into();
     assert_eq!(

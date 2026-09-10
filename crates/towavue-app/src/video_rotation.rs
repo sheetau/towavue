@@ -1,21 +1,15 @@
 use crate::*;
 use towavue_core::VideoRotation;
-use towavue_runtime_windows::{VideoOrientation, video_edit_geometry};
+#[cfg(test)]
+use towavue_runtime_windows::VideoOrientation;
+use towavue_runtime_windows::video_edit_geometry;
 
 mod drag;
 pub(super) use drag::VideoRotationDrag;
 
 pub(super) struct VideoRotationDialog {
     token: u64,
-    tab: TabId,
-    path: PathBuf,
-    media_generation: u64,
-    generation: PlaybackGeneration,
-    source: (u32, u32, f32),
-    orientation: VideoOrientation,
-    max_side: usize,
-    operations: Vec<EditOperation>,
-    geometry: (u32, u32, f32),
+    snapshot: video_edit::VideoEditSnapshot,
     angle: String,
     first_frame: bool,
 }
@@ -31,21 +25,12 @@ impl VideoRotationDialog {
             .ok_or("Use a finite angle from -180 to 180 degrees")?;
         let value = VideoRotation::new(
             (angle * 10.0).round() as i16,
-            (self.geometry.0, self.geometry.1),
-            self.geometry.2,
+            (self.snapshot.geometry.0, self.snapshot.geometry.1),
+            self.snapshot.geometry.2,
         )
         .ok_or("The rotated canvas exceeds the image size limit")?;
         if value.tenths() != 0 {
-            let mut edits = self.operations.clone();
-            edits.push(EditOperation::RotateVideo(value));
-            video_edit_geometry(
-                (self.source.0, self.source.1),
-                self.source.2,
-                self.orientation,
-                &edits,
-                self.max_side,
-            )
-            .map_err(|error| error.to_string())?;
+            self.snapshot.validate(EditOperation::RotateVideo(value))?;
         }
         Ok(value)
     }
@@ -143,13 +128,15 @@ impl VideoRotationDialog {
 }
 
 pub(super) fn uses_raster(operations: &[EditOperation]) -> bool {
-    operations.iter().any(
-        |operation| matches!(operation, EditOperation::RotateVideo(value) if value.tenths() != 0),
-    )
+    operations.iter().any(|operation| match operation {
+        EditOperation::RotateVideo(value) => value.tenths() != 0,
+        EditOperation::ResizeVideo(value) => !value.is_identity(),
+        _ => false,
+    })
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
-    fn video_operations(&self) -> &[EditOperation] {
+    pub(super) fn video_operations(&self) -> &[EditOperation] {
         self.tabs
             .active()
             .and_then(|tab| self.edits.get(&tab.id))
@@ -163,10 +150,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let session = self
             .session
             .as_ref()
-            .ok_or("Wait for video to load before rotating")?;
+            .ok_or("Wait for video to load before editing")?;
         let (width, height, aspect) = session
             .video_geometry()
-            .ok_or("Wait for a video frame before rotating")?;
+            .ok_or("Wait for a video frame before editing")?;
         let max_side = self
             .renderer
             .as_ref()
@@ -197,57 +184,24 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .ui_context
             .as_ref()
             .and_then(|context| context.memory(egui::Memory::focused))
-            .map(|focus| (dialog.tab, focus));
+            .map(|focus| (dialog.snapshot.tab, focus));
         self.video_rotation_dialog = Some(dialog);
         self.request_redraw();
     }
 
     fn capture_video_rotation(&mut self) -> Result<VideoRotationDialog, String> {
-        let geometry = self.validate_video_operations(self.video_operations())?;
-        let tab = self.tabs.active().ok_or("Video tab is unavailable")?;
-        let path = self.path.as_ref().ok_or("Video path is unavailable")?;
-        let session = self.session.as_ref().expect("validated video session");
-        let renderer = self.renderer.as_ref().expect("validated renderer");
+        let snapshot = self.capture_video_edit()?;
         self.rotation_generation = self.rotation_generation.wrapping_add(1);
         Ok(VideoRotationDialog {
             token: self.rotation_generation,
-            tab: tab.id,
-            path: path.clone(),
-            media_generation: self.media_generation,
-            generation: self.generation,
-            source: session.video_geometry().expect("validated frame"),
-            orientation: session.video_orientation().unwrap_or_default(),
-            max_side: renderer.max_texture_side(),
-            operations: self.video_operations().to_vec(),
-            geometry,
+            snapshot,
             angle: "0.0".into(),
             first_frame: true,
         })
     }
 
     fn video_rotation_is_current(&self, dialog: &VideoRotationDialog) -> bool {
-        self.media_kind == Some(MediaKind::Video)
-            && self.timeline_open
-            && !self.fullscreen
-            && self.tabs.active().is_some_and(|tab| tab.id == dialog.tab)
-            && self.path.as_ref() == Some(&dialog.path)
-            && self.media_generation == dialog.media_generation
-            && self.generation == dialog.generation
-            && self.video_operations() == dialog.operations
-            && self
-                .session
-                .as_ref()
-                .and_then(PlaybackSession::video_geometry)
-                == Some(dialog.source)
-            && self
-                .session
-                .as_ref()
-                .and_then(PlaybackSession::video_orientation)
-                == Some(dialog.orientation)
-            && self
-                .renderer
-                .as_ref()
-                .is_some_and(|renderer| renderer.max_texture_side() == dialog.max_side)
+        self.video_edit_is_current(&dialog.snapshot)
     }
 
     pub(super) fn cancel_stale_video_rotation(&mut self) {
@@ -295,8 +249,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     fn commit_video_rotation(&mut self, dialog: VideoRotationDialog, value: Option<VideoRotation>) {
         if let Some(value) = value {
             if self.video_rotation_is_current(&dialog)
-                && value.source_size() == (dialog.geometry.0, dialog.geometry.1)
-                && value.source_pixel_aspect() == dialog.geometry.2
+                && value.source_size() == (dialog.snapshot.geometry.0, dialog.snapshot.geometry.1)
+                && value.source_pixel_aspect() == dialog.snapshot.geometry.2
             {
                 self.push_visual_edit(EditOperation::RotateVideo(value));
             } else {
@@ -311,6 +265,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         size: (u32, u32),
     ) -> (ImageTransform, Option<Vec<EditOperation>>) {
         let mut operations = self.video_operations().to_vec();
+        if let Some(value) = self.video_resize_preview() {
+            operations.push(EditOperation::ResizeVideo(value));
+        }
         if let Some(dialog) = self
             .video_rotation_dialog
             .as_ref()

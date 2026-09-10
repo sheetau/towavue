@@ -34,6 +34,8 @@ mod timeline_input;
 mod trim;
 #[cfg(test)]
 mod video_context_tests;
+mod video_edit;
+mod video_resize;
 mod video_rotation;
 mod video_view;
 mod welcome;
@@ -176,6 +178,7 @@ enum UiAction {
     FinishResize(Option<towavue_core::ImageResize>),
     FinishRotation(u64, Option<towavue_core::ImageRotation>),
     FinishVideoRotation(u64, Option<towavue_core::VideoRotation>),
+    FinishVideoResize(u64, Option<towavue_core::VideoResize>),
 }
 
 enum AppEvent {
@@ -670,6 +673,7 @@ struct Application<N> {
     resize_dialog: Option<resize::ResizeDialog>,
     rotation_dialog: Option<rotation::RotationDialog>,
     video_rotation_dialog: Option<video_rotation::VideoRotationDialog>,
+    video_resize_dialog: Option<video_resize::VideoResizeDialog>,
     video_raster_operations: Option<Vec<EditOperation>>,
     rotation_generation: u64,
     rotation_drag: Option<rotation::RotationDrag>,
@@ -848,6 +852,7 @@ where
             resize_dialog: None,
             rotation_dialog: None,
             video_rotation_dialog: None,
+            video_resize_dialog: None,
             video_raster_operations: None,
             rotation_generation: 0,
             rotation_drag: None,
@@ -2197,6 +2202,7 @@ where
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         self.cancel_stale_video_rotation();
+        self.cancel_stale_video_resize();
         self.video_raster_operations = None;
         self.image_seek_preview_active = false;
         self.video_rect = None;
@@ -2373,6 +2379,8 @@ where
             }
         } else if self.pending_guard.is_some() {
             self.draw_unsaved_guard(&context, actions);
+        } else if self.video_resize_dialog.is_some() {
+            self.show_video_resize(&context, actions);
         } else if self.video_rotation_dialog.is_some() {
             self.show_video_rotation(&context, actions);
         } else if let Some(dialog) = &mut self.rotation_dialog {
@@ -2685,12 +2693,14 @@ where
             ui.id().with("video-edit-surface"),
             egui::Sense::click_and_drag(),
         );
-        let rotation = if self.video_rotation_dialog.is_none() {
+        let rotation = if self.video_rotation_dialog.is_none() && self.video_resize_dialog.is_none()
+        {
             self.update_video_rotation_drag(ui, &response, full)
         } else {
             rotation::RotationResponse::Inactive
         };
         if self.video_rotation_dialog.is_none()
+            && self.video_resize_dialog.is_none()
             && matches!(rotation, rotation::RotationResponse::Inactive)
         {
             self.update_video_view(ui, &response, full);
@@ -2698,7 +2708,9 @@ where
         let (transform, operations) = self.video_presentation((width, height));
         self.video_raster_operations = operations;
         let size = (transform.size.0 as u32, transform.size.1 as u32);
-        let preview = self.video_rotation_dialog.is_some() || self.video_rotation_drag.is_some();
+        let preview = self.video_rotation_dialog.is_some()
+            || self.video_rotation_drag.is_some()
+            || self.video_resize_dialog.is_some();
         let full = if preview {
             fitted_video_rect(viewport, size, transform.pixel_aspect(pixel_aspect))
         } else {
@@ -2715,6 +2727,7 @@ where
             rect
         });
         if self.video_rotation_dialog.is_some()
+            || self.video_resize_dialog.is_some()
             || matches!(rotation, rotation::RotationResponse::Preview)
         {
             return;
@@ -4219,6 +4232,11 @@ where
                         && self.pending_guard.is_none()
                         && self.export_error.is_none()
                 }
+                UiAction::FinishVideoResize(..) => {
+                    self.video_resize_dialog.is_some()
+                        && self.pending_guard.is_none()
+                        && self.export_error.is_none()
+                }
                 UiAction::CancelExport => {
                     self.active_export.is_some() && self.export_error.is_none()
                 }
@@ -4229,6 +4247,7 @@ where
         }
         match action {
             UiAction::FinishVideoRotation(token, value) => self.finish_video_rotation(token, value),
+            UiAction::FinishVideoResize(token, value) => self.finish_video_resize(token, value),
             UiAction::FinishRotation(token, value) => self.finish_rotation(token, value),
             UiAction::FinishResize(value) => {
                 if self.resize_dialog.take().is_some()
@@ -4362,7 +4381,7 @@ where
         }
         if matches!(
             command,
-            CommandId::FreeRotateImage | CommandId::FreeRotateVideo
+            CommandId::FreeRotateImage | CommandId::FreeRotateVideo | CommandId::ResizeVideo
         ) && (self.palette_open || self.grid_open)
         {
             self.cancel_command_overlay();
@@ -4581,6 +4600,7 @@ where
             }
             CommandId::FreeRotateImage => self.open_rotation(),
             CommandId::FreeRotateVideo => self.open_video_rotation(),
+            CommandId::ResizeVideo => self.open_video_resize(),
             CommandId::CopyImage => {
                 if self.image_copy.is_some() {
                     self.set_status("Image copy is already in progress".into());
@@ -4839,6 +4859,7 @@ where
         self.resize_dialog = None;
         self.rotation_dialog = None;
         self.video_rotation_dialog = None;
+        self.video_resize_dialog = None;
         self.video_raster_operations = None;
         self.rotation_drag = None;
         self.video_rotation_drag = None;
@@ -4959,15 +4980,16 @@ where
     }
 
     fn push_visual_edit(&mut self, operation: EditOperation) {
-        if matches!(operation, EditOperation::ResizeVideo(_)) {
-            self.set_status("Video resampling controls are not connected yet".into());
+        if matches!(operation, EditOperation::ResizeVideo(value) if value.is_identity()) {
             return;
         }
         if matches!(operation, EditOperation::RotateVideo(value) if value.tenths() == 0) {
             return;
         }
-        if matches!(operation, EditOperation::RotateVideo(_))
-            && self.media_kind != Some(MediaKind::Video)
+        if matches!(
+            operation,
+            EditOperation::RotateVideo(_) | EditOperation::ResizeVideo(_)
+        ) && self.media_kind != Some(MediaKind::Video)
         {
             return;
         }
@@ -5513,6 +5535,10 @@ where
         }
         if self.video_rotation_dialog.is_some() {
             self.set_status("Apply or cancel video rotation before leaving.".into());
+            return;
+        }
+        if self.video_resize_dialog.is_some() {
+            self.set_status("Apply or cancel video resize before leaving.".into());
             return;
         }
         if matches!(&action, GuardedAction::Navigate(path) if self.path.as_ref() == Some(path)) {
@@ -6582,6 +6608,7 @@ where
         self.resize_dialog.is_some()
             || self.rotation_dialog.is_some()
             || self.video_rotation_dialog.is_some()
+            || self.video_resize_dialog.is_some()
             || self.pending_dialog.is_some()
             || self.native_prompt.is_some()
             || self.pending_guard.is_some()

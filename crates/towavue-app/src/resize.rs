@@ -7,6 +7,7 @@ pub struct ResizeDialog {
     keep_ratio: bool,
     filter: ResampleFilter,
     first_frame: bool,
+    step: u32,
 }
 
 impl ResizeDialog {
@@ -18,15 +19,86 @@ impl ResizeDialog {
             keep_ratio: true,
             filter: ResampleFilter::Lanczos,
             first_frame: true,
+            step: 1,
         }
     }
 
-    fn value(&self) -> Option<ImageResize> {
+    pub(super) fn for_video(size: (u32, u32), aspect: f32) -> Self {
+        let mut dialog = Self::new(size);
+        dialog.step = 2;
+        dialog.ratio *= f64::from(aspect);
+        let (width, height) = if aspect >= 1.0 {
+            (f64::from(size.0) * f64::from(aspect), f64::from(size.1))
+        } else {
+            (f64::from(size.0), f64::from(size.1) / f64::from(aspect))
+        };
+        dialog.width = ((width / 2.0).round().max(8.0) * 2.0).to_string();
+        dialog.height = ((height / 2.0).round().max(8.0) * 2.0).to_string();
+        dialog
+    }
+
+    pub(super) fn value(&self) -> Option<ImageResize> {
         ImageResize::new(
             self.width.parse().ok()?,
             self.height.parse().ok()?,
             self.filter,
         )
+    }
+
+    pub(super) fn controls(&mut self, ui: &mut egui::Ui) {
+        let previous = (self.width.clone(), self.height.clone(), self.filter);
+        ui.label("Width (pixels)");
+        let width = text_input(ui, "Width in pixels", &mut self.width);
+        if self.first_frame {
+            width.request_focus();
+            self.first_frame = false;
+        }
+        if width.changed()
+            && self.keep_ratio
+            && let Ok(value) = self.width.parse::<u32>()
+        {
+            self.height = self.round(f64::from(value) / self.ratio);
+        }
+        ui.label("Height (pixels)");
+        let height = text_input(ui, "Height in pixels", &mut self.height);
+        if height.changed()
+            && self.keep_ratio
+            && let Ok(value) = self.height.parse::<u32>()
+        {
+            self.width = self.round(f64::from(value) * self.ratio);
+        }
+        if ui
+            .checkbox(&mut self.keep_ratio, "Keep aspect ratio")
+            .changed()
+            && self.keep_ratio
+            && let Ok(value) = self.width.parse::<u32>()
+        {
+            self.height = self.round(f64::from(value) / self.ratio);
+        }
+        egui::ComboBox::from_label("Resampling filter")
+            .selected_text(filter_name(self.filter))
+            .show_ui(ui, |ui| {
+                for filter in [
+                    ResampleFilter::Nearest,
+                    ResampleFilter::Bilinear,
+                    ResampleFilter::Bicubic,
+                    ResampleFilter::Lanczos,
+                ] {
+                    if ui
+                        .selectable_value(&mut self.filter, filter, filter_name(filter))
+                        .clicked()
+                    {
+                        ui.close();
+                    }
+                }
+            });
+        if previous != (self.width.clone(), self.height.clone(), self.filter) {
+            ui.ctx().request_repaint();
+        }
+    }
+
+    fn round(&self, value: f64) -> String {
+        ((value / f64::from(self.step)).round() * f64::from(self.step)).to_string()
     }
 
     pub fn show(&mut self, context: &egui::Context) -> Option<Option<ImageResize>> {
@@ -35,46 +107,7 @@ impl ResizeDialog {
             ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 360.0));
             crate::chrome::modal_heading(ui, "Resize / resample image");
             ui.label("Original file is kept. Apply adds one undoable edit.");
-            ui.label("Width (pixels)");
-            let width = text_input(ui, "Width in pixels", &mut self.width);
-            if self.first_frame {
-                width.request_focus();
-                self.first_frame = false;
-            }
-            if width.changed()
-                && self.keep_ratio
-                && let Ok(value) = self.width.parse::<u32>()
-            {
-                self.height = ((f64::from(value) / self.ratio).round() as u32).to_string();
-            }
-            ui.label("Height (pixels)");
-            let height = text_input(ui, "Height in pixels", &mut self.height);
-            if height.changed()
-                && self.keep_ratio
-                && let Ok(value) = self.height.parse::<u32>()
-            {
-                self.width = ((f64::from(value) * self.ratio).round() as u32).to_string();
-            }
-            if ui
-                .checkbox(&mut self.keep_ratio, "Keep aspect ratio")
-                .changed()
-                && self.keep_ratio
-                && let Ok(value) = self.width.parse::<u32>()
-            {
-                self.height = ((f64::from(value) / self.ratio).round() as u32).to_string();
-            }
-            egui::ComboBox::from_label("Resampling filter")
-                .selected_text(filter_name(self.filter))
-                .show_ui(ui, |ui| {
-                    for filter in [
-                        ResampleFilter::Nearest,
-                        ResampleFilter::Bilinear,
-                        ResampleFilter::Bicubic,
-                        ResampleFilter::Lanczos,
-                    ] {
-                        ui.selectable_value(&mut self.filter, filter, filter_name(filter));
-                    }
-                });
+            self.controls(ui);
             let value = self.value();
             if value.is_none() {
                 ui.label("Use 1–16384 pixels per side, up to 128 Mi pixels.");

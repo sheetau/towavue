@@ -108,6 +108,7 @@ pub enum CommandId {
     SelectAspectNineSixteen,
     FreeRotateImage,
     FreeRotateVideo,
+    ResizeVideo,
 }
 
 impl CommandId {
@@ -214,6 +215,7 @@ impl CommandId {
             Self::SelectAspectNineSixteen => "select_aspect_9_16",
             Self::FreeRotateImage => "free_rotate_image",
             Self::FreeRotateVideo => "free_rotate_video",
+            Self::ResizeVideo => "resize_video",
             Self::ToggleImageInterpolation => "toggle_image_interpolation",
         }
     }
@@ -428,6 +430,7 @@ impl CommandDefinition {
                         | CommandId::FlipHorizontal
                         | CommandId::FlipVertical
                         | CommandId::FreeRotateVideo
+                        | CommandId::ResizeVideo
                         | CommandId::ZoomIn
                         | CommandId::ZoomOut
                         | CommandId::ActualSize
@@ -843,6 +846,11 @@ const COMMANDS: &[CommandDefinition] = &[
     command(
         CommandId::FreeRotateVideo,
         "Free rotate video",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::ResizeVideo,
+        "Resize / resample video",
         &[MediaKind::Video],
     ),
 ];

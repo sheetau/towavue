@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 13:23 V05 resize UI checkpoint: timeline内Ctrl+R／Edit menuへ幅・高さ・比率／4filterとGPU previewのdialogを接続。Cancel／identity非編集、snapshot／budget・古いtoken拒否、focus／overlay、Apply／Undo/Redo・実保存再読込と再生状態不変を確認。画像と入力、動画回転とsnapshotを共有し、実D3D11VA復旧前後の10 UI previewはCPU転送0。次はV04音声frame相当操作の契約照合へ進み、V05通常window／mixed-DPI・全素材品質／持続性能を含む全台帳は未完として継続する。
+
 2026-09-10 13:04 V05 GPU resize checkpoint: 4方式を同一deviceの横／縦passへ接続し、符号付きfloat中間・係数再利用・512 MiB合算予算を実装。保存の縮小時色間引きを無効化し、WARPの36寸法条件／24高彩度pattern条件と合成順序、実GPUの1080p／4Kの16条件で独立referenceを照合。操作UIはまだ未接続であり、次はtimeline内Ctrl+R／寸法・比率・filter／Apply・Cancelとpreview／Undoへ進む。通常window／全素材品質・性能と全台帳の残件は維持する。
 
 2026-09-10 12:40 V05 resize基盤checkpoint: VideoResizeのsource寸法／SAR・偶数16px以上の出力、4補間方式とSAR1のsoftware保存を実装。4方式×7条件、crop／回転／再resize、metadata orientationとtrim／rate／区間削除・伸縮／音声、既存target保護を回帰確認。GPU表示と操作UIは未接続でapp入口は拒否を維持。次は縮小時のkernel幅・符号付き中間精度を含む4方式の同一device GPU処理と予算確認。通常window／全素材品質・性能、UX台帳全体は未完。

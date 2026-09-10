@@ -84,6 +84,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::ApplyCrop, "Ctrl+Y"),
         (CommandId::CopyImage, "Ctrl+C"),
         (CommandId::ResizeImage, "Ctrl+R"),
+        (CommandId::ResizeVideo, "Ctrl+R"),
         (CommandId::FreeRotateImage, "Ctrl+Shift+R"),
         (CommandId::FreeRotateVideo, "Ctrl+Shift+R"),
         (CommandId::CycleAudioRepeat, "Ctrl+R"),
@@ -1507,6 +1508,74 @@ mod tests {
                 image
             ),
             ShortcutMatch::Command(CommandId::ResizeImage)
+        );
+    }
+
+    #[test]
+    fn video_resize_binding_is_timeline_only_and_preserves_custom_keys() {
+        use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+        let bindings = defaults();
+        let sequence = bindings
+            .get(CommandId::ResizeVideo)
+            .expect("resize binding");
+        assert_eq!(sequence.to_string(), "Ctrl+R");
+        let video = CommandContext {
+            media_kind: Some(MediaKind::Video),
+            timeline_open: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            bindings.resolve(sequence.strokes(), video),
+            ShortcutMatch::Command(CommandId::ResizeVideo)
+        );
+        assert_eq!(
+            bindings.resolve(
+                sequence.strokes(),
+                CommandContext {
+                    timeline_open: false,
+                    ..video
+                }
+            ),
+            ShortcutMatch::None
+        );
+        let custom = parse("resize_video = Ctrl+K R\n", defaults()).expect("custom");
+        assert_eq!(
+            custom.resolve(sequence.strokes(), video),
+            ShortcutMatch::None
+        );
+        assert_eq!(
+            custom.resolve(
+                custom
+                    .get(CommandId::ResizeVideo)
+                    .expect("custom key")
+                    .strokes(),
+                video
+            ),
+            ShortcutMatch::Command(CommandId::ResizeVideo)
+        );
+        assert_eq!(
+            parse(&serialize(&custom), defaults()).expect("round trip"),
+            custom
+        );
+        assert_eq!(
+            custom.resolve(
+                sequence.strokes(),
+                CommandContext {
+                    media_kind: Some(MediaKind::Image),
+                    ..video
+                }
+            ),
+            ShortcutMatch::Command(CommandId::ResizeImage)
+        );
+        assert_eq!(
+            custom.resolve(
+                sequence.strokes(),
+                CommandContext {
+                    media_kind: Some(MediaKind::Audio),
+                    ..video
+                }
+            ),
+            ShortcutMatch::Command(CommandId::CycleAudioRepeat)
         );
     }
 

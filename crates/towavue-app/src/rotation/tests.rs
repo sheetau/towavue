@@ -2,7 +2,7 @@ use super::*;
 use std::sync::mpsc;
 
 #[test]
-fn video_resize_foundation_rejects_app_use_until_ui_is_connected() {
+fn video_resize_rejects_wrong_media_or_unavailable_source() {
     let (mut app, _) = application();
     app.image_view.selection = Some(UnitRect::FULL);
     app.image_view.zoom = ZoomMode::Custom(2.0);

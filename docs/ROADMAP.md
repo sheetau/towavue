@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 M01 logo menu checkpoint: 右上File／右下Edit／左下Viewの8 logical px drag・releaseを既存submenuへ接続。選択矢印の強調／shaft移動、source/tab・graphics／overlay／focus／resize／DPI・Escape取消、通常click／keyboard／UIAを保持。batched／sparse入力の所有・一回確定、guard／Undo、閉じたmenuの再openと親状態寿命を検証する。実GPU復旧前後10点で3方向の描画／submenu／EscapeとCPU転送0を確認。先行707e82bのCI34451683252は成功。次はU09のtab context menuのkeyboard入口・focusを照合し、M01通常window／物理入力を含む全台帳の残件を維持する。
+
 2026-09-10 U05 toolbar progress checkpoint: 保存jobのsnapshotからtrim／区間編集／rateを反映した推定進捗を上部境界へ接続。normalize二pass、長さ不明／画像のindeterminate、取消時停止、Finishedで解除、UIA非操作進捗に対応。画像移動・読取／dialogには表示せず、既存取消／guardと全画面時の詳細UIを維持する。1物理px／hover不変／二境界、DPI・狭幅・tab切替後の実保存、実GPU復旧前後を確認する。先行a433a69のCI34450453754は成功。E01他画像形式・JPEG残項目を含む全台帳は継続し、次はM01ロゴの方向menu操作を既存menu／focus契約へ照合する。通常window／混在DPI／性能の最終確認も残す。
 
 2026-09-10 E01 JPEG metadata UI checkpoint: 形式別の対応4項目・XML validationをruntimeと共有し、言語別既存値／作者順の非同期表示・Apply／CancelをSaveへ接続。JPEG→JPEGは設定未使用／全Keepでも対象4項目を保持し、表示の省略では元値を切り詰めない。PNGと共通の全項目UIA／focus／compact、実Save／再Save／全Keep復元／Remove・出力形式失敗／guard／source lifecycleを検証する。JPEG他6項目／EXIF・IPTC・COM整合／Extended XMP・他形式と全UX台帳は継続。先行067a225のCI34449201712は成功。次は残る画像metadataの形式別契約と不足項目を照合し、通常window／全素材品質の残件も維持する。

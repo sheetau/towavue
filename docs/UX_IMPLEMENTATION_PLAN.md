@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-10 M01追加checkpoint: logoの3方向を既存File／Edit／View submenuへ接続し、8px閾値／release確定・shaft移動／非選択矢印の半透明・取消と通常menuを共存させる。press所有、複数／疎な入力、閉じたparent stateの再open、guard／Undo・keyboard左右／Escapeを検証。native GPU復旧前後10点でも描画し履歴／transport不変・CPU転送0。次はU09のkeyboard context menu入口へ進み、E01残項目／U05／M01通常windowを含む全台帳を継続する。
+
 2026-09-10 U05追加checkpoint: 草案の保存進捗をtoolbar下境界へ接続。source／編集snapshotとworker時刻による推定、normalizeの二pass、画像／未知長の有界indeterminate、取消停止／terminal解除、非操作UIAを追加。hoverで太さ・入力状態を変えず、軽い画像移動では表示しない。既存取消・guard・全画面詳細を維持。E01の残る形式／項目や他の台帳を落とさず、次にM01の明示方向menu操作を照合する。
 
 2026-09-10 E01 JPEG UI checkpoint: 共通metadata dialogへJPEG4項目・非同期の言語別値／作者順表示を接続し、PNGと共通のSave／再Save／全Keep復元・Remove／出力形式失敗時のtarget保護／guard／source lifecycleを検証する。runtimeの形式別項目・XML validationを共有し、読取待ち／失敗・隠れた非対応項目／不正XML値はApply不可。既定JPEG保存もKeepの全値を保持する。他6項目・EXIF／IPTC／COM整合・Extended XMP・他画像形式／通常window／全codec品質を含む全台帳は継続する。
@@ -73,7 +75,7 @@
 | A01 | 音声の自動次曲、repeat all／one／off、shuffleとbuttons | 主要経路実装。tab別のShell順auto-next、repeat off／all／one、shuffle一巡、前後操作、status buttons／View／palette／音声Ctrl+R。曲末にShell順を非同期再取得し、初回取得前のtab切替にも対応。実WASAPIでactive／背景の次曲・loop・dirty guard・古い通知拒否・失敗隔離を検証。通常releaseでbuttons／shortcut／自然EOFの次曲を確認。modeのrestart永続化、gapless、手動選曲の独立した履歴stackは提供しない |
 | A02 | 音声timeline常時、動画共通の選択編集・音量／速度操作 | 音声timelineはfullscreenでも常設、Tでは閉じずcompact seek／専用buttonなし。V03共通の時間選択・Delete／Keep・UIA端点を接続。共有rubber-band音量／Alt+drag stretchと数値操作も接続。共有範囲再生も接続し、repeat off/all/oneと背景停止を実WASAPIで確認。最終操作監査は引き続き未完 |
 | E01 | metadata書換、音声抽出、normalize、stereo／mono export | 部分実装。音声のみ出力、normalize／Mono・Stereo設定とSave連携済み。動画／音声の10文字metadata設定UI・非同期既存値・source別保持・再probe／既存target保護を検証。PNG→PNGの10項目とJPEG→JPEGのXMP4項目もFile／custom command・既存値UI・Save／再Save／guard／source lifecycleへ接続済みで全Keep／設定未使用でも保持。JPEGは言語Alt／作者Seq・Keep／Set／Remove、非XMP bytes・EXIF／画素不変、有界parse・取消・target保護を確認。JPEG残る文字項目、他形式／EXIF・IPTC・COM整合／Extended XMP、通常window／全codec品質は未完 |
-| M01 | logoの三方向menu gestureと最小限の状態表示 | 未完。クリック／keyboard menuとlogo描画は存在。閾値・角度・mouseup・取消を共有dispatchへ渡す |
+| M01 | logoの三方向menu gestureと最小限の状態表示 | 主経路実装。8 logical px・右上File／右下Edit／左下View、releaseでsubmenuだけ開く。shaftの80ms移動と非選択矢印の半透明、取消／所有・source/tab／graphics世代、普通のclick／keyboard／UIA、guard／一回Undoを検証。3幅×100／125／200%の再openと形状、実GPU復旧前後10点の3方向／Escape・履歴／transport不変・CPU転送0を確認。通常windowでの物理pointer／混在DPI・全focus/style監査は継続 |
 | G01 | menu／palette／custom prefix／media別grid／dirty guard／Shell順 | 実装あり。追加commandの全入口と重なり・keyboard／IME／UIA・Undo／保存を変更ごとに再検証する |
 
 ## 実装順

@@ -253,45 +253,72 @@ pub fn tab_drop_gap(tabs: &[Rect], strip: Rect, pointer: Pos2) -> Option<(usize,
     Some((gap, x.clamp(strip.left() + 1.0, strip.right() - 1.0)))
 }
 
-pub fn logo(ui: &Ui, rect: Rect) {
+pub fn logo(ui: &Ui, rect: Rect, selected: Option<crate::menu::Section>, shift: f32) {
+    use crate::menu::Section;
     let rect = Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0));
     let point = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (16.0 / 27.68);
-    let stroke = Stroke::new(1.1, FOREGROUND);
-    for (a, b) in [
-        ((2.17, 2.17), (10.21, 10.21)),
-        ((2.17, 25.5), (10.21, 17.47)),
-        ((17.47, 10.21), (25.5, 2.17)),
+    let stroke = |section| {
+        Stroke::new(
+            1.1,
+            if selected.is_none() || selected == section {
+                FOREGROUND
+            } else {
+                Color32::from_white_alpha(100)
+            },
+        )
+    };
+    let offset = shift * 15.3;
+    for (a, b, section) in [
+        (
+            (2.17 + offset, 2.17 + offset),
+            (10.21 + offset, 10.21 + offset),
+            Section::Edit,
+        ),
+        ((2.17, 25.5), (10.21, 17.47), Section::View),
+        ((17.47, 10.21), (25.5, 2.17), Section::File),
     ] {
         ui.painter()
-            .line_segment([point(a.0, a.1), point(b.0, b.1)], stroke);
+            .line_segment([point(a.0, a.1), point(b.0, b.1)], stroke(Some(section)));
     }
-    for coordinates in [
-        [(9.82, 1.0), (5.0, 1.0), (2.2, 2.2), (1.0, 5.0), (1.0, 9.82)],
-        [
-            (17.47, 1.0),
-            (22.68, 1.0),
-            (25.5, 2.2),
-            (26.68, 5.0),
-            (26.68, 10.21),
-        ],
-        [
-            (26.68, 17.47),
-            (26.68, 22.68),
-            (25.5, 25.5),
-            (22.68, 26.68),
-            (17.47, 26.68),
-        ],
-        [
-            (1.0, 17.86),
-            (1.0, 22.68),
-            (2.2, 25.5),
-            (5.0, 26.68),
-            (9.82, 26.68),
-        ],
+    for (coordinates, section) in [
+        (
+            [(9.82, 1.0), (5.0, 1.0), (2.2, 2.2), (1.0, 5.0), (1.0, 9.82)],
+            None,
+        ),
+        (
+            [
+                (17.47, 1.0),
+                (22.68, 1.0),
+                (25.5, 2.2),
+                (26.68, 5.0),
+                (26.68, 10.21),
+            ],
+            Some(Section::File),
+        ),
+        (
+            [
+                (26.68, 17.47),
+                (26.68, 22.68),
+                (25.5, 25.5),
+                (22.68, 26.68),
+                (17.47, 26.68),
+            ],
+            Some(Section::Edit),
+        ),
+        (
+            [
+                (1.0, 17.86),
+                (1.0, 22.68),
+                (2.2, 25.5),
+                (5.0, 26.68),
+                (9.82, 26.68),
+            ],
+            Some(Section::View),
+        ),
     ] {
         ui.painter().add(egui::Shape::line(
             coordinates.into_iter().map(|(x, y)| point(x, y)).collect(),
-            stroke,
+            stroke(section),
         ));
     }
 }

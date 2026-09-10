@@ -125,17 +125,55 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
     ("Help", &[&[ShowLicenses]]),
 ];
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Section {
+    File,
+    Edit,
+    View,
+}
+
+impl Section {
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            Self::File => "File",
+            Self::Edit => "Edit",
+            Self::View => "View",
+        }
+    }
+}
+
+#[cfg(test)]
 pub fn show(
     ui: &mut egui::Ui,
     context: CommandContext,
     shortcuts: &ShortcutBindings,
 ) -> Option<CommandId> {
+    show_section(ui, context, shortcuts, None)
+}
+
+pub(crate) fn show_section(
+    ui: &mut egui::Ui,
+    context: CommandContext,
+    shortcuts: &ShortcutBindings,
+    initial: Option<Section>,
+) -> Option<CommandId> {
     let mut chosen = None;
+    if initial.is_some() {
+        // Reopened parent state must be live before installing a child on its first pass.
+        let root = egui::containers::menu::find_menu_root(ui).id;
+        egui::containers::menu::MenuState::mark_shown(ui.ctx(), root);
+    }
     let keyboard = MenuKeyboard::begin(ui);
+    let requested_category = keyboard
+        .right
+        .then(|| ui.memory(|memory| memory.focused()))
+        .flatten();
     let mut categories = Vec::new();
     for (title, groups) in MENUS {
         let category = ui.next_auto_id();
-        if keyboard.right && ui.memory(|memory| memory.has_focus(category)) {
+        if initial.is_some_and(|section| section.title() == *title)
+            || requested_category == Some(category)
+        {
             let submenu = egui::containers::menu::SubMenu::id_from_widget_id(category);
             // MenuState drops an open child unless it is marked live before the next lookup.
             egui::containers::menu::MenuState::mark_shown(ui.ctx(), submenu);

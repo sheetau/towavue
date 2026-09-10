@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## M01: ロゴからの方向menu操作（2026-09-10）
+
+左上の既存logo buttonへprimary pointerの方向dragを追加する。8 logical px以上、右下45度±45度はEdit、その上側の右上はFile、下側の左下はViewへ対応させる。左上方向／閾値内へ戻したreleaseは取消。releaseで既存のcategory submenuを開くだけで、commandは実行しない。選択はrelease位置で再評価する。保持中は選択した矢印だけ白、他を半透明にし、左上shaftを右下へ80msで移す。release後は通常logoへ戻す。
+
+既存Popup／MenuKeyboard／command有効性・shortcut表示を共用し、普通のclick／keyboard／UIA menuは維持する。方向dragのpopupはrelease点の右下8pxへanchorを固定し、離したpointerが別categoryへ直ちにhoverしないようにする（画面端の配置調整は既存Popupへ任せる）。通常clickのanchorは従来どおり。press所有とsource/tab／graphics世代を固定し、Escape・focus喪失・pointer消失・resize／DPI・他overlay／modal・toolbar非表示で取消。取消後の遅いreleaseをclickやcommandに変換しない。同frameのpress／move／releaseと描画再passでも一度だけ受理する。既存menuのEscape／左右移動／focus復帰・保存guardと非破壊編集を変更しない。
+
 ## U05: 保存中のツールバー境界進捗（2026-09-10）
 
 保存jobがある間だけ、ツールバー下の既存境界に非hoverのSeekと同じ白／#181818・1物理pxの進捗を表示する。別の境界やhit領域／focus stopは追加しない。通常の画像移動・preview／metadata読取・保存先選択には表示しない。既存の取消／保存先・解析状態の表示と、離脱Saveのguardは維持する。全画面でtoolbarがない時は境界も表示せず、既存の取消UIを利用する。

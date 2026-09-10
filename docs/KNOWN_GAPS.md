@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10 M01: ロゴのprimary dragは右上File／右下Edit／左下Viewへ対応する。8 logical px以上動かしてreleaseし、元の位置へ戻す／左上方向／Escape／focus喪失・pointer消失／resize／DPI・source/tab変更／別overlayでは取消。方向popupはrelease点の右下8pxを基準にし、画面端では既存Popupが配置を調整する。普通のclick／keyboardでは従来のanchorを使う。7回帰と実GPU描画を確認するが、通常windowの物理pointer・実混在DPI／最終screen pixel認定とは区別する。その他の台帳も未完のまま。
+
 2026-09-10 U05: 保存中のtoolbar境界は出力時刻／開始時の既知durationに基づく推定進捗であり、wall-clockの残り時間／byte数ではない。normalize解析／encodeを半分ずつとし、hardware fallbackによる再encodeで戻ることがある。出力時刻が終端でもpublishまでは99%以下に留める。画像／長さ不明はindeterminate、取消後は停止、Finishedで元境界へ戻る。通常の画像移動では点滅させない。既存のexport詳細／Cancelと離脱guardは残し、toolbarのない全画面では境界進捗を出さない。通常window／physical入力／実混在DPIの最終照合は未完。
 
 2026-09-10 JPEG UI更新: 以下16:15の未接続項目を更新し、JPEG4項目のUI／言語・作者順の既存値表示／全Keep既定保存を接続済み。JPEG→JPEG保存では設定未使用でも有界metadata検査を行うため、破損／過大／未対応構造のXMPを含む入力は保存を拒否する。表示は値1024 UTF-8 bytes、言語63 ASCII charsで省略を明示するが、Keepの保存値は完全保持する。Setは全言語／全作者を一つへ置換し、Removeは全値を削除。EXIF／IPTC／COMの同期・残る6項目／Extended XMP・他画像形式と通常window／物理IME／混在DPI／全素材認定は未完。全metadata保持や無変換JPEG保存ではない。

@@ -15,6 +15,7 @@ mod frame_step;
 mod grid;
 mod hold_speed;
 mod image_navigation;
+mod logo_menu;
 mod menu;
 mod metadata_export;
 mod palette;
@@ -2297,6 +2298,7 @@ where
             self.session.as_ref().and_then(PlaybackSession::timeline),
         );
         if self.fullscreen {
+            logo_menu::cancel(&context);
             self.tab_preview.clear();
         } else {
             self.draw_top_bar(root, actions);
@@ -3252,15 +3254,20 @@ where
                     ui.spacing_mut().item_spacing.x = 2.0;
                     ui.visuals_mut().widgets.inactive.weak_bg_fill = chrome::BACKGROUND;
                     let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
-                    let (response, inner) = egui::containers::menu::MenuButton::from_button(
-                        egui::Button::new("")
-                            .min_size(egui::vec2(28.0, chrome::TAB_HEIGHT))
-                            .stroke(egui::Stroke::NONE),
-                    )
-                    .ui(ui, |ui| {
-                        menu::show(ui, self.command_context(), &self.shortcuts)
-                    });
-                    let menu = egui::InnerResponse::new(inner.map(|inner| inner.inner), response);
+                    let menu = logo_menu::show(
+                        ui,
+                        self.command_context(),
+                        &self.shortcuts,
+                        (
+                            self.tabs.active().map(|tab| tab.id),
+                            self.media_generation,
+                            self.graphics_epoch,
+                        ),
+                        !self.modal_input_blocked()
+                            && !self.palette_open
+                            && !self.grid_open
+                            && !self.filmstrip_open,
+                    );
                     if return_to_tab && self.tabs.active().is_none() {
                         menu.response.request_focus();
                     }
@@ -3276,7 +3283,6 @@ where
                     {
                         menu.response.request_focus();
                     }
-                    chrome::logo(ui, menu.response.rect);
                     menu.response.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
@@ -3284,7 +3290,8 @@ where
                             "towavue menu",
                         )
                     });
-                    menu.response.on_hover_text("towavue menu");
+                    menu.response
+                        .on_hover_text("towavue menu · drag ↗ File / ↘ Edit / ↙ View");
 
                     let controls_width = self.native_caption.as_ref().map_or(154.0, |caption| {
                         caption.controls_width() / ui.ctx().pixels_per_point()
@@ -6962,6 +6969,13 @@ where
     }
 
     fn process_key(&mut self, event: &KeyEvent) {
+        if event.state == ElementState::Pressed
+            && event.logical_key == WinitKey::Named(NamedKey::Escape)
+            && self.ui_context.as_ref().is_some_and(logo_menu::cancel)
+        {
+            self.request_redraw();
+            return;
+        }
         if self.modal_input_blocked() {
             return;
         }
@@ -7669,6 +7683,27 @@ where
             )
         {
             self.cancel_hold_speed();
+        }
+        if let Some(context) = &self.ui_context {
+            let escape = matches!(&event, WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed && event.logical_key == WinitKey::Named(NamedKey::Escape));
+            if (escape
+                || matches!(
+                    &event,
+                    WindowEvent::Focused(false)
+                        | WindowEvent::CursorLeft { .. }
+                        | WindowEvent::Resized(_)
+                        | WindowEvent::ScaleFactorChanged { .. }
+                        | WindowEvent::CloseRequested
+                        | WindowEvent::DroppedFile(_)
+                ))
+                && logo_menu::cancel(context)
+            {
+                self.request_redraw();
+                if escape {
+                    return;
+                }
+            }
         }
         if self.reading_drag.is_some() {
             match &event {

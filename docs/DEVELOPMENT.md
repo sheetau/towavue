@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### ロゴからFile／Edit／Viewを開く（2026-09-10、M01）
+
+通常windowで左上ロゴをprimary pointerで押し、8 logical px以上の右上／右下／左下へ動かして離すと、File／Edit／Viewの既存submenuを開く。保持中は選択した矢印だけ白く、左上のshaftを右下へ80msで移す。左上方向・閾値内へ戻す・Escape・focus／pointer喪失では取消。方向操作のpopupはrelease点の脇へ固定し、通常clickやkeyboard操作の配置は変更しない。開いた後は既存の上下／左右／Enter／Escape・UIA・有効性／shortcut表示を使う。gestureだけでcommandは実行しない。
+
+`cargo test -p towavue-app logo_`で3方向／閾値・batched／sparse／複数入力・press所有・取消15条件・通常UIA・keyboard左右／Escape、Undoの一回確定とCloseTabのdirty guard、3幅×100／125／200%で閉じたmenuを再open、7本のlogo形状／選択色／shaft移動・repaint停止を確認する。既存menu全体も回帰対象。実D3D11VA復旧前後10点で、同じ所有windowの描画へ3方向の保持feedbackとsubmenu／Escapeを通し、CPU転送0と履歴／transport不変を確認する。合成inputとnative rendererの試験であり、OSの物理pointer／混在DPIを認定するものではない。既存の親MenuStateはclose後に寿命が切れるため、programmaticな初回child表示前にparentをlive化する。rootだけでなくchildにもopening releaseを外側clickとして扱わない設定を渡す。
+
+M01検証結果: 最終session7056でfmt／Clippy／workspace511（app285＋core61＋runtime161＋integration4）、追加app実機依存6件、release buildが終了0。通常ignored13は成功数へ含めず、追加試験にSKIPなし。実GPU復旧前後10点で3方向を開きCPU転送0。Release SHA-256 `fd9b1f22f1ae09946a046288ee5c620c0eaeabba604d02a6db4eb797a813774b`。dependency／notice inventory変更なし。
+
 ### 保存進捗のツールバー境界（2026-09-10、U05）
 
 Save／Export as／音声のみ出力を実行すると、toolbar下の既存境界が白／#181818・1物理pxの進捗になる。既知の音声／動画は保存開始時のsource長・trim／区間編集／rateを使った推定、normalizeは解析／encodeを半分ずつ使う。長さ不明／画像は短い白線が移動する。Cancel後は止まり、完了／取消／失敗で元の境界へ戻る。hoverの太線／つまみ／focus stopはない。画像の左右移動・preview／metadata読取・保存先dialogには表示しない。保存先／状態とCancelの詳細UI、離脱Saveのguardは維持する。

@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "drag_tests.rs"]
 mod drag_tests;
+#[path = "view_tests.rs"]
+mod view_tests;
 
 pub(crate) fn hardware_dialog_preview<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
@@ -36,6 +38,7 @@ pub(crate) fn hardware_dialog_preview<N: Fn(AppEvent) + Send + Sync + 'static>(
     assert_eq!(app.image_view, view);
     assert_eq!(app.generation, generation);
     drag_tests::preview_cancel(app);
+    view_tests::exercise(app, false);
     let size = app.window.as_ref().expect("owned window").inner_size();
     app.renderer
         .as_mut()
@@ -508,6 +511,7 @@ fn video_rotation_modal_previews_commits_crops_undoes_and_exports_without_changi
             .expect("reopen export");
             assert_eq!(count, 5);
             drag_tests::exercise(&mut app);
+            view_tests::exercise(&mut app, true);
             assert_eq!(
                 std::fs::read(&self.source).expect("unchanged source"),
                 bytes

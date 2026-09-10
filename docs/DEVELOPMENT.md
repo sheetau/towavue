@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 動画の表示zoom／pan（2026-09-10 12:27、V05 partial）
+
+timeline内の映像viewportでCtrl＋wheelを使うとcursor基点でzoomし、右dragでpanする。+／-、Ctrl+HのActual、Shift+WのFit、Shift+CのCoverをView menu／custom bindingと共有する。Actualは表示向きの1画素行＝1 physical px、横は編集後SARを保持し、自由回転後はSAR1。Fit／Coverはwindowに追従するがCustomはphysical倍率を維持する。倍率／pan／selectionは既存playback tab viewに保持し、timelineを閉じてもfullscreenでも描画へ適用する。変更操作はtimeline内だけ許可する。
+
+映像はviewportとの交差だけを対応UVで描き、selectionの座標には切り出し前のrectを使う。保存画素には影響しない。全映像が画面外でもviewportの右drag／Fitで復帰でき、取消しで開始前のpanへ戻る。角度preview中は一時FitしCancelで元のviewへ戻す。新しいtexture pool／CPU転送は追加せず、既存の同一device UV表示とGPU rasterを使う。
+
+新規3 testsはSAR4種・寸法3種・密度3種のFit／Cover／Actual／Custom、分数位置のclipと回転／反転UV、5commandのcontext／custom prefix。既存FFV1 UI試験に密度1×／1.25×／2×でcursor基点、pan／取消、modal／palette／grid／filmstrip／timeline遮断、fullscreen保持、画面外からの復帰、zoom前後の保存全5frame RGBA一致を追加した。Ctrl解除後の平滑化残量による倍率変化を検出し、Ctrl保持中だけ受け取るよう修正した。tab試験も倍率に加えてpanの復帰を確認する。
+
+実D3D11VAの10箇所にも同じUI操作試験を追加し、CPU転送0を維持。session21746でClippy／workspace429（app249／core59／runtime117／integration4）、session24513でfmt check／Release／app opt-in5件がすべて終了0。SKIPなし、通常ignored11件は別計上。Release SHA-256は`17ae5418b58fd5552de8ccaf052e95d94b40fb46b14c735c72d1a4a3415e6e8b`。先行03f360fのCI34432617166は成功。次は動画resize／resample。通常windowの物理操作／混在DPI・全素材品質／性能と全UX台帳は未完とし、hidden-windowの結果で代用しない。追加導入・配布・外部foreground入力・clipboard書込は行わない。
+
 ### 動画をAlt保持で自由回転（2026-09-10 12:12、I06 partial）
 
 timeline表示中の映像上でAlt＋左pressし、左右へdragする。画像と同じ1 logical px＝0.5度、±180度・0.1度単位。角度dialogと同じsnapshot／budget検証／GPU処理を使い、全canvasをviewportへFitする。Alt保持のreleaseだけ一件を確定し、Alt先離し／Escape／focus・cursor喪失／wheel／secondary press／window geometry・source・context変更では取消する。0度はRedo枝も維持する。入力の所有権とpress／release時の修飾状態を画像と共有し、既存の画像drag回帰5件も通過した。

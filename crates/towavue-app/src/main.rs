@@ -35,6 +35,7 @@ mod trim;
 #[cfg(test)]
 mod video_context_tests;
 mod video_rotation;
+mod video_view;
 mod welcome;
 mod wheel_input;
 
@@ -2659,23 +2660,53 @@ where
         };
         let transform = self.visual_transform((width, height));
         let size = (transform.size.0 as u32, transform.size.1 as u32);
-        let viewport = fitted_video_rect(ui.max_rect(), size, transform.pixel_aspect(pixel_aspect));
-        let response = ui.interact(
+        let viewport = ui.max_rect();
+        self.image_viewport = viewport.size();
+        let full = video_view::rect(
             viewport,
+            size,
+            transform.pixel_aspect(pixel_aspect),
+            ui.ctx().pixels_per_point(),
+            self.image_view,
+        );
+        let response = ui.interact(
+            if self.visual_selection_enabled() {
+                viewport
+            } else {
+                viewport.intersect(full)
+            },
             ui.id().with("video-edit-surface"),
             egui::Sense::click_and_drag(),
         );
         let rotation = if self.video_rotation_dialog.is_none() {
-            self.update_video_rotation_drag(ui, &response, viewport)
+            self.update_video_rotation_drag(ui, &response, full)
         } else {
             rotation::RotationResponse::Inactive
         };
+        if self.video_rotation_dialog.is_none()
+            && matches!(rotation, rotation::RotationResponse::Inactive)
+        {
+            self.update_video_view(ui, &response, full);
+        }
         let (transform, operations) = self.video_presentation((width, height));
         self.video_raster_operations = operations;
         let size = (transform.size.0 as u32, transform.size.1 as u32);
-        let viewport = fitted_video_rect(ui.max_rect(), size, transform.pixel_aspect(pixel_aspect));
-        self.video_rect = Some(viewport);
-        self.video_uv = transform.uv;
+        let preview = self.video_rotation_dialog.is_some() || self.video_rotation_drag.is_some();
+        let full = if preview {
+            fitted_video_rect(viewport, size, transform.pixel_aspect(pixel_aspect))
+        } else {
+            video_view::rect(
+                viewport,
+                size,
+                transform.pixel_aspect(pixel_aspect),
+                ui.ctx().pixels_per_point(),
+                self.image_view,
+            )
+        };
+        self.video_rect = video_view::clipped(viewport, full, transform.uv).map(|(rect, uv)| {
+            self.video_uv = uv;
+            rect
+        });
         if self.video_rotation_dialog.is_some()
             || matches!(rotation, rotation::RotationResponse::Preview)
         {
@@ -2683,21 +2714,33 @@ where
         }
         if matches!(rotation, rotation::RotationResponse::Cancelled) {
             if let Some(selection) = self.image_view.selection {
-                paint_selection(&ui.painter_at(viewport), viewport, selection);
+                paint_selection(&ui.painter_at(viewport), full, selection);
             }
             return;
         }
         let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
         volume_targets.push(response.clone());
-        self.update_selection(&response, viewport, size, shift, pointer);
+        self.update_selection(&response, full, size, shift, pointer);
         if !self.visual_selection_enabled() {
             self.hold_response(&response, actions);
             selection::release_focus(ui.ctx());
             return;
         }
         if let Some(selection) = self.image_view.selection {
-            paint_selection(&ui.painter_at(viewport), viewport, selection);
-            self.selection_controls(ui, viewport, size);
+            paint_selection(&ui.painter_at(viewport), full, selection);
+            self.selection_controls(ui, full, size);
+            let offset = selection::reveal_offset(
+                ui.ctx(),
+                self.selection_identity(),
+                viewport,
+                full,
+                selection,
+            );
+            if offset != egui::Vec2::ZERO {
+                self.image_view.pan.0 += offset.x;
+                self.image_view.pan.1 += offset.y;
+                self.request_redraw();
+            }
         }
     }
 
@@ -3721,8 +3764,9 @@ where
                             self.reading_settings.first_page_count
                         ));
                     }
-                    if let Some(image) = &self.image {
-                        let (width, height) = image.dimensions();
+                    if (self.media_kind == Some(MediaKind::Image) && !self.reading_mode)
+                        || self.media_kind == Some(MediaKind::Video)
+                    {
                         let zoom = match self.image_view.zoom {
                             ZoomMode::Fit => "Fit".into(),
                             ZoomMode::Cover => "Cover".into(),
@@ -3731,9 +3775,10 @@ where
                                 format!("{:.*}%", if scale < 0.1 { 2 } else { 0 }, scale * 100.0)
                             }
                         };
-                        if !self.reading_mode {
-                            details.push(zoom);
-                        }
+                        details.push(zoom);
+                    }
+                    if let Some(image) = &self.image {
+                        let (width, height) = image.dimensions();
                         details.push(format!("{} {width}×{height} · {}", image.decoded.format, if self.nearest_images { "Nearest" } else { "Smooth" }));
                     } else if self.session.is_some() {
                         let edit = self.edit_state();
@@ -4443,7 +4488,7 @@ where
                 self.request_redraw();
             }
             CommandId::CoverWindow => {
-                if self.media_kind == Some(MediaKind::Image) && !self.reading_mode {
+                if self.media_kind == Some(MediaKind::Video) || !self.reading_mode {
                     self.image_view.cover();
                     self.request_redraw();
                 }
@@ -5353,6 +5398,10 @@ where
     }
 
     fn zoom_image(&mut self, factor: f32) {
+        if self.media_kind == Some(MediaKind::Video) {
+            self.zoom_video(factor);
+            return;
+        }
         let Some(image) = &self.image else { return };
         let Some(context) = &self.ui_context else {
             return;
@@ -7355,7 +7404,10 @@ where
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
         }
-        if (self.rotation_drag.is_some() || self.video_rotation_drag.is_some())
+        if (self.rotation_drag.is_some()
+            || self.video_rotation_drag.is_some()
+            || (self.media_kind == Some(MediaKind::Video)
+                && matches!(self.view_drag, Some(ViewDrag::Pan { .. }))))
             && matches!(
                 &event,
                 WindowEvent::CursorLeft { .. }

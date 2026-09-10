@@ -1,5 +1,15 @@
 # towavue アーキテクチャ
 
+## V05: 動画の表示zoom／pan契約（2026-09-10）
+
+動画のzoomは画素編集ではなくImageViewStateの表示状態とする。草案の操作制限に合わせ、倍率変更・右dragはtimeline表示中だけ許可し、閉じた視聴中／fullscreenでも確定したzoom／panは保持する。Zoom in/out・Actual size・Fit・Coverは既存command／custom binding／View menuを画像と共有し、音声は対象外。Ctrl＋wheelは現在のpointerを基点に実zoom_deltaを使い、Ctrlを離した後の平滑化残量では変更しない。overlay／modal／別gestureが入力を所有する間も変更しない。keyboard/menuのzoomは画像と同じ中心基準、右dragの取消しは開始前のpanへ戻す。window geometry／focus・cursor喪失／別操作では途中panを取消する。
+
+倍率は表示向きのpixel行をphysical pixelへ対応させ、横方向を編集後SAR倍する。Actualは1行＝1 physical px、Customはその倍率、Fit／Coverは現在のlogical viewportをDPIとSARで補正した二軸比率から求める。SARを整数寸法へ丸めない。任意回転後は採用済みの最終canvas／SAR1を使う。手動倍率の上下限は既存ImageViewStateに従い、window寸法の変更でCustom倍率を再計算しない。panはlogical座標で、保持済みplayback tab viewへそのまま格納する。
+
+選択・辺操作には切り出し前の映像rectと最終pixel寸法を使い、選択線はviewportでclipする。GPUへはviewportとの交差rectと対応する補間UVを渡し、表示clipを整数pixel cropや編集履歴へ変換しない。既存のsoftware／hardware UV表示と順序付きGPU rasterを使い、CPU readback・別device・新しいtexture poolは追加しない。hardwareの非identity UVでは既存RGBA中間textureを使用する。全体が画面外なら動画を描かず、編集viewportの右dragまたはFitで復帰できる。自由回転preview中だけ全canvasをFitし、取消しで元のzoom／panへ戻る。保存は表示clipを参照しない。
+
+resize／resampleは別の画素編集として未完。通常windowの物理入力／混在DPI、全解像度・HDR画質／性能の認定は残件であり、限定fixture・hidden-windowの証拠で置き換えない。
+
 ## I06: 動画自由回転の保存・表示・角度UI契約（2026-09-10）
 
 動画hold-drag契約（2026-09-10追加）: timeline表示中の映像上でAlt＋左pressから左右dragし、画像と同じ1 logical px＝0.5度・±180度・0.1度単位へ丸める。角度dialogのsnapshot／geometry・budget検証と確定処理を共有し、previewの全canvasを動画viewportへFitする。Alt保持のmouse releaseだけ一件を確定し、0度は非編集。Alt先離し／Escape／focus・cursor喪失／wheel／secondary press／window geometry・source・context変更で取消し、履歴・選択・transportをpreviewのために変更しない。releaseとmodifier解除が同じframeでも、release時の修飾状態と位置を使う。入力ownership／別overlay／既存gestureを侵さず、確定までselection操作を抑止する。

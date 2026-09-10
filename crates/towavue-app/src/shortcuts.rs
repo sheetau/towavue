@@ -963,7 +963,7 @@ mod tests {
     }
 
     #[test]
-    fn cover_is_single_image_only_and_uses_customizable_bindings() {
+    fn cover_is_visual_context_only_and_uses_customizable_bindings() {
         let mut bindings = defaults();
         let key = "Shift+C".parse::<KeySequence>().expect("cover key");
         for (kind, reading, enabled) in [
@@ -1007,6 +1007,57 @@ mod tests {
             parse(&serialize(&bindings), defaults()).expect("round trip"),
             bindings
         );
+    }
+
+    #[test]
+    fn video_zoom_keys_require_timeline_and_preserve_custom_bindings() {
+        let mut bindings = defaults();
+        for (command, key) in [
+            (CommandId::ZoomIn, "Plus"),
+            (CommandId::ZoomOut, "Minus"),
+            (CommandId::ActualSize, "Ctrl+H"),
+            (CommandId::FitToWindow, "Shift+W"),
+            (CommandId::CoverWindow, "Shift+C"),
+        ] {
+            let key = key.parse::<KeySequence>().expect("key");
+            for (kind, timeline, enabled) in [
+                (MediaKind::Video, true, true),
+                (MediaKind::Video, false, false),
+                (MediaKind::Image, false, true),
+                (MediaKind::Audio, true, false),
+            ] {
+                let context = CommandContext {
+                    media_kind: Some(kind),
+                    timeline_open: timeline,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    bindings.resolve(key.strokes(), context),
+                    if enabled {
+                        ShortcutMatch::Command(command)
+                    } else {
+                        ShortcutMatch::None
+                    },
+                    "{command:?}/{kind:?}/{timeline}"
+                );
+            }
+            let custom = "Ctrl+K Z".parse::<KeySequence>().expect("custom prefix");
+            bindings.set(command, custom.clone());
+            let context = CommandContext {
+                media_kind: Some(MediaKind::Video),
+                timeline_open: true,
+                ..Default::default()
+            };
+            assert_eq!(
+                bindings.resolve(key.strokes(), context),
+                ShortcutMatch::None
+            );
+            assert_eq!(
+                bindings.resolve(custom.strokes(), context),
+                ShortcutMatch::Command(command)
+            );
+            bindings = defaults();
+        }
     }
 
     #[test]

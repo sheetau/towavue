@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 12:27 V05表示zoom checkpoint: 動画のtimeline内でCtrl＋wheel／+・-／Actual／Fit／Coverと右drag panを接続。SAR・physical倍率、cursor基点、viewport／UV clip、入力所有権・取消、timeline／fullscreen／tab保持を確認し、zoom前後の保存全5frame画素も一致。実D3D11VAの10回の描画試験はCPU転送0。次は動画resize／resampleの画素編集・GPU／保存契約。通常window／混在DPI・全素材画質／性能を含むUX台帳全体は未完のまま継続する。
+
 2026-09-09 再開指定: ownerが「それは古い指示です。既存のgoalを遂行してください」と明示したため、以下のcheckpoint後の待機指定は失効する。既存のUX_IMPLEMENTATION_PLAN全体を引き続き実装・検証する。ローンチ準備・公開の停止は維持する。
 
 2026-09-10 画像操作checkpoint: I04のPageUp／PageDown等の追加キーと1～10枚jump、I06のreading L／Vを共有commandへ接続。Shell順・読書・未保存確認・設定互換とmenu全項目を回帰確認する。Ctrl+左右は採用済みの一枚移動を維持。通常window入力／IME、preset／自由回転を含む台帳の全残件は継続し、goal全体の完了とはしない。

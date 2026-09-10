@@ -428,6 +428,11 @@ impl CommandDefinition {
                         | CommandId::FlipHorizontal
                         | CommandId::FlipVertical
                         | CommandId::FreeRotateVideo
+                        | CommandId::ZoomIn
+                        | CommandId::ZoomOut
+                        | CommandId::ActualSize
+                        | CommandId::FitToWindow
+                        | CommandId::CoverWindow
                 ))
             && (!matches!(
                 self.id,
@@ -474,6 +479,7 @@ impl CommandDefinition {
 }
 
 const PLAYABLE_MEDIA: &[MediaKind] = &[MediaKind::Video, MediaKind::Audio];
+const VISUAL_MEDIA: &[MediaKind] = &[MediaKind::Image, MediaKind::Video];
 const ANY_MEDIA: &[MediaKind] = &[MediaKind::Image, MediaKind::Video, MediaKind::Audio];
 
 const COMMANDS: &[CommandDefinition] = &[
@@ -517,22 +523,14 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::ToggleFilmstrip, "Toggle filmstrip", ANY_MEDIA),
     command(CommandId::ToggleCommandPalette, "Show command palette", &[]),
     command(CommandId::ReloadShortcuts, "Reload keyboard shortcuts", &[]),
-    command(CommandId::ZoomIn, "Zoom in", &[MediaKind::Image]),
-    command(CommandId::ZoomOut, "Zoom out", &[MediaKind::Image]),
-    command(
-        CommandId::ActualSize,
-        "Zoom to actual size",
-        &[MediaKind::Image],
-    ),
-    command(
-        CommandId::FitToWindow,
-        "Fit image to window",
-        &[MediaKind::Image],
-    ),
+    command(CommandId::ZoomIn, "Zoom in", VISUAL_MEDIA),
+    command(CommandId::ZoomOut, "Zoom out", VISUAL_MEDIA),
+    command(CommandId::ActualSize, "Zoom to actual size", VISUAL_MEDIA),
+    command(CommandId::FitToWindow, "Fit media to window", VISUAL_MEDIA),
     command(
         CommandId::CoverWindow,
-        "Cover window with image",
-        &[MediaKind::Image],
+        "Cover window with media",
+        VISUAL_MEDIA,
     ),
     command(CommandId::SelectAll, "Select whole media", ANY_MEDIA),
     command(CommandId::ClearSelection, "Clear selection", ANY_MEDIA),
@@ -1000,6 +998,11 @@ mod tests {
                     CommandId::RotateCounterclockwise,
                     CommandId::FlipHorizontal,
                     CommandId::FlipVertical,
+                    CommandId::ZoomIn,
+                    CommandId::ZoomOut,
+                    CommandId::ActualSize,
+                    CommandId::FitToWindow,
+                    CommandId::CoverWindow,
                 ] {
                     let definition = command_definitions()
                         .iter()

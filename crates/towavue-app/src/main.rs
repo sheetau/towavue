@@ -203,7 +203,7 @@ enum UiAction {
     CloseTab(TabId),
     DropTab(TabId, egui::Pos2, egui::Vec2),
     OpenMedia(PathBuf, bool),
-    OpenWindow(PathBuf, u64, egui::Pos2),
+    OpenWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
     Seek(MediaTime),
     CommitVideoScrub(MediaTime),
     ResolveGuard(GuardDecision),
@@ -4745,8 +4745,8 @@ where
             }
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
             UiAction::DropTab(id, point, anchor) => self.request_tab_drop(id, point, anchor),
-            UiAction::OpenWindow(path, generation, client_origin) => {
-                self.request_filmstrip_window(path, generation, client_origin)
+            UiAction::OpenWindow(path, generation, point, anchor) => {
+                self.request_filmstrip_window(path, generation, point, anchor)
             }
             UiAction::OpenMedia(path, force_new) => {
                 if force_new {

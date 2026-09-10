@@ -156,11 +156,15 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     assert_eq!(host.windows[&welcome].tabs.tabs()[0].id, returned);
     assert_eq!(host.windows[&welcome].edits[&returned], edits);
     let app = host.windows.get_mut(&welcome).expect("Welcome source");
+    app.window
+        .as_ref()
+        .expect("window")
+        .set_outer_position(winit::dpi::PhysicalPosition::new(50, 50));
     for _ in 0..3 {
         frame(app, true, vec![]);
     }
     let start = tab_drag::tests::label_center(app, returned);
-    let outside = egui::pos2(-40.0, 90.0);
+    let outside = egui::pos2(1000.0, 90.0);
     let origin = app
         .window
         .as_ref()

@@ -216,11 +216,12 @@ impl WindowHost {
         request: &tab_transfer::DetachRequest,
         visible: bool,
         client_position: winit::dpi::PhysicalPosition<i32>,
+        anchor: egui::Vec2,
     ) -> Result<WindowKey, String> {
         self.detach_tab_with(source, request, visible, |app, device| {
             app.start_on_device(event_loop, Some(device), false)
                 .map_err(|error| error.to_string())?;
-            app.position_window_client(client_position)
+            app.position_window_at_drop(client_position, anchor)
         })
     }
 
@@ -335,7 +336,7 @@ impl WindowHost {
             return Ok(None);
         };
         app.validate_transfer_window()?;
-        let position = self.source_client_position(source, request.client_origin)?;
+        let position = self.source_client_position(source, request.point)?;
         let path = canonical_shell_path(&request.path).map_err(|error| error.to_string())?;
         if MediaKind::from_path(&path).is_none() {
             return Err(format!("Unsupported media: {}", path.display()));
@@ -350,7 +351,7 @@ impl WindowHost {
             .map_err(|error| error.to_string())?;
         let app = self.windows.get_mut(&destination).expect("new window");
         let opened = start(app, device).and_then(|()| {
-            app.position_window_client(position)?;
+            app.position_window_at_drop(position, request.anchor)?;
             app.open_external(path, true);
             if app.path.is_none() {
                 return Err(app.status_message.as_ref().map_or_else(

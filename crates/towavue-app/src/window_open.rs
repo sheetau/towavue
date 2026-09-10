@@ -3,7 +3,8 @@ use super::*;
 #[derive(Clone)]
 pub(super) struct Request {
     pub path: PathBuf,
-    pub client_origin: egui::Pos2,
+    pub point: egui::Pos2,
+    pub anchor: egui::Vec2,
     folder_generation: u64,
     tab: Option<TabId>,
     instance: u64,
@@ -29,9 +30,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         &mut self,
         path: PathBuf,
         generation: u64,
-        client_origin: egui::Pos2,
+        point: egui::Pos2,
+        anchor: egui::Vec2,
     ) {
-        if !client_origin.is_finite() {
+        if !point.is_finite() || !anchor.is_finite() {
             return;
         }
         if !self.hosted_graphics {
@@ -44,7 +46,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         self.pending_window_open = Some(Request {
             path,
-            client_origin,
+            point,
+            anchor,
             folder_generation: generation,
             tab: self.tabs.active().map(|tab| tab.id),
             instance: self.media_generation,
@@ -59,18 +62,45 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && self.can_open_filmstrip_window(&request.path, request.folder_generation)
     }
 
-    pub(super) fn position_window_client(
+    pub(super) fn position_window_at_drop(
         &self,
         position: winit::dpi::PhysicalPosition<i32>,
+        anchor: egui::Vec2,
     ) -> Result<(), String> {
         let window = self.window.as_ref().expect("started window");
+        let area = towavue_runtime_windows::monitor_work_area((position.x, position.y))
+            .ok_or("Could not query destination monitor work area")?;
+        // Enter the selected monitor while hidden so its actual DPI and size are
+        // available before applying the logical grab offset and final edge clamp.
+        window.set_outer_position(clamp_window_position(position, window.outer_size(), area));
         let inner = window.inner_position().map_err(|error| error.to_string())?;
         let outer = window.outer_position().map_err(|error| error.to_string())?;
-        // Position the hidden client before publishing its media and showing it.
-        window.set_outer_position(winit::dpi::PhysicalPosition::new(
-            position.x - (inner.x - outer.x),
-            position.y - (inner.y - outer.y),
-        ));
+        let density = window.scale_factor() as f32
+            * self.ui_context.as_ref().expect("started UI").zoom_factor();
+        let requested = winit::dpi::PhysicalPosition::new(
+            position.x - (anchor.x * density).round() as i32 - (inner.x - outer.x),
+            position.y - (anchor.y * density).round() as i32 - (inner.y - outer.y),
+        );
+        window.set_outer_position(clamp_window_position(requested, window.outer_size(), area));
         Ok(())
     }
+}
+
+pub(super) fn clamp_window_position(
+    position: winit::dpi::PhysicalPosition<i32>,
+    size: winit::dpi::PhysicalSize<u32>,
+    area: (i32, i32, i32, i32),
+) -> winit::dpi::PhysicalPosition<i32> {
+    // Oversized windows keep their top-left controls visible without changing the
+    // existing size/minimum-size policy. Use wide arithmetic for negative desktops.
+    winit::dpi::PhysicalPosition::new(
+        (position.x as i64).clamp(
+            area.0 as i64,
+            (area.2 as i64 - size.width as i64).max(area.0 as i64),
+        ) as i32,
+        (position.y as i64).clamp(
+            area.1 as i64,
+            (area.3 as i64 - size.height as i64).max(area.1 as i64),
+        ) as i32,
+    )
 }

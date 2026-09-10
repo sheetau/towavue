@@ -32,7 +32,7 @@ mod waveform;
 mod window_point;
 
 pub use launch::{LaunchRequest, LaunchRole, LaunchServer};
-pub use window_point::unobscured_window_point;
+pub use window_point::{monitor_work_area, unobscured_window_point};
 
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};
 pub use cancellation::Cancellation;

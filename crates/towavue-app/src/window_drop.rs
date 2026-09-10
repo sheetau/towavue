@@ -151,9 +151,9 @@ impl WindowHost {
                         }
                     })
             } else {
-                self.source_client_position(source, point - anchor)
+                self.source_client_position(source, point)
                     .and_then(|position| {
-                        self.detach_tab(event_loop, source, &request, visible, position)
+                        self.detach_tab(event_loop, source, &request, visible, position, anchor)
                     })
                     .map(|_| ())
             };

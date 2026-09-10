@@ -1,7 +1,35 @@
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::Graphics::Gdi::{ClientToScreen, ScreenToClient};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+};
 use windows::Win32::UI::WindowsAndMessaging::{GA_ROOT, GetAncestor, WindowFromPoint};
+
+/// Returns the nearest monitor's work rectangle in physical virtual-screen coordinates.
+/// Call on the per-monitor DPI-aware UI thread.
+pub fn monitor_work_area(point: (i32, i32)) -> Option<(i32, i32, i32, i32)> {
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: both inputs are owned scalar/stack data. The borrowed monitor handle
+    // is used only for this synchronous query; no native handle or pointer escapes.
+    unsafe {
+        let monitor = MonitorFromPoint(
+            POINT {
+                x: point.0,
+                y: point.1,
+            },
+            MONITOR_DEFAULTTONEAREST,
+        );
+        if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+            return None;
+        }
+    }
+    let rect = info.rcWork;
+    Some((rect.left, rect.top, rect.right, rect.bottom))
+}
 
 /// Maps a source client point into a target only when that target is unobscured.
 /// Coordinates are physical pixels in the caller's per-monitor DPI-aware UI thread.

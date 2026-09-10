@@ -21,6 +21,43 @@ fn snapshot(paths: &[PathBuf]) -> FolderSnapshot {
 }
 
 #[test]
+fn drop_window_clamp_handles_taskbars_negative_desktops_and_oversized_windows() {
+    use winit::dpi::{PhysicalPosition, PhysicalSize};
+    for (point, size, area, expected) in [
+        ((100, 80), (960, 576), (0, 0, 1920, 1032), (100, 80)),
+        ((1910, 1022), (960, 576), (0, 0, 1920, 1032), (960, 456)),
+        ((-100, -100), (960, 576), (0, 40, 1920, 1080), (0, 40)),
+        (
+            (-2400, 100),
+            (1920, 1152),
+            (-2560, -245, 0, 1355),
+            (-2400, 100),
+        ),
+        (
+            (-100, 1000),
+            (1920, 1152),
+            (-2560, -245, 0, 1355),
+            (-1920, 203),
+        ),
+        ((0, 0), (960, 576), (1920, -406, 3000, 1514), (1920, 0)),
+        ((500, 500), (960, 576), (0, 0, 480, 300), (0, 0)),
+        (
+            (i32::MAX, i32::MIN),
+            (u32::MAX, u32::MAX),
+            (-2560, -245, 0, 1355),
+            (-2560, -245),
+        ),
+    ] {
+        let actual = window_open::clamp_window_position(
+            PhysicalPosition::new(point.0, point.1),
+            PhysicalSize::new(size.0, size.1),
+            area,
+        );
+        assert_eq!((actual.x, actual.y), expected);
+    }
+}
+
+#[test]
 fn queued_filmstrip_windows_validate_source_identity_and_coalesce_duplicate_actions() {
     let Some(root) = crate::tests::isolated_test_root(
         "window_host::opening_tests::queued_filmstrip_windows_validate_source_identity_and_coalesce_duplicate_actions",
@@ -34,30 +71,60 @@ fn queued_filmstrip_windows_validate_source_identity_and_coalesce_duplicate_acti
     let tab = app.tabs.open_new(paths[0].clone(), MediaKind::Image);
     app.folder_snapshot = Some(snapshot(&paths));
     app.filmstrip_open = true;
-    app.handle_ui_action(UiAction::OpenWindow(paths[1].clone(), 41, egui::Pos2::ZERO));
+    app.handle_ui_action(UiAction::OpenWindow(
+        paths[1].clone(),
+        41,
+        egui::Pos2::ZERO,
+        egui::Vec2::ZERO,
+    ));
     app.handle_ui_action(UiAction::OpenWindow(
         root.join("foreign.png"),
         42,
         egui::Pos2::ZERO,
+        egui::Vec2::ZERO,
     ));
     assert!(app.pending_window_open.is_none());
     app.palette_open = true;
-    app.handle_ui_action(UiAction::OpenWindow(paths[1].clone(), 42, egui::Pos2::ZERO));
+    app.handle_ui_action(UiAction::OpenWindow(
+        paths[1].clone(),
+        42,
+        egui::Pos2::ZERO,
+        egui::Vec2::ZERO,
+    ));
     assert!(app.pending_window_open.is_none());
     app.palette_open = false;
     for point in [egui::pos2(f32::NAN, 0.0), egui::pos2(0.0, f32::INFINITY)] {
-        app.handle_ui_action(UiAction::OpenWindow(paths[1].clone(), 42, point));
+        app.handle_ui_action(UiAction::OpenWindow(
+            paths[1].clone(),
+            42,
+            point,
+            egui::Vec2::ZERO,
+        ));
+        assert!(app.pending_window_open.is_none());
+        app.handle_ui_action(UiAction::OpenWindow(
+            paths[1].clone(),
+            42,
+            egui::Pos2::ZERO,
+            point.to_vec2(),
+        ));
         assert!(app.pending_window_open.is_none());
     }
     app.handle_ui_action(UiAction::OpenWindow(
         paths[1].clone(),
         42,
         egui::pos2(20.0, 40.0),
+        egui::vec2(10.0, 15.0),
     ));
-    app.handle_ui_action(UiAction::OpenWindow(paths[0].clone(), 42, egui::Pos2::ZERO));
+    app.handle_ui_action(UiAction::OpenWindow(
+        paths[0].clone(),
+        42,
+        egui::Pos2::ZERO,
+        egui::Vec2::ZERO,
+    ));
     let request = app.pending_window_open.take().expect("one queued action");
     assert_eq!(request.path, paths[1]);
-    assert_eq!(request.client_origin, egui::pos2(20.0, 40.0));
+    assert_eq!(request.point, egui::pos2(20.0, 40.0));
+    assert_eq!(request.anchor, egui::vec2(10.0, 15.0));
     assert!(app.window_open_request_is_current(&request));
     app.filmstrip_open = false;
     assert!(!app.window_open_request_is_current(&request));
@@ -127,6 +194,67 @@ pub(super) fn finish_child(app: &mut WindowApplication) {
     }
 }
 
+fn exercise_edge_placement(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
+    let key = host.add_application(None).expect("placement window");
+    host.start_pending(event_loop, false);
+    let app = &host.windows[&key];
+    let window = app.window.as_ref().expect("window");
+    let monitors: Vec<_> = window.available_monitors().collect();
+    assert!(!monitors.is_empty());
+    for monitor in monitors {
+        let origin = monitor.position();
+        let area = towavue_runtime_windows::monitor_work_area((origin.x + 10, origin.y + 10))
+            .expect("work area");
+        for point in [
+            winit::dpi::PhysicalPosition::new(area.0 + 10, area.1 + 10),
+            winit::dpi::PhysicalPosition::new(area.2 - 10, area.3 - 10),
+            winit::dpi::PhysicalPosition::new((area.0 + area.2) / 2, (area.1 + area.3) / 2),
+        ] {
+            let anchor = egui::vec2(100.0, 15.0);
+            app.position_window_at_drop(point, anchor).expect("place");
+            let position = window.outer_position().expect("outer position");
+            let inner = window.inner_position().expect("inner position");
+            let size = window.outer_size();
+            let scale = window.scale_factor() as f32;
+            let requested = (
+                point.x - (anchor.x * scale).round() as i32 - (inner.x - position.x),
+                point.y - (anchor.y * scale).round() as i32 - (inner.y - position.y),
+            );
+            let expected = (
+                requested
+                    .0
+                    .max(area.0)
+                    .min((area.2 - size.width as i32).max(area.0)),
+                requested
+                    .1
+                    .max(area.1)
+                    .min((area.3 - size.height as i32).max(area.1)),
+            );
+            assert_eq!(
+                (position.x, position.y),
+                expected,
+                "DPI-scaled anchor and work-area placement"
+            );
+            assert!(position.x >= area.0 && position.y >= area.1);
+            if size.width as i32 <= area.2 - area.0 {
+                assert!(position.x + size.width as i32 <= area.2);
+            }
+            if size.height as i32 <= area.3 - area.1 {
+                assert!(position.y + size.height as i32 <= area.3);
+            }
+            assert_eq!(window.is_visible(), Some(false));
+            eprintln!(
+                "PASS hidden drop placement: work={area:?} scale={scale} point={point:?} position={position:?} size={size:?}"
+            );
+        }
+    }
+    host.windows
+        .get_mut(&key)
+        .expect("placement window")
+        .exit_requested = true;
+    host.remove_closed();
+}
+
 pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let source = *host.windows.keys().next().expect("source");
     let app = host.windows.get_mut(&source).expect("source");
@@ -169,6 +297,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         image_path.clone(),
         42,
         egui::Pos2::ZERO,
+        egui::Vec2::ZERO,
     ));
     let request = app.pending_window_open.take().expect("request");
     assert!(
@@ -191,7 +320,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     for path in &paths {
         let app = host.windows.get_mut(&source).expect("source");
         app.filmstrip_open = true;
-        let client_origin = egui::pos2(-80.0, 60.0);
+        let client_origin = egui::pos2(100.0, 60.0);
         let origin = app
             .window
             .as_ref()
@@ -203,7 +332,12 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
             origin.x + (client_origin.x * density).round() as i32,
             origin.y + (client_origin.y * density).round() as i32,
         );
-        app.handle_ui_action(UiAction::OpenWindow(path.clone(), 42, client_origin));
+        app.handle_ui_action(UiAction::OpenWindow(
+            path.clone(),
+            42,
+            client_origin,
+            egui::Vec2::ZERO,
+        ));
         let keys: Vec<_> = host.windows.keys().copied().collect();
         host.open_pending_windows(event_loop, false);
         let child = *host
@@ -298,7 +432,12 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let missing = source_path.with_file_name("missing-filmstrip.png");
     app.folder_snapshot = Some(snapshot(&[source_path, missing.clone()]));
     app.filmstrip_open = true;
-    app.handle_ui_action(UiAction::OpenWindow(missing, 42, egui::Pos2::ZERO));
+    app.handle_ui_action(UiAction::OpenWindow(
+        missing,
+        42,
+        egui::Pos2::ZERO,
+        egui::Vec2::ZERO,
+    ));
     host.open_pending_windows(event_loop, false);
     assert_eq!(host.windows.len(), window_count);
     let app = host.windows.get_mut(&source).expect("source");
@@ -323,6 +462,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     }
     app.folder_snapshot = old_snapshot;
     app.close_filmstrip();
+    exercise_edge_placement(host, event_loop);
     eprintln!(
         "PASS hosted filmstrip windows: normal action opens/loads image, silent video and corrupt media independently; silent audio playback verified={audio_verified}; same-device cross-draw; source tabs/edits/export/clock/session unchanged; startup/post-start/missing-file failures preserve filmstrip and leave no child"
     );

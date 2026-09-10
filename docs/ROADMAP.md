@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 U08 monitor-placement checkpoint: release点からmonitorの作業領域を選び、hidden配置後の実DPIで論理grabを再計算して位置をclampする。通常の手動移動とサイズ規則は変更しない。右端793pxのはみ出しと旧native回帰の失敗→修正後成功を確認。3台／96・192 DPIで端・中央、負座標／taskbar／過大windowの回帰、可視右端の閉じる領域・mixed-DPI移送・filmstrip右下と映像画素保持が通過。546f3dbのCI34509593269は成功。別件としてDPI往復で960×576→1946×1223→989×651へ増える既存サイズ問題を確認したため、次はcustom captionとwinitのDPI resizeを修正する。全UX台帳・全media／DPI比率／UIA・IME／style／latency・資源は継続する。
+
 2026-09-11 U08 filmstrip-position checkpoint: filmstrip外dropもrelease位置を無視していたため、浮遊カード左上を要求へ引き継ぎ、タブ分離と共通の座標変換で表示前に配置する。元tab／未保存編集は保持し、子は元ファイルを独立Openする。旧native位置回帰の失敗→修正後成功、3幅×3密度、非有限座標／stale／重複・失敗時保持を確認。可視の生成動画／PNG／無音WAVで位置／foreground、編集済み元動画と未編集子の画素一致、画像の均一色144点と音声終端を確認。1404496のCI34508201666は成功。mixed-DPI／monitor端／全media・codec／UIA・IME／style／latency・資源と全UX台帳は継続する。
 
 2026-09-11 U08 detach-position checkpoint: 外drop後の新windowがrelease位置を無視する欠落を可視操作と旧コードで失敗するnative回帰で確認し、先頭slotのgrab offset／source density／client原点から表示前に配置する。3幅×3密度×3tabのheadless回帰、native位置／未保存画像の保持と、可視の先頭／2番目動画tabの分離・再結合／映像48,140画素一致を確認。所有する別process windowで覆った背面には誤結合せず、覆いを外すと結合する。e773cbeのCI34506640146は成功。全UX台帳、mixed-DPI／monitor端／filmstrip分離の可視確認／全media／latencyと資源測定は継続する。全体テストで別経路の断続的失敗も観測したため、再現性の監査は残す。

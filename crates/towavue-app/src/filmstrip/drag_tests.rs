@@ -169,7 +169,8 @@ fn filmstrip_drag_copies_the_owned_path_once_and_reuses_its_preview() {
                 == vec![UiAction::OpenWindow(
                     target.clone(),
                     snapshot.generation,
-                    outside - (origin - rect.min)
+                    outside,
+                    origin - rect.min,
                 )]
         );
         assert!(
@@ -241,7 +242,8 @@ fn filmstrip_window_origin_preserves_the_card_grab_across_sizes_and_densities() 
                     == vec![UiAction::OpenWindow(
                         target.clone(),
                         snapshot.generation,
-                        outside - offset
+                        outside,
+                        offset,
                     )],
                 "width {width}, density {density}"
             );

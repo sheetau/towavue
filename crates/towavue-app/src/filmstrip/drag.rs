@@ -160,7 +160,8 @@ impl State {
                 actions.push(UiAction::OpenWindow(
                     drag.path.clone(),
                     scope.generation,
-                    pointer.expect("outside release point") - drag.offset,
+                    pointer.expect("outside release point"),
+                    drag.offset,
                 ));
             }
         }

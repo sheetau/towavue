@@ -1,5 +1,15 @@
 # towavue アーキテクチャ
 
+## U08: drop先monitorの作業領域とDPI（2026-09-11）
+
+画面端ではgrab位置の完全一致より、新windowの操作領域の可視性を優先する。tab／filmstripの要求はrelease点と論理grab offsetを別に保持し、sourceのUI densityでrelease点を物理screen座標へ変換する。monitorはwindow原点や矩形の最大重なりではなく、release点で選ぶ。runtimeの同期read-only境界でMonitorFromPoint／GetMonitorInfoWのrcWorkを取得し、負座標とtaskbar領域を扱う（[Microsoft MONITORINFO](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-monitorinfo)）。native handleはappへ渡さない。
+
+hidden windowを選択monitor内へ一度配置して実際のDPI／サイズを確定し、移動先DPI×UI zoomでgrab offsetを計算し直す。client／outer差を除いて作業領域へclampしてからmediaを公開する。通常位置ではoffsetを保持し、端では位置だけを補正する。既存windowの手動移動・サイズ／最小サイズ規則は変更しない。window自体が作業領域より大きい軸は左／上へ揃えるため、その場合に全操作部が収まる保証はしない。
+
+可視の右端dropはclient (2833,231)、幅960で右端3000を793px超えた。修正後は(2040,231)へ収まり、閉じるボタン位置(2978,246)のOS hitを確認。左の192 DPIへは実cursor (-2220,277)からclient (-2420,132)、1946×1223を作業領域内へ配置し、200pxの横grab offsetを保持。主monitorのfilmstrip右下dropは(960,456)、960×576でtaskbar上の1032に収まる。大きい表示の4色点と、96 DPIの640×480へ揃えた編集済み48,140画素／未編集112,572画素も確認した。
+
+別件の未解決証拠：caption付きwindowを96→192→96 DPIへ動かすと、非表示native検証で960×576→1946×1223→989×651へ増えた。修正前の可視windowでも192 DPI時に1946×1223となるため、位置clampとは別の既存問題として追跡する。次はwinitのWM_DPICHANGEDのclient／outer調整とcustom captionの境界を確認する。全DPI比率／全media／HDR／UIA／IME／latency・資源の認定ではない。
+
 ## U08: filmstripから開くwindowの位置（2026-09-11）
 
 filmstripの外dragは元ファイルの独立Openであり、tabのlive state移送ではない。release点からカード内のgrab offsetを引いた、浮遊カード左上のsource-client座標を要求へ保持する。tab分離と同じsource density／client原点の変換とclient／outer inset補正を共用し、新しいhidden HWNDを配置してからmediaを開き、成功後に表示して元filmstripを閉じる。要求のfolder generation／元tab／media instance・modal・重複拒否と、失敗時の元window／filmstrip保持は維持する。非有限座標はqueueへ入れない。新windowのサイズ規則と、tab以外を既存windowへ結合しない契約は変更しない。

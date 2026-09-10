@@ -556,6 +556,7 @@ fn exercise_audio(host: &mut WindowHost, event_loop: &ActiveEventLoop, destinati
             &request,
             false,
             winit::dpi::PhysicalPosition::new(100, 80),
+            egui::Vec2::ZERO,
         )
         .expect("detach paused audio");
     let app = host.windows.get_mut(&detached).expect("detached audio");

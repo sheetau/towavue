@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 I03 cancellation checkpoint: foreground／静止画prefetchの読取・Seekと変換境界へ世代取消を接続。PNG／JPEG／BMP／TIFF／WebPで画素一致と途中取消を確認し、拡張子fallbackを維持して既存animated AVIF回帰も通す。生成6000×4000、Release各7回、開始20ms取消の処理終了中央値はPNG120.899→24.735ms、JPEG44.221→28.305ms、BMP78.538→21.159ms。warm file-cacheの復号単体であり、初回段階表示／cold／可視UIの速度保証ではない。a590fe9のCI34526543071は成功。初回静止画previewを含む全UX台帳を引き続き実施し、配布準備は再開しない。
+
 2026-09-11 U02/U08 verification checkpoint: native guardの168文字日本語／`&`名、通常／fullscreen×96／192 DPIの折返し・末尾・全ボタン・取消後の辺focusと1pxキー調整を確認。Cancel／worker失敗後のfocus復帰を既存app回帰へ追加した。全体チェック中、幅1080のportrait作業領域でfilmstrip／tab分離の旧テストが未補正座標を期待して失敗したため、既存のwork-area補正を独立計算する厳密なoracleへ修正。アプリ挙動・許容誤差は変更しない。8551c42のCI34525054544は成功。次はI03の通常静止画first-decodeと表示待ちを測定し、段階表示・取消・先読みの残件へ進む。全UX台帳を継続する。
 
 2026-09-11 U02 native-guard checkpoint: 同windowでexportしていない通常の未保存確認をWindows Task Dialogへ移し、既定Cancel・明示Export／Discard・Exit時の全編集破棄を表示。STA所有・manifest v6・二重表示防止・失敗時Cancelを接続した。file pickerはnative、live export／長文error／編集form／tooltipは操作性と追加実装量を根拠に現行方式を採用。実96／192 DPI、SDK UIA InvokeのCancel／Discard／Save、保存PNG57,600画素、別window独立操作と全チェックを確認。旧.NET UIAのPane判定はnative SDKのButton／Invokeと区別する。a557b5aのCI34523120355は成功。次はnative guardのUnicode長名／fullscreen／focus復帰を確認し、全UIA・IME・style・media品質／性能等の全UX台帳を継続する。

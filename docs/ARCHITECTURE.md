@@ -132,6 +132,12 @@ source durationからmax(20, ceil(seconds/5))個の区間を作り、その中�
 
 固定H.264素材のdebug検証で16コマ生成約1.119秒、4コマの終端sheet約0.327秒、memory clone取得約0.56～0.59msを観測した。これはUI表示遅延の保証ではない。実画素と単枚reference、density／端／UV、同textureで16位置を描画して追加uploadなし、世代／優先度／2枚LRU／texture上限を確認する。所有する可視960×576 windowと生成40秒MPEG-4素材では停止中hoverの非Seek、前半／後半thumbnail、クリックSeekとtab hoverを確認した。software decode条件の一例であり、長GOP／全codec／HDR／混在DPI／資源peak・本画面scrubは未認定・未完。
 
+## I03: 古い画像の復号を読取境界で取り消す（2026-09-11）
+
+foregroundと静止画prefetchの既存generation判定を、Fileを包むRead／Seek adapterへ渡す。外側のBufReaderで小さなcodec読取をまとめ、大きな一回のreadも64 KiBまでにする。取消時のI/O errorはcodecが包み直す場合があるため、decode結果の返却前にgenerationを再検査し、既存のCancelledへ統一する。画像内容による形式推定と拡張子fallbackを併用し、animated AVIFのように推定だけで判定できない入力も維持する。
+
+静止画はdecode後・向き変換後にも検査して不要な後続変換を省く。thread／cache／画素予算は増やさない。実行中のOS readやcodec内部のメモリ内計算を強制中断するものではなく、JPEGなどは次の検査まで待つ。AVIFのFFmpeg処理は既存のframe境界取消を維持する。通常画像の初回低解像度表示、cold-storageとUI end-to-end latencyは別の未完事項とする。
+
 ## I03/U10: 静止画先読み結果のpreview共用（2026-09-10）
 
 既存の隣画像一件／256 MiBの静止画先読みは、原寸cacheへの登録後、decoded-cache mutexを解放してから同じ原寸の借用frameをPreviewCacheへ渡す。既存の240×160以内の縮小、source metadata key、host全体64件／16 MiBを使い、追加decode／補助process／disk encodeはしない。原寸cache hitでも元寸法付きpreviewを再供給し、縮小側だけがevictionされた場合に再decodeしない。先読みの静止画限定／元画質／枚数／順序は変えず、animation／AVIFの先読みやvideo sheetを追加したという意味ではない。

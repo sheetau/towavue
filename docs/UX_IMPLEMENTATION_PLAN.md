@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-11 I03取消checkpoint: foregroundと静止画prefetchはbuffered file読取／Seek・画素変換の区切りでも古い世代を破棄する。5静止画形式の全画素一致／途中取消と既存animation previewを回帰確認。6000×4000のwarm Release復号で20ms時点取消後の処理終了はPNG約121→25ms、JPEG約44→28ms、BMP約79→21ms。OS read／codec内計算の強制中断や初回静止画previewの実装ではなく、cold／可視UI latencyと下記全台帳は未完のまま維持する。
+
 2026-09-11 U01/U04 caption-geometry checkpoint: native controlsの実bottomに1 physical px区切り線を隣接させ、96 DPIの1px／192 DPIの6px隙間を解消。title barの左右6 logical px外側marginだけを除き、native境界・status余白・tab名10px余白は保持する。最大化で画面外となるtop insetを避け、最大26 logical pxの行へlogo／tabを中央配置する。通常・最大化×96／192 DPIの可視画素、logo clickとnative close guard／Cancel後268,160画素一致／Discardを確認。任意UI倍率・全DPI・Windows 10・全media・物理menu key・drag latencyと残台帳は継続する。
 
 2026-09-10 U10 shared-preview checkpoint: PreviewCacheをhost全体へ共有し、同じkeyの生成／probeを一件に集約。RGBAの64件／16 MiB枠はwindow数で増やさず、duration成功値は別の64件枠とする。取消中のwaiterは生成側を止めず、生成失敗／取消はleaseを解放。別keyは並行処理し、foreground縮小seed・元window閉鎖後の再利用を維持する。競合／取消／失敗再試行・source変更／上限と複数Applicationでの共有を回帰化。実時間の改善幅、cold先行生成／動画sheet／GPU texture共有は未認定。

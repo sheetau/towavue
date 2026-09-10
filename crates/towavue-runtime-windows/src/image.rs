@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, Error as IoError};
+use std::io::{BufReader, Error as IoError, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;
 
@@ -70,33 +70,40 @@ pub(crate) fn decode_image_for_prefetch(
     byte_limit: usize,
     is_current: &dyn Fn() -> bool,
 ) -> Result<Option<DecodedImage>, ImageDecodeError> {
+    let result = (|| {
+        check_current(is_current)?;
+        let mut reader = image::ImageReader::new(open(path, is_current)?);
+        if let Ok(format) = ImageFormat::from_path(path) {
+            reader.set_format(format);
+        }
+        let reader = reader
+            .with_guessed_format()
+            .map_err(ImageDecodeError::Open)?;
+        let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
+        let skip = match format {
+            ImageFormat::Gif | ImageFormat::Avif => true,
+            ImageFormat::Png => PngDecoder::new(open(path, is_current)?)?.is_apng()?,
+            ImageFormat::WebP => WebPDecoder::new(open(path, is_current)?)?.has_animation(),
+            _ => false,
+        };
+        if skip {
+            return Ok(None);
+        }
+        let frame = static_frame(reader, byte_limit, is_current)?;
+        check_current(is_current)?;
+        Ok(Some(DecodedImage {
+            format: format_name(format),
+            frames: vec![frame],
+        }))
+    })();
     check_current(is_current)?;
-    let reader = image::ImageReader::open(path)
-        .map_err(ImageDecodeError::Open)?
-        .with_guessed_format()
-        .map_err(ImageDecodeError::Open)?;
-    let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
-    let skip = match format {
-        ImageFormat::Gif | ImageFormat::Avif => true,
-        ImageFormat::Png => PngDecoder::new(open(path)?)?.is_apng()?,
-        ImageFormat::WebP => WebPDecoder::new(open(path)?)?.has_animation(),
-        _ => false,
-    };
-    if skip {
-        return Ok(None);
-    }
-    let frame = static_frame(reader, byte_limit)?;
-    check_current(is_current)?;
-    Ok(Some(DecodedImage {
-        format: format_name(format),
-        frames: vec![frame],
-    }))
+    result
 }
 
 pub(crate) fn decode_image_cancellable(
     path: &Path,
     byte_limit: usize,
-    is_current: &(impl Fn() -> bool + ?Sized),
+    is_current: &dyn Fn() -> bool,
 ) -> Result<DecodedImage, ImageDecodeError> {
     decode_image_with_preview(path, byte_limit, is_current, &mut |_, _, _| {})
 }
@@ -106,48 +113,56 @@ pub(crate) type ImagePreviewCallback<'a> = dyn FnMut(u32, u32, &[u8]) + 'a;
 pub(crate) fn decode_image_with_preview(
     path: &Path,
     byte_limit: usize,
-    is_current: &(impl Fn() -> bool + ?Sized),
+    is_current: &dyn Fn() -> bool,
     preview: &mut ImagePreviewCallback<'_>,
 ) -> Result<DecodedImage, ImageDecodeError> {
-    check_current(is_current)?;
-    let reader = image::ImageReader::open(path)
-        .map_err(ImageDecodeError::Open)?
-        .with_guessed_format()
-        .map_err(ImageDecodeError::Open)?;
-    let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
-    let frames = match format {
-        ImageFormat::Avif => ffmpeg_frames(path, byte_limit, is_current, preview)?,
-        ImageFormat::Gif => {
-            let mut decoder = GifDecoder::new(open(path)?)?;
-            decoder.set_limits(image::Limits::default())?;
-            animated_frames(decoder, byte_limit, is_current, preview)?
+    let result = (|| {
+        check_current(is_current)?;
+        let mut reader = image::ImageReader::new(open(path, is_current)?);
+        if let Ok(format) = ImageFormat::from_path(path) {
+            reader.set_format(format);
         }
-        ImageFormat::WebP => {
-            let decoder = WebPDecoder::new(open(path)?)?;
-            if decoder.has_animation() {
+        let reader = reader
+            .with_guessed_format()
+            .map_err(ImageDecodeError::Open)?;
+        let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
+        let frames = match format {
+            ImageFormat::Avif => ffmpeg_frames(path, byte_limit, is_current, preview)?,
+            ImageFormat::Gif => {
+                let mut decoder = GifDecoder::new(open(path, is_current)?)?;
+                decoder.set_limits(image::Limits::default())?;
                 animated_frames(decoder, byte_limit, is_current, preview)?
-            } else {
-                vec![static_frame(reader, byte_limit)?]
             }
-        }
-        ImageFormat::Png => {
-            let decoder = PngDecoder::new(open(path)?)?;
-            if decoder.is_apng()? {
-                animated_frames(decoder.apng()?, byte_limit, is_current, preview)?
-            } else {
-                vec![static_frame(reader, byte_limit)?]
+            ImageFormat::WebP => {
+                let decoder = WebPDecoder::new(open(path, is_current)?)?;
+                if decoder.has_animation() {
+                    animated_frames(decoder, byte_limit, is_current, preview)?
+                } else {
+                    vec![static_frame(reader, byte_limit, is_current)?]
+                }
             }
+            ImageFormat::Png => {
+                let decoder = PngDecoder::new(open(path, is_current)?)?;
+                if decoder.is_apng()? {
+                    animated_frames(decoder.apng()?, byte_limit, is_current, preview)?
+                } else {
+                    vec![static_frame(reader, byte_limit, is_current)?]
+                }
+            }
+            _ => vec![static_frame(reader, byte_limit, is_current)?],
+        };
+        check_current(is_current)?;
+        if frames.is_empty() {
+            return Err(ImageDecodeError::Empty);
         }
-        _ => vec![static_frame(reader, byte_limit)?],
-    };
+        Ok(DecodedImage {
+            format: format_name(format),
+            frames,
+        })
+    })();
+    // Codec adapters may wrap the reader's cancellation as an ordinary decode error.
     check_current(is_current)?;
-    if frames.is_empty() {
-        return Err(ImageDecodeError::Empty);
-    }
-    Ok(DecodedImage {
-        format: format_name(format),
-        frames,
-    })
+    result
 }
 
 fn ffmpeg_frames(
@@ -208,15 +223,45 @@ fn ffmpeg_frames(
     Ok(frames)
 }
 
-fn open(path: &Path) -> Result<BufReader<File>, ImageDecodeError> {
+struct CancellableReader<'a, R> {
+    inner: R,
+    is_current: &'a dyn Fn() -> bool,
+}
+
+impl<R: Read> Read for CancellableReader<'_, R> {
+    fn read(&mut self, bytes: &mut [u8]) -> Result<usize, IoError> {
+        if !(self.is_current)() {
+            return Err(IoError::other(ImageDecodeError::Cancelled));
+        }
+        // Bound read_to_end's growing requests; the outer BufReader amortizes
+        // checks for codecs that read individual pixels or small header fields.
+        let count = bytes.len().min(64 * 1024);
+        self.inner.read(&mut bytes[..count])
+    }
+}
+
+impl<R: Seek> Seek for CancellableReader<'_, R> {
+    fn seek(&mut self, position: SeekFrom) -> Result<u64, IoError> {
+        if !(self.is_current)() {
+            return Err(IoError::other(ImageDecodeError::Cancelled));
+        }
+        self.inner.seek(position)
+    }
+}
+
+fn open<'a>(
+    path: &Path,
+    is_current: &'a dyn Fn() -> bool,
+) -> Result<BufReader<CancellableReader<'a, File>>, ImageDecodeError> {
     File::open(path)
-        .map(BufReader::new)
+        .map(|inner| BufReader::new(CancellableReader { inner, is_current }))
         .map_err(ImageDecodeError::Open)
 }
 
 fn static_frame(
-    reader: image::ImageReader<BufReader<File>>,
+    reader: image::ImageReader<BufReader<CancellableReader<'_, File>>>,
     byte_limit: usize,
+    is_current: &dyn Fn() -> bool,
 ) -> Result<DecodedImageFrame, ImageDecodeError> {
     let mut decoder = reader.into_decoder()?;
     let (width, height) = decoder.dimensions();
@@ -227,8 +272,11 @@ fn static_frame(
         return Err(ImageDecodeError::TooLarge);
     }
     let orientation = decoder.orientation()?;
+    check_current(is_current)?;
     let mut image = DynamicImage::from_decoder(decoder)?;
+    check_current(is_current)?;
     image.apply_orientation(orientation);
+    check_current(is_current)?;
     let image = image.into_rgba8();
     Ok(DecodedImageFrame {
         width: image.width(),
@@ -308,6 +356,79 @@ mod tests {
     use image::{Delay, Rgb, RgbImage, Rgba, RgbaImage};
 
     use super::*;
+
+    #[test]
+    fn cancellable_reader_bounds_reads_and_does_not_touch_superseded_input() {
+        let current = std::cell::Cell::new(true);
+        let check = || current.get();
+        let mut reader = CancellableReader {
+            inner: std::io::Cursor::new(vec![7; 256 * 1024]),
+            is_current: &check,
+        };
+        let mut bytes = vec![0; 256 * 1024];
+        assert_eq!(reader.read(&mut bytes).expect("bounded read"), 64 * 1024);
+        assert!(bytes[..64 * 1024].iter().all(|byte| *byte == 7));
+        assert_eq!(reader.seek(SeekFrom::Start(17)).expect("seek"), 17);
+        current.set(false);
+        assert!(reader.read(&mut bytes).is_err());
+        assert!(reader.seek(SeekFrom::Start(0)).is_err());
+        assert_eq!(reader.inner.position(), 17, "no I/O after cancellation");
+    }
+
+    #[test]
+    fn static_decodes_preserve_pixels_and_cancel_inside_foreground_and_prefetch() {
+        for extension in ["png", "jpg", "bmp", "tiff", "webp"] {
+            let path = temporary_path(extension);
+            RgbImage::from_fn(512, 256, |x, y| {
+                let n = (x + y * 512).wrapping_mul(0x9e37_79b9);
+                let n = (n ^ (n >> 16)).wrapping_mul(0x85eb_ca6b);
+                Rgb([n as u8, (n >> 8) as u8, (n >> 16) as u8])
+            })
+            .save(&path)
+            .expect("owned static fixture");
+            let expected = image::open(&path)
+                .expect("reference decoder")
+                .into_rgba8()
+                .into_raw();
+            for prefetch in [false, true] {
+                let decode = |current: &dyn Fn() -> bool| {
+                    if prefetch {
+                        decode_image_for_prefetch(&path, IMAGE_BYTE_LIMIT, current)
+                            .map(|image| image.expect("static prefetch"))
+                    } else {
+                        decode_image_cancellable(&path, IMAGE_BYTE_LIMIT, current)
+                    }
+                };
+                let polls = std::cell::Cell::new(0);
+                let decoded = decode(&|| {
+                    polls.set(polls.get() + 1);
+                    true
+                })
+                .expect("current image");
+                assert_eq!(decoded.dimensions(), (512, 256));
+                assert_eq!(decoded.frames[0].rgba, expected, "{extension}");
+                let full_polls = polls.get();
+                assert!(
+                    full_polls > 8,
+                    "must check within the codec, not just at entry/exit"
+                );
+                polls.set(0);
+                let result = decode(&|| {
+                    polls.set(polls.get() + 1);
+                    polls.get() < full_polls / 2
+                });
+                assert!(
+                    matches!(result, Err(ImageDecodeError::Cancelled)),
+                    "{extension}, prefetch={prefetch}"
+                );
+                assert!(
+                    polls.get() < full_polls,
+                    "stop without finishing the old decode"
+                );
+            }
+            fs::remove_file(path).expect("remove owned fixture");
+        }
+    }
 
     #[test]
     fn image_limit_rejects_rgba_expansion_and_cancelled_requests() {

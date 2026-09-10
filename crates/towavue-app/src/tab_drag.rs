@@ -260,6 +260,7 @@ struct DropStrip {
     tabs: Vec<TabId>,
     rectangles: Vec<egui::Rect>,
     strip: egui::Rect,
+    append_right: f32,
     screen: egui::Rect,
     density: f32,
     frame: u64,
@@ -270,6 +271,11 @@ impl DropStrip {
         if self.tabs.is_empty() {
             (self.strip.width() >= 2.0 && self.strip.contains(point))
                 .then_some((0, self.strip.left() + 1.0))
+        } else if self.strip.width() >= 2.0
+            && point.x > self.strip.right()
+            && self.strip.with_max_x(self.append_right).contains(point)
+        {
+            Some((self.tabs.len(), self.strip.right() - 1.0))
         } else {
             chrome::tab_drop_gap(&self.rectangles, self.strip, point)
         }
@@ -297,12 +303,14 @@ pub(super) fn incoming(
     tabs: Vec<TabId>,
     rectangles: Vec<egui::Rect>,
     strip: egui::Rect,
+    append_right: f32,
     pointer: Option<egui::Pos2>,
 ) {
     let layout = DropStrip {
         tabs,
         rectangles,
         strip,
+        append_right,
         screen: ui.ctx().content_rect(),
         density: ui.ctx().pixels_per_point(),
         frame: ui.ctx().cumulative_frame_nr(),
@@ -321,7 +329,7 @@ pub(super) fn incoming(
         } else {
             0.0
         };
-        if direction != 0.0 && !layout.tabs.is_empty() {
+        if direction != 0.0 && !layout.tabs.is_empty() && strip.contains(point) {
             let delta = ui.input(|input| input.stable_dt.min(0.05)) * 360.0 * direction;
             ui.scroll_with_delta_animation(
                 egui::vec2(delta, 0.0),

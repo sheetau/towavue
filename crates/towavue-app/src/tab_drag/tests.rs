@@ -126,6 +126,52 @@ fn incoming_tabs_show_clipped_gaps_and_reject_stale_layouts_without_activation()
 }
 
 #[test]
+fn incoming_tabs_append_in_unused_toolbar_space_without_expanding_native_controls() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::incoming_tabs_append_in_unused_toolbar_space_without_expanding_native_controls",
+    ) else {
+        return;
+    };
+    for width in [960.0, 1440.0] {
+        for density in [1.0, 1.25, 2.0] {
+            let mut app = setup(&root);
+            let context = app.ui_context.clone().expect("context");
+            context.set_pixels_per_point(density);
+            for _ in 0..3 {
+                frame(&mut app, egui::vec2(width, 576.0), false, vec![]);
+            }
+            let original = app.tabs.clone();
+            let ids: Vec<_> = original.tabs().iter().map(|tab| tab.id).collect();
+            let layout = context
+                .data(|data| data.get_temp::<DropStrip>("incoming-tab-strip".into()))
+                .expect("layout");
+            let point = egui::pos2(layout.strip.right() + 12.0, layout.strip.center().y);
+            assert_eq!(
+                incoming_gap(&context, &ids, point),
+                Some(ids.len()),
+                "blank toolbar {width}/{density}"
+            );
+            app.incoming_tab_pointer = Some(point);
+            let (output, actions) = frame(&mut app, egui::vec2(width, 576.0), false, vec![]);
+            assert!(actions.is_empty());
+            let x = layout.strip.right() - 1.0;
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::LineSegment { points, stroke }
+                if *points == [egui::pos2(x, layout.strip.top()), egui::pos2(x, layout.strip.bottom())]
+                    && stroke.width == 2.0 && stroke.color == chrome::FOREGROUND)));
+            for outside in [
+                egui::pos2(width - 30.0, point.y),
+                egui::pos2(10.0, point.y),
+                point + egui::vec2(0.0, 100.0),
+            ] {
+                assert!(incoming_gap(&context, &ids, outside).is_none());
+            }
+            assert_eq!(app.tabs, original);
+        }
+    }
+}
+
+#[test]
 fn incoming_tabs_scroll_without_pointer_capture_and_accept_empty_welcome() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_drag::tests::incoming_tabs_scroll_without_pointer_capture_and_accept_empty_welcome",

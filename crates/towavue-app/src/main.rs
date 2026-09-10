@@ -3557,6 +3557,10 @@ where
                         caption.controls_width() / ui.ctx().pixels_per_point()
                     });
                     let strip_width = (ui.available_width() - controls_width - 56.0).max(80.0);
+                    // Incoming tabs may append in the blank native-drag area, but not
+                    // over caption buttons. Do not change its ordinary hit behavior.
+                    let append_right =
+                        ui.cursor().left() + (ui.available_width() - controls_width).max(20.0);
                     let width = chrome::tab_width(strip_width, self.tabs.tabs().len());
                     egui::ScrollArea::horizontal()
                         .id_salt("tab-strip")
@@ -3780,6 +3784,7 @@ where
                                         self.tabs.tabs().iter().map(|tab| tab.id).collect(),
                                         tab_rects,
                                         strip,
+                                        append_right,
                                         incoming_pointer,
                                     );
                                 }
@@ -3793,7 +3798,14 @@ where
                         egui::Sense::hover(),
                     );
                     if let Some(id) = self.tabs.welcome() {
-                        tab_drag::incoming(ui, Vec::new(), Vec::new(), drag_rect, incoming_pointer);
+                        tab_drag::incoming(
+                            ui,
+                            Vec::new(),
+                            Vec::new(),
+                            drag_rect,
+                            drag_rect.right(),
+                            incoming_pointer,
+                        );
                         let welcome_rect = egui::Rect::from_min_size(
                             drag_rect.min,
                             egui::vec2(drag_rect.width().min(150.0), drag_rect.height()),

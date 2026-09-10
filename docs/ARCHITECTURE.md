@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## U08: 可視の結合操作と末尾の空白drop（2026-09-11）
+
+incoming tabのdrop領域は、実際のtab stripに加えて、その右のnative window-drag空白まで含める。空白では末尾gapを選び、挿入線は可視stripの右端へ置く。caption controlsの予約幅は除外する。これはdrop判定だけの拡張であり、通常のnative drag hit region、local tab並べ替え、tab幅／scroll領域は変更しない。空白でのincoming hoverは端scrollを開始せず、既存のclipped strip内の端scrollは維持する。media／logo／caption／modalと古いlayoutの拒否を維持する。
+
+所有する二つの可視640×480 windowで、修正前はlast-tab右12px前後の空白が拒否され、tab本体へのdropのみ成功することを再現した。修正後は同じ空白で挿入線・末尾追加・destination foreground・未保存90度回転の保持が成立する。media領域のdrop拒否、Welcomeへの戻し、通常空白dragによる50×30pxのwindow移動も確認した。これはmixed-DPI／全media／遮蔽matrixや遅延測定の完了を意味しない。
+
+残る不具合：EOF停止中の生成MPEG-4動画をWelcome windowへ戻すと、tab／dirty state／位置は移るがメイン映像が黒いままになるケースが反復した。600msの操作後captureに加え、入力なしの追加captureでも残り、通常window dragやclose guard表示で映像が戻る。再描画または表示経路が疑われるが原因未確定。request_redrawはrestore経路に存在するため、単に無条件の追加repaintを入れて解決扱いにしない。次にfull-window render／transferを追跡する。可視の分離、遮蔽、mixed-DPIと性能の残件も維持する。
+
 ## V02/U10: 単枚動画プレビューの補助デコーダー利用（2026-09-11）
 
 Seek／tabの初期単枚とvideo filmstripは、sheetと同じworker-owned software decoder／filter helperを一つのtargetで使う。通常時のCLI起動を省くが、単枚request間でinputを保持する変更ではない。縮小後のRGBAを一回PNGにして既存cacheへ渡す。非取消エラーは従来CLIへfallbackし、取消と生成中のsource metadata変更をpublish前に拒否する。画像・音声の生成経路、再生session／D3D11、共有cacheの件数／容量は変更しない。

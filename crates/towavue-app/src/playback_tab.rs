@@ -9,6 +9,7 @@ pub(super) struct RetainedPlaybackTab {
     pub path: PathBuf,
     pub kind: MediaKind,
     pub instance: u64,
+    pub origin: Option<(crate::window_host::WindowKey, u64)>,
     pub session: Option<PlaybackSession>,
     pub clock: Option<PlaybackClock>,
     pub state: PlaybackState,

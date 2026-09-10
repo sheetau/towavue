@@ -12,6 +12,11 @@ pub struct Playlist {
 }
 
 impl Playlist {
+    pub(super) fn detach_context(&mut self) {
+        self.suspend();
+        self.keyboard_focus = None;
+    }
+
     pub fn suspend(&mut self) {
         self.wheel.clear();
     }

@@ -13,6 +13,34 @@ pub(super) struct AudioTab {
 }
 
 impl AudioTab {
+    pub(super) fn transfer(
+        &mut self,
+        old: u64,
+        new: u64,
+        notify: impl Fn() + Send + Sync + 'static,
+    ) {
+        self.handled_eof = self
+            .handled_eof
+            .filter(|instance| *instance == old)
+            .map(|_| new);
+        self.requested_eof = self
+            .requested_eof
+            .filter(|(instance, _)| *instance == old)
+            .map(|(_, generation)| (new, generation));
+        // Folder completion must wake the new owner even after the old window closes.
+        self.provider = match FolderOrderProvider::with_notify(notify) {
+            Ok(provider) => {
+                provider.request(Some(self.folder.clone()));
+                Some(provider)
+            }
+            Err(error) => {
+                eprintln!("towavue: audio order unavailable after tab transfer: {error}");
+                None
+            }
+        };
+        self.refreshing = self.provider.is_some();
+    }
+
     fn accept_snapshot(&mut self, snapshot: FolderSnapshot) {
         if snapshot.folder_path == self.folder {
             self.order.set_items(
@@ -360,6 +388,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             self.audio_export_settings.remove(&id);
             self.metadata_export_settings.remove(&id);
             let instance = saved.instance;
+            saved.origin = self.window_key.map(|key| (key, instance));
             let notify = Arc::clone(&self.notify);
             match PlaybackSession::open(
                 &path,
@@ -395,6 +424,46 @@ mod tests {
     use std::sync::mpsc;
     use winit::platform::windows::EventLoopBuilderExtWindows;
     use winit::window::WindowAttributes;
+
+    #[test]
+    fn transferred_audio_queue_rebinds_wakeup_and_remaps_eof_identity() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "audio_playback::tests::transferred_audio_queue_rebinds_wakeup_and_remaps_eof_identity",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let path = root.join("routing-only.wav");
+        let id = app.tabs.open_new(path.clone(), MediaKind::Audio);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Audio);
+        app.ensure_audio_queue();
+        let queue = app.audio_queues.get_mut(&id).expect("queue");
+        queue.order.cycle_repeat();
+        queue.handled_eof = Some(7);
+        queue.requested_eof = Some((7, PlaybackGeneration::INITIAL));
+        let (sent, received) = mpsc::channel();
+        queue.transfer(7, 19, move || {
+            let _ = sent.send(());
+        });
+        assert_eq!(queue.handled_eof, Some(19));
+        assert_eq!(queue.requested_eof, Some((19, PlaybackGeneration::INITIAL)));
+        assert_eq!(queue.order.repeat(), RepeatMode::All);
+        received
+            .recv_timeout(Duration::from_secs(5))
+            .expect("new owner's folder wakeup");
+        assert!(
+            queue
+                .provider
+                .as_ref()
+                .expect("rebound provider")
+                .take_completed()
+                .is_some()
+        );
+        queue.transfer(20, 31, || {});
+        assert_eq!(queue.handled_eof, None);
+        assert_eq!(queue.requested_eof, None);
+    }
 
     fn advance<N: Fn(AppEvent) + Send + Sync + 'static>(
         app: &mut Application<N>,

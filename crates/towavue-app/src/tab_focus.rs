@@ -16,6 +16,25 @@ fn state_id() -> Id {
     Id::new("tab-media-focus")
 }
 
+pub(super) fn take(context: &Context, tab: TabId) -> Option<Id> {
+    let key = context.data_mut(|data| {
+        data.get_temp_mut_or_default::<State>(state_id())
+            .saved
+            .get(&tab)
+            .copied()
+    });
+    forget(context, tab);
+    key
+}
+
+pub(super) fn adopt(context: &Context, tab: TabId, key: Id) {
+    context.data_mut(|data| {
+        data.get_temp_mut_or_default::<State>(state_id())
+            .saved
+            .insert(tab, key)
+    });
+}
+
 pub(super) fn forget(context: &Context, tab: TabId) {
     let focused = context.memory(|memory| memory.focused());
     let surrender = context.data_mut(|data| {

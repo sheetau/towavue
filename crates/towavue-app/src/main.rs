@@ -36,6 +36,7 @@ mod tab_drag;
 mod tab_focus;
 mod tab_menu;
 mod tab_preview;
+mod tab_transfer;
 mod time_selection;
 mod timeline_edit;
 mod timeline_input;
@@ -652,6 +653,9 @@ struct Application<N> {
     initial_path: Option<PathBuf>,
     notify: Arc<N>,
     event_loop_proxy: Option<EventLoopProxy<window_host::Event>>,
+    window_key: Option<window_host::WindowKey>,
+    playback_origin: Option<(window_host::WindowKey, u64)>,
+    pending_tab_detach: Option<tab_transfer::DetachRequest>,
     hosted_graphics: bool,
     graphics_recovery_request: Option<window_host::GraphicsRecoveryRequest>,
     window: Option<Arc<Window>>,
@@ -839,6 +843,9 @@ where
             initial_path,
             notify,
             event_loop_proxy: None,
+            window_key: None,
+            playback_origin: None,
+            pending_tab_detach: None,
             hosted_graphics: false,
             graphics_recovery_request: None,
             window: None,
@@ -1215,18 +1222,28 @@ where
         {
             return;
         }
+        let mut saved = self.take_playback_tab_state();
+        saved.poll();
+        self.retained_playback.insert(id, saved);
+    }
+
+    fn take_playback_tab_state(&mut self) -> playback_tab::RetainedPlaybackTab {
         let position = self.current_position();
         self.cancel_view_drag();
         self.playlist.suspend();
-        let mut clock = self
-            .clock
-            .take()
-            .unwrap_or_else(|| PlaybackClock::new(position, self.playback_rate()));
+        let mut clock = self.clock.take().unwrap_or_else(|| {
+            if self.state == PlaybackState::Playing {
+                PlaybackClock::new(position, self.playback_rate())
+            } else {
+                PlaybackClock::paused(position, self.playback_rate())
+            }
+        });
         clock.set_paused(self.state != PlaybackState::Playing);
-        let mut saved = playback_tab::RetainedPlaybackTab {
+        playback_tab::RetainedPlaybackTab {
             path: self.path.clone().expect("displayed path"),
-            kind,
+            kind: self.media_kind.expect("displayed playback kind"),
             instance: self.media_generation,
+            origin: self.playback_origin.take(),
             session: self.session.take(),
             clock: Some(clock),
             state: self.state,
@@ -1251,13 +1268,17 @@ where
             graphics_epoch: self.graphics_epoch,
             recovery_position: None,
             video_suspended: false,
-        };
-        saved.poll();
-        self.retained_playback.insert(id, saved);
+        }
     }
 
-    fn restore_playback_tab(&mut self, mut saved: playback_tab::RetainedPlaybackTab) {
-        saved.poll();
+    fn restore_playback_tab(
+        &mut self,
+        mut saved: playback_tab::RetainedPlaybackTab,
+        transferred: bool,
+    ) {
+        if !transferred || saved.video_suspended {
+            saved.poll();
+        }
         let position = saved.position();
         if saved.video_suspended {
             if let Some(session) = &mut saved.session
@@ -1269,6 +1290,7 @@ where
             saved.decode_finished = false;
         }
         self.media_generation = saved.instance;
+        self.playback_origin = saved.origin;
         self.session = saved.session;
         if let Some(session) = &self.session {
             self.generation = session.generation();
@@ -1315,6 +1337,10 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        self.load_path_with_transfer(path, kind, false);
+    }
+
+    fn load_path_with_transfer(&mut self, path: PathBuf, kind: MediaKind, transferred: bool) {
         if let Some(id) = self.displayed_tab
             && self.tabs.active().is_some_and(|tab| tab.id == id)
             && let Some(context) = &self.ui_context
@@ -1372,6 +1398,7 @@ where
         self.image_loading = false;
         self.image_error = None;
         self.session.take();
+        self.playback_origin = None;
         self.image = None;
         self.reading_pages.clear();
         self.timeline_open = kind == MediaKind::Audio;
@@ -1400,7 +1427,7 @@ where
         self.drift_samples.clear();
         self.refresh_folder_snapshot();
         if let Some(saved) = saved_playback {
-            self.restore_playback_tab(saved);
+            self.restore_playback_tab(saved, transferred);
             return;
         }
         if kind == MediaKind::Image {
@@ -1424,6 +1451,7 @@ where
         let graphics_device = renderer.graphics_device();
         let notify = Arc::clone(&self.notify);
         let media_generation = self.media_generation;
+        self.playback_origin = self.window_key.map(|key| (key, media_generation));
         match PlaybackSession::open(
             &path,
             graphics_device,
@@ -4471,7 +4499,7 @@ where
                 }
             }
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
-            UiAction::DetachTab(id) => self.request_guarded(GuardedAction::DetachTab(id)),
+            UiAction::DetachTab(id) => self.request_tab_detach(id),
             UiAction::OpenWindow(path, generation) => {
                 self.open_filmstrip_window(path, generation, spawn_new_window)
             }
@@ -6007,6 +6035,7 @@ where
             self.load_path(path, kind);
         } else {
             self.session.take();
+            self.playback_origin = None;
             self.displayed_tab = None;
             self.cancel_frame_steps();
             self.playback_error = None;

@@ -8,6 +8,10 @@ mod tests;
 #[path = "window_graphics_tests.rs"]
 mod graphics_tests;
 
+#[cfg(test)]
+#[path = "window_transfer_tests.rs"]
+mod transfer_tests;
+
 // Never reused, even after the native HWND or a window-local session ID is reused.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct WindowKey(u64);
@@ -69,6 +73,7 @@ impl WindowHost {
         });
         let mut app = Application::new(initial_path, notify)?;
         app.event_loop_proxy = self.proxy.clone();
+        app.window_key = Some(key);
         app.hosted_graphics = true;
         self.windows.insert(key, app);
         Ok(key)
@@ -102,8 +107,125 @@ impl WindowHost {
         })
     }
 
+    fn move_playback_tab(
+        &mut self,
+        source: WindowKey,
+        destination: WindowKey,
+        request: &tab_transfer::DetachRequest,
+        gap: usize,
+    ) -> Result<TabId, String> {
+        if source == destination {
+            return Err("choose another window".into());
+        }
+        self.windows
+            .get(&source)
+            .ok_or("source window is closed")?
+            .validate_playback_transfer(request)?;
+        let target = self
+            .windows
+            .get(&destination)
+            .ok_or("destination window is closed")?;
+        target.validate_transfer_window()?;
+        if gap > target.tabs.tabs().len() {
+            return Err("the destination tab strip changed".into());
+        }
+        // All fallible validation is complete before extracting any user state.
+        let transfer = self
+            .windows
+            .get_mut(&source)
+            .expect("validated source")
+            .take_playback_transfer(request);
+        Ok(self
+            .windows
+            .get_mut(&destination)
+            .expect("validated destination")
+            .accept_playback_transfer(transfer, gap))
+    }
+
+    fn detach_pending_tabs(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
+        let requests: Vec<_> = self
+            .windows
+            .iter_mut()
+            .filter_map(|(key, app)| app.pending_tab_detach.take().map(|request| (*key, request)))
+            .collect();
+        for (source, request) in requests {
+            let result = self.detach_playback_tab(event_loop, source, &request, visible);
+            if let Err(error) = result
+                && let Some(app) = self.windows.get_mut(&source)
+            {
+                app.set_status(format!("Could not detach tab: {error}"));
+            }
+        }
+    }
+
+    fn detach_playback_tab(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        source: WindowKey,
+        request: &tab_transfer::DetachRequest,
+        visible: bool,
+    ) -> Result<WindowKey, String> {
+        self.detach_playback_tab_with(source, request, visible, |app, device| {
+            app.start_on_device(event_loop, Some(device), false)
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn detach_playback_tab_with(
+        &mut self,
+        source: WindowKey,
+        request: &tab_transfer::DetachRequest,
+        visible: bool,
+        start: impl FnOnce(
+            &mut WindowApplication,
+            towavue_runtime_windows::GraphicsDevice,
+        ) -> Result<(), String>,
+    ) -> Result<WindowKey, String> {
+        let app = self.windows.get(&source).ok_or("source window is closed")?;
+        app.validate_playback_transfer(request)?;
+        let device = app
+            .renderer
+            .as_ref()
+            .expect("validated renderer")
+            .graphics_device();
+        let destination = self
+            .add_application(None)
+            .map_err(|error| error.to_string())?;
+        // Keep the empty HWND hidden until both startup and transfer succeed.
+        let started = start(
+            self.windows.get_mut(&destination).expect("new window"),
+            device,
+        );
+        let moved = started.and_then(|()| self.move_playback_tab(source, destination, request, 0));
+        match moved {
+            Ok(_) => {
+                self.windows[&destination]
+                    .window
+                    .as_ref()
+                    .expect("started window")
+                    .set_visible(visible);
+                Ok(destination)
+            }
+            Err(error) => {
+                let mut app = self.windows.remove(&destination).expect("new window");
+                if let Some(renderer) = app.renderer.take() {
+                    renderer.release_surface();
+                }
+                Err(error)
+            }
+        }
+    }
+
     fn route(&mut self, event: Event) {
         match event {
+            Event::Window(origin, AppEvent::Playback(instance, event)) => {
+                if let Some((owner, instance)) = self.playback_owner((origin, instance)) {
+                    self.windows
+                        .get_mut(&owner)
+                        .expect("live playback owner")
+                        .handle_app_event(AppEvent::Playback(instance, event));
+                }
+            }
             Event::Window(key, event) => {
                 if let Some(app) = self.windows.get_mut(&key).filter(|app| !app.exit_requested) {
                     app.handle_app_event(event);
@@ -116,6 +238,24 @@ impl WindowHost {
             }
         }
         self.recover_pending_graphics();
+    }
+
+    fn playback_owner(&self, origin: (WindowKey, u64)) -> Option<(WindowKey, u64)> {
+        // The session keeps its immutable callback origin through any number of
+        // moves. Resolve against live owners, without forwarding chains or tombstones.
+        self.windows
+            .iter()
+            .filter(|(_, app)| !app.exit_requested)
+            .find_map(|(key, app)| {
+                if app.playback_origin == Some(origin) {
+                    Some((*key, app.media_generation))
+                } else {
+                    app.retained_playback
+                        .values()
+                        .find(|saved| saved.origin == Some(origin))
+                        .map(|saved| (*key, saved.instance))
+                }
+            })
     }
 
     fn recover_pending_graphics(&mut self) {
@@ -263,8 +403,9 @@ impl ApplicationHandler<Event> for WindowHost {
         self.start_pending(event_loop, true);
     }
 
-    fn user_event(&mut self, _: &ActiveEventLoop, event: Event) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         self.route(event);
+        self.detach_pending_tabs(event_loop, true);
     }
 
     fn window_event(
@@ -277,6 +418,7 @@ impl ApplicationHandler<Event> for WindowHost {
             app.window_event(event_loop, window_id, event);
         }
         self.recover_pending_graphics();
+        self.detach_pending_tabs(event_loop, true);
     }
 
     fn device_event(
@@ -294,6 +436,7 @@ impl ApplicationHandler<Event> for WindowHost {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.detach_pending_tabs(event_loop, true);
         event_loop.set_control_flow(self.prepare_wait());
         if self.windows.is_empty() {
             // Windows winit waits once after AboutToWait; prepare_wait selects Poll.

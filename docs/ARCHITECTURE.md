@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U08: tab dragの追従表示（2026-09-10）
+
+前frameの可視tab labelとprimary pressを対応させ、6 logical pxを超えた移動をdragとして所有する。close buttonはdrag開始点にしない。端12 logical px内で保持すると既存ScrollAreaを360 logical px/sで横scrollし、同じframeの再passで重複加算しない。barの描画が途切れた場合や非active source path変更も取消対象。capture中のCursorLeft／PointerGoneだけでは分離操作を破棄せず、追従描画と新しいscroll要求を止めて後続座標／releaseを待つ。直前に受理済みのscrollは次layoutで反映する。実focus喪失は取消する。
+
+bar内のdrag中は掴んだ位置を保ってtab本体をpointerへ追従させ、挿入先の隣接tabはease／animationなしで即座に場所を空ける。TabSetの実順序はrelease時に一度だけ確定し、drag中の表示順は投影に留める。active／編集／保存先／再生sessionを切り替えず、Escape・focus喪失・modal／popup・source／tab構成変更・resize／DPI変更で投影を破棄する。bar外のwindow内releaseは取消、window外releaseは既存のguard付きdetachへ渡す。dragged tabの描画はwindow内へclipし、下のmedia操作へ入力を渡さない。既存の挿入線だけを動かす表示をこの契約で置換する。window間結合・状態移送・filmstrip分離は別の未完項目として維持し、pathだけのprocess起動をそれらの達成と扱わない。
+
 ## U07: 非active動画の保持surface（2026-09-10）
 
 非active化でvideo worker／queue／decoderを停止し、開いたinputと最後の表示frameを保持する既存契約は維持する。最後のAVFrameが24枚のtexture arrayをpinすることをH.264で実測した。保持時だけ同じdevice上のArraySize=1 textureへ同一format／寸法の全subresourceをcopyし、AVFrameを解放する。通常表示中はdecode surfaceを直接使い、CPU readback／色変換／再encodeは追加しない。PTS／orientation／pixel aspect／transferとpaused-frame対応を保持し、復帰直後の描画を維持する。既に独立化したframeは再copyせず、新frameで置換する。

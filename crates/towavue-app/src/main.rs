@@ -32,6 +32,7 @@ mod seekbar;
 mod selection;
 mod selection_aspect;
 mod shortcuts;
+mod tab_drag;
 mod tab_focus;
 mod tab_menu;
 mod tab_preview;
@@ -3343,18 +3344,61 @@ where
                         .auto_shrink([true, false])
                         .show(ui, |ui| {
                             ui.horizontal_centered(|ui| {
-                                let mut tab_rects = Vec::new();
-                                let mut dragged = None;
+                                let tab_rects: Vec<_> = self
+                                    .tabs
+                                    .tabs()
+                                    .iter()
+                                    .map(|_| {
+                                        ui.allocate_exact_size(
+                                            egui::vec2(width, chrome::TAB_HEIGHT),
+                                            egui::Sense::hover(),
+                                        )
+                                        .0
+                                    })
+                                    .collect();
+                                let strip = ui.min_rect().intersect(ui.clip_rect());
+                                let mut drag_layout = tab_drag::Layout::new(
+                                    ui,
+                                    self.tabs
+                                        .tabs()
+                                        .iter()
+                                        .map(|tab| (tab.id, tab.target.current_path().to_owned()))
+                                        .collect(),
+                                    tab_rects.clone(),
+                                    strip,
+                                    (
+                                        self.tabs.active().map(|tab| tab.id),
+                                        self.media_generation,
+                                        self.graphics_epoch,
+                                    ),
+                                    !self.modal_input_blocked()
+                                        && !self.palette_open
+                                        && !self.grid_open
+                                        && !self.filmstrip_open
+                                        && !egui::Popup::is_any_open(ui.ctx()),
+                                );
                                 for (index, tab) in self.tabs.tabs().iter().enumerate() {
                                     let active =
                                         self.tabs.active().is_some_and(|item| item.id == tab.id);
                                     let dirty =
                                         self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty);
-                                    let (rect, _) = ui.allocate_exact_size(
-                                        egui::vec2(width, chrome::TAB_HEIGHT),
-                                        egui::Sense::hover(),
-                                    );
-                                    tab_rects.push(rect);
+                                    let rect = drag_layout.rect(index);
+                                    let floating = drag_layout.floating == Some(tab.id);
+                                    let layer = if floating {
+                                        egui::LayerId::new(
+                                            egui::Order::Foreground,
+                                            "floating-tab".into(),
+                                        )
+                                    } else {
+                                        ui.layer_id()
+                                    };
+                                    let clip = if floating {
+                                        window_rect
+                                    } else {
+                                        ui.clip_rect()
+                                    };
+                                    let mut painter = ui.painter().clone().with_layer_id(layer);
+                                    painter.set_clip_rect(clip);
                                     if active {
                                         let focus = (tab.id, index, width, strip_width);
                                         let focus_id = ui.id().with("visible-active-tab");
@@ -3366,10 +3410,10 @@ where
                                             changed
                                         });
                                         if changed {
-                                            ui.scroll_to_rect(rect, None);
+                                            ui.scroll_to_rect(tab_rects[index], None);
                                         }
                                     }
-                                    ui.painter().rect_filled(
+                                    painter.rect_filled(
                                         rect,
                                         3.0,
                                         if active {
@@ -3378,7 +3422,7 @@ where
                                             chrome::BACKGROUND
                                         },
                                     );
-                                    let hover_background = ui.painter().add(egui::Shape::Noop);
+                                    let hover_background = painter.add(egui::Shape::Noop);
                                     let label_rect = egui::Rect::from_min_max(
                                         rect.min,
                                         rect.max - egui::vec2(chrome::TAB_CLOSE_WIDTH, 0.0),
@@ -3392,8 +3436,10 @@ where
                                     let mut tab_ui = ui.new_child(
                                         egui::UiBuilder::new()
                                             .id(ui.id().with(("media-tab", tab.id)))
+                                            .layer_id(layer)
                                             .max_rect(rect),
                                     );
+                                    tab_ui.set_clip_rect(clip);
                                     tab_ui.spacing_mut().button_padding =
                                         egui::vec2(chrome::TAB_PADDING, 0.0);
                                     tab_ui.visuals_mut().widgets.inactive.bg_stroke =
@@ -3427,11 +3473,7 @@ where
                                     if response.clicked_by(egui::PointerButton::Middle) {
                                         actions.push(UiAction::CloseTab(tab.id));
                                     }
-                                    if response.dragged_by(egui::PointerButton::Primary)
-                                        || response.drag_stopped_by(egui::PointerButton::Primary)
-                                    {
-                                        dragged = Some((tab.id, response.clone()));
-                                    }
+                                    drag_layout.register(tab.id, &response);
                                     let close_rect = egui::Rect::from_min_max(
                                         egui::pos2(
                                             rect.right() - chrome::TAB_CLOSE_WIDTH,
@@ -3447,13 +3489,13 @@ where
                                         )
                                         .on_hover_text("Close tab");
                                     if response.hovered() || close.hovered() {
-                                        ui.painter().set(
+                                        painter.set(
                                             hover_background,
                                             egui::Shape::rect_filled(rect, 3.0, chrome::HOVER),
                                         );
                                     }
                                     if response.has_focus() || close.has_focus() {
-                                        ui.painter().rect_stroke(
+                                        painter.rect_stroke(
                                             rect,
                                             3.0,
                                             ui.visuals().selection.stroke,
@@ -3508,33 +3550,8 @@ where
                                         tab_ui.memory_mut(|memory| memory.request_focus(focus));
                                     }
                                 }
-                                if let Some((id, response)) = dragged {
-                                    if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-                                        ui.ctx().stop_dragging();
-                                    } else if let Some(pointer) = response.interact_pointer_pos() {
-                                        let strip = ui.min_rect().intersect(ui.clip_rect());
-                                        if let Some((gap, x)) =
-                                            chrome::tab_drop_gap(&tab_rects, strip, pointer)
-                                        {
-                                            ui.painter_at(strip).line_segment(
-                                                [
-                                                    egui::pos2(x, strip.top()),
-                                                    egui::pos2(x, strip.bottom()),
-                                                ],
-                                                egui::Stroke::new(2.0, chrome::FOREGROUND),
-                                            );
-                                            if response
-                                                .drag_stopped_by(egui::PointerButton::Primary)
-                                            {
-                                                actions.push(UiAction::ReorderTab(id, gap));
-                                            }
-                                        } else if response
-                                            .drag_stopped_by(egui::PointerButton::Primary)
-                                            && !window_rect.contains(pointer)
-                                        {
-                                            actions.push(UiAction::DetachTab(id));
-                                        }
-                                    }
+                                if let Some(action) = drag_layout.finish(ui, strip) {
+                                    actions.push(action);
                                 }
                             });
                         });

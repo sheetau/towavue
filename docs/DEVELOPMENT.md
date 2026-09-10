@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### タブ本体のdrag追従（2026-09-10、U08）
+
+タブ名をprimary buttonで掴み6 logical px以上動かすと、掴んだ位置を保って本体が追従し、挿入先のtabがeaseなしで場所を空ける。表示の投影なので、離すまでは実順序／active／編集／再生を変更しない。bar端12px内で保持すると横scrollする。bar外のwindow内dropは取消、window外dropは従来の保存確認付き・path-only detach。window間結合や状態移送はまだできない。
+
+`cargo test -p towavue-app tab_drag_`は新規4件と既存1件。描画中のtab／隣接tab座標とUIA、release一回、11取消条件と直後の新press、まとめて届くinput、CursorLeft後の外drop、17tabの3幅×3密度での端scrollと掴み位置維持を確認する。native caption/GPU recovery試験へ往復・media上のEscapeを追加し、実描画後の履歴／transport／generationとCPU転送0を確認する。合成入力とhidden windowの描画であり、外部foreground入力や通常window／実混在DPIの最終認定ではない。
+
+U08 drag最終検証: session43230のfocused5、fmt／Clippy／workspace524（app298＋core61＋runtime161＋integration4）、追加app実機依存6件、Releaseが終了0。通常ignored15は成功数へ含めず、追加試験にSKIPなし。実GPU復旧前後10点の往復・media上取消でもCPU転送0。Release SHA-256 `8f5be607504fa0ba4475c38b6d25d7ae65a0b61c6f4842c29823e094289bcd7a`。dependency／lock／notice inventory／runtime／unsafe変更なし。
+
 ### 非active動画の保持surface（2026-09-10、U07）
 
 `cargo test -p towavue-runtime-windows retained_surface_hardware -- --ignored --nocapture`でhidden hardware deviceを使う2試験を実行する。既存M1 H.264 fixtureから音声を除き、1080p H.264／VP9 Profile 2 PQ動画は固定FFmpegのlibopenh264／libvpx-vp9で生成する。終了時に生成一時動画を削除する。通常suiteではignoredで、capabilityが使えないcaseはSKIP理由を出す。外部window操作・可聴音・配布はない。

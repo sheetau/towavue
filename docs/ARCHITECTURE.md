@@ -2,6 +2,8 @@
 
 ## V02: compact seekのメイン映像scrub（2026-09-11）
 
+可視比較で通常tooltipがdrag時に抑制される欠落を確認し、compact seek自身が保持するdragの間だけサムネイル／時刻tooltipを強制表示する。単なるpress・他widgetのdrag・取消後は従来のhover判定に戻す。画像のcompact seekにも同じ規則を使う。実マウスでSAR 2:1の320×180素材に90度回転→35度自由回転→crop→左右反転→200×232 resizeを重ね、Fit、Cover、右drag panを保持したcompact scrubの配置と実映像を比較した。別のdisplay-matrix 90度／SAR 2:1素材でも向きと比率を確認し、source orientationを二重適用していないことを確認した。低解像度補間・輪郭の差は残り、HDR／全編集順序／全素材の品質認定ではない。
+
 以下は従来の「本画面scrubを含めない」という段階制限を更新する。動画のcompact seekで横方向dragと判定した時だけsession／clockを一時停止し、既存sheetまたは単枚fallbackのtextureをメイン映像にも描く。press／hoverだけでは停止しない。上方向dragのtimeline展開、画像移動、音声timelineは変更しない。drag中は実Seekを発行せず、releaseで通常Seekを一回だけ呼ぶ。元がPlayingなら通常SeekのEOF／trim停止規則を評価後に再開する。Escape・focus喪失・別command／source／tab・graphics recoveryではSeekなしで取消し、元の再生状態へ戻す。
 
 eguiのdiscarded passを跨いでreleaseを保持するCommitting状態と、Seek後の新frameまで最後のpreviewを保持するAwaitingFrame状態を分ける。runtimeのvideo_refresh_pendingが解除された時に実映像へ戻し、低解像度meshの表示を実Seekのpresentation計測に数えない。別sheetが未到着なら最後の低解像度sampleを保持し、一枚もない時は通常の停止映像を残す。編集後時刻からsourceへの写像と世代管理は従来経路を使い、追加decoder／device／原寸readbackを導入しない。

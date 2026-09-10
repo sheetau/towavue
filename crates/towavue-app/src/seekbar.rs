@@ -219,7 +219,12 @@ pub fn preview_tooltip(response: &Response, ratio: f32) -> egui::Tooltip<'static
         egui::lerp(response.rect.x_range(), ratio),
         response.rect.top(),
     );
-    let mut tooltip = egui::Tooltip::for_enabled(response)
+    let tooltip = if response.enabled() && timeline_input::is_dragging(response) {
+        egui::Tooltip::for_widget(response)
+    } else {
+        egui::Tooltip::for_enabled(response)
+    };
+    let mut tooltip = tooltip
         .width(160.0)
         .layout(egui::Layout::top_down(egui::Align::Center));
     tooltip.popup = tooltip
@@ -237,6 +242,71 @@ pub fn item_index(ratio: f32, count: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seek_drag_keeps_the_thumbnail_and_time_visible_without_hover() {
+        for video in [false, true] {
+            let context = crate::fonts::test_context();
+            let screen = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 300.0));
+            let status = Rect::from_min_size(egui::pos2(0.0, 270.0), egui::vec2(500.0, 30.0));
+            let start = egui::pos2(80.0, 270.0);
+            let end = egui::pos2(360.0, 200.0);
+            let button = |position, pressed| egui::Event::PointerButton {
+                pos: position,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let frame = |events, enabled| {
+                let mut visible = false;
+                let mut commit = None;
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        events,
+                        ..Default::default()
+                    },
+                    |_| {
+                        let (response, drag) =
+                            show_drag(&context, status, 0.2, None, enabled, video);
+                        let mut other = response.clone();
+                        other.id = response.id.with("unrelated-widget");
+                        assert!(!timeline_input::is_dragging(&other));
+                        if drag.released {
+                            commit = drag.position;
+                        }
+                        visible = preview_tooltip(&response, 0.7)
+                            .show(|ui| {
+                                ui.allocate_space(egui::vec2(160.0, 90.0));
+                                ui.monospace("00:21");
+                            })
+                            .is_some();
+                    },
+                );
+                (visible, commit)
+            };
+            frame(vec![], true);
+            frame(vec![], true);
+            frame(
+                vec![egui::Event::PointerMoved(start), button(start, true)],
+                true,
+            );
+            assert!(
+                !frame(vec![], true).0,
+                "press alone does not force a tooltip"
+            );
+            assert!(
+                frame(vec![egui::Event::PointerMoved(end)], true).0,
+                "owned drag must show thumbnail and time outside the track"
+            );
+            assert!(frame(vec![], true).0, "holding the drag keeps the preview");
+            assert!(
+                !frame(vec![], false).0,
+                "disabled input cancels the drag preview"
+            );
+            assert_eq!(frame(vec![button(end, false)], true).1, None);
+        }
+    }
 
     #[test]
     fn compact_endpoints_match_handle_centers_without_changing_timeline_coordinates() {

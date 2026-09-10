@@ -60,6 +60,14 @@ pub fn is_active(context: &Context) -> bool {
     })
 }
 
+pub fn is_dragging(response: &Response) -> bool {
+    response.ctx.data(|data| {
+        data.get_temp::<State>(state_id())
+            .and_then(|state| state.active)
+            .is_some_and(|active| active.id == response.id && active.dragging)
+    })
+}
+
 pub fn cancel(context: &Context) -> bool {
     let active = context.data_mut(|data| {
         data.get_temp_mut_or_default::<State>(state_id())

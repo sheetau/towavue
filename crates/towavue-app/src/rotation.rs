@@ -2,7 +2,7 @@ use crate::*;
 use towavue_core::ImageRotation;
 
 mod drag;
-pub(super) use drag::{RotationDrag, RotationResponse};
+pub(super) use drag::{RotationDrag, RotationResponse, rotation_input};
 
 pub(super) struct RotationDialog {
     pub(super) token: u64,

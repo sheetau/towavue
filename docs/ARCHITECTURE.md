@@ -2,9 +2,11 @@
 
 ## I06: 動画自由回転の保存・表示・角度UI契約（2026-09-10）
 
+動画hold-drag契約（2026-09-10追加）: timeline表示中の映像上でAlt＋左pressから左右dragし、画像と同じ1 logical px＝0.5度・±180度・0.1度単位へ丸める。角度dialogのsnapshot／geometry・budget検証と確定処理を共有し、previewの全canvasを動画viewportへFitする。Alt保持のmouse releaseだけ一件を確定し、0度は非編集。Alt先離し／Escape／focus・cursor喪失／wheel／secondary press／window geometry・source・context変更で取消し、履歴・選択・transportをpreviewのために変更しない。releaseとmodifier解除が同じframeでも、release時の修飾状態と位置を使う。入力ownership／別overlay／既存gestureを侵さず、確定までselection操作を抑止する。
+
 角度UI契約（11:43追加）: 動画専用Free rotate video commandをEdit menu／palette／grid／custom bindingへ追加し、既定Ctrl+Shift+Rは画像commandとcontextで分離する。timeline表示中のみ開け、既存custom key／prefixが重なる場合は追加defaultを抑止する。右下の有界scroll modalで±180度・0.1度単位の数値／sliderを操作する。透明な入力遮断backdropで他の操作を止め、映像面に現在の編集列＋仮の一回転を同一deviceでpreviewする。dialog更新前にそのframeの寸法と操作列を一緒に捕捉し、角度変更時は次の再描画を要求してrectと画素の一時不一致を防ぐ。再生／停止・clock・履歴・selectionはpreviewのために変更しない。modal中の選択枠は隠し、Cancel／Escape／0度で元へ戻す。Applyは既存visual編集と同じ一件の履歴追加・selection解除・Fitを行う。
 
-適用契約: dialog token、tab／path、media／playback世代、操作列、実frame寸法／SAR／orientation、device辺上限を確認する。古いactionは新dialogを閉じず、source交換やcontext変化は取消する。runtimeの非確保video_edit_geometryで入力snapshot／編集順／中間payload予算を確認し、無効な角度やbudget errorはApplyを無効にする。後続visual editとUndo/Redoの候補も履歴を変える前に確認する。自由回転を含む表示は最終canvas寸法・SAR1・identity UVとし、全操作をGPU rasterへ渡す。preset／cropも同じ最終pixel座標を使う。timelineを閉じても確定済み編集を描画する。画像dialog／Alt操作は変更せず、動画のAltドラッグ、HDR／dynamic geometry／全寸法性能・通常window認定は残件。
+適用契約: dialog token、tab／path、media／playback世代、操作列、実frame寸法／SAR／orientation、device辺上限を確認する。古いactionは新dialogを閉じず、source交換やcontext変化は取消する。runtimeの非確保video_edit_geometryで入力snapshot／編集順／中間payload予算を確認し、無効な角度やbudget errorはApplyを無効にする。後続visual editとUndo/Redoの候補も履歴を変える前に確認する。自由回転を含む表示は最終canvas寸法・SAR1・identity UVとし、全操作をGPU rasterへ渡す。preset／cropも同じ最終pixel座標を使う。timelineを閉じても確定済み編集を描画する。画像dialog／Alt操作の契約は維持し、HDR／dynamic geometry／全寸法性能・通常window認定は残件。
 
 VideoRotationは操作直前のsample寸法とpixel aspect、square-pixel寸法、0.1度単位の角度、回転raster寸法と偶数出力canvasを保持する。SARが1より大きければ幅をSAR倍、小さければ高さを1/SAR倍して最近整数へ丸め、元のdetailを減らす縮小はしない。各寸法は16384px／128M pixels以内。角度0は履歴にもfilter列にも入れず、pixel aspect正規化やpaddingも行わない。
 

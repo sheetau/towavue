@@ -22,6 +22,8 @@
 
 2026-09-10 11:45 動画角度UI checkpoint: timeline表示中のEdit menu／Ctrl+Shift+R／角度dialog／sliderと映像面のGPU previewを接続。Apply前のgeometry／budget照合、Cancel／0度・古いtoken／context、selection／crop／再回転／Undo/Redoと保存再読込を確認。software実動画と実D3D11VAのapp描画を検証し、後者はCPU転送0を維持。次は動画のAlt保持drag。通常windowの外観・全寸法／HDR品質／性能とUX台帳全体は未完のまま継続する。
 
+2026-09-10 12:12 動画hold-drag checkpoint: Alt＋左dragを画像と共通の入力契約で接続。角度dialogのsnapshot／geometry・budget確認／GPU preview／確定を共有し、1×／2×、release順序、取消12条件、Undo／0度／保存再読込を回帰確認。実D3D11VAの10描画点もCPU転送0を維持。次はV05動画zoom／resizeの採用契約を照合する。通常window入力・外観／全素材品質／性能とUX台帳全体は未完。
+
 2026-09-09 16:48追記: ownerの最新の区切り・push依頼に従い、進行中だったcompact seek端点修正だけを検証してcheckpointに含める。ローンチ準備は再開せず、このcheckpoint後は次の機能・UI実装へ自動着手しない。既存の改善台帳は残件として保持し、次のgoal設定・作業指示を待つ。goal全体の完了を意味しない。
 
 2026-09-09 新goal: ownerが草案とfollow-upに基づく機能・操作・UI改善を指定した。[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)の台帳へ要求・既存実装・残件を対応付け、H1内で順次実装・検証する。下記の「新goal待ち」は解消したが、ローンチ準備の停止は維持する。

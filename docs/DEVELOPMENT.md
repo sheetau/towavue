@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 動画をAlt保持で自由回転（2026-09-10 12:12、I06 partial）
+
+timeline表示中の映像上でAlt＋左pressし、左右へdragする。画像と同じ1 logical px＝0.5度、±180度・0.1度単位。角度dialogと同じsnapshot／budget検証／GPU処理を使い、全canvasをviewportへFitする。Alt保持のreleaseだけ一件を確定し、Alt先離し／Escape／focus・cursor喪失／wheel／secondary press／window geometry・source・context変更では取消する。0度はRedo枝も維持する。入力の所有権とpress／release時の修飾状態を画像と共有し、既存の画像drag回帰5件も通過した。
+
+既存の実FFV1 UI試験を拡張し、1×／2×でpreview・取消・確定・Undo・0度、release後のpointer移動と重複release、12取消条件と開始拒否、drag確定列のH264保存後の全5frame寸法／SAR1と原本不変を確認した。実D3D11VA試験の10箇所でもpreview／取消と同一frameのrelease→modifier解除を確認し、CPU transfer0を維持する。scale変更直後の座標選択と、模擬frameの予測時刻が実window時刻を追い越す試験fixtureの問題を修正した。製品の時計は変更していない。
+
+最終session29453でfmt check／Clippy／workspace426（app246／core59／runtime117／integration4）、Release、app opt-in5件が終了0。SKIPなし、通常ignored11件は別計上。Release SHA-256は`53ef1b63bef8703c36c75498054ae786f2ea26e28f60710fecb33e3cd584ebbe`。先行2650222のCI34431088247は成功。通常windowの外観／物理操作、HDR・全素材画質／性能とUX台帳全体は未完。次は台帳の動画zoom／resize契約を照合する。外部foreground入力・clipboard書込・配布・追加導入は行わない。
+
 ### 動画の角度dialogとGPU preview（2026-09-10 11:45、I06 partial）
 
 timeline表示中にEdit menu「Free rotate video」またはCtrl+Shift+Rで開く。画像の同キーは画像commandへ渡し、読み書き済みcustom key／prefixを上書きしない。右下のscroll modalで±180度・0.1度の入力／sliderを操作し、映像面で実GPU previewを見る。previewはそのframeのgeometryと操作列を一緒に捕捉し、dialogの更新を次の描画へ反映する。選択枠を一時的に隠すが、Cancel／Escape／0度は履歴・selection・viewを変更しない。再生／停止を変更せず、pause中も同じframeをpreviewする。Applyだけ一件を追加してFit・選択解除し、後続crop／再回転・Undo/Redo・保存も最終canvas座標を使う。

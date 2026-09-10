@@ -2,6 +2,9 @@ use crate::*;
 use towavue_core::VideoRotation;
 use towavue_runtime_windows::{VideoOrientation, video_edit_geometry};
 
+mod drag;
+pub(super) use drag::VideoRotationDrag;
+
 pub(super) struct VideoRotationDialog {
     token: u64,
     tab: TabId,
@@ -183,23 +186,30 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if !self.visual_selection_enabled() || self.media_kind != Some(MediaKind::Video) {
             return;
         }
-        let geometry = match self.validate_video_operations(self.video_operations()) {
-            Ok(geometry) => geometry,
+        let dialog = match self.capture_video_rotation() {
+            Ok(dialog) => dialog,
             Err(error) => {
                 self.set_status(error);
                 return;
             }
         };
-        let (Some(tab), Some(path), Some(session), Some(renderer)) = (
-            self.tabs.active(),
-            self.path.as_ref(),
-            self.session.as_ref(),
-            self.renderer.as_ref(),
-        ) else {
-            return;
-        };
+        self.guard_return_focus = self
+            .ui_context
+            .as_ref()
+            .and_then(|context| context.memory(egui::Memory::focused))
+            .map(|focus| (dialog.tab, focus));
+        self.video_rotation_dialog = Some(dialog);
+        self.request_redraw();
+    }
+
+    fn capture_video_rotation(&mut self) -> Result<VideoRotationDialog, String> {
+        let geometry = self.validate_video_operations(self.video_operations())?;
+        let tab = self.tabs.active().ok_or("Video tab is unavailable")?;
+        let path = self.path.as_ref().ok_or("Video path is unavailable")?;
+        let session = self.session.as_ref().expect("validated video session");
+        let renderer = self.renderer.as_ref().expect("validated renderer");
         self.rotation_generation = self.rotation_generation.wrapping_add(1);
-        self.video_rotation_dialog = Some(VideoRotationDialog {
+        Ok(VideoRotationDialog {
             token: self.rotation_generation,
             tab: tab.id,
             path: path.clone(),
@@ -212,13 +222,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             geometry,
             angle: "0.0".into(),
             first_frame: true,
-        });
-        self.guard_return_focus = self
-            .ui_context
-            .as_ref()
-            .and_then(|context| context.memory(egui::Memory::focused))
-            .map(|focus| (tab.id, focus));
-        self.request_redraw();
+        })
     }
 
     fn video_rotation_is_current(&self, dialog: &VideoRotationDialog) -> bool {
@@ -247,6 +251,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn cancel_stale_video_rotation(&mut self) {
+        if self
+            .video_rotation_drag
+            .as_ref()
+            .is_some_and(|drag| !self.video_rotation_is_current(&drag.preview))
+        {
+            self.cancel_view_drag();
+        }
         if self
             .video_rotation_dialog
             .as_ref()
@@ -278,6 +289,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         }
         let dialog = self.video_rotation_dialog.take().expect("matching dialog");
+        self.commit_video_rotation(dialog, value);
+    }
+
+    fn commit_video_rotation(&mut self, dialog: VideoRotationDialog, value: Option<VideoRotation>) {
         if let Some(value) = value {
             if self.video_rotation_is_current(&dialog)
                 && value.source_size() == (dialog.geometry.0, dialog.geometry.1)
@@ -296,7 +311,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         size: (u32, u32),
     ) -> (ImageTransform, Option<Vec<EditOperation>>) {
         let mut operations = self.video_operations().to_vec();
-        if let Some(dialog) = &self.video_rotation_dialog
+        if let Some(dialog) = self
+            .video_rotation_dialog
+            .as_ref()
+            .or_else(|| self.video_rotation_drag.as_ref().map(|drag| &drag.preview))
             && self.video_rotation_is_current(dialog)
             && let Ok(value) = dialog.value()
             && value.tenths() != 0

@@ -17,6 +17,34 @@ fn modifiers_allow_rotation(modifiers: egui::Modifiers) -> bool {
     modifiers.alt && !modifiers.ctrl && !modifiers.command && !modifiers.mac_cmd
 }
 
+pub(crate) struct RotationInput {
+    pub origin: Option<egui::Pos2>,
+    pub release: Option<egui::Pos2>,
+    pub alt_press: bool,
+    pub held: bool,
+    pub released_with_alt: bool,
+    pub interrupted: bool,
+}
+
+pub(crate) fn rotation_input(ui: &egui::Ui, response: &egui::Response) -> RotationInput {
+    let (origin, release) = view_drag_button_positions(response, egui::PointerButton::Primary);
+    ui.input(|input| RotationInput {
+        origin, release,
+        alt_press: input.events.iter().any(|event| matches!(event,
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers }
+            if Some(*pos) == origin && modifiers_allow_rotation(*modifiers))),
+        held: modifiers_allow_rotation(input.modifiers),
+        released_with_alt: input.events.iter().any(|event| matches!(event,
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers }
+            if Some(*pos) == release && modifiers_allow_rotation(*modifiers))),
+        interrupted: !input.focused || input.events.iter().any(|event| matches!(event,
+            egui::Event::PointerGone | egui::Event::WindowFocused(false)
+            | egui::Event::Key { key: egui::Key::Escape, pressed: true, .. }
+            | egui::Event::MouseWheel { .. }
+            | egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, .. })),
+    })
+}
+
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(crate) fn cancel_stale_rotation_drag(&mut self) {
         if self
@@ -33,21 +61,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         response: &egui::Response,
         image_rect: egui::Rect,
     ) -> RotationResponse {
-        let (origin, release) = view_drag_button_positions(response, egui::PointerButton::Primary);
-        let (alt_press, held, released_with_alt, interrupted) = ui.input(|input| {
-            let alt_press = input.events.iter().any(|event| matches!(event,
-                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers }
-                if Some(*pos) == origin && modifiers_allow_rotation(*modifiers)));
-            let released_with_alt = input.events.iter().any(|event| matches!(event,
-                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers }
-                if Some(*pos) == release && modifiers_allow_rotation(*modifiers)));
-            let interrupted = !input.focused || input.events.iter().any(|event| matches!(event,
-                egui::Event::PointerGone | egui::Event::WindowFocused(false)
-                | egui::Event::Key { key: egui::Key::Escape, pressed: true, .. }
-                | egui::Event::MouseWheel { .. }
-                | egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, .. }));
-            (alt_press, modifiers_allow_rotation(input.modifiers), released_with_alt, interrupted)
-        });
+        let RotationInput {
+            origin,
+            release,
+            alt_press,
+            held,
+            released_with_alt,
+            interrupted,
+        } = rotation_input(ui, response);
         if self.rotation_drag.is_none() && !alt_press {
             return RotationResponse::Inactive;
         }
@@ -151,7 +172,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(crate) fn rotation_modifiers_changed(&mut self) {
-        if self.rotation_drag.is_none()
+        if (self.rotation_drag.is_none() && self.video_rotation_drag.is_none())
             || (self.modifiers.alt_key()
                 && !self.modifiers.control_key()
                 && !self.modifiers.super_key())

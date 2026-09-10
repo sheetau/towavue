@@ -665,6 +665,7 @@ struct Application<N> {
     video_raster_operations: Option<Vec<EditOperation>>,
     rotation_generation: u64,
     rotation_drag: Option<rotation::RotationDrag>,
+    video_rotation_drag: Option<video_rotation::VideoRotationDrag>,
     edits: BTreeMap<TabId, EditHistory>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
@@ -842,6 +843,7 @@ where
             video_raster_operations: None,
             rotation_generation: 0,
             rotation_drag: None,
+            video_rotation_drag: None,
             edits: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
@@ -2655,21 +2657,36 @@ where
             }
             return;
         };
-        let (transform, operations) = self.video_presentation((width, height));
-        self.video_raster_operations = operations;
+        let transform = self.visual_transform((width, height));
         let size = (transform.size.0 as u32, transform.size.1 as u32);
-        let pixel_aspect = transform.pixel_aspect(pixel_aspect);
-        let viewport = fitted_video_rect(ui.max_rect(), size, pixel_aspect);
-        self.video_rect = Some(viewport);
-        self.video_uv = transform.uv;
-        if self.video_rotation_dialog.is_some() {
-            return;
-        }
+        let viewport = fitted_video_rect(ui.max_rect(), size, transform.pixel_aspect(pixel_aspect));
         let response = ui.interact(
             viewport,
             ui.id().with("video-edit-surface"),
             egui::Sense::click_and_drag(),
         );
+        let rotation = if self.video_rotation_dialog.is_none() {
+            self.update_video_rotation_drag(ui, &response, viewport)
+        } else {
+            rotation::RotationResponse::Inactive
+        };
+        let (transform, operations) = self.video_presentation((width, height));
+        self.video_raster_operations = operations;
+        let size = (transform.size.0 as u32, transform.size.1 as u32);
+        let viewport = fitted_video_rect(ui.max_rect(), size, transform.pixel_aspect(pixel_aspect));
+        self.video_rect = Some(viewport);
+        self.video_uv = transform.uv;
+        if self.video_rotation_dialog.is_some()
+            || matches!(rotation, rotation::RotationResponse::Preview)
+        {
+            return;
+        }
+        if matches!(rotation, rotation::RotationResponse::Cancelled) {
+            if let Some(selection) = self.image_view.selection {
+                paint_selection(&ui.painter_at(viewport), viewport, selection);
+            }
+            return;
+        }
         let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
         volume_targets.push(response.clone());
         self.update_selection(&response, viewport, size, shift, pointer);
@@ -2765,6 +2782,7 @@ where
     fn cancel_view_drag(&mut self) -> bool {
         let mut canceled_press = self.cancel_hold_speed();
         canceled_press |= self.rotation_drag.take().is_some();
+        canceled_press |= self.video_rotation_drag.take().is_some();
         canceled_press |= self.finish_reading_drag(true);
         canceled_press |= self.ui_context.as_ref().is_some_and(timeline_input::cancel);
         if let Some(state) = &mut self.ui_state {
@@ -4771,6 +4789,7 @@ where
         self.video_rotation_dialog = None;
         self.video_raster_operations = None;
         self.rotation_drag = None;
+        self.video_rotation_drag = None;
     }
 
     fn install_edited_image(&mut self, decoded: Arc<DecodedImage>) -> Result<(), String> {
@@ -7336,7 +7355,7 @@ where
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
         }
-        if self.rotation_drag.is_some()
+        if (self.rotation_drag.is_some() || self.video_rotation_drag.is_some())
             && matches!(
                 &event,
                 WindowEvent::CursorLeft { .. }
@@ -7457,6 +7476,7 @@ where
                     .is_some_and(egui::Popup::is_any_open))
             || self.view_drag.is_some()
             || self.rotation_drag.is_some()
+            || self.video_rotation_drag.is_some()
             || self
                 .ui_context
                 .as_ref()

@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "drag_tests.rs"]
+mod drag_tests;
+
 pub(crate) fn hardware_dialog_preview<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
 ) {
@@ -32,6 +35,21 @@ pub(crate) fn hardware_dialog_preview<N: Fn(AppEvent) + Send + Sync + 'static>(
     assert_eq!(app.edits, history);
     assert_eq!(app.image_view, view);
     assert_eq!(app.generation, generation);
+    drag_tests::preview_cancel(app);
+    let size = app.window.as_ref().expect("owned window").inner_size();
+    app.renderer
+        .as_mut()
+        .expect("renderer")
+        .resize_surface(size.width, size.height)
+        .expect("restore native surface size");
+    assert_eq!(
+        app.session
+            .as_ref()
+            .expect("hardware session")
+            .metrics()
+            .cpu_transfer_count,
+        0
+    );
     app.timeline_open = timeline;
     eprintln!(
         "PASS hardware angle dialog: real app render/GPU preview/cancel, no history or generation change, CPU transfers 0"
@@ -42,7 +60,22 @@ fn frame<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
     events: Vec<egui::Event>,
 ) -> egui::accesskit::TreeUpdate {
+    frame_input(app, egui::Modifiers::NONE, events)
+}
+
+fn frame_input<N: Fn(AppEvent) + Send + Sync + 'static>(
+    app: &mut Application<N>,
+    modifiers: egui::Modifiers,
+    events: Vec<egui::Event>,
+) -> egui::accesskit::TreeUpdate {
     let context = app.ui_context.clone().expect("context");
+    context.enable_accesskit();
+    // Native render_frame and synthetic pointer passes must use the same epoch;
+    // RawInput's predicted time can otherwise advance past the next native pass.
+    let time = match (&mut app.ui_state, &app.window) {
+        (Some(state), Some(window)) => state.take_egui_input(window).time,
+        _ => None,
+    };
     let mut actions = Vec::new();
     let mut output = context.run_ui(
         egui::RawInput {
@@ -51,6 +84,8 @@ fn frame<N: Fn(AppEvent) + Send + Sync + 'static>(
                 egui::vec2(640.0, 480.0),
             )),
             events,
+            modifiers,
+            time,
             ..Default::default()
         },
         |ui| app.draw_ui(ui, &mut actions),
@@ -62,7 +97,11 @@ fn frame<N: Fn(AppEvent) + Send + Sync + 'static>(
         .expect("UIA tree");
     if let Some(rect) = app.video_rect {
         let renderer = app.renderer.as_mut().expect("renderer");
-        renderer.resize_surface(640, 480).expect("surface");
+        let scale = context.pixels_per_point();
+        let rect = rect * scale;
+        renderer
+            .resize_surface((640.0 * scale) as u32, (480.0 * scale) as u32)
+            .expect("surface");
         renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
         let session = app.session.as_mut().expect("session");
         if let Some(operations) = &app.video_raster_operations {
@@ -468,6 +507,7 @@ fn video_rotation_modal_previews_commits_crops_undoes_and_exports_without_changi
             })
             .expect("reopen export");
             assert_eq!(count, 5);
+            drag_tests::exercise(&mut app);
             assert_eq!(
                 std::fs::read(&self.source).expect("unchanged source"),
                 bytes

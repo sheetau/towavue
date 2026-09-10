@@ -6,7 +6,7 @@
 
 ## 1. 試用前に知るべき制約
 
-2026-09-10: 動画自由回転をtimeline表示中のEdit menu／Ctrl+Shift+R／角度dialogへ接続した。映像面の同一device GPU preview、Apply／Cancel／0度、適用前budget確認、最終寸法・SAR1のselection／crop／再回転／Undo/Redoと保存を回帰確認。dialogは映像の右下の一部に重なる。動画のAltドラッグは未接続。中間GPU payloadは512 MiBまでで、それ以外のdecode／driver領域は別。GPU previewと保存は補間実装が異なり、byte一致は保証しない。元SARの整数寸法への丸めと再サンプリング／再符号化があり、無損失ではない。HDR、途中でgeometryが変わる素材、全container／hardware encode／大画像性能と通常window外観は未認定。確定済み編集と異なるsource geometryは黙って変形せずerrorにする。
+2026-09-10: 動画自由回転をtimeline表示中のEdit menu／Ctrl+Shift+R／角度dialogへ接続した。映像面の同一device GPU preview、Apply／Cancel／0度、適用前budget確認、最終寸法・SAR1のselection／crop／再回転／Undo/Redoと保存を回帰確認。dialogは映像の右下の一部に重なる。Alt保持の左dragも同じGPU previewと確定処理へ接続し、全canvasをFitする。Alt先離し／Escape／focus喪失等は取消する。中間GPU payloadは512 MiBまでで、それ以外のdecode／driver領域は別。GPU previewと保存は補間実装が異なり、byte一致は保証しない。元SARの整数寸法への丸めと再サンプリング／再符号化があり、無損失ではない。HDR、途中でgeometryが変わる素材、全container／hardware encode／大画像性能と通常window外観は未認定。確定済み編集と異なるsource geometryは黙って変形せずerrorにする。
 
 2026-09-10: 画像自由回転のmenu／Ctrl+Shift+R／角度入力／slider／配置previewに加え、Alt＋画像上の左dragを接続した。Alt保持のmouse releaseだけ一件を確定し、キー先離し／Escape／focus喪失や0度は非編集。対象と世代を再確認する。previewは既存textureのmeshを回す近似で、最終画素の厳密なpreviewではない。dragは現在scaleを維持するため回転後の角がviewport外へ出る場合があり、全体配置は数値dialogで確認できる。通常windowの外観／操作、大画像／多数animation frame性能、alpha非対応形式や動画への接続は未完。非同期RGBA処理とPNG exportは同じfilter列を使う。任意角度はGBRAP8でalphaを乗算して補間するため画質変化はあり、無損失なのは90度単位の専用経路だけ。動画・音声への画像自由回転exportは明示拒否する。
 
@@ -157,7 +157,7 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 | 選択drag・panの取消 | H1で開始前の範囲/位置を保持し、Escape・focus喪失・modal/overlay・別commandで復元。取消後のmove/releaseで再開しない。回帰testと通常releaseのEscape、focus往復、dirty guard保持を確認 |
 | 指定aspect ratio | 未実装 |
 | Crop、90度rotate、flip、undo/redo、export | 実装済み |
-| 自由回転 | 画像の角度dialog／slider／Alt保持drag／配置preview／非同期確定まで実装。動画・通常window／性能は未完 |
+| 自由回転 | 画像の角度dialog／slider／Alt保持drag／配置preview／非同期確定と、動画の角度UI／Alt保持drag／同一device GPU preview／保存を実装。通常window／全素材画質／性能は未完 |
 | Clipboard copy | 未実装 |
 | Resize/resampleとinterpolation選択 | Ctrl+Rの寸法／比率固定／4補間、非同期処理とUndo/Redo、処理済みcopyを実装し保存PNGとの一致を確認。View／paletteから表示専用Smooth／Nearestも切替可能。画像／animation／読書・cache clone／復旧dataと無編集・copy不変を回帰、WARPと実windowでnearest出力画素を確認。resize固有の実GPU復旧／mixed-DPI追加監査は残る |
 | Fullscreen | H1で画像/readingの全領域表示、Escape復帰と最大化状態の保持を実装。複数DPI/monitor matrixは未検証 |

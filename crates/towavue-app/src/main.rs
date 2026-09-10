@@ -50,6 +50,7 @@ mod video_view;
 mod welcome;
 mod wheel_input;
 mod window_host;
+mod window_open;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
@@ -659,6 +660,7 @@ struct Application<N> {
     window_key: Option<window_host::WindowKey>,
     playback_origin: Option<(window_host::WindowKey, u64)>,
     pending_tab_detach: Option<tab_transfer::DetachRequest>,
+    pending_window_open: Option<window_open::Request>,
     hosted_graphics: bool,
     graphics_recovery_request: Option<window_host::GraphicsRecoveryRequest>,
     window: Option<Arc<Window>>,
@@ -850,6 +852,7 @@ where
             window_key: None,
             playback_origin: None,
             pending_tab_detach: None,
+            pending_window_open: None,
             hosted_graphics: false,
             graphics_recovery_request: None,
             window: None,
@@ -4552,7 +4555,7 @@ where
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
             UiAction::DetachTab(id) => self.request_tab_detach(id),
             UiAction::OpenWindow(path, generation) => {
-                self.open_filmstrip_window(path, generation, spawn_new_window)
+                self.request_filmstrip_window(path, generation)
             }
             UiAction::OpenMedia(path, force_new) => {
                 if force_new {
@@ -6023,19 +6026,7 @@ where
         generation: u64,
         launch: impl FnOnce(&Path) -> std::io::Result<()>,
     ) {
-        if !self.filmstrip_open
-            || self.modal_input_blocked()
-            || self.palette_open
-            || self.grid_open
-            || self
-                .ui_context
-                .as_ref()
-                .is_some_and(egui::Popup::is_any_open)
-            || !self.folder_snapshot.as_ref().is_some_and(|snapshot| {
-                snapshot.generation == generation
-                    && snapshot.items.iter().any(|item| item.path == path)
-            })
-        {
+        if !self.can_open_filmstrip_window(&path, generation) {
             return;
         }
         match launch(&path) {

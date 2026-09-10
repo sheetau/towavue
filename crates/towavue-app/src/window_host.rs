@@ -12,6 +12,10 @@ mod graphics_tests;
 #[path = "window_transfer_tests.rs"]
 mod transfer_tests;
 
+#[cfg(test)]
+#[path = "window_open_tests.rs"]
+mod opening_tests;
+
 // Never reused, even after the native HWND or a window-local session ID is reused.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct WindowKey(u64);
@@ -244,6 +248,91 @@ impl WindowHost {
         self.recover_pending_graphics();
     }
 
+    fn open_pending_windows(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
+        let requests: Vec<_> = self
+            .windows
+            .iter_mut()
+            .filter_map(|(key, app)| {
+                app.pending_window_open
+                    .take()
+                    .map(|request| (*key, request))
+            })
+            .collect();
+        for (source, request) in requests {
+            if let Err(error) =
+                self.open_filmstrip_window_with(source, &request, visible, |app, device| {
+                    app.start_on_device(event_loop, Some(device), false)
+                        .map_err(|error| error.to_string())
+                })
+                && let Some(app) = self.windows.get_mut(&source)
+            {
+                app.set_status(format!("Could not open new window: {error}"));
+            }
+        }
+    }
+
+    fn open_filmstrip_window_with(
+        &mut self,
+        source: WindowKey,
+        request: &window_open::Request,
+        visible: bool,
+        start: impl FnOnce(
+            &mut WindowApplication,
+            towavue_runtime_windows::GraphicsDevice,
+        ) -> Result<(), String>,
+    ) -> Result<Option<WindowKey>, String> {
+        let Some(app) = self
+            .windows
+            .get(&source)
+            .filter(|app| app.window_open_request_is_current(request))
+        else {
+            return Ok(None);
+        };
+        app.validate_transfer_window()?;
+        let path = canonical_shell_path(&request.path).map_err(|error| error.to_string())?;
+        if MediaKind::from_path(&path).is_none() {
+            return Err(format!("Unsupported media: {}", path.display()));
+        }
+        let device = app
+            .renderer
+            .as_ref()
+            .expect("validated renderer")
+            .graphics_device();
+        let destination = self
+            .add_application(None)
+            .map_err(|error| error.to_string())?;
+        let app = self.windows.get_mut(&destination).expect("new window");
+        let opened = start(app, device).and_then(|()| {
+            app.open_external(path, true);
+            if app.path.is_none() {
+                return Err(app.status_message.as_ref().map_or_else(
+                    || "The media could not be opened".into(),
+                    |(text, _)| text.clone(),
+                ));
+            }
+            Ok(())
+        });
+        if let Err(error) = opened {
+            let mut app = self.windows.remove(&destination).expect("new window");
+            if let Some(renderer) = app.renderer.take() {
+                renderer.release_surface();
+            }
+            return Err(error);
+        }
+        // Window startup is acknowledged here. Image/decode errors remain in the
+        // independent child, just as for ordinary Open; no source edits are copied.
+        self.windows[&destination]
+            .window
+            .as_ref()
+            .expect("started window")
+            .set_visible(visible);
+        self.windows
+            .get_mut(&source)
+            .expect("source window")
+            .close_filmstrip();
+        Ok(Some(destination))
+    }
+
     fn playback_owner(&self, origin: (WindowKey, u64)) -> Option<(WindowKey, u64)> {
         // The session keeps its immutable callback origin through any number of
         // moves. Resolve against live owners, without forwarding chains or tombstones.
@@ -410,6 +499,7 @@ impl ApplicationHandler<Event> for WindowHost {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         self.route(event);
         self.detach_pending_tabs(event_loop, true);
+        self.open_pending_windows(event_loop, true);
     }
 
     fn window_event(
@@ -423,6 +513,7 @@ impl ApplicationHandler<Event> for WindowHost {
         }
         self.recover_pending_graphics();
         self.detach_pending_tabs(event_loop, true);
+        self.open_pending_windows(event_loop, true);
     }
 
     fn device_event(
@@ -441,6 +532,7 @@ impl ApplicationHandler<Event> for WindowHost {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.detach_pending_tabs(event_loop, true);
+        self.open_pending_windows(event_loop, true);
         event_loop.set_control_flow(self.prepare_wait());
         if self.windows.is_empty() {
             // Windows winit waits once after AboutToWait; prepare_wait selects Poll.

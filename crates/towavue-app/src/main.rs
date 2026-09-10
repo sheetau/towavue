@@ -184,7 +184,7 @@ enum UiAction {
     ),
     Volume(TabId, f32),
     CloseTab(TabId),
-    DetachTab(TabId),
+    DropTab(TabId, egui::Pos2),
     OpenMedia(PathBuf, bool),
     OpenWindow(PathBuf, u64),
     Seek(MediaTime),
@@ -659,8 +659,9 @@ struct Application<N> {
     event_loop_proxy: Option<EventLoopProxy<window_host::Event>>,
     window_key: Option<window_host::WindowKey>,
     playback_origin: Option<(window_host::WindowKey, u64)>,
-    pending_tab_detach: Option<tab_transfer::DetachRequest>,
     pending_window_open: Option<window_open::Request>,
+    pending_tab_drop: Option<(tab_transfer::DetachRequest, egui::Pos2)>,
+    incoming_tab_pointer: Option<egui::Pos2>,
     hosted_graphics: bool,
     graphics_recovery_request: Option<window_host::GraphicsRecoveryRequest>,
     window: Option<Arc<Window>>,
@@ -851,8 +852,9 @@ where
             event_loop_proxy: None,
             window_key: None,
             playback_origin: None,
-            pending_tab_detach: None,
             pending_window_open: None,
+            pending_tab_drop: None,
+            incoming_tab_pointer: None,
             hosted_graphics: false,
             graphics_recovery_request: None,
             window: None,
@@ -3354,6 +3356,9 @@ where
     }
 
     fn draw_top_bar(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        let incoming_pointer = self
+            .incoming_tab_pointer
+            .filter(|_| self.accepts_tab_drop());
         let mut preview_target = None;
         let preview_allowed = !self.modal_input_blocked()
             && !self.palette_open
@@ -3650,6 +3655,15 @@ where
                                 if let Some(action) = drag_layout.finish(ui, strip) {
                                     actions.push(action);
                                 }
+                                if !self.tabs.tabs().is_empty() {
+                                    tab_drag::incoming(
+                                        ui,
+                                        self.tabs.tabs().iter().map(|tab| tab.id).collect(),
+                                        tab_rects,
+                                        strip,
+                                        incoming_pointer,
+                                    );
+                                }
                             });
                         });
                     let (drag_rect, _) = ui.allocate_exact_size(
@@ -3660,6 +3674,7 @@ where
                         egui::Sense::hover(),
                     );
                     if let Some(id) = self.tabs.welcome() {
+                        tab_drag::incoming(ui, Vec::new(), Vec::new(), drag_rect, incoming_pointer);
                         let welcome_rect = egui::Rect::from_min_size(
                             drag_rect.min,
                             egui::vec2(drag_rect.width().min(150.0), drag_rect.height()),
@@ -4553,7 +4568,7 @@ where
                 }
             }
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
-            UiAction::DetachTab(id) => self.request_tab_detach(id),
+            UiAction::DropTab(id, point) => self.request_tab_drop(id, point),
             UiAction::OpenWindow(path, generation) => {
                 self.request_filmstrip_window(path, generation)
             }
@@ -10338,7 +10353,11 @@ mod tests {
             ),
             (egui::pos2(300.0, 90.0), false, None),
             (egui::pos2(500.0, 14.0), true, None),
-            (egui::pos2(-20.0, 90.0), false, Some(UiAction::DetachTab(a))),
+            (
+                egui::pos2(-20.0, 90.0),
+                false,
+                Some(UiAction::DropTab(a, egui::pos2(-20.0, 90.0))),
+            ),
         ] {
             app.tabs = original.clone();
             let context = fonts::test_context();

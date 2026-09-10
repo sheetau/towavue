@@ -28,6 +28,9 @@ pub use recent::{RecentFiles, RecentUpdate};
 mod tempo;
 mod watch;
 mod waveform;
+mod window_point;
+
+pub use window_point::unobscured_window_point;
 
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};
 pub use cancellation::Cancellation;

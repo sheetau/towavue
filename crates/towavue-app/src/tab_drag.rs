@@ -220,7 +220,11 @@ impl Layout {
                         .interact_pos()
                         .is_some_and(|p| !screen.contains(p))
                 }) {
-                    Some(UiAction::DetachTab(drag.tab))
+                    Some(UiAction::DropTab(
+                        drag.tab,
+                        ui.input(|input| input.pointer.interact_pos())
+                            .expect("release point"),
+                    ))
                 } else {
                     None
                 };
@@ -239,4 +243,93 @@ impl Layout {
         context.data_mut(|data| data.insert_temp(state_id(), self.state));
         action
     }
+}
+
+pub(super) fn active_pointer(context: &egui::Context) -> Option<(TabId, egui::Pos2)> {
+    let state = context.data(|data| data.get_temp::<State>(state_id()))?;
+    let drag = state.drag.filter(|drag| drag.crossed)?;
+    context.input(|input| {
+        (input.focused && input.pointer.primary_down())
+            .then(|| input.pointer.interact_pos().map(|point| (drag.tab, point)))
+            .flatten()
+    })
+}
+
+#[derive(Clone)]
+struct DropStrip {
+    tabs: Vec<TabId>,
+    rectangles: Vec<egui::Rect>,
+    strip: egui::Rect,
+    screen: egui::Rect,
+    density: f32,
+    frame: u64,
+}
+
+impl DropStrip {
+    fn gap(&self, point: egui::Pos2) -> Option<(usize, f32)> {
+        if self.tabs.is_empty() {
+            (self.strip.width() >= 2.0 && self.strip.contains(point))
+                .then_some((0, self.strip.left() + 1.0))
+        } else {
+            chrome::tab_drop_gap(&self.rectangles, self.strip, point)
+        }
+    }
+}
+
+pub(super) fn incoming_gap(
+    context: &egui::Context,
+    tabs: &[TabId],
+    point: egui::Pos2,
+) -> Option<usize> {
+    let strip = context.data(|data| data.get_temp::<DropStrip>("incoming-tab-strip".into()))?;
+    if strip.tabs != tabs
+        || strip.screen != context.content_rect()
+        || strip.density != context.pixels_per_point()
+        || context.cumulative_frame_nr() > strip.frame + 1
+    {
+        return None;
+    }
+    strip.gap(point).map(|(gap, _)| gap)
+}
+
+pub(super) fn incoming(
+    ui: &egui::Ui,
+    tabs: Vec<TabId>,
+    rectangles: Vec<egui::Rect>,
+    strip: egui::Rect,
+    pointer: Option<egui::Pos2>,
+) {
+    let layout = DropStrip {
+        tabs,
+        rectangles,
+        strip,
+        screen: ui.ctx().content_rect(),
+        density: ui.ctx().pixels_per_point(),
+        frame: ui.ctx().cumulative_frame_nr(),
+    };
+    if let Some(point) = pointer
+        && let Some((_, x)) = layout.gap(point)
+    {
+        ui.painter_at(strip).line_segment(
+            [egui::pos2(x, strip.top()), egui::pos2(x, strip.bottom())],
+            egui::Stroke::new(2.0, chrome::FOREGROUND),
+        );
+        let direction = if point.x < strip.left() + 12.0 {
+            1.0
+        } else if point.x > strip.right() - 12.0 {
+            -1.0
+        } else {
+            0.0
+        };
+        if direction != 0.0 && !layout.tabs.is_empty() {
+            let delta = ui.input(|input| input.stable_dt.min(0.05)) * 360.0 * direction;
+            ui.scroll_with_delta_animation(
+                egui::vec2(delta, 0.0),
+                egui::style::ScrollAnimation::none(),
+            );
+            ui.ctx().request_repaint();
+        }
+    }
+    ui.ctx()
+        .data_mut(|data| data.insert_temp("incoming-tab-strip".into(), layout));
 }

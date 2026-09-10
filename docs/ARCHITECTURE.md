@@ -1,12 +1,20 @@
 # towavue アーキテクチャ
 
+## U08: 同host window間の通常tab drop（2026-09-10）
+
+外dropはtab IDに加えてrelease時のsource client座標をqueueし、hostが同deviceの既存windowへの結合か新window分離かを選ぶ。runtimeだけがClientToScreen／WindowFromPoint／root照合／ScreenToClientを扱い、appはsource／target各contextのpixels-per-pointで物理座標を変換する。別windowに隠れたtab barやpopupの背後へは結合しない。独立processの既存windowへはまだ移送しない。
+
+結合範囲は実際に描画したtab stripと空windowのWelcome領域。通常の挿入gap規則とclipを共用し、hover時は2 logical pxの縦線を表示する。対象windowはactivateせず、端で横scrollできる。source dragの取消・release・対象の閉鎖／modal／overlayでindicatorを解除する。releaseで対象tab列・viewport／density・描画世代とgraphics／modalを再検証し、前節で導入したstage→state移送を実行する。既存host window上でも媒体領域や無効なstripなら移送せず、診断して元tabを残す。どのhost windowもhitしなければ従来の新window分離へ進む。元の未保存編集を再読込や保存確認で置き換えず、最後のtab移送後はWelcomeを残す。
+
+検証はheadlessの複数幅／densityでのgap・indicator・scroll・古いlayout拒否と、所有する非表示HWNDでの実drag action／GPU描画／state移送に分ける。非表示HWNDではOSのhit選択だけを注入するため、可視windowの実pointer capture／occlusion／mixed-DPIを認定したことにはしない。別process入口・可視入力と全体の時間／資源評価は未完。
+
 ## U08: filmstripからの同host新window（2026-09-10）
 
 通常のfilmstrip外dragは`WindowHost`へ新window要求を渡す。要求には元tab ID・media instance・folder generation・対象pathを持たせ、処理前にfilmstripの表示／modal／overlay／所属を再確認する。重複queueは増やさず、元tab・folder・媒体が変わった要求や閉鎖済みownerは無視する。source deviceが利用でき、pathを正規化・判別できる場合に、同device上の非表示HWNDを初期化して通常のOpen処理を開始する。
 
 これは既存tabの移送ではなく、元ファイルを独立した新tabとして開く操作である。元tab・未保存履歴・保存先・再生位置／sessionは変更しない。window作成前後の初期化失敗やOpen受付前のpath失敗では新windowを破棄し、元filmstripを残して診断する。window作成とOpen受付成功後に新windowを表示して元filmstripを閉じる。初回decode完了は起動受付と区別し、壊れた媒体などの読込失敗は新windowの標準診断に任せる。元の未保存編集を複製したり、読込失敗を理由に元tabを閉じたりしない。
 
-通常のtab分離とfilmstrip新windowは同じevent loop／D3D11 device／通知所有権／終了管理を使う。既存windowへのdrag結合／drop indicator、別processとして開始される入口の所有権、可視windowの実入力／mixed-DPIと起動・描画時間の評価は引き続き未完。
+通常のtab分離とfilmstrip新windowは同じevent loop／D3D11 device／通知所有権／終了管理を使う。既存windowへのdrag結合／drop indicatorは上節の同host処理を使う。別processとして開始される入口の所有権、可視windowの実入力／mixed-DPIと起動・描画時間の評価は引き続き未完。
 
 ## U08: 画像tabのcontext移送と未取得ページの再開（2026-09-10）
 
@@ -16,11 +24,11 @@
 
 不足ページの再開でも、元の512 MiB decoded-image予算を増やさない。appが保持中のprimary／readingページの画素bytesを渡し、ImageLoaderはそれを差し引いた残量からcache hit／decodeごとの消費を計上する。残量不足は既存のTooLarge診断で、そのページをエラー表示として残す。新規の全ページ要求は従来の予算を使う。
 
-同context内のtab復帰も取得済みreadingページを保持して不足分だけ再開する。新window側の読み込み／GPU upload実行時間、可視ウィンドウのdrag・mixed-DPIは別の検証項目とする。filmstripからの新windowは上節の同host処理を使う。既存windowへの通常drag結合／indicatorは未接続。
+同context内のtab復帰も取得済みreadingページを保持して不足分だけ再開する。新window側の読み込み／GPU upload実行時間、可視ウィンドウのdrag・mixed-DPIは別の検証項目とする。filmstripからの新windowと既存windowへの通常drag結合／indicatorは上節の同host処理を使う。
 
 ## U08: 音声／動画tabのlive移送（2026-09-10）
 
-host配下のtabの外dragは、同じD3D11 deviceで新しい非表示windowを初期化し、成功後にtabを移して表示する。作成失敗・古いtab/path/media instance・閉鎖／modal／graphics復旧待ち・対象tabのexport中は移送しない。移送する未保存編集は破棄せず、保存guardを出さずに履歴ごと新しいtab IDへ移す。最後のtabを移した元windowはWelcomeを残す。既存windowへの挿入位置指定の内部移送も同じ手順を使うが、window間drop／結合indicatorへの通常入力接続は未完。
+host配下のtabを新windowへ分離する際は、同じD3D11 deviceで新しい非表示windowを初期化し、成功後にtabを移して表示する。作成失敗・古いtab/path/media instance・閉鎖／modal／graphics復旧待ち・対象tabのexport中は移送しない。移送する未保存編集は破棄せず、保存guardを出さずに履歴ごと新しいtab IDへ移す。最後のtabを移した元windowはWelcomeを残す。既存windowへの挿入位置指定の移送も同じ手順を使い、通常dropは上節のhit／gap検証から呼ぶ。
 
 sessionは作成時の`(WindowKey, media instance)`を不変の通知originとして保持する。hostはactive／retained sessionの現在の所有者を検索し、宛先のlocal instanceに置き換えてPlayback通知だけを配送する。移動前にqueueへ入った通知、元window削除後、反復移送をforwarding chainや永続aliasなしで扱う。session破棄後のoriginには配送しない。background音声の次曲で新sessionを作る時は、その時の所有windowを新originにする。UIA／その他のwindow workerは従来の固定宛先を維持する。
 

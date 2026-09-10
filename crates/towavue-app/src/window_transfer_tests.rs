@@ -253,8 +253,12 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     host.windows
         .get_mut(&source)
         .expect("source")
-        .handle_ui_action(UiAction::DetachTab(returned));
-    host.detach_pending_tabs(event_loop, false);
+        .close_filmstrip();
+    host.windows
+        .get_mut(&source)
+        .expect("source")
+        .handle_ui_action(UiAction::DropTab(returned, egui::pos2(-20.0, 90.0)));
+    host.update_tab_drops_with(event_loop, false, |_, _, _| None);
     assert_eq!(host.windows.len(), 3);
     let detached = *host
         .windows
@@ -401,8 +405,8 @@ fn exercise_images(
     host.windows
         .get_mut(&source)
         .expect("source")
-        .handle_ui_action(UiAction::DetachTab(id));
-    host.detach_pending_tabs(event_loop, false);
+        .handle_ui_action(UiAction::DropTab(id, egui::pos2(-20.0, 90.0)));
+    host.update_tab_drops_with(event_loop, false, |_, _, _| None);
     let detached = *host
         .windows
         .keys()

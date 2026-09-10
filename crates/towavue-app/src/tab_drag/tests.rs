@@ -54,6 +54,124 @@ fn state<N>(app: &Application<N>) -> State {
         .expect("state")
 }
 
+pub(crate) fn drop_point(context: &egui::Context, gap: usize) -> egui::Pos2 {
+    let layout = context
+        .data(|data| data.get_temp::<DropStrip>("incoming-tab-strip".into()))
+        .expect("strip");
+    let x = layout
+        .rectangles
+        .get(gap)
+        .map_or(layout.strip.right() - 4.0, |rect| rect.left() + 4.0);
+    egui::pos2(
+        x.clamp(layout.strip.left() + 2.0, layout.strip.right() - 2.0),
+        layout.strip.center().y,
+    )
+}
+
+pub(crate) fn label_center<N>(app: &Application<N>, tab: TabId) -> egui::Pos2 {
+    state(app)
+        .widgets
+        .iter()
+        .find(|(id, _, _)| *id == tab)
+        .expect("tab")
+        .2
+        .center()
+}
+
+#[test]
+fn incoming_tabs_show_clipped_gaps_and_reject_stale_layouts_without_activation() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::incoming_tabs_show_clipped_gaps_and_reject_stale_layouts_without_activation",
+    ) else {
+        return;
+    };
+    for width in [480.0, 960.0, 1440.0] {
+        for density in [1.0, 1.25, 2.0] {
+            let mut app = setup(&root);
+            let context = app.ui_context.clone().expect("context");
+            context.set_pixels_per_point(density);
+            let size = egui::vec2(width, 576.0);
+            for _ in 0..3 {
+                frame(&mut app, size, false, vec![]);
+            }
+            let original = app.tabs.clone();
+            let ids: Vec<_> = original.tabs().iter().map(|tab| tab.id).collect();
+            for gap in 0..=ids.len() {
+                let point = drop_point(&context, gap);
+                app.incoming_tab_pointer = Some(point);
+                let (output, actions) = frame(&mut app, size, false, vec![]);
+                assert!(actions.is_empty());
+                assert_eq!(incoming_gap(&context, &ids, point), Some(gap));
+                let layout = context
+                    .data(|data| data.get_temp::<DropStrip>("incoming-tab-strip".into()))
+                    .expect("layout");
+                let x = layout.gap(point).expect("gap").1;
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::LineSegment { points, stroke }
+                    if *points == [egui::pos2(x, layout.strip.top()), egui::pos2(x, layout.strip.bottom())]
+                        && stroke.width == 2.0 && stroke.color == chrome::FOREGROUND)));
+                assert!(incoming_gap(&context, &ids, point + egui::vec2(0.0, 100.0)).is_none());
+            }
+            assert_eq!(app.tabs, original);
+            let point = drop_point(&context, 1);
+            assert!(incoming_gap(&context, &ids[..1], point).is_none());
+            context.set_pixels_per_point(density + 0.5);
+            // Density changes apply on the following pass; an undrawn strip stays stale.
+            for _ in 0..2 {
+                let _ = context.run_ui(egui::RawInput::default(), |_| {});
+            }
+            assert!(incoming_gap(&context, &ids, point).is_none());
+        }
+    }
+}
+
+#[test]
+fn incoming_tabs_scroll_without_pointer_capture_and_accept_empty_welcome() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::incoming_tabs_scroll_without_pointer_capture_and_accept_empty_welcome",
+    ) else {
+        return;
+    };
+    let mut app = setup(&root);
+    let size = egui::vec2(480.0, 576.0);
+    let first = app.tabs.tabs()[0].id;
+    for index in 0..14 {
+        app.tabs
+            .open_new(root.join(format!("incoming-{index}.png")), MediaKind::Image);
+    }
+    app.tabs.activate(first);
+    for _ in 0..20 {
+        frame(&mut app, size, false, vec![]);
+    }
+    let original = app.tabs.clone();
+    let initial = state(&app);
+    let strip = initial.strip.expect("strip");
+    app.incoming_tab_pointer = Some(egui::pos2(strip.right() - 2.0, strip.center().y));
+    for _ in 0..12 {
+        assert!(frame(&mut app, size, false, vec![]).1.is_empty());
+    }
+    assert!(
+        state(&app).widgets.last().expect("last").2.left()
+            < initial.widgets.last().expect("last").2.left() - 20.0
+    );
+    app.incoming_tab_pointer = None;
+    for _ in 0..2 {
+        frame(&mut app, size, false, vec![]);
+    }
+    let stopped = state(&app).widgets.last().expect("last").2.left();
+    for _ in 0..3 {
+        frame(&mut app, size, false, vec![]);
+    }
+    assert_eq!(state(&app).widgets.last().expect("last").2.left(), stopped);
+    assert_eq!(app.tabs, original);
+    app.tabs = Default::default();
+    for _ in 0..3 {
+        frame(&mut app, size, false, vec![]);
+    }
+    let context = app.ui_context.as_ref().expect("context");
+    assert_eq!(incoming_gap(context, &[], drop_point(context, 0)), Some(0));
+}
+
 #[test]
 fn tab_drag_projects_the_grabbed_offset_and_neighbors_without_mutating_tabs() {
     let Some(root) = crate::tests::isolated_test_root(
@@ -294,7 +412,7 @@ fn tab_drag_batched_move_release_still_commits_once() {
         true,
         vec![egui::Event::PointerMoved(outside), pointer(outside, false)],
     );
-    assert!(actions == vec![UiAction::DetachTab(original[0].0)]);
+    assert!(actions == vec![UiAction::DropTab(original[0].0, outside)]);
     assert!(frame(&mut app, size, true, vec![]).1.is_empty());
     // All three events may arrive between paints; the original press still owns the move.
     let (_, actions) = frame(

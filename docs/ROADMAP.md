@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 U08 merge-input checkpoint: tab外releaseの座標をhostへ渡し、同host既存windowの実描画tab strip／Welcomeへgap指定でlive stateを移す。runtimeのroot hit照合と各windowのDPI変換を通し、hover中はfocusを奪わず挿入線／端scroll、成功後に移動先focus。modal／overlay／媒体領域／古いtab列・viewport・densityを拒否し、他windowに隠れた対象へは結合しない。3幅×3密度のheadlessと、OS hit選択だけを注入した非表示HWNDの実drag／GPU indicator／dirty画像移送／Welcomeを検証。独立process入口の所有権、可視windowの実入力／重なり／mixed-DPIと全UX台帳・性能は引き続き未完。
+
 2026-09-10 U08 hosted-filmstrip checkpoint: 通常のサムネイル外dragを同host／device上の新windowへ接続。元tabの移送ではなく独立した元ファイルのOpenとし、元編集・保存先・再生session／位置を保持する。要求の重複・tab／媒体／folder世代・overlayを検証し、初期化前後／missing path失敗では子を残さずfilmstripを保持。受付後の壊れた媒体は新windowの通常診断とする。非表示HWNDで画像・無音音声／動画・壊れた画像の読込み、共有device描画と元state不変を確認。先行a598fe0のCI34473236643は成功。次は既存windowへの通常drag結合／drop indicatorと別process入口の所有権。可視window／mixed-DPI／性能と全UX台帳は継続する。
 
 2026-09-10 U08 image-transfer checkpoint: 画像の外dragも同一hostのstate移送へ接続。移動先contextの全textureを準備してからsourceを外し、静止画／アニメーションの画素Arc・現在frame／deadline・sampling・view・未保存履歴とUndo元を保持する。処理中resampleと未取得readingページだけを再開し、既存ページ／エラー／preview・Shell順を残す。再開時も既存512 MiB decoded予算から保持済みbytesを差し引く。非表示HWNDでactive／retained画像の反復移送・focus・stage失敗保持・共有GPU復旧・close guardを確認。先行2f62d3cのCI34470975468は成功。次はfilmstrip新windowの同host化と既存windowへの通常drop／結合indicator。全UX台帳・U07性能／P010・可視window／物理入力／mixed-DPIは継続する。

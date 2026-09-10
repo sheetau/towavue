@@ -63,17 +63,6 @@ impl ImagePresentation {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
-    pub(super) fn request_tab_detach(&mut self, id: TabId) {
-        if !self.hosted_graphics {
-            self.request_guarded(GuardedAction::DetachTab(id));
-            return;
-        }
-        match self.tab_detach_request(id) {
-            Ok(request) => self.pending_tab_detach = Some(request),
-            Err(error) => self.set_status(format!("Could not detach tab: {error}")),
-        }
-    }
-
     pub(super) fn validate_transfer_window(&self) -> Result<(), String> {
         if self.exit_requested || self.modal_input_blocked() {
             return Err("close the dialog before moving a tab".into());

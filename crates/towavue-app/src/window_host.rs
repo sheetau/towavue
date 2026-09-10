@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "window_drop.rs"]
+mod dropping;
+
 #[cfg(test)]
 #[path = "window_host_tests.rs"]
 mod tests;
@@ -148,22 +151,6 @@ impl WindowHost {
             .get_mut(&destination)
             .expect("validated destination")
             .accept_tab_transfer(transfer, gap))
-    }
-
-    fn detach_pending_tabs(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
-        let requests: Vec<_> = self
-            .windows
-            .iter_mut()
-            .filter_map(|(key, app)| app.pending_tab_detach.take().map(|request| (*key, request)))
-            .collect();
-        for (source, request) in requests {
-            let result = self.detach_tab(event_loop, source, &request, visible);
-            if let Err(error) = result
-                && let Some(app) = self.windows.get_mut(&source)
-            {
-                app.set_status(format!("Could not detach tab: {error}"));
-            }
-        }
     }
 
     fn detach_tab(
@@ -498,8 +485,8 @@ impl ApplicationHandler<Event> for WindowHost {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         self.route(event);
-        self.detach_pending_tabs(event_loop, true);
         self.open_pending_windows(event_loop, true);
+        self.update_tab_drops(event_loop, true);
     }
 
     fn window_event(
@@ -512,8 +499,8 @@ impl ApplicationHandler<Event> for WindowHost {
             app.window_event(event_loop, window_id, event);
         }
         self.recover_pending_graphics();
-        self.detach_pending_tabs(event_loop, true);
         self.open_pending_windows(event_loop, true);
+        self.update_tab_drops(event_loop, true);
     }
 
     fn device_event(
@@ -531,8 +518,8 @@ impl ApplicationHandler<Event> for WindowHost {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.detach_pending_tabs(event_loop, true);
         self.open_pending_windows(event_loop, true);
+        self.update_tab_drops(event_loop, true);
         event_loop.set_control_flow(self.prepare_wait());
         if self.windows.is_empty() {
             // Windows winit waits once after AboutToWait; prepare_wait selects Poll.

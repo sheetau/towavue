@@ -1,5 +1,9 @@
 # towavue アーキテクチャ
 
+## U11: fullscreen画像のselection focus（2026-09-11）
+
+画像の選択辺がfocusを持つ場合も、既存fullscreen controlsのkeyboard保持条件へ含める。status説明の表示に新しいoverlayを作らず、Exit fullscreenへのfocus要求も発生させない。既存のmodal・window focus・outside pressの優先順位を維持し、画像viewportと選択範囲は変えない。100／125／200%の全app frame回帰で4辺のUIA focus・説明・選択保持・modal抑制を確認。実UIAの96／192 DPIでも4辺を確認し、statusを除く2,016,000／3,942,400画素はfocus移動前後で一致した。音声では96／192 DPIの通常windowと192 DPIのfullscreenで1px反転枠を確認し、4数値対象のfocus前後でtimeline全画素が一致した。全比率・全UIAクライアント・全素材の監査とは区別する。
+
 ## U11: 時間選択の数値focus表示（2026-09-11）
 
 時間選択の開始／終了・局所音量・選択長さの4コントロールにも、追加のfocus四角を描かない規則を適用する。既存の位置・hit領域・数値ラベル・keyboard／UIA値は残し、focus中の対象名と値、左右キーの案内をstatus欄へ表示する。対象IDが現在のfocusと一致しない場合、disabled／popup／modal中、timeline非表示時には古い説明を出さない。画像のselection focus状態へ混ぜず、時間側のIDで保持する。描画順の都合でstatusは直前のtimeline描画から得た説明を使い、通常の再描画で現在値へ更新する。

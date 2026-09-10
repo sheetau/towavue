@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 U11 audio/fullscreen checkpoint: 音声の通常96／192 DPIとfullscreen192 DPIで1px反転枠を確認し、4数値対象のfocus前後でtimeline全画素が一致。画像fullscreenではUIAで辺へfocusしてもstatusが隠れる欠陥を可視と回帰で再現し、既存barの保持条件へselection focusを追加した。実UIA96／192 DPIの4辺で説明・focus保持・media全画素一致、Downで下辺130→131 source pixelsを確認。100／125／200%回帰と全体チェック通過。958ec7fのCI34521224695は成功。全UX goalは未完了で、次はU02のnative modal選択判断を継続する。全比率・素材・UIA・IME・性能・資源・metadata等の台帳を縮小しない。
+
 2026-09-11 U11/U09 visible-selection checkpoint: 生成PNG／SAR動画の選択枠が96／192 DPIで正確な1px反転色、追加の内外塗りなしと確認。画像の辺resize／範囲内click、tabのMenu key／Shift+F10とdisabled skip／Escape復帰も通常windowで確認した。時間端点・音量・長さに残っていたfocus四角は可視と旧コードで失敗する回帰で再現し、statusの対象名・値へ置換。192 DPIの4対象focus前後でtimeline 245,760画素一致、96 DPIへ戻した開始端の0.1秒調整を確認。776988fのCI34519379513は成功。音声／fullscreen／全比率・UIA／native system menuと全UX台帳は継続する。
 
 2026-09-11 U01/U04 caption-geometry checkpoint: native controlsのclient-relative bottomへtitle barを合わせ、1 physical px区切り線までの96 DPI／1px・192 DPI／6pxの隙間と左右6 logical px外側marginを除く。最大化の画面外insetを避け、logo／tab行を中央配置する。可視の通常・最大化×96／192 DPIでnative hover下端と区切りが隣接し、logo menu・close guardのCancel／Discardを確認。Cancel後のmedia領域268,160画素が一致する。6ed328fのCI34517162248は成功。全DPI比率／Windows 10／native menuの物理キー／drag遅延・選択UIと全UX台帳は継続する。

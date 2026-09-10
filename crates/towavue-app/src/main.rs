@@ -4013,6 +4013,7 @@ where
             && (self.fullscreen_controls_keyboard
                 || (!held && tab)
                 || controls_have_focus()
+                || selection::has_focus(context)
                 || tab_focus::wants_controls(context));
         // A newly shown Area needs a sizing pass before its Exit button can receive focus.
         self.fullscreen_controls_focus_requested = eligible
@@ -13145,6 +13146,102 @@ mod tests {
             assert!(app.pending_guard.is_none());
             assert_eq!(app.path.as_ref(), Some(&source));
             assert_eq!(app.edits, edits);
+        }
+    }
+
+    #[test]
+    fn fullscreen_selection_focus_reveals_its_status_without_stealing_focus() {
+        let Some(root) = isolated_test_root(
+            "tests::fullscreen_selection_focus_reveals_its_status_without_stealing_focus",
+        ) else {
+            return;
+        };
+        for density in [1.0, 1.25, 2.0] {
+            let context = fonts::test_context();
+            context.enable_accesskit();
+            context.set_pixels_per_point(density);
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let path = root.join("focus.png");
+            app.tabs.open_new(path.clone(), MediaKind::Image);
+            app.path = Some(path.clone());
+            app.media_kind = Some(MediaKind::Image);
+            app.fullscreen = true;
+            app.ui_context = Some(context.clone());
+            app.image = Some(
+                ImagePresentation::from_decoded(
+                    &context,
+                    &path,
+                    DecodedImage {
+                        format: "test",
+                        frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                            width: 64,
+                            height: 64,
+                            rgba: vec![255; 64 * 64 * 4],
+                            delay: Duration::ZERO,
+                        }],
+                    }
+                    .into(),
+                )
+                .expect("image"),
+            );
+            let selected = UnitRect {
+                min: UnitPoint { x: 0.25, y: 0.25 },
+                max: UnitPoint { x: 0.75, y: 0.75 },
+            };
+            app.image_view.selection = Some(selected);
+            let frame = |app: &mut Application<_>, events| {
+                let mut actions = Vec::new();
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(960.0, 576.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| app.draw_ui(ui, &mut actions),
+                );
+                assert!(actions.is_empty());
+                output.platform_output.accesskit_update.expect("tree")
+            };
+            frame(&mut app, vec![]);
+            assert!(!app.fullscreen_controls_visible);
+            for (index, label) in ["left", "right", "top", "bottom"].into_iter().enumerate() {
+                let target = app.selection_identity().with(index);
+                frame(
+                    &mut app,
+                    vec![egui::Event::AccessKitActionRequest(
+                        egui::accesskit::ActionRequest {
+                            action: egui::accesskit::Action::Focus,
+                            target_tree: egui::accesskit::TreeId::ROOT,
+                            target_node: target.accesskit_id(),
+                            data: None,
+                        },
+                    )],
+                );
+                frame(&mut app, vec![]);
+                let tree = frame(&mut app, vec![]);
+                assert_eq!(
+                    tree.focus,
+                    target.accesskit_id(),
+                    "do not focus Exit fullscreen"
+                );
+                assert!(
+                    app.fullscreen_controls_visible,
+                    "focused edge needs visible status"
+                );
+                let expected = format!("Selection {label} (pixels):");
+                assert!(
+                    tree.nodes.iter().any(|(_, node)| node
+                        .value()
+                        .is_some_and(|text| text.starts_with(&expected)))
+                );
+                assert_eq!(app.image_view.selection, Some(selected));
+            }
+            app.pending_guard = Some(GuardedAction::Exit);
+            frame(&mut app, vec![]);
+            assert!(!app.fullscreen_controls_visible, "modal takes precedence");
         }
     }
 

@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U07: tab別のmedia control focus（2026-09-10）
+
+表示／再生tabの最後のmedia control focusを、egui widget IDではなく役割keyでwindow内に保持する。再生／読書／repeat・shuffle、crop preview、Seek／timeline値／選択辺、playlist／filmstrip項目が対象。項目はpathで識別する。tab名・native caption・menu／palette・設定modalの一時focusはmedia状態として保存しない。復帰先のenabledで可視のcontrolへ描画時にfocusを戻し、存在しない場合は現在tabへ戻す。読込中は待つが、新しいpointer／key／UIA操作は保留復帰より優先する。source変更／同tab再読込／close時に破棄する。focus復帰自体ではactivate／Seek／編集／再生変更をしない。未確定modal入力の永続化や別windowへのfocus移送は行わない。
+
+保存量は開いているtabごとに一つのrole hashと、現在passの可視control ID一覧だけとする。Play／Pauseとrepeat状態違いは同じrole、通常Seekとtimeline値は別の表示領域として識別する。全画面の保存済みbar操作を戻す際は既存のkeyboard表示機構を使い、初回Area sizing passを一度待ってから不存在を判定する。全画面で見つからないcontrolは非表示のtabへfocusを要求しない。native window／focus喪失中とmodal／command overlay中は復帰しない。実混在DPI／物理入力／全UIA監査、tab間のresource pool／decoder復帰遅延は別の残件。
+
 ## U09: tab context menuのkeyboard入口（2026-09-10）
 
 focusされたmedia tab名／close buttonからShift+F10、修飾なしのWindows Menu key、UIA ShowContextMenuで既存tab menuを開く。activeではなくfocus先のTabIdを対象とし、表示だけではactivate／履歴変更しない。keyboard／UIAではtabの可視部分をanchorにし、pointerの位置に依存しない。right-clickのpointer anchorは維持する。Escapeは呼出元へfocusを戻し、command選択は既存dispatch／dirty guardへ渡す。guard／保存が終了するまでfocus復帰を保留し、呼出元tabが残れば元widget、閉じたなら現在tab、全close後はWelcomeへ戻す。modal／他overlay／別popup／fullscreen／drag中／focus喪失では新しい呼出しを受け付けず、repeatで再openしない。通常Enterによるtab activationとmiddle-click closeは変更しない。Welcomeはmedia用menuの対象外。共通MenuKeyboardが矢印／Tabを処理したら、eguiがpass開始時に予約した空間focus移動も取消し、独自移動との二重適用を防ぐ。

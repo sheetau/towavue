@@ -158,6 +158,7 @@ impl Playlist {
                     if reveal == Some(index) {
                         response.request_focus();
                     }
+                    crate::tab_focus::observe(&response, ("playlist-row", &item.path));
                     if response.has_focus() {
                         self.keyboard_focus = Some((item.path.clone(), response.id));
                     }

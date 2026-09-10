@@ -240,6 +240,7 @@ impl Filmstrip {
                             response.request_focus();
                             self.focus_requested = false;
                         }
+                        crate::tab_focus::observe(&response, ("filmstrip-item", &item.path));
                         response.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,

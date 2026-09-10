@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### メディア操作部品のtab別focus（2026-09-10、U07）
+
+画像の選択辺／crop preview、動画の再生／Seek／時間範囲、音声のrepeat／shuffle／playlistなどへTabでfocusして別tabへ切り替え、戻ると同じ役割の操作へ復帰する。filmstrip項目はpathで記憶する。再生／編集／sourceを操作せず、消えた項目や無効なcontrolは通常windowなら現在tabへ戻す。ファイルの切替／再読込・tab closeで記憶を解除し、modal／command overlay／focus喪失中は復帰しない。読込待ち中に新しく操作した場合は、その操作を優先する。
+
+`cargo test -p towavue-app tab_focus_`の4回帰は実画像のsource削除後の往復、履歴不変、source再読込／close解除、異なるwidget IDでの役割復帰、待機と新入力優先、22役割のheadless UIA（画像8・動画6・音声8）、全画面Play／Pauseのrole共通化・初回Area sizing待ち／不存在fallbackを確認する。役割matrixは同一layoutのtab IDを切り替えてID流用を検出するUI単体試験であり、actual session保持の証拠とは分ける。`playback_tab_tests`の実device3試験へnative UI描画／focusを追加し、既知・未知終端の背景動画、WASAPI音声を含む背景再生、同一device復旧を挟んでPlay／Repeat／Readingへ戻ることを確認する。外部foreground input／clipboard書込は行わない。
+
+U07 focus検証結果: 最終session21133でfmt／Clippy／workspace520（app294＋core61＋runtime161＋integration4）、追加app実機依存6件、release buildが終了0。通常ignored13は成功数へ含めず、追加試験にSKIPなし。実device3試験は通常suiteの2件と追加の音声あり1件であり、成功数へ二重加算していない。Release SHA-256 `8cf70365979226664f79a9ff4ddb412cce23793493828f67859d34f1e7e2f03f`。dependency／notice inventory変更なし。
+
 ### タブメニューをkeyboardから開く（2026-09-10、U09）
 
 Tabでmedia tab名またはそのclose buttonへfocusし、Shift+F10／修飾なしのMenu keyを押す。現在表示中ではなくfocus対象のtab menuが、そのtabの脇に開く。UIA ShowContextMenuも同じ入口。Escapeで呼出元へ戻り、未保存確認のCancel後も元widgetへ戻る。対象を閉じた場合は現在tab、全close後はWelcomeへ戻す。right-clickは従来のpointer位置へ開く。overlay／modal／別popup／fullscreen／drag中やfocus喪失・repeatでは新しく開かない。

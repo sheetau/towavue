@@ -186,6 +186,7 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
             let view = app.image_view;
             let first_instance = app.media_generation;
             let first_generation = app.generation;
+            tab_focus::tests::hardware_focus(&mut app, "Play / replay", true);
             let second = open_muted(&mut app, self.root.join("second.mp4"), MediaKind::Video);
             wait(&mut app, &events, |app| {
                 app.media_duration.is_some() && app.pending_time.is_some()
@@ -198,6 +199,7 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
             let music = self.audio.then(|| {
                 let id = open_muted(&mut app, self.root.join("tone.wav"), MediaKind::Audio);
                 wait(&mut app, &events, |app| app.media_duration.is_some());
+                tab_focus::tests::hardware_focus(&mut app, "Repeat off", true);
                 id
             });
             app.open_external(self.root.join("image.bmp"), true);
@@ -205,6 +207,7 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
             wait(&mut app, &events, |app| {
                 !app.image_loading && app.image.is_some()
             });
+            tab_focus::tests::hardware_focus(&mut app, "Reading mode", true);
             assert_eq!(app.retained_playback.len(), if self.audio { 3 } else { 2 });
             assert!(app.retained_playback[&first].video_suspended);
             assert_eq!(
@@ -327,6 +330,7 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
             );
             draw_video(&mut app);
             assert!(app.pending_seek_started.is_none());
+            tab_focus::tests::hardware_focus(&mut app, "Play / replay", false);
             assert_eq!(app.media_generation, first_instance);
             assert_eq!(app.image_view, view);
             assert_eq!(app.state, PlaybackState::Paused);
@@ -355,8 +359,12 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
             );
             app.remove_tab(new, false);
             if let Some(music) = music {
+                app.activate_tab(music);
+                tab_focus::tests::hardware_focus(&mut app, "Repeat off", false);
                 app.remove_tab(music, false);
             }
+            app.activate_tab(image);
+            tab_focus::tests::hardware_focus(&mut app, "Reading mode", false);
             app.remove_tab(first, false);
             app.remove_tab(image, false);
             assert!(app.retained_playback.is_empty() && app.session.is_none());

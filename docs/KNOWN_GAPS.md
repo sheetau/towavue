@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10 U07 focus: media controlの最後のfocusはtab別のrole／pathとして復帰する。可視でenabledなcontrolだけ対象とし、通常windowで不存在なら現在tabへ戻す。全画面では保存したbar操作を表示して戻せるが、hidden tabへfocusしない。22役割のUIA、実画像のsource削除後の再読込なし復帰、実GPU／WASAPIで動画・音声・画像の切替／復旧を検証する。全window・物理入力／IME・混在DPI／UIA監査やresource予算／decoder復帰遅延の完了を意味しない。modalの未確定入力や別windowへのfocus移送は保持対象外。
+
 2026-09-10 U09: tab名／close buttonにfocusしてShift+F10・Menu key、またはUIA ShowContextMenuから既存tab menuを開ける。非active対象・Escape／guard後のfocus、close後の現在tab／Welcome、reorder／無効項目skipを回帰で確認する。実GPU復旧前後でも合成inputとUIAによる6入口を描画したが、通常windowの物理Menu key／実混在DPI・全体UIA監査を完了した証拠ではない。OS clipboardへの新たな書込やExplorer呼出しは今回実行していない。
 
 2026-09-10 M01: ロゴのprimary dragは右上File／右下Edit／左下Viewへ対応する。8 logical px以上動かしてreleaseし、元の位置へ戻す／左上方向／Escape／focus喪失・pointer消失／resize／DPI・source/tab変更／別overlayでは取消。方向popupはrelease点の右下8pxを基準にし、画面端では既存Popupが配置を調整する。普通のclick／keyboardでは従来のanchorを使う。7回帰と実GPU描画を確認するが、通常windowの物理pointer・実混在DPI／最終screen pixel認定とは区別する。その他の台帳も未完のまま。

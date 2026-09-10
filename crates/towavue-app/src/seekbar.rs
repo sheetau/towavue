@@ -83,6 +83,9 @@ pub fn value_input(
     enabled: bool,
 ) -> Option<f64> {
     use egui::accesskit::{Action, ActionData, Orientation, TreeId};
+    if enabled {
+        crate::tab_focus::observe(response, ("media-value", response.layer_id.id, label));
+    }
     if response.has_focus() {
         response
             .ctx

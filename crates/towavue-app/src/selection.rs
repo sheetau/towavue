@@ -152,6 +152,7 @@ pub fn controls(
                         identity.with(index),
                         egui::Sense::focusable_noninteractive(),
                     );
+                    crate::tab_focus::observe(&response, ("selection-edge", index));
                     response.widget_info(|| {
                         egui::WidgetInfo::slider(enabled, f64::from(values[index]), labels[index])
                     });

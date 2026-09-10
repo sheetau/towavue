@@ -32,6 +32,7 @@ mod seekbar;
 mod selection;
 mod selection_aspect;
 mod shortcuts;
+mod tab_focus;
 mod tab_menu;
 mod tab_preview;
 mod time_selection;
@@ -1298,6 +1299,12 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
+        if let Some(id) = self.displayed_tab
+            && self.tabs.active().is_some_and(|tab| tab.id == id)
+            && let Some(context) = &self.ui_context
+        {
+            tab_focus::forget(context, id);
+        }
         self.cancel_hold_speed();
         self.cancel_frame_steps();
         self.retain_image_tab();
@@ -2241,6 +2248,17 @@ where
         self.video_rect = None;
         let context = root.ctx().clone();
         let modal_blocked = self.modal_input_blocked();
+        tab_focus::begin(
+            &context,
+            self.tabs.active().map(|tab| tab.id),
+            !modal_blocked
+                && !self.palette_open
+                && !self.grid_open
+                && !egui::Popup::is_any_open(&context)
+                && context.input(|input| {
+                    input.focused && !input.events.contains(&egui::Event::WindowFocused(false))
+                }),
+        );
         if modal_blocked
             || self.palette_open
             || self.grid_open
@@ -2435,6 +2453,11 @@ where
         {
             actions.push(UiAction::FinishResize(action));
         }
+        tab_focus::finish(
+            &context,
+            self.image_loading || self.state == PlaybackState::Loading,
+            !self.fullscreen,
+        );
         if context.input(|input| !input.raw.hovered_files.is_empty()) {
             let painter = context.layer_painter(egui::LayerId::new(
                 egui::Order::Tooltip,
@@ -3714,7 +3737,10 @@ where
         self.fullscreen_controls_keyboard = eligible
             && focused
             && !outside_press
-            && (self.fullscreen_controls_keyboard || (!held && tab) || controls_have_focus());
+            && (self.fullscreen_controls_keyboard
+                || (!held && tab)
+                || controls_have_focus()
+                || tab_focus::wants_controls(context));
         // A newly shown Area needs a sizing pass before its Exit button can receive focus.
         self.fullscreen_controls_focus_requested = eligible
             && focused
@@ -3846,12 +3872,10 @@ where
                             ui.label(label);
                             ui.label("Drag up/down: images per page\nDrag left/right: images on the first page\nRelease to keep; Escape to cancel");
                         }).on_disabled_hover_text("Save or undo unsaved edits before entering reading mode");
-                        if !self.reading_mode && self.image_view.selection.is_some()
-                            && ui
-                                .selectable_label(self.image_view.crop_preview, "Crop preview")
-                                .clicked()
-                        {
-                            actions.push(UiAction::Command(CommandId::ToggleCropPreview));
+                        if !self.reading_mode && self.image_view.selection.is_some() {
+                            let response = ui.selectable_label(self.image_view.crop_preview, "Crop preview");
+                            tab_focus::observe(&response, "crop-preview");
+                            if response.clicked() { actions.push(UiAction::Command(CommandId::ToggleCropPreview)); }
                         }
                     }
                     let mut details = Vec::new();
@@ -5898,6 +5922,7 @@ where
         self.edits.remove(&id);
         self.retained_images.remove(&id);
         if let Some(context) = &self.ui_context {
+            tab_focus::forget(context, id);
             context.data_mut(|data| {
                 data.remove::<egui::containers::panel::PanelState>(egui::Id::new(("timeline", id)))
             });

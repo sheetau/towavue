@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 I03 JPEG-first checkpoint: 大きなJPEGの初回cache missでは同梱FFmpegの1/8復号から小さなpreviewを先に通知し、既存の共有cache／世代mailbox／通常・reading描画を使う。EXIF8向き・元寸法・色／alpha・予算と原寸前通知、成功／失敗／取消／source変更／closeを確認。生成6000×4000のwarm Releaseでpreview約13ms、原寸約55ms（先行なし約42ms）という負荷の交換を記録する。ee9af9fのCI34528272592は成功。他静止画形式の初回preview、cold／UI latency・全JPEG品質／peakと全UX台帳を継続する。
+
 2026-09-11 I03 cancellation checkpoint: foreground／静止画prefetchの読取・Seekと変換境界へ世代取消を接続。PNG／JPEG／BMP／TIFF／WebPで画素一致と途中取消を確認し、拡張子fallbackを維持して既存animated AVIF回帰も通す。生成6000×4000、Release各7回、開始20ms取消の処理終了中央値はPNG120.899→24.735ms、JPEG44.221→28.305ms、BMP78.538→21.159ms。warm file-cacheの復号単体であり、初回段階表示／cold／可視UIの速度保証ではない。a590fe9のCI34526543071は成功。初回静止画previewを含む全UX台帳を引き続き実施し、配布準備は再開しない。
 
 2026-09-11 U02/U08 verification checkpoint: native guardの168文字日本語／`&`名、通常／fullscreen×96／192 DPIの折返し・末尾・全ボタン・取消後の辺focusと1pxキー調整を確認。Cancel／worker失敗後のfocus復帰を既存app回帰へ追加した。全体チェック中、幅1080のportrait作業領域でfilmstrip／tab分離の旧テストが未補正座標を期待して失敗したため、既存のwork-area補正を独立計算する厳密なoracleへ修正。アプリ挙動・許容誤差は変更しない。8551c42のCI34525054544は成功。次はI03の通常静止画first-decodeと表示待ちを測定し、段階表示・取消・先読みの残件へ進む。全UX台帳を継続する。

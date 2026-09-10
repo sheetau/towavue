@@ -307,17 +307,12 @@ fn run_worker(
                 .lock()
                 .expect("image cache")
                 .take(&path, stamp, remaining);
-            let mut first_frame = |width, height, pixels: &[u8]| {
-                let Some(previews) = &previews else { return };
-                let current =
-                    || is_current() && stamp.is_some() && ImageStamp::read(&path) == stamp;
-                previews.remember_pixels(&path, width, height, pixels, &current);
-                if !current() {
+            let preview_current =
+                || is_current() && stamp.is_some() && ImageStamp::read(&path) == stamp;
+            let publish_preview = |preview| {
+                if !preview_current() {
                     return;
                 }
-                let Ok(Some(preview)) = previews.cached_image(&path) else {
-                    return;
-                };
                 {
                     let mut mailbox = mutex.lock().expect("image mailbox");
                     if mailbox.closed || mailbox.generation != generation {
@@ -332,6 +327,20 @@ fn run_worker(
                     });
                 }
                 notify();
+            };
+            if cached.is_none()
+                && let Some(previews) = &previews
+                && let Some(preview) =
+                    previews.prepare_image_preview(&path, remaining, &preview_current)
+            {
+                publish_preview(preview);
+            }
+            let mut first_frame = |width, height, pixels: &[u8]| {
+                let Some(previews) = &previews else { return };
+                previews.remember_pixels(&path, width, height, pixels, &preview_current);
+                if let Ok(Some(preview)) = previews.cached_image(&path) {
+                    publish_preview(preview);
+                }
             };
             let result = cached.unwrap_or_else(|| {
                 decode(&path, remaining, &is_current, &mut first_frame).map(Arc::new)
@@ -694,6 +703,123 @@ mod tests {
             }
             drop(loader);
             worker.join().expect("worker shutdown");
+            std::fs::remove_dir_all(root).expect("remove owned fixtures");
+        }
+    }
+
+    #[test]
+    fn cold_jpeg_preview_is_published_before_original_and_retires_on_terminal_paths() {
+        for mode in ["success", "failure", "cancel", "changed", "closed"] {
+            let root = std::env::temp_dir()
+                .join(format!("towavue-jpeg-first-{}-{mode}", std::process::id()));
+            std::fs::create_dir_all(&root).expect("owned fixture root");
+            let path = root.join("source.jpg");
+            image::RgbImage::from_pixel(2560, 1920, image::Rgb([12, 80, 190]))
+                .save(&path)
+                .expect("large JPEG");
+            let previews = PreviewCache::new(root.join("cache")).expect("preview cache");
+            let shared = Arc::new((
+                Mutex::new(Mailbox {
+                    previews: Some(previews.clone()),
+                    ..Default::default()
+                }),
+                Condvar::new(),
+            ));
+            let mut loader = Some(ImageLoader {
+                shared: Arc::clone(&shared),
+                prefetch_worker: LatestTask::new("jpeg-preview-test").expect("prefetch worker"),
+            });
+            let (started_tx, started_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let (ready_tx, ready_rx) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                run_worker(
+                    shared,
+                    || {
+                        let _ = ready_tx.send(());
+                    },
+                    |path, budget, current, preview| {
+                        started_tx.send(()).expect("full decode entry");
+                        release_rx
+                            .recv_timeout(Duration::from_secs(10))
+                            .expect("release original");
+                        if mode == "failure" {
+                            return Err(ImageDecodeError::TooLarge);
+                        }
+                        decode_image_with_preview(path, budget, current, preview)
+                    },
+                )
+            });
+            let generation = loader.as_ref().expect("loader").request(vec![path.clone()]);
+            started_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("original starts after preview");
+            ready_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("preview notification");
+            let preview = loader
+                .as_ref()
+                .expect("loader")
+                .take_preview()
+                .expect("uncached JPEG first display");
+            assert_eq!(preview.generation, generation);
+            assert_eq!(preview.path, path);
+            assert_eq!(preview.preview.source_size, (2560, 1920));
+            assert_eq!(
+                (preview.preview.image.width, preview.preview.image.height),
+                (213, 160)
+            );
+            assert!(loader.as_ref().expect("loader").take_completed().is_none());
+            assert_eq!(
+                previews
+                    .cached_image(&path)
+                    .expect("cache")
+                    .expect("reusable preview")
+                    .image,
+                preview.preview.image
+            );
+            loader
+                .as_ref()
+                .expect("loader")
+                .shared
+                .0
+                .lock()
+                .expect("mailbox")
+                .preview_ready = Some(preview);
+            match mode {
+                "cancel" => {
+                    loader.as_ref().expect("loader").request(Vec::new());
+                }
+                "closed" => drop(loader.take()),
+                "changed" => std::fs::write(&path, b"replaced JPEG").expect("replace owned input"),
+                _ => {}
+            }
+            release_tx.send(()).expect("release full decode");
+            if matches!(mode, "success" | "failure" | "changed") {
+                ready_rx
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("original completion");
+                let loader = loader.as_ref().expect("loader");
+                assert!(loader.take_preview().is_none());
+                let completed = loader.take_completed().expect("completion");
+                let result = &completed.images[0].1;
+                if mode == "success" {
+                    let reference = crate::decode_image(&path).expect("independent original");
+                    assert_eq!(result.as_ref().expect("original").as_ref(), &reference);
+                } else {
+                    assert!(result.is_err());
+                }
+            }
+            if mode == "cancel" {
+                let loader = loader.as_ref().expect("loader");
+                assert!(loader.take_preview().is_none());
+                assert!(loader.take_completed().is_none());
+            }
+            drop(loader);
+            worker.join().expect("worker shutdown");
+            if matches!(mode, "cancel" | "closed") {
+                assert!(ready_rx.try_recv().is_err());
+            }
             std::fs::remove_dir_all(root).expect("remove owned fixtures");
         }
     }

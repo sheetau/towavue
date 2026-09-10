@@ -138,6 +138,16 @@ foregroundと静止画prefetchの既存generation判定を、Fileを包むRead�
 
 静止画はdecode後・向き変換後にも検査して不要な後続変換を省く。thread／cache／画素予算は増やさない。実行中のOS readやcodec内部のメモリ内計算を強制中断するものではなく、JPEGなどは次の検査まで待つ。AVIFのFFmpeg処理は既存のframe境界取消を維持する。通常画像の初回低解像度表示、cold-storageとUI end-to-end latencyは別の未完事項とする。
 
+## I03: 大きなJPEGの初回低解像度preview（2026-09-11）
+
+foregroundの原寸cache miss時に、既存previewがあれば再利用し、なければJPEGだけ同梱FFmpegのMJPEG decoderへ圧縮packetを直接渡す。独立process／demux走査／追加workerは作らない。低解像度復号は[lowresとcodec上限](https://ffmpeg.org/doxygen/trunk/structAVCodec.html)を確認して1/8寸法を要求し、一件・一threadのsoftware decoderとscalerをworker内で所有する。画像の原寸decode・編集・保存やD3D11 deviceを置換しない。
+
+内容からJPEGと確認し、4,194,304画素以上かつ残る原寸budget内を対象とする。先行処理の圧縮入力は32 MiBまで、出力はEXIFの8向きを適用後240×160以内のRGBA。元の向き補正済み寸法は縮小画素と別に保持し、通常／readingの配置・倍率を変えない。低解像度frameが期待した寸法でない場合やcodec失敗は先行previewだけを諦め、従来の原寸経路に診断を任せる。取消は読取・処理境界で検査し、native decoder内部を強制中断しない。
+
+PreviewCacheの既存64件／16 MiB枠とsource stamp、ImageLoaderの世代付き一件mailbox・ImagesReadyを共用する。同keyの生成枠を非blockingで取得し、他window／filmstripが生成中なら重複生成も待機もせず原寸へ進む。生成中にUI/cache mutexを保持しない。原寸が先に完了した場合はpreviewを表示せず直接原寸へ進み、失敗／取消／closeでもplaceholderを退役させる。先読みだけの原寸decodeはこの追加の縮小復号を行わない。
+
+生成6000×4000 JPEGのwarm file-cache・Release各7回では、先行なし原寸中央値42.377ms、先行ありpreview 12.984ms／原寸55.549ms。早い低画質表示と引換えに原寸完了は約13ms遅くなる。この追加decode・圧縮コピー・software負荷を許容し、大きなJPEGの初期応答を優先する。UI end-to-end、cold-storage、全JPEG方式／色管理・資源peakの保証ではない。他の静止画形式、総decode高速化、libjpeg-turbo採否は引き続き測定対象とする。
+
 ## I03/U10: 静止画先読み結果のpreview共用（2026-09-10）
 
 既存の隣画像一件／256 MiBの静止画先読みは、原寸cacheへの登録後、decoded-cache mutexを解放してから同じ原寸の借用frameをPreviewCacheへ渡す。既存の240×160以内の縮小、source metadata key、host全体64件／16 MiBを使い、追加decode／補助process／disk encodeはしない。原寸cache hitでも元寸法付きpreviewを再供給し、縮小側だけがevictionされた場合に再decodeしない。先読みの静止画限定／元画質／枚数／順序は変えず、animation／AVIFの先読みやvideo sheetを追加したという意味ではない。

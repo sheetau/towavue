@@ -11,6 +11,9 @@ use thiserror::Error;
 
 use crate::decode::{self, DecodeError, DecodeOutput};
 
+mod jpeg_preview;
+pub(crate) use jpeg_preview::jpeg_preview;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecodedImageFrame {
     pub width: u32,

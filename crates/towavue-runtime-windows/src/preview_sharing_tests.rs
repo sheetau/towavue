@@ -22,6 +22,61 @@ fn png() -> Vec<u8> {
 }
 
 #[test]
+fn jpeg_first_preview_reuses_pixels_without_waiting_for_another_generator() {
+    let cache = cache("jpeg-first-sharing");
+    let path = cache.root.join("source.jpg");
+    image::RgbImage::from_pixel(2560, 1920, image::Rgb([12, 80, 190]))
+        .save(&path)
+        .expect("large JPEG");
+    let key = cache_key(&path, IMAGE_PREVIEW_VARIANT).expect("source key");
+    let held = cache.claim_generation(&key).expect("another generator");
+    let worker_cache = cache.clone();
+    let worker_path = path.clone();
+    let (sent, received) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        sent.send(worker_cache.prepare_image_preview(
+            &worker_path,
+            crate::image::IMAGE_BYTE_LIMIT,
+            &|| true,
+        ))
+        .expect("speculation result");
+    });
+    let immediate = received.recv_timeout(Duration::from_secs(1));
+    drop(held);
+    worker.join().expect("worker");
+    assert!(
+        immediate
+            .expect("foreground must not wait for another generator")
+            .is_none()
+    );
+    let preview = cache
+        .prepare_image_preview(&path, crate::image::IMAGE_BYTE_LIMIT, &|| true)
+        .expect("generate after release");
+    let held = cache.claim_generation(&key).expect("hold generation again");
+    assert_eq!(
+        cache
+            .prepare_image_preview(&path, crate::image::IMAGE_BYTE_LIMIT, &|| true)
+            .expect("warm reuse")
+            .image,
+        preview.image
+    );
+    assert!(
+        cache
+            .prepare_image_preview(&path, crate::image::IMAGE_BYTE_LIMIT, &|| false)
+            .is_none()
+    );
+    drop(held);
+    fs::write(&path, b"changed input").expect("replace owned source");
+    assert!(
+        cache
+            .prepare_image_preview(&path, crate::image::IMAGE_BYTE_LIMIT, &|| true)
+            .is_none()
+    );
+    assert!(cache.in_flight.0.lock().expect("pending").is_empty());
+    fs::remove_dir_all(&cache.root).expect("remove owned cache");
+}
+
+#[test]
 fn identical_preview_work_is_coalesced_but_other_keys_and_cancellation_are_independent() {
     let cache = cache("preview-coalesce");
     let (started, start) = mpsc::channel();

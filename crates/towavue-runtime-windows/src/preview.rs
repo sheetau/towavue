@@ -484,6 +484,51 @@ impl PreviewCache {
         }
     }
 
+    pub(crate) fn prepare_image_preview(
+        &self,
+        path: &Path,
+        byte_limit: usize,
+        current: &dyn Fn() -> bool,
+    ) -> Option<CachedImagePreview> {
+        if !current() {
+            return None;
+        }
+        if let Ok(Some(preview)) = self.cached_image(path) {
+            return Some(preview);
+        }
+        let key = cache_key(path, IMAGE_PREVIEW_VARIANT).ok()?;
+        // Speculation must neither duplicate this key nor delay the original
+        // behind another window's preview generator.
+        if !self
+            .in_flight
+            .0
+            .lock()
+            .expect("preview generation")
+            .insert(key.clone())
+        {
+            return None;
+        }
+        let _lease = GenerationLease {
+            pending: Arc::clone(&self.in_flight),
+            key: key.clone(),
+        };
+        if let Ok(Some(preview)) = self.cached_image(path) {
+            return Some(preview);
+        }
+        let preview = crate::image::jpeg_preview(path, byte_limit, current).ok()??;
+        if !current() || cache_key(path, IMAGE_PREVIEW_VARIANT).ok().as_ref() != Some(&key) {
+            return None;
+        }
+        let mut memory = self.memory.lock().expect("preview memory");
+        memory.insert(key, preview.image.clone());
+        memory
+            .entries
+            .back_mut()
+            .expect("bounded image preview")
+            .source_size = Some(preview.source_size);
+        Some(preview)
+    }
+
     pub(crate) fn remember_pixels(
         &self,
         path: &Path,

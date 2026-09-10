@@ -1,7 +1,7 @@
 use super::*;
 use ffmpeg::filter;
 
-/// One worker-owned input/decoder/filter graph serves the bounded sheet request.
+/// One worker-owned input/decoder/filter graph serves a bounded preview request.
 /// Only reduced owned pixels leave this auxiliary software path, never playback frames.
 pub(crate) fn preview_video_frames(
     path: &Path,

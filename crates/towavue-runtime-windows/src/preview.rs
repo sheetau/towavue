@@ -172,6 +172,7 @@ impl PreviewCache {
         check_cancelled(self.cancellation.as_ref())
     }
 
+    /// Video thumbnails fit within a square of `width` pixels with square-pixel output.
     pub fn thumbnail(
         &self,
         source: &Path,
@@ -179,6 +180,19 @@ impl PreviewCache {
         width: u32,
     ) -> Result<PreviewImage, PreviewError> {
         self.check_cancelled()?;
+        if MediaKind::from_path(source) == Some(MediaKind::Video) {
+            if width == 0 {
+                return Err(PreviewError::Generate(
+                    "invalid thumbnail dimensions".into(),
+                ));
+            }
+            return self.video_frame(
+                source,
+                position,
+                &format!("thumbnail-video-v4-{}-{width}", position.as_nanos()),
+                &format!("scale={width}:{width}:force_original_aspect_ratio=decrease:reset_sar=1,format=rgba"),
+            );
+        }
         let key = cache_key(
             source,
             &format!("thumbnail-v3-{}-{width}", position.as_millis()),
@@ -200,25 +214,65 @@ impl PreviewCache {
             .flatten();
         let image = if kind == MediaKind::Audio {
             self.waveform(source, 240, 160)?
+        } else if kind == MediaKind::Video {
+            self.video_frame(
+                source,
+                duration.unwrap_or_default().mul_f64(0.1),
+                "filmstrip-video-v4",
+                "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2,format=rgba",
+            )?
         } else {
-            let (version, filter) = if kind == MediaKind::Image {
-                (
-                    IMAGE_PREVIEW_VARIANT,
-                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
-                )
-            } else {
-                (
-                    "filmstrip-v3",
-                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2",
-                )
-            };
-            let key = cache_key(source, version)?;
+            let key = cache_key(source, IMAGE_PREVIEW_VARIANT)?;
             self.load_or_generate(key, || {
-                let position = duration.unwrap_or_default().mul_f64(0.1);
-                frame_preview(source, position, filter, self.cancellation.as_ref())
+                frame_preview(
+                    source,
+                    Duration::ZERO,
+                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
+                    self.cancellation.as_ref(),
+                )
             })?
         };
         Ok(MediaPreview { image, duration })
+    }
+
+    fn video_frame(
+        &self,
+        source: &Path,
+        position: Duration,
+        variant: &str,
+        filter: &str,
+    ) -> Result<PreviewImage, PreviewError> {
+        let key = cache_key(source, variant)?;
+        self.load_or_generate(key.clone(), || {
+            let mut frame = None;
+            let result = crate::decode::preview_video_frames(
+                source,
+                &[position],
+                filter,
+                &|| self.cancellation.as_ref().is_some_and(Cancellation::is_cancelled),
+                |_, image| frame = Some(image),
+            );
+            self.check_cancelled()?;
+            let bytes = match result {
+                Ok(()) => {
+                    let frame = frame.ok_or(PreviewError::NoFrame)?;
+                    let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)
+                        .expect("packed preview frame");
+                    let mut png = std::io::Cursor::new(Vec::new());
+                    image.write_to(&mut png, image::ImageFormat::Png)?;
+                    png.into_inner()
+                }
+                Err(error) => {
+                    eprintln!("towavue: auxiliary preview decoder unavailable; using frame fallback: {error}");
+                    frame_preview(source, position, filter, self.cancellation.as_ref())?
+                }
+            };
+            self.check_cancelled()?;
+            if cache_key(source, variant)? != key {
+                return Err(PreviewError::Generate("Source changed during preview generation".into()));
+            }
+            Ok(bytes)
+        })
     }
 
     pub fn waveform(
@@ -1097,7 +1151,7 @@ mod tests {
         assert_eq!((card.image.width, card.image.height), (240, 160));
         let mut args =
             preview_input_arguments(&source, Duration::from_millis(799), None).expect("input");
-        args.extend(["-vf".into(), "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2".into(), "-frames:v".into(), "1".into()]);
+        args.extend(["-vf".into(), "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2,format=rgba".into(), "-frames:v".into(), "1".into()]);
         assert_eq!(
             card.image,
             decode_png(&run_ffmpeg(&args, None).expect("reference card")).expect("PNG")

@@ -1,5 +1,15 @@
 # towavue アーキテクチャ
 
+## V02/U10: 単枚動画プレビューの補助デコーダー利用（2026-09-11）
+
+Seek／tabの初期単枚とvideo filmstripは、sheetと同じworker-owned software decoder／filter helperを一つのtargetで使う。通常時のCLI起動を省くが、単枚request間でinputを保持する変更ではない。縮小後のRGBAを一回PNGにして既存cacheへ渡す。非取消エラーは従来CLIへfallbackし、取消と生成中のsource metadata変更をpublish前に拒否する。画像・音声の生成経路、再生session／D3D11、共有cacheの件数／容量は変更しない。
+
+動画単枚は`width × width`内のaspect-fit、`reset_sar=1`、paddingなしとする。従来の幅だけのscaleでは縦長入力の高さが膨らみ、SARも表示ピクセルに反映できなかった。filmstripは既存240×160のpadded fitを維持する。両方RGBAを明示し、video専用v4 keyへ分離して旧寸法／色のcacheを再使用しない。単枚keyはtarget nanosecondsを含め、従来のmillisecond切り捨てによる別targetの衝突も避ける。画像のthumbnail-v3／filmstrip-image-v4は維持する。
+
+TSで音声が映像より先に始まる生成素材では、従来CLIのtimestamp rebasingがvideo開始をzeroにし、format originに対する指定位置と異なるframeを選ぶケースを確認した。独立ffprobeのformat start、CLI `-copyts`、timestamp `select`による小素材の全走査参照ではnativeと画素一致する。終端以降は独立reverse参照を用いる。参照の全走査はテスト限定であり、productionへ追加しない。fallback自体の旧timestamp制約や全形式の精密Seekは未解消である。
+
+Release測定（PNG生成・disk登録を含むcache miss、同じRGBA filter）：小さな32×96／SAR 2:1素材はCLI 53.5022ms、native 3.0056ms。1080p／GOP 180の4.8秒位置はCLI 91.345ms、native 96.7887msで、この長GOP条件では改善なし。後者memory hitは80.6µs。OS cacheをflushしたcold-storage測定、UI end-to-end latency、全process peak／全codec／HDRの保証ではない。可視の所有素材で回転／SARを保つfilmstrip・scrub／tabを確認し、240×160の新しい単枚cacheも生成した。初期単枚が画面に出る瞬間の時間は未計測である。
+
 ## V02/U10: sheet内の補助デコーダー共用（2026-09-11）
 
 従来のコマごとの子process生成を、worker内で所有する一つのFFmpeg input／software decoder／filter graphへ置き換える。各sampleの前に既存のorigin／TS-aware seekを行いdecoderをflushし、最初のtarget以降のframe、または実video終端の最後のframeを使う。decoderとfilterのthread指定は1、decoderのmax_pixelsは128 Mi pixelとする。これは再生用session／D3D11 deviceの共用や変更ではなく、補助処理自身の再利用である。GOPの先頭からの再decode自体はまだ残る。

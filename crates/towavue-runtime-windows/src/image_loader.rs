@@ -92,7 +92,7 @@ impl ImageCache {
 #[derive(Default)]
 struct Mailbox {
     generation: u64,
-    pending: Option<Vec<PathBuf>>,
+    pending: Option<(Vec<PathBuf>, usize)>,
     completed: Option<LoadedImages>,
     closed: bool,
     cache: Arc<Mutex<ImageCache>>,
@@ -133,11 +133,17 @@ impl ImageLoader {
     }
 
     pub fn request(&self, paths: Vec<PathBuf>) -> u64 {
+        self.request_with_retained_bytes(paths, 0)
+    }
+
+    /// Decode missing pages within the same budget as the caller's already retained pages.
+    pub fn request_with_retained_bytes(&self, paths: Vec<PathBuf>, retained_bytes: usize) -> u64 {
         self.prefetch_worker.clear();
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("image mailbox");
         mailbox.generation = mailbox.generation.wrapping_add(1);
-        mailbox.pending = (!paths.is_empty()).then_some(paths);
+        mailbox.pending =
+            (!paths.is_empty()).then_some((paths, IMAGE_BYTE_LIMIT.saturating_sub(retained_bytes)));
         mailbox.completed = None;
         ready.notify_one();
         mailbox.generation
@@ -236,7 +242,7 @@ fn run_worker(
     let cache = Arc::clone(&mutex.lock().expect("image mailbox").cache);
     let previews = mutex.lock().expect("image mailbox").previews.clone();
     loop {
-        let (generation, paths) = {
+        let (generation, (paths, mut remaining)) = {
             let mut mailbox = ready
                 .wait_while(mutex.lock().expect("image mailbox"), |mailbox| {
                     !mailbox.closed && mailbox.pending.is_none()
@@ -254,7 +260,6 @@ fn run_worker(
             let mailbox = mutex.lock().expect("image mailbox");
             !mailbox.closed && mailbox.generation == generation
         };
-        let mut remaining = IMAGE_BYTE_LIMIT;
         let total = paths.len();
         for (index, path) in paths.into_iter().enumerate() {
             if !is_current() {
@@ -330,6 +335,84 @@ mod tests {
                 delay: Duration::ZERO,
             }],
         })
+    }
+
+    #[test]
+    fn resumed_pages_share_the_budget_with_already_retained_pixels() {
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let loader = ImageLoader {
+            shared: Arc::clone(&shared),
+            prefetch_worker: LatestTask::new("image-resume-budget").expect("prefetch worker"),
+        };
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (budget_tx, budget_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            run_worker(
+                shared,
+                || {
+                    ready_tx.send(()).expect("notify");
+                },
+                |_, budget, _| {
+                    budget_tx.send(budget).expect("observed budget");
+                    if budget < 4 {
+                        Err(ImageDecodeError::TooLarge)
+                    } else {
+                        Ok((*pixel(1)).clone())
+                    }
+                },
+            )
+        });
+        let paths = vec![
+            PathBuf::from("missing-a"),
+            PathBuf::from("missing-b"),
+            PathBuf::from("missing-c"),
+        ];
+        let generation = loader.request_with_retained_bytes(paths, IMAGE_BYTE_LIMIT - 8);
+        for expected in [8, 4, 0] {
+            ready_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("page completion");
+            assert_eq!(
+                budget_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("budget"),
+                expected
+            );
+        }
+        let result = loader.take_completed().expect("pages");
+        assert_eq!(result.generation, generation);
+        assert_eq!(result.images.len(), 3);
+        assert!(result.images[..2].iter().all(|(_, result)| result.is_ok()));
+        assert!(matches!(
+            &result.images[2].1,
+            Err(ImageDecodeError::TooLarge)
+        ));
+        loader.request_with_retained_bytes(vec![PathBuf::from("over-budget")], usize::MAX);
+        ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("over-budget completion");
+        assert_eq!(
+            budget_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("zero budget"),
+            0
+        );
+        assert!(matches!(
+            &loader.take_completed().expect("over-budget").images[0].1,
+            Err(ImageDecodeError::TooLarge)
+        ));
+        loader.request(vec![PathBuf::from("fresh")]);
+        ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("fresh completion");
+        assert_eq!(
+            budget_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("fresh budget"),
+            IMAGE_BYTE_LIMIT
+        );
+        drop(loader);
+        worker.join().expect("worker stopped");
     }
 
     #[test]

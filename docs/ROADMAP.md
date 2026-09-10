@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 U08 image-transfer checkpoint: 画像の外dragも同一hostのstate移送へ接続。移動先contextの全textureを準備してからsourceを外し、静止画／アニメーションの画素Arc・現在frame／deadline・sampling・view・未保存履歴とUndo元を保持する。処理中resampleと未取得readingページだけを再開し、既存ページ／エラー／preview・Shell順を残す。再開時も既存512 MiB decoded予算から保持済みbytesを差し引く。非表示HWNDでactive／retained画像の反復移送・focus・stage失敗保持・共有GPU復旧・close guardを確認。先行2f62d3cのCI34470975468は成功。次はfilmstrip新windowの同host化と既存windowへの通常drop／結合indicator。全UX台帳・U07性能／P010・可視window／物理入力／mixed-DPIは継続する。
+
 2026-09-10 U08 live-transfer checkpoint: 音声／動画の外dragを同一hostの新window初期化→state移送→表示へ接続。sessionの不変originから現在ownerへ通知を配送し、未保存編集・保存先・設定と再生状態を移す。非表示HWNDでactive／非active動画の往復・停止frame／時計・CPU転送0・focus、無音音声の再生／停止・repeat／shuffle・元window削除後の通知、初期化前後の失敗保持を確認する。画像・filmstripの同host化、既存windowへの通常drop／結合indicatorは次工程。先行aeb185dのCI34467998719は成功。全UX台帳と通常window／物理入力／mixed-DPI、U07性能／P010等の残件は継続する。
 
 2026-09-10 U08/U07 shared-recovery checkpoint: hostへlossを集約し、全対象の停止→全surface stage→成功時commitを接続。作成途中の失敗は部分復帰せず、Retryは健全deviceを再利用して要求元だけを復旧する。停止時計がframe PTSより僅かに後の場合の1frame進行を修正し、元PTSとtransport targetを分離。実D3D11VAの非表示2window／retained動画でactive／background／presentation loss・再生／停止・第一／第二surface失敗・Cancel／Retry・stale通知を、WARPで200ns差・RGBA・hidden復帰／意図的Seekを確認。先行a344ff4のCI34465884251は成功。次は移動sessionの通知所有権とstate移送を通常分離／結合へ接続する。実TDR・混在画像／音声／endpoint／HDR／全codec・可視window／物理入力／混在DPI、U07遅延・P010を含む全UX台帳は継続する。

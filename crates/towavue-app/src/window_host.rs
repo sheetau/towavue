@@ -107,7 +107,7 @@ impl WindowHost {
         })
     }
 
-    fn move_playback_tab(
+    fn move_tab(
         &mut self,
         source: WindowKey,
         destination: WindowKey,
@@ -120,7 +120,7 @@ impl WindowHost {
         self.windows
             .get(&source)
             .ok_or("source window is closed")?
-            .validate_playback_transfer(request)?;
+            .validate_tab_transfer(request)?;
         let target = self
             .windows
             .get(&destination)
@@ -129,17 +129,21 @@ impl WindowHost {
         if gap > target.tabs.tabs().len() {
             return Err("the destination tab strip changed".into());
         }
+        let stage = self.windows[&source].prepare_image_transfer(
+            request.tab,
+            target.ui_context.as_ref().expect("validated context"),
+        )?;
         // All fallible validation is complete before extracting any user state.
         let transfer = self
             .windows
             .get_mut(&source)
             .expect("validated source")
-            .take_playback_transfer(request);
+            .take_tab_transfer(request, stage);
         Ok(self
             .windows
             .get_mut(&destination)
             .expect("validated destination")
-            .accept_playback_transfer(transfer, gap))
+            .accept_tab_transfer(transfer, gap))
     }
 
     fn detach_pending_tabs(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
@@ -149,7 +153,7 @@ impl WindowHost {
             .filter_map(|(key, app)| app.pending_tab_detach.take().map(|request| (*key, request)))
             .collect();
         for (source, request) in requests {
-            let result = self.detach_playback_tab(event_loop, source, &request, visible);
+            let result = self.detach_tab(event_loop, source, &request, visible);
             if let Err(error) = result
                 && let Some(app) = self.windows.get_mut(&source)
             {
@@ -158,20 +162,20 @@ impl WindowHost {
         }
     }
 
-    fn detach_playback_tab(
+    fn detach_tab(
         &mut self,
         event_loop: &ActiveEventLoop,
         source: WindowKey,
         request: &tab_transfer::DetachRequest,
         visible: bool,
     ) -> Result<WindowKey, String> {
-        self.detach_playback_tab_with(source, request, visible, |app, device| {
+        self.detach_tab_with(source, request, visible, |app, device| {
             app.start_on_device(event_loop, Some(device), false)
                 .map_err(|error| error.to_string())
         })
     }
 
-    fn detach_playback_tab_with(
+    fn detach_tab_with(
         &mut self,
         source: WindowKey,
         request: &tab_transfer::DetachRequest,
@@ -182,7 +186,7 @@ impl WindowHost {
         ) -> Result<(), String>,
     ) -> Result<WindowKey, String> {
         let app = self.windows.get(&source).ok_or("source window is closed")?;
-        app.validate_playback_transfer(request)?;
+        app.validate_tab_transfer(request)?;
         let device = app
             .renderer
             .as_ref()
@@ -196,7 +200,7 @@ impl WindowHost {
             self.windows.get_mut(&destination).expect("new window"),
             device,
         );
-        let moved = started.and_then(|()| self.move_playback_tab(source, destination, request, 0));
+        let moved = started.and_then(|()| self.move_tab(source, destination, request, 0));
         match moved {
             Ok(_) => {
                 self.windows[&destination]

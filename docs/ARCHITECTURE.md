@@ -1,14 +1,24 @@
 # towavue アーキテクチャ
 
+## U08: 画像tabのcontext移送と未取得ページの再開（2026-09-10）
+
+画像の通常外dragも音声／動画と同じhost内の移送transactionを使う。移動先の作成と全画像textureの準備を終えるまで元tabを外さない。active／retainedの静止画・アニメーション・読みかけページ・読み込みpreviewは、元の画素を参照しつつ移動先contextへ新textureを登録する。上限を超えた画像／ページ／previewがあればstageを破棄して元tabと編集を残す。texture IDとsamplingの可変状態はwindow間共有せず、decoded Arc・現在frame index・次frame deadline・sampling設定を保持する。retained画像にもlocal media instanceを持たせ、pathが同じでも古い移送要求を区別する。
+
+画像編集は履歴・元decoded Arc・確定済みの描画結果を移す。処理中のresampleだけ新ownerのworkerで元画素から再開し、旧ownerの完了は従来の世代照合で拒否する。取得済みのreadingページ／エラー／previewは保持し、未取得のsuffixだけ新ownerのImageLoaderへ要求する。appのrequest offsetでworkerのchunk index／totalを元のページ列へ対応させる。同じShell順の更新では再要求せず、隣接ページの構成が変わった時は従来どおり再構築する。previewはColorImageをArcで持ち、新textureへの移送に使う。取得済み画素のために元sourceファイルを再読込せず、永続バックアップも作らない。
+
+不足ページの再開でも、元の512 MiB decoded-image予算を増やさない。appが保持中のprimary／readingページの画素bytesを渡し、ImageLoaderはそれを差し引いた残量からcache hit／decodeごとの消費を計上する。残量不足は既存のTooLarge診断で、そのページをエラー表示として残す。新規の全ページ要求は従来の予算を使う。
+
+同context内のtab復帰も取得済みreadingページを保持して不足分だけ再開する。新window側の読み込み／GPU upload実行時間、可視ウィンドウのdrag・mixed-DPIは別の検証項目とする。filmstripからの新windowはまだpath-only別processで、既存windowへの通常drag結合／indicatorも未接続。
+
 ## U08: 音声／動画tabのlive移送（2026-09-10）
 
-host配下の音声／動画tabの外dragは、同じD3D11 deviceで新しい非表示windowを初期化し、成功後にtabを移して表示する。作成失敗・古いtab/path/media instance・閉鎖／modal／graphics復旧待ち・対象tabのexport中は移送しない。移送する未保存編集は破棄せず、保存guardを出さずに履歴ごと新しいtab IDへ移す。最後のtabを移した元windowはWelcomeを残す。既存windowへの挿入位置指定の内部移送も同じ手順を使うが、window間drop／結合indicatorへの通常入力接続は未完。
+host配下のtabの外dragは、同じD3D11 deviceで新しい非表示windowを初期化し、成功後にtabを移して表示する。作成失敗・古いtab/path/media instance・閉鎖／modal／graphics復旧待ち・対象tabのexport中は移送しない。移送する未保存編集は破棄せず、保存guardを出さずに履歴ごと新しいtab IDへ移す。最後のtabを移した元windowはWelcomeを残す。既存windowへの挿入位置指定の内部移送も同じ手順を使うが、window間drop／結合indicatorへの通常入力接続は未完。
 
 sessionは作成時の`(WindowKey, media instance)`を不変の通知originとして保持する。hostはactive／retained sessionの現在の所有者を検索し、宛先のlocal instanceに置き換えてPlayback通知だけを配送する。移動前にqueueへ入った通知、元window削除後、反復移送をforwarding chainや永続aliasなしで扱う。session破棄後のoriginには配送しない。background音声の次曲で新sessionを作る時は、その時の所有windowを新originにする。UIA／その他のwindow workerは従来の固定宛先を維持する。
 
 active sessionのdecoder／WASAPIを開き直さず、時計・再生状態・表示frame・選択・view・filmstrip／playlist位置・編集履歴・保存先・音声／metadata export設定を移す。非active動画は既存のbounded suspensionから通常の再表示経路で戻す。新contextで無効な波形textureは再生成し、duration workerは元ownerから取り除き必要なら再要求する。playlistの古いwidget IDは捨て、tabの意味的focus roleとtimeline panel寸法を新IDへ移す。音声queueのrepeat／shuffle／順序を保持し、EOF instanceを付け替え、Shell順workerの通知先を新ownerへ再作成する。
 
-画像tabはまだguard付きpath-only別process分離を維持する。画像texture／読み込み途中の移送、filmstrip新windowの同host化、通常window間drop、可視windowの実入力／mixed-DPI、全codec／endpoint／HDRの組合せはこのcheckpointの完成扱いにしない。
+画像tabは上節のcontext移送を使う。filmstrip新windowの同host化、通常window間drop、可視windowの実入力／mixed-DPI、全codec／endpoint／HDRの組合せは未完として維持する。
 
 ## U08/U07: 共有deviceの復旧transactionと停止frame（2026-09-10）
 
@@ -26,7 +36,7 @@ Retryだけの場合は要求元を対象とし、他windowに健全なdeviceが
 
 各appの`schedule`は希望する`ControlFlow`を返し、globalな待機／終了を変更しない。hostはPollを優先し、WaitUntilの最小値を採用する。既存の保存／離脱guardが`exit_requested`を確定したwindowだけを除去する。HWNDを保持したまま描画surfaceを解放し、最後のwindowがなくなった場合だけPoll＋event-loop exitを行う。別windowが残る間は終了しない。
 
-追加windowの初期化は既存rendererのdeviceを引き継ぐ。音声／動画の通常分離はlive移送へ接続し、画像とfilmstrip起動はまだ別processのままとする。共有deviceの復旧は上節のtransactionで扱う。
+追加windowの初期化は既存rendererのdeviceを引き継ぐ。画像／音声／動画tabの通常分離はlive移送へ接続し、filmstrip起動はまだ別processのままとする。共有deviceの復旧は上節のtransactionで扱う。
 
 headlessの通知／close guard／deadline集約に加え、実worker・AccessKit adapter付き非表示2windowでD3D11VA動画を確認する。window-local IDを意図的に一致させ、合成UIA通知の宛先・未保存取消／破棄・survivorのframe／generation・replacement keyと遅延通知破棄・最後のwindow終了を検証する。非表示HWNDでは通常のpaint通知待ちで表示frameが進まなかったため、試験だけが所有windowへのRedrawRequestedを明示配送する。[winitのWindows描画要求](https://docs.rs/winit/0.30.13/winit/window/struct.Window.html#method.request_redraw)はWM_PAINTに対応する。通常の可視window／物理入力／混在DPIの証明とは区別する。
 

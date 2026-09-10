@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "tab_transfer_tests.rs"]
+pub(crate) mod tests;
+
 #[derive(Clone)]
 pub(super) struct DetachRequest {
     pub tab: TabId,
@@ -7,9 +11,9 @@ pub(super) struct DetachRequest {
     instance: u64,
 }
 
-pub(super) struct PlaybackTransfer {
+pub(super) struct TabTransfer {
     target: towavue_core::TabTarget,
-    playback: playback_tab::RetainedPlaybackTab,
+    media: MediaTransfer,
     edits: Option<EditHistory>,
     export_path: Option<PathBuf>,
     audio_options: Option<AudioExportOptions>,
@@ -19,20 +23,52 @@ pub(super) struct PlaybackTransfer {
     timeline: Option<egui::containers::panel::PanelState>,
 }
 
+enum MediaTransfer {
+    Playback(Box<playback_tab::RetainedPlaybackTab>),
+    Image(Box<RetainedImageTab>),
+}
+
+pub(super) struct ImageStage {
+    image: Option<ImagePresentation>,
+    pages: Vec<Result<ImagePresentation, String>>,
+    previews: BTreeMap<PathBuf, ImagePreviewPresentation>,
+}
+
+impl ImagePresentation {
+    fn rebind(&self, context: &egui::Context, path: &Path) -> Result<Self, String> {
+        let limit = context.input(|input| input.max_texture_side);
+        if self
+            .decoded
+            .frames
+            .iter()
+            .any(|frame| frame.width as usize > limit || frame.height as usize > limit)
+        {
+            return Err(format!(
+                "Image dimensions exceed this graphics device's {limit}px texture limit"
+            ));
+        }
+        let sampling = self.sampling.get();
+        Ok(Self {
+            decoded: Arc::clone(&self.decoded),
+            texture: context.load_texture(
+                format!("image:{}", path.display()),
+                color_image(&self.decoded.frames[self.frame_index]),
+                sampling,
+            ),
+            frame_index: self.frame_index,
+            next_frame_at: self.next_frame_at,
+            sampling: std::rc::Rc::new(std::cell::Cell::new(sampling)),
+        })
+    }
+}
+
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn request_tab_detach(&mut self, id: TabId) {
-        if !self.hosted_graphics
-            || self
-                .tabs
-                .tabs()
-                .iter()
-                .find(|tab| tab.id == id)
-                .is_some_and(|tab| tab.target.media_kind() == MediaKind::Image)
-        {
+        if !self.hosted_graphics {
             self.request_guarded(GuardedAction::DetachTab(id));
             return;
         }
-        match self.playback_detach_request(id) {
+        match self.tab_detach_request(id) {
             Ok(request) => self.pending_tab_detach = Some(request),
             Err(error) => self.set_status(format!("Could not detach tab: {error}")),
         }
@@ -51,7 +87,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         Ok(())
     }
 
-    pub(super) fn playback_detach_request(&self, id: TabId) -> Result<DetachRequest, String> {
+    pub(super) fn tab_detach_request(&self, id: TabId) -> Result<DetachRequest, String> {
         self.validate_transfer_window()?;
         let tab = self
             .tabs
@@ -59,9 +95,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .iter()
             .find(|tab| tab.id == id)
             .ok_or("the tab is no longer open")?;
-        if !matches!(tab.target.media_kind(), MediaKind::Audio | MediaKind::Video) {
-            return Err("live transfer requires an audio or video tab".into());
-        }
         if self
             .active_export
             .as_ref()
@@ -72,6 +105,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let path = tab.target.current_path();
         let instance = if self.displayed_tab == Some(id) && self.path.as_deref() == Some(path) {
             self.media_generation
+        } else if tab.target.media_kind() == MediaKind::Image {
+            self.retained_images
+                .get(&id)
+                .filter(|saved| saved.path == path)
+                .ok_or("the tab's image state is unavailable")?
+                .instance
         } else {
             self.retained_playback
                 .get(&id)
@@ -86,15 +125,80 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         })
     }
 
-    pub(super) fn validate_playback_transfer(&self, request: &DetachRequest) -> Result<(), String> {
-        let current = self.playback_detach_request(request.tab)?;
+    pub(super) fn validate_tab_transfer(&self, request: &DetachRequest) -> Result<(), String> {
+        let current = self.tab_detach_request(request.tab)?;
         if current.path != request.path || current.instance != request.instance {
             return Err("the tab changed before it could be moved".into());
         }
         Ok(())
     }
 
-    pub(super) fn take_playback_transfer(&mut self, request: &DetachRequest) -> PlaybackTransfer {
+    pub(super) fn prepare_image_transfer(
+        &self,
+        id: TabId,
+        context: &egui::Context,
+    ) -> Result<Option<ImageStage>, String> {
+        let tab = self
+            .tabs
+            .tabs()
+            .iter()
+            .find(|tab| tab.id == id)
+            .expect("validated tab");
+        if tab.target.media_kind() != MediaKind::Image {
+            return Ok(None);
+        }
+        let path = tab.target.current_path();
+        let (image, pages, previews) = if self.displayed_tab == Some(id) {
+            (&self.image, &self.reading_pages, &self.image_previews)
+        } else {
+            let saved = &self.retained_images[&id];
+            (&saved.image, &saved.reading_pages, &saved.previews)
+        };
+        let image = image
+            .as_ref()
+            .map(|image| image.rebind(context, path))
+            .transpose()?;
+        let pages = pages
+            .iter()
+            .map(|page| match page {
+                Ok(image) => image.rebind(context, path).map(Ok),
+                Err(error) => Ok(Err(error.clone())),
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let limit = context.input(|input| input.max_texture_side);
+        let previews = previews
+            .iter()
+            .map(|(path, preview)| {
+                if preview.pixels.size.iter().any(|side| *side > limit) {
+                    return Err("Loading preview exceeds the destination texture limit".to_owned());
+                }
+                let pixels = Arc::clone(&preview.pixels);
+                Ok((
+                    path.clone(),
+                    ImagePreviewPresentation {
+                        texture: context.load_texture(
+                            format!("loading-preview:{}", path.display()),
+                            Arc::clone(&pixels),
+                            TextureOptions::LINEAR,
+                        ),
+                        pixels,
+                        source_size: preview.source_size,
+                    },
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>, String>>()?;
+        Ok(Some(ImageStage {
+            image,
+            pages,
+            previews,
+        }))
+    }
+
+    pub(super) fn take_tab_transfer(
+        &mut self,
+        request: &DetachRequest,
+        stage: Option<ImageStage>,
+    ) -> TabTransfer {
         let id = request.tab;
         let target = self
             .tabs
@@ -104,20 +208,34 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .expect("validated tab")
             .target
             .clone();
-        let mut playback = if self.displayed_tab == Some(id) {
-            self.cancel_hold_speed();
-            self.cancel_frame_steps();
-            self.take_playback_tab_state()
+        let media = if target.media_kind() == MediaKind::Image {
+            let mut saved = if self.displayed_tab == Some(id) {
+                self.take_image_tab_state()
+            } else {
+                self.retained_images.remove(&id).expect("validated image")
+            };
+            let stage = stage.expect("prepared image textures");
+            saved.image = stage.image;
+            saved.reading_pages = stage.pages;
+            saved.previews = stage.previews;
+            MediaTransfer::Image(Box::new(saved))
         } else {
-            self.retained_playback
-                .remove(&id)
-                .expect("validated playback")
+            let mut playback = if self.displayed_tab == Some(id) {
+                self.cancel_hold_speed();
+                self.cancel_frame_steps();
+                self.take_playback_tab_state()
+            } else {
+                self.retained_playback
+                    .remove(&id)
+                    .expect("validated playback")
+            };
+            // egui texture and widget IDs belong to the source context, unlike the
+            // runtime frame, which remains on the host's shared D3D11 device.
+            playback.waveform = None;
+            playback.playlist.detach_context();
+            self.duration_workers.remove(&playback.instance);
+            MediaTransfer::Playback(Box::new(playback))
         };
-        // egui texture and widget IDs belong to the source context, unlike the
-        // runtime frame, which remains on the host's shared D3D11 device.
-        playback.waveform = None;
-        playback.playlist.detach_context();
-        self.duration_workers.remove(&playback.instance);
         let focus = self
             .ui_context
             .as_ref()
@@ -129,9 +247,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 )))
             })
         });
-        let transfer = PlaybackTransfer {
+        let transfer = TabTransfer {
             target,
-            playback,
+            media,
             edits: self.edits.remove(&id),
             export_path: self.export_paths.remove(&id),
             audio_options: self.audio_export_settings.remove(&id),
@@ -144,11 +262,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         transfer
     }
 
-    pub(super) fn accept_playback_transfer(
-        &mut self,
-        mut transfer: PlaybackTransfer,
-        gap: usize,
-    ) -> TabId {
+    pub(super) fn accept_tab_transfer(&mut self, mut transfer: TabTransfer, gap: usize) -> TabId {
         let path = transfer.target.current_path().to_owned();
         let kind = transfer.target.media_kind();
         let id = self.tabs.open_new(path.clone(), kind);
@@ -160,9 +274,20 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .media_sequence
             .max(self.media_generation)
             .wrapping_add(1);
-        let old_instance = transfer.playback.instance;
-        transfer.playback.instance = self.media_sequence;
-        transfer.playback.graphics_epoch = self.graphics_epoch;
+        let old_instance = match &mut transfer.media {
+            MediaTransfer::Playback(saved) => {
+                let old = saved.instance;
+                saved.instance = self.media_sequence;
+                saved.graphics_epoch = self.graphics_epoch;
+                old
+            }
+            MediaTransfer::Image(saved) => {
+                let old = saved.instance;
+                saved.instance = self.media_sequence;
+                saved.graphics_epoch = self.graphics_epoch;
+                old
+            }
+        };
         if let Some(edits) = transfer.edits {
             self.edits.insert(id, edits);
         }
@@ -182,7 +307,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             });
             self.audio_queues.insert(id, queue);
         }
-        self.retained_playback.insert(id, transfer.playback);
+        match transfer.media {
+            MediaTransfer::Playback(saved) => {
+                self.retained_playback.insert(id, *saved);
+            }
+            MediaTransfer::Image(saved) => {
+                self.retained_images.insert(id, *saved);
+            }
+        }
         self.load_path_with_transfer(path, kind, true);
         if let Some(context) = &self.ui_context {
             if let Some(focus) = transfer.focus {

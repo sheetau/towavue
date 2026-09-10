@@ -340,11 +340,13 @@ struct ImagePresentation {
 
 struct ImagePreviewPresentation {
     texture: TextureHandle,
+    pixels: Arc<egui::ColorImage>,
     source_size: (u32, u32),
 }
 
 struct RetainedImageTab {
     path: PathBuf,
+    instance: u64,
     view: ImageViewState,
     reading_mode: bool,
     reading_settings: ReadingSettings,
@@ -353,6 +355,7 @@ struct RetainedImageTab {
     timeline_open: bool,
     image: Option<ImagePresentation>,
     reading_pages: Vec<Result<ImagePresentation, String>>,
+    previews: BTreeMap<PathBuf, ImagePreviewPresentation>,
     folder_snapshot: Option<FolderSnapshot>,
     source: Option<Arc<DecodedImage>>,
     operations: Option<Vec<EditOperation>>,
@@ -723,6 +726,7 @@ struct Application<N> {
     pending_image_previews: BTreeSet<PathBuf>,
     image_previews: BTreeMap<PathBuf, ImagePreviewPresentation>,
     image_generation: u64,
+    image_request_offset: usize,
     image_loading: bool,
     image_navigation_forward: bool,
     image_error: Option<String>,
@@ -914,6 +918,7 @@ where
             image_previews: BTreeMap::new(),
             image_loader,
             image_generation: 0,
+            image_request_offset: 0,
             image_loading: false,
             image_navigation_forward: true,
             image_error: None,
@@ -1149,35 +1154,39 @@ where
         {
             return;
         }
+        let saved = self.take_image_tab_state();
+        self.retained_images.insert(id, saved);
+    }
+
+    fn take_image_tab_state(&mut self) -> RetainedImageTab {
         self.cancel_view_drag();
-        let path = self.path.clone().expect("displayed image path");
-        self.retained_images.insert(
-            id,
-            RetainedImageTab {
-                path,
-                view: self.image_view,
-                reading_mode: self.reading_mode,
-                reading_settings: self.reading_settings,
-                filmstrip_open: self.filmstrip_open,
-                filmstrip_view: self.filmstrip.take_view(),
-                timeline_open: self.timeline_open,
-                image: self.image.take(),
-                reading_pages: std::mem::take(&mut self.reading_pages),
-                folder_snapshot: self.folder_snapshot.take(),
-                source: self.image_edit_source.take(),
-                operations: self.image_edit_operations.take(),
-                materialized: self.image_materialized,
-                error: self.image_error.take(),
-                resume_loading: self.image_loading,
-                resume_editing: self.image_edit_pending,
-                state: self.state,
-                graphics_epoch: self.graphics_epoch,
-                status_message: self.status_message.take(),
-            },
-        );
+        RetainedImageTab {
+            path: self.path.clone().expect("displayed image path"),
+            instance: self.media_generation,
+            view: self.image_view,
+            reading_mode: self.reading_mode,
+            reading_settings: self.reading_settings,
+            filmstrip_open: self.filmstrip_open,
+            filmstrip_view: self.filmstrip.take_view(),
+            timeline_open: self.timeline_open,
+            image: self.image.take(),
+            reading_pages: std::mem::take(&mut self.reading_pages),
+            previews: std::mem::take(&mut self.image_previews),
+            folder_snapshot: self.folder_snapshot.take(),
+            source: self.image_edit_source.take(),
+            operations: self.image_edit_operations.take(),
+            materialized: self.image_materialized,
+            error: self.image_error.take(),
+            resume_loading: self.image_loading,
+            resume_editing: self.image_edit_pending,
+            state: self.state,
+            graphics_epoch: self.graphics_epoch,
+            status_message: self.status_message.take(),
+        }
     }
 
     fn restore_image_tab(&mut self, saved: RetainedImageTab) {
+        self.media_generation = saved.instance;
         self.image_view = saved.view;
         self.reading_mode = saved.reading_mode && !self.command_context().has_unsaved_edits;
         self.reading_settings = saved.reading_settings;
@@ -1186,6 +1195,7 @@ where
         self.timeline_open = saved.timeline_open;
         self.image = saved.image;
         self.reading_pages = saved.reading_pages;
+        self.image_previews = saved.previews;
         self.folder_snapshot = saved.folder_snapshot;
         self.image_edit_source = saved.source;
         self.image_edit_operations = saved.operations;
@@ -1194,9 +1204,9 @@ where
         self.state = saved.state;
         self.status_message = saved.status_message;
         self.restore_ui_textures |= saved.graphics_epoch != self.graphics_epoch;
-        self.restored_reading_pages = self.reading_mode && !saved.resume_loading;
+        self.restored_reading_pages = self.reading_mode;
         if saved.resume_loading {
-            self.rebuild_reading_pages();
+            self.resume_image_load();
         }
         if saved.resume_editing {
             self.image_edit_operations = None;
@@ -1681,14 +1691,51 @@ where
         if !self.reading_mode && self.image.is_some() {
             return;
         }
-        let paths = self.reading_request_paths();
+        self.request_image_paths(self.reading_request_paths(), 0);
+    }
+
+    fn resume_image_load(&mut self) {
+        let offset = if self.image.is_some() || self.image_error.is_some() {
+            1 + self.reading_pages.len()
+        } else {
+            0
+        };
+        let paths = self
+            .reading_request_paths()
+            .into_iter()
+            .skip(offset)
+            .collect();
+        self.request_image_paths(paths, offset);
+    }
+
+    fn request_image_paths(&mut self, paths: Vec<PathBuf>, offset: usize) {
+        self.image_request_offset = offset;
+        self.image_loading = !paths.is_empty();
         if paths.is_empty() {
             return;
         }
-        self.image_error = None;
-        self.image_loading = true;
-        self.image_generation = self.image_loader.request(paths.clone());
+        if offset == 0 {
+            self.image_error = None;
+        }
+        let retained_bytes = if offset == 0 {
+            0
+        } else {
+            self.image
+                .as_ref()
+                .map_or(0, |image| image.decoded.retained_bytes())
+                + self
+                    .reading_pages
+                    .iter()
+                    .filter_map(|page| page.as_ref().ok())
+                    .map(|image| image.decoded.retained_bytes())
+                    .sum::<usize>()
+        };
+        self.image_generation = self
+            .image_loader
+            .request_with_retained_bytes(paths.clone(), retained_bytes);
         self.pending_image_previews = paths.iter().cloned().collect();
+        self.image_previews
+            .retain(|path, _| self.pending_image_previews.contains(path));
         let generation = self.image_preview_generation;
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
@@ -1735,17 +1782,19 @@ where
         if image.width as usize > limit || image.height as usize > limit {
             return;
         }
+        let pixels = Arc::new(egui::ColorImage::from_rgba_unmultiplied(
+            [image.width as usize, image.height as usize],
+            &image.rgba,
+        ));
         self.image_previews.insert(
             path.clone(),
             ImagePreviewPresentation {
                 texture: context.load_texture(
                     format!("loading-preview:{}", path.display()),
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [image.width as usize, image.height as usize],
-                        &image.rgba,
-                    ),
+                    Arc::clone(&pixels),
                     TextureOptions::LINEAR,
                 ),
+                pixels,
                 source_size: preview.source_size,
             },
         );
@@ -1759,7 +1808,9 @@ where
         self.apply_loaded_images(result);
     }
 
-    fn apply_loaded_images(&mut self, result: towavue_runtime_windows::LoadedImages) {
+    fn apply_loaded_images(&mut self, mut result: towavue_runtime_windows::LoadedImages) {
+        result.first_index += self.image_request_offset;
+        result.total += self.image_request_offset;
         if result.generation != self.image_generation
             || !self.image_loading
             || (result.first_index != 0 && result.first_index != self.reading_pages.len() + 1)
@@ -6595,6 +6646,12 @@ where
                 ),
             ));
         }
+        textures.extend(self.image_previews.values().map(|preview| {
+            (
+                preview.texture.id(),
+                egui::epaint::ImageDelta::full(Arc::clone(&preview.pixels), TextureOptions::LINEAR),
+            )
+        }));
         textures
     }
 

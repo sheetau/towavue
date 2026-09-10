@@ -132,10 +132,10 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .expect("frame");
     let generation = app.generation;
     let origin = app.playback_origin.expect("origin");
-    let request = app.playback_detach_request(id).expect("request");
+    let request = app.tab_detach_request(id).expect("request");
     let before_tabs = app.tabs.tabs().to_vec();
     assert!(
-        host.detach_playback_tab_with(source, &request, false, |_, _| Err(
+        host.detach_tab_with(source, &request, false, |_, _| Err(
             "injected startup failure".into()
         ))
         .is_err()
@@ -144,7 +144,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     assert_eq!(host.windows[&source].tabs.tabs(), before_tabs);
     assert_eq!(host.windows[&source].edits[&id], edits);
     assert!(
-        host.detach_playback_tab_with(source, &request, false, |app, device| {
+        host.detach_tab_with(source, &request, false, |app, device| {
             app.start_on_device(event_loop, Some(device), false)
                 .expect("staged hidden HWND");
             Err("injected post-start failure".into())
@@ -155,7 +155,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let app = host.windows.get_mut(&source).expect("source");
     app.media_generation += 1;
     assert!(
-        app.validate_playback_transfer(&request).is_err(),
+        app.validate_tab_transfer(&request).is_err(),
         "same-path reload invalidates a queued request"
     );
     app.media_generation -= 1;
@@ -183,7 +183,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         continuation: None,
     });
     assert!(
-        app.validate_playback_transfer(&request).is_err(),
+        app.validate_tab_transfer(&request).is_err(),
         "cannot move an exporting tab"
     );
     let other = app
@@ -195,7 +195,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .id;
     app.active_export.as_mut().expect("export").tab = other;
     assert!(
-        app.validate_playback_transfer(&request).is_ok(),
+        app.validate_tab_transfer(&request).is_ok(),
         "another tab's export need not block transfer"
     );
     app.active_export.take();
@@ -206,15 +206,12 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         generation,
     );
     host.windows.get_mut(&target).expect("target").export_error = Some("modal test".into());
-    assert!(host.move_playback_tab(source, target, &request, 0).is_err());
+    assert!(host.move_tab(source, target, &request, 0).is_err());
     host.windows.get_mut(&target).expect("target").export_error = None;
-    assert!(
-        host.move_playback_tab(source, target, &request, usize::MAX)
-            .is_err()
-    );
-    assert!(host.move_playback_tab(source, source, &request, 0).is_err());
+    assert!(host.move_tab(source, target, &request, usize::MAX).is_err());
+    assert!(host.move_tab(source, source, &request, 0).is_err());
     let moved = host
-        .move_playback_tab(source, target, &request, 0)
+        .move_tab(source, target, &request, 0)
         .expect("move dirty live video");
     assert!(host.windows[&source].pending_guard.is_none());
     assert!(!host.windows[&source].edits.contains_key(&id));
@@ -231,14 +228,14 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let instance = app.media_generation;
     assert_eq!(host.playback_owner(origin), Some((target, instance)));
     assert!(
-        host.move_playback_tab(source, target, &request, 0).is_err(),
+        host.move_tab(source, target, &request, 0).is_err(),
         "stale tab request"
     );
     let back_request = host.windows[&target]
-        .playback_detach_request(moved)
+        .tab_detach_request(moved)
         .expect("return request");
     let returned = host
-        .move_playback_tab(target, source, &back_request, 1)
+        .move_tab(target, source, &back_request, 1)
         .expect("return live tab");
     host.windows
         .get_mut(&target)
@@ -272,9 +269,9 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     assert_frame(app, position, frame, generation);
     let detached_id = app.tabs.active().expect("tab").id;
     assert_eq!(app.edits[&detached_id], edits);
-    let request = app.playback_detach_request(detached_id).expect("request");
+    let request = app.tab_detach_request(detached_id).expect("request");
     let returned = host
-        .move_playback_tab(detached, source, &request, 1)
+        .move_tab(detached, source, &request, 1)
         .expect("return detached tab");
     assert!(host.windows[&detached].tabs.tabs().is_empty());
     assert!(host.windows[&detached].path.is_none());
@@ -301,11 +298,11 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .id;
     app.activate_tab(other);
     let request = app
-        .playback_detach_request(returned)
+        .tab_detach_request(returned)
         .expect("background request");
     assert!(app.retained_playback[&returned].video_suspended);
     let moved = host
-        .move_playback_tab(source, target, &request, 0)
+        .move_tab(source, target, &request, 0)
         .expect("move background video");
     assert_eq!(
         host.windows[&source]
@@ -322,17 +319,143 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         generation,
     );
     let request = host.windows[&target]
-        .playback_detach_request(moved)
+        .tab_detach_request(moved)
         .expect("return request");
-    host.move_playback_tab(target, source, &request, 1)
+    host.move_tab(target, source, &request, 1)
         .expect("return background tab");
     host.windows
         .get_mut(&target)
         .expect("target")
         .activate_tab(target_active);
     exercise_audio(host, event_loop, source);
+    exercise_images(host, event_loop, source, target);
     eprintln!(
         "PASS live video transfer: dirty state, exact paused frame/clock, unchanged session generation, shared-device draw with no CPU transfer, repeat moves, hidden detached HWND, Welcome source, failed startup/modal/stale/gap guards"
+    );
+}
+
+fn draw_image(app: &mut WindowApplication, original: &Arc<DecodedImage>, frame: usize) {
+    let size = app.window.as_ref().expect("window").inner_size();
+    app.renderer
+        .as_mut()
+        .expect("renderer")
+        .resize_surface(size.width, size.height)
+        .expect("native surface");
+    app.render_frame();
+    assert!(app.image_error.is_none(), "{:?}", app.image_error);
+    assert!(!app.image_loading);
+    let image = app.image.as_ref().expect("image");
+    assert!(Arc::ptr_eq(&image.decoded, original));
+    assert_eq!(image.frame_index, frame);
+}
+
+fn exercise_images(
+    host: &mut WindowHost,
+    event_loop: &ActiveEventLoop,
+    source: WindowKey,
+    target: WindowKey,
+) {
+    let target_active = host.windows[&target]
+        .tabs
+        .active()
+        .expect("target video")
+        .id;
+    let app = host.windows.get_mut(&source).expect("source");
+    let source_active = app.tabs.active().expect("source video").id;
+    let path = app
+        .path
+        .as_ref()
+        .expect("owned fixture")
+        .with_file_name("memory-only-animation.png");
+    let original = tab_transfer::tests::decoded(true);
+    let id = tab_transfer::tests::install(app, path, Arc::clone(&original));
+    app.image_view.selection = Some(UnitRect {
+        min: UnitPoint { x: 0.0, y: 0.0 },
+        max: UnitPoint { x: 0.5, y: 1.0 },
+    });
+    app.edits
+        .entry(id)
+        .or_default()
+        .push(EditOperation::FlipHorizontal, MediaKind::Image);
+    let history = app.edits[&id].clone();
+    let image = app.image.as_mut().expect("animation");
+    image.frame_index = 1;
+    image.next_frame_at = Some(Instant::now() + Duration::from_secs(60));
+    image
+        .texture
+        .set(color_image(&original.frames[1]), TextureOptions::LINEAR);
+    let deadline = image.next_frame_at;
+    tab_focus::tests::hardware_focus(app, "Crop preview", true);
+    let request = app.tab_detach_request(id).expect("image request");
+    let context = host.windows[&target]
+        .ui_context
+        .clone()
+        .expect("target context");
+    let limit = context.input(|input| input.max_texture_side);
+    context.input_mut(|input| input.max_texture_side = 1);
+    assert!(host.move_tab(source, target, &request, 0).is_err());
+    context.input_mut(|input| input.max_texture_side = limit);
+    assert_eq!(host.windows[&source].edits[&id], history);
+    draw_image(host.windows.get_mut(&source).expect("source"), &original, 1);
+    let keys: Vec<_> = host.windows.keys().copied().collect();
+    host.windows
+        .get_mut(&source)
+        .expect("source")
+        .handle_ui_action(UiAction::DetachTab(id));
+    host.detach_pending_tabs(event_loop, false);
+    let detached = *host
+        .windows
+        .keys()
+        .find(|key| !keys.contains(key))
+        .expect("detached image HWND");
+    let app = host.windows.get_mut(&detached).expect("detached");
+    let moved = app.tabs.active().expect("image tab").id;
+    assert_eq!(
+        app.window.as_ref().expect("window").is_visible(),
+        Some(false)
+    );
+    assert_eq!(app.edits[&moved], history);
+    assert!(app.pending_guard.is_none());
+    assert_eq!(app.image.as_ref().expect("image").next_frame_at, deadline);
+    tab_focus::tests::hardware_focus(app, "Crop preview", false);
+    draw_image(app, &original, 1);
+    app.recover_graphics_device(MediaTime::ZERO);
+    host.recover_pending_graphics();
+    draw_image(
+        host.windows.get_mut(&detached).expect("recovered image"),
+        &original,
+        1,
+    );
+    let request = host.windows[&detached]
+        .tab_detach_request(moved)
+        .expect("image return");
+    let moved = host
+        .move_tab(detached, target, &request, 0)
+        .expect("move image into video window");
+    app_close(host, detached);
+    let app = host.windows.get_mut(&target).expect("target");
+    draw_image(app, &original, 1);
+    app.activate_tab(target_active);
+    let request = app.tab_detach_request(moved).expect("background image");
+    let returned = host
+        .move_tab(target, source, &request, 0)
+        .expect("move retained image");
+    let app = host.windows.get_mut(&source).expect("source");
+    draw_image(app, &original, 1);
+    assert_eq!(app.edits[&returned], history);
+    app.request_guarded(GuardedAction::CloseTab(returned));
+    assert!(
+        app.pending_guard.is_some(),
+        "normal close still protects transferred edits"
+    );
+    app.resolve_guard(GuardDecision::Cancel);
+    assert!(app.edits[&returned].is_dirty());
+    app.request_guarded(GuardedAction::CloseTab(returned));
+    app.resolve_guard(GuardDecision::Discard);
+    app.activate_tab(source_active);
+    assert_eq!(host.windows.len(), keys.len());
+    eprintln!(
+        "PASS live image transfer: hidden native detach and repeat moves, active/retained animation pixels retained in memory, current frame/deadline/dirty history/UIA focus, texture-stage rollback, shared-device recovery and ordinary close guard"
     );
 }
 
@@ -380,10 +503,10 @@ fn exercise_audio(host: &mut WindowHost, event_loop: &ActiveEventLoop, destinati
     let modes = app.audio_mode();
     let generation = app.generation;
     let origin = app.playback_origin.expect("audio origin");
-    let request = app.playback_detach_request(id).expect("audio request");
+    let request = app.tab_detach_request(id).expect("audio request");
     let gap = host.windows[&destination].tabs.tabs().len();
     let moved = host
-        .move_playback_tab(source, destination, &request, gap)
+        .move_tab(source, destination, &request, gap)
         .expect("move playing audio");
     app_close(host, source);
     let app = host
@@ -413,11 +536,9 @@ fn exercise_audio(host: &mut WindowHost, event_loop: &ActiveEventLoop, destinati
     app.toggle_pause();
     assert_eq!(app.state, PlaybackState::Paused);
     let position = app.current_position();
-    let request = app
-        .playback_detach_request(moved)
-        .expect("paused audio request");
+    let request = app.tab_detach_request(moved).expect("paused audio request");
     let detached = host
-        .detach_playback_tab(event_loop, destination, &request, false)
+        .detach_tab(event_loop, destination, &request, false)
         .expect("detach paused audio");
     let app = host.windows.get_mut(&detached).expect("detached audio");
     assert_eq!(app.state, PlaybackState::Paused);

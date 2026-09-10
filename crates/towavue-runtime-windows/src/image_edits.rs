@@ -8,11 +8,13 @@ pub fn render_image_edits(
     operations: &[EditOperation],
     cancel: &Cancellation,
 ) -> Result<DecodedImage, String> {
-    if operations
-        .iter()
-        .any(|operation| matches!(operation, EditOperation::RotateVideo(_)))
-    {
-        return Err("Video rotation cannot be applied to image frames".into());
+    if operations.iter().any(|operation| {
+        matches!(
+            operation,
+            EditOperation::RotateVideo(_) | EditOperation::ResizeVideo(_)
+        )
+    }) {
+        return Err("Video raster edits cannot be applied to image frames".into());
     }
     let mut frames = Vec::with_capacity(source.frames.len());
     let mut retained = 0_u64;
@@ -356,7 +358,7 @@ mod tests {
                 hardware_encode: false,
             });
             assert!(
-                matches!(result, Err(crate::ExportError::Failed(message)) if message == "Image rotation requires image media")
+                matches!(result, Err(crate::ExportError::Failed(message)) if message == "Image raster edits require image media")
             );
             assert_eq!(
                 std::fs::read(&guarded_target).expect("target preserved"),

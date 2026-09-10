@@ -11,6 +11,7 @@ mod media;
 mod navigation;
 mod tabs;
 mod timeline;
+mod video_resize;
 mod video_rotation;
 
 use std::fmt;
@@ -36,6 +37,7 @@ pub use navigation::{
 };
 pub use tabs::{Tab, TabId, TabSet, TabTarget};
 pub use timeline::{EditTimeline, TimeRange, TimelineEdit, TimelineSpan};
+pub use video_resize::VideoResize;
 pub use video_rotation::VideoRotation;
 
 /// A signed media timestamp stored as nanoseconds.

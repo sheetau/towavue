@@ -1,5 +1,15 @@
 # towavue アーキテクチャ
 
+## V05: 動画resize／resample採用契約（2026-09-10、接続作業中）
+
+動画の画素resizeは表示zoomと区別し、専用VideoResizeへ操作直前のsample寸法／SAR、指定出力寸法、補間方式を保持する。出力は指定どおりの偶数幅・高さ（各16～16384px、128M pixels以内）、SAR1とし、encoderの都合で黙ってpadding／cropしない。入力の奇数寸法は許可する。元がSAR1かつ同寸法なら補間方式によらず非編集とする。SARだけが異なる場合は同寸法でも表示比率変更として一件の編集になる。UIは元の表示比率を保持する設定を既定にし、丸め後の寸法と比率を表示してApply前に確認できるようにする。 同梱OpenH264の実exportで16px未満の拒否を確認したため、最小寸法は既存動画cropと同じ16pxへ揃える。
+
+Nearest／Bilinear／Bicubic／Lanczosの4方式を画像と共有する。保存はRGB8の明示scaleとSAR1を履歴順に挿入し、crop／quarter turn／flip／自由回転／再resizeも変更後の座標系を使う。source geometry／SAR／orientationと各操作snapshotを保存先配置前に照合し、不一致では既存targetを変えない。動画以外への適用と画像resizeの動画流用は拒否する。これは再サンプリング・再符号化であり、無損失を保証しない。
+
+先にcore／software保存と合成順序を検証し、続いて4方式の同一device GPU表示、適用前budget／最終geometry、timeline内Ctrl+Rのmodal／Apply／Cancel／Undoへ接続する。GPU／UI未接続の段階ではapp入口を公開しない。補間方式の削減やCPU readbackで表示契約を代用しない。HDR・dynamic geometry・全素材画質／性能と通常windowの最終認定は別途必要であり、UX台帳全体をこの基盤へ縮小しない。
+
+GPU接続前の固定source照合: FFmpegのlibswscale/utils.cではBicubicの既定B=0／C=0.6、Lanczosの半径3を用い、縮小率に応じてkernelの幅を広げ、境界の係数を端へ集約して正規化する。libswscale/swscale.cの水平中間は符号付き精度を保持する。単純な固定2／4／6点sampleや各軸後のRGBA8 clampを同じfilterの証明にしない。GPU側も縮小のalias抑制と中間精度を考慮し、画素・memory予算・速度を実測してからUIへ公開する。
+
 ## V05: 動画の表示zoom／pan契約（2026-09-10）
 
 動画のzoomは画素編集ではなくImageViewStateの表示状態とする。草案の操作制限に合わせ、倍率変更・右dragはtimeline表示中だけ許可し、閉じた視聴中／fullscreenでも確定したzoom／panは保持する。Zoom in/out・Actual size・Fit・Coverは既存command／custom binding／View menuを画像と共有し、音声は対象外。Ctrl＋wheelは現在のpointerを基点に実zoom_deltaを使い、Ctrlを離した後の平滑化残量では変更しない。overlay／modal／別gestureが入力を所有する間も変更しない。keyboard/menuのzoomは画像と同じ中心基準、右dragの取消しは開始前のpanへ戻す。window geometry／focus・cursor喪失／別操作では途中panを取消する。

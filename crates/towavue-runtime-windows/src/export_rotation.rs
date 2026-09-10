@@ -1,7 +1,15 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "export_resize_tests.rs"]
+mod resize_tests;
+
 pub(super) fn validate(request: &ExportRequest) -> Result<(), ExportError> {
-    if !request.operations.iter().any(|operation| matches!(operation, EditOperation::RotateVideo(rotation) if rotation.tenths() != 0)) {
+    if !request.operations.iter().any(|operation| match operation {
+        EditOperation::RotateVideo(rotation) => rotation.tenths() != 0,
+        EditOperation::ResizeVideo(resize) => !resize.is_identity(),
+        _ => false,
+    }) {
         return Ok(());
     }
     let validate = || -> Result<(), String> {
@@ -40,6 +48,19 @@ pub(super) fn validate(request: &ExportRequest) -> Result<(), ExportError> {
         }
         for operation in &request.operations {
             match *operation {
+                EditOperation::ResizeVideo(resize) if !resize.is_identity() => {
+                    if size != resize.source_size()
+                        || (aspect - resize.source_pixel_aspect()).abs() > aspect.abs() * 0.00001
+                    {
+                        return Err(format!(
+                            "Video resize input changed: expected {:?} SAR {}, found {size:?} SAR {aspect}",
+                            resize.source_size(),
+                            resize.source_pixel_aspect()
+                        ));
+                    }
+                    size = resize.size();
+                    aspect = 1.0;
+                }
                 EditOperation::RotateVideo(rotation) if rotation.tenths() != 0 => {
                     if size != rotation.source_size()
                         || (aspect - rotation.source_pixel_aspect()).abs() > aspect.abs() * 0.00001
@@ -85,7 +106,13 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use towavue_core::{PixelCrop, VideoRotation};
 
-    fn run(executable: &Path, args: &[&str], source: Option<&Path>, tail: &[&str], target: &Path) {
+    pub(super) fn run(
+        executable: &Path,
+        args: &[&str],
+        source: Option<&Path>,
+        tail: &[&str],
+        target: &Path,
+    ) {
         let mut command = Command::new(executable);
         command.creation_flags(CREATE_NO_WINDOW).args(args);
         if let Some(source) = source {
@@ -99,7 +126,7 @@ mod tests {
         );
     }
 
-    fn video(path: &Path) -> Vec<crate::VideoFrame> {
+    pub(super) fn video(path: &Path) -> Vec<crate::VideoFrame> {
         let mut frames = Vec::new();
         crate::decode::decode_file(path, |output| {
             if let crate::DecodeOutput::Video(frame) = output {

@@ -109,24 +109,28 @@ fn export_cancellable(
         return Err(ExportError::SameAsSource);
     }
     if request.kind != MediaKind::Image
-        && request
-            .operations
-            .iter()
-            .any(|operation| matches!(operation, EditOperation::RotateImage(_)))
+        && request.operations.iter().any(|operation| {
+            matches!(
+                operation,
+                EditOperation::RotateImage(_) | EditOperation::Resize(_)
+            )
+        })
     {
         return Err(ExportError::Failed(
-            "Image rotation requires image media".into(),
+            "Image raster edits require image media".into(),
         ));
     }
     let state = EditState::from_operations(&request.operations);
     if request.kind != MediaKind::Video
-        && request
-            .operations
-            .iter()
-            .any(|operation| matches!(operation, EditOperation::RotateVideo(_)))
+        && request.operations.iter().any(|operation| {
+            matches!(
+                operation,
+                EditOperation::RotateVideo(_) | EditOperation::ResizeVideo(_)
+            )
+        })
     {
         return Err(ExportError::Failed(
-            "Video rotation requires video media".into(),
+            "Video raster edits require video media".into(),
         ));
     }
     if !state.trim_is_valid(None) {
@@ -665,6 +669,17 @@ pub(crate) fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
     operations
         .iter()
         .filter_map(|operation| match *operation {
+            EditOperation::ResizeVideo(resize) => {
+                if resize.is_identity() { return None; }
+                let (width, height) = resize.size();
+                let flags = match resize.filter() {
+                    towavue_core::ResampleFilter::Nearest => "neighbor",
+                    towavue_core::ResampleFilter::Bilinear => "bilinear",
+                    towavue_core::ResampleFilter::Bicubic => "bicubic",
+                    towavue_core::ResampleFilter::Lanczos => "lanczos",
+                };
+                Some(format!("format=gbrp,scale={width}:{height}:flags={flags},format=gbrp,setsar=1"))
+            }
             EditOperation::RotateVideo(rotation) => {
                 if rotation.tenths() == 0 { return None; }
                 let (square_width, square_height) = rotation.square_size();

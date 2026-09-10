@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### 動画resize／resampleの保存基盤（2026-09-10 12:40、V05 UI未接続）
+
+このcheckpointは操作UIを公開しない。VideoResizeへsource寸法／SARと指定出力・filterを保持し、video-onlyの一件の履歴とする。偶数16～16384px・128M pixels以内、出力SAR1で、同寸法かつ入力SAR1ならfilterによらず非編集／Redo保持。奇数sourceは許可する。初回の2×2 exportで同梱OpenH264が16px未満を明示拒否したため、既存動画cropと同じ下限をApply前に課す契約へ修正した。黙ってpaddingしない。
+
+保存はGBRP8→選択したscale→GBRP8→SAR1を履歴順に挿入する。保存先配置前のsource／SAR／orientationと操作snapshot照合を既存自由回転から共有し、後続crop／回転／再resizeも順序どおり検証する。画像resizeを動画へ流用したり、動画resizeを画像／音声へ適用したりする経路は拒否する。GPU表示は4方式が接続されるまで明示拒否し、appでもhistory／viewを変更せず拒否する。
+
+新規6 tests: coreの境界／全filter／identity・SAR変更と履歴、appとGPUの未接続拒否・最終geometry、runtimeの4方式×7条件の独立FFmpeg referenceとの全4frame寸法／SAR／時刻／RGBA一致、resize→crop→quarter turn→自由回転→flip→再resize→quarter turn、誤ったsnapshot／kind時の既存targetとsource保持。metadata orientation素材はtrim／rate／音量に加え、区間Delete／Stretch／部分音量を比較し、resizeなしexportと全映像時刻・音声PCMが一致する。音声fixtureは非ゼロの合成波で、decode比較だけに使い再生しない。
+
+固定FFmpegのlibswscale/utils.c／swscale.cを照合し、Bicubic B=0／C=0.6、Lanczos半径3、縮小時のkernel拡幅、境界係数集約、符号付き中間精度を確認した。次のGPU実装で固定tap数や各軸RGBA8 clampへ簡略化しない。GPU表示／UI・hardware encode／HDR・全素材品質／性能と通常windowの認定はまだ未完。
+
+最終session10975でfmt check／Clippy／workspace435（app250／core61／runtime120／integration4）／Release／app opt-in5件が終了0。SKIPなし、通常ignored11件は別計上。先行の全体試験では、画像向け拒否diagnosticをresizeも含む文言へ変更したことによる旧文字列assertを検出し、期待値を更新して再実行した。Release SHA-256は`f86d49ddc7a9d2581b8ad32ab133e1ea6ada25d70fbd6ac98e3a416eb5cd1304`。先行a84307cのCI34433549444は成功。外部foreground入力／clipboard書込／依存・vendor変更／配布・追加導入は行わない。
+
 ### 動画の表示zoom／pan（2026-09-10 12:27、V05 partial）
 
 timeline内の映像viewportでCtrl＋wheelを使うとcursor基点でzoomし、右dragでpanする。+／-、Ctrl+HのActual、Shift+WのFit、Shift+CのCoverをView menu／custom bindingと共有する。Actualは表示向きの1画素行＝1 physical px、横は編集後SARを保持し、自由回転後はSAR1。Fit／Coverはwindowに追従するがCustomはphysical倍率を維持する。倍率／pan／selectionは既存playback tab viewに保持し、timelineを閉じてもfullscreenでも描画へ適用する。変更操作はtimeline内だけ許可する。

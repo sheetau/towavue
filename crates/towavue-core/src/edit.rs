@@ -106,6 +106,7 @@ impl PlaybackRange {
 pub enum EditOperation {
     Timeline(crate::TimelineEdit),
     Resize(ImageResize),
+    ResizeVideo(crate::VideoResize),
     RotateImage(ImageRotation),
     RotateVideo(crate::VideoRotation),
     Crop(PixelCrop),
@@ -124,7 +125,7 @@ impl EditOperation {
         match self {
             Self::Timeline(_) => matches!(kind, MediaKind::Video | MediaKind::Audio),
             Self::Resize(_) | Self::RotateImage(_) => kind == MediaKind::Image,
-            Self::RotateVideo(_) => kind == MediaKind::Video,
+            Self::RotateVideo(_) | Self::ResizeVideo(_) => kind == MediaKind::Video,
             Self::Crop(_)
             | Self::RotateClockwise
             | Self::RotateCounterclockwise
@@ -177,6 +178,7 @@ impl EditState {
             match *operation {
                 EditOperation::Crop(_)
                 | EditOperation::Resize(_)
+                | EditOperation::ResizeVideo(_)
                 | EditOperation::RotateImage(_)
                 | EditOperation::RotateVideo(_)
                 | EditOperation::Timeline(_) => {}
@@ -233,6 +235,7 @@ impl EditHistory {
     pub fn push(&mut self, operation: EditOperation, kind: MediaKind) -> bool {
         if matches!(operation, EditOperation::RotateImage(rotation) if rotation.tenths() == 0)
             || matches!(operation, EditOperation::RotateVideo(rotation) if rotation.tenths() == 0)
+            || matches!(operation, EditOperation::ResizeVideo(resize) if resize.is_identity())
         {
             return false;
         }

@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 12:40 V05 resize基盤checkpoint: VideoResizeのsource寸法／SAR・偶数16px以上の出力、4補間方式とSAR1のsoftware保存を実装。4方式×7条件、crop／回転／再resize、metadata orientationとtrim／rate／区間削除・伸縮／音声、既存target保護を回帰確認。GPU表示と操作UIは未接続でapp入口は拒否を維持。次は縮小時のkernel幅・符号付き中間精度を含む4方式の同一device GPU処理と予算確認。通常window／全素材品質・性能、UX台帳全体は未完。
+
 2026-09-10 12:27 V05表示zoom checkpoint: 動画のtimeline内でCtrl＋wheel／+・-／Actual／Fit／Coverと右drag panを接続。SAR・physical倍率、cursor基点、viewport／UV clip、入力所有権・取消、timeline／fullscreen／tab保持を確認し、zoom前後の保存全5frame画素も一致。実D3D11VAの10回の描画試験はCPU転送0。次は動画resize／resampleの画素編集・GPU／保存契約。通常window／混在DPI・全素材画質／性能を含むUX台帳全体は未完のまま継続する。
 
 2026-09-09 再開指定: ownerが「それは古い指示です。既存のgoalを遂行してください」と明示したため、以下のcheckpoint後の待機指定は失効する。既存のUX_IMPLEMENTATION_PLAN全体を引き続き実装・検証する。ローンチ準備・公開の停止は維持する。

@@ -52,6 +52,10 @@ impl Plan {
             let size = plan.size;
             let identity = VideoOrientation::default().source_uv();
             match *operation {
+                EditOperation::ResizeVideo(resize) if !resize.is_identity() => {
+                    // Resampling filters must be implemented before exposing this GPU path.
+                    return Err(RenderError::InvalidVideoEdit);
+                }
                 EditOperation::RotateVideo(rotation) if rotation.tenths() != 0 => {
                     if size != rotation.source_size()
                         || (plan.pixel_aspect - rotation.source_pixel_aspect()).abs()

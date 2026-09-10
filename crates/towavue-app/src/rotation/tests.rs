@@ -2,6 +2,52 @@ use super::*;
 use std::sync::mpsc;
 
 #[test]
+fn video_resize_foundation_rejects_app_and_gpu_use_until_display_is_connected() {
+    let (mut app, _) = application();
+    app.image_view.selection = Some(UnitRect::FULL);
+    app.image_view.zoom = ZoomMode::Custom(2.0);
+    app.image_view.pan = (13.0, -7.0);
+    let view = app.image_view;
+    let edits = app.edits.clone();
+    let resize = towavue_core::VideoResize::new(
+        (96, 48),
+        towavue_core::ResampleFilter::Lanczos,
+        (64, 48),
+        2.0,
+    )
+    .expect("resize");
+    for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
+        app.media_kind = Some(kind);
+        app.push_visual_edit(EditOperation::ResizeVideo(resize));
+        assert_eq!(app.edits, edits);
+        assert_eq!(app.image_view, view);
+    }
+    assert!(
+        towavue_runtime_windows::video_edit_geometry(
+            (64, 48),
+            2.0,
+            towavue_runtime_windows::VideoOrientation::default(),
+            &[EditOperation::ResizeVideo(resize)],
+            16384
+        )
+        .is_err()
+    );
+    let transformed = ImageTransform::new(
+        (64, 48),
+        &[
+            EditOperation::ResizeVideo(resize),
+            EditOperation::RotateClockwise,
+        ],
+    );
+    assert_eq!(transformed.size, (48.0, 96.0));
+    assert_eq!(transformed.pixel_aspect(2.0), 1.0);
+    assert_eq!(
+        transformed.uv,
+        towavue_runtime_windows::VideoOrientation::default().source_uv()
+    );
+}
+
+#[test]
 fn video_rotation_rejects_missing_video_frame_without_changing_visual_state() {
     let (mut app, _) = application();
     app.media_kind = Some(MediaKind::Video);

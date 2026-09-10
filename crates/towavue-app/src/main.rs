@@ -546,6 +546,13 @@ impl ImageTransform {
                     let (width, height) = resize.size();
                     transform.size = (width as f32, height as f32);
                 }
+                EditOperation::ResizeVideo(resize) => {
+                    if !resize.is_identity() {
+                        let (width, height) = resize.size();
+                        transform.size = (width as f32, height as f32);
+                        transform.square_pixels = true;
+                    }
+                }
                 EditOperation::RotateImage(rotation) => {
                     // Arbitrary rotation is materialized by the image worker, not this UV path.
                     let (width, height) = rotation.size();
@@ -4952,6 +4959,10 @@ where
     }
 
     fn push_visual_edit(&mut self, operation: EditOperation) {
+        if matches!(operation, EditOperation::ResizeVideo(_)) {
+            self.set_status("Video resampling display is not connected yet".into());
+            return;
+        }
         if matches!(operation, EditOperation::RotateVideo(value) if value.tenths() == 0) {
             return;
         }

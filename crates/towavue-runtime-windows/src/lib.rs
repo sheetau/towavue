@@ -42,8 +42,8 @@ pub use dialog::{
 };
 pub use export::{
     AudioChannels, AudioExportOptions, ExportError, ExportEvent, ExportJob, ExportOptions,
-    ExportOutcome, ExportOutput, ExportRequest, export_media, export_media_with_options,
-    export_media_with_output,
+    ExportOutcome, ExportOutput, ExportRequest, MetadataExportOptions, MetadataField, export_media,
+    export_media_with_options, export_media_with_output,
 };
 pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};

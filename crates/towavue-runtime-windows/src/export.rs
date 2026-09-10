@@ -20,6 +20,10 @@ mod rotation;
 mod audio_options;
 pub use audio_options::{AudioChannels, AudioExportOptions};
 
+#[path = "export_metadata.rs"]
+mod metadata;
+pub use metadata::{MetadataExportOptions, MetadataField};
+
 #[cfg(test)]
 #[path = "export_audio_tests.rs"]
 mod audio_tests;
@@ -32,10 +36,11 @@ pub enum ExportOutput {
     AudioOnly,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ExportOptions {
     pub output: ExportOutput,
     pub audio: AudioExportOptions,
+    pub metadata: MetadataExportOptions,
 }
 
 #[derive(Clone, Debug)]
@@ -194,7 +199,14 @@ fn export_options_cancellable(
     analyzing: &(impl Fn(Duration) + Sync),
 ) -> Result<ExportOutcome, ExportError> {
     if options.output == ExportOutput::Media {
-        return export_audio_cancellable(request, options.audio, cancelled, progress, analyzing);
+        return export_audio_cancellable(
+            request,
+            options.audio,
+            &options.metadata,
+            cancelled,
+            progress,
+            analyzing,
+        );
     }
     check_cancelled(cancelled)?;
     if same_path(&request.source, &request.target) {
@@ -239,7 +251,14 @@ fn export_options_cancellable(
         | EditOperation::RotateVideo(_)
         | EditOperation::ResizeVideo(_) => false,
     });
-    export_audio_cancellable(&audio, options.audio, cancelled, progress, analyzing)
+    export_audio_cancellable(
+        &audio,
+        options.audio,
+        &options.metadata,
+        cancelled,
+        progress,
+        analyzing,
+    )
 }
 
 fn export_cancellable(
@@ -250,6 +269,7 @@ fn export_cancellable(
     export_audio_cancellable(
         request,
         AudioExportOptions::default(),
+        &MetadataExportOptions::default(),
         cancelled,
         progress,
         &|_| {},
@@ -259,6 +279,7 @@ fn export_cancellable(
 fn export_audio_cancellable(
     request: &ExportRequest,
     options: AudioExportOptions,
+    metadata: &MetadataExportOptions,
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
     analyzing: &(impl Fn(Duration) + Sync),
@@ -295,11 +316,17 @@ fn export_audio_cancellable(
         return Err(ExportError::InvalidTrim);
     }
     check_cancelled(cancelled)?;
+    if request.kind == MediaKind::Image && !metadata.is_empty() {
+        return Err(ExportError::Failed(
+            "Image metadata export is not connected yet".into(),
+        ));
+    }
     let source_stamp = options
         .normalize_peak
         .then(|| audio_options::SourceStamp::read(&request.source))
         .transpose()?;
     let mut streams = ExportStreams::probe(request)?;
+    streams.metadata = metadata.clone();
     if request.kind == MediaKind::Audio && streams.audio.is_none() {
         return Err(ExportError::Failed(
             "The source has no audio stream to export".into(),
@@ -368,6 +395,8 @@ fn export_audio_cancellable(
             if let Some(stamp) = &source_stamp {
                 stamp.verify(&request.source)?;
             }
+            check_cancelled(cancelled)?;
+            metadata.verify(&staging.output)?;
             staging.publish(&request.target, cancelled, trimmed_kind)?;
             return Ok(ExportOutcome {
                 used_hardware_encoder: true,
@@ -391,6 +420,8 @@ fn export_audio_cancellable(
     if let Some(stamp) = &source_stamp {
         stamp.verify(&request.source)?;
     }
+    check_cancelled(cancelled)?;
+    metadata.verify(&staging.output)?;
     staging.publish(&request.target, cancelled, trimmed_kind)?;
     Ok(ExportOutcome {
         used_hardware_encoder: false,
@@ -593,6 +624,7 @@ struct ExportStreams {
     audio: Option<(usize, ffmpeg::Rational)>,
     audio_channels: Option<u16>,
     audio_post_filters: Vec<String>,
+    metadata: MetadataExportOptions,
     duration: Option<towavue_core::MediaTime>,
     timeline: Option<towavue_core::EditTimeline>,
 }
@@ -646,6 +678,7 @@ impl ExportStreams {
                 duration,
                 timeline: None,
                 audio_post_filters: Vec::new(),
+                metadata: MetadataExportOptions::default(),
             })
         };
         probe().map_err(|error| {
@@ -674,6 +707,7 @@ fn ffmpeg_arguments(
         "-map_metadata".into(),
         "0".into(),
     ];
+    arguments.extend(streams.metadata.arguments());
     if request.kind == MediaKind::Audio {
         arguments.extend(["-vn".into(), "-sn".into(), "-dn".into()]);
     }

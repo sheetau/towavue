@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 非破壊metadata書換の出力基盤（2026-09-10 14:54、E01 partial・UI未接続）
+
+`ExportOptions.metadata`の`MetadataExportOptions`へ、Title／Artist／Album／Album artist／Composer／Genre／Date／Track／Comment／Copyrightを指定できる。項目未指定はKeep、空文字はRemove、非空文字はSet。1項目1024 UTF-8 bytes／合計4096 bytes、NUL禁止で、無効な更新は以前の設定を保持する。shellを使わず固定keyと文字列を個別argumentで渡す。container／出力streamの指定項目だけを変更し、encode後にstaged fileを再probeして値／削除が一致した場合だけpublishする。技術metadataや元fileは変更しない。まだ通常UIから指定できず、画像向けは明示拒否する。
+
+新規5 tests: 上限／Keep復帰／Remove／literal argument、WAV／FLAC／MP3／M4A／Ogg／Opusのtitle Set／Removeとlossless PCM不変、Matroska全10項目のUnicode・改行／引用符／記号と映像全RGBA／PCM不変、ADTS title・RIFF AlbumArtist欠落／M4A track 003/012→3/12の拒否と既存target保持、開始前／進捗後取消・same source拒否・画像未接続拒否。選択audioとglobalで異なるtitleを持つ素材でも、未指定artistを保ちつつtitleを統一する。trim／Delete／Stretch／局所・master音量／rate／normalize／Stereoを含む動画とAudioOnlyの全PCM一致、両encoderのmetadata argument、workerのanalysis→encoding→単一完了を確認した。非ゼロfixture音声はexport／decode比較のみで再生しない。
+
+最終session60587: fmt check／Clippy／workspace470（app263／core61／runtime142／integration4）、app opt-in6件、Release終了0。SKIPなし、通常ignored13は別計上。Release SHA-256 `fa2c0367ee7120fa1f968cfbd05dd79372d5713bf5b0d7997e92177a2bf47898`。先行f219f76のCI34442221336は成功。設定UI／source別保持・画像metadataと全UX台帳の未完事項を継続する。全format／全tag／実hardware encoderのmetadata保持認定ではない。
+
 ### 音声export設定UIとsource別保持（2026-09-10 14:42、E01 partial）
 
 動画・音声のFile「Audio export options」からNormalize peak (-1 dBFS)とKeep／Mono／Stereoを選ぶ。既定keyはなく、`audio_export_options`へcustom bindingを割り当てられる。Applyは設定だけを確定し、次のSave／Export as／音声のみ出力に反映する。再生音・履歴・dirty状態は変更しない。Cancel／Escapeはdraftを破棄し、menu／palette／gridからのfocusを戻す。240×150でもApply／Cancelは説明文のscroll外へ保持する。

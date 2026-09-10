@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## E01: 非破壊metadata出力の文字項目（2026-09-10）
+
+草案の書き出し時metadata書換は元fileを変更しない出力設定とする。まずTitle／Artist／Album／Album artist／Composer／Genre／Date／Track／Comment／Copyrightの文字項目をKeep（既定）／Set／Removeで指定する。空文字SetはRemoveと同じ意味で扱う。技術的な回転・色・durationや任意のFFmpeg optionを編集対象にしない。文字列はUTF-8で1項目1024 bytes・全項目4096 bytes以内、NULは禁止する。Unicode・改行・引用符・等号は文字として保持し、shellを介さず個別argumentとして渡す。
+
+通常動画／音声と音声のみ出力へ同じ設定を渡し、指定項目だけcontainer／出力streamへ上書きまたは削除する。Keepは従来のmetadata copyであり、全formatを越えた完全保持を意味しない。encode後のstaged fileを再probeして指定値／削除を照合し、非対応形式・値の切捨て／変形はpublish前に拒否する。既存の取消・source別名保護・stagingを共用する。設定は画像／音声sample・時間軸を変えず、再encode自体は従来の保存経路に従う。
+
+最初に動画／音声のruntime基盤と実file回帰を接続する。画像はFFmpegのformat metadata指定だけではPNG等の文字chunk／EXIFに反映されないため、未接続の間は明示拒否し、画像metadata対応を台帳から除外しない。設定UI・source別保持・取消／再Save／離脱の接続は後続とし、通常操作から使えるとは宣言しない。
+
 ## E01: 音声export設定UIと保持範囲（2026-09-10）
 
 動画／音声のFile menu「Audio export options」とcustom commandから設定modalを開く。既定keyは増やさず、動画のtimeline有無を問わない。Peak −1 dBFS normalizeのOn／OffとKeep／Mono／Stereoを提示し、再生や編集履歴には作用せず次のSave／Save As／AudioOnlyへ適用されること、LUFS／true-peakではないこと、mono／stereo変換は1／2channel入力が必要なことを説明する。Applyは設定だけを確定し、Cancel／Escape・古いtoken・source／tab／media世代変更は破棄する。前のfocusを復元し、modal中の編集／移動／離脱を共通guardで防ぐ。実行中exportがある場合は新たな設定modalを開かない。

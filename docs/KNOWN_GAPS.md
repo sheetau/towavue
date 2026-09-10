@@ -199,7 +199,7 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 | 項目 | 現状 |
 |---|---|
 | Source非破壊export | 実装済み。同一source pathへの出力を拒否 |
-| Metadata保持 | FFmpegの`-map_metadata 0`を使用。formatを越えた完全保持や個別編集UIは保証していない |
+| Metadata保持／書換 | 既定は`-map_metadata 0`。10文字項目のKeep／Set／Remove出力基盤とstaged file事後照合を実装。非対応tag・値の変形時は既存targetを保持して失敗する。設定UI／source別保持・画像metadataは未接続。全format間の完全保持・EXIF／技術metadata編集は未認定 |
 | Hardware encode | H.264 Media Foundationを強制要求し、失敗時software fallback。基準adapterではhardware成功を確認できていない |
 | NVENC/AMF/QSV encode選択 | 未実装 |
 | Codec、quality、bitrate、containerの選択UI | 未実装。拡張子別の固定codec |

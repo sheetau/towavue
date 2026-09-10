@@ -5418,8 +5418,9 @@ where
                 .get(&id)
                 .copied()
                 .unwrap_or_default(),
+            ..Default::default()
         };
-        match ExportJob::start_with_options(request.clone(), options, move |event| {
+        match ExportJob::start_with_options(request.clone(), options.clone(), move |event| {
             notify(AppEvent::Export(event))
         }) {
             Ok(job) => {

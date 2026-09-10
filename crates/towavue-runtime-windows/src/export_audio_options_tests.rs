@@ -36,6 +36,7 @@ fn options(normalize_peak: bool, channels: AudioChannels) -> ExportOptions {
             normalize_peak,
             channels,
         },
+        ..Default::default()
     }
 }
 
@@ -221,7 +222,7 @@ fn normalization_progress_and_cancellation_keep_existing_target_and_detect_sourc
         let seen_encode = AtomicBool::new(false);
         let error = export_options_cancellable(
             &request,
-            options,
+            options.clone(),
             &cancelled,
             &|time| {
                 assert!(

@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## U08: 同一deviceの複数描画先基盤（2026-09-10）
+
+`FrameRenderer::with_graphics_device`／`with_native_caption_on_device`は、opaqueな既存`GraphicsDevice`を受け取り、そのdeviceのadapterから取得したfactoryで別HWNDのswap chainを作る。新しいdeviceやFFmpeg sessionは作らない。既存constructorの単独device作成とflip-discard／RGBA8の描画設定は変えない。deviceの指定は[MicrosoftのCreateSwapChain契約](https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgifactory-createswapchain)に従う。
+
+共有するrendererは同じevent-loop threadで逐次描画し、decode workerとの既存multithread-protected immediate contextを維持する。各rendererはswap chain／UI renderer／動画処理resourceを別に所有する。片方のsurface解放でcontext stateを解除しても、残るrendererは次の描画で自分のstateをbindする。egui context間のTextureHandle移送を許可するものではない。
+
+音声なし生成H.264の実D3D11VA sessionでCOM device／context同一性とswap chain独立性、3サイズの交互動画／UI描画の画素一致、surface破棄／再作成後の継続と次frame進行を確認する。テストだけのstaging readbackは再生のCPU転送0とは区別する。この基盤はwindow host・通知routing・編集／再生state移送・全window一括device復旧をまだ実装しない。通常分離をこの経路へ切り替えるのはそれらの所有権と失敗時の復旧を揃えてからとする。
+
 ## U08: filmstripからの新window要求（2026-09-10）
 
 filmstripの項目をprimary dragし、window外でreleaseすると、その項目のpathを新windowへ開く。元tabを移動／closeせず、現在の編集・再生を変更しないためdirty guardは不要とする。既存tabの分離／結合や状態移送とは別の「参照先を新規に開く」操作。6 logical px超から低解像度previewとfile名をpointerへ追従表示し、追加decodeはしない。window内release・Escape・focus喪失・overlay・folder snapshot／current source・screen／density変更・filmstrip終了で取消する。既存primary click／middle click／UIAは維持する。capture中の一時的なpointer離脱は後続座標を待つ。

@@ -34,7 +34,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::Win32::Graphics::Dxgi::{
     DXGI_PRESENT, DXGI_SWAP_CHAIN_DESC, DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_DISCARD,
-    DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice, IDXGISwapChain,
+    DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice, IDXGIFactory, IDXGISwapChain,
 };
 use windows::core::{BOOL, Interface, PCSTR, s};
 
@@ -43,6 +43,10 @@ use crate::decode::{HardwareVideoFrame, VideoTransfer};
 
 #[path = "video_raster.rs"]
 pub(crate) mod raster;
+
+#[cfg(test)]
+#[path = "shared_renderer_tests.rs"]
+mod shared_renderer_tests;
 
 /// Validates ordered video edits without allocating GPU resources or changing playback.
 /// Returns final sample dimensions and pixel aspect; the limit is the renderer's device limit.
@@ -349,17 +353,48 @@ impl FrameRenderer {
             return Err(RenderError::UnsupportedWindow);
         };
         let hwnd = HWND(handle.hwnd.get() as *mut _);
-        Self::for_handle(hwnd, None)
+        Self::for_handle(hwnd, None, None)
     }
 
     pub fn with_native_caption(caption: &crate::NativeCaption) -> Result<Self, RenderError> {
         let surface = crate::caption::CaptionSurface::new(caption)?;
-        Self::for_handle(surface.handle, Some(surface))
+        Self::for_handle(surface.handle, Some(surface), None)
+    }
+
+    /// Creates a separate window surface on the existing playback device.
+    /// Renderers sharing this device must be driven by the same event-loop thread.
+    pub fn with_graphics_device(
+        window: &impl HasWindowHandle,
+        graphics_device: GraphicsDevice,
+    ) -> Result<Self, RenderError> {
+        let raw_handle = window
+            .window_handle()
+            .map_err(|_| RenderError::WindowHandle)?
+            .as_raw();
+        let RawWindowHandle::Win32(handle) = raw_handle else {
+            return Err(RenderError::UnsupportedWindow);
+        };
+        Self::for_handle(
+            HWND(handle.hwnd.get() as *mut _),
+            None,
+            Some(graphics_device),
+        )
+    }
+
+    /// Creates a caption child surface on the existing playback device.
+    /// Renderers sharing this device must be driven by the same event-loop thread.
+    pub fn with_native_caption_on_device(
+        caption: &crate::NativeCaption,
+        graphics_device: GraphicsDevice,
+    ) -> Result<Self, RenderError> {
+        let surface = crate::caption::CaptionSurface::new(caption)?;
+        Self::for_handle(surface.handle, Some(surface), Some(graphics_device))
     }
 
     fn for_handle(
         hwnd: HWND,
         caption_surface: Option<crate::caption::CaptionSurface>,
+        graphics_device: Option<GraphicsDevice>,
     ) -> Result<Self, RenderError> {
         let description = DXGI_SWAP_CHAIN_DESC {
             BufferDesc: DXGI_MODE_DESC {
@@ -388,19 +423,33 @@ impl FrameRenderer {
         // The returned COM interfaces are owned by this renderer and are used only
         // on the winit event-loop thread where the renderer is constructed.
         unsafe {
-            D3D11CreateDeviceAndSwapChain(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
-                None,
-                D3D11_SDK_VERSION,
-                Some(&description),
-                Some(&mut swap_chain),
-                Some(&mut device),
-                Some(&mut feature_level),
-                Some(&mut context),
-            )?;
+            if let Some(shared) = graphics_device {
+                // Use the factory belonging to this device, not merely the same adapter.
+                // All interfaces are owned; the shared immediate context is already
+                // multithread-protected for decode workers. Each HWND owns one swap chain.
+                let dxgi_device: IDXGIDevice = shared.device.cast()?;
+                let factory: IDXGIFactory = dxgi_device.GetAdapter()?.GetParent()?;
+                factory
+                    .CreateSwapChain(&shared.device, &description, &mut swap_chain)
+                    .ok()?;
+                context = Some(shared.device.GetImmediateContext()?);
+                feature_level = shared.device.GetFeatureLevel();
+                device = Some(shared.device);
+            } else {
+                D3D11CreateDeviceAndSwapChain(
+                    None,
+                    D3D_DRIVER_TYPE_HARDWARE,
+                    HMODULE::default(),
+                    D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                    None,
+                    D3D11_SDK_VERSION,
+                    Some(&description),
+                    Some(&mut swap_chain),
+                    Some(&mut device),
+                    Some(&mut feature_level),
+                    Some(&mut context),
+                )?;
+            }
         }
 
         let device = device.expect("D3D11 returned success without a device");
@@ -456,9 +505,10 @@ impl FrameRenderer {
     pub fn release_surface(self) {
         let context = self.context.clone();
         drop(self);
-        // The event-loop owner has stopped playback workers. This owned context
-        // outlives the dropped renderer; unbind and flush deferred references so
-        // the old flip swap chain no longer occupies its HWND.
+        // No other renderer draws concurrently on the owning event-loop thread.
+        // This owned, multithread-protected context outlives the dropped renderer;
+        // unbind and flush deferred references so the old flip swap chain releases
+        // its HWND. Surviving renderers bind their own state on their next draw.
         unsafe {
             context.ClearState();
             context.Flush();

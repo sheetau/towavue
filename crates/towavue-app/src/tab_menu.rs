@@ -2,6 +2,101 @@ use towavue_core::{CommandId, ShortcutBindings, TabId, TabSet, command_definitio
 
 use CommandId::*;
 
+#[cfg(test)]
+pub(crate) mod keyboard_tests;
+
+pub(crate) fn context_key_event(
+    key: &winit::keyboard::Key,
+    modifiers: winit::keyboard::ModifiersState,
+    pressed: bool,
+    repeat: bool,
+) -> Option<egui::Event> {
+    (key == &winit::keyboard::Key::Named(winit::keyboard::NamedKey::ContextMenu)
+        && (!pressed || (modifiers.is_empty() && !repeat)))
+        .then_some(egui::Event::Key {
+            key: egui::Key::F10,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::SHIFT,
+        })
+}
+
+pub(crate) fn popup(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    close: &egui::Response,
+    contents: impl FnOnce(&mut egui::Ui) -> Option<CommandId>,
+) -> Option<CommandId> {
+    let context = ui.ctx();
+    let popup_id = egui::Popup::default_response_id(response);
+    let was_open = egui::Popup::is_id_open(context, popup_id);
+    let eligible = response.enabled()
+        && context.dragged_id().is_none()
+        && (!egui::Popup::is_any_open(context) || was_open)
+        && ui.input(|input| {
+            input.focused
+                && !input.pointer.any_down()
+                && !input.events.contains(&egui::Event::WindowFocused(false))
+        });
+    for widget in [response, close] {
+        context.accesskit_node_builder(widget.id, |node| {
+            node.add_action(egui::accesskit::Action::ShowContextMenu);
+        });
+    }
+    let origin = [response, close].into_iter().find(|widget| {
+        let focused = widget.has_focus();
+        eligible
+            && ui.input(|input| {
+                input.has_accesskit_action_request(
+                    widget.id,
+                    egui::accesskit::Action::ShowContextMenu,
+                ) || (focused
+                    && input.events.iter().any(|event| {
+                        matches!(event, egui::Event::Key {
+                            key: egui::Key::F10, pressed: true, repeat: false, modifiers, ..
+                        } if *modifiers == egui::Modifiers::SHIFT)
+                    }))
+            })
+    });
+    let anchor_id = popup_id.with("keyboard-anchor");
+    if let Some(origin) = origin {
+        ui.input_mut(|input| {
+            input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10);
+            input.consume_accesskit_action_requests(origin.id, |request| {
+                request.action == egui::accesskit::Action::ShowContextMenu
+            });
+        });
+        context.data_mut(|data| data.insert_temp(anchor_id, origin.id));
+    } else if response.secondary_clicked() {
+        context.data_mut(|data| data.remove::<egui::Id>(anchor_id));
+    }
+    let keyboard_origin = context.data(|data| data.get_temp::<egui::Id>(anchor_id));
+    let mut popup = egui::Popup::context_menu(response);
+    if origin.is_some() {
+        popup = popup.open_memory(egui::SetOpenCommand::Bool(true));
+    }
+    if keyboard_origin.is_some() {
+        popup = popup.at_position(
+            response
+                .rect
+                .union(close.rect)
+                .intersect(ui.clip_rect())
+                .left_bottom(),
+        );
+    }
+    let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let chosen = popup.show(contents).and_then(|inner| inner.inner);
+    if (was_open || origin.is_some()) && !egui::Popup::is_id_open(context, popup_id) {
+        if (escape || chosen.is_some()) && !egui::Popup::is_any_open(context) {
+            context
+                .memory_mut(|memory| memory.request_focus(keyboard_origin.unwrap_or(response.id)));
+        }
+        context.data_mut(|data| data.remove::<egui::Id>(anchor_id));
+    }
+    chosen
+}
+
 pub fn close_targets(tabs: &TabSet, target: TabId, command: CommandId) -> Vec<TabId> {
     let Some(index) = tabs.tabs().iter().position(|tab| tab.id == target) else {
         return Vec::new();

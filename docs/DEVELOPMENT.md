@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### タブメニューをkeyboardから開く（2026-09-10、U09）
+
+Tabでmedia tab名またはそのclose buttonへfocusし、Shift+F10／修飾なしのMenu keyを押す。現在表示中ではなくfocus対象のtab menuが、そのtabの脇に開く。UIA ShowContextMenuも同じ入口。Escapeで呼出元へ戻り、未保存確認のCancel後も元widgetへ戻る。対象を閉じた場合は現在tab、全close後はWelcomeへ戻す。right-clickは従来のpointer位置へ開く。overlay／modal／別popup／fullscreen／drag中やfocus喪失・repeatでは新しく開かない。
+
+`cargo test -p towavue-app tab_context_`の5回帰で、2focus先×3入口・active不変、10拒否条件／queued UIA、guard Cancel／Discard、clean close／Welcome、3幅×100／125／200%、right-click anchor、reorder後の連続矢印／無効項目skipを確認する。共通MenuKeyboardはeguiの予約済み空間移動も取消し、一回の矢印で二重に進まないよう修正した。実D3D11VA復旧前後10点で6入口とEscape復帰を同じ所有windowへ描画し、履歴／transport／generation不変・CPU転送0を確認する。Menu keyの対応関数＋合成inputによる試験であり、物理key event／通常window／実混在DPIの最終認定とは区別する。
+
+U09検証結果: 最終session40989でfmt／Clippy／workspace516（app290＋core61＋runtime161＋integration4）、追加app実機依存6件、release buildが終了0。通常ignored13は成功数へ含めず、追加試験にSKIPなし。Release SHA-256 `5d6f629e75279cb750ad405b297ba8fdebd65ffd88cba641ce68870a67237278`。dependency／notice inventory変更なし。
+
 ### ロゴからFile／Edit／Viewを開く（2026-09-10、M01）
 
 通常windowで左上ロゴをprimary pointerで押し、8 logical px以上の右上／右下／左下へ動かして離すと、File／Edit／Viewの既存submenuを開く。保持中は選択した矢印だけ白く、左上のshaftを右下へ80msで移す。左上方向・閾値内へ戻す・Escape・focus／pointer喪失では取消。方向操作のpopupはrelease点の脇へ固定し、通常clickやkeyboard操作の配置は変更しない。開いた後は既存の上下／左右／Enter／Escape・UIA・有効性／shortcut表示を使う。gestureだけでcommandは実行しない。

@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10 U09: tab名／close buttonにfocusしてShift+F10・Menu key、またはUIA ShowContextMenuから既存tab menuを開ける。非active対象・Escape／guard後のfocus、close後の現在tab／Welcome、reorder／無効項目skipを回帰で確認する。実GPU復旧前後でも合成inputとUIAによる6入口を描画したが、通常windowの物理Menu key／実混在DPI・全体UIA監査を完了した証拠ではない。OS clipboardへの新たな書込やExplorer呼出しは今回実行していない。
+
 2026-09-10 M01: ロゴのprimary dragは右上File／右下Edit／左下Viewへ対応する。8 logical px以上動かしてreleaseし、元の位置へ戻す／左上方向／Escape／focus喪失・pointer消失／resize／DPI・source/tab変更／別overlayでは取消。方向popupはrelease点の右下8pxを基準にし、画面端では既存Popupが配置を調整する。普通のclick／keyboardでは従来のanchorを使う。7回帰と実GPU描画を確認するが、通常windowの物理pointer・実混在DPI／最終screen pixel認定とは区別する。その他の台帳も未完のまま。
 
 2026-09-10 U05: 保存中のtoolbar境界は出力時刻／開始時の既知durationに基づく推定進捗であり、wall-clockの残り時間／byte数ではない。normalize解析／encodeを半分ずつとし、hardware fallbackによる再encodeで戻ることがある。出力時刻が終端でもpublishまでは99%以下に留める。画像／長さ不明はindeterminate、取消後は停止、Finishedで元境界へ戻る。通常の画像移動では点滅させない。既存のexport詳細／Cancelと離脱guardは残し、toolbarのない全画面では境界進捗を出さない。通常window／physical入力／実混在DPIの最終照合は未完。

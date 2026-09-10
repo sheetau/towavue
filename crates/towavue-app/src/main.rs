@@ -3241,10 +3241,25 @@ where
             && !egui::Popup::is_any_open(root.ctx())
             && root.input(|input| input.focused && !input.pointer.any_down());
         let window_rect = root.max_rect();
+        let tab_menu_focus = (!self.modal_input_blocked()
+            && self.active_export.is_none()
+            && !self.palette_open
+            && !self.grid_open
+            && !self.filmstrip_open)
+            .then(|| {
+                root.ctx().data_mut(|data| {
+                    let key = "tab-menu-return-focus".into();
+                    let focus = data.get_temp::<(TabId, egui::Id)>(key);
+                    data.remove::<(TabId, egui::Id)>(key);
+                    focus
+                })
+            })
+            .flatten();
         let return_to_tab = root.ctx().data_mut(|data| {
             data.remove_temp::<bool>("filmstrip-return-tab".into())
                 .unwrap_or(false)
-        });
+        }) || tab_menu_focus
+            .is_some_and(|(target, _)| !self.tabs.tabs().iter().any(|tab| tab.id == target));
         let panel = egui::Panel::top("tabs")
             .exact_size(chrome::TITLE_HEIGHT)
             .show_separator_line(false)
@@ -3380,30 +3395,6 @@ where
                                         .truncate()
                                         .sense(egui::Sense::click_and_drag()),
                                     );
-                                    if !self.modal_input_blocked()
-                                        && !self.palette_open
-                                        && !self.grid_open
-                                        && !self.filmstrip_open
-                                    {
-                                        response.context_menu(|ui| {
-                                            if let Some(command) = tab_menu::show(
-                                                ui,
-                                                &self.tabs,
-                                                tab.id,
-                                                !self.closed_tabs.is_empty(),
-                                                &self.shortcuts,
-                                            ) {
-                                                actions.push(UiAction::TabCommand(tab.id, command));
-                                            }
-                                        });
-                                    }
-                                    if preview_allowed && !egui::Popup::is_any_open(tab_ui.ctx()) {
-                                        let target = self.tab_preview.target(tab);
-                                        if response.hovered() {
-                                            preview_target = Some(target.clone());
-                                        }
-                                        self.tab_preview.show(&response, &target);
-                                    }
                                     if response.clicked() {
                                         actions.push(UiAction::ActivateTab(tab.id));
                                     }
@@ -3461,8 +3452,37 @@ where
                                             tab.target.current_path().display().to_string(),
                                         );
                                     });
+                                    if !self.modal_input_blocked()
+                                        && !self.palette_open
+                                        && !self.grid_open
+                                        && !self.filmstrip_open
+                                        && let Some(command) =
+                                            tab_menu::popup(&tab_ui, &response, &close, |ui| {
+                                                tab_menu::show(
+                                                    ui,
+                                                    &self.tabs,
+                                                    tab.id,
+                                                    !self.closed_tabs.is_empty(),
+                                                    &self.shortcuts,
+                                                )
+                                            })
+                                    {
+                                        actions.push(UiAction::TabCommand(tab.id, command));
+                                    }
                                     if close.clicked() {
                                         actions.push(UiAction::CloseTab(tab.id));
+                                    }
+                                    if preview_allowed && !egui::Popup::is_any_open(tab_ui.ctx()) {
+                                        let target = self.tab_preview.target(tab);
+                                        if response.hovered() {
+                                            preview_target = Some(target.clone());
+                                        }
+                                        self.tab_preview.show(&response, &target);
+                                    }
+                                    if let Some((target, focus)) = tab_menu_focus
+                                        && target == tab.id
+                                    {
+                                        tab_ui.memory_mut(|memory| memory.request_focus(focus));
                                     }
                                 }
                                 if let Some((id, response)) = dragged {
@@ -4351,7 +4371,20 @@ where
                 self.handle_hold_speed(media, generation, action)
             }
             UiAction::ActivateTab(id) => self.activate_tab(id),
-            UiAction::TabCommand(id, command) => self.dispatch_tab_command(id, command),
+            UiAction::TabCommand(id, command) => {
+                let focus = self
+                    .ui_context
+                    .as_ref()
+                    .and_then(|context| context.memory(|memory| memory.focused()));
+                self.dispatch_tab_command(id, command);
+                if let Some(context) = &self.ui_context
+                    && let Some(focus) = focus
+                {
+                    context.data_mut(|data| {
+                        data.insert_temp("tab-menu-return-focus".into(), (id, focus))
+                    });
+                }
+            }
             UiAction::ReorderTab(id, gap) => {
                 self.tabs.reorder(id, gap);
                 self.request_redraw();
@@ -7803,6 +7836,23 @@ where
             && self.grid_key_index(event.physical_key).is_some()
         {
             self.process_key(event);
+            return;
+        }
+        if let WindowEvent::KeyboardInput {
+            event,
+            is_synthetic: false,
+            ..
+        } = &event
+            && let Some(input) = tab_menu::context_key_event(
+                &event.logical_key,
+                self.modifiers,
+                event.state == ElementState::Pressed,
+                event.repeat,
+            )
+            && let Some(state) = &mut self.ui_state
+        {
+            state.egui_input_mut().events.push(input);
+            self.request_redraw();
             return;
         }
         let event_response = match (self.window.as_ref(), self.ui_state.as_mut()) {

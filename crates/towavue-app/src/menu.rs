@@ -273,6 +273,10 @@ impl MenuKeyboard {
                 input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
             )
         });
+        if backward || forward || left || right {
+            // Consuming the event does not clear egui's already queued spatial traversal.
+            ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+        }
         result.left = left;
         result.right = right;
         // A submenu's first visible pass has no remembered items yet. Apply

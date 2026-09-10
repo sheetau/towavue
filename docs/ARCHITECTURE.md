@@ -1,5 +1,9 @@
 # towavue アーキテクチャ
 
+## U09: tab context menuのkeyboard入口（2026-09-10）
+
+focusされたmedia tab名／close buttonからShift+F10、修飾なしのWindows Menu key、UIA ShowContextMenuで既存tab menuを開く。activeではなくfocus先のTabIdを対象とし、表示だけではactivate／履歴変更しない。keyboard／UIAではtabの可視部分をanchorにし、pointerの位置に依存しない。right-clickのpointer anchorは維持する。Escapeは呼出元へfocusを戻し、command選択は既存dispatch／dirty guardへ渡す。guard／保存が終了するまでfocus復帰を保留し、呼出元tabが残れば元widget、閉じたなら現在tab、全close後はWelcomeへ戻す。modal／他overlay／別popup／fullscreen／drag中／focus喪失では新しい呼出しを受け付けず、repeatで再openしない。通常Enterによるtab activationとmiddle-click closeは変更しない。Welcomeはmedia用menuの対象外。共通MenuKeyboardが矢印／Tabを処理したら、eguiがpass開始時に予約した空間focus移動も取消し、独自移動との二重適用を防ぐ。
+
 ## M01: ロゴからの方向menu操作（2026-09-10）
 
 左上の既存logo buttonへprimary pointerの方向dragを追加する。8 logical px以上、右下45度±45度はEdit、その上側の右上はFile、下側の左下はViewへ対応させる。左上方向／閾値内へ戻したreleaseは取消。releaseで既存のcategory submenuを開くだけで、commandは実行しない。選択はrelease位置で再評価する。保持中は選択した矢印だけ白、他を半透明にし、左上shaftを右下へ80msで移す。release後は通常logoへ戻す。

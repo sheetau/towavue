@@ -2,13 +2,15 @@
 
 ## I06: 自由回転の画像基盤（2026-09-10）
 
+画像hold-drag契約（2026-09-10）: 草案で未決だった保持キーはAltを採用する。原寸画像上でAlt＋左pressから左右dragし、1 logical pxを0.5度、-180～180度・0.1度単位へ丸めてプレビューする。Ctrl／Super併用は対象外。既存textureを画像の中心・現在のscale／panで回し、確定前のview／selection／履歴は変更しない。crop preview中も対象は選択だけでなく編集後の全画像とする。Alt保持でmouse releaseすると一件だけ確定し、移動0は非編集。Altを先に離す、Escape、focus／cursor喪失、window geometry変更、別command／source変更では取消する。canvas上限超過はpreviewで知らせ、確定を拒否する。数値dialogはCtrl+Shift+Rとmenuのまま維持する。動画と通常window／性能の認定は別残件。
+
 画像UI契約（2026-09-10）: Free rotate image command（既定Ctrl+Shift+R）をEdit menu／palette／grid／custom shortcutへ追加する。原寸画像が利用できる非reading時だけ角度dialogを開き、数値入力と横sliderで-180～180度を0.1度へ丸めて調整する。dialogの有界canvasでは現在の編集後画像meshを回転させ、透明余白と配置を近似previewする。これは保存用画素を生成するものではない。確定後の全frameは共通raster workerで生成する。previewは履歴／selection／zoom／原本を変えず、Cancel／Escape／角度0のApplyは完全な無編集終了とする。
 
-Applyはdialog token、tab、media／raster世代、source画素identity、path、編集列、現在寸法を再確認してから一件だけ追加する。古いactionは新dialogを閉じず、無効なcontextでは適用しない。既存modal入力保護・復帰focus・離脱時のApply/Cancel要求へ接続し、source交換ではdialogを破棄する。画像上のshortcut保持drag、動画、通常windowの最終操作／外観と大画像性能は未完として維持する。
+Applyはdialog token、tab、media／raster世代、source画素identity、path、編集列、現在寸法を再確認してから一件だけ追加する。古いactionは新dialogを閉じず、無効なcontextでは適用しない。既存modal入力保護・復帰focus・離脱時のApply/Cancel要求へ接続し、source交換ではdialogを破棄する。hold-dragも同じsnapshot取得・適用検証とmesh回転を使う。動画、通常windowの最終操作／外観と大画像性能は未完として維持する。
 
 自由回転を画像の非同期raster編集から実装する。角度は時計回り正の0.1度単位、-180～180度。操作直前の寸法と、回転した画素領域を切らず収めるceil済み外接canvas寸法をcoreの検証済み値に保持し、最大16384px／128M pixelsの既存画像上限へ収める。角度0は履歴を増やさずRedo枝も変えない。±90／180度は既存transpose／flipを使い、任意角度は透明黒の余白とpremultiplied-alphaで補間する。固定FFmpegのrotateが対応するGBRAP8を明示し、透明色の色漏れを防ぐ。元画素と直前のcrop／resize／反転／回転の順序を保持する。
 
-表示用workerと画像exportは同じvisual filter列・固定canvas寸法を使用する。ImageViewのUVだけで自由回転を表現しない。処理待ち／失敗中は既存raster待機・errorを表示し、完了後のRGBAを既存同一deviceへ載せ、materialized状態では履歴を二重適用しない。Undoでraster編集がなくなれば保持元画像へ戻す。原本と共有cacheの画素は書換えない。workerの取消・世代・tab境界、512MiB上限と全animation frameのdelayを維持する。画像hold-drag操作、動画の単一device上での任意角度表示とSAR／export契約はまだ接続せず、自由回転全体の残件とする。
+表示用workerと画像exportは同じvisual filter列・固定canvas寸法を使用する。ImageViewのUVだけで自由回転を表現しない。処理待ち／失敗中は既存raster待機・errorを表示し、完了後のRGBAを既存同一deviceへ載せ、materialized状態では履歴を二重適用しない。Undoでraster編集がなくなれば保持元画像へ戻す。原本と共有cacheの画素は書換えない。workerの取消・世代・tab境界、512MiB上限と全animation frameのdelayを維持する。動画の単一device上での任意角度表示とSAR／export契約はまだ接続せず、自由回転全体の残件とする。
 
 ## I06: アスペクト比の選択プリセット（2026-09-10）
 

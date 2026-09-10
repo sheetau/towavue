@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### Alt保持で画像を自由回転（2026-09-10 10:41、I06部分実装）
+
+原寸画像上でAlt＋左pressを始め、左右に動かす。1 logical pxにつき0.5度、0.1度単位で-180～180度へ丸める。現在の中心／scale／panを使うため、回転後の角がviewport外へ出ることはあるが、確定処理は画像全体を外接canvasに収める。crop preview中も選択部分だけでなく編集後の全画像が対象。正確な角度指定や全体配置の確認は従来のCtrl+Shift+R／menu dialogで行える。
+
+Altを押したままmouse releaseすると一件の編集を確定し、元の全frameから非同期処理する。Altを先に離す、Escape、focus／cursor喪失、window geometry変更、別command／source変更は取消。Ctrl／Super併用や画像外で始めたpress、他widget所有のpressは対象外。通常左dragの選択と右dragのpanは維持する。数値dialogと同じsnapshot／世代／source／編集列の検証を再利用し、ゼロ角度・上限超過・古いcontext・重複releaseから履歴を増やさない。
+
+新規5 testsで実draw_imageのhold／move／release、90度回転後の追加編集とworker／Undo、部分selectionとcrop previewの保持、同一frameのpress～release後にpointerがさらに動く場合、取消9条件・7種類の開始拒否、通常選択、0度／上限超過、1×／2×のlogical-point幾何を確認する。取消frameにも元画像meshが残ることを確認。極端なzoomでもcheckerboardはviewport内だけを描き、frameのshape数は2000未満。これはmeshとheadless inputの検証であり、通常windowの物理入力・全DPI／IME・大画像の応答性能を認定するものではない。動画自由回転の単一device／SAR／保存とUX台帳全体は引き続き残る。
+
+最終session73829でfmt check／Clippy／workspace413（app242／core57／runtime110／integration4）、app opt-in5件とReleaseがterminal exit0。普通実行のignored11件は成功数に含めない。既存H264 D3D11VA復旧はCPU transfer0。Release SHA-256は`b1f11697a0916fabacbf748aab4cb376107c090cd678ea02d0ee315b84f523cc`。前30fe38bのCI34425469667は成功。OS clipboard書込や通常windowへの外部入力、追加導入は行っていない。
+
 ### 画像自由回転の角度UI（2026-09-10 10:26、I06部分実装）
 
 Edit menuのFree rotate image／Ctrl+Shift+Rから角度dialogを開く。数値入力と横sliderで時計回り正の-180～180度、0.1度単位へ調整する。配置previewは既存textureとcrop／flip／90度回転のUVを再利用する近似で、ドラッグのたびに全画像workerを作らない。Applyで一つの編集を確定して全frameを処理する。Cancel／Escape／0度ではselection／zoom／履歴を変えず、対象tab／source／世代／編集列が変わった場合は適用を拒否する。原寸読込前・reading・動画／音声・処理待ち／失敗中には開かない。既存custom key／prefixと新既定キーが衝突した場合はcustomを保持する。

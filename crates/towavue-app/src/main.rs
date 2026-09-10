@@ -645,6 +645,7 @@ struct Application<N> {
     resize_dialog: Option<resize::ResizeDialog>,
     rotation_dialog: Option<rotation::RotationDialog>,
     rotation_generation: u64,
+    rotation_drag: Option<rotation::RotationDrag>,
     edits: BTreeMap<TabId, EditHistory>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
@@ -819,6 +820,7 @@ where
             resize_dialog: None,
             rotation_dialog: None,
             rotation_generation: 0,
+            rotation_drag: None,
             edits: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
@@ -2445,6 +2447,7 @@ where
     }
 
     fn draw_image(&mut self, ui: &mut egui::Ui) {
+        self.cancel_stale_rotation_drag();
         self.update_image_sampling();
         if self.image_edit_pending {
             ui.centered_and_justified(|ui| {
@@ -2524,6 +2527,24 @@ where
                 input.pointer.hover_pos(),
             )
         });
+        let initial_rect = egui::Rect::from_center_size(
+            center,
+            egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
+        );
+        match self.draw_rotation_drag(ui, &response, initial_rect) {
+            rotation::RotationResponse::Inactive => {}
+            rotation::RotationResponse::Preview => return,
+            rotation::RotationResponse::Cancelled => {
+                let painter = ui.painter_at(viewport);
+                painter.add(transformed_image_mesh(texture, initial_rect, transform));
+                if !self.image_view.crop_preview
+                    && let Some(selection) = self.image_view.selection
+                {
+                    paint_selection(&painter, initial_rect, selection);
+                }
+                return;
+            }
+        }
         if zoom != 1.0
             && response.hovered()
             && !self.modal_input_blocked()
@@ -2705,6 +2726,7 @@ where
 
     fn cancel_view_drag(&mut self) -> bool {
         let mut canceled_press = self.cancel_hold_speed();
+        canceled_press |= self.rotation_drag.take().is_some();
         canceled_press |= self.finish_reading_drag(true);
         canceled_press |= self.ui_context.as_ref().is_some_and(timeline_input::cancel);
         if let Some(state) = &mut self.ui_state {
@@ -4697,6 +4719,7 @@ where
         self.image_materialized = false;
         self.resize_dialog = None;
         self.rotation_dialog = None;
+        self.rotation_drag = None;
     }
 
     fn install_edited_image(&mut self, decoded: Arc<DecodedImage>) -> Result<(), String> {
@@ -7218,6 +7241,20 @@ where
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
         }
+        if self.rotation_drag.is_some()
+            && matches!(
+                &event,
+                WindowEvent::CursorLeft { .. }
+                    | WindowEvent::Resized(_)
+                    | WindowEvent::ScaleFactorChanged { .. }
+                    | WindowEvent::Focused(false)
+                    | WindowEvent::CloseRequested
+                    | WindowEvent::DroppedFile(_)
+                    | WindowEvent::MouseWheel { .. }
+            )
+        {
+            self.cancel_view_drag();
+        }
         if matches!(
             &event,
             WindowEvent::Focused(false)
@@ -7324,6 +7361,7 @@ where
                     .as_ref()
                     .is_some_and(egui::Popup::is_any_open))
             || self.view_drag.is_some()
+            || self.rotation_drag.is_some()
             || self
                 .ui_context
                 .as_ref()
@@ -7384,7 +7422,10 @@ where
                 }
                 self.request_redraw();
             }
-            WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers.state();
+                self.rotation_modifiers_changed();
+            }
             WindowEvent::KeyboardInput { event, .. } if !consumed => self.process_key(&event),
             WindowEvent::RedrawRequested => self.render_frame(),
             _ if consumed => self.request_redraw(),

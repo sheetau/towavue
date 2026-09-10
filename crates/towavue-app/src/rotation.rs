@@ -1,6 +1,9 @@
 use crate::*;
 use towavue_core::ImageRotation;
 
+mod drag;
+pub(super) use drag::{RotationDrag, RotationResponse};
+
 pub(super) struct RotationDialog {
     pub(super) token: u64,
     tab: TabId,
@@ -36,6 +39,7 @@ impl RotationDialog {
                 .show(ui, |ui| {
                     chrome::modal_heading(ui, "Free rotate image");
                     ui.label("Preview only. Apply adds one undoable edit.");
+                    ui.label("Tip: hold Alt and drag horizontally on the image.");
                     ui.label("Angle in degrees (clockwise, 0.1 degree steps)");
                     let response =
                         resize::text_input(ui, "Rotation angle in degrees", &mut self.angle);
@@ -115,10 +119,19 @@ fn preview_mesh(
         rect.center(),
         egui::vec2(transform.size.0, transform.size.1) * scale,
     );
+    rotated_mesh(texture, source, transform, rotation.tenths())
+}
+
+fn rotated_mesh(
+    texture: egui::TextureId,
+    source: egui::Rect,
+    transform: ImageTransform,
+    tenths: i16,
+) -> egui::Mesh {
     let mut mesh = transformed_image_mesh(texture, source, transform);
-    let angle = egui::emath::Rot2::from_angle((f32::from(rotation.tenths()) / 10.0).to_radians());
+    let angle = egui::emath::Rot2::from_angle((f32::from(tenths) / 10.0).to_radians());
     for vertex in &mut mesh.vertices {
-        vertex.pos = rect.center() + angle * (vertex.pos - rect.center());
+        vertex.pos = source.center() + angle * (vertex.pos - source.center());
     }
     mesh
 }
@@ -130,6 +143,13 @@ fn paint_preview(
     transform: ImageTransform,
     rotation: ImageRotation,
 ) {
+    let painter = painter.with_clip_rect(rect);
+    paint_checkerboard(&painter, rect);
+    painter.add(preview_mesh(rect, texture, transform, rotation));
+}
+
+fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
+    let rect = rect.intersect(painter.clip_rect());
     let painter = painter.with_clip_rect(rect);
     painter.rect_filled(rect, 0.0, Color32::from_gray(32));
     for row in 0..(rect.height() / 12.0).ceil() as usize {
@@ -146,27 +166,39 @@ fn paint_preview(
             }
         }
     }
-    painter.add(preview_mesh(rect, texture, transform, rotation));
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn open_rotation(&mut self) {
+        let Some(dialog) = self.capture_rotation() else {
+            self.set_status("Wait for the full image to load before rotating".into());
+            return;
+        };
+        self.guard_return_focus = self
+            .ui_context
+            .as_ref()
+            .and_then(|context| context.memory(|memory| memory.focused()))
+            .map(|focus| (dialog.tab, focus));
+        self.rotation_dialog = Some(dialog);
+        self.request_redraw();
+    }
+
+    fn capture_rotation(&mut self) -> Option<RotationDialog> {
         let (Some(tab), Some(path), Some(image)) =
             (self.tabs.active(), self.path.as_ref(), self.image.as_ref())
         else {
-            self.set_status("Wait for the full image to load before rotating".into());
-            return;
+            return None;
         };
         if self.media_kind != Some(MediaKind::Image)
             || self.reading_mode
             || self.image_edit_pending
             || self.image_error.is_some()
         {
-            return;
+            return None;
         }
         let transform = self.visual_transform(image.dimensions());
         self.rotation_generation = self.rotation_generation.wrapping_add(1);
-        self.rotation_dialog = Some(RotationDialog {
+        Some(RotationDialog {
             token: self.rotation_generation,
             tab: tab.id,
             media_generation: self.media_generation,
@@ -182,13 +214,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             transform,
             angle: "0.0".into(),
             first_frame: true,
-        });
-        self.guard_return_focus = self
-            .ui_context
-            .as_ref()
-            .and_then(|context| context.memory(|memory| memory.focused()))
-            .map(|focus| (tab.id, focus));
-        self.request_redraw();
+        })
     }
 
     pub(super) fn finish_rotation(&mut self, token: u64, value: Option<ImageRotation>) {
@@ -203,7 +229,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .rotation_dialog
             .take()
             .expect("matching rotation dialog");
-        let valid = self.tabs.active().is_some_and(|tab| tab.id == dialog.tab)
+        self.commit_rotation(dialog, value);
+    }
+
+    fn rotation_is_current(&self, dialog: &RotationDialog) -> bool {
+        self.tabs.active().is_some_and(|tab| tab.id == dialog.tab)
             && self.media_kind == Some(MediaKind::Image)
             && !self.reading_mode
             && !self.image_edit_pending
@@ -219,7 +249,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .edits
                 .get(&dialog.tab)
                 .map_or(&[][..], EditHistory::operations)
-                == dialog.operations;
+                == dialog.operations
+    }
+
+    fn commit_rotation(&mut self, dialog: RotationDialog, value: Option<ImageRotation>) {
+        let valid = self.rotation_is_current(&dialog);
         if let Some(value) = value {
             if valid
                 && value.source_size()

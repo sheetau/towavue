@@ -1,7 +1,7 @@
 use super::*;
 use std::sync::mpsc;
 
-fn application() -> (
+pub(super) fn application() -> (
     Application<impl Fn(AppEvent) + Send + Sync>,
     mpsc::Receiver<AppEvent>,
 ) {

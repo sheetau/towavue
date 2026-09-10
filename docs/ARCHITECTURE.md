@@ -1,5 +1,15 @@
 # towavue アーキテクチャ
 
+## V02/U10: 有界の動画サムネイルシート（2026-09-11）
+
+source durationからmax(20, ceil(seconds/5))個の区間を作り、その中央をsampleする。1枚16コマ、4×4の960×640 RGBA、各コマ240×160のFit＋黒paddingとする。source path／metadata／duration／sheet index／versionをkeyに、既存PreviewCacheの同key生成集約・取消・64件／16 MiB memory／64 MiB disk枠を共用する。既存のbest-stream／TS Seek／向き・SAR／末尾frame fallbackを使い、各sheetの最大16回の子process取得を逐次実行する。途中取消では未完成sheetを公開しない。原寸の再生decoderやGPU deviceは追加しないが、補助codec／processの負荷自体はある。
+
+通常動画の現在のsource位置をUIの描画時に先読み要求する。UI threadではmetadata／file I/Oをせず、既知durationからsheet位置を計算する。専用latest-only workerは一件だけ生成し、Seek hoverが別sheetを求めたら優先する。現在位置の先読みで進行中のhover要求を取り消さない。Seek側はcontext内に最大2枚のLRU、失敗keyは32件まで保持し、同sheet内のhoverでは同じtextureとUVを使う。slotのtexel中心をUV端とし、rounded-rectのAAが隣cellへUVを広げないようmesh経路で描画する。source切替／timeline toggle／graphics recoveryで世代更新と取消・texture破棄を行う。通常video timeline内にはhover previewを表示しない。
+
+初期応答をsheetの全16コマ完了まで待たせず、Seekは従来の単枚取得を併用し、sheet完了後に置換する。tab hoverも共有memory sheetがあれば直接UV表示し、なければ単枚を先に通知してsheetを続ける。duration／sheet生成失敗時は単枚経路を残す。tab位置は編集後の現在時刻をsourceへ戻してからsourceのsampleを選び、Seekのsource sheetと整合させる。tab hoverのGPU textureは別所有の一枚であり、SeekとのCPU／disk共用をGPU texture共有と表現しない。先読みは現在位置のsheetだけで、長編全体の事前走査は行わない。
+
+固定H.264素材のdebug検証で16コマ生成約1.119秒、4コマの終端sheet約0.327秒、memory clone取得約0.56～0.59msを観測した。これはUI表示遅延の保証ではない。実画素と単枚reference、density／端／UV、同textureで16位置を描画して追加uploadなし、世代／優先度／2枚LRU／texture上限を確認する。所有する可視960×576 windowと生成40秒MPEG-4素材では停止中hoverの非Seek、前半／後半thumbnail、クリックSeekとtab hoverを確認した。software decode条件の一例であり、長GOP／全codec／HDR／混在DPI／資源peak・本画面scrubは未認定・未完。
+
 ## I03/U10: 静止画先読み結果のpreview共用（2026-09-10）
 
 既存の隣画像一件／256 MiBの静止画先読みは、原寸cacheへの登録後、decoded-cache mutexを解放してから同じ原寸の借用frameをPreviewCacheへ渡す。既存の240×160以内の縮小、source metadata key、host全体64件／16 MiBを使い、追加decode／補助process／disk encodeはしない。原寸cache hitでも元寸法付きpreviewを再供給し、縮小側だけがevictionされた場合に再decodeしない。先読みの静止画限定／元画質／枚数／順序は変えず、animation／AVIFの先読みやvideo sheetを追加したという意味ではない。

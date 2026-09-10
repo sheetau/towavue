@@ -46,6 +46,7 @@ mod video_context_tests;
 mod video_edit;
 mod video_resize;
 mod video_rotation;
+mod video_sheets;
 mod video_view;
 mod welcome;
 mod wheel_input;
@@ -215,6 +216,16 @@ enum UiAction {
 }
 
 enum AppEvent {
+    TabVideoSheet(
+        tab_preview::Target,
+        u64,
+        Result<towavue_runtime_windows::VideoPreviewSheet, String>,
+    ),
+    VideoSheet(
+        video_sheets::Request,
+        u64,
+        Result<towavue_runtime_windows::VideoPreviewSheet, String>,
+    ),
     MetadataLoaded(u64, Result<Vec<MetadataSourceValue>, String>),
     FrameStep(u64, Result<Option<MediaTime>, String>),
     Accessibility(accesskit_winit::Event),
@@ -761,6 +772,7 @@ struct Application<N> {
     duration_workers: BTreeMap<u64, LatestTask>,
     waveform_worker: LatestTask,
     thumbnail_worker: LatestTask,
+    video_sheets: video_sheets::VideoSheets,
     frame_steps: frame_step::FrameSteps,
     held_speed: Option<hold_speed::Held>,
     timeline_open: bool,
@@ -964,6 +976,7 @@ where
             duration_workers: BTreeMap::new(),
             waveform_worker: LatestTask::new("towavue-waveform")?,
             thumbnail_worker: LatestTask::new("towavue-thumbnail")?,
+            video_sheets: video_sheets::VideoSheets::new()?,
             frame_steps: frame_step::FrameSteps::new()?,
             held_speed: None,
             timeline_open: false,
@@ -1368,6 +1381,7 @@ where
     }
 
     fn next_media_instance(&mut self) {
+        self.video_sheets.clear();
         self.media_sequence = self
             .media_sequence
             .max(self.media_generation)
@@ -1553,6 +1567,30 @@ where
                 .map_err(|error| error.to_string());
             notify(AppEvent::Thumbnail(path, generation, bucket, result));
         });
+    }
+
+    fn request_video_sheet(
+        &mut self,
+        position: Duration,
+        priority: bool,
+    ) -> Option<video_sheets::Request> {
+        if self.media_kind != Some(MediaKind::Video) {
+            return None;
+        }
+        let target = video_sheets::Request {
+            path: self.path.clone()?,
+            layout: towavue_runtime_windows::VideoSheetLayout::for_position(
+                self.media_duration?,
+                position,
+            )?,
+        };
+        self.video_sheets.request(
+            target.clone(),
+            priority,
+            &self.preview_cache,
+            Arc::clone(&self.notify),
+        );
+        Some(target)
     }
 
     fn load_duration(&mut self, path: PathBuf) {
@@ -1966,6 +2004,26 @@ where
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::TabVideoSheet(target, generation, result) => {
+                if self
+                    .tabs
+                    .tabs()
+                    .iter()
+                    .any(|tab| tab.id == target.tab && tab.target.current_path() == target.path)
+                    && let Some(context) = &self.ui_context
+                {
+                    self.tab_preview
+                        .finish_sheet(context, target, generation, result);
+                    self.request_redraw();
+                }
+            }
+            AppEvent::VideoSheet(target, generation, result) => {
+                if let Some(context) = &self.ui_context {
+                    self.video_sheets
+                        .finish(context, target, generation, result);
+                    self.request_redraw();
+                }
+            }
             AppEvent::MetadataLoaded(token, values) => self.finish_metadata_read(token, values),
             AppEvent::FrameStep(serial, result) => self.finish_frame_step(serial, result),
             AppEvent::Accessibility(event) => {
@@ -2444,6 +2502,17 @@ where
         wheel_input::begin_frame(&context);
         let mut volume_targets = Vec::new();
         let position = Duration::from_secs_f64(self.current_position().as_seconds_f64().max(0.0));
+        if self.renderer.is_some() && !self.timeline_is_visible() {
+            let source = self
+                .session
+                .as_ref()
+                .and_then(PlaybackSession::timeline)
+                .and_then(|plan| plan.source_time(media_time(position)))
+                .map_or(position, |source| {
+                    Duration::from_nanos(source.as_nanoseconds() as u64)
+                });
+            self.request_video_sheet(source, false);
+        }
         self.tab_preview.record(
             &self.tabs,
             self.path.as_deref(),
@@ -4298,6 +4367,20 @@ where
     }
 
     fn draw_seek_preview(&mut self, response: &egui::Response, ratio: f32, duration: Duration) {
+        let position = duration.mul_f32(ratio.clamp(0.0, 1.0));
+        let source = self
+            .session
+            .as_ref()
+            .and_then(PlaybackSession::timeline)
+            .and_then(|plan| plan.source_time(media_time(position)))
+            .map_or(position, |source| {
+                Duration::from_nanos(source.as_nanoseconds() as u64)
+            });
+        let target = self.request_video_sheet(source, true);
+        let sheet = target
+            .as_ref()
+            .and_then(|target| self.video_sheets.image(target, source));
+        let sheet_ready = sheet.is_some();
         let bucket = ((ratio * 20.0).floor() as u64).min(19);
         let sample = duration.mul_f64((bucket as f64 + 0.5) / 20.0);
         let (bucket, sample) = self
@@ -4311,6 +4394,7 @@ where
                 (nanos | (1 << 63), Duration::from_nanos(nanos))
             });
         if self.media_kind == Some(MediaKind::Video)
+            && sheet.is_none()
             && self
                 .hover_thumbnail
                 .as_ref()
@@ -4319,19 +4403,21 @@ where
             self.load_hover_thumbnail(sample, bucket);
         }
         seekbar::preview_tooltip(response, ratio).show(|ui| {
-            if let Some((cached, texture)) = &self.hover_thumbnail
+            let height =
+                (response.rect.top() - response.ctx.viewport_rect().top() - 40.0).clamp(1.0, 108.0);
+            if let Some(image) = sheet {
+                ui.add(image.max_size(egui::vec2(160.0, height)));
+            } else if let Some((cached, texture)) = &self.hover_thumbnail
                 && self.media_kind == Some(MediaKind::Video)
                 && *cached == bucket
             {
                 // Reserve space above the track for the caption, frame and tooltip gap.
-                let height = (response.rect.top() - response.ctx.viewport_rect().top() - 40.0)
-                    .clamp(1.0, 108.0);
                 ui.add(
                     egui::Image::new((texture.id(), texture.size_vec2()))
                         .max_size(egui::vec2(160.0, height)),
                 );
             }
-            if self.failed_thumbnails.contains(&bucket) {
+            if !sheet_ready && self.failed_thumbnails.contains(&bucket) {
                 ui.label("Thumbnail unavailable");
             }
             ui.monospace(format_time(media_time(duration.mul_f32(ratio))));
@@ -5070,6 +5156,7 @@ where
             CommandId::AudioExportOptions => self.open_audio_export_options(),
             CommandId::MetadataExportOptions => self.open_metadata_export_options(),
             CommandId::ToggleTimeline => {
+                self.video_sheets.clear();
                 self.thumbnail_worker.clear();
                 self.thumbnail_loading = None;
                 self.hover_thumbnail = None;
@@ -6725,6 +6812,7 @@ where
     }
 
     fn prepare_graphics_recovery(&mut self) {
+        self.video_sheets.clear();
         let position = self.current_position();
         self.graphics_epoch = self.graphics_epoch.wrapping_add(1);
         self.tab_preview.clear();
@@ -6775,6 +6863,7 @@ where
         position: MediaTime,
         state: PlaybackState,
     ) {
+        self.video_sheets.clear();
         self.state = state;
         let graphics_device = renderer.graphics_device();
         for saved in self.retained_playback.values_mut() {

@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 V02/U10 video-sheet checkpoint: 16コマ単位の有界sheetを現在位置から先読みし、Seek hoverを優先、同sheet内は一つのtextureのUVだけを変える。短編20区間／長編約5秒間隔、共有memory／diskと生成集約、Seekの2枚LRU／tab別texture、単枚の初期応答fallback、世代取消／上限／GPU復旧へ接続。実H.264の生成／cache時間と画素、headlessのtexture uploadなし／優先度／LRUを確認。ownerから可視window操作の許可を受け、所有する生成素材windowで実mouse hover／Seek／tab表示と停止位置不変を確認した。先行a086f6bのCI34481359872は成功、08430ebのCI34481983430はcancelledで成功扱いしない。本画面scrub、全codec／長GOP・mixed-DPI・peak負荷と全UX台帳は継続する。
+
 2026-09-10 I03/U10 prefetch-seed checkpoint: 既存の隣静止画先読みから共有縮小previewを供給し、原寸cache hitからも再decodeせず再登録する。mutexを解放して縮小し、原寸／縮小予算・先読み枚数を増やさず、表示通知を出さない。実PNGの画素／alpha／寸法・filmstrip再利用／disk生成なし・原寸Arc同一と、取消／source変更／close／失敗／animation拒否を確認する。静止画first-decode／cold-storage性能、animation先読み、動画sheet／GPU共有と全UX台帳は継続。先行a086f6bのCI34481359872は確認時実行中。
 
 2026-09-10 I03/U10 first-frame checkpoint: GIF／APNG／animated WebP／AVIFの原寸decodeから最初の借用frameを縮小し、全frame完了前にImagesReadyで通常／readingへ公開する。追加decoder／process／原寸コピーはなく、元寸法・共有preview上限を維持。mailboxの一件枠、原寸成功／失敗時の退役、source変更／取消／close拒否と実codecの画素／timing不変・予算を確認する。AVIFの取消／予算診断が一般consumer停止で隠れる点も修正する。先行8b03da5のCI34479689433は成功。静止画first-decode・cold-storage／可視UI時間・先読みpreview／動画sheet／GPU共有と全UX台帳は継続し、ローンチ準備は再開しない。

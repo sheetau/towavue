@@ -17,6 +17,9 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CACHE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const IMAGE_PREVIEW_VARIANT: &str = "filmstrip-image-v4";
+#[path = "video_preview_sheet.rs"]
+mod video_sheet;
+pub use video_sheet::{VideoPreviewSheet, VideoSheetLayout};
 #[cfg(test)]
 #[path = "preview_sharing_tests.rs"]
 mod sharing_tests;

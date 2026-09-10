@@ -25,6 +25,7 @@ pub struct TabPreview {
     generation: u64,
     target: Option<Target>,
     texture: Option<Result<TextureHandle, String>>,
+    sheet_uv: Option<egui::Rect>,
     positions: BTreeMap<TabId, LastPosition>,
 }
 
@@ -35,6 +36,7 @@ impl TabPreview {
             generation: 0,
             target: None,
             texture: None,
+            sheet_uv: None,
             positions: BTreeMap::new(),
         })
     }
@@ -53,15 +55,15 @@ impl TabPreview {
             && Some(tab.target.current_path()) == path
             && tab.target.media_kind() == MediaKind::Video
         {
-            let position = if let Some(plan) = timeline {
-                let duration = Duration::from_nanos(plan.duration().as_nanoseconds() as u64);
-                plan.source_time(crate::media_time(sample_time(position, Some(duration))))
+            let source = if let Some(plan) = timeline {
+                plan.source_time(crate::media_time(position))
                     .map_or(Duration::ZERO, |source| {
                         Duration::from_nanos(source.as_nanoseconds() as u64)
                     })
             } else {
-                sample_time(position, duration)
+                position
             };
+            let position = sample_time(source, duration);
             self.positions.insert(
                 tab.id,
                 LastPosition {
@@ -92,6 +94,7 @@ impl TabPreview {
             self.worker.clear();
             self.generation = self.generation.wrapping_add(1);
             self.texture = None;
+            self.sheet_uv = None;
         }
     }
 
@@ -111,14 +114,57 @@ impl TabPreview {
         let cache = cache.clone();
         self.worker.submit(move |cancellation| {
             let cache = cache.cancellable(cancellation.clone());
-            let result = if target.kind == MediaKind::Video {
-                cache.thumbnail(&target.path, target.position, 240)
-            } else {
-                cache
-                    .filmstrip(&target.path, target.kind)
-                    .map(|media| media.image)
+            if target.kind == MediaKind::Video {
+                let mut first_preview_sent = false;
+                let result = cache
+                    .duration(&target.path)
+                    .and_then(|duration| {
+                        let layout = towavue_runtime_windows::VideoSheetLayout::for_position(
+                            duration,
+                            target.position,
+                        )
+                        .ok_or(towavue_runtime_windows::PreviewError::InvalidDuration)?;
+                        if let Some(sheet) = cache.cached_video_sheet(&target.path, layout)? {
+                            return Ok(sheet);
+                        }
+                        let first = cache
+                            .thumbnail(&target.path, target.position, 240)
+                            .map_err(|error| error.to_string());
+                        if !cancellation.is_cancelled() {
+                            notify(crate::AppEvent::TabPreview(
+                                target.clone(),
+                                generation,
+                                first,
+                            ));
+                            first_preview_sent = true;
+                        }
+                        cache.video_sheet(&target.path, layout)
+                    })
+                    .map_err(|error| error.to_string());
+                if !cancellation.is_cancelled() {
+                    match result {
+                        Ok(sheet) => notify(crate::AppEvent::TabVideoSheet(
+                            target,
+                            generation,
+                            Ok(sheet),
+                        )),
+                        Err(_) if !first_preview_sent => {
+                            let result = cache
+                                .thumbnail(&target.path, target.position, 240)
+                                .map_err(|error| error.to_string());
+                            if !cancellation.is_cancelled() {
+                                notify(crate::AppEvent::TabPreview(target, generation, result));
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                }
+                return;
             }
-            .map_err(|error| error.to_string());
+            let result = cache
+                .filmstrip(&target.path, target.kind)
+                .map(|media| media.image)
+                .map_err(|error| error.to_string());
             if !cancellation.is_cancelled() {
                 notify(crate::AppEvent::TabPreview(target, generation, result));
             }
@@ -135,6 +181,7 @@ impl TabPreview {
         if generation != self.generation || self.target.as_ref() != Some(&target) {
             return;
         }
+        self.sheet_uv = None;
         self.texture = Some(result.and_then(|image| {
             let limit = context.input(|input| input.max_texture_side);
             if image.width as usize > limit || image.height as usize > limit {
@@ -152,6 +199,32 @@ impl TabPreview {
         context.request_repaint();
     }
 
+    pub fn finish_sheet(
+        &mut self,
+        context: &egui::Context,
+        target: Target,
+        generation: u64,
+        result: Result<towavue_runtime_windows::VideoPreviewSheet, String>,
+    ) {
+        if generation != self.generation || self.target.as_ref() != Some(&target) {
+            return;
+        }
+        let mut uv = None;
+        let pixels = result.and_then(|sheet| {
+            let [left, top, right, bottom] = sheet
+                .layout
+                .uv(target.position)
+                .ok_or_else(|| "Video sheet does not contain the requested position".to_owned())?;
+            uv = Some(egui::Rect::from_min_max(
+                egui::pos2(left, top),
+                egui::pos2(right, bottom),
+            ));
+            Ok(sheet.image)
+        });
+        self.finish(context, target, generation, pixels);
+        self.sheet_uv = uv;
+    }
+
     pub fn show(&self, response: &egui::Response, target: &Target) {
         let mut tooltip = egui::Tooltip::for_enabled(response).width(240.0);
         tooltip.popup = tooltip
@@ -165,10 +238,19 @@ impl TabPreview {
                 .flatten();
             match texture {
                 Some(Ok(texture)) => {
-                    ui.add(
-                        egui::Image::new((texture.id(), texture.size_vec2()))
-                            .max_size(egui::vec2(240.0, 160.0)),
-                    );
+                    let size = self
+                        .sheet_uv
+                        .map_or_else(|| texture.size_vec2(), |_| egui::vec2(240.0, 160.0));
+                    let mut image = egui::Image::new((texture.id(), size))
+                        .uv(self.sheet_uv.unwrap_or(egui::Rect::from_min_max(
+                            egui::Pos2::ZERO,
+                            egui::pos2(1.0, 1.0),
+                        )))
+                        .max_size(egui::vec2(240.0, 160.0));
+                    if self.sheet_uv.is_some() {
+                        image = image.rotate(0.0, egui::vec2(0.5, 0.5));
+                    }
+                    ui.add(image);
                 }
                 result => {
                     ui.label(if result.is_some() {
@@ -192,9 +274,9 @@ impl TabPreview {
 fn sample_time(position: Duration, duration: Option<Duration>) -> Duration {
     match duration.filter(|duration| !duration.is_zero()) {
         Some(duration) => {
-            let bucket =
-                ((position.as_secs_f64() / duration.as_secs_f64() * 20.0).floor() as u64).min(19);
-            duration.mul_f64((bucket as f64 + 0.5) / 20.0)
+            towavue_runtime_windows::VideoSheetLayout::for_position(duration, position)
+                .and_then(|layout| layout.sample_position(position))
+                .unwrap_or(position)
         }
         None => Duration::from_secs(position.as_secs()),
     }
@@ -275,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn edited_preview_samples_in_edited_time_then_maps_to_the_source() {
+    fn edited_preview_maps_current_time_before_selecting_a_source_sheet_cell() {
         use towavue_core::{EditTimeline, MediaTime, PlaybackRange, TimeRange, TimelineEdit};
         let time = |seconds: i64| MediaTime::from_nanoseconds(seconds * 1_000_000_000);
         let mut plan = EditTimeline::new(time(100), PlaybackRange::default()).expect("plan");
@@ -293,7 +375,7 @@ mod tests {
             Some(&plan),
         );
         let target = preview.target(tabs.active().expect("tab"));
-        assert_eq!(target.position, Duration::from_millis(71500));
+        assert_eq!(target.position, Duration::from_millis(72500));
         tabs.open_new("other.png".into(), MediaKind::Image);
         assert_eq!(preview.target(&tabs.tabs()[0]), target);
     }

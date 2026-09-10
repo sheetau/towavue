@@ -678,7 +678,9 @@ pub(crate) fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
                     towavue_core::ResampleFilter::Bicubic => "bicubic",
                     towavue_core::ResampleFilter::Lanczos => "lanczos",
                 };
-                Some(format!("format=gbrp,scale={width}:{height}:flags={flags},format=gbrp,setsar=1"))
+                // Preserve full RGB input; the scaler otherwise subsamples color
+                // for even-width sources reduced by at least half, even in GBRP.
+                Some(format!("format=gbrp,scale={width}:{height}:flags={flags}+full_chroma_inp,format=gbrp,setsar=1"))
             }
             EditOperation::RotateVideo(rotation) => {
                 if rotation.tenths() == 0 { return None; }

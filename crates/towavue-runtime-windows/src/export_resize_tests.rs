@@ -94,7 +94,7 @@ fn video_resize_exports_all_filters_exact_dimensions_sar_and_identity() {
                 "null".to_owned()
             } else {
                 format!(
-                    "format=gbrp,scale=w={}:h={}:flags={flag},format=gbrp,setsar=1,copy",
+                    "format=gbrp,scale=w={}:h={}:flags={flag}+full_chroma_inp,format=gbrp,setsar=1,copy",
                     output.0, output.1
                 )
             };
@@ -169,7 +169,7 @@ fn video_resize_composes_with_rotation_crop_and_refuses_stale_or_wrong_media_bef
     };
     export_media(&request).expect("composed resize");
     let reference = root.join("reference.mp4");
-    let filter = "format=gbrp,scale=96:48:flags=lanczos,format=gbrp,setsar=1,crop=64:32:4:6:exact=1,transpose=clock,rotate=317*PI/1800:ow='ceil(rotw(317*PI/1800))':oh='ceil(roth(317*PI/1800))':c=black:bilinear=1,pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:color=black,setsar=1,hflip,scale=80:60:flags=bicubic,format=gbrp,setsar=1,transpose=cclock,copy";
+    let filter = "format=gbrp,scale=96:48:flags=lanczos+full_chroma_inp,format=gbrp,setsar=1,crop=64:32:4:6:exact=1,transpose=clock,rotate=317*PI/1800:ow='ceil(rotw(317*PI/1800))':oh='ceil(roth(317*PI/1800))':c=black:bilinear=1,pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:color=black,setsar=1,hflip,scale=80:60:flags=bicubic+full_chroma_inp,format=gbrp,setsar=1,transpose=cclock,copy";
     run(
         &executable,
         &["-v", "error", "-i"],

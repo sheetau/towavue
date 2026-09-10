@@ -1,6 +1,7 @@
 use towavue_core::{EditOperation, MediaKind, UnitPoint};
 
 use super::RenderError;
+use super::resample::FilterSpec;
 use crate::VideoOrientation;
 
 const MAX_BYTES: u64 = 512 * 1024 * 1024;
@@ -12,11 +13,25 @@ pub(super) struct Stage {
     pub slot: usize,
     // Pixel-center mapping, followed by the active canvas and rotation boundary mode.
     pub constants: [[f32; 4]; 4],
+    pub filter: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct Slot {
+    pub size: Size,
+    pub floating_point: bool,
+}
+
+impl Slot {
+    fn bytes(self) -> u64 {
+        u64::from(self.size.0) * u64::from(self.size.1) * if self.floating_point { 8 } else { 4 }
+    }
 }
 
 pub(crate) struct Plan {
     pub(super) stages: Vec<Stage>,
-    pub(super) slots: Vec<Size>,
+    pub(super) slots: Vec<Slot>,
+    pub(super) filters: Vec<FilterSpec>,
     pub(crate) size: Size,
     pub(crate) pixel_aspect: f32,
 }
@@ -32,6 +47,7 @@ impl Plan {
         let mut plan = Self {
             stages: Vec::new(),
             slots: Vec::new(),
+            filters: Vec::new(),
             size: source,
             pixel_aspect,
         };
@@ -53,8 +69,16 @@ impl Plan {
             let identity = VideoOrientation::default().source_uv();
             match *operation {
                 EditOperation::ResizeVideo(resize) if !resize.is_identity() => {
-                    // Resampling filters must be implemented before exposing this GPU path.
-                    return Err(RenderError::InvalidVideoEdit);
+                    if size != resize.source_size()
+                        || (plan.pixel_aspect - resize.source_pixel_aspect()).abs()
+                            > plan.pixel_aspect.abs() * 0.00001
+                    {
+                        return Err(RenderError::InvalidVideoEdit);
+                    }
+                    let output = resize.size();
+                    plan.resample((output.0, size.1), resize.filter(), true, max_side)?;
+                    plan.resample(output, resize.filter(), false, max_side)?;
+                    plan.pixel_aspect = 1.0;
                 }
                 EditOperation::RotateVideo(rotation) if rotation.tenths() != 0 => {
                     if size != rotation.source_size()
@@ -213,32 +237,92 @@ impl Plan {
         constants: [[f32; 4]; 4],
         max_side: usize,
     ) -> Result<(), RenderError> {
+        self.push_stage(size, constants, None, false, max_side)
+    }
+
+    fn resample(
+        &mut self,
+        size: Size,
+        filter: towavue_core::ResampleFilter,
+        horizontal: bool,
+        max_side: usize,
+    ) -> Result<(), RenderError> {
+        let spec = FilterSpec {
+            source: if horizontal { self.size.0 } else { self.size.1 },
+            target: if horizontal { size.0 } else { size.1 },
+            filter,
+        };
+        let index = if let Some(index) = self.filters.iter().position(|value| *value == spec) {
+            index
+        } else {
+            if self.bytes() + spec.bytes() > MAX_BYTES {
+                return Err(RenderError::VideoEditBudget);
+            }
+            self.filters.push(spec);
+            self.filters.len() - 1
+        };
+        self.push_stage(
+            size,
+            [
+                [0.0; 4],
+                [0.0; 4],
+                [0.0; 4],
+                [
+                    size.0 as f32,
+                    size.1 as f32,
+                    if horizontal { 2.0 } else { 3.0 },
+                    spec.taps() as f32,
+                ],
+            ],
+            Some(index),
+            horizontal,
+            max_side,
+        )
+    }
+
+    fn bytes(&self) -> u64 {
+        self.slots.iter().map(|slot| slot.bytes()).sum::<u64>()
+            + self
+                .filters
+                .iter()
+                .map(|filter| filter.bytes())
+                .sum::<u64>()
+    }
+
+    fn push_stage(
+        &mut self,
+        size: Size,
+        constants: [[f32; 4]; 4],
+        filter: Option<usize>,
+        floating_point: bool,
+        max_side: usize,
+    ) -> Result<(), RenderError> {
         self.validate_size(size, max_side)?;
+        let specification = Slot {
+            size,
+            floating_point,
+        };
         let previous = self.stages.last().map(|stage| stage.slot);
         let slot = if let Some(slot) = self
             .slots
             .iter()
             .enumerate()
-            .position(|(index, dimensions)| *dimensions == size && Some(index) != previous)
+            .position(|(index, slot)| *slot == specification && Some(index) != previous)
         {
             slot
         } else {
-            let bytes: u64 = self
-                .slots
-                .iter()
-                .chain(std::iter::once(&size))
-                .map(|(width, height)| u64::from(*width) * u64::from(*height) * 4)
-                .sum();
+            let bytes = self.bytes() + specification.bytes();
             if bytes > MAX_BYTES {
                 return Err(RenderError::VideoEditBudget);
             }
-            self.slots.push(size);
+            self.slots.push(specification);
             self.slots.len() - 1
         };
         self.stages.push(Stage {
             size,
             slot,
             constants,
+            filter,
         });
         self.size = size;
         Ok(())

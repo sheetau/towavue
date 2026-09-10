@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 動画resize／resampleのGPU基盤（2026-09-10 13:06、V05 UI未接続）
+
+横／縦のseparable GPU passを追加した。横中間はRGBA16 floatで負値とovershootを保ち、最終RGBA8でclampする。4filterの係数はsource／target長とfilter別に一度生成・uploadし、同一deviceのRG32 float textureを再利用する。geometry検証はspecだけを扱い、textureと係数payloadを合計512 MiBへ制限する。履歴変更時は旧poolを解放してから新規確保し、直前sourceとtargetを分離・pass後にunbindする。極端な縦横比では出力が許容寸法でも横中間の予算超過で拒否する。動画の操作UIは次の工程であり、このcheckpointではapp入口の拒否を維持する。
+
+画素比較で、64×48→30×18のNearestでも保存側に元にない色が出ることを再現した。固定FFmpegのlibswscale/utils.cの偶数幅RGB縮小時の色間引きが原因で、packed／planar出力とscalar実装へ切り分けた後、動画resizeのscaleだけに`full_chroma_inp`を明示して解消した。画像resize・回転のfilterは変更しない。独立referenceのflagも合わせ、4方式×9寸法条件、小さい／奇数source、4方式×3高彩度pattern×拡大縮小、metadata orientation／SAR／crop／自由回転／再resizeをWARPで確認。Nearestは完全一致、他方式は最大3段階以内。係数正規化・負値・縮小tap拡幅、2000resizeのslot／係数再利用、budget拒否、filter変更時の再生成、前frameとsource不変も回帰確認した。
+
+opt-in `hardware_video_resize_completion_latency_1080p_and_4k`はwindowも音声も使わず実hardware D3D11で測定する。adapter LUID low83637／high0、1920×1080→1280×720／3840×2160と3840×2160→1920×1080／240×136の4方式計16条件。計測外の全画素比較はNearest完全一致、他方式各色最大1。session31806終了0、SKIPなし。各条件はcold1回とwarm12回、CPUでのdraw開始からGPU event完了までを計り、frame readback／decode／present／UIを含まない。cold0.703～28.685ms、warm中央値0.051～16.002ms、最大16.038ms。品質readbackを挟まない先行測定ではwarm中央値0.068～0.207ms・最大12.838msであり、同じGPUでも待機・schedulingを含むwall時間には大きな差がある。これをGPU内部所要時間や安定した4K60再生の認定へ読み替えない。
+
+最終session55403はfmt check／Clippy／workspace441（app250／core61／runtime126／integration4）、app opt-in5件、Releaseが終了0。通常ignored12件は別計上し、そのうち新hardware計測1件は上記で明示実行済み。実H264 D3D11VAでは復旧前後の10描画点で回転／crop／再回転に4方式resizeを続け、再生位置・表示count保持、CPU transfer0、direct Video Processorへの復帰を確認した。新しいresize操作UIの認定ではない。Release SHA-256は`e3232ba0f90c7ee1bac700d1ae949cbf35a007c95447dc79e7f980720e1de373`。先行9c71d86のCI34434379354は成功。依存・vendor・DLL・公開／追加導入／clipboard・外部foreground入力は変更しない。全素材／HDR／hardware encode品質、通常window／mixed DPI／持続性能とUX全台帳の残件を維持して次へ進む。
+
 ### 動画resize／resampleの保存基盤（2026-09-10 12:40、V05 UI未接続）
 
 このcheckpointは操作UIを公開しない。VideoResizeへsource寸法／SARと指定出力・filterを保持し、video-onlyの一件の履歴とする。偶数16～16384px・128M pixels以内、出力SAR1で、同寸法かつ入力SAR1ならfilterによらず非編集／Redo保持。奇数sourceは許可する。初回の2×2 exportで同梱OpenH264が16px未満を明示拒否したため、既存動画cropと同じ下限をApply前に課す契約へ修正した。黙ってpaddingしない。

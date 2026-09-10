@@ -1,14 +1,26 @@
 use super::*;
 use windows::Win32::Graphics::Direct3D11::ID3D11ShaderResourceView;
+use windows::Win32::Graphics::Direct3D11::{D3D11_SUBRESOURCE_DATA, D3D11_USAGE_IMMUTABLE};
+use windows::Win32::Graphics::Dxgi::Common::{
+    DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R32G32_FLOAT,
+};
+
+#[path = "video_resample.rs"]
+mod resample;
 
 #[path = "video_raster_plan.rs"]
 mod plan;
 pub(crate) use plan::Plan;
 
 struct Surface {
-    size: (u32, u32),
+    specification: plan::Slot,
     texture: ID3D11Texture2D,
     target: ID3D11RenderTargetView,
+    source: ID3D11ShaderResourceView,
+}
+
+struct Coefficients {
+    specification: resample::FilterSpec,
     source: ID3D11ShaderResourceView,
 }
 
@@ -16,6 +28,7 @@ pub(super) struct VideoRaster {
     shader: ID3D11PixelShader,
     constants: ID3D11Buffer,
     surfaces: Vec<Surface>,
+    filters: Vec<Coefficients>,
 }
 
 impl VideoRaster {
@@ -42,6 +55,7 @@ impl VideoRaster {
             shader: shader.expect("D3D11 pixel shader"),
             constants: constants.expect("D3D11 constant buffer"),
             surfaces: Vec::new(),
+            filters: Vec::new(),
         })
     }
 
@@ -49,15 +63,22 @@ impl VideoRaster {
         if self
             .surfaces
             .iter()
-            .map(|surface| surface.size)
+            .map(|surface| surface.specification)
             .eq(plan.slots.iter().copied())
+            && self
+                .filters
+                .iter()
+                .map(|filter| filter.specification)
+                .eq(plan.filters.iter().copied())
         {
             return Ok(());
         }
         // No stage views stay bound after draw. Drop the old pool before allocation,
         // so changing histories does not double the validated 512 MiB payload budget.
         self.surfaces.clear();
-        for &(width, height) in &plan.slots {
+        self.filters.clear();
+        for specification in &plan.slots {
+            let (width, height) = specification.size;
             let mut texture = None;
             let mut target = None;
             let mut source = None;
@@ -70,7 +91,11 @@ impl VideoRaster {
                         Height: height,
                         MipLevels: 1,
                         ArraySize: 1,
-                        Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                        Format: if specification.floating_point {
+                            DXGI_FORMAT_R16G16B16A16_FLOAT
+                        } else {
+                            DXGI_FORMAT_R8G8B8A8_UNORM
+                        },
                         SampleDesc: DXGI_SAMPLE_DESC {
                             Count: 1,
                             Quality: 0,
@@ -88,10 +113,51 @@ impl VideoRaster {
                 device.CreateShaderResourceView(texture, None, Some(&mut source))?;
             }
             self.surfaces.push(Surface {
-                size: (width, height),
+                specification: *specification,
                 texture: texture.expect("D3D11 raster texture"),
                 target: target.expect("D3D11 raster target"),
                 source: source.expect("D3D11 raster source"),
+            });
+        }
+        for &specification in &plan.filters {
+            let coefficients = specification.coefficients();
+            let mut texture = None;
+            let mut source = None;
+            // Immutable coefficient upload copies this owned slice synchronously.
+            // The SRV retains its same-device texture after the local COM owner drops.
+            // It is only bound by this renderer's serialized event-loop thread.
+            unsafe {
+                device.CreateTexture2D(
+                    &D3D11_TEXTURE2D_DESC {
+                        Width: specification.taps(),
+                        Height: specification.target,
+                        MipLevels: 1,
+                        ArraySize: 1,
+                        Format: DXGI_FORMAT_R32G32_FLOAT,
+                        SampleDesc: DXGI_SAMPLE_DESC {
+                            Count: 1,
+                            Quality: 0,
+                        },
+                        Usage: D3D11_USAGE_IMMUTABLE,
+                        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+                        ..Default::default()
+                    },
+                    Some(&D3D11_SUBRESOURCE_DATA {
+                        pSysMem: coefficients.as_ptr().cast(),
+                        SysMemPitch: specification.taps() * 8,
+                        SysMemSlicePitch: 0,
+                    }),
+                    Some(&mut texture),
+                )?;
+                device.CreateShaderResourceView(
+                    texture.as_ref().expect("coefficient texture"),
+                    None,
+                    Some(&mut source),
+                )?;
+            }
+            self.filters.push(Coefficients {
+                specification,
+                source: source.expect("coefficient source"),
             });
         }
         Ok(())
@@ -139,7 +205,13 @@ impl VideoRaster {
                     Some(&[Some(surface.target.clone())]),
                     None::<&ID3D11DepthStencilView>,
                 );
-                context.PSSetShaderResources(0, Some(&[source]));
+                context.PSSetShaderResources(
+                    0,
+                    Some(&[
+                        source,
+                        stage.filter.map(|index| self.filters[index].source.clone()),
+                    ]),
+                );
                 context.RSSetViewports(Some(&[D3D11_VIEWPORT {
                     Width: stage.size.0 as f32,
                     Height: stage.size.1 as f32,
@@ -148,7 +220,7 @@ impl VideoRaster {
                     ..Default::default()
                 }]));
                 context.Draw(3, 0);
-                context.PSSetShaderResources(0, Some(&[None]));
+                context.PSSetShaderResources(0, Some(&[None, None]));
                 context.OMSetRenderTargets(None, None::<&ID3D11DepthStencilView>);
                 source = Some(surface.source.clone());
             }

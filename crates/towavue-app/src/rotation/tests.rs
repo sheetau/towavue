@@ -2,7 +2,7 @@ use super::*;
 use std::sync::mpsc;
 
 #[test]
-fn video_resize_foundation_rejects_app_and_gpu_use_until_display_is_connected() {
+fn video_resize_foundation_rejects_app_use_until_ui_is_connected() {
     let (mut app, _) = application();
     app.image_view.selection = Some(UnitRect::FULL);
     app.image_view.zoom = ZoomMode::Custom(2.0);
@@ -22,7 +22,7 @@ fn video_resize_foundation_rejects_app_and_gpu_use_until_display_is_connected() 
         assert_eq!(app.edits, edits);
         assert_eq!(app.image_view, view);
     }
-    assert!(
+    assert_eq!(
         towavue_runtime_windows::video_edit_geometry(
             (64, 48),
             2.0,
@@ -30,7 +30,8 @@ fn video_resize_foundation_rejects_app_and_gpu_use_until_display_is_connected() 
             &[EditOperation::ResizeVideo(resize)],
             16384
         )
-        .is_err()
+        .expect("GPU resize geometry"),
+        (96, 48, 1.0)
     );
     let transformed = ImageTransform::new(
         (64, 48),

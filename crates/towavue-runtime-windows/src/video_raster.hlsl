@@ -1,4 +1,5 @@
 Texture2D source_texture : register(t0);
+Texture2D<float2> coefficients : register(t1);
 SamplerState source_sampler : register(s0);
 cbuffer RasterTransform : register(b0) {
     float4 origin;
@@ -10,6 +11,18 @@ cbuffer RasterTransform : register(b0) {
 float4 main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
     float2 pixel = position.xy - 0.5;
     if (any(pixel >= canvas.xy)) return float4(0, 0, 0, 1);
+    if (canvas.z >= 2) {
+        bool horizontal = canvas.z == 2;
+        int destination = int(horizontal ? pixel.x : pixel.y);
+        float3 sum = 0;
+        [loop] for (int tap = 0; tap < int(canvas.w); ++tap) {
+            float2 coefficient = coefficients.Load(int3(tap, destination, 0));
+            int2 sample = horizontal ? int2(coefficient.x, pixel.y) : int2(pixel.x, coefficient.x);
+            sum += source_texture.Load(int3(sample, 0)).rgb * coefficient.y;
+        }
+        // The horizontal target is signed float; only the final RGBA8 target clamps.
+        return float4(sum, 1);
+    }
     uint width, height;
     source_texture.GetDimensions(width, height);
     float2 size = float2(width, height);

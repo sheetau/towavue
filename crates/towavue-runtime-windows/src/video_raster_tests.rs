@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "video_resample_tests.rs"]
+mod resample_tests;
 use std::io::Write;
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -43,6 +46,10 @@ struct Gpu {
 impl Gpu {
     fn new() -> Self {
         let graphics = GraphicsDevice::warp_for_test().expect("offscreen WARP device");
+        Self::with_graphics(graphics)
+    }
+
+    fn with_graphics(graphics: GraphicsDevice) -> Self {
         // This test owns its windowless device and uses its context on this thread only.
         let context = unsafe { graphics.device.GetImmediateContext() }.expect("context");
         let blitter = SoftwareBlitter::new(&graphics.device).expect("blitter");
@@ -190,7 +197,10 @@ fn reference(size: (u32, u32), rgba: &[u8], filter: &str) -> Vec<u8> {
 fn raster_plan_validates_context_and_budgets_exact_size_reusable_slots() {
     let flips = vec![Edit::FlipHorizontal; 1000];
     let p = plan((16384, 16), 1.0, &flips);
-    assert_eq!(p.slots, [(16384, 16), (16384, 16)]);
+    assert_eq!(
+        p.slots.iter().map(|slot| slot.size).collect::<Vec<_>>(),
+        [(16384, 16), (16384, 16)]
+    );
     assert!(p.stages.windows(2).all(|pair| pair[0].slot != pair[1].slot));
     let p = plan(
         (16384, 16),
@@ -201,7 +211,10 @@ fn raster_plan_validates_context_and_budgets_exact_size_reusable_slots() {
             Edit::RotateClockwise,
         ],
     );
-    assert_eq!(p.slots, [(16, 16384), (16384, 16)]);
+    assert_eq!(
+        p.slots.iter().map(|slot| slot.size).collect::<Vec<_>>(),
+        [(16, 16384), (16384, 16)]
+    );
     assert_eq!((p.size, p.pixel_aspect), ((16, 16384), 0.5));
     let p = plan((8192, 8192), 1.0, &flips);
     assert_eq!(p.slots.len(), 2); // Exactly 512 MiB; no allocation in this test.

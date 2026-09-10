@@ -84,7 +84,7 @@ pub enum RenderError {
     HdrConversionUnsupported,
     #[error("video edit dimensions, pixel aspect, or operation are invalid for this frame")]
     InvalidVideoEdit,
-    #[error("video edit exceeds the device texture size or 512 MiB intermediate RGBA budget")]
+    #[error("video edit exceeds the device texture size or 512 MiB raster and coefficient budget")]
     VideoEditBudget,
 }
 

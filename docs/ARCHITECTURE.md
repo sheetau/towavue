@@ -10,6 +10,10 @@ Nearest／Bilinear／Bicubic／Lanczosの4方式を画像と共有する。保�
 
 GPU接続前の固定source照合: FFmpegのlibswscale/utils.cではBicubicの既定B=0／C=0.6、Lanczosの半径3を用い、縮小率に応じてkernelの幅を広げ、境界の係数を端へ集約して正規化する。libswscale/swscale.cの水平中間は符号付き精度を保持する。単純な固定2／4／6点sampleや各軸後のRGBA8 clampを同じfilterの証明にしない。GPU側も縮小のalias抑制と中間精度を考慮し、画素・memory予算・速度を実測してからUIへ公開する。
 
+GPU resize実装方針（2026-09-10追加）: 横／縦のseparable passとし、横中間はRGBA16 floatで負の補間値を保持、最終出力でRGBA8へ戻す。source／target長・filterに対応する正規化係数はCPU上で一度計算し、同一deviceの読取専用RG32 float textureへ転送・再利用する。media画素のCPU readbackは行わない。geometry planでは係数を生成せずspecだけ扱い、寸法・format別の中間textureと係数payloadを合わせて512 MiB以内へ制限する。隣接stageのsource／target分離と各pass後のunbindを維持する。縮小率に応じたtap数を使い、固定tapへ切り詰めない。画素比較・精度・速度の検証が終わるまでUIは公開しない。
+
+2026-09-10実装・画素照合: 上記GPU処理を接続し、WARPの拡大／縮小／奇数・極小source／高彩度pattern／metadata orientation／crop／回転／再resizeと、実GPUの1080p／4Kを独立FFmpeg出力へ比較する。固定libswscaleは偶数幅RGBから半分以下へ縮小する時、標準flagでは入力色を間引くことがあり、64×48→30×18のNearestでも元にない色を再現した。動画ResizeVideoのexportに限り`full_chroma_inp`を明示し、GBRP8の各色を保持する。GPUのNearestは完全一致、他方式は固定小型fixtureで各色最大3以内、実GPUの16条件で最大1以内を確認。一般素材のbyte一致保証ではない。横中間を含めたpayload予算を超える縦横比変更は出力寸法が範囲内でも拒否する。512 MiBはdecode／入力画像／driver／CPU係数生成時の一時領域を含むprocess全体の上限ではない。UIは次のsliceで接続する。
+
 ## V05: 動画の表示zoom／pan契約（2026-09-10）
 
 動画のzoomは画素編集ではなくImageViewStateの表示状態とする。草案の操作制限に合わせ、倍率変更・右dragはtimeline表示中だけ許可し、閉じた視聴中／fullscreenでも確定したzoom／panは保持する。Zoom in/out・Actual size・Fit・Coverは既存command／custom binding／View menuを画像と共有し、音声は対象外。Ctrl＋wheelは現在のpointerを基点に実zoom_deltaを使い、Ctrlを離した後の平滑化残量では変更しない。overlay／modal／別gestureが入力を所有する間も変更しない。keyboard/menuのzoomは画像と同じ中心基準、右dragの取消しは開始前のpanへ戻す。window geometry／focus・cursor喪失／別操作では途中panを取消する。

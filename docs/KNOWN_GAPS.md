@@ -6,7 +6,7 @@
 
 ## 1. 試用前に知るべき制約
 
-2026-09-10: 動画resizeのcore値／履歴とsoftware保存基盤を追加。出力は偶数16～16384px・128M pixels以内、SAR1。Nearest／Bilinear／Bicubic／Lanczosを明示し、拡大・縮小・奇数source／SAR・同寸法と合成順序を回帰確認した。OpenH264の実拒否により16px未満はApply前に拒否する契約へ揃え、黙ってpaddingしない。GPUの4方式・中間精度／予算と操作UIは未接続なので利用不可。全素材・HDR・hardware encode品質や通常windowの認定は別残件。
+2026-09-10: 動画resizeのcore値／履歴・software保存とGPU4方式を接続。出力は偶数16～16384px・128M pixels以内、SAR1。Nearest／Bilinear／Bicubic／Lanczosを明示し、拡大・縮小・奇数／極小source・SARと合成順序を回帰確認した。GPUは符号付きfloat中間と係数を再利用し、合計512 MiBを超える編集を拒否するため、出力寸法が範囲内でも利用できない縦横比／履歴がある。保存の縮小時色間引きは明示無効化。OpenH264に合わせた16px下限は維持し、黙ってpaddingしない。操作UIは未接続なのでアプリからは利用不可。代表GPU／WARPの精度・速度比較は全素材・HDR・hardware encode品質・安定した連続再生や通常windowの認定ではない。
 
 2026-09-10: 動画のtimeline表示中にCtrl＋wheel／+・-／100%／Fit／Coverと右drag panを接続した。表示clipはUVだけへ反映し、保存・選択・履歴は変えない。閉じたtimeline／fullscreen／tab復帰では倍率・panを保持する。Actualは表示向きの画素行を1 physical pxにし、横のSARは維持する。動画resize／resample、通常windowの物理操作・混在DPI／全素材品質・性能は未完。hardwareのzoomは既存の同一device内RGBA中間描画を使い、CPU転送を増やさない。
 

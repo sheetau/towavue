@@ -4960,7 +4960,7 @@ where
 
     fn push_visual_edit(&mut self, operation: EditOperation) {
         if matches!(operation, EditOperation::ResizeVideo(_)) {
-            self.set_status("Video resampling display is not connected yet".into());
+            self.set_status("Video resampling controls are not connected yet".into());
             return;
         }
         if matches!(operation, EditOperation::RotateVideo(value) if value.tenths() == 0) {
@@ -14240,6 +14240,24 @@ mod tests {
                             .expect("ordered same-device hardware raster")
                     );
                     renderer.present_surface().expect("present raster");
+                    for filter in [
+                        towavue_core::ResampleFilter::Nearest,
+                        towavue_core::ResampleFilter::Bilinear,
+                        towavue_core::ResampleFilter::Bicubic,
+                        towavue_core::ResampleFilter::Lanczos,
+                    ] {
+                        let mut resized = edits.to_vec();
+                        resized.push(EditOperation::ResizeVideo(
+                            towavue_core::VideoResize::new((96, 64), filter, second.size(), 1.0)
+                                .expect("hardware resize"),
+                        ));
+                        assert!(
+                            session
+                                .draw_current_edited(renderer, destination, identity, &resized)
+                                .expect("same-device four-filter resize")
+                        );
+                        renderer.present_surface().expect("present resized raster");
+                    }
                     assert_eq!(session.metrics().cpu_transfer_count, 0);
                     assert_eq!(
                         session.metrics().presented_frame_count,
@@ -14255,7 +14273,7 @@ mod tests {
                         .present_surface()
                         .expect("present direct video again");
                     eprintln!(
-                        "PASS ordered hardware rotation/crop/rotation and direct-path return; CPU transfers 0"
+                        "PASS ordered hardware rotation/crop/rotation, four-filter resize and direct-path return; CPU transfers 0"
                     );
                     video_rotation::tests::hardware_dialog_preview(app);
                     return;

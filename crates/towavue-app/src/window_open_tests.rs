@@ -34,17 +34,30 @@ fn queued_filmstrip_windows_validate_source_identity_and_coalesce_duplicate_acti
     let tab = app.tabs.open_new(paths[0].clone(), MediaKind::Image);
     app.folder_snapshot = Some(snapshot(&paths));
     app.filmstrip_open = true;
-    app.handle_ui_action(UiAction::OpenWindow(paths[1].clone(), 41));
-    app.handle_ui_action(UiAction::OpenWindow(root.join("foreign.png"), 42));
+    app.handle_ui_action(UiAction::OpenWindow(paths[1].clone(), 41, egui::Pos2::ZERO));
+    app.handle_ui_action(UiAction::OpenWindow(
+        root.join("foreign.png"),
+        42,
+        egui::Pos2::ZERO,
+    ));
     assert!(app.pending_window_open.is_none());
     app.palette_open = true;
-    app.handle_ui_action(UiAction::OpenWindow(paths[1].clone(), 42));
+    app.handle_ui_action(UiAction::OpenWindow(paths[1].clone(), 42, egui::Pos2::ZERO));
     assert!(app.pending_window_open.is_none());
     app.palette_open = false;
-    app.handle_ui_action(UiAction::OpenWindow(paths[1].clone(), 42));
-    app.handle_ui_action(UiAction::OpenWindow(paths[0].clone(), 42));
+    for point in [egui::pos2(f32::NAN, 0.0), egui::pos2(0.0, f32::INFINITY)] {
+        app.handle_ui_action(UiAction::OpenWindow(paths[1].clone(), 42, point));
+        assert!(app.pending_window_open.is_none());
+    }
+    app.handle_ui_action(UiAction::OpenWindow(
+        paths[1].clone(),
+        42,
+        egui::pos2(20.0, 40.0),
+    ));
+    app.handle_ui_action(UiAction::OpenWindow(paths[0].clone(), 42, egui::Pos2::ZERO));
     let request = app.pending_window_open.take().expect("one queued action");
     assert_eq!(request.path, paths[1]);
+    assert_eq!(request.client_origin, egui::pos2(20.0, 40.0));
     assert!(app.window_open_request_is_current(&request));
     app.filmstrip_open = false;
     assert!(!app.window_open_request_is_current(&request));
@@ -152,7 +165,11 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
 
     let app = host.windows.get_mut(&source).expect("source");
     app.filmstrip_open = true;
-    app.handle_ui_action(UiAction::OpenWindow(image_path.clone(), 42));
+    app.handle_ui_action(UiAction::OpenWindow(
+        image_path.clone(),
+        42,
+        egui::Pos2::ZERO,
+    ));
     let request = app.pending_window_open.take().expect("request");
     assert!(
         host.open_filmstrip_window_with(source, &request, false, |_, _| Err(
@@ -174,7 +191,19 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     for path in &paths {
         let app = host.windows.get_mut(&source).expect("source");
         app.filmstrip_open = true;
-        app.handle_ui_action(UiAction::OpenWindow(path.clone(), 42));
+        let client_origin = egui::pos2(-80.0, 60.0);
+        let origin = app
+            .window
+            .as_ref()
+            .expect("source window")
+            .inner_position()
+            .expect("origin");
+        let density = app.ui_context.as_ref().expect("context").pixels_per_point();
+        let expected_position = winit::dpi::PhysicalPosition::new(
+            origin.x + (client_origin.x * density).round() as i32,
+            origin.y + (client_origin.y * density).round() as i32,
+        );
+        app.handle_ui_action(UiAction::OpenWindow(path.clone(), 42, client_origin));
         let keys: Vec<_> = host.windows.keys().copied().collect();
         host.open_pending_windows(event_loop, false);
         let child = *host
@@ -184,6 +213,15 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
             .expect("hosted filmstrip child");
         assert_eq!(host.windows.len(), window_count + 1);
         let app = host.windows.get_mut(&child).expect("child");
+        assert_eq!(
+            app.window
+                .as_ref()
+                .expect("child window")
+                .inner_position()
+                .expect("position"),
+            expected_position,
+            "filmstrip child must open at the dragged card origin"
+        );
         assert_eq!(
             app.window.as_ref().expect("child window").is_visible(),
             Some(false)
@@ -260,7 +298,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let missing = source_path.with_file_name("missing-filmstrip.png");
     app.folder_snapshot = Some(snapshot(&[source_path, missing.clone()]));
     app.filmstrip_open = true;
-    app.handle_ui_action(UiAction::OpenWindow(missing, 42));
+    app.handle_ui_action(UiAction::OpenWindow(missing, 42, egui::Pos2::ZERO));
     host.open_pending_windows(event_loop, false);
     assert_eq!(host.windows.len(), window_count);
     let app = host.windows.get_mut(&source).expect("source");

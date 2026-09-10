@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 U08 filmstrip-position checkpoint: filmstrip外dropもrelease位置を無視していたため、浮遊カード左上を要求へ引き継ぎ、タブ分離と共通の座標変換で表示前に配置する。元tab／未保存編集は保持し、子は元ファイルを独立Openする。旧native位置回帰の失敗→修正後成功、3幅×3密度、非有限座標／stale／重複・失敗時保持を確認。可視の生成動画／PNG／無音WAVで位置／foreground、編集済み元動画と未編集子の画素一致、画像の均一色144点と音声終端を確認。1404496のCI34508201666は成功。mixed-DPI／monitor端／全media・codec／UIA・IME／style／latency・資源と全UX台帳は継続する。
+
 2026-09-11 U08 detach-position checkpoint: 外drop後の新windowがrelease位置を無視する欠落を可視操作と旧コードで失敗するnative回帰で確認し、先頭slotのgrab offset／source density／client原点から表示前に配置する。3幅×3密度×3tabのheadless回帰、native位置／未保存画像の保持と、可視の先頭／2番目動画tabの分離・再結合／映像48,140画素一致を確認。所有する別process windowで覆った背面には誤結合せず、覆いを外すと結合する。e773cbeのCI34506640146は成功。全UX台帳、mixed-DPI／monitor端／filmstrip分離の可視確認／全media／latencyと資源測定は継続する。全体テストで別経路の断続的失敗も観測したため、再現性の監査は残す。
 
 2026-09-11 U08 visible-merge checkpoint（確認記録訂正）: 可視の二windowでlast-tab右の空白dropが拒否される欠落を再現し、native captionを除く空白での末尾追加へ修正。挿入線・未保存回転／focus・media領域拒否・Welcomeへの戻し、通常native window dragを確認。2幅×3密度の回帰、既存scroll／取消と全体チェックが通過。84f86e1のCI34503758408は成功。Welcomeへ戻した動画の黒画面という先の判定は保存画像の誤読だった。既存3枚と診断コードなしReleaseの新しい3回の往復後で、移動前の映像48,140画素との完全一致を確認し、不具合判定を撤回する。表示処理の変更は残さない。次は可視分離／遮蔽の実入力を確認する。mixed-DPI／全media／性能と全UX台帳は未完のまま維持する。

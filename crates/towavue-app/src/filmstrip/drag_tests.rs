@@ -164,7 +164,14 @@ fn filmstrip_drag_copies_the_owned_path_once_and_reuses_its_preview() {
         };
         events.extend([egui::Event::PointerMoved(outside), pointer(outside, false)]);
         let (_, actions) = frame(&mut strip, &context, &snapshot, source, true, input(events));
-        assert!(actions == vec![UiAction::OpenWindow(target.clone(), snapshot.generation)]);
+        assert!(
+            actions
+                == vec![UiAction::OpenWindow(
+                    target.clone(),
+                    snapshot.generation,
+                    outside - (origin - rect.min)
+                )]
+        );
         assert!(
             frame(&mut strip, &context, &snapshot, source, true, input(vec![]))
                 .1
@@ -174,6 +181,76 @@ fn filmstrip_drag_copies_the_owned_path_once_and_reuses_its_preview() {
             strip.generation, generation,
             "drag does not request another preview decode"
         );
+    }
+}
+
+#[test]
+fn filmstrip_window_origin_preserves_the_card_grab_across_sizes_and_densities() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_window_origin_preserves_the_card_grab_across_sizes_and_densities",
+    ) else {
+        return;
+    };
+    for width in [480.0, 960.0, 1440.0] {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.enable_accesskit();
+            context.set_pixels_per_point(density);
+            let snapshot = snapshot(&root);
+            let source = &snapshot.items[0].path;
+            let target = &snapshot.items[1].path;
+            let mut strip =
+                Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                    .expect("strip");
+            let raw = |events| egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 576.0),
+                )),
+                ..input(events)
+            };
+            for _ in 0..3 {
+                frame(&mut strip, &context, &snapshot, source, true, raw(vec![]));
+            }
+            let output = frame(&mut strip, &context, &snapshot, source, true, raw(vec![])).0;
+            let rect = card(&output, "other.png");
+            let offset = egui::vec2(24.0, 20.0);
+            let origin = rect.min + offset;
+            let outside = egui::pos2(width + 120.0, 110.0);
+            frame(
+                &mut strip,
+                &context,
+                &snapshot,
+                source,
+                true,
+                raw(vec![pointer(origin, true)]),
+            );
+            let (_, actions) = frame(
+                &mut strip,
+                &context,
+                &snapshot,
+                source,
+                true,
+                raw(vec![
+                    egui::Event::PointerMoved(outside),
+                    pointer(outside, false),
+                ]),
+            );
+            assert!(
+                actions
+                    == vec![UiAction::OpenWindow(
+                        target.clone(),
+                        snapshot.generation,
+                        outside - offset
+                    )],
+                "width {width}, density {density}"
+            );
+            assert!(
+                frame(&mut strip, &context, &snapshot, source, true, raw(vec![]))
+                    .1
+                    .is_empty()
+            );
+        }
     }
 }
 

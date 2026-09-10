@@ -67,11 +67,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 }
 
 impl WindowHost {
-    fn detached_client_position(
+    pub(super) fn source_client_position(
         &self,
         source: WindowKey,
         point: egui::Pos2,
-        anchor: egui::Vec2,
     ) -> Result<winit::dpi::PhysicalPosition<i32>, String> {
         let app = self.windows.get(&source).ok_or("source window is closed")?;
         let window = app.window.as_ref().ok_or("source window is not ready")?;
@@ -82,8 +81,8 @@ impl WindowHost {
             .ok_or("source UI is not ready")?
             .pixels_per_point();
         Ok(winit::dpi::PhysicalPosition::new(
-            origin.x + ((point.x - anchor.x) * density).round() as i32,
-            origin.y + ((point.y - anchor.y) * density).round() as i32,
+            origin.x + (point.x * density).round() as i32,
+            origin.y + (point.y * density).round() as i32,
         ))
     }
 
@@ -152,7 +151,7 @@ impl WindowHost {
                         }
                     })
             } else {
-                self.detached_client_position(source, point, anchor)
+                self.source_client_position(source, point - anchor)
                     .and_then(|position| {
                         self.detach_tab(event_loop, source, &request, visible, position)
                     })

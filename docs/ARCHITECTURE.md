@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U08: filmstripから開くwindowの位置（2026-09-11）
+
+filmstripの外dragは元ファイルの独立Openであり、tabのlive state移送ではない。release点からカード内のgrab offsetを引いた、浮遊カード左上のsource-client座標を要求へ保持する。tab分離と同じsource density／client原点の変換とclient／outer inset補正を共用し、新しいhidden HWNDを配置してからmediaを開き、成功後に表示して元filmstripを閉じる。要求のfolder generation／元tab／media instance・modal・重複拒否と、失敗時の元window／filmstrip保持は維持する。非有限座標はqueueへ入れない。新windowのサイズ規則と、tab以外を既存windowへ結合しない契約は変更しない。
+
+可視のrelease (973,246)に対し、旧実装は既定(104,104)へ開いた。修正後はカード内grab (60,40)からclient (913,206)へ開き、foregroundも移る。元の未保存90度回転動画48,140画素と独立した未編集動画112,572画素が各参照と完全一致。生成PNGの均一色144点、無音WAVのPlaying→Ended、元動画の保持も確認した。3幅×3密度のカード座標と非表示nativeの画像／動画／音声配置を回帰検証する。生成素材・単一monitorの証拠であり、mixed-DPI／monitor端／全codec／latency・資源／全UIAの完了とはしない。
+
 ## U08: タブ分離時の位置保持（2026-09-11）
 
 外dropにはrelease座標と、先頭slotへ移した時のgrab offsetを引き継ぐ。sourceのclient原点とUI densityから新windowのclient原点を物理座標へ変換し、hidden HWNDのclient／outer差を補正して、state移送と表示の前に配置する。sourceの元tab indexやscroll量は新windowの位置へ持ち込まない。位置取得を含む初期化の失敗時は既存のrollback経路で新windowを片付け、元tabを保持する。結合側のOS topmost root照合とgap選択は変更しない。

@@ -220,15 +220,7 @@ impl WindowHost {
         self.detach_tab_with(source, request, visible, |app, device| {
             app.start_on_device(event_loop, Some(device), false)
                 .map_err(|error| error.to_string())?;
-            let window = app.window.as_ref().expect("started window");
-            let inner = window.inner_position().map_err(|error| error.to_string())?;
-            let outer = window.outer_position().map_err(|error| error.to_string())?;
-            // Position the hidden client before publishing the transferred tab.
-            window.set_outer_position(winit::dpi::PhysicalPosition::new(
-                client_position.x - (inner.x - outer.x),
-                client_position.y - (inner.y - outer.y),
-            ));
-            Ok(())
+            app.position_window_client(client_position)
         })
     }
 
@@ -343,6 +335,7 @@ impl WindowHost {
             return Ok(None);
         };
         app.validate_transfer_window()?;
+        let position = self.source_client_position(source, request.client_origin)?;
         let path = canonical_shell_path(&request.path).map_err(|error| error.to_string())?;
         if MediaKind::from_path(&path).is_none() {
             return Err(format!("Unsupported media: {}", path.display()));
@@ -357,6 +350,7 @@ impl WindowHost {
             .map_err(|error| error.to_string())?;
         let app = self.windows.get_mut(&destination).expect("new window");
         let opened = start(app, device).and_then(|()| {
+            app.position_window_client(position)?;
             app.open_external(path, true);
             if app.path.is_none() {
                 return Err(app.status_message.as_ref().map_or_else(

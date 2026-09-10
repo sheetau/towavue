@@ -157,7 +157,11 @@ impl State {
                 && drag.crossed
                 && pointer.is_some_and(|pointer| !scope.screen.contains(pointer))
             {
-                actions.push(UiAction::OpenWindow(drag.path.clone(), scope.generation));
+                actions.push(UiAction::OpenWindow(
+                    drag.path.clone(),
+                    scope.generation,
+                    pointer.expect("outside release point") - drag.offset,
+                ));
             }
         }
         if released {

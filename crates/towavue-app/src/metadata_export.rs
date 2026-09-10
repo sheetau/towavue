@@ -1,5 +1,7 @@
 use crate::*;
-use towavue_runtime_windows::{MetadataExportOptions, MetadataField, MetadataSourceValue};
+use towavue_runtime_windows::{
+    ImageMetadataFormat, MetadataExportOptions, MetadataField, MetadataSourceValue,
+};
 
 #[derive(Clone, Copy, Default, PartialEq)]
 enum Mode {
@@ -29,23 +31,28 @@ pub(super) struct MetadataDialog {
 }
 
 impl MetadataDialog {
+    fn image_format(&self) -> Option<ImageMetadataFormat> {
+        (self.kind == MediaKind::Image)
+            .then(|| ImageMetadataFormat::from_path(&self.source))
+            .flatten()
+    }
+
     fn options(&self) -> Result<MetadataExportOptions, String> {
         if self.kind == MediaKind::Image {
-            if !self
-                .source
-                .extension()
-                .and_then(|value| value.to_str())
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
-            {
-                return Err("Image metadata currently requires PNG input and PNG output.".into());
+            if self.image_format().is_none() {
+                return Err(
+                    "Image metadata requires PNG or JPEG input with the same output format.".into(),
+                );
             }
             match &self.current {
                 Some(Ok(_)) => {}
                 Some(Err(_)) => {
-                    return Err("PNG metadata must be readable before applying options.".into());
+                    return Err("Image metadata must be readable before applying options.".into());
                 }
                 None => {
-                    return Err("Wait for PNG metadata inspection before applying options.".into());
+                    return Err(
+                        "Wait for image metadata inspection before applying options.".into(),
+                    );
                 }
             }
         }
@@ -60,11 +67,18 @@ impl MetadataDialog {
                 .set(field, value)
                 .map_err(|error| format!("{}: {error}", field.label()))?;
         }
+        if let Some(format) = self.image_format() {
+            format
+                .validate_options(&options)
+                .map_err(|error| error.to_string())?;
+        }
         Ok(options)
     }
 
     fn show(&mut self, context: &egui::Context) -> Option<Option<MetadataExportOptions>> {
         let mut action = None;
+        let image_format = self.image_format();
+        let fields = image_format.map_or(&MetadataField::ALL[..], ImageMetadataFormat::fields);
         let popup_open = egui::Popup::is_any_open(context);
         let escape = context.input_mut(|input| {
             let mut ime_event = false;
@@ -92,18 +106,27 @@ impl MetadataDialog {
                 let response = egui::ComboBox::from_id_salt("metadata-field")
                     .selected_text(MetadataField::ALL[self.selected].label()).show_ui(ui, |ui| {
                         for (index, field) in MetadataField::ALL.into_iter().enumerate() {
+                            if !fields.contains(&field) { continue; }
                             if ui.selectable_value(&mut self.selected, index, field.label()).clicked() { ui.close(); }
                         }
                     }).response;
                 if self.first_frame { response.request_focus(); self.first_frame = false; }
                 if response.gained_focus() { response.scroll_to_me(None); }
                 let field = MetadataField::ALL[self.selected];
-                if self.kind == MediaKind::Image {
+                if image_format == Some(ImageMetadataFormat::Png) {
                     ui.label(format!("PNG keyword: {}", match field {
                         MetadataField::Artist => "Author",
                         MetadataField::AlbumArtist => "Album Artist",
                         MetadataField::Date => "Creation Time (text, no date conversion)",
                         _ => field.label(),
+                    }));
+                } else if image_format == Some(ImageMetadataFormat::Jpeg) {
+                    ui.label(format!("JPEG XMP property: {}", match field {
+                        MetadataField::Title => "dc:title (language alternatives)",
+                        MetadataField::Artist => "dc:creator (ordered authors)",
+                        MetadataField::Comment => "dc:description (language alternatives)",
+                        MetadataField::Copyright => "dc:rights (language alternatives)",
+                        _ => unreachable!("JPEG field selector is restricted"),
                     }));
                 }
                 let draft = &mut self.fields[self.selected];
@@ -126,14 +149,20 @@ impl MetadataDialog {
                             found = true;
                             ui.label(format!("{}{}: {}", value.scope, if value.truncated { " (truncated)" } else { "" }, value.value));
                         }
-                        if !found { ui.label(if self.kind == MediaKind::Image { "No matching PNG text value." } else { "No value in the file or selected streams." }); }
+                        if !found { ui.label(if self.kind == MediaKind::Image { "No matching image text value." } else { "No value in the file or selected streams." }); }
                     }
                 }
                 ui.separator();
-                if self.kind == MediaKind::Image {
+                if image_format == Some(ImageMetadataFormat::Png) {
                     ui.label("PNG input and PNG output only. Applies to the next Save or Export as for this tab's current file. Original file, displayed pixels and edit history stay unchanged.");
                     ui.label("Only these 10 PNG text fields are edited; EXIF, XMP and technical metadata are not edited. Keep preserves matching source text chunks in PNG output, including when all fields are Keep. Other formats do not guarantee preservation.");
                     ui.label("Set/Remove replaces all matching text variants. Choose a .png export path; other output formats fail without replacing the target. Reading rejects corrupt text or more than 128 text chunks / 1 MiB stored or expanded text.");
+                } else if image_format == Some(ImageMetadataFormat::Jpeg) {
+                    ui.label("JPEG input and JPEG output only. Applies to the next Save or Export as for this tab's current file. Original file, displayed pixels and edit history stay unchanged.");
+                    ui.label("Only these 4 XMP text fields are edited. EXIF, IPTC and JPEG comments (COM) are not synchronized; unknown or technical source XMP is not copied. Keep preserves all source languages and author order, including when all fields are Keep.");
+                    ui.label("Set replaces all values of the field with one (x-default for language alternatives). Remove deletes all values. Choose a .jpg or .jpeg export path; other output formats fail without replacing the target. Extended XMP, corrupt or oversized metadata is rejected (one packet, 65502 bytes, 128 text values).");
+                } else if self.kind == MediaKind::Image {
+                    ui.label("Image metadata currently supports PNG and JPEG only, with the same input/output format. Other image formats cannot apply metadata options.");
                 } else {
                     ui.label("Applies to the next Save, Export as and Export audio only for this tab's current file. Playback, original file and edit history stay unchanged.");
                     ui.label("Set/Remove affects the file and output streams. Unsupported tags or changed values fail before replacing the target. Keep is not a guarantee of complete metadata preservation across formats.");
@@ -313,11 +342,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let dialog = self.metadata_dialog.as_ref().expect("matching dialog");
         let tab = dialog.tab;
         let current = self.metadata_dialog_is_current(dialog);
-        // UIA or queued actions must not bypass PNG capability/read validation.
-        if value.is_some()
+        // UIA or queued actions must not bypass image capability/read validation.
+        if let Some(value) = &value
             && current
-            && dialog.options().is_err()
             && dialog.kind == MediaKind::Image
+            && (dialog.options().is_err()
+                || dialog
+                    .image_format()
+                    .is_none_or(|format| format.validate_options(value).is_err()))
         {
             return;
         }

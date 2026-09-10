@@ -4,9 +4,9 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
-JPEG は XMP の Title／Artist／Comment／Copyright を保存する基盤まで追加しました。言語別タイトル・複数作者の保持と、日本語の書換・削除を検証済みですが、JPEG 用の操作UIはまだ未接続です。EXIF／IPTCとの整合や他の文字項目は引き続き未対応です。
+JPEG も File menu「Metadata export options」から XMP の Title／Artist／Comment／Copyright を指定できます。言語別の既存値・作者順を表示し、Keepは全値を保持、Setは一つの値へ置換、Removeはその項目の全値を削除します。JPEG形式で保存してください。設定未使用／全項目Keepの通常保存でも対象4項目を保持します。EXIF／IPTC／JPEGコメントとの同期・他6項目・Extended XMPは未対応で、元の未知／技術XMPはコピーしません。
 
-File menu「Metadata export options」から、動画・音声とPNG画像のタイトル・アーティストなど10項目をKeep／Set／Removeで指定できます。既存値を非同期で表示し、Apply後のSave／Export asに反映します（動画は音声のみ出力にも反映）。設定は現在のファイル・タブ内だけで保持し、再読込・別ファイル／次曲・タブを閉じると解除します。再生・表示画素・編集履歴は変更せず、Cancel／Escapeは未適用の入力を破棄します。PNGはPNG形式で保存してください。全項目Keepや設定未使用の通常PNG保存でも対象の文字情報を保持します。EXIF／XMPは編集対象外で、他の画像形式は制約を表示しApplyできません。非対応の出力形式・破損／過大な文字情報では、既存の保存先を変更しません。
+動画・音声とPNG画像では、同じ「Metadata export options」からタイトル・アーティストなど10項目をKeep／Set／Removeで指定できます。既存値を非同期で表示し、Apply後のSave／Export asに反映します（動画は音声のみ出力にも反映）。設定は現在のファイル・タブ内だけで保持し、再読込・別ファイル／次曲・タブを閉じると解除します。再生・表示画素・編集履歴は変更せず、Cancel／Escapeは未適用の入力を破棄します。PNGはPNG形式で保存してください。全項目Keepや設定未使用の通常PNG保存でも対象の文字情報を保持します。PNGのEXIF／XMPは編集対象外で、PNG／JPEG以外の画像形式は制約を表示しApplyできません。画像metadataの読取待ち／失敗時もApply不可です。非対応の出力形式・破損／過大な文字情報では、既存の保存先を変更しません。
 
 動画・音声のFile menu「Audio export options」から、ノーマライズとKeep／Mono／Stereoを設定できます。Apply後のSave／Export as／音声のみ出力に反映し、再生音や編集履歴は変更しません。設定はタブ内の現在のファイルだけで保持し、再読込・別ファイルや次曲への移動・タブを閉じると既定のOff／Keepへ戻ります。Cancel／Escapeは設定を変更しません。ノーマライズは編集・channel変換後のsample peakを−1 dBFSへ合わせる二段階処理で、LUFS／true-peak補正や動的音量追従ではありません。全体音量の変更を打ち消す場合がありますが、曲中の強弱と無音は保持します。
 

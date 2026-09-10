@@ -284,7 +284,7 @@ pub(super) fn inspect(path: &Path) -> Result<Vec<MetadataSourceValue>, ExportErr
         .into_iter()
         .map(|chunk| MetadataSourceValue {
             field: chunk.field,
-            scope: "PNG text",
+            scope: "PNG text".into(),
             value: chunk.text[..chunk.text.floor_char_boundary(1024)].to_owned(),
             truncated: chunk.text.len() > 1024,
         })

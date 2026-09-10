@@ -3,7 +3,7 @@ use crate::audio_export::tests::frame;
 use crate::audio_export_tests::{drain_export, fixture};
 use crate::video_rotation::tests::{access, node};
 
-mod png;
+mod image;
 
 fn read_ready<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
@@ -178,16 +178,18 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
     ) else {
         return;
     };
-    for kind in [MediaKind::Audio, MediaKind::Image] {
+    for (kind, filename) in [
+        (MediaKind::Audio, "audio.wav"),
+        (MediaKind::Image, "image.PNG"),
+        (MediaKind::Image, "image.JPEG"),
+    ] {
         let context = fonts::test_context();
         context.enable_accesskit();
         let mut app = Application::new(None, |_| {}).expect("app");
         app.ui_context = Some(context.clone());
-        let source = root.join(if kind == MediaKind::Image {
-            "image.PNG"
-        } else {
-            "audio.wav"
-        });
+        let source = root.join(filename);
+        let fields = ImageMetadataFormat::from_path(&source)
+            .map_or(&MetadataField::ALL[..], ImageMetadataFormat::fields);
         let tab = app.tabs.open_new(source.clone(), kind);
         app.path = Some(source);
         app.media_kind = Some(kind);
@@ -221,14 +223,18 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
             token,
             Ok(vec![MetadataSourceValue {
                 field: MetadataField::Title,
-                scope: "File",
+                scope: "File".into(),
                 value: "Original title".into(),
                 truncated: false,
             }]),
         );
-        for (index, field) in MetadataField::ALL.into_iter().enumerate() {
-            if index > 0 {
-                click(&mut app, MetadataField::ALL[index - 1].label());
+        for (position, &field) in fields.iter().enumerate() {
+            let index = MetadataField::ALL
+                .iter()
+                .position(|candidate| *candidate == field)
+                .expect("known field");
+            if position > 0 {
+                click(&mut app, fields[position - 1].label());
                 click(&mut app, field.label());
             }
             click(&mut app, "Set value");
@@ -565,15 +571,26 @@ fn metadata_ime_and_popup_escape_do_not_discard_uncommitted_text() {
     ) else {
         return;
     };
+    for (kind, filename) in [
+        (MediaKind::Audio, "audio.wav"),
+        (MediaKind::Image, "image.png"),
+        (MediaKind::Image, "image.jpeg"),
+    ] {
+        metadata_ime_and_popup_escape(&root.join(filename), kind);
+    }
+}
+
+fn metadata_ime_and_popup_escape(source: &Path, kind: MediaKind) {
     let context = fonts::test_context();
     context.enable_accesskit();
     let mut app = Application::new(None, |_| {}).expect("app");
     app.ui_context = Some(context.clone());
-    let source = root.join("audio.wav");
-    app.tabs.open_new(source.clone(), MediaKind::Audio);
-    app.path = Some(source);
-    app.media_kind = Some(MediaKind::Audio);
+    app.tabs.open_new(source.into(), kind);
+    app.path = Some(source.into());
+    app.media_kind = Some(kind);
     app.open_metadata_export_options();
+    let token = app.metadata_dialog.as_ref().expect("dialog").token;
+    app.finish_metadata_read(token, Ok(vec![]));
     click(&mut app, "Set value");
     let size = egui::vec2(640.0, 600.0);
     let tree = frame(&mut app, size, vec![])

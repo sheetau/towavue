@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 E01 JPEG metadata UI checkpoint: 形式別の対応4項目・XML validationをruntimeと共有し、言語別既存値／作者順の非同期表示・Apply／CancelをSaveへ接続。JPEG→JPEGは設定未使用／全Keepでも対象4項目を保持し、表示の省略では元値を切り詰めない。PNGと共通の全項目UIA／focus／compact、実Save／再Save／全Keep復元／Remove・出力形式失敗／guard／source lifecycleを検証する。JPEG他6項目／EXIF・IPTC・COM整合／Extended XMP・他形式と全UX台帳は継続。先行067a225のCI34449201712は成功。次は残る画像metadataの形式別契約と不足項目を照合し、通常window／全素材品質の残件も維持する。
+
 2026-09-10 16:15 E01 JPEG XMP基盤checkpoint: 標準XMPのTitle／Artist／Comment／CopyrightをJPEG→JPEG出力へ接続。言語Alt／作者Seq、namespace URI・Unicode／参照・CR保持を扱い、DTD／複数packet／Extended XMP・未対応構造／過大入力は拒否する。stageの非XMP bytes／EXIF・復号画素不変、独立JPEG decoderのXMP抽出、回転／反転保存とKeep／Set／Remove、取消／source変更／write失敗・target保護を7回帰で確認。他6項目、JPEG UI／全Keep既定保存・EXIF／IPTC整合と他形式は未完。次は形式別項目／既存値表示・UIとKeep保存の契約を揃える。全UX台帳／通常window／全素材品質・性能は継続。先行3a72bf0のCI34447566341は成功。
 
 2026-09-10 15:55 E01 PNG metadata UI checkpoint: File／custom commandを画像へ開き、PNG既存値・keyword対応・PNG入出力／文字のみの説明とApply／CancelをSaveへ接続した。未対応画像・読取待ち／失敗はApply不可。全KeepのPNG保存も元の対象文字情報を保持するよう基盤を揃える。全10項目UIA／compact／focus、実Save／再Save／全Keep復元／Remove・非PNG保存先失敗／guardとsource lifecycleを確認。先行2eb281bのCI34446598113はCargo.lockのnotice照合hash更新漏れで失敗し、今回hashを同期して146 packagesの整合性試験を通す。公開準備は再開しない。次は他画像形式のmetadata契約／実装へ進み、通常window／混在DPI／全codec品質・性能と全UX台帳の未完事項を継続する。

@@ -72,6 +72,149 @@ fn without_xmp(bytes: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn jpeg_metadata_inspection_is_bounded_but_default_keep_preserves_full_languages_and_creators() {
+    let root = root("jpeg-inspect-keep");
+    let source = root.join("source.JPEG");
+    let target = root.join("saved.JPG");
+    let long = "日本語".repeat(200);
+    let language = "a".repeat(100);
+    let packet = PACKET
+        .replace("日本語の題名", &long)
+        .replace("xml:lang=\"ja\"", &format!("xml:lang=\"{language}\""));
+    let original = tagged(packet.as_bytes());
+    fs::write(&source, &original).expect("source");
+    let shown = read_export_metadata(&source, MediaKind::Image).expect("public inspection");
+    assert_eq!(shown.len(), 6);
+    assert_eq!(shown[0].scope, "JPEG XMP (x-default)");
+    assert_eq!(shown[1].scope, format!("JPEG XMP ({}…)", "a".repeat(63)));
+    assert_eq!(shown[1].value, long[..long.floor_char_boundary(1024)]);
+    assert!(shown[1].truncated);
+    assert_eq!(shown[2].scope, "JPEG XMP (creator 1)");
+    assert_eq!(shown[3].scope, "JPEG XMP (creator 2)");
+    assert_eq!(shown[3].value, "Second <author>");
+    assert!(
+        shown
+            .iter()
+            .enumerate()
+            .all(|(index, value)| value.truncated == (index == 1))
+    );
+    let cancel = AtomicBool::new(false);
+    let expected = read(&source, &cancel).expect("full source");
+    let mut request = request(&source, &target);
+    request.operations.push(EditOperation::RotateClockwise);
+    export_media(&request).expect("default all Keep");
+    assert_eq!(read(&target, &cancel).expect("full output"), expected);
+    assert_eq!(
+        read_export_metadata(&target, MediaKind::Image).expect("display output"),
+        shown
+    );
+    let pixels = image::open(&target).expect("rotated image");
+    assert_eq!((pixels.width(), pixels.height()), (24, 32));
+    assert_eq!(fs::read(&source).expect("source unchanged"), original);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn jpeg_metadata_capability_and_xml_validation_match_export_contract() {
+    for extension in ["jpg", "jpeg", "JPG", "JPEG"] {
+        assert_eq!(
+            ImageMetadataFormat::from_path(Path::new(&format!("source.{extension}"))),
+            Some(ImageMetadataFormat::Jpeg)
+        );
+    }
+    assert_eq!(
+        ImageMetadataFormat::from_path(Path::new("source.PnG")),
+        Some(ImageMetadataFormat::Png)
+    );
+    for path in ["source", "source.webp", "source.jpg.pngx"] {
+        assert!(ImageMetadataFormat::from_path(Path::new(path)).is_none());
+        assert!(read_export_metadata(Path::new(path), MediaKind::Image).is_err());
+    }
+    assert_eq!(ImageMetadataFormat::Png.fields(), &MetadataField::ALL);
+    assert_eq!(
+        ImageMetadataFormat::Jpeg.fields(),
+        &[
+            MetadataField::Title,
+            MetadataField::Artist,
+            MetadataField::Comment,
+            MetadataField::Copyright
+        ]
+    );
+    for field in MetadataField::ALL {
+        for text in ["", "日本語 & <text>\r\n\t"] {
+            let metadata = options(field, text).metadata;
+            assert!(ImageMetadataFormat::Png.validate_options(&metadata).is_ok());
+            assert_eq!(
+                ImageMetadataFormat::Jpeg
+                    .validate_options(&metadata)
+                    .is_ok(),
+                ImageMetadataFormat::Jpeg.fields().contains(&field)
+            );
+        }
+    }
+    for text in ["bad\u{1}", "bad\u{b}", "bad\u{fffe}", "bad\u{ffff}"] {
+        assert!(
+            ImageMetadataFormat::Jpeg
+                .validate_options(&options(MetadataField::Title, text).metadata)
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn jpeg_default_keep_corruption_cancellation_and_source_change_preserve_target() {
+    let root = root("jpeg-default-protection");
+    let source = root.join("source.jpg");
+    let target = root.join("target.jpg");
+    let original = tagged(PACKET.as_bytes());
+    fs::write(&source, &original).expect("source");
+    fs::write(&target, b"existing target").expect("target");
+    let request = request(&source, &target);
+    for mode in 0..3 {
+        let cancel = AtomicBool::new(mode == 0);
+        let error = export_options_cancellable(
+            &request,
+            ExportOptions::default(),
+            &cancel,
+            &|_| {
+                if mode == 1 {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                if mode == 2 {
+                    fs::OpenOptions::new()
+                        .append(true)
+                        .open(&source)
+                        .expect("source")
+                        .write_all(b"changed")
+                        .expect("modify fixture");
+                }
+            },
+            &|_| panic!("no audio"),
+        )
+        .expect_err("must not publish");
+        if mode == 2 {
+            assert!(error.to_string().contains("source changed"), "{error}");
+        } else {
+            assert!(matches!(error, ExportError::Cancelled));
+        }
+        assert_eq!(fs::read(&target).expect("protected"), b"existing target");
+        assert_eq!(fs::read_dir(&root).expect("no stage leaks").count(), 2);
+        fs::write(&source, &original).expect("restore fixture");
+    }
+    let invalid = tagged(
+        PACKET
+            .replace("Original &amp; title", "&missing;")
+            .as_bytes(),
+    );
+    fs::write(&source, &invalid).expect("invalid source");
+    assert!(read_export_metadata(&source, MediaKind::Image).is_err());
+    assert!(export_media(&request).is_err());
+    assert_eq!(fs::read(&target).expect("protected"), b"existing target");
+    assert_eq!(fs::read(&source).expect("unchanged"), invalid);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn xmp_round_trips_namespace_aliases_languages_creators_escaping_and_overrides() {
     let cancelled = AtomicBool::new(false);
     let original = xmp::parse(PACKET.as_bytes(), &cancelled).expect("source properties");

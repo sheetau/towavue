@@ -154,6 +154,32 @@ fn read(path: &Path, cancelled: &AtomicBool) -> Result<Vec<xmp::Value>, ExportEr
         .map(Option::unwrap_or_default)
 }
 
+pub(super) fn inspect(path: &Path) -> Result<Vec<MetadataSourceValue>, ExportError> {
+    let mut creator = 0;
+    Ok(read(path, &AtomicBool::new(false))?
+        .into_iter()
+        .map(|value| {
+            let scope = if let Some(language) = value.language {
+                // The XMP reader accepts only ASCII language tags.
+                format!(
+                    "JPEG XMP ({}{})",
+                    &language[..language.len().min(63)],
+                    if language.len() > 63 { "…" } else { "" }
+                )
+            } else {
+                creator += 1;
+                format!("JPEG XMP (creator {creator})")
+            };
+            MetadataSourceValue {
+                field: value.field,
+                scope,
+                truncated: value.text.len() > 1024,
+                value: value.text[..value.text.floor_char_boundary(1024)].to_owned(),
+            }
+        })
+        .collect())
+}
+
 pub(super) struct JpegMetadata {
     values: Vec<xmp::Value>,
     packet: Vec<u8>,

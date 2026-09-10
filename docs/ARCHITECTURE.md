@@ -1,12 +1,18 @@
 # towavue アーキテクチャ
 
+## E01: JPEG文字metadataのUIとKeep保存（2026-09-10）
+
+JPEG UIはruntimeが公開する形式別の対応項目とvalidationを使い、Title／Artist／Comment／Copyrightだけを選択可能にする。非同期の既存値には言語と作者の順番を表示し、表示だけを1024 UTF-8 bytesへ切り詰める。読取待ち／失敗・XMLに不正な文字／未対応項目はApply不可。Setは言語別値／複数作者を一つへ置換し、Removeはその項目の全値を除去することを説明する。PNGと同じsource/tab世代guard・設定lifecycleを共有する。
+
+基盤段階のSet／Remove限定を置き換え、JPEG→JPEG保存は全Keep／設定dialog未使用でも対応4項目の文字・言語・作者順序を保持する。元の未知／技術XMP、EXIF／IPTC／COMとの同期は保証せず、JPEG以外の保存先への明示設定は拒否する。元sourceと既存targetを守る有界読取・stage照合・source stampを既定保存にも適用する。他6項目・他画像形式・通常window／物理IME／全素材品質と全UX台帳は引き続き未完。
+
 ## E01: JPEG XMP文字metadataの保存基盤（2026-09-10）
 
 JPEGは標準APP1 XMPのdc:title／dc:creator／dc:description／dc:rightsを、Title／Artist／Comment／Copyrightへ対応させる。[Adobe Dublin Core定義](https://developer.adobe.com/xmp/docs/xmp-namespaces/dc/)に従いtitle／description／rightsは言語別Alt、creatorは順序付きSeqとして扱う。Keepは文字値・言語・順序を保持し、XMLのprefix／空白のbyte一致ではない。Setは単一値（Altはx-default）、Removeは該当propertyを除去する。他の6項目は未対応として明示拒否し、今後の形式別契約へ残す。
 
 標準XMP一packet、UTF-8、65502 bytes以内、32階層／4096 elements／128文字値へ制限する。namespace URIで識別し、通常の属性形式／文字要素／Alt・Seqを読み、DTD／外部entity・不正参照・複数packet／Extended XMP・未対応の対象property構造は拒否する。元EXIF／IPTC／COMとXMPの相互整合はまだ行わず、XMP文字だけの処理として区別する。未知／技術的な元XMPを編集済み画像へcopyしない。
 
-JPEG入力→JPEG出力で文字Set／Removeを指定した時、既存encode後のstageに標準XMPを差し替え、再読取照合してからpublishする。JPEG marker／entropy bytesをstreamingで複写し、metadata処理で再decode／再encodeせず、stageのEXIF／ICC／画像bytesを変更しない。source stamp、取消、既存target保護を共用する。設定なしのJPEG保存は従来経路であり、全Keepと画像UIへの接続は次工程で契約を揃える。JPEG UI、他項目／形式・EXIF／IPTC整合、通常window／全素材品質と全UX台帳は未完のまま維持する。
+JPEG入力→JPEG出力で、既存encode後のstageに標準XMPを差し替え、再読取照合してからpublishする。JPEG marker／entropy bytesをstreamingで複写し、metadata処理で再decode／再encodeせず、stageのEXIF／ICC／画像bytesを変更しない。source stamp、取消、既存target保護を共用する。基盤段階ではSet／Remove時だけ有効だったが、現在は上記UI契約に従い全Keep／設定未使用のJPEG→JPEG保存にも本経路を使う。他項目／形式・EXIF／IPTC整合、通常window／全素材品質と全UX台帳は未完のまま維持する。
 
 ## E01: PNG文字metadataのUIとKeep保存（2026-09-10）
 

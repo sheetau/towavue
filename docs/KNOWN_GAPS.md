@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10 JPEG UI更新: 以下16:15の未接続項目を更新し、JPEG4項目のUI／言語・作者順の既存値表示／全Keep既定保存を接続済み。JPEG→JPEG保存では設定未使用でも有界metadata検査を行うため、破損／過大／未対応構造のXMPを含む入力は保存を拒否する。表示は値1024 UTF-8 bytes、言語63 ASCII charsで省略を明示するが、Keepの保存値は完全保持する。Setは全言語／全作者を一つへ置換し、Removeは全値を削除。EXIF／IPTC／COMの同期・残る6項目／Extended XMP・他画像形式と通常window／物理IME／混在DPI／全素材認定は未完。全metadata保持や無変換JPEG保存ではない。
+
 2026-09-10 16:15: JPEG XMPのTitle／Artist／Comment／Copyrightはruntimeの保存基盤だけ対応し、JPEG用UI・共通の既存値表示APIは未接続。標準APP1一packetのUTF-8／Alt言語値・Seq作者・単純文字／属性形式を扱う。65502 bytes・32階層／4096 elements／128値まで。Extended XMP、複数packet、非空のRDF subject、参照でescapeされたnamespace宣言、対象文字への構造／修飾は明示拒否する。EXIF／IPTC／COMとの同期や全XMP保持ではなく、stageのXMP packetを対象文字値で置き換える（元の未知／技術XMPはcopyしない）。stageのEXIF／ICC／非XMP画像bytesは変更しない。他6文字項目・JPEG全Keep既定保存・UI／他形式／全素材品質は継続し、synthetic multi-scan marker試験を実progressive素材の全対応認定とはしない。
 
 2026-09-10 15:55: PNG画像のMetadata export optionsは操作UI・既存値表示・Save／再Save／Export asへ接続済み。PNG→PNGは設定未使用／全Keepでも対象10項目の元textを保持し、以下15:43記録の「Set／Remove時だけ」を置き換える。他画像形式・PNG読取待ち／失敗はApply不可で、非PNG保存先にSet／Removeを反映しようとした場合は既存targetを保持して失敗する。入力を勝手に修復したり保存形式を変更しない。EXIF／XMP／未知keywordの完全保持、他形式metadata、通常windowでの物理IME／mixed-DPIは未認定。既存の画像encode自体を無変換保存にするものではない。

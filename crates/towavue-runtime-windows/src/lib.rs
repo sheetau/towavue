@@ -42,9 +42,9 @@ pub use dialog::{
 };
 pub use export::{
     AudioChannels, AudioExportOptions, ExportError, ExportEvent, ExportJob, ExportOptions,
-    ExportOutcome, ExportOutput, ExportRequest, MetadataExportOptions, MetadataField,
-    MetadataSourceValue, export_media, export_media_with_options, export_media_with_output,
-    read_export_metadata,
+    ExportOutcome, ExportOutput, ExportRequest, ImageMetadataFormat, MetadataExportOptions,
+    MetadataField, MetadataSourceValue, export_media, export_media_with_options,
+    export_media_with_output, read_export_metadata,
 };
 pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};

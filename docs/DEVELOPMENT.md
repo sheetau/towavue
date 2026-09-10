@@ -4,7 +4,15 @@
 
 ## 1. 最初に試す
 
+### JPEG metadata UIと全Keep保存（2026-09-10、E01 partial）
+
+JPEGを開きFile「Metadata export options」からTitle／Artist／Comment／Copyrightを選ぶ。既存値はXMP言語と作者順を表示し、他6項目は候補へ出さない。Keepは全言語／作者順、Setは単一値（言語項目はx-default）、Removeはその項目の全値を扱う。Apply後のSave／Export asは.jpg／.jpegを選ぶ。表示／履歴は変更せず、Cancel／Escapeは未適用入力を破棄する。PNG同様にsource/tab限定で設定を保持し、再読込／別source／closeで解除する。読取待ち／失敗・不正XML文字はApply不可。EXIF／IPTC／COMとの同期・未知／技術XMPのコピーは行わない。
+
+`cargo test -p towavue-app metadata_export`は音声／PNG／JPEGの形式別全項目・3mode・UIA入力／UTF-8上限・focus／compact、実画像の言語／作者順説明・不正XML／未対応項目／読取前のqueued Apply拒否・stale結果、Save／再Save／全Keep復元／Remove・形式失敗／guard／tab保持・source再読込解除を確認する。JPEGの表示省略は保存値に影響せず、runtimeの既定Keep回帰で長い多言語値／作者順の完全一致と回転画像を確認する。設定未使用時も破損metadata／取消／source変更では既存targetを保持する。生成fixtureとheadless egui/UIAによる検証で、通常windowのJPEG UI／物理IME・全素材品質の認定ではない。下の16:15記録のUI／全Keep未接続を更新する。
+
 ### JPEG XMP文字metadata保存基盤（2026-09-10 16:15、E01 partial）
+
+上記UI更新の検証: session61092でfmt／all-target Clippy／workspace499（app273＋core61＋runtime161＋integration4）、app実機依存6件、release buildが終了0。通常suiteのignored13は成功数へ含めず、追加6件にSKIPなし。Release SHA-256 `c0690e6188fdb8566fcedb3b2416e19e728682b4c370630eeafc3fb1e3345a5a`。固定dependency／notice inventoryは変更なし。以下は先行基盤時点の記録。
 
 JPEG UIはまだ未接続。runtimeの`export_media_with_options`へJPEG入力・JPEG出力とTitle／Artist／Comment／CopyrightのSet／Removeを渡すと、encode後のXMPへ反映する。dc:title／creator／description／rightsの言語・作者順をKeepし、Setは一値、Removeは対象propertyを消す。元EXIF／IPTC／COMとの整合や他6項目はまだ扱わない。設定なしのJPEG保存は従来経路で、PNGの全Keep保持とは異なる。
 

@@ -63,9 +63,46 @@ impl MetadataField {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MetadataSourceValue {
     pub field: MetadataField,
-    pub scope: &'static str,
+    pub scope: String,
     pub value: String,
     pub truncated: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImageMetadataFormat {
+    Png,
+    Jpeg,
+}
+
+impl ImageMetadataFormat {
+    pub fn from_path(path: &Path) -> Option<Self> {
+        if png_metadata::png_path(path) {
+            Some(Self::Png)
+        } else if jpeg_metadata::jpeg_path(path) {
+            Some(Self::Jpeg)
+        } else {
+            None
+        }
+    }
+
+    pub fn fields(self) -> &'static [MetadataField] {
+        match self {
+            Self::Png => &MetadataField::ALL,
+            Self::Jpeg => &[
+                MetadataField::Title,
+                MetadataField::Artist,
+                MetadataField::Comment,
+                MetadataField::Copyright,
+            ],
+        }
+    }
+
+    pub fn validate_options(self, options: &MetadataExportOptions) -> Result<(), ExportError> {
+        if self == Self::Jpeg {
+            xmp::apply(&mut Vec::new(), options)?;
+        }
+        Ok(())
+    }
 }
 
 /// Reads bounded display values only; export Keep still copies the original tags.
@@ -74,13 +111,20 @@ pub fn read_export_metadata(
     kind: MediaKind,
 ) -> Result<Vec<MetadataSourceValue>, ExportError> {
     if kind == MediaKind::Image {
-        return png_metadata::inspect(path);
+        return match ImageMetadataFormat::from_path(path) {
+            Some(ImageMetadataFormat::Png) => png_metadata::inspect(path),
+            Some(ImageMetadataFormat::Jpeg) => jpeg_metadata::inspect(path),
+            None => Err(ExportError::Failed(
+                "Image metadata currently supports PNG or JPEG input with the same output format"
+                    .into(),
+            )),
+        };
     }
     ffmpeg::init().map_err(|error| ExportError::Failed(error.to_string()))?;
     let input =
         ffmpeg::format::input(path).map_err(|error| ExportError::Failed(error.to_string()))?;
     let mut values = Vec::new();
-    let mut collect = |scope, tags: ffmpeg::DictionaryRef<'_>| {
+    let mut collect = |scope: &str, tags: ffmpeg::DictionaryRef<'_>| {
         for field in MetadataField::ALL {
             if let Some((_, value)) = tags
                 .iter()
@@ -88,7 +132,7 @@ pub fn read_export_metadata(
             {
                 values.push(MetadataSourceValue {
                     field,
-                    scope,
+                    scope: scope.into(),
                     value: value[..value.floor_char_boundary(1024)].to_owned(),
                     truncated: value.len() > 1024,
                 });

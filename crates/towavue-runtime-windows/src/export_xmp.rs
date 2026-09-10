@@ -316,13 +316,7 @@ pub(super) fn apply(
 ) -> Result<(), ExportError> {
     for field in MetadataField::ALL {
         if let Some(text) = options.get(field) {
-            if !matches!(
-                field,
-                MetadataField::Title
-                    | MetadataField::Artist
-                    | MetadataField::Comment
-                    | MetadataField::Copyright
-            ) {
+            if !ImageMetadataFormat::Jpeg.fields().contains(&field) {
                 return Err(invalid(format!(
                     "'{}' is not supported; JPEG currently supports Title, Artist, Comment and Copyright",
                     field.label()

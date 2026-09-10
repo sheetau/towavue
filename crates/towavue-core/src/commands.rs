@@ -109,6 +109,8 @@ pub enum CommandId {
     FreeRotateImage,
     FreeRotateVideo,
     ResizeVideo,
+    StepAudioBackward,
+    StepAudioForward,
 }
 
 impl CommandId {
@@ -216,6 +218,8 @@ impl CommandId {
             Self::FreeRotateImage => "free_rotate_image",
             Self::FreeRotateVideo => "free_rotate_video",
             Self::ResizeVideo => "resize_video",
+            Self::StepAudioBackward => "step_audio_backward",
+            Self::StepAudioForward => "step_audio_forward",
             Self::ToggleImageInterpolation => "toggle_image_interpolation",
         }
     }
@@ -852,6 +856,16 @@ const COMMANDS: &[CommandDefinition] = &[
         CommandId::ResizeVideo,
         "Resize / resample video",
         &[MediaKind::Video],
+    ),
+    command(
+        CommandId::StepAudioBackward,
+        "Step audio backward (10 ms)",
+        &[MediaKind::Audio],
+    ),
+    command(
+        CommandId::StepAudioForward,
+        "Step audio forward (10 ms)",
+        &[MediaKind::Audio],
     ),
 ];
 

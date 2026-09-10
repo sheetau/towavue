@@ -56,6 +56,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             &[ToggleImageInterpolation],
             &[TogglePause, SeekBackward, SeekForward],
             &[PreviousVideoFrame, NextVideoFrame],
+            &[StepAudioBackward, StepAudioForward],
             &[CycleAudioRepeat, ToggleAudioShuffle],
             &[PreviousMedia, NextMedia, PreviousSameKind, NextSameKind],
             &[PreviousImage, NextImage, FirstImage, LastImage],
@@ -587,6 +588,14 @@ mod tests {
                 "resize_video",
                 ResizeVideo,
                 towavue_core::MediaKind::Video,
+            ),
+            (
+                "View",
+                2,
+                4,
+                "step_audio_",
+                StepAudioForward,
+                towavue_core::MediaKind::Audio,
             ),
         ] {
             let context = egui::Context::default();

@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## V04: 音声のフレーム相当移動（2026-09-10）
+
+草案の音声`,／.`は前後10msの微小Seekとして採用する。音声には表示fpsがなく、codecのdecoded frame／packet長を使うと同じ操作の移動幅が形式で変わるため、編集操作として一定の時間単位を選ぶ。これはPCMの1sample移動や圧縮frame境界への移動ではない。専用の「Step audio backward/forward (10 ms)」command／View menu／custom bindingへ単位を明記し、動画の実PTS探索とその設定は変更しない。
+
+移動は現在の編集後時間軸を基準とし、先頭0／既知終端でclampする。再生中・停止中・EOFから利用でき、hold-speed解除後に一時停止して既存Seekを使う。rateによって10msを増減せず、履歴・時間選択は変更しない。範囲再生の外へ出る場合だけ既存Seekの規則で範囲再生を解除する。modal／別media／未ロード・故障状態は対象外。新しいdecoder／worker／queueを追加せず、連続入力は直前の停止位置から累積する。sample精度の波形編集・auditionや全形式のseek遅延を認定するものではない。
+
 ## V05: 動画resize／resample採用契約（2026-09-10、UI接続済み）
 
 UI接続方針: 動画の回転・resizeでsource／tab／世代／orientation／編集列／device寸法上限のsnapshot照合を共有する。画像と寸法・比率・4filterの入力部品を共用し、動画だけは入力SARを含めた表示比率と偶数格子を使う。動画resize専用commandをtimeline内Ctrl+R／Edit menuへ追加し、既存custom bindingは維持する。右下の入力透過でない透明backdrop modalで全canvasのGPU previewを表示し、Apply前のsnapshot／budget照合、Cancel／identity非編集、focus復帰とUndo/Redoを回転と同じ契約にする。

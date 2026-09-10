@@ -4439,6 +4439,8 @@ where
             CommandId::ToggleAudioShuffle => self.change_audio_mode(true),
             CommandId::PreviousVideoFrame => self.step_video_frame(false),
             CommandId::NextVideoFrame => self.step_video_frame(true),
+            CommandId::StepAudioBackward => self.step_audio(false),
+            CommandId::StepAudioForward => self.step_audio(true),
             CommandId::JumpImagesBackward1 => self.jump_images(-1),
             CommandId::JumpImagesBackward2 => self.jump_images(-2),
             CommandId::JumpImagesBackward3 => self.jump_images(-3),

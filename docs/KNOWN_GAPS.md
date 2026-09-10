@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10: 音声`,／.`は前後10msの微小Seekで、移動時に停止する。codecのframe長やPCMのsample単位ではない。編集後時間軸、連続入力・先頭／実EOF・2倍速設定・区間削除／伸縮・範囲再生外への移動を無音WAVと実WASAPIで確認した。全codecのsample位相、低遅延audition・通常window物理入力の認定ではなく、既存のSeek精度／遅延の制約を引き継ぐ。
+
 2026-09-10: 動画resizeのcore値／履歴・software保存とGPU4方式に、timeline内Ctrl+R／Edit menuの寸法・比率・filter／preview／Apply・Cancel UIを接続。出力は偶数16～16384px・128M pixels以内、SAR1。比率保持では連動する辺を2pxへ丸めるため厳密な元比率から差が生じる。手入力の奇数は自動修正せず適用不可。Nearest／Bilinear／Bicubic／Lanczos、拡大・縮小・奇数／極小source・SARと合成順序を回帰確認した。GPUは符号付きfloat中間と係数を再利用し、合計512 MiBを超える編集を拒否するため、出力寸法が範囲内でも利用できない縦横比／履歴がある。保存の縮小時色間引きは明示無効化。OpenH264に合わせた16px下限は維持し、黙ってpaddingしない。実UIの取消・履歴／再生状態保持とD3D11VA復旧前後は確認済みだが、代表GPU／WARPの精度・速度比較は全素材・HDR・hardware encode品質・安定した連続再生や通常windowの認定ではない。
 
 2026-09-10: 動画のtimeline表示中にCtrl＋wheel／+・-／100%／Fit／Coverと右drag panを接続した。表示clipはUVだけへ反映し、保存・選択・履歴は変えない。閉じたtimeline／fullscreen／tab復帰では倍率・panを保持する。Actualは表示向きの画素行を1 physical pxにし、横のSARは維持する。動画resize／resample、通常windowの物理操作・混在DPI／全素材品質・性能は未完。hardwareのzoomは既存の同一device内RGBA中間描画を使い、CPU転送を増やさない。
@@ -18,7 +20,7 @@
 
 2026-09-10: I04の画像移動aliasと1～10枚jump、I06のreading L／V aliasを実装した。Shell順・画像枚数・端点停止・見開き・dirty guard・設定互換と実画像の読込を自動回帰で確認。新Image jump menuも全20項目のfocus／scroll／dispatchを確認した。Ctrl+左右だけは既存の同種一枚移動を維持する。Ctrl+Shift+数字は上段物理数字を補助的に使い、custom記号が優先する。通常windowの物理入力・全keyboard layout／IMEでの最終確認、I06の自由回転は未完である。
 
-2026-09-10: 動画のcomma／periodを非同期の前後実PTS移動へ接続した。最大32操作の順序・取消・tab／世代・一時停止した正確な表示・Delete／stretch区間をhidden-windowで回帰確認。BフレームのSeekが後のkeyframeを選ぶ問題を実際に再現し、key packetのPTS確認と前GOPへの移動で修正した。全参照PTS／画素・複数stream・TSを照合。速度はCtrl+comma／Ctrl+periodへ移し、旧標準だけを設定移行する。長GOP／高解像度での応答性、音声側のframe相当操作、通常windowでの最終確認は未完。探索はsoftware codecを使い、readbackや追加deviceは作らない。
+2026-09-10: 動画のcomma／periodを非同期の前後実PTS移動へ接続した。最大32操作の順序・取消・tab／世代・一時停止した正確な表示・Delete／stretch区間をhidden-windowで回帰確認。BフレームのSeekが後のkeyframeを選ぶ問題を実際に再現し、key packetのPTS確認と前GOPへの移動で修正した。全参照PTS／画素・複数stream・TSを照合。速度はCtrl+comma／Ctrl+periodへ移し、旧標準だけを設定移行する。長GOP／高解像度での応答性、通常windowでの最終確認は未完。探索はsoftware codecを使い、readbackや追加deviceは作らない。
 
 2026-09-10: 動画のvisual選択・crop・回転・flipをtimeline表示中へ制限した。閉じる／全画面で編集結果は維持し、枠と辺操作は隠す。視聴・保存・Undo/Redoは維持する。新しいpointer／UIA／shortcut／全画面context回帰と既存の動画export画素照合は成功したが、この変更の通常windowでの操作確認は未実施。J/K/L・動画frame移動・長押し2倍速を接続した。長押しは動画視聴面と共通再生buttonで400ms、解除で元rate/pauseへ戻り、編集・保存結果は変えない。hidden-windowと無音WASAPIの回帰は成功。pipeline再開を伴うため、任意素材の長GOP遅延や無音のない速度切替は未認定。
 

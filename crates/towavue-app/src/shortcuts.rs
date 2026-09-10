@@ -101,6 +101,8 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::RateUp, "Ctrl+."),
         (CommandId::PreviousVideoFrame, ","),
         (CommandId::NextVideoFrame, "."),
+        (CommandId::StepAudioBackward, ","),
+        (CommandId::StepAudioForward, "."),
         (CommandId::ResetRate, "/"),
         (CommandId::Save, "Ctrl+S"),
         (CommandId::ExportAs, "Ctrl+Shift+S"),
@@ -738,7 +740,7 @@ mod tests {
                 ShortcutMatch::Command(command)
             );
         }
-        for kind in [None, Some(MediaKind::Image), Some(MediaKind::Audio)] {
+        for kind in [None, Some(MediaKind::Image)] {
             let context = CommandContext {
                 media_kind: kind,
                 ..Default::default()
@@ -874,6 +876,57 @@ mod tests {
         assert_eq!(
             resolve(&bindings, "P", video.media_kind, false),
             ShortcutMatch::Command(CommandId::TogglePause)
+        );
+    }
+
+    #[test]
+    fn audio_step_keys_are_explicit_in_context_and_preserve_custom_speed_bindings() {
+        let audio = CommandContext {
+            media_kind: Some(MediaKind::Audio),
+            ..Default::default()
+        };
+        for (key, command) in [
+            (",", CommandId::StepAudioBackward),
+            (".", CommandId::StepAudioForward),
+        ] {
+            let sequence = key.parse::<KeySequence>().expect("key");
+            for timeline_open in [false, true] {
+                assert_eq!(
+                    defaults().resolve(
+                        sequence.strokes(),
+                        CommandContext {
+                            timeline_open,
+                            ..audio
+                        }
+                    ),
+                    ShortcutMatch::Command(command)
+                );
+            }
+        }
+        let custom = parse("step_audio_forward = Ctrl+K F\n", defaults()).expect("custom");
+        assert_eq!(
+            custom.resolve(".".parse::<KeySequence>().expect("key").strokes(), audio),
+            ShortcutMatch::None
+        );
+        assert_eq!(
+            custom.resolve(
+                "Ctrl+K F".parse::<KeySequence>().expect("key").strokes(),
+                audio
+            ),
+            ShortcutMatch::Command(CommandId::StepAudioForward)
+        );
+        assert_eq!(
+            parse(&serialize(&custom), defaults()).expect("round trip"),
+            custom
+        );
+        let custom = parse(
+            &format!("{FRAME_BINDING_HEADER}\nrate_down = ,\n"),
+            defaults(),
+        )
+        .expect("custom speed");
+        assert_eq!(
+            custom.resolve(",".parse::<KeySequence>().expect("key").strokes(), audio),
+            ShortcutMatch::Command(CommandId::RateDown)
         );
     }
 

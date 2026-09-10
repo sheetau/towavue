@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 13:34 V04音声微小移動checkpoint: 草案の音声frame相当操作を編集後時間軸の10ms Seekとして採用し、comma／period・View menu／custom bindingへ単位を明記。移動時停止、連続入力、先頭／実EOF・区間削除／伸縮／rate・範囲再生外への移動、履歴／source不変を無音WAV・実WASAPIで検証。動画の実PTS探索は変更しない。次はE01書き出しオプション（音声のみ／normalize／channel変換）の契約と既存保存導線を照合する。通常window・全形式精度／遅延と全台帳の残件は継続する。
+
 2026-09-10 13:23 V05 resize UI checkpoint: timeline内Ctrl+R／Edit menuへ幅・高さ・比率／4filterとGPU previewのdialogを接続。Cancel／identity非編集、snapshot／budget・古いtoken拒否、focus／overlay、Apply／Undo/Redo・実保存再読込と再生状態不変を確認。画像と入力、動画回転とsnapshotを共有し、実D3D11VA復旧前後の10 UI previewはCPU転送0。次はV04音声frame相当操作の契約照合へ進み、V05通常window／mixed-DPI・全素材品質／持続性能を含む全台帳は未完として継続する。
 
 2026-09-10 13:04 V05 GPU resize checkpoint: 4方式を同一deviceの横／縦passへ接続し、符号付きfloat中間・係数再利用・512 MiB合算予算を実装。保存の縮小時色間引きを無効化し、WARPの36寸法条件／24高彩度pattern条件と合成順序、実GPUの1080p／4Kの16条件で独立referenceを照合。操作UIはまだ未接続であり、次はtimeline内Ctrl+R／寸法・比率・filter／Apply・Cancelとpreview／Undoへ進む。通常window／全素材品質・性能と全台帳の残件は維持する。

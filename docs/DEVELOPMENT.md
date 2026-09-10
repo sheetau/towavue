@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 音声の10ms微小移動（2026-09-10 13:37、V04 partial）
+
+音声の`,／.`は前後10msのSeekとして接続した。View menu「Step audio backward／forward (10 ms)」とcustom bindingを共有し、映像なしの音声でも利用できる。音声のcodec frame長を表示操作の単位にせず、形式によらない短い時間単位を採用したもので、PCMの1sample移動や圧縮frame境界の探索ではない。動画の実PTS探索・32操作queueは変更しない。
+
+hold-speedを解除してから現在位置を取得し、sessionと補助clockを一時停止して既存のSeekへ渡す。再生中／停止中／EOFで利用でき、編集後時間軸の位置から10msずつ累積する。先頭・既知終端は既存Seekでclampし、rateで移動幅を変えない。履歴と時間選択は非編集、範囲再生の外へ移動する時だけ既存の規則で範囲再生を解除する。未ロード・別media・modalは拒否する。追加worker／queue／runtime API／unsafeはない。
+
+新規通常2 testsは未ロード／別media時の非停止、音声専用key・custom prefix・設定往復・既存custom speed keyを確認。View menuのkeyboard移動／Enterで2つの新commandへ到達する回帰も追加した。新opt-inは所有する無音48kHz stereo WAVと非表示window・実WASAPIを使い、10回の前進／後退、再生中からの停止、0秒／終端clamp、実decode・drainのEOFからの戻り、modal、不変の履歴／元file、Delete＋Stretchと2倍速設定でも10ms、範囲再生外への移動、30ms後も停止位置不変を確認した。サンプル位相や聴感、全codecのSeek遅延を認定する試験ではない。
+
+最終session36083はfmt check／Clippy／workspace446（app255／core61／runtime126／integration4）、app opt-in6件、Releaseが終了0。SKIPなし、通常ignored13は別計上。Release SHA-256 `c9db63819ace166820edd8d306210360940d65c0b53d00dfa0b6e3b48f715dcb`。先行f82e0dfのCI34437227965は成功。configは新試験の子processで隔離し、fixtureは通常harnessで片付ける。配布・導入・clipboard・外部foreground入力は行わない。次はE01の音声のみ書き出し／normalize／channel変換を既存の保存安全性・編集適用と照合する。通常window・全素材精度／持続性能、他のUX台帳全残件も維持する。
+
 ### 動画resizeの操作UI（2026-09-10 13:23、V05 partial）
 
 timeline表示中のCtrl+R／Edit menu「Resize / resample video」で右下dialogを開く。幅・高さ／Keep aspect ratio／4filterを画像と共有し、動画では元のSARを含む表示比率と2px格子を使う。初期値は正方形ピクセル化した偶数寸法、連動辺は最近傍2pxへ丸め、手入力の奇数は拒否する。実出力寸法と比率を表示し、GPU budgetを含む検証失敗時はApply不可。previewは現在の履歴の後ろへ一時resizeを付けて全canvasをFit表示し、同じframeのgeometry／UVとGPU処理を使う。

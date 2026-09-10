@@ -7,6 +7,9 @@ use towavue_runtime_windows::{LatestTask, adjacent_video_frame};
 use crate::{AppEvent, Application};
 
 #[cfg(test)]
+#[path = "audio_step_tests.rs"]
+mod audio_tests;
+#[cfg(test)]
 mod tests;
 
 pub(super) struct FrameSteps {
@@ -44,6 +47,41 @@ impl FrameSteps {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn step_audio(&mut self, forward: bool) {
+        if self.media_kind != Some(MediaKind::Audio)
+            || !matches!(
+                self.state,
+                PlaybackState::Playing | PlaybackState::Paused | PlaybackState::Ended
+            )
+            || self.session.is_none()
+            || self.modal_input_blocked()
+        {
+            return;
+        }
+        self.cancel_hold_speed();
+        let position = self.current_position();
+        let step = std::time::Duration::from_millis(10);
+        let target = if forward {
+            position.saturating_add(step)
+        } else {
+            position.saturating_sub(step)
+        };
+        if let Err(error) = self
+            .session
+            .as_mut()
+            .expect("audio session")
+            .set_paused(true)
+        {
+            self.fail(error.to_string());
+            return;
+        }
+        if let Some(clock) = &mut self.clock {
+            clock.set_paused(true);
+        }
+        self.state = PlaybackState::Paused;
+        self.seek_to(target);
+    }
+
     pub(super) fn cancel_frame_steps(&mut self) {
         self.frame_steps.worker.clear();
         self.frame_steps.serial = self.frame_steps.serial.wrapping_add(1);

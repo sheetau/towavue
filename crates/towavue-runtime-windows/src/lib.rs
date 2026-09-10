@@ -13,6 +13,7 @@ mod image_edits;
 mod image_loader;
 mod input;
 mod latest_task;
+mod launch;
 mod media_tools;
 mod orientation;
 mod pinned_cursor;
@@ -30,6 +31,7 @@ mod watch;
 mod waveform;
 mod window_point;
 
+pub use launch::{LaunchRequest, LaunchRole, LaunchServer};
 pub use window_point::unobscured_window_point;
 
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};

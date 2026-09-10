@@ -82,7 +82,7 @@ fn queued_filmstrip_windows_validate_source_identity_and_coalesce_duplicate_acti
     );
 }
 
-fn finish_child(app: &mut WindowApplication) {
+pub(super) fn finish_child(app: &mut WindowApplication) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         app.finish_image_load();

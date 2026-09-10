@@ -95,6 +95,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut event_loop = EventLoop::<window_host::Event>::with_user_event();
     configure_mouse_input(&mut event_loop);
     let event_loop = event_loop.build()?;
+    let proxy = event_loop.create_proxy();
+    let _launch_server = match towavue_runtime_windows::LaunchServer::start_or_forward(
+        initial_path.as_deref(),
+        move |request| {
+            let _ = proxy.send_event(window_host::Event::Launch(request));
+        },
+    )? {
+        towavue_runtime_windows::LaunchRole::Forwarded => return Ok(()),
+        towavue_runtime_windows::LaunchRole::Primary(server) => server,
+    };
     let mut application =
         window_host::WindowHost::new(initial_path, Some(event_loop.create_proxy()))?;
     event_loop.run_app(&mut application)?;
@@ -102,7 +112,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn parse_initial_path() -> Result<Option<PathBuf>, Box<dyn Error>> {
-    let mut arguments = std::env::args_os().skip(1);
+    initial_path_from(std::env::args_os().skip(1))
+}
+
+fn initial_path_from(
+    mut arguments: impl Iterator<Item = std::ffi::OsString>,
+) -> Result<Option<PathBuf>, Box<dyn Error>> {
     let Some(path) = arguments.next() else {
         return Ok(None);
     };
@@ -113,7 +128,7 @@ fn parse_initial_path() -> Result<Option<PathBuf>, Box<dyn Error>> {
     if !path.exists() {
         return Err(format!("path does not exist: {}", path.display()).into());
     }
-    Ok(Some(path))
+    Ok(Some(path.canonicalize()?))
 }
 
 struct PlaybackClock {

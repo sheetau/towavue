@@ -1,12 +1,22 @@
 # towavue アーキテクチャ
 
+## U08: 起動要求を同じhostへ集約（2026-09-10）
+
+通常起動は引き続き新windowを一つ開く。同ユーザーSID・logon session・canonical executable pathの既存hostがあれば、ファイル／folderの絶対pathまたはWelcome要求だけをそのhostへ渡す。既存tabへ勝手に追加せず、同deviceの新しい非表示windowを初期化してから表示する。起動元のrelative pathは転送前に解決する。異なるinstall場所やユーザー／sessionは別hostとし、すでに独立している旧processのlive stateを奪わない。
+
+runtimeのmessage-only HWNDとsession-local named mutexを使用する。mutexの名前hashは起動競合の調整だけで、転送先はprotocol class／完全title・process executable／SIDを照合する。既定token DACLとWindowsのdesktop／UIPI制約を維持し、メッセージfilterを緩和しない。ネットワークlistener・永続service・path交換用file・async runtimeは追加しない。受信するWM_COPYDATAは不信な入力としてversion／長さ／UTF-16 path構造・絶対pathを検証し、path以外のcommand／編集／native objectは受け付けない。同じdesktop上の任意codeに対する認証境界とは扱わない。
+
+受信threadはpathを所有bufferへcopyしてUI eventへ渡し、window初期化成功のackを最大4秒待つ。起動元は送信結果を最大5秒待つ。起動競合ではreadyを待つが、送信後のtimeout／拒否／終了は「まだ開く可能性がある」として診断し、自動再送や独立windowへのfallbackで重複を作らない。async media decode完了はack条件にせず、通常Openと同じ新window内診断とする。最後のwindow終了時は受信を止め、所有thread上でHWNDを破棄・joinしてからmutexを解放する。process異常終了時もkernel handleの寿命に従いmarkerが消える。
+
+参照: [WM_COPYDATAのbuffer寿命](https://learn.microsoft.com/en-us/windows/win32/dataxchg/wm-copydata)、[message-only window](https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features)、[SendMessageTimeout](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendmessagetimeoutw)、[session-local mutex](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createmutexw)。可視Explorer起動／foreground・mixed-DPI・実install更新との組合せは別の未検証項目とする。
+
 ## U08: 同host window間の通常tab drop（2026-09-10）
 
 外dropはtab IDに加えてrelease時のsource client座標をqueueし、hostが同deviceの既存windowへの結合か新window分離かを選ぶ。runtimeだけがClientToScreen／WindowFromPoint／root照合／ScreenToClientを扱い、appはsource／target各contextのpixels-per-pointで物理座標を変換する。別windowに隠れたtab barやpopupの背後へは結合しない。独立processの既存windowへはまだ移送しない。
 
 結合範囲は実際に描画したtab stripと空windowのWelcome領域。通常の挿入gap規則とclipを共用し、hover時は2 logical pxの縦線を表示する。対象windowはactivateせず、端で横scrollできる。source dragの取消・release・対象の閉鎖／modal／overlayでindicatorを解除する。releaseで対象tab列・viewport／density・描画世代とgraphics／modalを再検証し、前節で導入したstage→state移送を実行する。既存host window上でも媒体領域や無効なstripなら移送せず、診断して元tabを残す。どのhost windowもhitしなければ従来の新window分離へ進む。元の未保存編集を再読込や保存確認で置き換えず、最後のtab移送後はWelcomeを残す。
 
-検証はheadlessの複数幅／densityでのgap・indicator・scroll・古いlayout拒否と、所有する非表示HWNDでの実drag action／GPU描画／state移送に分ける。非表示HWNDではOSのhit選択だけを注入するため、可視windowの実pointer capture／occlusion／mixed-DPIを認定したことにはしない。別process入口・可視入力と全体の時間／資源評価は未完。
+検証はheadlessの複数幅／densityでのgap・indicator・scroll・古いlayout拒否と、所有する非表示HWNDでの実drag action／GPU描画／state移送に分ける。非表示HWNDではOSのhit選択だけを注入するため、可視windowの実pointer capture／occlusion／mixed-DPIを認定したことにはしない。通常の別process入口は上節の起動集約を使い、可視入力と全体の時間／資源評価は未完。
 
 ## U08: filmstripからの同host新window（2026-09-10）
 
@@ -14,7 +24,7 @@
 
 これは既存tabの移送ではなく、元ファイルを独立した新tabとして開く操作である。元tab・未保存履歴・保存先・再生位置／sessionは変更しない。window作成前後の初期化失敗やOpen受付前のpath失敗では新windowを破棄し、元filmstripを残して診断する。window作成とOpen受付成功後に新windowを表示して元filmstripを閉じる。初回decode完了は起動受付と区別し、壊れた媒体などの読込失敗は新windowの標準診断に任せる。元の未保存編集を複製したり、読込失敗を理由に元tabを閉じたりしない。
 
-通常のtab分離とfilmstrip新windowは同じevent loop／D3D11 device／通知所有権／終了管理を使う。既存windowへのdrag結合／drop indicatorは上節の同host処理を使う。別processとして開始される入口の所有権、可視windowの実入力／mixed-DPIと起動・描画時間の評価は引き続き未完。
+通常のtab分離とfilmstrip新windowは同じevent loop／D3D11 device／通知所有権／終了管理を使う。既存windowへのdrag結合／drop indicatorと通常起動の集約は上節の同host処理を使う。可視windowの実入力／mixed-DPIと起動・描画時間の評価は引き続き未完。
 
 ## U08: 画像tabのcontext移送と未取得ページの再開（2026-09-10）
 

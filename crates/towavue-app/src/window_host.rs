@@ -19,6 +19,10 @@ mod transfer_tests;
 #[path = "window_open_tests.rs"]
 mod opening_tests;
 
+#[cfg(test)]
+#[path = "window_launch_tests.rs"]
+mod launch_tests;
+
 // Never reused, even after the native HWND or a window-local session ID is reused.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct WindowKey(u64);
@@ -31,6 +35,7 @@ pub(crate) struct GraphicsRecoveryRequest {
 }
 
 pub(crate) enum Event {
+    Launch(towavue_runtime_windows::LaunchRequest),
     Window(WindowKey, AppEvent),
     Accessibility(accesskit_winit::Event),
 }
@@ -47,6 +52,7 @@ pub(crate) struct WindowHost {
     windows: BTreeMap<WindowKey, WindowApplication>,
     proxy: Option<EventLoopProxy<Event>>,
     next_key: u64,
+    pending_launches: Vec<towavue_runtime_windows::LaunchRequest>,
 }
 
 impl WindowHost {
@@ -58,6 +64,7 @@ impl WindowHost {
             windows: BTreeMap::new(),
             proxy,
             next_key: 1,
+            pending_launches: Vec::new(),
         };
         host.add_application(initial_path)?;
         Ok(host)
@@ -112,6 +119,52 @@ impl WindowHost {
         self.windows.values_mut().find(|app| {
             !app.exit_requested && app.window.as_ref().is_some_and(|window| window.id() == id)
         })
+    }
+
+    fn open_pending_launches(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
+        for request in std::mem::take(&mut self.pending_launches) {
+            let result =
+                self.open_launched_window_with(request.path.clone(), visible, |app, device| {
+                    app.start_on_device(event_loop, device, false)
+                        .map_err(|error| error.to_string())
+                });
+            if let Err(error) = &result {
+                eprintln!("towavue: could not open launched window: {error}");
+            }
+            request.acknowledge(result.is_ok());
+        }
+    }
+
+    fn open_launched_window_with(
+        &mut self,
+        path: Option<PathBuf>,
+        visible: bool,
+        start: impl FnOnce(
+            &mut WindowApplication,
+            Option<towavue_runtime_windows::GraphicsDevice>,
+        ) -> Result<(), String>,
+    ) -> Result<WindowKey, String> {
+        let device = self
+            .windows
+            .values()
+            .find_map(|app| app.renderer.as_ref().map(FrameRenderer::graphics_device));
+        let key = self
+            .add_application(path)
+            .map_err(|error| error.to_string())?;
+        let app = self.windows.get_mut(&key).expect("new window");
+        if let Err(error) = start(app, device) {
+            let mut app = self.windows.remove(&key).expect("new window");
+            if let Some(renderer) = app.renderer.take() {
+                renderer.release_surface();
+            }
+            return Err(error);
+        }
+        let window = app.window.as_ref().expect("started window");
+        window.set_visible(visible);
+        if visible {
+            window.focus_window();
+        }
+        Ok(key)
     }
 
     fn move_tab(
@@ -213,6 +266,7 @@ impl WindowHost {
 
     fn route(&mut self, event: Event) {
         match event {
+            Event::Launch(request) => self.pending_launches.push(request),
             Event::Window(origin, AppEvent::Playback(instance, event)) => {
                 if let Some((owner, instance)) = self.playback_owner((origin, instance)) {
                     self.windows
@@ -485,6 +539,7 @@ impl ApplicationHandler<Event> for WindowHost {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         self.route(event);
+        self.open_pending_launches(event_loop, true);
         self.open_pending_windows(event_loop, true);
         self.update_tab_drops(event_loop, true);
     }
@@ -518,6 +573,7 @@ impl ApplicationHandler<Event> for WindowHost {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.open_pending_launches(event_loop, true);
         self.open_pending_windows(event_loop, true);
         self.update_tab_drops(event_loop, true);
         event_loop.set_control_flow(self.prepare_wait());

@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 U08 launch-routing checkpoint: 同じSID／session／executableからの通常起動を既存hostへ集約し、file／folder／Welcomeを同deviceの新windowとして開く。絶対path-onlyのbounded UTF-16要求、message-only受信窓、session-local lifetime marker、process／SID照合とstartup ackを採用。timeoutでは自動再送・重複fallbackしない。実子processの並行転送／拒否／timeout／owner終了後の再取得、非表示HWNDの実IPC→起動ack／file decode／folder Shell読込み／Welcome・元state保持／同device描画を確認。先行39138e8のCI34476325249は成功。旧独立processのlive state回収はせず、可視Explorer／foreground／window間入力・mixed-DPIと全UX台帳／性能は継続する。
+
 2026-09-10 U08 merge-input checkpoint: tab外releaseの座標をhostへ渡し、同host既存windowの実描画tab strip／Welcomeへgap指定でlive stateを移す。runtimeのroot hit照合と各windowのDPI変換を通し、hover中はfocusを奪わず挿入線／端scroll、成功後に移動先focus。modal／overlay／媒体領域／古いtab列・viewport・densityを拒否し、他windowに隠れた対象へは結合しない。3幅×3密度のheadlessと、OS hit選択だけを注入した非表示HWNDの実drag／GPU indicator／dirty画像移送／Welcomeを検証。独立process入口の所有権、可視windowの実入力／重なり／mixed-DPIと全UX台帳・性能は引き続き未完。
 
 2026-09-10 U08 hosted-filmstrip checkpoint: 通常のサムネイル外dragを同host／device上の新windowへ接続。元tabの移送ではなく独立した元ファイルのOpenとし、元編集・保存先・再生session／位置を保持する。要求の重複・tab／媒体／folder世代・overlayを検証し、初期化前後／missing path失敗では子を残さずfilmstripを保持。受付後の壊れた媒体は新windowの通常診断とする。非表示HWNDで画像・無音音声／動画・壊れた画像の読込み、共有device描画と元state不変を確認。先行a598fe0のCI34473236643は成功。次は既存windowへの通常drag結合／drop indicatorと別process入口の所有権。可視window／mixed-DPI／性能と全UX台帳は継続する。

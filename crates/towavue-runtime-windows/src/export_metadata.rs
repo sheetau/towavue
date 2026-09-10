@@ -43,6 +43,70 @@ impl MetadataField {
             Self::Copyright => "copyright",
         }
     }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Title => "Title",
+            Self::Artist => "Artist",
+            Self::Album => "Album",
+            Self::AlbumArtist => "Album artist",
+            Self::Composer => "Composer",
+            Self::Genre => "Genre",
+            Self::Date => "Date",
+            Self::Track => "Track",
+            Self::Comment => "Comment",
+            Self::Copyright => "Copyright",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MetadataSourceValue {
+    pub field: MetadataField,
+    pub scope: &'static str,
+    pub value: String,
+    pub truncated: bool,
+}
+
+/// Reads bounded display values only; export Keep still copies the original tags.
+pub fn read_export_metadata(
+    path: &Path,
+    kind: MediaKind,
+) -> Result<Vec<MetadataSourceValue>, ExportError> {
+    if kind == MediaKind::Image {
+        return Err(ExportError::Failed(
+            "Image metadata inspection is not connected yet".into(),
+        ));
+    }
+    ffmpeg::init().map_err(|error| ExportError::Failed(error.to_string()))?;
+    let input =
+        ffmpeg::format::input(path).map_err(|error| ExportError::Failed(error.to_string()))?;
+    let mut values = Vec::new();
+    let mut collect = |scope, tags: ffmpeg::DictionaryRef<'_>| {
+        for field in MetadataField::ALL {
+            if let Some((_, value)) = tags
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(field.key()))
+            {
+                values.push(MetadataSourceValue {
+                    field,
+                    scope,
+                    value: value[..value.floor_char_boundary(1024)].to_owned(),
+                    truncated: value.len() > 1024,
+                });
+            }
+        }
+    };
+    collect("File", input.metadata());
+    if kind == MediaKind::Video
+        && let Some(stream) = input.streams().best(ffmpeg::media::Type::Video)
+    {
+        collect("Video", stream.metadata());
+    }
+    if let Some(stream) = input.streams().best(ffmpeg::media::Type::Audio) {
+        collect("Audio", stream.metadata());
+    }
+    Ok(values)
 }
 
 /// Absent fields keep source tags; empty values remove a field from the output.

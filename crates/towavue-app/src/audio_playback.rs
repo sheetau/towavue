@@ -358,6 +358,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             self.edits.insert(id, EditHistory::default());
             self.export_paths.remove(&id);
             self.audio_export_settings.remove(&id);
+            self.metadata_export_settings.remove(&id);
             let instance = saved.instance;
             let notify = Arc::clone(&self.notify);
             match PlaybackSession::open(
@@ -705,6 +706,14 @@ mod tests {
                 wait(&mut app, &events, |app| app.state == PlaybackState::Ended);
                 let old_instance = app.media_generation;
                 let old_generation = app.generation;
+                let mut metadata = MetadataExportOptions::default();
+                metadata
+                    .set(
+                        towavue_runtime_windows::MetadataField::Title,
+                        Some("Previous track".into()),
+                    )
+                    .expect("metadata setting");
+                app.metadata_export_settings.insert(audio, metadata.clone());
                 app.audio_export_settings.insert(
                     audio,
                     AudioExportOptions {
@@ -715,6 +724,7 @@ mod tests {
                 advance(&mut app, &events);
                 assert_eq!(app.path.as_ref(), Some(&paths[1]));
                 assert!(!app.audio_export_settings.contains_key(&audio));
+                assert!(!app.metadata_export_settings.contains_key(&audio));
                 assert_eq!(app.tabs.active().expect("same tab").id, audio);
                 assert!(app.media_generation > old_instance);
                 app.handle_app_event(AppEvent::Playback(
@@ -777,6 +787,7 @@ mod tests {
                         && app.retained_playback[&audio].state == PlaybackState::Ended
                 });
                 let image_instance = app.media_generation;
+                app.metadata_export_settings.insert(audio, metadata);
                 app.audio_export_settings.insert(
                     audio,
                     AudioExportOptions {
@@ -787,6 +798,7 @@ mod tests {
                 advance(&mut app, &events);
                 assert_eq!(app.retained_playback[&audio].path, paths[1]);
                 assert!(!app.audio_export_settings.contains_key(&audio));
+                assert!(!app.metadata_export_settings.contains_key(&audio));
                 assert_eq!(app.tabs.active().expect("image stays active").id, image);
                 assert_eq!(app.media_generation, image_instance);
                 assert_eq!(

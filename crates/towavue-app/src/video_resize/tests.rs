@@ -44,6 +44,17 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
         vec![access(node(&tree, "Height in pixels"), Some("64"))],
     );
     frame(app, vec![]);
+    resize::tests::select_all_filters(app, |app, filter| {
+        assert_eq!(
+            app.video_resize_dialog
+                .as_ref()
+                .expect("dialog")
+                .value()
+                .expect("resize")
+                .filter(),
+            filter
+        )
+    });
     let dialog = app.video_resize_dialog.as_ref().expect("preview");
     let first = dialog.value().expect("valid preview");
     assert_eq!(first.size(), (96, 64));

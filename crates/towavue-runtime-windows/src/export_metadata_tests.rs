@@ -8,6 +8,75 @@ fn edits(field: MetadataField, value: &str) -> MetadataExportOptions {
     options
 }
 
+#[test]
+fn metadata_inspection_selects_playback_streams_and_bounds_display_without_changing_tags() {
+    let root = root("metadata-inspection");
+    let raw = root.join("raw.mkv");
+    fixture(&raw);
+    let source = root.join("source.mkv");
+    let comment = format!("comment={}", "音".repeat(500));
+    ffmpeg(
+        &[
+            "-i",
+            raw.to_str().expect("path"),
+            "-map",
+            "0",
+            "-c",
+            "copy",
+            "-metadata",
+            &comment,
+            "-metadata:s:a:0",
+            "title=Not the selected audio",
+            "-metadata:s:a:1",
+            "title=Selected audio",
+            "-metadata:s:v:0",
+            "title=Selected video",
+        ],
+        &source,
+    );
+    let original = fs::read(&source).expect("original");
+    for kind in [MediaKind::Audio, MediaKind::Video] {
+        let values = read_export_metadata(&source, kind).expect("source tags");
+        assert!(values.len() <= 30);
+        assert!(
+            values
+                .iter()
+                .any(|value| value.scope == "File" && value.value == "Audio derivative fixture")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|value| value.scope == "Audio" && value.value == "Selected audio")
+        );
+        assert_eq!(
+            values.iter().any(|value| value.scope == "Video"),
+            kind == MediaKind::Video
+        );
+        assert!(
+            !values
+                .iter()
+                .any(|value| value.value == "Not the selected audio")
+        );
+        let comment = values
+            .iter()
+            .find(|value| value.field == MetadataField::Comment)
+            .expect("comment");
+        assert!(comment.truncated);
+        assert_eq!(comment.value, "音".repeat(341));
+        assert!(values.iter().all(|value| value.value.len() <= 1024));
+    }
+    assert!(read_export_metadata(&source, MediaKind::Image).is_err());
+    assert!(read_export_metadata(&root.join("missing.mkv"), MediaKind::Video).is_err());
+    assert_eq!(fs::read(&source).expect("source"), original);
+    let input = ffmpeg::format::input(&source).expect("original tags");
+    assert_eq!(
+        input.metadata().get("COMMENT"),
+        Some("音".repeat(500).as_str())
+    );
+    drop(input);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
 fn request(source: &Path, target: &Path, kind: MediaKind) -> ExportRequest {
     ExportRequest {
         source: source.into(),

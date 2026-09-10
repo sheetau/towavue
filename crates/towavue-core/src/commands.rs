@@ -56,6 +56,7 @@ pub enum CommandId {
     ExportAs,
     ExportAudio,
     AudioExportOptions,
+    MetadataExportOptions,
     ToggleTimeline,
     ToggleGridMenu,
     ToggleHardwareEncode,
@@ -178,6 +179,7 @@ impl CommandId {
             Self::ExportAs => "export_as",
             Self::ExportAudio => "export_audio",
             Self::AudioExportOptions => "audio_export_options",
+            Self::MetadataExportOptions => "metadata_export_options",
             Self::ToggleTimeline => "toggle_timeline",
             Self::ToggleGridMenu => "toggle_grid_menu",
             Self::ToggleHardwareEncode => "toggle_hardware_encode",
@@ -637,6 +639,11 @@ const COMMANDS: &[CommandDefinition] = &[
     command(
         CommandId::AudioExportOptions,
         "Audio export options",
+        PLAYABLE_MEDIA,
+    ),
+    command(
+        CommandId::MetadataExportOptions,
+        "Metadata export options",
         PLAYABLE_MEDIA,
     ),
     command(

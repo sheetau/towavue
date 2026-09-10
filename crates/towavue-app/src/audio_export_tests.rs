@@ -2,7 +2,7 @@ use super::*;
 use std::os::windows::process::CommandExt;
 use std::sync::mpsc;
 
-fn fixture(path: &Path) {
+pub(super) fn fixture(path: &Path) {
     let output = std::process::Command::new(
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe"),
     )

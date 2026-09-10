@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-10 15:18 E01／U02追加checkpoint: metadata設定UIと非同期既存値表示をSave／再Save／AudioOnlyへ接続し、source/tab単位保持・取消／stale／guard、全10項目・IMEを検証。全app描画がmodal内popupも毎frame閉じる不具合を再現し、metadata・画像／動画resizeの選択を修正。実GPU上のmetadata Apply／復旧と4filter選択も確認。画像metadata・通常window／mixed-DPI／全codecと全台帳の未完事項を継続する。
+
 2026-09-10 14:54 E01追加checkpoint: 個別metadataの10文字項目をtyped export optionsへ接続。非破壊・値の事後照合・未対応形式／表記変形時の既存target保持、通常動画／音声・AudioOnlyとnormalize／timeline共存を確認。設定UI／source別保持と画像metadataは次工程で、全台帳の未完事項を継続する。
 
 2026-09-10 14:40 E01追加checkpoint: File「Audio export options」のnormalize／channel選択を通常Save・再Save・Export as・AudioOnlyへ接続。Apply／Cancel／Escape、focus／compact・stale source／tab／generation、未保存guardと実PCMを確認。設定はtab内の現在source限りで、別曲・再読込・closeに引き継がない。実GPU復旧前後の設定UI操作も確認。次は個別metadata書換へ進み、通常window／全codec品質と全台帳の未完事項を継続する。
@@ -42,7 +44,7 @@
 | ID | 要求・到達状態 | 初期証拠／残件 |
 |---|---|---|
 | U01 | ネイティブ角丸・境界・caption controls、重くないwindow drag | 主実装をcheckpoint化。DWM caption＋同一deviceの入力透過child surface。角丸、標準button hit、drag／double-click／最小化／最大化／復元／fullscreen、PNG・短いhardware動画、UIA操作とguard、pointer resize、画像と再生／一時停止動画の復旧を確認。標準system menuのpopupも確認。混在DPI・物理キーのmenu操作・drag遅延の定量比較は継続。Snap候補は基準機の設定で無効なため表示未検証 |
-| U02 | modalのnative利用をコード量・操作性で判断 | 要照合。通常egui、graphics故障時native。guardと入力・focus・保存取消を維持して判断を記録する |
+| U02 | modalのnative利用をコード量・操作性で判断 | 要照合。通常egui、graphics故障時native。metadataと画像／動画resizeのpopup保持を全app frameで修正・回帰確認。guardと入力・focus・保存取消、全modalのnative選択判断は継続 |
 | U03 | Codicon、Figtree＋日本語UI font、数字の等幅 | 主対応済み。monapadのFigtree／Monaco Codiconを同梱、既存tnum字形を再生成可能な派生fontへ固定。Yu Gothic UI Regularのfaceを優先し、glyph・等幅・UI配置と実日本語画面を確認。今後追加する操作のiconとnative caption後の最終照合は継続 |
 | U04 | grayscale配色、barの2境界、logo／tabの中央揃え・左寄せ・一定padding | 一部対応。基本バー・共通widget状態色・clear色、logo／tab中央と左10px余白、timeline上へ移る2境界を実装・検証。overlay固有色／全media状態での最終照合、font/icon変更後の配置確認は残る |
 | U05 | 重い保存等の進捗はtoolbar下境界、軽い画像移動で点滅させない | 未完。現在はexport window／一時status。実際の進捗・取消・失敗との整合が必要 |
@@ -66,7 +68,7 @@
 | V05 | 動画のzoom・resizeと既存crop／rotate／flip／fullscreen | timeline内のCtrl＋wheel／+・-／100%／Fit／Coverと右drag panを接続。SAR／physical倍率・cursor基点、viewportとUVのclip、modal／overlay／取消、timeline／fullscreen／tab保持と保存画素不変を回帰確認。実D3D11VAの復旧前後もCPU転送0。resize／resampleのcore値・4filterのsoftware保存・SAR1／合成順序・source照合、GPU4方式／符号付き中間／係数再利用／512 MiB予算と代表画素・速度を確認。Ctrl+R／Edit menuの寸法・比率・4filter／preview／Apply・Cancel UI、identity／snapshot／古いtoken拒否、focus／overlay・Undo/Redo・保存再読込と実D3D11VAも接続。通常window／混在DPI・全素材品質／持続性能は未完、単一device・preview/exportの対応を維持する |
 | A01 | 音声の自動次曲、repeat all／one／off、shuffleとbuttons | 主要経路実装。tab別のShell順auto-next、repeat off／all／one、shuffle一巡、前後操作、status buttons／View／palette／音声Ctrl+R。曲末にShell順を非同期再取得し、初回取得前のtab切替にも対応。実WASAPIでactive／背景の次曲・loop・dirty guard・古い通知拒否・失敗隔離を検証。通常releaseでbuttons／shortcut／自然EOFの次曲を確認。modeのrestart永続化、gapless、手動選曲の独立した履歴stackは提供しない |
 | A02 | 音声timeline常時、動画共通の選択編集・音量／速度操作 | 音声timelineはfullscreenでも常設、Tでは閉じずcompact seek／専用buttonなし。V03共通の時間選択・Delete／Keep・UIA端点を接続。共有rubber-band音量／Alt+drag stretchと数値操作も接続。共有範囲再生も接続し、repeat off/all/oneと背景停止を実WASAPIで確認。最終操作監査は引き続き未完 |
-| E01 | metadata書換、音声抽出、normalize、stereo／mono export | 部分実装。動画の音声のみ別名出力、normalize／Mono・Stereo設定UIとSave連携は接続済み。10文字項目のmetadata出力基盤と再probe／既存target保護を検証。metadata設定UI・source別保持・画像metadata、通常window／全codec品質は未完 |
+| E01 | metadata書換、音声抽出、normalize、stereo／mono export | 部分実装。音声のみ出力、normalize／Mono・Stereo設定とSave連携済み。動画／音声の10文字metadata設定UI・非同期既存値・source別保持・再probe／既存target保護を検証。画像metadata、通常window／全codec品質は未完 |
 | M01 | logoの三方向menu gestureと最小限の状態表示 | 未完。クリック／keyboard menuとlogo描画は存在。閾値・角度・mouseup・取消を共有dispatchへ渡す |
 | G01 | menu／palette／custom prefix／media別grid／dirty guard／Shell順 | 実装あり。追加commandの全入口と重なり・keyboard／IME／UIA・Undo／保存を変更ごとに再検証する |
 

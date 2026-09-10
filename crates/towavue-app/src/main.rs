@@ -15,6 +15,7 @@ mod grid;
 mod hold_speed;
 mod image_navigation;
 mod menu;
+mod metadata_export;
 mod palette;
 mod playback_tab;
 #[cfg(test)]
@@ -66,6 +67,7 @@ use towavue_runtime_windows::{
     canonical_shell_path, configure_mouse_input, cursor_position_in_window, pick_path, reveal_file,
     reveal_license_guide, show_prompt,
 };
+use towavue_runtime_windows::{MetadataExportOptions, MetadataSourceValue};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -184,9 +186,11 @@ enum UiAction {
     FinishVideoRotation(u64, Option<towavue_core::VideoRotation>),
     FinishVideoResize(u64, Option<towavue_core::VideoResize>),
     FinishAudioExportOptions(u64, Option<AudioExportOptions>),
+    FinishMetadataOptions(u64, Option<MetadataExportOptions>),
 }
 
 enum AppEvent {
+    MetadataLoaded(u64, Result<Vec<MetadataSourceValue>, String>),
     FrameStep(u64, Result<Option<MediaTime>, String>),
     Accessibility(accesskit_winit::Event),
     ImagesReady,
@@ -686,6 +690,10 @@ struct Application<N> {
     audio_export_dialog: Option<audio_export::AudioExportDialog>,
     audio_export_generation: u64,
     audio_export_settings: BTreeMap<TabId, AudioExportOptions>,
+    metadata_dialog: Option<metadata_export::MetadataDialog>,
+    metadata_generation: u64,
+    metadata_export_settings: BTreeMap<TabId, MetadataExportOptions>,
+    metadata_worker: Option<LatestTask>,
     video_raster_operations: Option<Vec<EditOperation>>,
     rotation_generation: u64,
     rotation_drag: Option<rotation::RotationDrag>,
@@ -868,6 +876,10 @@ where
             audio_export_dialog: None,
             audio_export_generation: 0,
             audio_export_settings: BTreeMap::new(),
+            metadata_dialog: None,
+            metadata_generation: 0,
+            metadata_export_settings: BTreeMap::new(),
+            metadata_worker: None,
             video_raster_operations: None,
             rotation_generation: 0,
             rotation_drag: None,
@@ -1808,6 +1820,7 @@ where
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::MetadataLoaded(token, values) => self.finish_metadata_read(token, values),
             AppEvent::FrameStep(serial, result) => self.finish_frame_step(serial, result),
             AppEvent::Accessibility(event) => {
                 if self.window.as_ref().map(|window| window.id()) == Some(event.window_id)
@@ -2219,6 +2232,7 @@ where
         self.cancel_stale_video_rotation();
         self.cancel_stale_video_resize();
         self.cancel_stale_audio_export_options();
+        self.cancel_stale_metadata_dialog();
         self.video_raster_operations = None;
         self.image_seek_preview_active = false;
         self.video_rect = None;
@@ -2263,7 +2277,12 @@ where
             let opacity = root.opacity();
             root.disable();
             root.set_opacity(opacity);
-            egui::Popup::close_all(&context);
+            if self.metadata_dialog.is_none()
+                && self.resize_dialog.is_none()
+                && self.video_resize_dialog.is_none()
+            {
+                egui::Popup::close_all(&context);
+            }
         }
         wheel_input::begin_frame(&context);
         let mut volume_targets = Vec::new();
@@ -2397,6 +2416,8 @@ where
             self.draw_unsaved_guard(&context, actions);
         } else if self.audio_export_dialog.is_some() {
             self.show_audio_export_options(&context, actions);
+        } else if self.metadata_dialog.is_some() {
+            self.show_metadata_options(&context, actions);
         } else if self.video_resize_dialog.is_some() {
             self.show_video_resize(&context, actions);
         } else if self.video_rotation_dialog.is_some() {
@@ -2447,6 +2468,9 @@ where
                 .on_hover_text(export.request.target.display().to_string());
             if export.options.audio != AudioExportOptions::default() {
                 ui.label(audio_export::summary(export.options.audio));
+            }
+            if !export.options.metadata.is_empty() {
+                ui.label("Metadata changes: verified before replacing the target");
             }
             ui.label(if export.cancelling {
                 "Cancelling export…".to_owned()
@@ -4271,6 +4295,11 @@ where
                         && self.pending_guard.is_none()
                         && self.export_error.is_none()
                 }
+                UiAction::FinishMetadataOptions(..) => {
+                    self.metadata_dialog.is_some()
+                        && self.pending_guard.is_none()
+                        && self.export_error.is_none()
+                }
                 UiAction::CancelExport => {
                     self.active_export.is_some() && self.export_error.is_none()
                 }
@@ -4280,6 +4309,9 @@ where
             return;
         }
         match action {
+            UiAction::FinishMetadataOptions(token, value) => {
+                self.finish_metadata_options(token, value)
+            }
             UiAction::FinishAudioExportOptions(token, value) => {
                 self.finish_audio_export_options(token, value)
             }
@@ -4422,6 +4454,7 @@ where
                 | CommandId::FreeRotateVideo
                 | CommandId::ResizeVideo
                 | CommandId::AudioExportOptions
+                | CommandId::MetadataExportOptions
         ) && (self.palette_open || self.grid_open)
         {
             self.cancel_command_overlay();
@@ -4626,6 +4659,9 @@ where
                     return;
                 };
                 let size = self.visual_transform(image.dimensions()).size;
+                if let Some(context) = &self.ui_context {
+                    egui::Popup::close_all(context);
+                }
                 self.resize_dialog = Some(resize::ResizeDialog::new((
                     size.0.round() as u32,
                     size.1.round() as u32,
@@ -4796,6 +4832,7 @@ where
                 self.export_current_output(true, None, ExportOutput::AudioOnly);
             }
             CommandId::AudioExportOptions => self.open_audio_export_options(),
+            CommandId::MetadataExportOptions => self.open_metadata_export_options(),
             CommandId::ToggleTimeline => {
                 self.thumbnail_worker.clear();
                 self.thumbnail_loading = None;
@@ -4907,6 +4944,7 @@ where
         self.video_rotation_dialog = None;
         self.video_resize_dialog = None;
         self.audio_export_dialog = None;
+        self.cancel_metadata_dialog();
         self.video_raster_operations = None;
         self.rotation_drag = None;
         self.video_rotation_drag = None;
@@ -5418,7 +5456,11 @@ where
                 .get(&id)
                 .copied()
                 .unwrap_or_default(),
-            ..Default::default()
+            metadata: self
+                .metadata_export_settings
+                .get(&id)
+                .cloned()
+                .unwrap_or_default(),
         };
         match ExportJob::start_with_options(request.clone(), options.clone(), move |event| {
             notify(AppEvent::Export(event))
@@ -5617,6 +5659,10 @@ where
     fn request_guarded(&mut self, action: GuardedAction) {
         self.cancel_hold_speed();
         self.cancel_frame_steps();
+        if self.metadata_dialog.is_some() {
+            self.set_status("Apply or cancel metadata options before leaving.".into());
+            return;
+        }
         if self.audio_export_dialog.is_some() {
             self.set_status("Apply or cancel audio export options before leaving.".into());
             return;
@@ -5808,6 +5854,7 @@ where
         }
         self.export_paths.remove(&id);
         self.audio_export_settings.remove(&id);
+        self.metadata_export_settings.remove(&id);
         if !was_active {
             self.request_redraw();
             return;
@@ -6061,6 +6108,7 @@ where
             self.edits.insert(id, EditHistory::default());
             self.export_paths.remove(&id);
             self.audio_export_settings.remove(&id);
+            self.metadata_export_settings.remove(&id);
         }
         self.load_path(path, kind);
     }
@@ -6709,6 +6757,7 @@ where
             || self.video_resize_dialog.is_some()
             || self.pending_dialog.is_some()
             || self.audio_export_dialog.is_some()
+            || self.metadata_dialog.is_some()
             || self.native_prompt.is_some()
             || self.pending_guard.is_some()
             || self.export_error.is_some()
@@ -10506,8 +10555,20 @@ mod tests {
                     hardware_encode: false,
                 };
                 // Same-source rejection keeps this UI fixture free of file writes and FFmpeg.
+                let mut metadata = MetadataExportOptions::default();
+                if mode >= 5 {
+                    metadata
+                        .set(
+                            towavue_runtime_windows::MetadataField::Title,
+                            Some("Export title".into()),
+                        )
+                        .expect("metadata option");
+                }
                 ActiveExport {
-                    options: ExportOptions::default(),
+                    options: ExportOptions {
+                        metadata,
+                        ..Default::default()
+                    },
                     job: ExportJob::start(request.clone(), |_| {}).expect("fixture worker"),
                     tab,
                     request,
@@ -13751,6 +13812,15 @@ mod tests {
             ..Default::default()
         };
         app.audio_export_settings.insert(original, options);
+        let mut metadata = MetadataExportOptions::default();
+        metadata
+            .set(
+                towavue_runtime_windows::MetadataField::Title,
+                Some("Original track title".into()),
+            )
+            .expect("metadata setting");
+        app.metadata_export_settings
+            .insert(original, metadata.clone());
         app.open_external(first.clone(), false);
         assert_eq!(app.tabs.active().expect("same tab").id, original);
         assert_eq!(app.path, source);
@@ -13760,6 +13830,7 @@ mod tests {
         );
         assert_eq!(app.export_paths[&original], second);
         assert_eq!(app.audio_export_settings.get(&original), Some(&options));
+        assert_eq!(app.metadata_export_settings.get(&original), Some(&metadata));
         app.open_external(image, false);
         let background = app.tabs.active().expect("image tab").id;
         app.edits
@@ -13772,6 +13843,7 @@ mod tests {
         assert_eq!(app.edits[&original], EditHistory::default());
         assert!(!app.export_paths.contains_key(&original));
         assert!(!app.audio_export_settings.contains_key(&original));
+        assert!(!app.metadata_export_settings.contains_key(&original));
         assert_eq!(app.edits[&background], image_history);
         app.edits
             .get_mut(&original)

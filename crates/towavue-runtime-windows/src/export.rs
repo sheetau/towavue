@@ -22,7 +22,9 @@ pub use audio_options::{AudioChannels, AudioExportOptions};
 
 #[path = "export_metadata.rs"]
 mod metadata;
-pub use metadata::{MetadataExportOptions, MetadataField};
+pub use metadata::{
+    MetadataExportOptions, MetadataField, MetadataSourceValue, read_export_metadata,
+};
 
 #[cfg(test)]
 #[path = "export_audio_tests.rs"]

@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 15:18 E01 metadata UI／U02 popup checkpoint: File／custom commandへ10項目のKeep／Set／Remove、非同期global／best stream既存値表示とsource別設定保持を接続。全項目UIA・UTF-8上限・IME／popup Escape・取消／focus／stale結果、実Save／再Save／AudioOnly／離脱Saveを確認。modal中の一律popup閉鎖を原因として、metadataと画像／動画resizeの選択を修正し、全app frameと実GPU復旧前後で4filter選択を確認。次は画像metadataへ進む。全UX台帳・通常window／混在DPI／全素材品質・性能は継続する。先行dc15b09のCI34443028049は成功。
+
 2026-09-10 14:54 E01 metadata基盤checkpoint: 10文字項目のKeep／Set／Removeを通常動画／音声・音声のみ出力へ追加し、staged出力の値／削除を再probeしてからpublishする。6音声形式のtitle、Matroska全10項目、Unicode／改行／引用符、既存target保護と区間編集／normalizeとのPCM一致を確認。ADTS title・RIFF非対応tag・M4A track表記変形は既存targetを置換せず拒否する。設定UI／source別保持・画像metadataは未接続で、次はこれらへ進む。全UX台帳と通常window／全素材品質の残件は維持する。先行f219f76のCI34442221336は成功。
 
 2026-09-10 14:40 E01音声option UI checkpoint: File menu／custom commandの設定modalをSave／Export as／AudioOnlyへ接続。Apply／Cancel・Escape・compact配置・overlay focus・stale token／同path再読込拒否と、実PCMでの再Save／離脱時Saveを確認。設定はtab内の現在sourceだけに保持し、別曲・再読込・closeで解除する。音声のみ出力は動画の未保存状態と通常Save先を保持する。実D3D11VA復旧前後10点のUI操作は履歴／transport不変・CPU転送0。次は個別metadata書換へ進む。通常window／全codec品質と他のUX台帳全残件は維持する。先行590d240のCI34440521631は成功。

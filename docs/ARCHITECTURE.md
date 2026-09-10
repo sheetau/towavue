@@ -1,12 +1,20 @@
 # towavue アーキテクチャ
 
+## E01: metadata設定UIと非同期の既存値表示（2026-09-10）
+
+metadataと画像／動画resizeのmodal内popupはframeを越えて保持する。背景menuはmodalを開く時に閉じ、modal全体を毎frame閉じる処理でそのfield／filter選択まで消さない。metadataのCancel／source変更時は所有popupも閉じる。文字入力のUIA SetValueは既存resize用のbridgeを共有し、複数行roleを維持する。IME候補中とcommit同frameのEscapeはdialogを閉じず、popup内Escapeはpopupだけを閉じる。
+
+動画／音声のFile「Metadata export options」から10文字項目を選び、Keep／Set／Removeと値を指定する。既定keyは追加しない。現在fileのglobal／再生と同じbest video・audio streamの値を、window/GPUを所有しないlatest-only workerで取得する。表示値は各1024 UTF-8 bytesへ文字境界で制限し、省略を明示する。これは表示上限で、Keepの元tagを切り詰めない。古いtoken／source／tab／generationの結果は破棄し、Cancel／source変更／close時に待機要求を取消する。進行中のFFmpeg probeを強制中断する保証ではなく、UI threadを待たせない。
+
+Applyは出力設定だけを確定し、次のSave／Export as／AudioOnlyに適用する。再生音・画素・編集履歴・dirty状態は変更しない。設定保持は音声export optionsと同じcurrent-source/tab内sessionに限定し、別file／次曲・再読込・closeで解除、tab切替／再Saveは保持する。Cancel／Escapeは未適用draftを破棄し前focusへ戻す。modal中の移動・編集・離脱とexport中の設定変更を防ぎ、無効文字／上限超過はApplyできない。保存先dialogのCancelは適用済み設定を戻さない。AudioOnlyは動画の未保存guard／通常Save先を保持する。画像metadataは次工程として残す。
+
 ## E01: 非破壊metadata出力の文字項目（2026-09-10）
 
 草案の書き出し時metadata書換は元fileを変更しない出力設定とする。まずTitle／Artist／Album／Album artist／Composer／Genre／Date／Track／Comment／Copyrightの文字項目をKeep（既定）／Set／Removeで指定する。空文字SetはRemoveと同じ意味で扱う。技術的な回転・色・durationや任意のFFmpeg optionを編集対象にしない。文字列はUTF-8で1項目1024 bytes・全項目4096 bytes以内、NULは禁止する。Unicode・改行・引用符・等号は文字として保持し、shellを介さず個別argumentとして渡す。
 
 通常動画／音声と音声のみ出力へ同じ設定を渡し、指定項目だけcontainer／出力streamへ上書きまたは削除する。Keepは従来のmetadata copyであり、全formatを越えた完全保持を意味しない。encode後のstaged fileを再probeして指定値／削除を照合し、非対応形式・値の切捨て／変形はpublish前に拒否する。既存の取消・source別名保護・stagingを共用する。設定は画像／音声sample・時間軸を変えず、再encode自体は従来の保存経路に従う。
 
-最初に動画／音声のruntime基盤と実file回帰を接続する。画像はFFmpegのformat metadata指定だけではPNG等の文字chunk／EXIFに反映されないため、未接続の間は明示拒否し、画像metadata対応を台帳から除外しない。設定UI・source別保持・取消／再Save／離脱の接続は後続とし、通常操作から使えるとは宣言しない。
+動画／音声のruntime基盤と実file回帰に加え、上記の設定UI・source別保持・取消／再Save／離脱へ接続する。画像はFFmpegのformat metadata指定だけではPNG等の文字chunk／EXIFに反映されないため、未接続の間は明示拒否し、画像metadata対応を台帳から除外しない。
 
 ## E01: 音声export設定UIと保持範囲（2026-09-10）
 

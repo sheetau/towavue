@@ -41,6 +41,7 @@ pub(crate) fn hardware_dialog_preview<N: Fn(AppEvent) + Send + Sync + 'static>(
     view_tests::exercise(app, false);
     video_resize::tests::exercise(app, false);
     audio_export::tests::hardware_round_trip(app);
+    metadata_export::tests::hardware_round_trip(app);
     let size = app.window.as_ref().expect("owned window").inner_size();
     app.renderer
         .as_mut()

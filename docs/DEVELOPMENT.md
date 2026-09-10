@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### metadata設定UI・既存値表示とmodal内popup（2026-09-10 15:23、E01／U02 partial）
+
+動画／音声のFile「Metadata export options」で10項目から選び、Keep／Set／Removeと複数行文字を指定する。既定keyはなく、`metadata_export_options`へcustom bindingを割り当てられる。現在値はglobalと再生と同じbest video／audioからlatest-only workerで取得し、scope別に表示する。各値1024 UTF-8 bytesまでで、省略を明示する。表示制限はKeepの元tagを変えない。read失敗は画面へ表示し、遅れた結果はtoken／source／tab／generationで拒否する。
+
+Applyは次のSave／Export as／AudioOnlyの出力設定だけを確定する。再生・履歴・dirty状態は変更しない。設定はcurrent-source/tab内sessionだけで、再Save・tab切替は保持、再読込・別file／次曲・closeで解除する。Cancel／Escape、無効文字／byte上限、export中の設定変更・modal中の離脱を保護する。IME候補中・commit同frameのEscapeは画面を閉じず、popup内Escapeはpopupだけを閉じる。dialogを開くたびwidget identityを変え、前dialogの遅れたSetValueやtext editor状態を引き継がない。画像metadataは未接続。
+
+新規7 ordinary testsは、非同期read用global／best stream選択・Unicode境界の省略と元tag不変、全10項目のUIA文字入力／3mode／Apply・Cancel・compact footer・overlay focus、stale snapshot4種類／遅延read／古いUIA identity、IME／popup Escape、実Save／再Save／Remove／AudioOnly・失敗先保護・離脱Save／source reset、custom binding、画像resizeの全app frameでの4filter選択を確認する。既存外部source再利用・active／background音声次曲試験にもmetadata保持／解除を追加した。保存fixtureは無音で、設定が再生状態やsource bytesを変更しない。
+
+全appのmodal branchが毎frame `Popup::close_all` を呼び、単独dialog試験では見えないfield／filter popup消失を再現した。metadataと画像／動画resizeは背景popupを開始時に閉じ、所有popupを次frameへ保持する。画像のheadless appと実D3D11VA復旧前後10点で4filterを選択し、native metadata Apply／restoreも追加した。CPU transfers0。複数行TextEditには既存数値入力のUIA SetValue bridgeを共有し、multiline roleを維持する。通常windowの物理入力・IME／mixed-DPIと全素材品質の最終認定ではない。
+
+最終session51884: fmt check／Clippy／workspace477（app269／core61／runtime143／integration4）、app opt-in6件、Release終了0。SKIPなし、通常ignored13は別計上。Release SHA-256 `e0bc787c10d84d2ae62c1268563ac984af655501fc7abc0da8d563de5143ba01`。先行dc15b09のCI34443028049は成功。次は画像metadataへ進み、全UX台帳の未完事項を維持する。
+
 ### 非破壊metadata書換の出力基盤（2026-09-10 14:54、E01 partial・UI未接続）
 
 `ExportOptions.metadata`の`MetadataExportOptions`へ、Title／Artist／Album／Album artist／Composer／Genre／Date／Track／Comment／Copyrightを指定できる。項目未指定はKeep、空文字はRemove、非空文字はSet。1項目1024 UTF-8 bytes／合計4096 bytes、NUL禁止で、無効な更新は以前の設定を保持する。shellを使わず固定keyと文字列を個別argumentで渡す。container／出力streamの指定項目だけを変更し、encode後にstaged fileを再probeして値／削除が一致した場合だけpublishする。技術metadataや元fileは変更しない。まだ通常UIから指定できず、画像向けは明示拒否する。

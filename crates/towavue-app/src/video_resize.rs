@@ -91,6 +91,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             snapshot.geometry.2,
         );
         self.rotation_generation = self.rotation_generation.wrapping_add(1);
+        if let Some(context) = &self.ui_context {
+            egui::Popup::close_all(context);
+        }
         self.video_resize_dialog = Some(VideoResizeDialog {
             token: self.rotation_generation,
             snapshot,

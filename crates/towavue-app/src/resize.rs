@@ -136,6 +136,23 @@ impl ResizeDialog {
 }
 
 pub(super) fn text_input(ui: &mut egui::Ui, label: &str, value: &mut String) -> egui::Response {
+    text_input_rows(ui, label, value, 1)
+}
+
+pub(super) fn multiline_text_input(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut String,
+) -> egui::Response {
+    text_input_rows(ui, label, value, 3)
+}
+
+fn text_input_rows(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut String,
+    rows: usize,
+) -> egui::Response {
     use egui::accesskit::{Action, ActionData, TreeId};
     let id = ui.make_persistent_id(label);
     let mut changed = false;
@@ -156,12 +173,24 @@ pub(super) fn text_input(ui: &mut egui::Ui, label: &str, value: &mut String) -> 
             })
         });
     }
-    let mut response = ui.add(egui::TextEdit::singleline(value).id(id).hint_text(label));
+    let editor = if rows == 1 {
+        egui::TextEdit::singleline(value)
+    } else {
+        egui::TextEdit::multiline(value)
+            .desired_rows(rows)
+            .desired_width(f32::INFINITY)
+            .char_limit(4097)
+    };
+    let mut response = ui.add(editor.id(id).hint_text(label));
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), label)
     });
-    ui.ctx()
-        .accesskit_node_builder(id, |node| node.add_action(Action::SetValue));
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.add_action(Action::SetValue);
+        if rows > 1 {
+            node.set_role(egui::accesskit::Role::MultilineTextInput);
+        }
+    });
     if changed {
         response.mark_changed();
     }
@@ -178,8 +207,75 @@ fn filter_name(filter: ResampleFilter) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub(crate) fn select_all_filters<N: Fn(crate::AppEvent) + Send + Sync + 'static>(
+        app: &mut crate::Application<N>,
+        check: impl Fn(&crate::Application<N>, ResampleFilter),
+    ) {
+        use crate::video_rotation::tests::{access, frame, node};
+        for filter in [
+            ResampleFilter::Nearest,
+            ResampleFilter::Bilinear,
+            ResampleFilter::Bicubic,
+            ResampleFilter::Lanczos,
+        ] {
+            let tree = frame(app, vec![]);
+            let combo = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.role() == egui::accesskit::Role::ComboBox)
+                .expect("filter selector")
+                .0;
+            frame(app, vec![access(combo, None)]);
+            let tree = frame(app, vec![]);
+            assert!(
+                egui::Popup::is_any_open(app.ui_context.as_ref().expect("context")),
+                "the app must not close a modal's popup on the next frame"
+            );
+            frame(app, vec![access(node(&tree, filter_name(filter)), None)]);
+            frame(app, vec![]);
+            frame(app, vec![]);
+            check(app, filter);
+        }
+    }
+
+    #[test]
+    fn image_resize_filter_popup_survives_full_app_frames_and_cancel() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "resize::tests::image_resize_filter_popup_survives_full_app_frames_and_cancel",
+        ) else {
+            return;
+        };
+        let context = crate::fonts::test_context();
+        context.enable_accesskit();
+        let mut app = crate::Application::new(None, |_| {}).expect("app");
+        app.ui_context = Some(context);
+        let source = root.join("image.png");
+        app.tabs
+            .open_new(source.clone(), towavue_core::MediaKind::Image);
+        app.path = Some(source);
+        app.media_kind = Some(towavue_core::MediaKind::Image);
+        app.resize_dialog = Some(ResizeDialog::new((64, 48)));
+        for _ in 0..3 {
+            crate::video_rotation::tests::frame(&mut app, vec![]);
+        }
+        select_all_filters(&mut app, |app, filter| {
+            assert_eq!(
+                app.resize_dialog
+                    .as_ref()
+                    .expect("dialog")
+                    .value()
+                    .expect("size")
+                    .filter,
+                filter
+            )
+        });
+        app.handle_ui_action(crate::UiAction::FinishResize(None));
+        assert!(app.resize_dialog.is_none());
+        assert!(app.edits.is_empty());
+    }
 
     #[test]
     fn resize_dimensions_validate_both_edges_and_total_area() {

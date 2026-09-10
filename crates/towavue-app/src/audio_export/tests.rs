@@ -94,7 +94,7 @@ fn audio_export_modal_is_transactional_and_rejects_stale_tokens_sources_and_unre
     }
 }
 
-fn frame<N: Fn(AppEvent) + Send + Sync + 'static>(
+pub(crate) fn frame<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
     size: egui::Vec2,
     events: Vec<egui::Event>,

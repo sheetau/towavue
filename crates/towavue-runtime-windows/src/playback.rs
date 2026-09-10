@@ -10,6 +10,10 @@ use towavue_core::{EditTimeline, MediaTime, PlaybackGeneration, PlaybackRange, T
 #[path = "playback_timeline.rs"]
 mod timeline;
 
+#[cfg(test)]
+#[path = "retained_surface_tests.rs"]
+mod retained_surface_tests;
+
 use crate::audio::{AudioOutput, AudioOutputError, AudioOutputEvent, AudioOutputSender};
 use crate::decode::{
     self, AudioFormat, DecodeOutput, DecodeStream, HardwareVideoFrame, ParallelRuntimeDecodeOutput,
@@ -615,6 +619,12 @@ impl PlaybackSession {
             position
         };
         self.stop_video(true);
+        if !visible
+            && let Some(PresentationFrame::Hardware(frame)) = &mut self.current_video
+            && let Err(error) = frame.retain_surface(&self.graphics_device)
+        {
+            eprintln!("towavue: retaining original video surface after copy failure: {error}");
+        }
         self.completion.restart_video();
         self.video_visible = false;
         if visible {

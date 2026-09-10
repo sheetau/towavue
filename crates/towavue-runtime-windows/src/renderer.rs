@@ -103,6 +103,79 @@ pub struct GraphicsDevice {
 }
 
 impl GraphicsDevice {
+    pub(crate) fn copy_video_surface(
+        &self,
+        frame: &HardwareVideoFrame,
+    ) -> Result<ID3D11Texture2D, RenderError> {
+        let (raw, slice) = frame
+            .texture_and_slice()
+            .ok_or(RenderError::InvalidHardwareFrame)?;
+        // The frame owns the borrowed texture throughout validation and copy submission.
+        // This device's immediate context is multithread-protected before any worker uses it.
+        unsafe {
+            let source = ID3D11Texture2D::from_raw_borrowed(&raw)
+                .ok_or(RenderError::InvalidHardwareFrame)?;
+            let mut desc = D3D11_TEXTURE2D_DESC::default();
+            source.GetDesc(&mut desc);
+            if source.GetDevice()? != self.device
+                || slice >= desc.ArraySize
+                || desc.MipLevels != 1
+                || desc.SampleDesc.Count != 1
+            {
+                return Err(RenderError::InvalidHardwareFrame);
+            }
+            desc.ArraySize = 1;
+            desc.Usage = D3D11_USAGE_DEFAULT;
+            desc.CPUAccessFlags = 0;
+            desc.MiscFlags = 0;
+            let mut retained = None;
+            self.device
+                .CreateTexture2D(&desc, None, Some(&mut retained))?;
+            let retained = retained.ok_or(RenderError::InvalidHardwareFrame)?;
+            let context = self.device.GetImmediateContext()?;
+            // Matching dimensions/format and one mip make the array index a subresource
+            // index. A null box copies the entire slice without CPU mapping or conversion.
+            context.CopySubresourceRegion(&retained, 0, 0, 0, 0, source, slice, None);
+            self.device.GetDeviceRemovedReason()?;
+            Ok(retained)
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hardware_for_test() -> Result<Self, RenderError> {
+        use windows::Win32::Graphics::Direct3D11::D3D11CreateDevice;
+        let mut device = None;
+        let mut context = None;
+        // The test owns this windowless device and enables the same context serialization
+        // as production before sharing it with FFmpeg's worker.
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                Some(&mut context),
+            )?;
+            let multithread: ID3D11Multithread = context.expect("hardware context").cast()?;
+            let _ = multithread.SetMultithreadProtected(true);
+        }
+        let device = device.expect("hardware device");
+        let dxgi: IDXGIDevice = device.cast()?;
+        // Owned device/adapter references outlive the descriptor query.
+        let luid = unsafe { dxgi.GetAdapter()?.GetDesc()?.AdapterLuid };
+        Ok(Self {
+            device,
+            adapter_luid: AdapterLuid {
+                low_part: luid.LowPart,
+                high_part: luid.HighPart,
+            },
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn warp_for_test() -> Result<Self, RenderError> {
         use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_WARP;
@@ -487,7 +560,7 @@ impl FrameRenderer {
         let (texture_raw, array_slice) = frame
             .texture_and_slice()
             .ok_or(RenderError::InvalidHardwareFrame)?;
-        // The AVFrame owns this COM reference for the duration of the call.
+        // The frame's decoded or retained backing owns this COM reference throughout the call.
         let texture = unsafe { ID3D11Texture2D::from_raw_borrowed(&texture_raw) }
             .ok_or(RenderError::InvalidHardwareFrame)?;
         let edited = plan.is_some()
@@ -642,7 +715,7 @@ impl FrameRenderer {
             },
         };
 
-        // Views live only through this event-loop blit; the AVFrame and output owners
+        // Views live only through this event-loop blit; the frame and output owners
         // retain their resources for the entire operation.
         unsafe {
             let mut input_view = None;

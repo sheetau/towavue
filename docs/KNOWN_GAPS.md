@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10 U07 surface: 最後のhardware frameを独立textureへ移し、非active保持時のFFmpeg array参照を解放する。H.264のNV12 160×96／1920×1088で24→1枚と画素一致を確認。後者の画素データ換算は約71.72→2.99 MiBだが、driverの予約量／解放時刻やprocess全体のVRAM測定ではない。copy失敗時は元frameを保持しstderrで診断する。P010回帰はVP9 Profile 2のD3D11VA初期化失敗・software fallbackで明示skipし、実hardwareの成功とは数えない。復帰decoder再構築／Seek待ち、全format／device組合せと長期性能は未完。
+
 2026-09-10 U07 focus: media controlの最後のfocusはtab別のrole／pathとして復帰する。可視でenabledなcontrolだけ対象とし、通常windowで不存在なら現在tabへ戻す。全画面では保存したbar操作を表示して戻せるが、hidden tabへfocusしない。22役割のUIA、実画像のsource削除後の再読込なし復帰、実GPU／WASAPIで動画・音声・画像の切替／復旧を検証する。全window・物理入力／IME・混在DPI／UIA監査やresource予算／decoder復帰遅延の完了を意味しない。modalの未確定入力や別windowへのfocus移送は保持対象外。
 
 2026-09-10 U09: tab名／close buttonにfocusしてShift+F10・Menu key、またはUIA ShowContextMenuから既存tab menuを開ける。非active対象・Escape／guard後のfocus、close後の現在tab／Welcome、reorder／無効項目skipを回帰で確認する。実GPU復旧前後でも合成inputとUIAによる6入口を描画したが、通常windowの物理Menu key／実混在DPI・全体UIA監査を完了した証拠ではない。OS clipboardへの新たな書込やExplorer呼出しは今回実行していない。

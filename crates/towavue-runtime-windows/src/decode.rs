@@ -14,6 +14,8 @@ use ffmpeg::{ChannelLayout, Rational, Rescale, Rounding};
 use ffmpeg_next as ffmpeg;
 use thiserror::Error;
 use towavue_core::MediaTime;
+use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
+use windows::core::Interface;
 
 use crate::{GraphicsDevice, VideoOrientation};
 
@@ -36,7 +38,7 @@ pub struct VideoFrame {
     pub rgba: Vec<u8>,
 }
 
-/// Runtime-only owner of one FFmpeg-referenced D3D11 decode surface.
+/// Runtime-only owner of a decoded or independently retained D3D11 surface.
 pub(crate) struct HardwareVideoFrame {
     pub(crate) presentation_time: MediaTime,
     pub(crate) width: u32,
@@ -44,7 +46,12 @@ pub(crate) struct HardwareVideoFrame {
     pub(crate) pixel_aspect: f32,
     pub(crate) orientation: VideoOrientation,
     pub(crate) transfer: VideoTransfer,
-    frame: frame::Video,
+    backing: HardwareFrameBacking,
+}
+
+enum HardwareFrameBacking {
+    Decoded(frame::Video),
+    Retained(ID3D11Texture2D),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -56,13 +63,30 @@ pub(crate) enum VideoTransfer {
 
 impl HardwareVideoFrame {
     pub(crate) fn texture_and_slice(&self) -> Option<(*mut std::ffi::c_void, u32)> {
+        let frame = match &self.backing {
+            HardwareFrameBacking::Decoded(frame) => frame,
+            HardwareFrameBacking::Retained(texture) => return Some((texture.as_raw(), 0)),
+        };
         // AV_PIX_FMT_D3D11 defines data[0] as ID3D11Texture2D* and data[1]
         // as an integer array-slice index. The AVFrame keeps the texture alive.
         unsafe {
-            let frame = self.frame.as_ptr();
+            let frame = frame.as_ptr();
             let texture: *mut std::ffi::c_void = (*frame).data[0].cast();
             (!texture.is_null()).then_some((texture, (*frame).data[1] as usize as u32))
         }
+    }
+
+    pub(crate) fn retain_surface(
+        &mut self,
+        device: &GraphicsDevice,
+    ) -> Result<(), crate::RenderError> {
+        if matches!(self.backing, HardwareFrameBacking::Decoded(_)) {
+            // Replace ownership only after allocation and submission succeed. Dropping the
+            // AVFrame then releases its pool reference; D3D11 retains in-flight copy resources.
+            let texture = device.copy_video_surface(self)?;
+            self.backing = HardwareFrameBacking::Retained(texture);
+        }
+        Ok(())
     }
 }
 
@@ -207,7 +231,7 @@ impl HardwareVideoPipeline {
                         pixel_aspect: pixel_aspect(decoded.aspect_ratio()),
                         orientation: frame_orientation(&decoded, self.orientation)?,
                         transfer: video_transfer(&decoded).unwrap_or(self.transfer),
-                        frame: decoded,
+                        backing: HardwareFrameBacking::Decoded(decoded),
                     };
                     if !emit(RuntimeDecodeOutput::Video(output)) {
                         return Err(DecodeError::ConsumerClosed);

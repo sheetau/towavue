@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 非active動画の保持surface（2026-09-10、U07）
+
+`cargo test -p towavue-runtime-windows retained_surface_hardware -- --ignored --nocapture`でhidden hardware deviceを使う2試験を実行する。既存M1 H.264 fixtureから音声を除き、1080p H.264／VP9 Profile 2 PQ動画は固定FFmpegのlibopenh264／libvpx-vp9で生成する。終了時に生成一時動画を削除する。通常suiteではignoredで、capabilityが使えないcaseはSKIP理由を出す。外部window操作・可聴音・配布はない。
+
+修正前の160×96 NV12ではhide後もArraySize=24。修正後は小画像／1920×1088とも24→1。全sliceのtest-only staging readbackで画素一致、PTS／metadata／paused表示・新frame置換・5往復・独立化済みframeの再copy抑制・別device拒否時の元参照維持を確認する。productionのCPU transfer counterは0。1080pの画素データ換算は約71.72→2.99 MiBで、実VRAM予約／解放量ではない。warm offscreenの参考値はhide約0.9～1.1ms、show呼出し約0.04～0.06ms、新frame到着約7～8ms。テストreadback後の参考計測であり通常UIの応答時間保証／decoder再構築解消ではない。P010試験はこの環境でVP9 Profile 2のD3D11VA初期化が失敗しsoftwareへfallbackしたため明示skip。P010実hardware成功とは数えず、全format／device／復帰遅延の残件を維持する。
+
+U07 surface最終検証: session2975のfmt／Clippy／workspace520（app294＋core61＋runtime161＋integration4）、追加app6件、Releaseが終了0。通常ignored15は成功数とは別。runtime追加2件のうちNV12のみ実確認、P010は明示skipでhardware成功には数えない。Release SHA-256 `9c2e809c1c4cafaa820e3c7a419d64d5b3d771b95ad824e0cc182a92f5e08450`。dependency／lock／notice inventoryは不変。
+
 ### メディア操作部品のtab別focus（2026-09-10、U07）
 
 画像の選択辺／crop preview、動画の再生／Seek／時間範囲、音声のrepeat／shuffle／playlistなどへTabでfocusして別tabへ切り替え、戻ると同じ役割の操作へ復帰する。filmstrip項目はpathで記憶する。再生／編集／sourceを操作せず、消えた項目や無効なcontrolは通常windowなら現在tabへ戻す。ファイルの切替／再読込・tab closeで記憶を解除し、modal／command overlay／focus喪失中は復帰しない。読込待ち中に新しく操作した場合は、その操作を優先する。

@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U07: 非active動画の保持surface（2026-09-10）
+
+非active化でvideo worker／queue／decoderを停止し、開いたinputと最後の表示frameを保持する既存契約は維持する。最後のAVFrameが24枚のtexture arrayをpinすることをH.264で実測した。保持時だけ同じdevice上のArraySize=1 textureへ同一format／寸法の全subresourceをcopyし、AVFrameを解放する。通常表示中はdecode surfaceを直接使い、CPU readback／色変換／再encodeは追加しない。PTS／orientation／pixel aspect／transferとpaused-frame対応を保持し、復帰直後の描画を維持する。既に独立化したframeは再copyせず、新frameで置換する。
+
+copyは[CopySubresourceRegion](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-copysubresourceregion)の同device／同format・全slice条件に従う。確保失敗は元frameを残して明示診断し、通常のdevice removal経路を妨げない。対象はset_video_visible(false)でdecodeを休止する時点であり、終端不明の背景decodeを維持する既存方針は変えない。decoder再構築／Seek待機の解消やprocess全体のVRAM上限とは別の変更で、texture descriptor由来の保持量と実VRAM予約量は区別して測定する。
+
 ## U07: tab別のmedia control focus（2026-09-10）
 
 表示／再生tabの最後のmedia control focusを、egui widget IDではなく役割keyでwindow内に保持する。再生／読書／repeat・shuffle、crop preview、Seek／timeline値／選択辺、playlist／filmstrip項目が対象。項目はpathで識別する。tab名・native caption・menu／palette・設定modalの一時focusはmedia状態として保存しない。復帰先のenabledで可視のcontrolへ描画時にfocusを戻し、存在しない場合は現在tabへ戻す。読込中は待つが、新しいpointer／key／UIA操作は保留復帰より優先する。source変更／同tab再読込／close時に破棄する。focus復帰自体ではactivate／Seek／編集／再生変更をしない。未確定modal入力の永続化や別windowへのfocus移送は行わない。

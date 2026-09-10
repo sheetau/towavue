@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 U07 surface checkpoint: 非active化で保持frameだけを同一deviceの独立textureへcopyし、FFmpeg pool参照を解放する。H.264小画像／1080pの24→1枚、画素／PTS保持・5往復・異device拒否時の元frame保持を確認。通常decodeはzero-copy、背景音声／復帰表示契約は維持。先行8557085のCI34457683438は成功。P010用VP9 Profile 2はこの環境のD3D11VA初期化失敗で明示skip、未検証として残す。次は復帰decoder／Seek遅延とU08の連続drag／結合契約を照合する。全resource予算・通常window／混在DPI・全UIA・metadata／preview／seek／性能を含む全台帳は継続する。
+
 2026-09-10 U07 focus checkpoint: media controlをrole／項目pathでtab別に記憶し、再生／読書／audio mode・Seek／timeline／選択辺・playlist／filmstripへ戻す。source再読込／closeで破棄、overlay／focus喪失／新入力を尊重し、初回fullscreen sizingを待つ。実画像source削除後も再読込なしで復帰、headless22役割と実GPU／WASAPIのtab切替・背景EOF／device復旧を確認する。先行749be07のCI34455772918は成功。次はU07の非active動画resource保持量・復帰時decoder再構築／Seek待機を計測・照合する。通常window／混在DPI・全UIA監査、metadata／preview／seek／性能を含む全台帳を継続する。
 
 2026-09-10 U09 keyboard checkpoint: tab名／close buttonからShift+F10・Menu key・UIA ShowContextMenuでfocus対象の既存menuを開く。非active対象／pointer不要・Escape／guard取消後のorigin復帰、close後の現在tab／Welcome復帰を確認。連続矢印の二重focus移動を修正し、reorder後の無効項目skip・3幅×3密度・実GPU復旧前後10点の6入口を検証する。先行71492ddのCI34454309977は成功。次はU07のtab別focus復帰と残るresource／復帰遅延の契約を照合する。U09の通常window／物理Menu key・混在DPI／全UIA監査、他の全台帳を継続する。

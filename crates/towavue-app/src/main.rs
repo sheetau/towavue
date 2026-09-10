@@ -48,6 +48,7 @@ mod video_rotation;
 mod video_view;
 mod welcome;
 mod wheel_input;
+mod window_host;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
@@ -89,15 +90,11 @@ const VIDEO_LATE_TOLERANCE: Duration = Duration::from_millis(40);
 
 fn main() -> Result<(), Box<dyn Error>> {
     let initial_path = parse_initial_path()?;
-    let mut event_loop = EventLoop::<AppEvent>::with_user_event();
+    let mut event_loop = EventLoop::<window_host::Event>::with_user_event();
     configure_mouse_input(&mut event_loop);
     let event_loop = event_loop.build()?;
-    let proxy = event_loop.create_proxy();
-    let accessibility_proxy = proxy.clone();
-    let mut application = Application::new(initial_path, move |event| {
-        let _ = proxy.send_event(event);
-    })?;
-    application.event_loop_proxy = Some(accessibility_proxy);
+    let mut application =
+        window_host::WindowHost::new(initial_path, Some(event_loop.create_proxy()))?;
     event_loop.run_app(&mut application)?;
     Ok(())
 }
@@ -228,12 +225,6 @@ enum AppEvent {
         u64,
         Result<towavue_runtime_windows::PreviewImage, String>,
     ),
-}
-
-impl From<accesskit_winit::Event> for AppEvent {
-    fn from(event: accesskit_winit::Event) -> Self {
-        Self::Accessibility(event)
-    }
 }
 
 fn handle_accesskit_window_event(
@@ -654,7 +645,7 @@ impl ImageTransform {
 struct Application<N> {
     initial_path: Option<PathBuf>,
     notify: Arc<N>,
-    event_loop_proxy: Option<EventLoopProxy<AppEvent>>,
+    event_loop_proxy: Option<EventLoopProxy<window_host::Event>>,
     window: Option<Arc<Window>>,
     native_caption: Option<NativeCaption>,
     fullscreen: bool,
@@ -978,6 +969,15 @@ where
     }
 
     fn start(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
+        self.start_on_device(event_loop, None, true)
+    }
+
+    fn start_on_device(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        graphics_device: Option<towavue_runtime_windows::GraphicsDevice>,
+        visible: bool,
+    ) -> Result<(), Box<dyn Error>> {
         let attributes = Window::default_attributes()
             .with_title(self.title())
             .with_inner_size(LogicalSize::new(960, 576))
@@ -986,7 +986,11 @@ where
             .with_decorations(true);
         let window = Arc::new(event_loop.create_window(attributes)?);
         let native_caption = NativeCaption::new(window.clone())?;
-        let mut renderer = FrameRenderer::with_native_caption(&native_caption)?;
+        let mut renderer = if let Some(device) = graphics_device {
+            FrameRenderer::with_native_caption_on_device(&native_caption, device)?
+        } else {
+            FrameRenderer::with_native_caption(&native_caption)?
+        };
         let size = window.inner_size();
         renderer.resize_surface(size.width, size.height)?;
         let context = egui::Context::default();
@@ -1010,7 +1014,7 @@ where
                 .expect("native application event loop proxy")
                 .clone(),
         );
-        window.set_visible(true);
+        window.set_visible(visible);
         self.window = Some(window);
         self.native_caption = Some(native_caption);
         self.renderer = Some(renderer);
@@ -7241,12 +7245,9 @@ where
         ))
     }
 
-    fn schedule(&mut self, event_loop: &ActiveEventLoop) {
+    fn schedule(&mut self) -> ControlFlow {
         if self.exit_requested {
-            // Windows winit waits once after AboutToWait, even when it requested exit.
-            event_loop.set_control_flow(ControlFlow::Poll);
-            event_loop.exit();
-            return;
+            return ControlFlow::Poll;
         }
         self.poll_audio();
         for saved in self.retained_playback.values_mut() {
@@ -7328,27 +7329,21 @@ where
                     .map_or(due_at, |background| due_at.min(background));
                 if due_at <= Instant::now() {
                     window.request_redraw();
-                    event_loop.set_control_flow(ControlFlow::Wait);
-                    return;
+                    return ControlFlow::Wait;
                 }
-                event_loop.set_control_flow(ControlFlow::WaitUntil(due_at));
-                return;
+                return ControlFlow::WaitUntil(due_at);
             }
             if !self.audio_drained {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                return ControlFlow::WaitUntil(
                     self.ui_repaint_at
                         .map_or(Instant::now() + AUDIO_EVENT_POLL_INTERVAL, |ui| {
                             ui.min(Instant::now() + AUDIO_EVENT_POLL_INTERVAL)
                         }),
-                ));
-                return;
+                );
             }
         }
-        if let Some(deadline) = self.idle_wakeup(now) {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        } else {
-            event_loop.set_control_flow(ControlFlow::Wait);
-        }
+        self.idle_wakeup(now)
+            .map_or(ControlFlow::Wait, ControlFlow::WaitUntil)
     }
 
     fn background_wakeup(&self, now: Instant) -> Option<Instant> {
@@ -7996,7 +7991,12 @@ where
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.schedule(event_loop);
+        event_loop.set_control_flow(self.schedule());
+        if self.exit_requested {
+            // Windows winit waits once after AboutToWait, even when it requested exit.
+            event_loop.set_control_flow(ControlFlow::Poll);
+            event_loop.exit();
+        }
     }
 }
 

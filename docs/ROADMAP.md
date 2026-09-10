@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 U08 window-host checkpoint: 通常entryをWindowHostへ移し、再利用しないwindow keyでworker通知を配送、UIAはnative IDで照合、全windowの最早deadlineと最後のwindowだけの終了へ集約する。未保存guard取消／破棄とclose前後の遅延通知拒否、実worker／UIA adapter付き非表示2windowのD3D11VA frame／停止位置保持とreplacementを確認する。試験の描画イベントは明示配送で、通常可視windowの最終確認とは区別する。先行d730c05のCI34464290594は成功。次は全windowのdevice復旧と移動sessionの通知所有権を揃え、state移送と通常分離／結合入口へ接続する。全UX台帳・U07復帰遅延／P010・通常window／物理入力／混在DPIは継続する。
+
 2026-09-10 U08 shared-surface checkpoint: runtimeへ同一D3D11 device上の別window／caption描画先を追加。所有する非表示2windowでCOM同一性・swap chain独立性、3サイズの交互動画／UI画素一致、破棄／再作成後の同じsession保持と次frame進行を確認。通常の分離／結合は未接続で、次は同一event loopのwindow hostと通知／deadline集約、state移送、全windowのdevice復旧を揃える。先行2491639のCI34463040310は成功。物理drag・子window起動／読込、U07復帰遅延・P010、全UX台帳は未完のまま継続する。
 
 2026-09-10 U08 filmstrip checkpoint: visible cardのprimary dragを既存previewで追従表示し、外releaseからpath参照の新window要求へ接続。元tab・編集・保存先・transportは保持し、起動失敗はfilmstripを残す。preview無効化を含む11取消条件・batch input／pointer gap・folder generation／所属／overlay・単一path引数、実GPU復旧前後10点での描画／取消を検証する。先行eefc010のCI34461491979は成功。子windowの実起動／読込・物理dragの最終確認、既存tabのwindow間結合／状態移送は残件。状態引継ぎ範囲の非blocking確認をownerへ送り、回答を採用する。全UX台帳とU07復帰遅延・P010等を維持する。

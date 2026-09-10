@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U01/U04: native captionの非アクティブ背景（2026-09-11）
+
+黒いclientとnative captionの背景を揃えるため、作成時にDWMWA_CAPTION_COLORへ黒のCOLORREFを指定する。Windows 11 build 22000以降の公開属性であり、拒否される旧環境では既存のnative表示を維持して起動を失敗させない（[Microsoft DWMWINDOWATTRIBUTE](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)）。native glyphの非アクティブ色・hover／pressed色・hit test・UIA／close経路は変更しない。WM_NCACTIVATEの偽装やボタンの独自描画で常時activeに見せない。草案の灰色化への対応は背景の不一致を解消することで行い、OSが示す非アクティブ状態は残す。
+
+所有するneutral windowへfocusを移した可視baselineでは、caption背景がRGB(43,43,43)だった。同じHWNDへの属性設定でRGB(0,0,0)になり、最終exeでも96／192 DPIの通常windowと192 DPIの最大化で黒を確認した。ボタンboundsは96 DPIで(487,0,633,30)、192 DPIで(976,0,1268,57)のまま。赤いclose hoverとnative click終了を確認。DwmGetWindowAttributeによるこのset用属性の取得は基準機でも失敗するため、getterの成功や失敗を色の適用／対応可否の証拠にしない。色は可視画素で検証する。左右padding／bar下端の間隔、全DPI比率・Windows 10の外観は別の未完事項として維持する。
+
 ## U01/U08: fullscreenのmonitor移動と復元（2026-09-11）
 
 Win+Shift+Left／Rightで移動する全画面windowは、移動先monitorの全領域に収める。可視試験でOSのWM_DPICHANGEDは正しい移動先矩形を通知していたが、winit 0.30.13が旧client寸法のまま位置変更を再要求し、逆方向のDPI通知を招いた。runtimeは通知の提案矩形からmonitorの実rcMonitorを取得し、そのWM_DPICHANGED処理中だけCellへ保持する。同期WM_WINDOWPOSCHANGINGの座標／寸法をその矩形へ合わせ、NOMOVE／NOSIZEだけを外してwinitへ渡す。winitのmonitor追跡・DPI通知・activation／Z順は維持する（[Microsoft WM_WINDOWPOSCHANGING](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-windowposchanging)）。ネスト終了で以前のCell値へ戻し、callbackがsubclassを外してもstateが残るよう一時Rcを保持する。通常移動・最大化・描画ごとのresizeには適用しない。

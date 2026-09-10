@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 U01/U04 inactive-caption checkpoint: 非active時にnative controlsの背景だけが灰色になる草案指摘をRGB(43,43,43)で再現。DWMWA_CAPTION_COLORの黒指定だけでclientと揃え、native glyphのinactive色／hover／hitと旧OS fallbackを維持する。可視96／192 DPIの通常・192 DPI最大化でRGB(0,0,0)、bounds不変、赤いclose hover／native click終了と全体チェックが通過。74f492fのCI34515762417は成功。Alt+Spaceは既存の別process global bindingに取られたためnative menuの実キー確認とはせず、追加入力は行わない。次は実boundsに基づく左右padding／bar高さ・下端間隔を詰め、全UX台帳を継続する。
+
 2026-09-11 U01/U08 fullscreen-monitor checkpoint: Win+Shift+矢印の全画面移動で旧client寸法が残り、2台にまたがる欠陥を可視再現。DPI通知中の同期位置提案だけを移動先monitor矩形へ補正し、winitの追跡を維持する。全画面終了の二重拡大も確認し、NativeCaptionへ切替と論理client寸法の復元を一体化。3台／96・192 DPIを両方向に2周してbounds一致、通常復元と映像48,140画素一致、最大化からの切替／別DPI／最大化復帰、guard mouse操作を確認。非表示nativeのproposal／flag／scope解除・実monitor／復元と全体チェックも通過。e31fe06／2d4efb6のCI34512924647／34513773723は成功。元window配置への復帰規則は変更しない。次は通常captionの余白・操作部／native menu・selectionのmixed-DPI外観と操作を監査し、全media／UIA・IME／latency・資源を含む全UX台帳を継続する。
 
 2026-09-11 U07/U08 verification-clock checkpoint: native focus probeのRawInput時刻省略が仮想frame時間を実時計より先へ進めていた。旧コードで約8msの先行を直接検出し、hosted probeは通常描画と同じegui-winit時計へ統一、adapterを持たないrenderer-only fixtureは仮想時計を維持する。音声移送検証でもPause送信直後を停止完了と扱う競合を約13ms差で確認。既存runtime試験と同じ待機後に150msの停止継続を追加検査し、移送前後の完全一致は維持する。両修正後native hostは20回連続、全体チェックも通過。製品コード／UIの待機時間は変更しない。全体の無競合性・実操作のPause latencyの認定ではない。次は最大化／fullscreen状態でのmixed-DPI移動と通常caption操作を監査し、全UX台帳を継続する。

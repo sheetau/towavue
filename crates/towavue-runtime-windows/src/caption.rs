@@ -5,8 +5,8 @@ use std::sync::Arc;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_CAPTION_BUTTON_BOUNDS, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmDefWindowProc,
-    DwmExtendFrameIntoClientArea, DwmGetWindowAttribute, DwmSetWindowAttribute,
+    DWMWA_CAPTION_BUTTON_BOUNDS, DWMWA_CAPTION_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    DwmDefWindowProc, DwmExtendFrameIntoClientArea, DwmGetWindowAttribute, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
     BLACK_BRUSH, ClientToScreen, CombineRgn, CreateRectRgn, DeleteObject, FillRect, GetDC,
@@ -105,6 +105,15 @@ impl NativeCaption {
                 DWMWA_USE_IMMERSIVE_DARK_MODE,
                 (&dark as *const i32).cast(),
                 size_of::<i32>() as u32,
+            );
+            // Keep the inactive native background aligned with the black client;
+            // DWM still owns glyph/hover colors. Older Windows can reject this.
+            let background = 0_u32;
+            let _ = DwmSetWindowAttribute(
+                handle,
+                DWMWA_CAPTION_COLOR,
+                (&background as *const u32).cast(),
+                size_of::<u32>() as u32,
             );
         }
         caption.refresh_frame()?;

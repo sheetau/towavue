@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 画像自由回転の角度UI（2026-09-10 10:26、I06部分実装）
+
+Edit menuのFree rotate image／Ctrl+Shift+Rから角度dialogを開く。数値入力と横sliderで時計回り正の-180～180度、0.1度単位へ調整する。配置previewは既存textureとcrop／flip／90度回転のUVを再利用する近似で、ドラッグのたびに全画像workerを作らない。Applyで一つの編集を確定して全frameを処理する。Cancel／Escape／0度ではselection／zoom／履歴を変えず、対象tab／source／世代／編集列が変わった場合は適用を拒否する。原寸読込前・reading・動画／音声・処理待ち／失敗中には開かない。既存custom key／prefixと新既定キーが衝突した場合はcustomを保持する。
+
+headless eguiで角度のkeyboard／UIA SetValue、sliderのNumericValueとpointer、Apply／Escape、選択辺focusへの復帰を確認。320×300のscrollでApply／Cancelのboundsが画面内へ入ることとCancel actionを確認。meshの±180／90／31.7／0.1／0度の向き・canvas内包・crop後UV、取消／identity／重複token／12種類のcontext不一致、実workerとUndoも回帰する。menuの矢印focus／scroll／Enter dispatchと登録一意性、bindingのcontext／custom prefix／round tripを確認した。これは通常windowの描画・入力、全DPI／IME、保存全形式の認定ではない。
+
+最終session22580でfmt check／Clippy／workspace408（app237／core57／runtime110／integration4）、app opt-in5件とReleaseがterminal exit0。opt-inは全PASS／SKIPなし、通常ignored11件と区別する。H264 D3D11VA復旧のCPU transferは0。Release SHA-256は`1583bd12268a48cecdbf41362441b01c693ee183ed67675e03d235789b2b8187`。前bbc1a9dのCI34417121438は成功。最後にpalette／gridからのdialog起動と取消後の選択辺focus復帰も回帰確認した。次は画像上のshortcut保持drag。動画の単一device／SAR／保存、通常windowの外観／操作と大画像性能、UX台帳全体は未完として継続する。
+
 ### 画像自由回転の基盤検証（2026-09-10 08:26、I06 UI未接続）
 
 この段階では新しい操作UIはない。coreのImageRotationは時計回り正の0.1度単位（-180～180度）、操作直前の寸法と外接canvasを保持する。source／出力とも16384px・128M pixels以内で検証し、角度0は履歴／Redo枝を変えない。renderer用UVへ任意角度を押し込まず、既存の非同期画像編集workerで全frameを生成する。Undoでraster編集がなくなれば保持元の画素へ戻り、materialized画素は履歴を二重適用しない。

@@ -36,7 +36,7 @@ impl ResizeDialog {
             crate::chrome::modal_heading(ui, "Resize / resample image");
             ui.label("Original file is kept. Apply adds one undoable edit.");
             ui.label("Width (pixels)");
-            let width = pixel_input(ui, "Width in pixels", &mut self.width);
+            let width = text_input(ui, "Width in pixels", &mut self.width);
             if self.first_frame {
                 width.request_focus();
                 self.first_frame = false;
@@ -48,7 +48,7 @@ impl ResizeDialog {
                 self.height = ((f64::from(value) / self.ratio).round() as u32).to_string();
             }
             ui.label("Height (pixels)");
-            let height = pixel_input(ui, "Height in pixels", &mut self.height);
+            let height = text_input(ui, "Height in pixels", &mut self.height);
             if height.changed()
                 && self.keep_ratio
                 && let Ok(value) = self.height.parse::<u32>()
@@ -102,7 +102,7 @@ impl ResizeDialog {
     }
 }
 
-fn pixel_input(ui: &mut egui::Ui, label: &str, value: &mut String) -> egui::Response {
+pub(super) fn text_input(ui: &mut egui::Ui, label: &str, value: &mut String) -> egui::Response {
     use egui::accesskit::{Action, ActionData, TreeId};
     let id = ui.make_persistent_id(label);
     let mut changed = false;

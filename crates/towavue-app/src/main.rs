@@ -19,6 +19,7 @@ mod playback_tab_tests;
 mod playlist;
 mod reading_input;
 mod resize;
+mod rotation;
 #[cfg(test)]
 mod rotation_tests;
 mod seekbar;
@@ -171,6 +172,7 @@ enum UiAction {
     CancelExport,
     DismissExportError,
     FinishResize(Option<towavue_core::ImageResize>),
+    FinishRotation(u64, Option<towavue_core::ImageRotation>),
 }
 
 enum AppEvent {
@@ -641,6 +643,8 @@ struct Application<N> {
     image_materialized: bool,
     nearest_images: bool,
     resize_dialog: Option<resize::ResizeDialog>,
+    rotation_dialog: Option<rotation::RotationDialog>,
+    rotation_generation: u64,
     edits: BTreeMap<TabId, EditHistory>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
@@ -813,6 +817,8 @@ where
             image_materialized: false,
             nearest_images: false,
             resize_dialog: None,
+            rotation_dialog: None,
+            rotation_generation: 0,
             edits: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
@@ -2323,6 +2329,10 @@ where
             }
         } else if self.pending_guard.is_some() {
             self.draw_unsaved_guard(&context, actions);
+        } else if let Some(dialog) = &mut self.rotation_dialog {
+            if let Some(action) = dialog.show(&context) {
+                actions.push(UiAction::FinishRotation(dialog.token, action));
+            }
         } else if let Some(dialog) = &mut self.resize_dialog
             && let Some(action) = dialog.show(&context)
         {
@@ -4069,6 +4079,11 @@ where
                         && self.pending_guard.is_none()
                         && self.export_error.is_none()
                 }
+                UiAction::FinishRotation(..) => {
+                    self.rotation_dialog.is_some()
+                        && self.pending_guard.is_none()
+                        && self.export_error.is_none()
+                }
                 UiAction::CancelExport => {
                     self.active_export.is_some() && self.export_error.is_none()
                 }
@@ -4078,6 +4093,7 @@ where
             return;
         }
         match action {
+            UiAction::FinishRotation(token, value) => self.finish_rotation(token, value),
             UiAction::FinishResize(value) => {
                 if self.resize_dialog.take().is_some()
                     && let Some(value) = value
@@ -4176,6 +4192,7 @@ where
             && matches!(
                 command,
                 CommandId::ResizeImage
+                    | CommandId::FreeRotateImage
                     | CommandId::SelectAll
                     | CommandId::SelectAspectSquare
                     | CommandId::SelectAspectFourThree
@@ -4206,6 +4223,9 @@ where
                     .and_then(|context| context.memory(egui::Memory::focused))
             };
             self.filmstrip_return_focus = focus.map(|id| (self.media_generation, id));
+        }
+        if command == CommandId::FreeRotateImage && (self.palette_open || self.grid_open) {
+            self.cancel_command_overlay();
         }
         self.command_overlay_return_focus = if matches!(
             command,
@@ -4419,6 +4439,7 @@ where
                 self.grid_open = false;
                 self.request_redraw();
             }
+            CommandId::FreeRotateImage => self.open_rotation(),
             CommandId::CopyImage => {
                 if self.image_copy.is_some() {
                     self.set_status("Image copy is already in progress".into());
@@ -4675,6 +4696,7 @@ where
         self.image_edit_pending = false;
         self.image_materialized = false;
         self.resize_dialog = None;
+        self.rotation_dialog = None;
     }
 
     fn install_edited_image(&mut self, decoded: Arc<DecodedImage>) -> Result<(), String> {
@@ -5291,6 +5313,10 @@ where
         self.cancel_frame_steps();
         if self.resize_dialog.is_some() {
             self.set_status("Apply or cancel image resize before leaving.".into());
+            return;
+        }
+        if self.rotation_dialog.is_some() {
+            self.set_status("Apply or cancel image rotation before leaving.".into());
             return;
         }
         if matches!(&action, GuardedAction::Navigate(path) if self.path.as_ref() == Some(path)) {
@@ -6358,6 +6384,7 @@ where
 
     fn modal_input_blocked(&self) -> bool {
         self.resize_dialog.is_some()
+            || self.rotation_dialog.is_some()
             || self.pending_dialog.is_some()
             || self.native_prompt.is_some()
             || self.pending_guard.is_some()

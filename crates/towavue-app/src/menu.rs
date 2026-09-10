@@ -26,6 +26,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             &[Undo, Redo],
             &[CopyImage],
             &[ResizeImage],
+            &[FreeRotateImage],
             &[SelectAll, ApplyCrop, ClearSelection],
             &[
                 SelectAspectSquare,
@@ -545,10 +546,11 @@ mod tests {
     }
 
     #[test]
-    fn image_jump_and_aspect_menus_scroll_to_every_item_and_dispatch_the_selected_command() {
+    fn image_jump_aspect_and_rotation_menus_scroll_and_dispatch_the_selected_command() {
         for (category, steps, leading, prefix, expected) in [
             ("Image jump", 3, 0, "jump_images_", JumpImagesForward10),
-            ("Edit", 1, 7, "select_aspect_", SelectAspectNineSixteen),
+            ("Edit", 1, 8, "select_aspect_", SelectAspectNineSixteen),
+            ("Edit", 1, 4, "free_rotate_image", FreeRotateImage),
         ] {
             let context = egui::Context::default();
             let shortcuts = crate::shortcuts::defaults();

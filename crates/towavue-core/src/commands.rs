@@ -106,6 +106,7 @@ pub enum CommandId {
     SelectAspectTwoThree,
     SelectAspectSixteenNine,
     SelectAspectNineSixteen,
+    FreeRotateImage,
 }
 
 impl CommandId {
@@ -210,6 +211,7 @@ impl CommandId {
             Self::SelectAspectTwoThree => "select_aspect_2_3",
             Self::SelectAspectSixteenNine => "select_aspect_16_9",
             Self::SelectAspectNineSixteen => "select_aspect_9_16",
+            Self::FreeRotateImage => "free_rotate_image",
             Self::ToggleImageInterpolation => "toggle_image_interpolation",
         }
     }
@@ -459,6 +461,7 @@ impl CommandDefinition {
                         | CommandId::Undo
                         | CommandId::Redo
                         | CommandId::ResizeImage
+                        | CommandId::FreeRotateImage
                 ))
             && (self.media_kinds.is_empty()
                 || context
@@ -830,6 +833,11 @@ const COMMANDS: &[CommandDefinition] = &[
         CommandId::SelectAspectNineSixteen,
         "Select 9:16 aspect ratio",
         &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::FreeRotateImage,
+        "Free rotate image",
+        &[MediaKind::Image],
     ),
 ];
 

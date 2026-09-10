@@ -84,6 +84,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::ApplyCrop, "Ctrl+Y"),
         (CommandId::CopyImage, "Ctrl+C"),
         (CommandId::ResizeImage, "Ctrl+R"),
+        (CommandId::FreeRotateImage, "Ctrl+Shift+R"),
         (CommandId::CycleAudioRepeat, "Ctrl+R"),
         (CommandId::RotateClockwise, "R"),
         (CommandId::RotateCounterclockwise, "L"),
@@ -244,7 +245,8 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         .iter()
         .filter(|definition| {
             (definition.id.as_str().starts_with("jump_images_")
-                || definition.id.as_str().starts_with("select_aspect_"))
+                || definition.id.as_str().starts_with("select_aspect_")
+                || definition.id == CommandId::FreeRotateImage)
                 && !declared.contains(&definition.id)
         })
     {
@@ -311,6 +313,66 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 mod tests {
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn free_rotation_binding_is_contextual_and_preserves_custom_keys_and_prefixes() {
+        let key: KeySequence = "Ctrl+Shift+R".parse().expect("key");
+        let image = CommandContext {
+            media_kind: Some(MediaKind::Image),
+            ..Default::default()
+        };
+        for kind in [
+            None,
+            Some(MediaKind::Image),
+            Some(MediaKind::Video),
+            Some(MediaKind::Audio),
+        ] {
+            for reading_mode in [false, true] {
+                assert_eq!(
+                    defaults().resolve(
+                        key.strokes(),
+                        CommandContext {
+                            media_kind: kind,
+                            reading_mode,
+                            ..image
+                        }
+                    ),
+                    if kind == Some(MediaKind::Image) && !reading_mode {
+                        ShortcutMatch::Command(CommandId::FreeRotateImage)
+                    } else {
+                        ShortcutMatch::None
+                    }
+                );
+            }
+        }
+        for custom in ["Ctrl+Shift+R", "Ctrl+Shift+R F"] {
+            let bindings =
+                parse(&format!("toggle_filmstrip = {custom}\n"), defaults()).expect("custom");
+            assert!(bindings.get(CommandId::FreeRotateImage).is_none());
+            assert_eq!(
+                bindings.resolve(custom.parse::<KeySequence>().expect("key").strokes(), image),
+                ShortcutMatch::Command(CommandId::ToggleFilmstrip)
+            );
+            assert_eq!(
+                parse(&serialize(&bindings), defaults()).expect("round trip"),
+                bindings
+            );
+        }
+        let bindings =
+            parse("free_rotate_image = Ctrl+K R\n", defaults()).expect("custom rotation");
+        assert_eq!(bindings.resolve(key.strokes(), image), ShortcutMatch::None);
+        assert_eq!(
+            bindings.resolve(
+                "Ctrl+K R".parse::<KeySequence>().expect("key").strokes(),
+                image
+            ),
+            ShortcutMatch::Command(CommandId::FreeRotateImage)
+        );
+        assert_eq!(
+            parse(&serialize(&bindings), defaults()).expect("round trip"),
+            bindings
+        );
+    }
 
     #[test]
     fn aspect_preset_prefixes_are_contextual_and_preserve_existing_configuration() {

@@ -53,6 +53,7 @@ pub(crate) struct WindowHost {
     proxy: Option<EventLoopProxy<Event>>,
     next_key: u64,
     pending_launches: Vec<towavue_runtime_windows::LaunchRequest>,
+    preview_cache: PreviewCache,
 }
 
 impl WindowHost {
@@ -65,6 +66,7 @@ impl WindowHost {
             proxy,
             next_key: 1,
             pending_launches: Vec::new(),
+            preview_cache: PreviewCache::local()?,
         };
         host.add_application(initial_path)?;
         Ok(host)
@@ -85,7 +87,8 @@ impl WindowHost {
                 let _ = proxy.send_event(Event::Window(key, event));
             }
         });
-        let mut app = Application::new(initial_path, notify)?;
+        let mut app =
+            Application::new_with_preview_cache(initial_path, notify, self.preview_cache.clone())?;
         app.event_loop_proxy = self.proxy.clone();
         app.window_key = Some(key);
         app.hosted_graphics = true;

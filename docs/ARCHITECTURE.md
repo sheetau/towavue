@@ -1,5 +1,15 @@
 # towavue アーキテクチャ
 
+## U10: host全体のpreview共有と同一要求の集約（2026-09-10）
+
+`WindowHost`が一つの`PreviewCache`を所有し、各ApplicationのImageLoader／filmstrip／recent／tab hover／seek workerへcloneを渡す。既存の低解像度RGBA上限64件／16 MiBをwindow数で増やさず、元windowを閉じても残りのwindowと後から開いたwindowが使える。egui textureは引き続きcontext別に所有し、GPU texture共有を達成したとは扱わない。
+
+同じsource metadata／variant keyの生成は一件にまとめる。生成中keyのleaseを共有し、他のworkerは完了後にmemory／diskを再確認する。別keyは並行に進み、mutexを保持したままdecode／disk I/Oしない。待機中は10ms間隔で自分の取消を確認し、待機側の取消で生成側を止めない。生成側の失敗／取消でもleaseを解放して、残るconsumerが再試行する。foregroundの原寸decodeはこの待機へ入れず、従来どおり縮小画素をmemoryへ供給する。memory hitは生成待ちより優先する。
+
+filmstripの動画／音声等で使うdurationも、同じsource path・size・更新時刻を含むkeyで成功値だけ64件のLRUへ保持する。同時probeを集約し、失敗／取消は保存しない。metadataが変われば別keyになり、古いdurationを返さない。RGBAの上限は従来のままで、durationは小さな別metadata枠とする。一時PNG名にはprocess内の連番も加え、独立cache instanceの同時保存でも一時ファイルを取り合わない。diskが使用不能／busyの場合の画素返却・後の保存再試行という既存契約は変えない。
+
+これは重複decode／probeとwindowごとのmemory cache複製を減らす変更であり、cold-storage全般や可視UIの表示時間を認定するものではない。動画sheet・GPU texture共用・未訪問媒体の先行生成と実時間／資源評価は引き続き未完。
+
 ## U08: 起動要求を同じhostへ集約（2026-09-10）
 
 通常起動は引き続き新windowを一つ開く。同ユーザーSID・logon session・canonical executable pathの既存hostがあれば、ファイル／folderの絶対pathまたはWelcome要求だけをそのhostへ渡す。既存tabへ勝手に追加せず、同deviceの新しい非表示windowを初期化してから表示する。起動元のrelative pathは転送前に解決する。異なるinstall場所やユーザー／sessionは別hostとし、すでに独立している旧processのlive stateを奪わない。

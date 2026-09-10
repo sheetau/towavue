@@ -1,10 +1,11 @@
-use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime};
 
 use thiserror::Error;
@@ -16,11 +17,34 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CACHE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const IMAGE_PREVIEW_VARIANT: &str = "filmstrip-image-v4";
+#[cfg(test)]
+#[path = "preview_sharing_tests.rs"]
+mod sharing_tests;
+static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+
+type InFlight = Arc<(Mutex<HashSet<String>>, Condvar)>;
+
+struct GenerationLease {
+    pending: InFlight,
+    key: String,
+}
+
+impl Drop for GenerationLease {
+    fn drop(&mut self) {
+        let (pending, ready) = &*self.pending;
+        pending
+            .lock()
+            .expect("preview generation")
+            .remove(&self.key);
+        ready.notify_all();
+    }
+}
 
 #[derive(Default)]
 struct PreviewMemory {
     entries: VecDeque<PreviewEntry>,
     bytes: usize,
+    durations: VecDeque<(String, Duration)>,
 }
 
 struct PreviewEntry {
@@ -107,6 +131,7 @@ pub struct PreviewCache {
     root: PathBuf,
     cancellation: Option<Cancellation>,
     memory: Arc<Mutex<PreviewMemory>>,
+    in_flight: InFlight,
 }
 
 impl PreviewCache {
@@ -127,6 +152,7 @@ impl PreviewCache {
             root,
             cancellation: None,
             memory: Arc::default(),
+            in_flight: Arc::default(),
         })
     }
 
@@ -135,6 +161,7 @@ impl PreviewCache {
             root: self.root.clone(),
             cancellation: Some(cancellation),
             memory: Arc::clone(&self.memory),
+            in_flight: Arc::clone(&self.in_flight),
         }
     }
 
@@ -254,6 +281,42 @@ impl PreviewCache {
     }
 
     pub fn duration(&self, source: &Path) -> Result<Duration, PreviewError> {
+        self.check_cancelled()?;
+        self.duration_with(cache_key(source, "duration-v1")?, || {
+            self.probe_duration(source)
+        })
+    }
+
+    fn duration_with(
+        &self,
+        key: String,
+        probe: impl FnOnce() -> Result<Duration, PreviewError>,
+    ) -> Result<Duration, PreviewError> {
+        let _lease = self.claim_generation(&key)?;
+        {
+            let mut memory = self.memory.lock().expect("preview memory");
+            if let Some(index) = memory
+                .durations
+                .iter()
+                .position(|(stored, _)| stored == &key)
+            {
+                let entry = memory.durations.remove(index).expect("duration");
+                let duration = entry.1;
+                memory.durations.push_back(entry);
+                return Ok(duration);
+            }
+        }
+        let duration = probe()?;
+        self.check_cancelled()?;
+        let mut memory = self.memory.lock().expect("preview memory");
+        if memory.durations.len() == 64 {
+            memory.durations.pop_front();
+        }
+        memory.durations.push_back((key, duration));
+        Ok(duration)
+    }
+
+    fn probe_duration(&self, source: &Path) -> Result<Duration, PreviewError> {
         let executable = tool_path("ffprobe.exe")?;
         let command = hidden_command(
             &executable,
@@ -280,6 +343,13 @@ impl PreviewCache {
         generate: impl FnOnce() -> Result<Vec<u8>, PreviewError>,
     ) -> Result<PreviewImage, PreviewError> {
         self.check_cancelled()?;
+        if let Some(image) = self.memory.lock().expect("preview memory").get(&key) {
+            self.check_cancelled()?;
+            return Ok(image);
+        }
+        // Coalesce only this key. Never hold a cache mutex during decode or disk I/O.
+        let _lease = self.claim_generation(&key)?;
+        self.check_cancelled()?;
         let cached = self.memory.lock().expect("preview memory").get(&key);
         if let Some(image) = cached {
             self.check_cancelled()?;
@@ -299,7 +369,11 @@ impl PreviewCache {
         let bytes = generate()?;
         let image = decode_png(&bytes)?;
         self.check_cancelled()?;
-        let temporary = self.root.join(format!("{key}.{}.tmp", std::process::id()));
+        let temporary = self.root.join(format!(
+            "{key}.{}.{}.tmp",
+            std::process::id(),
+            NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
+        ));
         // Disk persistence is optional once valid pixels are available.
         let stored = fs::create_dir_all(&self.root)
             .and_then(|()| fs::write(&temporary, &bytes))
@@ -322,6 +396,24 @@ impl PreviewCache {
                 .insert(key, image.clone());
         }
         Ok(image)
+    }
+
+    fn claim_generation(&self, key: &str) -> Result<GenerationLease, PreviewError> {
+        let (pending, ready) = &*self.in_flight;
+        let mut pending = pending.lock().expect("preview generation");
+        loop {
+            self.check_cancelled()?;
+            if pending.insert(key.to_owned()) {
+                return Ok(GenerationLease {
+                    pending: Arc::clone(&self.in_flight),
+                    key: key.to_owned(),
+                });
+            }
+            pending = ready
+                .wait_timeout(pending, Duration::from_millis(10))
+                .expect("preview generation")
+                .0;
+        }
     }
 
     pub(crate) fn remember_image(
@@ -866,21 +958,20 @@ mod tests {
             .expect("fixture PNG");
         let bytes = png.into_inner();
         let expected = decode_png(&bytes).expect("fixture pixels");
-        let temporary = root.join(format!("busy.{}.tmp", std::process::id()));
+        let temporary = root.join("busy.png");
         fs::write(&temporary, b"held cache file").expect("temporary fixture");
         let lock = fs::OpenOptions::new()
             .read(true)
-            // A failed write must not delete the file it could not open.
-            .share_mode(1 | 4)
+            // A failed replacement must preserve the existing cache file.
+            .share_mode(1)
             .open(&temporary)
-            .expect("deny writes while permitting read and deletion");
+            .expect("deny replacement while permitting read");
         let result = cache.load_or_generate("busy".into(), || Ok(bytes.clone()));
         assert_eq!(
             result.expect("cache storage is optional after successful generation"),
             expected
         );
         assert_eq!(fs::read(&temporary).expect("held file"), b"held cache file");
-        assert!(!root.join("busy.png").exists());
         drop(lock);
         fs::remove_file(&temporary).expect("release temporary fixture");
         assert_eq!(
@@ -1194,6 +1285,7 @@ mod tests {
         let cancellation = Cancellation::default();
         cancellation.cancel();
         let cache = PreviewCache {
+            in_flight: Arc::default(),
             root: PathBuf::from("must-not-create-cache"),
             cancellation: Some(cancellation),
             memory: Arc::default(),
@@ -1317,7 +1409,7 @@ mod tests {
             })
             .expect("seed legacy padded cache");
         let key = cache_key(&source, "filmstrip-image-v4").expect("card key");
-        let temporary = cache.root.join(format!("{key}.{}.tmp", std::process::id()));
+        let temporary = cache.root.join(format!("{key}.png"));
         fs::write(&temporary, b"held cache file").expect("temporary fixture");
         let lock = fs::OpenOptions::new()
             .read(true)
@@ -1328,7 +1420,6 @@ mod tests {
             .filmstrip(&source, MediaKind::Image)
             .expect("generated landscape card despite cache contention");
         assert_eq!(fs::read(&temporary).expect("held file"), b"held cache file");
-        assert!(!cache.root.join(format!("{key}.png")).exists());
         drop(lock);
         fs::remove_file(temporary).expect("release cache file");
         assert_eq!((card.image.width, card.image.height), (240, 120));

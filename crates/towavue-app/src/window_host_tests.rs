@@ -29,6 +29,58 @@ fn has_accessibility_tree(app: &mut WindowApplication) -> bool {
 }
 
 #[test]
+fn hosted_windows_share_seeded_image_previews_after_the_original_owner_closes() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::tests::hosted_windows_share_seeded_image_previews_after_the_original_owner_closes",
+    ) else {
+        return;
+    };
+    let mut host = WindowHost::new(None, None).expect("host");
+    let first = *host.windows.keys().next().expect("first");
+    let second = host.add_application(None).expect("second");
+    let path = root.join("shared-seed.bmp");
+    tab_transfer::tests::bitmap(&path);
+    let app = host.windows.get_mut(&first).expect("first");
+    app.ui_context = Some(fonts::test_context());
+    app.tabs.open_new(path.clone(), MediaKind::Image);
+    app.load_path(path.clone(), MediaKind::Image);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.image_loading {
+        app.finish_image_load();
+        assert!(Instant::now() < deadline, "seeded preview deadline");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(app.image_error.is_none());
+    let shared = host.windows[&second]
+        .preview_cache
+        .cached_image(&path)
+        .expect("lookup")
+        .expect("other window uses seeded memory");
+    assert_eq!(shared.source_size, (2, 1));
+    host.windows.get_mut(&first).expect("first").exit_requested = true;
+    host.remove_closed();
+    assert_eq!(
+        host.windows[&second]
+            .preview_cache
+            .cached_image(&path)
+            .expect("lookup after close")
+            .expect("shared lifetime")
+            .image,
+        shared.image
+    );
+    let third = host.add_application(None).expect("replacement");
+    assert_eq!(
+        host.windows[&third]
+            .preview_cache
+            .cached_image(&path)
+            .expect("new owner lookup")
+            .expect("host lifetime")
+            .image,
+        shared.image
+    );
+}
+
+#[test]
 fn notifications_stay_with_their_window_and_closed_keys_are_not_reused() {
     let Some(_) = crate::tests::isolated_test_root(
         "window_host::tests::notifications_stay_with_their_window_and_closed_keys_are_not_reused",

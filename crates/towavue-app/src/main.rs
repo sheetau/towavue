@@ -827,7 +827,18 @@ impl<N> Application<N>
 where
     N: Fn(AppEvent) + Send + Sync + 'static,
 {
+    #[cfg(test)]
     fn new(initial_path: Option<PathBuf>, notify: N) -> Result<Self, Box<dyn Error>> {
+        let preview_cache = PreviewCache::local()
+            .map_err(|error| format!("could not open preview cache: {error}"))?;
+        Self::new_with_preview_cache(initial_path, notify, preview_cache)
+    }
+
+    fn new_with_preview_cache(
+        initial_path: Option<PathBuf>,
+        notify: N,
+        preview_cache: PreviewCache,
+    ) -> Result<Self, Box<dyn Error>> {
         let shortcut_path = shortcuts::config_path()?;
         let grid_path = grid::config_path()?;
         let mut warnings = Vec::new();
@@ -847,8 +858,6 @@ where
             eprintln!("towavue: {warning}");
             warning
         });
-        let preview_cache = PreviewCache::local()
-            .map_err(|error| format!("could not open preview cache: {error}"))?;
         let notify = Arc::new(notify);
         let image_notify = Arc::clone(&notify);
         let image_loader = ImageLoader::new(preview_cache.clone(), move || {

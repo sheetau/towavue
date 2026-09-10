@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 U10 shared-preview checkpoint: hostがPreviewCacheを一つ所有し、window間の画像／filmstrip／recent／tab／seek workerへ共有。RGBA上限64件／16 MiBをwindow数で増やさず、元window閉鎖後も再利用する。同keyのdecode／disk生成を一件へ集約し、別keyは並行、待機取消は独立、失敗／取消後は再試行可能。durationもsource metadata keyで成功値64件を共有し、重複FFprobeを抑える。生成の共用／取消／失敗解放・metadata更新／上限・元window閉鎖後のseed再利用を確認。先行076e486のCI34478547413は成功。cold／可視UIの実時間、未訪問preview先行生成／動画sheet／GPU texture共有と全UX台帳は未完。可視入力許可の返答を待つ間も独立項目を進める。
+
 2026-09-10 U08 launch-routing checkpoint: 同じSID／session／executableからの通常起動を既存hostへ集約し、file／folder／Welcomeを同deviceの新windowとして開く。絶対path-onlyのbounded UTF-16要求、message-only受信窓、session-local lifetime marker、process／SID照合とstartup ackを採用。timeoutでは自動再送・重複fallbackしない。実子processの並行転送／拒否／timeout／owner終了後の再取得、非表示HWNDの実IPC→起動ack／file decode／folder Shell読込み／Welcome・元state保持／同device描画を確認。先行39138e8のCI34476325249は成功。旧独立processのlive state回収はせず、可視Explorer／foreground／window間入力・mixed-DPIと全UX台帳／性能は継続する。
 
 2026-09-10 U08 merge-input checkpoint: tab外releaseの座標をhostへ渡し、同host既存windowの実描画tab strip／Welcomeへgap指定でlive stateを移す。runtimeのroot hit照合と各windowのDPI変換を通し、hover中はfocusを奪わず挿入線／端scroll、成功後に移動先focus。modal／overlay／媒体領域／古いtab列・viewport・densityを拒否し、他windowに隠れた対象へは結合しない。3幅×3密度のheadlessと、OS hit選択だけを注入した非表示HWNDの実drag／GPU indicator／dirty画像移送／Welcomeを検証。独立process入口の所有権、可視windowの実入力／重なり／mixed-DPIと全UX台帳・性能は引き続き未完。

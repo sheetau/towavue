@@ -74,9 +74,7 @@ pub fn read_export_metadata(
     kind: MediaKind,
 ) -> Result<Vec<MetadataSourceValue>, ExportError> {
     if kind == MediaKind::Image {
-        return Err(ExportError::Failed(
-            "Image metadata inspection is not connected yet".into(),
-        ));
+        return png_metadata::inspect(path);
     }
     ffmpeg::init().map_err(|error| ExportError::Failed(error.to_string()))?;
     let input =

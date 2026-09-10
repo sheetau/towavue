@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## E01: PNG文字metadataの保存基盤（2026-09-10）
+
+画像はまずPNG入力→PNG出力の10文字項目に対応する。Title／Artist／Album／Album artist／Composer／Genre／Date／Track／Comment／Copyrightを、PNG keywordのTitle／Author／Album／Album Artist／Composer／Genre／Creation Time／Track／Comment／Copyrightへ対応させる。既存の同名keywordと動画用keyをASCII大小文字を無視して読む。Setは非圧縮iTXtのUTF-8、Removeは該当keywordの全重複・言語variantを除去し、Keepは該当する元のtEXt／zTXt／iTXt chunkをそのまま保持する。[PNG仕様](https://www.w3.org/TR/png-3/#11textinfo)に従い、Dateは文字列であり時刻の変換・検証はしない。
+
+既存の画像encode後、隔離staging内で文字chunkだけを差し替え、指定とKeepのraw chunkを再読取照合してからpublishする。画像画素の再encodeは従来の保存経路だけで行い、metadata処理ではIDATを含む他のchunkを変更しない。元のEXIF／XMP／未知keywordを編集済み画像へ追加copyしない（向き・色の二重適用を防ぐ）。これは全metadata保持や無変換画像保存ではない。metadata設定が全Keepの既存保存経路は変更せず、一項目以上Set／Removeした時に本経路を使う。
+
+入力／出力のsignature・chunk長・CRC・終端をstreamingで確認し、文字chunkは最大128件、格納bytes／展開UTF-8 bytesはそれぞれ合計1 MiBへ制限する。圧縮文字の過大展開・不正UTF-8／構造・CRC破損は明示拒否し、IDAT全体は保持しない。取消をchunk／64 KiBごとに確認し、source長／更新時刻を読取前とpublish前で照合する。失敗時は既存source／targetを保持し、所有stageを片付ける。他形式への文字設定は拒否する。画像用UI、他形式／EXIF・XMP対応、通常windowと全素材認定は次工程として台帳に残す。
+
 ## E01: metadata設定UIと非同期の既存値表示（2026-09-10）
 
 metadataと画像／動画resizeのmodal内popupはframeを越えて保持する。背景menuはmodalを開く時に閉じ、modal全体を毎frame閉じる処理でそのfield／filter選択まで消さない。metadataのCancel／source変更時は所有popupも閉じる。文字入力のUIA SetValueは既存resize用のbridgeを共有し、複数行roleを維持する。IME候補中とcommit同frameのEscapeはdialogを閉じず、popup内Escapeはpopupだけを閉じる。

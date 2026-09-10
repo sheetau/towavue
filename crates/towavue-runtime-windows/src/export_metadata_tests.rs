@@ -316,7 +316,7 @@ fn metadata_unsupported_output_cancel_and_image_rejection_preserve_existing_targ
         export_media_with_options(
             &image_request,
             ExportOptions {
-                metadata: edits(MetadataField::Title, "not connected"),
+                metadata: edits(MetadataField::Title, "unsupported image output"),
                 ..Default::default()
             }
         )

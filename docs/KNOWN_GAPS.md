@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10 15:43: PNG→PNGの文字metadata保存基盤を追加したが、画像用の設定UIはまだ利用できない。対象は10文字項目だけで、Set／Removeが一件以上ある時にKeepの該当元text chunkも保持する。全Keepの既定保存は従来経路のまま。ArtistはAuthor、DateはCreation Time、Album artistはAlbum Artistに対応する。元EXIF／XMP／未知keywordの追加copyは行わず、画像encode済みの技術情報を変更しない。文字は128 chunks／格納・展開各1 MiBまでで、破損／過大展開や非PNG入出力は拒否する。全tag保持・技術metadata編集・他形式対応・通常window認定とは区別する。
+
 2026-09-10: 動画／音声の「Metadata export options」は10文字項目をKeep／Set／Removeで指定し、次のSave／Export as／音声のみ出力へ適用する。設定は現在source/tabのsession限りで、再起動・再読込／次曲・closeでは保持しない。非同期既存値表示はglobal／best video・audioだけ、各値1024 UTF-8 bytesまでで省略を明示する。Keepの元tagをこの表示上限で切り詰めるものではない。未対応tag・表記変形は出力後の照合で既存targetを保持して失敗する。画像metadata・全format／全tag保持、通常windowでの物理IME／mixed-DPI認定は未完。metadataと画像／動画resizeのpopupが次frameで閉じる不具合は修正し、全app frame・実GPUで回帰確認した。
 
 2026-09-10: normalize／channel変換はFile「Audio export options」からSave／Export as／音声のみ出力へ接続済み。設定はtab内の現在sourceに限り、再読込・別曲・closeで解除し、再起動／閉じたtabの再表示／別processへのdetachでは保持しない。設定自体は編集履歴・再生音を変更しない。normalizeは編集・channel変換後のsample peak −1 dBFSへ一定gainを適用し、曲中の強弱を維持する。LUFS／true-peakではなく、lossy encode後のpeak保証ではない。完全なmute／silenceはそのまま保持する。Monoは0.5L+0.5R、Stereoはmono複製で、多channel→1／2channelは拒否する。Keepでの6channel normalizeは確認した。二pass間のsource変更はsize／mtimeで照合するが同じ情報への偽装やnamespace全体のatomicityは保証しない。PCM全長を保持しない解析だが、FFmpegのdecoder／filter作業領域を含むprocess全体の厳密なmemory上限ではない。全codec／通常window品質と個別metadata書換を残す。

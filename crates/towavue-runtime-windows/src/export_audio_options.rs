@@ -53,7 +53,7 @@ impl SourceStamp {
     pub(super) fn verify(&self, source: &Path) -> Result<(), ExportError> {
         if *self != Self::read(source)? {
             return Err(ExportError::Failed(
-                "The source changed during audio normalization; nothing was published".into(),
+                "The source changed during export; nothing was published".into(),
             ));
         }
         Ok(())

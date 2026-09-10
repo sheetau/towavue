@@ -2660,9 +2660,11 @@ name = "towavue-runtime-windows"
 version = "0.0.0"
 dependencies = [
  "arboard",
+ "crc32fast",
  "egui",
  "egui-directx11",
  "ffmpeg-next",
+ "flate2",
  "image",
  "raw-window-handle",
  "thiserror 2.0.20",

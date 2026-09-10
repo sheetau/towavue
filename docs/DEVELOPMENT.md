@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### PNG文字metadata保存基盤（2026-09-10 15:43、E01 partial）
+
+画像の操作UIはまだ未接続。runtimeの`export_media_with_options`へPNG入力／PNG出力と一項目以上のmetadata Set／Removeを渡すと、既存画像encode後のstageへ10文字項目を反映する。日本語・改行はiTXtで保存し、Keepは該当する元tEXt／zTXt／iTXtをraw保持する。元EXIF／XMP／未知keywordは追加copyしない。全Keepだけなら従来保存であり、全metadata保持機能ではない。PNG既存値は`read_export_metadata`で最大128件、各1024 UTF-8 bytesの省略表示を取得できる。
+
+`cargo test -p towavue-runtime-windows png_metadata`の7回帰は、3文字encoding／重複・言語variant・Unicode境界、1 MiB展開の正常値と上限超過／128件境界・CRC・全位置truncation・不正構造、stage差替えの非text bytes／画素一致、全10項目・crop／回転／resize合成、既存target保護・取消・source変更・midstream取消／書込失敗／stage破損・衝突とcleanup、workerの一回完了を検証する。無音画像fixtureだけを使い、外部入力・clipboard・通常window操作は行わない。crc32fast 1.5.1／flate2 1.1.10は既存lock内の版を直接参照するだけで、新しいpackage／versionは追加していない。他画像形式／画像UI・通常window／全素材品質と全UX台帳は継続する。
+
 ### metadata設定UI・既存値表示とmodal内popup（2026-09-10 15:23、E01／U02 partial）
 
 動画／音声のFile「Metadata export options」で10項目から選び、Keep／Set／Removeと複数行文字を指定する。既定keyはなく、`metadata_export_options`へcustom bindingを割り当てられる。現在値はglobalと再生と同じbest video／audioからlatest-only workerで取得し、scope別に表示する。各値1024 UTF-8 bytesまでで、省略を明示する。表示制限はKeepの元tagを変えない。read失敗は画面へ表示し、遅れた結果はtoken／source／tab／generationで拒否する。

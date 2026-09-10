@@ -22,6 +22,8 @@ pub use audio_options::{AudioChannels, AudioExportOptions};
 
 #[path = "export_metadata.rs"]
 mod metadata;
+#[path = "export_png_metadata.rs"]
+mod png_metadata;
 pub use metadata::{
     MetadataExportOptions, MetadataField, MetadataSourceValue, read_export_metadata,
 };
@@ -318,17 +320,17 @@ fn export_audio_cancellable(
         return Err(ExportError::InvalidTrim);
     }
     check_cancelled(cancelled)?;
-    if request.kind == MediaKind::Image && !metadata.is_empty() {
-        return Err(ExportError::Failed(
-            "Image metadata export is not connected yet".into(),
-        ));
-    }
-    let source_stamp = options
-        .normalize_peak
+    let image_metadata = request.kind == MediaKind::Image && !metadata.is_empty();
+    let source_stamp = (options.normalize_peak || image_metadata)
         .then(|| audio_options::SourceStamp::read(&request.source))
         .transpose()?;
+    let png_metadata = image_metadata
+        .then(|| png_metadata::PngMetadata::prepare(request, metadata, cancelled))
+        .transpose()?;
     let mut streams = ExportStreams::probe(request)?;
-    streams.metadata = metadata.clone();
+    if !image_metadata {
+        streams.metadata = metadata.clone();
+    }
     if request.kind == MediaKind::Audio && streams.audio.is_none() {
         return Err(ExportError::Failed(
             "The source has no audio stream to export".into(),
@@ -419,11 +421,15 @@ fn export_audio_cancellable(
             message
         }));
     }
+    if let Some(png_metadata) = png_metadata {
+        png_metadata.apply(&staging, cancelled)?;
+    } else {
+        metadata.verify(&staging.output)?;
+    }
     if let Some(stamp) = &source_stamp {
         stamp.verify(&request.source)?;
     }
     check_cancelled(cancelled)?;
-    metadata.verify(&staging.output)?;
     staging.publish(&request.target, cancelled, trimmed_kind)?;
     Ok(ExportOutcome {
         used_hardware_encoder: false,
@@ -538,6 +544,7 @@ impl Drop for StagedExport {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.output);
         let _ = fs::remove_file(self.directory.join("timeline-filter.txt"));
+        let _ = fs::remove_file(self.directory.join("metadata.png"));
         let _ = fs::remove_dir(&self.directory);
     }
 }

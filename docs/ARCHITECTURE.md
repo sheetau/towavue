@@ -1,12 +1,20 @@
 # towavue アーキテクチャ
 
+## U01/U08: fullscreenのmonitor移動と復元（2026-09-11）
+
+Win+Shift+Left／Rightで移動する全画面windowは、移動先monitorの全領域に収める。可視試験でOSのWM_DPICHANGEDは正しい移動先矩形を通知していたが、winit 0.30.13が旧client寸法のまま位置変更を再要求し、逆方向のDPI通知を招いた。runtimeは通知の提案矩形からmonitorの実rcMonitorを取得し、そのWM_DPICHANGED処理中だけCellへ保持する。同期WM_WINDOWPOSCHANGINGの座標／寸法をその矩形へ合わせ、NOMOVE／NOSIZEだけを外してwinitへ渡す。winitのmonitor追跡・DPI通知・activation／Z順は維持する（[Microsoft WM_WINDOWPOSCHANGING](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-windowposchanging)）。ネスト終了で以前のCell値へ戻し、callbackがsubclassを外してもstateが残るよう一時Rcを保持する。通常移動・最大化・描画ごとのresizeには適用しない。
+
+NativeCaption::set_fullscreenがcaption stateとwinitのborderless切替を一体で所有する。入る前の論理client寸法を記録し、終了時はwinitの配置復元完了後に実client／outer差から一度だけ寸法を整える。SetWindowPlacementとDPI換算による二重拡大を残さない。最大化状態の退避／復元はappが既存どおり担当し、captionの切替は最大化解除後に行う。元のwindow配置へ戻る規則は維持するため、全画面中の最後のmonitorへ通常windowを移す新仕様ではない。新device／dependency／per-frame補正は追加しない。
+
+可視baselineは左2560×1600からprimary1920×1080への移動で(-1136,0)、2560×1600のままとなり、反対方向でも旧1920×1080が残った。移動だけの中間修正では全画面終了時に1280×960が2560×1920へ倍増した。最終Releaseでは3台を両方向に2周し、各monitorの原点／寸法／DPIが一致。元の1280×960へ復元し、位置だけを96 DPI側へ動かした640×480で編集済み映像48,140画素が一致。最大化→全画面→別DPI→最大化復帰とguardのmouse取消／破棄も確認した。非表示native試験はpending proposalの補正／解除・flag保持、実monitor移動と論理復元寸法を検証するが、それだけでは旧可視OS shortcutの不具合は再現しない。全DPI比率・全media・長時間移動／drag latency・UIA／IME／styleの認定は継続する。
+
 ## U01/U08: custom captionのDPIサイズ保持（2026-09-11）
 
 通常の復元windowは、DPI変更前のclient寸法を旧DPIから新DPIへ倍率換算する。WM_NCCALCSIZEで通常枠をclient化しているため、winit 0.30.13のWM_DPICHANGEDが加算する標準枠の余白は実際のclientに不要である（[Microsoft custom frame](https://learn.microsoft.com/en-us/windows/win32/dwm/customframe)、[WM_DPICHANGED](https://learn.microsoft.com/en-us/windows/win32/hidpi/wm-dpichanged)）。runtimeのcaption subclassで前回DPIを保持し、winitの状態更新・ScaleFactorChanged通知・提案位置を通した後、実測client／outer差を使って寸法だけを補正する。位置・Z順・activationは変えず、描画ごとの補正や別deviceは追加しない。appはInnerSizeWriterで別の寸法を要求しない現行契約を前提とし、winit更新時はこの境界の回帰を再確認する。
 
 DPI記録はfullscreen／maximizedでも更新するが、それらの寸法へ通常windowの倍率補正は適用しない。DWM frameは通知処理後に更新する。同threadのCellと同期native呼出しに限定し、COM／HWNDはappへ渡さない。
 
-旧native回帰は1920×1152に対し1946×1223で失敗。修正後は3台を2周し、960×576→1920×1152→960×576、作業領域とgrab位置を保持した。異なるDPIのmonitorがない場合は専用のskip理由を報告する。可視の生成動画は3周で640×480→1280×960→640×480、往復前後の編集済み映像48,140画素が一致。96／192 DPIそれぞれで最大化／fullscreenからの復元寸法も確認した。fullscreen／maximizedのまま別DPIへ移す操作、全DPI比率／全media／latency・資源は未認定。
+旧native回帰は1920×1152に対し1946×1223で失敗。修正後は3台を2周し、960×576→1920×1152→960×576、作業領域とgrab位置を保持した。異なるDPIのmonitorがない場合は専用のskip理由を報告する。可視の生成動画は3周で640×480→1280×960→640×480、往復前後の編集済み映像48,140画素が一致。96／192 DPIそれぞれで最大化／fullscreenからの復元寸法も確認した。その状態のまま別DPIへ移す操作は上記fullscreen節で追加対応した。全DPI比率／全media／latency・資源は未認定。
 
 ## U08: drop先monitorの作業領域とDPI（2026-09-11）
 

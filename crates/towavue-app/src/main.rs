@@ -7226,9 +7226,6 @@ where
                 selection::release_focus(context);
             }
         }
-        if let Some(caption) = &self.native_caption {
-            caption.set_fullscreen(enabled);
-        }
         self.fullscreen_controls_visible = false;
         self.fullscreen_controls_focus_requested = false;
         self.fullscreen_controls_keyboard = false;
@@ -7242,7 +7239,11 @@ where
                     window.set_maximized(false);
                 }
             }
-            window.set_fullscreen(enabled.then_some(Fullscreen::Borderless(monitor)));
+            if let Some(caption) = &self.native_caption {
+                caption.set_fullscreen(enabled);
+            } else {
+                window.set_fullscreen(enabled.then_some(Fullscreen::Borderless(monitor)));
+            }
             if !enabled && self.fullscreen_was_maximized {
                 window.set_maximized(true);
                 self.fullscreen_was_maximized = false;

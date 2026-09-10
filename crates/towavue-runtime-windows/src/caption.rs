@@ -10,8 +10,8 @@ use windows::Win32::Graphics::Dwm::{
 };
 use windows::Win32::Graphics::Gdi::{
     BLACK_BRUSH, ClientToScreen, CombineRgn, CreateRectRgn, DeleteObject, FillRect, GetDC,
-    GetStockObject, HBRUSH, HDC, InvalidateRect, RGN_DIFF, ReleaseDC, ScreenToClient, SetWindowRgn,
-    ValidateRect,
+    GetMonitorInfoW, GetStockObject, HBRUSH, HDC, InvalidateRect, MONITOR_DEFAULTTONEAREST,
+    MONITORINFO, MonitorFromRect, RGN_DIFF, ReleaseDC, ScreenToClient, SetWindowRgn, ValidateRect,
 };
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::MARGINS;
@@ -42,6 +42,7 @@ struct CaptionState {
     fullscreen: Cell<bool>,
     drag: Cell<Option<egui::Rect>>,
     dpi: Cell<u32>,
+    fullscreen_dpi_bounds: Cell<Option<RECT>>,
 }
 
 /// A UI-thread-owned DWM frame whose client title row is drawn by the application.
@@ -49,6 +50,7 @@ pub struct NativeCaption {
     window: Arc<Window>,
     handle: HWND,
     state: Rc<CaptionState>,
+    windowed_size: Cell<Option<winit::dpi::LogicalSize<f64>>>,
 }
 
 impl NativeCaption {
@@ -67,6 +69,7 @@ impl NativeCaption {
             drag: Cell::new(None),
             // SAFETY: live, same-thread window checked above; scalar query only.
             dpi: Cell::new(unsafe { GetDpiForWindow(handle) }),
+            fullscreen_dpi_bounds: Cell::new(None),
         });
         let callback_state = Rc::into_raw(state.clone());
         // SAFETY: the subclass owns one Rc reference, released on removal/destruction.
@@ -91,6 +94,7 @@ impl NativeCaption {
             window,
             handle,
             state,
+            windowed_size: Cell::new(None),
         };
         // SAFETY: DWM copies this scalar attribute synchronously. Older systems may
         // reject dark mode; their native frame remains functional with its OS colors.
@@ -104,24 +108,29 @@ impl NativeCaption {
             );
         }
         caption.refresh_frame()?;
-        // SAFETY: preserve the requested client dimensions after removing the old
-        // title band. No activation/movement and no winit style-based size estimate.
+        caption.resize_client(initial_size)?;
+        Ok(caption)
+    }
+
+    fn resize_client(&self, size: winit::dpi::PhysicalSize<u32>) -> windows::core::Result<()> {
+        // SAFETY: retained same-thread window; stack outputs are not retained.
+        // Preserve client dimensions without activation, movement or style estimates.
         unsafe {
             let mut outer = RECT::default();
             let mut client = RECT::default();
-            GetWindowRect(handle, &mut outer)?;
-            GetClientRect(handle, &mut client)?;
+            GetWindowRect(self.handle, &mut outer)?;
+            GetClientRect(self.handle, &mut client)?;
             SetWindowPos(
-                handle,
+                self.handle,
                 None,
                 0,
                 0,
-                outer.right - outer.left + initial_size.width as i32 - client.right,
-                outer.bottom - outer.top + initial_size.height as i32 - client.bottom,
+                outer.right - outer.left + size.width as i32 - client.right,
+                outer.bottom - outer.top + size.height as i32 - client.bottom,
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
             )?;
         }
-        Ok(caption)
+        Ok(())
     }
 
     /// Physical client coordinates; no native handle or callback escapes the runtime.
@@ -129,11 +138,31 @@ impl NativeCaption {
         self.state.drag.set(region);
     }
 
+    /// Change the custom frame and the window's borderless fullscreen state together.
     pub fn set_fullscreen(&self, fullscreen: bool) {
+        if fullscreen == self.state.fullscreen.get() {
+            return;
+        }
+        if fullscreen {
+            self.windowed_size.set(Some(
+                self.window
+                    .inner_size()
+                    .to_logical(self.window.scale_factor()),
+            ));
+        }
         self.state.fullscreen.set(fullscreen);
         self.state.drag.set(None);
         // SAFETY: same-thread, retained window; DWM copies the stack margins.
         unsafe { extend_frame(self.handle, fullscreen) };
+        self.window.set_fullscreen(
+            fullscreen
+                .then(|| winit::window::Fullscreen::Borderless(self.window.current_monitor())),
+        );
+        if !fullscreen && let Some(size) = self.windowed_size.take() {
+            // SetWindowPlacement can cross DPI while restoring an already scaled
+            // rectangle. Restore the saved logical client size once, after that call.
+            let _ = self.resize_client(size.to_physical(self.window.scale_factor()));
+        }
     }
 
     /// Width reserved at the right of the client area, in physical pixels.
@@ -341,10 +370,43 @@ unsafe extern "system" fn caption_proc(
             if RemoveWindowSubclass(handle, Some(caption_proc), SUBCLASS_ID).as_bool() {
                 drop(Rc::from_raw(data as *const CaptionState));
             }
+        } else if message == WM_WINDOWPOSCHANGING
+            && state.fullscreen.get()
+            && let Some(bounds) = state.fullscreen_dpi_bounds.get()
+        {
+            // winit may reuse the old fullscreen client size during WM_DPICHANGED.
+            // Constrain that synchronous proposal before its monitor tracking runs.
+            let position = &mut *(lparam.0 as *mut WINDOWPOS);
+            position.x = bounds.left;
+            position.y = bounds.top;
+            position.cx = bounds.right - bounds.left;
+            position.cy = bounds.bottom - bounds.top;
+            position.flags &= !(SWP_NOMOVE | SWP_NOSIZE);
+            return DefSubclassProc(handle, message, wparam, lparam);
         } else if message == WM_DPICHANGED {
+            // winit can dispatch application callbacks reentrantly. Keep the state
+            // alive even if a callback removes the subclass before we restore it.
+            Rc::increment_strong_count(data as *const CaptionState);
+            let state = Rc::from_raw(data as *const CaptionState);
             let dpi = u32::from(wparam.0 as u16);
             let previous_dpi = state.dpi.replace(dpi);
             let fullscreen = state.fullscreen.get();
+            let previous_bounds = state.fullscreen_dpi_bounds.get();
+            if fullscreen {
+                let suggested = &*(lparam.0 as *const RECT);
+                let mut info = MONITORINFO {
+                    cbSize: size_of::<MONITORINFO>() as u32,
+                    ..Default::default()
+                };
+                if GetMonitorInfoW(
+                    MonitorFromRect(suggested, MONITOR_DEFAULTTONEAREST),
+                    &mut info,
+                )
+                .as_bool()
+                {
+                    state.fullscreen_dpi_bounds.set(Some(info.rcMonitor));
+                }
+            }
             let mut client = RECT::default();
             let size = (!fullscreen
                 && !IsZoomed(handle).as_bool()
@@ -358,6 +420,7 @@ unsafe extern "system" fn caption_proc(
             // Keep winit's DPI state/events and suggested position. Its style-based
             // resize adds standard-frame margins despite our WM_NCCALCSIZE override.
             let result = DefSubclassProc(handle, message, wparam, lparam);
+            state.fullscreen_dpi_bounds.set(previous_bounds);
             if let Some(size) = size {
                 let mut outer = RECT::default();
                 if GetWindowRect(handle, &mut outer).is_ok()
@@ -666,6 +729,7 @@ mod tests {
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
             return;
         }
         #[derive(Default)]
@@ -723,6 +787,114 @@ mod tests {
                             expected as isize
                         );
                     }
+                    let monitors: Vec<_> = window.available_monitors().collect();
+                    assert!(!monitors.is_empty());
+                    if !monitors
+                        .iter()
+                        .any(|monitor| monitor.scale_factor() != window.scale_factor())
+                    {
+                        eprintln!(
+                            "SKIP fullscreen mixed-DPI movement: no differently scaled monitor"
+                        );
+                    }
+                    caption.state.fullscreen.set(true);
+                    let bounds = RECT {
+                        left: -400,
+                        top: 10,
+                        right: 400,
+                        bottom: 610,
+                    };
+                    caption.state.fullscreen_dpi_bounds.set(Some(bounds));
+                    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
+                    let mut proposal = WINDOWPOS {
+                        x: 5,
+                        y: 7,
+                        cx: 123,
+                        cy: 234,
+                        flags,
+                        ..Default::default()
+                    };
+                    SendMessageW(
+                        handle,
+                        WM_WINDOWPOSCHANGING,
+                        None,
+                        Some(LPARAM((&mut proposal as *mut WINDOWPOS) as isize)),
+                    );
+                    assert_eq!(
+                        (proposal.x, proposal.y, proposal.cx, proposal.cy),
+                        (-400, 10, 800, 600)
+                    );
+                    assert_eq!(proposal.flags, SWP_NOZORDER | SWP_NOACTIVATE);
+                    caption.state.fullscreen_dpi_bounds.set(None);
+                    proposal = WINDOWPOS {
+                        x: 5,
+                        y: 7,
+                        cx: 123,
+                        cy: 234,
+                        flags,
+                        ..Default::default()
+                    };
+                    SendMessageW(
+                        handle,
+                        WM_WINDOWPOSCHANGING,
+                        None,
+                        Some(LPARAM((&mut proposal as *mut WINDOWPOS) as isize)),
+                    );
+                    assert_eq!(
+                        (proposal.x, proposal.y, proposal.cx, proposal.cy),
+                        (5, 7, 123, 234)
+                    );
+                    assert_eq!(proposal.flags, flags);
+                    caption.state.fullscreen.set(false);
+                    let entry_monitor = monitors
+                        .iter()
+                        .max_by(|left, right| left.scale_factor().total_cmp(&right.scale_factor()))
+                        .expect("entry monitor");
+                    window.set_outer_position(entry_monitor.position());
+                    let windowed_size =
+                        window.inner_size().to_logical::<f64>(window.scale_factor());
+                    caption.set_fullscreen(true);
+                    for monitor in monitors.iter().cycle().take(monitors.len() * 2) {
+                        let position = monitor.position();
+                        let size = monitor.size();
+                        // Exercise native moves across real monitors without user input.
+                        // The visible OS-shortcut trial separately covers old client sizing.
+                        SetWindowPos(
+                            handle,
+                            None,
+                            position.x,
+                            position.y,
+                            size.width as i32,
+                            size.height as i32,
+                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING,
+                        )
+                        .expect("native fullscreen monitor move");
+                        assert_eq!(
+                            window.outer_position().expect("position"),
+                            monitor.position()
+                        );
+                        assert_eq!(
+                            window.inner_size(),
+                            monitor.size(),
+                            "fullscreen monitor bounds"
+                        );
+                        assert_eq!(window.scale_factor(), monitor.scale_factor());
+                        assert!(caption.state.fullscreen_dpi_bounds.get().is_none());
+                        eprintln!(
+                            "PASS fullscreen monitor: position={:?} size={:?} scale={}",
+                            monitor.position(),
+                            monitor.size(),
+                            monitor.scale_factor()
+                        );
+                    }
+                    caption.set_fullscreen(false);
+                    assert_eq!(
+                        window.inner_size(),
+                        windowed_size.to_physical::<u32>(window.scale_factor()),
+                        "fullscreen exit restores logical client size"
+                    );
+                    assert!(window.fullscreen().is_none());
+                    assert!(caption.windowed_size.get().is_none());
                     let state = caption.state.clone();
                     assert_eq!(Rc::strong_count(&state), 4);
                     drop(surface);

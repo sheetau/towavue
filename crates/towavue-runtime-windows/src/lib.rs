@@ -40,7 +40,10 @@ pub use dialog::{
     DialogError, FileDialogKind, PromptButtons, PromptResponse, cursor_position_in_window,
     pick_path, show_prompt,
 };
-pub use export::{ExportError, ExportEvent, ExportJob, ExportOutcome, ExportRequest, export_media};
+pub use export::{
+    ExportError, ExportEvent, ExportJob, ExportOutcome, ExportOutput, ExportRequest, export_media,
+    export_media_with_output,
+};
 pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_clipboard::{ImageCopyJob, ImageCopyRequest};

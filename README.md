@@ -4,6 +4,8 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
+動画のFile menu「Export audio only」から、音声だけを別ファイルへ書き出せます。既定は`元の名前-audio.wav`で、WAV／FLAC／MP3／M4A／AAC／Ogg Opus／Opusを選べます。時間範囲・区間削除／伸縮・音量・速度は反映し、映像のcrop／回転／resizeは含めません。再encodeであり圧縮音声の無変換抽出ではありません。元動画の編集履歴・保存済み状態・通常のSave先は変わらず、未保存編集の確認も残ります。音声なし・空の出力・キャンセルでは既存の保存先を保持します。normalize・stereo／mono変換・個別metadata書換はまだ未実装です。
+
 音声でも `,`／`.` で10ms戻る／進む操作が使えます。移動すると一時停止し、削除・伸縮後の時間軸にも対応します。View menuの「Step audio backward／forward (10 ms)」からも使え、先頭・終端で止まります。これは音声の微小Seekで、PCMの1sample移動や圧縮形式ごとのフレーム境界移動ではありません。
 
 動画はtimeline表示中に`Ctrl+R`、またはEdit menuの「Resize / resample video」からリサイズできます。右下のdialogで幅・高さとNearest／Bilinear／Bicubic／Lanczosを指定し、映像面にGPUプレビューを表示します。元の表示比率を既定で保持し、連動する辺は2px単位へ丸めます。出力は偶数16～16384px・正方形ピクセルで、寸法・GPU予算を超える指定は適用できません。Applyは一件の編集、Cancel／Escapeと同寸法・ピクセル比不変の場合は非編集です。crop／回転・Undo/Redo・保存へ接続済みで、再生位置や再生／停止状態は変更しません。通常window・全素材品質／持続性能の最終確認は未完です。

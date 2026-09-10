@@ -2,6 +2,8 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+mod audio_export_tests;
 mod audio_playback;
 mod chrome;
 mod cursor;
@@ -57,10 +59,11 @@ use towavue_core::{
 };
 use towavue_runtime_windows::{
     AudioOutputEvent, CaptionAction, DecodedImage, DialogError, ExportError, ExportEvent,
-    ExportJob, ExportRequest, FileDialogKind, FolderOrderProvider, FolderWatcher, FrameRenderer,
-    ImageLoader, LatestTask, NativeCaption, PlaybackEvent, PlaybackSession, PreviewCache,
-    PromptButtons, PromptResponse, RenderError, canonical_shell_path, configure_mouse_input,
-    cursor_position_in_window, pick_path, reveal_file, reveal_license_guide, show_prompt,
+    ExportJob, ExportOutput, ExportRequest, FileDialogKind, FolderOrderProvider, FolderWatcher,
+    FrameRenderer, ImageLoader, LatestTask, NativeCaption, PlaybackEvent, PlaybackSession,
+    PreviewCache, PromptButtons, PromptResponse, RenderError, canonical_shell_path,
+    configure_mouse_input, cursor_position_in_window, pick_path, reveal_file, reveal_license_guide,
+    show_prompt,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -271,6 +274,7 @@ enum DialogIntent {
         tab: TabId,
         source: PathBuf,
         kind: MediaKind,
+        output: ExportOutput,
         continuation: Option<GuardedAction>,
     },
 }
@@ -307,6 +311,7 @@ struct ActiveExport {
     job: ExportJob,
     tab: TabId,
     request: ExportRequest,
+    output: ExportOutput,
     encoded: Duration,
     cancelling: bool,
     continuation: Option<GuardedAction>,
@@ -4752,6 +4757,9 @@ where
             CommandId::ExportAs => {
                 self.export_current(true, None);
             }
+            CommandId::ExportAudio => {
+                self.export_current_output(true, None, ExportOutput::AudioOnly);
+            }
             CommandId::ToggleTimeline => {
                 self.thumbnail_worker.clear();
                 self.thumbnail_loading = None;
@@ -5259,6 +5267,7 @@ where
                 tab,
                 source,
                 kind,
+                output,
                 continuation,
             } => match result {
                 Ok(Some(target))
@@ -5266,7 +5275,7 @@ where
                         active.id == tab && active.target.current_path() == source
                     }) =>
                 {
-                    self.start_export(tab, source, kind, target, continuation);
+                    self.start_export(tab, source, kind, target, continuation, output);
                 }
                 other => {
                     self.pending_guard = continuation;
@@ -5285,6 +5294,15 @@ where
     }
 
     fn export_current(&mut self, force_dialog: bool, continuation: Option<GuardedAction>) -> bool {
+        self.export_current_output(force_dialog, continuation, ExportOutput::Media)
+    }
+
+    fn export_current_output(
+        &mut self,
+        force_dialog: bool,
+        continuation: Option<GuardedAction>,
+        output: ExportOutput,
+    ) -> bool {
         if self.active_export.is_some() || self.pending_dialog.is_some() {
             self.set_status(
                 "An export is already running. Wait for it or choose Cancel export.".into(),
@@ -5300,21 +5318,30 @@ where
         }) else {
             return false;
         };
-        let target = if !force_dialog {
+        let target = if !force_dialog && output == ExportOutput::Media {
             self.export_paths.get(&id).cloned()
         } else {
             None
         };
         match target {
-            Some(target) => self.start_export(id, source, kind, target, continuation),
+            Some(target) => self.start_export(id, source, kind, target, continuation, output),
             None => {
-                let suggested_name = export_name(&source);
+                let dialog = if output == ExportOutput::AudioOnly {
+                    FileDialogKind::SaveAudio {
+                        suggested_name: export_audio_name(&source),
+                    }
+                } else {
+                    FileDialogKind::SaveFile {
+                        suggested_name: export_name(&source),
+                    }
+                };
                 self.begin_dialog(
-                    FileDialogKind::SaveFile { suggested_name },
+                    dialog,
                     DialogIntent::Export {
                         tab: id,
                         source,
                         kind,
+                        output,
                         continuation,
                     },
                 )
@@ -5329,6 +5356,7 @@ where
         kind: MediaKind,
         target: PathBuf,
         continuation: Option<GuardedAction>,
+        output: ExportOutput,
     ) -> bool {
         let operations = self
             .edits
@@ -5343,7 +5371,7 @@ where
             hardware_encode: self.prefer_hardware_encode,
         };
         let notify = Arc::clone(&self.notify);
-        match ExportJob::start(request.clone(), move |event| {
+        match ExportJob::start_with_output(request.clone(), output, move |event| {
             notify(AppEvent::Export(event))
         }) {
             Ok(job) => {
@@ -5351,6 +5379,7 @@ where
                     job,
                     tab: id,
                     request,
+                    output,
                     encoded: Duration::ZERO,
                     cancelling: false,
                     continuation,
@@ -5381,10 +5410,12 @@ where
                 };
                 match result {
                     Ok(outcome) => {
-                        if self.tabs.tabs().iter().any(|tab| {
-                            tab.id == export.tab
-                                && tab.target.current_path() == export.request.source
-                        }) {
+                        if export.output == ExportOutput::Media
+                            && self.tabs.tabs().iter().any(|tab| {
+                                tab.id == export.tab
+                                    && tab.target.current_path() == export.request.source
+                            })
+                        {
                             self.export_paths
                                 .insert(export.tab, export.request.target.clone());
                             self.edits
@@ -5401,6 +5432,8 @@ where
                             "{} {} ({encoder} encode)",
                             if export.cancelling {
                                 "Export completed before cancellation; automatic leaving cancelled:"
+                            } else if export.output == ExportOutput::AudioOnly {
+                                "Exported audio (video save state unchanged):"
                             } else {
                                 "Exported"
                             },
@@ -7389,6 +7422,14 @@ fn export_name(path: &Path) -> String {
     }
 }
 
+fn export_audio_name(path: &Path) -> String {
+    let stem = path
+        .file_stem()
+        .map(|value| value.to_string_lossy())
+        .unwrap_or_default();
+    format!("{stem}-audio.wav")
+}
+
 fn format_time(time: MediaTime) -> String {
     let seconds = time.as_nanoseconds().max(0) as u64 / 1_000_000_000;
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
@@ -8504,7 +8545,8 @@ mod tests {
                         &mut app,
                         vec![key(egui::Key::ArrowRight, egui::Modifiers::NONE)],
                     );
-                    invoke(&mut app, "Close tab");
+                    // Disambiguate the command from Close tabs left/right and the tab-strip button.
+                    invoke(&mut app, "Close tab Ctrl+W");
                     assert!(app.pending_guard.is_some());
                     invoke(&mut app, "Cancel");
                     assert!(app.pending_guard.is_none());
@@ -8976,6 +9018,7 @@ mod tests {
                     tab,
                     source: path.clone(),
                     kind: MediaKind::Image,
+                    output: ExportOutput::Media,
                     continuation: app.pending_guard.take(),
                 });
                 frame(&mut app, vec![]);
@@ -10399,6 +10442,7 @@ mod tests {
                 };
                 // Same-source rejection keeps this UI fixture free of file writes and FFmpeg.
                 ActiveExport {
+                    output: ExportOutput::Media,
                     job: ExportJob::start(request.clone(), |_| {}).expect("fixture worker"),
                     tab,
                     request,
@@ -13781,6 +13825,7 @@ mod tests {
             tab,
             source: source.clone(),
             kind: MediaKind::Image,
+            output: ExportOutput::Media,
             continuation: Some(GuardedAction::CloseTab(tab)),
         };
         for result in [Ok(None), Err(DialogError::OwnerUnavailable)] {

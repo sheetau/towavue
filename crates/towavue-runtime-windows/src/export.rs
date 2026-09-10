@@ -16,6 +16,17 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[path = "export_rotation.rs"]
 mod rotation;
 
+#[cfg(test)]
+#[path = "export_audio_tests.rs"]
+mod audio_tests;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExportOutput {
+    Media,
+    /// A derivative with time/audio edits only; the request still describes the source media.
+    AudioOnly,
+}
+
 #[derive(Clone, Debug)]
 pub struct ExportRequest {
     pub source: PathBuf,
@@ -47,14 +58,23 @@ impl ExportJob {
         request: ExportRequest,
         notify: impl Fn(ExportEvent) + Send + Sync + 'static,
     ) -> Result<Self, ExportError> {
+        Self::start_with_output(request, ExportOutput::Media, notify)
+    }
+
+    pub fn start_with_output(
+        request: ExportRequest,
+        output: ExportOutput,
+        notify: impl Fn(ExportEvent) + Send + Sync + 'static,
+    ) -> Result<Self, ExportError> {
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_cancelled = Arc::clone(&cancelled);
         let thread = thread::Builder::new()
             .name("towavue-export".into())
             .spawn(move || {
-                let result = export_cancellable(&request, &worker_cancelled, &|time| {
-                    notify(ExportEvent::Progress(time));
-                });
+                let result =
+                    export_output_cancellable(&request, output, &worker_cancelled, &|time| {
+                        notify(ExportEvent::Progress(time));
+                    });
                 notify(ExportEvent::Finished(result));
             })
             .map_err(ExportError::Start)?;
@@ -100,6 +120,68 @@ pub fn export_media(request: &ExportRequest) -> Result<ExportOutcome, ExportErro
     export_cancellable(request, &AtomicBool::new(false), &|_| {})
 }
 
+pub fn export_media_with_output(
+    request: &ExportRequest,
+    output: ExportOutput,
+) -> Result<ExportOutcome, ExportError> {
+    export_output_cancellable(request, output, &AtomicBool::new(false), &|_| {})
+}
+
+fn export_output_cancellable(
+    request: &ExportRequest,
+    output: ExportOutput,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+) -> Result<ExportOutcome, ExportError> {
+    if output == ExportOutput::Media {
+        return export_cancellable(request, cancelled, progress);
+    }
+    check_cancelled(cancelled)?;
+    if same_path(&request.source, &request.target) {
+        return Err(ExportError::SameAsSource);
+    }
+    if request.kind == MediaKind::Image {
+        return Err(ExportError::Failed(
+            "Audio-only export requires video or audio media".into(),
+        ));
+    }
+    let extension = request
+        .target
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !matches!(
+        extension.as_str(),
+        "wav" | "flac" | "mp3" | "m4a" | "aac" | "ogg" | "opus"
+    ) {
+        return Err(ExportError::Failed(
+            "Audio-only export requires WAV, FLAC, MP3, M4A, AAC, Ogg or Opus output".into(),
+        ));
+    }
+    let mut audio = request.clone();
+    audio.kind = MediaKind::Audio;
+    audio.hardware_encode = false;
+    // Project only the worker's request; the caller retains the full video history.
+    audio.operations.retain(|operation| match operation {
+        EditOperation::SetTrimStart(_)
+        | EditOperation::SetTrimEnd(_)
+        | EditOperation::SetVolume(_)
+        | EditOperation::SetRate(_)
+        | EditOperation::Timeline(_) => true,
+        EditOperation::Crop(_)
+        | EditOperation::RotateClockwise
+        | EditOperation::RotateCounterclockwise
+        | EditOperation::FlipHorizontal
+        | EditOperation::FlipVertical
+        | EditOperation::Resize(_)
+        | EditOperation::RotateImage(_)
+        | EditOperation::RotateVideo(_)
+        | EditOperation::ResizeVideo(_) => false,
+    });
+    export_cancellable(&audio, cancelled, progress)
+}
+
 fn export_cancellable(
     request: &ExportRequest,
     cancelled: &AtomicBool,
@@ -138,6 +220,11 @@ fn export_cancellable(
     }
     check_cancelled(cancelled)?;
     let mut streams = ExportStreams::probe(request)?;
+    if request.kind == MediaKind::Audio && streams.audio.is_none() {
+        return Err(ExportError::Failed(
+            "The source has no audio stream to export".into(),
+        ));
+    }
     rotation::validate(request)?;
     if request
         .operations
@@ -162,9 +249,11 @@ fn export_cancellable(
             return Err(ExportError::InvalidTimeline);
         }
     }
-    let trimmed_kind =
-        (state.trim_start.is_some() || state.trim_end.is_some() || streams.timeline.is_some())
-            .then_some(request.kind);
+    let trimmed_kind = (request.kind == MediaKind::Audio
+        || state.trim_start.is_some()
+        || state.trim_end.is_some()
+        || streams.timeline.is_some())
+    .then_some(request.kind);
     let staging = StagedExport::new(&request.target)?;
     let staged_request = ExportRequest {
         target: staging.output.clone(),
@@ -477,6 +566,9 @@ fn ffmpeg_arguments(
         "-map_metadata".into(),
         "0".into(),
     ];
+    if request.kind == MediaKind::Audio {
+        arguments.extend(["-vn".into(), "-sn".into(), "-dn".into()]);
+    }
     if let Some(timeline) = &streams.timeline {
         arguments.extend([
             "-copyts".into(),

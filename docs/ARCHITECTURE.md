@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## E01: 音声のみの派生書き出し（2026-09-10）
+
+動画のFile menu「Export audio only」から別名の音声を作る。既定は`元のstem-audio.wav`、WAV／FLAC／MP3／M4A／AAC／Ogg Opus／Opusを対象とする。元動画のSave先・saved cursor・編集履歴・再生状態は変更せず、離脱guardのSaveにも代用しない。再実行は毎回保存先を選び、既存の非同期dialog／export worker・進捗・キャンセル・staging／publish保護を共用する。dialog中にsource／tabが変わった場合は開始しない。
+
+runtimeは通常mediaとAudioOnlyの出力目的を明示的に受け、AudioOnlyではworker内のrequest copyから画像・動画の空間編集だけを除く。元requestのkindと編集列は保持する。再生と同じbest audio streamだけを選び、trim／master rate・volume／区間削除・伸縮・局所音量を既存音声filterへ渡す。無音声素材・画像kind・非対応出力拡張子は既存targetを変更せず拒否し、映像・字幕・添付画像を出力しない。音声は再encodeでありpacket抽出ではない。metadataは既存copy方針を維持し、個別metadata書換・normalize・channel変換は次のsliceで接続する。通常windowのphysical dialog操作・全codec品質認定とは分ける。
+
 ## V04: 音声のフレーム相当移動（2026-09-10）
 
 草案の音声`,／.`は前後10msの微小Seekとして採用する。音声には表示fpsがなく、codecのdecoded frame／packet長を使うと同じ操作の移動幅が形式で変わるため、編集操作として一定の時間単位を選ぶ。これはPCMの1sample移動や圧縮frame境界への移動ではない。専用の「Step audio backward/forward (10 ms)」command／View menu／custom bindingへ単位を明記し、動画の実PTS探索とその設定は変更しない。

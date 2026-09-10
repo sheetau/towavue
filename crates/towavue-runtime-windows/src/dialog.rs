@@ -8,6 +8,7 @@ use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
 use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
+use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::{
     FILEOPENDIALOGOPTIONS, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_OVERWRITEPROMPT,
     FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, FileOpenDialog, FileSaveDialog, IFileOpenDialog,
@@ -17,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, IDNO, IDOK, IDRETRY, IDYES, MB_DEFBUTTON2, MB_DEFBUTTON3,
     MB_ICONWARNING, MB_OK, MB_RETRYCANCEL, MB_YESNOCANCEL, MessageBoxW,
 };
-use windows::core::PCWSTR;
+use windows::core::{PCWSTR, w};
 
 const ERROR_CANCELLED_HRESULT: u32 = 0x8007_04c7;
 
@@ -40,6 +41,7 @@ pub enum FileDialogKind {
     OpenFile,
     OpenFolder,
     SaveFile { suggested_name: String },
+    SaveAudio { suggested_name: String },
 }
 
 /// Keeps the owner alive until its modal dialog closes, without blocking the caller.
@@ -190,7 +192,10 @@ fn dialog_thread(
             FileDialogKind::OpenFile => show_initialized_dialog(false, owner_handle),
             FileDialogKind::OpenFolder => show_initialized_dialog(true, owner_handle),
             FileDialogKind::SaveFile { suggested_name } => {
-                show_initialized_save_dialog(&suggested_name, owner_handle)
+                show_initialized_save_dialog(&suggested_name, owner_handle, false)
+            }
+            FileDialogKind::SaveAudio { suggested_name } => {
+                show_initialized_save_dialog(&suggested_name, owner_handle, true)
             }
         }
     }
@@ -225,15 +230,11 @@ unsafe fn show_initialized_dialog(
 unsafe fn show_initialized_save_dialog(
     suggested_name: &str,
     owner: HWND,
+    audio_only: bool,
 ) -> Result<Option<PathBuf>, DialogError> {
+    // The caller owns the STA until this function returns; interfaces never cross threads.
     unsafe {
-        let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_ALL)?;
-        dialog.SetOptions(FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_OVERWRITEPROMPT)?;
-        let wide = suggested_name
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        dialog.SetFileName(PCWSTR(wide.as_ptr()))?;
+        let dialog = prepare_save_dialog(suggested_name, audio_only)?;
         if let Err(error) = dialog.Show(Some(owner)) {
             if error.code().0 as u32 == ERROR_CANCELLED_HRESULT {
                 return Ok(None);
@@ -248,12 +249,104 @@ unsafe fn show_initialized_save_dialog(
     }
 }
 
+// The caller keeps its initialized STA alive and drops the returned interface on that thread.
+unsafe fn prepare_save_dialog(
+    suggested_name: &str,
+    audio_only: bool,
+) -> Result<IFileSaveDialog, DialogError> {
+    unsafe {
+        let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_ALL)?;
+        dialog.SetOptions(FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_OVERWRITEPROMPT)?;
+        if audio_only {
+            // Static UTF-16 filter strings outlive this STA-owned dialog and its Show call.
+            dialog.SetTitle(w!("Export audio only (video edits remain unchanged)"))?;
+            dialog.SetFileTypes(&audio_file_types())?;
+            dialog.SetFileTypeIndex(1)?;
+            dialog.SetDefaultExtension(w!("wav"))?;
+        }
+        let wide = suggested_name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        dialog.SetFileName(PCWSTR(wide.as_ptr()))?;
+        Ok(dialog)
+    }
+}
+
+fn audio_file_types() -> [COMDLG_FILTERSPEC; 7] {
+    [
+        COMDLG_FILTERSPEC {
+            pszName: w!("WAV audio (*.wav)"),
+            pszSpec: w!("*.wav"),
+        },
+        COMDLG_FILTERSPEC {
+            pszName: w!("FLAC audio (*.flac)"),
+            pszSpec: w!("*.flac"),
+        },
+        COMDLG_FILTERSPEC {
+            pszName: w!("MP3 audio (*.mp3)"),
+            pszSpec: w!("*.mp3"),
+        },
+        COMDLG_FILTERSPEC {
+            pszName: w!("M4A / AAC audio (*.m4a)"),
+            pszSpec: w!("*.m4a"),
+        },
+        COMDLG_FILTERSPEC {
+            pszName: w!("AAC audio (*.aac)"),
+            pszSpec: w!("*.aac"),
+        },
+        COMDLG_FILTERSPEC {
+            pszName: w!("Ogg / Opus audio (*.ogg)"),
+            pszSpec: w!("*.ogg"),
+        },
+        COMDLG_FILTERSPEC {
+            pszName: w!("Opus audio (*.opus)"),
+            pszSpec: w!("*.opus"),
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn audio_save_dialog_accepts_seven_types_unicode_name_and_preserves_overwrite_prompt_without_showing()
+     {
+        thread::spawn(|| {
+            // This owned worker initializes an STA, never calls Show or changes focus,
+            // frees the returned filename and drops every interface before the apartment.
+            unsafe {
+                OleInitialize(None).expect("STA");
+                let _apartment = DialogApartment;
+                let dialog =
+                    prepare_save_dialog("動画.final-audio.wav", true).expect("audio save dialog");
+                let options = dialog.GetOptions().expect("options");
+                assert_eq!(options & FOS_OVERWRITEPROMPT, FOS_OVERWRITEPROMPT);
+                assert_eq!(options & FOS_PATHMUSTEXIST, FOS_PATHMUSTEXIST);
+                assert_eq!(dialog.GetFileTypeIndex().expect("default type"), 1);
+                for index in 1..=audio_file_types().len() as u32 {
+                    dialog.SetFileTypeIndex(index).expect("supported type");
+                    assert_eq!(dialog.GetFileTypeIndex().expect("selected type"), index);
+                }
+                let name = dialog.GetFileName().expect("suggested name");
+                let text = name.to_string();
+                CoTaskMemFree(Some(name.0.cast()));
+                assert_eq!(text.expect("UTF-16"), "動画.final-audio.wav");
+                let regular =
+                    prepare_save_dialog("image-export.png", false).expect("regular save dialog");
+                assert_eq!(
+                    regular.GetOptions().expect("regular options") & FOS_OVERWRITEPROMPT,
+                    FOS_OVERWRITEPROMPT
+                );
+            }
+        })
+        .join()
+        .expect("owned dialog worker");
+    }
 
     #[test]
     fn dialog_worker_returns_without_waiting_and_delivers_choice_or_cancel_once() {

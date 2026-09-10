@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 動画の音声のみ書き出し（2026-09-10 13:58、E01 partial）
+
+動画のFile menu「Export audio only」、またはcustom bindingの`export_audio`を使う。既定keyは追加せず、視聴中／timeline内の両方で利用できる。保存dialogは`元stem-audio.wav`とWAV／FLAC／MP3／M4A／AAC／Ogg Opus／Opusを提示する。時間範囲・区間削除／伸縮・局所／master音量・速度を反映する一方、crop・回転・resizeなど映像編集は除く。packet copyではなく音声再encodeで、既存metadata copy方針を維持する。元動画の履歴・Save先・saved cursorを変更しないため、未保存guardは残る。毎回保存先を選び、通常の進捗／Cancel exportを共用する。
+
+追加7 testは、7形式のbest audio／再open・WAV／FLAC全PCM／metadata title、独立FFmpegによるtrim／rate／gainと削除／伸縮／局所音量後28800 samplesの一致、原本・既存target保護、無音声／空trim／空timeline／誤kind・拡張子／開始前・進捗後cancelを検証する。appはclean／dirty双方のSave状態／履歴／transport保持・離脱guard、dialog cancel／stale tab・失敗／publish後cancel、custom binding round-tripを確認。WindowsのSTA上で非表示のIFileSaveDialogへ7形式・日本語名・overwrite promptを設定して照合し、File menuのkeyboard dispatchも確認する。通常windowでdialogを実表示した拡張子切替・物理入力、全codec品質は未認定である。
+
+最終session82896: fmt check／Clippy／workspace453（app258／core61／runtime130／integration4）、既存app opt-in6件、Releaseが終了0。SKIPなし、通常ignored13は別計上。Release SHA-256 `57d5f697bf3a867147009637fe91fcb4d240f4d865f184e10d26b11084c4bd56`。既存D3D11VA回帰はCPU transfers0。menu追加により既存UIA試験の`Close tab` prefixが`Close tabs to the left`を拾うことを再現し、実nodeを確認して試験の対象名を一意化した。初回File submenu試験もfocus確立passを追加した。前回b7c030bのCI34437967190はinstaller prerequisite fixtureの15秒timeoutで失敗したが、ローンチ再認定は再開しない。normalize・stereo／mono変換・個別metadata書換と全UX台帳の未完事項を引き継ぐ。
+
 ### 音声の10ms微小移動（2026-09-10 13:37、V04 partial）
 
 音声の`,／.`は前後10msのSeekとして接続した。View menu「Step audio backward／forward (10 ms)」とcustom bindingを共有し、映像なしの音声でも利用できる。音声のcodec frame長を表示操作の単位にせず、形式によらない短い時間単位を採用したもので、PCMの1sample移動や圧縮frame境界の探索ではない。動画の実PTS探索・32操作queueは変更しない。

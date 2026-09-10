@@ -7,7 +7,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         "File",
         &[
             &[OpenFile, OpenFolder],
-            &[Save, ExportAs, ToggleHardwareEncode],
+            &[Save, ExportAs, ExportAudio, ToggleHardwareEncode],
             &[CopyFilePath, RevealFile],
             &[
                 CloseTab,
@@ -597,6 +597,14 @@ mod tests {
                 StepAudioForward,
                 towavue_core::MediaKind::Audio,
             ),
+            (
+                "File",
+                0,
+                4,
+                "export_audio",
+                ExportAudio,
+                towavue_core::MediaKind::Video,
+            ),
         ] {
             let context = egui::Context::default();
             let shortcuts = crate::shortcuts::defaults();
@@ -644,6 +652,7 @@ mod tests {
                 frame(vec![]);
             }
             assert!(click(&mut frame, egui::pos2(20.0, 15.0)).is_empty());
+            frame(vec![]);
             for _ in 0..steps {
                 frame(vec![key(egui::Key::ArrowDown)]);
             }

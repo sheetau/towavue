@@ -1633,6 +1633,42 @@ mod tests {
     }
 
     #[test]
+    fn audio_export_command_is_video_only_customizable_and_uses_an_audio_filename() {
+        use towavue_core::{CommandContext, KeySequence, MediaKind, ShortcutMatch};
+        let bindings = defaults();
+        assert!(
+            bindings.get(CommandId::ExportAudio).is_none(),
+            "no new default key conflict"
+        );
+        let custom = parse("export_audio = Ctrl+K A\n", bindings).expect("custom audio export");
+        let sequence: KeySequence = "Ctrl+K A".parse().expect("sequence");
+        for kind in [
+            None,
+            Some(MediaKind::Image),
+            Some(MediaKind::Audio),
+            Some(MediaKind::Video),
+        ] {
+            let context = CommandContext {
+                media_kind: kind,
+                ..Default::default()
+            };
+            let resolved = custom.resolve(sequence.strokes(), context);
+            assert_eq!(
+                resolved == ShortcutMatch::Command(CommandId::ExportAudio),
+                kind == Some(MediaKind::Video)
+            );
+        }
+        assert_eq!(
+            parse(&serialize(&custom), defaults()).expect("round trip"),
+            custom
+        );
+        assert_eq!(
+            crate::export_audio_name(std::path::Path::new("動画.final.MKV")),
+            "動画.final-audio.wav"
+        );
+    }
+
+    #[test]
     fn migrates_m5_crop_preview_binding_to_m6_apply_crop() {
         let bindings =
             parse("toggle_crop_preview = Ctrl+Y\n", defaults()).expect("migrate shortcuts");

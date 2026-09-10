@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10: 動画のFile menu「Export audio only」はWAV／FLAC／MP3／M4A／AAC／Ogg Opus／Opusへbest audioだけを再encodeする。時間・音量・速度・区間編集を反映し、映像編集は出力しない。元動画の保存先／saved cursorを変更せず、未保存guardは残る。圧縮packetの無変換抽出ではなく、lossy形式は品質が変わる。7形式再open・lossless PCM／編集sample列と既存file保護は確認したが、native dialogを実表示した形式切替／物理操作・全codec品質／metadata完全保持は未認定。normalize・channel変換・個別metadata書換は残る。
+
 2026-09-10: 音声`,／.`は前後10msの微小Seekで、移動時に停止する。codecのframe長やPCMのsample単位ではない。編集後時間軸、連続入力・先頭／実EOF・2倍速設定・区間削除／伸縮・範囲再生外への移動を無音WAVと実WASAPIで確認した。全codecのsample位相、低遅延audition・通常window物理入力の認定ではなく、既存のSeek精度／遅延の制約を引き継ぐ。
 
 2026-09-10: 動画resizeのcore値／履歴・software保存とGPU4方式に、timeline内Ctrl+R／Edit menuの寸法・比率・filter／preview／Apply・Cancel UIを接続。出力は偶数16～16384px・128M pixels以内、SAR1。比率保持では連動する辺を2pxへ丸めるため厳密な元比率から差が生じる。手入力の奇数は自動修正せず適用不可。Nearest／Bilinear／Bicubic／Lanczos、拡大・縮小・奇数／極小source・SARと合成順序を回帰確認した。GPUは符号付きfloat中間と係数を再利用し、合計512 MiBを超える編集を拒否するため、出力寸法が範囲内でも利用できない縦横比／履歴がある。保存の縮小時色間引きは明示無効化。OpenH264に合わせた16px下限は維持し、黙ってpaddingしない。実UIの取消・履歴／再生状態保持とD3D11VA復旧前後は確認済みだが、代表GPU／WARPの精度・速度比較は全素材・HDR・hardware encode品質・安定した連続再生や通常windowの認定ではない。
@@ -186,7 +188,7 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 | Repeat、shuffle | 音声のoff／all／one、重複のないshuffle順、前後操作と自然EOF、背景自動送りを実装。未保存／export中の別曲への自動移動は停止。gaplessと再起動後のmode保存は保証しない |
 | Video zoom、fullscreen、resize/resample | fullscreenはH1でhardware/software共通のaspect-fitと復帰を確認。zoomとresize/resampleは未実装 |
 | Video crop/rotate/flipのlive preview | H1で同じdevice内のUV表示を実装。回転後のSAR・selection、Undo/Redoとexport照合を検証。trim live範囲再生とは別 |
-| Audio-only export、normalize、stereo/mono変換 | 未実装 |
+| Audio-only export、normalize、stereo/mono変換 | 動画の音声のみ出力はFile menuから7形式へ接続済み。normalize／stereo・mono変換は未実装 |
 | Track/codec/subtitle selection | 未実装 |
 | Exclusive WASAPI | 意図的にdefaultへ採用しない。将来optionを検討可能 |
 

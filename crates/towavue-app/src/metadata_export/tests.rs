@@ -3,6 +3,8 @@ use crate::audio_export::tests::frame;
 use crate::audio_export_tests::{drain_export, fixture};
 use crate::video_rotation::tests::{access, node};
 
+mod png;
+
 fn read_ready<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
     events: &std::sync::mpsc::Receiver<AppEvent>,
@@ -176,122 +178,108 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
     ) else {
         return;
     };
-    let context = fonts::test_context();
-    context.enable_accesskit();
-    let mut app = Application::new(None, |_| {}).expect("app");
-    app.ui_context = Some(context.clone());
-    let source = root.join("audio.wav");
-    let tab = app.tabs.open_new(source.clone(), MediaKind::Audio);
-    app.path = Some(source);
-    app.media_kind = Some(MediaKind::Audio);
-    app.state = PlaybackState::Paused;
-    let size = egui::vec2(640.0, 600.0);
-    for _ in 0..3 {
-        frame(&mut app, size, vec![]);
-    }
-    let menu = node(
-        &frame(&mut app, size, vec![])
-            .platform_output
-            .accesskit_update
-            .expect("tree"),
-        "towavue menu",
-    );
-    frame(
-        &mut app,
-        size,
-        vec![egui::Event::AccessKitActionRequest(
-            egui::accesskit::ActionRequest {
-                action: egui::accesskit::Action::Focus,
-                target_tree: egui::accesskit::TreeId::ROOT,
-                target_node: menu,
-                data: None,
-            },
-        )],
-    );
-    app.dispatch(CommandId::MetadataExportOptions);
-    let token = app.metadata_dialog.as_ref().expect("dialog").token;
-    app.finish_metadata_read(
-        token,
-        Ok(vec![MetadataSourceValue {
-            field: MetadataField::Title,
-            scope: "File",
-            value: "Original title".into(),
-            truncated: false,
-        }]),
-    );
-    for (index, field) in MetadataField::ALL.into_iter().enumerate() {
-        if index > 0 {
-            click(&mut app, MetadataField::ALL[index - 1].label());
-            click(&mut app, field.label());
+    for kind in [MediaKind::Audio, MediaKind::Image] {
+        let context = fonts::test_context();
+        context.enable_accesskit();
+        let mut app = Application::new(None, |_| {}).expect("app");
+        app.ui_context = Some(context.clone());
+        let source = root.join(if kind == MediaKind::Image {
+            "image.PNG"
+        } else {
+            "audio.wav"
+        });
+        let tab = app.tabs.open_new(source.clone(), kind);
+        app.path = Some(source);
+        app.media_kind = Some(kind);
+        app.state = PlaybackState::Paused;
+        let size = egui::vec2(640.0, 600.0);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
         }
-        click(&mut app, "Set value");
-        let value = format!("{} 日本語\nsecond line", field.label());
-        set_value(&mut app, &value);
-        app.finish_metadata_read(token, Ok(vec![]));
-        assert_eq!(
-            app.metadata_dialog.as_ref().expect("draft").fields[index].text,
-            value
+        let menu = node(
+            &frame(&mut app, size, vec![])
+                .platform_output
+                .accesskit_update
+                .expect("tree"),
+            "towavue menu",
         );
-        click(&mut app, "Remove value");
-        assert_eq!(
-            app.metadata_dialog
-                .as_ref()
-                .expect("draft")
-                .options()
-                .expect("valid")
-                .get(field),
-            Some("")
+        frame(
+            &mut app,
+            size,
+            vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Focus,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: menu,
+                    data: None,
+                },
+            )],
         );
-        click(&mut app, "Keep source value");
-        assert_eq!(
-            app.metadata_dialog
-                .as_ref()
-                .expect("draft")
-                .options()
-                .expect("valid")
-                .get(field),
-            None
+        app.dispatch(CommandId::MetadataExportOptions);
+        let token = app.metadata_dialog.as_ref().expect("dialog").token;
+        app.finish_metadata_read(
+            token,
+            Ok(vec![MetadataSourceValue {
+                field: MetadataField::Title,
+                scope: "File",
+                value: "Original title".into(),
+                truncated: false,
+            }]),
         );
-        click(&mut app, "Set value");
-    }
-    assert!(app.metadata_export_settings.is_empty());
-    set_value(&mut app, &"音".repeat(342));
-    let tree = frame(&mut app, size, vec![])
-        .platform_output
-        .accesskit_update
-        .expect("tree");
-    assert!(
-        tree.nodes
-            .iter()
-            .any(|(_, node)| node.label() == Some("Apply metadata") && node.is_disabled())
-    );
-    set_value(&mut app, "Copyright text");
-    let expected = app
-        .metadata_dialog
-        .as_ref()
-        .expect("draft")
-        .options()
-        .expect("valid");
-    click(&mut app, "Apply metadata");
-    assert_eq!(app.metadata_export_settings.get(&tab), Some(&expected));
-    for _ in 0..3 {
-        frame(&mut app, size, vec![]);
-    }
-    assert_eq!(
-        frame(&mut app, size, vec![])
+        for (index, field) in MetadataField::ALL.into_iter().enumerate() {
+            if index > 0 {
+                click(&mut app, MetadataField::ALL[index - 1].label());
+                click(&mut app, field.label());
+            }
+            click(&mut app, "Set value");
+            let value = format!("{} 日本語\nsecond line", field.label());
+            set_value(&mut app, &value);
+            app.finish_metadata_read(token, Ok(vec![]));
+            assert_eq!(
+                app.metadata_dialog.as_ref().expect("draft").fields[index].text,
+                value
+            );
+            click(&mut app, "Remove value");
+            assert_eq!(
+                app.metadata_dialog
+                    .as_ref()
+                    .expect("draft")
+                    .options()
+                    .expect("valid")
+                    .get(field),
+                Some("")
+            );
+            click(&mut app, "Keep source value");
+            assert_eq!(
+                app.metadata_dialog
+                    .as_ref()
+                    .expect("draft")
+                    .options()
+                    .expect("valid")
+                    .get(field),
+                None
+            );
+            click(&mut app, "Set value");
+        }
+        assert!(app.metadata_export_settings.is_empty());
+        set_value(&mut app, &"音".repeat(342));
+        let tree = frame(&mut app, size, vec![])
             .platform_output
             .accesskit_update
-            .expect("tree")
-            .focus,
-        menu
-    );
-    for command in [CommandId::ToggleCommandPalette, CommandId::ToggleGridMenu] {
-        app.dispatch(command);
-        frame(&mut app, size, vec![]);
-        app.dispatch(CommandId::MetadataExportOptions);
-        assert!(!app.palette_open && !app.grid_open);
-        click(&mut app, "Keep source value");
-        click(&mut app, "Cancel");
+            .expect("tree");
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("Apply metadata") && node.is_disabled())
+        );
+        set_value(&mut app, "Copyright text");
+        let expected = app
+            .metadata_dialog
+            .as_ref()
+            .expect("draft")
+            .options()
+            .expect("valid");
+        click(&mut app, "Apply metadata");
         assert_eq!(app.metadata_export_settings.get(&tab), Some(&expected));
         for _ in 0..3 {
             frame(&mut app, size, vec![]);
@@ -304,51 +292,71 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
                 .focus,
             menu
         );
-    }
-    for size in [
-        egui::vec2(480.0, 360.0),
-        egui::vec2(320.0, 200.0),
-        egui::vec2(240.0, 150.0),
-    ] {
-        app.open_metadata_export_options();
-        for _ in 0..4 {
+        for command in [CommandId::ToggleCommandPalette, CommandId::ToggleGridMenu] {
+            app.dispatch(command);
             frame(&mut app, size, vec![]);
+            app.dispatch(CommandId::MetadataExportOptions);
+            assert!(!app.palette_open && !app.grid_open);
+            click(&mut app, "Keep source value");
+            click(&mut app, "Cancel");
+            assert_eq!(app.metadata_export_settings.get(&tab), Some(&expected));
+            for _ in 0..3 {
+                frame(&mut app, size, vec![]);
+            }
+            assert_eq!(
+                frame(&mut app, size, vec![])
+                    .platform_output
+                    .accesskit_update
+                    .expect("tree")
+                    .focus,
+                menu
+            );
         }
-        let output = frame(&mut app, size, vec![]);
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
-        for label in ["Apply metadata", "Cancel"] {
-            let (clip, text) = output
-                .shapes
-                .iter()
-                .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.text() == label => {
-                        Some((shape.clip_rect, text))
-                    }
-                    _ => None,
-                })
-                .expect("footer text remains drawn");
-            assert!(screen.contains_rect(text.visual_bounding_rect()));
-            assert!(clip.contains_rect(text.visual_bounding_rect()));
+        for size in [
+            egui::vec2(480.0, 360.0),
+            egui::vec2(320.0, 200.0),
+            egui::vec2(240.0, 150.0),
+        ] {
+            app.open_metadata_export_options();
+            for _ in 0..4 {
+                frame(&mut app, size, vec![]);
+            }
+            let output = frame(&mut app, size, vec![]);
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+            for label in ["Apply metadata", "Cancel"] {
+                let (clip, text) = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.text() == label => {
+                            Some((shape.clip_rect, text))
+                        }
+                        _ => None,
+                    })
+                    .expect("footer text remains drawn");
+                assert!(screen.contains_rect(text.visual_bounding_rect()));
+                assert!(clip.contains_rect(text.visual_bounding_rect()));
+            }
+            frame(
+                &mut app,
+                size,
+                vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            assert!(app.metadata_dialog.is_none());
+            assert_eq!(app.metadata_export_settings.get(&tab), Some(&expected));
         }
-        frame(
-            &mut app,
-            size,
-            vec![egui::Event::Key {
-                key: egui::Key::Escape,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::NONE,
-            }],
+        assert!(
+            app.edits
+                .get(&tab)
+                .is_none_or(|history| !history.is_dirty())
         );
-        assert!(app.metadata_dialog.is_none());
-        assert_eq!(app.metadata_export_settings.get(&tab), Some(&expected));
     }
-    assert!(
-        app.edits
-            .get(&tab)
-            .is_none_or(|history| !history.is_dirty())
-    );
 }
 
 #[test]

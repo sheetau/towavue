@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 15:55 E01 PNG metadata UI checkpoint: File／custom commandを画像へ開き、PNG既存値・keyword対応・PNG入出力／文字のみの説明とApply／CancelをSaveへ接続した。未対応画像・読取待ち／失敗はApply不可。全KeepのPNG保存も元の対象文字情報を保持するよう基盤を揃える。全10項目UIA／compact／focus、実Save／再Save／全Keep復元／Remove・非PNG保存先失敗／guardとsource lifecycleを確認。先行2eb281bのCI34446598113はCargo.lockのnotice照合hash更新漏れで失敗し、今回hashを同期して146 packagesの整合性試験を通す。公開準備は再開しない。次は他画像形式のmetadata契約／実装へ進み、通常window／混在DPI／全codec品質・性能と全UX台帳の未完事項を継続する。
+
 2026-09-10 15:43 E01 PNG metadata基盤checkpoint: PNG→PNGの10文字項目をiTXt UTF-8で保存し、Keepの元text chunk／Set／Removeをstaging内で再照合する。画像decodeを伴わない有界stream処理、CRC／破損／過大展開拒否、取消／source変更／書込失敗時の既存file保護を確認。crop／回転／resize保存の非text bytesと画素はmetadataなしと一致する。画像UIと他形式／EXIF・XMP、通常window／混在DPI・全素材品質と全UX台帳は未完。次はPNG用UI／保存形式の説明とsource lifecycleへ接続する。先行37bd0feのCI34445108179は成功。
 
 2026-09-10 15:18 E01 metadata UI／U02 popup checkpoint: File／custom commandへ10項目のKeep／Set／Remove、非同期global／best stream既存値表示とsource別設定保持を接続。全項目UIA・UTF-8上限・IME／popup Escape・取消／focus／stale結果、実Save／再Save／AudioOnly／離脱Saveを確認。modal中の一律popup閉鎖を原因として、metadataと画像／動画resizeの選択を修正し、全app frameと実GPU復旧前後で4filter選択を確認。次は画像metadataへ進む。全UX台帳・通常window／混在DPI／全素材品質・性能は継続する。先行dc15b09のCI34443028049は成功。

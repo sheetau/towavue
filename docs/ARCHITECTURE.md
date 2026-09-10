@@ -1,12 +1,18 @@
 # towavue アーキテクチャ
 
+## E01: PNG文字metadataのUIとKeep保存（2026-09-10）
+
+File／custom commandのMetadata export optionsを画像にも開く。PNGは既存の10項目・非同期既存値・Apply／Cancel／IME／source/tab世代guardを共用し、PNG入力→PNG出力・文字項目だけであること、Author／Creation Time／Album Artistへの対応とEXIF／XMP対象外を明示する。他画像形式も制約を確認できるがApplyは無効にする。PNGの読取完了前／読取失敗時もApplyは無効。Apply／Cancel・Save／再Save／保存先選択の取消・tab保持／source再読込解除は動画／音声と同じで、設定変更は履歴／dirty／画素を変更しない。
+
+UIのKeepと保存結果を一致させるため、前段基盤の「Set／Removeがある時だけcopy」を置き換え、PNG→PNG保存では全Keep／設定dialog未使用でも10項目の元text chunkを保持する。対象はPNG文字chunkだけであり、未知keyword／EXIF／XMPの完全保持や他形式への保持を保証しない。source／outputの有界CRC確認と文字chunk差替えを既定PNG保存にも適用する。明示Set／Removeのある画像でPNG以外の保存先を選んだ時は、既存workerの形式拒否を表示しsource／target／設定／dirtyを保持する。保存先を勝手に変更・拡張子付替えしない。画像UIの通常window／物理IME／混在DPI・他形式／技術metadataと全UX台帳は継続する。
+
 ## E01: PNG文字metadataの保存基盤（2026-09-10）
 
 画像はまずPNG入力→PNG出力の10文字項目に対応する。Title／Artist／Album／Album artist／Composer／Genre／Date／Track／Comment／Copyrightを、PNG keywordのTitle／Author／Album／Album Artist／Composer／Genre／Creation Time／Track／Comment／Copyrightへ対応させる。既存の同名keywordと動画用keyをASCII大小文字を無視して読む。Setは非圧縮iTXtのUTF-8、Removeは該当keywordの全重複・言語variantを除去し、Keepは該当する元のtEXt／zTXt／iTXt chunkをそのまま保持する。[PNG仕様](https://www.w3.org/TR/png-3/#11textinfo)に従い、Dateは文字列であり時刻の変換・検証はしない。
 
-既存の画像encode後、隔離staging内で文字chunkだけを差し替え、指定とKeepのraw chunkを再読取照合してからpublishする。画像画素の再encodeは従来の保存経路だけで行い、metadata処理ではIDATを含む他のchunkを変更しない。元のEXIF／XMP／未知keywordを編集済み画像へ追加copyしない（向き・色の二重適用を防ぐ）。これは全metadata保持や無変換画像保存ではない。metadata設定が全Keepの既存保存経路は変更せず、一項目以上Set／Removeした時に本経路を使う。
+既存の画像encode後、隔離staging内で文字chunkだけを差し替え、指定とKeepのraw chunkを再読取照合してからpublishする。画像画素の再encodeは従来の保存経路だけで行い、metadata処理ではIDATを含む他のchunkを変更しない。元のEXIF／XMP／未知keywordを編集済み画像へ追加copyしない（向き・色の二重適用を防ぐ）。これは全metadata保持や無変換画像保存ではない。基盤段階ではSet／Remove時だけ有効だったが、現在は上記UI契約に従い全KeepのPNG→PNG保存にも本経路を使う。
 
-入力／出力のsignature・chunk長・CRC・終端をstreamingで確認し、文字chunkは最大128件、格納bytes／展開UTF-8 bytesはそれぞれ合計1 MiBへ制限する。圧縮文字の過大展開・不正UTF-8／構造・CRC破損は明示拒否し、IDAT全体は保持しない。取消をchunk／64 KiBごとに確認し、source長／更新時刻を読取前とpublish前で照合する。失敗時は既存source／targetを保持し、所有stageを片付ける。他形式への文字設定は拒否する。画像用UI、他形式／EXIF・XMP対応、通常windowと全素材認定は次工程として台帳に残す。
+入力／出力のsignature・chunk長・CRC・終端をstreamingで確認し、文字chunkは最大128件、格納bytes／展開UTF-8 bytesはそれぞれ合計1 MiBへ制限する。圧縮文字の過大展開・不正UTF-8／構造・CRC破損は明示拒否し、IDAT全体は保持しない。取消をchunk／64 KiBごとに確認し、source長／更新時刻を読取前とpublish前で照合する。失敗時は既存source／targetを保持し、所有stageを片付ける。他形式への文字設定は拒否する。PNG用UIは接続済みで、他形式／EXIF・XMP対応、通常windowと全素材認定は次工程として台帳に残す。
 
 ## E01: metadata設定UIと非同期の既存値表示（2026-09-10）
 

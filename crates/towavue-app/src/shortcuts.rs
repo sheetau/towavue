@@ -1701,7 +1701,7 @@ mod tests {
     }
 
     #[test]
-    fn metadata_options_custom_binding_round_trips_and_requires_playable_media() {
+    fn metadata_options_custom_binding_round_trips_and_requires_media() {
         use towavue_core::{CommandContext, KeySequence, MediaKind, ShortcutMatch};
         assert!(defaults().get(CommandId::MetadataExportOptions).is_none());
         let custom = parse("metadata_export_options = Ctrl+K M\n", defaults()).expect("custom key");
@@ -1721,7 +1721,7 @@ mod tests {
                 assert_eq!(
                     custom.resolve(sequence.strokes(), context)
                         == ShortcutMatch::Command(CommandId::MetadataExportOptions),
-                    matches!(kind, Some(MediaKind::Audio | MediaKind::Video))
+                    kind.is_some()
                 );
             }
         }

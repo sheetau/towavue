@@ -644,6 +644,14 @@ mod tests {
                 MetadataExportOptions,
                 towavue_core::MediaKind::Audio,
             ),
+            (
+                "File",
+                0,
+                4,
+                "metadata_export_options",
+                MetadataExportOptions,
+                towavue_core::MediaKind::Image,
+            ),
         ] {
             let context = egui::Context::default();
             let shortcuts = crate::shortcuts::defaults();

@@ -644,7 +644,7 @@ const COMMANDS: &[CommandDefinition] = &[
     command(
         CommandId::MetadataExportOptions,
         "Metadata export options",
-        PLAYABLE_MEDIA,
+        ANY_MEDIA,
     ),
     command(
         CommandId::ExportAudio,

@@ -26,7 +26,7 @@ fn keyword(field: MetadataField) -> &'static str {
     }
 }
 
-fn png_path(path: &Path) -> bool {
+pub(super) fn png_path(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))

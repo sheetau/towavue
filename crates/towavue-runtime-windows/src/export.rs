@@ -320,7 +320,10 @@ fn export_audio_cancellable(
         return Err(ExportError::InvalidTrim);
     }
     check_cancelled(cancelled)?;
-    let image_metadata = request.kind == MediaKind::Image && !metadata.is_empty();
+    let image_metadata = request.kind == MediaKind::Image
+        && (!metadata.is_empty()
+            || (png_metadata::png_path(&request.source)
+                && png_metadata::png_path(&request.target)));
     let source_stamp = (options.normalize_peak || image_metadata)
         .then(|| audio_options::SourceStamp::read(&request.source))
         .transpose()?;

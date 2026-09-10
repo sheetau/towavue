@@ -30,6 +30,25 @@ pub(super) struct MetadataDialog {
 
 impl MetadataDialog {
     fn options(&self) -> Result<MetadataExportOptions, String> {
+        if self.kind == MediaKind::Image {
+            if !self
+                .source
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
+            {
+                return Err("Image metadata currently requires PNG input and PNG output.".into());
+            }
+            match &self.current {
+                Some(Ok(_)) => {}
+                Some(Err(_)) => {
+                    return Err("PNG metadata must be readable before applying options.".into());
+                }
+                None => {
+                    return Err("Wait for PNG metadata inspection before applying options.".into());
+                }
+            }
+        }
         let mut options = MetadataExportOptions::default();
         for (field, draft) in MetadataField::ALL.into_iter().zip(&self.fields) {
             let value = match draft.mode {
@@ -79,6 +98,14 @@ impl MetadataDialog {
                 if self.first_frame { response.request_focus(); self.first_frame = false; }
                 if response.gained_focus() { response.scroll_to_me(None); }
                 let field = MetadataField::ALL[self.selected];
+                if self.kind == MediaKind::Image {
+                    ui.label(format!("PNG keyword: {}", match field {
+                        MetadataField::Artist => "Author",
+                        MetadataField::AlbumArtist => "Album Artist",
+                        MetadataField::Date => "Creation Time (text, no date conversion)",
+                        _ => field.label(),
+                    }));
+                }
                 let draft = &mut self.fields[self.selected];
                 for (mode, label) in [(Mode::Keep, "Keep source value"), (Mode::Set, "Set value"), (Mode::Remove, "Remove value")] {
                     let response = ui.radio_value(&mut draft.mode, mode, label);
@@ -99,12 +126,18 @@ impl MetadataDialog {
                             found = true;
                             ui.label(format!("{}{}: {}", value.scope, if value.truncated { " (truncated)" } else { "" }, value.value));
                         }
-                        if !found { ui.label("No value in the file or selected streams."); }
+                        if !found { ui.label(if self.kind == MediaKind::Image { "No matching PNG text value." } else { "No value in the file or selected streams." }); }
                     }
                 }
                 ui.separator();
-                ui.label("Applies to the next Save, Export as and Export audio only for this tab's current file. Playback, original file and edit history stay unchanged.");
-                ui.label("Set/Remove affects the file and output streams. Unsupported tags or changed values fail before replacing the target. Keep is not a guarantee of complete metadata preservation across formats.");
+                if self.kind == MediaKind::Image {
+                    ui.label("PNG input and PNG output only. Applies to the next Save or Export as for this tab's current file. Original file, displayed pixels and edit history stay unchanged.");
+                    ui.label("Only these 10 PNG text fields are edited; EXIF, XMP and technical metadata are not edited. Keep preserves matching source text chunks in PNG output, including when all fields are Keep. Other formats do not guarantee preservation.");
+                    ui.label("Set/Remove replaces all matching text variants. Choose a .png export path; other output formats fail without replacing the target. Reading rejects corrupt text or more than 128 text chunks / 1 MiB stored or expanded text.");
+                } else {
+                    ui.label("Applies to the next Save, Export as and Export audio only for this tab's current file. Playback, original file and edit history stay unchanged.");
+                    ui.label("Set/Remove affects the file and output streams. Unsupported tags or changed values fail before replacing the target. Keep is not a guarantee of complete metadata preservation across formats.");
+                }
                 ui.label("Up to 1024 UTF-8 bytes per field / 4096 total; no NUL. Settings reset on reload, another file or closing the tab. Apply does not export.");
                 if let Err(error) = self.options() { ui.label(error); }
             });
@@ -123,9 +156,7 @@ impl MetadataDialog {
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn open_metadata_export_options(&mut self) {
-        if self.modal_input_blocked()
-            || !matches!(self.media_kind, Some(MediaKind::Audio | MediaKind::Video))
-        {
+        if self.modal_input_blocked() || self.media_kind.is_none() {
             return;
         }
         if self.active_export.is_some() {
@@ -137,6 +168,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let Some(tab) = self.tabs.active() else {
             return;
         };
+        if self.media_kind != Some(tab.target.media_kind())
+            || self.path.as_deref() != Some(tab.target.current_path())
+        {
+            return;
+        }
         self.guard_return_focus = self
             .ui_context
             .as_ref()
@@ -277,6 +313,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let dialog = self.metadata_dialog.as_ref().expect("matching dialog");
         let tab = dialog.tab;
         let current = self.metadata_dialog_is_current(dialog);
+        // UIA or queued actions must not bypass PNG capability/read validation.
+        if value.is_some()
+            && current
+            && dialog.options().is_err()
+            && dialog.kind == MediaKind::Image
+        {
+            return;
+        }
         self.cancel_metadata_dialog();
         if let Some(value) = value {
             if current {

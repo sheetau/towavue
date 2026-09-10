@@ -468,6 +468,39 @@ fn png_metadata_worker_publishes_once_without_audio_analysis() {
 }
 
 #[test]
+fn png_default_save_preserves_known_text_chunks_without_explicit_options() {
+    let root = root("png-default-keep");
+    let source = root.join("source.png");
+    let target = root.join("target.png");
+    let original = with_texts(&[
+        chunk(b"tEXt", b"Title\0Original title"),
+        international("TITLE", "別の言語", true),
+        international("Comment", &"音".repeat(500), true),
+    ]);
+    fs::write(&source, &original).expect("source");
+    let request = request(&source, &target);
+    export_media(&request).expect("default Keep");
+    assert_eq!(
+        read(&target, &AtomicBool::new(false)).expect("retained chunks"),
+        scan_bytes(&original).expect("source chunks")
+    );
+    assert_eq!(
+        image::open(&target).expect("saved pixels"),
+        image::open(&source).expect("source pixels")
+    );
+    fs::write(
+        &source,
+        with_texts(&[international("Comment", &"x".repeat(TEXT_LIMIT + 1), true)]),
+    )
+    .expect("over-budget source");
+    let previous = fs::read(&target).expect("previous output");
+    assert!(export_media(&request).is_err());
+    assert_eq!(fs::read(&target).expect("preserved target"), previous);
+    assert_eq!(fs::read_dir(&root).expect("no staging").count(), 2);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn png_metadata_streaming_cancel_write_failure_and_bad_stage_do_not_publish() {
     struct CancelWriter<'a>(&'a AtomicBool);
     impl Write for CancelWriter<'_> {

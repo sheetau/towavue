@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### PNG文字metadataの設定UIと全Keep保存（2026-09-10 15:55、E01 partial）
+
+PNGを開き、File「Metadata export options」で既存値と10項目のKeep／Set／Removeを選ぶ。Artist／Album artist／Dateには実際のPNG keywordを表示し、PNG入力・PNG出力限定／EXIF・XMP対象外を説明する。読取待ち／失敗・非PNG入力ではApplyできない。Applyは設定だけを確定し、Save／Export asで`.png`へ書き出す。他形式へのSet／Removeは元の保存先・dirty・設定を保持して失敗する。通常のPNG保存／全Keepでも対象の元textを保持する。既に書き出したfileのtagではなく現在sourceを参照するので、Removeの後にKeepへ戻すと元のtagが復元される。
+
+2件の追加app回帰で実PNGのread／UIA文字・説明・pending／error／旧read拒否、Save／再Save／Remove／全Keep復元・回転画素不変／異形式target保護・guard Save／実tab切替・再読込解除／closeを確認。既存全10項目・3mode／UTF-8上限／Apply・Cancel／overlay focusと240×150までのfooter試験を画像にも拡張した。追加runtime回帰は設定未使用のraw Keepと過大metadata時のtarget保護を検証する。共通IME／動画GPU試験を維持するが、PNG通常window・物理IME／mixed-DPIの認定とはしない。以下15:43の記録はUI接続前の基盤段階で、現在の全Keep動作は本項を優先する。
+
 ### PNG文字metadata保存基盤（2026-09-10 15:43、E01 partial）
 
 画像の操作UIはまだ未接続。runtimeの`export_media_with_options`へPNG入力／PNG出力と一項目以上のmetadata Set／Removeを渡すと、既存画像encode後のstageへ10文字項目を反映する。日本語・改行はiTXtで保存し、Keepは該当する元tEXt／zTXt／iTXtをraw保持する。元EXIF／XMP／未知keywordは追加copyしない。全Keepだけなら従来保存であり、全metadata保持機能ではない。PNG既存値は`read_export_metadata`で最大128件、各1024 UTF-8 bytesの省略表示を取得できる。

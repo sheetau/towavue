@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U01/U04: native captionに合わせたtitle bar（2026-09-11）
+
+runtimeはnative controlsの予約矩形をphysical client座標で返す。appのtitle bar下端はそのbottom直後の1 physical px区切り線までとし、固定32 logical pxで生じていた隙間を残さない。最大化時に画面外となる上端insetを除いた高さへロゴ・タブ・閉じるアイコンを中央配置する。既にrootへ反映済みのsafe-areaを二重加算しない。行は最大26 logical pxとし、native領域に収まる高さへ縮める。native captionがないheadless構成だけ従来の32／26 logical pxを維持する。
+
+title barの左右6 logical px外側marginを除き、tab名内部の10 logical px余白、status barの6／3 logical px margin、native controlsの予約領域とWindowsのリサイズ境界は維持する。行内の2 logical px間隔はphysical pixelへ丸め、125%表示でscroll originが半画素に乗ることによる分離anchorの変動を避ける。DWM buttons自体を拡縮・独自描画しない。旧可視画素では96 DPIでボタン下端29と区切り31の間に1px、192 DPIで56と63の間に6pxの隙間があった。通常・最大化の96／192 DPIで区切りを各30／57へ揃えた。全DPI比率・Windows 10・任意UI倍率の外観認定ではない。
+
 ## U01/U04: native captionの非アクティブ背景（2026-09-11）
 
 黒いclientとnative captionの背景を揃えるため、作成時にDWMWA_CAPTION_COLORへ黒のCOLORREFを指定する。Windows 11 build 22000以降の公開属性であり、拒否される旧環境では既存のnative表示を維持して起動を失敗させない（[Microsoft DWMWINDOWATTRIBUTE](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)）。native glyphの非アクティブ色・hover／pressed色・hit test・UIA／close経路は変更しない。WM_NCACTIVATEの偽装やボタンの独自描画で常時activeに見せない。草案の灰色化への対応は背景の不一致を解消することで行い、OSが示す非アクティブ状態は残す。
@@ -710,7 +716,7 @@ tab操作でactive identityが変わらない場合はmediaを再loadしない�
 
 UI本文は同梱Figtree Regularを先頭に使う。固定eguiのfont backendはOpenType featureを選択しないため、元fontが持つtnum数字glyphを既定cmapへ固定した派生fontを、pin済み再生成scriptで作る。数字以外の字形・metricsを変えず、元fontとライセンス・変更説明も保持する。専用Codicon familyをicon widgetだけへ指定し、一般textのprivate-use文字をiconとして解釈しない。日本語はruntimeがWindows Fonts内のYuGothM.ttcのface 1（Yu Gothic UI Regular）、Meiryo、MS Gothicの順で読める一つのfontとface indexを返し、Figtreeとegui既定fallbackの間へ登録する。コード等のMonospaceは既定Latin fontを維持する。日本語fontは同梱・download・OS設定変更せず、ない環境でもFigtree/Codiconを導入し診断を残す。Windowsに通常存在しないHiragino Sansを取得・同梱しない。
 
-上部は32 logical pxの単一title/tab bar、下部は30 logical pxのstatus barとし、暗いneutral色でmedia領域を優先する。U01以前はdecorationsなしのwinit windowにwindow controlsも描画していたが、現在は上記native caption構成を検証中である。window closeは既存のdirty/export guardを必ず通す。tab幅は等分、最大160 px・最小72 pxとし、収まらない場合は横scrollする。path/名前は省略表示と全文tooltipを使い、右側の状態表示へ専用領域を確保する。menuの方向gestureとtab reorderの要求・進捗はUX台帳に従う。
+上部は上記native controlsの高さに合わせた単一title/tab bar、下部は30 logical pxのstatus barとし、暗いneutral色でmedia領域を優先する。U01以前はdecorationsなしのwinit windowにwindow controlsも描画していたが、現在は上記native caption構成を検証中である。window closeは既存のdirty/export guardを必ず通す。tab幅は等分、最大160 px・最小72 pxとし、収まらない場合は横scrollする。path/名前は省略表示と全文tooltipを使い、右側の状態表示へ専用領域を確保する。menuの方向gestureとtab reorderの要求・進捗はUX台帳に従う。
 
 logo menuはFile / Edit / Viewの3分類とし、app内の固定配置で関連commandを区切る。全registry commandを一箇所ずつ配置し、title・有効条件・現在のcustom shortcutは既存registry/bindingsから取得する。shortcutは右揃え、縦に収まらないsubmenuはwindow内でscrollする。commandのdispatch・dirty guardは変更せず、分類のために新commandやruntime処理は追加しない。方向drag gestureは引き続き対象外とする。
 

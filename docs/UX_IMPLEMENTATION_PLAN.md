@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-11 U01/U04 caption-geometry checkpoint: native controlsの実bottomに1 physical px区切り線を隣接させ、96 DPIの1px／192 DPIの6px隙間を解消。title barの左右6 logical px外側marginだけを除き、native境界・status余白・tab名10px余白は保持する。最大化で画面外となるtop insetを避け、最大26 logical pxの行へlogo／tabを中央配置する。通常・最大化×96／192 DPIの可視画素、logo clickとnative close guard／Cancel後268,160画素一致／Discardを確認。任意UI倍率・全DPI・Windows 10・全media・物理menu key・drag latencyと残台帳は継続する。
+
 2026-09-10 U10 shared-preview checkpoint: PreviewCacheをhost全体へ共有し、同じkeyの生成／probeを一件に集約。RGBAの64件／16 MiB枠はwindow数で増やさず、duration成功値は別の64件枠とする。取消中のwaiterは生成側を止めず、生成失敗／取消はleaseを解放。別keyは並行処理し、foreground縮小seed・元window閉鎖後の再利用を維持する。競合／取消／失敗再試行・source変更／上限と複数Applicationでの共有を回帰化。実時間の改善幅、cold先行生成／動画sheet／GPU texture共有は未認定。
 
 2026-09-10 U08 launch-routing checkpoint: 同じユーザーSID／session／実行ファイルからの入口を同hostへ集約し、通常どおり新windowを開く。UTF-16絶対path／Welcomeだけをmessage-only HWNDで転送し、startup ackを待つ。mutexはhost寿命と初期競合の調整、転送先のexe／SIDは別に照合。実processで並行転送・拒否／timeoutと再送なし・終了後のmarker解放、非表示HWNDで実IPC・file／folder／Welcome・元state保持とGPU共有を確認。旧独立processの回収は行わない。可視Explorer／foreground・重なり／mixed-DPI・性能と全台帳は継続する。
@@ -71,7 +73,7 @@
 
 | ID | 要求・到達状態 | 初期証拠／残件 |
 |---|---|---|
-| U01 | ネイティブ角丸・境界・caption controls、重くないwindow drag | 主実装をcheckpoint化。DWM caption＋同一deviceの入力透過child surface。角丸、標準button hit、drag／double-click／最小化／最大化／復元／fullscreen、PNG・短いhardware動画、UIA操作とguard、pointer resize、画像と再生／一時停止動画の復旧を確認。標準system menuのpopupも確認。96／192 DPIの全画面移動で旧寸法が残る問題と復元時の二重拡大を修正。可視3台・両方向2周のbounds／動画画素と最大化復帰／guard mouseを確認。非activeのnative背景だけが灰色になる不一致を公開caption-color属性で修正し、96／192 DPIの可視黒背景・bounds保持・赤いclose hover／native終了を確認。native glyphのinactive色は保持。padding／bar高さ・全DPI比率・物理キーのmenu操作・drag遅延の定量比較は継続。Snap候補は基準機の設定で無効なため表示未検証 |
+| U01 | ネイティブ角丸・境界・caption controls、重くないwindow drag | 主実装をcheckpoint化。DWM caption＋同一deviceの入力透過child surface。角丸、標準button hit、drag／double-click／最小化／最大化／復元／fullscreen、PNG・短いhardware動画、UIA操作とguard、pointer resize、画像と再生／一時停止動画の復旧を確認。標準system menuのpopupも確認。96／192 DPIの全画面移動で旧寸法が残る問題と復元時の二重拡大を修正。可視3台・両方向2周のbounds／動画画素と最大化復帰／guard mouseを確認。非activeのnative背景だけが灰色になる不一致を公開caption-color属性で修正し、96／192 DPIの可視黒背景・bounds保持・赤いclose hover／native終了を確認。native glyphのinactive色は保持。左右外側paddingとbar下端の隙間を除き、通常・最大化×96／192 DPIで区切り隣接と行配置を確認。全DPI比率・物理キーのmenu操作・drag遅延の定量比較は継続。Snap候補は基準機の設定で無効なため表示未検証 |
 | U02 | modalのnative利用をコード量・操作性で判断 | 要照合。通常egui、graphics故障時native。metadataと画像／動画resizeのpopup保持を全app frameで修正・回帰確認。guardと入力・focus・保存取消、全modalのnative選択判断は継続 |
 | U03 | Codicon、Figtree＋日本語UI font、数字の等幅 | 主対応済み。monapadのFigtree／Monaco Codiconを同梱、既存tnum字形を再生成可能な派生fontへ固定。Yu Gothic UI Regularのfaceを優先し、glyph・等幅・UI配置と実日本語画面を確認。今後追加する操作のiconとnative caption後の最終照合は継続 |
 | U04 | grayscale配色、barの2境界、logo／tabの中央揃え・左寄せ・一定padding | 一部対応。基本バー・共通widget状態色・clear色、logo／tab中央と左10px余白、timeline上へ移る2境界を実装・検証。overlay固有色／全media状態での最終照合、font/icon変更後の配置確認は残る |

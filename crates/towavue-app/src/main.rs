@@ -3505,17 +3505,33 @@ where
                 .unwrap_or(false)
         }) || tab_menu_focus
             .is_some_and(|(target, _)| !self.tabs.tabs().iter().any(|tab| tab.id == target));
+        let density = root.ctx().pixels_per_point();
+        let native = self
+            .native_caption
+            .as_ref()
+            .map(|caption| (caption.controls_bounds(), caption.top_inset()));
+        let layout = chrome::title_layout(
+            native.map(|(bounds, inset)| (bounds.bottom(), inset)),
+            root.max_rect().top(),
+            density,
+        );
+        let controls_width = native.map_or(154.0, |(bounds, _)| bounds.width() / density);
         let panel = egui::Panel::top("tabs")
-            .exact_size(chrome::TITLE_HEIGHT)
+            .exact_size(layout.height)
             .show_separator_line(false)
-            .frame(chrome::bar())
+            .frame(chrome::bar().inner_margin(0))
             .show(root, |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
+                ui.add_space(layout.top_padding);
+                let size = egui::vec2(ui.available_width(), layout.tab_height);
+                let row = egui::Layout::left_to_right(egui::Align::Center);
+                ui.allocate_ui_with_layout(size, row, |ui| {
+                    // Keep the scroll origin on a physical pixel when outer padding is zero.
+                    ui.spacing_mut().item_spacing.x = (2.0 * density).round() / density;
                     ui.visuals_mut().widgets.inactive.weak_bg_fill = chrome::BACKGROUND;
                     let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
                     let menu = logo_menu::show(
                         ui,
+                        layout.tab_height,
                         self.command_context(),
                         &self.shortcuts,
                         (
@@ -3553,9 +3569,6 @@ where
                     menu.response
                         .on_hover_text("towavue menu · drag ↗ File / ↘ Edit / ↙ View");
 
-                    let controls_width = self.native_caption.as_ref().map_or(154.0, |caption| {
-                        caption.controls_width() / ui.ctx().pixels_per_point()
-                    });
                     let strip_width = (ui.available_width() - controls_width - 56.0).max(80.0);
                     // Incoming tabs may append in the blank native-drag area, but not
                     // over caption buttons. Do not change its ordinary hit behavior.
@@ -3565,7 +3578,7 @@ where
                     egui::ScrollArea::horizontal()
                         .id_salt("tab-strip")
                         .max_width(strip_width)
-                        .max_height(chrome::TAB_HEIGHT)
+                        .max_height(layout.tab_height)
                         .auto_shrink([true, false])
                         .show(ui, |ui| {
                             ui.horizontal_centered(|ui| {
@@ -3575,7 +3588,7 @@ where
                                     .iter()
                                     .map(|_| {
                                         ui.allocate_exact_size(
-                                            egui::vec2(width, chrome::TAB_HEIGHT),
+                                            egui::vec2(width, layout.tab_height),
                                             egui::Sense::hover(),
                                         )
                                         .0
@@ -3793,7 +3806,7 @@ where
                     let (drag_rect, _) = ui.allocate_exact_size(
                         egui::vec2(
                             (ui.available_width() - controls_width).max(20.0),
-                            chrome::TAB_HEIGHT,
+                            layout.tab_height,
                         ),
                         egui::Sense::hover(),
                     );
@@ -10671,6 +10684,7 @@ mod tests {
                         )
                     };
                     let logo = bounds("towavue menu");
+                    assert_eq!(logo.left(), 0.0, "no title-bar outer padding");
                     let label = bounds("a.png");
                     let close = bounds("Close tab: a.png");
                     assert!((logo.width() - 28.0).abs() < 0.01, "{logo:?}");

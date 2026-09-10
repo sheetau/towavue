@@ -63,6 +63,7 @@ fn direction(delta: egui::Vec2) -> Option<Section> {
 
 pub(super) fn show(
     ui: &mut egui::Ui,
+    height: f32,
     commands: CommandContext,
     shortcuts: &ShortcutBindings,
     source: Source,
@@ -70,7 +71,7 @@ pub(super) fn show(
 ) -> egui::InnerResponse<Option<Option<CommandId>>> {
     let response = ui.add(
         egui::Button::new("")
-            .min_size(egui::vec2(28.0, chrome::TAB_HEIGHT))
+            .min_size(egui::vec2(28.0, height))
             .stroke(egui::Stroke::NONE)
             .sense(egui::Sense::click_and_drag()),
     );

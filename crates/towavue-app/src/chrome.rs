@@ -51,6 +51,30 @@ pub const TAB_HEIGHT: f32 = 26.0;
 pub const TAB_CLOSE_WIDTH: f32 = 24.0;
 pub const TAB_PADDING: f32 = 10.0;
 
+pub struct TitleLayout {
+    pub height: f32,
+    pub top_padding: f32,
+    pub tab_height: f32,
+}
+
+pub fn title_layout(native: Option<(f32, f32)>, top: f32, density: f32) -> TitleLayout {
+    // DWM owns the physical button height. Leave its clipped maximized top
+    // outside the row, and place our one-pixel separator immediately below it.
+    let (height, top_padding) = native.map_or((TITLE_HEIGHT, 0.0), |(bottom, inset)| {
+        (
+            (bottom + 1.0) / density - top,
+            (inset / density - top).max(0.0),
+        )
+    });
+    let content_height = height - native.map_or(0.0, |_| 1.0 / density);
+    let tab_height = TAB_HEIGHT.min(content_height - top_padding);
+    TitleLayout {
+        height,
+        top_padding: top_padding + (content_height - top_padding - tab_height) * 0.5,
+        tab_height,
+    }
+}
+
 pub fn style(style: &mut egui::Style) {
     style.visuals.panel_fill = BACKGROUND;
     style.visuals.selection.bg_fill = HOVER;
@@ -336,6 +360,36 @@ pub fn logo(ui: &Ui, rect: Rect, selected: Option<crate::menu::Section>, shift: 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn title_row_follows_native_bounds_without_double_counting_safe_area() {
+        for (density, bottom, inset) in [
+            (1.0, 30.0, 0.0),
+            (1.0, 30.0, 8.0),
+            (1.25, 37.0, 0.0),
+            (1.5, 44.0, 10.0),
+            (2.0, 57.0, 0.0),
+            (2.0, 57.0, 13.0),
+        ] {
+            for top in [0.0, inset / density] {
+                let layout = super::title_layout(Some((bottom, inset)), top, density);
+                let row_top = (top + layout.top_padding) * density;
+                let row_bottom = row_top + layout.tab_height * density;
+                assert!(((top + layout.height) * density - bottom - 1.0).abs() < 0.001);
+                assert!(row_top >= inset - 0.001);
+                assert!(row_bottom <= bottom + 0.001);
+                assert!((row_top + row_bottom - inset - bottom).abs() < 0.001);
+                assert!(layout.tab_height <= super::TAB_HEIGHT);
+                assert!(layout.tab_height >= 20.0);
+            }
+        }
+        for density in [1.0, 1.25, 2.0] {
+            let layout = super::title_layout(None, 0.0, density);
+            assert_eq!(layout.height, super::TITLE_HEIGHT);
+            assert_eq!(layout.top_padding, 3.0);
+            assert_eq!(layout.tab_height, super::TAB_HEIGHT);
+        }
+    }
+
     #[test]
     fn reading_icon_keeps_its_contours_and_only_fills_when_selected() {
         let context = egui::Context::default();

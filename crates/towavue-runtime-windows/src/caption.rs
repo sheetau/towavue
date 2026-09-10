@@ -174,10 +174,13 @@ impl NativeCaption {
         }
     }
 
-    /// Width reserved at the right of the client area, in physical pixels.
-    pub fn controls_width(&self) -> f32 {
+    /// Reserved native caption area in physical client coordinates.
+    pub fn controls_bounds(&self) -> egui::Rect {
         let bounds = caption_bounds(self.handle);
-        (self.window.inner_size().width as f32 - bounds.left as f32).max(0.0)
+        egui::Rect::from_min_max(
+            egui::pos2(bounds.left as f32, bounds.top as f32),
+            egui::pos2(bounds.right as f32, bounds.bottom as f32),
+        )
     }
 
     pub fn accessible_buttons(&self) -> Vec<CaptionButton> {

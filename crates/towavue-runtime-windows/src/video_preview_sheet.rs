@@ -6,6 +6,11 @@ const CELL_WIDTH: u32 = 240;
 const CELL_HEIGHT: u32 = 160;
 const WIDTH: u32 = COLUMNS * CELL_WIDTH;
 const HEIGHT: u32 = CELLS / COLUMNS * CELL_HEIGHT;
+const FILTER: &str = "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2,format=rgba";
+
+#[cfg(test)]
+#[path = "video_preview_sheet_tests.rs"]
+mod generation_tests;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct VideoSheetLayout {
@@ -16,7 +21,7 @@ pub struct VideoSheetLayout {
 
 impl VideoSheetLayout {
     fn variant(self) -> String {
-        format!("video-sheet-v1-{}-{}", self.duration.as_nanos(), self.index)
+        format!("video-sheet-v2-{}-{}", self.duration.as_nanos(), self.index)
     }
     pub fn for_position(duration: Duration, position: Duration) -> Option<Self> {
         if duration.is_zero() {
@@ -112,20 +117,56 @@ impl PreviewCache {
         self.check_cancelled()?;
         let key = cache_key(source, &layout.variant())?;
         let image = self.load_or_generate(key.clone(), || {
-            let mut sheet = image::RgbaImage::from_pixel(WIDTH, HEIGHT, image::Rgba([0, 0, 0, 255]));
-            for slot in 0..CELLS {
-                let Some(position) = layout.position(slot) else { break };
-                self.check_cancelled()?;
-                let png = frame_preview(source, position,
-                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2",
-                    self.cancellation.as_ref())?;
-                let frame = image::load_from_memory_with_format(&png, image::ImageFormat::Png)?.into_rgba8();
-                image::imageops::replace(&mut sheet, &frame,
-                    i64::from(slot % COLUMNS * CELL_WIDTH), i64::from(slot / COLUMNS * CELL_HEIGHT));
+            let mut sheet =
+                image::RgbaImage::from_pixel(WIDTH, HEIGHT, image::Rgba([0, 0, 0, 255]));
+            let targets: Vec<_> = (0..CELLS)
+                .filter_map(|slot| layout.position(slot))
+                .collect();
+            let result = crate::decode::preview_video_frames(
+                source,
+                &targets,
+                FILTER,
+                &|| {
+                    self.cancellation
+                        .as_ref()
+                        .is_some_and(Cancellation::is_cancelled)
+                },
+                |slot, frame| {
+                    let frame = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)
+                        .expect("packed preview frame");
+                    image::imageops::replace(
+                        &mut sheet,
+                        &frame,
+                        i64::from(slot as u32 % COLUMNS * CELL_WIDTH),
+                        i64::from(slot as u32 / COLUMNS * CELL_HEIGHT),
+                    );
+                },
+            );
+            self.check_cancelled()?;
+            if let Err(error) = result {
+                eprintln!(
+                    "towavue: shared preview decoder unavailable; using frame fallback: {error}"
+                );
+                for (slot, position) in targets.into_iter().enumerate() {
+                    self.check_cancelled()?;
+                    let png = frame_preview(source, position, FILTER, self.cancellation.as_ref())?;
+                    let frame = image::load_from_memory_with_format(&png, image::ImageFormat::Png)?
+                        .into_rgba8();
+                    image::imageops::replace(
+                        &mut sheet,
+                        &frame,
+                        i64::from(slot as u32 % COLUMNS * CELL_WIDTH),
+                        i64::from(slot as u32 / COLUMNS * CELL_HEIGHT),
+                    );
+                }
             }
             self.check_cancelled()?;
             let current = cache_key(source, &layout.variant())?;
-            if current != key { return Err(PreviewError::Generate("Source changed during sheet generation".into())); }
+            if current != key {
+                return Err(PreviewError::Generate(
+                    "Source changed during sheet generation".into(),
+                ));
+            }
             let mut png = std::io::Cursor::new(Vec::new());
             sheet.write_to(&mut png, image::ImageFormat::Png)?;
             Ok(png.into_inner())
@@ -205,12 +246,41 @@ mod tests {
                 start.elapsed()
             );
             assert_eq!((sheet.image.width, sheet.image.height), (WIDTH, HEIGHT));
+            let targets: Vec<_> = (0..CELLS)
+                .filter_map(|slot| layout.position(slot))
+                .collect();
+            let start = std::time::Instant::now();
+            crate::decode::preview_video_frames(
+                &source,
+                &targets,
+                FILTER,
+                &|| false,
+                |slot, frame| {
+                    assert_eq!((frame.width, frame.height), (CELL_WIDTH, CELL_HEIGHT));
+                    for y in 0..CELL_HEIGHT {
+                        let offset = (((slot as u32 / COLUMNS * CELL_HEIGHT + y) * WIDTH
+                            + slot as u32 % COLUMNS * CELL_WIDTH)
+                            * 4) as usize;
+                        assert_eq!(
+                            &sheet.image.rgba[offset..offset + (CELL_WIDTH * 4) as usize],
+                            &frame.rgba[(y * CELL_WIDTH * 4) as usize
+                                ..((y + 1) * CELL_WIDTH * 4) as usize],
+                            "shared decoder cell {slot} row {y}"
+                        );
+                    }
+                },
+            )
+            .expect("shared preview decoder");
+            eprintln!(
+                "video sheet {} shared decoder: {:?}",
+                layout.index(),
+                start.elapsed()
+            );
             for slot in [0, 3, 15] {
                 let Some(position) = layout.position(slot) else {
                     continue;
                 };
-                let png = frame_preview(&source, position,
-                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2", None)
+                let png = frame_preview(&source, position, FILTER, None)
                     .expect("independent single-frame preview");
                 let reference = image::load_from_memory(&png)
                     .expect("reference PNG")

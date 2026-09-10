@@ -1,5 +1,17 @@
 # towavue アーキテクチャ
 
+## V02/U10: sheet内の補助デコーダー共用（2026-09-11）
+
+従来のコマごとの子process生成を、worker内で所有する一つのFFmpeg input／software decoder／filter graphへ置き換える。各sampleの前に既存のorigin／TS-aware seekを行いdecoderをflushし、最初のtarget以降のframe、または実video終端の最後のframeを使う。decoderとfilterのthread指定は1、decoderのmax_pixelsは128 Mi pixelとする。これは再生用session／D3D11 deviceの共用や変更ではなく、補助処理自身の再利用である。GOPの先頭からの再decode自体はまだ残る。
+
+scale／pad／RGBA変換前にsourceのquarter-turn／reflectionを適用する。graphはwidth／height／pixel format／time base／SAR／color space／range／orientationをkeyに再利用し、異なるframe propertiesでは再構成する。native frameはworker内に留め、外へ渡すのは一コマの縮小済みowned RGBAだけである。PNG往復はシート全体を既存cacheへ登録する一回のみ。従来PNG encoderの自動RGB24選択とRGBA経路には数LSBの差があったため、sheetとCLI参照を明示RGBAへ統一し、cache variantをv2へ更新する。比較の許容誤差を広げる変更ではない。
+
+packet／decoded frame／filter／publishの境界で取消を確認する。取消後はCLI fallbackを開始せず、完成していないsheetをcacheへ登録しない。native処理の非取消エラーでは従来の単枚生成で全sampleを作り直し、既存の失敗診断とsource変更検査を保つ。これはlibav内の一回のI/O／codec呼出に期限を保証するものではない。既存の共有64件／16 MiB memory、64 MiB disk、appの二枚LRUと最後のscrub sampleの参照保持は変えない。
+
+H.264、B-frame付きMPEG-4、VFR、SAR／回転／反転、full-range BT.709、alpha付きQTRLE、default video stream、MP4／MKV／TSの非zero origin、長い音声末尾を比較する。RGBA指定の独立CLI参照と画素一致を要求し、45度display matrixによる実fallbackと取消も確認した。旧TS input-seek参照が最後のframeを返せない場合は、小さな生成素材を先頭からscan／reverseした独立参照で確認する。新経路自身の結果を参照画像にはしない。
+
+観測値：小さなH.264のdebug full-sheetは従来1.126秒→新0.260秒、新Release full-sheetは26.34ms。1080p／30fps／6秒／GOP 180の16コマ取得は同じRelease比較でCLI 1.327秒→shared 0.759秒（sheet PNG登録前）。これらは生成素材の個別測定であり、UI応答、全codec／HDR、CPU総量／process treeのpeak memory、mixed-DPIや長編全体の性能保証ではない。
+
 ## V02: compact seekのメイン映像scrub（2026-09-11）
 
 可視比較で通常tooltipがdrag時に抑制される欠落を確認し、compact seek自身が保持するdragの間だけサムネイル／時刻tooltipを強制表示する。単なるpress・他widgetのdrag・取消後は従来のhover判定に戻す。画像のcompact seekにも同じ規則を使う。実マウスでSAR 2:1の320×180素材に90度回転→35度自由回転→crop→左右反転→200×232 resizeを重ね、Fit、Cover、右drag panを保持したcompact scrubの配置と実映像を比較した。別のdisplay-matrix 90度／SAR 2:1素材でも向きと比率を確認し、source orientationを二重適用していないことを確認した。低解像度補間・輪郭の差は残り、HDR／全編集順序／全素材の品質認定ではない。

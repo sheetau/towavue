@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 V02/U10 shared-decoder checkpoint: sheet内で補助input／software decoder／filter graphを共用し、通常経路のコマ別process起動・PNG往復を除去する。RGBA明示のv2 cache、thread指定／pixel上限、協調取消、source変更拒否と既存CLI fallbackを維持する。origin／TS、向き／SAR／色／alpha、B-frame／VFR、best stream／video EOFとfallbackを独立参照で検証。小H.264の新Release full-sheet 26.34ms、1080p長GOPの16コマ取得は同Release条件で約1.33→0.76秒。可視の回転／SAR素材でdragとtab表示も確認した。先行1132f3aのCI34498237382は成功。GOP再decode、UI latency／全process peak／全codec／HDR／mixed-DPIおよび全UX台帳は継続する。
+
 2026-09-11 V02 drag-tooltip／visible-edit checkpoint: 草案の「ドラッグではサムネイルと本画面を同時表示」に対し、通常tooltipがdrag時に消える欠落を再現・修正した。所有gestureだけ強制表示し、画像／動画、track外への移動、保持、disable取消と後続releaseを回帰で確認する。可視の生成SAR素材で直角／自由回転・crop・flip・resize・Cover／panを重ねて実映像とscrubの配置を比較し、別のdisplay-matrix素材でもsource向きを確認。先行e0dc280のCI34496739888は成功。全codec／HDR／編集順序、mixed-DPI、cold生成負荷と全UX台帳は未完のまま継続する。
 
 2026-09-11 V02 main-scrub checkpoint: 動画compact seekの横drag中は一時停止して既存sheet／単枚textureをメイン表示へ使い、release一回でSeek・元が再生中なら再開する。Escape／focus喪失・別操作でSeekなし取消、EOFは停止。crop／回転／反転／resizeとzoom／panを低解像度geometryに反映し、新frame到着までpreviewを保持する。実sessionの固定位置／一回Seek／multipass／取消／終端・復帰とgeometry／mesh、可視の生成素材による停止・再生drag／取消を確認。先行037aac5のCI34494083591は成功。長GOP／cold生成、編集済み素材の可視比較、HDR／全codec、mixed-DPI／peak負荷および全UX台帳は継続し、launch準備は再開しない。

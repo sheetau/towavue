@@ -21,6 +21,8 @@ use crate::{GraphicsDevice, VideoOrientation};
 
 mod frame_step;
 pub use frame_step::adjacent_video_frame;
+mod preview_frames;
+pub(crate) use preview_frames::preview_video_frames;
 
 const OUTPUT_AUDIO_CHANNELS: usize = 2;
 const BYTES_PER_F32: usize = size_of::<f32>();

@@ -176,6 +176,10 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         origin.x + ((outside.x - start.x) * density).round() as i32,
         origin.y + ((outside.y - start.y) * density).round() as i32,
     );
+    let release = winit::dpi::PhysicalPosition::new(
+        origin.x + (outside.x * density).round() as i32,
+        origin.y + (outside.y * density).round() as i32,
+    );
     frame(
         app,
         true,
@@ -192,14 +196,10 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .find(|key| !previous.contains(key))
         .expect("detached window");
     let app = &host.windows[&detached];
-    assert_eq!(
-        app.window
-            .as_ref()
-            .expect("window")
-            .inner_position()
-            .expect("position"),
+    opening_tests::assert_drop_client_position(
+        app.window.as_ref().expect("window"),
         expected,
-        "detached client must preserve the grabbed tab offset at the release point"
+        release,
     );
     let moved = app.tabs.active().expect("detached tab").id;
     assert_eq!(app.edits[&moved], edits);

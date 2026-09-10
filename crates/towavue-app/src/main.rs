@@ -9705,6 +9705,32 @@ mod tests {
             assert_eq!(app.tabs.active().map(|tab| tab.id), Some(tab));
             assert!(app.guard_return_focus.is_none());
         }
+        for failure in [false, true] {
+            let before = app.image_view.selection;
+            let focused = context
+                .memory(|memory| memory.focused())
+                .expect("focused edge");
+            assert_eq!(focused.accesskit_id(), ids[1]);
+            app.request_guarded(GuardedAction::CloseTab(tab));
+            app.native_prompt = Some(FallbackPrompt::Guard);
+            frame(&mut app, vec![]);
+            // The blocked UI already releases focus; Cancel must restore the saved edge.
+            assert!(context.memory(|memory| memory.focused()).is_none());
+            app.finish_native_prompt(if failure {
+                Err(DialogError::ThreadStopped)
+            } else {
+                Ok(PromptResponse::Cancel)
+            });
+            frame(&mut app, vec![]);
+            visible(&frame(&mut app, vec![]), 1);
+            assert_eq!(app.image_view.selection, before);
+            let right = crop(&app).x + crop(&app).width;
+            frame(&mut app, vec![key(egui::Key::ArrowLeft)]);
+            assert_eq!(crop(&app).x + crop(&app).width, right - 1);
+            assert_eq!(app.edits[&tab], history);
+            assert!(app.guard_return_focus.is_none());
+            assert!(app.native_prompt.is_none() && app.pending_guard.is_none());
+        }
         let other = app.tabs.open_new(root.join("other.png"), MediaKind::Image);
         app.tabs.activate(tab);
         app.request_guarded(GuardedAction::CloseTab(tab));

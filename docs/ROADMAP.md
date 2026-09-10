@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 U02/U08 verification checkpoint: native guardの168文字日本語／`&`名、通常／fullscreen×96／192 DPIの折返し・末尾・全ボタン・取消後の辺focusと1pxキー調整を確認。Cancel／worker失敗後のfocus復帰を既存app回帰へ追加した。全体チェック中、幅1080のportrait作業領域でfilmstrip／tab分離の旧テストが未補正座標を期待して失敗したため、既存のwork-area補正を独立計算する厳密なoracleへ修正。アプリ挙動・許容誤差は変更しない。8551c42のCI34525054544は成功。次はI03の通常静止画first-decodeと表示待ちを測定し、段階表示・取消・先読みの残件へ進む。全UX台帳を継続する。
+
 2026-09-11 U02 native-guard checkpoint: 同windowでexportしていない通常の未保存確認をWindows Task Dialogへ移し、既定Cancel・明示Export／Discard・Exit時の全編集破棄を表示。STA所有・manifest v6・二重表示防止・失敗時Cancelを接続した。file pickerはnative、live export／長文error／編集form／tooltipは操作性と追加実装量を根拠に現行方式を採用。実96／192 DPI、SDK UIA InvokeのCancel／Discard／Save、保存PNG57,600画素、別window独立操作と全チェックを確認。旧.NET UIAのPane判定はnative SDKのButton／Invokeと区別する。a557b5aのCI34523120355は成功。次はnative guardのUnicode長名／fullscreen／focus復帰を確認し、全UIA・IME・style・media品質／性能等の全UX台帳を継続する。
 
 2026-09-11 U11 audio/fullscreen checkpoint: 音声の通常96／192 DPIとfullscreen192 DPIで1px反転枠を確認し、4数値対象のfocus前後でtimeline全画素が一致。画像fullscreenではUIAで辺へfocusしてもstatusが隠れる欠陥を可視と回帰で再現し、既存barの保持条件へselection focusを追加した。実UIA96／192 DPIの4辺で説明・focus保持・media全画素一致、Downで下辺130→131 source pixelsを確認。100／125／200%回帰と全体チェック通過。958ec7fのCI34521224695は成功。全UX goalは未完了で、次はU02のnative modal選択判断を継続する。全比率・素材・UIA・IME・性能・資源・metadata等の台帳を縮小しない。

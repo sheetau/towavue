@@ -18,7 +18,7 @@
 
 runtimeの専用STA workerがownerのArcとUTF-16文字列・button配列をmodal終了まで保持する。appへ戻すのは既存の選択結果だけであり、COM／HWND／callback pointerを渡さない。[TASKDIALOGCONFIG](https://learn.microsoft.com/en-us/windows/win32/api/commctrl/ns-commctrl-taskdialogconfig)でowner中央配置と既定Cancelを指定し、既存のguard／file dialog／export継続へ接続する。通常native確認は可視window・exportなし・errorなしの場合に開始し、native promptとfile dialogの二重起動を拒否する。裏側のegui確認は描かない。非表示test hostとexport中の既存egui経路は維持する。確認の起動／worker失敗ではCancelとして編集を残し、statusへ理由を出す。自動再表示ループにしない。
 
-実Windows SDK UIAクライアントで96／192 DPIの3ボタンがButton型・Invoke対応と確認した。旧.NET UIAutomationでは同じnativeボタンがPane・patternなしと見えたため、その観測だけを実装欠陥の証拠にしない。一方で全クライアント互換とも主張しない。通常／全画面・Unicode長名・全倍率・故障時の実UI監査は引き続き必要。
+実Windows SDK UIAクライアントで96／192 DPIの3ボタンがButton型・Invoke対応と確認した。旧.NET UIAutomationでは同じnativeボタンがPane・patternなしと見えたため、その観測だけを実装欠陥の証拠にしない。一方で全クライアント互換とも主張しない。168文字の日本語・`&`を含むPNG名を通常／全画面×96／192 DPIで確認し、末尾と全ボタンが収まる。Cancel後は画像選択の同じ辺へfocusが戻り、右キーで1 source pixelずつ操作を続けられる。native titleのCloseもCancelとなる。app回帰は、blocked UIがfocusを解放した後のCancel／worker失敗で辺・選択・履歴を保持し、キー調整を再開することを確認する。全素材・最大長・全倍率・全クライアント・故障時の実UI監査は継続する。
 
 ## U11: fullscreen画像のselection focus（2026-09-11）
 

@@ -1,5 +1,34 @@
 use super::*;
 
+pub(super) fn assert_drop_client_position(
+    window: &Window,
+    requested: winit::dpi::PhysicalPosition<i32>,
+    release: winit::dpi::PhysicalPosition<i32>,
+) {
+    let inner = window.inner_position().expect("position");
+    let outer = window.outer_position().expect("outer position");
+    let size = window.outer_size();
+    let inset = (inner.x - outer.x, inner.y - outer.y);
+    let area = towavue_runtime_windows::monitor_work_area((release.x, release.y))
+        .expect("drop monitor work area");
+    // The grab origin is exact only when the new window fits there. Check the
+    // edge correction independently, including a portrait/narrow desktop.
+    let expected = winit::dpi::PhysicalPosition::new(
+        (requested.x - inset.0)
+            .max(area.0)
+            .min((area.2 - size.width as i32).max(area.0))
+            + inset.0,
+        (requested.y - inset.1)
+            .max(area.1)
+            .min((area.3 - size.height as i32).max(area.1))
+            + inset.1,
+    );
+    assert_eq!(
+        inner, expected,
+        "drop must respect the grab origin and work area: size={size:?}, work={area:?}"
+    );
+}
+
 fn snapshot(paths: &[PathBuf]) -> FolderSnapshot {
     FolderSnapshot {
         folder_identity: towavue_core::ShellIdentity::new(vec![0]),
@@ -26,6 +55,7 @@ fn drop_window_clamp_handles_taskbars_negative_desktops_and_oversized_windows() 
     for (point, size, area, expected) in [
         ((100, 80), (960, 576), (0, 0, 1920, 1032), (100, 80)),
         ((1910, 1022), (960, 576), (0, 0, 1920, 1032), (960, 456)),
+        ((178, 138), (960, 576), (0, 0, 1080, 1872), (120, 138)),
         ((-100, -100), (960, 576), (0, 40, 1920, 1080), (0, 40)),
         (
             (-2400, 100),
@@ -359,14 +389,10 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
             .expect("hosted filmstrip child");
         assert_eq!(host.windows.len(), window_count + 1);
         let app = host.windows.get_mut(&child).expect("child");
-        assert_eq!(
-            app.window
-                .as_ref()
-                .expect("child window")
-                .inner_position()
-                .expect("position"),
+        assert_drop_client_position(
+            app.window.as_ref().expect("child window"),
             expected_position,
-            "filmstrip child must open at the dragged card origin"
+            expected_position,
         );
         assert_eq!(
             app.window.as_ref().expect("child window").is_visible(),

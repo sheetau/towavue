@@ -129,20 +129,29 @@ impl VideoSheets {
     }
 
     pub fn image(&self, target: &Request, position: Duration) -> Option<egui::Image<'static>> {
+        let (texture, uv) = self.sample(target, position)?;
+        Some(
+            // Mesh painting preserves cell UVs; rounded-rect antialiasing expands them.
+            egui::Image::new((texture.id(), egui::vec2(240.0, 160.0)))
+                .rotate(0.0, egui::vec2(0.5, 0.5))
+                .uv(uv),
+        )
+    }
+
+    pub fn sample(
+        &self,
+        target: &Request,
+        position: Duration,
+    ) -> Option<(TextureHandle, egui::Rect)> {
         let (_, texture) = self
             .textures
             .iter()
             .find(|(request, _)| request == target)?;
         let [left, top, right, bottom] = target.layout.uv(position)?;
-        Some(
-            // Mesh painting preserves cell UVs; rounded-rect antialiasing expands them.
-            egui::Image::new((texture.id(), egui::vec2(240.0, 160.0)))
-                .rotate(0.0, egui::vec2(0.5, 0.5))
-                .uv(egui::Rect::from_min_max(
-                    egui::pos2(left, top),
-                    egui::pos2(right, bottom),
-                )),
-        )
+        Some((
+            texture.clone(),
+            egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(right, bottom)),
+        ))
     }
 }
 

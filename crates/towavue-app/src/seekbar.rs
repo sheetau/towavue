@@ -9,6 +9,19 @@ pub fn show(
     enabled: bool,
     video: bool,
 ) -> (Response, Option<egui::Pos2>, bool) {
+    let (response, drag) = show_drag(context, status, progress, parent, enabled, video);
+    let commit = if drag.released { drag.position } else { None };
+    (response, commit, drag.open_timeline)
+}
+
+pub fn show_drag(
+    context: &Context,
+    status: Rect,
+    progress: f32,
+    parent: Option<egui::LayerId>,
+    enabled: bool,
+    video: bool,
+) -> (Response, timeline_input::Drag) {
     let area = egui::Area::new("compact-seek-bar".into());
     if let Some(parent) = parent {
         context.set_sublayer(parent, area.layer());
@@ -28,7 +41,6 @@ pub fn show(
             } else {
                 timeline_input::seek_drag(&response)
             };
-            let commit = if drag.released { drag.position } else { None };
             let dragging = drag.dragging && !drag.released;
             let active = response.hovered() || response.has_focus() || dragging;
             let progress = if dragging {
@@ -67,8 +79,7 @@ pub fn show(
             }
             (
                 response.on_hover_cursor(egui::CursorIcon::PointingHand),
-                commit,
-                drag.open_timeline,
+                drag,
             )
         })
         .inner

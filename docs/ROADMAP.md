@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 V02 main-scrub checkpoint: 動画compact seekの横drag中は一時停止して既存sheet／単枚textureをメイン表示へ使い、release一回でSeek・元が再生中なら再開する。Escape／focus喪失・別操作でSeekなし取消、EOFは停止。crop／回転／反転／resizeとzoom／panを低解像度geometryに反映し、新frame到着までpreviewを保持する。実sessionの固定位置／一回Seek／multipass／取消／終端・復帰とgeometry／mesh、可視の生成素材による停止・再生drag／取消を確認。先行037aac5のCI34494083591は成功。長GOP／cold生成、編集済み素材の可視比較、HDR／全codec、mixed-DPI／peak負荷および全UX台帳は継続し、launch準備は再開しない。
+
 2026-09-11 V02/U10 video-sheet checkpoint: 16コマ単位の有界sheetを現在位置から先読みし、Seek hoverを優先、同sheet内は一つのtextureのUVだけを変える。短編20区間／長編約5秒間隔、共有memory／diskと生成集約、Seekの2枚LRU／tab別texture、単枚の初期応答fallback、世代取消／上限／GPU復旧へ接続。実H.264の生成／cache時間と画素、headlessのtexture uploadなし／優先度／LRUを確認。ownerから可視window操作の許可を受け、所有する生成素材windowで実mouse hover／Seek／tab表示と停止位置不変を確認した。先行a086f6bのCI34481359872は成功、08430ebのCI34481983430はcancelledで成功扱いしない。本画面scrub、全codec／長GOP・mixed-DPI・peak負荷と全UX台帳は継続する。
 
 2026-09-10 I03/U10 prefetch-seed checkpoint: 既存の隣静止画先読みから共有縮小previewを供給し、原寸cache hitからも再decodeせず再登録する。mutexを解放して縮小し、原寸／縮小予算・先読み枚数を増やさず、表示通知を出さない。実PNGの画素／alpha／寸法・filmstrip再利用／disk生成なし・原寸Arc同一と、取消／source変更／close／失敗／animation拒否を確認する。静止画first-decode／cold-storage性能、animation先読み、動画sheet／GPU共有と全UX台帳は継続。先行a086f6bのCI34481359872は確認時実行中。

@@ -46,6 +46,7 @@ mod video_context_tests;
 mod video_edit;
 mod video_resize;
 mod video_rotation;
+mod video_scrub;
 mod video_sheets;
 mod video_view;
 mod welcome;
@@ -204,6 +205,7 @@ enum UiAction {
     OpenMedia(PathBuf, bool),
     OpenWindow(PathBuf, u64),
     Seek(MediaTime),
+    CommitVideoScrub(MediaTime),
     ResolveGuard(GuardDecision),
     CancelExport,
     DismissExportError,
@@ -789,6 +791,9 @@ struct Application<N> {
     session: Option<PlaybackSession>,
     pending_time: Option<MediaTime>,
     video_rect: Option<egui::Rect>,
+    video_scrub: Option<video_scrub::Scrub>,
+    video_scrub_seen: bool,
+    video_scrub_surface: Option<(egui::Painter, egui::Rect)>,
     video_uv: [UnitPoint; 4],
     ui_repaint_at: Option<Instant>,
     restore_ui_textures: bool,
@@ -993,6 +998,9 @@ where
             session: None,
             pending_time: None,
             video_rect: None,
+            video_scrub: None,
+            video_scrub_seen: false,
+            video_scrub_surface: None,
             video_uv: ImageTransform::new((1, 1), &[]).uv,
             ui_repaint_at: None,
             restore_ui_textures: false,
@@ -1381,6 +1389,7 @@ where
     }
 
     fn next_media_instance(&mut self) {
+        self.video_scrub = None;
         self.video_sheets.clear();
         self.media_sequence = self
             .media_sequence
@@ -2440,6 +2449,8 @@ where
         self.video_raster_operations = None;
         self.image_seek_preview_active = false;
         self.video_rect = None;
+        self.video_scrub_seen = false;
+        self.video_scrub_surface = None;
         let context = root.ctx().clone();
         let modal_blocked = self.modal_input_blocked();
         tab_focus::begin(
@@ -2576,6 +2587,7 @@ where
             self.draw_seek_bar(&context, rect, None, actions);
         }
         self.draw_fullscreen_controls(&context, actions, &mut volume_targets);
+        self.draw_video_scrub();
         self.volume_wheel(&context, &volume_targets, actions);
         if self.fullscreen
             && let Some((message, started)) = &self.status_message
@@ -2941,6 +2953,7 @@ where
         volume_targets: &mut Vec<egui::Response>,
         actions: &mut Vec<UiAction>,
     ) {
+        self.video_scrub_surface = Some((ui.painter().clone(), ui.max_rect()));
         let Some((width, height, pixel_aspect)) = self
             .session
             .as_ref()
@@ -3129,6 +3142,7 @@ where
 
     fn cancel_view_drag(&mut self) -> bool {
         let mut canceled_press = self.cancel_hold_speed();
+        canceled_press |= self.cancel_video_scrub();
         canceled_press |= self.rotation_drag.take().is_some();
         canceled_press |= self.video_rotation_drag.take().is_some();
         canceled_press |= self.finish_reading_drag(true);
@@ -4340,11 +4354,13 @@ where
         let progress = (self.current_position().as_seconds_f64() / duration.as_secs_f64())
             .clamp(0.0, 1.0) as f32;
         let enabled = !self.modal_input_blocked();
-        let (response, commit, open_timeline) =
-            seekbar::show(context, status, progress, parent, enabled, true);
-        if open_timeline {
+        let (response, drag) = seekbar::show_drag(context, status, progress, parent, enabled, true);
+        if drag.open_timeline {
             actions.push(UiAction::Command(CommandId::ToggleTimeline));
             return;
+        }
+        if drag.dragging && self.media_kind == Some(MediaKind::Video) {
+            self.begin_video_scrub();
         }
         let value = seekbar::value_input(
             &response,
@@ -4354,15 +4370,21 @@ where
             KEYBOARD_SEEK_STEP.as_secs_f64(),
             enabled,
         );
-        if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
+        if let Some(pointer) = drag
+            .position
+            .or(response.interact_pointer_pos())
+            .or(response.hover_pos())
+        {
             let ratio = seekbar::compact_ratio(response.rect, pointer.x);
             self.draw_seek_preview(&response, ratio, duration);
         }
         if let Some(value) = value {
             actions.push(UiAction::Seek(media_time(Duration::from_secs_f64(value))));
-        } else if let Some(pointer) = commit {
+        } else if drag.released
+            && let Some(pointer) = drag.position
+        {
             let ratio = seekbar::compact_ratio(response.rect, pointer.x);
-            actions.push(UiAction::Seek(media_time(duration.mul_f32(ratio))));
+            self.queue_video_scrub(media_time(duration.mul_f32(ratio)), actions);
         }
     }
 
@@ -4393,6 +4415,23 @@ where
                 let nanos = source.as_nanoseconds() as u64;
                 (nanos | (1 << 63), Duration::from_nanos(nanos))
             });
+        let scrub_sample = target
+            .as_ref()
+            .and_then(|target| self.video_sheets.sample(target, source))
+            .map(|(texture, uv)| (texture, uv, true))
+            .or_else(|| {
+                self.hover_thumbnail
+                    .as_ref()
+                    .filter(|(cached, _)| *cached == bucket)
+                    .map(|(_, texture)| {
+                        (
+                            texture.clone(),
+                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                            false,
+                        )
+                    })
+            });
+        self.update_scrub_sample(scrub_sample);
         if self.media_kind == Some(MediaKind::Video)
             && sheet.is_none()
             && self
@@ -4564,6 +4603,9 @@ where
     }
 
     fn handle_ui_action(&mut self, action: UiAction) {
+        if !matches!(action, UiAction::CommitVideoScrub(_)) {
+            self.cancel_video_scrub();
+        }
         if !matches!(action, UiAction::BeginReadingDrag(..)) {
             self.finish_reading_drag(true);
         }
@@ -4702,6 +4744,7 @@ where
                 }
             }
             UiAction::Seek(target) => self.seek_to(target),
+            UiAction::CommitVideoScrub(target) => self.commit_video_scrub(target),
             UiAction::Volume(id, volume) => {
                 if self.tabs.active().is_some_and(|tab| tab.id == id) {
                     self.push_edit(EditOperation::SetVolume(volume));
@@ -6540,6 +6583,7 @@ where
     }
 
     fn seek_to(&mut self, target: MediaTime) {
+        self.cancel_video_scrub();
         self.cancel_hold_speed();
         self.cancel_frame_steps();
         if self
@@ -6812,6 +6856,7 @@ where
     }
 
     fn prepare_graphics_recovery(&mut self) {
+        self.cancel_video_scrub();
         self.video_sheets.clear();
         let position = self.current_position();
         self.graphics_epoch = self.graphics_epoch.wrapping_add(1);
@@ -17151,6 +17196,7 @@ mod tests {
                 app.toggle_pause();
                 assert_eq!(app.state, PlaybackState::Playing);
                 assert_eq!(app.current_position(), time(1));
+                video_scrub::tests::exercise(&mut app);
                 for state in [PlaybackState::Loading, PlaybackState::Faulted] {
                     app.state = state;
                     let generation = app.generation;

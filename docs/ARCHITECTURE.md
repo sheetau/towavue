@@ -1,5 +1,15 @@
 # towavue アーキテクチャ
 
+## V02: compact seekのメイン映像scrub（2026-09-11）
+
+以下は従来の「本画面scrubを含めない」という段階制限を更新する。動画のcompact seekで横方向dragと判定した時だけsession／clockを一時停止し、既存sheetまたは単枚fallbackのtextureをメイン映像にも描く。press／hoverだけでは停止しない。上方向dragのtimeline展開、画像移動、音声timelineは変更しない。drag中は実Seekを発行せず、releaseで通常Seekを一回だけ呼ぶ。元がPlayingなら通常SeekのEOF／trim停止規則を評価後に再開する。Escape・focus喪失・別command／source／tab・graphics recoveryではSeekなしで取消し、元の再生状態へ戻す。
+
+eguiのdiscarded passを跨いでreleaseを保持するCommitting状態と、Seek後の新frameまで最後のpreviewを保持するAwaitingFrame状態を分ける。runtimeのvideo_refresh_pendingが解除された時に実映像へ戻し、低解像度meshの表示を実Seekのpresentation計測に数えない。別sheetが未到着なら最後の低解像度sampleを保持し、一枚もない時は通常の停止映像を残す。編集後時刻からsourceへの写像と世代管理は従来経路を使い、追加decoder／device／原寸readbackを導入しない。
+
+sheetはsource orientation／SAR適用済みである。appでは元の向きの画素座標から、cropの凸多角形clip、直角回転／反転、resize、square-pixel化を伴う自由回転を順番に適用し、補間したUVを同じtextureへ参照する。黒い余白・偶数canvas paddingと、既存Fit／Cover／zoom／panを保つ。これは低解像度の概形確認であり、正確なframe時刻・resample filter・HDR色・export品質を再現するものではない。新たに保持するのは最後のsampleのtexture参照一枚と小さな頂点列である。
+
+停止／再生中の固定位置、release一回、discarded pass、Escape／focus取消、終端停止と新frameへの復帰を実session回帰で確認する。所有する可視960×576 window／生成40秒MPEG-4素材でも停止・再生からの実mouse dragと取消を確認した。長GOP／全codec、編集済み素材の可視比較、混在DPI、cold latency／peak負荷の認定は残る。
+
 ## V02/U10: 有界の動画サムネイルシート（2026-09-11）
 
 source durationからmax(20, ceil(seconds/5))個の区間を作り、その中央をsampleする。1枚16コマ、4×4の960×640 RGBA、各コマ240×160のFit＋黒paddingとする。source path／metadata／duration／sheet index／versionをkeyに、既存PreviewCacheの同key生成集約・取消・64件／16 MiB memory／64 MiB disk枠を共用する。既存のbest-stream／TS Seek／向き・SAR／末尾frame fallbackを使い、各sheetの最大16回の子process取得を逐次実行する。途中取消では未完成sheetを公開しない。原寸の再生decoderやGPU deviceは追加しないが、補助codec／processの負荷自体はある。

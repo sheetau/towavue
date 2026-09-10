@@ -546,6 +546,11 @@ impl ImageTransform {
                     let (width, height) = rotation.size();
                     transform.size = (width as f32, height as f32);
                 }
+                EditOperation::RotateVideo(rotation) => {
+                    // Prospective canvas only; playback must use ordered GPU raster stages.
+                    let (width, height) = rotation.size();
+                    transform.size = (width as f32, height as f32);
+                }
                 EditOperation::Crop(region) => transform.crop_pixels(region),
                 EditOperation::RotateClockwise => {
                     transform.uv.rotate_right(1);
@@ -4837,6 +4842,10 @@ where
     }
 
     fn push_visual_edit(&mut self, operation: EditOperation) {
+        if matches!(operation, EditOperation::RotateVideo(_)) {
+            self.set_status("Video free rotation awaits GPU presentation support".into());
+            return;
+        }
         self.push_edit(operation);
         self.image_view.selection = None;
         self.image_view.crop_preview = false;

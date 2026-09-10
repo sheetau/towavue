@@ -13,6 +13,9 @@ use towavue_core::{EditOperation, EditState, MediaKind};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+#[path = "export_rotation.rs"]
+mod rotation;
+
 #[derive(Clone, Debug)]
 pub struct ExportRequest {
     pub source: PathBuf,
@@ -112,15 +115,26 @@ fn export_cancellable(
             .any(|operation| matches!(operation, EditOperation::RotateImage(_)))
     {
         return Err(ExportError::Failed(
-            "Free rotation currently supports images only".into(),
+            "Image rotation requires image media".into(),
         ));
     }
     let state = EditState::from_operations(&request.operations);
+    if request.kind != MediaKind::Video
+        && request
+            .operations
+            .iter()
+            .any(|operation| matches!(operation, EditOperation::RotateVideo(_)))
+    {
+        return Err(ExportError::Failed(
+            "Video rotation requires video media".into(),
+        ));
+    }
     if !state.trim_is_valid(None) {
         return Err(ExportError::InvalidTrim);
     }
     check_cancelled(cancelled)?;
     let mut streams = ExportStreams::probe(request)?;
+    rotation::validate(request)?;
     if request
         .operations
         .iter()
@@ -651,6 +665,19 @@ pub(crate) fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
     operations
         .iter()
         .filter_map(|operation| match *operation {
+            EditOperation::RotateVideo(rotation) => {
+                if rotation.tenths() == 0 { return None; }
+                let (square_width, square_height) = rotation.square_size();
+                let (raster_width, raster_height) = rotation.raster_size();
+                let (width, height) = rotation.size();
+                let rotate = match rotation.tenths() {
+                    900 => "transpose=clock".into(),
+                    -900 => "transpose=cclock".into(),
+                    -1800 | 1800 => "hflip,vflip".into(),
+                    tenths => format!("rotate={tenths}*PI/1800:ow={raster_width}:oh={raster_height}:c=black:bilinear=1"),
+                };
+                Some(format!("format=gbrp,scale={square_width}:{square_height}:flags=bilinear,format=gbrp,setsar=1,{rotate},pad={width}:{height}:0:0:color=black,setsar=1"))
+            }
             EditOperation::RotateImage(rotation) => Some(match rotation.tenths() {
                 0 => "null".into(),
                 900 => "transpose=clock".into(),

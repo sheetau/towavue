@@ -16,6 +16,8 @@
 
 2026-09-10 10:41 画像hold-drag checkpoint: Alt＋左dragによる水平回転preview／一件の確定を接続し、取消・入力所有権・同一frame release・crop preview／既存編集・logical scale・有界描画を回帰確認。既存角度dialogは維持。次は動画の単一device上の自由回転表示／SAR／編集順序とexport契約を詰める。画像の通常window／性能の認定とUX台帳全体も未完として継続する。
 
+2026-09-10 11:04 動画自由回転基盤checkpoint: VideoRotationのsource／SAR／square-pixel／外接寸法と偶数黒canvas、RGB8の順序付きsoftware exportを実装。全角度境界、独立filterによる合成画素、metadata orientationとtrim／rate／audio、既存target保護を回帰確認。次は同じ順序を単一deviceのGPU中間描画へ接続する。表示とUIは未完・app入口は未公開であり、H1／UX台帳全体は引き続き未完。
+
 2026-09-09 16:48追記: ownerの最新の区切り・push依頼に従い、進行中だったcompact seek端点修正だけを検証してcheckpointに含める。ローンチ準備は再開せず、このcheckpoint後は次の機能・UI実装へ自動着手しない。既存の改善台帳は残件として保持し、次のgoal設定・作業指示を待つ。goal全体の完了を意味しない。
 
 2026-09-09 新goal: ownerが草案とfollow-upに基づく機能・操作・UI改善を指定した。[UX_IMPLEMENTATION_PLAN](UX_IMPLEMENTATION_PLAN.md)の台帳へ要求・既存実装・残件を対応付け、H1内で順次実装・検証する。下記の「新goal待ち」は解消したが、ローンチ準備の停止は維持する。

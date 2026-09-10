@@ -1,6 +1,19 @@
 use super::*;
 use std::sync::mpsc;
 
+#[test]
+fn video_rotation_cannot_enter_visual_history_before_gpu_presentation_is_connected() {
+    let (mut app, _) = application();
+    app.media_kind = Some(MediaKind::Video);
+    app.image_view.selection = Some(UnitRect::FULL);
+    let view = app.image_view;
+    app.push_visual_edit(EditOperation::RotateVideo(
+        towavue_core::VideoRotation::new(317, (64, 48), 2.0).expect("rotation"),
+    ));
+    assert_eq!(app.image_view, view);
+    assert!(app.edits.is_empty() && !app.image_edit_pending && app.rotation_dialog.is_none());
+}
+
 pub(super) fn application() -> (
     Application<impl Fn(AppEvent) + Send + Sync>,
     mpsc::Receiver<AppEvent>,

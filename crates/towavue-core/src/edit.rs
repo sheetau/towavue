@@ -107,6 +107,7 @@ pub enum EditOperation {
     Timeline(crate::TimelineEdit),
     Resize(ImageResize),
     RotateImage(ImageRotation),
+    RotateVideo(crate::VideoRotation),
     Crop(PixelCrop),
     RotateClockwise,
     RotateCounterclockwise,
@@ -123,6 +124,7 @@ impl EditOperation {
         match self {
             Self::Timeline(_) => matches!(kind, MediaKind::Video | MediaKind::Audio),
             Self::Resize(_) | Self::RotateImage(_) => kind == MediaKind::Image,
+            Self::RotateVideo(_) => kind == MediaKind::Video,
             Self::Crop(_)
             | Self::RotateClockwise
             | Self::RotateCounterclockwise
@@ -176,6 +178,7 @@ impl EditState {
                 EditOperation::Crop(_)
                 | EditOperation::Resize(_)
                 | EditOperation::RotateImage(_)
+                | EditOperation::RotateVideo(_)
                 | EditOperation::Timeline(_) => {}
                 EditOperation::RotateClockwise => {
                     state.quarter_turns = (state.quarter_turns + 1) % 4;
@@ -228,7 +231,9 @@ impl EditHistory {
     }
 
     pub fn push(&mut self, operation: EditOperation, kind: MediaKind) -> bool {
-        if matches!(operation, EditOperation::RotateImage(rotation) if rotation.tenths() == 0) {
+        if matches!(operation, EditOperation::RotateImage(rotation) if rotation.tenths() == 0)
+            || matches!(operation, EditOperation::RotateVideo(rotation) if rotation.tenths() == 0)
+        {
             return false;
         }
         if !operation.applies_to(kind) {

@@ -1,5 +1,15 @@
 # towavue アーキテクチャ
 
+## I06: 動画自由回転の保存契約（2026-09-10、表示UI未接続）
+
+VideoRotationは操作直前のsample寸法とpixel aspect、square-pixel寸法、0.1度単位の角度、回転raster寸法と偶数出力canvasを保持する。SARが1より大きければ幅をSAR倍、小さければ高さを1/SAR倍して最近整数へ丸め、元のdetailを減らす縮小はしない。各寸法は16384px／128M pixels以内。角度0は履歴にもfilter列にも入れず、pixel aspect正規化やpaddingも行わない。
+
+非ゼロ角度の保存は、GBRP8→bilinear square-pixel scale→GBRP8明示→SAR1→回転→右／下へ最大1pxの黒いpadding→SAR1とする。回転は画像と同じceil外接寸法、90度倍数はtranspose／flip、他はbilinearで黒い余白を生成する。scaleの後にもGBRP8を固定し、複数回転の間で自動交渉によりYUVへ変わらないようにする。既存crop／quarter turn／flipとの順序を保持し、次の操作はpadding後の寸法を使う。これは動画の再サンプリング・再符号化であり無損失の契約ではない。
+
+保存前にはbest video streamの寸法、container／codecの表示用SAR、display matrixの軸交換を解決し、操作列をたどって各回転の入力と照合する。FFmpegのav_guess_sample_aspect_ratioを、export workerが所有するinputと借用streamの寿命内で読み取り呼出しし、native pointerを外へ出さない。寸法／SAR不一致、範囲外crop、非video操作との混在は配置変更前に拒否する。frame途中で変わる寸法／SAR／orientationやHDRの品質認定は別残件である。
+
+表示側は既存の四隅UVだけでは回転後の黒いcanvasや、その後のcrop／再回転を保持できない。順序付きの中間raster処理を同じD3D11 device上へ接続する必要があり、まだ未実装。現段階ではappのvisual edit入口でVideoRotationを拒否し、command／dialog／dragへ公開しない。ソフトウェア保存の基盤テストをGPU表示、hardware encode品質、通常windowの操作確認の代用にはしない。
+
 ## I06: 自由回転の画像基盤（2026-09-10）
 
 画像hold-drag契約（2026-09-10）: 草案で未決だった保持キーはAltを採用する。原寸画像上でAlt＋左pressから左右dragし、1 logical pxを0.5度、-180～180度・0.1度単位へ丸めてプレビューする。Ctrl／Super併用は対象外。既存textureを画像の中心・現在のscale／panで回し、確定前のview／selection／履歴は変更しない。crop preview中も対象は選択だけでなく編集後の全画像とする。Alt保持でmouse releaseすると一件だけ確定し、移動0は非編集。Altを先に離す、Escape、focus／cursor喪失、window geometry変更、別command／source変更では取消する。canvas上限超過はpreviewで知らせ、確定を拒否する。数値dialogはCtrl+Shift+Rとmenuのまま維持する。動画と通常window／性能の認定は別残件。

@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-10 11:04 I06追加checkpoint: 動画自由回転のcore値とsoftware exportを追加。SARを保つsquare-pixel化、RGB8の維持、偶数黒canvas、既存crop／quarter turn／flip／再回転との順序と保存前geometry照合を回帰確認。表示matrix付き素材のtrim／rate／audioも比較した。動画のGPU表示／操作UIは未接続で、下表の動画自由回転と全残件は未完のまま維持する。
+
 「未完」は新goalの残件。「要照合」は採用済み契約・実装・実画面の追加確認が必要であり、完了扱いではない。
 
 | ID | 要求・到達状態 | 初期証拠／残件 |

@@ -8,6 +8,12 @@ pub fn render_image_edits(
     operations: &[EditOperation],
     cancel: &Cancellation,
 ) -> Result<DecodedImage, String> {
+    if operations
+        .iter()
+        .any(|operation| matches!(operation, EditOperation::RotateVideo(_)))
+    {
+        return Err("Video rotation cannot be applied to image frames".into());
+    }
     let mut frames = Vec::with_capacity(source.frames.len());
     let mut retained = 0_u64;
     for frame in &source.frames {
@@ -350,7 +356,7 @@ mod tests {
                 hardware_encode: false,
             });
             assert!(
-                matches!(result, Err(crate::ExportError::Failed(message)) if message == "Free rotation currently supports images only")
+                matches!(result, Err(crate::ExportError::Failed(message)) if message == "Image rotation requires image media")
             );
             assert_eq!(
                 std::fs::read(&guarded_target).expect("target preserved"),

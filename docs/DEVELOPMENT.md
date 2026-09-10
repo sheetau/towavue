@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### 動画自由回転のgeometry／保存基盤（2026-09-10 11:04、I06 UI未接続）
+
+このcheckpointは操作UIを増やさない。VideoRotationは操作直前の寸法／SARから圧縮表示軸を拡大してsquare pixelsへ丸め、回転のceil外接canvasと右／下最大1pxの偶数paddingを検証する。0度は正規化・paddingを含めて無操作。上限は各stage16384px・128M pixels。画像と同じ0.1度単位だが、画像の透明alpha契約ではなく動画のRGB8／黒余白／再符号化である。
+
+GBRP8→bilinear scale→GBRP8明示→setsar1→rotate／transpose→pad→setsar1を使う。最初はscale後のpixel formatを固定せず、2回転の合成が独立referenceと不一致になった。scale後にもGBRP8を固定すると全RGBAが一致した。保存前の照合は最初のdecoder SARだけでは不足し、固定FFmpegのav_guess_sample_aspect_ratioを用いてcontainer優先・codec fallbackを解決する。読み取りのnative callをexport workerの所有input／借用stream寿命内に隔離した。元素材の実decode後SARも一致し、再生側の既存SAR処理は変更していない。
+
+新規6 tests: coreで全3601角度×6種類の寸法／SAR、奇数寸法・丸め・area／side上限とvideo-only／0度／Redo。runtimeでは6種の角度／SARの4-frame素材を実H264 exportし、独立rotw／roth／pad式のreferenceと全RGBA・PTS・寸法／SARを比較する。crop→90度→自由回転→flip→crop→自由回転→逆90度の列も全画素一致。display matrix付き動画ではtrim／rate後のframe PTSと音声の全chunk時刻／frame数／PCM bytesが回転なしexportと一致した。誤った寸法／SAR・media kindは既存targetを変えず拒否し、sourceも不変。appはGPU表示接続前のvisual editを拒否してview／履歴を保持する。
+
+次は既存D3D11 Video ProcessorのRGBA中間textureを起点に、同一device内で順序付きのraster表示を接続する。現在の四隅UVだけでは、回転後のcanvasに対するcrop／再回転を再現できない。GPU表示／角度UI／hold-drag、HDR、frame途中のgeometry変更、全container／hardware encode品質と性能、通常windowの検証は未完であり、この保存試験をそれらの証明に使わない。
+
+最終session87820でfmt check／Clippy／workspace419（app243／core59／runtime113／integration4）とReleaseがterminal exit0。session48929のapp opt-in5件も全PASS／SKIPなし、既存H264 D3D11VA復旧はCPU transfer0。通常ignored11件は成功数に含めない。最終Release SHA-256は`519409d91522b8509cd616f8ad6bea0a2fa86d2b3099b0a65823f2bf3b4ebd32`。前f745b59のCI34426521774は成功。成功した専用fixtureは通常cleanup済み、失敗試験のtemp資料は保持する。通常windowへの外部入力、OS clipboard書込、追加導入は行っていない。
+
 ### Alt保持で画像を自由回転（2026-09-10 10:41、I06部分実装）
 
 原寸画像上でAlt＋左pressを始め、左右に動かす。1 logical pxにつき0.5度、0.1度単位で-180～180度へ丸める。現在の中心／scale／panを使うため、回転後の角がviewport外へ出ることはあるが、確定処理は画像全体を外接canvasに収める。crop preview中も選択部分だけでなく編集後の全画像が対象。正確な角度指定や全体配置の確認は従来のCtrl+Shift+R／menu dialogで行える。

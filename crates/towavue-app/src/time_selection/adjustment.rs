@@ -224,14 +224,7 @@ pub(super) fn values(
                 crate::chrome::FOREGROUND,
             );
         }
-        if control.has_focus() {
-            ui.painter().rect_stroke(
-                rect.shrink(1.0),
-                0.0,
-                ui.visuals().selection.stroke,
-                egui::StrokeKind::Inside,
-            );
-        }
+        super::describe_focus(&control, available, name, value);
         if let Some(next) = next {
             let edit = if stretch {
                 TimelineEdit::Stretch(

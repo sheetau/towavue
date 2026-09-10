@@ -4219,7 +4219,13 @@ where
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             ui.set_min_width(path_width);
-                            let selection_hint = (!self.modal_input_blocked()).then(|| selection::focus_hint(ui.ctx())).flatten();
+                            let selection_hint = (!self.modal_input_blocked()).then(|| {
+                                selection::focus_hint(ui.ctx()).or_else(|| {
+                                    ((self.media_kind == Some(MediaKind::Video) && self.timeline_open)
+                                        || self.media_kind == Some(MediaKind::Audio))
+                                        .then(|| time_selection::focus_hint(ui.ctx())).flatten()
+                                })
+                            }).flatten();
                             let (text, color, tooltip) =
                                 if let Some(message) = selection_hint {
                                     (message.clone(), chrome::FOREGROUND, message)

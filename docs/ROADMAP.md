@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 U11/U09 visible-selection checkpoint: 生成PNG／SAR動画の選択枠が96／192 DPIで正確な1px反転色、追加の内外塗りなしと確認。画像の辺resize／範囲内click、tabのMenu key／Shift+F10とdisabled skip／Escape復帰も通常windowで確認した。時間端点・音量・長さに残っていたfocus四角は可視と旧コードで失敗する回帰で再現し、statusの対象名・値へ置換。192 DPIの4対象focus前後でtimeline 245,760画素一致、96 DPIへ戻した開始端の0.1秒調整を確認。776988fのCI34519379513は成功。音声／fullscreen／全比率・UIA／native system menuと全UX台帳は継続する。
+
 2026-09-11 U01/U04 caption-geometry checkpoint: native controlsのclient-relative bottomへtitle barを合わせ、1 physical px区切り線までの96 DPI／1px・192 DPI／6pxの隙間と左右6 logical px外側marginを除く。最大化の画面外insetを避け、logo／tab行を中央配置する。可視の通常・最大化×96／192 DPIでnative hover下端と区切りが隣接し、logo menu・close guardのCancel／Discardを確認。Cancel後のmedia領域268,160画素が一致する。6ed328fのCI34517162248は成功。全DPI比率／Windows 10／native menuの物理キー／drag遅延・選択UIと全UX台帳は継続する。
 
 2026-09-11 U01/U04 inactive-caption checkpoint: 非active時にnative controlsの背景だけが灰色になる草案指摘をRGB(43,43,43)で再現。DWMWA_CAPTION_COLORの黒指定だけでclientと揃え、native glyphのinactive色／hover／hitと旧OS fallbackを維持する。可視96／192 DPIの通常・192 DPI最大化でRGB(0,0,0)、bounds不変、赤いclose hover／native click終了と全体チェックが通過。74f492fのCI34515762417は成功。Alt+Spaceは既存の別process global bindingに取られたためnative menuの実キー確認とはせず、追加入力は行わない。次は実boundsに基づく左右padding／bar高さ・下端間隔を詰め、全UX台帳を継続する。

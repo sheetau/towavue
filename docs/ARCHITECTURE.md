@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U11: 時間選択の数値focus表示（2026-09-11）
+
+時間選択の開始／終了・局所音量・選択長さの4コントロールにも、追加のfocus四角を描かない規則を適用する。既存の位置・hit領域・数値ラベル・keyboard／UIA値は残し、focus中の対象名と値、左右キーの案内をstatus欄へ表示する。対象IDが現在のfocusと一致しない場合、disabled／popup／modal中、timeline非表示時には古い説明を出さない。画像のselection focus状態へ混ぜず、時間側のIDで保持する。描画順の都合でstatusは直前のtimeline描画から得た説明を使い、通常の再描画で現在値へ更新する。
+
+可視の生成PNGとSAR動画で、96／192 DPIの選択枠全画素が元のRGBの反転、内外の追加塗りなしと一致した。時間選択では既存In／Out／Volume／Lengthラベルを枠の欠陥と混同しない。これらの数値領域外で1px反転枠を検証し、focus前後はtimeline全域245,760画素の一致を別途確認した。音声・全画面・全比率・全UIAクライアントの最終監査は継続する。
+
 ## U01/U04: native captionに合わせたtitle bar（2026-09-11）
 
 runtimeはnative controlsの予約矩形をphysical client座標で返す。appのtitle bar下端はそのbottom直後の1 physical px区切り線までとし、固定32 logical pxで生じていた隙間を残さない。最大化時に画面外となる上端insetを除いた高さへロゴ・タブ・閉じるアイコンを中央配置する。既にrootへ反映済みのsafe-areaを二重加算しない。行は最大26 logical pxとし、native領域に収まる高さへ縮める。native captionがないheadless構成だけ従来の32／26 logical pxを維持する。

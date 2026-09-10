@@ -3,6 +3,32 @@ use towavue_core::{EditTimeline, MediaTime, TimeRange, TimelineEdit};
 
 mod adjustment;
 
+pub(super) fn focus_hint(context: &egui::Context) -> Option<String> {
+    let (id, text) = context
+        .data(|data| data.get_temp::<(egui::Id, String)>("time-selection-focus-hint".into()))?;
+    (context.memory(|memory| memory.has_focus(id)) && !egui::Popup::is_any_open(context))
+        .then_some(text)
+}
+
+fn describe_focus(response: &Response, enabled: bool, label: &str, value: f64) {
+    if response.has_focus() {
+        response.ctx.data_mut(|data| {
+            let key = "time-selection-focus-hint".into();
+            if enabled && response.enabled() {
+                data.insert_temp(
+                    key,
+                    (
+                        response.id,
+                        format!("{label}: {value:.3} · Left/Right adjust"),
+                    ),
+                );
+            } else {
+                data.remove::<(egui::Id, String)>(key);
+            }
+        });
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Gesture {
     Seek,
@@ -213,21 +239,15 @@ pub(super) fn show(
                 crate::chrome::FOREGROUND,
             );
         }
-        if control.has_focus() {
-            painter.rect_stroke(
-                bounds.shrink(1.0),
-                0.0,
-                ui.visuals().selection.stroke,
-                egui::StrokeKind::Inside,
-            );
-        }
+        let label = if start {
+            "Time selection start (seconds)"
+        } else {
+            "Time selection end (seconds)"
+        };
+        describe_focus(&control, enabled, label, current.as_seconds_f64());
         if let Some(value) = crate::seekbar::value_input(
             &control,
-            if start {
-                "Time selection start (seconds)"
-            } else {
-                "Time selection end (seconds)"
-            },
+            label,
             current.as_seconds_f64(),
             0.0..=seconds,
             0.1,
@@ -259,6 +279,110 @@ pub(super) fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn focused_time_values_do_not_add_rectangles_to_the_selection_outline() {
+        let identity = egui::Id::new("time-focus-style");
+        for density in [1.0, 1.25, 2.0] {
+            for (target, label, value) in [
+                (
+                    identity.with(("selection-value", true)),
+                    "Time selection start (seconds)",
+                    2.0,
+                ),
+                (
+                    identity.with(("selection-value", false)),
+                    "Time selection end (seconds)",
+                    6.0,
+                ),
+                (
+                    identity.with(("timeline-adjustment-value", false)),
+                    "Local volume (%)",
+                    100.0,
+                ),
+                (
+                    identity.with(("timeline-adjustment-value", true)),
+                    "Selected duration (seconds)",
+                    4.0,
+                ),
+            ] {
+                let context = crate::fonts::test_context();
+                context.enable_accesskit();
+                context.set_pixels_per_point(density);
+                context.memory_mut(|memory| memory.request_focus(target));
+                let output = context.run_ui(Default::default(), |ui| {
+                    let rect =
+                        Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 100.0));
+                    let response = ui.interact(rect, identity, egui::Sense::click_and_drag());
+                    let result = show(
+                        ui,
+                        &response,
+                        time(10.0),
+                        time(1.0),
+                        TimeRange::new(time(2.0), time(6.0)),
+                        None,
+                        true,
+                    );
+                    assert!(
+                        result.seek.is_none()
+                            && result.selection.is_none()
+                            && result.edit.is_none()
+                    );
+                });
+                assert!(context.memory(|memory| memory.has_focus(target)));
+                assert_eq!(
+                    focus_hint(&context),
+                    Some(format!("{label}: {value:.3} · Left/Right adjust"))
+                );
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree");
+                let node = &tree
+                    .nodes
+                    .iter()
+                    .find(|(id, _)| *id == target.accesskit_id())
+                    .expect("value control")
+                    .1;
+                assert_eq!(node.label(), Some(label));
+                assert_eq!(node.numeric_value(), Some(value));
+                assert!(node.supports_action(egui::accesskit::Action::SetValue));
+                assert!(
+                    output.shapes.iter().all(|shape| !matches!(&shape.shape,
+                    egui::Shape::Rect(rect) if rect.stroke != egui::Stroke::NONE)),
+                    "no extra value-focus frame at density {density}"
+                );
+                assert_eq!(
+                    output
+                        .shapes
+                        .iter()
+                        .filter(|shape| matches!(shape.shape, egui::Shape::Callback(_)))
+                        .count(),
+                    1
+                );
+                let _ = context.run_ui(Default::default(), |ui| {
+                    let response = ui.interact(
+                        ui.max_rect(),
+                        target,
+                        egui::Sense::focusable_noninteractive(),
+                    );
+                    describe_focus(&response, false, label, value);
+                    assert!(
+                        focus_hint(&context).is_none(),
+                        "disabled control has no hint"
+                    );
+                    describe_focus(&response, true, label, value);
+                    assert!(focus_hint(&context).is_some());
+                    response.surrender_focus();
+                    assert!(
+                        focus_hint(&context).is_none(),
+                        "do not retain stale focus text"
+                    );
+                });
+            }
+        }
+    }
+
     fn time(seconds: f64) -> MediaTime {
         crate::media_time(std::time::Duration::from_secs_f64(seconds))
     }

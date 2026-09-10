@@ -33,7 +33,7 @@ fn fixture(path: &Path) {
     );
 }
 
-fn drain_export<F: Fn(AppEvent) + Send + Sync + 'static>(
+pub(super) fn drain_export<F: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<F>,
     events: &mpsc::Receiver<AppEvent>,
 ) {
@@ -83,12 +83,13 @@ fn audio_derivative_preserves_video_save_cursor_target_history_transport_and_lea
             tab,
             source: source.clone(),
             kind: MediaKind::Video,
+            generation: app.media_generation,
             output: ExportOutput::AudioOnly,
             continuation: None,
         });
         app.finish_dialog(Ok(Some(target.clone())));
         let export = app.active_export.as_ref().expect("worker connected");
-        assert_eq!(export.output, ExportOutput::AudioOnly);
+        assert_eq!(export.options.output, ExportOutput::AudioOnly);
         assert_eq!(export.request.kind, MediaKind::Video);
         assert_eq!(export.request.operations, operations);
         drain_export(&mut app, &events);
@@ -148,10 +149,12 @@ fn audio_derivative_dialog_cancel_stale_source_failure_and_cancel_race_keep_edit
         .entry(tab)
         .or_default()
         .push(EditOperation::RotateClockwise, MediaKind::Video);
+    let generation = app.media_generation;
     let intent = || DialogIntent::Export {
         tab,
         source: source.clone(),
         kind: MediaKind::Video,
+        generation,
         output: ExportOutput::AudioOnly,
         continuation: None,
     };

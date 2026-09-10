@@ -1669,6 +1669,38 @@ mod tests {
     }
 
     #[test]
+    fn audio_export_options_binding_round_trips_for_audio_and_both_video_contexts() {
+        use towavue_core::{CommandContext, KeySequence, MediaKind, ShortcutMatch};
+        assert!(defaults().get(CommandId::AudioExportOptions).is_none());
+        let custom =
+            parse("audio_export_options = Ctrl+K O\n", defaults()).expect("custom options key");
+        let sequence: KeySequence = "Ctrl+K O".parse().expect("sequence");
+        for kind in [
+            None,
+            Some(MediaKind::Image),
+            Some(MediaKind::Audio),
+            Some(MediaKind::Video),
+        ] {
+            for timeline_open in [false, true] {
+                let context = CommandContext {
+                    media_kind: kind,
+                    timeline_open,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    custom.resolve(sequence.strokes(), context)
+                        == ShortcutMatch::Command(CommandId::AudioExportOptions),
+                    matches!(kind, Some(MediaKind::Audio | MediaKind::Video))
+                );
+            }
+        }
+        assert_eq!(
+            parse(&serialize(&custom), defaults()).expect("round trip"),
+            custom
+        );
+    }
+
+    #[test]
     fn migrates_m5_crop_preview_binding_to_m6_apply_crop() {
         let bindings =
             parse("toggle_crop_preview = Ctrl+Y\n", defaults()).expect("migrate shortcuts");

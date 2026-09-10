@@ -7,7 +7,13 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         "File",
         &[
             &[OpenFile, OpenFolder],
-            &[Save, ExportAs, ExportAudio, ToggleHardwareEncode],
+            &[
+                Save,
+                ExportAs,
+                ExportAudio,
+                AudioExportOptions,
+                ToggleHardwareEncode,
+            ],
             &[CopyFilePath, RevealFile],
             &[
                 CloseTab,
@@ -604,6 +610,22 @@ mod tests {
                 "export_audio",
                 ExportAudio,
                 towavue_core::MediaKind::Video,
+            ),
+            (
+                "File",
+                0,
+                5,
+                "audio_export_options",
+                AudioExportOptions,
+                towavue_core::MediaKind::Video,
+            ),
+            (
+                "File",
+                0,
+                4,
+                "audio_export_options",
+                AudioExportOptions,
+                towavue_core::MediaKind::Audio,
             ),
         ] {
             let context = egui::Context::default();

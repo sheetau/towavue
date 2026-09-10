@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## E01: 音声export設定UIと保持範囲（2026-09-10）
+
+動画／音声のFile menu「Audio export options」とcustom commandから設定modalを開く。既定keyは増やさず、動画のtimeline有無を問わない。Peak −1 dBFS normalizeのOn／OffとKeep／Mono／Stereoを提示し、再生や編集履歴には作用せず次のSave／Save As／AudioOnlyへ適用されること、LUFS／true-peakではないこと、mono／stereo変換は1／2channel入力が必要なことを説明する。Applyは設定だけを確定し、Cancel／Escape・古いtoken・source／tab／media世代変更は破棄する。前のfocusを復元し、modal中の編集／移動／離脱を共通guardで防ぐ。実行中exportがある場合は新たな設定modalを開かない。
+
+設定はtabに属する現在sourceのsession内状態で、タブを行き来しても保持する。同じsourceの再Saveは現在の設定を使い、書き出し開始時にoptionsをworkerと進捗表示へcopyする。設定変更自体はdirty／saved cursorを変更しない。AudioOnlyは既存どおり通常のSave先／saved cursorを変更せず、設定も勝手に戻さない。別sourceへの移動、外部置換の再ロード、background音声の次曲、tab close時は設定を初期化する。pathだけを持つclosed-tab再open／別windowへの引継ぎやapp restartでは設定を引き継がない。native保存dialogもmedia世代を照合し、同じpathのsource再ロードを古い選択で開始しない。設定modalのCancelと、Apply後の保存dialogのCancelは別操作であり、後者では適用済み設定を保持する。
+
 ## E01: 音声出力optionの採用契約（2026-09-10、runtime基盤から接続）
 
 normalizeは任意の「sample peak −1 dBFS」一括補正として採用する。既定はOff、LUFS／RMS／true-peak／動的音量追従ではない。trim・区間削除／伸縮・局所／master gain・rateとchannel変換を適用した音声全体を解析し、全channel共通の一定gainを最後に適用する。無音はgain1で保持する。これはencode前のsample peak目標で、lossy codecの再構成peakや知覚音量の一致は保証しない。master gainを変えてもnormalizeにより全体のgainが打ち消されることがあるが、部分的な強弱は保持する。

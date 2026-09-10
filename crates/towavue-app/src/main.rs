@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod audio_export;
 #[cfg(test)]
 mod audio_export_tests;
 mod audio_playback;
@@ -58,12 +59,12 @@ use towavue_core::{
     TabTarget, UnitPoint, UnitRect, ZoomMode, command_definitions,
 };
 use towavue_runtime_windows::{
-    AudioOutputEvent, CaptionAction, DecodedImage, DialogError, ExportError, ExportEvent,
-    ExportJob, ExportOutput, ExportRequest, FileDialogKind, FolderOrderProvider, FolderWatcher,
-    FrameRenderer, ImageLoader, LatestTask, NativeCaption, PlaybackEvent, PlaybackSession,
-    PreviewCache, PromptButtons, PromptResponse, RenderError, canonical_shell_path,
-    configure_mouse_input, cursor_position_in_window, pick_path, reveal_file, reveal_license_guide,
-    show_prompt,
+    AudioExportOptions, AudioOutputEvent, CaptionAction, DecodedImage, DialogError, ExportError,
+    ExportEvent, ExportJob, ExportOptions, ExportOutput, ExportRequest, FileDialogKind,
+    FolderOrderProvider, FolderWatcher, FrameRenderer, ImageLoader, LatestTask, NativeCaption,
+    PlaybackEvent, PlaybackSession, PreviewCache, PromptButtons, PromptResponse, RenderError,
+    canonical_shell_path, configure_mouse_input, cursor_position_in_window, pick_path, reveal_file,
+    reveal_license_guide, show_prompt,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -182,6 +183,7 @@ enum UiAction {
     FinishRotation(u64, Option<towavue_core::ImageRotation>),
     FinishVideoRotation(u64, Option<towavue_core::VideoRotation>),
     FinishVideoResize(u64, Option<towavue_core::VideoResize>),
+    FinishAudioExportOptions(u64, Option<AudioExportOptions>),
 }
 
 enum AppEvent {
@@ -274,6 +276,7 @@ enum DialogIntent {
         tab: TabId,
         source: PathBuf,
         kind: MediaKind,
+        generation: u64,
         output: ExportOutput,
         continuation: Option<GuardedAction>,
     },
@@ -311,7 +314,7 @@ struct ActiveExport {
     job: ExportJob,
     tab: TabId,
     request: ExportRequest,
-    output: ExportOutput,
+    options: ExportOptions,
     encoded: Duration,
     analyzing_audio: bool,
     cancelling: bool,
@@ -680,6 +683,9 @@ struct Application<N> {
     rotation_dialog: Option<rotation::RotationDialog>,
     video_rotation_dialog: Option<video_rotation::VideoRotationDialog>,
     video_resize_dialog: Option<video_resize::VideoResizeDialog>,
+    audio_export_dialog: Option<audio_export::AudioExportDialog>,
+    audio_export_generation: u64,
+    audio_export_settings: BTreeMap<TabId, AudioExportOptions>,
     video_raster_operations: Option<Vec<EditOperation>>,
     rotation_generation: u64,
     rotation_drag: Option<rotation::RotationDrag>,
@@ -859,6 +865,9 @@ where
             rotation_dialog: None,
             video_rotation_dialog: None,
             video_resize_dialog: None,
+            audio_export_dialog: None,
+            audio_export_generation: 0,
+            audio_export_settings: BTreeMap::new(),
             video_raster_operations: None,
             rotation_generation: 0,
             rotation_drag: None,
@@ -2209,6 +2218,7 @@ where
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         self.cancel_stale_video_rotation();
         self.cancel_stale_video_resize();
+        self.cancel_stale_audio_export_options();
         self.video_raster_operations = None;
         self.image_seek_preview_active = false;
         self.video_rect = None;
@@ -2385,6 +2395,8 @@ where
             }
         } else if self.pending_guard.is_some() {
             self.draw_unsaved_guard(&context, actions);
+        } else if self.audio_export_dialog.is_some() {
+            self.show_audio_export_options(&context, actions);
         } else if self.video_resize_dialog.is_some() {
             self.show_video_resize(&context, actions);
         } else if self.video_rotation_dialog.is_some() {
@@ -2433,6 +2445,9 @@ where
             ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 340.0));
             ui.add(egui::Label::new(display_name(&export.request.target)).truncate())
                 .on_hover_text(export.request.target.display().to_string());
+            if export.options.audio != AudioExportOptions::default() {
+                ui.label(audio_export::summary(export.options.audio));
+            }
             ui.label(if export.cancelling {
                 "Cancelling export…".to_owned()
             } else {
@@ -4251,6 +4266,11 @@ where
                         && self.pending_guard.is_none()
                         && self.export_error.is_none()
                 }
+                UiAction::FinishAudioExportOptions(..) => {
+                    self.audio_export_dialog.is_some()
+                        && self.pending_guard.is_none()
+                        && self.export_error.is_none()
+                }
                 UiAction::CancelExport => {
                     self.active_export.is_some() && self.export_error.is_none()
                 }
@@ -4260,6 +4280,9 @@ where
             return;
         }
         match action {
+            UiAction::FinishAudioExportOptions(token, value) => {
+                self.finish_audio_export_options(token, value)
+            }
             UiAction::FinishVideoRotation(token, value) => self.finish_video_rotation(token, value),
             UiAction::FinishVideoResize(token, value) => self.finish_video_resize(token, value),
             UiAction::FinishRotation(token, value) => self.finish_rotation(token, value),
@@ -4395,7 +4418,10 @@ where
         }
         if matches!(
             command,
-            CommandId::FreeRotateImage | CommandId::FreeRotateVideo | CommandId::ResizeVideo
+            CommandId::FreeRotateImage
+                | CommandId::FreeRotateVideo
+                | CommandId::ResizeVideo
+                | CommandId::AudioExportOptions
         ) && (self.palette_open || self.grid_open)
         {
             self.cancel_command_overlay();
@@ -4769,6 +4795,7 @@ where
             CommandId::ExportAudio => {
                 self.export_current_output(true, None, ExportOutput::AudioOnly);
             }
+            CommandId::AudioExportOptions => self.open_audio_export_options(),
             CommandId::ToggleTimeline => {
                 self.thumbnail_worker.clear();
                 self.thumbnail_loading = None;
@@ -4879,6 +4906,7 @@ where
         self.rotation_dialog = None;
         self.video_rotation_dialog = None;
         self.video_resize_dialog = None;
+        self.audio_export_dialog = None;
         self.video_raster_operations = None;
         self.rotation_drag = None;
         self.video_rotation_drag = None;
@@ -5276,13 +5304,15 @@ where
                 tab,
                 source,
                 kind,
+                generation,
                 output,
                 continuation,
             } => match result {
                 Ok(Some(target))
-                    if self.tabs.active().is_some_and(|active| {
-                        active.id == tab && active.target.current_path() == source
-                    }) =>
+                    if generation == self.media_generation
+                        && self.tabs.active().is_some_and(|active| {
+                            active.id == tab && active.target.current_path() == source
+                        }) =>
                 {
                     self.start_export(tab, source, kind, target, continuation, output);
                 }
@@ -5350,6 +5380,7 @@ where
                         tab: id,
                         source,
                         kind,
+                        generation: self.media_generation,
                         output,
                         continuation,
                     },
@@ -5380,7 +5411,15 @@ where
             hardware_encode: self.prefer_hardware_encode,
         };
         let notify = Arc::clone(&self.notify);
-        match ExportJob::start_with_output(request.clone(), output, move |event| {
+        let options = ExportOptions {
+            output,
+            audio: self
+                .audio_export_settings
+                .get(&id)
+                .copied()
+                .unwrap_or_default(),
+        };
+        match ExportJob::start_with_options(request.clone(), options, move |event| {
             notify(AppEvent::Export(event))
         }) {
             Ok(job) => {
@@ -5388,7 +5427,7 @@ where
                     job,
                     tab: id,
                     request,
-                    output,
+                    options,
                     encoded: Duration::ZERO,
                     analyzing_audio: false,
                     cancelling: false,
@@ -5427,7 +5466,7 @@ where
                 };
                 match result {
                     Ok(outcome) => {
-                        if export.output == ExportOutput::Media
+                        if export.options.output == ExportOutput::Media
                             && self.tabs.tabs().iter().any(|tab| {
                                 tab.id == export.tab
                                     && tab.target.current_path() == export.request.source
@@ -5449,7 +5488,7 @@ where
                             "{} {} ({encoder} encode)",
                             if export.cancelling {
                                 "Export completed before cancellation; automatic leaving cancelled:"
-                            } else if export.output == ExportOutput::AudioOnly {
+                            } else if export.options.output == ExportOutput::AudioOnly {
                                 "Exported audio (video save state unchanged):"
                             } else {
                                 "Exported"
@@ -5577,6 +5616,10 @@ where
     fn request_guarded(&mut self, action: GuardedAction) {
         self.cancel_hold_speed();
         self.cancel_frame_steps();
+        if self.audio_export_dialog.is_some() {
+            self.set_status("Apply or cancel audio export options before leaving.".into());
+            return;
+        }
         if self.resize_dialog.is_some() {
             self.set_status("Apply or cancel image resize before leaving.".into());
             return;
@@ -5763,6 +5806,7 @@ where
             self.duration_workers.remove(&saved.instance);
         }
         self.export_paths.remove(&id);
+        self.audio_export_settings.remove(&id);
         if !was_active {
             self.request_redraw();
             return;
@@ -6015,6 +6059,7 @@ where
             tab.target.set_current_path(path.clone(), kind);
             self.edits.insert(id, EditHistory::default());
             self.export_paths.remove(&id);
+            self.audio_export_settings.remove(&id);
         }
         self.load_path(path, kind);
     }
@@ -6662,6 +6707,7 @@ where
             || self.video_rotation_dialog.is_some()
             || self.video_resize_dialog.is_some()
             || self.pending_dialog.is_some()
+            || self.audio_export_dialog.is_some()
             || self.native_prompt.is_some()
             || self.pending_guard.is_some()
             || self.export_error.is_some()
@@ -9035,6 +9081,7 @@ mod tests {
                     tab,
                     source: path.clone(),
                     kind: MediaKind::Image,
+                    generation: app.media_generation,
                     output: ExportOutput::Media,
                     continuation: app.pending_guard.take(),
                 });
@@ -10459,7 +10506,7 @@ mod tests {
                 };
                 // Same-source rejection keeps this UI fixture free of file writes and FFmpeg.
                 ActiveExport {
-                    output: ExportOutput::Media,
+                    options: ExportOptions::default(),
                     job: ExportJob::start(request.clone(), |_| {}).expect("fixture worker"),
                     tab,
                     request,
@@ -13698,6 +13745,11 @@ mod tests {
         history.mark_saved();
         let saved = history.clone();
         app.export_paths.insert(original, second.clone());
+        let options = AudioExportOptions {
+            normalize_peak: true,
+            ..Default::default()
+        };
+        app.audio_export_settings.insert(original, options);
         app.open_external(first.clone(), false);
         assert_eq!(app.tabs.active().expect("same tab").id, original);
         assert_eq!(app.path, source);
@@ -13706,6 +13758,7 @@ mod tests {
             "same source retains saved editing"
         );
         assert_eq!(app.export_paths[&original], second);
+        assert_eq!(app.audio_export_settings.get(&original), Some(&options));
         app.open_external(image, false);
         let background = app.tabs.active().expect("image tab").id;
         app.edits
@@ -13717,6 +13770,7 @@ mod tests {
         assert_eq!(app.tabs.active().expect("reused tab").id, original);
         assert_eq!(app.edits[&original], EditHistory::default());
         assert!(!app.export_paths.contains_key(&original));
+        assert!(!app.audio_export_settings.contains_key(&original));
         assert_eq!(app.edits[&background], image_history);
         app.edits
             .get_mut(&original)
@@ -13849,10 +13903,12 @@ mod tests {
         app.dispatch(CommandId::RotateClockwise);
         let tab = app.tabs.active().expect("active tab").id;
         let source = app.path.clone().expect("source path");
+        let generation = app.media_generation;
         let intent = || DialogIntent::Export {
             tab,
             source: source.clone(),
             kind: MediaKind::Image,
+            generation,
             output: ExportOutput::Media,
             continuation: Some(GuardedAction::CloseTab(tab)),
         };

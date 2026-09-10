@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### 音声export設定UIとsource別保持（2026-09-10 14:42、E01 partial）
+
+動画・音声のFile「Audio export options」からNormalize peak (-1 dBFS)とKeep／Mono／Stereoを選ぶ。既定keyはなく、`audio_export_options`へcustom bindingを割り当てられる。Applyは設定だけを確定し、次のSave／Export as／音声のみ出力に反映する。再生音・履歴・dirty状態は変更しない。Cancel／Escapeはdraftを破棄し、menu／palette／gridからのfocusを戻す。240×150でもApply／Cancelは説明文のscroll外へ保持する。
+
+設定は現在sourceのtab内sessionだけで保持する。tab切替と再Saveは保持し、再読込・別file／次曲への移動・closeで既定へ戻す。再起動・pathだけの閉じたtab再表示・別processへのdetachには引き継がない。export中は設定変更を拒否する。modalのtab／source／kind／generationとtokenを照合し、native Save dialogも同path再読込後の古い結果を拒否する。設定Apply後に保存先選択をCancelしても、適用済み設定は残る。音声のみ出力後も動画の通常Save先・未保存guardを保持する。
+
+追加5 ordinary testsはcustom binding、実UIAの全channel選択／Apply／Cancel／Escape・compact配置／overlay focus、stale snapshot4種類とtoken、Save／再Save／AudioOnly／失敗先保護／同path再読込拒否、離脱時Saveを確認する。1秒48000 samplesの非ゼロ合成音はheadless export／decode比較だけに用い、再生しない。正規化peakとmono複製stereoを照合。既存native D3D11VA復旧fixtureの10点へ設定UIのApply／restoreを追加し、履歴／transport／generation不変・CPU transfers0を確認した。実WASAPIの無音次曲試験はactive／background双方の設定解除も検証する。通常windowの物理入力／混在DPI／全codec品質の認定ではない。
+
+最終session1577: fmt check／Clippy／workspace465（app263／core61／runtime137／integration4）、app opt-in6件、Release終了0。SKIPなし、通常ignored13は別計上。Release SHA-256 `099d594d6c84b42bb24440db4693d6961fe15908254c1fc429377b7e80696e1d`。先行590d240のCI34440521631は成功。次は個別metadata書換へ進む。全UX台帳と通常window／全素材品質・持続性能などの未完事項は引き続き保持する。
+
 ### normalize／channel変換の出力基盤（2026-09-10 14:17、E01 partial・UI未接続）
 
 runtimeの`ExportOptions`／`AudioExportOptions`にsample peak −1 dBFS normalize（既定Off）とKeep／Mono／Stereo（既定Keep）を追加した。`ExportJob::start_with_options`と同期検証用`export_media_with_options`から、通常動画／音声とAudioOnlyへ共通指定する。既存API・appの通常入口は既定値を維持し、設定UIは次工程である。現時点では通常操作からこれらのoptionを有効にできない。

@@ -55,6 +55,7 @@ pub enum CommandId {
     Save,
     ExportAs,
     ExportAudio,
+    AudioExportOptions,
     ToggleTimeline,
     ToggleGridMenu,
     ToggleHardwareEncode,
@@ -176,6 +177,7 @@ impl CommandId {
             Self::Save => "save",
             Self::ExportAs => "export_as",
             Self::ExportAudio => "export_audio",
+            Self::AudioExportOptions => "audio_export_options",
             Self::ToggleTimeline => "toggle_timeline",
             Self::ToggleGridMenu => "toggle_grid_menu",
             Self::ToggleHardwareEncode => "toggle_hardware_encode",
@@ -632,6 +634,11 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::ResetRate, "Reset playback rate", PLAYABLE_MEDIA),
     command(CommandId::Save, "Save exported media", ANY_MEDIA),
     command(CommandId::ExportAs, "Export as", ANY_MEDIA),
+    command(
+        CommandId::AudioExportOptions,
+        "Audio export options",
+        PLAYABLE_MEDIA,
+    ),
     command(
         CommandId::ExportAudio,
         "Export audio only",

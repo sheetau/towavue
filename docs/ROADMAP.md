@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 I03/U10 prefetch-seed checkpoint: 既存の隣静止画先読みから共有縮小previewを供給し、原寸cache hitからも再decodeせず再登録する。mutexを解放して縮小し、原寸／縮小予算・先読み枚数を増やさず、表示通知を出さない。実PNGの画素／alpha／寸法・filmstrip再利用／disk生成なし・原寸Arc同一と、取消／source変更／close／失敗／animation拒否を確認する。静止画first-decode／cold-storage性能、animation先読み、動画sheet／GPU共有と全UX台帳は継続。先行a086f6bのCI34481359872は確認時実行中。
+
 2026-09-10 I03/U10 first-frame checkpoint: GIF／APNG／animated WebP／AVIFの原寸decodeから最初の借用frameを縮小し、全frame完了前にImagesReadyで通常／readingへ公開する。追加decoder／process／原寸コピーはなく、元寸法・共有preview上限を維持。mailboxの一件枠、原寸成功／失敗時の退役、source変更／取消／close拒否と実codecの画素／timing不変・予算を確認する。AVIFの取消／予算診断が一般consumer停止で隠れる点も修正する。先行8b03da5のCI34479689433は成功。静止画first-decode・cold-storage／可視UI時間・先読みpreview／動画sheet／GPU共有と全UX台帳は継続し、ローンチ準備は再開しない。
 
 2026-09-10 U10 shared-preview checkpoint: hostがPreviewCacheを一つ所有し、window間の画像／filmstrip／recent／tab／seek workerへ共有。RGBA上限64件／16 MiBをwindow数で増やさず、元window閉鎖後も再利用する。同keyのdecode／disk生成を一件へ集約し、別keyは並行、待機取消は独立、失敗／取消後は再試行可能。durationもsource metadata keyで成功値64件を共有し、重複FFprobeを抑える。生成の共用／取消／失敗解放・metadata更新／上限・元window閉鎖後のseed再利用を確認。先行076e486のCI34478547413は成功。cold／可視UIの実時間、未訪問preview先行生成／動画sheet／GPU texture共有と全UX台帳は未完。可視入力許可の返答を待つ間も独立項目を進める。

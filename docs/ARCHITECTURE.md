@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## I03/U10: 静止画先読み結果のpreview共用（2026-09-10）
+
+既存の隣画像一件／256 MiBの静止画先読みは、原寸cacheへの登録後、decoded-cache mutexを解放してから同じ原寸の借用frameをPreviewCacheへ渡す。既存の240×160以内の縮小、source metadata key、host全体64件／16 MiBを使い、追加decode／補助process／disk encodeはしない。原寸cache hitでも元寸法付きpreviewを再供給し、縮小側だけがevictionされた場合に再decodeしない。先読みの静止画限定／元画質／枚数／順序は変えず、animation／AVIFの先読みやvideo sheetを追加したという意味ではない。
+
+画像request generation／closed／取消とsource stampを確認して供給し、closeはmailbox終了前に先読みtokenを取り消す。codec／縮小／preview-cache操作中にdecoded-cacheやUI mailboxのmutexを保持しない。先読みからImagesReady／LoadedImagePreviewを通知せず、表示・編集・GPU textureは変更しない。通常のforeground requestが来たら従来の原寸Arcを再利用し、必要な低解像度consumerは共有previewを使う。実PNGで先読み・alpha／寸法・filmstrip再利用／disk生成なし・原寸同一Arc、制御したworkerで取消／変更／close／失敗／animation拒否を確認する。可視UIの速度とcold-storage資源評価は別途残る。
+
 ## I03/U10: 原寸デコードの最初のフレームを段階表示する（2026-09-10）
 
 GIF／APNG／animated WebP／FFmpeg AVIFのforeground decodeで、メモリ予算内の最初のフレームを得た直後に借用RGBAと実際の表示寸法をPreviewCacheへ渡す。既存の240×160以内の縮小・source metadata key・64件／16 MiB共有枠を使い、追加の原寸コピー、別decoder／process、disk encodeは行わない。後続フレームは同じdecoderで続ける。静止画の先行decodeや最初のフレーム自体の待ち時間削減は含めない。

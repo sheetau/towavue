@@ -177,40 +177,55 @@ impl ImageLoader {
         + 'static,
     ) {
         let shared = Arc::clone(&self.shared);
-        let (generation, cache) = {
+        let (generation, cache, previews) = {
             let mailbox = shared.0.lock().expect("image mailbox");
-            (mailbox.generation, Arc::clone(&mailbox.cache))
+            (
+                mailbox.generation,
+                Arc::clone(&mailbox.cache),
+                mailbox.previews.clone(),
+            )
         };
         self.prefetch_worker.submit(move |cancellation| {
             let Some(stamp) = ImageStamp::read(&path) else {
                 return;
             };
-            {
+            let current = || {
                 let mailbox = shared.0.lock().expect("image mailbox");
-                if mailbox.closed || mailbox.generation != generation || cancellation.is_cancelled()
-                {
-                    return;
-                }
+                !mailbox.closed && mailbox.generation == generation && !cancellation.is_cancelled()
+            };
+            if !current() {
+                return;
             }
-            if cache
+            let cached = cache
                 .lock()
                 .expect("image cache")
                 .entries
                 .iter()
-                .any(|entry| entry.0 == path && entry.1 == stamp)
-            {
-                return;
-            }
-            let current = || !cancellation.is_cancelled();
-            let Ok(Some(image)) = decode(&path, CACHE_BYTE_LIMIT, &current) else {
-                return;
+                .find(|entry| entry.0 == path && entry.1 == stamp)
+                .map(|entry| Arc::clone(&entry.2));
+            let image = if let Some(image) = cached {
+                image
+            } else {
+                let Ok(Some(image)) = decode(&path, CACHE_BYTE_LIMIT, &current) else {
+                    return;
+                };
+                if image.is_animated() || ImageStamp::read(&path) != Some(stamp) || !current() {
+                    return;
+                }
+                let image = Arc::new(image);
+                {
+                    let mut cache = cache.lock().expect("image cache");
+                    if cancellation.is_cancelled() {
+                        return;
+                    }
+                    cache.insert(path.clone(), stamp, Arc::clone(&image));
+                }
+                image
             };
-            if image.is_animated() || ImageStamp::read(&path) != Some(stamp) {
-                return;
-            }
-            let mut cache = cache.lock().expect("image cache");
-            if current() {
-                cache.insert(path, stamp, Arc::new(image));
+            if let Some(previews) = previews {
+                previews.remember_image(&path, &image, &|| {
+                    current() && ImageStamp::read(&path) == Some(stamp)
+                });
             }
         });
     }
@@ -236,6 +251,7 @@ impl ImageLoader {
 
 impl Drop for ImageLoader {
     fn drop(&mut self) {
+        self.prefetch_worker.clear();
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("image mailbox");
         mailbox.closed = true;
@@ -373,6 +389,185 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn obsolete_or_unsuitable_prefetches_do_not_seed_either_cache() {
+        for mode in ["cancel", "changed", "closed", "error", "animated"] {
+            let root = std::env::temp_dir().join(format!(
+                "towavue-prefetch-reject-{}-{mode}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&root).expect("owned fixture directory");
+            let path = root.join("source.png");
+            std::fs::write(&path, [1]).expect("source identity");
+            let previews = PreviewCache::new(root.join("cache")).expect("preview cache");
+            let shared = Arc::new((
+                Mutex::new(Mailbox {
+                    previews: Some(previews.clone()),
+                    ..Default::default()
+                }),
+                Condvar::new(),
+            ));
+            let mut loader = Some(ImageLoader {
+                shared: Arc::clone(&shared),
+                prefetch_worker: LatestTask::new("prefetch-rejection-test").expect("worker"),
+            });
+            let (started_tx, started_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            loader.as_ref().expect("live loader").prefetch_with_decode(
+                path.clone(),
+                move |_, _, _| {
+                    started_tx.send(()).expect("started");
+                    release_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("release codec");
+                    if mode == "error" {
+                        return Err(ImageDecodeError::TooLarge);
+                    }
+                    let mut image = (*pixel(9)).clone();
+                    if mode == "animated" {
+                        image.frames.push(image.frames[0].clone());
+                    }
+                    Ok(Some(image))
+                },
+            );
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("prefetch started");
+            match mode {
+                "cancel" => {
+                    loader.as_ref().expect("live loader").request(Vec::new());
+                }
+                "changed" => std::fs::write(&path, [2, 3]).expect("changed source"),
+                "closed" => drop(loader.take()),
+                _ => {}
+            }
+            release_tx.send(()).expect("finish codec");
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let retained = if loader.is_some() { 2 } else { 1 };
+            while Arc::strong_count(&shared) != retained {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "prefetch closure did not finish"
+                );
+                thread::sleep(Duration::from_millis(1));
+            }
+            assert!(
+                shared
+                    .0
+                    .lock()
+                    .expect("mailbox")
+                    .cache
+                    .lock()
+                    .expect("decoded cache")
+                    .entries
+                    .is_empty()
+            );
+            assert!(
+                previews
+                    .cached_image(&path)
+                    .expect("preview lookup")
+                    .is_none()
+            );
+            drop(loader);
+            std::fs::remove_dir_all(root).expect("remove owned fixtures");
+        }
+    }
+
+    #[test]
+    fn prefetched_originals_seed_previews_and_reseed_without_decoding() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-prefetch-preview-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("owned fixture directory");
+        let path = root.join("unvisited.png");
+        image::RgbaImage::from_pixel(600, 400, image::Rgba([17, 37, 59, 127]))
+            .save(&path)
+            .expect("owned PNG");
+        let previews = PreviewCache::new(root.join("cache")).expect("preview cache");
+        let (sent, ready) = mpsc::channel();
+        let loader = ImageLoader::new(previews.clone(), move || {
+            let _ = sent.send(());
+        })
+        .expect("image loader");
+        let wait = |cache: &PreviewCache| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(preview) = cache.cached_image(&path).expect("cache lookup") {
+                    return preview;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "prefetch did not seed a preview"
+                );
+                thread::sleep(Duration::from_millis(1));
+            }
+        };
+        loader.prefetch(path.clone());
+        let first = wait(&previews);
+        assert_eq!(first.source_size, (600, 400));
+        assert_eq!((first.image.width, first.image.height), (240, 160));
+        assert!(
+            first
+                .image
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|rgba| rgba == &[17, 37, 59, 127])
+        );
+        assert!(loader.take_completed().is_none() && loader.take_preview().is_none());
+        assert!(
+            ready.try_recv().is_err(),
+            "speculation must not wake or replace the visible image"
+        );
+        let original = loader
+            .shared
+            .0
+            .lock()
+            .expect("mailbox")
+            .cache
+            .lock()
+            .expect("decoded cache")
+            .entries[0]
+            .2
+            .clone();
+        let filmstrip = previews
+            .filmstrip(&path, towavue_core::MediaKind::Image)
+            .expect("shared filmstrip");
+        assert_eq!(filmstrip.image, first.image);
+        assert_eq!(
+            std::fs::read_dir(root.join("cache"))
+                .expect("cache files")
+                .count(),
+            0,
+            "seeded filmstrip does not generate a disk thumbnail"
+        );
+
+        // A decoded hit can outlive its small preview. Replace only that optional
+        // cache in the fixture to exercise reseeding without another codec call.
+        let empty = PreviewCache::new(root.join("empty-cache")).expect("empty preview cache");
+        loader.shared.0.lock().expect("mailbox").previews = Some(empty.clone());
+        loader.prefetch_with_decode(path.clone(), |_, _, _| {
+            panic!("decoded hit must not decode again")
+        });
+        let reseeded = wait(&empty);
+        assert_eq!(reseeded.image, first.image);
+        assert_eq!(reseeded.source_size, first.source_size);
+        loader.request(vec![path.clone()]);
+        ready
+            .recv_timeout(Duration::from_secs(5))
+            .expect("original ready");
+        let loaded = loader
+            .take_completed()
+            .expect("original")
+            .images
+            .remove(0)
+            .1
+            .expect("decoded");
+        assert!(Arc::ptr_eq(&loaded, &original));
+        drop(loader);
+        std::fs::remove_dir_all(root).expect("remove owned fixtures");
+    }
 
     #[test]
     fn first_frame_preview_precedes_completion_and_respects_request_lifetime() {

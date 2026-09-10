@@ -85,6 +85,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::CopyImage, "Ctrl+C"),
         (CommandId::ResizeImage, "Ctrl+R"),
         (CommandId::FreeRotateImage, "Ctrl+Shift+R"),
+        (CommandId::FreeRotateVideo, "Ctrl+Shift+R"),
         (CommandId::CycleAudioRepeat, "Ctrl+R"),
         (CommandId::RotateClockwise, "R"),
         (CommandId::RotateCounterclockwise, "L"),
@@ -246,7 +247,10 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         .filter(|definition| {
             (definition.id.as_str().starts_with("jump_images_")
                 || definition.id.as_str().starts_with("select_aspect_")
-                || definition.id == CommandId::FreeRotateImage)
+                || matches!(
+                    definition.id,
+                    CommandId::FreeRotateImage | CommandId::FreeRotateVideo
+                ))
                 && !declared.contains(&definition.id)
         })
     {
@@ -321,6 +325,15 @@ mod tests {
             media_kind: Some(MediaKind::Image),
             ..Default::default()
         };
+        let video = CommandContext {
+            media_kind: Some(MediaKind::Video),
+            timeline_open: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            defaults().resolve(key.strokes(), video),
+            ShortcutMatch::Command(CommandId::FreeRotateVideo)
+        );
         for kind in [
             None,
             Some(MediaKind::Image),
@@ -349,6 +362,7 @@ mod tests {
             let bindings =
                 parse(&format!("toggle_filmstrip = {custom}\n"), defaults()).expect("custom");
             assert!(bindings.get(CommandId::FreeRotateImage).is_none());
+            assert!(bindings.get(CommandId::FreeRotateVideo).is_none());
             assert_eq!(
                 bindings.resolve(custom.parse::<KeySequence>().expect("key").strokes(), image),
                 ShortcutMatch::Command(CommandId::ToggleFilmstrip)
@@ -360,6 +374,10 @@ mod tests {
         }
         let bindings =
             parse("free_rotate_image = Ctrl+K R\n", defaults()).expect("custom rotation");
+        assert_eq!(
+            bindings.resolve(key.strokes(), video),
+            ShortcutMatch::Command(CommandId::FreeRotateVideo)
+        );
         assert_eq!(bindings.resolve(key.strokes(), image), ShortcutMatch::None);
         assert_eq!(
             bindings.resolve(

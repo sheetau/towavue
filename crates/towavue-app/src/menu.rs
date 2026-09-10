@@ -26,7 +26,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             &[Undo, Redo],
             &[CopyImage],
             &[ResizeImage],
-            &[FreeRotateImage],
+            &[FreeRotateImage, FreeRotateVideo],
             &[SelectAll, ApplyCrop, ClearSelection],
             &[
                 SelectAspectSquare,
@@ -547,10 +547,39 @@ mod tests {
 
     #[test]
     fn image_jump_aspect_and_rotation_menus_scroll_and_dispatch_the_selected_command() {
-        for (category, steps, leading, prefix, expected) in [
-            ("Image jump", 3, 0, "jump_images_", JumpImagesForward10),
-            ("Edit", 1, 8, "select_aspect_", SelectAspectNineSixteen),
-            ("Edit", 1, 4, "free_rotate_image", FreeRotateImage),
+        for (category, steps, leading, prefix, expected, kind) in [
+            (
+                "Image jump",
+                3,
+                0,
+                "jump_images_",
+                JumpImagesForward10,
+                towavue_core::MediaKind::Image,
+            ),
+            (
+                "Edit",
+                1,
+                8,
+                "select_aspect_",
+                SelectAspectNineSixteen,
+                towavue_core::MediaKind::Image,
+            ),
+            (
+                "Edit",
+                1,
+                4,
+                "free_rotate_image",
+                FreeRotateImage,
+                towavue_core::MediaKind::Image,
+            ),
+            (
+                "Edit",
+                1,
+                2,
+                "free_rotate_video",
+                FreeRotateVideo,
+                towavue_core::MediaKind::Video,
+            ),
         ] {
             let context = egui::Context::default();
             let shortcuts = crate::shortcuts::defaults();
@@ -572,7 +601,8 @@ mod tests {
                             if let Some(command) = show(
                                 ui,
                                 CommandContext {
-                                    media_kind: Some(towavue_core::MediaKind::Image),
+                                    media_kind: Some(kind),
+                                    timeline_open: kind == towavue_core::MediaKind::Video,
                                     ..Default::default()
                                 },
                                 &shortcuts,

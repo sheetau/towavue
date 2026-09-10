@@ -44,6 +44,25 @@ use crate::decode::{HardwareVideoFrame, VideoTransfer};
 #[path = "video_raster.rs"]
 pub(crate) mod raster;
 
+/// Validates ordered video edits without allocating GPU resources or changing playback.
+/// Returns final sample dimensions and pixel aspect; the limit is the renderer's device limit.
+pub fn video_edit_geometry(
+    source: (u32, u32),
+    pixel_aspect: f32,
+    orientation: crate::VideoOrientation,
+    operations: &[towavue_core::EditOperation],
+    max_texture_side: usize,
+) -> Result<(u32, u32, f32), RenderError> {
+    let plan = raster::Plan::new(
+        source,
+        pixel_aspect,
+        orientation,
+        operations,
+        max_texture_side,
+    )?;
+    Ok((plan.size.0, plan.size.1, plan.pixel_aspect))
+}
+
 /// A failure while creating or using the shared D3D11 renderer.
 #[derive(Debug, Error)]
 pub enum RenderError {

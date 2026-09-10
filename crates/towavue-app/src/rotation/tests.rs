@@ -2,7 +2,7 @@ use super::*;
 use std::sync::mpsc;
 
 #[test]
-fn video_rotation_cannot_enter_visual_history_before_gpu_presentation_is_connected() {
+fn video_rotation_rejects_missing_video_frame_without_changing_visual_state() {
     let (mut app, _) = application();
     app.media_kind = Some(MediaKind::Video);
     app.image_view.selection = Some(UnitRect::FULL);

@@ -107,6 +107,7 @@ pub enum CommandId {
     SelectAspectSixteenNine,
     SelectAspectNineSixteen,
     FreeRotateImage,
+    FreeRotateVideo,
 }
 
 impl CommandId {
@@ -212,6 +213,7 @@ impl CommandId {
             Self::SelectAspectSixteenNine => "select_aspect_16_9",
             Self::SelectAspectNineSixteen => "select_aspect_9_16",
             Self::FreeRotateImage => "free_rotate_image",
+            Self::FreeRotateVideo => "free_rotate_video",
             Self::ToggleImageInterpolation => "toggle_image_interpolation",
         }
     }
@@ -425,6 +427,7 @@ impl CommandDefinition {
                         | CommandId::RotateCounterclockwise
                         | CommandId::FlipHorizontal
                         | CommandId::FlipVertical
+                        | CommandId::FreeRotateVideo
                 ))
             && (!matches!(
                 self.id,
@@ -838,6 +841,11 @@ const COMMANDS: &[CommandDefinition] = &[
         CommandId::FreeRotateImage,
         "Free rotate image",
         &[MediaKind::Image],
+    ),
+    command(
+        CommandId::FreeRotateVideo,
+        "Free rotate video",
+        &[MediaKind::Video],
     ),
 ];
 

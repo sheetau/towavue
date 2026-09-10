@@ -34,6 +34,7 @@ mod timeline_input;
 mod trim;
 #[cfg(test)]
 mod video_context_tests;
+mod video_rotation;
 mod welcome;
 mod wheel_input;
 
@@ -173,6 +174,7 @@ enum UiAction {
     DismissExportError,
     FinishResize(Option<towavue_core::ImageResize>),
     FinishRotation(u64, Option<towavue_core::ImageRotation>),
+    FinishVideoRotation(u64, Option<towavue_core::VideoRotation>),
 }
 
 enum AppEvent {
@@ -511,6 +513,7 @@ enum ViewDrag {
 struct ImageTransform {
     uv: [UnitPoint; 4],
     size: (f32, f32),
+    square_pixels: bool,
 }
 
 impl ImageTransform {
@@ -529,6 +532,7 @@ impl ImageTransform {
     ) -> Self {
         let mut transform = Self {
             uv: orientation.source_uv(),
+            square_pixels: false,
             size: if orientation.swaps_axes() {
                 (size.1 as f32, size.0 as f32)
             } else {
@@ -547,9 +551,11 @@ impl ImageTransform {
                     transform.size = (width as f32, height as f32);
                 }
                 EditOperation::RotateVideo(rotation) => {
-                    // Prospective canvas only; playback must use ordered GPU raster stages.
-                    let (width, height) = rotation.size();
-                    transform.size = (width as f32, height as f32);
+                    if rotation.tenths() != 0 {
+                        let (width, height) = rotation.size();
+                        transform.size = (width as f32, height as f32);
+                        transform.square_pixels = true;
+                    }
                 }
                 EditOperation::Crop(region) => transform.crop_pixels(region),
                 EditOperation::RotateClockwise => {
@@ -574,6 +580,10 @@ impl ImageTransform {
                 | EditOperation::SetRate(_)
                 | EditOperation::Timeline(_) => {}
             }
+        }
+        if transform.square_pixels {
+            // The GPU materializes the complete ordered history, including later crops.
+            transform.uv = towavue_runtime_windows::VideoOrientation::default().source_uv();
         }
         transform
     }
@@ -601,7 +611,9 @@ impl ImageTransform {
     }
 
     fn pixel_aspect(&self, source_aspect: f32) -> f32 {
-        if self.uv[0].x == self.uv[1].x {
+        if self.square_pixels {
+            1.0
+        } else if self.uv[0].x == self.uv[1].x {
             1.0 / source_aspect
         } else {
             source_aspect
@@ -649,6 +661,8 @@ struct Application<N> {
     nearest_images: bool,
     resize_dialog: Option<resize::ResizeDialog>,
     rotation_dialog: Option<rotation::RotationDialog>,
+    video_rotation_dialog: Option<video_rotation::VideoRotationDialog>,
+    video_raster_operations: Option<Vec<EditOperation>>,
     rotation_generation: u64,
     rotation_drag: Option<rotation::RotationDrag>,
     edits: BTreeMap<TabId, EditHistory>,
@@ -824,6 +838,8 @@ where
             nearest_images: false,
             resize_dialog: None,
             rotation_dialog: None,
+            video_rotation_dialog: None,
+            video_raster_operations: None,
             rotation_generation: 0,
             rotation_drag: None,
             edits: BTreeMap::new(),
@@ -2105,7 +2121,16 @@ where
         let renderer = self.renderer.as_mut().expect("renderer exists");
         let media_result = renderer.clear([0.0, 0.0, 0.0, 1.0]).and_then(|()| {
             if let (Some(session), Some(rect)) = (&mut self.session, self.video_rect) {
-                session.draw_current(renderer, rect * context.pixels_per_point(), self.video_uv)
+                if let Some(operations) = &self.video_raster_operations {
+                    session.draw_current_edited(
+                        renderer,
+                        rect * context.pixels_per_point(),
+                        self.video_uv,
+                        operations,
+                    )
+                } else {
+                    session.draw_current(renderer, rect * context.pixels_per_point(), self.video_uv)
+                }
             } else {
                 Ok(false)
             }
@@ -2161,6 +2186,8 @@ where
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        self.cancel_stale_video_rotation();
+        self.video_raster_operations = None;
         self.image_seek_preview_active = false;
         self.video_rect = None;
         let context = root.ctx().clone();
@@ -2336,6 +2363,8 @@ where
             }
         } else if self.pending_guard.is_some() {
             self.draw_unsaved_guard(&context, actions);
+        } else if self.video_rotation_dialog.is_some() {
+            self.show_video_rotation(&context, actions);
         } else if let Some(dialog) = &mut self.rotation_dialog {
             if let Some(action) = dialog.show(&context) {
                 actions.push(UiAction::FinishRotation(dialog.token, action));
@@ -2626,12 +2655,16 @@ where
             }
             return;
         };
-        let transform = self.visual_transform((width, height));
+        let (transform, operations) = self.video_presentation((width, height));
+        self.video_raster_operations = operations;
         let size = (transform.size.0 as u32, transform.size.1 as u32);
         let pixel_aspect = transform.pixel_aspect(pixel_aspect);
         let viewport = fitted_video_rect(ui.max_rect(), size, pixel_aspect);
         self.video_rect = Some(viewport);
         self.video_uv = transform.uv;
+        if self.video_rotation_dialog.is_some() {
+            return;
+        }
         let response = ui.interact(
             viewport,
             ui.id().with("video-edit-surface"),
@@ -4111,6 +4144,11 @@ where
                         && self.pending_guard.is_none()
                         && self.export_error.is_none()
                 }
+                UiAction::FinishVideoRotation(..) => {
+                    self.video_rotation_dialog.is_some()
+                        && self.pending_guard.is_none()
+                        && self.export_error.is_none()
+                }
                 UiAction::CancelExport => {
                     self.active_export.is_some() && self.export_error.is_none()
                 }
@@ -4120,6 +4158,7 @@ where
             return;
         }
         match action {
+            UiAction::FinishVideoRotation(token, value) => self.finish_video_rotation(token, value),
             UiAction::FinishRotation(token, value) => self.finish_rotation(token, value),
             UiAction::FinishResize(value) => {
                 if self.resize_dialog.take().is_some()
@@ -4251,7 +4290,11 @@ where
             };
             self.filmstrip_return_focus = focus.map(|id| (self.media_generation, id));
         }
-        if command == CommandId::FreeRotateImage && (self.palette_open || self.grid_open) {
+        if matches!(
+            command,
+            CommandId::FreeRotateImage | CommandId::FreeRotateVideo
+        ) && (self.palette_open || self.grid_open)
+        {
             self.cancel_command_overlay();
         }
         self.command_overlay_return_focus = if matches!(
@@ -4467,6 +4510,7 @@ where
                 self.request_redraw();
             }
             CommandId::FreeRotateImage => self.open_rotation(),
+            CommandId::FreeRotateVideo => self.open_video_rotation(),
             CommandId::CopyImage => {
                 if self.image_copy.is_some() {
                     self.set_status("Image copy is already in progress".into());
@@ -4724,6 +4768,8 @@ where
         self.image_materialized = false;
         self.resize_dialog = None;
         self.rotation_dialog = None;
+        self.video_rotation_dialog = None;
+        self.video_raster_operations = None;
         self.rotation_drag = None;
     }
 
@@ -4842,9 +4888,28 @@ where
     }
 
     fn push_visual_edit(&mut self, operation: EditOperation) {
-        if matches!(operation, EditOperation::RotateVideo(_)) {
-            self.set_status("Video free rotation awaits GPU presentation support".into());
+        if matches!(operation, EditOperation::RotateVideo(value) if value.tenths() == 0) {
             return;
+        }
+        if matches!(operation, EditOperation::RotateVideo(_))
+            && self.media_kind != Some(MediaKind::Video)
+        {
+            return;
+        }
+        if self.media_kind == Some(MediaKind::Video) {
+            let mut operations = self
+                .tabs
+                .active()
+                .and_then(|tab| self.edits.get(&tab.id))
+                .map_or(&[][..], EditHistory::operations)
+                .to_vec();
+            operations.push(operation);
+            if video_rotation::uses_raster(&operations)
+                && let Err(error) = self.validate_video_operations(&operations)
+            {
+                self.set_status(error);
+                return;
+            }
         }
         self.push_edit(operation);
         self.image_view.selection = None;
@@ -4967,6 +5032,22 @@ where
         let Some(id) = self.tabs.active().map(|tab| tab.id) else {
             return;
         };
+        if self.media_kind == Some(MediaKind::Video)
+            && let Some(mut candidate) = self.edits.get(&id).cloned()
+        {
+            let changed = if redo {
+                candidate.redo()
+            } else {
+                candidate.undo()
+            };
+            if changed
+                && video_rotation::uses_raster(candidate.operations())
+                && let Err(error) = self.validate_video_operations(candidate.operations())
+            {
+                self.set_status(error);
+                return;
+            }
+        }
         let previous = self.edit_state();
         let changed = self
             .edits
@@ -5349,6 +5430,10 @@ where
         }
         if self.rotation_dialog.is_some() {
             self.set_status("Apply or cancel image rotation before leaving.".into());
+            return;
+        }
+        if self.video_rotation_dialog.is_some() {
+            self.set_status("Apply or cancel video rotation before leaving.".into());
             return;
         }
         if matches!(&action, GuardedAction::Navigate(path) if self.path.as_ref() == Some(path)) {
@@ -6417,6 +6502,7 @@ where
     fn modal_input_blocked(&self) -> bool {
         self.resize_dialog.is_some()
             || self.rotation_dialog.is_some()
+            || self.video_rotation_dialog.is_some()
             || self.pending_dialog.is_some()
             || self.native_prompt.is_some()
             || self.pending_guard.is_some()
@@ -14088,6 +14174,7 @@ mod tests {
                     eprintln!(
                         "PASS ordered hardware rotation/crop/rotation and direct-path return; CPU transfers 0"
                     );
+                    video_rotation::tests::hardware_dialog_preview(app);
                     return;
                 }
                 assert!(

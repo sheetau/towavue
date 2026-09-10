@@ -4,6 +4,18 @@
 
 ## 1. 最初に試す
 
+### 動画の角度dialogとGPU preview（2026-09-10 11:45、I06 partial）
+
+timeline表示中にEdit menu「Free rotate video」またはCtrl+Shift+Rで開く。画像の同キーは画像commandへ渡し、読み書き済みcustom key／prefixを上書きしない。右下のscroll modalで±180度・0.1度の入力／sliderを操作し、映像面で実GPU previewを見る。previewはそのframeのgeometryと操作列を一緒に捕捉し、dialogの更新を次の描画へ反映する。選択枠を一時的に隠すが、Cancel／Escape／0度は履歴・selection・viewを変更しない。再生／停止を変更せず、pause中も同じframeをpreviewする。Applyだけ一件を追加してFit・選択解除し、後続crop／再回転・Undo/Redo・保存も最終canvas座標を使う。
+
+runtimeのvideo_edit_geometryをGPU非確保の事前検証として公開し、dialogの候補と後続visual edit、Undo/Redo候補に同じsnapshot／budget確認を行う。token・tab／path・media／playback世代・現在frameの寸法／SAR／orientation・device辺上限の照合も追加した。古いactionは新dialogを閉じず、context変更やsource resetでは取消する。透明backdropでも他の入力を遮断し、既存guard-return-focusを使う。
+
+新規3 tests: 最終canvas／SAR1／identity UVと0度、予算失敗時のdisabled Apply／compact320×300／Escape、実FFV1 SAR1.5素材のhidden-window UI操作。後者はkeyboard入力、UIA数値／slider／Apply／Cancel、元focus復帰、preview中のview／history／time不変、0度、crop／再回転／Undo/Redo、renderer不在時のRedo不変、timelineを閉じた表示継続、古いtoken／6 context変更／自動stale取消、誤った入力拒否、H264保存後の全5frame寸法／SAR／orientationと原本bytes不変を確認する。既存menu keyboard試験をvideo項目へ拡張し、shortcutのcontext／custom保護も回帰確認した。
+
+実D3D11VA native-caption opt-inも通常appのcommand→角度dialog→render_frame→Cancelへ拡張。再生／停止・編集timeline Seek・device再作成前後の10回がPASS、CPU transfer0で履歴／view／generationを保持した。独立renderer試験だけでUI結線済みとはしない。動画Alt-dragと通常window外観／全寸法性能／HDR・dynamic geometryは未完。先行95b0f9cのCI34429476944は成功。外部foreground入力、clipboard書込、配布／追加導入、依存・vendor変更はない。
+
+最終session90116でfocused3件、fmt check／Clippy／workspace426（app246／core59／runtime117／integration4）、Release、app opt-in5件が終了0。SKIPなし、通常ignored11件は別計上。Release SHA-256は`cda247cda628bf5b5c9302d424b5895be7b2444dbded4ae4b89830a7144715f6`。最終レビューで空白付き数値とsliderの0.1度丸めを統一し、UIAの実値31.700000000000017を確認して数値試験は1e-9以内の比較にした。操作値317 tenthsの検証は厳密比較のまま維持する。
+
 ### 動画の同一device GPU raster基盤（2026-09-10 11:22、I06 UI未接続）
 
 draw_current_editedをruntimeに追加し、現在frameのorientation／SARから編集列を検証して、RGBA uploadまたは既存Video Processor出力を同じD3D11 device内で順序付き描画する。crop／quarter turn／flip、square-pixel scale／自由回転／黒paddingを各stageにし、寸法別にtextureを再利用する。直前sourceとは別slotを選び、RGBA payload合計512 MiB・deviceの辺上限を超えるplanは描画前に拒否する。driver・decode・元RGBAは別枠。通常動画経路へ戻ると追加poolを解放する。CPU readbackはテストだけで、productionのhardware frameはGPU内に留まる。

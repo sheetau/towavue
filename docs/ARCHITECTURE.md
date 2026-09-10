@@ -1,6 +1,10 @@
 # towavue アーキテクチャ
 
-## I06: 動画自由回転の保存契約（2026-09-10、表示UI未接続）
+## I06: 動画自由回転の保存・表示・角度UI契約（2026-09-10）
+
+角度UI契約（11:43追加）: 動画専用Free rotate video commandをEdit menu／palette／grid／custom bindingへ追加し、既定Ctrl+Shift+Rは画像commandとcontextで分離する。timeline表示中のみ開け、既存custom key／prefixが重なる場合は追加defaultを抑止する。右下の有界scroll modalで±180度・0.1度単位の数値／sliderを操作する。透明な入力遮断backdropで他の操作を止め、映像面に現在の編集列＋仮の一回転を同一deviceでpreviewする。dialog更新前にそのframeの寸法と操作列を一緒に捕捉し、角度変更時は次の再描画を要求してrectと画素の一時不一致を防ぐ。再生／停止・clock・履歴・selectionはpreviewのために変更しない。modal中の選択枠は隠し、Cancel／Escape／0度で元へ戻す。Applyは既存visual編集と同じ一件の履歴追加・selection解除・Fitを行う。
+
+適用契約: dialog token、tab／path、media／playback世代、操作列、実frame寸法／SAR／orientation、device辺上限を確認する。古いactionは新dialogを閉じず、source交換やcontext変化は取消する。runtimeの非確保video_edit_geometryで入力snapshot／編集順／中間payload予算を確認し、無効な角度やbudget errorはApplyを無効にする。後続visual editとUndo/Redoの候補も履歴を変える前に確認する。自由回転を含む表示は最終canvas寸法・SAR1・identity UVとし、全操作をGPU rasterへ渡す。preset／cropも同じ最終pixel座標を使う。timelineを閉じても確定済み編集を描画する。画像dialog／Alt操作は変更せず、動画のAltドラッグ、HDR／dynamic geometry／全寸法性能・通常window認定は残件。
 
 VideoRotationは操作直前のsample寸法とpixel aspect、square-pixel寸法、0.1度単位の角度、回転raster寸法と偶数出力canvasを保持する。SARが1より大きければ幅をSAR倍、小さければ高さを1/SAR倍して最近整数へ丸め、元のdetailを減らす縮小はしない。各寸法は16384px／128M pixels以内。角度0は履歴にもfilter列にも入れず、pixel aspect正規化やpaddingも行わない。
 
@@ -8,9 +12,9 @@ VideoRotationは操作直前のsample寸法とpixel aspect、square-pixel寸法�
 
 保存前にはbest video streamの寸法、container／codecの表示用SAR、display matrixの軸交換を解決し、操作列をたどって各回転の入力と照合する。FFmpegのav_guess_sample_aspect_ratioを、export workerが所有するinputと借用streamの寿命内で読み取り呼出しし、native pointerを外へ出さない。寸法／SAR不一致、範囲外crop、非video操作との混在は配置変更前に拒否する。frame途中で変わる寸法／SAR／orientationやHDRの品質認定は別残件である。
 
-表示側は既存の四隅UVだけでは回転後の黒いcanvasや、その後のcrop／再回転を保持できない。順序付きの中間raster処理を同じD3D11 device上へ接続したが、現段階ではappのvisual edit入口でVideoRotationを拒否し、command／dialog／dragへ公開しない。ソフトウェア保存の基盤テストをGPU表示、hardware encode品質、通常windowの操作確認の代用にはしない。
+表示側は既存の四隅UVだけでは回転後の黒いcanvasや、その後のcrop／再回転を保持できない。順序付きの中間raster処理を同じD3D11 device上へ接続し、角度dialogと確定済み履歴の表示に使う。ソフトウェア保存の基盤テストをGPU表示、hardware encode品質、通常windowの操作確認の代用にはしない。
 
-GPU raster契約（2026-09-10）: runtimeのdraw_current_editedは現在frameの寸法／SAR／orientationから操作列を検証し、source orientation→crop／quarter turn／flip→square-pixel scale／自由回転／paddingを履歴順に描く。各回転の入力snapshot不一致、非video操作、無効cropは描画前にtyped errorへする。表示用UVは最終rasterに対する一時cropだけを表し、元frameのUVを二重適用しない。decode session・PTS・音声・履歴は変更しない。app UI側の事前検証と編集後geometry／selectionへの接続は次の残件。
+GPU raster契約（2026-09-10）: runtimeのdraw_current_editedは現在frameの寸法／SAR／orientationから操作列を検証し、source orientation→crop／quarter turn／flip→square-pixel scale／自由回転／paddingを履歴順に描く。各回転の入力snapshot不一致、非video操作、無効cropは描画前にtyped errorへする。表示用UVは最終rasterに対する一時cropだけを表し、元frameのUVを二重適用しない。decode session・PTS・音声・履歴は変更しない。app UI側も同じplanによる事前検証と編集後geometry／selectionを使う。
 
 softwareは既存RGBA upload、hardwareは既存Video Processorの色変換／HDR能力判定後のRGBA textureを入力にする。中間textureは同じdeviceのGPU専用RGBA8・RTV／SRVとし、CPU readback／再uploadはしない。寸法が一致し直前のsourceと異なるslotを再利用し、同じ寸法の連続stageでも最大2枚。layoutが変わる時だけ旧poolを解放して再確保し、通常経路へ戻る時も解放する。所有する中間RGBA payloadは合計512 MiB、各辺はdevice上限以下とし、事前に超過を拒否する。source upload／Video Processor出力・decode pool・driverの保留resourceは別枠であり、process全体やGPU物理使用量の上限ではない。幅／高さの最大値を組み合わせた巨大な正方形textureは確保しない。
 

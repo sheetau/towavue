@@ -4,6 +4,16 @@
 
 ## 1. 最初に試す
 
+### normalize／channel変換の出力基盤（2026-09-10 14:17、E01 partial・UI未接続）
+
+runtimeの`ExportOptions`／`AudioExportOptions`にsample peak −1 dBFS normalize（既定Off）とKeep／Mono／Stereo（既定Keep）を追加した。`ExportJob::start_with_options`と同期検証用`export_media_with_options`から、通常動画／音声とAudioOnlyへ共通指定する。既存API・appの通常入口は既定値を維持し、設定UIは次工程である。現時点では通常操作からこれらのoptionを有効にできない。
+
+固定FFmpegのastats実装を確認し、編集・channel変換後のdouble音声をnull muxerへ流す解析passと、共通gainを加えるencode passを実装。mono化は0.5L+0.5R、stereo化はmonoの複製。全PCM中間file／bufferを保持せず、診断末尾16 KiBから全体peak・sample数・NaN／Infを照合する。局所音量など曲中の比率は保持し、無音はgain1。元のsize／mtimeを解析前後・publish前に照合し、取消や解析失敗で既存targetを変更しない。動的音量追従・LUFS／true-peak補正ではなく、lossy encode後の再構成peak保証ではない。
+
+追加7 test: 左右平均／複製／identity・逆相相殺、normalize前後全sample、silent／微小音／overfull floatとmaster gain・時間内の強弱、Keep6channel／明示的な多channel変換拒否、実NaN／Inf・空音声／無音声／image拒否、解析／encode中cancelと元file変更、jobのphase順と単一完了、trim／Delete／Stretch／局所・master gain／rateの独立19200 samples比較。通常動画とAudioOnlyのPCMは一致し、動画frame数／全RGBAは従来保存と一致する。両encoder branchの音声filter列も一致。phase表示／cancelは既存app試験を拡張し、240×150を含む5寸法で確認した。全codec／hardware encodeの音質、通常windowでの設定操作の認定ではない。
+
+最終session17243: fmt check／Clippy／workspace460（app258／core61／runtime137／integration4）、app opt-in6件、Release終了0。SKIPなし、通常ignored13は別計上。Release SHA-256 `837a702b1b264081c11ce029d49f428dacc71a1420329e09efbe3fae61bb6757`。先行65ab0d2のCI34439302401は成功。次はoption UIと保存先・source／tabに対応した設定保持／取消／dirty guardとの整合を実装し、その後個別metadata書換へ進む。全UX台帳の未完事項を維持する。
+
 ### 動画の音声のみ書き出し（2026-09-10 13:58、E01 partial）
 
 動画のFile menu「Export audio only」、またはcustom bindingの`export_audio`を使う。既定keyは追加せず、視聴中／timeline内の両方で利用できる。保存dialogは`元stem-audio.wav`とWAV／FLAC／MP3／M4A／AAC／Ogg Opus／Opusを提示する。時間範囲・区間削除／伸縮・局所／master音量・速度を反映する一方、crop・回転・resizeなど映像編集は除く。packet copyではなく音声再encodeで、既存metadata copy方針を維持する。元動画の履歴・Save先・saved cursorを変更しないため、未保存guardは残る。毎回保存先を選び、通常の進捗／Cancel exportを共用する。

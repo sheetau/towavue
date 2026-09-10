@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-10 14:15 E01追加checkpoint: peak −1 dBFS二pass normalize／Mono・Stereo変換をtyped runtime optionsへ実装。編集後PCM・静音／微小音／過大float／6chKeepとsource・target保護、動画画素不変、解析／encodeのphase／cancelを確認。設定UIと保存option保持は次工程で、通常操作からはまだ有効にできない。metadata書換と全台帳を継続する。
+
 2026-09-10 13:58 E01追加checkpoint: 動画からの音声のみ別名保存をFile menu／custom binding／native7形式と既存非同期workerへ接続。best audio、時間／局所編集、再open・lossless PCM・独立timeline sample列とsource／既存target／動画Save状態・離脱guard保持を確認。normalization／channel変換・metadata書換と全台帳の未完事項を継続する。
 
 2026-09-10 13:34 V04追加checkpoint: 音声`,／.`を前後10msの微小Seekとして実装し、View／custom bindingへ単位を明示。停止・累積・先頭／実EOF・編集時間軸／rate・範囲外移動と履歴／source保持を実WASAPIで確認。動画は実フレーム、音声は時間単位でありPCM sample／圧縮frame境界移動ではない。次はE01の書き出しオプションへ進み、全台帳の未完事項を維持する。
@@ -60,7 +62,7 @@
 | V05 | 動画のzoom・resizeと既存crop／rotate／flip／fullscreen | timeline内のCtrl＋wheel／+・-／100%／Fit／Coverと右drag panを接続。SAR／physical倍率・cursor基点、viewportとUVのclip、modal／overlay／取消、timeline／fullscreen／tab保持と保存画素不変を回帰確認。実D3D11VAの復旧前後もCPU転送0。resize／resampleのcore値・4filterのsoftware保存・SAR1／合成順序・source照合、GPU4方式／符号付き中間／係数再利用／512 MiB予算と代表画素・速度を確認。Ctrl+R／Edit menuの寸法・比率・4filter／preview／Apply・Cancel UI、identity／snapshot／古いtoken拒否、focus／overlay・Undo/Redo・保存再読込と実D3D11VAも接続。通常window／混在DPI・全素材品質／持続性能は未完、単一device・preview/exportの対応を維持する |
 | A01 | 音声の自動次曲、repeat all／one／off、shuffleとbuttons | 主要経路実装。tab別のShell順auto-next、repeat off／all／one、shuffle一巡、前後操作、status buttons／View／palette／音声Ctrl+R。曲末にShell順を非同期再取得し、初回取得前のtab切替にも対応。実WASAPIでactive／背景の次曲・loop・dirty guard・古い通知拒否・失敗隔離を検証。通常releaseでbuttons／shortcut／自然EOFの次曲を確認。modeのrestart永続化、gapless、手動選曲の独立した履歴stackは提供しない |
 | A02 | 音声timeline常時、動画共通の選択編集・音量／速度操作 | 音声timelineはfullscreenでも常設、Tでは閉じずcompact seek／専用buttonなし。V03共通の時間選択・Delete／Keep・UIA端点を接続。共有rubber-band音量／Alt+drag stretchと数値操作も接続。共有範囲再生も接続し、repeat off/all/oneと背景停止を実WASAPIで確認。最終操作監査は引き続き未完 |
-| E01 | metadata書換、音声抽出、normalize、stereo／mono export | 部分実装。動画の音声のみ別名出力（7形式／時間・局所編集／元動画Save状態保持）と再openを確認。normalize・stereo／mono変換・個別metadata書換は未実装。通常window／全codec品質も未認定 |
+| E01 | metadata書換、音声抽出、normalize、stereo／mono export | 部分実装。動画の音声のみ別名出力は接続済み。normalize／Mono・Stereo変換のruntime二pass基盤・実PCM回帰は実装済みだが、設定UI／保存option保持は未接続。個別metadata書換、通常window／全codec品質も未完 |
 | M01 | logoの三方向menu gestureと最小限の状態表示 | 未完。クリック／keyboard menuとlogo描画は存在。閾値・角度・mouseup・取消を共有dispatchへ渡す |
 | G01 | menu／palette／custom prefix／media別grid／dirty guard／Shell順 | 実装あり。追加commandの全入口と重なり・keyboard／IME／UIA・Undo／保存を変更ごとに再検証する |
 

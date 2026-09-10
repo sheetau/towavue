@@ -16,15 +16,26 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[path = "export_rotation.rs"]
 mod rotation;
 
+#[path = "export_audio_options.rs"]
+mod audio_options;
+pub use audio_options::{AudioChannels, AudioExportOptions};
+
 #[cfg(test)]
 #[path = "export_audio_tests.rs"]
 mod audio_tests;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ExportOutput {
+    #[default]
     Media,
     /// A derivative with time/audio edits only; the request still describes the source media.
     AudioOnly,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ExportOptions {
+    pub output: ExportOutput,
+    pub audio: AudioExportOptions,
 }
 
 #[derive(Clone, Debug)]
@@ -43,6 +54,7 @@ pub struct ExportOutcome {
 
 #[derive(Debug)]
 pub enum ExportEvent {
+    AnalyzingAudio(Duration),
     Progress(Duration),
     Finished(Result<ExportOutcome, ExportError>),
 }
@@ -66,15 +78,37 @@ impl ExportJob {
         output: ExportOutput,
         notify: impl Fn(ExportEvent) + Send + Sync + 'static,
     ) -> Result<Self, ExportError> {
+        Self::start_with_options(
+            request,
+            ExportOptions {
+                output,
+                ..Default::default()
+            },
+            notify,
+        )
+    }
+
+    pub fn start_with_options(
+        request: ExportRequest,
+        options: ExportOptions,
+        notify: impl Fn(ExportEvent) + Send + Sync + 'static,
+    ) -> Result<Self, ExportError> {
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_cancelled = Arc::clone(&cancelled);
         let thread = thread::Builder::new()
             .name("towavue-export".into())
             .spawn(move || {
-                let result =
-                    export_output_cancellable(&request, output, &worker_cancelled, &|time| {
+                let result = export_options_cancellable(
+                    &request,
+                    options,
+                    &worker_cancelled,
+                    &|time| {
                         notify(ExportEvent::Progress(time));
-                    });
+                    },
+                    &|time| {
+                        notify(ExportEvent::AnalyzingAudio(time));
+                    },
+                );
                 notify(ExportEvent::Finished(result));
             })
             .map_err(ExportError::Start)?;
@@ -127,14 +161,40 @@ pub fn export_media_with_output(
     export_output_cancellable(request, output, &AtomicBool::new(false), &|_| {})
 }
 
+pub fn export_media_with_options(
+    request: &ExportRequest,
+    options: ExportOptions,
+) -> Result<ExportOutcome, ExportError> {
+    export_options_cancellable(request, options, &AtomicBool::new(false), &|_| {}, &|_| {})
+}
+
 fn export_output_cancellable(
     request: &ExportRequest,
     output: ExportOutput,
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
 ) -> Result<ExportOutcome, ExportError> {
-    if output == ExportOutput::Media {
-        return export_cancellable(request, cancelled, progress);
+    export_options_cancellable(
+        request,
+        ExportOptions {
+            output,
+            ..Default::default()
+        },
+        cancelled,
+        progress,
+        &|_| {},
+    )
+}
+
+fn export_options_cancellable(
+    request: &ExportRequest,
+    options: ExportOptions,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+    analyzing: &(impl Fn(Duration) + Sync),
+) -> Result<ExportOutcome, ExportError> {
+    if options.output == ExportOutput::Media {
+        return export_audio_cancellable(request, options.audio, cancelled, progress, analyzing);
     }
     check_cancelled(cancelled)?;
     if same_path(&request.source, &request.target) {
@@ -179,13 +239,29 @@ fn export_output_cancellable(
         | EditOperation::RotateVideo(_)
         | EditOperation::ResizeVideo(_) => false,
     });
-    export_cancellable(&audio, cancelled, progress)
+    export_audio_cancellable(&audio, options.audio, cancelled, progress, analyzing)
 }
 
 fn export_cancellable(
     request: &ExportRequest,
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
+) -> Result<ExportOutcome, ExportError> {
+    export_audio_cancellable(
+        request,
+        AudioExportOptions::default(),
+        cancelled,
+        progress,
+        &|_| {},
+    )
+}
+
+fn export_audio_cancellable(
+    request: &ExportRequest,
+    options: AudioExportOptions,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+    analyzing: &(impl Fn(Duration) + Sync),
 ) -> Result<ExportOutcome, ExportError> {
     if same_path(&request.source, &request.target) {
         return Err(ExportError::SameAsSource);
@@ -219,6 +295,10 @@ fn export_cancellable(
         return Err(ExportError::InvalidTrim);
     }
     check_cancelled(cancelled)?;
+    let source_stamp = options
+        .normalize_peak
+        .then(|| audio_options::SourceStamp::read(&request.source))
+        .transpose()?;
     let mut streams = ExportStreams::probe(request)?;
     if request.kind == MediaKind::Audio && streams.audio.is_none() {
         return Err(ExportError::Failed(
@@ -249,6 +329,7 @@ fn export_cancellable(
             return Err(ExportError::InvalidTimeline);
         }
     }
+    streams.audio_post_filters = options.filters(streams.audio_channels)?;
     let trimmed_kind = (request.kind == MediaKind::Audio
         || state.trim_start.is_some()
         || state.trim_end.is_some()
@@ -260,6 +341,22 @@ fn export_cancellable(
         ..request.clone()
     };
     let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;
+    if options.normalize_peak {
+        let gain = audio_options::analyze(
+            &staged_request,
+            &streams,
+            &staging,
+            &executable,
+            cancelled,
+            analyzing,
+        )?;
+        if let Some(stamp) = &source_stamp {
+            stamp.verify(&request.source)?;
+        }
+        streams
+            .audio_post_filters
+            .push(format!("volume={gain:.17e}:precision=double"));
+    }
     if request.hardware_encode && hardware_encode_supported_target(request) {
         let hardware = run_ffmpeg(
             &executable,
@@ -268,6 +365,9 @@ fn export_cancellable(
             progress,
         )?;
         if hardware.status.success() {
+            if let Some(stamp) = &source_stamp {
+                stamp.verify(&request.source)?;
+            }
             staging.publish(&request.target, cancelled, trimmed_kind)?;
             return Ok(ExportOutcome {
                 used_hardware_encoder: true,
@@ -287,6 +387,9 @@ fn export_cancellable(
         } else {
             message
         }));
+    }
+    if let Some(stamp) = &source_stamp {
+        stamp.verify(&request.source)?;
     }
     staging.publish(&request.target, cancelled, trimmed_kind)?;
     Ok(ExportOutcome {
@@ -484,10 +587,12 @@ fn run_ffmpeg(
     })
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct ExportStreams {
     video: Option<(usize, ffmpeg::Rational)>,
     audio: Option<(usize, ffmpeg::Rational)>,
+    audio_channels: Option<u16>,
+    audio_post_filters: Vec<String>,
     duration: Option<towavue_core::MediaTime>,
     timeline: Option<towavue_core::EditTimeline>,
 }
@@ -515,6 +620,7 @@ impl ExportStreams {
                     Ok::<_, ffmpeg::Error>((
                         stream.index(),
                         ffmpeg::Rational(1, decoder.rate() as i32),
+                        decoder.channels(),
                     ))
                 })
                 .transpose()?;
@@ -535,9 +641,11 @@ impl ExportStreams {
                 .map(towavue_core::MediaTime::from_nanoseconds);
             Ok(Self {
                 video,
-                audio,
+                audio: audio.map(|(index, time_base, _)| (index, time_base)),
+                audio_channels: audio.map(|(_, _, channels)| channels),
                 duration,
                 timeline: None,
+                audio_post_filters: Vec::new(),
             })
         };
         probe().map_err(|error| {
@@ -617,13 +725,15 @@ fn ffmpeg_arguments(
             if !video.is_empty() {
                 arguments.extend(["-vf".into(), video.join(",")]);
             }
-            let audio = audio_filters(&state, streams.audio.map(|(_, time_base)| time_base));
+            let mut audio = audio_filters(&state, streams.audio.map(|(_, time_base)| time_base));
+            audio.extend(streams.audio_post_filters.iter().cloned());
             if !audio.is_empty() {
                 arguments.extend(["-af".into(), audio.join(",")]);
             }
         }
         MediaKind::Audio => {
-            let audio = audio_filters(&state, streams.audio.map(|(_, time_base)| time_base));
+            let mut audio = audio_filters(&state, streams.audio.map(|(_, time_base)| time_base));
+            audio.extend(streams.audio_post_filters.iter().cloned());
             if !audio.is_empty() {
                 arguments.extend(["-af".into(), audio.join(",")]);
             }
@@ -706,11 +816,23 @@ fn timeline_filters(
     let outputs = format!(
         "{}{}",
         if video == 1 { "[joinedv]" } else { "" },
-        if audio == 1 { "[outa]" } else { "" }
+        if audio == 0 {
+            ""
+        } else if streams.audio_post_filters.is_empty() {
+            "[outa]"
+        } else {
+            "[joineda]"
+        }
     );
     filters.push(format!(
         "{inputs}concat=n={count}:v={video}:a={audio}{outputs}"
     ));
+    if audio == 1 && !streams.audio_post_filters.is_empty() {
+        filters.push(format!(
+            "[joineda]{}[outa]",
+            streams.audio_post_filters.join(",")
+        ));
+    }
     if video == 1 {
         let mut visual = visual_filters(&request.operations);
         if codec_arguments(request, hardware)

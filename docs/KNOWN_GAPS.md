@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10: normalize／channel変換はruntime基盤のみ実装済みで、設定UIは未接続。normalizeは編集・channel変換後のsample peak −1 dBFSへ一定gainを適用し、曲中の強弱を維持する。LUFS／true-peakではなく、lossy encode後のpeak保証ではない。完全なmute／silenceはそのまま保持する。Monoは0.5L+0.5R、Stereoはmono複製で、多channel→1／2channelは拒否する。Keepでの6channel normalizeは確認した。二pass間のsource変更はsize／mtimeで照合するが同じ情報への偽装やnamespace全体のatomicityは保証しない。PCM全長を保持しない解析だが、FFmpegのdecoder／filter作業領域を含むprocess全体の厳密なmemory上限ではない。option UI・全codec／通常window品質と個別metadata書換を残す。
+
 2026-09-10: 動画のFile menu「Export audio only」はWAV／FLAC／MP3／M4A／AAC／Ogg Opus／Opusへbest audioだけを再encodeする。時間・音量・速度・区間編集を反映し、映像編集は出力しない。元動画の保存先／saved cursorを変更せず、未保存guardは残る。圧縮packetの無変換抽出ではなく、lossy形式は品質が変わる。7形式再open・lossless PCM／編集sample列と既存file保護は確認したが、native dialogを実表示した形式切替／物理操作・全codec品質／metadata完全保持は未認定。normalize・channel変換・個別metadata書換は残る。
 
 2026-09-10: 音声`,／.`は前後10msの微小Seekで、移動時に停止する。codecのframe長やPCMのsample単位ではない。編集後時間軸、連続入力・先頭／実EOF・2倍速設定・区間削除／伸縮・範囲再生外への移動を無音WAVと実WASAPIで確認した。全codecのsample位相、低遅延audition・通常window物理入力の認定ではなく、既存のSeek精度／遅延の制約を引き継ぐ。
@@ -188,7 +190,7 @@ menuからpaletteを開いて取消すと、消えた項目へのfocus復帰でn
 | Repeat、shuffle | 音声のoff／all／one、重複のないshuffle順、前後操作と自然EOF、背景自動送りを実装。未保存／export中の別曲への自動移動は停止。gaplessと再起動後のmode保存は保証しない |
 | Video zoom、fullscreen、resize/resample | fullscreenはH1でhardware/software共通のaspect-fitと復帰を確認。zoomとresize/resampleは未実装 |
 | Video crop/rotate/flipのlive preview | H1で同じdevice内のUV表示を実装。回転後のSAR・selection、Undo/Redoとexport照合を検証。trim live範囲再生とは別 |
-| Audio-only export、normalize、stereo/mono変換 | 動画の音声のみ出力はFile menuから7形式へ接続済み。normalize／stereo・mono変換は未実装 |
+| Audio-only export、normalize、stereo/mono変換 | 音声のみ出力はFile menuから7形式へ接続済み。normalize／Mono・Stereo変換のruntime基盤は検証済み、設定UI／保存option保持は未接続 |
 | Track/codec/subtitle selection | 未実装 |
 | Exclusive WASAPI | 意図的にdefaultへ採用しない。将来optionを検討可能 |
 

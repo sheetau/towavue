@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 14:15 E01音声option基盤checkpoint: normalizeを編集・channel変換後のsample peak −1 dBFS共通gainと定義し、bounded診断の二pass音声解析／encodeを接続。Monoは左右平均、Stereoはmono複製、Keepは多channel共通gainも保持。静音／微小音／overfull float・6channel、無効／空音声・取消／source変更、独立編集PCMと動画／音声のみ保存の一致・映像不変を確認。解析phase表示は接続済み、optionを選ぶUI／保存設定保持は未接続で次工程。metadata書換と全UX台帳の未完事項も継続する。先行65ab0d2のCI34439302401は成功。
+
 2026-09-10 13:58 E01音声派生出力checkpoint: 動画のFile menu／custom commandから7音声形式の別名保存へ接続。best audio・時間／局所編集を反映し、映像編集を除外。元動画のSave先／saved cursor・未保存guardは保持する。7形式再open、WAV／FLAC PCM、trim／rate／gain・削除／伸縮後の独立sample列、取消／無音声／空出力／既存target保護とnative dialog設定を確認。次はnormalizeの定義とchannel変換の出力optionへ進む。metadata書換・通常window／全codec品質と他のUX台帳全残件は未完のまま維持する。前回b7c030bのCI34437967190はinstaller prerequisite fixtureの15秒timeoutで失敗し、ローンチ作業は再開しない。
 
 2026-09-10 13:34 V04音声微小移動checkpoint: 草案の音声frame相当操作を編集後時間軸の10ms Seekとして採用し、comma／period・View menu／custom bindingへ単位を明記。移動時停止、連続入力、先頭／実EOF・区間削除／伸縮／rate・範囲再生外への移動、履歴／source不変を無音WAV・実WASAPIで検証。動画の実PTS探索は変更しない。次はE01書き出しオプション（音声のみ／normalize／channel変換）の契約と既存保存導線を照合する。通常window・全形式精度／遅延と全台帳の残件は継続する。

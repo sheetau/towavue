@@ -313,6 +313,7 @@ struct ActiveExport {
     request: ExportRequest,
     output: ExportOutput,
     encoded: Duration,
+    analyzing_audio: bool,
     cancelling: bool,
     continuation: Option<GuardedAction>,
 }
@@ -2435,7 +2436,15 @@ where
             ui.label(if export.cancelling {
                 "Cancelling export…".to_owned()
             } else {
-                format!("Encoded {}", format_time(media_time(export.encoded)))
+                format!(
+                    "{} {}",
+                    if export.analyzing_audio {
+                        "Analyzing audio"
+                    } else {
+                        "Encoded"
+                    },
+                    format_time(media_time(export.encoded))
+                )
             });
             if ui
                 .add_enabled(!export.cancelling, egui::Button::new("Cancel export"))
@@ -5381,6 +5390,7 @@ where
                     request,
                     output,
                     encoded: Duration::ZERO,
+                    analyzing_audio: false,
                     cancelling: false,
                     continuation,
                 });
@@ -5399,8 +5409,15 @@ where
 
     fn handle_export_event(&mut self, event: ExportEvent) {
         match event {
+            ExportEvent::AnalyzingAudio(time) => {
+                if let Some(export) = &mut self.active_export {
+                    export.analyzing_audio = true;
+                    export.encoded = time;
+                }
+            }
             ExportEvent::Progress(time) => {
                 if let Some(export) = &mut self.active_export {
+                    export.analyzing_audio = false;
                     export.encoded = time;
                 }
             }
@@ -10429,7 +10446,7 @@ mod tests {
         )));
         let path = app.path.clone().expect("fixture path");
         let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
-        for mode in 0..5 {
+        for mode in 0..7 {
             app.pending_guard = matches!(mode, 0 | 1 | 4).then_some(GuardedAction::Exit);
             app.export_error = (mode == 1).then(|| "Long export error with details. ".repeat(200));
             app.active_export = (mode >= 2).then(|| {
@@ -10447,10 +10464,19 @@ mod tests {
                     tab,
                     request,
                     encoded: Duration::ZERO,
+                    analyzing_audio: false,
                     cancelling: false,
                     continuation: (mode == 3).then_some(GuardedAction::Exit),
                 }
             });
+            if mode >= 5 {
+                app.handle_export_event(ExportEvent::AnalyzingAudio(Duration::from_secs(1)));
+                assert!(app.active_export.as_ref().expect("export").analyzing_audio);
+                if mode == 6 {
+                    app.handle_export_event(ExportEvent::Progress(Duration::from_secs(2)));
+                    assert!(!app.active_export.as_ref().expect("export").analyzing_audio);
+                }
+            }
             for size in [
                 egui::vec2(960.0, 576.0),
                 egui::vec2(480.0, 300.0),
@@ -10473,6 +10499,8 @@ mod tests {
                     1 => &["Export failed", "OK"],
                     2 => &["Cancel export"],
                     3 => &["Exporting before continuing", "Cancel export"],
+                    5 => &["Analyzing audio 00:01", "Cancel export"],
+                    6 => &["Encoded 00:02", "Cancel export"],
                     4 => &[
                         "Unsaved edits",
                         "Export and continue",
@@ -10497,7 +10525,7 @@ mod tests {
                     .iter()
                     .filter(|(_, node)| node.role() == egui::accesskit::Role::Dialog)
                     .collect();
-                if mode == 2 {
+                if matches!(mode, 2 | 5 | 6) {
                     assert!(dialogs.is_empty(), "background export is not modal");
                 } else {
                     assert_eq!(dialogs.len(), 1, "one named active modal");

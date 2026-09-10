@@ -41,7 +41,8 @@ pub use dialog::{
     pick_path, show_prompt,
 };
 pub use export::{
-    ExportError, ExportEvent, ExportJob, ExportOutcome, ExportOutput, ExportRequest, export_media,
+    AudioChannels, AudioExportOptions, ExportError, ExportEvent, ExportJob, ExportOptions,
+    ExportOutcome, ExportOutput, ExportRequest, export_media, export_media_with_options,
     export_media_with_output,
 };
 pub use fonts::japanese_ui_font;

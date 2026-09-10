@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## E01: 音声出力optionの採用契約（2026-09-10、runtime基盤から接続）
+
+normalizeは任意の「sample peak −1 dBFS」一括補正として採用する。既定はOff、LUFS／RMS／true-peak／動的音量追従ではない。trim・区間削除／伸縮・局所／master gain・rateとchannel変換を適用した音声全体を解析し、全channel共通の一定gainを最後に適用する。無音はgain1で保持する。これはencode前のsample peak目標で、lossy codecの再構成peakや知覚音量の一致は保証しない。master gainを変えてもnormalizeにより全体のgainが打ち消されることがあるが、部分的な強弱は保持する。
+
+channelはKeep（既定）／Mono／Stereo。stereo→monoは0.5L+0.5R、mono→stereoは同一sampleの左右複製、既に目的のchannel数なら恒等変換とする。mono／stereoへの変換元は1／2channelに限定し、多channelを黙って切り捨てたり別のdownmix規則を追加しない。Keepでのnormalizeは多channelも共通gainで保持する。無音声素材・画像への非既定音声optionは既存target変更前に拒否する。
+
+通常動画／音声保存とAudioOnlyへ同じtyped optionsを渡す。runtime workerは固定FFmpegのdouble sample形式・最終音声filterの同一列を二回使う。第一passは音声だけをnull出力へ流してastatsの全体peak／sample数／NaN・Infを取得し、第二passでgainを追加して通常encodeする。全PCM・全長中間音声をmemory／diskへ保持せず、既存16 KiB診断tail・staged filter file・取消／publish保護を共用する。空音声／不正・欠落した解析値は公開しない。解析とencodeの進捗を区別し、hardware失敗時のsoftware fallbackにも同じgain・channel filterを渡す。UI／保存先に紐づくoption保持は後続sliceで接続し、未接続を機能完了とは扱わない。sourceが二つのpass間に外部変更される場合の整合性は開始／解析後／publish前のfile情報照合で拒否し、同userによる同一情報への偽装まで保証するものではない。
+
 ## E01: 音声のみの派生書き出し（2026-09-10）
 
 動画のFile menu「Export audio only」から別名の音声を作る。既定は`元のstem-audio.wav`、WAV／FLAC／MP3／M4A／AAC／Ogg Opus／Opusを対象とする。元動画のSave先・saved cursor・編集履歴・再生状態は変更せず、離脱guardのSaveにも代用しない。再実行は毎回保存先を選び、既存の非同期dialog／export worker・進捗・キャンセル・staging／publish保護を共用する。dialog中にsource／tabが変わった場合は開始しない。

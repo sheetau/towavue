@@ -5,7 +5,7 @@ use towavue_core::{
     MediaTime, PixelCrop, ResampleFilter, TimeRange, TimelineEdit, VideoResize, VideoRotation,
 };
 
-fn root(label: &str) -> PathBuf {
+pub(super) fn root(label: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock")
@@ -15,7 +15,7 @@ fn root(label: &str) -> PathBuf {
     root
 }
 
-fn ffmpeg(args: &[&str], target: &Path) {
+pub(super) fn ffmpeg(args: &[&str], target: &Path) {
     let output = Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("fixed FFmpeg"))
         .creation_flags(CREATE_NO_WINDOW)
         .args(["-v", "error", "-nostdin", "-y"])
@@ -30,7 +30,7 @@ fn ffmpeg(args: &[&str], target: &Path) {
     );
 }
 
-fn fixture(path: &Path) {
+pub(super) fn fixture(path: &Path) {
     ffmpeg(
         &[
             "-f",
@@ -66,7 +66,7 @@ fn fixture(path: &Path) {
     );
 }
 
-fn pcm(path: &Path) -> Vec<u8> {
+pub(super) fn pcm(path: &Path) -> Vec<u8> {
     let output = Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("fixed FFmpeg"))
         .creation_flags(CREATE_NO_WINDOW)
         .args(["-v", "error", "-i"])

@@ -1,12 +1,22 @@
 # towavue アーキテクチャ
 
+## U08/U07: 共有deviceの復旧transactionと停止frame（2026-09-10）
+
+host管理下のappは、active／retained decoder・presentationからのdevice lossを復旧要求として記録する。hostが各windowの時計位置／再生状態を先に取得し、対象のactive／retained sessionをすべて停止・旧surfaceを解放してから、新deviceと全対象のsurfaceをstageする。全部のsurface作成が成功した時だけappへcommitしてsession／UI textureを復帰させる。最初または途中の作成失敗ではstageしたsurfaceを解放し、全対象を編集／位置保持のnative Retry／Cancel待ちにする。session固有の再開失敗はそのwindowの既存診断に従い、共有deviceを別deviceへ分岐させない。
+
+Retryだけの場合は要求元を対象とし、他windowに健全なdeviceがあればそれを使う。Cancel済み／まだ選択待ちのrendererなしwindowを自動復旧しない。健全とみなしたdeviceの除去が確認された時は、そのdeviceを使うwindowも含めて新deviceへ復旧する。旧stream generationの通知は既存照合で拒否し、失敗後のrendererなしwindowからの遅延lossも自動Retryにしない。通常app entryへ接続済みだが、同一processでの新window要求・session通知先変更・tab state移送／結合は引き続き未接続。
+
+停止時計は表示frameのPTSと一致するとは限らない。runtimeの`suspend_for_graphics_recovery`は呼出元の現在時計位置とframe PTSだけを保持し、旧deviceのtextureを残さない。同じ位置へのpaused復旧ではaudio／transport targetを保ち、videoだけ元frame PTSから再開する。非active動画では再表示までこのtimestamp対を保持する。意図的なSeek・別target・再生状態変更では古いframeを流用しない。appとretained tabの復旧時計は、作成とpauseの間のns差を足さず正確な位置へanchorする。
+
+生成H.264の非表示2window／各retained tabで、loss通知とpresentation errorを注入し、再生中／停止中の復帰、相手windowのrendererへのhardware cross-draw、第一／第二surface作成失敗、Cancelと個別Retry、遅延通知を検証する。WARP/software試験は時計がframeより200ns後のvisible／hidden復旧で元PTSとRGBA一致、transport target保持、意図的Seek／別targetでの無効化を確認する。実TDR・物理device取り外し、複数windowの混在画像／音声・WASAPI endpoint／HDR・全codec・通常可視window／混在DPIを検証済みとはしない。
+
 ## U08: window host・通知と待機の所有権（2026-09-10）
 
 通常のevent-loop entryを`WindowHost`とし、window別の`Application`を保持する。worker通知を再利用しない`WindowKey`と`AppEvent`の組で包み、window-localなmedia instance／playback generationが一致しても別windowへ配送しない。close承認済み／削除済み／未知のkeyは無視する。AccessKit通知はnative `WindowId`で選び、従来のapp内window照合も維持する。raw motionは各appの既存focus判定を通し、非focus側の古いdragも解除できるようにする。
 
 各appの`schedule`は希望する`ControlFlow`を返し、globalな待機／終了を変更しない。hostはPollを優先し、WaitUntilの最小値を採用する。既存の保存／離脱guardが`exit_requested`を確定したwindowだけを除去する。HWNDを保持したまま描画surfaceを解放し、最後のwindowがなくなった場合だけPoll＋event-loop exitを行う。別windowが残る間は終了しない。
 
-追加windowの内部初期化は既存rendererのdeviceを引き継ぐが、通常の分離／filmstrip起動はまだ別processのままとする。移動するsessionの通知宛先変更、同一event loopでの新window要求と成功応答、編集／UI texture／再生state移送、全windowのdevice復旧を揃えるまで入口を切り替えない。WindowKeyの固定配送だけでは移送後のsession通知を扱えない。
+追加windowの内部初期化は既存rendererのdeviceを引き継ぐが、通常の分離／filmstrip起動はまだ別processのままとする。移動するsessionの通知宛先変更、同一event loopでの新window要求と成功応答、編集／UI texture／再生state移送を揃えるまで入口を切り替えない。共有deviceの復旧は上節のtransactionで扱う。WindowKeyの固定配送だけでは移送後のsession通知を扱えない。
 
 headlessの通知／close guard／deadline集約に加え、実worker・AccessKit adapter付き非表示2windowでD3D11VA動画を確認する。window-local IDを意図的に一致させ、合成UIA通知の宛先・未保存取消／破棄・survivorのframe／generation・replacement keyと遅延通知破棄・最後のwindow終了を検証する。非表示HWNDでは通常のpaint通知待ちで表示frameが進まなかったため、試験だけが所有windowへのRedrawRequestedを明示配送する。[winitのWindows描画要求](https://docs.rs/winit/0.30.13/winit/window/struct.Window.html#method.request_redraw)はWM_PAINTに対応する。通常の可視window／物理入力／混在DPIの証明とは区別する。
 
@@ -16,7 +26,7 @@ headlessの通知／close guard／deadline集約に加え、実worker・AccessKi
 
 共有するrendererは同じevent-loop threadで逐次描画し、decode workerとの既存multithread-protected immediate contextを維持する。各rendererはswap chain／UI renderer／動画処理resourceを別に所有する。片方のsurface解放でcontext stateを解除しても、残るrendererは次の描画で自分のstateをbindする。egui context間のTextureHandle移送を許可するものではない。
 
-音声なし生成H.264の実D3D11VA sessionでCOM device／context同一性とswap chain独立性、3サイズの交互動画／UI描画の画素一致、surface破棄／再作成後の継続と次frame進行を確認する。テストだけのstaging readbackは再生のCPU転送0とは区別する。この基盤はwindow host・通知routing・編集／再生state移送・全window一括device復旧をまだ実装しない。通常分離をこの経路へ切り替えるのはそれらの所有権と失敗時の復旧を揃えてからとする。
+音声なし生成H.264の実D3D11VA sessionでCOM device／context同一性とswap chain独立性、3サイズの交互動画／UI描画の画素一致、surface破棄／再作成後の継続と次frame進行を確認する。テストだけのstaging readbackは再生のCPU転送0とは区別する。runtimeの描画基盤はwindow host・通知routing・編集／再生state移送の所有者ではない。hostと共有device復旧は上節で扱い、通常分離への接続にはsession通知とstate移送の所有権をさらに揃える。
 
 ## U08: filmstripからの新window要求（2026-09-10）
 

@@ -137,6 +137,7 @@ pub struct PlaybackSession {
     current_video_unpresented: bool,
     video_refresh_pending: bool,
     retained_video_position: Option<MediaTime>,
+    recovery_frame: Option<(MediaTime, MediaTime)>,
     audio: Option<AudioOutput>,
     video_thread: Option<JoinHandle<Option<decode::ParallelInput>>>,
     video_input: Option<decode::ParallelInput>,
@@ -186,6 +187,7 @@ impl PlaybackSession {
             current_video_unpresented: false,
             video_refresh_pending: true,
             retained_video_position: None,
+            recovery_frame: None,
             audio: None,
             video_thread: None,
             video_input: None,
@@ -339,6 +341,9 @@ impl PlaybackSession {
         graphics_device: GraphicsDevice,
         target: MediaTime,
     ) -> Result<PlaybackGeneration, PlaybackError> {
+        let recovery_frame = self
+            .recovery_frame
+            .filter(|(position, _)| self.paused && *position == target);
         self.stop_pipeline();
         self.adapter_luid = graphics_device.adapter_luid();
         self.graphics_device = graphics_device;
@@ -353,13 +358,26 @@ impl PlaybackSession {
             })
             .max(MediaTime::ZERO);
         self.metrics.reset();
+        self.recovery_frame = recovery_frame.filter(|(position, _)| *position == self.target);
         self.start_pipeline()?;
         Ok(self.generation)
     }
 
     /// Quiesce the old device before its window surface is released.
-    pub fn suspend_for_graphics_recovery(&mut self) {
+    /// `position` is the current transport clock, not a new seek target.
+    pub fn suspend_for_graphics_recovery(&mut self, position: MediaTime) {
+        // Keep only timestamps, never a texture from a removed device. A paused
+        // clock can lie between frames; seeking at the clock would advance a frame.
+        let recovery_frame = self
+            .recovery_frame
+            .filter(|(saved, _)| *saved == position)
+            .or_else(|| {
+                self.paused
+                    .then(|| self.current_video_time().map(|frame| (position, frame)))
+                    .flatten()
+            });
         self.stop_pipeline();
+        self.recovery_frame = recovery_frame;
     }
 
     fn start_pipeline(&mut self) -> Result<(), PlaybackError> {
@@ -407,8 +425,9 @@ impl PlaybackSession {
         if self.audio.is_none() {
             self.completion.finish(DecodeCompletion::AUDIO);
         }
+        let video_target = self.recovery_frame.map_or(self.target, |(_, frame)| frame);
         if self.video_visible
-            && let Err(error) = self.start_video(self.target)
+            && let Err(error) = self.start_video(video_target)
         {
             self.stop_pipeline();
             return Err(error);
@@ -555,10 +574,12 @@ impl PlaybackSession {
             })?;
         self.video_rx = Some(video_rx);
         self.video_thread = Some(video_thread);
+        self.recovery_frame = None;
         Ok(())
     }
 
     fn stop_pipeline(&mut self) {
+        self.recovery_frame = None;
         self.decode_cancel.store(true, Ordering::Relaxed);
         // Release the bounded audio receiver before joining its producer.
         self.audio.take();
@@ -610,7 +631,12 @@ impl PlaybackSession {
                 self.retained_video_position = None;
             }
         }
-        let target = if visible && self.paused && self.retained_video_position == Some(position) {
+        let target = if visible
+            && self.paused
+            && let Some((_, frame)) = self.recovery_frame.filter(|(saved, _)| *saved == position)
+        {
+            frame
+        } else if visible && self.paused && self.retained_video_position == Some(position) {
             // Preserve the exact paused frame, even when its timestamp differs from the clock.
             self.current_video
                 .as_ref()
@@ -782,6 +808,9 @@ impl PlaybackSession {
             audio.set_paused(paused)?;
         }
         self.paused = paused;
+        if !paused {
+            self.recovery_frame = None;
+        }
         Ok(())
     }
 
@@ -1202,6 +1231,100 @@ mod tests {
         assert!(session.video_geometry().is_none() && session.video_refresh_pending());
         drop(session);
         std::fs::remove_file(path).expect("remove owned video-only fixture");
+    }
+
+    #[test]
+    fn paused_graphics_recovery_preserves_frame_and_distinct_transport_position() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("towavue-paused-recovery-{unique}.mp4"));
+        let output = std::process::Command::new(
+            crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"),
+        )
+        .args(["-v", "error", "-i"])
+        .arg(fixture())
+        .args(["-map", "0:v:0", "-c", "copy", "-an"])
+        .arg(&path)
+        .output()
+        .expect("silent fixture");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for visible in [true, false] {
+            let mut session = PlaybackSession::open(
+                &path,
+                GraphicsDevice::warp_for_test().expect("WARP"),
+                0.0,
+                1.0,
+                PlaybackRange::default(),
+                |_| {},
+            )
+            .expect("software session");
+            session.set_paused(true).expect("pause");
+            session
+                .seek(MediaTime::from_nanoseconds(300_000_000))
+                .expect("seek");
+            let frame_time = wait_for_video(&mut session);
+            session.advance_pending();
+            let Some(PresentationFrame::Software(frame)) = session.current_video.as_ref() else {
+                panic!("WARP uses software decode");
+            };
+            let expected = frame.rgba.clone();
+            let position = frame_time.saturating_add(Duration::from_nanos(200));
+            if !visible {
+                session
+                    .set_video_visible(false, position)
+                    .expect("retain hidden frame");
+            }
+            session.suspend_for_graphics_recovery(position);
+            assert!(session.current_video.is_none());
+            session.suspend_for_graphics_recovery(position);
+            session
+                .replace_graphics_device(
+                    GraphicsDevice::warp_for_test().expect("replacement WARP"),
+                    position,
+                )
+                .expect("replace device");
+            assert_eq!(session.target(), position);
+            if !visible {
+                assert!(session.video_thread.is_none());
+                session
+                    .set_video_visible(true, position)
+                    .expect("return hidden tab");
+            }
+            assert_eq!(wait_for_video(&mut session), frame_time);
+            session.advance_pending();
+            let Some(PresentationFrame::Software(frame)) = session.current_video.as_ref() else {
+                panic!("restored software frame");
+            };
+            assert_eq!(frame.rgba, expected);
+            assert!(session.recovery_frame.is_none());
+            // An intentional new seek must not reuse the old recovery frame.
+            session.seek(position).expect("intentional seek");
+            assert!(wait_for_video(&mut session) > frame_time);
+            session.advance_pending();
+            session.suspend_for_graphics_recovery(position);
+            let different = MediaTime::from_nanoseconds(1_000_000_000);
+            session
+                .replace_graphics_device(
+                    GraphicsDevice::warp_for_test().expect("third WARP"),
+                    different,
+                )
+                .expect("different recovery target");
+            assert!(wait_for_video(&mut session) >= different);
+            session.advance_pending();
+            session.suspend_for_graphics_recovery(different);
+            assert!(session.recovery_frame.is_some());
+            session
+                .set_paused(false)
+                .expect("resume invalidates paused recovery frame");
+            assert!(session.recovery_frame.is_none());
+        }
+        std::fs::remove_file(path).expect("remove owned recovery fixture");
     }
 
     #[test]

@@ -317,6 +317,7 @@ fn native_host_routes_workers_and_keeps_other_windows_alive_after_close() {
                     self.host.windows[&first].generation,
                     self.host.windows[&second].generation
                 );
+                graphics_tests::exercise(&mut self.host);
                 let first_id = self.host.windows[&first]
                     .window
                     .as_ref()

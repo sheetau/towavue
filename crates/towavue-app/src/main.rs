@@ -122,6 +122,12 @@ struct PlaybackClock {
 }
 
 impl PlaybackClock {
+    fn paused(media_anchor: MediaTime, rate: f32) -> Self {
+        let mut clock = Self::new(media_anchor, rate);
+        clock.paused_at = Some(clock.wall_anchor);
+        clock
+    }
+
     fn new(media_anchor: MediaTime, rate: f32) -> Self {
         Self {
             media_anchor,
@@ -646,6 +652,8 @@ struct Application<N> {
     initial_path: Option<PathBuf>,
     notify: Arc<N>,
     event_loop_proxy: Option<EventLoopProxy<window_host::Event>>,
+    hosted_graphics: bool,
+    graphics_recovery_request: Option<window_host::GraphicsRecoveryRequest>,
     window: Option<Arc<Window>>,
     native_caption: Option<NativeCaption>,
     fullscreen: bool,
@@ -831,6 +839,8 @@ where
             initial_path,
             notify,
             event_loop_proxy: None,
+            hosted_graphics: false,
+            graphics_recovery_request: None,
             window: None,
             native_caption: None,
             fullscreen: false,
@@ -6496,7 +6506,7 @@ where
                 position, state, ..
             } if response == PromptResponse::Retry => {
                 self.state = state;
-                self.recover_graphics_device(position);
+                self.request_graphics_recovery(position, true);
             }
             FallbackPrompt::Recovery { .. } => {}
             FallbackPrompt::Guard => self.resolve_guard(match response {
@@ -6560,15 +6570,43 @@ where
     }
 
     fn recover_graphics_device(&mut self, position: MediaTime) {
+        self.request_graphics_recovery(position, false);
+    }
+
+    fn request_graphics_recovery(&mut self, position: MediaTime, retry: bool) {
+        if self.hosted_graphics {
+            // A failed transaction already stopped this window's old device. Late
+            // decoder loss events must not retry it without the user's Retry choice.
+            if retry || self.renderer.is_some() {
+                self.graphics_recovery_request.get_or_insert(
+                    window_host::GraphicsRecoveryRequest {
+                        position,
+                        state: self.state,
+                        retry,
+                    },
+                );
+            }
+            return;
+        }
+        let state = self.state;
+        self.prepare_graphics_recovery();
+        match self.create_graphics_surface(None) {
+            Ok(renderer) => self.restore_graphics_surface(renderer, position, state),
+            Err(error) => self.fail_graphics_recovery(position, state, error),
+        }
+    }
+
+    fn prepare_graphics_recovery(&mut self) {
+        let position = self.current_position();
         self.graphics_epoch = self.graphics_epoch.wrapping_add(1);
         self.tab_preview.clear();
         self.clear_image_previews();
         self.image_texture_cache.entries.clear();
-        let state = self.state;
+        self.graphics_recovery_request = None;
         self.queued_recovery = None;
         self.pending_seek_started = None;
         if let Some(session) = &mut self.session {
-            session.suspend_for_graphics_recovery();
+            session.suspend_for_graphics_recovery(position);
         }
         for saved in self.retained_playback.values_mut() {
             saved.suspend_for_recovery();
@@ -6576,34 +6614,40 @@ where
         if let Some(renderer) = self.renderer.take() {
             renderer.release_surface();
         }
-        let Some(window) = &self.window else {
-            self.fail("window was unavailable during graphics recovery".to_owned());
-            return;
-        };
-        let mut renderer = match self.native_caption.as_ref().map_or_else(
-            || FrameRenderer::new(window),
-            FrameRenderer::with_native_caption,
-        ) {
-            Ok(renderer) => renderer,
-            Err(error) => {
-                self.fail_graphics_recovery(
-                    position,
-                    state,
-                    format!("D3D11 device recovery failed: {error}"),
-                );
-                return;
+    }
+
+    fn create_graphics_surface(
+        &self,
+        device: Option<towavue_runtime_windows::GraphicsDevice>,
+    ) -> Result<FrameRenderer, String> {
+        let window = self
+            .window
+            .as_ref()
+            .ok_or_else(|| "window was unavailable during graphics recovery".to_owned())?;
+        let mut renderer = match (self.native_caption.as_ref(), device) {
+            (Some(caption), Some(device)) => {
+                FrameRenderer::with_native_caption_on_device(caption, device)
             }
-        };
+            (Some(caption), None) => FrameRenderer::with_native_caption(caption),
+            (None, Some(device)) => FrameRenderer::with_graphics_device(window, device),
+            (None, None) => FrameRenderer::new(window),
+        }
+        .map_err(|error| format!("D3D11 device recovery failed: {error}"))?;
         let size = window.inner_size();
         if let Err(error) = renderer.resize_surface(size.width, size.height) {
             renderer.release_surface();
-            self.fail_graphics_recovery(
-                position,
-                state,
-                format!("D3D11 surface recovery failed: {error}"),
-            );
-            return;
+            return Err(format!("D3D11 surface recovery failed: {error}"));
         }
+        Ok(renderer)
+    }
+
+    fn restore_graphics_surface(
+        &mut self,
+        renderer: FrameRenderer,
+        position: MediaTime,
+        state: PlaybackState,
+    ) {
+        self.state = state;
         let graphics_device = renderer.graphics_device();
         for saved in self.retained_playback.values_mut() {
             saved.recover(graphics_device.clone(), self.graphics_epoch);
@@ -6626,17 +6670,18 @@ where
             return;
         };
         if self.state == PlaybackState::Ended || !session.range().contains(position) {
-            if let Err(error) = session.set_paused(true) {
-                self.fail(error.to_string());
-                return;
-            }
             self.state = PlaybackState::Paused;
+        }
+        if let Err(error) = session.set_paused(self.state != PlaybackState::Playing) {
+            self.fail(error.to_string());
+            return;
         }
         match session.replace_graphics_device(graphics_device, position) {
             Ok(generation) => {
                 self.generation = generation;
                 self.pending_time = None;
-                self.clock = None;
+                self.clock = (self.state != PlaybackState::Playing)
+                    .then(|| PlaybackClock::paused(session.target(), session.rate()));
                 self.decode_finished = false;
                 self.audio_drained = !session.has_audio();
                 self.metrics_recorded = false;

@@ -4,9 +4,20 @@ use super::*;
 #[path = "window_host_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "window_graphics_tests.rs"]
+mod graphics_tests;
+
 // Never reused, even after the native HWND or a window-local session ID is reused.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct WindowKey(u64);
+
+#[derive(Clone, Copy)]
+pub(crate) struct GraphicsRecoveryRequest {
+    pub position: MediaTime,
+    pub state: PlaybackState,
+    pub retry: bool,
+}
 
 pub(crate) enum Event {
     Window(WindowKey, AppEvent),
@@ -58,6 +69,7 @@ impl WindowHost {
         });
         let mut app = Application::new(initial_path, notify)?;
         app.event_loop_proxy = self.proxy.clone();
+        app.hosted_graphics = true;
         self.windows.insert(key, app);
         Ok(key)
     }
@@ -103,14 +115,117 @@ impl WindowHost {
                 }
             }
         }
+        self.recover_pending_graphics();
+    }
+
+    fn recover_pending_graphics(&mut self) {
+        self.recover_pending_graphics_with(|app, device| app.create_graphics_surface(device));
+    }
+
+    fn recover_pending_graphics_with(
+        &mut self,
+        mut create: impl FnMut(
+            &WindowApplication,
+            Option<towavue_runtime_windows::GraphicsDevice>,
+        ) -> Result<FrameRenderer, String>,
+    ) {
+        let requests: BTreeMap<_, _> = self
+            .windows
+            .iter_mut()
+            .filter_map(|(key, app)| {
+                app.graphics_recovery_request
+                    .take()
+                    .map(|request| (*key, request))
+            })
+            .collect();
+        if requests.is_empty() {
+            return;
+        }
+        let lost = requests.values().any(|request| !request.retry)
+            || self
+                .windows
+                .values()
+                .filter_map(|app| app.renderer.as_ref())
+                .any(|renderer| renderer.device_removed_reason().is_some());
+        let targets: BTreeMap<_, _> = self
+            .windows
+            .iter()
+            .filter(|(key, app)| {
+                !app.exit_requested
+                    && app.window.is_some()
+                    && (requests.contains_key(key) || (lost && app.renderer.is_some()))
+            })
+            .map(|(key, app)| {
+                (
+                    *key,
+                    requests
+                        .get(key)
+                        .copied()
+                        .unwrap_or(GraphicsRecoveryRequest {
+                            position: app.current_position(),
+                            state: app.state,
+                            retry: false,
+                        }),
+                )
+            })
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+        let mut device = if lost {
+            None
+        } else {
+            self.windows
+                .iter()
+                .filter(|(key, app)| !targets.contains_key(key) && !app.exit_requested)
+                .find_map(|(_, app)| app.renderer.as_ref().map(FrameRenderer::graphics_device))
+        };
+        // Quiesce every affected session before allocating any replacement surface.
+        for key in targets.keys() {
+            self.windows
+                .get_mut(key)
+                .expect("target window")
+                .prepare_graphics_recovery();
+        }
+        let mut surfaces = BTreeMap::new();
+        for key in targets.keys() {
+            match create(&self.windows[key], device.clone()) {
+                Ok(renderer) => {
+                    device = Some(renderer.graphics_device());
+                    surfaces.insert(*key, renderer);
+                }
+                Err(error) => {
+                    // Never resume one window against a partially created device group.
+                    for renderer in surfaces.into_values() {
+                        renderer.release_surface();
+                    }
+                    for (key, point) in targets {
+                        self.windows
+                            .get_mut(&key)
+                            .expect("target window")
+                            .fail_graphics_recovery(point.position, point.state, error.clone());
+                    }
+                    return;
+                }
+            }
+        }
+        for (key, renderer) in surfaces {
+            let point = targets[&key];
+            self.windows
+                .get_mut(&key)
+                .expect("target window")
+                .restore_graphics_surface(renderer, point.position, point.state);
+        }
     }
 
     fn prepare_wait(&mut self) -> ControlFlow {
+        self.recover_pending_graphics();
         self.remove_closed();
         let mut wait = ControlFlow::Wait;
         for app in self.windows.values_mut() {
             wait = earliest_wait(wait, app.schedule());
         }
+        self.recover_pending_graphics();
         self.remove_closed();
         if self.windows.is_empty() {
             ControlFlow::Poll
@@ -161,6 +276,7 @@ impl ApplicationHandler<Event> for WindowHost {
         if let Some(app) = self.native_window(window_id) {
             app.window_event(event_loop, window_id, event);
         }
+        self.recover_pending_graphics();
     }
 
     fn device_event(
@@ -174,6 +290,7 @@ impl ApplicationHandler<Event> for WindowHost {
         for app in self.windows.values_mut().filter(|app| !app.exit_requested) {
             app.device_event(event_loop, id, event.clone());
         }
+        self.recover_pending_graphics();
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {

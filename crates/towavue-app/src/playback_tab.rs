@@ -112,8 +112,11 @@ impl RetainedPlaybackTab {
 
     fn anchor(&mut self, position: MediaTime, paused: bool) {
         let rate = self.session.as_ref().map_or(1.0, PlaybackSession::rate);
-        let mut clock = PlaybackClock::new(position, rate);
-        clock.set_paused(paused);
+        let clock = if paused {
+            PlaybackClock::paused(position, rate)
+        } else {
+            PlaybackClock::new(position, rate)
+        };
         self.clock = Some(clock);
     }
 
@@ -222,7 +225,9 @@ impl RetainedPlaybackTab {
             self.anchor(position, true);
         }
         if let Some(session) = &mut self.session {
-            session.suspend_for_graphics_recovery();
+            session.suspend_for_graphics_recovery(
+                self.recovery_position.expect("saved recovery position"),
+            );
         }
         self.waveform = None;
     }

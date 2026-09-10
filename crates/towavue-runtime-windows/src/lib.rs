@@ -55,7 +55,7 @@ pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_clipboard::{ImageCopyJob, ImageCopyRequest};
 pub use image_edits::render_image_edits;
-pub use image_loader::{ImageLoader, LoadedImages};
+pub use image_loader::{ImageLoader, LoadedImagePreview, LoadedImages};
 pub use input::configure_mouse_input;
 pub use latest_task::LatestTask;
 pub use orientation::VideoOrientation;

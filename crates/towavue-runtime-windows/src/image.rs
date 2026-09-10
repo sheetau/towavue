@@ -98,6 +98,17 @@ pub(crate) fn decode_image_cancellable(
     byte_limit: usize,
     is_current: &(impl Fn() -> bool + ?Sized),
 ) -> Result<DecodedImage, ImageDecodeError> {
+    decode_image_with_preview(path, byte_limit, is_current, &mut |_, _, _| {})
+}
+
+pub(crate) type ImagePreviewCallback<'a> = dyn FnMut(u32, u32, &[u8]) + 'a;
+
+pub(crate) fn decode_image_with_preview(
+    path: &Path,
+    byte_limit: usize,
+    is_current: &(impl Fn() -> bool + ?Sized),
+    preview: &mut ImagePreviewCallback<'_>,
+) -> Result<DecodedImage, ImageDecodeError> {
     check_current(is_current)?;
     let reader = image::ImageReader::open(path)
         .map_err(ImageDecodeError::Open)?
@@ -105,16 +116,16 @@ pub(crate) fn decode_image_cancellable(
         .map_err(ImageDecodeError::Open)?;
     let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
     let frames = match format {
-        ImageFormat::Avif => ffmpeg_frames(path, byte_limit, is_current)?,
+        ImageFormat::Avif => ffmpeg_frames(path, byte_limit, is_current, preview)?,
         ImageFormat::Gif => {
             let mut decoder = GifDecoder::new(open(path)?)?;
             decoder.set_limits(image::Limits::default())?;
-            animated_frames(decoder, byte_limit, is_current)?
+            animated_frames(decoder, byte_limit, is_current, preview)?
         }
         ImageFormat::WebP => {
             let decoder = WebPDecoder::new(open(path)?)?;
             if decoder.has_animation() {
-                animated_frames(decoder, byte_limit, is_current)?
+                animated_frames(decoder, byte_limit, is_current, preview)?
             } else {
                 vec![static_frame(reader, byte_limit)?]
             }
@@ -122,7 +133,7 @@ pub(crate) fn decode_image_cancellable(
         ImageFormat::Png => {
             let decoder = PngDecoder::new(open(path)?)?;
             if decoder.is_apng()? {
-                animated_frames(decoder.apng()?, byte_limit, is_current)?
+                animated_frames(decoder.apng()?, byte_limit, is_current, preview)?
             } else {
                 vec![static_frame(reader, byte_limit)?]
             }
@@ -143,11 +154,12 @@ fn ffmpeg_frames(
     path: &Path,
     byte_limit: usize,
     is_current: &(impl Fn() -> bool + ?Sized),
+    preview: &mut ImagePreviewCallback<'_>,
 ) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
     let mut decoded = Vec::new();
     let mut remaining = byte_limit;
     let mut failure = None;
-    decode::decode_file(path, |output| {
+    let result = decode::decode_file(path, |output| {
         if !is_current() {
             failure = Some(ImageDecodeError::Cancelled);
             return false;
@@ -158,13 +170,17 @@ fn ffmpeg_frames(
                 return false;
             };
             remaining = bytes;
+            if decoded.is_empty() {
+                preview(frame.width, frame.height, &frame.rgba);
+            }
             decoded.push(frame);
         }
         true
-    })?;
+    });
     if let Some(error) = failure {
         return Err(error);
     }
+    result?;
     let presentation_times = decoded
         .iter()
         .map(|frame| frame.presentation_time)
@@ -226,6 +242,7 @@ fn animated_frames<'a>(
     decoder: impl AnimationDecoder<'a>,
     byte_limit: usize,
     is_current: &(impl Fn() -> bool + ?Sized),
+    preview: &mut ImagePreviewCallback<'_>,
 ) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
     let mut frames = Vec::new();
     let mut remaining = byte_limit;
@@ -237,6 +254,10 @@ fn animated_frames<'a>(
         remaining = remaining
             .checked_sub(frame.rgba.len())
             .ok_or(ImageDecodeError::TooLarge)?;
+        check_current(is_current)?;
+        if frames.is_empty() {
+            preview(frame.width, frame.height, &frame.rgba);
+        }
         frames.push(frame);
     }
     Ok(frames)
@@ -359,6 +380,79 @@ mod tests {
     }
 
     #[test]
+    fn animated_format_previews_match_the_original_first_frame() {
+        let ffmpeg =
+            std::path::PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+                .join("bin/ffmpeg.exe");
+        for (extension, codec) in [
+            ("apng", "apng"),
+            ("webp", "libwebp_anim"),
+            ("avif", "libaom-av1"),
+        ] {
+            let path = temporary_path(extension);
+            let output = std::process::Command::new(&ffmpeg)
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=32x24:rate=2:duration=1",
+                    "-frames:v",
+                    "2",
+                    "-c:v",
+                    codec,
+                    "-threads",
+                    "1",
+                ])
+                .arg(&path)
+                .output()
+                .expect("generate owned animation");
+            assert!(
+                output.status.success(),
+                "{extension}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let reference = decode_image(&path).expect("reference decode");
+            assert_eq!(reference.frames.len(), 2, "{extension}");
+            let mut previews = Vec::new();
+            let decoded =
+                decode_image_with_preview(&path, IMAGE_BYTE_LIMIT, &|| true, &mut |w, h, rgba| {
+                    previews.push((w, h, rgba.to_vec()));
+                })
+                .expect("decode with first-frame callback");
+            assert_eq!(decoded, reference);
+            assert_eq!(
+                previews,
+                vec![(32, 24, reference.frames[0].rgba.clone())],
+                "{extension}"
+            );
+            let current = std::cell::Cell::new(true);
+            let result = decode_image_with_preview(
+                &path,
+                IMAGE_BYTE_LIMIT,
+                &|| current.get(),
+                &mut |_, _, _| {
+                    current.set(false);
+                },
+            );
+            assert!(
+                matches!(result, Err(ImageDecodeError::Cancelled)),
+                "{extension}: {result:?}"
+            );
+            let mut previews = 0;
+            let result =
+                decode_image_with_preview(&path, 1, &|| true, &mut |_, _, _| previews += 1);
+            assert!(
+                matches!(result, Err(ImageDecodeError::TooLarge)),
+                "{extension}: {result:?}"
+            );
+            assert_eq!(previews, 0);
+            fs::remove_file(path).expect("remove owned animation");
+        }
+    }
+
+    #[test]
     fn preserves_animated_gif_frames_and_timing() {
         let path = temporary_path("gif");
         let file = File::create(&path).expect("create GIF fixture");
@@ -378,7 +472,30 @@ mod tests {
         }
         drop(encoder);
 
-        let decoded = decode_image(&path).expect("decode GIF fixture");
+        let mut previews = Vec::new();
+        let decoded =
+            decode_image_with_preview(&path, IMAGE_BYTE_LIMIT, &|| true, &mut |w, h, rgba| {
+                previews.push((w, h, rgba.to_vec()));
+            })
+            .expect("decode GIF fixture");
+        assert_eq!(previews, vec![(2, 1, decoded.frames[0].rgba.clone())]);
+        let current = std::cell::Cell::new(true);
+        let cancelled = decode_image_with_preview(
+            &path,
+            IMAGE_BYTE_LIMIT,
+            &|| current.get(),
+            &mut |_, _, _| {
+                current.set(false);
+            },
+        );
+        assert!(matches!(cancelled, Err(ImageDecodeError::Cancelled)));
+        let mut previews = 0;
+        let oversized = decode_image_with_preview(&path, 7, &|| true, &mut |_, _, _| previews += 1);
+        assert!(matches!(oversized, Err(ImageDecodeError::TooLarge)));
+        assert_eq!(
+            previews, 0,
+            "an over-budget first frame cannot be published"
+        );
         assert!(
             decode_image_for_prefetch(&path, 0, &|| true)
                 .expect("skip animated prefetch")

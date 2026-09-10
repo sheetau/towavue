@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## I03/U10: 原寸デコードの最初のフレームを段階表示する（2026-09-10）
+
+GIF／APNG／animated WebP／FFmpeg AVIFのforeground decodeで、メモリ予算内の最初のフレームを得た直後に借用RGBAと実際の表示寸法をPreviewCacheへ渡す。既存の240×160以内の縮小・source metadata key・64件／16 MiB共有枠を使い、追加の原寸コピー、別decoder／process、disk encodeは行わない。後続フレームは同じdecoderで続ける。静止画の先行decodeや最初のフレーム自体の待ち時間削減は含めない。
+
+ImageLoaderのmailboxは進行中画像の縮小previewを最大一件保持し、通常のImagesReadyで通知する。原寸の成功／失敗時は未消費previewを退役させ、原寸が先に到着すればそちらを使う。要求更新・closeで破棄し、生成前後にgeneration／file stamp／closedを検査する。appは原寸request generationに加えて既存のpath／未読込位置／image_loading条件を照合し、通常とreadingの同じ一時texture描画へ渡す。previewは原寸成功や編集可能状態を意味しない。途中の予算超過や破損でも原寸の診断を隠さず、表示placeholderを除去する。既存cache-only workerはwarm hitを即時取得するため残す。後段のI03 cache-only記述はこの初回animation通知で拡張する。
+
+FFmpegのconsumer停止に伴う一般エラーより、画像側で判定したCancelled／TooLargeを優先して返す。実生成GIF／APNG／WebP／AVIFでfirst-frame画素と原寸全frame／時間の不変性、予算と取消を検証する。制御したworker順序の検証を、可視windowの速度測定やcold-storage全般の解消とは扱わない。
+
 ## U10: host全体のpreview共有と同一要求の集約（2026-09-10）
 
 `WindowHost`が一つの`PreviewCache`を所有し、各ApplicationのImageLoader／filmstrip／recent／tab hover／seek workerへcloneを渡す。既存の低解像度RGBA上限64件／16 MiBをwindow数で増やさず、元windowを閉じても残りのwindowと後から開いたwindowが使える。egui textureは引き続きcontext別に所有し、GPU texture共有を達成したとは扱わない。

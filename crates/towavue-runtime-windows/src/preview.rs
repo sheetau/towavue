@@ -422,34 +422,44 @@ impl PreviewCache {
         decoded: &crate::DecodedImage,
         current: &dyn Fn() -> bool,
     ) {
+        if let Some(frame) = decoded.frames.first() {
+            self.remember_pixels(path, frame.width, frame.height, &frame.rgba, current);
+        }
+    }
+
+    pub(crate) fn remember_pixels(
+        &self,
+        path: &Path,
+        source_width: u32,
+        source_height: u32,
+        pixels: &[u8],
+        current: &dyn Fn() -> bool,
+    ) {
         if !current() {
             return;
         }
         let Ok(key) = cache_key(path, IMAGE_PREVIEW_VARIANT) else {
             return;
         };
-        let Some(frame) = decoded.frames.first() else {
-            return;
-        };
         {
             let mut memory = self.memory.lock().expect("preview memory");
             if let Some(entry) = memory.entries.iter_mut().find(|entry| entry.key == key) {
-                entry.source_size = Some((frame.width, frame.height));
+                entry.source_size = Some((source_width, source_height));
                 return;
             }
         }
-        let scale = (240.0 / f64::from(frame.width))
-            .min(160.0 / f64::from(frame.height))
+        let scale = (240.0 / f64::from(source_width))
+            .min(160.0 / f64::from(source_height))
             .min(1.0);
-        let width = (f64::from(frame.width) * scale).round().max(1.0) as u32;
-        let height = (f64::from(frame.height) * scale).round().max(1.0) as u32;
+        let width = (f64::from(source_width) * scale).round().max(1.0) as u32;
+        let height = (f64::from(source_height) * scale).round().max(1.0) as u32;
         let mut rgba = Vec::with_capacity((width * height * 4) as usize);
         for y in 0..height {
-            let source_y = u64::from(y) * u64::from(frame.height) / u64::from(height);
+            let source_y = u64::from(y) * u64::from(source_height) / u64::from(height);
             for x in 0..width {
-                let source_x = u64::from(x) * u64::from(frame.width) / u64::from(width);
-                let index = ((source_y * u64::from(frame.width) + source_x) * 4) as usize;
-                rgba.extend_from_slice(&frame.rgba[index..index + 4]);
+                let source_x = u64::from(x) * u64::from(source_width) / u64::from(width);
+                let index = ((source_y * u64::from(source_width) + source_x) * 4) as usize;
+                rgba.extend_from_slice(&pixels[index..index + 4]);
             }
         }
         if current() && cache_key(path, IMAGE_PREVIEW_VARIANT).ok().as_ref() == Some(&key) {
@@ -466,7 +476,7 @@ impl PreviewCache {
                 .entries
                 .back_mut()
                 .expect("bounded image preview")
-                .source_size = Some((frame.width, frame.height));
+                .source_size = Some((source_width, source_height));
         }
     }
 

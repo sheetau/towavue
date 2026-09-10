@@ -1831,10 +1831,22 @@ where
     }
 
     fn finish_image_load(&mut self) {
+        if let Some(preview) = self.image_loader.take_preview() {
+            self.finish_loaded_image_preview(preview);
+        }
         let Some(result) = self.image_loader.take_completed() else {
             return;
         };
         self.apply_loaded_images(result);
+    }
+
+    fn finish_loaded_image_preview(
+        &mut self,
+        preview: towavue_runtime_windows::LoadedImagePreview,
+    ) {
+        if preview.generation == self.image_generation {
+            self.finish_image_preview(preview.path, self.image_preview_generation, preview.preview);
+        }
     }
 
     fn apply_loaded_images(&mut self, mut result: towavue_runtime_windows::LoadedImages) {
@@ -15459,10 +15471,20 @@ mod tests {
             },
             source_size: (600, 800),
         };
+        app.finish_loaded_image_preview(towavue_runtime_windows::LoadedImagePreview {
+            generation: app.image_generation.wrapping_add(1),
+            path: path.clone(),
+            preview: preview(),
+        });
+        assert!(app.image_previews.is_empty());
         app.finish_image_preview(path.clone(), generation + 1, preview());
         app.finish_image_preview(PathBuf::from("unrequested.png"), generation, preview());
         assert!(app.image_previews.is_empty());
-        app.finish_image_preview(path.clone(), generation, preview());
+        app.finish_loaded_image_preview(towavue_runtime_windows::LoadedImagePreview {
+            generation: app.image_generation,
+            path: path.clone(),
+            preview: preview(),
+        });
         assert!(app.image.is_none());
         assert_eq!(app.state, PlaybackState::Loading);
         let preview_texture = app.image_previews[&path].texture.id();

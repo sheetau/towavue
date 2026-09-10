@@ -4,8 +4,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::SystemTime;
 
-use crate::image::{IMAGE_BYTE_LIMIT, decode_image_cancellable, decode_image_for_prefetch};
-use crate::{DecodedImage, ImageDecodeError, LatestTask, PreviewCache};
+use crate::image::{
+    IMAGE_BYTE_LIMIT, ImagePreviewCallback, decode_image_for_prefetch, decode_image_with_preview,
+};
+use crate::{CachedImagePreview, DecodedImage, ImageDecodeError, LatestTask, PreviewCache};
 
 const CACHE_BYTE_LIMIT: usize = 256 * 1024 * 1024;
 
@@ -14,6 +16,12 @@ pub struct LoadedImages {
     pub first_index: usize,
     pub total: usize,
     pub images: Vec<(PathBuf, Result<Arc<DecodedImage>, ImageDecodeError>)>,
+}
+
+pub struct LoadedImagePreview {
+    pub generation: u64,
+    pub path: PathBuf,
+    pub preview: CachedImagePreview,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -94,6 +102,7 @@ struct Mailbox {
     generation: u64,
     pending: Option<(Vec<PathBuf>, usize)>,
     completed: Option<LoadedImages>,
+    preview_ready: Option<LoadedImagePreview>,
     closed: bool,
     cache: Arc<Mutex<ImageCache>>,
     previews: Option<PreviewCache>,
@@ -122,8 +131,8 @@ impl ImageLoader {
         thread::Builder::new()
             .name("towavue-images".into())
             .spawn(move || {
-                run_worker(worker_shared, notify, |path, budget, current| {
-                    decode_image_cancellable(path, budget, current)
+                run_worker(worker_shared, notify, |path, budget, current, preview| {
+                    decode_image_with_preview(path, budget, current, preview)
                 });
             })?;
         Ok(Self {
@@ -145,6 +154,7 @@ impl ImageLoader {
         mailbox.pending =
             (!paths.is_empty()).then_some((paths, IMAGE_BYTE_LIMIT.saturating_sub(retained_bytes)));
         mailbox.completed = None;
+        mailbox.preview_ready = None;
         ready.notify_one();
         mailbox.generation
     }
@@ -213,6 +223,15 @@ impl ImageLoader {
             .completed
             .take()
     }
+
+    pub fn take_preview(&self) -> Option<LoadedImagePreview> {
+        self.shared
+            .0
+            .lock()
+            .expect("image mailbox")
+            .preview_ready
+            .take()
+    }
 }
 
 impl Drop for ImageLoader {
@@ -222,6 +241,7 @@ impl Drop for ImageLoader {
         mailbox.closed = true;
         mailbox.pending = None;
         mailbox.completed = None;
+        mailbox.preview_ready = None;
         ready.notify_one();
         // A codec may still be finishing one frame. Only the worker owns its decoder;
         // cancellation prevents publication without blocking window close on that frame.
@@ -235,6 +255,7 @@ fn run_worker(
         &std::path::Path,
         usize,
         &dyn Fn() -> bool,
+        &mut ImagePreviewCallback<'_>,
     ) -> Result<DecodedImage, ImageDecodeError>,
 ) {
     let (mutex, ready) = &*shared;
@@ -270,8 +291,35 @@ fn run_worker(
                 .lock()
                 .expect("image cache")
                 .take(&path, stamp, remaining);
-            let result =
-                cached.unwrap_or_else(|| decode(&path, remaining, &is_current).map(Arc::new));
+            let mut first_frame = |width, height, pixels: &[u8]| {
+                let Some(previews) = &previews else { return };
+                let current =
+                    || is_current() && stamp.is_some() && ImageStamp::read(&path) == stamp;
+                previews.remember_pixels(&path, width, height, pixels, &current);
+                if !current() {
+                    return;
+                }
+                let Ok(Some(preview)) = previews.cached_image(&path) else {
+                    return;
+                };
+                {
+                    let mut mailbox = mutex.lock().expect("image mailbox");
+                    if mailbox.closed || mailbox.generation != generation {
+                        return;
+                    }
+                    // At most one in-progress image owns preview pixels; completed pages
+                    // use their originals even if the UI has not consumed the wakeup yet.
+                    mailbox.preview_ready = Some(LoadedImagePreview {
+                        generation,
+                        path: path.clone(),
+                        preview,
+                    });
+                }
+                notify();
+            };
+            let result = cached.unwrap_or_else(|| {
+                decode(&path, remaining, &is_current, &mut first_frame).map(Arc::new)
+            });
             if let Ok(image) = &result {
                 remaining -= image.retained_bytes();
                 if is_current()
@@ -294,6 +342,7 @@ fn run_worker(
                 if mailbox.generation != generation {
                     break;
                 }
+                mailbox.preview_ready = None;
                 mailbox
                     .completed
                     .get_or_insert_with(|| LoadedImages {
@@ -325,6 +374,135 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn first_frame_preview_precedes_completion_and_respects_request_lifetime() {
+        for mode in ["success", "failure", "cancel", "changed", "closed"] {
+            let root = std::env::temp_dir().join(format!(
+                "towavue-first-preview-{}-{mode}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&root).expect("fixture directory");
+            let path = root.join("source.gif");
+            std::fs::write(&path, [1]).expect("source identity");
+            let previews = PreviewCache::new(root.join("cache")).expect("preview cache");
+            let shared = Arc::new((
+                Mutex::new(Mailbox {
+                    previews: Some(previews.clone()),
+                    ..Default::default()
+                }),
+                Condvar::new(),
+            ));
+            let mut loader = Some(ImageLoader {
+                shared: Arc::clone(&shared),
+                prefetch_worker: LatestTask::new("first-preview-test").expect("prefetch worker"),
+            });
+            let (started_tx, started_rx) = mpsc::channel();
+            let (begin_tx, begin_rx) = mpsc::channel();
+            let (preview_tx, preview_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let (ready_tx, ready_rx) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                run_worker(
+                    shared,
+                    || {
+                        let _ = ready_tx.send(());
+                    },
+                    |_, _, _, preview| {
+                        started_tx.send(()).expect("started");
+                        begin_rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .expect("begin first frame");
+                        preview(600, 400, &vec![127; 600 * 400 * 4]);
+                        preview_tx.send(()).expect("preview attempted");
+                        release_rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .expect("finish remaining frames");
+                        if mode == "failure" {
+                            Err(ImageDecodeError::TooLarge)
+                        } else {
+                            Ok((*pixel(9)).clone())
+                        }
+                    },
+                )
+            });
+            let generation = loader
+                .as_ref()
+                .expect("live loader")
+                .request(vec![path.clone()]);
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("decode started");
+            match mode {
+                "cancel" => {
+                    loader.as_ref().expect("live loader").request(Vec::new());
+                }
+                "changed" => std::fs::write(&path, [2, 3]).expect("replace source"),
+                "closed" => drop(loader.take()),
+                _ => {}
+            }
+            begin_tx.send(()).expect("decode first frame");
+            preview_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("first frame attempted");
+            if matches!(mode, "success" | "failure") {
+                ready_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("preview wakeup before full decode");
+                let loader = loader.as_ref().expect("live loader");
+                assert!(loader.take_completed().is_none());
+                let preview = loader
+                    .take_preview()
+                    .expect("cold preview without a completed original");
+                assert_eq!(preview.generation, generation);
+                assert_eq!(preview.path, path);
+                assert_eq!(preview.preview.source_size, (600, 400));
+                assert_eq!(
+                    (preview.preview.image.width, preview.preview.image.height),
+                    (240, 160)
+                );
+                assert_eq!(preview.preview.image.rgba, vec![127; 240 * 160 * 4]);
+                assert_eq!(
+                    previews
+                        .cached_image(&path)
+                        .expect("cache lookup")
+                        .expect("seeded preview")
+                        .image,
+                    preview.preview.image
+                );
+                assert!(loader.take_preview().is_none());
+                // Also exercise cleanup if the UI has not consumed the preview.
+                loader.shared.0.lock().expect("mailbox").preview_ready = Some(preview);
+            } else {
+                assert!(
+                    previews
+                        .cached_image(&path)
+                        .expect("cache lookup")
+                        .is_none()
+                );
+                assert!(ready_rx.try_recv().is_err());
+                if let Some(loader) = &loader {
+                    assert!(loader.take_preview().is_none());
+                }
+            }
+            release_tx.send(()).expect("complete decode");
+            if matches!(mode, "success" | "failure" | "changed") {
+                ready_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("original completion");
+                let loader = loader.as_ref().expect("live loader");
+                assert!(
+                    loader.take_preview().is_none(),
+                    "success and failure retire the placeholder"
+                );
+                let completed = loader.take_completed().expect("completed image");
+                assert_eq!(completed.images[0].1.is_err(), mode == "failure");
+            }
+            drop(loader);
+            worker.join().expect("worker shutdown");
+            std::fs::remove_dir_all(root).expect("remove owned fixtures");
+        }
+    }
+
     fn pixel(value: u8) -> Arc<DecodedImage> {
         Arc::new(DecodedImage {
             format: "PNG",
@@ -352,7 +530,7 @@ mod tests {
                 || {
                     ready_tx.send(()).expect("notify");
                 },
-                |_, budget, _| {
+                |_, budget, _, _| {
                     budget_tx.send(budget).expect("observed budget");
                     if budget < 4 {
                         Err(ImageDecodeError::TooLarge)
@@ -436,7 +614,7 @@ mod tests {
                 || {
                     let _ = ready_tx.send(());
                 },
-                |_, _, _| {
+                |_, _, _, _| {
                     decoded_tx.send(()).expect("foreground decode");
                     Ok((*pixel(9)).clone())
                 },
@@ -640,7 +818,7 @@ mod tests {
                 || {
                     ready_tx.send(()).expect("notify");
                 },
-                |path, _, _| {
+                |path, _, _, _| {
                     decoded_tx.send(()).expect("count decode");
                     let bytes = std::fs::read(path).map_err(ImageDecodeError::Open)?;
                     Ok((*pixel(bytes[0])).clone())
@@ -696,7 +874,7 @@ mod tests {
                 || {
                     ready_tx.send(()).expect("notification");
                 },
-                |path, budget, _| {
+                |path, budget, _, _| {
                     if path == std::path::Path::new("broken.png") {
                         assert_eq!(budget, IMAGE_BYTE_LIMIT - 4);
                         return Err(ImageDecodeError::UnknownFormat);
@@ -755,7 +933,7 @@ mod tests {
                 || {
                     ready_tx.send(()).expect("notify");
                 },
-                |path, budget, _| {
+                |path, budget, _, _| {
                     if path == Path::new("second.png") {
                         assert_eq!(budget, IMAGE_BYTE_LIMIT - 4);
                         started_tx.send(()).expect("second started");
@@ -822,7 +1000,7 @@ mod tests {
                 || {
                     ready_tx.send(()).expect("notification");
                 },
-                |path, _, current| {
+                |path, _, current, _| {
                     started_tx.send(path.to_owned()).expect("started receiver");
                     if path == std::path::Path::new("first.png") {
                         resume_rx

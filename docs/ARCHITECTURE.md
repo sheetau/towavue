@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## E01: JPEG XMP文字metadataの保存基盤（2026-09-10）
+
+JPEGは標準APP1 XMPのdc:title／dc:creator／dc:description／dc:rightsを、Title／Artist／Comment／Copyrightへ対応させる。[Adobe Dublin Core定義](https://developer.adobe.com/xmp/docs/xmp-namespaces/dc/)に従いtitle／description／rightsは言語別Alt、creatorは順序付きSeqとして扱う。Keepは文字値・言語・順序を保持し、XMLのprefix／空白のbyte一致ではない。Setは単一値（Altはx-default）、Removeは該当propertyを除去する。他の6項目は未対応として明示拒否し、今後の形式別契約へ残す。
+
+標準XMP一packet、UTF-8、65502 bytes以内、32階層／4096 elements／128文字値へ制限する。namespace URIで識別し、通常の属性形式／文字要素／Alt・Seqを読み、DTD／外部entity・不正参照・複数packet／Extended XMP・未対応の対象property構造は拒否する。元EXIF／IPTC／COMとXMPの相互整合はまだ行わず、XMP文字だけの処理として区別する。未知／技術的な元XMPを編集済み画像へcopyしない。
+
+JPEG入力→JPEG出力で文字Set／Removeを指定した時、既存encode後のstageに標準XMPを差し替え、再読取照合してからpublishする。JPEG marker／entropy bytesをstreamingで複写し、metadata処理で再decode／再encodeせず、stageのEXIF／ICC／画像bytesを変更しない。source stamp、取消、既存target保護を共用する。設定なしのJPEG保存は従来経路であり、全Keepと画像UIへの接続は次工程で契約を揃える。JPEG UI、他項目／形式・EXIF／IPTC整合、通常window／全素材品質と全UX台帳は未完のまま維持する。
+
 ## E01: PNG文字metadataのUIとKeep保存（2026-09-10）
 
 File／custom commandのMetadata export optionsを画像にも開く。PNGは既存の10項目・非同期既存値・Apply／Cancel／IME／source/tab世代guardを共用し、PNG入力→PNG出力・文字項目だけであること、Author／Creation Time／Album Artistへの対応とEXIF／XMP対象外を明示する。他画像形式も制約を確認できるがApplyは無効にする。PNGの読取完了前／読取失敗時もApplyは無効。Apply／Cancel・Save／再Save／保存先選択の取消・tab保持／source再読込解除は動画／音声と同じで、設定変更は履歴／dirty／画素を変更しない。

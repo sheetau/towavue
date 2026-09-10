@@ -2666,6 +2666,7 @@ dependencies = [
  "ffmpeg-next",
  "flate2",
  "image",
+ "quick-xml",
  "raw-window-handle",
  "thiserror 2.0.20",
  "towavue-core",

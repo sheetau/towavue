@@ -4,6 +4,12 @@
 
 ## 1. 最初に試す
 
+### JPEG XMP文字metadata保存基盤（2026-09-10 16:15、E01 partial）
+
+JPEG UIはまだ未接続。runtimeの`export_media_with_options`へJPEG入力・JPEG出力とTitle／Artist／Comment／CopyrightのSet／Removeを渡すと、encode後のXMPへ反映する。dc:title／creator／description／rightsの言語・作者順をKeepし、Setは一値、Removeは対象propertyを消す。元EXIF／IPTC／COMとの整合や他6項目はまだ扱わない。設定なしのJPEG保存は従来経路で、PNGの全Keep保持とは異なる。
+
+`cargo test -p towavue-runtime-windows jpeg_metadata`の7回帰はnamespace別名／属性・Alt／Seq／CDATA・文字参照・UnicodeとCR、全位置truncation／DTD・未対応参照・複数root／property・XML／packet上限、stageの非XMP bytes・EXIFと独立decoderのXMP抽出・画素一致、回転／反転保存の4項目Set／Keep／Remove、合成multi-scan／stuffing／restart markerのbyte不変、source／既存target保護・取消／write失敗／stage衝突を確認する。画像fixtureのみで、外部入力／音声再生は追加しない。quick-xml 0.41.0は既存lock版を直接利用し、Windows dependency closureへ追加したMIT本文・lock hashをnotice inventoryへ反映する。147 packagesの資料試験を行うが、配布・公開は行わない。
+
 ### PNG文字metadataの設定UIと全Keep保存（2026-09-10 15:55、E01 partial）
 
 PNGを開き、File「Metadata export options」で既存値と10項目のKeep／Set／Removeを選ぶ。Artist／Album artist／Dateには実際のPNG keywordを表示し、PNG入力・PNG出力限定／EXIF・XMP対象外を説明する。読取待ち／失敗・非PNG入力ではApplyできない。Applyは設定だけを確定し、Save／Export asで`.png`へ書き出す。他形式へのSet／Removeは元の保存先・dirty・設定を保持して失敗する。通常のPNG保存／全Keepでも対象の元textを保持する。既に書き出したfileのtagではなく現在sourceを参照するので、Removeの後にKeepへ戻すと元のtagが復元される。

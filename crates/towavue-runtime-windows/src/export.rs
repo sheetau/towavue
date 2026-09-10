@@ -20,10 +20,14 @@ mod rotation;
 mod audio_options;
 pub use audio_options::{AudioChannels, AudioExportOptions};
 
+#[path = "export_jpeg_metadata.rs"]
+mod jpeg_metadata;
 #[path = "export_metadata.rs"]
 mod metadata;
 #[path = "export_png_metadata.rs"]
 mod png_metadata;
+#[path = "export_xmp.rs"]
+mod xmp;
 pub use metadata::{
     MetadataExportOptions, MetadataField, MetadataSourceValue, read_export_metadata,
 };
@@ -327,7 +331,10 @@ fn export_audio_cancellable(
     let source_stamp = (options.normalize_peak || image_metadata)
         .then(|| audio_options::SourceStamp::read(&request.source))
         .transpose()?;
-    let png_metadata = image_metadata
+    let jpeg_metadata = (image_metadata && jpeg_metadata::jpeg_path(&request.source))
+        .then(|| jpeg_metadata::JpegMetadata::prepare(request, metadata, cancelled))
+        .transpose()?;
+    let png_metadata = (image_metadata && jpeg_metadata.is_none())
         .then(|| png_metadata::PngMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
     let mut streams = ExportStreams::probe(request)?;
@@ -426,6 +433,8 @@ fn export_audio_cancellable(
     }
     if let Some(png_metadata) = png_metadata {
         png_metadata.apply(&staging, cancelled)?;
+    } else if let Some(jpeg_metadata) = jpeg_metadata {
+        jpeg_metadata.apply(&staging, cancelled)?;
     } else {
         metadata.verify(&staging.output)?;
     }
@@ -548,6 +557,7 @@ impl Drop for StagedExport {
         let _ = fs::remove_file(&self.output);
         let _ = fs::remove_file(self.directory.join("timeline-filter.txt"));
         let _ = fs::remove_file(self.directory.join("metadata.png"));
+        let _ = fs::remove_file(self.directory.join("metadata.jpg"));
         let _ = fs::remove_dir(&self.directory);
     }
 }

@@ -1,0 +1,485 @@
+use super::*;
+use crate::export::audio_tests::root;
+use std::io::Cursor;
+
+const PACKET: &str = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:d="http://purl.org/dc/elements/1.1/" xmlns:t="http://ns.adobe.com/tiff/1.0/" r:about="" t:Orientation="6"><d:title><r:Alt><r:li xml:lang="x-default">Original &amp; title</r:li><r:li xml:lang="ja">日本語の題名</r:li></r:Alt></d:title><d:creator><r:Seq><r:li>First author</r:li><r:li><![CDATA[Second <author>]]></r:li></r:Seq></d:creator><d:description><r:Alt><r:li xml:lang="x-default">Original comment</r:li></r:Alt></d:description><d:rights><r:Alt><r:li xml:lang="x-default">Original rights</r:li></r:Alt></d:rights></r:Description></r:RDF></x:xmpmeta>"#;
+
+fn fixture() -> Vec<u8> {
+    let pixels = image::RgbImage::from_fn(32, 24, |x, y| {
+        image::Rgb([(x * 7) as u8, (y * 9) as u8, (x * y) as u8])
+    });
+    let mut output = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(pixels)
+        .write_to(&mut output, image::ImageFormat::Jpeg)
+        .expect("JPEG fixture");
+    output.into_inner()
+}
+
+fn segment(code: u8, bytes: &[u8]) -> Vec<u8> {
+    [
+        &[0xff, code][..],
+        &((bytes.len() + 2) as u16).to_be_bytes(),
+        bytes,
+    ]
+    .concat()
+}
+
+fn tagged(packet: &[u8]) -> Vec<u8> {
+    let bytes = fixture();
+    let mut output = Vec::new();
+    scan(
+        Cursor::new(&bytes),
+        Some(&mut output),
+        packet,
+        &AtomicBool::new(false),
+    )
+    .expect("fixture packet");
+    output
+}
+
+fn request(source: &Path, target: &Path) -> ExportRequest {
+    ExportRequest {
+        source: source.into(),
+        target: target.into(),
+        kind: MediaKind::Image,
+        operations: vec![],
+        hardware_encode: false,
+    }
+}
+
+fn options(field: MetadataField, text: &str) -> ExportOptions {
+    let mut metadata = MetadataExportOptions::default();
+    metadata.set(field, Some(text.into())).expect("metadata");
+    ExportOptions {
+        metadata,
+        ..Default::default()
+    }
+}
+
+fn without_xmp(bytes: &[u8]) -> Vec<u8> {
+    let mut position = 2;
+    let mut result = bytes[..2].to_vec();
+    while bytes[position + 1] != 0xda {
+        let length = u16::from_be_bytes([bytes[position + 2], bytes[position + 3]]) as usize;
+        let end = position + 2 + length;
+        if bytes[position + 1] != 0xe1 || !bytes[position + 4..end].starts_with(XMP) {
+            result.extend_from_slice(&bytes[position..end]);
+        }
+        position = end;
+    }
+    result.extend_from_slice(&bytes[position..]);
+    result
+}
+
+#[test]
+fn xmp_round_trips_namespace_aliases_languages_creators_escaping_and_overrides() {
+    let cancelled = AtomicBool::new(false);
+    let original = xmp::parse(PACKET.as_bytes(), &cancelled).expect("source properties");
+    assert_eq!(original.len(), 6);
+    assert_eq!(original[0].text, "Original & title");
+    assert_eq!(original[1].language.as_deref(), Some("ja"));
+    assert_eq!(original[3].text, "Second <author>");
+    let encoded = xmp::encode(&original).expect("encode");
+    assert_eq!(
+        xmp::parse(&encoded, &cancelled).expect("round trip"),
+        original
+    );
+    assert!(!String::from_utf8_lossy(&encoded).contains("Orientation"));
+    let mut values = original.clone();
+    for field in [
+        MetadataField::Title,
+        MetadataField::Artist,
+        MetadataField::Comment,
+        MetadataField::Copyright,
+    ] {
+        let text = format!("{} 日本語\r\n<>&'\"", field.key());
+        xmp::apply(&mut values, &options(field, &text).metadata).expect("set");
+    }
+    assert_eq!(values.len(), 4);
+    assert_eq!(
+        xmp::parse(&xmp::encode(&values).expect("encode"), &cancelled).expect("all values"),
+        values
+    );
+    xmp::apply(&mut values, &options(MetadataField::Title, "").metadata).expect("remove");
+    assert!(
+        values
+            .iter()
+            .all(|value| value.field != MetadataField::Title)
+    );
+    let attribute = r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/" dc:title="Title &#13;&amp;&quot;" dc:creator="Creator"/></rdf:RDF>"#;
+    let values = xmp::parse(attribute.as_bytes(), &cancelled).expect("attribute properties");
+    assert_eq!(values[0].text, "Title \r&\"");
+    assert_eq!(
+        xmp::parse(&xmp::encode(&values).expect("encode"), &cancelled)
+            .expect("attributes round trip"),
+        values
+    );
+    assert!(matches!(
+        xmp::parse(PACKET.as_bytes(), &AtomicBool::new(true)),
+        Err(ExportError::Cancelled)
+    ));
+}
+
+#[test]
+fn xmp_rejects_entities_invalid_xml_ambiguous_properties_and_resource_limits() {
+    let cancel = AtomicBool::new(false);
+    for bad in [
+        format!("<!DOCTYPE x [<!ENTITY e SYSTEM 'file:///C:/private'>]>{PACKET}"),
+        PACKET.replace("Original &amp; title", "&unknown;"),
+        PACKET.replace("Original &amp; title", "&#0;"),
+        PACKET.replace("Original &amp; title", "&#xFFFF;"),
+        PACKET.replace("xml:lang=\"ja\"", "xml:lang=\"x-default\""),
+        PACKET.replace("<d:title>", "<d:title r:parseType=\"Resource\">"),
+        PACKET.replace("r:Alt", "r:Bag"),
+        PACKET.replace("</d:title>", "</d:title><d:title>duplicate</d:title>"),
+        PACKET.replace("<d:title>", "<undefined:title>"),
+        PACKET.replace("</d:title>", "</d:rights>"),
+        PACKET.replace(
+            "http://purl.org/dc/elements/1.1/",
+            "&#104;ttp://purl.org/dc/elements/1.1/",
+        ),
+        PACKET.replace("r:about=\"\"", "r:about=\"https://example.invalid/other\""),
+        format!("{PACKET}{PACKET}"),
+        format!("junk{PACKET}"),
+        format!("<?xml version=\"1.1\"?>{PACKET}"),
+        format!("<?xml version=\"1.0\" encoding=\"UTF-16\"?>{PACKET}"),
+        format!("{}x", " ".repeat(xmp::LIMIT)),
+        format!("{}{}", "<a>".repeat(33), "</a>".repeat(33)),
+        format!("<a>{}</a>", "<b/>".repeat(4096)),
+    ] {
+        assert!(
+            xmp::parse(bad.as_bytes(), &cancel).is_err(),
+            "accepted invalid input: {}",
+            &bad[..bad.len().min(80)]
+        );
+    }
+    for length in 0..PACKET.len() {
+        assert!(
+            xmp::parse(&PACKET.as_bytes()[..length], &cancel).is_err(),
+            "truncated {length}"
+        );
+    }
+    let too_many = PACKET.replace(
+        "<r:li>First author</r:li>",
+        &"<r:li>author</r:li>".repeat(129),
+    );
+    assert!(xmp::parse(too_many.as_bytes(), &cancel).is_err());
+    let expensive = PACKET.replace(
+        "Original &amp; title",
+        &format!("<![CDATA[{}]]>", "&".repeat(20000)),
+    );
+    let values = xmp::parse(expensive.as_bytes(), &cancel).expect("bounded source text");
+    assert!(
+        xmp::encode(&values).is_err(),
+        "escaped output must fit APP1 too"
+    );
+    for field in [
+        MetadataField::Album,
+        MetadataField::AlbumArtist,
+        MetadataField::Composer,
+        MetadataField::Genre,
+        MetadataField::Date,
+        MetadataField::Track,
+    ] {
+        assert!(xmp::apply(&mut vec![], &options(field, "value").metadata).is_err());
+    }
+    assert!(
+        xmp::apply(
+            &mut vec![],
+            &options(MetadataField::Title, "bad\u{0001}").metadata
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn jpeg_metadata_splice_preserves_every_non_xmp_byte_and_decoded_pixel() {
+    let root = root("jpeg-splice");
+    let source = root.join("source.JPEG");
+    let target = root.join("target.jpg");
+    let original = tagged(PACKET.as_bytes());
+    fs::write(&source, &original).expect("source");
+    let staging = StagedExport::new(&target).expect("stage");
+    let mut encoded = tagged(
+        PACKET
+            .replace("Original &amp; title", "Encoder title")
+            .as_bytes(),
+    );
+    let exif = b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x06\0\0\0\0\0\0\0";
+    encoded.splice(2..2, segment(0xe1, exif));
+    fs::write(&staging.output, &encoded).expect("stage");
+    let cancel = AtomicBool::new(false);
+    let metadata = JpegMetadata::prepare(
+        &request(&source, &target),
+        &options(MetadataField::Title, "新しい題名").metadata,
+        &cancel,
+    )
+    .expect("prepare");
+    metadata.apply(&staging, &cancel).expect("rewrite");
+    let actual = fs::read(&staging.output).expect("rewritten");
+    let mut independent = image::codecs::jpeg::JpegDecoder::new(Cursor::new(&actual))
+        .expect("independent JPEG decoder");
+    assert_eq!(
+        image::ImageDecoder::xmp_metadata(&mut independent).expect("independent XMP extraction"),
+        Some(metadata.packet.clone())
+    );
+    assert_eq!(without_xmp(&actual), without_xmp(&encoded));
+    assert_eq!(
+        image::load_from_memory(&actual).expect("pixels"),
+        image::load_from_memory(&encoded).expect("baseline pixels")
+    );
+    assert_eq!(
+        read(&staging.output, &cancel).expect("values"),
+        metadata.values
+    );
+    assert_eq!(
+        metadata
+            .values
+            .iter()
+            .filter(|value| value.field == MetadataField::Artist)
+            .map(|value| value.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["First author", "Second <author>"]
+    );
+    assert_eq!(fs::read(&source).expect("unchanged"), original);
+    drop(staging);
+    assert_eq!(fs::read_dir(&root).expect("cleanup").count(), 1);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn jpeg_export_metadata_set_keep_remove_matches_default_rotated_jpeg_pixels() {
+    let root = root("jpeg-export");
+    let source = root.join("source.jpg");
+    let target = root.join("target.jpeg");
+    let original = tagged(PACKET.as_bytes());
+    fs::write(&source, &original).expect("source");
+    let mut request = request(&source, &target);
+    request.operations = vec![
+        EditOperation::RotateClockwise,
+        EditOperation::FlipHorizontal,
+    ];
+    export_media(&request).expect("baseline save");
+    let baseline = fs::read(&target).expect("baseline");
+    for field in [
+        MetadataField::Title,
+        MetadataField::Artist,
+        MetadataField::Comment,
+        MetadataField::Copyright,
+    ] {
+        for value in ["日本語\r\n<&> text", ""] {
+            export_media_with_options(&request, options(field, value))
+                .expect("JPEG export with metadata");
+            let actual = fs::read(&target).expect("export");
+            assert_eq!(without_xmp(&actual), without_xmp(&baseline));
+            assert_eq!(
+                image::open(&target).expect("pixels"),
+                image::load_from_memory(&baseline).expect("baseline pixels")
+            );
+            let values = read(&target, &AtomicBool::new(false)).expect("metadata");
+            let fields = values
+                .iter()
+                .filter(|item| item.field == field)
+                .collect::<Vec<_>>();
+            if value.is_empty() {
+                assert!(fields.is_empty());
+            } else {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].text, value);
+            }
+        }
+    }
+    assert_eq!(fs::read(&source).expect("source unchanged"), original);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn jpeg_marker_parser_preserves_stuffed_bytes_restarts_and_multiple_synthetic_scans() {
+    let mut synthetic = vec![0xff, 0xd8];
+    synthetic.extend(segment(0xe0, b"JFIF\0"));
+    synthetic.extend(segment(0xda, b"scan1"));
+    synthetic.extend([1, 2, 0xff, 0, 3, 0xff, 0xd0, 4, 0xff, 0xff, 0xd7, 5]);
+    synthetic.extend(segment(0xda, b"scan2"));
+    synthetic.extend([6, 7, 0xff, 0, 8, 0xff, 0xd9]);
+    let mut output = Vec::new();
+    scan(
+        Cursor::new(&synthetic),
+        Some(&mut output),
+        &[],
+        &AtomicBool::new(false),
+    )
+    .expect("synthetic multi-scan traversal");
+    assert_eq!(output, synthetic);
+    for end in 0..synthetic.len() {
+        assert!(
+            scan(
+                Cursor::new(&synthetic[..end]),
+                None,
+                &[],
+                &AtomicBool::new(false)
+            )
+            .is_err()
+        );
+    }
+    for prefix in [XMP, EXTENDED] {
+        let mut bad = tagged(PACKET.as_bytes());
+        bad.splice(2..2, segment(0xe1, &[prefix, PACKET.as_bytes()].concat()));
+        assert!(scan(Cursor::new(bad), None, &[], &AtomicBool::new(false)).is_err());
+    }
+    let mut trailing = fixture();
+    trailing.push(0);
+    assert!(scan(Cursor::new(trailing), None, &[], &AtomicBool::new(false)).is_err());
+}
+
+#[test]
+fn jpeg_metadata_failures_cancellation_source_change_and_unsupported_fields_protect_target() {
+    let root = root("jpeg-protection");
+    let source = root.join("source.jpg");
+    let target = root.join("target.jpeg");
+    let original = tagged(PACKET.as_bytes());
+    fs::write(&source, &original).expect("source");
+    fs::write(&target, b"existing target").expect("target");
+    let request = request(&source, &target);
+    let settings = options(MetadataField::Title, "new");
+    for mode in 0..3 {
+        let cancel = AtomicBool::new(mode == 0);
+        let result = export_options_cancellable(
+            &request,
+            settings.clone(),
+            &cancel,
+            &|_| {
+                if mode == 1 {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                if mode == 2 {
+                    fs::OpenOptions::new()
+                        .append(true)
+                        .open(&source)
+                        .expect("owned source")
+                        .write_all(b"changed")
+                        .expect("change");
+                }
+            },
+            &|_| panic!("no audio"),
+        );
+        let error = result.expect_err("must not publish");
+        if mode == 2 {
+            assert!(error.to_string().contains("source changed"), "{error}");
+        } else {
+            assert!(matches!(error, ExportError::Cancelled));
+        }
+        assert_eq!(fs::read(&target).expect("protected"), b"existing target");
+        assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
+        fs::write(&source, &original).expect("restore fixture");
+    }
+    assert!(
+        export_media_with_options(&request, options(MetadataField::Album, "unsupported")).is_err()
+    );
+    let invalid = tagged(
+        PACKET
+            .replace("Original &amp; title", "&missing;")
+            .as_bytes(),
+    );
+    fs::write(&source, &invalid).expect("invalid source");
+    assert!(export_media_with_options(&request, settings.clone()).is_err());
+    assert_eq!(fs::read(&source).expect("source preserved"), invalid);
+    assert_eq!(
+        fs::read(&target).expect("target preserved"),
+        b"existing target"
+    );
+    let mut same = request.clone();
+    same.target = source;
+    assert!(matches!(
+        export_media_with_options(&same, settings),
+        Err(ExportError::SameAsSource)
+    ));
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn jpeg_metadata_copy_cancel_write_failure_and_invalid_stage_leave_owned_files_intact() {
+    struct CancelWriter<'a>(&'a AtomicBool);
+    impl Write for CancelWriter<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            assert!(bytes.len() <= 65536);
+            if bytes.len() == 65536 {
+                self.0.store(true, Ordering::Relaxed);
+            }
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let original = tagged(PACKET.as_bytes());
+    let mut large = original.clone();
+    let end = large.len() - 2;
+    large.splice(end..end, vec![1; 200000]);
+    let cancel = AtomicBool::new(false);
+    let mut writer = CancelWriter(&cancel);
+    assert!(matches!(
+        scan(Cursor::new(large), Some(&mut writer), &[], &cancel),
+        Err(ExportError::Cancelled)
+    ));
+    cancel.store(false, Ordering::Relaxed);
+    let mut writer = Cursor::new([0_u8; 40]);
+    assert!(matches!(
+        scan(Cursor::new(&original), Some(&mut writer), &[], &cancel),
+        Err(ExportError::Output(_))
+    ));
+    let root = root("jpeg-stage-protection");
+    let source = root.join("source.jpg");
+    let target = root.join("target.jpg");
+    fs::write(&source, &original).expect("source");
+    fs::write(&target, b"existing target").expect("target");
+    let options = options(MetadataField::Title, "new");
+    let metadata = JpegMetadata::prepare(&request(&source, &target), &options.metadata, &cancel)
+        .expect("prepare");
+    for collision in [false, true] {
+        let staging = StagedExport::new(&target).expect("stage");
+        let encoded = if collision {
+            original.clone()
+        } else {
+            original[..original.len() - 1].to_vec()
+        };
+        fs::write(&staging.output, &encoded).expect("stage bytes");
+        if collision {
+            fs::write(staging.directory.join("metadata.jpg"), b"sentinel").expect("collision");
+        }
+        assert!(metadata.apply(&staging, &cancel).is_err());
+        assert_eq!(fs::read(&staging.output).expect("stage preserved"), encoded);
+        assert_eq!(
+            fs::read(&target).expect("target preserved"),
+            b"existing target"
+        );
+        drop(staging);
+        assert_eq!(fs::read_dir(&root).expect("cleanup").count(), 2);
+    }
+    for extension in ["png", "webp", "avif", "tiff", "bmp", "gif"] {
+        let unsupported = root.join(format!("unsupported.{extension}"));
+        fs::write(&unsupported, b"unchanged").expect("sentinel");
+        assert!(
+            export_media_with_options(&request(&source, &unsupported), options.clone()).is_err()
+        );
+        assert_eq!(
+            fs::read(unsupported).expect("target protected"),
+            b"unchanged"
+        );
+    }
+    let mut remove = ExportOptions::default();
+    for field in [
+        MetadataField::Title,
+        MetadataField::Artist,
+        MetadataField::Comment,
+        MetadataField::Copyright,
+    ] {
+        remove
+            .metadata
+            .set(field, Some(String::new()))
+            .expect("remove all");
+    }
+    export_media_with_options(&request(&source, &target), remove).expect("remove packet");
+    assert!(read(&target, &cancel).expect("no text").is_empty());
+    assert_eq!(fs::read(&source).expect("source protected"), original);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}

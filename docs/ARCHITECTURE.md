@@ -6,7 +6,7 @@ incoming tabのdrop領域は、実際のtab stripに加えて、その右のnati
 
 所有する二つの可視640×480 windowで、修正前はlast-tab右12px前後の空白が拒否され、tab本体へのdropのみ成功することを再現した。修正後は同じ空白で挿入線・末尾追加・destination foreground・未保存90度回転の保持が成立する。media領域のdrop拒否、Welcomeへの戻し、通常空白dragによる50×30pxのwindow移動も確認した。これはmixed-DPI／全media／遮蔽matrixや遅延測定の完了を意味しない。
 
-残る不具合：EOF停止中の生成MPEG-4動画をWelcome windowへ戻すと、tab／dirty state／位置は移るがメイン映像が黒いままになるケースが反復した。600msの操作後captureに加え、入力なしの追加captureでも残り、通常window dragやclose guard表示で映像が戻る。再描画または表示経路が疑われるが原因未確定。request_redrawはrestore経路に存在するため、単に無条件の追加repaintを入れて解決扱いにしない。次にfull-window render／transferを追跡する。可視の分離、遮蔽、mixed-DPIと性能の残件も維持する。
+確認記録の訂正：Welcomeへ戻したEOF動画が黒いという先の判定は、保存画像の誤読だった。既存の初回／二回目returnと入力なしcaptureは、移動前の映像領域48,140画素と完全一致する。診断コードを除去した同じ実装のReleaseでも、可視二window間の3回の往復後に同領域の完全一致を確認した。この観測に対する表示処理の修正は不要であり、試作したcaption順序／surface class／swap effect変更やGPU readbackは残さない。画面の見た目だけで黒画面と断定せず、保存画素を照合する。可視の分離、遮蔽、mixed-DPIと性能の残件は維持する。
 
 ## V02/U10: 単枚動画プレビューの補助デコーダー利用（2026-09-11）
 

@@ -4,7 +4,7 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
-2026-09-11 U08 visible-merge checkpoint: 可視の二windowでlast-tab右の空白dropが拒否される欠落を再現し、native captionを除く空白での末尾追加へ修正。挿入線・未保存回転／focus・media領域拒否・Welcomeへの戻し、通常native window dragを確認。2幅×3密度の回帰、既存scroll／取消と全体チェックが通過。先行1c07556のCI34502327383は成功。別の未解決問題として、EOF動画をWelcomeへ戻すと入力なしでは黒い映像が残り、次の操作で戻るケースを反復した。次はこのfull-window再描画／表示経路を追跡・修正する。可視分離／遮蔽／mixed-DPI／全media／性能と全UX台帳は未完のまま維持する。
+2026-09-11 U08 visible-merge checkpoint（確認記録訂正）: 可視の二windowでlast-tab右の空白dropが拒否される欠落を再現し、native captionを除く空白での末尾追加へ修正。挿入線・未保存回転／focus・media領域拒否・Welcomeへの戻し、通常native window dragを確認。2幅×3密度の回帰、既存scroll／取消と全体チェックが通過。84f86e1のCI34503758408は成功。Welcomeへ戻した動画の黒画面という先の判定は保存画像の誤読だった。既存3枚と診断コードなしReleaseの新しい3回の往復後で、移動前の映像48,140画素との完全一致を確認し、不具合判定を撤回する。表示処理の変更は残さない。次は可視分離／遮蔽の実入力を確認する。mixed-DPI／全media／性能と全UX台帳は未完のまま維持する。
 
 2026-09-11 V02/U10 single-preview checkpoint: video単枚／filmstripを補助decoderへ接続し、通常CLI起動を除去。単枚のSAR／向きと正方形内の寸法上限、video専用v4 key、取消／source変更拒否／既存fallbackを維持する。独立timestamp参照、全既存互換素材、portrait／rotation／cache再利用を検証。Releaseの小素材は約54→3ms、1080p長GOPは約91→97msで後者の改善なし。所有windowでfilmstrip／scrub／tab表示を確認したが初期表示時間は未計測。先行f2ca0b8のCI34500549758は成功。長GOPの再decode、CLI fallbackのtimestamp制約、UI end-to-end／全process peak、全codec／HDR／mixed-DPIおよび全UX台帳は継続する。配布準備は再開しない。
 

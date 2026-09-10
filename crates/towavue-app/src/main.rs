@@ -181,6 +181,7 @@ enum UiAction {
     CloseTab(TabId),
     DetachTab(TabId),
     OpenMedia(PathBuf, bool),
+    OpenWindow(PathBuf, u64),
     Seek(MediaTime),
     ResolveGuard(GuardDecision),
     CancelExport,
@@ -4457,6 +4458,9 @@ where
             }
             UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
             UiAction::DetachTab(id) => self.request_guarded(GuardedAction::DetachTab(id)),
+            UiAction::OpenWindow(path, generation) => {
+                self.open_filmstrip_window(path, generation, spawn_new_window)
+            }
             UiAction::OpenMedia(path, force_new) => {
                 if force_new {
                     self.open_external(path, true);
@@ -5909,9 +5913,7 @@ where
         else {
             return;
         };
-        let result = std::env::current_exe()
-            .and_then(|executable| std::process::Command::new(executable).arg(&path).spawn())
-            .map(|_| ());
+        let result = spawn_new_window(&path);
         match result {
             Ok(()) => self.remove_tab(id, false),
             Err(error) => self.set_status(format!("Could not detach tab: {error}")),
@@ -5920,6 +5922,34 @@ where
 
     fn close_tab_unchecked(&mut self, id: TabId) {
         self.remove_tab(id, true);
+    }
+
+    fn open_filmstrip_window(
+        &mut self,
+        path: PathBuf,
+        generation: u64,
+        launch: impl FnOnce(&Path) -> std::io::Result<()>,
+    ) {
+        if !self.filmstrip_open
+            || self.modal_input_blocked()
+            || self.palette_open
+            || self.grid_open
+            || self
+                .ui_context
+                .as_ref()
+                .is_some_and(egui::Popup::is_any_open)
+            || !self.folder_snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot.generation == generation
+                    && snapshot.items.iter().any(|item| item.path == path)
+            })
+        {
+            return;
+        }
+        match launch(&path) {
+            Ok(()) => self.close_filmstrip(),
+            Err(error) => self.set_status(format!("Could not open new window: {error}")),
+        }
+        self.request_redraw();
     }
 
     fn remove_tab(&mut self, id: TabId, remember: bool) {
@@ -6906,6 +6936,7 @@ where
 
     fn close_filmstrip(&mut self) {
         self.filmstrip_open = false;
+        self.filmstrip.cancel_drag();
         let origin = self
             .filmstrip_return_focus
             .take()
@@ -7429,6 +7460,17 @@ fn percentile_95(samples: &[Duration]) -> Duration {
     ordered.sort_unstable();
     let index = (ordered.len() * 95).div_ceil(100).saturating_sub(1);
     ordered[index]
+}
+
+fn spawn_new_window(path: &Path) -> std::io::Result<()> {
+    let executable = std::env::current_exe()?;
+    new_window_command(&executable, path).spawn().map(|_| ())
+}
+
+fn new_window_command(executable: &Path, path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(executable);
+    command.arg(path);
+    command
 }
 
 fn view_drag_button_positions(

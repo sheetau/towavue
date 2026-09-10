@@ -46,6 +46,7 @@ pub(crate) fn hardware_dialog_preview<N: Fn(AppEvent) + Send + Sync + 'static>(
     logo_menu::tests::hardware_round_trip(app);
     tab_menu::keyboard_tests::hardware_round_trip(app);
     tab_drag::tests::hardware_round_trip(app);
+    filmstrip::drag_tests::hardware_drag_cancel(app);
     let size = app.window.as_ref().expect("owned window").inner_size();
     app.renderer
         .as_mut()

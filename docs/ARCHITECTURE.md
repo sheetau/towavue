@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## U08: filmstripからの新window要求（2026-09-10）
+
+filmstripの項目をprimary dragし、window外でreleaseすると、その項目のpathを新windowへ開く。元tabを移動／closeせず、現在の編集・再生を変更しないためdirty guardは不要とする。既存tabの分離／結合や状態移送とは別の「参照先を新規に開く」操作。6 logical px超から低解像度previewとfile名をpointerへ追従表示し、追加decodeはしない。window内release・Escape・focus喪失・overlay・folder snapshot／current source・screen／density変更・filmstrip終了で取消する。既存primary click／middle click／UIAは維持する。capture中の一時的なpointer離脱は後続座標を待つ。
+
+UIはpathとfolder snapshot generationを渡し、appが現在のfilmstrip／snapshot所属を再検証して同じexecutableへ一つのpath引数として起動要求する。要求成功時だけfilmstripを閉じ、失敗時はそのまま診断を表示する。spawn成功は子windowの読込完了や描画成功の保証ではない。元sourceの保持と未保存backupを作らない方針は変えない。
+
+source再読込／GPU復旧でpreviewを無効化する時もgestureを破棄し、旧contextのtexture handleをdragだけに残さない。通常の可視項目更新では、掴んだ低解像度textureだけをgesture終了まで保持する。
+
 ## U08: tab dragの追従表示（2026-09-10）
 
 前frameの可視tab labelとprimary pressを対応させ、6 logical pxを超えた移動をdragとして所有する。close buttonはdrag開始点にしない。端12 logical px内で保持すると既存ScrollAreaを360 logical px/sで横scrollし、同じframeの再passで重複加算しない。barの描画が途切れた場合や非active source path変更も取消対象。capture中のCursorLeft／PointerGoneだけでは分離操作を破棄せず、追従描画と新しいscroll要求を止めて後続座標／releaseを待つ。直前に受理済みのscrollは次layoutで反映する。実focus喪失は取消する。

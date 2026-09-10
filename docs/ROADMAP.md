@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 U08 filmstrip checkpoint: visible cardのprimary dragを既存previewで追従表示し、外releaseからpath参照の新window要求へ接続。元tab・編集・保存先・transportは保持し、起動失敗はfilmstripを残す。preview無効化を含む11取消条件・batch input／pointer gap・folder generation／所属／overlay・単一path引数、実GPU復旧前後10点での描画／取消を検証する。先行eefc010のCI34461491979は成功。子windowの実起動／読込・物理dragの最終確認、既存tabのwindow間結合／状態移送は残件。状態引継ぎ範囲の非blocking確認をownerへ送り、回答を採用する。全UX台帳とU07復帰遅延・P010等を維持する。
+
 2026-09-10 U08 drag checkpoint: tab本体を掴んだoffsetのまま追従表示し、隣接tabの即時投影・端の横scrollと既存drop indicatorを接続。release時だけ順序を確定し、取消／batch input／source・構成・画面変化と狭幅3×密度3を回帰確認する。実GPU上で往復／media上の取消を描画し、編集／transport／generationを維持する。先行7d0484dのCI34459310161は成功。次はwindow間結合・分離時の状態移送／filmstrip入口の契約と実装へ進む。現行path-only別process detachを完成扱いにせず、U07復帰遅延・P010・通常window／物理入力／混在DPIと全UX台帳の未完事項を維持する。
 
 2026-09-10 U07 surface checkpoint: 非active化で保持frameだけを同一deviceの独立textureへcopyし、FFmpeg pool参照を解放する。H.264小画像／1080pの24→1枚、画素／PTS保持・5往復・異device拒否時の元frame保持を確認。通常decodeはzero-copy、背景音声／復帰表示契約は維持。先行8557085のCI34457683438は成功。P010用VP9 Profile 2はこの環境のD3D11VA初期化失敗で明示skip、未検証として残す。次は復帰decoder／Seek遅延とU08の連続drag／結合契約を照合する。全resource予算・通常window／混在DPI・全UIA・metadata／preview／seek／性能を含む全台帳は継続する。

@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10 U08 filmstrip: 外へのprimary dragから、元ファイルを別windowへ開く入口を追加した。これは元tabを閉じないpath参照の新規Openで、未保存編集／再生状態の移送ではない。起動失敗・古いsnapshot／所属外path・overlayを拒否し、元tabを保持する。単一path引数と成功／失敗のapp状態、合成gestureとhidden GPUのpreview描画／取消を確認するが、今回の試験では実子processを起動していない。spawn成功だけでは子windowの描画／読込成功を保証しない。通常window／物理capture・混在DPI、window間結合／状態移送は未完。
+
 2026-09-10 U08 drag: bar内の操作はtab本体の追従・隣接tabの即時移動・端の横scrollへ対応した。表示だけを投影し、TabSetの確定はrelease一回。window内bar外へのdropとEscape等は取消、外へのdropは従来のguard付きpath-only別process起動のまま。連続したwindow間結合／状態移送とfilmstrip分離は未実装。3幅×3密度・UIA座標とhidden native GPUの描画は確認するが、通常windowの物理drag／mixed-DPI・実CursorLeft/captureの最終認定は残す。
 
 2026-09-10 U07 surface: 最後のhardware frameを独立textureへ移し、非active保持時のFFmpeg array参照を解放する。H.264のNV12 160×96／1920×1088で24→1枚と画素一致を確認。後者の画素データ換算は約71.72→2.99 MiBだが、driverの予約量／解放時刻やprocess全体のVRAM測定ではない。copy失敗時は元frameを保持しstderrで診断する。P010回帰はVP9 Profile 2のD3D11VA初期化失敗・software fallbackで明示skipし、実hardwareの成功とは数えない。復帰decoder再構築／Seek待ち、全format／device組合せと長期性能は未完。

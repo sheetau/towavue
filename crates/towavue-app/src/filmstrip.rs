@@ -14,6 +14,11 @@ const HEIGHT: f32 = 118.0;
 
 type Preview = Result<(TextureHandle, Option<Duration>), String>;
 
+mod drag;
+
+#[cfg(test)]
+pub(crate) mod drag_tests;
+
 #[derive(Default)]
 pub struct View {
     focus: Option<PathBuf>,
@@ -28,6 +33,7 @@ pub struct Filmstrip {
     focus: Option<PathBuf>,
     focus_requested: bool,
     scroll_offset: f32,
+    drag: drag::State,
 }
 
 impl Filmstrip {
@@ -40,6 +46,7 @@ impl Filmstrip {
             focus: None,
             focus_requested: false,
             scroll_offset: 0.0,
+            drag: drag::State::default(),
         })
     }
 
@@ -50,7 +57,12 @@ impl Filmstrip {
         self.clear_previews();
     }
 
+    pub fn cancel_drag(&mut self) {
+        self.drag.clear();
+    }
+
     pub fn clear_previews(&mut self) {
+        self.drag.clear();
         if !self.visible.is_empty() {
             self.generation = self.loader.request(Vec::new());
             self.visible.clear();
@@ -163,6 +175,7 @@ impl Filmstrip {
         actions: &mut Vec<UiAction>,
     ) {
         let screen = context.content_rect();
+        self.drag.begin(context, snapshot, current, enabled);
         context
             .layer_painter(egui::LayerId::new(
                 egui::Order::Middle,
@@ -229,9 +242,11 @@ impl Filmstrip {
                         let response = ui.interact(
                             rect,
                             ui.id().with(("filmstrip-item", &item.path)),
-                            egui::Sense::click(),
+                            egui::Sense::click_and_drag(),
                         );
                         let active = selected == Some(index);
+                        self.drag
+                            .observe(&response, &item.path, self.previews.get(&item.path));
                         if active
                             && self.focus_requested
                             && response.enabled()
@@ -325,6 +340,9 @@ impl Filmstrip {
                             actions.push(UiAction::OpenMedia(item.path.clone(), true));
                         }
                         let mut tooltip = item.path.display().to_string();
+                        tooltip.push_str(
+                            "\nDrag outside the window to open the source file in a new window.",
+                        );
                         if let Some(Err(error)) = self.previews.get(&item.path) {
                             tooltip.push_str(&format!("\nPreview unavailable: {error}"));
                         }
@@ -334,6 +352,7 @@ impl Filmstrip {
                 self.scroll_offset = output.state.offset.x;
             });
         self.set_visible(wanted);
+        self.drag.finish(context, actions);
     }
 
     pub fn show_recent(

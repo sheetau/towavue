@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### filmstripから別windowへ開く（2026-09-10、U08）
+
+filmstripのcardをprimary buttonで掴んで6 logical pxを超えて動かすと、既存の低解像度previewとfile名が追従する。window外へ離すと元ファイルのpathを新windowへ渡す。元tabを閉じず未保存編集はそのまま残る。window内release／Escape／focus喪失・overlay・snapshot／current source／screen／density変更・filmstrip終了では取消。起動要求が失敗すると理由を表示してfilmstripを残し、成功時だけ閉じる。編集状態の複製やwindow間結合ではない。
+
+`cargo test -p towavue-app filmstrip::drag_tests`の3回帰でpreview texture共用と追加decode要求なし・描画位置、batch input／座標欠落後の復帰・一回だけのpath action、preview無効化を含む11取消条件、起動成功／失敗・古いfolder generation／所属外path／overlay拒否、元tab／dirty history／保存先／transport不変とUnicode／spaceを含む単一path引数を確認する。起動関数は試験用の成功／失敗で置換し、実子processの起動試験とは区別する。既存filmstripのclick／middle click／UIA・virtualization回帰も維持する。native GPU recoveryの10点では合成previewを描画してdrag／Escapeし、履歴／generation不変・CPU転送0を確認する。通常windowの物理drag・子windowの読込／表示と実混在DPIは未認定。
+
+U08 filmstrip最終検証: session32533のfocused3、fmt／Clippy／workspace527（app301＋core61＋runtime161＋integration4）、追加app実機依存6件とReleaseが終了0。通常ignored15は成功数へ含めず、追加app試験にSKIPなし。Release SHA-256 `db9eaa49f9331114170573fcf36bf6278058463b6f50c747803e6b23cf869e86`。dependency／lock／notice inventory／runtime／unsafe変更なし。
+
 ### タブ本体のdrag追従（2026-09-10、U08）
 
 タブ名をprimary buttonで掴み6 logical px以上動かすと、掴んだ位置を保って本体が追従し、挿入先のtabがeaseなしで場所を空ける。表示の投影なので、離すまでは実順序／active／編集／再生を変更しない。bar端12px内で保持すると横scrollする。bar外のwindow内dropは取消、window外dropは従来の保存確認付き・path-only detach。window間結合や状態移送はまだできない。

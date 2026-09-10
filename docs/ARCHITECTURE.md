@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U05: 保存中のツールバー境界進捗（2026-09-10）
+
+保存jobがある間だけ、ツールバー下の既存境界に非hoverのSeekと同じ白／#181818・1物理pxの進捗を表示する。別の境界やhit領域／focus stopは追加しない。通常の画像移動・preview／metadata読取・保存先選択には表示しない。既存の取消／保存先・解析状態の表示と、離脱Saveのguardは維持する。全画面でtoolbarがない時は境界も表示せず、既存の取消UIを利用する。
+
+保存開始時のsource長とrequestのtrim／区間編集／全体rateから出力長をsnapshotし、workerの出力時刻に対する推定比率を使う。normalize時は解析／encodeの二passへ半分ずつ割り当てる。これは壁時計の残り時間や厳密なbyte進捗ではない。hardware fallbackで再encodeが始まればそのpassの実報告へ戻る。publish完了前は99%以下に留める。長さ不明・静止画は数値を捏造せず有界のindeterminate表示にし、取消要求後は止め、Finishedの成功／取消／失敗すべてで元の境界へ戻す。source/tab切替後も保存jobのsnapshotだけを参照する。UIAには非操作の進捗と解析／encode／取消状態を伝える。
+
 ## E01: JPEG文字metadataのUIとKeep保存（2026-09-10）
 
 JPEG UIはruntimeが公開する形式別の対応項目とvalidationを使い、Title／Artist／Comment／Copyrightだけを選択可能にする。非同期の既存値には言語と作者の順番を表示し、表示だけを1024 UTF-8 bytesへ切り詰める。読取待ち／失敗・XMLに不正な文字／未対応項目はApply不可。Setは言語別値／複数作者を一つへ置換し、Removeはその項目の全値を除去することを説明する。PNGと同じsource/tab世代guard・設定lifecycleを共有する。

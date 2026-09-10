@@ -6,6 +6,8 @@
 
 ## 1. 試用前に知るべき制約
 
+2026-09-10 U05: 保存中のtoolbar境界は出力時刻／開始時の既知durationに基づく推定進捗であり、wall-clockの残り時間／byte数ではない。normalize解析／encodeを半分ずつとし、hardware fallbackによる再encodeで戻ることがある。出力時刻が終端でもpublishまでは99%以下に留める。画像／長さ不明はindeterminate、取消後は停止、Finishedで元境界へ戻る。通常の画像移動では点滅させない。既存のexport詳細／Cancelと離脱guardは残し、toolbarのない全画面では境界進捗を出さない。通常window／physical入力／実混在DPIの最終照合は未完。
+
 2026-09-10 JPEG UI更新: 以下16:15の未接続項目を更新し、JPEG4項目のUI／言語・作者順の既存値表示／全Keep既定保存を接続済み。JPEG→JPEG保存では設定未使用でも有界metadata検査を行うため、破損／過大／未対応構造のXMPを含む入力は保存を拒否する。表示は値1024 UTF-8 bytes、言語63 ASCII charsで省略を明示するが、Keepの保存値は完全保持する。Setは全言語／全作者を一つへ置換し、Removeは全値を削除。EXIF／IPTC／COMの同期・残る6項目／Extended XMP・他画像形式と通常window／物理IME／混在DPI／全素材認定は未完。全metadata保持や無変換JPEG保存ではない。
 
 2026-09-10 16:15: JPEG XMPのTitle／Artist／Comment／Copyrightはruntimeの保存基盤だけ対応し、JPEG用UI・共通の既存値表示APIは未接続。標準APP1一packetのUTF-8／Alt言語値・Seq作者・単純文字／属性形式を扱う。65502 bytes・32階層／4096 elements／128値まで。Extended XMP、複数packet、非空のRDF subject、参照でescapeされたnamespace宣言、対象文字への構造／修飾は明示拒否する。EXIF／IPTC／COMとの同期や全XMP保持ではなく、stageのXMP packetを対象文字値で置き換える（元の未知／技術XMPはcopyしない）。stageのEXIF／ICC／非XMP画像bytesは変更しない。他6文字項目・JPEG全Keep既定保存・UI／他形式／全素材品質は継続し、synthetic multi-scan marker試験を実progressive素材の全対応認定とはしない。

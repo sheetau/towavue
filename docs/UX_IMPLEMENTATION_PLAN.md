@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-10 U05追加checkpoint: 草案の保存進捗をtoolbar下境界へ接続。source／編集snapshotとworker時刻による推定、normalizeの二pass、画像／未知長の有界indeterminate、取消停止／terminal解除、非操作UIAを追加。hoverで太さ・入力状態を変えず、軽い画像移動では表示しない。既存取消・guard・全画面詳細を維持。E01の残る形式／項目や他の台帳を落とさず、次にM01の明示方向menu操作を照合する。
+
 2026-09-10 E01 JPEG UI checkpoint: 共通metadata dialogへJPEG4項目・非同期の言語別値／作者順表示を接続し、PNGと共通のSave／再Save／全Keep復元・Remove／出力形式失敗時のtarget保護／guard／source lifecycleを検証する。runtimeの形式別項目・XML validationを共有し、読取待ち／失敗・隠れた非対応項目／不正XML値はApply不可。既定JPEG保存もKeepの全値を保持する。他6項目・EXIF／IPTC／COM整合・Extended XMP・他画像形式／通常window／全codec品質を含む全台帳は継続する。
 
 2026-09-10 15:18 E01／U02追加checkpoint: metadata設定UIと非同期既存値表示をSave／再Save／AudioOnlyへ接続し、source/tab単位保持・取消／stale／guard、全10項目・IMEを検証。全app描画がmodal内popupも毎frame閉じる不具合を再現し、metadata・画像／動画resizeの選択を修正。実GPU上のmetadata Apply／復旧と4filter選択も確認。画像metadata・通常window／mixed-DPI／全codecと全台帳の未完事項を継続する。
@@ -49,7 +51,7 @@
 | U02 | modalのnative利用をコード量・操作性で判断 | 要照合。通常egui、graphics故障時native。metadataと画像／動画resizeのpopup保持を全app frameで修正・回帰確認。guardと入力・focus・保存取消、全modalのnative選択判断は継続 |
 | U03 | Codicon、Figtree＋日本語UI font、数字の等幅 | 主対応済み。monapadのFigtree／Monaco Codiconを同梱、既存tnum字形を再生成可能な派生fontへ固定。Yu Gothic UI Regularのfaceを優先し、glyph・等幅・UI配置と実日本語画面を確認。今後追加する操作のiconとnative caption後の最終照合は継続 |
 | U04 | grayscale配色、barの2境界、logo／tabの中央揃え・左寄せ・一定padding | 一部対応。基本バー・共通widget状態色・clear色、logo／tab中央と左10px余白、timeline上へ移る2境界を実装・検証。overlay固有色／全media状態での最終照合、font/icon変更後の配置確認は残る |
-| U05 | 重い保存等の進捗はtoolbar下境界、軽い画像移動で点滅させない | 未完。現在はexport window／一時status。実際の進捗・取消・失敗との整合が必要 |
+| U05 | 重い保存等の進捗はtoolbar下境界、軽い画像移動で点滅させない | 主経路実装。保存jobのsnapshotへtrim／区間編集／rateを反映し、workerの出力時刻から推定。normalize二pass、静止画／未知長はindeterminate、取消停止／完了・取消・失敗で境界復帰。既存取消／guard維持、UIA進捗、100／125／200%×狭幅の1物理px・hover不変、画像読込非表示、tab切替後の実保存と実GPU復旧前後を確認。通常windowの見え方／物理入力／mixed-DPIの最終照合は継続 |
 | U06 | Welcome tab常在、Open file/folderと最近開いたfile | 主要実装済み。空選択をWelcome identityへ置換し、初回Open／最後のcloseを往復。直近40件のpath-only履歴をworkerで永続化し、複数window更新をlock下でmerge、破損fileは保持して警告する。可視cardだけ既存filmstrip worker／低解像度cacheを共用し、thumbnail／waveform・duration・左揃えfile名から開く。Windows 11でPNG／MP4／WAVの履歴、順序更新、正常終了後の再起動復元、UIA OpenとWelcome復帰、狭幅gridを確認。session復元や未保存backupは追加しない。全screen reader／物理入力matrixはG01で継続 |
 | U07 | tabごとの全表示／再生状態保持、背景音声・複数動画、非activeの表示負荷抑制 | 一部実装。画像の画素／view／読書状態に加え、通常UIで動画／音声session・clock・view・bar開閉・取得済みduration/waveformを保持。複数sessionの背景音声・既知／未知終端・停止位置・fault隔離・close・全sessionの同一device復旧を検証。既知終端の非active動画はdecode停止、未知ならclock同期の有界処理。音声は復帰時に再Openせず、映像も開いた入力を再利用する。保持した最終frameを復帰直後に再描画し、現在位置の新frameへ置換する。decoder再構築／Seek／置換待機、hardware surface pool保持量の削減は残る。playlist／表示中filmstripのscrollとtimeline高さもtab別に保持。全focus状態、全resource予算、device／endpoint失敗の全組合せは未完 |
 | U08 | tab dragの連続性、window分離／結合、filmstripから分離、drop indicator | 一部実装。並べ替えと別processへのpath detachのみ。結合と状態移送を未完として扱う |

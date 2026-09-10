@@ -8,6 +8,7 @@ mod audio_export_tests;
 mod audio_playback;
 mod chrome;
 mod cursor;
+mod export_progress;
 mod filmstrip;
 mod fonts;
 mod frame_step;
@@ -319,6 +320,7 @@ struct ActiveExport {
     tab: TabId,
     request: ExportRequest,
     options: ExportOptions,
+    progress: export_progress::ExportProgress,
     encoded: Duration,
     analyzing_audio: bool,
     cancelling: bool,
@@ -3241,8 +3243,9 @@ where
             data.remove_temp::<bool>("filmstrip-return-tab".into())
                 .unwrap_or(false)
         });
-        egui::Panel::top("tabs")
+        let panel = egui::Panel::top("tabs")
             .exact_size(chrome::TITLE_HEIGHT)
+            .show_separator_line(false)
             .frame(chrome::bar())
             .show(root, |ui| {
                 ui.horizontal_centered(|ui| {
@@ -3533,6 +3536,7 @@ where
                     }
                 });
             });
+        export_progress::draw(root, panel.response.rect, self.active_export.as_mut());
         self.tab_preview.request(
             preview_target,
             &self.preview_cache,
@@ -5467,12 +5471,17 @@ where
         }) {
             Ok(job) => {
                 self.active_export = Some(ActiveExport {
+                    progress: export_progress::ExportProgress::new(
+                        &request,
+                        &options,
+                        self.media_duration,
+                    ),
+                    analyzing_audio: options.audio.normalize_peak,
                     job,
                     tab: id,
                     request,
                     options,
                     encoded: Duration::ZERO,
-                    analyzing_audio: false,
                     cancelling: false,
                     continuation,
                 });
@@ -5492,13 +5501,17 @@ where
     fn handle_export_event(&mut self, event: ExportEvent) {
         match event {
             ExportEvent::AnalyzingAudio(time) => {
-                if let Some(export) = &mut self.active_export {
+                if let Some(export) = &mut self.active_export
+                    && !export.cancelling
+                {
                     export.analyzing_audio = true;
                     export.encoded = time;
                 }
             }
             ExportEvent::Progress(time) => {
-                if let Some(export) = &mut self.active_export {
+                if let Some(export) = &mut self.active_export
+                    && !export.cancelling
+                {
                     export.analyzing_audio = false;
                     export.encoded = time;
                 }
@@ -10565,6 +10578,11 @@ mod tests {
                         .expect("metadata option");
                 }
                 ActiveExport {
+                    progress: export_progress::ExportProgress::new(
+                        &request,
+                        &ExportOptions::default(),
+                        None,
+                    ),
                     options: ExportOptions {
                         metadata,
                         ..Default::default()

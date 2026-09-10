@@ -4,6 +4,14 @@
 
 ## 1. 最初に試す
 
+### 保存進捗のツールバー境界（2026-09-10、U05）
+
+Save／Export as／音声のみ出力を実行すると、toolbar下の既存境界が白／#181818・1物理pxの進捗になる。既知の音声／動画は保存開始時のsource長・trim／区間編集／rateを使った推定、normalizeは解析／encodeを半分ずつ使う。長さ不明／画像は短い白線が移動する。Cancel後は止まり、完了／取消／失敗で元の境界へ戻る。hoverの太線／つまみ／focus stopはない。画像の左右移動・preview／metadata読取・保存先dialogには表示しない。保存先／状態とCancelの詳細UI、離脱Saveのguardは維持する。
+
+`cargo test -p towavue-app export_progress`は編集後長さ／二pass、未知長の描画だけの60ms repaint要求と取消・完了後の停止、3幅×100／125／200%の1px描画／hover・pointer不変／UIA、全画面非表示と復帰、成功／取消／失敗／late event、実normalize動画保存・音声のみ出力中に別tabの長さへ切り替えてもsnapshotが変わらないことを確認する。既存chrome二境界／compact guard回帰も維持。実D3D11VA復旧前後の同じ所有windowに推定二pass／再encode・indeterminate／cancel／解除のUIを描画し、UIA値・再生／編集不変・CPU転送0を確認する。native試験の進捗状態は非書込fixtureから与え、hardware encoderの実failure試験やscreenの厳密pixel認定とは区別する。
+
+U05検証結果: 最終session97978でfmt／Clippy／workspace504（app278＋core61＋runtime161＋integration4）、追加app実機依存6件、release buildが終了0。通常ignored13は成功件数へ含めず、追加試験にSKIPなし。実GPU復旧前後10点でprogress UIを描画しCPU転送0。Release SHA-256 `2865d2de7d303f44a4a0215f6788d0de841023f4c4b3f36f515a66d4e1d55851`。共有test helperの不要borrow2件をClippy指摘で修正してから全体を再実行した。dependency／notice inventory変更なし。
+
 ### JPEG metadata UIと全Keep保存（2026-09-10、E01 partial）
 
 JPEGを開きFile「Metadata export options」からTitle／Artist／Comment／Copyrightを選ぶ。既存値はXMP言語と作者順を表示し、他6項目は候補へ出さない。Keepは全言語／作者順、Setは単一値（言語項目はx-default）、Removeはその項目の全値を扱う。Apply後のSave／Export asは.jpg／.jpegを選ぶ。表示／履歴は変更せず、Cancel／Escapeは未適用入力を破棄する。PNG同様にsource/tab限定で設定を保持し、再読込／別source／closeで解除する。読取待ち／失敗・不正XML文字はApply不可。EXIF／IPTC／COMとの同期・未知／技術XMPのコピーは行わない。

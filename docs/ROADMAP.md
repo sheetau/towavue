@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-10 U05 toolbar progress checkpoint: 保存jobのsnapshotからtrim／区間編集／rateを反映した推定進捗を上部境界へ接続。normalize二pass、長さ不明／画像のindeterminate、取消時停止、Finishedで解除、UIA非操作進捗に対応。画像移動・読取／dialogには表示せず、既存取消／guardと全画面時の詳細UIを維持する。1物理px／hover不変／二境界、DPI・狭幅・tab切替後の実保存、実GPU復旧前後を確認する。先行a433a69のCI34450453754は成功。E01他画像形式・JPEG残項目を含む全台帳は継続し、次はM01ロゴの方向menu操作を既存menu／focus契約へ照合する。通常window／混在DPI／性能の最終確認も残す。
+
 2026-09-10 E01 JPEG metadata UI checkpoint: 形式別の対応4項目・XML validationをruntimeと共有し、言語別既存値／作者順の非同期表示・Apply／CancelをSaveへ接続。JPEG→JPEGは設定未使用／全Keepでも対象4項目を保持し、表示の省略では元値を切り詰めない。PNGと共通の全項目UIA／focus／compact、実Save／再Save／全Keep復元／Remove・出力形式失敗／guard／source lifecycleを検証する。JPEG他6項目／EXIF・IPTC・COM整合／Extended XMP・他形式と全UX台帳は継続。先行067a225のCI34449201712は成功。次は残る画像metadataの形式別契約と不足項目を照合し、通常window／全素材品質の残件も維持する。
 
 2026-09-10 16:15 E01 JPEG XMP基盤checkpoint: 標準XMPのTitle／Artist／Comment／CopyrightをJPEG→JPEG出力へ接続。言語Alt／作者Seq、namespace URI・Unicode／参照・CR保持を扱い、DTD／複数packet／Extended XMP・未対応構造／過大入力は拒否する。stageの非XMP bytes／EXIF・復号画素不変、独立JPEG decoderのXMP抽出、回転／反転保存とKeep／Set／Remove、取消／source変更／write失敗・target保護を7回帰で確認。他6項目、JPEG UI／全Keep既定保存・EXIF／IPTC整合と他形式は未完。次は形式別項目／既存値表示・UIとKeep保存の契約を揃える。全UX台帳／通常window／全素材品質・性能は継続。先行3a72bf0のCI34447566341は成功。

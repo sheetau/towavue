@@ -1,6 +1,8 @@
 use super::*;
 use std::os::windows::process::CommandExt;
 
+mod gpu;
+
 fn bitmap_fixture(path: &Path) {
     let mut bitmap = vec![0_u8; 62];
     bitmap[..2].copy_from_slice(b"BM");
@@ -197,6 +199,10 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
     ) else {
         return;
     };
+    measure(root, None);
+}
+
+fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
     let output = std::process::Command::new(
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe"),
     )
@@ -258,7 +264,7 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
         captured_at: std::time::SystemTime::UNIX_EPOCH,
     });
     let epoch = Instant::now();
-    let draw = |app: &mut Application<_>| {
+    let draw = |app: &mut Application<_>, renderer: &mut Option<FrameRenderer>, verify| {
         let output = context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -290,7 +296,12 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
                 egui::Shape::Mesh(mesh) if mesh.texture_id == held.image.texture.id())
             })
         });
-        (full, preview, held)
+        let gpu_calls = if let Some(renderer) = renderer {
+            gpu::submit(app, &context, output, renderer, verify)
+        } else {
+            Duration::ZERO
+        };
+        (full, preview, held, gpu_calls)
     };
     let receive = |app: &mut Application<_>, timeout| {
         let mut prepare = Duration::ZERO;
@@ -305,24 +316,36 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
         }
         prepare
     };
-    draw(&mut app);
+    draw(&mut app, &mut renderer, false);
     app.load_path(paths[0].clone(), MediaKind::Image);
     let deadline = Instant::now() + Duration::from_secs(30);
     while app.image_loading {
         assert!(Instant::now() < deadline, "initial image timeout");
         receive(&mut app, Duration::from_millis(10));
-        draw(&mut app);
+        draw(&mut app, &mut renderer, false);
     }
-    assert!(draw(&mut app).0);
+    assert!(draw(&mut app, &mut renderer, false).0);
     // A deliberate initial look allows the existing bounded neighbor worker to run.
     let deadline = Instant::now() + Duration::from_millis(500);
     while Instant::now() < deadline {
         receive(&mut app, Duration::from_millis(5));
     }
-    for cadence in [Duration::ZERO, Duration::from_millis(33)] {
+    let cases = [
+        (Duration::ZERO, false),
+        (Duration::from_millis(33), false),
+        (Duration::ZERO, true),
+    ];
+    for (cadence, verify) in cases {
+        if verify && renderer.is_none() {
+            continue;
+        }
+        app.nearest_images = verify;
+        draw(&mut app, &mut renderer, false);
+        let mut memory = renderer.as_ref().map(gpu::Memory::new);
         let mut ready = Vec::new();
         let mut prepare = Vec::new();
         let mut draw_time = Vec::new();
+        let mut gpu_time = Vec::new();
         let mut dispatch = Vec::new();
         let mut blank_targets = 0;
         let mut preview_targets = 0;
@@ -336,10 +359,13 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
             let mut handoff = false;
             let mut preparation = Duration::ZERO;
             let mut drawing = Duration::ZERO;
+            let mut gpu_calls = Duration::ZERO;
             loop {
                 let draw_started = Instant::now();
-                let (full, low_resolution, held) = draw(&mut app);
+                let (full, low_resolution, held, gpu_elapsed) =
+                    draw(&mut app, &mut renderer, verify);
                 drawing += draw_started.elapsed();
+                gpu_calls += gpu_elapsed;
                 blank |= !full && !low_resolution && !held;
                 preview |= low_resolution;
                 handoff |= held;
@@ -355,6 +381,10 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
             ready.push(start.elapsed());
             prepare.push(preparation);
             draw_time.push(drawing);
+            gpu_time.push(gpu_calls);
+            if let (Some(memory), Some(renderer)) = (&mut memory, &renderer) {
+                memory.sample(renderer);
+            }
             blank_targets += usize::from(blank);
             preview_targets += usize::from(preview);
             handoff_targets += usize::from(handoff);
@@ -374,7 +404,9 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
             values[values.len() / 2].as_secs_f64() * 1000.0
         };
         eprintln!(
-            "NAV100 cadence_ms={} files_mib={:.1} full=100 blank_targets={} preview_targets={} handoff_targets={} ready_median_ms={:.3} ready_p95_ms={:.3} event_completion_median_ms={:.3} draw_total_median_ms={:.3} dispatch_median_ms={:.3}",
+            "NAV100 gpu={} readback={} cadence_ms={} files_mib={:.1} full=100 blank_targets={} preview_targets={} handoff_targets={} ready_median_ms={:.3} ready_p95_ms={:.3} event_completion_median_ms={:.3} draw_total_median_ms={:.3} gpu_calls_total_median_ms={:.3} dispatch_median_ms={:.3}",
+            renderer.is_some(),
+            verify,
             cadence.as_millis(),
             bytes as f64 / 1048576.0,
             blank_targets,
@@ -384,10 +416,14 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
             percentile_95(&ready).as_secs_f64() * 1000.0,
             median(&prepare),
             median(&draw_time),
+            median(&gpu_time),
             median(&dispatch)
         );
+        if let Some(memory) = memory {
+            memory.report();
+        }
     }
     eprintln!(
-        "Scope: warm filesystem, synthetic Shell snapshot, serialized commands with all originals visited, CPU egui mesh/texture preparation. Event completion and total draw calls can both prepare textures; neither isolates conversion time. No GPU presentation, physical keys, dropped-key burst, peak memory or IrfanView comparison. Any blank/preview target leaves the seamless-navigation gate unmet."
+        "Scope: warm filesystem, synthetic Shell snapshot, serialized commands with all originals visited. GPU runs use a hidden 960x576 window and include upload/render/Present in readiness; CPU runs only prepare meshes/textures. The separate readback run uses Nearest with 64 pixel checks per displayed original and is NOT a throughput comparison. Memory: process-lifetime OS peaks, GPU sampled maxima after image arrivals, not transient GPU peaks. No physical keys, dropped-key burst, cold data, other formats or IrfanView comparison. Any blank/preview target leaves the seamless-navigation gate unmet."
     );
 }

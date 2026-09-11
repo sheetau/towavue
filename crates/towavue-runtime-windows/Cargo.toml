@@ -8,7 +8,7 @@ repository.workspace = true
 publish = false
 
 [features]
-render-verification = []
+render-verification = ["windows/Win32_System_ProcessStatus"]
 
 [dependencies]
 arboard = { version = "=3.6.1", default-features = false, features = ["image-data"] }

@@ -66,6 +66,8 @@ pub use preview::{
     VideoSheetLayout,
 };
 pub use preview_loader::{PreviewLoader, VISIBLE_PREVIEW_LIMIT};
+#[cfg(feature = "render-verification")]
+pub use renderer::VerificationMemory;
 pub use renderer::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError, video_edit_geometry};
 pub use selection_outline::{paint_selection_outline, paint_time_selection};
 pub use shell::{

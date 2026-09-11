@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I03/I06/I07 GPU-NAV100 checkpoint: 4096×2304 JPEG100枚／31.8MiBをhidden 960×576窓で実GPU描画。readbackなしのRelease計測2回で即時ready中央値17.243／17.236ms、33ms間隔11.073／11.241ms。各caseで原寸100、blank／preview各0。別Nearest走行で原寸ごとに64点を照合し、読戻しの待機時間を性能根拠にしない。process lifetime最高commitは1240.1／1241.0MiB、working setは927.4／923.7MiB。通常走行のGPU最高観測local約338.2MiB／nonlocal約38.7MiBは瞬間peakではない。既存CPU計測も再確認。実右矢印burstでの全画像到達、cold／他形式、IrfanView比較と資源使用量の妥当性は未完であり、全UX gateは維持する。
+
 2026-09-12 I06/I07 GPU-handoff regression: appの実draw_ui→D3D11 upload／描画→RGBA readback→Presentで、100／125／200%・各12回の要求更新中の原寸維持を中央領域の全画素比較で確認。表示専用保持を外した対照は赤preview／空表示と区別できる。同じdeviceでのrenderer再作成＋texture復元と新しい緑原寸への置換、旧decoded allocation解放も確認。読み戻しは非default featureをdev-dependencyからだけ有効にし通常配布経路へ入れない。小型生成素材・hidden windowの回帰であり、100枚大画像GPU／物理burst／peak memoryと全UX gateは未完。
 
 2026-09-12 I06/I07 original-display-handoff checkpoint: 同一tabの通常画像navigation中は旧原寸一枚を表示専用で保持し、新しい原寸の準備後に置き換える。旧sourceのpath／transformを保持し、編集・保存／copy等と中央view入力を禁止。最新要求への再移動・古い完了・preview抑止・graphics復元・失敗／tab離脱／close時の解放を3倍率で回帰確認。4096×2304 JPEG100枚のRelease CPU計測2回とも、即時／33ms間隔でblank／preview各0、handoff各100、新原寸到達各100。再実行のready中央値16.929／7.521ms、p95 17.939／8.658ms。単なるdecode高速化や実GPUの無ちらつき認定ではない。追加一画像の生存期間を明記し、実GPU／burst全画像到達／peak memoryと全UX gateを継続する。

@@ -13,6 +13,12 @@
 
 ### 2026-09-12追記の差分台帳
 
+I03/I06/I07 GPU-NAV100: 既存100枚生成／Shell合成順／全原寸を待つ直列navigation計測を共通化し、GPU版はhidden 960×576窓へupload／描画／Presentまで行う。GPU API呼出時間も総draw時間と別に記録する（純GPU実行時間ではない）。通常のSmooth走行は読戻しなし、後続のNearest照合走行だけ各原寸64点の読戻しを行い、decode先読みへ余分な時間を与える後者を性能比較には使わない。test-only runtime counterからprocessのOS最高値と各画像到達後のGPU usageを取得し、未対応counterは理由付き省略。通常buildへ機能を入れない。
+
+Release 2回の結果: 即時ready中央値17.243／17.236ms、p95 20.316／20.072ms、GPU呼出累計中央値4.039／4.008ms。33ms間隔はready中央値11.073／11.241ms、p95 12.574／12.694ms、GPU呼出4.398／4.504ms。各caseで原寸100・blank 0・preview 0・handoff 100。別照合走行も各100原寸の64点を通過。CPU再実行は中央値16.879／7.682msでblank／preview各0を維持。これは当該条件での測定結果であり、ソフトウェアの高速化を今回実装したという意味ではない。
+
+資源: 通常2case終了までのprocess lifetime最高working set 927.4／923.7MiB、最高commit 1240.1／1241.0MiB。通常走行のGPU local最高観測は約338.2MiB、nonlocalは約38.7MiB（segmentごとの別々の最大値で、足し合わせた同時peakではない）。照合走行はstagingも使うため別扱い。各case開始前の既存cache、runtime／driver、allocatorを含むプロセス全体の値であり、handoff単体の追加費用とは言えない。再測定: `cargo test -p towavue-app --release hundred_large_images_report_gpu_navigation_and_memory -- --ignored --nocapture`。デバッグ版は検証に約320秒かかり、性能値へ使わない。実キーburstの取りこぼし、可視screen、cold／他形式とIrfanView比較は未達。次は最新要求優先の挙動と「右矢印連打でも全原寸」の要求を照合し、資源の内訳／解放も追跡する。
+
 I06/I07 GPU-handoff回帰: 小型の模様付き生成原寸を実draw_uiからD3D11へ送り、3倍率・各12回の最新要求更新とpreview到着で中央領域の全画素を比較。保持を外した対照条件の赤preview／空表示を識別し、同じdevice上でrendererを再作成した際のtexture復元、新原寸の全サンプル置換も確認。RGBA pointerとArc weak参照から一つの旧decoded allocationを共有し、置換後に解放されることを確認する。runtime内のsafeな読み戻し入口を非default featureに限定し、appのdev-dependencyだけで使う。通常依存経路にfeatureがないことをcargo treeで確認。これはhidden窓の描画／Presentと旧CPUデータ寿命の検証で、100枚大画像のGPU性能・可視画面・物理入力・GPU allocation／process peak memoryの証明ではない。次は既存NAV100をGPU submissionと資源測定へ拡張する。
 
 I06/I07 original-display-handoff: 同じtabの通常画像移動は旧原寸一枚を表示専用で保持する。新targetのimageや編集履歴としては扱わず、旧path／表示transform／取得済み容量をstatusにも使う。保持中の編集・保存／metadata options・画像／path copy・Explorer表示・view操作を禁止し、navigationは最新要求優先を維持する。3倍率の実draw_ui回帰で旧mesh維持、縮小preview抑止、pointer／command入力で履歴とview不変、古い完了の無視、新原寸への置換、graphics復元対象と失敗／tab移動／closeのtexture解放を確認。読み込み中の新tab stateへ旧画像を渡さない。

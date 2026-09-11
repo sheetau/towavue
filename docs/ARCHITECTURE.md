@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## V03/A02/U12: timelineのドラッグ所有権とhover進捗（2026-09-12）
+
+timelineのCTIは領域内の白1物理px線と上端の下向き三角markerとする。markerの8 logical px高／左右各6 logical px内だけをseek dragの開始対象にし、端では領域内へ切り詰める。線全体の特別なhit判定は廃止し、線からも通常の範囲選択dragを始められる。通常timeline clickによるseekは維持する。
+
+選択端から6 logical px以内の通常dragは近い側の端を変更し、反対端とpress時の掴みoffsetを固定する。media端と反対端の1ns手前までclampし、端の交差で選択を消したりseekへ変更しない。marker、選択端、音量線、通常選択の順に判定する。既存のAlt＋選択内dragによるstretchは優先し、音量線は最初の移動方向でgain／通常選択を固定する。端／stretchはResizeHorizontal、音量線はResizeRow、markerはGrab／Grabbingを使用する。既存の一回commit、取消／focus喪失／modal、keyboard／UIAを維持する。音量線は白alpha128（約50%）。timeline背景／余白と白20% difference選択塗り・左右点線は別の未完gateとして保持する。
+
+compact seekbarのpointer hover中は既存trackと同じ高さでhover位置まで白alpha64（約25%）を描き、再生進捗の白より後ろ・背景より前に置く。hoverだけではseekしない。端のhandle内側travel、非hoverの全幅1px、disabled／keyboard／既存drag処理は変更しない。
+
 ## U04: メディア通知のステータス集約（2026-09-12）
 
 画像読込／再サンプリング／読書ページ／再生失敗のmessageをmedia表示面へ描かず、status左のpathと置換する。読書drag中の値、長押し速度、期限内の一時通知、処理中／失敗状態、folder処理の順に解決する。既存のselection keyboard focus hintは保持し、読書drag中はその値を優先する。一時通知は既存の4秒で失効し、処理／失敗が残っていればその状態、それ以外はpathへ戻る。失敗詳細はstatusのtooltipへ全文保持し、読書の複数失敗も集約する。画像成功時に寸法・形式を一時通知へ書き込まず、形式／寸法／frame数はstatus右へ常設する。読書drag確定値は4秒残し、取消値は残さない。

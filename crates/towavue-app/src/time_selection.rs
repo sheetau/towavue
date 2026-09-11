@@ -33,6 +33,7 @@ fn describe_focus(response: &Response, enabled: bool, label: &str, value: f64) {
 enum Gesture {
     Seek,
     Select,
+    Resize(TimeRange, bool),
     Band(TimeRange, f32),
     Gain(TimeRange, f32),
     Stretch(TimeRange),
@@ -80,33 +81,55 @@ pub(super) fn show(
         Default::default()
     };
     let mode_id = response.id.with("time-selection-mode");
+    let choose = |origin: egui::Pos2, modifiers: egui::Modifiers| {
+        let selected =
+            selection.filter(|range| at(origin.x) >= range.start() && at(origin.x) <= range.end());
+        if modifiers.alt && !modifiers.ctrl && !modifiers.shift {
+            return selected.map_or(Gesture::Select, Gesture::Stretch);
+        }
+        if playhead_rect(rect, x_at(position)).contains(origin) {
+            return Gesture::Seek;
+        }
+        if !modifiers.any()
+            && let Some(range) = selection
+        {
+            let left = (origin.x - x_at(range.start())).abs();
+            let right = (origin.x - x_at(range.end())).abs();
+            if left.min(right) <= 6.0 {
+                return Gesture::Resize(range, left <= right);
+            }
+        }
+        let gain = adjustment::gain_at(&bands, at(origin.x));
+        if !modifiers.any()
+            && (selection.is_none() || selected.is_some())
+            && (origin.y - adjustment::gain_y(rect, gain)).abs() <= 4.0
+            && let Some(range) = selection.or_else(|| TimeRange::new(MediaTime::ZERO, duration))
+        {
+            return Gesture::Band(range, gain);
+        }
+        Gesture::Select
+    };
+    let cursor = |mode| match mode {
+        Gesture::Seek => egui::CursorIcon::Grab,
+        Gesture::Resize(..) | Gesture::Stretch(_) => egui::CursorIcon::ResizeHorizontal,
+        Gesture::Band(..) | Gesture::Gain(..) => egui::CursorIcon::ResizeRow,
+        Gesture::Select => egui::CursorIcon::Crosshair,
+    };
+    if enabled
+        && response.hovered()
+        && let Some(pointer) = response.hover_pos()
+    {
+        ui.ctx()
+            .set_cursor_icon(cursor(choose(pointer, ui.input(|input| input.modifiers))));
+    }
     if let (Some(origin), Some(pointer)) = (drag.origin, drag.position) {
-        let choose = || {
-            let selected = selection
-                .filter(|range| at(origin.x) >= range.start() && at(origin.x) <= range.end());
-            if drag.modifiers.alt && !drag.modifiers.ctrl && !drag.modifiers.shift {
-                return selected.map_or(Gesture::Select, Gesture::Stretch);
-            }
-            if (origin.x - x_at(position)).abs() <= 8.0 {
-                return Gesture::Seek;
-            }
-            let gain = adjustment::gain_at(&bands, at(origin.x));
-            if !drag.modifiers.any()
-                && (selection.is_none() || selected.is_some())
-                && (origin.y - adjustment::gain_y(rect, gain)).abs() <= 4.0
-                && let Some(range) = selection.or_else(|| TimeRange::new(MediaTime::ZERO, duration))
-            {
-                return Gesture::Band(range, gain);
-            }
-            Gesture::Select
-        };
         if drag.started {
             ui.ctx()
-                .data_mut(|data| data.insert_temp(mode_id, choose()));
+                .data_mut(|data| data.insert_temp(mode_id, choose(origin, drag.modifiers)));
         }
-        let mut mode = ui
-            .ctx()
-            .data_mut(|data| *data.get_temp_mut_or_insert_with(mode_id, choose));
+        let mut mode = ui.ctx().data_mut(|data| {
+            *data.get_temp_mut_or_insert_with(mode_id, || choose(origin, drag.modifiers))
+        });
         if let Gesture::Band(range, gain) = mode
             && let Some(direction) = drag.direction
         {
@@ -117,6 +140,11 @@ pub(super) fn show(
             };
             ui.ctx().data_mut(|data| data.insert_temp(mode_id, mode));
         }
+        ui.ctx().set_cursor_icon(if matches!(mode, Gesture::Seek) {
+            egui::CursorIcon::Grabbing
+        } else {
+            cursor(mode)
+        });
         if drag.dragging && matches!(mode, Gesture::Gain(..) | Gesture::Stretch(_)) {
             let edit = match mode {
                 Gesture::Gain(range, original) => {
@@ -147,6 +175,35 @@ pub(super) fn show(
             };
             if drag.released && adjustment::changes_plan(duration, plan, edit) {
                 output.edit = Some(edit);
+            }
+        } else if drag.dragging
+            && let Gesture::Resize(range, start) = mode
+        {
+            let endpoint = if start { range.start() } else { range.end() };
+            let delta = (f64::from(pointer.x) - f64::from(origin.x))
+                / f64::from(rect.width().max(1.0))
+                * duration.as_nanoseconds() as f64;
+            let point = MediaTime::from_nanoseconds(
+                ((endpoint.as_nanoseconds() as f64 + delta).round() as i64)
+                    .clamp(0, duration.as_nanoseconds()),
+            );
+            preview = if start {
+                TimeRange::new(
+                    point.min(MediaTime::from_nanoseconds(
+                        range.end().as_nanoseconds() - 1,
+                    )),
+                    range.end(),
+                )
+            } else {
+                TimeRange::new(
+                    range.start(),
+                    point.max(MediaTime::from_nanoseconds(
+                        range.start().as_nanoseconds() + 1,
+                    )),
+                )
+            };
+            if drag.released && preview != selection {
+                output.selection = Some(preview);
             }
         } else if drag.dragging && matches!(mode, Gesture::Select) {
             let a = at(origin.x);
@@ -204,7 +261,30 @@ pub(super) fn show(
             ),
         );
     }
-    painter.vline(x_at(head), rect.y_range(), (2.0, crate::chrome::FOREGROUND));
+    let pixel = 1.0 / ui.ctx().pixels_per_point();
+    let x = (x_at(head) / pixel).floor() * pixel;
+    let x = x.clamp(rect.left(), (rect.right() - pixel).max(rect.left()));
+    painter.rect_filled(
+        Rect::from_min_max(
+            egui::pos2(x, rect.top()),
+            egui::pos2((x + pixel).min(rect.right()), rect.bottom()),
+        ),
+        0.0,
+        crate::chrome::FOREGROUND,
+    );
+    let marker = playhead_rect(rect, x_at(head));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            marker.left_top(),
+            marker.right_top(),
+            egui::pos2(
+                x_at(head).clamp(marker.left(), marker.right()),
+                marker.bottom(),
+            ),
+        ],
+        crate::chrome::FOREGROUND,
+        egui::Stroke::NONE,
+    ));
     for start in [true, false] {
         let selection = output.selection.unwrap_or(selection);
         let current = selection.map_or(if start { MediaTime::ZERO } else { duration }, |range| {
@@ -274,6 +354,16 @@ pub(super) fn show(
         output.edit = adjustment::values(ui, response, duration, selection, plan, enabled);
     }
     output
+}
+
+fn playhead_rect(rect: Rect, x: f32) -> Rect {
+    Rect::from_min_max(
+        egui::pos2((x - 6.0).max(rect.left()), rect.top()),
+        egui::pos2(
+            (x + 6.0).min(rect.right()),
+            (rect.top() + 8.0).min(rect.bottom()),
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -439,16 +529,21 @@ mod tests {
     #[test]
     fn horizontal_selection_and_head_seek_commit_once_in_batched_or_separate_frames() {
         for batched in [false, true] {
-            for (start, end, seek) in [
-                (120.0, 320.0, false),
-                (320.0, 120.0, false),
-                (20.0, 220.0, true),
-                (220.0, 220.0, true),
+            for (start, end, seek, marker) in [
+                (120.0, 320.0, false, false),
+                (320.0, 120.0, false, false),
+                (20.0, 220.0, false, false),
+                (20.0, 220.0, true, true),
+                (220.0, 220.0, true, false),
             ] {
                 let context = egui::Context::default();
                 frame(&context, vec![], true, None);
+                let mut press = button(start, true);
+                if marker && let egui::Event::PointerButton { pos, .. } = &mut press {
+                    pos.y = 34.0;
+                }
                 let events = vec![
-                    button(start, true),
+                    press,
                     egui::Event::PointerMoved(egui::pos2(end, 70.0)),
                     button(end, false),
                 ];
@@ -468,13 +563,193 @@ mod tests {
                     assert!(results[0].seek.is_none());
                     assert_eq!(
                         results[0].selection,
-                        Some(TimeRange::new(time(2.5), time(7.5)))
+                        Some(TimeRange::new(
+                            time(f64::from((start.min(end) - 20.0) / 40.0)),
+                            time(f64::from((start.max(end) - 20.0) / 40.0))
+                        ))
                     );
                 }
                 assert!(frame(&context, vec![], true, None).is_empty());
             }
         }
     }
+    #[test]
+    fn selection_edges_resize_without_seeking_and_cancel_without_committing() {
+        let selected = TimeRange::new(time(2.5), time(7.5));
+        for batched in [false, true] {
+            for (start, end, expected) in [
+                (120.0, 80.0, TimeRange::new(time(1.5), time(7.5))),
+                (320.0, 360.0, TimeRange::new(time(2.5), time(8.5))),
+                (125.0, 85.0, TimeRange::new(time(1.5), time(7.5))),
+                (120.0, -100.0, TimeRange::new(time(0.0), time(7.5))),
+                (320.0, 600.0, TimeRange::new(time(2.5), time(10.0))),
+                (
+                    120.0,
+                    400.0,
+                    TimeRange::new(MediaTime::from_nanoseconds(7_499_999_999), time(7.5)),
+                ),
+                (
+                    320.0,
+                    40.0,
+                    TimeRange::new(time(2.5), MediaTime::from_nanoseconds(2_500_000_001)),
+                ),
+            ] {
+                let context = egui::Context::default();
+                frame(&context, vec![], true, selected);
+                let events = vec![
+                    button(start, true),
+                    egui::Event::PointerMoved(egui::pos2(end, 70.0)),
+                    button(end, false),
+                ];
+                let results = if batched {
+                    frame(&context, events, true, selected)
+                } else {
+                    let mut results = Vec::new();
+                    for event in events {
+                        results.extend(frame(&context, vec![event], true, selected));
+                    }
+                    results
+                };
+                assert_eq!(results.len(), 1);
+                assert_eq!(results[0].selection, Some(expected));
+                assert!(results[0].seek.is_none() && results[0].edit.is_none());
+                assert!(frame(&context, vec![], true, expected).is_empty());
+            }
+        }
+        for start in [120.0, 320.0] {
+            for interruption in 0..4 {
+                let context = egui::Context::default();
+                frame(&context, vec![], true, selected);
+                frame(
+                    &context,
+                    vec![
+                        button(start, true),
+                        egui::Event::PointerMoved(egui::pos2(220.0, 70.0)),
+                    ],
+                    true,
+                    selected,
+                );
+                match interruption {
+                    0 => {
+                        crate::timeline_input::cancel(&context);
+                    }
+                    1 => {
+                        frame(&context, vec![], false, selected);
+                    }
+                    2 => {
+                        frame(
+                            &context,
+                            vec![egui::Event::WindowFocused(false)],
+                            true,
+                            selected,
+                        );
+                    }
+                    _ => {
+                        frame(
+                            &context,
+                            vec![egui::Event::Key {
+                                key: egui::Key::Escape,
+                                physical_key: None,
+                                pressed: true,
+                                repeat: false,
+                                modifiers: egui::Modifiers::NONE,
+                            }],
+                            true,
+                            selected,
+                        );
+                    }
+                }
+                assert!(frame(&context, vec![button(220.0, false)], true, selected).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn timeline_marker_and_line_are_inside_and_hover_cursors_match_the_target() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = egui::Context::default();
+            context.set_pixels_per_point(density);
+            let rect = Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 100.0));
+            for position in [time(0.0), time(5.0), time(10.0)] {
+                let x = 20.0 + position.as_seconds_f64() as f32 * 40.0;
+                for (pointer, expected) in [
+                    (egui::pos2(x, 34.0), egui::CursorIcon::Grab),
+                    (egui::pos2(x, 70.0), egui::CursorIcon::Crosshair),
+                    (egui::pos2(120.0, 70.0), egui::CursorIcon::ResizeHorizontal),
+                    (egui::pos2(320.0, 70.0), egui::CursorIcon::ResizeHorizontal),
+                    (egui::pos2(180.0, 80.0), egui::CursorIcon::ResizeRow),
+                ] {
+                    let mut output = egui::FullOutput::default();
+                    for _ in 0..3 {
+                        output = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(500.0, 200.0),
+                                )),
+                                events: vec![egui::Event::PointerMoved(pointer)],
+                                ..Default::default()
+                            },
+                            |ui| {
+                                let response = ui.interact(
+                                    rect,
+                                    "marker-test".into(),
+                                    egui::Sense::click_and_drag(),
+                                );
+                                let result = show(
+                                    ui,
+                                    &response,
+                                    time(10.0),
+                                    position,
+                                    TimeRange::new(time(2.5), time(7.5)),
+                                    None,
+                                    true,
+                                );
+                                assert!(
+                                    result.seek.is_none()
+                                        && result.selection.is_none()
+                                        && result.edit.is_none()
+                                );
+                            },
+                        );
+                    }
+                    assert_eq!(output.platform_output.cursor_icon, expected);
+                    let stem = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(shape) if shape.fill == crate::chrome::FOREGROUND => {
+                                Some(shape.rect)
+                            }
+                            _ => None,
+                        })
+                        .expect("CTI stem");
+                    assert!(rect.contains_rect(stem));
+                    assert!((stem.width() * density - 1.0).abs() < 0.001);
+                    let marker = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Path(shape)
+                                if shape.closed && shape.fill == crate::chrome::FOREGROUND =>
+                            {
+                                Some(&shape.points)
+                            }
+                            _ => None,
+                        })
+                        .expect("playhead triangle");
+                    assert_eq!(marker.len(), 3);
+                    assert!(
+                        marker
+                            .iter()
+                            .all(|point| rect.contains(*point) && point.y <= rect.top() + 8.0)
+                    );
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == egui::Color32::from_white_alpha(128))));
+                }
+            }
+        }
+    }
+
     #[test]
     fn cancellation_retains_selection_and_a_new_press_rechooses_the_gesture() {
         for interruption in 0..4 {

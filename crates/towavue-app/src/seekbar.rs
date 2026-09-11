@@ -65,6 +65,18 @@ pub fn show_drag(
                     crate::chrome::BORDER
                 },
             );
+            if response.hovered()
+                && let Some(pointer) = response.hover_pos()
+            {
+                ui.painter().rect_filled(
+                    Rect::from_min_max(
+                        track.min,
+                        egui::pos2(pointer.x.clamp(track.left(), track.right()), track.bottom()),
+                    ),
+                    0.0,
+                    egui::Color32::from_white_alpha(64),
+                );
+            }
             ui.painter().rect_filled(
                 Rect::from_min_max(track.min, egui::pos2(x, track.bottom())),
                 0.0,
@@ -242,6 +254,76 @@ pub fn item_index(ratio: f32, count: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hover_progress_is_between_background_and_playback_without_committing() {
+        for density in [1.0, 1.25, 2.0] {
+            for value in [0.0, 0.25, 1.0] {
+                for (pointer, enabled, hover) in [
+                    (egui::pos2(0.0, 270.0), true, true),
+                    (egui::pos2(350.0, 270.0), true, true),
+                    (egui::pos2(500.0, 270.0), true, true),
+                    (egui::pos2(350.0, 200.0), true, false),
+                    (egui::pos2(350.0, 270.0), false, false),
+                ] {
+                    let context = Context::default();
+                    context.set_pixels_per_point(density);
+                    let status =
+                        Rect::from_min_max(egui::pos2(0.0, 270.0), egui::pos2(500.0, 300.0));
+                    let mut output = egui::FullOutput::default();
+                    for frame in 0..3 {
+                        output = context.run_ui(
+                            egui::RawInput {
+                                time: Some(f64::from(frame)),
+                                screen_rect: Some(Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(500.0, 300.0),
+                                )),
+                                events: vec![egui::Event::PointerMoved(pointer)],
+                                ..Default::default()
+                            },
+                            |_| {
+                                let (_, commit, open) =
+                                    show(&context, status, value, None, enabled, true);
+                                assert!(commit.is_none() && !open);
+                            },
+                        );
+                    }
+                    let rectangles: Vec<_> = output
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(rect) => Some(rect),
+                            _ => None,
+                        })
+                        .collect();
+                    let preview = rectangles
+                        .iter()
+                        .position(|rect| rect.fill == egui::Color32::from_white_alpha(64));
+                    assert_eq!(
+                        preview.is_some(),
+                        hover,
+                        "pointer {pointer:?}, enabled {enabled}, density {density}, value {value}"
+                    );
+                    if let Some(index) = preview {
+                        let track = rectangles[index - 1];
+                        let preview = rectangles[index];
+                        let played = rectangles[index + 1];
+                        assert_eq!(track.fill, crate::chrome::HOVER);
+                        assert_eq!(played.fill, crate::chrome::FOREGROUND);
+                        assert_eq!(preview.rect.left(), track.rect.left());
+                        assert_eq!(
+                            preview.rect.right(),
+                            pointer.x.clamp(track.rect.left(), track.rect.right())
+                        );
+                        assert_eq!(preview.rect.y_range(), track.rect.y_range());
+                        assert_eq!(played.rect.right(), 4.0 + 492.0 * value);
+                        assert_eq!(played.rect.y_range(), preview.rect.y_range());
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn seek_drag_keeps_the_thumbnail_and_time_visible_without_hover() {

@@ -104,7 +104,7 @@ pub(super) fn paint(
             painter.hline(
                 x_at(pair[0])..=x_at(pair[1]),
                 gain_y(rect, gain),
-                (1.0, crate::chrome::FOREGROUND),
+                (1.0, egui::Color32::from_white_alpha(128)),
             );
         }
     }

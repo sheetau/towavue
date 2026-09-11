@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 V03/A02/U12 timeline-input checkpoint: CTIを領域内の白1物理px＋三角markerとし、seek dragの開始をmarkerへ限定。線からの通常範囲選択、左右端resize／cursor／offset保持／交差clampと音量線の白50%／ResizeRowを実装。batched／別frameの一回commit、取消、既存gain／stretch／keyboard／UIAを回帰確認。seekbarは背景と再生済み白の間にhover位置まで白25%進捗を追加し、3倍率の順序・範囲・非commit・disabled／既存端点を確認。実入力・実画面は今回未確認。timeline背景／余白・difference選択塗り／点線、preview等の全UX gateは未完。
+
 2026-09-12 U04 status checkpoint: media表示面のloading／resampling／画像・読書・再生errorをstatus左へ集約。読書drag値を優先し確定後4秒、画像成功時の情報flashを除きframe数を右へ常設。fullscreen上中央の通知は下端barへ統合しfocus取得なし・既存抑止を維持。2幅×3倍率×通常／fullscreenの一回描画・path復帰、部分ページ／複数error、読書取消・履歴と既存focusを回帰確認。Release通常画像のpath／右情報を可視確認。Computer Useの対象とのintegrity差とactivation失敗により実入力は未確認。音量HUD・caption／tab／timeline／preview等と全UX gateは未完。
 
 2026-09-12 U04/G01 diagnostic-outline checkpoint: Debug版eguiのrect単位ID交替警告を画像tab／focus fixtureで再現し、可視診断だけを抑制。menu Escapeとtab間focus復帰の回帰で赤枠なし・元のfocus／非dispatchを確認。通常focusと実ID重複診断は維持し、Release動作は変更しない。status message集約・実画面と全UX gateは未完。

@@ -1388,6 +1388,82 @@ mod tests {
     }
 
     #[test]
+    fn disk_thumbnail_precedes_the_original_after_memory_cache_restart() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-disk-first-preview-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("owned directory");
+        let path = root.join("source.png");
+        image::RgbaImage::from_pixel(480, 320, image::Rgba([12, 34, 56, 127]))
+            .save(&path)
+            .expect("owned PNG");
+        let original = crate::decode_image(&path).expect("reference original");
+        let cache_root = root.join("cache");
+        let seed = PreviewCache::new(cache_root.clone()).expect("seed cache");
+        let expected = seed
+            .filmstrip(&path, towavue_core::MediaKind::Image)
+            .expect("persist thumbnail")
+            .image;
+        drop(seed);
+        let shared = Arc::new((
+            Mutex::new(Mailbox {
+                previews: Some(PreviewCache::new(cache_root).expect("fresh memory cache")),
+                ..Default::default()
+            }),
+            Condvar::new(),
+        ));
+        let loader = ImageLoader {
+            shared: Arc::clone(&shared),
+            prefetch_worker: LatestTask::new("disk-preview-test").expect("worker"),
+        };
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            run_worker(
+                shared,
+                || {
+                    let _ = ready_tx.send(());
+                },
+                |path, budget, current, preview| {
+                    started_tx.send(()).expect("original started");
+                    release_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("release original");
+                    decode_image_with_preview(path, budget, current, preview)
+                },
+            )
+        });
+        let generation = loader.request(vec![path.clone()]);
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("original blocked");
+        ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("preview ready before original");
+        assert!(loader.take_completed().is_none());
+        let preview = loader.take_preview().expect("disk preview notification");
+        assert_eq!(preview.generation, generation);
+        assert_eq!(preview.path, path);
+        assert_eq!(preview.preview.source_size, (480, 320));
+        assert_eq!(preview.preview.image, expected);
+        loader.shared.0.lock().expect("mailbox").preview_ready = Some(preview);
+        release_tx.send(()).expect("resume original");
+        ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("original ready");
+        assert!(loader.take_preview().is_none());
+        let completed = loader.take_completed().expect("original result");
+        assert_eq!(completed.generation, generation);
+        assert_eq!(
+            completed.images[0].1.as_ref().expect("original").as_ref(),
+            &original
+        );
+        drop(loader);
+        worker.join().expect("shutdown");
+        std::fs::remove_dir_all(root).expect("remove owned fixtures");
+    }
+
+    #[test]
     fn first_frame_preview_precedes_completion_and_respects_request_lifetime() {
         for mode in ["success", "failure", "cancel", "changed", "closed"] {
             let root = std::env::temp_dir().join(format!(

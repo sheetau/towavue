@@ -2,6 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,6 +18,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CACHE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const STATIC_THUMBNAIL_BYTE_LIMIT: usize = 128 * 1024 * 1024;
+const IMAGE_PREVIEW_FILE_LIMIT: usize = 1024 * 1024;
 const IMAGE_PREVIEW_VARIANT: &str = "filmstrip-image-v4";
 #[path = "video_preview_sheet.rs"]
 mod video_sheet;
@@ -63,6 +65,19 @@ pub struct CachedImagePreview {
 }
 
 impl PreviewMemory {
+    fn insert_encoded(&mut self, key: String, image: PreviewImage, bytes: &[u8]) {
+        let source_size = thumbnail_source_size(bytes).or_else(|| {
+            self.entries
+                .iter()
+                .find(|entry| entry.key == key)
+                .and_then(|entry| entry.source_size)
+        });
+        self.insert(key.clone(), image);
+        if let Some(entry) = self.entries.iter_mut().find(|entry| entry.key == key) {
+            entry.source_size = source_size;
+        }
+    }
+
     fn get(&mut self, key: &str) -> Option<PreviewImage> {
         let index = self.entries.iter().position(|entry| entry.key == key)?;
         let entry = self.entries.remove(index)?;
@@ -448,7 +463,7 @@ impl PreviewCache {
             self.memory
                 .lock()
                 .expect("preview memory")
-                .insert(key, image.clone());
+                .insert_encoded(key, image.clone(), &bytes);
             return Ok(image);
         }
         let bytes = generate()?;
@@ -478,7 +493,7 @@ impl PreviewCache {
             self.memory
                 .lock()
                 .expect("preview memory")
-                .insert(key, image.clone());
+                .insert_encoded(key, image.clone(), &bytes);
         }
         Ok(image)
     }
@@ -627,7 +642,35 @@ impl PreviewCache {
             })
         };
         self.check_cancelled()?;
-        Ok(preview)
+        if preview.is_some() {
+            return Ok(preview);
+        }
+        let Ok(file) = fs::File::open(self.root.join(format!("{key}.png"))) else {
+            return Ok(None);
+        };
+        let mut bytes = Vec::new();
+        let read = file
+            .take((IMAGE_PREVIEW_FILE_LIMIT + 1) as u64)
+            .read_to_end(&mut bytes);
+        self.check_cancelled()?;
+        if read.is_err() || bytes.len() > IMAGE_PREVIEW_FILE_LIMIT {
+            return Ok(None);
+        }
+        let Some(source_size) = thumbnail_source_size(&bytes) else {
+            return Ok(None);
+        };
+        let Ok(image) = decode_png(&bytes) else {
+            return Ok(None);
+        };
+        self.check_cancelled()?;
+        if cache_key(path, IMAGE_PREVIEW_VARIANT)? != key {
+            return Ok(None);
+        }
+        self.memory
+            .lock()
+            .expect("preview memory")
+            .insert_encoded(key, image.clone(), &bytes);
+        Ok(Some(CachedImagePreview { image, source_size }))
     }
 
     fn prune(&self) -> Result<(), PreviewError> {
@@ -685,6 +728,7 @@ fn static_thumbnail_png(
 ) -> Option<Vec<u8>> {
     let decoded = crate::image::decode_image_for_prefetch(source, byte_limit, current).ok()??;
     let frame = decoded.frames.into_iter().next()?;
+    let source_size = (frame.width, frame.height);
     let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;
     let small = image::DynamicImage::ImageRgba8(image).resize(
         240,
@@ -696,7 +740,38 @@ fn static_thumbnail_png(
     }
     let mut bytes = std::io::Cursor::new(Vec::new());
     small.write_to(&mut bytes, image::ImageFormat::Png).ok()?;
-    current().then(|| bytes.into_inner())
+    // The private ancillary chunk follows IHDR in our cache PNGs, never source files.
+    let mut chunk = Vec::with_capacity(20);
+    chunk.extend_from_slice(&8_u32.to_be_bytes());
+    chunk.extend_from_slice(b"tvSz");
+    chunk.extend_from_slice(&source_size.0.to_be_bytes());
+    chunk.extend_from_slice(&source_size.1.to_be_bytes());
+    chunk.extend_from_slice(&crc32fast::hash(&chunk[4..]).to_be_bytes());
+    let mut bytes = bytes.into_inner();
+    bytes.splice(33..33, chunk);
+    current().then_some(bytes)
+}
+
+fn thumbnail_source_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    let header = bytes.get(..53)?;
+    if &header[..16] != b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR"
+        || &header[33..41] != b"\0\0\0\x08tvSz"
+        || crc32fast::hash(&header[37..49]) != u32::from_be_bytes(header[49..53].try_into().ok()?)
+    {
+        return None;
+    }
+    let width = u32::from_be_bytes(header[16..20].try_into().ok()?);
+    let height = u32::from_be_bytes(header[20..24].try_into().ok()?);
+    if !(1..=240).contains(&width) || !(1..=160).contains(&height) {
+        return None;
+    }
+    let width = u32::from_be_bytes(header[41..45].try_into().ok()?);
+    let height = u32::from_be_bytes(header[45..49].try_into().ok()?);
+    let bytes = u64::from(width)
+        .checked_mul(u64::from(height))?
+        .checked_mul(4)?;
+    (width != 0 && height != 0 && bytes <= STATIC_THUMBNAIL_BYTE_LIMIT as u64)
+        .then_some((width, height))
 }
 
 fn frame_preview(
@@ -1596,12 +1671,13 @@ mod tests {
                 .expect("cache card after releasing contention")
                 .image
         );
-        assert!(
+        assert_eq!(
             cache
                 .cached_image(&source)
                 .expect("known thumbnail")
-                .is_none(),
-            "unknown source dimensions cannot be used as an original-size preview"
+                .expect("direct thumbnail includes source dimensions")
+                .source_size,
+            (32, 16)
         );
         let decoded = crate::decode_image(&source).expect("original dimensions");
         cache.remember_image(&source, &decoded, &|| true);

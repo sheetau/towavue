@@ -22,6 +22,144 @@ fn png() -> Vec<u8> {
 }
 
 #[test]
+fn persisted_thumbnail_dimensions_reject_invalid_metadata_and_keep_legacy_pixels() {
+    let cache = cache("thumbnail-dimension-validation");
+    let source = cache.root.join("source.png");
+    image::RgbImage::from_pixel(480, 320, image::Rgb([24, 48, 96]))
+        .save(&source)
+        .expect("owned PNG");
+    let valid = static_thumbnail_png(&source, STATIC_THUMBNAIL_BYTE_LIMIT, &|| true)
+        .expect("encoded thumbnail");
+    assert_eq!(thumbnail_source_size(&valid), Some((480, 320)));
+    let mut memory = PreviewMemory::default();
+    memory.insert_encoded("known".into(), decode_png(&valid).expect("pixels"), &valid);
+    memory.insert_encoded(
+        "known".into(),
+        decode_png(&png()).expect("legacy pixels"),
+        &png(),
+    );
+    assert_eq!(
+        memory.entries[0].source_size,
+        Some((480, 320)),
+        "a late legacy cache read must not erase known dimensions for the same source key"
+    );
+    for end in 0..53 {
+        assert_eq!(thumbnail_source_size(&valid[..end]), None);
+    }
+    let key = cache_key(&source, IMAGE_PREVIEW_VARIANT).expect("key");
+    let disk = cache.root.join(format!("{key}.png"));
+    for mode in [
+        "legacy",
+        "checksum",
+        "zero",
+        "oversize",
+        "overflow",
+        "preview-size",
+        "length",
+        "pixels",
+        "file-size",
+    ] {
+        let mut bytes = valid.clone();
+        match mode {
+            "legacy" => {
+                bytes.drain(33..53);
+            }
+            "checksum" => bytes[49] ^= 1,
+            "zero" => bytes[41..45].copy_from_slice(&0_u32.to_be_bytes()),
+            "oversize" => bytes[41..49]
+                .copy_from_slice(&[32768_u32.to_be_bytes(), 32768_u32.to_be_bytes()].concat()),
+            "overflow" => bytes[41..49].fill(255),
+            "preview-size" => bytes[16..20].copy_from_slice(&241_u32.to_be_bytes()),
+            "length" => bytes[36] = 7,
+            "pixels" => bytes.truncate(53),
+            "file-size" => bytes.resize(IMAGE_PREVIEW_FILE_LIMIT + 1, 0),
+            _ => unreachable!(),
+        }
+        if matches!(mode, "zero" | "oversize" | "overflow") {
+            let crc = crc32fast::hash(&bytes[37..49]);
+            bytes[49..53].copy_from_slice(&crc.to_be_bytes());
+        }
+        fs::write(&disk, &bytes).expect("owned invalid/legacy cache");
+        let fresh = PreviewCache::new(cache.root.clone()).expect("fresh memory");
+        assert!(
+            fresh
+                .cached_image(&source)
+                .expect("optional invalid cache")
+                .is_none(),
+            "{mode}"
+        );
+        assert_eq!(fs::read(&disk).expect("cache retained"), bytes);
+        if mode == "legacy" {
+            assert_eq!(
+                fresh
+                    .filmstrip(&source, MediaKind::Image)
+                    .expect("legacy thumbnail remains usable")
+                    .image,
+                decode_png(&valid).expect("pixels")
+            );
+            assert!(
+                fresh
+                    .cached_image(&source)
+                    .expect("unknown legacy dimensions")
+                    .is_none()
+            );
+        }
+    }
+    fs::write(&disk, &valid).expect("restore owned cache");
+    let token = Cancellation::default();
+    token.cancel();
+    assert!(matches!(
+        cache.cancellable(token).cached_image(&source),
+        Err(PreviewError::Cancelled)
+    ));
+    fs::write(&source, b"changed source identity").expect("replace owned source");
+    assert!(cache.cached_image(&source).expect("new key").is_none());
+    fs::remove_dir_all(&cache.root).expect("remove owned fixtures");
+}
+
+#[test]
+fn persisted_thumbnail_geometry_uses_all_exif_orientations() {
+    use image::ImageEncoder;
+    let cache = cache("thumbnail-oriented-dimensions");
+    let pixels = image::RgbaImage::from_fn(48, 32, |x, y| {
+        image::Rgba([x as u8 * 4, y as u8 * 6, 91, 127])
+    });
+    for tag in 1..=8 {
+        let source = cache.root.join(format!("oriented-{tag}.png"));
+        let mut exif = *b"II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x01\0\0\0\0\0\0\0";
+        exif[18] = tag;
+        let file = fs::File::create(&source).expect("owned PNG");
+        let mut encoder = image::codecs::png::PngEncoder::new(file);
+        encoder.set_exif_metadata(exif.to_vec()).expect("EXIF");
+        encoder
+            .write_image(pixels.as_raw(), 48, 32, image::ExtendedColorType::Rgba8)
+            .expect("oriented source");
+        let thumbnail = cache
+            .filmstrip(&source, MediaKind::Image)
+            .expect("thumbnail");
+        let fresh = PreviewCache::new(cache.root.clone()).expect("fresh memory");
+        let preview = fresh
+            .cached_image(&source)
+            .expect("lookup")
+            .expect("persisted geometry");
+        let mut expected = image::DynamicImage::ImageRgba8(pixels.clone());
+        expected
+            .apply_orientation(image::metadata::Orientation::from_exif(tag).expect("orientation"));
+        assert_eq!(
+            preview.source_size,
+            (expected.width(), expected.height()),
+            "orientation={tag}"
+        );
+        let small = expected
+            .resize(240, 160, image::imageops::FilterType::Nearest)
+            .into_rgba8();
+        assert_eq!(preview.image, thumbnail.image);
+        assert_eq!(preview.image.rgba, small.into_raw());
+    }
+    fs::remove_dir_all(&cache.root).expect("remove owned fixtures");
+}
+
+#[test]
 fn direct_static_thumbnails_preserve_sampled_pixels_and_bound_original_bytes() {
     let cache = cache("direct-static-thumbnail");
     for extension in ["png", "bmp", "webp", "jpg"] {
@@ -74,6 +212,14 @@ fn direct_static_thumbnails_preserve_sampled_pixels_and_bound_original_bytes() {
             direct
         );
         let fresh = PreviewCache::new(cache.root.clone()).expect("fresh memory");
+        for consumer in [&cache, &fresh] {
+            let preview = consumer
+                .cached_image(&path)
+                .expect("lookup")
+                .expect("direct thumbnail retains source dimensions for first display");
+            assert_eq!(preview.source_size, (480, 320));
+            assert_eq!(preview.image, direct);
+        }
         assert_eq!(
             fresh
                 .filmstrip(&path, MediaKind::Image)

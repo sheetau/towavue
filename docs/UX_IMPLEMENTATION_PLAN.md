@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-11 I03/U10元寸法付きdisk preview checkpoint: direct静止画サムネイルの元寸法をcache PNGへ保持し、memoryが空でも原寸前に再利用する。専用情報の位置／CRC／寸法・1 MiB読取上限を検査し、旧cacheは破棄・寸法推測せずthumbnailとして維持。4形式／8向き・不正情報／取消と原寸前通知・全原寸一致／preview退役を回帰確認。可視UI／cold／全品質／資源と全台帳は未完。
+
 2026-09-11 U10直接静止画サムネイルcheckpoint: キャッシュと専用高速経路を優先し、それ以外の静止画を原寸RGBA128 MiB内で直接decode／nearest縮小して既存PNG cacheへ保存する。4形式の全sample画素／alpha・budget／取消、disk再利用とanimation fallbackを回帰確認。24MP PNG warm ReleaseはAPI取得約514→141ms。Computer Use更新後もpipe不可のため可視確認は保留。PNG本表示の初回・cold／全品質・資源・previewと原寸の同時重複、全UX台帳は未完。
 
 2026-09-11 U10/I03未訪問サムネイルcheckpoint: filmstrip／tab hover／recent等の未訪問大JPEG・BMPへ既存の高速previewを共用し、原寸読込前にも元寸法付きcacheを供給。既存memory／diskは優先、非対応fallback維持。単独JPEGの先頭seekによるNoFrameも再現・修正。色／alpha／寸法・共有と小4形式の従来経路／diskを回帰確認し、24MP warm Releaseの取得は修正済みCLI約91→14ms（JPEG）／280→1.3ms（BMP）。可視UI全体、cold／全素材／GPU共有／資源と全台帳は未完。

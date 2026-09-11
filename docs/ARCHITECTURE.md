@@ -132,6 +132,16 @@ source durationからmax(20, ceil(seconds/5))個の区間を作り、その中�
 
 固定H.264素材のdebug検証で16コマ生成約1.119秒、4コマの終端sheet約0.327秒、memory clone取得約0.56～0.59msを観測した。これはUI表示遅延の保証ではない。実画素と単枚reference、density／端／UV、同textureで16位置を描画して追加uploadなし、世代／優先度／2枚LRU／texture上限を確認する。所有する可視960×576 windowと生成40秒MPEG-4素材では停止中hoverの非Seek、前半／後半thumbnail、クリックSeekとtab hoverを確認した。software decode条件の一例であり、長GOP／全codec／HDR／混在DPI／資源peak・本画面scrubは未認定・未完。
 
+## I03/U10: 保存したサムネイルを原寸前のpreviewへ戻す（2026-09-11）
+
+直接生成した静止画のcache PNGに、向き補正後の元width／heightを保持する。IHDR直後のprivate ancillary chunk tvSzを20 bytes（length=8、type、各u32 big-endian寸法、type＋dataのCRC32）として追加し、元画像や書き出し画像へは追加しない。既存filmstrip-image-v4 keyとPNG cacheを継続し、sidecar／新DB／追加依存は作らない。load_or_generateの生成／disk hitでこの寸法を共有memoryへ戻す。
+
+cached_imageはmemoryの既知元寸法を優先し、なければworker側で該当cache PNGを最大1 MiB＋超過検出1 byteだけ読む。codec呼出前にsignature／IHDR／専用chunk位置と長さ／CRC、preview幅1..240・高さ1..160、元寸法の非ゼロ・checked RGBA計算と128 MiB上限を検査する。通常のPNG pixel decode・取消・source key再照合を通したものだけmemoryへ登録する。I/O／PNG decode中にmemory mutexを保持せず、生成leaseの取得待ちはしない。CRCは破損検出でありcacheの暗号学的真正性保証ではない。
+
+原寸loaderとappの既存preview workerはこの元寸法付き画素をそのまま使い、原寸のgeneration／成功・失敗時の退役を維持する。新worker・原寸再decode・GPU texture経路・編集座標を追加しない。旧cache／不正寸法／破損／大きすぎるfileは原寸用previewとして採用せず、削除しない。寸法のない旧PNGはfilmstripとして使い続け、元画像が後で供給された際の既存寸法upgradeも維持する。同じsource keyの後着PNGに寸法がなくても、memory側で既知になった寸法は消さない。全旧cacheを起動時に走査／再生成する仕様ではない。
+
+4形式のdirect thumbnailのmemory／fresh cache再利用、EXIF8向きの元寸法と全縮小RGBA、legacy／CRC／ゼロ／overflow／上限／不正preview寸法／truncation／1 MiB超過・取消／source変更を回帰確認する。原寸workerを制御して止めた実PNG試験では、fresh cacheから先にpreview通知が届き、再開後は元の全RGBAと一致してpreviewが退役する。可視UI／cold-storage latencyと全UX台帳は未完で、これを原寸decode自体の高速化とは呼ばない。
+
 ## U10: 静止画サムネイルの直接復号（2026-09-11）
 
 画像filmstripでmemory／diskと既存JPEG・BMP専用previewが使えない場合、既存の静止画専用decode_image_for_prefetchを原寸RGBA上限128 MiBで試す。原寸の向き補正・depth／alpha変換・読取境界取消を再利用し、所有するRGBAをcopyせず画像bufferへ移し、nearestで240×160内へ縮小する。小画像は従来filmstripと同様に拡大する。小さなPNGへencodeして既存load_or_generateのmemory／disk・同key生成lease・取消をそのまま使う。PNG往復自体を除いた経路ではないが、対応静止画のFFmpeg別process／入力準備を除く。

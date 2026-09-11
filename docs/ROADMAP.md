@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 I03/U10 persisted-thumbnail checkpoint: direct静止画cache PNGに補正済み元寸法を保持し、fresh memoryでも原寸前のpreviewへ再利用する。専用20-byte chunk／CRC／寸法とRGBA上限、1 MiBの読取上限・取消／source stampを検査し、古い寸法なしcacheはthumbnailとして維持。4形式・EXIF8向き・破損matrixと、原寸停止中のdisk preview通知→原寸画素一致／退役を確認。c05c528のCI34582851963は成功。可視UI／cold／全品質・資源と全UX台帳は継続する。
+
 2026-09-11 U10 direct-static-thumbnail checkpoint: memory／disk・JPEG/BMP専用previewの後に、原寸RGBA128 MiB以内の静止画を既存画像decoderで直接縮小する。原寸copy／新workerはなく、既存PNG disk cacheと同key生成leaseを維持。4形式の全sample RGBA・budget／取消／disk、GIFと不正入力fallbackを回帰確認。24MP PNG warm Releaseの最終API取得は約514→141ms。可視操作は更新版Computer Useでもpipe接続不可で保留。c5dccf3のCI34582156898は成功。全UX台帳、PNG本表示の初回／cold／全品質／資源は継続する。
 
 2026-09-11 U10/I03 static-filmstrip checkpoint: 未訪問の大きなJPEG／BMPに既存高速previewを共用し、元寸法付き共有memoryへ供給。memory／disk hitを優先し、fast非対応は従来経路を保つ。JPEG単独画像のNoFrameを再現し、画像先頭の不要な-ss 0を除去。小JPEG／BMP／PNG／WebP fallback・disk再利用、大画像の色／alpha／寸法・本表示共有／取消／source変更を回帰確認。24MP warm Releaseの修正済みCLI対比はJPEG約91→14ms／BMP約280→1.3ms。可視UI／cold／全品質・資源と全UX台帳は継続する。

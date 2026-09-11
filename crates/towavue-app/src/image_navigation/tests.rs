@@ -1,6 +1,120 @@
 use super::*;
 
 #[test]
+fn adjacent_navigation_preserves_mixed_shell_order_without_copying_the_folder() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::tests::adjacent_navigation_preserves_mixed_shell_order_without_copying_the_folder",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let items: Vec<_> = (0..50_000)
+        .map(|index| {
+            let kind = if index % 3 == 1 {
+                MediaKind::Video
+            } else {
+                MediaKind::Image
+            };
+            towavue_core::FolderMediaItem {
+                identity: towavue_core::ShellIdentity::new(vec![]),
+                path: root.join(format!(
+                    "{}-{index}.{}",
+                    "long-owned-name-".repeat(8),
+                    if kind == MediaKind::Image {
+                        "png"
+                    } else {
+                        "mp4"
+                    }
+                )),
+                kind,
+            }
+        })
+        .collect();
+    let tab = app.tabs.open_new(items[0].path.clone(), MediaKind::Image);
+    app.edits
+        .entry(tab)
+        .or_default()
+        .push(EditOperation::RotateClockwise, MediaKind::Image);
+    let history = app.edits.clone();
+    app.folder_snapshot = Some(FolderSnapshot {
+        folder_identity: towavue_core::ShellIdentity::new(vec![]),
+        folder_path: root.clone(),
+        items,
+        sort_columns: vec![],
+        source: FolderSnapshotSource::LiveExplorerView,
+        generation: 1,
+        captured_at: std::time::SystemTime::UNIX_EPOCH,
+    });
+    let mut elapsed = Duration::ZERO;
+    for current in [0, 25_000, 49_999] {
+        let snapshot = app.folder_snapshot.as_ref().expect("snapshot");
+        let path = snapshot.items[current].path.clone();
+        let kind = snapshot.items[current].kind;
+        app.path = Some(path.clone());
+        app.media_kind = Some(kind);
+        app.tabs
+            .active_mut()
+            .expect("tab")
+            .target
+            .set_current_path(path.clone(), kind);
+        for same_kind in [false, true] {
+            let eligible: Vec<_> = app
+                .folder_snapshot
+                .as_ref()
+                .expect("snapshot")
+                .items
+                .iter()
+                .filter(|item| !same_kind || item.kind == kind)
+                .map(|item| item.path.clone())
+                .collect();
+            let index = eligible
+                .iter()
+                .position(|candidate| candidate == &path)
+                .expect("current");
+            for forward in [false, true] {
+                let target = if forward {
+                    (index + 1) % eligible.len()
+                } else {
+                    (index + eligible.len() - 1) % eligible.len()
+                };
+                for _ in 0..10 {
+                    let started = Instant::now();
+                    app.navigate(forward, same_kind);
+                    elapsed += started.elapsed();
+                    assert!(
+                        matches!(&app.pending_guard, Some(GuardedAction::Navigate(actual)) if actual == &eligible[target])
+                    );
+                    app.pending_guard = None;
+                    assert_eq!(app.path.as_ref(), Some(&path));
+                    assert_eq!(app.edits, history);
+                }
+            }
+        }
+    }
+    eprintln!(
+        "adjacent navigation: 120 guarded requests over 50000 mixed long paths in {elapsed:?}"
+    );
+    app.folder_snapshot
+        .as_mut()
+        .expect("snapshot")
+        .items
+        .truncate(1);
+    app.path = Some(
+        app.folder_snapshot.as_ref().expect("snapshot").items[0]
+            .path
+            .clone(),
+    );
+    app.media_kind = Some(MediaKind::Image);
+    for same_kind in [false, true] {
+        for forward in [false, true] {
+            app.navigate(forward, same_kind);
+            assert!(app.pending_guard.is_none());
+            assert_eq!(app.edits, history);
+        }
+    }
+}
+
+#[test]
 fn jumps_count_only_shell_ordered_images_clamp_and_preserve_reading_and_dirty_history() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_navigation::tests::jumps_count_only_shell_ordered_images_clamp_and_preserve_reading_and_dirty_history",

@@ -6487,21 +6487,28 @@ where
         ) else {
             return;
         };
-        let paths = snapshot
-            .items
+        let items = &snapshot.items;
+        let Some(current) = items
             .iter()
-            .filter(|item| !same_kind || item.kind == kind)
-            .map(|item| item.path.clone())
-            .collect::<Vec<_>>();
-        let Some(current) = paths.iter().position(|candidate| candidate == path) else {
+            .position(|item| item.path == *path && (!same_kind || item.kind == kind))
+        else {
             return;
         };
-        let index = if forward {
-            (current + 1) % paths.len()
+        let target = if forward {
+            items[current + 1..]
+                .iter()
+                .chain(items[..=current].iter())
+                .find(|item| !same_kind || item.kind == kind)
         } else {
-            (current + paths.len() - 1) % paths.len()
+            items[..current]
+                .iter()
+                .rev()
+                .chain(items[current..].iter().rev())
+                .find(|item| !same_kind || item.kind == kind)
         };
-        self.request_guarded(GuardedAction::Navigate(paths[index].clone()));
+        if let Some(target) = target {
+            self.request_guarded(GuardedAction::Navigate(target.path.clone()));
+        }
     }
 
     fn navigate_image(&mut self, forward: bool) {

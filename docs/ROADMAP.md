@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I03/I04 adjacent-path checkpoint: 通常前後移動の全path Vec生成を除き、現在位置から方向順に走査して一件だけguardへ複製する。5万件の混在Shell順・前後／循環／同種filter・dirty保護を既存の選択規則と比較し、Releaseの120要求は約586→340ms。現在位置の線形検索、復号・描画とreading／音声同種queueは変えない。一枚だけの再loadは既存guardで防止済みであり、新規修正とはしない。可視latency・cold／全素材／資源と全UX台帳は継続する。
+
 2026-09-11 U07 same-audio-open checkpoint: 現在のcleanな音声sourceを外部再Openするとsession／位置／選択／focusを初期化する問題を再現・修正。同じ表示tab・pathでFaulted以外なら再loadせず、別曲置換・dirty／export保護・強制新規・失敗時の再試行を維持する。状態matrixと既存source置換回帰、実D3D11／WASAPIで再生／停止中の再Open・世代／位置／選択／focus保持、背景再生／復旧を確認。通常windowの全入口・全UIA／IME／mixed-DPI・全UX台帳は継続する。
 
 2026-09-11 V03/A02 audition-PCM checkpoint: 選択終端でatempo入力まで切り詰め、通常再生と波形が変わる問題を再現・修正。最後の実編集区間内で必要な後続入力を許し、出力を選択sample数で止めた時点でconsumerを正常終了する。6範囲×3速度の全PCM／長さ／PTS・chunk上限、最終chunkの拒否／取消を確認。選択自体で音を変えない契約であり、実際の短い編集区間のtempo品質・初期Seek位相・削除区間負荷・全UI／UX台帳は継続する。

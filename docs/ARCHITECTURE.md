@@ -1,5 +1,9 @@
 # towavue アーキテクチャ
 
+## I03/I04: 前後移動で全pathを複製しない（2026-09-12）
+
+通常の前後移動は既存FolderSnapshotから現在のraw indexを求め、進行方向のsliceと端からのsliceを順に走査する。同種filter・Shell順・端の循環を保ち、選ばれた一件のpathだけをguardへcopyする。入力ごとの全path Vec生成は行わず、並びのcache・worker・snapshot所有権は増やさない。現在path不在／同種に不一致なら移動せず、候補が自身だけなら従来の同一path guardによるno-opを維持する。音声同種移動のqueue規則と読書modeの見開き送りは変更しない。
+
 ## U07: 現在の音声sourceの外部再Open（2026-09-11）
 
 外部Openが既存のcleanな音声playlist tabを選び、そのtabをすでに表示中でpathも一致する場合は、正常／読込中／終端の状態を保持して再loadしない。再生session・clock・位置・選択・view・focusと取得中workerをそのまま使う。Faultedの場合は同じpathでも従来どおり再試行する。背景tabは既存のactivate／保持state復帰経路を使い、別曲への置換では従来の編集／export設定初期化を維持する。

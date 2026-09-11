@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-12 I03/I04 adjacent-path checkpoint: 通常前後移動で全候補pathを複製せず、元のShell snapshotから選んだ一件だけguardへ渡す。5万件の混在一覧・先頭／中間／末尾・前後／同種filterの120要求で従来の移動先とdirty保持を比較し、Release処理単体は約586→340ms。一枚だけの場合は既存の同一path no-opを維持する。現在位置は線形検索のままであり、復号／描画・可視latencyや全素材の性能改善は認定しない。reading／音声queueと予算は変更せず、全台帳は継続する。
+
 2026-09-11 U07 same-audio-open checkpoint: 現在のcleanな音声tabとpathが一致する外部Openを再loadしない。読込／再生／停止／終端の状態、選択・bar・世代を保持し、Faultedは再試行できる。既存の別source初期化／dirty保護／強制新規を維持。実D3D11／WASAPIの再生・停止・再開でsession世代／位置／view／選択／focusを保持し、背景再生・復旧・closeも確認。全入口／通常window／IME・mixed-DPIと全台帳は未完のまま継続する。
 
 2026-09-11 V03/A02 audition-PCM checkpoint: 選択末尾をtempo入力EOFとせず、同じ編集区間から必要な文脈を読み、出力sample数で停止する。1ms・stretch・gain／Delete跨ぎ・終端近くを含む6範囲×3速度で同じ開始の通常再生と全PCM一致。最終chunkでのconsumer拒否／取消は正常完了へ変換しない。前回観測した選択4倍速の波形差はこの範囲で解消。真の短区間編集の速度処理・初期Seek位相・長い削除区間負荷・全codec／UIと全台帳は未完のまま継続する。

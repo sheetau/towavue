@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 I03 neighbor-prefetch checkpoint: 通常表示の先読みを移動方向の隣一枚から前後近隣最大9枚へ広げる。距離優先／同距離は直前方向、Shell順／循環／重複除外を維持し、readingの見開き全体とworker／cache予算は変更しない。1～23枚の全開始位置・両方向と実10画像の移動前preview／往復原寸画素を回帰確認。全609 tests／Release成功。通常960×576で生成1920×1080 PNGの01→10→09→10→01、readingの01＋02→03＋04と通常復帰を可視確認。可視速度差／cold／全資源は未測定。7f4ddbcのCI34592804403成功。全UX台帳は未完のまま継続する。
+
 2026-09-11 I03/U10 animation-prefetch checkpoint: 隣のGIF／APNG／animated WebP／AVIFの先頭だけを既存workerで先読みし、原寸cacheとは別の有界previewへ供給する。4形式の画素・元寸法・原寸全frame／delay維持、一frame予算・取消／世代・非通知・生成集約を回帰確認。全608 tests／Release成功。通常960×576の生成GIFでLoading中のpreview→原寸を可視確認したが、変更前も最初の約200ms観測ではpreviewがあり、可視速度差は未認定。1fefec9のCI34591591601成功。cold／全素材／peak・UI全般と全UX台帳の残件は継続する。
 
 2026-09-11 H1/I06/V05 input-pairing checkpoint: 同frameの後続gestureによって先の選択・pan・Alt回転の終点／click判定／修飾キーが変わる不具合を再現・修正。最初のreleaseで区切り、選択には押下時刻・移動履歴を保持する。前frame保持・原点復帰・長押し・同座標Alt違い・所有権を回帰確認。全606 tests成功、動画GPU preview／Undo／export再読込と通常960×576生成PNGの選択→click preview→Escapeを確認。右button／Alt保持dragの今回の確認は自動入力で、全native timing／mixed-DPIは残る。643606aのCI34590038494成功。全UX goalは未完のまま継続する。

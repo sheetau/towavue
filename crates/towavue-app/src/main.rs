@@ -1977,33 +1977,53 @@ where
         let path = self.path.as_ref()?;
         let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
         let current = images.iter().position(|item| &item.path == path)?;
-        let target = if self.reading_mode {
-            let next = self.reading_settings.adjacent_spread(
-                current,
-                images.len(),
-                self.image_navigation_forward,
-            )?;
-            if self
-                .reading_settings
-                .spread(current, images.len())
-                .contains(&next)
-            {
-                return None;
+        if !self.reading_mode {
+            // Leave one of the ten decoded-cache slots for the current image.
+            let count = images.len().saturating_sub(1).min(9);
+            let mut selected = Vec::with_capacity(count);
+            'neighbors: for distance in 1..=count {
+                for forward in [
+                    self.image_navigation_forward,
+                    !self.image_navigation_forward,
+                ] {
+                    let target = if forward {
+                        (current + distance) % images.len()
+                    } else {
+                        (current + images.len() - distance) % images.len()
+                    };
+                    if target != current && !selected.contains(&target) {
+                        selected.push(target);
+                        if selected.len() == count {
+                            break 'neighbors;
+                        }
+                    }
+                }
             }
-            next
-        } else if self.image_navigation_forward {
-            (current + 1) % images.len()
-        } else {
-            (current + images.len() - 1) % images.len()
-        };
-        (target != current).then(|| {
-            let range = if self.reading_mode {
-                self.reading_settings.spread(target, images.len())
-            } else {
-                target..target + 1
-            };
-            range.map(|index| images[index].path.clone()).collect()
-        })
+            return (!selected.is_empty()).then(|| {
+                selected
+                    .into_iter()
+                    .map(|index| images[index].path.clone())
+                    .collect()
+            });
+        }
+        let next = self.reading_settings.adjacent_spread(
+            current,
+            images.len(),
+            self.image_navigation_forward,
+        )?;
+        if self
+            .reading_settings
+            .spread(current, images.len())
+            .contains(&next)
+        {
+            return None;
+        }
+        Some(
+            self.reading_settings
+                .spread(next, images.len())
+                .map(|index| images[index].path.clone())
+                .collect(),
+        )
     }
 
     fn watch_folder(&mut self, folder: &Path) {
@@ -13121,21 +13141,41 @@ mod tests {
             }
         }
         app.reading_mode = false;
-        for (current, path) in paths.iter().enumerate() {
-            app.path = Some(path.clone());
-            for forward in [false, true] {
-                app.image_navigation_forward = forward;
-                let target = if forward {
-                    (current + 1) % paths.len()
-                } else {
-                    (current + paths.len() - 1) % paths.len()
-                };
-                assert_eq!(
-                    app.image_prefetch_paths(),
-                    Some(vec![paths[target].clone()])
-                );
+        let snapshot = app.folder_snapshot.clone().expect("snapshot");
+        for count in 1..=paths.len() {
+            app.folder_snapshot = Some(FolderSnapshot {
+                items: snapshot
+                    .items
+                    .iter()
+                    .filter(|item| {
+                        item.kind != MediaKind::Image || paths[..count].contains(&item.path)
+                    })
+                    .cloned()
+                    .collect(),
+                ..snapshot.clone()
+            });
+            for (current, path) in paths[..count].iter().enumerate() {
+                app.path = Some(path.clone());
+                for forward in [false, true] {
+                    app.image_navigation_forward = forward;
+                    let mut expected = Vec::new();
+                    for offset in [1isize, -1, 2, -2, 3, -3, 4, -4, 5] {
+                        let offset = if forward { offset } else { -offset };
+                        let target =
+                            (current as isize + offset).rem_euclid(count as isize) as usize;
+                        if target != current && !expected.contains(&paths[target]) {
+                            expected.push(paths[target].clone());
+                        }
+                    }
+                    assert_eq!(
+                        app.image_prefetch_paths(),
+                        (!expected.is_empty()).then_some(expected),
+                        "count={count}, current={current}, forward={forward}"
+                    );
+                }
             }
         }
+        app.folder_snapshot = Some(snapshot);
         app.reading_mode = true;
         app.reading_settings = ReadingSettings::default();
         app.folder_snapshot
@@ -13151,6 +13191,123 @@ mod tests {
         );
         app.path = Some(root.join("missing.png"));
         assert_eq!(app.image_prefetch_paths(), None);
+    }
+
+    #[test]
+    fn normal_image_prefetch_prepares_both_directions_before_navigation() {
+        let Some(root) = isolated_test_root(
+            "tests::normal_image_prefetch_prepares_both_directions_before_navigation",
+        ) else {
+            return;
+        };
+        let paths: Vec<_> = (0..10)
+            .rev()
+            .map(|index| root.join(format!("{index}.bmp")))
+            .collect();
+        let mut bitmap = vec![0_u8; 62];
+        bitmap[..2].copy_from_slice(b"BM");
+        bitmap[2..6].copy_from_slice(&62_u32.to_le_bytes());
+        bitmap[10..14].copy_from_slice(&54_u32.to_le_bytes());
+        bitmap[14..18].copy_from_slice(&40_u32.to_le_bytes());
+        bitmap[18..22].copy_from_slice(&2_u32.to_le_bytes());
+        bitmap[22..26].copy_from_slice(&1_u32.to_le_bytes());
+        bitmap[26..28].copy_from_slice(&1_u16.to_le_bytes());
+        bitmap[28..30].copy_from_slice(&24_u16.to_le_bytes());
+        bitmap[34..38].copy_from_slice(&8_u32.to_le_bytes());
+        for (index, path) in paths.iter().enumerate() {
+            bitmap[54..].copy_from_slice(&[12, 34, index as u8, 12, 34, index as u8, 0, 0]);
+            std::fs::write(path, &bitmap).expect("owned bitmap");
+        }
+        let (notify, events) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            let _ = notify.send(event);
+        })
+        .expect("app");
+        app.ui_context = Some(fonts::test_context());
+        app.tabs.open_new(paths[5].clone(), MediaKind::Image);
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: paths
+                .iter()
+                .cloned()
+                .map(|path| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![]),
+                    path,
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::UNIX_EPOCH,
+        });
+        let wait = |app: &mut Application<_>| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.image_loading {
+                let event = events
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .expect("image ready");
+                if matches!(event, AppEvent::ImagesReady) {
+                    app.finish_image_load();
+                }
+            }
+        };
+        app.load_path(paths[5].clone(), MediaKind::Image);
+        wait(&mut app);
+        let generation = app.image_generation;
+        let texture = app.image.as_ref().expect("current image").texture.id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        for (index, path) in paths.iter().enumerate() {
+            let preview = loop {
+                if let Some(preview) = app
+                    .preview_cache
+                    .cached_image(path)
+                    .expect("preview lookup")
+                {
+                    break preview;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "neighbor {index} was not prepared before navigation"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            };
+            assert_eq!(preview.source_size, (2, 1));
+            assert_eq!(preview.image.rgba, [index as u8, 34, 12, 255].repeat(2));
+        }
+        assert_eq!(app.image_generation, generation);
+        assert_eq!(
+            app.image.as_ref().expect("same image").texture.id(),
+            texture
+        );
+        assert!(app.edits.is_empty() && !app.image_loading);
+        let mut current = 5;
+        for forward in [
+            true, true, false, false, false, true, true, true, true, true, true,
+        ] {
+            app.dispatch(if forward {
+                CommandId::NextSameKind
+            } else {
+                CommandId::PreviousSameKind
+            });
+            current = if forward {
+                (current + 1) % paths.len()
+            } else {
+                (current + paths.len() - 1) % paths.len()
+            };
+            wait(&mut app);
+            assert_eq!(app.path.as_ref(), Some(&paths[current]));
+            assert_eq!(
+                app.image.as_ref().expect("loaded neighbor").decoded.frames[0].rgba,
+                [current as u8, 34, 12, 255].repeat(2)
+            );
+            assert!(
+                app.edits
+                    .values()
+                    .all(|edit| edit.operations().is_empty() && !edit.is_dirty())
+            );
+        }
     }
 
     #[test]

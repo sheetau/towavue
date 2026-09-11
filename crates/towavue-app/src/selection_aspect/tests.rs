@@ -215,7 +215,6 @@ fn image_aspect_presets_use_edited_geometry_preserve_history_and_export_selected
         let size = if rotation { (80, 120) } else { (120, 80) };
         let history = app.edits.clone();
         for (index, (id, ratio)) in PRESETS.iter().enumerate() {
-            app.image_view.crop_preview = true;
             app.process_shortcut("Ctrl+K".parse().expect("prefix"));
             app.process_shortcut((index + 1).to_string().parse().expect("preset"));
             let expected =
@@ -225,7 +224,6 @@ fn image_aspect_presets_use_edited_geometry_preserve_history_and_export_selected
                 Some(expected.unit_rect(size)),
                 "{id:?}"
             );
-            assert!(!app.image_view.crop_preview);
             assert_eq!(app.edits, history);
             assert_eq!(app.image_view.zoom, ZoomMode::Custom(2.0));
             assert_eq!(app.image_view.pan, (12.0, -9.0));

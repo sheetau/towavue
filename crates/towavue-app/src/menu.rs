@@ -74,7 +74,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
                 ActualSize,
                 FitToWindow,
                 CoverWindow,
-                ToggleCropPreview,
+                ZoomSelection,
             ],
             &[
                 ToggleReadingMode,

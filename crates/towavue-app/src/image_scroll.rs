@@ -33,11 +33,13 @@ pub fn bars(
         if !enabled {
             ui.disable();
         }
+        ui.style_mut().animation_time = 0.0;
         let style = &mut ui.style_mut().spacing.scroll;
         style.floating = true;
         style.floating_allocated_width = 0.0;
         style.dormant_handle_opacity = 1.0;
-        egui::ScrollArea::both()
+        egui::ScrollArea::new([overflow.x > 0.0, overflow.y > 0.0])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
             .id_salt("image-scroll")
             .auto_shrink([false, false])
             .content_margin(0)

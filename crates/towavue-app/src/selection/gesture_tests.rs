@@ -54,7 +54,7 @@ fn outside_click_clears_selection_but_drags_controls_and_cancellation_do_not() {
                 )
             };
             app.image_view.selection = Some(original);
-            app.image_view.crop_preview = false;
+            app.image_view.fit();
             app.image_view.pan = (7.0, 9.0);
             frame(&mut app, vec![egui::Event::PointerMoved(start)]);
             if case == 1 || case == 2 {
@@ -102,7 +102,10 @@ fn outside_click_clears_selection_but_drags_controls_and_cancellation_do_not() {
                     "start={start:?}, case={case}"
                 );
             }
-            assert_eq!(app.image_view.crop_preview, case == 7);
+            assert_eq!(
+                matches!(app.image_view.zoom, ZoomMode::Custom(_)),
+                case == 7
+            );
             if case != 7 {
                 assert_eq!(app.image_view.pan, (7.0, 9.0));
             }
@@ -156,7 +159,6 @@ fn corners_resize_both_edges_and_shift_keeps_the_opposite_corner_and_ratio() {
         for top in [false, true] {
             for shift in [false, true] {
                 app.image_view.selection = Some(original);
-                app.image_view.crop_preview = false;
                 let selected = selection_rect(image, original);
                 let start = egui::pos2(
                     if left {
@@ -241,7 +243,6 @@ fn corners_resize_both_edges_and_shift_keeps_the_opposite_corner_and_ratio() {
                 );
                 assert!(app.image_view.selection.expect("committed").width() > original.width());
                 assert!(app.view_drag.is_none());
-                assert!(!app.image_view.crop_preview);
             }
         }
     }

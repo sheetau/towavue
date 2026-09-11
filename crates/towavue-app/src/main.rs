@@ -2887,8 +2887,7 @@ where
                 .and_then(|path| self.image_previews.get(path))
             {
                 let viewport = ui.max_rect();
-                let mut transform = self.visual_transform(preview.source_size);
-                transform.crop(self.image_view.preview_region());
+                let transform = self.visual_transform(preview.source_size);
                 let pixels_per_point = ui.ctx().pixels_per_point();
                 let scale = self.image_view.scale(
                     (transform.size.0 as u32, transform.size.1 as u32),
@@ -2913,10 +2912,8 @@ where
             return;
         };
         let texture = image.texture.id();
-        let mut transform = self.visual_transform(image.dimensions());
+        let transform = self.visual_transform(image.dimensions());
         let viewport = ui.max_rect();
-        let region = self.image_view.preview_region();
-        transform.crop(region);
         let image_size = (transform.size.0 as u32, transform.size.1 as u32);
         self.image_viewport = viewport.size();
         let pixels_per_point = ui.ctx().pixels_per_point();
@@ -2951,9 +2948,7 @@ where
             rotation::RotationResponse::Cancelled => {
                 let painter = ui.painter_at(viewport);
                 painter.add(transformed_image_mesh(texture, initial_rect, transform));
-                if !self.image_view.crop_preview
-                    && let Some(selection) = self.image_view.selection
-                {
+                if let Some(selection) = self.image_view.selection {
                     paint_selection(&painter, initial_rect, selection);
                 }
                 return;
@@ -3008,6 +3003,18 @@ where
             self.image_view.pan.1 += delta.y;
         }
         image_scroll::clamp(&mut self.image_view, displayed, viewport.size());
+        self.update_selection(
+            &response,
+            egui::Rect::from_center_size(
+                viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1),
+                displayed,
+            ),
+            image_size,
+            shift,
+            pointer,
+        );
+        let scale = self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
+        let displayed = egui::vec2(transform.size.0 * scale, transform.size.1 * scale);
         let painter = ui.painter_at(viewport);
         // Compute bar input first, but keep the updated image behind the bars.
         let image_shape = painter.add(egui::Shape::Noop);
@@ -3015,17 +3022,11 @@ where
         let center = viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
         let image_rect = egui::Rect::from_center_size(center, displayed);
 
-        if !self.image_view.crop_preview {
-            self.update_selection(&response, image_rect, image_size, shift, pointer);
-        }
-
         painter.set(
             image_shape,
             egui::Shape::mesh(transformed_image_mesh(texture, image_rect, transform)),
         );
-        if !self.image_view.crop_preview
-            && let Some(selection) = self.image_view.selection
-        {
+        if let Some(selection) = self.image_view.selection {
             paint_selection(&painter, image_rect, selection);
             self.selection_controls(ui, image_rect, image_size);
             if let Some(selection) = self.image_view.selection {
@@ -3324,7 +3325,7 @@ where
         size: (u32, u32),
         pointer: Option<egui::Pos2>,
     ) -> bool {
-        if self.image_view.crop_preview || !self.view_drag_allowed(&response.ctx) {
+        if !self.view_drag_allowed(&response.ctx) {
             return false;
         }
         let (origin, release) =
@@ -3388,18 +3389,27 @@ where
         let point = unit_point(pointer, image_rect);
         if self.view_drag.is_none()
             && response.hovered()
-            && let Some(edge) = self
-                .image_view
-                .selection
-                .and_then(|selection| selection_edge(pointer, image_rect, selection))
+            && let Some(selection) = self.image_view.selection
         {
-            response.ctx.set_cursor_icon(match edge {
-                SelectionDrag::Left | SelectionDrag::Right => egui::CursorIcon::ResizeHorizontal,
-                SelectionDrag::Top | SelectionDrag::Bottom => egui::CursorIcon::ResizeVertical,
-                SelectionDrag::Corner { left, top } if left == top => egui::CursorIcon::ResizeNwSe,
-                SelectionDrag::Corner { .. } => egui::CursorIcon::ResizeNeSw,
-                SelectionDrag::New(_) | SelectionDrag::OutsideImage => egui::CursorIcon::Crosshair,
-            });
+            if let Some(edge) = selection_edge(pointer, image_rect, selection) {
+                response.ctx.set_cursor_icon(match edge {
+                    SelectionDrag::Left | SelectionDrag::Right => {
+                        egui::CursorIcon::ResizeHorizontal
+                    }
+                    SelectionDrag::Top | SelectionDrag::Bottom => egui::CursorIcon::ResizeVertical,
+                    SelectionDrag::Corner { left, top } if left == top => {
+                        egui::CursorIcon::ResizeNwSe
+                    }
+                    SelectionDrag::Corner { .. } => egui::CursorIcon::ResizeNeSw,
+                    SelectionDrag::New(_) | SelectionDrag::OutsideImage => {
+                        egui::CursorIcon::Crosshair
+                    }
+                });
+            } else if self.media_kind == Some(MediaKind::Image)
+                && selection_rect(image_rect, selection).contains(pointer)
+            {
+                response.ctx.set_cursor_icon(egui::CursorIcon::ZoomIn);
+            }
         }
         if self.view_drag.is_none()
             && let Some(origin) = origin
@@ -3515,11 +3525,15 @@ where
                 {
                     self.image_view.selection = None;
                 } else if self.media_kind == Some(MediaKind::Image)
-                    && !matches!(mode, SelectionDrag::OutsideImage)
+                    && matches!(mode, SelectionDrag::New(_))
+                    && selected.contains(origin)
                     && selected.contains(pointer)
                 {
-                    self.image_view.crop_preview = true;
-                    self.image_view.fit();
+                    self.zoom_image_selection(
+                        image_size,
+                        response.rect.size(),
+                        response.ctx.pixels_per_point(),
+                    );
                 }
             }
         }
@@ -4421,9 +4435,9 @@ where
                             ui.label("Drag up/down: images per page\nDrag left/right: images on the first page\nRelease to keep; Escape to cancel");
                         }).on_disabled_hover_text("Save or undo unsaved edits before entering reading mode");
                         if !self.reading_mode && self.image_view.selection.is_some() {
-                            let response = ui.selectable_label(self.image_view.crop_preview, "Crop preview");
-                            tab_focus::observe(&response, "crop-preview");
-                            if response.clicked() { actions.push(UiAction::Command(CommandId::ToggleCropPreview)); }
+                            let response = ui.button("Zoom to selection");
+                            tab_focus::observe(&response, "zoom-selection");
+                            if response.clicked() { actions.push(UiAction::Command(CommandId::ZoomSelection)); }
                         }
                     }
                     let mut details = Vec::new();
@@ -5097,7 +5111,7 @@ where
                     | CommandId::SelectAspectSixteenNine
                     | CommandId::SelectAspectNineSixteen
                     | CommandId::ApplyCrop
-                    | CommandId::ToggleCropPreview
+                    | CommandId::ZoomSelection
                     | CommandId::ToggleReadingMode
             )
         {
@@ -5268,7 +5282,6 @@ where
             CommandId::ClearSelection => {
                 self.set_time_selection(None);
                 self.image_view.selection = None;
-                self.image_view.crop_preview = false;
                 self.request_redraw();
             }
             CommandId::SelectAll => {
@@ -5299,7 +5312,6 @@ where
                     return;
                 }
                 self.image_view.selection = Some(UnitRect::FULL);
-                self.image_view.crop_preview = false;
                 if let Some(context) = &self.ui_context {
                     selection::focus_first(context, self.selection_identity());
                 }
@@ -5370,13 +5382,17 @@ where
                     Err(error) => self.set_status(format!("Could not start image copy: {error}")),
                 }
             }
-            CommandId::ToggleCropPreview => {
-                if self.image_view.selection.is_some() {
-                    self.image_view.crop_preview = !self.image_view.crop_preview;
-                    self.image_view.fit();
+            CommandId::ZoomSelection => {
+                if let Some(image) = &self.image
+                    && let Some(context) = &self.ui_context
+                {
+                    let transform = self.visual_transform(image.dimensions());
+                    self.zoom_image_selection(
+                        (transform.size.0 as u32, transform.size.1 as u32),
+                        self.image_viewport,
+                        context.pixels_per_point(),
+                    );
                     self.request_redraw();
-                } else {
-                    self.set_status("Drag on the image to create a crop selection".into());
                 }
             }
             CommandId::ToggleReadingMode => {
@@ -5576,7 +5592,6 @@ where
             self.push_edit(EditOperation::Crop(crop));
         }
         self.image_view.selection = None;
-        self.image_view.crop_preview = false;
         self.image_view.fit();
         self.set_status(format!(
             "Crop {} × {} px (source unchanged)",
@@ -5767,7 +5782,6 @@ where
         }
         self.push_edit(operation);
         self.image_view.selection = None;
-        self.image_view.crop_preview = false;
         self.image_view.fit();
     }
 
@@ -5918,7 +5932,6 @@ where
                 );
             }
             self.image_view.selection = None;
-            self.image_view.crop_preview = false;
             self.image_view.fit();
             self.refresh_title();
             self.request_redraw();
@@ -6265,6 +6278,27 @@ where
         self.request_redraw();
     }
 
+    fn zoom_image_selection(&mut self, size: (u32, u32), viewport: egui::Vec2, density: f32) {
+        let Some(selection) = self.image_view.selection else {
+            return;
+        };
+        if viewport.min_elem() <= 0.0 {
+            return;
+        }
+        let pixels = egui::vec2(size.0 as f32, size.1 as f32);
+        let selected = pixels * egui::vec2(selection.width(), selection.height());
+        let target = (viewport * density / selected.max(egui::Vec2::splat(1.0))).min_elem();
+        self.image_view.zoom = ZoomMode::Custom(target);
+        let scale = self.image_view.scale(size, (viewport * density).into()) / density;
+        self.image_view.zoom = ZoomMode::Custom(scale * density);
+        let center = egui::vec2(
+            (selection.min.x + selection.max.x) * 0.5,
+            (selection.min.y + selection.max.y) * 0.5,
+        );
+        self.image_view.pan = ((egui::Vec2::splat(0.5) - center) * pixels * scale).into();
+        image_scroll::clamp(&mut self.image_view, pixels * scale, viewport);
+    }
+
     fn zoom_image(&mut self, factor: f32) {
         if self.media_kind == Some(MediaKind::Video) {
             self.zoom_video(factor);
@@ -6277,8 +6311,7 @@ where
         if self.image_viewport.min_elem() <= 0.0 {
             return;
         }
-        let mut transform = self.visual_transform(image.dimensions());
-        transform.crop(self.image_view.preview_region());
+        let transform = self.visual_transform(image.dimensions());
         self.image_view.zoom_by(
             factor,
             (transform.size.0 as u32, transform.size.1 as u32),
@@ -11788,12 +11821,12 @@ mod tests {
             }
             let tab = app.tabs.active().expect("tab").id;
             let history = app.edits.entry(tab).or_default().operations().to_vec();
-            for preview in [false, true] {
-                app.image_view.selection = Some(UnitRect {
+            for selected in [false, true] {
+                let selection = selected.then_some(UnitRect {
                     min: UnitPoint { x: 0.0, y: 0.0 },
                     max: UnitPoint { x: 0.5, y: 1.0 },
                 });
-                app.image_view.crop_preview = preview;
+                app.image_view.selection = selection;
                 for fullscreen in [false, true] {
                     app.fullscreen = fullscreen;
                     for density in [1.0, 1.25, 2.0] {
@@ -11843,8 +11876,7 @@ mod tests {
                                     "unexpected image margin: {clip:?} versus {viewport:?}"
                                 );
                                 assert!((bounds.center() - viewport.center()).length() < 0.01);
-                                let mut transform = app.visual_transform((400, 200));
-                                transform.crop(app.image_view.preview_region());
+                                let transform = app.visual_transform((400, 200));
                                 let ratios = viewport.size()
                                     / egui::vec2(transform.size.0, transform.size.1);
                                 let scale = if command == CommandId::CoverWindow {
@@ -11859,8 +11891,7 @@ mod tests {
                                         < 0.01
                                 );
                                 assert_eq!(app.edits[&tab].operations(), history);
-                                assert_eq!(app.image_view.crop_preview, preview);
-                                assert_eq!(app.image_view.selection.expect("selection").max.x, 0.5);
+                                assert_eq!(app.image_view.selection, selection);
                             }
                         }
                     }
@@ -11874,10 +11905,10 @@ mod tests {
     }
 
     #[test]
-    fn image_zoom_uses_physical_pixels_and_the_current_preview_viewport() {
-        let Some(root) = isolated_test_root(
-            "tests::image_zoom_uses_physical_pixels_and_the_current_preview_viewport",
-        ) else {
+    fn image_zoom_uses_physical_pixels_and_the_current_viewport() {
+        let Some(root) =
+            isolated_test_root("tests::image_zoom_uses_physical_pixels_and_the_current_viewport")
+        else {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
@@ -11933,26 +11964,24 @@ mod tests {
                 .expect("image mesh")
         };
         for density in [1.0, 1.25, 1.5, 2.0, 1.0] {
-            for preview in [false, true] {
-                app.image_view.crop_preview = preview;
-                app.image_view.selection = Some(UnitRect {
+            for selected in [false, true] {
+                app.image_view.selection = selected.then_some(UnitRect {
                     min: UnitPoint { x: 0.0, y: 0.0 },
                     max: UnitPoint { x: 0.5, y: 0.5 },
                 });
                 app.image_view.actual_size();
-                let expected = egui::vec2(400.0, 200.0) / if preview { 2.0 } else { 1.0 };
+                let expected = egui::vec2(400.0, 200.0);
                 assert!((render(&mut app, density) - expected).length() < 0.01);
                 app.image_view.fit();
                 let fitted = render(&mut app, density);
                 assert!(
                     (fitted - egui::vec2(800.0, 400.0)).length() < 0.1,
-                    "density={density} preview={preview} fitted={fitted:?}"
+                    "density={density} selected={selected} fitted={fitted:?}"
                 );
                 app.zoom_image(1.25);
                 assert!((render(&mut app, density) - fitted * 1.25).length() < 0.1);
             }
         }
-        app.image_view.crop_preview = false;
         app.image_view.selection = None;
         app.image_view.zoom = ZoomMode::Custom(4.0);
         render(&mut app, 2.0);
@@ -13074,7 +13103,6 @@ mod tests {
                 zoom: ZoomMode::Actual,
                 pan: (30.0, -12.0),
                 selection: Some(UnitRect::FULL),
-                crop_preview: true,
             };
             app.folder_snapshot = Some(FolderSnapshot {
                 folder_identity: towavue_core::ShellIdentity::new(vec![]),
@@ -13177,12 +13205,11 @@ mod tests {
             CommandId::Undo,
             CommandId::Redo,
             CommandId::SelectAll,
-            CommandId::ToggleCropPreview,
+            CommandId::ZoomSelection,
         ] {
             app.handle_ui_action(UiAction::Command(command));
             assert_eq!(app.edits, saved, "{command:?}");
             assert!(app.image_view.selection.is_none());
-            assert!(!app.image_view.crop_preview);
         }
         app.dispatch(CommandId::ToggleReadingMode);
         app.dispatch(CommandId::Undo);
@@ -17534,7 +17561,6 @@ mod tests {
                 y: 1.0,
             },
         });
-        app.image_view.crop_preview = true;
         app.image_view.zoom = ZoomMode::Custom(7.0);
         let history = app.edits.clone();
         let request = app.image_copy_request().expect("snapshot");
@@ -18761,8 +18787,8 @@ mod tests {
                     min: UnitPoint { x: 0.1, y: 0.1 },
                     max: UnitPoint { x: 0.9, y: 0.9 },
                 };
+                app.image_view.fit();
                 app.image_view.selection = Some(original);
-                app.image_view.crop_preview = false;
                 let frame = |app: &mut Application<_>, events| {
                     let _ = context.run_ui(
                         egui::RawInput {
@@ -18836,7 +18862,10 @@ mod tests {
                     },
                     "gesture={gesture}, held={already_held}"
                 );
-                assert_eq!(app.image_view.crop_preview, !first_drag);
+                assert_eq!(
+                    matches!(app.image_view.zoom, ZoomMode::Custom(_)),
+                    !first_drag
+                );
                 assert!(app.view_drag.is_none());
             }
         }
@@ -19017,7 +19046,6 @@ mod tests {
                 app.image_view.selection, original,
                 "release after interruption {interruption}"
             );
-            assert!(!app.image_view.crop_preview);
         }
     }
 
@@ -19100,8 +19128,8 @@ mod tests {
                     app.media_kind = Some(kind);
                     app.view_drag = None;
                     app.timeline_open = kind == MediaKind::Video;
+                    app.image_view.fit();
                     app.image_view.selection = initial.map(|crop| crop.unit_rect((400, 400)));
-                    app.image_view.crop_preview = false;
                     let button = |pressed, pos| egui::Event::PointerButton {
                         pos,
                         button: egui::PointerButton::Primary,
@@ -19151,7 +19179,7 @@ mod tests {
                     );
                     assert!(app.view_drag.is_none());
                     assert_eq!(
-                        app.image_view.crop_preview,
+                        matches!(app.image_view.zoom, ZoomMode::Custom(_)),
                         kind == MediaKind::Image && start == end
                     );
                 }

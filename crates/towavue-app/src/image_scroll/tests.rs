@@ -1,6 +1,188 @@
 use super::*;
 
 #[test]
+fn selection_zoom_keeps_the_full_image_and_selection_in_the_input_frame() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_scroll::tests::selection_zoom_keeps_the_full_image_and_selection_in_the_input_frame",
+    ) else {
+        return;
+    };
+    let context = fonts::test_context();
+    context.enable_accesskit();
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let path = root.join("selection.png");
+    let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+    app.path = Some(path.clone());
+    app.media_kind = Some(MediaKind::Image);
+    app.fullscreen = true;
+    app.ui_context = Some(context.clone());
+    app.image = Some(
+        ImagePresentation::from_decoded(
+            &context,
+            &path,
+            DecodedImage {
+                format: "test",
+                frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                    width: 600,
+                    height: 400,
+                    rgba: vec![255; 600 * 400 * 4],
+                    delay: Duration::ZERO,
+                }],
+            }
+            .into(),
+        )
+        .expect("texture"),
+    );
+    let texture = app.image.as_ref().expect("image").texture.id();
+    let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
+    let mut time = 0.0;
+    let mut frame = |app: &mut Application<_>, density, events| {
+        time += 0.05;
+        let mut input = egui::RawInput {
+            screen_rect: Some(viewport),
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .expect("viewport")
+            .native_pixels_per_point = Some(density);
+        context.run_ui(input, |ui| app.draw_ui(ui, &mut Vec::new()))
+    };
+    let mesh = |output: &egui::FullOutput| {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id == texture => Some(mesh.clone()),
+                _ => None,
+            })
+            .expect("image mesh")
+    };
+    for (operation, pixels) in [
+        (EditOperation::FlipHorizontal, egui::vec2(600.0, 400.0)),
+        (EditOperation::RotateClockwise, egui::vec2(400.0, 600.0)),
+        (
+            EditOperation::Crop(PixelCrop {
+                x: 40,
+                y: 60,
+                width: 320,
+                height: 480,
+            }),
+            egui::vec2(320.0, 480.0),
+        ),
+    ] {
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(operation, MediaKind::Image);
+        let history = app.edits.clone();
+        for density in [1.0, 1.25, 2.0] {
+            for held in [false, true] {
+                app.image_view.fit();
+                let selected = UnitRect {
+                    min: UnitPoint { x: 0.1, y: 0.2 },
+                    max: UnitPoint { x: 0.5, y: 0.6 },
+                };
+                app.image_view.selection = Some(selected);
+                for _ in 0..3 {
+                    frame(&mut app, density, vec![]);
+                }
+                let before = mesh(&frame(&mut app, density, vec![]));
+                let start = selection_rect(before.calc_bounds(), selected).center();
+                let button = |pressed| egui::Event::PointerButton {
+                    pos: start,
+                    pressed,
+                    button: egui::PointerButton::Primary,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                frame(&mut app, density, vec![egui::Event::PointerMoved(start)]);
+                let hover = frame(&mut app, density, vec![]);
+                assert_eq!(hover.platform_output.cursor_icon, egui::CursorIcon::ZoomIn);
+                let output = if held {
+                    let pressed = frame(&mut app, density, vec![button(true)]);
+                    assert_eq!(
+                        pressed.platform_output.cursor_icon,
+                        egui::CursorIcon::Crosshair
+                    );
+                    assert_eq!(app.image_view.zoom, ZoomMode::Fit);
+                    frame(&mut app, density, vec![button(false)])
+                } else {
+                    frame(&mut app, density, vec![button(true), button(false)])
+                };
+                let zoomed = mesh(&output);
+                let scale = (viewport.size() / (pixels * 0.4)).min_elem();
+                let displayed = pixels * scale;
+                let limit = (displayed - viewport.size()).max(egui::Vec2::ZERO) * 0.5;
+                let expected_pan = (pixels * egui::vec2(0.2, 0.1) * scale).clamp(-limit, limit);
+                assert!((zoomed.calc_bounds().size() - displayed).length() < 0.001);
+                assert!(
+                    (zoomed.calc_bounds().center() - viewport.center() - expected_pan).length()
+                        < 0.001
+                );
+                assert!(
+                    matches!(app.image_view.zoom, ZoomMode::Custom(z) if (z - scale * density).abs() < 0.001)
+                );
+                assert_eq!(
+                    zoomed.vertices.iter().map(|v| v.uv).collect::<Vec<_>>(),
+                    before.vertices.iter().map(|v| v.uv).collect::<Vec<_>>()
+                );
+                assert_eq!(app.image_view.selection, Some(selected));
+                assert_eq!(app.edits, history);
+                assert!(output.textures_delta.set.is_empty());
+                assert!(
+                    output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("accessibility")
+                        .nodes
+                        .iter()
+                        .any(|(_, node)| node.role() == egui::accesskit::Role::ScrollBar)
+                );
+                let view = app.image_view;
+                app.dispatch(CommandId::ZoomSelection);
+                assert_eq!(
+                    app.image_view, view,
+                    "command and click share a non-toggle view"
+                );
+                let stable = mesh(&frame(&mut app, density, vec![]));
+                assert_eq!(stable.calc_bounds(), zoomed.calc_bounds());
+                app.dispatch(CommandId::ClearSelection);
+                let cleared = mesh(&frame(&mut app, density, vec![]));
+                assert_eq!(cleared.calc_bounds(), zoomed.calc_bounds());
+                assert!(app.image_view.selection.is_none());
+                app.dispatch(CommandId::FitToWindow);
+                let fitted = mesh(&frame(&mut app, density, vec![]));
+                assert_eq!(fitted.calc_bounds(), before.calc_bounds());
+                assert_eq!(app.edits, history);
+            }
+        }
+    }
+    app.image_view.selection = Some(
+        PixelCrop {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        }
+        .unit_rect((600, 400)),
+    );
+    app.zoom_image_selection((600, 400), viewport.size(), 2.0);
+    assert_eq!(app.image_view.zoom, ZoomMode::Custom(64.0));
+    assert_eq!(app.image_view.pan, (9400.0, 6250.0));
+    let limited = app.image_view;
+    app.zoom_image_selection((600, 400), egui::Vec2::ZERO, 2.0);
+    assert_eq!(app.image_view, limited);
+    app.image_view.selection = None;
+    let no_selection = app.image_view;
+    app.zoom_image_selection((600, 400), viewport.size(), 2.0);
+    assert_eq!(app.image_view, no_selection);
+}
+
+#[test]
 fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_scroll::tests::image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels",

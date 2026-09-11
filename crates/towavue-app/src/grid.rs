@@ -94,7 +94,7 @@ pub fn defaults() -> GridLayouts {
             CommandId::RotateClockwise,
             CommandId::FlipHorizontal,
             CommandId::FlipVertical,
-            CommandId::ToggleCropPreview,
+            CommandId::ZoomSelection,
             CommandId::ApplyCrop,
             CommandId::Undo,
             CommandId::Redo,

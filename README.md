@@ -4,7 +4,7 @@ towavueは、画像・動画・音声を一つの軽快なWindowsアプリで閲
 
 ## 現在の状態
 
-選択範囲から離れた表示面を左クリックすると、選択だけを解除します。画像外の余白も対象ですが、スクロールバー操作や取消では解除しません。画像内のドラッグは新しい範囲を作り、余白からのドラッグでは選択を維持します。従来のcrop previewから通常ズームへの変更は引き続き未対応です。
+選択範囲内をクリックすると、その範囲が収まる倍率・位置へ通常ズームします。従来のcrop previewは撤去し、画像全体と選択枠を保持したまま拡大します。編集内容は変わらず、Fitで全体表示へ戻せます。選択範囲から離れた表示面の左クリックは、余白を含め選択だけを解除します。スクロールバー操作や取消では解除しません。
 
 選択範囲の角をドラッグすると二辺を同時に変更でき、Shiftを押すと対角を固定したまま比率を保ちます。画像の選択範囲内を右ドラッグすると、画像ではなく選択範囲だけを同じサイズで移動します。画像端で停止し、取消すると元の選択へ戻ります。
 
@@ -363,7 +363,7 @@ gridは小さいwindowでも4列を保ち、長い名前は省略・hoverで全�
 
 gridのkeyはQWERTYの`1234/qwer/asdf/zxcv`に相当する物理位置です。Shiftで位置は変わらず、Ctrl/Alt/Windows key付きは通常shortcutとして扱います。paletteを開くとgridは閉じます。
 
-画像ではCtrl+wheelまたは+/-でzoom、Ctrl+Hでactual size、Shift+Wでfit、右dragでpanします。左dragでselectionを作り、辺dragでresize、Shift付き作成で正方形、Shift付きresizeで比率を保持します。選択範囲clickまたはCtrl+Shift+Yはcrop previewです。Bでreading mode、Rで縦横切替、Hで表示順反転、Ctrl+[ / Ctrl+]で表示数を2～10枚に変更できます。
+画像ではCtrl+wheelまたは+/-でzoom、Ctrl+Hでactual size、Shift+Wでfit、右dragでpanします。左dragでselectionを作り、辺・角dragでresize、Shift付き作成で正方形、Shift付きresizeで比率を保持します。選択範囲の内側clickまたはCtrl+Shift+Yは範囲への通常zoomです。選択内の右dragは選択だけを移動します。Bでreading mode、Rで縦横切替、Hで表示順反転、Ctrl+[ / Ctrl+]で表示数を2～10枚に変更できます。
 
 Shift付きの選択は画像端で片側だけが潰れないよう、比率を保って拡大を止めます。辺のresizeでは反対側と直交方向の中心を保ち、drag開始時の比率を使います。確定時の整数pixel（動画は偶数pixel）への丸めは従来どおりです。
 
@@ -379,7 +379,7 @@ Windowsでreleaseが最後のcursor移動通知より先に届く場合も、but
 
 押下直後、まだ描画されていない時点のEscapeも取消対象です。保留押下を次の描画へ持ち越さず、既存selectionやfullscreenは保持します。
 
-画像の100%は画面の実pixel基準です。zoomは現在の表示領域とcrop・回転後の寸法を使うため、小さいwindowやcrop previewからの一段の拡大も現在の見た目を基準にします。
+画像の100%は画面の実pixel基準です。zoomは現在の表示領域とcrop編集・回転後の寸法を使うため、小さいwindowや範囲zoom後の一段の拡大も現在の見た目を基準にします。
 
 Ctrl+wheelはcursor位置を基点に拡大・縮小します。wheelがzoom倍率へ変換された後の入力を使うよう修正し、実windowでの動作を確認しました。palette・grid・保存確認中やmenu上のwheelでは背景画像を拡大しません。
 

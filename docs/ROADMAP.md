@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I09 selection-zoom checkpoint: crop preview状態／選択UV切出しを撤去し、選択内clickと旧command入口を通常Custom倍率／有界panへ置換。選択枠・編集・textureを保ち、100／125／200%と回転後の同frame mesh／bar・cursor・非toggle command・解除後倍率保持・Fit復帰を回帰確認。旧設定名は読込aliasで引き継ぐ。可視入力・全DPI／gestureと全UX台帳は継続する。
+
 2026-09-12 I09 outside-click checkpoint: 選択枠から離れた表示面／余白の短いprimary clickで選択を解除する。辺・角優先、画像内の新規drag、余白dragの無変更、取消・無効領域・最初のgesture所有権を維持する。100／125／200%描画経路でbar操作は既存選択を保ち、外側clickだけが選択を解除してpan／dirty／textureを保つことを確認。crop preview撤去／通常zoomと全UX台帳は継続する。
 
 2026-09-12 I09 selection-gesture checkpoint: 角の二辺resize・Shiftで開始比率／対角固定・方向cursorと、画像範囲内の右dragによる選択移動を追加。移動はpixel幅／高さを保ち、画像端でclamp、共通取消で復元する。四隅×Shift有無・保持／同frame完結・上下限・非正方pixel範囲の移動と、100／125／200%の描画経路でpan／dirty保持を確認。可視操作、動画cornerの全品質、外部click解除・crop preview撤去／範囲zoomと全UX台帳は継続する。

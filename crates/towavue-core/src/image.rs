@@ -95,7 +95,6 @@ pub struct ImageViewState {
     pub zoom: ZoomMode,
     pub pan: (f32, f32),
     pub selection: Option<UnitRect>,
-    pub crop_preview: bool,
 }
 
 impl Default for ImageViewState {
@@ -104,7 +103,6 @@ impl Default for ImageViewState {
             zoom: ZoomMode::Fit,
             pan: (0.0, 0.0),
             selection: None,
-            crop_preview: false,
         }
     }
 }
@@ -146,14 +144,6 @@ impl ImageViewState {
     pub fn cover(&mut self) {
         self.zoom = ZoomMode::Cover;
         self.pan = (0.0, 0.0);
-    }
-
-    pub fn preview_region(self) -> UnitRect {
-        if self.crop_preview {
-            self.selection.unwrap_or(UnitRect::FULL)
-        } else {
-            UnitRect::FULL
-        }
     }
 }
 
@@ -278,13 +268,11 @@ mod tests {
         let mut view = ImageViewState {
             pan: (10.0, -20.0),
             selection: Some(UnitRect::FULL),
-            crop_preview: true,
             ..Default::default()
         };
         view.cover();
         assert_eq!(view.pan, (0.0, 0.0));
         assert_eq!(view.selection, Some(UnitRect::FULL));
-        assert!(view.crop_preview);
         for size in [(400, 200), (200, 400), (16_384, 512), (1, 1)] {
             for viewport in [(800.0, 600.0), (222.0, 464.0), (0.0, 0.0)] {
                 let scale = view.scale(size, viewport);
@@ -373,24 +361,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn crop_preview_requires_both_toggle_and_selection() {
-        let mut view = ImageViewState {
-            crop_preview: true,
-            ..ImageViewState::default()
-        };
-        assert_eq!(view.preview_region(), UnitRect::FULL);
-
-        let selection = UnitRect::from_drag(
-            UnitPoint { x: 0.2, y: 0.3 },
-            UnitPoint { x: 0.8, y: 0.9 },
-            (100, 100),
-            false,
-        );
-        view.selection = Some(selection);
-        assert_eq!(view.preview_region(), selection);
     }
 
     #[test]

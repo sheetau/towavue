@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## I09: crop preview撤去と通常の範囲zoom（2026-09-12）
+
+crop previewの状態と選択による描画UV切出しを撤去する。画像の選択内primary clickは、辺／角hitを除き、選択がviewportへ収まる通常Custom倍率とpanへ移る。編集後の画像寸法とphysical densityを使い、既存倍率上限とI08の画像端clampを保つ。表示画像全体・選択枠・編集履歴・textureは保持し、同じ描画回で新しい倍率・barへ反映する。選択内hoverはZoomIn、保持中はCrosshair。範囲を拡大した後も通常zoom／Fit／選択移動／解除を使い、preview解除という別操作は持たない。動画の範囲内clickは変更しない。
+
+menu／grid／palette／status／既定Ctrl＋Shift＋Yは非toggleのZoomSelectionへ置換する。旧設定のtoggle_crop_preview名は読込aliasとして引き継ぐが、出力はzoom_selectionのみ。旧M5のCtrl＋YからApplyCropへの既存移行は維持する。crop編集と保存処理は変更しない。
+
+以下の過去checkpointで保持／未対応としたcrop previewの記述は、この契約で置き換える。ImageViewStateはzoom・pan・selectionだけを保持し、Fit／Actual／Cover／copy／rotationはpreview状態を参照しない。画像用barの表示軸は当該描画回のoverflowから求め、出現animationを行わず、範囲zoomの初回から操作位置を表示する。
+
 ## I09: 表示面の外側clickによる選択解除（2026-09-12）
 
 visual selectionの外部clickは、選択枠から離れた表示面へのprimary pressと短いreleaseの組として扱う。画像外の余白も含むが、menu／overlay／scrollbarなどが所有する入力は対象外。辺・角のhitを優先し、そこへの短いclickでは解除しない。選択外で始まり選択外で終わるclickだけが選択を解除し、表示pan・zoom・編集履歴は変えない。画像内からのdragは従来どおり新しい範囲を作り、余白からのdragは選択を変更しない。取消・長押し・同frameの後続gestureを誤ってclickへ変換しない。動画は既存のtimeline表示時だけのvisual selection規則を維持する。

@@ -86,7 +86,7 @@ fn tab_focus_image_controls_restore_by_role_without_reloading_or_editing() {
             if name == "first.bmp" {
                 "Selection right (pixels)"
             } else {
-                "Crop preview"
+                "Zoom to selection"
             },
         );
         tree(&mut app, vec![focus(target)]);
@@ -100,7 +100,7 @@ fn tab_focus_image_controls_restore_by_role_without_reloading_or_editing() {
     for _ in 0..3 {
         for (tab, label) in [
             (tabs[0], "Selection right (pixels)"),
-            (tabs[1], "Crop preview"),
+            (tabs[1], "Zoom to selection"),
         ] {
             app.activate_tab(tab);
             assert!(!app.image_loading);
@@ -210,7 +210,7 @@ fn tab_focus_registers_image_video_audio_values_and_path_rows_without_dispatch()
             "png",
             vec![
                 "Reading mode",
-                "Crop preview",
+                "Zoom to selection",
                 "Selection left (pixels)",
                 "Selection right (pixels)",
                 "Selection top (pixels)",

@@ -71,7 +71,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::SelectAll, "Ctrl+A"),
         (CommandId::DeleteTimeSelection, "Delete"),
         (CommandId::KeepTimeSelection, "Ctrl+Y"),
-        (CommandId::ToggleCropPreview, "Ctrl+Shift+Y"),
+        (CommandId::ZoomSelection, "Ctrl+Shift+Y"),
         (CommandId::ToggleReadingMode, "B"),
         (CommandId::IncreaseReadingPages, "Ctrl+]"),
         (CommandId::DecreaseReadingPages, "Ctrl+["),
@@ -230,12 +230,16 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         }
     }
     if !has_apply_crop
+        && text.lines().any(|line| {
+            line.split_once('=')
+                .is_some_and(|(key, _)| key.trim() == "toggle_crop_preview")
+        })
         && bindings
-            .get(CommandId::ToggleCropPreview)
+            .get(CommandId::ZoomSelection)
             .is_some_and(|sequence| sequence.to_string() == "Ctrl+Y")
     {
         bindings.set(
-            CommandId::ToggleCropPreview,
+            CommandId::ZoomSelection,
             "Ctrl+Shift+Y".parse().expect("migration shortcut is valid"),
         );
         bindings.set(
@@ -1732,6 +1736,38 @@ mod tests {
     }
 
     #[test]
+    fn legacy_selection_zoom_binding_keeps_custom_keys_and_serializes_the_new_name() {
+        let bindings =
+            parse("toggle_crop_preview = Ctrl+Alt+Y\n", defaults()).expect("legacy custom binding");
+        assert_eq!(
+            bindings
+                .get(CommandId::ZoomSelection)
+                .expect("selection zoom")
+                .to_string(),
+            "Ctrl+Alt+Y"
+        );
+        let serialized = serialize(&bindings);
+        assert!(serialized.contains("zoom_selection = Ctrl+Alt+Y"));
+        assert!(!serialized.contains("toggle_crop_preview"));
+        assert_eq!(
+            parse(&serialized, defaults()).expect("round trip"),
+            bindings
+        );
+        assert_eq!(
+            "toggle_crop_preview".parse::<CommandId>(),
+            "zoom_selection".parse()
+        );
+        let current = parse("zoom_selection = Ctrl+Y\n", defaults()).expect("new custom binding");
+        assert_eq!(
+            current
+                .get(CommandId::ZoomSelection)
+                .expect("selection zoom")
+                .to_string(),
+            "Ctrl+Y"
+        );
+    }
+
+    #[test]
     fn migrates_m5_crop_preview_binding_to_m6_apply_crop() {
         let bindings =
             parse("toggle_crop_preview = Ctrl+Y\n", defaults()).expect("migrate shortcuts");
@@ -1745,8 +1781,8 @@ mod tests {
         );
         assert_eq!(
             bindings
-                .get(CommandId::ToggleCropPreview)
-                .expect("preview binding")
+                .get(CommandId::ZoomSelection)
+                .expect("selection zoom binding")
                 .to_string(),
             "Ctrl+Shift+Y"
         );

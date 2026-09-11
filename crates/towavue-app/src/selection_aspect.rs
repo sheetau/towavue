@@ -34,7 +34,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         self.set_time_selection(None);
         self.image_view.selection = Some(crop.unit_rect(size));
-        self.image_view.crop_preview = false;
         if let Some(context) = &self.ui_context {
             selection::focus_first(context, self.selection_identity());
         }

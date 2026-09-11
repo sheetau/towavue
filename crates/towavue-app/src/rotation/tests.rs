@@ -511,7 +511,6 @@ fn rotation_dialog_commit_is_atomic_cancel_and_identity_preserve_state_and_old_t
     let tab = app.tabs.active().expect("tab").id;
     app.push_visual_edit(EditOperation::RotateClockwise);
     app.image_view.selection = Some(UnitRect::FULL);
-    app.image_view.crop_preview = true;
     app.image_view.zoom = ZoomMode::Custom(2.0);
     app.image_view.pan = (13.0, -7.0);
     let view = app.image_view;
@@ -553,7 +552,7 @@ fn rotation_dialog_commit_is_atomic_cancel_and_identity_preserve_state_and_old_t
             EditOperation::RotateImage(value)
         ]
     );
-    assert!(app.image_view.selection.is_none() && !app.image_view.crop_preview);
+    assert!(app.image_view.selection.is_none());
     let deadline = Instant::now() + Duration::from_secs(10);
     while app.image_edit_pending {
         app.handle_app_event(

@@ -32,7 +32,7 @@ fn frame<N: Fn(AppEvent) + Send + Sync + 'static>(
 
 #[test]
 fn held_alt_rotation_previews_without_editing_then_commits_once_and_undo_restores_source() {
-    for crop_preview in [false, true] {
+    for zoom in [ZoomMode::Fit, ZoomMode::Custom(40.0)] {
         let (mut app, events) = application();
         let source = app.image.as_ref().expect("image").decoded.clone();
         let tab = app.tabs.active().expect("tab").id;
@@ -41,7 +41,7 @@ fn held_alt_rotation_previews_without_editing_then_commits_once_and_undo_restore
             min: UnitPoint { x: 0.25, y: 0.25 },
             max: UnitPoint { x: 0.75, y: 0.75 },
         });
-        app.image_view.crop_preview = crop_preview;
+        app.image_view.zoom = zoom;
         let view = app.image_view;
         let history = app.edits.clone();
         let start = egui::pos2(200.0, 200.0);

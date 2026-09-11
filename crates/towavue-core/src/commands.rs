@@ -28,7 +28,7 @@ pub enum CommandId {
     FitToWindow,
     ClearSelection,
     SelectAll,
-    ToggleCropPreview,
+    ZoomSelection,
     ToggleReadingMode,
     IncreaseReadingPages,
     DecreaseReadingPages,
@@ -149,7 +149,7 @@ impl CommandId {
             Self::CoverWindow => "cover_window",
             Self::ClearSelection => "clear_selection",
             Self::SelectAll => "select_all",
-            Self::ToggleCropPreview => "toggle_crop_preview",
+            Self::ZoomSelection => "zoom_selection",
             Self::ToggleReadingMode => "toggle_reading_mode",
             Self::IncreaseReadingPages => "increase_reading_pages",
             Self::DecreaseReadingPages => "decrease_reading_pages",
@@ -235,6 +235,9 @@ impl FromStr for CommandId {
     type Err = ();
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value == "toggle_crop_preview" {
+            return Ok(Self::ZoomSelection);
+        }
         command_definitions()
             .iter()
             .find_map(|definition| (definition.id.as_str() == value).then_some(definition.id))
@@ -473,7 +476,7 @@ impl CommandDefinition {
                         | CommandId::SelectAspectSixteenNine
                         | CommandId::SelectAspectNineSixteen
                         | CommandId::CoverWindow
-                        | CommandId::ToggleCropPreview
+                        | CommandId::ZoomSelection
                         | CommandId::ApplyCrop
                         | CommandId::RotateClockwise
                         | CommandId::RotateCounterclockwise
@@ -548,8 +551,8 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::SelectAll, "Select whole media", ANY_MEDIA),
     command(CommandId::ClearSelection, "Clear selection", ANY_MEDIA),
     command(
-        CommandId::ToggleCropPreview,
-        "Toggle crop preview",
+        CommandId::ZoomSelection,
+        "Zoom to selection",
         &[MediaKind::Image],
     ),
     command(
@@ -1162,7 +1165,7 @@ mod tests {
             CommandId::FlipHorizontal,
             CommandId::FlipVertical,
             CommandId::SelectAll,
-            CommandId::ToggleCropPreview,
+            CommandId::ZoomSelection,
             CommandId::CoverWindow,
             CommandId::ResizeImage,
         ] {

@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-12 I03 overlap checkpoint: 移動先が先読みを引き継げるようになった後で、texture準備前への先読み開始を再評価。100 JPEGの即時切替中央値22.598／22.659→16.645／16.592ms、p95 23.432／23.451→17.660／17.739ms。最短33msは7.983／7.987→8.506／8.337msで改善なし（p95 9.272／10.146ms）。現在画像のtexture処理をcontext lockで止め、既存workerが隣画像の原寸とpreviewを準備できることを回帰化。旧開始順で失敗、新開始順で成功。予算・worker・対象順・readingを変えず、同一completion末尾で再submitしない。中間blankは両条件100件、previewは97／6・再測定96／5で残り、可視GPU／burst／cold／全形式／資源と全台帳は継続する。
+
 2026-09-12 I03 100-image/handoff checkpoint: 生成4096×2304 JPEG 100枚・計31.8MiBのRelease計測で、入力処理／completion処理／原寸meshまでの時間を分離。画像切替の空要求二回を除き、移動先要求一回で復号中先読みを引き継ぐ。即時次要求の中央値28.496→22.598／22.659ms、p95 30.669→23.432／23.451ms。最短33ms条件は8.011→7.983／7.987ms。先読み開始を表示準備より前へ動かすだけの案は改善せず撤回した。回帰で世代一回置換・前後／循環の画素保持を確認。空表示／低解像度なしのgateは未達で、可視GPU／burst入力／cold／他形式／資源と全台帳を継続する。
 
 I03再測定: `cargo test -p towavue-app --release hundred_large_images_report_navigation_gaps_and_preparation_cost -- --ignored --nocapture`（既存FFMPEG_DIR設定が必要）。専用一時領域で100 JPEGを生成し、終了時に除去する。filesystemは生成直後でwarm、Shell snapshotは合成順、最初だけ500msの先読み時間を与える。各画像の原寸を待って全100枚を訪れ、最短間隔0／33msを比較する。command直後と通知処理後にも描画データを要求するため、blank／preview件数はその測定上の中間描画であり、実画面のちらつき回数ではない。GPU upload／Present、物理keyや一定周期burstの取りこぼし、IrfanView比較とpeak memoryは別の未完検証。

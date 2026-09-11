@@ -1939,6 +1939,19 @@ where
             return;
         }
         self.image_loading = result.first_index + result.images.len() < result.total;
+        // Matching prefetch now survives the next request, so overlap it with texture preparation.
+        let prefetched = if self.media_kind == Some(MediaKind::Image)
+            && !self.reading_mode
+            && !self.image_loading
+            && result.first_index == 0
+            && result.images[0].1.is_ok()
+            && let Some(paths) = self.image_prefetch_paths()
+        {
+            self.image_loader.prefetch_paths(paths);
+            true
+        } else {
+            false
+        };
         for (path, _) in &result.images {
             self.pending_image_previews.remove(path);
             self.image_previews.remove(path);
@@ -1980,7 +1993,9 @@ where
         if !self.image_loading {
             self.clear_image_previews();
         }
-        self.prefetch_next_image();
+        if !prefetched {
+            self.prefetch_next_image();
+        }
         self.refresh_title();
         self.request_redraw();
     }

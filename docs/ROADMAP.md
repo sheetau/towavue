@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 G01/I07/I08 inactive-image-wheel checkpoint: 下位scroll関数の非active対応だけでは、呼出元のdrag用focus gateで止まることを確認。画像wheelをoverlay共通条件へ分離し、Ctrl wheelも非activeで受け付ける。選択／右drag／bar、明示Zoom／multi-touchのfocus条件とfocus-loss frameの取消は維持。3倍率×active／inactiveの実draw_ui回帰でpan／zoomの同frame mesh、pointer基点・texture／履歴保持・再開／overlay抑止を確認済み。OS実入力、動画側zoomを含む他経路と全UX gateは維持する。
+
 2026-09-12 U03 font-audit checkpoint: Welcomeのアプリ名に残る明示Monospaceを除去し、既存Figtreeへ統一。3倍率×3幅で全text sectionのProportional／Codicon分離と32pxを検証し、元実装で回帰失敗を確認。既存の数字等幅・実日本語font・小窓／keyboard回帰も通過。通常960×576の変更前後は可視確認済みだが、native menu入力／全OS・DPIの実表示は未認定。全UX gateを維持する。
 
 2026-09-12 U03/U04 status-I/O checkpoint: 描画中のpath.metadataをruntime所有のLatestTaskへ移動。path／media instance／snapshot更新単位の現在一件だけを保持し、未取得／失敗は容量を省略。完了時の現在source／ticket照合、失敗記憶と0 bytesの区別、外部変更後のsnapshot再取得を回帰確認済み。OSのmetadata待ちは強制中断せずUIから分離する。実drag latency・表示／全DPIと全UX gateは保持する。

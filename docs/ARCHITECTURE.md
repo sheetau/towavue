@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## G01/I07/I08: 非active画像wheelの外側gate（2026-09-12）
+
+通常画像のwheel入力は、overlay／modal／popup等の共通許可条件と「dragなし」を確認し、window focusは要求しない。従来のimage_scroll_deltaだけでなく呼出元もview_drag_allowedを使っていたため、先行変更では非activeの実画像panが止まる余地を残していた。共通overlay条件をview_input_allowedへ抽出し、drag／選択／scrollbar入力では従来どおりfocus必須と取消を重ねる。wheelは縦・Shift横・Ctrl倍率を現在frameの描画へ反映し、keyboard focusやwindowのactive化を要求しない。
+
+zoom_eventsではMouseWheelだけ非activeを許可し、明示Zoom eventとmulti-touchはfocus必須を維持する。WindowFocused(false)が含まれるframeは全量破棄し、次frame以降のposition付き入力を受け付ける。event時点のmodifier・座標・単位・layer／rect／enabled、button競合、追加layout passで再生しない契約は変更しない。古いzoom即時化節の「非active禁止」はこのwheel例外で更新する。固定winit 0.30.13はWM_MOUSEWHEEL／WM_MOUSEHWHEELでmodifier更新後にwheelを発行するが、これは実OS入力の検証ではない。OS設定変更・focus強制・新たな入力hookは追加しない。動画側のzoom／timeline有効条件と平滑化は別経路として残す。
+
 ## U03: Welcomeのfont適用漏れ（2026-09-12）
 
 Welcome中央の32pxアプリ名もUI本文と同じProportional family（Figtree-tabular先頭）へ揃え、明示Monospace指定を外す。色・font size・column幅・action／shortcut・Codicon専用familyは変更しない。一般MonospaceのLatin font定義をFigtreeで上書きせず、コード表示用の既存契約と日本語fallbackは維持する。app内の明示font指定、TextEditと値非表示Sliderの利用箇所、固定eguiの関連既定値を確認した。現在のproduction widgetに明示Monospace指定は残っていないが、OS所有dialog／captionや全UIの実表示を一括認定するものではない。

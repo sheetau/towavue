@@ -19,6 +19,8 @@ mod hold_speed;
 mod hover_help;
 mod image_navigation;
 mod image_scroll;
+#[cfg(test)]
+mod image_wheel_tests;
 mod logo_menu;
 mod media_preview;
 mod menu;
@@ -2990,7 +2992,7 @@ where
                 return;
             }
         }
-        if self.view_drag_allowed(ui.ctx()) && self.view_drag.is_none() {
+        if self.view_input_allowed(ui.ctx()) && self.view_drag.is_none() {
             for (pointer, zoom) in wheel_input::zoom_events(ui.ctx(), &response) {
                 let center =
                     viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
@@ -3031,7 +3033,7 @@ where
             self.cancel_view_drag();
         }
         let enabled = self.view_drag_allowed(ui.ctx()) && self.view_drag.is_none();
-        if enabled {
+        if self.view_input_allowed(ui.ctx()) && self.view_drag.is_none() {
             let mut wheel_response = response.clone();
             wheel_response.interact_rect = viewport;
             let delta = wheel_input::image_scroll_delta(ui.ctx(), &wheel_response);
@@ -3315,14 +3317,16 @@ where
         true
     }
 
+    fn view_input_allowed(&self, context: &egui::Context) -> bool {
+        !self.modal_input_blocked()
+            && !self.palette_open
+            && !self.grid_open
+            && !self.filmstrip_open
+            && !egui::Popup::is_any_open(context)
+    }
+
     fn view_drag_allowed(&mut self, context: &egui::Context) -> bool {
-        if !context.input(|input| input.focused)
-            || self.modal_input_blocked()
-            || self.palette_open
-            || self.grid_open
-            || self.filmstrip_open
-            || egui::Popup::is_any_open(context)
-        {
+        if !context.input(|input| input.focused) || !self.view_input_allowed(context) {
             self.cancel_view_drag();
             return false;
         }

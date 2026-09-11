@@ -56,19 +56,19 @@ pub fn volume_delta(context: &Context, targets: &[Response], excluded: Option<eg
 pub fn zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
     if !target.enabled()
         || context.input(|input| {
-            !input.focused
-                || input
-                    .events
-                    .iter()
-                    .any(|event| matches!(event, Event::WindowFocused(false)))
+            input
+                .events
+                .iter()
+                .any(|event| matches!(event, Event::WindowFocused(false)))
         })
     {
         return Vec::new();
     }
+    let focused = context.input(|input| input.focused);
     if let Some(touch) = context.input(|input| input.multi_touch()) {
         return context
             .input(|input| input.pointer.hover_pos())
-            .filter(|_| target.hovered() && touch.zoom_delta != 1.0)
+            .filter(|_| focused && target.hovered() && touch.zoom_delta != 1.0)
             .map(|position| (position, touch.zoom_delta))
             .into_iter()
             .collect();
@@ -105,7 +105,7 @@ pub fn zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
                     };
                     (options.scroll_zoom_speed * points * (delta.x + delta.y)).exp()
                 }
-                Event::Zoom(factor) => factor,
+                Event::Zoom(factor) if focused => factor,
                 _ => return None,
             };
             (factor != 1.0).then_some((position, factor))
@@ -449,11 +449,44 @@ mod tests {
         assert_eq!(zooms.len(), 2);
         assert_eq!(zooms[1], (inside, 1.25));
         assert!(frame(vec![zoom(), Event::PointerMoved(inside)], true, true, false).is_empty());
+        for (unit, delta, points) in [
+            (egui::MouseWheelUnit::Point, 60.0, 60.0),
+            (
+                egui::MouseWheelUnit::Line,
+                -2.0,
+                -2.0 * options.line_scroll_speed,
+            ),
+            (egui::MouseWheelUnit::Page, 0.1, 30.0),
+        ] {
+            let zooms = frame(
+                vec![
+                    Event::PointerMoved(inside),
+                    wheel(unit, delta, egui::Modifiers::CTRL, egui::TouchPhase::Move),
+                    Event::PointerMoved(outside),
+                    zoom(),
+                    Event::PointerMoved(inside),
+                    Event::Zoom(1.25),
+                ],
+                true,
+                false,
+                true,
+            );
+            assert_eq!(
+                zooms.len(),
+                1,
+                "inactive wheel only, without replay in the extra pass"
+            );
+            assert_eq!(zooms[0].0, inside);
+            assert!((zooms[0].1 - (points * options.scroll_zoom_speed).exp()).abs() < 0.0001);
+            assert!(frame(vec![], true, false, false).is_empty());
+        }
         for (enabled, focused, modifiers, press) in [
             (false, true, egui::Modifiers::CTRL, false),
-            (true, false, egui::Modifiers::CTRL, false),
+            (false, false, egui::Modifiers::CTRL, false),
             (true, true, egui::Modifiers::NONE, false),
             (true, true, egui::Modifiers::CTRL, true),
+            (true, false, egui::Modifiers::NONE, false),
+            (true, false, egui::Modifiers::CTRL, true),
         ] {
             let mut events = vec![
                 Event::PointerMoved(inside),

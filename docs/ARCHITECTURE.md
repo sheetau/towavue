@@ -1,5 +1,9 @@
 # towavue アーキテクチャ
 
+## I07: 最後の画像tabの削除で原寸cacheを解放（2026-09-12）
+
+最後の画像tabを削除した場合は、音声／動画tabが残っていてもwindow所有の原寸texture cacheとdecoded cacheを解放する。全tabが空の場合の従来の解放も維持する。通常closeとtab transferが使う共通remove_tabで、active／inactiveどちらの削除にも適用する。無関係な音声／動画tabだけの削除では画像workerの世代を更新しない。decoded解放は既存ImageLoader.clearの非同期・世代取消を利用し、後続の音声／動画restoreが空requestを発行してもsticky clearを失わない。再生session／clock／編集／音量や共有thumbnailは触らず、画像tabが残る場合はcacheを維持する。transfer先へ渡した画像のArcは別ownerとして維持する。従来の「他tabが残れば維持」は原寸cacheについて「他の画像tabが残れば維持」へ更新する。device-wide Trimは引き続き全windowの空状態だけであり、再生中には追加しない。
+
 ## I07: 全windowが空になった後のGPU整理（2026-09-12）
 
 34a1cbbの2回の計測で、原寸のrenderer所有が消えた後も残る約338MiBが診断Trimで約14MiBへ低下した。これを根拠に、WindowHostが全windowの空状態を確認してから一度だけdeviceの内部cacheを整理する。全tab／session／retained mediaが空、open／dialog／folder／export／graphics recoveryが未進行、各windowの現在media instance／graphics epochに対応する空frameのPresent成功が条件。closeを同frame UI actionで処理しただけでは描画済みと認めない。

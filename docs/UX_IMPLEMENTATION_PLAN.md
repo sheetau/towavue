@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+I07 final-image-cache: 原寸cache解放を共通remove_tabの早期returnより前へ移し、最後の画像tab削除または全tab終了で実行する。Audio／Videoが残る場合もdecoded cacheは既存workerで非同期解放するが、別の画像tabがあれば維持。無関係なAudio／Videoだけのcloseでは画像workerの世代を変えず、active media instance／再生stateを維持する。全window空状態でのGPU Trim条件は変更しない。
+
+検証: 旧実装は最後の画像tabを閉じた後の非empty cacheで失敗。新回帰はactive／inactive×残存Audio／Video、実BMPからのdecoded cache保持と非同期Weak失効、texture free、同じmedia instance／state／errorを確認。別windowへのtransferでも移動元cacheを解放し、移動先の同じArc／RGBAを保持、移動先closeで最後のownerが消える。実動画／無音WASAPI session試験でinactive画像close後のsession generation／位置／速度／編集履歴を維持。これはsessionとCPU所有の確認で、今回の試験を新たなGPU動画Present認定とはしない。既存active-tab回帰は、最後の不要画像workerの取消だけを明示して許し、表示中Imageの世代と全media identity／viewの保持を引き続き検証。全666通常testsと追加音声試験通過。大画像Host統合計測／再open、閲覧中peak、native入力・比較・他UX gateを継続する。
+
 I07 production-idle-trim: 全windowのtab／session／retained mediaが空、pending open／folder／export／modal／graphics recoveryなし、palette／grid／filmstrip／popupなしをHostで確認する。各windowの空frameのPresent成功をmedia instanceとgraphics epochで受領し、同frameのclose UI actionだけでは受領済みにしない。全条件から1秒のWaitUntil、同じwindow集合／世代では一度だけClearState＋Trim。再open／window増減／復旧世代変更で取消・再待機。deviceやsurfaceを作り直さず、他windowにmediaがあれば整理しない。
 
 検証: 2共有GPU窓で一方close後の他方の原寸画素とTextureId維持、全close後のframe待ち、1秒境界／再試行なし、3種類のmedia tab、open／folder／error modal／recoveryと4overlayの抑止、window増減／epoch変更を回帰確認。整理後も両surfaceへ新しい原寸をuploadして中央RGBAを確認。実event loopは約1.009秒後に実行。実動画sessionがある既存GPU回帰にも整理抑止の確認を追加した。全664通常tests通過。小型fixtureのGPU local 31.7→21.6MiB／commit 161.5→139.5MiBはこの統合経路の観測であり、以前の100大画像の診断Trim値と混同しない。実時間testの終了時にWindowsがWaitで残るfixture不備はPoll設定で修正し、正常終了を確認。画像なし／他mediaありのcache、閲覧中peak、全native入力・比較・他UX gateを継続する。

@@ -85,6 +85,56 @@ fn finish(app: &mut App, events: &mpsc::Receiver<AppEvent>) {
 }
 
 #[test]
+fn final_image_transfer_clears_source_cache_without_dropping_destination_pixels() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::final_image_transfer_clears_source_cache_without_dropping_destination_pixels",
+    ) else {
+        return;
+    };
+    let (mut source, _) = app();
+    let (mut destination, _) = app();
+    let audio_path = root.join("remaining.wav");
+    let audio = source.tabs.open_new(audio_path.clone(), MediaKind::Audio);
+    source.load_path(audio_path, MediaKind::Audio);
+    let audio_instance = source.media_generation;
+    let id = install(&mut source, root.join("moving.png"), decoded(false));
+    let image = source.image.as_ref().expect("original").clone();
+    let weak = Arc::downgrade(&image.decoded);
+    let texture = image.texture.id();
+    source.image_texture_cache.entries.push_back(image);
+    let moved = transfer(&mut source, &mut destination, id);
+    assert_eq!(source.tabs.active().expect("remaining audio").id, audio);
+    assert_eq!(source.media_generation, audio_instance);
+    assert!(source.image_texture_cache.entries.is_empty());
+    assert!(
+        source
+            .ui_context
+            .as_ref()
+            .expect("source context")
+            .tex_manager()
+            .read()
+            .meta(texture)
+            .is_none()
+    );
+    assert!(Arc::ptr_eq(
+        &weak.upgrade().expect("destination owns pixels"),
+        &destination.image.as_ref().expect("moved original").decoded
+    ));
+    assert_eq!(
+        destination
+            .image
+            .as_ref()
+            .expect("moved original")
+            .decoded
+            .frames[0]
+            .rgba,
+        [0, 80, 200, 255].repeat(4)
+    );
+    destination.close_tab_unchecked(moved);
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
 fn image_transfer_rebinds_current_pixels_and_preserves_animation_edits_and_view() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_transfer::tests::image_transfer_rebinds_current_pixels_and_preserves_animation_edits_and_view",

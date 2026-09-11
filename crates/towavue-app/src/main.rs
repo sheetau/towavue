@@ -6727,6 +6727,17 @@ where
         self.export_paths.remove(&id);
         self.audio_export_settings.remove(&id);
         self.metadata_export_settings.remove(&id);
+        if self.tabs.tabs().is_empty()
+            || (removed.target.media_kind() == MediaKind::Image
+                && !self
+                    .tabs
+                    .tabs()
+                    .iter()
+                    .any(|tab| tab.target.media_kind() == MediaKind::Image))
+        {
+            self.image_generation = self.image_loader.clear();
+            self.image_texture_cache.entries.clear();
+        }
         if !was_active {
             self.request_redraw();
             return;
@@ -6745,8 +6756,6 @@ where
             self.cancel_frame_steps();
             self.playback_error = None;
             self.reset_image_edits();
-            self.image_generation = self.image_loader.clear();
-            self.image_texture_cache.entries.clear();
             self.image_loading = false;
             self.image_error = None;
             self.image = None;
@@ -20178,6 +20187,7 @@ mod tests {
             let history = app.edits[&active].clone();
             let view = app.image_view;
             let position = app.current_position();
+            let mut image_generation = app.image_generation;
             for operation in 0..3 {
                 match operation {
                     0 => app.close_tab_unchecked(background),
@@ -20194,7 +20204,12 @@ mod tests {
                 assert_eq!(app.current_position(), position);
                 assert_eq!(app.media_duration, Some(Duration::from_secs(30)));
                 assert!(app.timeline_open);
-                assert_eq!((app.image_generation, app.media_generation), (17, 23));
+                if operation == 0 && kind != MediaKind::Image {
+                    assert_ne!(app.image_generation, 17, "cancel the unused image worker");
+                    image_generation = app.image_generation;
+                }
+                assert_eq!(app.image_generation, image_generation);
+                assert_eq!(app.media_generation, 23);
                 assert_eq!(app.image_view, view);
                 assert_eq!(app.edits[&active], history);
                 assert!(!app.edits.contains_key(&background));

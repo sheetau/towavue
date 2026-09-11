@@ -280,7 +280,36 @@ fn run_session_trial(audio: bool, test: &str) {
             );
             assert!(app.held_speed.is_none());
             app.activate_tab(tab);
+            // Closing an inactive final image must drop its cache without touching this live session.
+            let cached = Arc::new(DecodedImage {
+                format: "test",
+                frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                    width: 2,
+                    height: 1,
+                    rgba: vec![255; 8],
+                    delay: Duration::ZERO,
+                }],
+            });
+            let weak = Arc::downgrade(&cached);
+            app.image_texture_cache
+                .load(&context, &self.path.with_extension("png"), cached)
+                .expect("previous image cache");
+            let instance = app.media_generation;
+            let generation = app.session.as_ref().expect("live session").generation();
+            let position = app.current_position();
+            let state = app.state;
             app.close_tab_unchecked(image);
+            assert!(app.image_texture_cache.entries.is_empty() && weak.upgrade().is_none());
+            assert_eq!(app.media_generation, instance);
+            assert_eq!(
+                app.session
+                    .as_ref()
+                    .expect("same live session")
+                    .generation(),
+                generation
+            );
+            assert_eq!(app.state, state);
+            assert!(app.current_position() >= position);
             assert_eq!(app.playback_rate(), 1.25);
             assert_eq!(app.edits[&tab], history);
             // Reaching EOF during a paused audition restores the rate, without restart.

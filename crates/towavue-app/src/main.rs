@@ -1475,7 +1475,9 @@ where
         {
             self.folder_snapshot = None;
         }
-        self.image_generation = self.image_loader.request(Vec::new());
+        if kind != MediaKind::Image || saved.is_some() {
+            self.image_generation = self.image_loader.request(Vec::new());
+        }
         self.image_loading = false;
         self.image_error = None;
         self.session.take();
@@ -1778,15 +1780,19 @@ where
     fn rebuild_reading_pages(&mut self) {
         self.clear_image_previews();
         self.reading_pages.clear();
-        self.image_generation = self.image_loader.request(Vec::new());
         self.image_loading = false;
-        if self.media_kind != Some(MediaKind::Image) {
-            return;
+        let paths = if self.media_kind == Some(MediaKind::Image)
+            && (self.reading_mode || self.image.is_none())
+        {
+            self.reading_request_paths()
+        } else {
+            Vec::new()
+        };
+        if paths.is_empty() {
+            self.image_generation = self.image_loader.request(Vec::new());
+        } else {
+            self.request_image_paths(paths, 0);
         }
-        if !self.reading_mode && self.image.is_some() {
-            return;
-        }
-        self.request_image_paths(self.reading_request_paths(), 0);
     }
 
     fn resume_image_load(&mut self) {
@@ -13608,11 +13614,17 @@ mod tests {
         for forward in [
             true, true, false, false, false, true, true, true, true, true, true,
         ] {
+            let generation = app.image_generation;
             app.dispatch(if forward {
                 CommandId::NextSameKind
             } else {
                 CommandId::PreviousSameKind
             });
+            assert_eq!(
+                app.image_generation,
+                generation.wrapping_add(1),
+                "navigation must replace the request once without cancelling adoptable prefetch first"
+            );
             current = if forward {
                 (current + 1) % paths.len()
             } else {

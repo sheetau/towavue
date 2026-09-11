@@ -11,6 +11,10 @@
 
 ## 作業台帳
 
+2026-09-12 I03 100-image/handoff checkpoint: 生成4096×2304 JPEG 100枚・計31.8MiBのRelease計測で、入力処理／completion処理／原寸meshまでの時間を分離。画像切替の空要求二回を除き、移動先要求一回で復号中先読みを引き継ぐ。即時次要求の中央値28.496→22.598／22.659ms、p95 30.669→23.432／23.451ms。最短33ms条件は8.011→7.983／7.987ms。先読み開始を表示準備より前へ動かすだけの案は改善せず撤回した。回帰で世代一回置換・前後／循環の画素保持を確認。空表示／低解像度なしのgateは未達で、可視GPU／burst入力／cold／他形式／資源と全台帳を継続する。
+
+I03再測定: `cargo test -p towavue-app --release hundred_large_images_report_navigation_gaps_and_preparation_cost -- --ignored --nocapture`（既存FFMPEG_DIR設定が必要）。専用一時領域で100 JPEGを生成し、終了時に除去する。filesystemは生成直後でwarm、Shell snapshotは合成順、最初だけ500msの先読み時間を与える。各画像の原寸を待って全100枚を訪れ、最短間隔0／33msを比較する。command直後と通知処理後にも描画データを要求するため、blank／preview件数はその測定上の中間描画であり、実画面のちらつき回数ではない。GPU upload／Present、物理keyや一定周期burstの取りこぼし、IrfanView比較とpeak memoryは別の未完検証。
+
 2026-09-12 I09 selection-zoom checkpoint: crop preview状態と描画切出しを除去。画像の選択内click・Zoom to selection commandは、画像全体と選択枠を保つ通常zoom／panへ移る。100／125／200%・回転画像の入力回mesh／UV保持・bar即時表示・hover／保持cursor・command同等性・選択解除とFit復帰を確認。旧shortcut／grid名はaliasとして読み込み、新名だけを保存する。可視入力・全DPI／全gestureと全台帳は未完。
 
 2026-09-12 I09 outside-click checkpoint: 選択外の表示面／余白へのprimary clickで選択のみ解除。短いreleaseまで待ち、辺／角hit・drag・取消・無効領域と同frame先行gestureの所有権を保つ。回帰で画像内dragの再選択、余白dragの無変更、barによる既存選択保持、100／125／200%の解除とpan／dirty／texture保持を確認。crop preview撤去／通常zoomと全台帳は未完。

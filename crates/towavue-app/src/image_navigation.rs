@@ -1,5 +1,8 @@
 use crate::*;
 
+#[cfg(test)]
+mod performance_tests;
+
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn jump_images(&mut self, offset: i32) {
         if self.media_kind != Some(MediaKind::Image) {

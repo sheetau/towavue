@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I03 100-image/handoff checkpoint: 4096×2304 JPEG 100枚のRelease計測を追加し、切替の二重空要求が進行中先読みを取消す経路を修正。要求世代を一回で置換し、原寸ready直後に次へ進むCPU描画条件の中央値は約28.5→22.6ms、p95は約30.7→23.4ms。最短33ms条件は約8msで大差なし。全100枚のpath／寸法／原寸mesh到達は確認したが、途中描画には空表示・低解像度が残る。可視GPU表示・一定周期入力の飛越し・cold／他形式／資源と全UX台帳は未完。
+
 2026-09-12 I09 selection-zoom checkpoint: crop preview状態／選択UV切出しを撤去し、選択内clickと旧command入口を通常Custom倍率／有界panへ置換。選択枠・編集・textureを保ち、100／125／200%と回転後の同frame mesh／bar・cursor・非toggle command・解除後倍率保持・Fit復帰を回帰確認。旧設定名は読込aliasで引き継ぐ。可視入力・全DPI／gestureと全UX台帳は継続する。
 
 2026-09-12 I09 outside-click checkpoint: 選択枠から離れた表示面／余白の短いprimary clickで選択を解除する。辺・角優先、画像内の新規drag、余白dragの無変更、取消・無効領域・最初のgesture所有権を維持する。100／125／200%描画経路でbar操作は既存選択を保ち、外側clickだけが選択を解除してpan／dirty／textureを保つことを確認。crop preview撤去／通常zoomと全UX台帳は継続する。

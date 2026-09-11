@@ -90,7 +90,8 @@ pub(super) fn decode_audio(
         return Ok(());
     };
     let source_start = first.source_target(target);
-    let source_end = segments.last().expect("nonempty segments").source_end();
+    // A selection bounds output, not tempo input: flushing at its end changes the PCM.
+    let source_end = segments.last().expect("nonempty segments").source.end();
     let sample_at = |time: MediaTime| {
         crate::tempo::output_sample_boundary(time.as_nanoseconds(), format.sample_rate, master_rate)
     };
@@ -98,7 +99,7 @@ pub(super) fn decode_audio(
     let mut index = 0;
     let mut tempo = None;
     let mut queue = VecDeque::new();
-    let mut process = |chunk: Option<AudioChunk>| -> Result<(), DecodeError> {
+    let mut process = |chunk: Option<AudioChunk>| -> Result<bool, DecodeError> {
         while let Some(segment) = segments.get(index) {
             if cancelled() {
                 return Err(DecodeError::ConsumerClosed);
@@ -129,7 +130,7 @@ pub(super) fn decode_audio(
                 decode::clip_audio_chunk(
                     &mut part,
                     segment.source_target(target),
-                    Some(segment.source_end()),
+                    Some(segment.source.end()),
                 );
                 if part.frames > 0 {
                     tempo
@@ -137,7 +138,7 @@ pub(super) fn decode_audio(
                         .expect("tempo")
                         .push(&part.bytes, &mut queue)?;
                 }
-                end >= segment.source_end()
+                end >= segment.source.end()
             } else {
                 true
             };
@@ -155,6 +156,9 @@ pub(super) fn decode_audio(
                 &cancelled,
                 &mut emit,
             )?;
+            if index + 1 == segments.len() && emitted == limit {
+                return Ok(true);
+            }
             if !complete {
                 break;
             }
@@ -175,9 +179,10 @@ pub(super) fn decode_audio(
             }
             index += 1;
         }
-        Ok(())
+        Ok(index == segments.len())
     };
     let mut failure = None;
+    let mut completed = false;
     // Decode once through ordered source intervals; repeated coarse-PTS seeks lose sample phase.
     let result = decode::decode_file_parallel_cancellable(
         path,
@@ -186,11 +191,18 @@ pub(super) fn decode_audio(
         Some(DecodeStream::Audio),
         &cancelled,
         |output| {
-            if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) = output
-                && let Err(error) = process(Some(chunk))
-            {
-                failure = Some(error);
-                return false;
+            if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) = output {
+                match process(Some(chunk)) {
+                    Ok(true) => {
+                        completed = true;
+                        return false;
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        failure = Some(error);
+                        return false;
+                    }
+                }
             }
             true
         },
@@ -198,8 +210,11 @@ pub(super) fn decode_audio(
     if let Some(error) = failure {
         return Err(error);
     }
+    if completed && matches!(result, Err(DecodeError::ConsumerClosed)) && !cancelled() {
+        return Ok(());
+    }
     result?;
-    process(None)
+    process(None).map(|_| ())
 }
 
 #[allow(clippy::too_many_arguments)]

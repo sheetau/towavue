@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-11 V03/A02 audition-PCM checkpoint: 選択末尾をtempo入力EOFとせず、同じ編集区間から必要な文脈を読み、出力sample数で停止する。1ms・stretch・gain／Delete跨ぎ・終端近くを含む6範囲×3速度で同じ開始の通常再生と全PCM一致。最終chunkでのconsumer拒否／取消は正常完了へ変換しない。前回観測した選択4倍速の波形差はこの範囲で解消。真の短区間編集の速度処理・初期Seek位相・長い削除区間負荷・全codec／UIと全台帳は未完のまま継続する。
+
 2026-09-11 V03/A02 sample-boundary checkpoint: 再生／保存の編集区間sample数を共通整数計算に変更。17ms等の境界で余分な無音と後続sample欠落を再現し、生成音声の部分gain／Delete全PCM一致を確認。4 sample rates×7速度・非整列／長時間の境界と短区間の選択sample数を回帰化。実WASAPIの無音再生でworker保持・停止／再開・編集clock・復旧も通過。17～84msを4倍速で選択すると、同じ開始から終端を設けない再生とは先頭波形が異なることも観測した。短区間速度処理の音質は未認定で、初期Seek位相・長い削除区間負荷・全codec／UI・全台帳とともに継続する。
 
 2026-09-11 G01/U06 dialog-focus checkpoint: pickerの取消／失敗時に同じtab・media generationの開始元focusを復帰し、別modal／guard・選択成功・対象変更では破棄する。command再実行なしと次のEnter一回だけのdispatchを含む2回帰、全612 tests／Release成功。通常960×576でOpen File／Open FolderのEnter→Escape→focus復帰→Enter再操作を可視確認。前回click不発は再現せず。全入口／実IME／mixed-DPI・全台帳は未完のまま継続する。

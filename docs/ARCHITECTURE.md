@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## V03/A02: 選択再生のtempo入力と出力終端（2026-09-11）
+
+選択再生は同じ編集位置からの通常再生のPCMを選択終端で止める操作とする。選択終端をatempo入力のEOFへ置き換えるとwindow処理の結果が変わるため、最後の編集区間内では選択終端後のsourceも必要に応じて入力する。gain／stretch／Deleteで区切られた実際の区間境界は越えて混ぜず、従来の区間ごとのtempo変換を保つ。出力は整数sample境界の必要数のみで、選択外のPCMをWASAPIへ送らない。
+
+必要な出力数が得られたらconsumer停止を正常完了として扱い、残るsource全体を読まない。利用者の取消・consumer拒否・別のdecode errorは成功へ変換しない。実際の区間終端／source EOFでは従来どおりtempoをflushして必要なら不足分をpaddingする。初期Seekの位相や本来の編集区間の短いtempo品質、削除区間の負荷は別の残件であり、この試聴範囲の補正で解決済みとしない。
+
 ## V03/A02: 音声timelineの整数sample境界（2026-09-11）
 
 再生と保存の編集区間境界は共通の整数計算で `ceil(編集ns × sample rate / (10^9 × master rate))` を求め、その差を区間の出力frame数とする。検証済みmaster rate 0.25～4.0のf32はすべて2^-25の整数倍なので、この固定単位へ正確に変換しi128で計算する。秒の浮動小数点丸めにより17ms等の境界へ余分な一sampleを足さない。非整列境界は従来どおり切り上げ、局所stretchのtempo処理・gain・source切出し・真に短いatempo末尾のpaddingは維持する。

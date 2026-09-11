@@ -481,7 +481,14 @@ fn selected_audio_stops_at_planned_samples_inside_a_stretched_span() {
         sample_rate: 48000,
         channels: 2,
     };
-    for selected in [range(375, 1237), range(17, 84), range(69, 139)] {
+    for selected in [
+        range(375, 1237),
+        range(17, 84),
+        range(69, 139),
+        range(17, 18),
+        range(617, 700),
+        range(1917, 1918),
+    ] {
         for (rate, numerator, denominator) in [(0.25, 1_i64, 4_i64), (1.0, 1, 1), (4.0, 4, 1)] {
             let mut count = 0;
             let mut samples = Vec::new();
@@ -526,12 +533,10 @@ fn selected_audio_stops_at_planned_samples_inside_a_stretched_span() {
                 },
             )
             .expect("same seek reference");
-            if selected == range(375, 1237) || rate == 1.0 {
-                assert!(
-                    samples[..1024] == reference[..1024],
-                    "selection stop does not rebase its initial PCM: {selected:?}, {rate}x"
-                );
-            }
+            assert!(
+                samples == reference[..samples.len()],
+                "selection stop must only bound output, not change PCM: {selected:?}, {rate}x"
+            );
         }
     }
     fs::remove_dir_all(directory).expect("remove owned fixture");
@@ -638,5 +643,50 @@ fn sample_aligned_timeline_joins_do_not_pad_or_drop_audio_frames() {
         "invalid rate must fail without panicking or overwriting"
     );
     assert_eq!(fs::read(&target).expect("protected target"), saved);
+    fs::remove_dir_all(directory).expect("remove owned fixture");
+}
+
+#[test]
+fn selection_audio_completion_preserves_final_chunk_rejection_and_cancellation() {
+    let (directory, path) = fixture(true);
+    let plan = plan();
+    for selected in [range(17, 18), range(375, 1237)] {
+        for (rate, divisor) in [(0.25, 1), (1.0, 4), (4.0, 16)] {
+            let expected =
+                ((selected.duration().as_nanoseconds() / 1_000_000) * 48 * 4 / divisor) as usize;
+            for reject in [false, true] {
+                let cancelled = AtomicBool::new(false);
+                let mut frames = 0;
+                let result = timeline::decode_audio(
+                    &path,
+                    &plan,
+                    selected.start(),
+                    Some(selected.end()),
+                    rate,
+                    AudioFormat {
+                        sample_rate: 48000,
+                        channels: 2,
+                    },
+                    &cancelled,
+                    |chunk| {
+                        frames += chunk.frames;
+                        assert!(frames <= expected);
+                        if frames == expected {
+                            if reject {
+                                return false;
+                            }
+                            cancelled.store(true, Ordering::Relaxed);
+                        }
+                        true
+                    },
+                );
+                assert_eq!(frames, expected);
+                assert!(
+                    matches!(result, Err(decode::DecodeError::ConsumerClosed)),
+                    "completion must not hide cancellation: {selected:?}, {rate}x, reject={reject}"
+                );
+            }
+        }
+    }
     fs::remove_dir_all(directory).expect("remove owned fixture");
 }

@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## I07: 全windowが空になった後のGPU整理（2026-09-12）
+
+34a1cbbの2回の計測で、原寸のrenderer所有が消えた後も残る約338MiBが診断Trimで約14MiBへ低下した。これを根拠に、WindowHostが全windowの空状態を確認してから一度だけdeviceの内部cacheを整理する。全tab／session／retained mediaが空、open／dialog／folder／export／graphics recoveryが未進行、各windowの現在media instance／graphics epochに対応する空frameのPresent成功が条件。closeを同frame UI actionで処理しただけでは描画済みと認めない。
+
+全条件成立から1秒後に既存event-loopのWaitUntilで実行する。条件不成立やwindow集合／media instance／graphics epoch変更で待機を取り消し、同じ空状態では成功・未対応を問わず再試行しない。ClearStateとIDXGIDevice3::Trimはruntime内に置き、device／window／生存textureを再作成しない。他windowにmediaがある間はdevice-wide Trimを行わず、通常の毎frame描画や最後の一windowだけのcloseへ直接追加しない。前節の診断限定方針のうち、この全window idle条件に限って製品への採用へ進める。全GPU／allocatorの瞬間使用量や閲覧中peak削減を保証するものではない。
+
+tabが空でもpalette／grid／filmstrip／popupを操作している間は待機を取り消す。これらを閉じてから条件を取り直し、検索やmenu操作中のdevice-wide整理を避ける。
+
 ## I07: GPU解放の検証境界（2026-09-12）
 
 非default render-verificationに限り、vendor rendererが保持中のmanaged textureのID／寸法を取得する。COM参照は返さず、通常buildには入口を含めない。app側TextureHandle失効とrenderer側pool削除を別々に検証する。閉じた後の使用量診断では通常frame、ClearState／Flush、Trimを分けて記録し、強制処理後の減少を通常動作の成果と呼ばない。ClearState／Flush／Trimの診断は他window／media処理のない所有test deviceだけで行い、製品のcloseや毎frameの経路へ追加しない。

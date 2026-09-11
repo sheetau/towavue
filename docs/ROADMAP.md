@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I07 production-idle-trim checkpoint: WindowHostの全windowが空で、各windowの現在media instance／graphics epochに対する空frameのPresent成功後、1秒のWaitUntilで一度だけdevice内部cacheを整理する。他media tab、session、retained media、pending open／folder／dialog／export／recoveryとpalette／grid／filmstrip／popupで待機を破棄。window集合／世代変更でも新しい1秒へ戻す。2共有GPU窓の原寸維持・再openの画素、復旧世代／window追加・削除、時間境界／再試行抑止を確認し、実event loopも約1.009秒で動作。生成動画の既存GPU回帰にも抑止確認を追加。全664通常tests／fmt／Clippy／Release通過。今回の小型fixtureでGPU localは約31.7→21.6MiB、現在commit約161.5→139.5MiB。前回の338→14MiBは診断値であり、今回の全window統合経路で100大画像を再計測した値ではない。次は画像tabを全て閉じても他media tabが残る場合の原寸cache所有を調べ、閲覧中peakと全UX gateを継続する。
+
 2026-09-12 I07 GPU-retirement checkpoint: 非default検証featureへrenderer側managed textureのID／寸法を追加し、appのTextureHandleと別に所有を確認。3倍率のGPU回帰でfree deltaを止めるとrendererだけに旧textureが残り、通知すると消える対照を通過。Release GPU-NAV100 2回で、通常close後は8個／253MiB→1個／1MiB、旧原寸IDは全削除。GPU localは通常close／ClearState+Flush／readback完了後も338.2MiB、診断専用Trim後13.85MiBへ低下。これはdriver等の再利用領域が主因という根拠であり、通常動作のGPU削減を実装済みとはしない。burst全100・blank／preview各0も維持。全663通常＋vendor 4 tests、Clippy／fmt／Release／147package notice検証を通過。次は全windowのidle条件とfree delta送信境界を調べ、共有deviceへ適用する整理処理を他windowの再生や直後の再openと合わせて設計・検証する。全UX gateは継続。
 
 2026-09-12 I07 last-tab cache-release checkpoint: 最後のtab closeで原寸texture cacheを空にし、decoded cacheは既存workerへ非同期解放を要求する。閉じたsourceのcache残留を旧実装で再現し、修正後はWeak参照の失効とegui free delta、別tabが残る場合のcache／retained original復元を回帰確認。復号／先読み中の取消・cache lockをUIで待たないこと・直後の再openでも解放要求を失わないこと・idle解放を検証。通常cache予算と共有thumbnailは変更せず、閲覧中peak削減・複数tab全経路・native入力を含む全UX gateは維持する。

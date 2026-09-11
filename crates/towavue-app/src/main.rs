@@ -746,6 +746,7 @@ struct Application<N> {
     retained_playback: BTreeMap<TabId, playback_tab::RetainedPlaybackTab>,
     audio_queues: BTreeMap<TabId, audio_playback::AudioTab>,
     graphics_epoch: u64,
+    idle_graphics_frame: Option<(u64, u64)>,
     restored_reading_pages: bool,
     closed_tabs: VecDeque<PathBuf>,
     recent_files: Option<towavue_runtime_windows::RecentFiles>,
@@ -960,6 +961,7 @@ where
             retained_playback: BTreeMap::new(),
             audio_queues: BTreeMap::new(),
             graphics_epoch: 0,
+            idle_graphics_frame: None,
             restored_reading_pages: false,
             closed_tabs: VecDeque::new(),
             recent_files: None,
@@ -2569,6 +2571,11 @@ where
             self.handle_render_error(error);
             return;
         }
+        self.idle_graphics_frame = self
+            .tabs
+            .tabs()
+            .is_empty()
+            .then_some((self.media_generation, self.graphics_epoch));
         self.record_seek_presentation(media_drawn);
         self.restore_ui_textures = false;
         self.check_eof();

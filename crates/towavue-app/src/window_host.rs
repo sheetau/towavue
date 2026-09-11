@@ -23,6 +23,8 @@ mod opening_tests;
 #[path = "window_launch_tests.rs"]
 mod launch_tests;
 
+mod idle_graphics;
+
 // Never reused, even after the native HWND or a window-local session ID is reused.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct WindowKey(u64);
@@ -54,6 +56,7 @@ pub(crate) struct WindowHost {
     next_key: u64,
     pending_launches: Vec<towavue_runtime_windows::LaunchRequest>,
     preview_cache: PreviewCache,
+    idle_graphics: Option<idle_graphics::IdleGraphics>,
 }
 
 impl WindowHost {
@@ -67,6 +70,7 @@ impl WindowHost {
             next_key: 1,
             pending_launches: Vec::new(),
             preview_cache: PreviewCache::local()?,
+            idle_graphics: None,
         };
         host.add_application(initial_path)?;
         Ok(host)
@@ -512,7 +516,7 @@ impl WindowHost {
         if self.windows.is_empty() {
             ControlFlow::Poll
         } else {
-            wait
+            earliest_wait(wait, self.trim_idle_graphics(Instant::now()))
         }
     }
 

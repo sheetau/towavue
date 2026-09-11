@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+I07 production-idle-trim: 全windowのtab／session／retained mediaが空、pending open／folder／export／modal／graphics recoveryなし、palette／grid／filmstrip／popupなしをHostで確認する。各windowの空frameのPresent成功をmedia instanceとgraphics epochで受領し、同frameのclose UI actionだけでは受領済みにしない。全条件から1秒のWaitUntil、同じwindow集合／世代では一度だけClearState＋Trim。再open／window増減／復旧世代変更で取消・再待機。deviceやsurfaceを作り直さず、他windowにmediaがあれば整理しない。
+
+検証: 2共有GPU窓で一方close後の他方の原寸画素とTextureId維持、全close後のframe待ち、1秒境界／再試行なし、3種類のmedia tab、open／folder／error modal／recoveryと4overlayの抑止、window増減／epoch変更を回帰確認。整理後も両surfaceへ新しい原寸をuploadして中央RGBAを確認。実event loopは約1.009秒後に実行。実動画sessionがある既存GPU回帰にも整理抑止の確認を追加した。全664通常tests通過。小型fixtureのGPU local 31.7→21.6MiB／commit 161.5→139.5MiBはこの統合経路の観測であり、以前の100大画像の診断Trim値と混同しない。実時間testの終了時にWindowsがWaitで残るfixture不備はPoll設定で修正し、正常終了を確認。画像なし／他mediaありのcache、閲覧中peak、全native入力・比較・他UX gateを継続する。
+
 I07 GPU-retirement: 非default検証featureのみでvendor rendererのmanaged texture ID／寸法を取得。3倍率の実GPU回帰へ、appから消えたtextureのfree deltaを止める負の対照を追加し、renderer側に残ること／通知後に消えることを確認。diagnostic ClearState／Flush／Trim後も次frameが描画できる。通常buildには入口を含めず、COMはruntime外へ出さない。vendorの変更説明／4ファイルhashと147package notice検証も更新済み。
 
 Release GPU-NAV100 2回: 100件burstは2057.919／2050.747msで全順序到達、空／preview各0。通常closeでmanaged 8個／253MiB→1個／1MiBとなり全原寸IDを削除。GPU localは通常close／ClearState+Flush／同期readback後も338.17MiB、診断Trim後13.85MiB。現在commitはclose後498.0／458.4MiB、Trim後97.5／95.4MiB、working setは150.0／141.4→110.9／104.6MiB。この差は通常処理の改善値ではなく、主な残量がDirect3D／driver内部の保持であるという環境限定の根拠とする。製品Trimは未導入。次はWindowHost全体のidle／free delta送信済み条件、他window再生・再openの影響と画像tabなし／他mediaありの原寸cacheを調べる。全native入力・peak・比較・他UX gateを維持する。

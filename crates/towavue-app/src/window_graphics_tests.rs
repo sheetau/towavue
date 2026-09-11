@@ -176,6 +176,11 @@ pub(super) fn exercise(host: &mut WindowHost) {
         draw_ready(app);
         assert_eq!(app.retained_playback.len(), 1);
     }
+    assert_eq!(host.trim_idle_graphics(Instant::now()), ControlFlow::Wait);
+    assert!(
+        host.idle_graphics.is_none(),
+        "loaded video sessions must prevent device-wide idle trim"
+    );
     let original_edits: BTreeMap<_, _> = host
         .windows
         .iter()

@@ -506,6 +506,20 @@ impl FrameRenderer {
         self.graphics_device.device_removed_reason()
     }
 
+    /// Release internal driver caches once all windows using this device are idle.
+    pub fn trim_idle_resources(&mut self) -> Result<(), RenderError> {
+        let device: windows::Win32::Graphics::Dxgi::IDXGIDevice3 =
+            self.graphics_device.device.cast()?;
+        // The event-loop owner has finished every window's empty frame and has no active
+        // media session. This owned, multithread-protected context outlives the calls;
+        // later draws rebind their state. Trim preserves all externally owned resources.
+        unsafe {
+            self.context.ClearState();
+            device.Trim();
+        }
+        Ok(())
+    }
+
     /// Release the old HWND swap chain before creating its replacement.
     pub fn release_surface(self) {
         let context = self.context.clone();

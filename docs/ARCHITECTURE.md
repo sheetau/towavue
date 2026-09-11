@@ -132,6 +132,14 @@ source durationからmax(20, ceil(seconds/5))個の区間を作り、その中�
 
 固定H.264素材のdebug検証で16コマ生成約1.119秒、4コマの終端sheet約0.327秒、memory clone取得約0.56～0.59msを観測した。これはUI表示遅延の保証ではない。実画素と単枚reference、density／端／UV、同textureで16位置を描画して追加uploadなし、世代／優先度／2枚LRU／texture上限を確認する。所有する可視960×576 windowと生成40秒MPEG-4素材では停止中hoverの非Seek、前半／後半thumbnail、クリックSeekとtab hoverを確認した。software decode条件の一例であり、長GOP／全codec／HDR／混在DPI／資源peak・本画面scrubは未認定・未完。
 
+## I03: managed textureの画素共有と行転送（2026-09-11）
+
+vendored egui-directx11はImageDataのArc<ColorImage>をmanaged textureのCPU backingとして保持する。全texture生成では画素Vecをcloneせず、同じimmutable画素を同期CreateTexture2Dへ渡す。partial更新だけArc::make_mutで共有元を保護し、唯一のownerなら同じallocationを更新する。free／置換でbackingを解放する。これはGPU textureのwindow間共有、decode RGBAの直接upload、常駐backing自体の除去ではない。
+
+partial更新は矩形と画素数を検証してCPU backingへ反映し、WRITE_DISCARD後に全行を復元する。[MapのRowPitch](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ns-d3d11-d3d11_mapped_subresource)に従い行頭を計算し、CPU側のpacked幅と同一と仮定しない。実GPUの3×3 textureで旧実装の下2行がゼロになることを再現した。native pointerは従来のrenderer内に留め、MapからUnmapの間だけ借用する。device、alpha変換、画素format、sampling、blendは変えない。
+
+6000×4000の全texture生成を同じoffscreen実GPUで各7回測定し、Release中央値30.540→22.692ms。96,000,000 byteの一時コピー／allocationを除去したことはArc同一性でも確認する。ドライバー初期化・allocation/cacheの影響があり、UI全体の速度や常駐memory削減を意味しない。WARP／実GPUの7幅、共有元不変／COW／unique backing再利用・不正入力・freeを回帰化し、既存のsampling／inversion readbackも維持する。
+
 ## I03: 古い画像の復号を読取境界で取り消す（2026-09-11）
 
 foregroundと静止画prefetchの既存generation判定を、Fileを包むRead／Seek adapterへ渡す。外側のBufReaderで小さなcodec読取をまとめ、大きな一回のreadも64 KiBまでにする。取消時のI/O errorはcodecが包み直す場合があるため、decode結果の返却前にgenerationを再検査し、既存のCancelledへ統一する。画像内容による形式推定と拡張子fallbackを併用し、animated AVIFのように推定だけで判定できない入力も維持する。

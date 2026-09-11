@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 I03 texture-upload checkpoint: managed textureがeguiのimmutable画素を共有し、GPU転送前の全Vec cloneを除去。6000×4000の転送単体Release中央値30.540→22.692ms、一時コピー96MBを削減する。partial updateのpacked-row仮定による実GPUの下行消失も再現し、RowPitchに沿う転送へ修正。7幅×WARP／実GPUの画素、COW／所有権・free、不正入力と既存sampling／inversionを検証する。UI全体・資源peak、他静止画形式の初回表示を含む全UX台帳は継続する。
+
 2026-09-11 I03 JPEG-first checkpoint: 大きなJPEGの初回cache missでは同梱FFmpegの1/8復号から小さなpreviewを先に通知し、既存の共有cache／世代mailbox／通常・reading描画を使う。EXIF8向き・元寸法・色／alpha・予算と原寸前通知、成功／失敗／取消／source変更／closeを確認。生成6000×4000のwarm Releaseでpreview約13ms、原寸約55ms（先行なし約42ms）という負荷の交換を記録する。ee9af9fのCI34528272592は成功。他静止画形式の初回preview、cold／UI latency・全JPEG品質／peakと全UX台帳を継続する。
 
 2026-09-11 I03 cancellation checkpoint: foreground／静止画prefetchの読取・Seekと変換境界へ世代取消を接続。PNG／JPEG／BMP／TIFF／WebPで画素一致と途中取消を確認し、拡張子fallbackを維持して既存animated AVIF回帰も通す。生成6000×4000、Release各7回、開始20ms取消の処理終了中央値はPNG120.899→24.735ms、JPEG44.221→28.305ms、BMP78.538→21.159ms。warm file-cacheの復号単体であり、初回段階表示／cold／可視UIの速度保証ではない。a590fe9のCI34526543071は成功。初回静止画previewを含む全UX台帳を引き続き実施し、配布準備は再開しない。

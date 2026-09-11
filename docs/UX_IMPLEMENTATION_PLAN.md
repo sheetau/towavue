@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-11 I03転送checkpoint: rendererの全texture生成でArc<ColorImage>を保持し、余分な画素cloneを省く。partialだけCOWとし、実GPUで再現したRowPitch無視の行消失を修正。7幅のGPU画素・共有元／所有権と既存描画を確認する。24MP転送単体はRelease中央値約31→23ms、UI end-to-end／常駐memory改善を示す値ではない。初回表示・cold・全JPEG品質／資源peakと全台帳は継続する。
+
 2026-09-11 I03 JPEG-first checkpoint: 大きなJPEGの原寸cache missへ同梱FFmpegの縮小復号を追加し、元寸法・EXIFを保つpreviewを一件mailboxで先行通知する。原寸／先読み経路の画質は変えず、非対応時は原寸へ戻す。8向きの寸法・代表色と、原寸前の通知／cache共用／原寸置換・failure／cancel／source変更／closeを回帰化。warm Release標本では約13msでpreview、原寸は約42→55msへ増加する。PNG等の初回preview、cold／UI end-to-end・全JPEG方式／peak、および全台帳は未完のまま維持する。
 
 2026-09-11 I03取消checkpoint: foregroundと静止画prefetchはbuffered file読取／Seek・画素変換の区切りでも古い世代を破棄する。5静止画形式の全画素一致／途中取消と既存animation previewを回帰確認。6000×4000のwarm Release復号で20ms時点取消後の処理終了はPNG約121→25ms、JPEG約44→28ms、BMP約79→21ms。OS read／codec内計算の強制中断や初回静止画previewの実装ではなく、cold／可視UI latencyと下記全台帳は未完のまま維持する。

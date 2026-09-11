@@ -26,11 +26,21 @@ Local changes:
   following ordinary meshes by exact readback on WARP and an owned offscreen
   hardware device. Hardware creation failure reports an explicit skip; shader,
   draw and pixel failures after creation fail the test.
+- Retain the incoming immutable `Arc<ColorImage>` for managed textures instead
+  of cloning its pixel allocation at upload. Partial updates use copy-on-write
+  only when another owner still holds that image. Free releases this backing.
+- Restore all rows of a discarded mapping using the returned `RowPitch`, not
+  packed CPU offsets. Validate image lengths, texture dimensions and partial
+  bounds before accessing GPU or CPU pixel storage. Offscreen WARP/hardware
+  readback covers seven row widths, repeated partial updates, unchanged shared
+  snapshots, unique-buffer reuse, invalid input and backing release.
 
 The public marker is additive; native device ownership APIs are unchanged.
-Upstream buffer/texture upload and normal blending otherwise remain unchanged.
+Upstream vertex/index buffer upload and normal blending remain unchanged.
 The existing context-zoom workaround
 in towavue's runtime wrapper is still required.
 
 Run `cargo test -p egui-directx11 --lib --locked --offline` from the repository root.
+Format with `cargo fmt --manifest-path vendor/egui-directx11/Cargo.toml -- --check`
+and lint with `cargo clippy -p egui-directx11 --all-targets --locked --offline -- -D warnings`.
 Offscreen validation does not qualify interactive window or mixed-DPI behavior.

@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-11 U10/I03未訪問サムネイルcheckpoint: filmstrip／tab hover／recent等の未訪問大JPEG・BMPへ既存の高速previewを共用し、原寸読込前にも元寸法付きcacheを供給。既存memory／diskは優先、非対応fallback維持。単独JPEGの先頭seekによるNoFrameも再現・修正。色／alpha／寸法・共有と小4形式の従来経路／diskを回帰確認し、24MP warm Releaseの取得は修正済みCLI約91→14ms（JPEG）／280→1.3ms（BMP）。可視UI全体、cold／全素材／GPU共有／資源と全台帳は未完。
+
 2026-09-11 I03見開き先読みcheckpoint: 通常は隣一枚、readingは隣見開き全体をShell順で一workerが準備する。cache最大10枚／合計256 MiB、batch成功分の合計上限とwarm hitの昇格で先頭優先を保つ。実行中の後続ページも採用し、古いbatch末尾は停止する。10実PNGの画素／原寸Arc／previewと、ページ数・先頭枚数・前後／wrap／縦横／逆順を回帰確認。Computer Use pipe接続不良で可視確認は保留。初回表示・animation／より広い先読み・cold／UI時間／資源を含む全台帳は未完。
 
 2026-09-11 I03先読み引継ぎcheckpoint: 実行中の同一先頭pathの復号を最新要求へ採用し、既存原寸cacheから受け取る。queued／別pathは待たず、取消／close／変更／失敗・予算とlease置換を回帰確認。実PNGで原寸再decode0・全画素一致、24MPの制御したwarm Release要求→結果は約118→48ms。UI時間、先読み枚数／全形式・初回段階表示・cold／資源を含む全台帳は継続する。

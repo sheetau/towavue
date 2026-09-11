@@ -223,14 +223,27 @@ impl PreviewCache {
             )?
         } else {
             let key = cache_key(source, IMAGE_PREVIEW_VARIANT)?;
-            self.load_or_generate(key, || {
-                frame_preview(
-                    source,
-                    Duration::ZERO,
-                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
-                    self.cancellation.as_ref(),
-                )
-            })?
+            let cached = self.memory.lock().expect("preview memory").get(&key);
+            if let Some(image) = cached {
+                self.check_cancelled()?;
+                image
+            } else if !self.root.join(format!("{key}.png")).is_file()
+                && let Some(preview) =
+                    self.prepare_image_preview(source, crate::image::IMAGE_BYTE_LIMIT, &|| {
+                        self.check_cancelled().is_ok()
+                    })
+            {
+                preview.image
+            } else {
+                self.load_or_generate(key, || {
+                    frame_preview(
+                        source,
+                        Duration::ZERO,
+                        "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
+                        self.cancellation.as_ref(),
+                    )
+                })?
+            }
         };
         Ok(MediaPreview { image, duration })
     }
@@ -739,21 +752,25 @@ fn preview_input_arguments(
     cancellation: Option<&Cancellation>,
 ) -> Result<Vec<String>, PreviewError> {
     check_cancelled(cancellation)?;
-    let (start, stream) = if MediaKind::from_path(source) == Some(MediaKind::Image) {
+    let is_image = MediaKind::from_path(source) == Some(MediaKind::Image);
+    let (start, stream) = if is_image {
         (position, 0)
     } else {
         crate::decode::preview_input(source, ffmpeg_next::media::Type::Video, position, &|| {
             cancellation.is_some_and(Cancellation::is_cancelled)
         })?
     };
-    let mut arguments = vec![
-        "-ss".into(),
-        format!("{:.6}", start.as_secs_f64()),
+    let mut arguments = Vec::new();
+    // image2 can skip its only packet even when seeking to zero.
+    if !is_image || !start.is_zero() {
+        arguments.extend(["-ss".into(), format!("{:.6}", start.as_secs_f64())]);
+    }
+    arguments.extend([
         "-i".into(),
         source.display().to_string(),
         "-map".into(),
         format!("0:{stream}"),
-    ];
+    ]);
     if start < position {
         arguments.extend([
             "-ss".into(),

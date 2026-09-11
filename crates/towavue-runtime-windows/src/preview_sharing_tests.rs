@@ -22,6 +22,139 @@ fn png() -> Vec<u8> {
 }
 
 #[test]
+fn static_preview_fallback_does_not_seek_past_the_only_frame() {
+    let cache = cache("static-preview-zero-seek");
+    for extension in ["jpg", "bmp", "png", "webp"] {
+        let path = cache.root.join(format!("small.{extension}"));
+        image::RgbImage::from_pixel(32, 16, image::Rgb([12, 80, 190]))
+            .save(&path)
+            .expect("owned small image");
+        let args = preview_input_arguments(&path, Duration::ZERO, None).expect("image arguments");
+        assert!(
+            !args.iter().any(|arg| arg == "-ss"),
+            "no seek for first image frame: {extension}"
+        );
+        let later = preview_input_arguments(&path, Duration::from_secs(1), None)
+            .expect("timed image arguments");
+        assert_eq!(
+            &later[..2],
+            &["-ss", "1.000000"],
+            "nonzero animation positions still seek"
+        );
+        let first = cache
+            .filmstrip(&path, MediaKind::Image)
+            .expect("small image fallback");
+        assert_eq!((first.image.width, first.image.height), (240, 120));
+        assert!(
+            first
+                .image
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| pixel[0].abs_diff(12) <= 5
+                    && pixel[1].abs_diff(80) <= 5
+                    && pixel[2].abs_diff(190) <= 5
+                    && pixel[3] == 255)
+        );
+        assert_eq!(
+            cache
+                .thumbnail(&path, Duration::ZERO, 16)
+                .expect("generic image thumbnail")
+                .rgba
+                .len(),
+            16 * 8 * 4
+        );
+        let fresh = PreviewCache::new(cache.root.clone()).expect("fresh memory");
+        assert_eq!(
+            fresh
+                .filmstrip(&path, MediaKind::Image)
+                .expect("disk reuse")
+                .image,
+            first.image
+        );
+    }
+    fs::remove_dir_all(&cache.root).expect("remove owned fixtures");
+}
+
+#[test]
+fn unvisited_static_filmstrips_share_the_bounded_first_preview() {
+    for extension in ["jpg", "bmp"] {
+        let cache = cache("unvisited-static-preview");
+        let path = cache.root.join(format!("source.{extension}"));
+        image::RgbImage::from_pixel(2560, 1920, image::Rgb([12, 80, 190]))
+            .save(&path)
+            .expect("large owned image");
+        let first = cache.filmstrip(&path, MediaKind::Image).expect("filmstrip");
+        assert!(first.duration.is_none());
+        let shared = cache
+            .cached_image(&path)
+            .expect("lookup")
+            .expect("preview includes source geometry before original decode");
+        assert_eq!(shared.source_size, (2560, 1920));
+        assert_eq!(first.image, shared.image);
+        assert_eq!((first.image.width, first.image.height), (213, 160));
+        assert!(first.image.rgba.as_chunks::<4>().0.iter().all(|pixel| {
+            pixel[0].abs_diff(12) <= 5
+                && pixel[1].abs_diff(80) <= 5
+                && pixel[2].abs_diff(190) <= 5
+                && pixel[3] == 255
+        }));
+        assert_eq!(
+            cache
+                .filmstrip(&path, MediaKind::Image)
+                .expect("warm thumbnail")
+                .image,
+            first.image
+        );
+        assert_eq!(
+            cache
+                .prepare_image_preview(&path, crate::image::IMAGE_BYTE_LIMIT, &|| true)
+                .expect("foreground reuse")
+                .image,
+            first.image
+        );
+        assert_eq!(
+            fs::read_dir(&cache.root).expect("cache files").count(),
+            1,
+            "fast path does not encode a disk thumbnail"
+        );
+        let disk = PreviewCache::new(cache.root.join("disk")).expect("existing disk cache");
+        let stored = disk
+            .load_or_generate(
+                cache_key(&path, IMAGE_PREVIEW_VARIANT).expect("key"),
+                || Ok(png()),
+            )
+            .expect("seed an independently recognizable cached preview");
+        let fresh = PreviewCache::new(disk.root.clone()).expect("fresh memory");
+        for _ in 0..2 {
+            assert_eq!(
+                fresh
+                    .filmstrip(&path, MediaKind::Image)
+                    .expect("prefer disk, then memory, over reduced decoding")
+                    .image,
+                stored
+            );
+            assert!(
+                fresh.cached_image(&path).expect("lookup").is_none(),
+                "disk reuse does not invent source dimensions"
+            );
+        }
+        let token = Cancellation::default();
+        token.cancel();
+        assert!(matches!(
+            cache.cancellable(token).filmstrip(&path, MediaKind::Image),
+            Err(PreviewError::Cancelled)
+        ));
+        fs::write(&path, b"changed source").expect("replace owned fixture");
+        assert!(cache.cached_image(&path).expect("new key").is_none());
+        assert!(cache.filmstrip(&path, MediaKind::Image).is_err());
+        assert!(cache.in_flight.0.lock().expect("pending").is_empty());
+        fs::remove_dir_all(&cache.root).expect("remove owned fixtures");
+    }
+}
+
+#[test]
 fn static_first_preview_reuses_pixels_without_waiting_for_another_generator() {
     for extension in ["jpg", "bmp"] {
         let cache = cache("static-first-sharing");

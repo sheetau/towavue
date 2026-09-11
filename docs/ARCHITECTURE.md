@@ -132,6 +132,14 @@ source durationからmax(20, ceil(seconds/5))個の区間を作り、その中�
 
 固定H.264素材のdebug検証で16コマ生成約1.119秒、4コマの終端sheet約0.327秒、memory clone取得約0.56～0.59msを観測した。これはUI表示遅延の保証ではない。実画素と単枚reference、density／端／UV、同textureで16位置を描画して追加uploadなし、世代／優先度／2枚LRU／texture上限を確認する。所有する可視960×576 windowと生成40秒MPEG-4素材では停止中hoverの非Seek、前半／後半thumbnail、クリックSeekとtab hoverを確認した。software decode条件の一例であり、長GOP／全codec／HDR／混在DPI／資源peak・本画面scrubは未認定・未完。
 
+## U10/I03: 未訪問静止画のサムネイルへ高速previewを共用（2026-09-11）
+
+filmstripの画像要求は既存memoryを優先し、disk cacheがない時だけforegroundと同じprepare_image_previewを試す。大きなJPEGの1/8復号と24bit非圧縮BMPの疎な行読取、240×160以内・原寸budget・取消・source stamp・同key生成leaseを共用する。得られたRGBAと元寸法をhost共有64件／16 MiBへ入れ、PNG encode／disk保存／FFmpeg別processは追加しない。tab hover／recent／画像seek等のfilmstrip consumerと、その後の原寸読込のpreviewが同じ画素を再利用する。新しいworker・原寸decode・GPU所有は作らない。fast生成結果はmemoryのみのため、そのcacheが失われれば再生成する。
+
+既存diskがあれば従来の読込を優先し、fast非対応／失敗／別generatorが所有中なら既存load_or_generateへ戻る。同keyの実行中生成は既存leaseで集約し、別key・取消は独立する。小画像／PNG／WebP等の従来FFmpeg fallbackとdisk永続化は残す。画像の先頭frameだけは入力-ss 0を付けない。固定FFmpegのimage2 JPEGはこの不要なseekで唯一のpacketを失いNoFrameになったためで、非ゼロのanimation位置と動画のseek／stream選択は変更しない。
+
+生成6000×4000 JPEG／BMP、warm file-cache・空のpreview cacheからRelease各7回で測定。先頭seekを修正した従来CLI＋PNG cache経路の中央値90.7328／280.3775msに対し、新filmstrip取得は13.7722／1.2578ms。cache key計算／生成／結果取得を含み、fixture読取とcache生成・後片付けは計時外。旧NoFrame経路の速度比較でも、cold-storage／可視UI／全画像品質の保証でもない。代表色／alpha・元寸法・共有・既存disk優先・小画像fallbackを回帰確認し、原寸decode／編集／保存は変更しない。
+
 ## I03: 実行中の静止画先読みをforegroundへ引き継ぐ（2026-09-11）
 
 ImageLoaderの先読みjobに固有のlease・現在のpath・要求generation・実行状態・取消tokenを保持する。新要求に実行中先読みのpathが含まれると、そのページの仕事を新generationへ引き継ぐ（readingの先頭以外も対象）。foreground workerは既存cache／小previewを確認後、該当原寸の完了だけをCondvarで待ち、元のArc<DecodedImage>をcacheから受け取る。UI thread・UI mailbox lockを保持して待たず、追加の原寸copy／decoder／workerやbyte予算は作らない。未開始のqueued仕事は採用しない。採用後は処理中のページだけを終え、古いbatchの後続ページへ進まない。

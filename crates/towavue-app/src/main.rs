@@ -6738,7 +6738,8 @@ where
             self.cancel_frame_steps();
             self.playback_error = None;
             self.reset_image_edits();
-            self.image_generation = self.image_loader.request(Vec::new());
+            self.image_generation = self.image_loader.clear();
+            self.image_texture_cache.entries.clear();
             self.image_loading = false;
             self.image_error = None;
             self.image = None;

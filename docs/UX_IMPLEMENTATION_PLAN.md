@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+I07 closed-cache: 最後のtab closeでは原寸texture cacheとdecoded cacheを解放する。decodedの大きなallocation解放は既存workerへ送り、UIはcache lock／codec完了を待たない。clear要求は新しいopenで上書きされず、旧復号／先読み結果は取消される。旧実装のcache残留を再現した回帰が修正後に通過。active／inactiveの別tabを閉じた場合は原寸texture／cacheとretained tab復元を維持し、最後のcloseだけでWeak失効とegui free deltaを確認。共有thumbnail cache・閲覧中予算は維持し、全資源のpeak削減認定にはしない。
+
+close計測: Release GPU-NAV100 2回でburst全100・空／preview各0、2013.465／2051.296ms。キャッシュ済み原寸のWeak失効、texture manager削除、Welcome 3 frameをsubmit後、現在commit 991.2→459.0／1066.2→531.1MiB、working set 665.6→141.2／669.4→142.3MiB。GPU local 338.2→338.2／338.2→302.2MiB、nonlocal 18.6→17.7／32.6→32.6MiB。通常case最高commitは1275.0／1242.7MiBで、閲覧中peak削減ではない。GPU資源の実生存とdriver保持の内訳、画像tabなしだが他media tabが残る場合、全tab構成の資源gateを継続する。全663通常tests通過、opt-in GPU試験は別集計。
+
 I03/I06/I07通常送りの逐次実行: 最新要求優先のため100件を描画前に送ると一周して最初の未描画targetを失う回帰を旧コードで確認。原寸handoffから新原寸のPresent成功まで方向だけ最大256件を保持し、同frame UI action後にmedia instance付きtokenを検証して1件ずつ進める。viewport外のmesh、旧handoff、復号完了だけではackにしない。dirty guard承認／直接target指定の後も最初の新原寸を通常送りで追い越さない。明示ジャンプ・source/tab移動・画像順／構成変更・失敗・編集／modal等では残りを取り消し、他種類だけの一覧変更では維持する。上限超過は通知し、受理済みの順序は守る。
 
 証拠: 新規5回帰で100方向の順序、前後混在、復号済み未描画中の追加入力、無効／重複／clip token、上限、取消、dirty guard承認を確認。既存の先読みテストは各画像の描画ackを合成してから次を要求する形へ更新し、先読み済みpixel／単一generation更新の検証は維持する。小型生成原寸の100件は実render_frame→GPU／Presentでも進行を確認。GPU-NAV100にも一括100コマンドcaseを追加し、4096×2304 JPEG100枚を2035.041／2048.473msで全順序描画、blank／preview各0。別の64点照合と通常caseも通過。通常GPUのready中央値は即時17.165／17.119ms、33ms間隔11.216／11.294ms。これはコマンド境界のburstであり、実キーボード入力の取りこぼしまで認定しない。メモリ予算は変更せず、通常case時点のprocess最高commitは1240.5／1241.5MiB程度のまま。次は閉tab／cacheの資源所有・解放と使用量削減を追跡し、native入力と全台帳を継続する。

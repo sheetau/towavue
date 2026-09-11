@@ -1,5 +1,9 @@
 # towavue アーキテクチャ
 
+## I07: 最後のtab closeで原寸cacheを解放（2026-09-12）
+
+最後のtabを閉じたらwindow所有の原寸texture cacheを空にし、ImageLoaderへ取消とdecoded cacheの非同期解放を要求する。復号workerが実行中の旧要求を抜けてからcacheを解放し、UIはcodec完了・cache lockを待たない。解放要求は直後の再openで上書きせず、新しいforeground要求の前に処理する。先読みは取消をcache挿入のlock内でも確認する。別tabが残る場合のcache／retained presentationと共有thumbnail cacheは維持する。GPU textureの解放は既存eguiのfree deltaを次の描画でrendererへ渡す。allocator／driverの予約とprocess-lifetime peakの低下を解放の必須条件にはしない。
+
 ## I03/I06/I07: 通常画像送りは描画成功後に逐次実行（2026-09-12）
 
 原寸表示済みの通常画像から始める次／前の1枚送りは、最新要求優先ではなく受理順に処理する。最初の移動から新原寸のmeshを含むframeのPresent成功までを待ち、追加の方向を最大256件だけ保持する。Pathやdecoded画像のqueueは増やさない。上限超過は通知して追加を受理せず、既存の受理分は維持する。復号完了だけでは次へ進めない。描画出力からmedia instance付きtokenを取得し、成功したPresentと同frameのUI action処理の後にtokenを検証して次の1件を開始する。描画失敗、旧handoffだけのframe、stale tokenは進行条件にしない。

@@ -132,6 +132,7 @@ struct Mailbox {
     completed: Option<LoadedImages>,
     preview_ready: Option<LoadedImagePreview>,
     closed: bool,
+    clear_cache: bool,
     cache: Arc<Mutex<ImageCache>>,
     previews: Option<PreviewCache>,
     prefetch: Option<PrefetchWork>,
@@ -176,8 +177,18 @@ impl ImageLoader {
 
     /// Decode missing pages within the same budget as the caller's already retained pages.
     pub fn request_with_retained_bytes(&self, paths: Vec<PathBuf>, retained_bytes: usize) -> u64 {
+        self.request_inner(paths, retained_bytes, false)
+    }
+
+    /// Cancel image work and release cached originals on the decoder thread, without joining it.
+    pub fn clear(&self) -> u64 {
+        self.request_inner(Vec::new(), 0, true)
+    }
+
+    fn request_inner(&self, paths: Vec<PathBuf>, retained_bytes: usize, clear_cache: bool) -> u64 {
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("image mailbox");
+        mailbox.clear_cache |= clear_cache;
         mailbox.generation = mailbox.generation.wrapping_add(1);
         let generation = mailbox.generation;
         if let Some(work) = &mut mailbox.prefetch {
@@ -397,10 +408,10 @@ fn run_worker(
     let cache = Arc::clone(&mutex.lock().expect("image mailbox").cache);
     let previews = mutex.lock().expect("image mailbox").previews.clone();
     loop {
-        let (generation, (paths, mut remaining)) = {
+        let (generation, pending, clear_cache) = {
             let mut mailbox = ready
                 .wait_while(mutex.lock().expect("image mailbox"), |mailbox| {
-                    !mailbox.closed && mailbox.pending.is_none()
+                    !mailbox.closed && mailbox.pending.is_none() && !mailbox.clear_cache
                 })
                 .expect("image mailbox");
             if mailbox.closed {
@@ -408,8 +419,17 @@ fn run_worker(
             }
             (
                 mailbox.generation,
-                mailbox.pending.take().expect("pending image request"),
+                mailbox.pending.take(),
+                std::mem::take(&mut mailbox.clear_cache),
             )
+        };
+        if clear_cache {
+            let mut cache = cache.lock().expect("image cache");
+            cache.entries.clear();
+            cache.bytes = 0;
+        }
+        let Some((paths, mut remaining)) = pending else {
+            continue;
         };
         let is_current = || {
             let mailbox = mutex.lock().expect("image mailbox");
@@ -535,6 +555,7 @@ fn run_worker(
 
 #[cfg(test)]
 mod tests {
+    mod release;
     use std::sync::mpsc;
     use std::time::Duration;
 

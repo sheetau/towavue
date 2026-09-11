@@ -4,6 +4,10 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I07 last-tab cache-release checkpoint: 最後のtab closeで原寸texture cacheを空にし、decoded cacheは既存workerへ非同期解放を要求する。閉じたsourceのcache残留を旧実装で再現し、修正後はWeak参照の失効とegui free delta、別tabが残る場合のcache／retained original復元を回帰確認。復号／先読み中の取消・cache lockをUIで待たないこと・直後の再openでも解放要求を失わないこと・idle解放を検証。通常cache予算と共有thumbnailは変更せず、閲覧中peak削減・複数tab全経路・native入力を含む全UX gateは維持する。
+
+同checkpointのRelease GPU-NAV100を2回実行し、100件burstは全順序描画・blank／preview各0、2013.465／2051.296ms。close後に原寸Weak失効とtexture manager削除、Welcome 3 frameのGPU submissionを確認。現在commitは991.2→459.0／1066.2→531.1MiB、working setは665.6→141.2／669.4→142.3MiB。GPU localは338.2→338.2／338.2→302.2MiBで、全GPU allocation解放・driver予約の内訳は未認定。全663通常testsとRelease build通過。次はGPUの生存資源とdriver側の保持を区別して調べ、device再作成や強制trimを根拠なく追加しない。
+
 2026-09-12 I03/I06/I07 sequential-navigation checkpoint: 100件一括要求で最初の未描画画像を上書きする旧挙動を回帰で再現し、通常1枚送りを方向最大256件の逐次処理へ変更。復号完了だけでは進めず、viewport内の新原寸meshと成功したPresent、同frame UI action後のmedia instanceを確認する。dirty guard承認後も同じhandoff起点を使う。方向順・復号後描画前の入力・旧／二重token・clip・取消／上限通知と実render_frameの100件を検証。4096×2304 JPEG100枚のRelease GPU一括要求は2回ともaccepted 100／presented 100／blank 0／preview 0、2035.041／2048.473ms。通常case中央値は即時約17.1ms／33ms間隔約11.2msを維持。OS実入力・可視screen・cold／他形式・IrfanView比較・資源削減と全UX gateは未完。
 
 2026-09-12 I03/I06/I07 GPU-NAV100 checkpoint: 4096×2304 JPEG100枚／31.8MiBをhidden 960×576窓で実GPU描画。readbackなしのRelease計測2回で即時ready中央値17.243／17.236ms、33ms間隔11.073／11.241ms。各caseで原寸100、blank／preview各0。別Nearest走行で原寸ごとに64点を照合し、読戻しの待機時間を性能根拠にしない。process lifetime最高commitは1240.1／1241.0MiB、working setは927.4／923.7MiB。通常走行のGPU最高観測local約338.2MiB／nonlocal約38.7MiBは瞬間peakではない。既存CPU計測も再確認。実右矢印burstでの全画像到達、cold／他形式、IrfanView比較と資源使用量の妥当性は未完であり、全UX gateは維持する。

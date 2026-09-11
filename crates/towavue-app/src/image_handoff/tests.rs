@@ -1,6 +1,7 @@
 use super::*;
 
 mod gpu;
+mod release;
 
 type App = Application<fn(AppEvent)>;
 

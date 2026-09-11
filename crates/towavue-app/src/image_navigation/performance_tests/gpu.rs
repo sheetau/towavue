@@ -142,4 +142,25 @@ impl Memory {
             self.gpu_max.map(|usage| usage.map(mib))
         );
     }
+
+    pub fn report_close(&self) {
+        let mib = |bytes: u64| bytes as f64 / 1048576.0;
+        eprintln!(
+            "NAV100_CLOSE working_before_after_mib={:.1}/{:.1} private_before_after_mib={:.1}/{:.1} gpu_local_nonlocal_before_after_mib={:?}/{:?}; cached original Weak references expired; three welcome frames submitted; allocator/driver reservations and lifetime peaks are not release assertions",
+            mib(self.start.working_set),
+            mib(self.end.working_set),
+            mib(self.start.private_bytes),
+            mib(self.end.private_bytes),
+            self.start
+                .gpu_local_nonlocal
+                .as_ref()
+                .ok()
+                .map(|usage| usage.map(mib)),
+            self.end
+                .gpu_local_nonlocal
+                .as_ref()
+                .ok()
+                .map(|usage| usage.map(mib)),
+        );
+    }
 }

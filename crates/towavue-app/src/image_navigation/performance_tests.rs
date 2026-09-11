@@ -470,6 +470,36 @@ fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
             "NAV100_BURST accepted=100 presented=100 blank=0 preview=0 elapsed_ms={:.3}; direct command burst, real GPU Present, no physical key delivery proof",
             started.elapsed().as_secs_f64() * 1000.0
         );
+        let mut memory = gpu::Memory::new(renderer.as_ref().expect("GPU"));
+        let originals: Vec<_> = app
+            .image_texture_cache
+            .entries
+            .iter()
+            .map(|image| Arc::downgrade(&image.decoded))
+            .collect();
+        let textures: Vec<_> = app
+            .image_texture_cache
+            .entries
+            .iter()
+            .map(|image| image.texture.id())
+            .collect();
+        assert!(!originals.is_empty());
+        app.close_tab_unchecked(app.tabs.active().expect("last tab").id);
+        assert!(app.image_texture_cache.entries.is_empty() && app.image.is_none());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while originals.iter().any(|image| image.upgrade().is_some()) {
+            assert!(Instant::now() < deadline, "closed originals remain alive");
+            receive(&mut app, Duration::from_millis(1));
+        }
+        for _ in 0..3 {
+            draw(&mut app, &mut renderer, false);
+        }
+        for id in textures {
+            assert!(context.tex_manager().read().meta(id).is_none());
+        }
+        let renderer = renderer.as_ref().expect("GPU");
+        memory.sample(renderer);
+        memory.report_close();
     }
     eprintln!(
         "Scope: warm filesystem, synthetic Shell snapshot, serialized commands with all originals visited. GPU runs use a hidden 960x576 window and include upload/render/Present in readiness; CPU runs only prepare meshes/textures. The separate readback run uses Nearest with 64 pixel checks per displayed original and is NOT a throughput comparison. Memory: process-lifetime OS peaks, GPU sampled maxima after image arrivals, not transient GPU peaks. No physical keys, dropped-key burst, cold data, other formats or IrfanView comparison. Any blank/preview target leaves the seamless-navigation gate unmet."

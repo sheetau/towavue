@@ -238,7 +238,13 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
                 click(&mut app, field.label());
             }
             click(&mut app, "Set value");
-            let value = format!("{} 日本語\nsecond line", field.label());
+            let value = match (ImageMetadataFormat::from_path(Path::new(filename)), field) {
+                (Some(ImageMetadataFormat::Jpeg), MetadataField::Date) => {
+                    "2024-02-29T12:34+09:00".into()
+                }
+                (Some(ImageMetadataFormat::Jpeg), MetadataField::Track) => "+0002".into(),
+                _ => format!("{} 日本語\nsecond line", field.label()),
+            };
             set_value(&mut app, &value);
             app.finish_metadata_read(token, Ok(vec![]));
             assert_eq!(

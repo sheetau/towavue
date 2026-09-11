@@ -10,6 +10,9 @@ const DM: &str = "http://ns.adobe.com/xmp/1.0/DynamicMedia/";
 const XML: &str = "http://www.w3.org/XML/1998/namespace";
 const META: &str = "adobe:ns:meta/";
 
+#[path = "export_xmp_typed.rs"]
+mod typed;
+
 fn invalid(message: impl std::fmt::Display) -> ExportError {
     ExportError::Failed(format!("JPEG XMP text: {message}"))
 }
@@ -31,6 +34,8 @@ impl Name {
             (DM, "album") => Some(MetadataField::Album),
             (DM, "composer") => Some(MetadataField::Composer),
             (DM, "genre") => Some(MetadataField::Genre),
+            (DM, "releaseDate") => Some(MetadataField::Date),
+            (DM, "trackNumber") => Some(MetadataField::Track),
             _ => None,
         }
     }
@@ -325,12 +330,15 @@ pub(super) fn apply(
         if let Some(text) = options.get(field) {
             if !ImageMetadataFormat::Jpeg.fields().contains(&field) {
                 return Err(invalid(format!(
-                    "'{}' is not supported; JPEG currently supports Title, Artist, Album, Composer, Genre, Comment and Copyright",
+                    "'{}' is not supported; JPEG currently supports Title, Artist, Album, Composer, Genre, Date, Track, Comment and Copyright",
                     field.label()
                 )));
             }
             if !valid_text(text) {
                 return Err(invalid("requested value contains invalid XML characters"));
+            }
+            if !text.is_empty() {
+                typed::validate(field, text)?;
             }
             values.retain(|value| value.field != field);
             if !text.is_empty() {
@@ -384,6 +392,8 @@ pub(super) fn encode(values: &[Value]) -> Result<Vec<u8>, ExportError> {
         (MetadataField::Album, "album"),
         (MetadataField::Composer, "composer"),
         (MetadataField::Genre, "genre"),
+        (MetadataField::Date, "releaseDate"),
+        (MetadataField::Track, "trackNumber"),
     ] {
         if let Some(value) = values.iter().find(|value| value.field == field) {
             result.push_str(&format!(

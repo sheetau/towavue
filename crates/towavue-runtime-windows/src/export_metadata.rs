@@ -94,6 +94,8 @@ impl ImageMetadataFormat {
                 MetadataField::Album,
                 MetadataField::Composer,
                 MetadataField::Genre,
+                MetadataField::Date,
+                MetadataField::Track,
                 MetadataField::Comment,
                 MetadataField::Copyright,
             ],

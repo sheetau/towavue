@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## E01: JPEG XMPの公開日とTrack（2026-09-12）
+
+JPEGの対応項目へDateとTrackを追加する。[Adobe Dynamic Media schema](https://developer.adobe.com/xmp/docs/xmp-namespaces/xmp-dm/)のxmpDM:releaseDateとxmpDM:trackNumberに対応させ、Dateは公開日であって撮影日時やfilesystem時刻ではないことをUIで明示する。[XMP基本型](https://developer.adobe.com/xmp/docs/xmp-namespaces/xmp-data-types/)に従い、Set時のDateは4桁年・年月・年月日または年月日T時分（任意の秒・小数秒・timezone）、Trackは任意長の十進数字列と任意の先頭符号とする。暦・時分秒・timezoneの範囲を検査し、月日／timezone補完、UTC変換、数値の正規化、Trackの分数表記への暗黙変換はしない。既存の文字数予算を維持する。
+
+既存sourceの単純な属性／要素値は非canonicalな表記でも表示し、Keepはその文字値を維持する。新しいSetだけを型検査し、Remove／空Setで削除できるようにする。保存stageの再読取照合と元source／既存target保護を共用し、PNG・動画／音声の自由な文字値は制限しない。Album artistの対応付け、EXIF／IPTC／COMとの同期、他画像形式とExtended XMPは未完のまま残す。
+
 ## I07: 大画像のHost統合整理・再open計測（2026-09-12）
 
 opt-in Release testのHOST100は、既存の4096×2304 JPEG100枚fixtureを共用し、可視windowの実WindowHostへ明示的な次pathを逐次渡す。worker通知・描画・Present・送りの受領・空frame・1秒の待機は製品event loopを通し、診断Trimやtest側の時刻送りは使わない。閉じる前・自動整理後・再open後のmanaged texture、process、GPU counterを記録し、旧原寸のWeak失効とrendererの旧ID削除を確認する。未対応GPU counterは理由付きskipであり、ゼロとして扱わない。非表示windowでは原寸取得後のRedrawRequestedが届かないケースを確認したため、描画をtest側で注入せず可視windowを使う。phaseごとの30秒watchdogは製品の早いwakeを上書きせず、timeoutの失敗をevent loop終了後に報告する。Debug実行は正しさの確認だけであり性能値として扱わない。

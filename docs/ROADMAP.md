@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 E01 JPEG Date/Track checkpoint: JPEGのDateをxmpDM:releaseDate（公開日）、TrackをxmpDM:trackNumberへ対応し、9項目の既存値UI・Keep／Set／Remove・Saveへ接続。Setは暦／時刻／timezone付きDateと符号付き十進整数を検査し、補完・UTC変換・正規化はしない。既存の非canonical表記はKeepで保持しRemoveで削除できる。実JPEGの属性／要素読取、回転保存の非XMP bytes／画素一致とsource／target保護、型の境界、UIのApply無効化／直接dispatch拒否、再Save／guard／tab/source lifecycleを検証。全669通常tests／fmt／Clippy／Release通過。可視キー・wheel試験はcomputer-useの再取得／再試行でもアクティブ化に失敗したため未確認。Album artist・他形式／EXIF／IPTC／COM／Extended XMP、全native/DPI/IME／品質と他UX gateは継続。
+
 2026-09-12 I07 HOST100 checkpoint: 可視windowの実WindowHostで4096×2304 JPEG100枚の逐次表示、最後のtab close、空frameと実1秒timer、再openをReleaseで2回確認。診断Trimや描画イベント注入は使わない。GPU local 303.17→17.09MiB、現在commit 959.1→131.6／954.9→130.8MiB。旧原寸Weak／renderer IDは消失し、Welcomeの小型texture等は残る。close→整理1019.839／1020.703ms、再open→描画43.526／49.978ms、別描画で64点一致。通常666tests／fmt／Clippy／Release通過。非表示試験のnative redraw待ちとcallback内timeout失敗を可視fixture／終了後の失敗報告へ修正し、製品動作は変更しない。物理入力・cold・他形式・比較・閲覧中peakと全UX gateは継続。
 
 2026-09-12 I07 final-image-cache checkpoint: 最後の画像tabをclose／transferしたら、音声・動画tabが残っていてもwindowの原寸texture／decoded cacheを解放する。全tab終了の従来動作、他の画像tabがある場合の保持、無関係な音声／動画tab closeで画像世代を変えないことを維持。旧実装の残留を再現し、active／inactive×Audio／Video、実BMPのdecoded cache Weak失効、texture free、transfer先のArc／画素維持を確認。実動画・無音音声sessionの識別子／位置／速度／履歴も維持。全666通常tests、追加WASAPI試験、fmt／Clippy／Release通過。device-wide Trimを再生中へ広げず、次は大画像のHost統合経路と再open時間を測る。閲覧中peak・比較と全UX gateは継続。

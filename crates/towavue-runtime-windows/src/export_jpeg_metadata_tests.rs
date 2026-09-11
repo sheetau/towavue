@@ -72,6 +72,78 @@ fn without_xmp(bytes: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn jpeg_date_and_track_keep_set_remove_preserve_pixels_and_reject_invalid_updates() {
+    let root = root("jpeg-typed-metadata");
+    let source = root.join("source.jpg");
+    let target = root.join("target.jpg");
+    for (field, local, original_text, replacement, invalid_text) in [
+        (
+            MetadataField::Date,
+            "releaseDate",
+            "circa 1999",
+            "2024-02-29T12:34:56.789+09:00",
+            "2023-02-29",
+        ),
+        (MetadataField::Track, "trackNumber", "2/12", "+0002", "2/12"),
+    ] {
+        assert!(ImageMetadataFormat::Jpeg.fields().contains(&field));
+        for attribute in [false, true] {
+            let property = if attribute {
+                format!("m:{local}=\"{original_text}\"")
+            } else {
+                String::new()
+            };
+            let child = if attribute {
+                String::new()
+            } else {
+                format!("<m:{local}>{original_text}</m:{local}>")
+            };
+            let packet = format!(
+                "<r:RDF xmlns:r=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><r:Description xmlns:m=\"http://ns.adobe.com/xmp/1.0/DynamicMedia/\" {property}>{child}</r:Description></r:RDF>"
+            );
+            let original = tagged(packet.as_bytes());
+            fs::write(&source, &original).expect("source");
+            let shown = inspect(&source).expect("read existing source spelling");
+            assert_eq!(shown.len(), 1);
+            assert_eq!(shown[0].field, field);
+            assert_eq!(shown[0].value, original_text);
+            let mut request = request(&source, &target);
+            request.operations.push(EditOperation::RotateClockwise);
+            export_media(&request).expect("Keep existing noncanonical spelling");
+            let baseline = fs::read(&target).expect("baseline");
+            assert_eq!(inspect(&target).expect("kept")[0].value, original_text);
+            for text in [replacement, ""] {
+                export_media_with_options(&request, options(field, text)).expect("Set or Remove");
+                let actual = fs::read(&target).expect("output");
+                assert_eq!(without_xmp(&actual), without_xmp(&baseline));
+                assert_eq!(
+                    image::open(&target).expect("pixels"),
+                    image::load_from_memory(&baseline).expect("baseline pixels")
+                );
+                let shown = inspect(&target).expect("read output");
+                if text.is_empty() {
+                    assert!(shown.is_empty());
+                } else {
+                    assert_eq!(shown.len(), 1);
+                    assert_eq!(shown[0].value, text);
+                }
+            }
+            let protected = fs::read(&target).expect("protected target");
+            assert!(
+                ImageMetadataFormat::Jpeg
+                    .validate_options(&options(field, invalid_text).metadata)
+                    .is_err()
+            );
+            assert!(export_media_with_options(&request, options(field, invalid_text)).is_err());
+            assert_eq!(fs::read(&target).expect("target unchanged"), protected);
+            assert_eq!(fs::read(&source).expect("source unchanged"), original);
+        }
+    }
+    assert_eq!(fs::read_dir(&root).expect("staging cleanup").count(), 2);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn jpeg_dynamic_media_text_round_trips_simple_properties_and_rejects_ambiguous_values() {
     let cancel = AtomicBool::new(false);
     let namespace = "http://ns.adobe.com/xmp/1.0/DynamicMedia/";
@@ -239,6 +311,8 @@ fn jpeg_metadata_capability_and_xml_validation_match_export_contract() {
             MetadataField::Album,
             MetadataField::Composer,
             MetadataField::Genre,
+            MetadataField::Date,
+            MetadataField::Track,
             MetadataField::Comment,
             MetadataField::Copyright
         ]
@@ -252,6 +326,8 @@ fn jpeg_metadata_capability_and_xml_validation_match_export_contract() {
                     .validate_options(&metadata)
                     .is_ok(),
                 ImageMetadataFormat::Jpeg.fields().contains(&field)
+                    && (text.is_empty()
+                        || !matches!(field, MetadataField::Date | MetadataField::Track))
             );
         }
     }

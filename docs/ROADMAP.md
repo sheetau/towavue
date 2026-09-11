@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 U03/U04 status-I/O checkpoint: 描画中のpath.metadataをruntime所有のLatestTaskへ移動。path／media instance／snapshot更新単位の現在一件だけを保持し、未取得／失敗は容量を省略。完了時の現在source／ticket照合、失敗記憶と0 bytesの区別、外部変更後のsnapshot再取得を回帰確認済み。OSのmetadata待ちは強制中断せずUIから分離する。実drag latency・表示／全DPIと全UX gateは保持する。
+
 2026-09-12 U03/U04 resize/shadow checkpoint: 通常幅の左寄せ5種は右端1px変更で不動だったが、狭い音声時計は0.5px動く経路を再現。可変幅領域を明示左寄せへ変更し、4倍率の往復resizeを回帰確認。eguiの影は横offset0／黒alpha112、window blur18／popup blur10へ調整し、24条件で旧版と同じmesh／vertex／index／texture構成を確認。実ウィンドウdrag全経路、font適用漏れとGPU時間／全blur品質の認定は未完。全UX gateを保持する。
 
 2026-09-12 U01/U04 tab-inset checkpoint: native button／下区切りの位置を変えず、通常時の内側1 physical px borderと上下3 logical pxを予約してタブ高を決定。最大化safe areaの二重加算を防ぎ、低い行でeguiの最小button高がはみ出す経路も修正。4倍率のnative geometryと3倍率のlabel／close bounds、既存全app回帰を確認。通常窓の変更前後を観察したが、今回のnative入力結果とfullscreenキャプチャは確定できず、全経路は未完。先行56d1eddのCIではforeground完了と別段階のpreview登録を混同した既存テストが競合し、共有結果を期限付きで待つ契約へ修正。全UX gateを維持する。

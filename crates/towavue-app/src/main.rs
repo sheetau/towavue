@@ -37,6 +37,7 @@ mod seekbar;
 mod selection;
 mod selection_aspect;
 mod shortcuts;
+mod status_file_size;
 mod tab_drag;
 mod tab_focus;
 mod tab_menu;
@@ -244,6 +245,7 @@ enum AppEvent {
     FolderReady,
     FilmstripReady,
     PlaylistDuration(playlist::DurationRequest, u64, Option<Duration>),
+    StatusFileSize(u64, Option<u64>),
     TabPreview(
         tab_preview::Target,
         u64,
@@ -800,6 +802,7 @@ struct Application<N> {
     preview_cache: PreviewCache,
     duration_workers: BTreeMap<u64, LatestTask>,
     volume_hud: volume_hud::Hud,
+    status_file_size: status_file_size::FileSize,
     playlist_duration_worker: LatestTask,
     playlist_duration_pending: Option<playlist::DurationRequest>,
     playlist_duration_generation: u64,
@@ -1012,6 +1015,7 @@ where
             preview_cache,
             duration_workers: BTreeMap::new(),
             volume_hud: volume_hud::Hud::default(),
+            status_file_size: status_file_size::FileSize::new()?,
             playlist_duration_worker: LatestTask::new("towavue-playlist-duration")?,
             playlist_duration_pending: None,
             playlist_duration_generation: 0,
@@ -2223,6 +2227,12 @@ where
                     saved.poll();
                 }
             }
+            AppEvent::StatusFileSize(ticket, bytes) => {
+                self.refresh_status_file_size();
+                if self.status_file_size.finish(ticket, bytes) {
+                    self.request_redraw();
+                }
+            }
             AppEvent::PlaylistDuration(request, generation, duration) => {
                 if self.playlist_duration_pending.as_ref() == Some(&request)
                     && self.playlist_duration_generation == generation
@@ -2546,6 +2556,7 @@ where
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        self.refresh_status_file_size();
         self.cancel_stale_video_rotation();
         self.cancel_stale_video_resize();
         self.cancel_stale_audio_export_options();
@@ -4349,6 +4360,22 @@ where
         }
     }
 
+    fn status_file_source(&self) -> Option<status_file_size::Source> {
+        self.path.as_ref().map(|path| status_file_size::Source {
+            path: path.clone(),
+            instance: self.media_generation,
+            snapshot: self
+                .folder_snapshot
+                .as_ref()
+                .map(|snapshot| (snapshot.generation, snapshot.captured_at)),
+        })
+    }
+
+    fn refresh_status_file_size(&mut self) {
+        self.status_file_size
+            .update(self.status_file_source(), self.notify.clone());
+    }
+
     fn draw_status_bar(
         &self,
         root: &mut egui::Ui,
@@ -4493,8 +4520,8 @@ where
                                 details.push("Name fallback".into());
                             }
                         }
-                        if let Ok(metadata) = path.metadata() {
-                            details.push(format_size(metadata.len()));
+                        if let Some(bytes) = self.status_file_size.bytes(self.status_file_source()) {
+                            details.push(format_size(bytes));
                         }
                     }
                     if self.tabs.active().is_some_and(|tab| {
@@ -6669,6 +6696,7 @@ where
             self.reading_pages.clear();
             self.clear_image_previews();
             self.path = None;
+            self.refresh_status_file_size();
             self.playlist.clear();
             self.media_kind = None;
             self.timeline_open = false;

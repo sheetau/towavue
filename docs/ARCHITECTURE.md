@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U03/U04: status容量の非同期取得（2026-09-12）
+
+status描画はfilesystem metadataを読まず、現在sourceの容量結果だけを表示する。windowごとにruntimeのLatestTaskを一つ所有し、path・media instance・folder snapshotのgeneration／captured_atが変わったときだけ問い合わせる。既存folder watcher／refreshによるsnapshot更新で同じpathも取り直す。容量cacheは現在source一件だけで、未取得・失敗は容量を省略し、失敗も次のsource更新まで再試行しない。空fileの0 bytesは既知の値として区別する。source変更時は古い容量を消し、完了eventでも現在sourceを再照合したうえで単調ticketを確認する。タブ復元／別windowへの移動では移動先のsourceとして再取得し、他tabの容量を表示しない。
+
+要求は一件実行＋最新一件待機に制限する。source消失／最後のtabを閉じると未着手要求を破棄し、worker破棄でUIをjoin待ちさせない。metadata問い合わせ自体のOS待ちを強制中断するものではなく、完了前後のcancel確認とticketで古い結果を捨てる。追加timer・polling・全folderの容量cacheは設けない。変更通知が利用できない環境で毎frameの外部変更検出を保証せず、既存snapshot refreshへ従う。実windowのdrag latency全体の改善量は未測定。
+
 ## U03/U04: 左寄せ時計と軽量な影調整（2026-09-12）
 
 音声statusが340 logical px未満では、短縮時計を可変幅領域の中央へ置かず、明示left-to-right／上下中央の子UIへ配置する。領域の最小幅・24px高さ・残りのvolume／repeat／shuffle用領域と、時計の省略／全文tooltipは維持する。右端resizeに追従するのは余剰幅であり時計の開始位置ではない。単なるLabel.halignではadd_sizedの領域内中央配置が変わらないため、配置を所有する子UIを変更する。通常幅のtab名／list名／status path・time・volumeは既存配置を維持する。

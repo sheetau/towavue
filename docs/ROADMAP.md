@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 U09/U10 help-lifetime checkpoint: 通常説明の22箇所を共通HoverHelpへ接続。eguiが前frameの元rectだけでtooltipを保持する経路をclip変更で再現し、clipped bounds／layer／hitと非操作型の寿命へ修正。100／125／200%、enabled／disabled、delay、離脱／次要素／overlay、元ボタンclick、大きな自分のtooltipとの重なりを回帰確認。media previewの即時表示契約は変更しない。実OS入力・全残留経路と全UX gateは未完。
+
 2026-09-12 U09/U10/V02/I02 preview checkpoint: previewを通常tooltipから共通の非操作Areaへ分離し、delay／fade待ちを除去、初期／変更sizeは同一frameで再配置。tabは下中央、seekはhover上中央。clipped bounds／layerを使い非active hoverとTooltip層越しのpreview対象要求を許可し、menu／別overlay／disabledは抑止。動画は画像slotを先に確保しcaption高さを固定、時刻fontをProportionalへ揃える。60秒のtooltip設定・旧tooltip・3倍率／active状態、未生成→横長→縦長→失敗の即時描画と比率／caption位置、既存seek drag／見開き／dirty tabを回帰確認。fadbda3のCIで検出されたvendor notice／sourceの更新漏れhashも整合し147 package noticesを検証。一般tooltip寿命・実画面／OS入力と全UX gateは未完。
 
 2026-09-12 V03/A02 timeline-rendering checkpoint: #181818・radius3背景と左右／上8px・下0のmargin、内側3pxの描画領域を導入。音声／動画×3幅×3倍率で背景／波形／選択位置と二境界を確認し、初期96px・tab別resize／小窓時上限の回帰も維持。時間選択だけ白20% difference塗りと左右1物理px点線へ変更し、文字／control線の下へ描く。反転blendをalpha対応し、WARP／hardwareの0／20／100%・重なり／clip／alpha／通常描画復帰の全画素を確認。従来の画像枠は変更しない。実window／入力・全DPI監査とpreview等の全UX gateは未完。

@@ -1,5 +1,9 @@
 # towavue アーキテクチャ
 
+## U09/U10: 説明tooltipの表示寿命（2026-09-12）
+
+アプリ内の説明tooltipは共通のHoverHelpで表示する。pointerがclipped interact rect内にあり、元要素のlayer／hit判定が有効な間だけ許可する。自分のtooltip層が元要素を覆う場合は保持できるが、元要素外のtooltip本体やそこへ向かうpointer移動だけでは保持しない。説明は非操作型とし、egui既定のdelay・still判定・grace・クリック抑止と有効／無効要素の区別を維持する。元要素を失って閉じる際は次frameの再描画を要求し、eguiの前frame所有権から次の説明へ移れるようにする。media previewは別の即時表示契約を維持する。egui本体の変更やOS tooltipは導入しない。
+
 ## U09/U10/V02/I02: 即時・非操作型media preview（2026-09-12）
 
 seek／image-reading／tab previewは、通常tooltipのdelay・still判定・前frameのtooltip所有権から分離した共通の非操作型Areaを使う。fade待ちを設けず、初回／内容寸法変更はeguiのdiscard passで同一frame内に再配置する。seekはhover位置の上中央、tabはtab中央の下へ4 logical px離してanchorし、画面端では画面内制約を優先する。pointerが離れれば非表示とし、既存seek dragの所有中だけ領域外でも保持する。標準tooltip全般の寿命やinteractive tooltipを強制終了するAPIは追加しない。

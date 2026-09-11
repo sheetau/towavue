@@ -1,6 +1,8 @@
 use egui::AtomExt;
 use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definitions};
 
+use crate::hover_help::HoverHelp;
+
 #[derive(Default)]
 pub struct CommandPalette {
     query: String,
@@ -109,7 +111,7 @@ impl CommandPalette {
                         .desired_width(f32::INFINITY)
                         .hint_text("> Search commands"),
                 )
-                .on_hover_text("Up / Down: select   Enter: run   Esc: close");
+                .help_text("Up / Down: select   Enter: run   Esc: close");
                 context.accesskit_node_builder(query_id, |node| {
                     node.set_label("Search commands");
                     node.add_action(egui::accesskit::Action::SetValue);
@@ -164,7 +166,7 @@ impl CommandPalette {
                                     .truncate()
                                     .min_size(egui::vec2(ui.available_width(), 22.0)),
                                 )
-                                .on_hover_ui(|ui| {
+                                .help_ui(|ui| {
                                     ui.set_max_width(
                                         (context.content_rect().width() - 32.0).clamp(1.0, 588.0),
                                     );

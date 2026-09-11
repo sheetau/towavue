@@ -2,6 +2,7 @@ use egui::RichText;
 use towavue_core::{CommandId, ShortcutBindings};
 
 use crate::chrome;
+use crate::hover_help::HoverHelp;
 
 pub fn show(
     ui: &mut egui::Ui,
@@ -52,7 +53,7 @@ pub fn show(
                                     .truncate()
                                     .shortcut_text(if width >= 300.0 { &shortcut } else { "" }),
                                 )
-                                .on_hover_text(format!("{label}  {shortcut}"));
+                                .help_text(format!("{label}  {shortcut}"));
                             response.widget_info(|| {
                                 egui::WidgetInfo::labeled(
                                     egui::WidgetType::Button,

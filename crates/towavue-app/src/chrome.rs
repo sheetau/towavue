@@ -1,6 +1,8 @@
 use egui::{Color32, Pos2, Rect, Stroke, Ui};
 use towavue_runtime_windows::{CaptionAction, CaptionButton};
 
+use crate::hover_help::HoverHelp;
+
 pub fn caption_accessibility(ui: &Ui, buttons: &[CaptionButton]) -> Vec<CaptionAction> {
     let mut actions = Vec::new();
     for button in buttons {
@@ -170,7 +172,7 @@ impl Icon {
 pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     let response = ui
         .add_sized([28.0, 24.0], egui::Button::new(icon.text()).frame(false))
-        .on_hover_text(label);
+        .help_text(label);
     let role = if matches!(icon, Icon::Pause) {
         Icon::Play
     } else {
@@ -196,7 +198,7 @@ pub fn audio_button(ui: &mut Ui, icon: AudioIcon, selected: bool, label: &str) -
             [28.0, 24.0],
             egui::Button::new("").frame(false).selected(selected),
         )
-        .on_hover_text(label);
+        .help_text(label);
     crate::tab_focus::observe(
         &response,
         ("audio-mode", matches!(icon, AudioIcon::Shuffle)),

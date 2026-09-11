@@ -14,6 +14,7 @@ mod fonts;
 mod frame_step;
 mod grid;
 mod hold_speed;
+mod hover_help;
 mod image_navigation;
 mod image_scroll;
 mod logo_menu;
@@ -85,6 +86,8 @@ use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey, PhysicalKey};
 use winit::window::{Fullscreen, Window, WindowId};
+
+use crate::hover_help::HoverHelp;
 
 const AUDIO_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const FOLDER_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -2754,7 +2757,7 @@ where
         let mut contents = |ui: &mut egui::Ui| {
             ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 340.0));
             ui.add(egui::Label::new(display_name(&export.request.target)).truncate())
-                .on_hover_text(export.request.target.display().to_string());
+                .help_text(export.request.target.display().to_string());
             if export.options.audio != AudioExportOptions::default() {
                 ui.label(audio_export::summary(export.options.audio));
             }
@@ -2807,8 +2810,7 @@ where
             chrome::modal_heading(ui, "Unsaved edits");
             ui.separator();
             ui.label("Export edits before continuing?");
-            ui.add(egui::Label::new(&name).truncate())
-                .on_hover_text(&name);
+            ui.add(egui::Label::new(&name).truncate()).help_text(&name);
             ui.label("Source file unchanged.");
             ui.horizontal_wrapped(|ui| {
                 if ui
@@ -3818,7 +3820,7 @@ where
                         )
                     });
                     menu.response
-                        .on_hover_text("towavue menu · drag ↗ File / ↘ Edit / ↙ View");
+                        .help_text("towavue menu · drag ↗ File / ↘ Edit / ↙ View");
 
                     let strip_width = (ui.available_width() - controls_width - 56.0).max(80.0);
                     // Incoming tabs may append in the blank native-drag area, but not
@@ -3967,7 +3969,7 @@ where
                                         rect.max,
                                     );
                                     let close = chrome::tab_close(&mut tab_ui, close_rect, dirty)
-                                        .on_hover_text("Close tab");
+                                        .help_text("Close tab");
                                     if response.hovered() || close.hovered() {
                                         painter.set(
                                             hover_background,
@@ -4166,8 +4168,8 @@ where
                                 let text = ui.fonts_mut(|fonts| fonts.layout_job(text));
                                 if ui
                                     .add_enabled(enabled, egui::Button::new(text).min_size(cell))
-                                    .on_hover_text(title)
-                                    .on_disabled_hover_text(title)
+                                    .help_text(title)
+                                    .disabled_help_text(title)
                                     .clicked()
                                 {
                                     if !matches!(
@@ -4192,7 +4194,7 @@ where
                         )
                         .truncate(),
                     )
-                    .on_hover_text(self.grid_path.display().to_string());
+                    .help_text(self.grid_path.display().to_string());
                 });
             });
     }
@@ -4352,7 +4354,7 @@ where
                             // Reserve three controls and their gaps before truncating a long clock.
                             let time_width = (ui.available_width() - 114.0).max(0.0);
                             ui.add_sized([time_width, 24.0], egui::Label::new(time_text).truncate())
-                                .on_hover_text(format!("{} / {duration}", format_time(self.current_position())));
+                                .help_text(format!("{} / {duration}", format_time(self.current_position())));
                         } else { ui.label(time_text); }
                         let volume = ui
                             .add_sized(
@@ -4366,7 +4368,7 @@ where
                                     .color(chrome::MUTED),
                                 ),
                             )
-                            .on_hover_text("Volume · wheel to adjust (playback and export)");
+                            .help_text("Volume · wheel to adjust (playback and export)");
                         volume_targets.push(volume);
                         if self.media_kind == Some(MediaKind::Audio) {
                             self.draw_audio_mode_buttons(ui, actions);
@@ -4387,10 +4389,10 @@ where
                         if response.clicked() {
                             actions.push(UiAction::Command(CommandId::ToggleReadingMode));
                         }
-                        response.on_hover_ui(|ui| {
+                        response.help_ui(|ui| {
                             ui.label(label);
                             ui.label("Drag up/down: images per page\nDrag left/right: images on the first page\nRelease to keep; Escape to cancel");
-                        }).on_disabled_hover_text("Save or undo unsaved edits before entering reading mode");
+                        }).disabled_help_text("Save or undo unsaved edits before entering reading mode");
                         if !self.reading_mode && self.image_view.selection.is_some() {
                             let response = ui.button("Zoom to selection");
                             tab_focus::observe(&response, "zoom-selection");
@@ -4489,7 +4491,7 @@ where
                                 egui::Label::new(RichText::new(text).size(12.0).color(color))
                                     .truncate(),
                             )
-                            .on_hover_text(tooltip);
+                            .help_text(tooltip);
                         },
                     );
                     ui.allocate_ui_with_layout(
@@ -4507,7 +4509,7 @@ where
                                 )
                                 .truncate(),
                             )
-                            .on_hover_text(format!("{info}\n{source}"));
+                            .help_text(format!("{info}\n{source}"));
                         },
                     );
                 });
@@ -4790,7 +4792,7 @@ where
                     );
                 }
                 let response = ui.allocate_rect(rect, egui::Sense::click_and_drag())
-                    .on_hover_text("Drag to select time · Shift+Space plays selection · drag playhead to seek · drag volume line up/down · Alt+drag selection to stretch · Delete removes · Ctrl+Y keeps");
+                    .help_text("Drag to select time · Shift+Space plays selection · drag playhead to seek · drag volume line up/down · Alt+drag selection to stretch · Delete removes · Ctrl+Y keeps");
                 let duration = self.playback_duration().unwrap_or_default();
                 if duration.is_zero() {
                     return;

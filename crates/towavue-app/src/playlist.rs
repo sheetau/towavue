@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use egui::RichText;
 use towavue_core::{FolderSnapshot, MediaKind};
 
+use crate::hover_help::HoverHelp;
+
 #[derive(Default)]
 pub struct Playlist {
     focus: Option<(PathBuf, usize)>,
@@ -152,7 +154,7 @@ impl Playlist {
                             },
                         )
                         .inner
-                        .on_hover_ui(|ui| {
+                        .help_ui(|ui| {
                             ui.set_max_width(
                                 (ui.ctx().viewport_rect().width() - 32.0).clamp(1.0, 400.0),
                             );

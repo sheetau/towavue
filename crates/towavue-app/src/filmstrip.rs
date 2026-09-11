@@ -7,6 +7,7 @@ use egui::{Align2, Color32, Context, FontId, Rect, TextureHandle, Vec2};
 use towavue_core::{FolderSnapshot, MediaKind, ReadingAxis};
 use towavue_runtime_windows::{PreviewCache, PreviewLoader, VISIBLE_PREVIEW_LIMIT};
 
+use crate::hover_help::HoverHelp;
 use crate::{UiAction, display_name, format_time, media_time};
 
 const STEP: f32 = 128.0;
@@ -346,7 +347,7 @@ impl Filmstrip {
                         if let Some(Err(error)) = self.previews.get(&item.path) {
                             tooltip.push_str(&format!("\nPreview unavailable: {error}"));
                         }
-                        response.on_hover_text(tooltip);
+                        response.help_text(tooltip);
                     }
                 });
                 self.scroll_offset = output.state.offset.x;
@@ -470,7 +471,7 @@ impl Filmstrip {
                                 actions.push(UiAction::OpenMedia(path.clone(), true));
                             }
                             if enabled {
-                                response.on_hover_text(path.display().to_string());
+                                response.help_text(path.display().to_string());
                             }
                         });
                     }

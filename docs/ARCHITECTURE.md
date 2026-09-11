@@ -132,6 +132,14 @@ source durationからmax(20, ceil(seconds/5))個の区間を作り、その中�
 
 固定H.264素材のdebug検証で16コマ生成約1.119秒、4コマの終端sheet約0.327秒、memory clone取得約0.56～0.59msを観測した。これはUI表示遅延の保証ではない。実画素と単枚reference、density／端／UV、同textureで16位置を描画して追加uploadなし、世代／優先度／2枚LRU／texture上限を確認する。所有する可視960×576 windowと生成40秒MPEG-4素材では停止中hoverの非Seek、前半／後半thumbnail、クリックSeekとtab hoverを確認した。software decode条件の一例であり、長GOP／全codec／HDR／混在DPI／資源peak・本画面scrubは未認定・未完。
 
+## I03: 静止PNG／WebPのdecoder再利用（2026-09-11）
+
+foregroundとprefetchは、内容推定済みreaderをPNG／WebPの型付きdecoderへ移し、そのinstanceでanimation判定後に静止画も復号する。static_frameはreaderを再度decoder化せずImageDecoderを受け取る。非対応の別backendやPNG先行decodeは追加しない。静止画は従来のImageReader既定limitsを適用し、PNGはheader parseから同じ既定512 MiB上限を使う（APNGのheaderにも適用する）。原寸RGBA budget・EXIF／alpha／16bit→8bit変換・取消・animation first-frame通知を維持する。
+
+生成した16 MiB tEXt付き小PNGは、旧foregroundが4,107回、再利用後のforeground／prefetchが2,058回のread／seek／取消確認を行う。固定版pngの8 KiB buffered readに基づく上限回帰で二重header parseを検出し、全RGBAも一致する。8種類の8／16bit・RGB／gray・alphaとEXIF8向き、予算を両経路で検証する。通常24MP PNGのRelease内訳はheader約0.1ms／画素復号約105ms／RGBA変換約15msであり、header再利用を普通のPNG全体の大幅高速化と扱わない。
+
+同じ24MP PNGをFFmpegのPNG decoderへ直接packetとして渡す追加測定でも、7回Releaseの総中央値約220ms（既存約118ms）、全96,000,000 bytes一致だったため採用しない。通常demux経路の測定とは分けて記録し、PNG等の初回段階表示、進行中先読みとforegroundの重複、UI latency／cold／資源と全UX台帳を残す。
+
 ## I03: 非圧縮BMPの疎な先行表示（2026-09-11）
 
 JPEGと同じforeground preview生成枠へ、内容判定による24bit BI_RGB／40-byte BITMAPINFOHEADERのBMPを追加する。[file headerの画素offset](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapfileheader)と[上下方向・4byte stride](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapinfoheader)を検査し、240×160以内の各出力行の中心に対応する原寸scanlineだけを読む。横方向も中心のnearest sampleとし、BGRから不透明RGBAへ変換する。原寸全体の一時allocationや追加worker／process／unsafeはなく、原寸decode・編集・保存はimage crateのまま。

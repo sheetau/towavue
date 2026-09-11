@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-11 I03 decoder再利用checkpoint: PNG／WebPの静止画判定後に同じdecoderを使い、PNG metadataの二重読取をforeground／prefetchから省く。8色形式×EXIF8向きの全画素・alpha／予算と既存animation／取消を確認。PNGの主な画素復号コストは未解消、FFmpeg直接packet案も遅く不採用。進行中先読みの引継ぎ・他形式初回表示・cold／UI時間／全資源と全台帳を維持する。
+
 2026-09-11 I03 BMP-first checkpoint: 24bit BI_RGB BMPの疎なsample行から先行表示し、元寸法・上下方向・paddingを保つ。24MP warm Releaseの先行取得約0.9ms／原寸約76ms。原寸不変、非対応alpha fallback・上限・取消とJPEG共通mailbox／cache lifecycleを回帰確認。Computer Use接続不可のため可視確認は保留。PNG等・cold／実UI時間・全資源を含む台帳全体を継続する。
 
 2026-09-11 I03 JPEG品質checkpoint: 9種の通常／progressive・gray・直接RGB・CMYK（黒版あり含む）で独立decoderと原寸への代表色比較、寸法・alphaを確認。grayは通常回帰、外部生成matrixは明示opt-inとし、production変更はない。YCCK／ICC・写真全画素・可視latency／他形式の初回表示と全台帳を継続する。

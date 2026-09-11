@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 I03 decoder-reuse checkpoint: PNG／WebPのanimation判定instanceを静止画にも再利用し、PNG metadataの二重読取をforeground／prefetchから除去。16 MiB textの回帰と8色形式×EXIF8向き×両経路の画素・予算、既存animation／取消を確認。FFmpeg直接PNG packetも測定では遅く不採用。普通のPNG画素復号／初回段階表示・進行中先読みの再利用・UI latencyと全UX台帳は継続する。先行3632806のCI34578656019は成功。
+
 2026-09-11 I03 BMP-first checkpoint: 24bit非圧縮BMPのsample行だけ読む小さな先行表示を追加。向き／padding／全sample色と原寸不変、破損・上限・取消・alpha fallback、共有cacheと原寸前通知／退役を確認。24MP warm Releaseでpreview約0.9ms／原寸約76ms。PNG／BMPの既存FFmpeg通常経路への置換は測定で遅いため見送る。Computer Use接続不可により可視確認は未実施。PNG等の初回表示・cold／UI latency・資源と全UX台帳を継続する。
 
 2026-09-11 I03 JPEG-quality checkpoint: 通常／progressive・gray・直接RGB・CMYK（黒版ありを含む）の生成9種類を独立decoderの代表色と原寸へ比較し、寸法・不透明alphaも確認。外部生成不要のgray回帰と任意の再生成／色比較テストを追加し、productionは変えない。YCCK／ICC／写真全画素・可視latencyの認定ではない。次は他静止画形式の初回表示と実際の画像移動待ちを進め、全UX台帳を維持する。

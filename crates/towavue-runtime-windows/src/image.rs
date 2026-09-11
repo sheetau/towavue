@@ -98,16 +98,25 @@ pub(crate) fn decode_image_for_prefetch(
             .with_guessed_format()
             .map_err(ImageDecodeError::Open)?;
         let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
-        let skip = match format {
-            ImageFormat::Gif | ImageFormat::Avif => true,
-            ImageFormat::Png => PngDecoder::new(open(path, is_current)?)?.is_apng()?,
-            ImageFormat::WebP => WebPDecoder::new(open(path, is_current)?)?.has_animation(),
-            _ => false,
+        let frame = match format {
+            ImageFormat::Gif | ImageFormat::Avif => return Ok(None),
+            ImageFormat::Png => {
+                let decoder =
+                    PngDecoder::with_limits(reader.into_inner(), image::Limits::default())?;
+                if decoder.is_apng()? {
+                    return Ok(None);
+                }
+                static_frame(decoder, byte_limit, is_current)?
+            }
+            ImageFormat::WebP => {
+                let decoder = WebPDecoder::new(reader.into_inner())?;
+                if decoder.has_animation() {
+                    return Ok(None);
+                }
+                static_frame(decoder, byte_limit, is_current)?
+            }
+            _ => static_frame(reader.into_decoder()?, byte_limit, is_current)?,
         };
-        if skip {
-            return Ok(None);
-        }
-        let frame = static_frame(reader, byte_limit, is_current)?;
         check_current(is_current)?;
         Ok(Some(DecodedImage {
             format: format_name(format),
@@ -152,22 +161,27 @@ pub(crate) fn decode_image_with_preview(
                 animated_frames(decoder, byte_limit, is_current, preview)?
             }
             ImageFormat::WebP => {
-                let decoder = WebPDecoder::new(open(path, is_current)?)?;
+                let decoder = WebPDecoder::new(reader.into_inner())?;
                 if decoder.has_animation() {
                     animated_frames(decoder, byte_limit, is_current, preview)?
                 } else {
-                    vec![static_frame(reader, byte_limit, is_current)?]
+                    vec![static_frame(decoder, byte_limit, is_current)?]
                 }
             }
             ImageFormat::Png => {
-                let decoder = PngDecoder::new(open(path, is_current)?)?;
+                let decoder =
+                    PngDecoder::with_limits(reader.into_inner(), image::Limits::default())?;
                 if decoder.is_apng()? {
                     animated_frames(decoder.apng()?, byte_limit, is_current, preview)?
                 } else {
-                    vec![static_frame(reader, byte_limit, is_current)?]
+                    vec![static_frame(decoder, byte_limit, is_current)?]
                 }
             }
-            _ => vec![static_frame(reader, byte_limit, is_current)?],
+            _ => vec![static_frame(
+                reader.into_decoder()?,
+                byte_limit,
+                is_current,
+            )?],
         };
         check_current(is_current)?;
         if frames.is_empty() {
@@ -277,11 +291,11 @@ fn open<'a>(
 }
 
 fn static_frame(
-    reader: image::ImageReader<BufReader<CancellableReader<'_, File>>>,
+    mut decoder: impl ImageDecoder,
     byte_limit: usize,
     is_current: &dyn Fn() -> bool,
 ) -> Result<DecodedImageFrame, ImageDecodeError> {
-    let mut decoder = reader.into_decoder()?;
+    decoder.set_limits(image::Limits::default())?;
     let (width, height) = decoder.dimensions();
     let bytes = (u64::from(width) * u64::from(height))
         .checked_mul(4)
@@ -367,6 +381,127 @@ fn format_name(format: ImageFormat) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reused_png_decoder_preserves_depth_alpha_orientation_and_budget() {
+        use image::ImageEncoder;
+        use image::metadata::Orientation;
+
+        let path = temporary_path("png");
+        let source = DynamicImage::ImageRgba16(image::ImageBuffer::from_fn(37, 23, |x, y| {
+            image::Rgba([
+                (x * 1733) as u16,
+                (y * 2891) as u16,
+                ((x + y) * 1031) as u16,
+                ((x * y) * 71) as u16,
+            ])
+        }));
+        let variants = [
+            DynamicImage::ImageLuma8(source.to_luma8()),
+            DynamicImage::ImageLumaA8(source.to_luma_alpha8()),
+            DynamicImage::ImageRgb8(source.to_rgb8()),
+            DynamicImage::ImageRgba8(source.to_rgba8()),
+            DynamicImage::ImageLuma16(source.to_luma16()),
+            DynamicImage::ImageLumaA16(source.to_luma_alpha16()),
+            DynamicImage::ImageRgb16(source.to_rgb16()),
+            source,
+        ];
+        for source in variants {
+            for tag in 1..=8 {
+                let mut exif =
+                    *b"II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x01\0\0\0\0\0\0\0";
+                exif[18] = tag;
+                let mut bytes = Vec::new();
+                let mut encoder = image::codecs::png::PngEncoder::new(&mut bytes);
+                encoder.set_exif_metadata(exif.to_vec()).expect("PNG EXIF");
+                encoder
+                    .write_image(
+                        source.as_bytes(),
+                        source.width(),
+                        source.height(),
+                        source.color().into(),
+                    )
+                    .expect("typed PNG");
+                std::fs::write(&path, bytes).expect("owned oriented PNG");
+                let mut expected = source.clone();
+                expected.apply_orientation(Orientation::from_exif(tag).expect("orientation tag"));
+                let expected = expected.into_rgba8();
+                for prefetch in [false, true] {
+                    let decode = |limit| {
+                        if prefetch {
+                            decode_image_for_prefetch(&path, limit, &|| true)
+                                .map(|image| image.expect("static PNG"))
+                        } else {
+                            decode_image_cancellable(&path, limit, &|| true)
+                        }
+                    };
+                    let decoded = decode(IMAGE_BYTE_LIMIT).expect("oriented typed PNG");
+                    assert_eq!(decoded.dimensions(), expected.dimensions());
+                    assert_eq!(
+                        decoded.frames[0].rgba,
+                        *expected.as_raw(),
+                        "{:?}, EXIF {tag}, prefetch {prefetch}",
+                        source.color()
+                    );
+                    assert!(matches!(decode(1), Err(ImageDecodeError::TooLarge)));
+                }
+            }
+        }
+        std::fs::remove_file(path).expect("remove owned typed PNG");
+    }
+
+    #[test]
+    fn static_png_metadata_is_read_once_for_foreground_and_prefetch() {
+        let source = image::RgbaImage::from_fn(32, 16, |x, y| {
+            image::Rgba([x as u8, y as u8, 180, (x * y) as u8])
+        });
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        source
+            .write_to(&mut encoded, ImageFormat::Png)
+            .expect("PNG fixture");
+        let mut encoded = encoded.into_inner();
+        let mut payload = b"Comment\0".to_vec();
+        payload.resize(16 * 1024 * 1024, b'a');
+        let mut chunk = (payload.len() as u32).to_be_bytes().to_vec();
+        chunk.extend_from_slice(b"tEXt");
+        chunk.extend_from_slice(&payload);
+        let checksum = crc32fast::hash(&chunk[4..]);
+        chunk.extend_from_slice(&checksum.to_be_bytes());
+        encoded.splice(33..33, chunk);
+        let path = std::env::temp_dir().join(format!(
+            "towavue-png-metadata-once-{}.png",
+            std::process::id()
+        ));
+        std::fs::write(&path, encoded).expect("owned metadata PNG");
+        for prefetch in [false, true] {
+            let polls = std::cell::Cell::new(0);
+            let current = || {
+                polls.set(polls.get() + 1);
+                true
+            };
+            let started = std::time::Instant::now();
+            let decoded = if prefetch {
+                decode_image_for_prefetch(&path, IMAGE_BYTE_LIMIT, &current)
+                    .expect("static prefetch")
+                    .expect("not animated")
+            } else {
+                decode_image_cancellable(&path, IMAGE_BYTE_LIMIT, &current).expect("foreground")
+            };
+            eprintln!(
+                "metadata PNG prefetch={prefetch}: {:?}, polls={}",
+                started.elapsed(),
+                polls.get()
+            );
+            assert_eq!(decoded.dimensions(), (32, 16));
+            assert_eq!(decoded.frames[0].rgba, *source.as_raw());
+            // The pinned PNG decoder streams text through roughly 2,048 buffered reads.
+            assert!(
+                polls.get() < 2500,
+                "metadata header read twice: {} polls",
+                polls.get()
+            );
+        }
+        std::fs::remove_file(path).expect("remove owned metadata PNG");
+    }
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 

@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 U04 status checkpoint: media表示面のloading／resampling／画像・読書・再生errorをstatus左へ集約。読書drag値を優先し確定後4秒、画像成功時の情報flashを除きframe数を右へ常設。fullscreen上中央の通知は下端barへ統合しfocus取得なし・既存抑止を維持。2幅×3倍率×通常／fullscreenの一回描画・path復帰、部分ページ／複数error、読書取消・履歴と既存focusを回帰確認。Release通常画像のpath／右情報を可視確認。Computer Useの対象とのintegrity差とactivation失敗により実入力は未確認。音量HUD・caption／tab／timeline／preview等と全UX gateは未完。
+
 2026-09-12 U04/G01 diagnostic-outline checkpoint: Debug版eguiのrect単位ID交替警告を画像tab／focus fixtureで再現し、可視診断だけを抑制。menu Escapeとtab間focus復帰の回帰で赤枠なし・元のfocus／非dispatchを確認。通常focusと実ID重複診断は維持し、Release動作は変更しない。status message集約・実画面と全UX gateは未完。
 
 2026-09-12 U07 dirty checkpoint: tabのasteriskをclose領域のCodicon丸印へ置換し、hover／focusでは×へ戻す。保存済みsnapshotと連続した直角回転／反転の同値性でdirtyを比較し、4回回転・二重反転等ではUndo履歴を残してcleanに戻る。5,461通りの向き・分岐／保存中編集・raster境界、代表RGBA一致と3倍率のindicator／close guardを確認。全編集の同値性・実ウィンドウ／全UI監査は未完。

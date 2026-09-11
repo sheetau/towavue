@@ -1973,12 +1973,6 @@ where
                 .and_then(|decoded| self.image_texture_cache.load(&context, &path, decoded))
             {
                 Ok(image) => {
-                    let (width, height) = image.dimensions();
-                    self.set_status(format!(
-                        "{} · {width} × {height} · {} frame(s)",
-                        image.decoded.format,
-                        image.decoded.frames.len()
-                    ));
                     self.image = Some(image);
                     self.image_error = None;
                     self.state = PlaybackState::Paused;
@@ -2643,27 +2637,10 @@ where
                     }) {
                         actions.push(UiAction::Command(command));
                     }
-                } else if self.state == PlaybackState::Faulted
-                    && self.media_kind != Some(MediaKind::Image)
-                    && let Some(error) = &self.playback_error
-                {
-                    ui.centered_and_justified(|ui| {
-                        ui.label(format!("Could not play media\n{error}"));
-                    });
                 } else if self.media_kind == Some(MediaKind::Audio) {
                     self.draw_audio_playlist(ui, actions);
                 } else if self.media_kind == Some(MediaKind::Image) {
                     self.draw_image(ui);
-                    if self.image_loading && !self.reading_mode && self.image.is_none() {
-                        egui::Area::new("image-loading".into())
-                            .fixed_pos(ui.max_rect().center_top() + egui::vec2(-65.0, 12.0))
-                            .interactable(false)
-                            .show(ui.ctx(), |ui| {
-                                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                    ui.label("Loading images…");
-                                });
-                            });
-                    }
                 } else if self.media_kind == Some(MediaKind::Video) {
                     self.draw_video_edit_overlay(ui, &mut volume_targets, actions);
                 }
@@ -2674,24 +2651,6 @@ where
         self.draw_fullscreen_controls(&context, actions, &mut volume_targets);
         self.draw_video_scrub();
         self.volume_wheel(&context, &volume_targets, actions);
-        if self.fullscreen
-            && let Some((message, started)) = &self.status_message
-            && (started.elapsed() < STATUS_MESSAGE_DURATION || self.held_speed.is_some())
-        {
-            egui::Area::new("fullscreen-status".into())
-                .anchor(Align2::CENTER_TOP, [0.0, 12.0])
-                .interactable(false)
-                .show(&context, |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.set_max_width((context.content_rect().width() - 32.0).max(100.0));
-                        ui.label(if self.held_speed.is_some() {
-                            "2× while held · release to restore playback"
-                        } else {
-                            message
-                        });
-                    });
-                });
-        }
         if self.filmstrip_open {
             if !modal_blocked {
                 self.filmstrip.show(
@@ -2884,29 +2843,16 @@ where
         self.cancel_stale_rotation_drag();
         self.update_image_sampling();
         if self.image_edit_pending {
-            ui.centered_and_justified(|ui| {
-                ui.label("Resampling image…");
-            });
             return;
         }
-        if self.image_edit_source.is_some()
-            && let Some(error) = &self.image_error
-        {
-            ui.centered_and_justified(|ui| {
-                ui.label(format!(
-                    "Could not resample image\n{error}\nUndo to restore the previous edit."
-                ));
-            });
+        if self.image_edit_source.is_some() && self.image_error.is_some() {
             return;
         }
         if self.reading_mode {
             self.draw_reading_pages(ui);
             return;
         }
-        if let Some(error) = &self.image_error {
-            ui.centered_and_justified(|ui| {
-                ui.label(format!("Could not load image\n{error}"));
-            });
+        if self.image_error.is_some() {
             return;
         }
         let Some(image) = self.image.as_ref() else {
@@ -3743,7 +3689,6 @@ where
             }
         }
         if pages.is_empty() {
-            ui.centered_and_justified(|ui| ui.label("No image pages available"));
             return;
         }
         let pending_size = self
@@ -3766,20 +3711,8 @@ where
         );
         let painter = ui.painter_at(viewport);
         for (image, page) in pages.into_iter().zip(rects) {
-            let image = match image {
-                Some(Ok(image)) => image,
-                other => {
-                    let label = match other {
-                        Some(Err(error)) => error.as_str(),
-                        None => "Loading…",
-                        Some(Ok(_)) => unreachable!(),
-                    };
-                    ui.scope_builder(egui::UiBuilder::new().max_rect(page), |ui| {
-                        ui.set_clip_rect(page);
-                        ui.centered_and_justified(|ui| ui.label(label));
-                    });
-                    continue;
-                }
+            let Some(Ok(image)) = image else {
+                continue;
             };
             painter.image(
                 image.0.id(),
@@ -4335,6 +4268,7 @@ where
             && (self.fullscreen_controls_keyboard
                 || self.fullscreen_controls_focus_requested
                 || (was_visible && (held || controls_have_focus()))
+                || self.status_notice().is_some()
                 || (!held && at_edge));
         if !self.fullscreen_controls_visible {
             return;
@@ -4463,18 +4397,8 @@ where
                         }
                     }
                     let mut details = Vec::new();
-                    if let Some((_, intent)) = &self.pending_folder {
-                        details.push(match intent {
-                            FolderIntent::Open => "Opening folder".into(),
-                            FolderIntent::Refresh(_) => "Loading order".into(),
-                        });
-                    }
-                    if self.media_kind == Some(MediaKind::Image) && self.reading_mode {
-                        details.push(format!(
-                            "Reading {} · first {}",
-                            self.reading_settings.page_count,
-                            self.reading_settings.first_page_count
-                        ));
+                    if self.media_kind == Some(MediaKind::Image) && self.reading_mode && self.reading_drag.is_none() {
+                        details.push(self.reading_status());
                     }
                     if (self.media_kind == Some(MediaKind::Image) && !self.reading_mode)
                         || self.media_kind == Some(MediaKind::Video)
@@ -4491,7 +4415,7 @@ where
                     }
                     if let Some(image) = &self.image {
                         let (width, height) = image.dimensions();
-                        details.push(format!("{} {width}×{height} · {}", image.decoded.format, if self.nearest_images { "Nearest" } else { "Smooth" }));
+                        details.push(format!("{} {width}×{height} · {} frame(s) · {}", image.decoded.format, image.decoded.frames.len(), if self.nearest_images { "Nearest" } else { "Smooth" }));
                     } else if self.session.is_some() {
                         let edit = self.edit_state();
                         details.push(if self.held_speed.is_some() { "2× while held".into() } else { format!("{:.2}×", edit.rate) });
@@ -4530,7 +4454,7 @@ where
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             ui.set_min_width(path_width);
-                            let selection_hint = (!self.modal_input_blocked()).then(|| {
+                            let selection_hint = (!self.modal_input_blocked() && self.reading_drag.is_none()).then(|| {
                                 selection::focus_hint(ui.ctx()).or_else(|| {
                                     ((self.media_kind == Some(MediaKind::Video) && self.timeline_open)
                                         || self.media_kind == Some(MediaKind::Audio))
@@ -4540,8 +4464,8 @@ where
                             let (text, color, tooltip) =
                                 if let Some(message) = selection_hint {
                                     (message.clone(), chrome::FOREGROUND, message)
-                                } else if let Some((message, _)) = &self.status_message {
-                                    (message.clone(), chrome::FOREGROUND, message.clone())
+                                } else if let Some(message) = self.status_notice() {
+                                    (message.clone(), chrome::FOREGROUND, message)
                                 } else if let Some(path) = &self.path {
                                     let parent = path
                                         .parent()
@@ -6851,6 +6775,9 @@ where
             self.reading_mode = drag.was_enabled;
             self.rebuild_reading_pages();
         }
+        if !cancel {
+            self.set_status(self.reading_status());
+        }
         self.request_redraw();
         true
     }
@@ -7488,6 +7415,74 @@ where
     fn set_status(&mut self, message: String) {
         self.status_message = Some((message, Instant::now()));
         self.request_redraw();
+    }
+
+    fn reading_status(&self) -> String {
+        format!(
+            "Reading {} · first {}",
+            self.reading_settings.page_count, self.reading_settings.first_page_count
+        )
+    }
+
+    fn status_notice(&self) -> Option<String> {
+        if self.reading_drag.is_some() {
+            return Some(self.reading_status());
+        }
+        if self.held_speed.is_some() {
+            return Some("2× while held · release to restore playback".into());
+        }
+        if let Some((message, shown)) = &self.status_message
+            && shown.elapsed() < STATUS_MESSAGE_DURATION
+        {
+            return Some(message.clone());
+        }
+        if self.media_kind == Some(MediaKind::Image) {
+            if self.image_edit_pending {
+                return Some("Resampling image…".into());
+            }
+            if let Some(error) = &self.image_error {
+                return Some(if self.image_edit_source.is_some() {
+                    format!(
+                        "Could not resample image: {error} · Undo to restore the previous edit."
+                    )
+                } else {
+                    format!("Could not load image: {error}")
+                });
+            }
+            if self.reading_mode {
+                let errors: Vec<_> = self
+                    .reading_pages
+                    .iter()
+                    .filter_map(|page| page.as_ref().err())
+                    .map(String::as_str)
+                    .collect();
+                if !errors.is_empty() {
+                    return Some(format!(
+                        "Could not load {} reading page(s): {}",
+                        errors.len(),
+                        errors.join("; ")
+                    ));
+                }
+            }
+            if self.image_loading {
+                return Some("Loading images…".into());
+            }
+            if self.reading_mode && self.image.is_none() && self.reading_pages.is_empty() {
+                return Some("No image pages available".into());
+            }
+        } else if self.state == PlaybackState::Faulted {
+            if let Some(error) = &self.playback_error {
+                return Some(format!("Could not play media: {error}"));
+            }
+        } else if self.media_kind.is_some() && self.state == PlaybackState::Loading {
+            return Some("Loading media…".into());
+        }
+        self.pending_folder
+            .as_ref()
+            .map(|(_, intent)| match intent {
+                FolderIntent::Open => "Opening folder…".into(),
+                FolderIntent::Refresh(_) => "Loading order…".into(),
+            })
     }
 
     fn record_seek_presentation(&mut self, media_drawn: bool) {
@@ -12358,6 +12353,168 @@ mod tests {
     }
 
     #[test]
+    fn media_notices_use_status_left_and_restore_paths_after_completion() {
+        let Some(root) = isolated_test_root(
+            "tests::media_notices_use_status_left_and_restore_paths_after_completion",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let path = root.join("page.png");
+        app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.status_message = None;
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let draw = |app: &mut Application<_>, width, density| {
+            context.set_pixels_per_point(density);
+            let mut output = egui::FullOutput::default();
+            for _ in 0..3 {
+                output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 576.0),
+                        )),
+                        events: vec![egui::Event::PointerMoved(egui::pos2(width / 2.0, 200.0))],
+                        ..Default::default()
+                    },
+                    |ui| app.draw_ui(ui, &mut Vec::new()),
+                );
+            }
+            output
+                .shapes
+                .into_iter()
+                .filter_map(|shape| match shape.shape {
+                    egui::Shape::Text(text) => Some((text.pos, text.galley.text().to_owned())),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        for fullscreen in [false, true] {
+            app.fullscreen = fullscreen;
+            for width in [480.0, 960.0] {
+                for density in [1.0, 1.25, 2.0] {
+                    for (edit, error, reading) in [
+                        (false, false, false),
+                        (true, false, false),
+                        (false, true, false),
+                        (false, false, true),
+                    ] {
+                        app.image_loading = true;
+                        app.image_edit_pending = edit;
+                        app.image_error = error.then(|| "decode fixture error".into());
+                        app.reading_mode = reading;
+                        app.reading_pages = if reading {
+                            vec![
+                                Err("second.png: corrupt page".into()),
+                                Err("third.png: missing page".into()),
+                            ]
+                        } else {
+                            vec![]
+                        };
+                        let notice = app.status_notice().expect("pending or failed media notice");
+                        let texts = draw(&mut app, width, density);
+                        let matches: Vec<_> =
+                            texts.iter().filter(|(_, text)| text == &notice).collect();
+                        assert_eq!(matches.len(), 1, "{notice}: {texts:?}");
+                        assert!(
+                            matches[0].0.y > 540.0 && matches[0].0.x < width / 2.0,
+                            "notice stays in status left"
+                        );
+                        assert!(!texts.iter().any(|(pos, text)| pos.y < 540.0
+                            && (text.contains("Loading")
+                                || text.contains("corrupt page")
+                                || text.contains("decode fixture")
+                                || text.contains("Resampling"))));
+                        if fullscreen {
+                            assert!(app.fullscreen_controls_visible);
+                            assert!(
+                                context.memory(egui::Memory::focused).is_none(),
+                                "notices do not take focus"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        app.fullscreen = false;
+        app.reading_mode = false;
+        app.reading_pages.clear();
+        app.image_error = None;
+        app.image_edit_pending = false;
+        app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+            generation: app.image_generation,
+            first_index: 0,
+            total: 1,
+            images: vec![(
+                path,
+                Ok(DecodedImage {
+                    format: "fixture",
+                    frames: vec![
+                        towavue_runtime_windows::DecodedImageFrame {
+                            width: 5,
+                            height: 3,
+                            rgba: vec![255; 60],
+                            delay: Duration::ZERO,
+                        };
+                        2
+                    ],
+                }
+                .into()),
+            )],
+        });
+        assert!(app.image.is_some() && !app.image_loading);
+        assert!(
+            app.status_message.is_none(),
+            "decode completion does not flash image information"
+        );
+        let texts = draw(&mut app, 960.0, 1.0);
+        assert!(
+            texts
+                .iter()
+                .any(|(pos, text)| pos.y > 540.0 && pos.x < 480.0 && text.ends_with("\\page.png"))
+        );
+        assert!(texts.iter().any(|(pos, text)| pos.y > 540.0
+            && pos.x > 480.0
+            && text.contains("fixture 5×3 · 2 frame(s)")));
+        app.set_status("Copied fixture".into());
+        assert_eq!(app.status_notice().as_deref(), Some("Copied fixture"));
+        app.status_message.as_mut().expect("notice").1 = Instant::now() - STATUS_MESSAGE_DURATION;
+        assert!(
+            app.status_notice().is_none(),
+            "expired messages do not survive tab restoration"
+        );
+        assert!(
+            draw(&mut app, 960.0, 1.0)
+                .iter()
+                .any(|(pos, text)| pos.y > 540.0 && text.ends_with("\\page.png"))
+        );
+        app.fullscreen = true;
+        draw(&mut app, 960.0, 1.0);
+        assert!(
+            !app.fullscreen_controls_visible,
+            "expired notices do not pin fullscreen controls"
+        );
+        for kind in [MediaKind::Video, MediaKind::Audio] {
+            app.media_kind = Some(kind);
+            app.state = PlaybackState::Loading;
+            assert_eq!(app.status_notice().as_deref(), Some("Loading media…"));
+            app.state = PlaybackState::Faulted;
+            app.playback_error = Some("playback fixture error".into());
+            let texts = draw(&mut app, 960.0, 1.0);
+            assert!(texts.iter().any(|(pos, text)| pos.y > 540.0
+                && text == "Could not play media: playback fixture error"));
+            assert!(
+                !texts
+                    .iter()
+                    .any(|(pos, text)| pos.y < 540.0 && text.contains("playback fixture error"))
+            );
+        }
+    }
+
+    #[test]
     fn fullscreen_layout_hides_chrome_and_fills_the_image_viewport() {
         let Some(root) = isolated_test_root(
             "tests::fullscreen_layout_hides_chrome_and_fills_the_image_viewport",
@@ -13439,6 +13596,20 @@ mod tests {
                     egui::Shape::Text(text) if text.galley.text().contains("Reading "))),
                     "counts remain visible before any image can be decoded"
                 );
+                if app.reading_drag.is_some() {
+                    let values: Vec<_> = output
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.text().contains("Reading ") => {
+                                Some(text.pos)
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    assert_eq!(values.len(), 1);
+                    assert!(values[0].x < 240.0 && values[0].y > 270.0);
+                }
             }
             actions
         };
@@ -13481,10 +13652,15 @@ mod tests {
         app.reading_mode = true;
         app.move_reading_drag((0.0, -25.0));
         assert_eq!(app.reading_settings.page_count, 3);
+        assert_eq!(app.status_notice().as_deref(), Some("Reading 3 · first 3"));
         draw(&mut app, vec![]);
         assert!(app.finish_reading_drag(true));
         assert!(!app.reading_mode);
         assert_eq!(app.reading_settings, ReadingSettings::default());
+        assert!(
+            app.status_message.is_none(),
+            "cancellation does not keep the abandoned values"
+        );
         let actions = draw(
             &mut app,
             vec![
@@ -13513,6 +13689,13 @@ mod tests {
             app.move_reading_drag((0.0, -48.0));
             app.finish_reading_drag(cancel);
             assert_eq!(app.reading_settings.page_count, if cancel { 2 } else { 4 });
+            if !cancel {
+                assert_eq!(
+                    app.status_message.as_ref().map(|(text, _)| text.as_str()),
+                    Some("Reading 4 · first 4")
+                );
+                app.status_message = None;
+            }
             assert!(app.reading_mode);
             assert_eq!(app.edits, edits);
             assert!(app.reading_cursor.is_none());
@@ -17127,8 +17310,9 @@ mod tests {
                     egui::Shape::Text(text) if text.galley.text() == "Loading…"
                 ))
                 .count(),
-            2
+            0
         );
+        assert_eq!(app.status_notice().as_deref(), Some("Loading images…"));
         let error_chunk = |generation, first_index, path: &PathBuf| LoadedImages {
             generation,
             first_index,
@@ -17627,11 +17811,17 @@ mod tests {
         }
         assert_eq!(app.image_generation, generation);
         assert!(app.edits.is_empty());
+        app.media_kind = Some(MediaKind::Image);
+        app.reading_mode = true;
         app.reading_pages.insert(0, Err("unreadable page".into()));
         let output = context.run_ui(Default::default(), |ui| app.draw_reading_pages(ui));
-        assert!(output.shapes.iter().any(|shape| {
+        assert!(!output.shapes.iter().any(|shape| {
             matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "unreadable page")
         }));
+        assert_eq!(
+            app.status_notice().as_deref(),
+            Some("Could not load 1 reading page(s): unreadable page")
+        );
         for id in ids {
             assert!(output.shapes.iter().any(|shape| {
                 matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == id)
@@ -19832,17 +20022,21 @@ mod tests {
         let context = fonts::test_context();
         for fullscreen in [false, true] {
             app.fullscreen = fullscreen;
-            let output = context.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(480.0, 300.0),
-                    )),
-                    ..Default::default()
-                },
-                |ui| app.draw_ui(ui, &mut Vec::new()),
-            );
-            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("Unsupported orientation fixture"))));
+            let mut output = egui::FullOutput::default();
+            // Fullscreen controls use an Area with an initial invisible sizing pass.
+            for _ in 0..3 {
+                output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 300.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| app.draw_ui(ui, &mut Vec::new()),
+                );
+            }
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.pos.y > 270.0 && text.galley.text().contains("Unsupported orientation fixture"))));
             assert_eq!(app.state, PlaybackState::Faulted);
         }
         app.close_tab_unchecked(tab);

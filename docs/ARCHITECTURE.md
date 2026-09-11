@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U04: メディア通知のステータス集約（2026-09-12）
+
+画像読込／再サンプリング／読書ページ／再生失敗のmessageをmedia表示面へ描かず、status左のpathと置換する。読書drag中の値、長押し速度、期限内の一時通知、処理中／失敗状態、folder処理の順に解決する。既存のselection keyboard focus hintは保持し、読書drag中はその値を優先する。一時通知は既存の4秒で失効し、処理／失敗が残っていればその状態、それ以外はpathへ戻る。失敗詳細はstatusのtooltipへ全文保持し、読書の複数失敗も集約する。画像成功時に寸法・形式を一時通知へ書き込まず、形式／寸法／frame数はstatus右へ常設する。読書drag確定値は4秒残し、取消値は残さない。
+
+fullscreenの上中央通知を廃止し、通知中は既存の下端control barを表示する。focusを取得せず、非active／modal／overlay等の従来の表示抑止は維持する。通知終了後は通常のedge／keyboard／dragによる可視条件へ戻る。Welcome案内や保存確認等のmodalはこの集約の対象外。音量HUDの追記は別gateとし、現時点では既存音量通知を保持する。
+
 ## U04/G01: Debug版のID交替診断枠（2026-09-12）
 
 共通styleでDebug版eguiのwarn_if_rect_changes_idだけを無効にする。同じrectに異なるtabのcontrolが現れる等の遷移を赤い診断枠として画面へ出さない。通常のfocus stroke／keyboard／UIA／tab別focus保持、同一pass内の実ID重複を検出するwarn_on_id_clash、他の診断設定は変更しない。固定eguiのこの診断描画自体がdebug_assertions限定のためReleaseの表示は変えない。これはID安定性の全監査や、利用者の全環境で赤枠が消えたことの認定ではない。

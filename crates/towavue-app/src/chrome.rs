@@ -118,6 +118,12 @@ pub fn style(style: &mut egui::Style) {
     style.visuals.weak_text_color = Some(MUTED);
     style.visuals.selection.bg_fill = HOVER;
     style.visuals.selection.stroke = Stroke::new(1.0, FOREGROUND);
+    style.visuals.window_shadow.offset[0] = 0;
+    style.visuals.window_shadow.blur = 18;
+    style.visuals.window_shadow.color = Color32::from_black_alpha(112);
+    style.visuals.popup_shadow.offset[0] = 0;
+    style.visuals.popup_shadow.blur = 10;
+    style.visuals.popup_shadow.color = Color32::from_black_alpha(112);
     style.visuals.hyperlink_color = FOREGROUND;
     for (visuals, foreground, background) in [
         (&mut style.visuals.widgets.noninteractive, MUTED, BORDER),
@@ -405,6 +411,98 @@ pub fn logo(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn centered_shadows_keep_the_existing_single_mesh_path() {
+        let context = crate::fonts::test_context();
+        let _ = context.run_ui(Default::default(), |_| {});
+        let old = egui::Style::default();
+        let mut styled = old.clone();
+        super::style(&mut styled);
+        let mut counts = Vec::new();
+        for (before, after) in [
+            (old.visuals.window_shadow, styled.visuals.window_shadow),
+            (old.visuals.popup_shadow, styled.visuals.popup_shadow),
+        ] {
+            assert_eq!(after.offset[0], 0);
+            assert_eq!(after.offset[1], before.offset[1]);
+            assert_eq!(after.spread, before.spread);
+            assert_eq!(after.margin().left, after.margin().right);
+            assert!(after.color.a() > before.color.a());
+            for density in [1.0, 1.25, 1.5, 2.0] {
+                for size in [
+                    egui::vec2(160.0, 108.0),
+                    egui::vec2(240.0, 160.0),
+                    egui::vec2(588.0, 300.0),
+                ] {
+                    let caster = egui::Rect::from_min_size(egui::pos2(40.0, 50.0), size);
+                    let tessellate = |shadow: egui::Shadow| {
+                        context.tessellate(
+                            vec![egui::epaint::ClippedShape {
+                                clip_rect: egui::Rect::EVERYTHING,
+                                shape: shadow.as_shape(caster, 6).into(),
+                            }],
+                            density,
+                        )
+                    };
+                    let before = tessellate(before);
+                    let after = tessellate(after);
+                    assert_eq!(before.len(), after.len());
+                    for (before, after) in before.iter().zip(&after) {
+                        if let (
+                            egui::epaint::Primitive::Mesh(before),
+                            egui::epaint::Primitive::Mesh(after),
+                        ) = (&before.primitive, &after.primitive)
+                        {
+                            assert_eq!(before.indices.len(), after.indices.len());
+                            assert_eq!(before.texture_id, after.texture_id);
+                        }
+                    }
+                    let vertices = |primitives: &[egui::ClippedPrimitive]| {
+                        primitives
+                            .iter()
+                            .map(|primitive| match &primitive.primitive {
+                                egui::epaint::Primitive::Mesh(mesh) => mesh.vertices.len(),
+                                egui::epaint::Primitive::Callback(_) => {
+                                    panic!("shadow must remain a plain mesh")
+                                }
+                            })
+                            .sum::<usize>()
+                    };
+                    assert_eq!(vertices(&before), vertices(&after));
+                    counts.push((vertices(&before), vertices(&after)));
+                }
+            }
+        }
+        counts.sort_unstable();
+        counts.dedup();
+        eprintln!("shadow vertex counts (old,new): {counts:?}");
+        let caster = egui::Rect::from_min_size(egui::pos2(40.0, 50.0), egui::vec2(240.0, 160.0));
+        let mut times = [Vec::new(), Vec::new()];
+        for round in 0..8 {
+            for index in [round % 2, 1 - round % 2] {
+                let shadow = [old.visuals.popup_shadow, styled.visuals.popup_shadow][index];
+                let start = std::time::Instant::now();
+                for _ in 0..2000 {
+                    std::hint::black_box(context.tessellate(
+                        vec![egui::epaint::ClippedShape {
+                            clip_rect: egui::Rect::EVERYTHING,
+                            shape: shadow.as_shape(caster, 6).into(),
+                        }],
+                        1.25,
+                    ));
+                }
+                times[index].push(start.elapsed());
+            }
+        }
+        for time in &mut times {
+            time.sort();
+        }
+        eprintln!(
+            "shadow tessellation median/2000 old={:?}, new={:?}",
+            times[0][4], times[1][4]
+        );
+    }
+
     #[test]
     fn native_height_tab_controls_stay_in_the_padded_row() {
         for density in [1.0, 1.25, 2.0] {

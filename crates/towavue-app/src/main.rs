@@ -7,6 +7,8 @@ mod audio_export;
 mod audio_export_tests;
 mod audio_playback;
 mod chrome;
+#[cfg(test)]
+mod chrome_resize_tests;
 mod cursor;
 mod export_progress;
 mod filmstrip;
@@ -4403,8 +4405,14 @@ where
                         if self.media_kind == Some(MediaKind::Audio) && ui.max_rect().width() < 340.0 {
                             // Reserve three controls and their gaps before truncating a long clock.
                             let time_width = (ui.available_width() - 114.0).max(0.0);
-                            ui.add_sized([time_width, 24.0], egui::Label::new(time_text).truncate())
-                                .help_text(format!("{} / {duration}", format_time(self.current_position())));
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(time_width, 24.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.set_min_width(time_width);
+                                    ui.add(egui::Label::new(time_text).truncate())
+                                },
+                            ).inner.help_text(format!("{} / {duration}", format_time(self.current_position())));
                         } else { ui.label(time_text); }
                         let volume = ui
                             .add_sized(

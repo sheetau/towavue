@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 U03/U04 resize/shadow checkpoint: 通常幅の左寄せ5種は右端1px変更で不動だったが、狭い音声時計は0.5px動く経路を再現。可変幅領域を明示左寄せへ変更し、4倍率の往復resizeを回帰確認。eguiの影は横offset0／黒alpha112、window blur18／popup blur10へ調整し、24条件で旧版と同じmesh／vertex／index／texture構成を確認。実ウィンドウdrag全経路、font適用漏れとGPU時間／全blur品質の認定は未完。全UX gateを保持する。
+
 2026-09-12 U01/U04 tab-inset checkpoint: native button／下区切りの位置を変えず、通常時の内側1 physical px borderと上下3 logical pxを予約してタブ高を決定。最大化safe areaの二重加算を防ぎ、低い行でeguiの最小button高がはみ出す経路も修正。4倍率のnative geometryと3倍率のlabel／close bounds、既存全app回帰を確認。通常窓の変更前後を観察したが、今回のnative入力結果とfullscreenキャプチャは確定できず、全経路は未完。先行56d1eddのCIではforeground完了と別段階のpreview登録を混同した既存テストが競合し、共有結果を期限付きで待つ契約へ修正。全UX gateを維持する。
 
 2026-09-12 V04/A01/A02 volume/list checkpoint: 1.2秒の非操作音量HUDを左中央／動画上余白へ配置し、status左の重複通知を除去。音声list／scrollbar外のwheelを音量へ接続。再生中の行は白文字のみ、右端に可視行の非同期source durationを表示。要求置換・snapshot／ticket照合・失敗記憶・label cache制限を追加。3倍率のHUD／行描画、期限／owner／Undo／status保持、wheel所有権、既存virtualized navigation／UIA、生成素材の実duration取得を回帰確認。実window／入力・全素材の確認と全UX gateは未完。

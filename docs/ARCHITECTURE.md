@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U03/U04: 左寄せ時計と軽量な影調整（2026-09-12）
+
+音声statusが340 logical px未満では、短縮時計を可変幅領域の中央へ置かず、明示left-to-right／上下中央の子UIへ配置する。領域の最小幅・24px高さ・残りのvolume／repeat／shuffle用領域と、時計の省略／全文tooltipは維持する。右端resizeに追従するのは余剰幅であり時計の開始位置ではない。単なるLabel.halignではadd_sizedの領域内中央配置が変わらないため、配置を所有する子UIを変更する。通常幅のtab名／list名／status path・time・volumeは既存配置を維持する。
+
+egui window／popup shadowの横offsetを0、黒alphaを112へ揃える。既存の縦offset（window20／popup10）・spread0は維持し、blur幅をwindow15→18、popup8→10 logical pxへ少し広げる。既存Shadowのfeathered plain meshだけを使い、shader・texture・blur pass・workerを追加しない。window／popup×3寸法×4倍率では旧版とvertex／index数・texture／primitive数が同じ。CPU側tessellation標本は測るが、blur外周の塗る面積は増えるためGPU時間不変とは断定しない。Gaussian／CSSと同等のぼかしを新設したものではなく、負荷優先の既存方式の調整とする。native DWMの影には触れない。
+
 ## U01/U04: native境界に沿うタブ余白（2026-09-12）
 
 toolbarのnative button下端／1 physical px区切り線と左右配置を変えず、タブの上下に3 logical pxずつの余白を確保する。通常時は上端のnative内側border 1 physical pxを別途予約し、最大化時は不可視insetを避けるがこのborderを重ねて予約しない。rootのsafe areaは二重加算しない。固定26pxではなく残りをタブ高とし、headlessの32px toolbarにも同じborder／余白計算を使う。極端に低い行では余白を利用可能高の1/4までに制限し、負の高さを作らない。タイトル行だけeguiの最小interact高を行高へ合わせ、buttonの縦paddingを0にする。tab文字の横10px／close幅24px、ID・guard・drag・native glyph／hit処理は維持する。任意UI倍率・native fullscreen／全DPIの実入力認定ではない。

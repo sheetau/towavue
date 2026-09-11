@@ -527,7 +527,15 @@ fn color_image(frame: &towavue_runtime_windows::DecodedImageFrame) -> egui::Colo
     for row in frame.rgba.chunks_exact(size[0].max(1) * 4) {
         let row = row.as_chunks::<4>().0;
         // Opaque rows need no alpha conversion; mixed rows keep egui's exact rounding.
-        if row.iter().all(|pixel| pixel[3] == 255) {
+        // Reduce whole pixels in bounded blocks while retaining early exit for mixed rows.
+        let alpha_mask = u32::from_ne_bytes([0, 0, 0, 255]);
+        if row.chunks(32).all(|block| {
+            block
+                .iter()
+                .fold(u32::MAX, |bits, pixel| bits & u32::from_ne_bytes(*pixel))
+                & alpha_mask
+                == alpha_mask
+        }) {
             pixels.extend(
                 row.iter()
                     .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3])),
@@ -16680,7 +16688,7 @@ mod tests {
 
     #[test]
     fn image_color_conversion_matches_egui_for_opaque_and_transparent_rows() {
-        for width in [1, 3, 256, 257] {
+        for width in [1, 3, 15, 16, 17, 31, 32, 33, 63, 64, 65, 256, 257] {
             let mut rgba = Vec::new();
             for alpha in 0..=255 {
                 for x in 0..width {
@@ -16712,6 +16720,18 @@ mod tests {
             compare(&frame);
             frame.rgba[3] = 0;
             compare(&frame);
+            for index in [15, 16, 17, 31, 32, 33, 63, 64, 65] {
+                if index >= width as usize {
+                    continue;
+                }
+                for pixel in frame.rgba.as_chunks_mut::<4>().0 {
+                    pixel[3] = 255;
+                }
+                for alpha in [0, 127, 128, 254] {
+                    frame.rgba[index * 4 + 3] = alpha;
+                    compare(&frame);
+                }
+            }
         }
     }
 

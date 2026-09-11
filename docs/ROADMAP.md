@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I03 color-preparation checkpoint: 表示用RGBAの不透明判定を行内32画素単位にまとめ、混在行のegui標準丸めと短絡を維持。全alpha・block境界の一致を確認。100 JPEGの準備中央値は約1ms短縮し、最短33ms切替は約8.3～8.5→7.3～7.5ms。即時切替は約16.7msでほぼ横ばい。中間blank／previewとGPU可視表示・cold／全形式／資源を含む全UX gateは未完。
+
 2026-09-12 I03 overlap checkpoint: 先読み引継ぎ修正を前提に、通常画像の復号成功受取からtexture準備前へ次画像の先読み開始を移動。同一completion末尾の再submitを防ぎ、予算・worker・readingは維持。UI contextのtexture準備を止めても先読みが進む回帰を確認。100 JPEGの即時切替中央値は約22.6→16.6ms、p95は約23.4→17.7ms。最短33ms条件は約8.0→8.3～8.5msと改善せず、blank／previewなし・GPU／実入力／全形式／資源と全UX台帳は未完。
 
 2026-09-12 I03 100-image/handoff checkpoint: 4096×2304 JPEG 100枚のRelease計測を追加し、切替の二重空要求が進行中先読みを取消す経路を修正。要求世代を一回で置換し、原寸ready直後に次へ進むCPU描画条件の中央値は約28.5→22.6ms、p95は約30.7→23.4ms。最短33ms条件は約8msで大差なし。全100枚のpath／寸法／原寸mesh到達は確認したが、途中描画には空表示・低解像度が残る。可視GPU表示・一定周期入力の飛越し・cold／他形式／資源と全UX台帳は未完。

@@ -1,14 +1,7 @@
 use super::*;
 use std::os::windows::process::CommandExt;
 
-#[test]
-fn neighbor_prefetch_runs_before_current_texture_preparation() {
-    let Some(root) = crate::tests::isolated_test_root(
-        "image_navigation::performance_tests::neighbor_prefetch_runs_before_current_texture_preparation",
-    ) else {
-        return;
-    };
-    let paths = [root.join("current.bmp"), root.join("next.bmp")];
+fn bitmap_fixture(path: &Path) {
     let mut bitmap = vec![0_u8; 62];
     bitmap[..2].copy_from_slice(b"BM");
     bitmap[2..6].copy_from_slice(&62_u32.to_le_bytes());
@@ -20,8 +13,116 @@ fn neighbor_prefetch_runs_before_current_texture_preparation() {
     bitmap[28..30].copy_from_slice(&24_u16.to_le_bytes());
     bitmap[34..38].copy_from_slice(&8_u32.to_le_bytes());
     bitmap[54..].copy_from_slice(&[12, 34, 56, 12, 34, 56, 0, 0]);
+    std::fs::write(path, bitmap).expect("owned bitmap");
+}
+
+#[test]
+fn completed_original_is_drawn_before_its_queued_notification() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::performance_tests::completed_original_is_drawn_before_its_queued_notification",
+    ) else {
+        return;
+    };
+    let path = root.join("source.bmp");
+    bitmap_fixture(&path);
+    for show_preview in [false, true] {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            if matches!(event, AppEvent::ImagesReady) {
+                let _ = tx.send(event);
+            }
+        })
+        .expect("app");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        app.tabs.open_new(path.clone(), MediaKind::Image);
+        // Prefetch inserts the original before its shared preview. A cache hit then
+        // emits only the completion notification, so this ordering test needs no sleep guess.
+        app.image_loader.prefetch(path.clone());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app
+            .preview_cache
+            .cached_image(&path)
+            .expect("preview lookup")
+            .is_none()
+        {
+            assert!(Instant::now() < deadline, "prefetch timeout");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        app.load_path(path.clone(), MediaKind::Image);
+        let queued = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("completed original");
+        assert!(app.image_loading && app.image.is_none());
+        if !show_preview {
+            app.ui_context = None;
+            let _ = context.run_ui(Default::default(), |ui| app.draw_ui(ui, &mut Vec::new()));
+            assert!(
+                app.image_loading && app.image.is_none(),
+                "do not drain before context setup"
+            );
+            app.ui_context = Some(context.clone());
+        }
+        if show_preview {
+            app.finish_image_preview(
+                path.clone(),
+                app.image_preview_generation,
+                towavue_runtime_windows::CachedImagePreview {
+                    source_size: (2, 1),
+                    image: towavue_runtime_windows::PreviewImage {
+                        width: 1,
+                        height: 1,
+                        rgba: vec![255, 0, 0, 255],
+                    },
+                },
+            );
+        }
+        let preview = app
+            .image_previews
+            .get(&path)
+            .map(|preview| preview.texture.id());
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(640.0, 480.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.draw_ui(ui, &mut Vec::new()),
+        );
+        let image = app
+            .image
+            .as_ref()
+            .expect("ready original must precede drawing");
+        let texture = image.texture.id();
+        assert_eq!(image.dimensions(), (2, 1));
+        assert!(!app.image_loading);
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Mesh(mesh) if mesh.texture_id == texture)));
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Mesh(mesh) if Some(mesh.texture_id) == preview)));
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text().contains("Loading images"))));
+        app.handle_app_event(queued);
+        assert_eq!(
+            app.image.as_ref().expect("original retained").texture.id(),
+            texture,
+            "late wakeup must not rebuild the texture"
+        );
+    }
+}
+
+#[test]
+fn neighbor_prefetch_runs_before_current_texture_preparation() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::performance_tests::neighbor_prefetch_runs_before_current_texture_preparation",
+    ) else {
+        return;
+    };
+    let paths = [root.join("current.bmp"), root.join("next.bmp")];
     for path in &paths {
-        std::fs::write(path, &bitmap).expect("owned bitmap");
+        bitmap_fixture(path);
     }
     let decoded = towavue_runtime_windows::decode_image(&paths[0]).expect("current original");
     let mut app = Application::new(None, |_| {}).expect("app");
@@ -215,6 +316,7 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
     for cadence in [Duration::ZERO, Duration::from_millis(33)] {
         let mut ready = Vec::new();
         let mut prepare = Vec::new();
+        let mut draw_time = Vec::new();
         let mut dispatch = Vec::new();
         let mut blank_targets = 0;
         let mut preview_targets = 0;
@@ -225,8 +327,11 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
             let mut blank = false;
             let mut preview = false;
             let mut preparation = Duration::ZERO;
+            let mut drawing = Duration::ZERO;
             loop {
+                let draw_started = Instant::now();
                 let (full, low_resolution) = draw(&mut app);
+                drawing += draw_started.elapsed();
                 blank |= !full && !low_resolution;
                 preview |= low_resolution;
                 if full {
@@ -240,6 +345,7 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
             }
             ready.push(start.elapsed());
             prepare.push(preparation);
+            draw_time.push(drawing);
             blank_targets += usize::from(blank);
             preview_targets += usize::from(preview);
             assert!(!app.image_loading && app.image_error.is_none());
@@ -258,7 +364,7 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
             values[values.len() / 2].as_secs_f64() * 1000.0
         };
         eprintln!(
-            "NAV100 cadence_ms={} files_mib={:.1} full=100 blank_targets={} preview_targets={} ready_median_ms={:.3} ready_p95_ms={:.3} prepare_median_ms={:.3} dispatch_median_ms={:.3}",
+            "NAV100 cadence_ms={} files_mib={:.1} full=100 blank_targets={} preview_targets={} ready_median_ms={:.3} ready_p95_ms={:.3} event_completion_median_ms={:.3} draw_total_median_ms={:.3} dispatch_median_ms={:.3}",
             cadence.as_millis(),
             bytes as f64 / 1048576.0,
             blank_targets,
@@ -266,10 +372,11 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
             median(&ready),
             percentile_95(&ready).as_secs_f64() * 1000.0,
             median(&prepare),
+            median(&draw_time),
             median(&dispatch)
         );
     }
     eprintln!(
-        "Scope: warm filesystem, synthetic Shell snapshot, serialized commands with all originals visited, CPU egui mesh/texture preparation; no GPU presentation, physical keys, dropped-key burst, peak memory or IrfanView comparison. Any blank/preview target leaves the seamless-navigation gate unmet."
+        "Scope: warm filesystem, synthetic Shell snapshot, serialized commands with all originals visited, CPU egui mesh/texture preparation. Event completion and total draw calls can both prepare textures; neither isolates conversion time. No GPU presentation, physical keys, dropped-key burst, peak memory or IrfanView comparison. Any blank/preview target leaves the seamless-navigation gate unmet."
     );
 }

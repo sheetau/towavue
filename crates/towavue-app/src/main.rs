@@ -2558,6 +2558,10 @@ where
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        if root.ctx().current_pass_index() == 0 && self.image_loading && self.ui_context.is_some() {
+            // A redraw can overtake the queued decoder wakeup; use an already-ready original.
+            self.finish_image_load();
+        }
         self.refresh_status_file_size();
         self.cancel_stale_video_rotation();
         self.cancel_stale_video_resize();

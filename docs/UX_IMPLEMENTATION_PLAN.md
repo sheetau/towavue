@@ -13,6 +13,8 @@
 
 ### 2026-09-12追記の差分台帳
 
+画像の原寸完成後に残る通知順序のgapを修正。draw_uiの初回passで既に完成した結果を取り込み、previewあり／なしの双方で原寸を優先する。未完了decodeは待たず、旧画像を表示対象として偽装しない。context未準備時と後着wake-upも回帰確認済み。100枚のRelease CPU計測では即時／33ms間隔ともblank_targets=100、preview_targets=96／1、ready中央値16.966／7.676ms。全原寸到達とseamless達成は区別し、gateは未達のまま。表示handoff・全画像到達・実GPU／resource確認を継続する。
+
 動画Ctrl wheelも共通parserへ接続し、非active入力と同frame内の複数pointer基点へ即時反映する。動画固有のmodifier除外、timeline／overlay・右dragの保護を維持。3倍率の生成動画GPU描画で同frame反映・末尾Ctrl解除・残量なし・focus loss／再開・timeline gateを確認。OSから非active窓への実入力は未検証。
 
 status容量は描画中のmetadata取得を廃止し、path／media instance／snapshot変更単位の非同期取得へ移す。現在一件だけを保持し、待機／失敗の省略・古いticket拒否・snapshot更新での再取得を回帰確認済み。workerは一件実行＋最新待機、UI closeでjoinしない。実window drag全体の遅延認定とは分け、下記gateを維持する。

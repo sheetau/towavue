@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## I06/I07: 完了済み原寸を描画前に取り込む（2026-09-12）
+
+image_loading中かつUI contextが準備済みなら、draw_uiの最初のlayout passで既存finish_image_loadを呼び、worker mailboxに既にある結果だけを取り込む。RedrawがImagesReadyの処理に先行しても、完成している原寸より空表示／縮小previewを優先しない。通知は引き続き必要であり、後から届いた同じwake-upは空のmailboxとして無害に処理する。context準備前に結果を消費せず、eguiの追加layout passで別の完了結果へ再切替しない。既存のgeneration／path／chunk順序／errorとtexture cache処理を再利用し、UIでの復号待機・filesystem query・新timer／worker／cacheは追加しない。texture準備の既存CPU費用はUI側に残る。
+
+これは完了通知と描画の順序に由来する不要な一回のloading表示を防ぐもので、未完了decodeを高速化したり、古い画像を保持して見かけだけ準備完了にする処理ではない。初回load・cache miss・連打の途中では引き続きpreview／空表示があり得る。100枚原寸のseamless gateは未達のまま保持し、表示handoffとmetadata／編集targetの整合、全画像到達とメモリ上限を次に扱う。
+
 ## G01/V05: 動画wheelの即時・非active反映（2026-09-12）
 
 動画も平滑化済みinput.zoom_deltaとframe末尾のhover／modifier判定から、画像と共通のevent単位zoom parserへ移す。動画用の薄い入口でCtrl必須・Alt／mac_cmd除外を各MouseWheelへ適用し、画像側のmodifier契約は変えない。単位・倍率速度・上限は従来値を維持する。複数wheelはevent時点のpointer位置で順にzoom_videoを適用し、その実倍率でpanと次event用centerを更新する。Ctrlをframe末尾に離しても既に届いたwheelを捨てず、空frameや後続Ctrl入力へ平滑化残量を持ち越さない。SAR・編集後寸法・physical倍率・viewport／UV clip・表示専用stateは既存経路を使う。

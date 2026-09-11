@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I06/I07 ready-before-draw checkpoint: 原寸結果がworker側で完成してもImagesReady未処理のRedrawで空表示になる経路を再現。初回layout passで完了済み結果だけを取り込み、previewの有無どちらでも原寸meshを同frameへ出す。context未準備時の保持・後着通知でtexture再生成しない回帰も追加。4096×2304 JPEG100枚のRelease CPU計測では即時／33ms間隔ともblank_targets=100、preview_targets=96／1、ready中央値16.966／7.676ms。全原寸を訪問したがseamless gateは未達。event完了とdraw双方がtexture準備し得るため計測labelも区別する。復号待ちの表示handoff・実GPU表示と全UX gateを保持する。
+
 2026-09-12 G01/V05 video-wheel checkpoint: 動画zoomを共通raw event parserへ移し、非active MouseWheelと同frame複数pointer基点を扱う。Ctrl／Alt除外はevent単位、timeline／overlay・drag保護は維持。生成FFV1／SAR素材の3倍率GPU描画で、active／inactive、末尾Ctrl解除、遅延残量なし、focus loss／再開、timelineを閉じた際の抑止を回帰確認。parserで修飾key競合・明示Zoomのfocus条件も確認。OS実入力・全hardware経路と全UX gateを保持する。
 
 2026-09-12 G01/I07/I08 inactive-image-wheel checkpoint: 下位scroll関数の非active対応だけでは、呼出元のdrag用focus gateで止まることを確認。画像wheelをoverlay共通条件へ分離し、Ctrl wheelも非activeで受け付ける。選択／右drag／bar、明示Zoom／multi-touchのfocus条件とfocus-loss frameの取消は維持。3倍率×active／inactiveの実draw_ui回帰でpan／zoomの同frame mesh、pointer基点・texture／履歴保持・再開／overlay抑止を確認済み。OS実入力、動画側zoomを含む他経路と全UX gateは維持する。

@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## I07: 大画像のHost統合整理・再open計測（2026-09-12）
+
+opt-in Release testのHOST100は、既存の4096×2304 JPEG100枚fixtureを共用し、可視windowの実WindowHostへ明示的な次pathを逐次渡す。worker通知・描画・Present・送りの受領・空frame・1秒の待機は製品event loopを通し、診断Trimやtest側の時刻送りは使わない。閉じる前・自動整理後・再open後のmanaged texture、process、GPU counterを記録し、旧原寸のWeak失効とrendererの旧ID削除を確認する。未対応GPU counterは理由付きskipであり、ゼロとして扱わない。非表示windowでは原寸取得後のRedrawRequestedが届かないケースを確認したため、描画をtest側で注入せず可視windowを使う。phaseごとの30秒watchdogは製品の早いwakeを上書きせず、timeoutの失敗をevent loop終了後に報告する。Debug実行は正しさの確認だけであり性能値として扱わない。
+
+再open時間はopen要求から製品描画の到達までとし、その後の照合用追加描画・64点readbackは含めない。flip-discardのPresent後の内容には依存せず、照合用描画をPresentする前に読む。閉じる前の非blank標本と再open後の標本を比較する。生成直後のwarm JPEG・可視単一window・明示pathの直列試験であり、全100画像の画素照合、物理キーburst、cold storage、全画面のnative操作、Trimなしとの遅延比較、閲覧中peak削減の証明とはしない。製品のcache予算・描画経路・依存関係は変更しない。
+
 ## I07: 最後の画像tabの削除で原寸cacheを解放（2026-09-12）
 
 最後の画像tabを削除した場合は、音声／動画tabが残っていてもwindow所有の原寸texture cacheとdecoded cacheを解放する。全tabが空の場合の従来の解放も維持する。通常closeとtab transferが使う共通remove_tabで、active／inactiveどちらの削除にも適用する。無関係な音声／動画tabだけの削除では画像workerの世代を更新しない。decoded解放は既存ImageLoader.clearの非同期・世代取消を利用し、後続の音声／動画restoreが空requestを発行してもsticky clearを失わない。再生session／clock／編集／音量や共有thumbnailは触らず、画像tabが残る場合はcacheを維持する。transfer先へ渡した画像のArcは別ownerとして維持する。従来の「他tabが残れば維持」は原寸cacheについて「他の画像tabが残れば維持」へ更新する。device-wide Trimは引き続き全windowの空状態だけであり、再生中には追加しない。

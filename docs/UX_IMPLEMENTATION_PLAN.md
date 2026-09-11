@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+I07 HOST100: 生成4096×2304 JPEG100枚を実WindowHostの可視windowで順番に表示し、最後のtabを閉じた後の製品側の自動整理と再openを測るopt-in試験を追加。非表示では原寸取得後のnative redrawが届かず最初で止まったため、描画注入ではなく可視fixtureへ変更した。phaseのwatchdogは既存の早いwakeを維持し、callbackでpanicせずevent loop終了後に失敗を報告する。Debugは正しさ専用。通常build・cache予算は変更しない。
+
+Release 2回とも全100到達、close→整理1019.839／1020.703ms。managed textureは8個／254MiB相当→13個／3.48MiB相当で旧原寸IDは全消失し、decoded Weakも失効する（Welcomeの小型texture等があるため個数ゼロを条件にしない）。GPU localは303.17→17.09MiB、現在commit 959.1→131.6／954.9→130.8MiB、working set 675.9→136.7／673.1→137.0MiB。再open→製品描画43.526／49.978msで、時間外の追加描画・Present前readbackにより閉じる前の非blank標本と64点が一致。後続画像の到達中央値32.017／31.478ms、process最高commit約1034MiBはこの可視・直列・warm条件の観測であり、以前のhidden NAV100やTrimなしとの直接比較には使わない。全666通常tests／fmt／Clippy／Releaseと独立2試行が通過。物理キー／wheel・全native/DPI、cold／他形式／IrfanView、閲覧中peak、他UX gateを継続する。
+
 I07 final-image-cache: 原寸cache解放を共通remove_tabの早期returnより前へ移し、最後の画像tab削除または全tab終了で実行する。Audio／Videoが残る場合もdecoded cacheは既存workerで非同期解放するが、別の画像tabがあれば維持。無関係なAudio／Videoだけのcloseでは画像workerの世代を変えず、active media instance／再生stateを維持する。全window空状態でのGPU Trim条件は変更しない。
 
 検証: 旧実装は最後の画像tabを閉じた後の非empty cacheで失敗。新回帰はactive／inactive×残存Audio／Video、実BMPからのdecoded cache保持と非同期Weak失効、texture free、同じmedia instance／state／errorを確認。別windowへのtransferでも移動元cacheを解放し、移動先の同じArc／RGBAを保持、移動先closeで最後のownerが消える。実動画／無音WASAPI session試験でinactive画像close後のsession generation／位置／速度／編集履歴を維持。これはsessionとCPU所有の確認で、今回の試験を新たなGPU動画Present認定とはしない。既存active-tab回帰は、最後の不要画像workerの取消だけを明示して許し、表示中Imageの世代と全media identity／viewの保持を引き続き検証。全666通常testsと追加音声試験通過。大画像Host統合計測／再open、閲覧中peak、native入力・比較・他UX gateを継続する。

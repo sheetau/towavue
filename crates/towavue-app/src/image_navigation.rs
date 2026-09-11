@@ -4,7 +4,7 @@ mod sequence;
 pub(super) use sequence::ImageSequence;
 
 #[cfg(test)]
-mod performance_tests;
+pub(crate) mod performance_tests;
 #[cfg(test)]
 mod sequence_tests;
 

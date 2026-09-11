@@ -202,7 +202,7 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
     measure(root, None);
 }
 
-fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
+pub(crate) fn large_jpeg_fixture(root: &Path) -> Vec<PathBuf> {
     let output = std::process::Command::new(
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe"),
     )
@@ -231,9 +231,13 @@ fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let paths: Vec<_> = (1..=100)
+    (1..=100)
         .map(|n| root.join(format!("image-{n:03}.jpg")))
-        .collect();
+        .collect()
+}
+
+fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
+    let paths = large_jpeg_fixture(&root);
     let bytes: u64 = paths
         .iter()
         .map(|path| std::fs::metadata(path).expect("fixture").len())

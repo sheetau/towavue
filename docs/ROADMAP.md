@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I09 selection-gesture checkpoint: 角の二辺resize・Shiftで開始比率／対角固定・方向cursorと、画像範囲内の右dragによる選択移動を追加。移動はpixel幅／高さを保ち、画像端でclamp、共通取消で復元する。四隅×Shift有無・保持／同frame完結・上下限・非正方pixel範囲の移動と、100／125／200%の描画経路でpan／dirty保持を確認。可視操作、動画cornerの全品質、外部click解除・crop preview撤去／範囲zoomと全UX台帳は継続する。
+
 2026-09-12 I08 bounded-image-scroll checkpoint: follow-up追記の画像pan制限・右drag Grabbing・縦wheel／Shift横wheel・overflow軸のfloating scrollbarを接続。表示panを一つの位置として共用し、zoom／preview／resize／編集後も画像端でclampする。100／125／200%のFit固定・両軸／片軸overflow・drag取消・wheel／bar・texture／dirty保持と既存の選択辺focusを確認。端の不可視操作領域は画像外panではなくviewportへのclipで保つ。Computer Useはwindow再選択後もactivationエラーで可視確認を保留。実入力・外観／全DPI／UIAと全UX台帳は継続する。
 
 2026-09-12 I07 immediate-zoom checkpoint: 画像Ctrl＋wheelが平滑化により複数frameへ分割される状態を再現し、raw event量を同じ描画回で全反映する。単位／倍率設定を保ち、各event座標を基点に順序どおり適用し、画像textureは再生成しない。30／120Hz相当の入力回倍率と90frameの残量なし、方向反転／同frame複数入力のmesh、単位・phase・修飾key・入力所有権を確認。通常scroll／動画は変更しない。実Ctrl＋wheelの可視latency／全DPI・連続負荷と全UX台帳は継続する。

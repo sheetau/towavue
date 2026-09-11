@@ -182,6 +182,50 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
         assert_eq!(app.edits, history);
         assert!(output.textures_delta.set.is_empty());
         assert_eq!(app.image.as_ref().expect("image").texture.id(), texture);
+        app.image_view.pan = (0.0, 0.0);
+        let selected = PixelCrop {
+            x: 400,
+            y: 320,
+            width: 200,
+            height: 160,
+        };
+        app.image_view.selection = Some(selected.unit_rect((1000, 800)));
+        frame(
+            &mut app,
+            vec![egui::Event::PointerMoved(start)],
+            density,
+            size,
+        );
+        let end = start + egui::vec2(20.0, -10.0);
+        frame(&mut app, vec![button(start, true)], density, size);
+        frame(
+            &mut app,
+            vec![egui::Event::PointerMoved(end), button(end, false)],
+            density,
+            size,
+        );
+        let moved = PixelCrop::from_selection(
+            app.image_view.selection.expect("moved selection"),
+            (1000, 800),
+            MediaKind::Image,
+        )
+        .expect("pixel selection");
+        assert_eq!(
+            (moved.width, moved.height),
+            (selected.width, selected.height)
+        );
+        assert_eq!(moved.x, selected.x + (20.0 * density).round() as u32);
+        assert_eq!(
+            moved.y,
+            (selected.y as f32 + (-10.0 * density).round()) as u32
+        );
+        assert_eq!(
+            app.image_view.pan,
+            (0.0, 0.0),
+            "selection drag must not pan the image"
+        );
+        assert_eq!(app.edits, history);
+        app.image_view.selection = None;
         app.image_view.pan = (10000.0, -10000.0);
         for _ in 0..3 {
             frame(&mut app, vec![], density, egui::vec2(1400.0, 300.0));

@@ -2,6 +2,9 @@ use egui::accesskit::{Action, ActionData, Orientation, TreeId};
 use egui::{Id, Rect, Ui};
 use towavue_core::{MediaKind, PixelCrop, UnitRect};
 
+#[cfg(test)]
+mod gesture_tests;
+
 pub fn has_focus(context: &egui::Context) -> bool {
     context
         .data(|data| data.get_temp::<Id>(Id::new("selection-value-focus")))

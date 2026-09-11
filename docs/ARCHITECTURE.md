@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## I09: 選択角のresizeと画像内の選択移動（2026-09-12）
+
+共通のvisual selection hit testでは、8 logical pxの既存許容幅内にある最も近い角を辺より優先し、二辺を同時に変更する。対角はdrag開始時の選択へ固定し、反対側へ交差した場合は反転せずそこで縮退する。Shift時は開始時の比率を保ち、pointerが要求する縦横の大きい方まで拡げつつ、対角から画像端までに収める。辺だけのShift操作は従来の反対辺固定・直交軸中央保持を維持する。hoverでは辺／角の向きに合うresize cursor、primary保持中はCrosshairを使う。確定時の画像／動画のpixel整列と取消は既存経路を使う。
+
+通常画像でcrop previewが無効な時、選択矩形内のsecondary pressは画像panより先に選択移動が所有する。開始時の選択とpointerを保持し、編集後の画像pixelへ換算した相対移動を整数へ丸め、幅・高さを保って画像端まで移動する。範囲外のsecondary pressはI08のpanを使う。移動中はAllScroll cursor、release自身の位置で確定し、共通のgesture取消では開始時の選択を復元する。画像pan・texture・編集履歴は変えず、同じreleaseをpanへ渡さない。readingと動画のsecondary panは変更しない。
+
+この変更は外部clickによる選択解除やcrop preview撤去／範囲への通常zoomを完了するものではない。それらはfollow-upの未完要件として保持する。角の共通geometry実装と、実動画での全入力／品質認定を混同しない。
+
 ## I08: 画像の有界panとscrollbar（2026-09-12）
 
 follow-up追記を採用し、通常画像の表示panは各軸で±max(表示寸法−viewport寸法, 0)／2 logical pxへ制限する。収まる軸は中央固定とし、拡大・縮小、編集後の寸法変更、window resize、保持state復帰と元寸法付きpreviewにも適用する。Ctrl＋wheelのpointer基点はこの範囲内だけ維持し、余白を作ってまで基点へ追従しない。右dragは少なくとも一軸にはみ出しがある時だけ開始し、保持中はGrabbing cursor、取消時は既存の開始位置復帰を使う。動画とreadingの表示・移動規則は変更しない。

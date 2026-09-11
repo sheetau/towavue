@@ -549,6 +549,7 @@ enum SelectionDrag {
     Right,
     Top,
     Bottom,
+    Corner { left: bool, top: bool },
 }
 
 #[derive(Clone, Copy)]
@@ -563,6 +564,10 @@ enum ViewDrag {
     Pan {
         origin: egui::Pos2,
         before: (f32, f32),
+    },
+    MoveSelection {
+        origin: egui::Pos2,
+        before: UnitRect,
     },
 }
 
@@ -2976,12 +2981,21 @@ where
         let displayed = egui::vec2(transform.size.0 * scale, transform.size.1 * scale);
         response.interact_rect =
             image_scroll::surface(viewport, displayed, ui.spacing().scroll.bar_width);
-        if displayed.x > viewport.width() || displayed.y > viewport.height() {
+        let selection_moved = self.move_image_selection(
+            &response,
+            egui::Rect::from_center_size(
+                viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1),
+                displayed,
+            ),
+            image_size,
+            pointer,
+        );
+        if !selection_moved && (displayed.x > viewport.width() || displayed.y > viewport.height()) {
             self.update_pan(&response, pointer);
             if matches!(self.view_drag, Some(ViewDrag::Pan { .. })) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             }
-        } else if matches!(self.view_drag, Some(ViewDrag::Pan { .. })) {
+        } else if !selection_moved && matches!(self.view_drag, Some(ViewDrag::Pan { .. })) {
             self.cancel_view_drag();
         }
         let enabled = self.view_drag_allowed(ui.ctx()) && self.view_drag.is_none();
@@ -3253,6 +3267,7 @@ where
             return canceled_press;
         };
         match drag {
+            ViewDrag::MoveSelection { before, .. } => self.image_view.selection = Some(before),
             ViewDrag::Selection { before, .. } => self.image_view.selection = before,
             ViewDrag::Pan { before, .. } => self.image_view.pan = before,
         }
@@ -3301,6 +3316,45 @@ where
         }
     }
 
+    fn move_image_selection(
+        &mut self,
+        response: &egui::Response,
+        image_rect: egui::Rect,
+        size: (u32, u32),
+        pointer: Option<egui::Pos2>,
+    ) -> bool {
+        if self.image_view.crop_preview || !self.view_drag_allowed(&response.ctx) {
+            return false;
+        }
+        let (origin, release) =
+            view_drag_button_positions(response, egui::PointerButton::Secondary);
+        if self.view_drag.is_none()
+            && let (Some(origin), Some(before)) = (origin, self.image_view.selection)
+            && selection_rect(image_rect, before).contains(origin)
+        {
+            self.view_drag = Some(ViewDrag::MoveSelection { origin, before });
+        }
+        let Some(ViewDrag::MoveSelection { origin, before }) = self.view_drag else {
+            return false;
+        };
+        if let Some(pointer) = release.or(pointer)
+            && let Some(mut crop) = PixelCrop::from_selection(before, size, MediaKind::Image)
+        {
+            let delta =
+                (pointer - origin) / image_rect.size() * egui::vec2(size.0 as f32, size.1 as f32);
+            crop.x =
+                (crop.x as f32 + delta.x.round()).clamp(0.0, (size.0 - crop.width) as f32) as u32;
+            crop.y =
+                (crop.y as f32 + delta.y.round()).clamp(0.0, (size.1 - crop.height) as f32) as u32;
+            self.image_view.selection = Some(crop.unit_rect(size));
+        }
+        response.ctx.set_cursor_icon(egui::CursorIcon::AllScroll);
+        if release.is_some() {
+            self.view_drag = None;
+        }
+        true
+    }
+
     fn visual_selection_enabled(&self) -> bool {
         self.media_kind != Some(MediaKind::Video) || self.timeline_is_visible()
     }
@@ -3313,6 +3367,9 @@ where
         square: bool,
         pointer: Option<egui::Pos2>,
     ) {
+        if matches!(self.view_drag, Some(ViewDrag::MoveSelection { .. })) {
+            return;
+        }
         if !self.visual_selection_enabled() {
             if matches!(self.view_drag, Some(ViewDrag::Selection { .. })) {
                 self.cancel_view_drag();
@@ -3328,6 +3385,21 @@ where
             return;
         };
         let point = unit_point(pointer, image_rect);
+        if self.view_drag.is_none()
+            && response.hovered()
+            && let Some(edge) = self
+                .image_view
+                .selection
+                .and_then(|selection| selection_edge(pointer, image_rect, selection))
+        {
+            response.ctx.set_cursor_icon(match edge {
+                SelectionDrag::Left | SelectionDrag::Right => egui::CursorIcon::ResizeHorizontal,
+                SelectionDrag::Top | SelectionDrag::Bottom => egui::CursorIcon::ResizeVertical,
+                SelectionDrag::Corner { left, top } if left == top => egui::CursorIcon::ResizeNwSe,
+                SelectionDrag::Corner { .. } => egui::CursorIcon::ResizeNeSw,
+                SelectionDrag::New(_) => egui::CursorIcon::Crosshair,
+            });
+        }
         if self.view_drag.is_none()
             && let Some(origin) = origin
             && let Some(mode) = self
@@ -3349,6 +3421,9 @@ where
             });
         }
         let selection_owned = matches!(self.view_drag, Some(ViewDrag::Selection { .. }));
+        if selection_owned && !released {
+            response.ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
         let options = response.ctx.options(|options| options.input_options);
         let mut tracking = origin.is_none();
         // egui's response can describe a later gesture in the same frame. Keep
@@ -3451,12 +3526,60 @@ where
         };
         let pixel_ratio = ratio_selection.width() * image_size.0 as f32
             / (ratio_selection.height() * image_size.1 as f32).max(1.0);
+        if let SelectionDrag::Corner { left, top } = edge {
+            let anchor = UnitPoint {
+                x: if left {
+                    ratio_selection.max.x
+                } else {
+                    ratio_selection.min.x
+                },
+                y: if top {
+                    ratio_selection.max.y
+                } else {
+                    ratio_selection.min.y
+                },
+            };
+            let mut width = if left {
+                anchor.x - point.x
+            } else {
+                point.x - anchor.x
+            }
+            .max(0.0);
+            let mut height = if top {
+                anchor.y - point.y
+            } else {
+                point.y - anchor.y
+            }
+            .max(0.0);
+            if preserve_ratio {
+                let ratio = ratio_selection.width() / ratio_selection.height().max(f32::EPSILON);
+                let max_width = if left { anchor.x } else { 1.0 - anchor.x };
+                let max_height = if top { anchor.y } else { 1.0 - anchor.y };
+                width = width
+                    .max(height * ratio)
+                    .min(max_width)
+                    .min(max_height * ratio);
+                height = width / ratio.max(f32::EPSILON);
+            }
+            selection = UnitRect {
+                min: UnitPoint {
+                    x: if left { anchor.x - width } else { anchor.x },
+                    y: if top { anchor.y - height } else { anchor.y },
+                },
+                max: UnitPoint {
+                    x: if left { anchor.x } else { anchor.x + width },
+                    y: if top { anchor.y } else { anchor.y + height },
+                },
+            };
+            self.image_view.selection = Some(selection);
+            return;
+        }
         match edge {
             SelectionDrag::Left => selection.min.x = point.x.min(selection.max.x),
             SelectionDrag::Right => selection.max.x = point.x.max(selection.min.x),
             SelectionDrag::Top => selection.min.y = point.y.min(selection.max.y),
             SelectionDrag::Bottom => selection.max.y = point.y.max(selection.min.y),
-            SelectionDrag::New(_) => return,
+            SelectionDrag::New(_) | SelectionDrag::Corner { .. } => return,
         }
         if preserve_ratio && image_size.0 > 0 && image_size.1 > 0 {
             match edge {
@@ -3493,7 +3616,7 @@ where
                     selection.min.x = (center - width * 0.5).max(0.0);
                     selection.max.x = (center + width * 0.5).min(1.0);
                 }
-                SelectionDrag::New(_) => {}
+                SelectionDrag::New(_) | SelectionDrag::Corner { .. } => {}
             }
         }
         self.image_view.selection = Some(selection);
@@ -8092,6 +8215,19 @@ fn selection_edge(
 ) -> Option<SelectionDrag> {
     let rect = selection_rect(image_rect, selection);
     let tolerance = 8.0;
+    if let Some((_, left, top)) = [
+        (rect.left_top(), true, true),
+        (rect.right_top(), false, true),
+        (rect.left_bottom(), true, false),
+        (rect.right_bottom(), false, false),
+    ]
+    .into_iter()
+    .map(|(corner, left, top)| ((pointer - corner).abs().max_elem(), left, top))
+    .filter(|(distance, _, _)| *distance <= tolerance)
+    .min_by(|left, right| left.0.total_cmp(&right.0))
+    {
+        return Some(SelectionDrag::Corner { left, top });
+    }
     let mut candidates = Vec::new();
     if pointer.y >= rect.top() - tolerance && pointer.y <= rect.bottom() + tolerance {
         candidates.push(((pointer.x - rect.left()).abs(), SelectionDrag::Left));

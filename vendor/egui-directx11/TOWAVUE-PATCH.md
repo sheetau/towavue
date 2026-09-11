@@ -17,12 +17,15 @@ Local changes:
 - Add an offscreen WARP test comparing mixed linear/nearest output pixels and
   switching a texture's sampler through a partial update.
 - Recognize the plain `InvertMesh` paint-callback payload in tessellation order.
-  Opaque white geometry uses inverse-destination RGB blending and preserves
-  destination alpha. Every subsequent normal mesh restores ordinary blending.
+  Premultiplied white geometry uses inverse-destination RGB blending and preserves
+  destination alpha. Vertex alpha interpolates from the original to inverted RGB:
+  `a * (1 - destination) + (1 - a) * destination`. Opaque image outlines remain
+  identical; alpha51 adds white20% difference fills for time selection. Every
+  subsequent normal mesh restores ordinary blending.
   Texture sampling, the existing UI pipeline and scissor clipping remain shared;
   arbitrary GPU callbacks are still unsupported. No native handles are carried
   in the payload.
-- Verify atlas-white inversion, overlapping inversion, clipping, alpha and
+- Verify atlas-white 0/20/100% inversion, overlapping inversion, clipping, alpha and
   following ordinary meshes by exact readback on WARP and an owned offscreen
   hardware device. Hardware creation failure reports an explicit skip; shader,
   draw and pixel failures after creation fail the test.

@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 V03/A02 timeline-rendering checkpoint: #181818・radius3背景と左右／上8px・下0のmargin、内側3pxの描画領域を導入。音声／動画×3幅×3倍率で背景／波形／選択位置と二境界を確認し、初期96px・tab別resize／小窓時上限の回帰も維持。時間選択だけ白20% difference塗りと左右1物理px点線へ変更し、文字／control線の下へ描く。反転blendをalpha対応し、WARP／hardwareの0／20／100%・重なり／clip／alpha／通常描画復帰の全画素を確認。従来の画像枠は変更しない。実window／入力・全DPI監査とpreview等の全UX gateは未完。
+
 2026-09-12 V03/A02/U12 timeline-input checkpoint: CTIを領域内の白1物理px＋三角markerとし、seek dragの開始をmarkerへ限定。線からの通常範囲選択、左右端resize／cursor／offset保持／交差clampと音量線の白50%／ResizeRowを実装。batched／別frameの一回commit、取消、既存gain／stretch／keyboard／UIAを回帰確認。seekbarは背景と再生済み白の間にhover位置まで白25%進捗を追加し、3倍率の順序・範囲・非commit・disabled／既存端点を確認。実入力・実画面は今回未確認。timeline背景／余白・difference選択塗り／点線、preview等の全UX gateは未完。
 
 2026-09-12 U04 status checkpoint: media表示面のloading／resampling／画像・読書・再生errorをstatus左へ集約。読書drag値を優先し確定後4秒、画像成功時の情報flashを除きframe数を右へ常設。fullscreen上中央の通知は下端barへ統合しfocus取得なし・既存抑止を維持。2幅×3倍率×通常／fullscreenの一回描画・path復帰、部分ページ／複数error、読書取消・履歴と既存focusを回帰確認。Release通常画像のpath／右情報を可視確認。Computer Useの対象とのintegrity差とactivation失敗により実入力は未確認。音量HUD・caption／tab／timeline／preview等と全UX gateは未完。

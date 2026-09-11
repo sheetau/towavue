@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## V03/A02: timeline背景と時間選択合成（2026-09-12）
+
+timeline panelの外側は黒とし、左右・上のmarginを8 logical px、下は0とする。#181818・corner radius 3の背景を置き、その内側3 logical pxを波形・選択・CTIの共通領域とする。内側へ配置してもpanel全体の領域を確保し、既定96px・tab別resize／小窓時上限を維持する。追加borderを出さず、toolbar下とtimeline上（非表示時はstatus上）の二境界を維持する。
+
+画像選択の既存1物理px反転枠は変更しない。時間選択だけ、波形上／文字とcontrol線の下に白alpha51（20%）difference塗りと、左右端だけの白1物理px点線（2物理px描画／2物理px空白）を描く。上下borderは描かない。pixel境界へ丸め、細い選択でも最小1px、左右が同じpixelなら一度だけ描く。既存のplain InvertMesh callbackと通常meshを順に使い、native handleや画素をappへ渡さない。
+
+反転blendのdestination項をINV_SRC_ALPHAにし、premultiplied whiteのalphaをaとした `a*(1-dst)+(1-a)*dst` とする。destination alphaは保持し、a=1の画像枠は従来と同じ結果。通常meshでは通常blendへ戻す。既存mesh描画経路を使い、合成専用texture／shader／readback／CPU画像処理は追加しない。WARP／hardwareのoffscreen readbackで0／20／100%、重なり・clip・alpha・後続通常描画を検証し、実window／mixed-DPI入力の認定とは区別する。
+
 ## V03/A02/U12: timelineのドラッグ所有権とhover進捗（2026-09-12）
 
 timelineのCTIは領域内の白1物理px線と上端の下向き三角markerとする。markerの8 logical px高／左右各6 logical px内だけをseek dragの開始対象にし、端では領域内へ切り詰める。線全体の特別なhit判定は廃止し、線からも通常の範囲選択dragを始められる。通常timeline clickによるseekは維持する。

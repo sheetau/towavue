@@ -4743,8 +4743,12 @@ where
             .default_size(96.0)
             .size_range(64.0_f32.min(max_height)..=max_height)
             .resizable(true)
+            .frame(egui::Frame::NONE.fill(chrome::BACKGROUND).inner_margin(egui::Margin { left: 8, right: 8, top: 8, bottom: 0 }))
             .show(root, |ui| {
-                let rect = ui.available_rect_before_wrap();
+                let background = ui.available_rect_before_wrap();
+                ui.set_min_size(background.size());
+                ui.painter().rect_filled(background, 3.0, chrome::BORDER);
+                let rect = background.shrink(3.0);
                 if let Some(waveform) = &self.waveform {
                     if let Some(plan) = self.session.as_ref().and_then(PlaybackSession::timeline) {
                         let painter = ui.painter().with_clip_rect(rect);
@@ -11156,15 +11160,32 @@ mod tests {
         };
         for width in [320.0, 480.0, 960.0] {
             for density in [1.0, 1.25, 2.0] {
-                for timeline in [false, true] {
+                for (kind, timeline) in [
+                    (MediaKind::Video, false),
+                    (MediaKind::Video, true),
+                    (MediaKind::Audio, true),
+                ] {
                     let mut app = Application::new(None, |_| {}).expect("headless app");
                     let first = app.tabs.open_new(root.join("a.png"), MediaKind::Image);
                     app.tabs
                         .open_new(root.join("a-much-longer-name.png"), MediaKind::Image);
                     app.tabs.activate(first);
                     app.timeline_open = timeline;
-                    app.media_kind = Some(MediaKind::Video);
+                    app.media_kind = Some(kind);
+                    app.media_duration = Some(Duration::from_secs(10));
+                    app.state = PlaybackState::Paused;
+                    app.time_selection = towavue_core::TimeRange::new(
+                        media_time(Duration::from_millis(2500)),
+                        media_time(Duration::from_millis(7500)),
+                    );
                     let context = fonts::test_context();
+                    let waveform = context.load_texture(
+                        "timeline style fixture",
+                        egui::ColorImage::new([2, 1], vec![Color32::WHITE, Color32::GRAY]),
+                        egui::TextureOptions::NEAREST,
+                    );
+                    let waveform_id = waveform.id();
+                    app.waveform = Some(waveform);
                     context.enable_accesskit();
                     context.global_style_mut(chrome::style);
                     let mut output = egui::FullOutput::default();
@@ -11264,6 +11285,47 @@ mod tests {
                     assert!(borders[1] > 32.0);
                     if timeline {
                         assert!(borders[1] < 260.0);
+                        let background = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Rect(rect)
+                                    if rect.fill == chrome::BORDER
+                                        && rect.corner_radius == egui::CornerRadius::same(3)
+                                        && rect.rect.top() > borders[1] =>
+                                {
+                                    Some(rect.rect)
+                                }
+                                _ => None,
+                            })
+                            .expect("rounded timeline background");
+                        assert_eq!(background.left(), 8.0);
+                        assert_eq!(width - background.right(), 8.0);
+                        assert!((background.top() - borders[1] - 8.0).abs() <= 1.0 / density);
+                        assert!((background.bottom() - 270.0).abs() <= 1.0 / density);
+                        let track = background.shrink(3.0);
+                        let waveform = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Mesh(mesh) if mesh.texture_id == waveform_id => {
+                                    Some(mesh.calc_bounds())
+                                }
+                                _ => None,
+                            })
+                            .expect("waveform within rounded background");
+                        assert_eq!(waveform, track);
+                        let fill = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Callback(callback) => Some(callback.rect),
+                                _ => None,
+                            })
+                            .expect("time-selection difference fill");
+                        assert_eq!(fill.y_range(), track.y_range());
+                        assert!((fill.left() - egui::lerp(track.x_range(), 0.25)).abs() < 0.01);
+                        assert!((fill.right() - egui::lerp(track.x_range(), 0.75)).abs() < 0.01);
                     } else {
                         assert!((borders[1] - 270.0).abs() <= 1.0);
                     }

@@ -238,6 +238,15 @@ pub(super) fn show(
         output.seek = Some(crate::media_time(std::time::Duration::from_secs_f64(value)));
     }
     let painter = ui.painter().with_clip_rect(rect);
+    if let Some(range) = preview {
+        towavue_runtime_windows::paint_time_selection(
+            &painter,
+            Rect::from_min_max(
+                egui::pos2(x_at(range.start()), rect.top()),
+                egui::pos2(x_at(range.end()), rect.bottom()),
+            ),
+        );
+    }
     adjustment::paint(&painter, rect, &bands, gain_preview, &x_at);
     if preview != selection
         && drag.dragging
@@ -250,15 +259,6 @@ pub(super) fn show(
             format!("Length {:.3}s", range.duration().as_seconds_f64()),
             egui::FontId::proportional(11.0),
             crate::chrome::FOREGROUND,
-        );
-    }
-    if let Some(range) = preview {
-        towavue_runtime_windows::paint_selection_outline(
-            &painter,
-            Rect::from_min_max(
-                egui::pos2(x_at(range.start()), rect.top() + 1.0),
-                egui::pos2(x_at(range.end()), rect.bottom() - 1.0),
-            ),
         );
     }
     let pixel = 1.0 / ui.ctx().pixels_per_point();

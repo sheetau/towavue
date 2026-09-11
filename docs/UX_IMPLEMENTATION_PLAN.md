@@ -24,7 +24,7 @@
 | M01/G01 menu | button下の固定位置、直接section時は親を出さず中身だけ保持、Image jumpをView子menuへ、logoは背景を変えずgray／white線色・左にも同じgap・Edit方向45度を実装。親非表示／先頭位置・境界角・通常rootの4分類・nested keyboardと全command配置・取消／一回dispatch、3サイズ×3倍率の再openを回帰確認。実画面／全focus・DPI・pixel単位の余白監査は未完 |
 | U03/U04 font／resize | seek preview等のfont適用漏れ、右端resize時の左寄せtext／icon振動を調査。性能を優先し修正可能性を判断する。未完 |
 | G01/I08 非active wheel | 音声list・画像縦／Shift横scroll・既存音量領域のfocus必須条件を除去。非activeで距離／軸／非選曲／focus不変、volume、取消／所有権を回帰確認。OS実入力・Ctrl＋wheel等の他経路は未完 |
-| V03/A02 timeline外観／入力 | 白50%volume線とResizeRow、領域内の白1物理px CTI＋三角playheadからだけseek drag、選択左右resize／cursorを実装。端のoffset保持・交差clamp、一回commit／取消と既存gain／stretch／keyboard／UIA、3倍率の線幅／marker／hoverを回帰確認。#181818の角丸背景・左右上同幅余白、白20% difference塗り＋左右白1px点線と実画面／入力は未完 |
+| V03/A02 timeline外観／入力 | 白50%volume線とResizeRow、領域内の白1物理px CTI＋三角playheadからだけseek drag、選択左右resize／cursorを実装。端のoffset保持・交差clamp、一回commit／取消と既存gain／stretch／keyboard／UIAを回帰確認。#181818のradius3背景・左右上8px／下0余白、白20% difference塗り＋左右白1物理px点線も実装。音声／動画の3幅×3倍率で共通領域／二境界、resize・小窓上限を維持。WARP／hardwareで0／20／100%反転合成・clip／alpha／重なり／通常復帰を全画素確認し、画像枠の旧描画を保持。実画面／入力・全DPI／全経路監査は未完 |
 | U09/U10 tooltip／preview | hover終了後に残るtooltip／tab preview不発を根本調査し、非active hoverと元要素への中央揃えも確認。未完 |
 | U04 popup shadow | 左右中央・濃さ・ぼかしを調整し、描画の粗さを負荷優先で評価。未完 |
 | U12 seek hover | 既存trackと同じ高さ・範囲で、背景と白進捗の間にhover位置まで白alpha64の進捗を表示。3倍率×再生／hover位置の描画順・端clamp・hover非commit・disabledなしと既存drag／keyboard／idle全幅を回帰確認。実画面と入力は未確認 |

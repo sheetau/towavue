@@ -56,7 +56,8 @@ pub struct Renderer {
     texture_pool: TexturePool,
 }
 
-/// A paint-callback payload for opaque white geometry that inverts destination RGB.
+/// A paint-callback payload for premultiplied white geometry that inverts destination RGB.
+/// Vertex alpha interpolates between the original and inverted destination.
 /// The mesh uses the normal texture pool, clipping and draw order; alpha is preserved.
 #[derive(Clone)]
 pub struct InvertMesh(pub egui::epaint::Mesh);
@@ -318,93 +319,109 @@ mod sampling_tests {
             egui::ColorImage::new([1, 1], vec![egui::Color32::WHITE]),
             egui::TextureOptions::NEAREST,
         );
-        let callback = |rect| {
+        let callback = |rect, alpha| {
             let mut mesh = egui::epaint::Mesh::default();
-            mesh.add_colored_rect(rect, egui::Color32::WHITE);
+            mesh.add_colored_rect(rect, egui::Color32::from_white_alpha(alpha));
             egui::Shape::Callback(egui::PaintCallback {
                 rect,
                 callback: std::sync::Arc::new(InvertMesh(mesh)),
             })
         };
-        let output = context.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_max(
-                    egui::Pos2::ZERO,
-                    egui::pos2(16.0, 4.0),
-                )),
-                ..Default::default()
-            },
-            |ui| {
-                // Populate the normal font atlas without painting text; outline
-                // callbacks sample its white texel exactly like runtime geometry.
-                let _ = ui.painter().layout_no_wrap(
-                    "atlas".into(),
-                    egui::FontId::proportional(12.0),
-                    egui::Color32::WHITE,
-                );
-                let painter = ui.painter().with_clip_rect(egui::Rect::from_min_max(
-                    egui::pos2(4.0, 0.0),
-                    egui::pos2(12.0, 4.0),
-                ));
-                painter.add(callback(egui::Rect::from_min_max(
-                    egui::pos2(2.0, 1.0),
-                    egui::pos2(14.0, 3.0),
-                )));
-                painter.add(callback(egui::Rect::from_min_max(
-                    egui::pos2(6.0, 1.0),
-                    egui::pos2(8.0, 3.0),
-                )));
-                let mut normal = egui::epaint::Mesh::with_texture(white.id());
-                normal.add_rect_with_uv(
-                    egui::Rect::from_min_max(egui::pos2(8.0, 1.0), egui::pos2(10.0, 3.0)),
-                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                    egui::Color32::GREEN,
-                );
-                painter.add(normal);
-            },
-        );
-        // The test owns this target and immediate context; no window or shared
-        // surface is touched. Copy/Map synchronize GPU completion before reading.
-        unsafe {
-            immediate.ClearRenderTargetView(
-                &view,
-                &[17.0 / 255.0, 83.0 / 255.0, 149.0 / 255.0, 128.0 / 255.0],
+        for alpha in [0, 51, 255] {
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_max(
+                        egui::Pos2::ZERO,
+                        egui::pos2(16.0, 4.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    // Populate the normal font atlas without painting text; outline
+                    // callbacks sample its white texel exactly like runtime geometry.
+                    let _ = ui.painter().layout_no_wrap(
+                        "atlas".into(),
+                        egui::FontId::proportional(12.0),
+                        egui::Color32::WHITE,
+                    );
+                    let painter = ui.painter().with_clip_rect(egui::Rect::from_min_max(
+                        egui::pos2(4.0, 0.0),
+                        egui::pos2(12.0, 4.0),
+                    ));
+                    painter.add(callback(
+                        egui::Rect::from_min_max(egui::pos2(2.0, 1.0), egui::pos2(14.0, 3.0)),
+                        alpha,
+                    ));
+                    painter.add(callback(
+                        egui::Rect::from_min_max(egui::pos2(6.0, 1.0), egui::pos2(8.0, 3.0)),
+                        alpha,
+                    ));
+                    let mut normal = egui::epaint::Mesh::with_texture(white.id());
+                    normal.add_rect_with_uv(
+                        egui::Rect::from_min_max(egui::pos2(8.0, 1.0), egui::pos2(10.0, 3.0)),
+                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                        egui::Color32::GREEN,
+                    );
+                    painter.add(normal);
+                },
             );
-        }
-        renderer.render(&immediate, &view, &context, split_output(output).0)?;
-        let mut pixels = Vec::new();
-        // Mapping borrows the staging allocation only until Unmap on this thread;
-        // copy each valid row while mapped and retain no pointer afterwards.
-        unsafe {
-            immediate.CopyResource(&staging, &target);
-            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            immediate.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
-            for y in 0..4 {
-                pixels.extend_from_slice(std::slice::from_raw_parts(
-                    mapped.pData.cast::<u8>().add(y * mapped.RowPitch as usize),
-                    16 * 4,
-                ));
-            }
-            immediate.Unmap(&staging, 0);
-        }
-        for y in 0..4 {
-            for x in 0..16 {
-                let expected = if (1..3).contains(&y) && (8..10).contains(&x) {
-                    [0, 255, 0, 255]
-                } else if (1..3).contains(&y) && ((4..6).contains(&x) || (10..12).contains(&x)) {
-                    [238, 172, 106, 128]
-                } else {
-                    [17, 83, 149, 128]
-                };
-                assert_eq!(
-                    &pixels[(y * 16 + x) * 4..(y * 16 + x + 1) * 4],
-                    &expected,
-                    "inversion/clip/order/alpha at {x},{y}"
+            // The test owns this target and immediate context; no window or shared
+            // surface is touched. Copy/Map synchronize GPU completion before reading.
+            unsafe {
+                immediate.ClearRenderTargetView(
+                    &view,
+                    &[17.0 / 255.0, 83.0 / 255.0, 149.0 / 255.0, 128.0 / 255.0],
                 );
+            }
+            renderer.render(&immediate, &view, &context, split_output(output).0)?;
+            let mut pixels = Vec::new();
+            // Mapping borrows the staging allocation only until Unmap on this thread;
+            // copy each valid row while mapped and retain no pointer afterwards.
+            unsafe {
+                immediate.CopyResource(&staging, &target);
+                let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+                immediate.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+                for y in 0..4 {
+                    pixels.extend_from_slice(std::slice::from_raw_parts(
+                        mapped.pData.cast::<u8>().add(y * mapped.RowPitch as usize),
+                        16 * 4,
+                    ));
+                }
+                immediate.Unmap(&staging, 0);
+            }
+            for y in 0..4 {
+                for x in 0..16 {
+                    let blend = |destination: [u8; 4]| {
+                        let opacity = f64::from(alpha) / 255.0;
+                        let mut result = destination;
+                        for channel in &mut result[..3] {
+                            *channel = (f64::from(255 - *channel) * opacity
+                                + f64::from(*channel) * (1.0 - opacity))
+                                .round() as u8;
+                        }
+                        result
+                    };
+                    let original = [17, 83, 149, 128];
+                    let expected = if (1..3).contains(&y) && (8..10).contains(&x) {
+                        [0, 255, 0, 255]
+                    } else if (1..3).contains(&y) && ((4..6).contains(&x) || (10..12).contains(&x))
+                    {
+                        blend(original)
+                    } else if (1..3).contains(&y) && (6..8).contains(&x) {
+                        blend(blend(original))
+                    } else {
+                        original
+                    };
+                    assert_eq!(
+                        &pixels[(y * 16 + x) * 4..(y * 16 + x + 1) * 4],
+                        &expected,
+                        "inversion/clip/order/alpha {alpha} at {x},{y}"
+                    );
+                }
             }
         }
         eprintln!(
-            "PASS UI readback: driver={driver:?}, atlas-white inversion, alpha, clip and draw order"
+            "PASS UI readback: driver={driver:?}, atlas-white 0/20/100% inversion, alpha, clip and draw order"
         );
         Ok(())
     }
@@ -438,7 +455,7 @@ impl Renderer {
         let mut invert_blend_state = None;
         let mut invert_description = Self::BLEND_DESC;
         invert_description.RenderTarget[0].SrcBlend = D3D11_BLEND_INV_DEST_COLOR;
-        invert_description.RenderTarget[0].DestBlend = D3D11_BLEND_ZERO;
+        invert_description.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
         invert_description.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
         invert_description.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
         // State descriptions remain alive during creation; both blend states are

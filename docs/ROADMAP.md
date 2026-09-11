@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 M01 input-order checkpoint: 可視不発を追跡し、release後のPointerGoneによる確定取消と、batched press／moveの遅延hit-testによるdrag owner移動をそれぞれ回帰で再現・修正。退出は入力順で処理し、logoの所有pressを既存egui APIへ固定する。短いclick・foreign owner取消・3方向・実画像操作面とtabを確認。全603 tests／Release成功、最終通常960×576の生成PNGでView→Escape→Edit→Escape→Fileと通常clickが通る。3a019b7のCI34588315920成功。最大化／混在DPI・全focus/style、全UX台帳の残件は継続する。
+
 2026-09-11 U10 warm-card checkpoint: filmstripの先頭missが後続memory hitまで待たせる現象を可視確認し、既存workerのmemory先行公開→miss逐次生成へ修正。source stamp・duration・世代／取消・64件上限を維持し、表示順・worker数・cache予算は変更しない。旧順序の回帰失敗→成功、全体601 tests／Release成功。新Releaseの実960×576で61 MB PNGだけがLoadingの間に後続warm cardsが表示され、その後PNGも同位置に完成することを確認。旧Releaseでも4静止画形式のfilmstrip／原寸、reading WebPの先行表示→原寸を確認した。eb00c43のCI34586129718成功。cold／全DPI・素材・資源と全UX台帳は継続する。
 
 2026-09-11 U04 grayscale checkpoint: 共通styleのoverlay／入力欄の既定色、palette・playlist・filmstripの固有色を既存tokensへ統一。popup 1／1.25／2倍率、palette最大600px／compact／検索、playlistの通常・選択・hover・focusとクリック、card／drag texture維持を回帰確認。Computer Use接続が復旧し、通常960×576の実画面で無音2曲の行選択・pause、palette検索とEscape、logo menuを確認。全体599 tests／Release成功、f3a9c90のCI34584717553成功。全DPI・全media・filmstripの今回の可視状態と全UX台帳は継続する。

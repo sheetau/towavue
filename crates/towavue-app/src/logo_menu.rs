@@ -95,9 +95,7 @@ pub(super) fn show(
         || events.iter().any(|event| {
             matches!(
                 event,
-                egui::Event::PointerGone
-                    | egui::Event::WindowFocused(false)
-                    | egui::Event::Key { pressed: true, .. }
+                egui::Event::WindowFocused(false) | egui::Event::Key { pressed: true, .. }
             )
         })
         || (egui::Popup::is_any_open(context) && !egui::Popup::is_id_open(context, popup));
@@ -124,6 +122,18 @@ pub(super) fn show(
     let mut pointer_event = false;
     for event in &events {
         match event {
+            // A native pointer exit can follow release in the same frame. Only
+            // cancel a still-held gesture, not the submenu already committed.
+            egui::Event::PointerGone => {
+                if state.drag.take().is_some() {
+                    state.suppress = true;
+                    egui::Popup::close_id(context, popup);
+                    if context.dragged_id() == Some(response.id) {
+                        context.stop_dragging();
+                    }
+                    response.request_focus();
+                }
+            }
             egui::Event::PointerButton {
                 pos,
                 button: egui::PointerButton::Primary,
@@ -180,6 +190,10 @@ pub(super) fn show(
             state.drag = None;
             state.suppress = true;
             selected = None;
+        } else {
+            // egui hit-tests batched press/move at the final position. Pin our
+            // validated press before its deferred drag decision picks that widget.
+            context.set_dragged_id(response.id);
         }
     }
     state.last_frame = frame;

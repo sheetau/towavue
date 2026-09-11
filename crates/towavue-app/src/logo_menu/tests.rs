@@ -160,6 +160,138 @@ fn logo_drag_opens_each_existing_submenu_without_dispatch_and_keeps_keyboard_nav
 }
 
 #[test]
+fn logo_keeps_its_owned_press_when_batched_motion_hits_loaded_media_or_a_tab() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "logo_menu::tests::logo_keeps_its_owned_press_when_batched_motion_hits_loaded_media_or_a_tab",
+    ) else {
+        return;
+    };
+    for (target, expected) in [
+        (egui::pos2(50.0, 9.0), "Open file "),
+        (egui::pos2(45.0, 46.0), "Undo "),
+        (egui::pos2(9.0, 50.0), "Toggle fullscreen "),
+    ] {
+        let (mut app, origin) = setup(&root);
+        let context = app.ui_context.clone().expect("context");
+        app.image = Some(
+            ImagePresentation::from_decoded(
+                &context,
+                app.path.as_ref().expect("path"),
+                crate::tab_transfer::tests::decoded(false),
+            )
+            .expect("image"),
+        );
+        let size = egui::vec2(960.0, 576.0);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        frame(&mut app, size, vec![egui::Event::PointerMoved(origin)]);
+        frame(
+            &mut app,
+            size,
+            vec![pointer(origin, true), egui::Event::PointerMoved(target)],
+        );
+        for _ in 0..10 {
+            frame(&mut app, size, vec![]);
+        }
+        assert!(
+            context
+                .data(|data| data.get_temp::<State>(state_id()))
+                .expect("state")
+                .drag
+                .is_some(),
+            "owned drag disappeared over {target:?}"
+        );
+        frame(&mut app, size, vec![pointer(target, false)]);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        let tree = frame(&mut app, size, vec![])
+            .platform_output
+            .accesskit_update
+            .expect("tree");
+        assert!(
+            tree.nodes.iter().any(|(_, node)| node
+                .label()
+                .is_some_and(|label| label.starts_with(expected))),
+            "missing {expected}"
+        );
+        assert!(
+            app.image_view.selection.is_none()
+                && app.view_drag.is_none()
+                && app.pending_dialog.is_none()
+        );
+        assert!(context.dragged_id().is_none());
+        frame(&mut app, size, vec![key(egui::Key::Escape)]);
+        frame(
+            &mut app,
+            size,
+            vec![egui::Event::PointerMoved(origin), pointer(origin, true)],
+        );
+        frame(&mut app, size, vec![pointer(origin, false)]);
+        assert!(
+            egui::Popup::is_any_open(&context),
+            "ordinary separated click still opens root"
+        );
+        assert!(context.dragged_id().is_none());
+    }
+}
+
+#[test]
+fn logo_pointer_exit_obeys_release_order_in_batched_native_events() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "logo_menu::tests::logo_pointer_exit_obeys_release_order_in_batched_native_events",
+    ) else {
+        return;
+    };
+    for batched_press in [false, true] {
+        for exit_before_release in [false, true] {
+            for (delta, expected) in [
+                (egui::vec2(24.0, -12.0), "Open file "),
+                (egui::vec2(24.0, 24.0), "Undo "),
+                (egui::vec2(-12.0, 24.0), "Toggle fullscreen "),
+            ] {
+                let (mut app, origin) = setup(&root);
+                let size = egui::vec2(640.0, 480.0);
+                let target = origin + delta;
+                let history = app.edits.clone();
+                let mut events = vec![pointer(origin, true), egui::Event::PointerMoved(target)];
+                if !batched_press {
+                    frame(&mut app, size, std::mem::take(&mut events));
+                }
+                if exit_before_release {
+                    events.extend([egui::Event::PointerGone, pointer(target, false)]);
+                } else {
+                    events.extend([pointer(target, false), egui::Event::PointerGone]);
+                }
+                frame(&mut app, size, events);
+                for _ in 0..3 {
+                    frame(&mut app, size, vec![]);
+                }
+                assert_eq!(
+                    egui::Popup::is_any_open(app.ui_context.as_ref().expect("context")),
+                    !exit_before_release,
+                    "batched_press={batched_press}, exit_before_release={exit_before_release}, delta={delta:?}"
+                );
+                assert!(app.edits == history && app.pending_dialog.is_none());
+                let output = frame(&mut app, size, vec![]);
+                let tree = output.platform_output.accesskit_update.expect("tree");
+                assert_eq!(
+                    tree.nodes.iter().any(|(_, node)| node
+                        .label()
+                        .is_some_and(|label| label.starts_with(expected))),
+                    !exit_before_release
+                );
+                frame(&mut app, size, vec![key(egui::Key::Escape)]);
+                assert!(!egui::Popup::is_any_open(
+                    app.ui_context.as_ref().expect("context")
+                ));
+            }
+        }
+    }
+}
+
+#[test]
 fn logo_drag_cancellation_never_replays_a_click_and_plain_uia_click_still_opens_root() {
     let Some(root) = crate::tests::isolated_test_root(
         "logo_menu::tests::logo_drag_cancellation_never_replays_a_click_and_plain_uia_click_still_opens_root",

@@ -358,6 +358,10 @@ focusされたmedia tab名／close buttonからShift+F10、修飾なしのWindow
 
 既存Popup／MenuKeyboard／command有効性・shortcut表示を共用し、普通のclick／keyboard／UIA menuは維持する。方向dragのpopupはrelease点の右下8pxへanchorを固定し、離したpointerが別categoryへ直ちにhoverしないようにする（画面端の配置調整は既存Popupへ任せる）。通常clickのanchorは従来どおり。press所有とsource/tab／graphics世代を固定し、Escape・focus喪失・pointer消失・resize／DPI・他overlay／modal・toolbar非表示で取消。取消後の遅いreleaseをclickやcommandに変換しない。同frameのpress／move／releaseと描画再passでも一度だけ受理する。既存menuのEscape／左右移動／focus復帰・保存guardと非破壊編集を変更しない。
 
+2026-09-11追記: nativeのCursorLeftはeguiへ渡し、PointerGoneをpress／releaseと同じイベント順で処理する。release前の退出は保持中のgestureを取消し、release後の退出は確定済みsubmenuを取り消さない。Windows通知の段階で先に取消すと、描画待ちのreleaseを追い越してしまう。同frameへまとめられたpressの有無×退出の前後×3方向を回帰確認する。focus喪失・Escape・resize等の既存取消は変更しない。
+
+eguiは同frameのpress／moveを最後のpointer位置でhit-testするため、logoで受理したpressが保持中なら、そのframe内に既存のdrag owner APIへ明示登録する。これにより次frameの遅延drag判定が移動先の画像操作面やtabを選ぶことを防ぐ。既存のforeign owner検査は残し、release済み／取消済みにはownerを登録しない。実画像操作面とtab上へのbatched移動・保持・3方向submenuと、短い通常click／release後のowner解除を回帰確認する。
+
 ## U05: 保存中のツールバー境界進捗（2026-09-10）
 
 保存jobがある間だけ、ツールバー下の既存境界に非hoverのSeekと同じ白／#181818・1物理pxの進捗を表示する。別の境界やhit領域／focus stopは追加しない。通常の画像移動・preview／metadata読取・保存先選択には表示しない。既存の取消／保存先・解析状態の表示と、離脱Saveのguardは維持する。全画面でtoolbarがない時は境界も表示せず、既存の取消UIを利用する。

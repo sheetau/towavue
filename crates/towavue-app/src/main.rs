@@ -8164,13 +8164,14 @@ where
             self.cancel_hold_speed();
         }
         if let Some(context) = &self.ui_context {
+            // CursorLeft is handled in egui event order so it cannot cancel an
+            // earlier release that is still queued for the next UI frame.
             let escape = matches!(&event, WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed && event.logical_key == WinitKey::Named(NamedKey::Escape));
             if (escape
                 || matches!(
                     &event,
                     WindowEvent::Focused(false)
-                        | WindowEvent::CursorLeft { .. }
                         | WindowEvent::Resized(_)
                         | WindowEvent::ScaleFactorChanged { .. }
                         | WindowEvent::CloseRequested

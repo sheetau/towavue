@@ -484,6 +484,16 @@ fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
             .map(|image| image.texture.id())
             .collect();
         assert!(!originals.is_empty());
+        let owned = renderer
+            .as_ref()
+            .expect("GPU")
+            .verification_managed_textures();
+        assert!(
+            textures
+                .iter()
+                .all(|id| owned.iter().any(|(owned_id, _)| id == owned_id))
+        );
+        gpu::report_resources(renderer.as_ref().expect("GPU"), "before_close");
         app.close_tab_unchecked(app.tabs.active().expect("last tab").id);
         assert!(app.image_texture_cache.entries.is_empty() && app.image.is_none());
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -494,12 +504,32 @@ fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
         for _ in 0..3 {
             draw(&mut app, &mut renderer, false);
         }
+        let owned = renderer
+            .as_ref()
+            .expect("GPU")
+            .verification_managed_textures();
         for id in textures {
             assert!(context.tex_manager().read().meta(id).is_none());
+            assert!(!owned.iter().any(|(owned_id, _)| *owned_id == id));
         }
-        let renderer = renderer.as_ref().expect("GPU");
+        let renderer = renderer.as_mut().expect("GPU");
         memory.sample(renderer);
         memory.report_close();
+        gpu::report_resources(renderer, "normal_close");
+        renderer
+            .verification_retire_resources(false)
+            .expect("diagnostic flush");
+        gpu::report_resources(renderer, "clear_flush");
+        drop(
+            renderer
+                .verification_surface_rgba()
+                .expect("GPU completion readback"),
+        );
+        gpu::report_resources(renderer, "readback_complete");
+        match renderer.verification_retire_resources(true) {
+            Ok(()) => gpu::report_resources(renderer, "diagnostic_trim"),
+            Err(error) => eprintln!("SKIP NAV100 diagnostic trim: {error}"),
+        }
     }
     eprintln!(
         "Scope: warm filesystem, synthetic Shell snapshot, serialized commands with all originals visited. GPU runs use a hidden 960x576 window and include upload/render/Present in readiness; CPU runs only prepare meshes/textures. The separate readback run uses Nearest with 64 pixel checks per displayed original and is NOT a throughput comparison. Memory: process-lifetime OS peaks, GPU sampled maxima after image arrivals, not transient GPU peaks. No physical keys, dropped-key burst, cold data, other formats or IrfanView comparison. Any blank/preview target leaves the seamless-navigation gate unmet."

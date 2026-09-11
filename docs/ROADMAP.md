@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I07 GPU-retirement checkpoint: 非default検証featureへrenderer側managed textureのID／寸法を追加し、appのTextureHandleと別に所有を確認。3倍率のGPU回帰でfree deltaを止めるとrendererだけに旧textureが残り、通知すると消える対照を通過。Release GPU-NAV100 2回で、通常close後は8個／253MiB→1個／1MiB、旧原寸IDは全削除。GPU localは通常close／ClearState+Flush／readback完了後も338.2MiB、診断専用Trim後13.85MiBへ低下。これはdriver等の再利用領域が主因という根拠であり、通常動作のGPU削減を実装済みとはしない。burst全100・blank／preview各0も維持。全663通常＋vendor 4 tests、Clippy／fmt／Release／147package notice検証を通過。次は全windowのidle条件とfree delta送信境界を調べ、共有deviceへ適用する整理処理を他windowの再生や直後の再openと合わせて設計・検証する。全UX gateは継続。
+
 2026-09-12 I07 last-tab cache-release checkpoint: 最後のtab closeで原寸texture cacheを空にし、decoded cacheは既存workerへ非同期解放を要求する。閉じたsourceのcache残留を旧実装で再現し、修正後はWeak参照の失効とegui free delta、別tabが残る場合のcache／retained original復元を回帰確認。復号／先読み中の取消・cache lockをUIで待たないこと・直後の再openでも解放要求を失わないこと・idle解放を検証。通常cache予算と共有thumbnailは変更せず、閲覧中peak削減・複数tab全経路・native入力を含む全UX gateは維持する。
 
 同checkpointのRelease GPU-NAV100を2回実行し、100件burstは全順序描画・blank／preview各0、2013.465／2051.296ms。close後に原寸Weak失効とtexture manager削除、Welcome 3 frameのGPU submissionを確認。現在commitは991.2→459.0／1066.2→531.1MiB、working setは665.6→141.2／669.4→142.3MiB。GPU localは338.2→338.2／338.2→302.2MiBで、全GPU allocation解放・driver予約の内訳は未認定。全663通常testsとRelease build通過。次はGPUの生存資源とdriver側の保持を区別して調べ、device再作成や強制trimを根拠なく追加しない。

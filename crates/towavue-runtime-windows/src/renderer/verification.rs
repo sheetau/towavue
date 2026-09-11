@@ -31,6 +31,30 @@ impl Drop for MappedSurface<'_> {
 }
 
 impl FrameRenderer {
+    /// Inventory of renderer-owned managed textures, not driver allocations or user/video views.
+    pub fn verification_managed_textures(&self) -> Vec<(egui::TextureId, [usize; 2])> {
+        self.ui_renderer.verification_managed_textures()
+    }
+
+    /// Diagnostic only: retire bindings on an isolated, idle test device, optionally trim its caches.
+    pub fn verification_retire_resources(&mut self, trim: bool) -> Result<(), RenderError> {
+        // The test owns this multithread-protected immediate context and performs no concurrent
+        // media work. No mapped memory is live; subsequent draws rebind their complete state.
+        unsafe {
+            self.context.ClearState();
+            self.context.Flush();
+        }
+        if trim {
+            let device: windows::Win32::Graphics::Dxgi::IDXGIDevice3 =
+                self.graphics_device.device.cast()?;
+            // The owned device reference outlives Trim; only its internal caches are discarded.
+            unsafe {
+                device.Trim();
+            }
+        }
+        Ok(())
+    }
+
     pub fn verification_memory(&self) -> Result<VerificationMemory, RenderError> {
         let mut counters = PROCESS_MEMORY_COUNTERS_EX {
             cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32,

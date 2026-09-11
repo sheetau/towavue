@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## I07: GPU解放の検証境界（2026-09-12）
+
+非default render-verificationに限り、vendor rendererが保持中のmanaged textureのID／寸法を取得する。COM参照は返さず、通常buildには入口を含めない。app側TextureHandle失効とrenderer側pool削除を別々に検証する。閉じた後の使用量診断では通常frame、ClearState／Flush、Trimを分けて記録し、強制処理後の減少を通常動作の成果と呼ばない。ClearState／Flush／Trimの診断は他window／media処理のない所有test deviceだけで行い、製品のcloseや毎frameの経路へ追加しない。
+
+根拠: [Microsoft Flush](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-flush)は遅延破棄と送信の費用、[Trim](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_3/nf-dxgi1_3-idxgidevice3-trim)は内部buffer整理と再描画時の再確保費用を説明する。shared deviceの一windowを閉じただけで他windowのcacheまで整理する方針は採用しない。
+
 ## I07: 最後のtab closeで原寸cacheを解放（2026-09-12）
 
 最後のtabを閉じたらwindow所有の原寸texture cacheを空にし、ImageLoaderへ取消とdecoded cacheの非同期解放を要求する。復号workerが実行中の旧要求を抜けてからcacheを解放し、UIはcodec完了・cache lockを待たない。解放要求は直後の再openで上書きせず、新しいforeground要求の前に処理する。先読みは取消をcache挿入のlock内でも確認する。別tabが残る場合のcache／retained presentationと共有thumbnail cacheは維持する。GPU textureの解放は既存eguiのfree deltaを次の描画でrendererへ渡す。allocator／driverの予約とprocess-lifetime peakの低下を解放の必須条件にはしない。

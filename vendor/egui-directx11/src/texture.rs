@@ -303,6 +303,17 @@ pub struct TexturePool {
 }
 
 impl TexturePool {
+    #[cfg(feature = "render-verification")]
+    pub fn verification_managed_textures(&self) -> Vec<(TextureId, [usize; 2])> {
+        self.pool
+            .iter()
+            .filter_map(|(id, texture)| match texture {
+                Texture::Managed(texture) => Some((*id, texture.image.size)),
+                Texture::User { .. } => None,
+            })
+            .collect()
+    }
+
     pub fn options(&self, id: TextureId) -> egui::TextureOptions {
         match self.pool.get(&id) {
             Some(Texture::Managed(texture)) => texture.options,

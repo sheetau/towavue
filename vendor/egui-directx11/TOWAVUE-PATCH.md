@@ -7,6 +7,10 @@ The original MIT and Apache-2.0 license texts and texture-source attribution are
 
 Local changes:
 
+- Add a nondefault `render-verification` feature exposing managed texture IDs and
+  dimensions for runtime tests. It returns no native references and does not change
+  texture lifetime or production rendering.
+
 - Retain managed texture sampling options across full and partial updates, and
   select a cached D3D11 sampler per draw (minification, magnification, wrapping).
   User textures default to linear/clamp. Mipmaps are not generated; the original

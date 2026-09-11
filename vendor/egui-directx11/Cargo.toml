@@ -7,6 +7,9 @@ repository = "https://github.com/Nekomaru-PKU/egui-directx11"
 authors = ["Nekomaru <Nekomaru@pku.edu.cn>"]
 description = "Pinned egui Direct3D11 renderer with towavue texture sampling fixes"
 
+[features]
+render-verification = []
+
 [dependencies]
 log = "=0.4.34"
 egui = "=0.35.0"

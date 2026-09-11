@@ -678,6 +678,12 @@ impl Renderer {
         Ok(())
     }
 
+    #[cfg(feature = "render-verification")]
+    /// Return managed texture IDs and logical dimensions without retaining native resources.
+    pub fn verification_managed_textures(&self) -> Vec<(egui::TextureId, [usize; 2])> {
+        self.texture_pool.verification_managed_textures()
+    }
+
     fn setup(
         &mut self,
         ctx: &ID3D11DeviceContext,

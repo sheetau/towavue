@@ -173,6 +173,40 @@ fn gpu_handoff_preserves_pixels_through_supersession_and_renderer_recreation() {
                         "replace all sampled pixels with the latest original"
                     );
                 }
+                let current_texture = app.image.as_ref().expect("current").texture.id();
+                let contains = |renderer: &FrameRenderer, id| {
+                    renderer
+                        .verification_managed_textures()
+                        .iter()
+                        .any(|(texture, _)| *texture == id)
+                };
+                assert!(!contains(&renderer, old_texture));
+                assert!(contains(&renderer, current_texture));
+                app.close_tab_unchecked(app.tabs.active().expect("last tab").id);
+                assert!(context.tex_manager().read().meta(current_texture).is_none());
+                let mut output = frame(&mut app, &context);
+                let withheld = std::mem::take(&mut output.textures_delta.free);
+                assert!(withheld.contains(&current_texture));
+                renderer
+                    .render_ui(&context, output)
+                    .expect("withheld free control");
+                assert!(
+                    contains(&renderer, current_texture),
+                    "egui deletion alone is not GPU pool release"
+                );
+                let mut output = frame(&mut app, &context);
+                output.textures_delta.free.extend(withheld);
+                renderer
+                    .render_ui(&context, output)
+                    .expect("deliver free delta");
+                assert!(!contains(&renderer, current_texture));
+                for trim in [false, true] {
+                    renderer
+                        .verification_retire_resources(trim)
+                        .expect("isolated diagnostic");
+                    draw(&mut app, &context, &mut renderer, false);
+                    assert!(!contains(&renderer, current_texture));
+                }
                 // Context texture IDs restart per fixture; release this renderer's texture table.
                 let device = renderer.graphics_device();
                 renderer.release_surface();

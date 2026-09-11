@@ -1,7 +1,12 @@
 use crate::*;
 
+mod sequence;
+pub(super) use sequence::ImageSequence;
+
 #[cfg(test)]
 mod performance_tests;
+#[cfg(test)]
+mod sequence_tests;
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn jump_images(&mut self, offset: i32) {

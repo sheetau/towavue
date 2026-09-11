@@ -296,12 +296,16 @@ fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
                 egui::Shape::Mesh(mesh) if mesh.texture_id == held.image.texture.id())
             })
         });
+        let token = app.image_sequence_token(&output);
+        let presented = full.then(|| app.path.clone().expect("original source"));
         let gpu_calls = if let Some(renderer) = renderer {
             gpu::submit(app, &context, output, renderer, verify)
         } else {
             Duration::ZERO
         };
-        (full, preview, held, gpu_calls)
+        // GPU submission above includes Present; the CPU-only measurement uses a simulated ack.
+        app.finish_image_sequence_frame(token);
+        (full, preview, held, gpu_calls, presented)
     };
     let receive = |app: &mut Application<_>, timeout| {
         let mut prepare = Duration::ZERO;
@@ -362,7 +366,7 @@ fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
             let mut gpu_calls = Duration::ZERO;
             loop {
                 let draw_started = Instant::now();
-                let (full, low_resolution, held, gpu_elapsed) =
+                let (full, low_resolution, held, gpu_elapsed, _) =
                     draw(&mut app, &mut renderer, verify);
                 drawing += draw_started.elapsed();
                 gpu_calls += gpu_elapsed;
@@ -422,6 +426,50 @@ fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
         if let Some(memory) = memory {
             memory.report();
         }
+    }
+    if renderer.is_some() {
+        app.nearest_images = false;
+        draw(&mut app, &mut renderer, false);
+        assert_eq!(app.path.as_ref(), Some(&paths[0]));
+        let started = Instant::now();
+        for _ in 0..100 {
+            app.dispatch(CommandId::NextSameKind);
+        }
+        assert_eq!(
+            app.path.as_ref(),
+            Some(&paths[1]),
+            "burst cannot supersede the first unseen original"
+        );
+        let mut visited = Vec::new();
+        let mut blank = 0;
+        let mut previews = 0;
+        while visited.len() < 100 {
+            let (full, preview, held, _, presented) = draw(&mut app, &mut renderer, false);
+            blank += usize::from(!full && !preview && !held);
+            previews += usize::from(preview);
+            if let Some(path) = presented {
+                visited.push(path);
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(60),
+                "GPU burst timeout"
+            );
+            if visited.len() < 100 {
+                receive(&mut app, Duration::from_millis(1));
+            }
+        }
+        assert!(
+            visited
+                .iter()
+                .enumerate()
+                .all(|(index, path)| path == &paths[(index + 1) % 100])
+        );
+        assert!(app.image_sequence.awaiting.is_none() && app.image_sequence.steps.is_empty());
+        assert_eq!((blank, previews), (0, 0));
+        eprintln!(
+            "NAV100_BURST accepted=100 presented=100 blank=0 preview=0 elapsed_ms={:.3}; direct command burst, real GPU Present, no physical key delivery proof",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
     }
     eprintln!(
         "Scope: warm filesystem, synthetic Shell snapshot, serialized commands with all originals visited. GPU runs use a hidden 960x576 window and include upload/render/Present in readiness; CPU runs only prepare meshes/textures. The separate readback run uses Nearest with 64 pixel checks per displayed original and is NOT a throughput comparison. Memory: process-lifetime OS peaks, GPU sampled maxima after image arrivals, not transient GPU peaks. No physical keys, dropped-key burst, cold data, other formats or IrfanView comparison. Any blank/preview target leaves the seamless-navigation gate unmet."

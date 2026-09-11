@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+I03/I06/I07通常送りの逐次実行: 最新要求優先のため100件を描画前に送ると一周して最初の未描画targetを失う回帰を旧コードで確認。原寸handoffから新原寸のPresent成功まで方向だけ最大256件を保持し、同frame UI action後にmedia instance付きtokenを検証して1件ずつ進める。viewport外のmesh、旧handoff、復号完了だけではackにしない。dirty guard承認／直接target指定の後も最初の新原寸を通常送りで追い越さない。明示ジャンプ・source/tab移動・画像順／構成変更・失敗・編集／modal等では残りを取り消し、他種類だけの一覧変更では維持する。上限超過は通知し、受理済みの順序は守る。
+
+証拠: 新規5回帰で100方向の順序、前後混在、復号済み未描画中の追加入力、無効／重複／clip token、上限、取消、dirty guard承認を確認。既存の先読みテストは各画像の描画ackを合成してから次を要求する形へ更新し、先読み済みpixel／単一generation更新の検証は維持する。小型生成原寸の100件は実render_frame→GPU／Presentでも進行を確認。GPU-NAV100にも一括100コマンドcaseを追加し、4096×2304 JPEG100枚を2035.041／2048.473msで全順序描画、blank／preview各0。別の64点照合と通常caseも通過。通常GPUのready中央値は即時17.165／17.119ms、33ms間隔11.216／11.294ms。これはコマンド境界のburstであり、実キーボード入力の取りこぼしまで認定しない。メモリ予算は変更せず、通常case時点のprocess最高commitは1240.5／1241.5MiB程度のまま。次は閉tab／cacheの資源所有・解放と使用量削減を追跡し、native入力と全台帳を継続する。
+
 I03/I06/I07 GPU-NAV100: 既存100枚生成／Shell合成順／全原寸を待つ直列navigation計測を共通化し、GPU版はhidden 960×576窓へupload／描画／Presentまで行う。GPU API呼出時間も総draw時間と別に記録する（純GPU実行時間ではない）。通常のSmooth走行は読戻しなし、後続のNearest照合走行だけ各原寸64点の読戻しを行い、decode先読みへ余分な時間を与える後者を性能比較には使わない。test-only runtime counterからprocessのOS最高値と各画像到達後のGPU usageを取得し、未対応counterは理由付き省略。通常buildへ機能を入れない。
 
 Release 2回の結果: 即時ready中央値17.243／17.236ms、p95 20.316／20.072ms、GPU呼出累計中央値4.039／4.008ms。33ms間隔はready中央値11.073／11.241ms、p95 12.574／12.694ms、GPU呼出4.398／4.504ms。各caseで原寸100・blank 0・preview 0・handoff 100。別照合走行も各100原寸の64点を通過。CPU再実行は中央値16.879／7.682msでblank／preview各0を維持。これは当該条件での測定結果であり、ソフトウェアの高速化を今回実装したという意味ではない。

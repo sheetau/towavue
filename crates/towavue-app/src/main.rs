@@ -793,6 +793,7 @@ struct Application<N> {
     image_request_offset: usize,
     image_loading: bool,
     image_navigation_forward: bool,
+    image_sequence: image_navigation::ImageSequence,
     image_error: Option<String>,
     playback_error: Option<String>,
     image_view: ImageViewState,
@@ -1007,6 +1008,7 @@ where
             image_request_offset: 0,
             image_loading: false,
             image_navigation_forward: true,
+            image_sequence: image_navigation::ImageSequence::default(),
             image_error: None,
             playback_error: None,
             image_view: ImageViewState::default(),
@@ -1261,6 +1263,7 @@ where
     }
 
     fn take_image_tab_state(&mut self) -> RetainedImageTab {
+        self.image_sequence = image_navigation::ImageSequence::default();
         self.image_handoff = None;
         self.cancel_view_drag();
         RetainedImageTab {
@@ -1456,6 +1459,7 @@ where
     }
 
     fn load_path_with_transfer(&mut self, path: PathBuf, kind: MediaKind, transferred: bool) {
+        self.image_sequence = image_navigation::ImageSequence::default();
         self.image_handoff = None;
         if let Some(id) = self.displayed_tab
             && self.tabs.active().is_some_and(|tab| tab.id == id)
@@ -1739,6 +1743,17 @@ where
     }
 
     fn apply_folder_snapshot(&mut self, snapshot: FolderSnapshot) {
+        if self.folder_snapshot.as_ref().is_some_and(|previous| {
+            previous.folder_path != snapshot.folder_path
+                || !previous
+                    .items_of_kind(MediaKind::Image)
+                    .map(|item| &item.path)
+                    .eq(snapshot
+                        .items_of_kind(MediaKind::Image)
+                        .map(|item| &item.path))
+        }) {
+            self.image_sequence = image_navigation::ImageSequence::default();
+        }
         self.sync_audio_snapshot(&snapshot);
         let previous_reading_paths = self.reading_request_paths();
         if self
@@ -2008,6 +2023,7 @@ where
                 Err(error) => {
                     self.image = None;
                     self.image_error = Some(error.clone());
+                    self.image_sequence = image_navigation::ImageSequence::default();
                     self.fail(error);
                 }
             }
@@ -2478,6 +2494,7 @@ where
         let mut output = context.run_ui(input, |ui| {
             self.draw_ui(ui, &mut actions);
         });
+        let image_presentation = self.image_sequence_token(&output);
         keep_accessibility_focus_live(&context, &mut output.platform_output);
         if self.restore_ui_textures {
             output
@@ -2561,6 +2578,7 @@ where
                 self.handle_ui_action(action.clone());
             }
         }
+        self.finish_image_sequence_frame(image_presentation);
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
@@ -6488,6 +6506,7 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        self.image_sequence = image_navigation::ImageSequence::default();
         self.cancel_hold_speed();
         self.cancel_frame_steps();
         if self.metadata_dialog.is_some() {
@@ -6725,6 +6744,7 @@ where
             self.image = None;
             self.reading_pages.clear();
             self.image_handoff = None;
+            self.image_sequence = image_navigation::ImageSequence::default();
             self.clear_image_previews();
             self.path = None;
             self.refresh_status_file_size();
@@ -6787,6 +6807,10 @@ where
     }
 
     fn navigate(&mut self, forward: bool, same_kind: bool) {
+        let sequence = same_kind && self.media_kind == Some(MediaKind::Image) && !self.reading_mode;
+        if sequence && self.queue_image_step(forward) {
+            return;
+        }
         if same_kind && self.media_kind == Some(MediaKind::Audio) {
             self.navigate_audio(forward);
             return;
@@ -6975,6 +6999,9 @@ where
         self.load_path(path, kind);
         if self.image_loading && self.image.is_none() {
             self.image_handoff = handoff;
+            if self.image_handoff.is_some() {
+                self.image_sequence.awaiting = Some(self.media_generation);
+            }
         }
     }
 
@@ -14386,6 +14413,21 @@ mod tests {
                     app.finish_image_load();
                 }
             }
+            // This prefetch test requests the next step after a displayed original.
+            // Native GPU/Present acknowledgement is verified by the NAV100 burst test.
+            let context = app.ui_context.clone().expect("context");
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(640.0, 480.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut Vec::new()),
+            );
+            let token = app.image_sequence_token(&output);
+            app.finish_image_sequence_frame(token);
         };
         app.load_path(paths[5].clone(), MediaKind::Image);
         wait(&mut app);

@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## I03/I06/I07: 通常画像送りは描画成功後に逐次実行（2026-09-12）
+
+原寸表示済みの通常画像から始める次／前の1枚送りは、最新要求優先ではなく受理順に処理する。最初の移動から新原寸のmeshを含むframeのPresent成功までを待ち、追加の方向を最大256件だけ保持する。Pathやdecoded画像のqueueは増やさない。上限超過は通知して追加を受理せず、既存の受理分は維持する。復号完了だけでは次へ進めない。描画出力からmedia instance付きtokenを取得し、成功したPresentと同frameのUI action処理の後にtokenを検証して次の1件を開始する。描画失敗、旧handoffだけのframe、stale tokenは進行条件にしない。
+
+待機開始は共通の原寸handoffに結び付け、dirty guard承認後や直接指定した移動先についても、後続の通常1枚送りが最初の新原寸を飛ばさないようにする。直接指定どうしの上書きは残りの方向を破棄して新しいhandoff／tokenを作るため、最新の明示指定を優先できる。
+
+直接の飛び先指定、別sourceのload／tab離脱、画像一覧の順序・構成変更、復号失敗、編集・modal／export等への移行では残りの送りを取り消す。内部の逐次送りだけがloadによる取消をまたいで残りの方向を引き継ぐ。dirty guardは各移動で再利用し、未保存編集やdialogを越えて進めない。reading mode、初回原寸なし、種類を跨ぐ移動や明示ジャンプの最新要求優先は変更しない。後続節の「連打は最新要求優先」は通常1枚送りについてこの契約で置き換える。CPU-only testの合成描画ackと、実rendererのPresent成功は証拠として区別する。
+
 ## I06/I07: 復号待ちの原寸表示引継ぎ（2026-09-12）
 
 GPU画素の回帰検証にはruntimeの非default `render-verification` featureをappのdev-dependencyからだけ有効にする。safeな検証専用入口が同じrendererのRGBA back bufferをstaging textureへ読み戻し、所有されたbytesだけを返す。COM／mapped pointerはruntime外へ出さず、通常buildの描画経路にCPU readbackは追加しない。hidden test windowの画素／Present検証は、可視画面・実key入力・アプリ全体のpeak memory証明とは区別する。
@@ -8,9 +16,9 @@ GPU画素の回帰検証にはruntimeの非default `render-verification` feature
 
 同一tabの通常画像navigationでは、直前に表示した原寸presentationを一枚だけ表示専用handoffとして保持する。path・view・表示transform・取得済み容量も旧sourceと一緒に固定し、原寸の復号／texture準備が成功した同じ処理で新sourceへ置き換える。保持中は中央の縮小previewとloading captionを出さず、旧画像のanimationも進めない。tab target／titleは最新要求先、statusの画像情報／pathは表示中の旧sourceを表す。旧presentationを新targetのself.imageへ戻さない。
 
-保持中の編集・Undo/Redo・保存／書出し／metadata options・画像／pathコピー・Explorer表示と画像view操作はcommand gateで無効にし、直接の編集／書出し／画像コピー入口も保護する。中央描画は入力を扱わない。navigation・tab／window操作は維持し、連打は既存の最新要求優先で最後に表示できた一枚を引き継ぐ。古いgeneration／pathの完了では置換しない。失敗、別sourceのload、tab離脱／transfer、最後のtab closeで解放し、未完了の新targetをretained tabへ保存するときに旧画像を混入させない。graphics復旧では保持中textureも既存decoded pixelsから復元する。
+保持中の編集・Undo/Redo・保存／書出し／metadata options・画像／pathコピー・Explorer表示と画像view操作はcommand gateで無効にし、直接の編集／書出し／画像コピー入口も保護する。中央描画は入力を扱わない。navigation・tab／window操作は維持し、明示した飛び先の変更は最新要求優先で最後に表示できた一枚を引き継ぐ。通常1枚送りは前節の逐次実行を使う。古いgeneration／pathの完了では置換しない。失敗、別sourceのload、tab離脱／transfer、最後のtab closeで解放し、未完了の新targetをretained tabへ保存するときに旧画像を混入させない。graphics復旧では保持中textureも既存decoded pixelsから復元する。
 
-ImagePresentationの既存Arc／texture handleを共有し、handoffのためのRGBAコピー・worker・要求queueは追加しない。ただしcacheからevictされた場合も直前一画像を生存させるため、既存の一画像decoded上限512MiBに収まる旧decodedデータと表示textureの寿命が延び得る。既存decoded cacheの10件／256MiBとtexture cacheの8件／256MiBは変更せず、これらをアプリ全体のpeak memory上限とは呼ばない。初回open、reading mode、表示可能な旧原寸なし、編集中decode待ち／errorはhandoff対象外。直列100枚の全原寸到達と、連打で全要求を表示すること、実GPUでの無ちらつき・資源認定は別々に検証する。
+ImagePresentationの既存Arc／texture handleを共有し、handoffのためのRGBAコピー・worker・画像データを持つqueueは追加しない。ただしcacheからevictされた場合も直前一画像を生存させるため、既存の一画像decoded上限512MiBに収まる旧decodedデータと表示textureの寿命が延び得る。既存decoded cacheの10件／256MiBとtexture cacheの8件／256MiBは変更せず、これらをアプリ全体のpeak memory上限とは呼ばない。初回open、reading mode、表示可能な旧原寸なし、編集中decode待ち／errorはhandoff対象外。直列100枚の全原寸到達と、連打で全要求を表示すること、実GPUでの無ちらつき・資源認定は別々に検証する。
 
 ## I06/I07: 完了済み原寸を描画前に取り込む（2026-09-12）
 

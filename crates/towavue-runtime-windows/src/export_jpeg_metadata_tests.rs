@@ -2,7 +2,7 @@ use super::*;
 use crate::export::audio_tests::root;
 use std::io::Cursor;
 
-const PACKET: &str = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:d="http://purl.org/dc/elements/1.1/" xmlns:t="http://ns.adobe.com/tiff/1.0/" r:about="" t:Orientation="6"><d:title><r:Alt><r:li xml:lang="x-default">Original &amp; title</r:li><r:li xml:lang="ja">日本語の題名</r:li></r:Alt></d:title><d:creator><r:Seq><r:li>First author</r:li><r:li><![CDATA[Second <author>]]></r:li></r:Seq></d:creator><d:description><r:Alt><r:li xml:lang="x-default">Original comment</r:li></r:Alt></d:description><d:rights><r:Alt><r:li xml:lang="x-default">Original rights</r:li></r:Alt></d:rights></r:Description></r:RDF></x:xmpmeta>"#;
+const PACKET: &str = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:d="http://purl.org/dc/elements/1.1/" xmlns:m="http://ns.adobe.com/xmp/1.0/DynamicMedia/" xmlns:t="http://ns.adobe.com/tiff/1.0/" r:about="" t:Orientation="6"><d:title><r:Alt><r:li xml:lang="x-default">Original &amp; title</r:li><r:li xml:lang="ja">日本語の題名</r:li></r:Alt></d:title><d:creator><r:Seq><r:li>First author</r:li><r:li><![CDATA[Second <author>]]></r:li></r:Seq></d:creator><d:description><r:Alt><r:li xml:lang="x-default">Original comment</r:li></r:Alt></d:description><d:rights><r:Alt><r:li xml:lang="x-default">Original rights</r:li></r:Alt></d:rights><m:album>Original album</m:album><m:composer>Original composer</m:composer><m:genre>Original genre</m:genre></r:Description></r:RDF></x:xmpmeta>"#;
 
 fn fixture() -> Vec<u8> {
     let pixels = image::RgbImage::from_fn(32, 24, |x, y| {
@@ -72,6 +72,95 @@ fn without_xmp(bytes: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn jpeg_dynamic_media_text_round_trips_simple_properties_and_rejects_ambiguous_values() {
+    let cancel = AtomicBool::new(false);
+    let namespace = "http://ns.adobe.com/xmp/1.0/DynamicMedia/";
+    for (field, local) in [
+        (MetadataField::Album, "album"),
+        (MetadataField::Composer, "composer"),
+        (MetadataField::Genre, "genre"),
+    ] {
+        let packet = |attributes: &str, children: &str| {
+            format!(
+                "<r:RDF xmlns:r=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><r:Description xmlns:m=\"{namespace}\" {attributes}>{children}</r:Description></r:RDF>"
+            )
+        };
+        for input in [
+            packet(&format!("m:{local}=\"日本語 &amp; text&#13;&#10;\""), ""),
+            packet(
+                "",
+                &format!("<m:{local}>日本語 &amp; text&#13;&#10;</m:{local}>"),
+            ),
+        ] {
+            let values = xmp::parse(input.as_bytes(), &cancel).expect("simple XMP");
+            assert_eq!(
+                values,
+                vec![xmp::Value {
+                    field,
+                    language: None,
+                    text: "日本語 & text\r\n".into(),
+                }]
+            );
+            let encoded = xmp::encode(&values).expect("simple encode");
+            let text = std::str::from_utf8(&encoded).expect("UTF-8");
+            assert!(text.contains(&format!("<xmpDM:{local}>")));
+            assert!(!text.contains("rdf:Seq") && !text.contains("rdf:Alt"));
+            assert_eq!(xmp::parse(&encoded, &cancel).expect("round trip"), values);
+        }
+        for bad in [
+            packet(
+                &format!("m:{local}=\"one\""),
+                &format!("<m:{local}>two</m:{local}>"),
+            ),
+            packet(
+                "",
+                &format!("<m:{local}><r:Seq><r:li>wrong type</r:li></r:Seq></m:{local}>"),
+            ),
+            packet(
+                "",
+                &format!("<m:{local} xml:lang=\"ja\">qualified</m:{local}>"),
+            ),
+            packet(
+                "",
+                &format!("<m:{local} r:resource=\"https://example.invalid/\"/>"),
+            ),
+        ] {
+            assert!(
+                xmp::parse(bad.as_bytes(), &cancel).is_err(),
+                "accepted {bad}"
+            );
+        }
+        let wrong_namespace = packet("", &format!("<m:{local}>unrelated</m:{local}>"))
+            .replace(namespace, "urn:unrelated");
+        assert!(
+            xmp::parse(wrong_namespace.as_bytes(), &cancel)
+                .expect("other namespace")
+                .is_empty()
+        );
+        let mut values = xmp::parse(PACKET.as_bytes(), &cancel).expect("existing fields");
+        let original: Vec<_> = values
+            .iter()
+            .filter(|value| value.field != field)
+            .cloned()
+            .collect();
+        xmp::apply(&mut values, &options(field, "New 日本語 <>&\r\n").metadata)
+            .expect("set simple text");
+        assert!(
+            values
+                .iter()
+                .any(|value| value.field == field && value.language.is_none())
+        );
+        assert_eq!(
+            xmp::parse(&xmp::encode(&values).expect("mixed encode"), &cancel).expect("mixed parse"),
+            values
+        );
+        xmp::apply(&mut values, &MetadataExportOptions::default()).expect("Keep");
+        xmp::apply(&mut values, &options(field, "").metadata).expect("Remove");
+        assert_eq!(values, original);
+    }
+}
+
+#[test]
 fn jpeg_metadata_inspection_is_bounded_but_default_keep_preserves_full_languages_and_creators() {
     let root = root("jpeg-inspect-keep");
     let source = root.join("source.JPEG");
@@ -84,7 +173,7 @@ fn jpeg_metadata_inspection_is_bounded_but_default_keep_preserves_full_languages
     let original = tagged(packet.as_bytes());
     fs::write(&source, &original).expect("source");
     let shown = read_export_metadata(&source, MediaKind::Image).expect("public inspection");
-    assert_eq!(shown.len(), 6);
+    assert_eq!(shown.len(), 9);
     assert_eq!(shown[0].scope, "JPEG XMP (x-default)");
     assert_eq!(shown[1].scope, format!("JPEG XMP ({}…)", "a".repeat(63)));
     assert_eq!(shown[1].value, long[..long.floor_char_boundary(1024)]);
@@ -92,6 +181,17 @@ fn jpeg_metadata_inspection_is_bounded_but_default_keep_preserves_full_languages
     assert_eq!(shown[2].scope, "JPEG XMP (creator 1)");
     assert_eq!(shown[3].scope, "JPEG XMP (creator 2)");
     assert_eq!(shown[3].value, "Second <author>");
+    for (field, text) in [
+        (MetadataField::Album, "Original album"),
+        (MetadataField::Composer, "Original composer"),
+        (MetadataField::Genre, "Original genre"),
+    ] {
+        assert!(
+            shown.iter().any(|value| value.field == field
+                && value.scope == "JPEG XMP"
+                && value.value == text)
+        );
+    }
     assert!(
         shown
             .iter()
@@ -136,6 +236,9 @@ fn jpeg_metadata_capability_and_xml_validation_match_export_contract() {
         &[
             MetadataField::Title,
             MetadataField::Artist,
+            MetadataField::Album,
+            MetadataField::Composer,
+            MetadataField::Genre,
             MetadataField::Comment,
             MetadataField::Copyright
         ]
@@ -218,7 +321,7 @@ fn jpeg_default_keep_corruption_cancellation_and_source_change_preserve_target()
 fn xmp_round_trips_namespace_aliases_languages_creators_escaping_and_overrides() {
     let cancelled = AtomicBool::new(false);
     let original = xmp::parse(PACKET.as_bytes(), &cancelled).expect("source properties");
-    assert_eq!(original.len(), 6);
+    assert_eq!(original.len(), 9);
     assert_eq!(original[0].text, "Original & title");
     assert_eq!(original[1].language.as_deref(), Some("ja"));
     assert_eq!(original[3].text, "Second <author>");
@@ -232,13 +335,16 @@ fn xmp_round_trips_namespace_aliases_languages_creators_escaping_and_overrides()
     for field in [
         MetadataField::Title,
         MetadataField::Artist,
+        MetadataField::Album,
+        MetadataField::Composer,
+        MetadataField::Genre,
         MetadataField::Comment,
         MetadataField::Copyright,
     ] {
         let text = format!("{} 日本語\r\n<>&'\"", field.key());
         xmp::apply(&mut values, &options(field, &text).metadata).expect("set");
     }
-    assert_eq!(values.len(), 4);
+    assert_eq!(values.len(), 7);
     assert_eq!(
         xmp::parse(&xmp::encode(&values).expect("encode"), &cancelled).expect("all values"),
         values
@@ -317,10 +423,7 @@ fn xmp_rejects_entities_invalid_xml_ambiguous_properties_and_resource_limits() {
         "escaped output must fit APP1 too"
     );
     for field in [
-        MetadataField::Album,
         MetadataField::AlbumArtist,
-        MetadataField::Composer,
-        MetadataField::Genre,
         MetadataField::Date,
         MetadataField::Track,
     ] {
@@ -407,6 +510,9 @@ fn jpeg_export_metadata_set_keep_remove_matches_default_rotated_jpeg_pixels() {
     for field in [
         MetadataField::Title,
         MetadataField::Artist,
+        MetadataField::Album,
+        MetadataField::Composer,
+        MetadataField::Genre,
         MetadataField::Comment,
         MetadataField::Copyright,
     ] {
@@ -516,7 +622,8 @@ fn jpeg_metadata_failures_cancellation_source_change_and_unsupported_fields_prot
         fs::write(&source, &original).expect("restore fixture");
     }
     assert!(
-        export_media_with_options(&request, options(MetadataField::Album, "unsupported")).is_err()
+        export_media_with_options(&request, options(MetadataField::AlbumArtist, "unsupported"))
+            .is_err()
     );
     let invalid = tagged(
         PACKET
@@ -613,6 +720,9 @@ fn jpeg_metadata_copy_cancel_write_failure_and_invalid_stage_leave_owned_files_i
     for field in [
         MetadataField::Title,
         MetadataField::Artist,
+        MetadataField::Album,
+        MetadataField::Composer,
+        MetadataField::Genre,
         MetadataField::Comment,
         MetadataField::Copyright,
     ] {

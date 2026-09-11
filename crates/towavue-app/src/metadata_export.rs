@@ -124,6 +124,9 @@ impl MetadataDialog {
                     ui.label(format!("JPEG XMP property: {}", match field {
                         MetadataField::Title => "dc:title (language alternatives)",
                         MetadataField::Artist => "dc:creator (ordered authors)",
+                        MetadataField::Album => "xmpDM:album (text)",
+                        MetadataField::Composer => "xmpDM:composer (text)",
+                        MetadataField::Genre => "xmpDM:genre (text)",
                         MetadataField::Comment => "dc:description (language alternatives)",
                         MetadataField::Copyright => "dc:rights (language alternatives)",
                         _ => unreachable!("JPEG field selector is restricted"),
@@ -159,7 +162,7 @@ impl MetadataDialog {
                     ui.label("Set/Remove replaces all matching text variants. Choose a .png export path; other output formats fail without replacing the target. Reading rejects corrupt text or more than 128 text chunks / 1 MiB stored or expanded text.");
                 } else if image_format == Some(ImageMetadataFormat::Jpeg) {
                     ui.label("JPEG input and JPEG output only. Applies to the next Save or Export as for this tab's current file. Original file, displayed pixels and edit history stay unchanged.");
-                    ui.label("Only these 4 XMP text fields are edited. EXIF, IPTC and JPEG comments (COM) are not synchronized; unknown or technical source XMP is not copied. Keep preserves all source languages and author order, including when all fields are Keep.");
+                    ui.label("Only these 7 XMP text fields are edited. EXIF, IPTC and JPEG comments (COM) are not synchronized; unknown or technical source XMP is not copied. Keep preserves all supported source text, languages and author order, including when all fields are Keep.");
                     ui.label("Set replaces all values of the field with one (x-default for language alternatives). Remove deletes all values. Choose a .jpg or .jpeg export path; other output formats fail without replacing the target. Extended XMP, corrupt or oversized metadata is rejected (one packet, 65502 bytes, 128 text values).");
                 } else if self.kind == MediaKind::Image {
                     ui.label("Image metadata currently supports PNG and JPEG only, with the same input/output format. Other image formats cannot apply metadata options.");

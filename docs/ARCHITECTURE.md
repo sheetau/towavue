@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## E01: JPEG Dynamic Media文字metadata（2026-09-11）
+
+JPEGの対応項目へAlbum／Composer／Genreを加え、[Adobe Dynamic Media定義](https://developer.adobe.com/xmp/docs/xmp-namespaces/xmp-dm/)のxmpDM:album／composer／genreへ対応させる。namespace URIで判定し、RDF Descriptionのattributeまたは単純なtext elementを読み、出力は単純elementとする。配列・修飾値・同一property重複は推測して変換せず拒否する。既存のdc言語Alt／作者Seqと混在でき、Keepは3項目も保持、Setは単一文字値、Removeはproperty除去となる。UIは対応先と元の文字値を表示し、7項目の形式別validation・既存の非同期読取／tab世代／保存guardへ接続する。
+
+文字とXML／APP1の予算・取消・source／既存target保護・stage再読取照合は変更しない。metadata差替処理ではJPEGの非XMP bytes／画素を変更しないが、通常画像保存の再encodeは従来どおり行う。Album artistの対応先、Dateの意味と日付型、Trackの整数／総数表記はこの文字列契約へ混ぜず残件とする。EXIF／IPTC／COM同期、未知／技術XMP・Extended XMP、他形式の完全保持も未完である。
+
 ## I03: 通常画像の前後先読み（2026-09-11）
 
 通常画像の表示とShell順取得が完了した後は、現在画像を除く近隣最大9枚を既存の一つの先読みworkerへ渡す。画像だけのShell順で距離1、2、3…と近いものを優先し、同じ距離では直前の移動方向を先にする。右移動なら次1／前1／次2／前2…の順で、単枚移動と同じ端の循環を使い、現在画像と重複候補は除外する。名前で再sortせず、件数上限に達したら候補探索を止める。readingでは既存の隣見開き全体を先読みし、この近隣単枚規則へ置き換えない。

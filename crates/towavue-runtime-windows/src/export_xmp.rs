@@ -6,6 +6,7 @@ use quick_xml::reader::NsReader;
 pub(super) const LIMIT: usize = 65502;
 const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const DC: &str = "http://purl.org/dc/elements/1.1/";
+const DM: &str = "http://ns.adobe.com/xmp/1.0/DynamicMedia/";
 const XML: &str = "http://www.w3.org/XML/1998/namespace";
 const META: &str = "adobe:ns:meta/";
 
@@ -22,14 +23,14 @@ impl Name {
     }
 
     fn field(&self) -> Option<MetadataField> {
-        if self.0 != DC {
-            return None;
-        }
-        match self.1.as_str() {
-            "title" => Some(MetadataField::Title),
-            "creator" => Some(MetadataField::Artist),
-            "description" => Some(MetadataField::Comment),
-            "rights" => Some(MetadataField::Copyright),
+        match (self.0.as_str(), self.1.as_str()) {
+            (DC, "title") => Some(MetadataField::Title),
+            (DC, "creator") => Some(MetadataField::Artist),
+            (DC, "description") => Some(MetadataField::Comment),
+            (DC, "rights") => Some(MetadataField::Copyright),
+            (DM, "album") => Some(MetadataField::Album),
+            (DM, "composer") => Some(MetadataField::Composer),
+            (DM, "genre") => Some(MetadataField::Genre),
             _ => None,
         }
     }
@@ -191,7 +192,10 @@ pub(super) struct Value {
 }
 
 fn alt(field: MetadataField) -> bool {
-    field != MetadataField::Artist
+    matches!(
+        field,
+        MetadataField::Title | MetadataField::Comment | MetadataField::Copyright
+    )
 }
 
 fn values(node: &Node, field: MetadataField) -> Result<Vec<Value>, ExportError> {
@@ -204,6 +208,9 @@ fn values(node: &Node, field: MetadataField) -> Result<Vec<Value>, ExportError> 
             language: alt(field).then(|| "x-default".into()),
             text: node.text.clone(),
         }]);
+    }
+    if !alt(field) && field != MetadataField::Artist {
+        return Err(invalid("expected a simple Dynamic Media text property"));
     }
     if !node.text.trim().is_empty() || node.children.len() != 1 {
         return Err(invalid("mixed or multiple property structures"));
@@ -318,7 +325,7 @@ pub(super) fn apply(
         if let Some(text) = options.get(field) {
             if !ImageMetadataFormat::Jpeg.fields().contains(&field) {
                 return Err(invalid(format!(
-                    "'{}' is not supported; JPEG currently supports Title, Artist, Comment and Copyright",
+                    "'{}' is not supported; JPEG currently supports Title, Artist, Album, Composer, Genre, Comment and Copyright",
                     field.label()
                 )));
             }
@@ -346,7 +353,7 @@ fn escaped(text: &str) -> String {
 
 pub(super) fn encode(values: &[Value]) -> Result<Vec<u8>, ExportError> {
     let mut result = format!(
-        "<x:xmpmeta xmlns:x=\"{META}\"><rdf:RDF xmlns:rdf=\"{RDF}\"><rdf:Description rdf:about=\"\" xmlns:dc=\"{DC}\">"
+        "<x:xmpmeta xmlns:x=\"{META}\"><rdf:RDF xmlns:rdf=\"{RDF}\"><rdf:Description rdf:about=\"\" xmlns:dc=\"{DC}\" xmlns:xmpDM=\"{DM}\">"
     );
     for (field, local) in [
         (MetadataField::Title, "title"),
@@ -372,6 +379,18 @@ pub(super) fn encode(values: &[Value]) -> Result<Vec<u8>, ExportError> {
             ));
         }
         result.push_str(&format!("</rdf:{array}></dc:{local}>"));
+    }
+    for (field, local) in [
+        (MetadataField::Album, "album"),
+        (MetadataField::Composer, "composer"),
+        (MetadataField::Genre, "genre"),
+    ] {
+        if let Some(value) = values.iter().find(|value| value.field == field) {
+            result.push_str(&format!(
+                "<xmpDM:{local}>{}</xmpDM:{local}>",
+                escaped(&value.text)
+            ));
+        }
     }
     result.push_str("</rdf:Description></rdf:RDF></x:xmpmeta>");
     if result.len() > LIMIT {

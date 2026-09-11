@@ -27,7 +27,7 @@ fn image_fixture(root: &Path, extension: &str) -> PathBuf {
         String::from_utf8_lossy(&output.stderr)
     );
     if extension == "jpeg" {
-        let packet = r#"<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:d="http://purl.org/dc/elements/1.1/"><d:title><r:Alt><r:li xml:lang="x-default">Original title</r:li><r:li xml:lang="ja">元の題名</r:li></r:Alt></d:title><d:creator><r:Seq><r:li>First author</r:li><r:li>Second author</r:li></r:Seq></d:creator><d:rights><r:Alt><r:li xml:lang="x-default">Original copyright</r:li></r:Alt></d:rights></r:Description></r:RDF>"#;
+        let packet = r#"<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:d="http://purl.org/dc/elements/1.1/" xmlns:m="http://ns.adobe.com/xmp/1.0/DynamicMedia/"><d:title><r:Alt><r:li xml:lang="x-default">Original title</r:li><r:li xml:lang="ja">元の題名</r:li></r:Alt></d:title><d:creator><r:Seq><r:li>First author</r:li><r:li>Second author</r:li></r:Seq></d:creator><d:rights><r:Alt><r:li xml:lang="x-default">Original copyright</r:li></r:Alt></d:rights><m:album>Original album</m:album><m:composer>Original composer</m:composer><m:genre>Original genre</m:genre></r:Description></r:RDF>"#;
         let header = b"http://ns.adobe.com/xap/1.0/\0";
         let bytes = std::fs::read(&raw).expect("JPEG bytes");
         let mut tagged = bytes[..2].to_vec();
@@ -181,14 +181,7 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
             .platform_output
             .accesskit_update
             .expect("selector");
-        for unsupported in [
-            "Album",
-            "Album artist",
-            "Composer",
-            "Genre",
-            "Date",
-            "Track",
-        ] {
+        for unsupported in ["Album artist", "Date", "Track"] {
             assert!(
                 !tree
                     .nodes
@@ -215,9 +208,65 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
         }
         click(&mut app, "Artist");
         click(&mut app, "Title");
+        for (field, property, value) in [
+            (MetadataField::Album, "album", "Original album"),
+            (MetadataField::Composer, "composer", "Original composer"),
+            (MetadataField::Genre, "genre", "Original genre"),
+        ] {
+            let label = field.label();
+            click(&mut app, "Title");
+            click(&mut app, label);
+            let tree = frame(&mut app, size, vec![])
+                .platform_output
+                .accesskit_update
+                .expect("simple text field");
+            for expected in [
+                format!("JPEG XMP property: xmpDM:{property} (text)"),
+                format!("JPEG XMP: {value}"),
+            ] {
+                assert!(
+                    tree.nodes
+                        .iter()
+                        .any(|(_, node)| node.value() == Some(expected.as_str()))
+                );
+            }
+            click(&mut app, "Set value");
+            set_value(&mut app, &format!("New {label} 日本語"));
+            assert_eq!(
+                app.metadata_dialog
+                    .as_ref()
+                    .expect("draft")
+                    .options()
+                    .expect("valid")
+                    .get(field),
+                Some(format!("New {label} 日本語").as_str())
+            );
+            click(&mut app, "Remove value");
+            assert_eq!(
+                app.metadata_dialog
+                    .as_ref()
+                    .expect("draft")
+                    .options()
+                    .expect("remove")
+                    .get(field),
+                Some("")
+            );
+            click(&mut app, "Keep source value");
+            assert_eq!(
+                app.metadata_dialog
+                    .as_ref()
+                    .expect("draft")
+                    .options()
+                    .expect("Keep")
+                    .get(field),
+                None
+            );
+            click(&mut app, label);
+            click(&mut app, "Title");
+        }
         let mut unsupported = MetadataExportOptions::default();
         unsupported
-            .set(MetadataField::Album, Some("hidden field".into()))
+            .set(MetadataField::AlbumArtist, Some("hidden field".into()))
             .expect("typed text");
         app.handle_ui_action(UiAction::FinishMetadataOptions(token, Some(unsupported)));
         assert!(app.metadata_dialog.is_some() && app.metadata_export_settings.is_empty());

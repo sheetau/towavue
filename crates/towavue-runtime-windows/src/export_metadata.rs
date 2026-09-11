@@ -91,6 +91,9 @@ impl ImageMetadataFormat {
             Self::Jpeg => &[
                 MetadataField::Title,
                 MetadataField::Artist,
+                MetadataField::Album,
+                MetadataField::Composer,
+                MetadataField::Genre,
                 MetadataField::Comment,
                 MetadataField::Copyright,
             ],

@@ -166,9 +166,11 @@ pub(super) fn inspect(path: &Path) -> Result<Vec<MetadataSourceValue>, ExportErr
                     &language[..language.len().min(63)],
                     if language.len() > 63 { "…" } else { "" }
                 )
-            } else {
+            } else if value.field == MetadataField::Artist {
                 creator += 1;
                 format!("JPEG XMP (creator {creator})")
+            } else {
+                "JPEG XMP".into()
             };
             MetadataSourceValue {
                 field: value.field,

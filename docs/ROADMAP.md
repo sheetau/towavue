@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 I03 reading-prefetch checkpoint: 隣見開き全体をShell順で逐次先読みし、256 MiBを維持してcache件数を8→10へ拡張。warm hitを含むbatch合計予算で先頭優先を保ち、後続ページの実行中decodeも移動先に含まれれば採用する。10実PNGの全画素／原寸Arc再利用・全preview、容量／重複／失敗・途中採用／空取消、2～10枚のapp選択matrixを回帰確認。9b1601aのCI34580771257は成功。可視確認はComputer Use pipe接続不良で保留し、速度改善の測定値は追加しない。全UX台帳、初回表示／cold／UI latency／資源を継続する。
+
 2026-09-11 I03 prefetch-handoff checkpoint: 新要求の先頭pathと同じ実行中先読みだけを引き継ぎ、原寸の重複decodeを除く。別画像／空要求／closeは待機解除、未開始jobは非採用、失敗／source変更は通常decode、残予算不足はTooLarge。実PNGの途中からの継続・全画素一致とworker制御matrixを確認。24MP warm Releaseの同一境界比較は要求→結果約118→48ms、可視UIや全形式の保証ではない。62131c4のCI34579596111は成功。全UX台帳、PNG初回表示・先読み範囲／cold／UI latency／資源と未確認BMP表示を継続する。
 
 2026-09-11 I03 decoder-reuse checkpoint: PNG／WebPのanimation判定instanceを静止画にも再利用し、PNG metadataの二重読取をforeground／prefetchから除去。16 MiB textの回帰と8色形式×EXIF8向き×両経路の画素・予算、既存animation／取消を確認。FFmpeg直接PNG packetも測定では遅く不採用。普通のPNG画素復号／初回段階表示・進行中先読みの再利用・UI latencyと全UX台帳は継続する。先行3632806のCI34578656019は成功。

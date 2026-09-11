@@ -10,6 +10,7 @@ use crate::image::{
 use crate::{CachedImagePreview, DecodedImage, ImageDecodeError, LatestTask, PreviewCache};
 
 const CACHE_BYTE_LIMIT: usize = 256 * 1024 * 1024;
+const CACHE_ENTRY_LIMIT: usize = 10;
 
 pub struct LoadedImages {
     pub generation: u64,
@@ -88,7 +89,7 @@ impl ImageCache {
         if image.is_animated() || bytes > self.byte_limit {
             return;
         }
-        while self.entries.len() >= 8 || self.bytes + bytes > self.byte_limit {
+        while self.entries.len() >= CACHE_ENTRY_LIMIT || self.bytes + bytes > self.byte_limit {
             let (_, _, removed) = self.entries.pop_front().expect("cached image to evict");
             self.bytes -= removed.retained_bytes();
         }
@@ -180,7 +181,7 @@ impl ImageLoader {
         mailbox.generation = mailbox.generation.wrapping_add(1);
         let generation = mailbox.generation;
         if let Some(work) = &mut mailbox.prefetch {
-            if paths.first() == Some(&work.path) && work.decoding {
+            if paths.contains(&work.path) && work.decoding {
                 work.generation = generation;
             } else {
                 // Invalidate the job without dropping a queued lease under this lock.
@@ -197,15 +198,20 @@ impl ImageLoader {
     }
 
     pub fn prefetch(&self, path: PathBuf) {
-        self.prefetch_with_decode(path, |path, budget, current| {
+        self.prefetch_paths(vec![path]);
+    }
+
+    /// Prepare a bounded group in priority order on the existing speculative worker.
+    pub fn prefetch_paths(&self, paths: Vec<PathBuf>) {
+        self.prefetch_with_decode(paths, |path, budget, current| {
             decode_image_for_prefetch(path, budget, current)
         });
     }
 
     fn prefetch_with_decode(
         &self,
-        path: PathBuf,
-        decode: impl FnOnce(
+        paths: Vec<PathBuf>,
+        mut decode: impl FnMut(
             &Path,
             usize,
             &dyn Fn() -> bool,
@@ -213,14 +219,27 @@ impl ImageLoader {
         + Send
         + 'static,
     ) {
+        let mut unique = Vec::new();
+        for path in paths.into_iter().take(CACHE_ENTRY_LIMIT) {
+            if !unique.contains(&path) {
+                unique.push(path);
+            }
+        }
         let shared = Arc::clone(&self.shared);
         let id = Arc::new(());
         let work_cancellation = crate::Cancellation::default();
-        let (cache, previews) = {
+        let (generation, cache, previews) = {
             let mut mailbox = shared.0.lock().expect("image mailbox");
             if let Some(work) = &mailbox.prefetch {
                 work.cancellation.cancel();
             }
+            let Some(path) = unique.first() else {
+                mailbox.prefetch = None;
+                shared.1.notify_all();
+                drop(mailbox);
+                self.prefetch_worker.clear();
+                return;
+            };
             mailbox.prefetch = Some(PrefetchWork {
                 id: Arc::clone(&id),
                 path: path.clone(),
@@ -229,7 +248,11 @@ impl ImageLoader {
                 cancellation: work_cancellation.clone(),
             });
             shared.1.notify_all();
-            (Arc::clone(&mailbox.cache), mailbox.previews.clone())
+            (
+                mailbox.generation,
+                Arc::clone(&mailbox.cache),
+                mailbox.previews.clone(),
+            )
         };
         let lease = PrefetchLease {
             shared: Arc::clone(&shared),
@@ -237,46 +260,59 @@ impl ImageLoader {
         };
         self.prefetch_worker.submit(move |cancellation| {
             let _lease = lease;
-            {
-                let mut mailbox = shared.0.lock().expect("image mailbox");
-                if let Some(work) = &mut mailbox.prefetch
-                    && Arc::ptr_eq(&work.id, &id)
+            let mut remaining = cache.lock().expect("image cache").byte_limit;
+            for path in unique {
                 {
-                    work.decoding = true;
+                    let mut mailbox = shared.0.lock().expect("image mailbox");
+                    // An adopted job finishes its current page, not the obsolete batch tail.
+                    if mailbox.generation != generation || remaining == 0 {
+                        break;
+                    }
+                    if let Some(work) = &mut mailbox.prefetch
+                        && Arc::ptr_eq(&work.id, &id)
+                    {
+                        work.path = path.clone();
+                        work.decoding = true;
+                    }
+                    shared.1.notify_all();
                 }
-            }
-            let current = || {
-                let mailbox = shared.0.lock().expect("image mailbox");
-                !mailbox.closed
-                    && !cancellation.is_cancelled()
-                    && !work_cancellation.is_cancelled()
-                    && mailbox.prefetch.as_ref().is_some_and(|work| {
-                        Arc::ptr_eq(&work.id, &id) && work.generation == mailbox.generation
-                    })
-            };
-            if !current() {
-                return;
-            }
-            let Some(stamp) = ImageStamp::read(&path) else {
-                return;
-            };
-            let cached = cache
-                .lock()
-                .expect("image cache")
-                .entries
-                .iter()
-                .find(|entry| entry.0 == path && entry.1 == stamp)
-                .map(|entry| Arc::clone(&entry.2));
-            let image = if let Some(image) = cached {
-                image
-            } else {
-                let Ok(Some(image)) = decode(&path, CACHE_BYTE_LIMIT, &current) else {
-                    return;
+                let current = || {
+                    let mailbox = shared.0.lock().expect("image mailbox");
+                    !mailbox.closed
+                        && !cancellation.is_cancelled()
+                        && !work_cancellation.is_cancelled()
+                        && mailbox.prefetch.as_ref().is_some_and(|work| {
+                            Arc::ptr_eq(&work.id, &id) && work.generation == mailbox.generation
+                        })
                 };
-                if image.is_animated() || ImageStamp::read(&path) != Some(stamp) || !current() {
+                if !current() {
                     return;
                 }
-                let image = Arc::new(image);
+                let Some(stamp) = ImageStamp::read(&path) else {
+                    continue;
+                };
+                let cached = cache
+                    .lock()
+                    .expect("image cache")
+                    .entries
+                    .iter()
+                    .find(|entry| entry.0 == path && entry.1 == stamp)
+                    .map(|entry| Arc::clone(&entry.2));
+                let image = if let Some(image) = cached {
+                    image
+                } else {
+                    let Ok(Some(image)) = decode(&path, remaining, &current) else {
+                        continue;
+                    };
+                    if image.is_animated() || ImageStamp::read(&path) != Some(stamp) || !current() {
+                        continue;
+                    }
+                    Arc::new(image)
+                };
+                if image.retained_bytes() > remaining || !current() {
+                    continue;
+                }
+                remaining -= image.retained_bytes();
                 {
                     let mut cache = cache.lock().expect("image cache");
                     if cancellation.is_cancelled() || work_cancellation.is_cancelled() {
@@ -284,22 +320,21 @@ impl ImageLoader {
                     }
                     cache.insert(path.clone(), stamp, Arc::clone(&image));
                 }
-                image
-            };
-            {
-                let mut mailbox = shared.0.lock().expect("image mailbox");
-                if let Some(work) = &mut mailbox.prefetch
-                    && Arc::ptr_eq(&work.id, &id)
                 {
-                    // The original may proceed before optional thumbnail generation.
-                    work.decoding = false;
+                    let mut mailbox = shared.0.lock().expect("image mailbox");
+                    if let Some(work) = &mut mailbox.prefetch
+                        && Arc::ptr_eq(&work.id, &id)
+                    {
+                        // The original may proceed before optional thumbnail generation.
+                        work.decoding = false;
+                    }
+                    shared.1.notify_all();
                 }
-                shared.1.notify_all();
-            }
-            if let Some(previews) = previews {
-                previews.remember_image(&path, &image, &|| {
-                    current() && ImageStamp::read(&path) == Some(stamp)
-                });
+                if let Some(previews) = &previews {
+                    previews.remember_image(&path, &image, &|| {
+                        current() && ImageStamp::read(&path) == Some(stamp)
+                    });
+                }
             }
         });
     }
@@ -496,6 +531,307 @@ mod tests {
 
     use super::*;
 
+    fn wait_for_prefetch(loader: &ImageLoader) {
+        let (mailbox, timeout) = loader
+            .shared
+            .1
+            .wait_timeout_while(
+                loader.shared.0.lock().expect("mailbox"),
+                Duration::from_secs(5),
+                |mailbox| mailbox.prefetch.is_some(),
+            )
+            .expect("prefetch completion");
+        assert!(!timeout.timed_out() && mailbox.prefetch.is_none());
+    }
+
+    #[test]
+    fn prefetch_batch_preserves_priority_budget_and_skips_failures() {
+        let root = std::env::temp_dir().join(format!(
+            "towavue-prefetch-batch-budget-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("owned directory");
+        let paths: Vec<_> = (0..11)
+            .map(|index| root.join(format!("{index}.png")))
+            .collect();
+        for path in &paths {
+            std::fs::write(path, [1]).expect("owned identity");
+        }
+        for budget in [8, 40] {
+            let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+            let cache = Arc::clone(&shared.0.lock().expect("mailbox").cache);
+            *cache.lock().expect("cache") = ImageCache::new(budget);
+            let warm = pixel(42);
+            {
+                let mut cache = cache.lock().expect("cache");
+                cache.insert(
+                    paths[0].clone(),
+                    ImageStamp::read(&paths[0]).expect("stamp"),
+                    Arc::clone(&warm),
+                );
+                // The priority hit is older than unrelated entries and must be promoted.
+                for index in 0..budget / 4 - 1 {
+                    cache.insert(
+                        root.join(format!("old-{index}")),
+                        ImageStamp::read(&paths[0]).expect("stamp"),
+                        pixel(99),
+                    );
+                }
+            }
+            let loader = ImageLoader {
+                shared,
+                prefetch_worker: LatestTask::new("batch-budget-test").expect("worker"),
+            };
+            let (sent, received) = mpsc::channel();
+            let mut batch = paths.clone();
+            batch.insert(1, paths[0].clone());
+            loader.prefetch_with_decode(batch, move |path, remaining, _| {
+                let index: u8 = path
+                    .file_stem()
+                    .expect("stem")
+                    .to_str()
+                    .expect("name")
+                    .parse()
+                    .expect("index");
+                sent.send((index, remaining)).expect("decode observation");
+                match index {
+                    1 => Err(ImageDecodeError::TooLarge),
+                    2 => Ok(None),
+                    _ => Ok(Some((*pixel(index)).clone())),
+                }
+            });
+            wait_for_prefetch(&loader);
+            let calls: Vec<_> = received.try_iter().collect();
+            let expected: Vec<_> = if budget == 8 {
+                vec![(1, 4), (2, 4), (3, 4)]
+            } else {
+                (1_u8..=8)
+                    .map(|index| (index, 36 - usize::from(index.saturating_sub(3)) * 4))
+                    .collect()
+            };
+            assert_eq!(calls, expected, "budget={budget}");
+            let mut cache = cache.lock().expect("cache");
+            assert!(cache.bytes <= budget && cache.entries.len() <= 10);
+            let retained = cache
+                .take(&paths[0], ImageStamp::read(&paths[0]), budget)
+                .expect("priority retained")
+                .expect("warm image");
+            assert!(Arc::ptr_eq(&warm, &retained));
+            let successful = if budget == 8 { 3 } else { 8 };
+            for (index, path) in paths.iter().enumerate().take(successful + 1).skip(3) {
+                assert_eq!(
+                    cache
+                        .take(path, ImageStamp::read(path), budget)
+                        .expect("batch page retained")
+                        .expect("image")
+                        .frames[0]
+                        .rgba,
+                    vec![index as u8; 4]
+                );
+            }
+            assert!(
+                cache
+                    .entries
+                    .iter()
+                    .all(|entry| entry.0 != paths[9] && entry.0 != paths[10])
+            );
+        }
+        std::fs::remove_dir_all(root).expect("remove owned fixtures");
+    }
+
+    #[test]
+    fn ten_page_prefetch_reuses_exact_originals_and_seeds_every_preview() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-prefetch-ten-pages-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("owned directory");
+        let paths: Vec<_> = (0..10)
+            .map(|index| root.join(format!("{index}.png")))
+            .collect();
+        for (index, path) in paths.iter().enumerate() {
+            image::RgbaImage::from_pixel(30, 20, image::Rgba([index as u8, 37, 59, 127]))
+                .save(path)
+                .expect("owned PNG");
+        }
+        let previews = PreviewCache::new(root.join("cache")).expect("preview cache");
+        let shared = Arc::new((
+            Mutex::new(Mailbox {
+                previews: Some(previews.clone()),
+                ..Default::default()
+            }),
+            Condvar::new(),
+        ));
+        let loader = ImageLoader {
+            shared: Arc::clone(&shared),
+            prefetch_worker: LatestTask::new("ten-pages-test").expect("worker"),
+        };
+        loader.prefetch_paths(paths.clone());
+        wait_for_prefetch(&loader);
+        assert!(loader.take_completed().is_none() && loader.take_preview().is_none());
+        let originals: Vec<_> = shared
+            .0
+            .lock()
+            .expect("mailbox")
+            .cache
+            .lock()
+            .expect("cache")
+            .entries
+            .iter()
+            .map(|entry| Arc::clone(&entry.2))
+            .collect();
+        assert_eq!(originals.len(), 10);
+        for (index, path) in paths.iter().enumerate() {
+            let expected = [index as u8, 37, 59, 127];
+            assert!(
+                originals[index].frames[0]
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .all(|pixel| *pixel == expected)
+            );
+            let preview = previews
+                .cached_image(path)
+                .expect("lookup")
+                .expect("seeded preview");
+            assert_eq!(preview.source_size, (30, 20));
+            assert!(
+                preview
+                    .image
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .all(|pixel| *pixel == expected)
+            );
+        }
+        let (sent, ready) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            run_worker(
+                shared,
+                || {
+                    let _ = sent.send(());
+                },
+                |_, _, _, _| panic!("prefetched spread must not decode again"),
+            )
+        });
+        let generation = loader.request(paths.clone());
+        let mut count = 0;
+        while count < paths.len() {
+            ready
+                .recv_timeout(Duration::from_secs(5))
+                .expect("foreground ready");
+            let Some(result) = loader.take_completed() else {
+                continue;
+            };
+            assert_eq!(result.generation, generation);
+            assert_eq!(result.first_index, count);
+            assert_eq!(result.total, 10);
+            for (path, image) in result.images {
+                assert_eq!(path, paths[count]);
+                assert!(Arc::ptr_eq(&image.expect("image"), &originals[count]));
+                count += 1;
+            }
+        }
+        drop(loader);
+        worker.join().expect("shutdown");
+        std::fs::remove_dir_all(root).expect("remove owned fixtures");
+    }
+
+    #[test]
+    fn later_prefetch_page_is_adopted_without_continuing_the_old_batch() {
+        let root = std::env::temp_dir().join(format!(
+            "towavue-prefetch-later-page-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("owned directory");
+        let paths: Vec<_> = (0..3)
+            .map(|index| root.join(format!("{index}.png")))
+            .collect();
+        for path in &paths {
+            std::fs::write(path, [1]).expect("owned identity");
+        }
+        for cancel in [false, true] {
+            let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+            let loader = ImageLoader {
+                shared: Arc::clone(&shared),
+                prefetch_worker: LatestTask::new("later-page-test").expect("worker"),
+            };
+            let (started_tx, started_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let (finished_tx, finished_rx) = mpsc::channel();
+            let mut index = 0;
+            loader.prefetch_with_decode(paths.clone(), move |_, _, current| {
+                index += 1;
+                assert!(index <= 2, "obsolete batch tail decoded");
+                if index == 2 {
+                    started_tx.send(()).expect("second started");
+                    release_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("release");
+                    finished_tx.send(current()).expect("currency");
+                }
+                Ok(Some((*pixel(index)).clone()))
+            });
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("second running");
+            let (sent, ready) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                run_worker(
+                    shared,
+                    || {
+                        let _ = sent.send(());
+                    },
+                    |_, _, _, _| Ok((*pixel(99)).clone()),
+                )
+            });
+            let generation = loader.request(paths.clone());
+            if cancel {
+                loader.prefetch_paths(vec![]);
+            }
+            if !cancel {
+                release_tx.send(()).expect("resume adopted page");
+            }
+            let mut values = Vec::new();
+            while values.len() < 3 {
+                ready
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("foreground ready without cancelled job");
+                if let Some(result) = loader.take_completed() {
+                    assert_eq!(result.generation, generation);
+                    assert_eq!(result.first_index, values.len());
+                    values.extend(
+                        result
+                            .images
+                            .into_iter()
+                            .map(|(_, image)| image.expect("image").frames[0].rgba[0]),
+                    );
+                }
+            }
+            if cancel {
+                release_tx.send(()).expect("finish cancelled page");
+            }
+            assert_eq!(
+                finished_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("currency"),
+                !cancel
+            );
+            assert_eq!(
+                values,
+                if cancel {
+                    vec![1, 99, 99]
+                } else {
+                    vec![1, 2, 99]
+                }
+            );
+            wait_for_prefetch(&loader);
+            drop(loader);
+            worker.join().expect("shutdown");
+        }
+        std::fs::remove_dir_all(root).expect("remove owned fixtures");
+    }
+
     #[test]
     fn foreground_adopts_the_matching_inflight_prefetch() {
         let path = std::env::temp_dir().join(format!(
@@ -521,7 +857,7 @@ mod tests {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let (current_tx, current_rx) = mpsc::channel();
-        loader.prefetch_with_decode(path.clone(), move |_, _, current| {
+        loader.prefetch_with_decode(vec![path.clone()], move |_, _, current| {
             started_tx.send(()).expect("prefetch started");
             release_rx
                 .recv_timeout(Duration::from_secs(5))
@@ -600,7 +936,7 @@ mod tests {
             let (release_tx, release_rx) = mpsc::channel();
             let (finished_tx, finished_rx) = mpsc::channel();
             loader.as_ref().expect("loader").prefetch_with_decode(
-                path.clone(),
+                vec![path.clone()],
                 move |_, _, current| {
                     started_tx.send(()).expect("started");
                     release_rx
@@ -734,7 +1070,7 @@ mod tests {
             let (old_started_tx, old_started_rx) = mpsc::channel();
             let (old_release_tx, old_release_rx) = mpsc::channel();
             let (old_finished_tx, old_finished_rx) = mpsc::channel();
-            loader.prefetch_with_decode(path.clone(), move |_, _, current| {
+            loader.prefetch_with_decode(vec![path.clone()], move |_, _, current| {
                 old_started_tx.send(()).expect("old started");
                 old_release_rx
                     .recv_timeout(Duration::from_secs(5))
@@ -747,7 +1083,7 @@ mod tests {
                 .expect("old running");
             let (new_started_tx, new_started_rx) = mpsc::channel();
             let (new_release_tx, new_release_rx) = mpsc::channel();
-            loader.prefetch_with_decode(path.clone(), move |_, _, current| {
+            loader.prefetch_with_decode(vec![path.clone()], move |_, _, current| {
                 new_started_tx.send(()).expect("replacement started");
                 new_release_rx
                     .recv_timeout(Duration::from_secs(5))
@@ -835,7 +1171,7 @@ mod tests {
         });
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        loader.prefetch_with_decode(path.clone(), move |path, budget, current| {
+        loader.prefetch_with_decode(vec![path.clone()], move |path, budget, current| {
             let polls = std::cell::Cell::new(0);
             decode_image_for_prefetch(path, budget, &|| {
                 polls.set(polls.get() + 1);
@@ -897,7 +1233,7 @@ mod tests {
             let (started_tx, started_rx) = mpsc::channel();
             let (release_tx, release_rx) = mpsc::channel();
             loader.as_ref().expect("live loader").prefetch_with_decode(
-                path.clone(),
+                vec![path.clone()],
                 move |_, _, _| {
                     started_tx.send(()).expect("started");
                     release_rx
@@ -1029,7 +1365,7 @@ mod tests {
         // cache in the fixture to exercise reseeding without another codec call.
         let empty = PreviewCache::new(root.join("empty-cache")).expect("empty preview cache");
         loader.shared.0.lock().expect("mailbox").previews = Some(empty.clone());
-        loader.prefetch_with_decode(path.clone(), |_, _, _| {
+        loader.prefetch_with_decode(vec![path.clone()], |_, _, _| {
             panic!("decoded hit must not decode again")
         });
         let reseeded = wait(&empty);
@@ -1421,7 +1757,7 @@ mod tests {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let (cancelled_tx, cancelled_rx) = mpsc::channel();
-        loader.prefetch_with_decode(first.clone(), move |_, budget, current| {
+        loader.prefetch_with_decode(vec![first.clone()], move |_, budget, current| {
             assert_eq!(budget, CACHE_BYTE_LIMIT);
             started_tx.send(()).expect("prefetch started");
             release_rx
@@ -1463,7 +1799,7 @@ mod tests {
                 .recv_timeout(Duration::from_secs(5))
                 .expect("cancelled")
         );
-        loader.prefetch_with_decode(first.clone(), |_, _, _| Ok(Some((*pixel(2)).clone())));
+        loader.prefetch_with_decode(vec![first.clone()], |_, _, _| Ok(Some((*pixel(2)).clone())));
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         let prefetched = loop {
             if let Some(image) = loader
@@ -1580,17 +1916,17 @@ mod tests {
         cache.insert("large".into(), stamp, Arc::new(too_large));
         assert!(cache.entries.is_empty());
         let mut cache = ImageCache::new(100);
-        for index in 0..9 {
+        for index in 0..11 {
             cache.insert(index.to_string().into(), stamp, pixel(index));
         }
-        assert_eq!(cache.entries.len(), 8);
-        assert_eq!(cache.bytes, 32);
+        assert_eq!(cache.entries.len(), 10);
+        assert_eq!(cache.bytes, 40);
         assert!(cache.take(Path::new("0"), Some(stamp), 100).is_none());
         assert!(matches!(
-            cache.take(Path::new("8"), Some(stamp), 3),
+            cache.take(Path::new("10"), Some(stamp), 3),
             Some(Err(ImageDecodeError::TooLarge))
         ));
-        assert_eq!(cache.bytes, 28);
+        assert_eq!(cache.bytes, 36);
         let retained = cache.entries[0].2.clone();
         assert_eq!(Arc::strong_count(&retained), 2);
         drop(cache);

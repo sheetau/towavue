@@ -1964,12 +1964,12 @@ where
         if self.media_kind != Some(MediaKind::Image) || self.image_loading || self.image.is_none() {
             return;
         }
-        if let Some(path) = self.image_prefetch_path() {
-            self.image_loader.prefetch(path);
+        if let Some(paths) = self.image_prefetch_paths() {
+            self.image_loader.prefetch_paths(paths);
         }
     }
 
-    fn image_prefetch_path(&self) -> Option<PathBuf> {
+    fn image_prefetch_paths(&self) -> Option<Vec<PathBuf>> {
         let snapshot = self.folder_snapshot.as_ref()?;
         let path = self.path.as_ref()?;
         let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
@@ -1993,7 +1993,14 @@ where
         } else {
             (current + images.len() - 1) % images.len()
         };
-        (target != current).then(|| images[target].path.clone())
+        (target != current).then(|| {
+            let range = if self.reading_mode {
+                self.reading_settings.spread(target, images.len())
+            } else {
+                target..target + 1
+            };
+            range.map(|index| images[index].path.clone()).collect()
+        })
     }
 
     fn watch_folder(&mut self, folder: &Path) {
@@ -12976,6 +12983,119 @@ mod tests {
     }
 
     #[test]
+    fn image_prefetch_selects_complete_adjacent_spreads_in_shell_order() {
+        let Some(root) = isolated_test_root(
+            "tests::image_prefetch_selects_complete_adjacent_spreads_in_shell_order",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let paths: Vec<_> = (0..23)
+            .rev()
+            .map(|index| root.join(format!("{index}.png")))
+            .collect();
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: paths
+                .iter()
+                .cloned()
+                .map(|path| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![]),
+                    path,
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::UNIX_EPOCH,
+        });
+        app.folder_snapshot
+            .as_mut()
+            .expect("snapshot")
+            .items
+            .insert(
+                1,
+                towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![]),
+                    path: root.join("skip.mp4"),
+                    kind: MediaKind::Video,
+                },
+            );
+        app.reading_mode = true;
+        for page_count in 2..=10 {
+            for first_page_count in 1..=page_count {
+                let mut starts = vec![0];
+                starts.extend((first_page_count..paths.len()).step_by(page_count));
+                starts.push(paths.len());
+                let spreads: Vec<_> = starts.windows(2).map(|pair| pair[0]..pair[1]).collect();
+                for axis in [ReadingAxis::Horizontal, ReadingAxis::Vertical] {
+                    for reversed in [false, true] {
+                        app.reading_settings = ReadingSettings {
+                            page_count,
+                            first_page_count,
+                            axis,
+                            reversed,
+                        };
+                        for (current, path) in paths.iter().enumerate() {
+                            app.path = Some(path.clone());
+                            let spread = spreads
+                                .iter()
+                                .position(|range| range.contains(&current))
+                                .expect("spread");
+                            for forward in [false, true] {
+                                app.image_navigation_forward = forward;
+                                let target = if forward {
+                                    (spread + 1) % spreads.len()
+                                } else {
+                                    (spread + spreads.len() - 1) % spreads.len()
+                                };
+                                assert_eq!(
+                                    app.image_prefetch_paths(),
+                                    Some(paths[spreads[target].clone()].to_vec()),
+                                    "{page_count}/{first_page_count} current={current} forward={forward}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        app.reading_mode = false;
+        for (current, path) in paths.iter().enumerate() {
+            app.path = Some(path.clone());
+            for forward in [false, true] {
+                app.image_navigation_forward = forward;
+                let target = if forward {
+                    (current + 1) % paths.len()
+                } else {
+                    (current + paths.len() - 1) % paths.len()
+                };
+                assert_eq!(
+                    app.image_prefetch_paths(),
+                    Some(vec![paths[target].clone()])
+                );
+            }
+        }
+        app.reading_mode = true;
+        app.reading_settings = ReadingSettings::default();
+        app.folder_snapshot
+            .as_mut()
+            .expect("snapshot")
+            .items
+            .retain(|item| paths[..2].contains(&item.path));
+        app.path = Some(paths[0].clone());
+        assert_eq!(
+            app.image_prefetch_paths(),
+            None,
+            "one spread has no neighbor"
+        );
+        app.path = Some(root.join("missing.png"));
+        assert_eq!(app.image_prefetch_paths(), None);
+    }
+
+    #[test]
     fn reading_navigation_uses_fixed_spreads_without_losing_dirty_anchor() {
         let Some(root) = isolated_test_root(
             "tests::reading_navigation_uses_fixed_spreads_without_losing_dirty_anchor",
@@ -13037,7 +13157,15 @@ mod tests {
                     assert!(matches!(&app.pending_guard,
                         Some(GuardedAction::Navigate(target_path)) if *target_path == root.join(names[target])));
                     if matches!(command, CommandId::NextImage | CommandId::PreviousImage) {
-                        assert_eq!(app.image_prefetch_path(), Some(root.join(names[target])));
+                        assert_eq!(
+                            app.image_prefetch_paths(),
+                            Some(
+                                app.reading_settings
+                                    .spread(target, names.len())
+                                    .map(|index| root.join(names[index]))
+                                    .collect()
+                            )
+                        );
                     }
                     app.resolve_guard(GuardDecision::Cancel);
                     assert_eq!(app.path.as_ref(), Some(&path));

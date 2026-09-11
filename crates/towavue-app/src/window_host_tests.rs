@@ -51,11 +51,19 @@ fn hosted_windows_share_seeded_image_previews_after_the_original_owner_closes() 
         std::thread::sleep(Duration::from_millis(2));
     }
     assert!(app.image_error.is_none());
-    let shared = host.windows[&second]
-        .preview_cache
-        .cached_image(&path)
-        .expect("lookup")
-        .expect("other window uses seeded memory");
+    // Foreground delivery deliberately precedes thumbnail seeding; wait for that
+    // separate contract before checking shared ownership and owner teardown.
+    let shared = loop {
+        if let Some(preview) = host.windows[&second]
+            .preview_cache
+            .cached_image(&path)
+            .expect("lookup")
+        {
+            break preview;
+        }
+        assert!(Instant::now() < deadline, "shared preview seed deadline");
+        std::thread::sleep(Duration::from_millis(2));
+    };
     assert_eq!(shared.source_size, (2, 1));
     host.windows.get_mut(&first).expect("first").exit_requested = true;
     host.remove_closed();

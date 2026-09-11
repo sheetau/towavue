@@ -3825,6 +3825,8 @@ where
                 let size = egui::vec2(ui.available_width(), layout.tab_height);
                 let row = egui::Layout::left_to_right(egui::Align::Center);
                 ui.allocate_ui_with_layout(size, row, |ui| {
+                    ui.spacing_mut().interact_size.y = layout.tab_height;
+                    ui.spacing_mut().button_padding.y = 0.0;
                     // Keep the scroll origin on a physical pixel when outer padding is zero.
                     ui.spacing_mut().item_spacing.x = (2.0 * density).round() / density;
                     ui.add_space(ui.spacing().item_spacing.x);
@@ -11327,7 +11329,11 @@ mod tests {
                     assert!((logo.width() - 28.0).abs() < 0.01, "{logo:?}");
                     for rect in [logo, label, close] {
                         assert!((rect.center().y - 16.0).abs() <= 1.0 / density, "{rect:?}");
-                        assert!((rect.height() - chrome::TAB_HEIGHT).abs() <= 1.0 / density);
+                        assert!(
+                            (rect.height() - chrome::title_layout(None, 0.0, density).tab_height)
+                                .abs()
+                                <= 1.0 / density
+                        );
                     }
                     assert!((close.width() - chrome::TAB_CLOSE_WIDTH).abs() < 0.01);
                     assert!((label.right() - close.left()).abs() < 0.01);

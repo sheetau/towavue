@@ -49,7 +49,6 @@ pub const BORDER: Color32 = Color32::from_gray(24);
 pub const HOVER: Color32 = Color32::from_gray(44);
 pub const TITLE_HEIGHT: f32 = 32.0;
 pub const STATUS_HEIGHT: f32 = 30.0;
-pub const TAB_HEIGHT: f32 = 26.0;
 pub const TAB_CLOSE_WIDTH: f32 = 24.0;
 pub const TAB_PADDING: f32 = 10.0;
 
@@ -88,11 +87,18 @@ pub fn title_layout(native: Option<(f32, f32)>, top: f32, density: f32) -> Title
             (inset / density - top).max(0.0),
         )
     });
-    let content_height = height - native.map_or(0.0, |_| 1.0 / density);
-    let tab_height = TAB_HEIGHT.min(content_height - top_padding);
+    let border = if native.is_none_or(|(_, inset)| inset == 0.0) {
+        1.0 / density
+    } else {
+        0.0
+    };
+    let top_padding = top_padding + border;
+    let available = (height - 1.0 / density - top_padding).max(0.0);
+    let gap = 3.0_f32.min(available / 4.0);
+    let tab_height = available - 2.0 * gap;
     TitleLayout {
         height,
-        top_padding: top_padding + (content_height - top_padding - tab_height) * 0.5,
+        top_padding: top_padding + gap,
         tab_height,
     }
 }
@@ -400,6 +406,45 @@ pub fn logo(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn native_height_tab_controls_stay_in_the_padded_row() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.global_style_mut(super::style);
+            for height in [16.0, 23.0, 24.0, 25.5] {
+                let row =
+                    egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(150.0, height));
+                let _ = context.run_ui(Default::default(), |ui| {
+                    ui.spacing_mut().button_padding = egui::vec2(super::TAB_PADDING, 0.0);
+                    ui.spacing_mut().interact_size.y = height;
+                    let close_rect = egui::Rect::from_min_max(
+                        egui::pos2(row.right() - super::TAB_CLOSE_WIDTH, row.top()),
+                        row.max,
+                    );
+                    let response = super::tab_close(ui, close_rect, false);
+                    assert!(
+                        row.contains_rect(response.rect),
+                        "close overflow: {height}, {:?}",
+                        response.rect
+                    );
+                    let label_rect = egui::Rect::from_min_max(row.min, close_rect.left_bottom());
+                    let response = ui.put(
+                        label_rect,
+                        egui::Button::new(("Tab label", egui::Atom::grow()))
+                            .truncate()
+                            .gap(0.0),
+                    );
+                    assert!(
+                        row.contains_rect(response.rect),
+                        "label overflow: {height}, {:?}",
+                        response.rect
+                    );
+                });
+            }
+        }
+    }
+
+    #[test]
     fn title_row_follows_native_bounds_without_double_counting_safe_area() {
         for (density, bottom, inset) in [
             (1.0, 30.0, 0.0),
@@ -416,16 +461,21 @@ mod tests {
                 assert!(((top + layout.height) * density - bottom - 1.0).abs() < 0.001);
                 assert!(row_top >= inset - 0.001);
                 assert!(row_bottom <= bottom + 0.001);
-                assert!((row_top + row_bottom - inset - bottom).abs() < 0.001);
-                assert!(layout.tab_height <= super::TAB_HEIGHT);
-                assert!(layout.tab_height >= 20.0);
+                let border = if inset == 0.0 { 1.0 } else { 0.0 };
+                assert!((row_top - inset - border - 3.0 * density).abs() < 0.001);
+                assert!((bottom - row_bottom - 3.0 * density).abs() < 0.001);
+                assert!(layout.tab_height >= 16.0);
             }
         }
         for density in [1.0, 1.25, 2.0] {
             let layout = super::title_layout(None, 0.0, density);
             assert_eq!(layout.height, super::TITLE_HEIGHT);
-            assert_eq!(layout.top_padding, 3.0);
-            assert_eq!(layout.tab_height, super::TAB_HEIGHT);
+            assert_eq!(layout.top_padding, 3.0 + 1.0 / density);
+            assert!(
+                (layout.height - 1.0 / density - layout.top_padding - layout.tab_height - 3.0)
+                    .abs()
+                    < 0.001
+            );
         }
     }
 

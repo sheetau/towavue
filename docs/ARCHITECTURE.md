@@ -1,5 +1,9 @@
 # towavue アーキテクチャ
 
+## U01/U04: native境界に沿うタブ余白（2026-09-12）
+
+toolbarのnative button下端／1 physical px区切り線と左右配置を変えず、タブの上下に3 logical pxずつの余白を確保する。通常時は上端のnative内側border 1 physical pxを別途予約し、最大化時は不可視insetを避けるがこのborderを重ねて予約しない。rootのsafe areaは二重加算しない。固定26pxではなく残りをタブ高とし、headlessの32px toolbarにも同じborder／余白計算を使う。極端に低い行では余白を利用可能高の1/4までに制限し、負の高さを作らない。タイトル行だけeguiの最小interact高を行高へ合わせ、buttonの縦paddingを0にする。tab文字の横10px／close幅24px、ID・guard・drag・native glyph／hit処理は維持する。任意UI倍率・native fullscreen／全DPIの実入力認定ではない。
+
 ## V04/A01/A02: 音量HUDと音声リスト（2026-09-12）
 
 master volumeは従来の0～2倍・edit history／live playback／export共有を維持する。変更時とvolumeを変えるUndo/Redoではtab ID・media instance付きHUDを1.2秒表示し、status左を音量通知で置換しない。HUDはmedia領域左中央、内側8 logical px、幅3px・最大長244pxの非操作描画とし、全長を0～200%へ対応付ける。動画左側に24pxの余白がなく上側に24px以上あれば上中央の横向きにする。小窓では内側へ縮める。期限の再描画だけを予約し、focus・新規Area・常時animationを追加しない。modal等では表示を抑止し、期限／owner変更で破棄する。
@@ -198,7 +202,7 @@ runtimeの専用STA workerがownerのArcとUTF-16文字列・button配列をmoda
 
 ## U01/U04: native captionに合わせたtitle bar（2026-09-11）
 
-runtimeはnative controlsの予約矩形をphysical client座標で返す。appのtitle bar下端はそのbottom直後の1 physical px区切り線までとし、固定32 logical pxで生じていた隙間を残さない。最大化時に画面外となる上端insetを除いた高さへロゴ・タブ・閉じるアイコンを中央配置する。既にrootへ反映済みのsafe-areaを二重加算しない。行は最大26 logical pxとし、native領域に収まる高さへ縮める。native captionがないheadless構成だけ従来の32／26 logical pxを維持する。
+runtimeはnative controlsの予約矩形をphysical client座標で返す。appのtitle bar下端はそのbottom直後の1 physical px区切り線までとし、固定32 logical pxで生じていた隙間を残さない。最大化時に画面外となる上端insetを避け、既にrootへ反映済みのsafe-areaを二重加算しない。行高と上下余白は上記U01/U04の3px契約に従う。native captionがないheadless構成では32 logical pxのtoolbarを維持する。
 
 title barの左右6 logical px外側marginを除き、tab名内部の10 logical px余白、status barの6／3 logical px margin、native controlsの予約領域とWindowsのリサイズ境界は維持する。行内の2 logical px間隔はphysical pixelへ丸め、125%表示でscroll originが半画素に乗ることによる分離anchorの変動を避ける。DWM buttons自体を拡縮・独自描画しない。旧可視画素では96 DPIでボタン下端29と区切り31の間に1px、192 DPIで56と63の間に6pxの隙間があった。通常・最大化の96／192 DPIで区切りを各30／57へ揃えた。全DPI比率・Windows 10・任意UI倍率の外観認定ではない。
 

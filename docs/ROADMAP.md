@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 G01/U06 dialog-focus checkpoint: native pickerの取消で元のkeyboard focusが失われる問題を再現・修正。開始時のfocus・tab・media generationを保持し、取消／失敗時に同じ対象で別modalが続かない場合だけ復帰する。選択成功・世代／tab変更・guard・孤立完了では破棄し、勝手にcommandを再実行しない。2回帰と全612 tests／Release成功。通常960×576のWelcomeでOpen File／Open FolderのEnter→Escape→元button復帰→Enter再操作を確認。前回の単発click不発は再現せず、全入口／IME／mixed-DPI・全UX台帳は継続する。
+
 2026-09-11 E01 JPEG simple-text checkpoint: 標準XMPのAlbum／Composer／Genreを既存4項目へ追加。namespaceに基づく単純文字値の読取・Keep／Set／Remove・JPEG保存とUIを接続する。属性／要素形式・特殊文字・混在言語／作者保持、重複／配列／修飾値の拒否、非XMP bytes／画素一致と保存先保護を確認。全610 tests／Release成功。通常960×576で3項目の既存値・Albumへの日本語／特殊文字入力・Cancel復帰を確認。実IME composition／全DPI、残る3項目とEXIF／IPTC／COM・他形式／全品質、全UX台帳は未完のまま継続する。
 
 2026-09-11 I03 neighbor-prefetch checkpoint: 通常表示の先読みを移動方向の隣一枚から前後近隣最大9枚へ広げる。距離優先／同距離は直前方向、Shell順／循環／重複除外を維持し、readingの見開き全体とworker／cache予算は変更しない。1～23枚の全開始位置・両方向と実10画像の移動前preview／往復原寸画素を回帰確認。全609 tests／Release成功。通常960×576で生成1920×1080 PNGの01→10→09→10→01、readingの01＋02→03＋04と通常復帰を可視確認。可視速度差／cold／全資源は未測定。7f4ddbcのCI34592804403成功。全UX台帳は未完のまま継続する。

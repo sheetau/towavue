@@ -704,6 +704,7 @@ struct Application<N> {
     fullscreen_was_maximized: bool,
     viewing_cursor: cursor::ViewingCursor,
     pending_dialog: Option<DialogIntent>,
+    file_dialog_return_focus: Option<(u64, Option<TabId>, egui::Id)>,
     renderer: Option<FrameRenderer>,
     ui_context: Option<egui::Context>,
     ui_state: Option<egui_winit::State>,
@@ -910,6 +911,7 @@ where
             fullscreen_was_maximized: false,
             viewing_cursor: cursor::ViewingCursor::default(),
             pending_dialog: None,
+            file_dialog_return_focus: None,
             renderer: None,
             ui_context: None,
             ui_state: None,
@@ -5779,6 +5781,15 @@ where
             notify(AppEvent::DialogFinished(result))
         }) {
             Ok(()) => {
+                self.file_dialog_return_focus = self.ui_context.as_ref().and_then(|context| {
+                    context.memory(egui::Memory::focused).map(|id| {
+                        (
+                            self.media_generation,
+                            self.tabs.active().map(|tab| tab.id),
+                            id,
+                        )
+                    })
+                });
                 self.pending_dialog = Some(intent);
                 self.request_redraw();
                 true
@@ -5807,9 +5818,11 @@ where
 
     fn finish_dialog(&mut self, result: Result<Option<PathBuf>, DialogError>) {
         self.refresh_pointer_position();
+        let return_focus = self.file_dialog_return_focus.take();
         let Some(intent) = self.pending_dialog.take() else {
             return;
         };
+        let cancelled_or_failed = !matches!(&result, Ok(Some(_)));
         match intent {
             DialogIntent::OpenFile => match result {
                 Ok(Some(path)) => self.open_external(path, false),
@@ -5849,6 +5862,15 @@ where
                     }
                 }
             },
+        }
+        if cancelled_or_failed
+            && !self.modal_input_blocked()
+            && let Some((generation, tab, id)) = return_focus
+            && generation == self.media_generation
+            && tab == self.tabs.active().map(|tab| tab.id)
+            && let Some(context) = &self.ui_context
+        {
+            context.memory_mut(|memory| memory.request_focus(id));
         }
         self.request_redraw();
     }
@@ -14981,6 +15003,163 @@ mod tests {
         assert!(app.pending_folder.is_none());
         assert!(app.folder_snapshot.is_none());
         assert!(app.path.is_none());
+    }
+
+    #[test]
+    fn file_dialog_cancel_restores_live_welcome_focus_without_replaying_the_command() {
+        let Some(_root) = isolated_test_root(
+            "tests::file_dialog_cancel_restores_live_welcome_focus_without_replaying_the_command",
+        ) else {
+            return;
+        };
+        for folder in [false, true] {
+            for failed in [false, true] {
+                let mut app = Application::new(None, |_| {}).expect("app");
+                let context = fonts::test_context();
+                context.enable_accesskit();
+                app.ui_context = Some(context.clone());
+                let frame = |app: &mut Application<_>, events| {
+                    let mut actions = Vec::new();
+                    let mut output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(960.0, 576.0),
+                            )),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| app.draw_ui(ui, &mut actions),
+                    );
+                    keep_accessibility_focus_live(&context, &mut output.platform_output);
+                    (output, actions)
+                };
+                for _ in 0..3 {
+                    frame(&mut app, vec![]);
+                }
+                let output = frame(&mut app, vec![]).0;
+                let target = output
+                    .platform_output
+                    .accesskit_update
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| {
+                        node.label()
+                            == Some(if folder {
+                                "Open Folder…"
+                            } else {
+                                "Open File…"
+                            })
+                    })
+                    .expect("Welcome action")
+                    .0;
+                frame(
+                    &mut app,
+                    vec![egui::Event::AccessKitActionRequest(
+                        egui::accesskit::ActionRequest {
+                            action: egui::accesskit::Action::Focus,
+                            target_tree: egui::accesskit::TreeId::ROOT,
+                            target_node: target,
+                            data: None,
+                        },
+                    )],
+                );
+                let origin = context.memory(egui::Memory::focused).expect("button focus");
+                let key = |pressed| egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                let actions = frame(&mut app, vec![key(true), key(false)]).1;
+                let command = if folder {
+                    CommandId::OpenFolder
+                } else {
+                    CommandId::OpenFile
+                };
+                assert!(matches!(actions.as_slice(), [UiAction::Command(id)] if *id == command));
+                // Model the captured origin and pending interval without opening a native dialog.
+                app.file_dialog_return_focus = Some((app.media_generation, None, origin));
+                app.pending_dialog = Some(if folder {
+                    DialogIntent::OpenFolder
+                } else {
+                    DialogIntent::OpenFile
+                });
+                for _ in 0..3 {
+                    assert!(frame(&mut app, vec![]).1.is_empty());
+                }
+                assert_ne!(context.memory(egui::Memory::focused), Some(origin));
+                app.finish_dialog(if failed {
+                    Err(DialogError::OwnerUnavailable)
+                } else {
+                    Ok(None)
+                });
+                let (output, actions) = frame(&mut app, vec![]);
+                assert!(actions.is_empty());
+                assert_eq!(
+                    output
+                        .platform_output
+                        .accesskit_update
+                        .expect("restored tree")
+                        .focus,
+                    target
+                );
+                assert_eq!(context.memory(egui::Memory::focused), Some(origin));
+                let actions = frame(&mut app, vec![key(true), key(false)]).1;
+                assert!(matches!(actions.as_slice(), [UiAction::Command(id)] if *id == command));
+                assert!(app.path.is_none() && app.edits.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn file_dialog_completion_drops_stale_focus_and_does_not_steal_guard_focus() {
+        let Some(root) = isolated_test_root(
+            "tests::file_dialog_completion_drops_stale_focus_and_does_not_steal_guard_focus",
+        ) else {
+            return;
+        };
+        for mode in 0..6 {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let context = fonts::test_context();
+            app.ui_context = Some(context.clone());
+            let origin = egui::Id::new("old dialog origin");
+            let current = egui::Id::new("new focus owner");
+            app.file_dialog_return_focus = Some((app.media_generation, None, origin));
+            app.pending_dialog = Some(DialogIntent::OpenFile);
+            match mode {
+                0 => app.media_generation += 1,
+                1 => {
+                    app.tabs
+                        .open_new(root.join("different.png"), MediaKind::Image);
+                }
+                2 => app.pending_guard = Some(GuardedAction::Exit),
+                3 => app.pending_dialog = None,
+                4 => app.native_prompt = Some(FallbackPrompt::ExportBusy),
+                _ => {}
+            }
+            context.memory_mut(|memory| memory.request_focus(current));
+            app.finish_dialog(if mode == 5 {
+                Ok(Some(root.join("unavailable.png")))
+            } else {
+                Ok(None)
+            });
+            assert_ne!(
+                context.memory(egui::Memory::focused),
+                Some(origin),
+                "mode {mode}"
+            );
+            assert!(app.file_dialog_return_focus.is_none());
+            if mode != 5 {
+                assert_eq!(
+                    context.memory(egui::Memory::focused),
+                    Some(current),
+                    "mode {mode}"
+                );
+            }
+        }
     }
 
     #[test]

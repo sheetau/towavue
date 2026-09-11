@@ -1,5 +1,9 @@
 # towavue アーキテクチャ
 
+## G01/U06: native file dialog取消後のfocus（2026-09-11）
+
+file／folder／export pickerの開始成功時に、そのwindowのegui focusとactive tab（Welcomeならなし）・media generationを保持する。取消／失敗後も同じtabとgenerationで、別modal／guardが続かない場合だけfocusを戻す。選択成功、source／tab変更、残るguard、対応するpending dialogがない遅延結果は保持先を破棄する。再描画でボタンを再登録した後の既存accessibility検査により、消えたmenu項目などの非live focusは除去する。勝手な再実行／ファイル再選択はせず、Enter等の次の操作を待つ。
+
 ## E01: JPEG Dynamic Media文字metadata（2026-09-11）
 
 JPEGの対応項目へAlbum／Composer／Genreを加え、[Adobe Dynamic Media定義](https://developer.adobe.com/xmp/docs/xmp-namespaces/xmp-dm/)のxmpDM:album／composer／genreへ対応させる。namespace URIで判定し、RDF Descriptionのattributeまたは単純なtext elementを読み、出力は単純elementとする。配列・修飾値・同一property重複は推測して変換せず拒否する。既存のdc言語Alt／作者Seqと混在でき、Keepは3項目も保持、Setは単一文字値、Removeはproperty除去となる。UIは対応先と元の文字値を表示し、7項目の形式別validation・既存の非同期読取／tab世代／保存guardへ接続する。

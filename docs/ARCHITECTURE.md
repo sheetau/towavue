@@ -1,5 +1,9 @@
 # towavue アーキテクチャ
 
+## U04/G01: Debug版のID交替診断枠（2026-09-12）
+
+共通styleでDebug版eguiのwarn_if_rect_changes_idだけを無効にする。同じrectに異なるtabのcontrolが現れる等の遷移を赤い診断枠として画面へ出さない。通常のfocus stroke／keyboard／UIA／tab別focus保持、同一pass内の実ID重複を検出するwarn_on_id_clash、他の診断設定は変更しない。固定eguiのこの診断描画自体がdebug_assertions限定のためReleaseの表示は変えない。これはID安定性の全監査や、利用者の全環境で赤枠が消えたことの認定ではない。
+
 ## U07: 未保存indicatorと可逆transformの同一性（2026-09-12）
 
 tab名末尾のasteriskを除き、未保存は既存close領域のdotで示す。領域をhover／keyboard focusするとclose glyphへ戻し、button ID・操作領域・close／dirty guardは維持する。UIAのclose名は維持し、未保存の説明を追加する。

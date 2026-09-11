@@ -39,10 +39,9 @@ fn wait_image(app: &mut App, events: &std::sync::mpsc::Receiver<AppEvent>) {
 }
 
 fn tree(app: &mut App, events: Vec<egui::Event>) -> egui::accesskit::TreeUpdate {
-    frame(app, egui::vec2(640.0, 480.0), events)
-        .platform_output
-        .accesskit_update
-        .expect("tree")
+    let output = frame(app, egui::vec2(640.0, 480.0), events);
+    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.stroke.color == Color32::RED)), "tab focus transitions must not paint red diagnostic rectangles");
+    output.platform_output.accesskit_update.expect("tree")
 }
 
 fn settle(app: &mut App) -> egui::accesskit::TreeUpdate {

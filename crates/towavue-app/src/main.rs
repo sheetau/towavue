@@ -9342,6 +9342,7 @@ mod tests {
         app.tabs.open_new(root.join("image.png"), MediaKind::Image);
         let context = fonts::test_context();
         context.enable_accesskit();
+        context.global_style_mut(chrome::style);
         let mut frame = |events| {
             let mut actions = Vec::new();
             let output = context.run_ui(
@@ -9356,6 +9357,7 @@ mod tests {
                 |ui| app.draw_top_bar(ui, &mut actions),
             );
             assert!(actions.is_empty(), "menu cancellation executes no command");
+            assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.stroke.color == Color32::RED)), "menu cancellation must not paint red diagnostic rectangles");
             output.platform_output.accesskit_update.expect("tree")
         };
         frame(vec![]);

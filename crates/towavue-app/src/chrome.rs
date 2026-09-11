@@ -96,6 +96,11 @@ pub fn title_layout(native: Option<(f32, f32)>, top: f32, density: f32) -> Title
 }
 
 pub fn style(style: &mut egui::Style) {
+    #[cfg(debug_assertions)]
+    {
+        // Different tab controls can legitimately replace each other at the same rect.
+        style.debug.warn_if_rect_changes_id = false;
+    }
     style.visuals.panel_fill = BACKGROUND;
     style.visuals.window_fill = BACKGROUND;
     style.visuals.window_stroke.color = BORDER;
@@ -463,6 +468,8 @@ mod tests {
     fn overlay_and_input_surfaces_use_the_shared_grayscale_palette() {
         let mut themed = egui::Style::default();
         style(&mut themed);
+        #[cfg(debug_assertions)]
+        assert!(!themed.debug.warn_if_rect_changes_id);
         assert_eq!(HOVER, Color32::from_rgb(44, 44, 44));
         for visuals in [
             themed.visuals.widgets.hovered,

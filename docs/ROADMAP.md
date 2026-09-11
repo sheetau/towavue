@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 U04/G01 diagnostic-outline checkpoint: Debug版eguiのrect単位ID交替警告を画像tab／focus fixtureで再現し、可視診断だけを抑制。menu Escapeとtab間focus復帰の回帰で赤枠なし・元のfocus／非dispatchを確認。通常focusと実ID重複診断は維持し、Release動作は変更しない。status message集約・実画面と全UX gateは未完。
+
 2026-09-12 U07 dirty checkpoint: tabのasteriskをclose領域のCodicon丸印へ置換し、hover／focusでは×へ戻す。保存済みsnapshotと連続した直角回転／反転の同値性でdirtyを比較し、4回回転・二重反転等ではUndo履歴を残してcleanに戻る。5,461通りの向き・分岐／保存中編集・raster境界、代表RGBA一致と3倍率のindicator／close guardを確認。全編集の同値性・実ウィンドウ／全UI監査は未完。
 
 2026-09-12 M01/G01 menu checkpoint: 方向dragのsection中身だけをbutton下へ固定表示し、親の通常clickとcommand描画を共用。Edit方向を45度領域へ、Image jumpをView子menuへ移動。logo背景不変・gray／white線色・左余白を反映し、位置／親非表示／keyboard／取消／再openを回帰確認。初回layout時の無効な子menuへのfocus移動も修正。実画面・native caption／tab寸法と全UX gateは未完。

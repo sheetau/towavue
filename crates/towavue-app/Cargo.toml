@@ -18,5 +18,8 @@ towavue-core = { path = "../towavue-core" }
 towavue-runtime-windows = { path = "../towavue-runtime-windows" }
 winit = "=0.30.13"
 
+[dev-dependencies]
+towavue-runtime-windows = { path = "../towavue-runtime-windows", features = ["render-verification"] }
+
 [lints]
 workspace = true

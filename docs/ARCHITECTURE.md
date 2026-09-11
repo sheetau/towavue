@@ -2,6 +2,8 @@
 
 ## I06/I07: 復号待ちの原寸表示引継ぎ（2026-09-12）
 
+GPU画素の回帰検証にはruntimeの非default `render-verification` featureをappのdev-dependencyからだけ有効にする。safeな検証専用入口が同じrendererのRGBA back bufferをstaging textureへ読み戻し、所有されたbytesだけを返す。COM／mapped pointerはruntime外へ出さず、通常buildの描画経路にCPU readbackは追加しない。hidden test windowの画素／Present検証は、可視画面・実key入力・アプリ全体のpeak memory証明とは区別する。
+
 同一tabの通常画像navigationでは、直前に表示した原寸presentationを一枚だけ表示専用handoffとして保持する。path・view・表示transform・取得済み容量も旧sourceと一緒に固定し、原寸の復号／texture準備が成功した同じ処理で新sourceへ置き換える。保持中は中央の縮小previewとloading captionを出さず、旧画像のanimationも進めない。tab target／titleは最新要求先、statusの画像情報／pathは表示中の旧sourceを表す。旧presentationを新targetのself.imageへ戻さない。
 
 保持中の編集・Undo/Redo・保存／書出し／metadata options・画像／pathコピー・Explorer表示と画像view操作はcommand gateで無効にし、直接の編集／書出し／画像コピー入口も保護する。中央描画は入力を扱わない。navigation・tab／window操作は維持し、連打は既存の最新要求優先で最後に表示できた一枚を引き継ぐ。古いgeneration／pathの完了では置換しない。失敗、別sourceのload、tab離脱／transfer、最後のtab closeで解放し、未完了の新targetをretained tabへ保存するときに旧画像を混入させない。graphics復旧では保持中textureも既存decoded pixelsから復元する。

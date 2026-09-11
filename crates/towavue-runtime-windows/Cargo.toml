@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+render-verification = []
+
 [dependencies]
 arboard = { version = "=3.6.1", default-features = false, features = ["image-data"] }
 crc32fast = "=1.5.1"

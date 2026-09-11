@@ -1,5 +1,8 @@
 use std::mem::ManuallyDrop;
 
+#[cfg(feature = "render-verification")]
+mod verification;
+
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use thiserror::Error;
 use towavue_core::UnitPoint;

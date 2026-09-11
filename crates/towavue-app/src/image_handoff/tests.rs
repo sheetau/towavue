@@ -1,5 +1,7 @@
 use super::*;
 
+mod gpu;
+
 type App = Application<fn(AppEvent)>;
 
 fn decoded(width: u32, height: u32, color: [u8; 4]) -> Arc<DecodedImage> {

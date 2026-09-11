@@ -13,6 +13,8 @@
 
 ### 2026-09-12追記の差分台帳
 
+I06/I07 GPU-handoff回帰: 小型の模様付き生成原寸を実draw_uiからD3D11へ送り、3倍率・各12回の最新要求更新とpreview到着で中央領域の全画素を比較。保持を外した対照条件の赤preview／空表示を識別し、同じdevice上でrendererを再作成した際のtexture復元、新原寸の全サンプル置換も確認。RGBA pointerとArc weak参照から一つの旧decoded allocationを共有し、置換後に解放されることを確認する。runtime内のsafeな読み戻し入口を非default featureに限定し、appのdev-dependencyだけで使う。通常依存経路にfeatureがないことをcargo treeで確認。これはhidden窓の描画／Presentと旧CPUデータ寿命の検証で、100枚大画像のGPU性能・可視画面・物理入力・GPU allocation／process peak memoryの証明ではない。次は既存NAV100をGPU submissionと資源測定へ拡張する。
+
 I06/I07 original-display-handoff: 同じtabの通常画像移動は旧原寸一枚を表示専用で保持する。新targetのimageや編集履歴としては扱わず、旧path／表示transform／取得済み容量をstatusにも使う。保持中の編集・保存／metadata options・画像／path copy・Explorer表示・view操作を禁止し、navigationは最新要求優先を維持する。3倍率の実draw_ui回帰で旧mesh維持、縮小preview抑止、pointer／command入力で履歴とview不変、古い完了の無視、新原寸への置換、graphics復元対象と失敗／tab移動／closeのtexture解放を確認。読み込み中の新tab stateへ旧画像を渡さない。
 
 NAV100後続計測: 4096×2304 JPEG100枚／31.8MiB、warm filesystem・合成Shell順・直列入力のRelease CPU計測を2回実行。どちらも即時／33ms間隔で新原寸100、blank 0、preview 0、handoff 100。保持画像は新原寸のreadyに数えない。ready中央値は初回18.036／8.458ms、再実行16.929／7.521ms、p95は26.575／10.383msと17.939／8.658ms。先行e2af6ecのblank 100から解消したが、復号速度改善と主張しない。再実行は生成済みRelease test exeの終了コード0も確認。既存cache上限は変えず、旧decoded一画像（既存512MiB上限内）とtextureの追加生存を認める。実GPU表示・物理burstの全画像到達・cold／他形式・peak memory／IrfanView比較は未達のまま。

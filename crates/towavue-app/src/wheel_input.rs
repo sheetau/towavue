@@ -54,6 +54,20 @@ pub fn volume_delta(context: &Context, targets: &[Response], excluded: Option<eg
 }
 
 pub fn zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
+    zoom_events_filtered(context, target, |_| true)
+}
+
+pub fn video_zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
+    zoom_events_filtered(context, target, |modifiers| {
+        modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd
+    })
+}
+
+fn zoom_events_filtered(
+    context: &Context,
+    target: &Response,
+    allowed: impl Fn(egui::Modifiers) -> bool,
+) -> Vec<(Pos2, f32)> {
     if !target.enabled()
         || context.input(|input| {
             input
@@ -65,10 +79,11 @@ pub fn zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
         return Vec::new();
     }
     let focused = context.input(|input| input.focused);
+    let gesture_allowed = focused && context.input(|input| allowed(input.modifiers));
     if let Some(touch) = context.input(|input| input.multi_touch()) {
         return context
             .input(|input| input.pointer.hover_pos())
-            .filter(|_| focused && target.hovered() && touch.zoom_delta != 1.0)
+            .filter(|_| gesture_allowed && target.hovered() && touch.zoom_delta != 1.0)
             .map(|position| (position, touch.zoom_delta))
             .into_iter()
             .collect();
@@ -97,7 +112,7 @@ pub fn zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
                     delta,
                     modifiers,
                     phase: egui::TouchPhase::Move,
-                } if modifiers.matches_any(options.zoom_modifier) => {
+                } if modifiers.matches_any(options.zoom_modifier) && allowed(modifiers) => {
                     let points = match unit {
                         egui::MouseWheelUnit::Point => 1.0,
                         egui::MouseWheelUnit::Line => options.line_scroll_speed,
@@ -105,7 +120,7 @@ pub fn zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
                     };
                     (options.scroll_zoom_speed * points * (delta.x + delta.y)).exp()
                 }
-                Event::Zoom(factor) if focused => factor,
+                Event::Zoom(factor) if gesture_allowed => factor,
                 _ => return None,
             };
             (factor != 1.0).then_some((position, factor))
@@ -508,6 +523,96 @@ mod tests {
                 }
             }
             assert!(frame(events, enabled, focused, false).is_empty());
+        }
+    }
+
+    #[test]
+    fn video_zoom_uses_event_modifiers_without_relaxing_gesture_focus() {
+        for focused in [false, true] {
+            let context = Context::default();
+            let point = egui::pos2(100.0, 100.0);
+            let frame = |events, modifiers| {
+                let mut result = Vec::new();
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            Pos2::ZERO,
+                            egui::vec2(400.0, 300.0),
+                        )),
+                        events,
+                        modifiers,
+                        focused,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        begin_frame(ui.ctx());
+                        let response = ui.allocate_rect(
+                            egui::Rect::from_min_size(
+                                egui::pos2(20.0, 20.0),
+                                egui::vec2(200.0, 160.0),
+                            ),
+                            egui::Sense::hover(),
+                        );
+                        result = video_zoom_events(ui.ctx(), &response);
+                    },
+                );
+                result
+            };
+            for _ in 0..3 {
+                frame(vec![Event::PointerMoved(point)], egui::Modifiers::NONE);
+            }
+            for (modifiers, accepted) in [
+                (egui::Modifiers::CTRL, true),
+                (
+                    egui::Modifiers {
+                        ctrl: true,
+                        shift: true,
+                        ..Default::default()
+                    },
+                    true,
+                ),
+                (
+                    egui::Modifiers {
+                        ctrl: true,
+                        alt: true,
+                        ..Default::default()
+                    },
+                    false,
+                ),
+                (
+                    egui::Modifiers {
+                        ctrl: true,
+                        mac_cmd: true,
+                        ..Default::default()
+                    },
+                    false,
+                ),
+                (egui::Modifiers::NONE, false),
+            ] {
+                let zooms = frame(
+                    vec![Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, 60.0),
+                        phase: egui::TouchPhase::Move,
+                        modifiers,
+                    }],
+                    if accepted {
+                        egui::Modifiers::NONE
+                    } else {
+                        egui::Modifiers::CTRL
+                    },
+                );
+                assert_eq!(zooms.len(), usize::from(accepted));
+                if accepted {
+                    assert_eq!(zooms[0].0, point);
+                    assert!((zooms[0].1 - (60.0_f32 / 200.0).exp()).abs() < 0.0001);
+                }
+            }
+            assert!(frame(vec![Event::Zoom(1.25)], egui::Modifiers::NONE).is_empty());
+            assert_eq!(
+                frame(vec![Event::Zoom(1.25)], egui::Modifiers::CTRL).len(),
+                usize::from(focused)
+            );
         }
     }
 

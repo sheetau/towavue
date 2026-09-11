@@ -79,6 +79,15 @@ fn frame_input<N: Fn(AppEvent) + Send + Sync + 'static>(
     modifiers: egui::Modifiers,
     events: Vec<egui::Event>,
 ) -> egui::accesskit::TreeUpdate {
+    frame_input_focused(app, modifiers, events, true)
+}
+
+fn frame_input_focused<N: Fn(AppEvent) + Send + Sync + 'static>(
+    app: &mut Application<N>,
+    modifiers: egui::Modifiers,
+    events: Vec<egui::Event>,
+    focused: bool,
+) -> egui::accesskit::TreeUpdate {
     let context = app.ui_context.clone().expect("context");
     context.enable_accesskit();
     // Native render_frame and synthetic pointer passes must use the same epoch;
@@ -97,6 +106,7 @@ fn frame_input<N: Fn(AppEvent) + Send + Sync + 'static>(
             events,
             modifiers,
             time,
+            focused,
             ..Default::default()
         },
         |ui| app.draw_ui(ui, &mut actions),

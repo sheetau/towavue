@@ -41,6 +41,71 @@ fn secondary(pos: egui::Pos2, pressed: bool) -> egui::Event {
     }
 }
 
+fn immediate_wheel<N: Fn(AppEvent) + Send + Sync + 'static>(
+    app: &mut Application<N>,
+    viewport: egui::Rect,
+) {
+    let saved = app.image_view;
+    let context = app.ui_context.clone().expect("context");
+    for focused in [false, true] {
+        app.image_view = saved;
+        for _ in 0..2 {
+            frame_input_focused(app, egui::Modifiers::NONE, vec![], focused);
+        }
+        let mut expected = full(app, viewport);
+        let mut events = Vec::new();
+        for (point, delta) in [
+            (viewport.center() + egui::vec2(30.0, 20.0), 60.0_f32),
+            (viewport.center() - egui::vec2(25.0, 15.0), -60.0),
+        ] {
+            let factor = (delta / 200.0).exp();
+            expected = egui::Rect::from_center_size(
+                point + (expected.center() - point) * factor,
+                expected.size() * factor,
+            );
+            events.extend([
+                egui::Event::PointerMoved(point),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, delta),
+                    modifiers: egui::Modifiers::CTRL,
+                    phase: egui::TouchPhase::Move,
+                },
+            ]);
+        }
+        // Frame-final Ctrl is released; each wheel must retain its own modifier and anchor.
+        frame_input_focused(app, egui::Modifiers::NONE, events, focused);
+        let actual = full(app, viewport);
+        assert!(
+            (actual.min - expected.min).length() < 0.01
+                && (actual.max - expected.max).length() < 0.01,
+            "immediate event-positioned video zoom, focused={focused}: {actual:?} / {expected:?}"
+        );
+        let view = app.image_view;
+        for _ in 0..3 {
+            frame_input_focused(app, egui::Modifiers::CTRL, vec![], focused);
+            assert_eq!(app.image_view, view, "no delayed video zoom tail");
+        }
+        assert!(context.memory(egui::Memory::focused).is_none());
+        let mut lost = vec![egui::Event::WindowFocused(false)];
+        lost.extend(wheel(viewport.center()));
+        frame_input_focused(app, egui::Modifiers::CTRL, lost, false);
+        assert_eq!(app.image_view, view, "focus-loss frame cancels zoom");
+        frame_input_focused(app, egui::Modifiers::CTRL, wheel(viewport.center()), false);
+        assert_ne!(
+            app.image_view.zoom, view.zoom,
+            "later inactive wheel resumes"
+        );
+        let view = app.image_view;
+        app.timeline_open = false;
+        frame_input_focused(app, egui::Modifiers::CTRL, wheel(viewport.center()), false);
+        assert_eq!(app.image_view, view, "viewing mode still blocks zoom");
+        app.timeline_open = true;
+    }
+    app.image_view = saved;
+    frame_input_focused(app, egui::Modifiers::NONE, vec![], true);
+}
+
 pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
     software: bool,
@@ -63,6 +128,7 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
         frame(app, vec![]);
         let fit = app.video_rect.expect("Fit frame");
         let viewport = egui::Rect::from_center_size(fit.center(), app.image_viewport);
+        immediate_wheel(app, viewport);
         let pointer = fit.center() + fit.size() * 0.12;
         frame_input(
             app,

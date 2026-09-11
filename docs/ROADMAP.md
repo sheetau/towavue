@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 G01/V05 video-wheel checkpoint: 動画zoomを共通raw event parserへ移し、非active MouseWheelと同frame複数pointer基点を扱う。Ctrl／Alt除外はevent単位、timeline／overlay・drag保護は維持。生成FFV1／SAR素材の3倍率GPU描画で、active／inactive、末尾Ctrl解除、遅延残量なし、focus loss／再開、timelineを閉じた際の抑止を回帰確認。parserで修飾key競合・明示Zoomのfocus条件も確認。OS実入力・全hardware経路と全UX gateを保持する。
+
 2026-09-12 G01/I07/I08 inactive-image-wheel checkpoint: 下位scroll関数の非active対応だけでは、呼出元のdrag用focus gateで止まることを確認。画像wheelをoverlay共通条件へ分離し、Ctrl wheelも非activeで受け付ける。選択／右drag／bar、明示Zoom／multi-touchのfocus条件とfocus-loss frameの取消は維持。3倍率×active／inactiveの実draw_ui回帰でpan／zoomの同frame mesh、pointer基点・texture／履歴保持・再開／overlay抑止を確認済み。OS実入力、動画側zoomを含む他経路と全UX gateは維持する。
 
 2026-09-12 U03 font-audit checkpoint: Welcomeのアプリ名に残る明示Monospaceを除去し、既存Figtreeへ統一。3倍率×3幅で全text sectionのProportional／Codicon分離と32pxを検証し、元実装で回帰失敗を確認。既存の数字等幅・実日本語font・小窓／keyboard回帰も通過。通常960×576の変更前後は可視確認済みだが、native menu入力／全OS・DPIの実表示は未認定。全UX gateを維持する。

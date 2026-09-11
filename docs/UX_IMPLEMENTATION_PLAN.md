@@ -13,6 +13,8 @@
 
 ### 2026-09-12追記の差分台帳
 
+動画Ctrl wheelも共通parserへ接続し、非active入力と同frame内の複数pointer基点へ即時反映する。動画固有のmodifier除外、timeline／overlay・右dragの保護を維持。3倍率の生成動画GPU描画で同frame反映・末尾Ctrl解除・残量なし・focus loss／再開・timeline gateを確認。OSから非active窓への実入力は未検証。
+
 status容量は描画中のmetadata取得を廃止し、path／media instance／snapshot変更単位の非同期取得へ移す。現在一件だけを保持し、待機／失敗の省略・古いticket拒否・snapshot更新での再取得を回帰確認済み。workerは一件実行＋最新待機、UI closeでjoinしない。実window drag全体の遅延認定とは分け、下記gateを維持する。
 
 追記で指摘された項目は、以前の主経路実装や自動testの成功で完了にしない。以下もgoalの完了条件へ含める。思案中と明記されたファイル検索paletteは引き続き実装対象外。
@@ -25,7 +27,7 @@ status容量は描画中のmetadata取得を廃止し、path／media instance／
 | U04 status／focus | loading／resampling／media errorをstatus左へ集約し、画像成功の寸法／形式flashを除きframe数は右へ常設。reading drag値を左優先、確定後4秒／取消は破棄。fullscreen通知は下端barへ統合。2幅×3倍率×通常／fullscreenの通知位置／一回表示・path復帰、部分ページ／複数error、既存focus／履歴を回帰確認。通常画像のpath／右情報は可視確認、Computer Useのintegrity差／activation失敗で実入力は未確認。Debug版のrect-ID交替診断による赤枠も再現・可視警告だけ抑制済み。Releaseには元々該当診断なし。実画面と全経路の監査は未完 |
 | M01/G01 menu | button下の固定位置、直接section時は親を出さず中身だけ保持、Image jumpをView子menuへ、logoは背景を変えずgray／white線色・左にも同じgap・Edit方向45度を実装。親非表示／先頭位置・境界角・通常rootの4分類・nested keyboardと全command配置・取消／一回dispatch、3サイズ×3倍率の再openを回帰確認。実画面／全focus・DPI・pixel単位の余白監査は未完 |
 | U03/U04 font／resize | seek／tab preview時刻に続き、Welcome中央のアプリ名もProportionalへ統一。productionの明示fontと入力widget既定値を監査し、残る明示Monospaceはなし。Welcome3倍率×3幅・Codicon分離と通常窓の前後を確認。通常幅のtab名／list／status path・time・volumeは4倍率の1px往復resizeで不動。狭い音声時計だけ可変領域内中央寄せで0.5px移動を再現し、領域を左寄せへ変更して同回帰を通過。OS所有UIを含む全font実表示／実window drag全経路は未完 |
-| G01/I07/I08 非active wheel | 音声list／音量に続き、画像縦／Shift横scrollの呼出元に残るdrag用focus gateも分離。画像Ctrl wheelを非activeで受理し、明示Zoom／touchと選択／drag／barのfocus条件は維持。3倍率×active／inactiveのdraw_uiで同frame pan／zoom mesh、pointer基点・texture／履歴／focus保持と取消／再開を確認。下位関数だけの先行testでは外側gateの不具合を検出できていなかった。OS実入力・動画zoom等の他経路は未完 |
+| G01/I07/I08/V05 非active wheel | 音声list／音量に続き、画像縦／Shift横scrollの呼出元に残るdrag用focus gateも分離。画像・動画Ctrl wheelを非activeで受理し、明示Zoom／touchと選択／drag／barのfocus条件は維持。3倍率×active／inactiveのdraw_uiで同frame pan／zoom、pointer基点・履歴／focus保持と取消／再開を確認。動画は生成素材のGPU描画も確認。下位関数だけの先行testでは画像の外側gateの不具合を検出できていなかった。OS実入力・全window／hardware経路は未完 |
 | V03/A02 timeline外観／入力 | 白50%volume線とResizeRow、領域内の白1物理px CTI＋三角playheadからだけseek drag、選択左右resize／cursorを実装。端のoffset保持・交差clamp、一回commit／取消と既存gain／stretch／keyboard／UIAを回帰確認。#181818のradius3背景・左右上8px／下0余白、白20% difference塗り＋左右白1物理px点線も実装。音声／動画の3幅×3倍率で共通領域／二境界、resize・小窓上限を維持。WARP／hardwareで0／20／100%反転合成・clip／alpha／重なり／通常復帰を全画素確認し、画像枠の旧描画を保持。実画面／入力・全DPI／全経路監査は未完 |
 | U09/U10 tooltip／preview | previewを通常tooltipのdelay／前frame所有権から分離した非操作Areaへ変更。tab下中央／seek上中央、同一frameのsize再配置と非active hover／生成要求を実装。旧Tooltip層はpreview対象を遮らず、menu／他overlay／disabledは抑止。60秒delay設定・旧tooltip・3倍率／active状態・離脱と既存dirty tab／drag／見開きを回帰確認。一般説明22箇所もclipped bounds／layer／hitを確認し、元要素外で終了。delay／disabled／切替／click／大きな自分の説明を3倍率で回帰確認。実画面／全OS入力と残留全経路の確認は未完 |
 | U04 popup shadow | egui影の横offsetを0・黒alpha112へ調整。window blur15→18／popup8→10、縦offset／spread維持。24条件でprimitive／vertex／index数・texture不変、CPU側tessellationを比較。既存feathered meshを維持し追加blur pass等なし。Gaussian化ではなく、実GPU時間／全表示品質は未確認 |

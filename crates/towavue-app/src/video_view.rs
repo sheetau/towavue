@@ -77,28 +77,23 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         response: &egui::Response,
         full: egui::Rect,
     ) {
-        if !self.visual_selection_enabled() || !self.view_drag_allowed(ui.ctx()) {
+        if !self.visual_selection_enabled() {
             return;
         }
-        let (zoom, pointer, allowed) = ui.input(|input| {
-            (
-                input.zoom_delta(),
-                input.pointer.hover_pos(),
-                input.focused
-                    && input.modifiers.ctrl
-                    && !input.modifiers.alt
-                    && !input.modifiers.mac_cmd
-                    && !input.pointer.any_down(),
-            )
-        });
-        if zoom != 1.0 && response.hovered() && allowed && self.view_drag.is_none() {
-            let ratio = self.zoom_video(zoom);
-            if let Some(pointer) = pointer {
-                let correction = (pointer - full.center()) * (1.0 - ratio);
+        if !self.view_input_allowed(ui.ctx()) {
+            self.cancel_view_drag();
+            return;
+        }
+        if self.view_drag.is_none() && !ui.input(|input| input.pointer.any_down()) {
+            let mut center = full.center();
+            for (pointer, zoom) in wheel_input::video_zoom_events(ui.ctx(), response) {
+                let ratio = self.zoom_video(zoom);
+                let correction = (pointer - center) * (1.0 - ratio);
                 self.image_view.pan.0 += correction.x;
                 self.image_view.pan.1 += correction.y;
+                center += correction;
             }
         }
-        self.update_pan(response, pointer);
+        self.update_pan(response, ui.input(|input| input.pointer.hover_pos()));
     }
 }

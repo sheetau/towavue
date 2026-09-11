@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## G01/V05: 動画wheelの即時・非active反映（2026-09-12）
+
+動画も平滑化済みinput.zoom_deltaとframe末尾のhover／modifier判定から、画像と共通のevent単位zoom parserへ移す。動画用の薄い入口でCtrl必須・Alt／mac_cmd除外を各MouseWheelへ適用し、画像側のmodifier契約は変えない。単位・倍率速度・上限は従来値を維持する。複数wheelはevent時点のpointer位置で順にzoom_videoを適用し、その実倍率でpanと次event用centerを更新する。Ctrlをframe末尾に離しても既に届いたwheelを捨てず、空frameや後続Ctrl入力へ平滑化残量を持ち越さない。SAR・編集後寸法・physical倍率・viewport／UV clip・表示専用stateは既存経路を使う。
+
+timelineによるvisual_selection_enabledと共通overlay／modal／popup gateは維持し、通常視聴ではzoomしない。MouseWheelはwindow focusを要求しないが、明示Zoom／multi-touchにはfocusと動画modifier条件を要求し、動画のbutton-down抑止も残す。右dragはupdate_panのfocus／取消契約を維持する。WindowFocused(false)を含むframeはzoomを破棄し、次frameから有効な非active wheelを再開する。新hook・OS設定変更・active化は行わない。先行画像wheel節で別経路として残した動画の平滑化はこの節で置き換える。生成FFV1／SAR素材のsoftware decode→GPU描画と3倍率回帰は行うが、実マウス入力や全D3D11VA経路の認定とは区別する。
+
 ## G01/I07/I08: 非active画像wheelの外側gate（2026-09-12）
 
 通常画像のwheel入力は、overlay／modal／popup等の共通許可条件と「dragなし」を確認し、window focusは要求しない。従来のimage_scroll_deltaだけでなく呼出元もview_drag_allowedを使っていたため、先行変更では非activeの実画像panが止まる余地を残していた。共通overlay条件をview_input_allowedへ抽出し、drag／選択／scrollbar入力では従来どおりfocus必須と取消を重ねる。wheelは縦・Shift横・Ctrl倍率を現在frameの描画へ反映し、keyboard focusやwindowのactive化を要求しない。

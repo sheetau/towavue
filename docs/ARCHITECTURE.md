@@ -1,5 +1,9 @@
 # towavue アーキテクチャ
 
+## U03: Welcomeのfont適用漏れ（2026-09-12）
+
+Welcome中央の32pxアプリ名もUI本文と同じProportional family（Figtree-tabular先頭）へ揃え、明示Monospace指定を外す。色・font size・column幅・action／shortcut・Codicon専用familyは変更しない。一般MonospaceのLatin font定義をFigtreeで上書きせず、コード表示用の既存契約と日本語fallbackは維持する。app内の明示font指定、TextEditと値非表示Sliderの利用箇所、固定eguiの関連既定値を確認した。現在のproduction widgetに明示Monospace指定は残っていないが、OS所有dialog／captionや全UIの実表示を一括認定するものではない。
+
 ## U03/U04: status容量の非同期取得（2026-09-12）
 
 status描画はfilesystem metadataを読まず、現在sourceの容量結果だけを表示する。windowごとにruntimeのLatestTaskを一つ所有し、path・media instance・folder snapshotのgeneration／captured_atが変わったときだけ問い合わせる。既存folder watcher／refreshによるsnapshot更新で同じpathも取り直す。容量cacheは現在source一件だけで、未取得・失敗は容量を省略し、失敗も次のsource更新まで再試行しない。空fileの0 bytesは既知の値として区別する。source変更時は古い容量を消し、完了eventでも現在sourceを再照合したうえで単調ticketを確認する。タブ復元／別windowへの移動では移動先のsourceとして再取得し、他tabの容量を表示しない。

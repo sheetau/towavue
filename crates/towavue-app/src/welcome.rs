@@ -23,12 +23,7 @@ pub fn show(
                     egui::vec2(width, 0.0),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        ui.label(
-                            RichText::new("towavue")
-                                .monospace()
-                                .size(32.0)
-                                .color(chrome::MUTED),
-                        );
+                        ui.label(RichText::new("towavue").size(32.0).color(chrome::MUTED));
                         ui.add_space(32.0);
                         ui.label(RichText::new("START").size(12.0).color(chrome::MUTED));
                         ui.add_space(8.0);
@@ -88,6 +83,55 @@ pub fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn welcome_text_uses_ui_font_while_icons_keep_their_own_family() {
+        for density in [1.0, 1.25, 2.0] {
+            for width in [240.0, 480.0, 960.0] {
+                let context = crate::fonts::test_context();
+                context.set_pixels_per_point(density);
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 576.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        show(ui, &ShortcutBindings::default(), |ui| {
+                            ui.label("No recent files");
+                        });
+                    },
+                );
+                let mut wordmark = false;
+                let mut icon = false;
+                for shape in &output.shapes {
+                    let egui::Shape::Text(text) = &shape.shape else {
+                        continue;
+                    };
+                    for section in &text.galley.job.sections {
+                        let family = &section.format.font_id.family;
+                        if family == &crate::fonts::icon_font().family {
+                            icon = true;
+                        } else {
+                            assert_eq!(
+                                family,
+                                &egui::FontFamily::Proportional,
+                                "UI font for {:?} at {density}x / {width}px",
+                                text.galley.text()
+                            );
+                        }
+                    }
+                    if text.galley.text() == "towavue" {
+                        wordmark = true;
+                        assert_eq!(text.galley.job.sections[0].format.font_id.size, 32.0);
+                    }
+                }
+                assert!(wordmark && icon, "audit both wordmark and action icons");
+            }
+        }
+    }
 
     #[test]
     fn welcome_idle_output_keeps_wordmark_and_shortcuts_visible() {

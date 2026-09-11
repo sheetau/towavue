@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 U03 font-audit checkpoint: Welcomeのアプリ名に残る明示Monospaceを除去し、既存Figtreeへ統一。3倍率×3幅で全text sectionのProportional／Codicon分離と32pxを検証し、元実装で回帰失敗を確認。既存の数字等幅・実日本語font・小窓／keyboard回帰も通過。通常960×576の変更前後は可視確認済みだが、native menu入力／全OS・DPIの実表示は未認定。全UX gateを維持する。
+
 2026-09-12 U03/U04 status-I/O checkpoint: 描画中のpath.metadataをruntime所有のLatestTaskへ移動。path／media instance／snapshot更新単位の現在一件だけを保持し、未取得／失敗は容量を省略。完了時の現在source／ticket照合、失敗記憶と0 bytesの区別、外部変更後のsnapshot再取得を回帰確認済み。OSのmetadata待ちは強制中断せずUIから分離する。実drag latency・表示／全DPIと全UX gateは保持する。
 
 2026-09-12 U03/U04 resize/shadow checkpoint: 通常幅の左寄せ5種は右端1px変更で不動だったが、狭い音声時計は0.5px動く経路を再現。可変幅領域を明示左寄せへ変更し、4倍率の往復resizeを回帰確認。eguiの影は横offset0／黒alpha112、window blur18／popup blur10へ調整し、24条件で旧版と同じmesh／vertex／index／texture構成を確認。実ウィンドウdrag全経路、font適用漏れとGPU時間／全blur品質の認定は未完。全UX gateを保持する。

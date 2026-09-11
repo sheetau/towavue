@@ -148,6 +148,12 @@ cached_imageはmemoryの既知元寸法を優先し、なければworker側で�
 
 4形式のdirect thumbnailのmemory／fresh cache再利用、EXIF8向きの元寸法と全縮小RGBA、legacy／CRC／ゼロ／overflow／上限／不正preview寸法／truncation／1 MiB超過・取消／source変更を回帰確認する。原寸workerを制御して止めた実PNG試験では、fresh cacheから先にpreview通知が届き、再開後は元の全RGBAと一致してpreviewが退役する。可視UI／cold-storage latencyと全UX台帳は未完で、これを原寸decode自体の高速化とは呼ばない。
 
+## U10: キャッシュ済みカードを生成待ちより先に公開（2026-09-11）
+
+filmstrip／recent等のPreviewLoaderは、最大64件の要求を既存worker上で二段階処理する。先にsource stamp付き共有memoryを調べ、取得済みcardを即時通知する。残ったmissだけを元の要求順に生成する。表示位置・Shell順・選択は変更せず、worker／GPU texture／cache予算を増やさない。sourceのmetadata読取は必要だが、この先行lookupでmedia probe／decode／disk PNG読込・生成lease待ちは行わない。動画・音声はdurationもmemoryに揃う場合だけ先行公開し、欠ける場合は既存経路で補完する。
+
+cache hitの直後もsource stampと取消を確認し、結果公開は生成経路と同じmailbox generation／closed検査を通す。スクロール・close中にlookupが終わっても古い結果や通知を公開しない。遅い未生成一枚が後続のwarm cardまで待たせることは避けるが、slow metadata I/O／未生成card同士／diskのみのhitの待機まで解消する契約ではない。
+
 ## U10: 静止画サムネイルの直接復号（2026-09-11）
 
 画像filmstripでmemory／diskと既存JPEG・BMP専用previewが使えない場合、既存の静止画専用decode_image_for_prefetchを原寸RGBA上限128 MiBで試す。原寸の向き補正・depth／alpha変換・読取境界取消を再利用し、所有するRGBAをcopyせず画像bufferへ移し、nearestで240×160内へ縮小する。小画像は従来filmstripと同様に拡大する。小さなPNGへencodeして既存load_or_generateのmemory／disk・同key生成lease・取消をそのまま使う。PNG往復自体を除いた経路ではないが、対応静止画のFFmpeg別process／入力準備を除く。

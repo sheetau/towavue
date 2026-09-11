@@ -65,6 +65,17 @@ pub struct CachedImagePreview {
 }
 
 impl PreviewMemory {
+    fn duration(&mut self, key: &str) -> Option<Duration> {
+        let index = self
+            .durations
+            .iter()
+            .position(|(stored, _)| stored == key)?;
+        let entry = self.durations.remove(index)?;
+        let duration = entry.1;
+        self.durations.push_back(entry);
+        Some(duration)
+    }
+
     fn insert_encoded(&mut self, key: String, image: PreviewImage, bytes: &[u8]) {
         let source_size = thumbnail_source_size(bytes).or_else(|| {
             self.entries
@@ -221,6 +232,43 @@ impl PreviewCache {
                 self.cancellation.as_ref(),
             )
         })
+    }
+
+    // Source metadata is read on the worker; no media probe, decode, disk PNG or lease wait.
+    pub(crate) fn cached_filmstrip(
+        &self,
+        source: &Path,
+        kind: MediaKind,
+    ) -> Result<Option<MediaPreview>, PreviewError> {
+        self.check_cancelled()?;
+        let variant = match kind {
+            MediaKind::Image => IMAGE_PREVIEW_VARIANT,
+            MediaKind::Video => "filmstrip-video-v4",
+            MediaKind::Audio => "waveform-v3-240-160",
+        };
+        let key = cache_key(source, variant)?;
+        let duration_key = (kind != MediaKind::Image)
+            .then(|| cache_key(source, "duration-v1"))
+            .transpose()?;
+        let preview = {
+            let mut memory = self.memory.lock().expect("preview memory");
+            let duration = if let Some(key) = duration_key {
+                let Some(duration) = memory.duration(&key) else {
+                    return Ok(None);
+                };
+                Some(duration)
+            } else {
+                None
+            };
+            memory
+                .get(&key)
+                .map(|image| MediaPreview { image, duration })
+        };
+        self.check_cancelled()?;
+        if preview.is_some() && cache_key(source, variant)? != key {
+            return Ok(None);
+        }
+        Ok(preview)
     }
 
     pub fn filmstrip(&self, source: &Path, kind: MediaKind) -> Result<MediaPreview, PreviewError> {
@@ -395,14 +443,7 @@ impl PreviewCache {
         let _lease = self.claim_generation(&key)?;
         {
             let mut memory = self.memory.lock().expect("preview memory");
-            if let Some(index) = memory
-                .durations
-                .iter()
-                .position(|(stored, _)| stored == &key)
-            {
-                let entry = memory.durations.remove(index).expect("duration");
-                let duration = entry.1;
-                memory.durations.push_back(entry);
+            if let Some(duration) = memory.duration(&key) {
                 return Ok(duration);
             }
         }
@@ -1431,6 +1472,12 @@ mod tests {
         let card = cache
             .filmstrip(&source, MediaKind::Video)
             .expect("filmstrip");
+        let cached = cache
+            .cached_filmstrip(&source, MediaKind::Video)
+            .expect("memory lookup")
+            .expect("warm video");
+        assert_eq!(cached.image, card.image);
+        assert_eq!(cached.duration, card.duration);
         let waveform = cache.waveform(&source, 160, 96).expect("waveform");
         let blue = |image: &PreviewImage| {
             let center = ((image.height / 2 * image.width + image.width / 2) * 4) as usize;
@@ -1750,6 +1797,12 @@ mod tests {
         let card = cache
             .filmstrip(&source, MediaKind::Audio)
             .expect("audio card");
+        let cached = cache
+            .cached_filmstrip(&source, MediaKind::Audio)
+            .expect("memory lookup")
+            .expect("warm audio");
+        assert_eq!(cached.image, card.image);
+        assert_eq!(cached.duration, card.duration);
         assert_eq!((card.image.width, card.image.height), (240, 160));
         assert_eq!(card.duration, Some(duration));
         fs::remove_dir_all(root).expect("remove waveform fixture");

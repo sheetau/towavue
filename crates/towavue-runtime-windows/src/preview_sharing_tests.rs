@@ -22,6 +22,71 @@ fn png() -> Vec<u8> {
 }
 
 #[test]
+fn cached_filmstrip_uses_memory_only_and_preserves_duration_and_source_identity() {
+    let cache = cache("filmstrip-memory-priority");
+    let image = decode_png(&png()).expect("fixture pixels");
+    for (kind, variant) in [
+        (MediaKind::Image, IMAGE_PREVIEW_VARIANT),
+        (MediaKind::Video, "filmstrip-video-v4"),
+        (MediaKind::Audio, "waveform-v3-240-160"),
+    ] {
+        let source = cache.root.join(format!("{kind:?}"));
+        fs::write(&source, b"not decodable media").expect("source identity only");
+        let key = cache_key(&source, variant).expect("key");
+        fs::write(cache.root.join(format!("{key}.png")), png()).expect("disk cache");
+        assert!(
+            cache
+                .cached_filmstrip(&source, kind)
+                .expect("no disk lookup")
+                .is_none()
+        );
+        cache
+            .memory
+            .lock()
+            .expect("memory")
+            .insert(key, image.clone());
+        let duration = if kind == MediaKind::Image {
+            None
+        } else {
+            assert!(
+                cache
+                    .cached_filmstrip(&source, kind)
+                    .expect("no media probe")
+                    .is_none()
+            );
+            cache.memory.lock().expect("memory").durations.push_back((
+                cache_key(&source, "duration-v1").expect("duration key"),
+                Duration::from_secs(7),
+            ));
+            Some(Duration::from_secs(7))
+        };
+        let cached = cache
+            .clone()
+            .cached_filmstrip(&source, kind)
+            .expect("shared memory lookup")
+            .expect("cached card");
+        assert_eq!(cached.image, image);
+        assert_eq!(cached.duration, duration);
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        assert!(matches!(
+            cache
+                .cancellable(cancellation)
+                .cached_filmstrip(&source, kind),
+            Err(PreviewError::Cancelled)
+        ));
+        fs::write(&source, b"changed source identity and length").expect("replace fixture");
+        assert!(
+            cache
+                .cached_filmstrip(&source, kind)
+                .expect("changed key")
+                .is_none()
+        );
+    }
+    fs::remove_dir_all(cache.root).expect("remove owned fixtures");
+}
+
+#[test]
 fn persisted_thumbnail_dimensions_reject_invalid_metadata_and_keep_legacy_pixels() {
     let cache = cache("thumbnail-dimension-validation");
     let source = cache.root.join("source.png");
@@ -211,6 +276,12 @@ fn direct_static_thumbnails_preserve_sampled_pixels_and_bound_original_bytes() {
                 .image,
             direct
         );
+        let cached = cache
+            .cached_filmstrip(&path, MediaKind::Image)
+            .expect("memory lookup")
+            .expect("warm image");
+        assert_eq!(cached.image, direct);
+        assert_eq!(cached.duration, None);
         let fresh = PreviewCache::new(cache.root.clone()).expect("fresh memory");
         for consumer in [&cache, &fresh] {
             let preview = consumer

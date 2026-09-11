@@ -11,6 +11,10 @@
 
 ## 作業台帳
 
+2026-09-11 U10 warm-card checkpoint: 可視filmstripで左の未生成PNGが後続の取得済みcardまで待たせる場面を確認し、workerのmemory先行公開→元順のmiss生成へ変更。画像／動画／音声の画素・duration、非decode／非disk lookup、source変更・取消と世代破棄を回帰確認する。既存Releaseでは6000×4000の4形式のfilmstrip／Tab・Shift+Tab・原寸表示、2枚reading、WebPのLoading中preview→原寸を可視確認。fresh processの未訪問PNGは原寸表示まで確認したが、先行previewの瞬間は撮影で区別できず未認定。全DPI／cold／全素材・資源と全台帳は継続する。
+
+同checkpointの最終Releaseでも、通常PNGのLoading中縮小preview→原寸、filmstripの未生成61 MB PNGだけがLoadingの間の後続warm cards、完成後の同位置・同選択とEscape復帰を可視確認。通常PNGのこの標本はWelcomeでdisk thumbnailがmemoryへ入った後なので、原寸要求による直接disk lookupの瞬間とは区別する。601 testsとloader回帰10連続が成功した。
+
 2026-09-11 U04 grayscale checkpoint: overlay・入力欄の既定色とpalette／playlist／filmstripの固有色を共通tokensへ統一。popup 3倍率・palette compact・playlist hover／focus非選択・クリック・dragカードの描画回帰を確認。Computer Use接続復旧後、通常960×576で無音2曲の選択・pause、palette検索／Escapeとlogo menuを可視確認。全DPI・全media状態とfilmstripの今回の可視検証は残る。全goalは未完のまま継続する。
 
 2026-09-11 I03/U10元寸法付きdisk preview checkpoint: direct静止画サムネイルの元寸法をcache PNGへ保持し、memoryが空でも原寸前に再利用する。専用情報の位置／CRC／寸法・1 MiB読取上限を検査し、旧cacheは破棄・寸法推測せずthumbnailとして維持。4形式／8向き・不正情報／取消と原寸前通知・全原寸一致／preview退役を回帰確認。可視UI／cold／全品質／資源と全台帳は未完。

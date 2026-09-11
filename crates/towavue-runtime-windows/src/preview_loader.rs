@@ -34,12 +34,23 @@ impl PreviewLoader {
         thread::Builder::new()
             .name("towavue-filmstrip".into())
             .spawn(move || {
-                run_worker(worker_shared, notify, |path, kind, cancellation| {
-                    cache
-                        .cancellable(cancellation.clone())
-                        .filmstrip(path, kind)
-                        .map_err(|error| error.to_string())
-                });
+                run_worker(
+                    worker_shared,
+                    notify,
+                    |path, kind, cancellation| {
+                        cache
+                            .cancellable(cancellation.clone())
+                            .cached_filmstrip(path, kind)
+                            .ok()
+                            .flatten()
+                    },
+                    |path, kind, cancellation| {
+                        cache
+                            .cancellable(cancellation.clone())
+                            .filmstrip(path, kind)
+                            .map_err(|error| error.to_string())
+                    },
+                );
             })?;
         Ok(Self { shared })
     }
@@ -78,6 +89,7 @@ impl Drop for PreviewLoader {
 fn run_worker(
     shared: Arc<(Mutex<Mailbox>, Condvar)>,
     notify: impl Fn(),
+    cached: impl Fn(&std::path::Path, MediaKind, &Cancellation) -> Option<MediaPreview>,
     generate: impl Fn(&std::path::Path, MediaKind, &Cancellation) -> Result<MediaPreview, String>,
 ) {
     let (mutex, ready) = &*shared;
@@ -97,14 +109,7 @@ fn run_worker(
                 mailbox.cancellation.clone(),
             )
         };
-        for (path, kind) in paths {
-            {
-                let mailbox = mutex.lock().expect("preview mailbox");
-                if mailbox.closed || mailbox.generation != generation {
-                    break;
-                }
-            }
-            let result = generate(&path, kind, &cancellation);
+        let publish = |path, result| {
             let publish = {
                 let mut mailbox = mutex.lock().expect("preview mailbox");
                 if mailbox.closed || mailbox.generation != generation {
@@ -121,6 +126,24 @@ fn run_worker(
             if publish {
                 notify();
             }
+        };
+        let mut missing = Vec::new();
+        for (path, kind) in paths {
+            if cancellation.is_cancelled() {
+                break;
+            }
+            if let Some(preview) = cached(&path, kind, &cancellation) {
+                publish(path, Ok(preview));
+            } else {
+                missing.push((path, kind));
+            }
+        }
+        for (path, kind) in missing {
+            if cancellation.is_cancelled() {
+                break;
+            }
+            let result = generate(&path, kind, &cancellation);
+            publish(path, result);
         }
     }
 }
@@ -133,6 +156,101 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cached_previews_publish_before_slow_generation_without_reordering_misses() {
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let loader = PreviewLoader {
+            shared: Arc::clone(&shared),
+        };
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            run_worker(
+                shared,
+                || ready_tx.send(()).expect("notify"),
+                |path, _, _| {
+                    path.starts_with("warm").then(|| MediaPreview {
+                        image: crate::PreviewImage {
+                            width: 1,
+                            height: 1,
+                            rgba: vec![1, 2, 3, 255],
+                        },
+                        duration: None,
+                    })
+                },
+                |path, _, _| {
+                    started_tx.send(path.to_owned()).expect("started");
+                    if path == std::path::Path::new("slow.png") {
+                        release_rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .expect("release slow preview");
+                    }
+                    Err("uncached fixture".into())
+                },
+            )
+        });
+        let generation = loader.request(vec![
+            ("slow.png".into(), MediaKind::Image),
+            ("warm/image.png".into(), MediaKind::Image),
+            ("warm/video.mp4".into(), MediaKind::Video),
+            ("warm/audio.wav".into(), MediaKind::Audio),
+            ("later.png".into(), MediaKind::Image),
+        ]);
+        assert_eq!(
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("slow start"),
+            PathBuf::from("slow.png")
+        );
+        let cached = loader.take_completed();
+        release_tx.send(()).expect("release");
+        assert_eq!(
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("later start"),
+            PathBuf::from("later.png")
+        );
+        for _ in 0..5 {
+            ready_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("all results");
+        }
+        let generated = loader.take_completed();
+        drop(loader);
+        worker.join().expect("worker exits");
+        assert_eq!(
+            cached
+                .iter()
+                .map(|item| item.path.as_path())
+                .collect::<Vec<_>>(),
+            ["warm/image.png", "warm/video.mp4", "warm/audio.wav"].map(std::path::Path::new)
+        );
+        assert!(cached.iter().all(|item| {
+            item.generation == generation
+                && item
+                    .result
+                    .as_ref()
+                    .is_ok_and(|preview| preview.image.rgba == [1, 2, 3, 255])
+        }));
+        assert_eq!(
+            generated
+                .iter()
+                .map(|item| item.path.as_path())
+                .collect::<Vec<_>>(),
+            ["slow.png", "later.png"].map(std::path::Path::new)
+        );
+        assert!(
+            generated
+                .iter()
+                .all(|item| item.generation == generation && item.result.is_err())
+        );
+        assert!(
+            started_rx.try_recv().is_err(),
+            "cache hits are not generated again"
+        );
+    }
+
+    #[test]
     fn preview_requests_and_results_are_bounded_and_publish_progress() {
         let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
         let loader = PreviewLoader {
@@ -143,6 +261,7 @@ mod tests {
             run_worker(
                 shared,
                 || tx.send(()).expect("notify progress"),
+                |_, _, _| None,
                 |_, _, _| Err("fixture failure".into()),
             )
         });
@@ -169,7 +288,7 @@ mod tests {
 
     #[test]
     fn scroll_and_close_reject_in_flight_previews_without_waiting() {
-        for close in [false, true] {
+        for (close, cache_hit) in [(false, false), (true, false), (false, true), (true, true)] {
             let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
             let loader = PreviewLoader {
                 shared: Arc::clone(&shared),
@@ -178,19 +297,36 @@ mod tests {
             let (release_tx, release_rx) = mpsc::channel();
             let (ready_tx, ready_rx) = mpsc::channel();
             let worker = thread::spawn(move || {
+                let block = |path: &std::path::Path, cancellation: &Cancellation| {
+                    started_tx.send(path.to_owned()).expect("notify start");
+                    if path == std::path::Path::new("old.png") {
+                        release_rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .expect("release generation");
+                        assert!(cancellation.is_cancelled());
+                    } else {
+                        assert!(!cancellation.is_cancelled());
+                    }
+                };
                 run_worker(
                     shared,
                     || ready_tx.send(()).expect("notify result"),
                     |path, _, cancellation| {
-                        started_tx.send(path.to_owned()).expect("notify start");
-                        if path == std::path::Path::new("old.png") {
-                            release_rx
-                                .recv_timeout(Duration::from_secs(5))
-                                .expect("release generation");
-                            assert!(cancellation.is_cancelled());
-                        } else {
-                            assert!(!cancellation.is_cancelled());
-                        }
+                        cache_hit.then(|| {
+                            block(path, cancellation);
+                            MediaPreview {
+                                image: crate::PreviewImage {
+                                    width: 1,
+                                    height: 1,
+                                    rgba: vec![1, 2, 3, 255],
+                                },
+                                duration: None,
+                            }
+                        })
+                    },
+                    |path, _, cancellation| {
+                        assert!(!cache_hit, "cached result must not be generated");
+                        block(path, cancellation);
                         Err("fixture failure".into())
                     },
                 )

@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 V04/A01/A02 volume/list checkpoint: 1.2秒の非操作音量HUDを左中央／動画上余白へ配置し、status左の重複通知を除去。音声list／scrollbar外のwheelを音量へ接続。再生中の行は白文字のみ、右端に可視行の非同期source durationを表示。要求置換・snapshot／ticket照合・失敗記憶・label cache制限を追加。3倍率のHUD／行描画、期限／owner／Undo／status保持、wheel所有権、既存virtualized navigation／UIA、生成素材の実duration取得を回帰確認。実window／入力・全素材の確認と全UX gateは未完。
+
 2026-09-12 U09/U10 help-lifetime checkpoint: 通常説明の22箇所を共通HoverHelpへ接続。eguiが前frameの元rectだけでtooltipを保持する経路をclip変更で再現し、clipped bounds／layer／hitと非操作型の寿命へ修正。100／125／200%、enabled／disabled、delay、離脱／次要素／overlay、元ボタンclick、大きな自分のtooltipとの重なりを回帰確認。media previewの即時表示契約は変更しない。実OS入力・全残留経路と全UX gateは未完。
 
 2026-09-12 U09/U10/V02/I02 preview checkpoint: previewを通常tooltipから共通の非操作Areaへ分離し、delay／fade待ちを除去、初期／変更sizeは同一frameで再配置。tabは下中央、seekはhover上中央。clipped bounds／layerを使い非active hoverとTooltip層越しのpreview対象要求を許可し、menu／別overlay／disabledは抑止。動画は画像slotを先に確保しcaption高さを固定、時刻fontをProportionalへ揃える。60秒のtooltip設定・旧tooltip・3倍率／active状態、未生成→横長→縦長→失敗の即時描画と比率／caption位置、既存seek drag／見開き／dirty tabを回帰確認。fadbda3のCIで検出されたvendor notice／sourceの更新漏れhashも整合し147 package noticesを検証。一般tooltip寿命・実画面／OS入力と全UX gateは未完。

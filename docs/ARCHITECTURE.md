@@ -1,5 +1,15 @@
 # towavue アーキテクチャ
 
+## V04/A01/A02: 音量HUDと音声リスト（2026-09-12）
+
+master volumeは従来の0～2倍・edit history／live playback／export共有を維持する。変更時とvolumeを変えるUndo/Redoではtab ID・media instance付きHUDを1.2秒表示し、status左を音量通知で置換しない。HUDはmedia領域左中央、内側8 logical px、幅3px・最大長244pxの非操作描画とし、全長を0～200%へ対応付ける。動画左側に24pxの余白がなく上側に24px以上あれば上中央の横向きにする。小窓では内側へ縮める。期限の再描画だけを予約し、focus・新規Area・常時animationを追加しない。modal等では表示を抑止し、期限／owner変更で破棄する。
+
+音声音量wheelはtoolbar／tabより下の領域へ広げ、playlistのscroll viewportとscrollbar全体を除外する。timeline・status・list外余白では既存のevent時点の座標・layer・modifier・button・overlay／取消判定で一度だけSetVolumeをdispatchする。list全体の空白もscroll領域として保護し、scrollを音量へ流用しない。非activeで届いたwheelをfocus状態だけで捨てない契約を維持する。
+
+playlistの現在行はinactive文字だけ白にし、背景はhover時だけ描き、keyboard focusでは文字の白表示を保つ。行の右端へsource durationを表示し、長い名称は従来どおり一行truncateする。UIAのpath／current説明に取得済みdurationを追加し、行の安定IDと全幅clickを維持する。
+
+durationはwindowごとにruntime所有LatestTaskを一本追加し、可視行の未取得一件を順に要求する。既存PreviewCacheのmetadata-key付きduration経路を使用し、UI threadでprobe／filesystem I/Oしない。scroll等で先頭の未取得対象が変われば進行中／待機要求を取消し、完了はrequest ticketとfolder path／snapshot generation／capture timeで照合する。失敗もsnapshot内で記憶し毎frame再試行しない。app側label cacheは256件または可視行数の大きい方を上限とし、非可視項目を除く。snapshot変更・最後のtab closeで破棄し、非audio表示では待機を取消す。大量folderの全件probe、追加texture、再生sessionの変更は行わない。
+
 ## U09/U10: 説明tooltipの表示寿命（2026-09-12）
 
 アプリ内の説明tooltipは共通のHoverHelpで表示する。pointerがclipped interact rect内にあり、元要素のlayer／hit判定が有効な間だけ許可する。自分のtooltip層が元要素を覆う場合は保持できるが、元要素外のtooltip本体やそこへ向かうpointer移動だけでは保持しない。説明は非操作型とし、egui既定のdelay・still判定・grace・クリック抑止と有効／無効要素の区別を維持する。元要素を失って閉じる際は次frameの再描画を要求し、eguiの前frame所有権から次の説明へ移れるようにする。media previewは別の即時表示契約を維持する。egui本体の変更やOS tooltipは導入しない。
@@ -32,7 +42,7 @@ compact seekbarのpointer hover中は既存trackと同じ高さでhover位置ま
 
 画像読込／再サンプリング／読書ページ／再生失敗のmessageをmedia表示面へ描かず、status左のpathと置換する。読書drag中の値、長押し速度、期限内の一時通知、処理中／失敗状態、folder処理の順に解決する。既存のselection keyboard focus hintは保持し、読書drag中はその値を優先する。一時通知は既存の4秒で失効し、処理／失敗が残っていればその状態、それ以外はpathへ戻る。失敗詳細はstatusのtooltipへ全文保持し、読書の複数失敗も集約する。画像成功時に寸法・形式を一時通知へ書き込まず、形式／寸法／frame数はstatus右へ常設する。読書drag確定値は4秒残し、取消値は残さない。
 
-fullscreenの上中央通知を廃止し、通知中は既存の下端control barを表示する。focusを取得せず、非active／modal／overlay等の従来の表示抑止は維持する。通知終了後は通常のedge／keyboard／dragによる可視条件へ戻る。Welcome案内や保存確認等のmodalはこの集約の対象外。音量HUDの追記は別gateとし、現時点では既存音量通知を保持する。
+fullscreenの上中央通知を廃止し、通知中は既存の下端control barを表示する。focusを取得せず、非active／modal／overlay等の従来の表示抑止は維持する。通知終了後は通常のedge／keyboard／dragによる可視条件へ戻る。Welcome案内や保存確認等のmodalはこの集約の対象外。音量変更の通知は上記HUD契約へ分離する。
 
 ## U04/G01: Debug版のID交替診断枠（2026-09-12）
 
@@ -1130,7 +1140,7 @@ parallel video decodeは対象時刻より前の最後のowned frameを一枚だ
 
 ### H1 live volume
 
-動画面と動画/音声status barの独立したvolume表示では、修飾keyなしの縦wheelで音量を調整する。Line/Pageの1単位またはPointの50 logical pxで10 percentage pointsとし、同一frameのraw eventを合算して0～2倍の既存SetVolume編集へ一度だけ渡す。音声playlist・timeline・filmstrip・tab上のscrollは奪わない。focus喪失、button保持、modal/menu/palette/grid/filmstrip中は受け付けない。smooth scrollの余韻では編集しない。
+動画面と動画/音声status barの独立したvolume表示では、修飾keyなしの縦wheelで音量を調整する。Line/Pageの1単位またはPointの50 logical pxで10 percentage pointsとし、同一frameのraw eventを合算して0～2倍の既存SetVolume編集へ一度だけ渡す。音声playlist／scrollbar・filmstrip・tab上のscrollは奪わない。音声timeline等のlist外操作は新しいHUD／list契約に従う。focus喪失、button保持、modal/menu/palette/grid/filmstrip中は受け付けない。smooth scrollの余韻では編集しない。
 
 音量のwheel判定はframe最後のhoverではなく、raw event列の各PointerMoved/PointerGoneを追った時点の座標で行う。先頭wheelのため前frame末尾の位置を保持し、再layout passでは同じ開始位置を使う。status/videoの有効な領域を集め、その座標の最前面layerに属するwheelだけを一回合算する。button押下やfocus喪失を含むframeでは音量操作を取り消す。
 

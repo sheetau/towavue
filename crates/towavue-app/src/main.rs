@@ -52,6 +52,7 @@ mod video_rotation;
 mod video_scrub;
 mod video_sheets;
 mod video_view;
+mod volume_hud;
 mod welcome;
 mod wheel_input;
 mod window_host;
@@ -240,6 +241,7 @@ enum AppEvent {
     ImagePreview(PathBuf, u64, towavue_runtime_windows::CachedImagePreview),
     FolderReady,
     FilmstripReady,
+    PlaylistDuration(playlist::DurationRequest, u64, Option<Duration>),
     TabPreview(
         tab_preview::Target,
         u64,
@@ -795,6 +797,10 @@ struct Application<N> {
     reading_pages: Vec<Result<ImagePresentation, String>>,
     preview_cache: PreviewCache,
     duration_workers: BTreeMap<u64, LatestTask>,
+    volume_hud: volume_hud::Hud,
+    playlist_duration_worker: LatestTask,
+    playlist_duration_pending: Option<playlist::DurationRequest>,
+    playlist_duration_generation: u64,
     waveform_worker: LatestTask,
     thumbnail_worker: LatestTask,
     video_sheets: video_sheets::VideoSheets,
@@ -1003,6 +1009,10 @@ where
             reading_pages: Vec::new(),
             preview_cache,
             duration_workers: BTreeMap::new(),
+            volume_hud: volume_hud::Hud::default(),
+            playlist_duration_worker: LatestTask::new("towavue-playlist-duration")?,
+            playlist_duration_pending: None,
+            playlist_duration_generation: 0,
             waveform_worker: LatestTask::new("towavue-waveform")?,
             thumbnail_worker: LatestTask::new("towavue-thumbnail")?,
             video_sheets: video_sheets::VideoSheets::new()?,
@@ -2211,6 +2221,15 @@ where
                     saved.poll();
                 }
             }
+            AppEvent::PlaylistDuration(request, generation, duration) => {
+                if self.playlist_duration_pending.as_ref() == Some(&request)
+                    && self.playlist_duration_generation == generation
+                {
+                    self.playlist_duration_pending = None;
+                    self.playlist.finish_duration(request, duration);
+                    self.request_redraw();
+                }
+            }
             AppEvent::Waveform(path, generation, result)
                 if self.path.as_ref() == Some(&path) && generation == self.media_generation =>
             {
@@ -2620,6 +2639,13 @@ where
         } else {
             self.draw_top_bar(root, actions);
         }
+        if self.media_kind == Some(MediaKind::Audio) {
+            volume_targets.push(root.interact(
+                root.available_rect_before_wrap(),
+                root.id().with("audio-volume-surface"),
+                egui::Sense::hover(),
+            ));
+        }
         let status_rect = if !self.fullscreen || self.media_kind == Some(MediaKind::Audio) {
             let rect = self.draw_status_bar(root, actions, &mut volume_targets);
             self.draw_timeline(root, actions);
@@ -2648,9 +2674,28 @@ where
                 } else if self.media_kind == Some(MediaKind::Video) {
                     self.draw_video_edit_overlay(ui, &mut volume_targets, actions);
                 }
+                if !modal_blocked
+                    && !self.palette_open
+                    && !self.grid_open
+                    && !self.filmstrip_open
+                    && !egui::Popup::is_any_open(&context)
+                {
+                    let owner = self
+                        .tabs
+                        .active()
+                        .map(|tab| (tab.id, self.media_generation));
+                    let volume = self.edit_state().volume;
+                    self.volume_hud
+                        .show(ui, owner, self.video_rect, volume, Instant::now());
+                }
             });
         if let Some(rect) = status_rect {
             self.draw_seek_bar(&context, rect, None, actions);
+        }
+        if self.media_kind != Some(MediaKind::Audio)
+            && self.playlist_duration_pending.take().is_some()
+        {
+            self.playlist_duration_worker.clear();
         }
         self.draw_fullscreen_controls(&context, actions, &mut volume_targets);
         self.draw_video_scrub();
@@ -3209,7 +3254,10 @@ where
         }) {
             return;
         }
-        let delta = wheel_input::volume_delta(context, targets);
+        let excluded = (self.media_kind == Some(MediaKind::Audio))
+            .then_some(self.playlist.scroll_rect)
+            .flatten();
+        let delta = wheel_input::volume_delta(context, targets, excluded);
         let before = self.edit_state().volume;
         let volume = (before + delta * 0.1).clamp(0.0, 2.0);
         if volume != before {
@@ -4857,6 +4905,23 @@ where
         ) {
             actions.push(UiAction::OpenMedia(path, false));
         }
+        let request = self.playlist.duration_request();
+        if request != self.playlist_duration_pending {
+            self.playlist_duration_generation = self.playlist_duration_generation.wrapping_add(1);
+            let generation = self.playlist_duration_generation;
+            self.playlist_duration_pending = request.clone();
+            if let Some(request) = request {
+                let cache = self.preview_cache.clone();
+                let notify = Arc::clone(&self.notify);
+                self.playlist_duration_worker.submit(move |cancellation| {
+                    let cache = cache.cancellable(cancellation);
+                    let duration = cache.duration(&request.path).ok();
+                    notify(AppEvent::PlaylistDuration(request, generation, duration));
+                });
+            } else {
+                self.playlist_duration_worker.clear();
+            }
+        }
     }
 
     fn draw_command_palette(&mut self, context: &egui::Context, actions: &mut Vec<UiAction>) {
@@ -5761,7 +5826,8 @@ where
         let (Some(tab), Some(kind)) = (self.tabs.active(), self.media_kind) else {
             return;
         };
-        if self.edits.entry(tab.id).or_default().push(operation, kind) {
+        let id = tab.id;
+        if self.edits.entry(id).or_default().push(operation, kind) {
             let retained_selection = match (operation, self.time_selection) {
                 (
                     EditOperation::Timeline(towavue_core::TimelineEdit::SetVolume(_, _)),
@@ -5789,22 +5855,23 @@ where
             if retained_selection.is_some() {
                 self.time_selection = retained_selection;
             }
-            self.set_status(match operation {
-                EditOperation::SetVolume(_) => format!(
-                    "Volume {:.0}% · playback and export (source unchanged)",
-                    self.edit_state().volume * 100.0
-                ),
-                EditOperation::SetRate(_) => format!(
-                    "Rate {:.2}× · playback and export (source unchanged)",
-                    self.edit_state().rate
-                ),
-                EditOperation::SetTrimStart(_) | EditOperation::SetTrimEnd(_) => trim::label(
-                    &self.edit_state(),
-                    media_time(self.media_duration.unwrap_or_default()),
-                )
-                .unwrap_or_default(),
-                _ => "Edit added (source unchanged)".into(),
-            });
+            if matches!(operation, EditOperation::SetVolume(_)) {
+                self.volume_hud
+                    .changed(id, self.media_generation, Instant::now());
+            } else {
+                self.set_status(match operation {
+                    EditOperation::SetRate(_) => format!(
+                        "Rate {:.2}× · playback and export (source unchanged)",
+                        self.edit_state().rate
+                    ),
+                    EditOperation::SetTrimStart(_) | EditOperation::SetTrimEnd(_) => trim::label(
+                        &self.edit_state(),
+                        media_time(self.media_duration.unwrap_or_default()),
+                    )
+                    .unwrap_or_default(),
+                    _ => "Edit added (source unchanged)".into(),
+                });
+            }
             self.refresh_title();
             self.request_redraw();
         }
@@ -5884,6 +5951,10 @@ where
             self.refresh_image_edits();
             self.sync_playback_edits();
             let next = self.edit_state();
+            if previous.volume != next.volume {
+                self.volume_hud
+                    .changed(id, self.media_generation, Instant::now());
+            }
             if (previous.trim_start, previous.trim_end) != (next.trim_start, next.trim_end) {
                 self.set_status(
                     trim::label(&next, media_time(self.media_duration.unwrap_or_default()))
@@ -6598,6 +6669,8 @@ where
             self.hover_thumbnail = None;
             self.next_media_instance();
             self.duration_workers.clear();
+            self.playlist_duration_worker.clear();
+            self.playlist_duration_pending = None;
             self.waveform_worker.clear();
             self.thumbnail_worker.clear();
             self.failed_thumbnails.clear();
@@ -13151,9 +13224,8 @@ mod tests {
     }
 
     #[test]
-    fn audio_volume_wheel_is_limited_to_its_status_label() {
-        let Some(root) =
-            isolated_test_root("tests::audio_volume_wheel_is_limited_to_its_status_label")
+    fn audio_volume_wheel_accepts_list_exterior_and_preserves_list_scroll() {
+        let Some(root) = isolated_test_root("tests::audio_volume_wheel_accepts_list_exterior")
         else {
             return;
         };
@@ -13161,7 +13233,10 @@ mod tests {
         let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
         app.path = Some(root.join("audio.wav"));
         app.media_kind = Some(MediaKind::Audio);
-        for width in [240.0, 480.0, 960.0] {
+        for (width, focused) in [240.0, 480.0, 960.0]
+            .into_iter()
+            .flat_map(|width| [true, false].map(|focused| (width, focused)))
+        {
             let context = fonts::test_context();
             let mut frame = |events| {
                 let mut actions = Vec::new();
@@ -13171,6 +13246,7 @@ mod tests {
                             egui::Pos2::ZERO,
                             egui::vec2(width, 300.0),
                         )),
+                        focused,
                         events,
                         ..Default::default()
                     },
@@ -13237,7 +13313,14 @@ mod tests {
                     "each wheel belongs to its event-time position"
                 );
             }
-            for (pos, expected) in [(label.center(), true), (egui::pos2(100.0, 100.0), false)] {
+            for (pos, expected) in [
+                (label.center(), true),
+                (egui::pos2(100.0, 100.0), false),
+                (egui::pos2(width - 10.0, 100.0), false),
+                (egui::pos2(2.0, 100.0), true),
+                (egui::pos2(100.0, 225.0), true),
+                (egui::pos2(100.0, 10.0), false),
+            ] {
                 let actions = frame(vec![
                     egui::Event::PointerMoved(pos),
                     egui::Event::MouseWheel {
@@ -13260,6 +13343,133 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn playlist_duration_worker_populates_visible_labels_and_rejects_old_tickets() {
+        let Some(root) = isolated_test_root("tests::playlist_duration_worker") else {
+            return;
+        };
+        let source =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            if matches!(event, AppEvent::PlaylistDuration(..)) {
+                let _ = tx.send(event);
+            }
+        })
+        .expect("headless application");
+        app.tabs.open_new(source.clone(), MediaKind::Audio);
+        app.path = Some(source.clone());
+        app.media_kind = Some(MediaKind::Audio);
+        // Duration probing is independent of playback; reuse the required generated codec fixture.
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root,
+            items: vec![towavue_core::FolderMediaItem {
+                identity: towavue_core::ShellIdentity::new(vec![]),
+                path: source,
+                kind: MediaKind::Audio,
+            }],
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        let context = fonts::test_context();
+        let frame = |app: &mut Application<_>| {
+            context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.draw_audio_playlist(ui, &mut Vec::new()),
+            )
+        };
+        frame(&mut app);
+        let ticket = app.playlist_duration_generation;
+        for _ in 0..8 {
+            frame(&mut app);
+        }
+        assert_eq!(
+            app.playlist_duration_generation, ticket,
+            "do not resubmit every frame"
+        );
+        let AppEvent::PlaylistDuration(request, generation, duration) = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("probed visible duration")
+        else {
+            panic!("duration event");
+        };
+        let duration = duration.expect("generated fixture duration");
+        assert!(!duration.is_zero());
+        app.playlist_duration_generation += 1;
+        app.handle_app_event(AppEvent::PlaylistDuration(
+            request.clone(),
+            generation,
+            Some(duration),
+        ));
+        assert!(
+            app.playlist_duration_pending.is_some(),
+            "late ticket must not satisfy replacement"
+        );
+        app.handle_app_event(AppEvent::PlaylistDuration(
+            request,
+            app.playlist_duration_generation,
+            Some(duration),
+        ));
+        let output = frame(&mut app);
+        assert!(app.playlist_duration_pending.is_none());
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == format_time(media_time(duration)))));
+    }
+
+    #[test]
+    fn volume_hud_replaces_status_notice_and_tracks_undo_without_extra_edits() {
+        let Some(root) = isolated_test_root("tests::volume_hud_replaces_status_notice") else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
+        app.path = Some(root.join("audio.wav"));
+        app.media_kind = Some(MediaKind::Audio);
+        app.set_status("Existing notice".into());
+        let notice = app.status_message.clone();
+        app.push_edit(EditOperation::SetVolume(0.5));
+        assert_eq!(
+            app.status_message, notice,
+            "volume must not replace the path or another notice"
+        );
+        assert_eq!(app.edit_state().volume, 0.5);
+        let context = fonts::test_context();
+        let frame = |app: &mut Application<_>| {
+            context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 400.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut Vec::new()),
+            )
+        };
+        let is_hud = |output: &egui::FullOutput| {
+            output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == chrome::FOREGROUND && (rect.rect.width() - 3.0).abs() < 0.01 && rect.rect.height() > 20.0 && rect.rect.left() < 10.0))
+        };
+        assert!(is_hud(&frame(&mut app)));
+        assert_eq!(app.edits[&tab].operations().len(), 1);
+        app.undo_edit(false);
+        assert_eq!(app.edit_state().volume, 1.0);
+        assert!(is_hud(&frame(&mut app)));
+        assert_eq!(app.status_message, notice);
+        app.media_generation += 1;
+        assert!(
+            !is_hud(&frame(&mut app)),
+            "new source must not inherit the HUD"
+        );
     }
 
     #[test]

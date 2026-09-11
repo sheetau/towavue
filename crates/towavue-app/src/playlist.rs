@@ -1,9 +1,17 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use egui::RichText;
 use towavue_core::{FolderSnapshot, MediaKind};
 
 use crate::hover_help::HoverHelp;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DurationRequest {
+    snapshot: (PathBuf, u64, SystemTime),
+    pub path: PathBuf,
+}
 
 #[derive(Default)]
 pub struct Playlist {
@@ -11,6 +19,10 @@ pub struct Playlist {
     keyboard_focus: Option<(PathBuf, egui::Id)>,
     wheel: crate::wheel_input::Scroll,
     scroll_offset: f32,
+    pub scroll_rect: Option<egui::Rect>,
+    duration_snapshot: Option<(PathBuf, u64, SystemTime)>,
+    durations: BTreeMap<PathBuf, Option<Duration>>,
+    visible: Vec<PathBuf>,
 }
 
 impl Playlist {
@@ -28,6 +40,39 @@ impl Playlist {
         self.keyboard_focus = None;
         self.wheel.clear();
         self.scroll_offset = 0.0;
+        self.duration_snapshot = None;
+        self.durations.clear();
+        self.visible.clear();
+        self.scroll_rect = None;
+    }
+
+    pub fn duration_request(&self) -> Option<DurationRequest> {
+        Some(DurationRequest {
+            snapshot: self.duration_snapshot.clone()?,
+            path: self
+                .visible
+                .iter()
+                .find(|path| !self.durations.contains_key(*path))?
+                .clone(),
+        })
+    }
+
+    pub fn finish_duration(&mut self, request: DurationRequest, duration: Option<Duration>) {
+        if self.duration_snapshot.as_ref() != Some(&request.snapshot) {
+            return;
+        }
+        if self.durations.len() >= 256.max(self.visible.len()) {
+            let Some(old) = self
+                .durations
+                .keys()
+                .find(|path| !self.visible.contains(path))
+                .cloned()
+            else {
+                return;
+            };
+            self.durations.remove(&old);
+        }
+        self.durations.insert(request.path, duration);
     }
 
     pub fn show(
@@ -38,6 +83,19 @@ impl Playlist {
         allow_wheel: bool,
     ) -> Option<PathBuf> {
         let mut chosen = None;
+        self.scroll_rect = None;
+        self.visible.clear();
+        let key = snapshot.map(|snapshot| {
+            (
+                snapshot.folder_path.clone(),
+                snapshot.generation,
+                snapshot.captured_at,
+            )
+        });
+        if self.duration_snapshot != key {
+            self.durations.clear();
+            self.duration_snapshot = key;
+        }
         crate::wheel_input::begin_frame(ui.ctx());
         let items: Vec<_> = snapshot
             .into_iter()
@@ -45,6 +103,8 @@ impl Playlist {
             .collect();
         egui::Frame::new().inner_margin(8).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
+            // The scrollbar is part of the list's wheel ownership too.
+            self.scroll_rect = Some(ui.available_rect_before_wrap().intersect(ui.clip_rect()));
             let mut reveal = None;
             if ui.is_enabled()
                 && !egui::Popup::is_any_open(ui.ctx())
@@ -139,18 +199,47 @@ impl Playlist {
             let output = scroll.show_rows(ui, 32.0, items.len(), |ui, rows| {
                 for index in rows {
                     let item = items[index];
+                    self.visible.push(item.path.clone());
                     let selected = current == Some(item.path.as_path());
                     let name = crate::display_name(&item.path);
                     let text = RichText::new(format!("{}. {name}", index + 1)).size(14.0);
+                    let duration = self
+                        .durations
+                        .get(&item.path)
+                        .copied()
+                        .flatten()
+                        .map(|duration| crate::format_time(crate::media_time(duration)))
+                        .unwrap_or_else(|| "—".into());
+                    let duration = RichText::new(duration).size(14.0);
                     let response = ui
                         .scope_builder(
                             egui::UiBuilder::new().id(ui.id().with(("audio-row", &item.path))),
                             |ui| {
-                                ui.add_sized(
+                                if selected {
+                                    ui.visuals_mut().widgets.inactive.fg_stroke.color =
+                                        egui::Color32::WHITE;
+                                }
+                                let background = ui.painter().add(egui::Shape::Noop);
+                                let response = ui.add_sized(
                                     egui::vec2(ui.available_width(), 32.0),
-                                    egui::Button::selectable(selected, (text, egui::Atom::grow()))
-                                        .truncate(),
-                                )
+                                    egui::Button::selectable(
+                                        false,
+                                        (text, egui::Atom::grow(), duration),
+                                    )
+                                    .fill(egui::Color32::TRANSPARENT)
+                                    .truncate(),
+                                );
+                                if response.hovered() {
+                                    ui.painter().set(
+                                        background,
+                                        egui::Shape::rect_filled(
+                                            response.rect,
+                                            3,
+                                            crate::chrome::HOVER,
+                                        ),
+                                    );
+                                }
+                                response
                             },
                         )
                         .inner
@@ -158,7 +247,7 @@ impl Playlist {
                             ui.set_max_width(
                                 (ui.ctx().viewport_rect().width() - 32.0).clamp(1.0, 400.0),
                             );
-                            ui.add(egui::Label::new(name).wrap());
+                            ui.add(egui::Label::new(&name).wrap());
                         });
                     if reveal == Some(index) {
                         response.request_focus();
@@ -169,10 +258,20 @@ impl Playlist {
                     }
                     ui.ctx().accesskit_node_builder(response.id, |node| {
                         node.clear_toggled();
+                        node.set_label(format!("{}. {name}", index + 1));
                         node.set_description(format!(
-                            "{}{}",
+                            "{}{}{}",
                             item.path.display(),
-                            if selected { " (current track)" } else { "" }
+                            if selected { " (current track)" } else { "" },
+                            self.durations
+                                .get(&item.path)
+                                .copied()
+                                .flatten()
+                                .map(|duration| format!(
+                                    " · Duration {}",
+                                    crate::format_time(crate::media_time(duration))
+                                ))
+                                .unwrap_or_default()
                         ));
                     });
                     if response.clicked() {
@@ -194,6 +293,92 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn durations_are_visible_only_refresh_safe_and_right_aligned_without_current_fill() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.global_style_mut(crate::chrome::style);
+            context.set_pixels_per_point(density);
+            let mut playlist = Playlist::default();
+            let mut snapshot = snapshot(10_000);
+            snapshot.items[0].path = PathBuf::from(format!("{}.wav", "long-".repeat(30)));
+            let mut time = 0.0;
+            let mut frame = |playlist: &mut Playlist,
+                             snapshot: &FolderSnapshot,
+                             pointer: Option<Pos2>| {
+                time += 0.1;
+                context.run_ui(
+                    egui::RawInput {
+                        time: Some(time),
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(320.0, 240.0))),
+                        events: pointer.map(Event::PointerMoved).into_iter().collect(),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        playlist.show(ui, Some(snapshot), Some(&snapshot.items[0].path), true);
+                    },
+                )
+            };
+            frame(&mut playlist, &snapshot, None);
+            frame(&mut playlist, &snapshot, None);
+            let first = playlist.duration_request().expect("first visible duration");
+            assert_eq!(first.path, snapshot.items[0].path);
+            playlist.finish_duration(first.clone(), Some(Duration::from_secs(161)));
+            let second = playlist.duration_request().expect("next visible duration");
+            assert_eq!(second.path, snapshot.items[1].path);
+            playlist.finish_duration(second, None);
+            assert_eq!(
+                playlist.duration_request().expect("skip failed row").path,
+                snapshot.items[2].path
+            );
+            assert!(
+                playlist.visible.len() < 12,
+                "do not probe the entire folder"
+            );
+            let output = frame(&mut playlist, &snapshot, None);
+            let duration = texts(&output)
+                .into_iter()
+                .find(|text| text.galley.text() == "02:41")
+                .expect("duration caption");
+            assert!(duration.pos.x > 260.0 && duration.pos.x + duration.galley.size().x <= 312.0);
+            assert_eq!(duration.fallback_color, egui::Color32::WHITE);
+            let row =
+                Rect::from_min_size(Pos2::new(8.0, duration.pos.y - 5.0), Vec2::new(300.0, 32.0));
+            let backgrounds = |output: &egui::FullOutput| {
+                output.shapes.iter().filter(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.fill == crate::chrome::HOVER && rect.rect.intersects(row))).count()
+            };
+            assert_eq!(backgrounds(&output), 0, "current row is text-only");
+            frame(&mut playlist, &snapshot, Some(row.center()));
+            assert!(
+                backgrounds(&frame(&mut playlist, &snapshot, Some(row.center()))) > 0,
+                "current row still has hover feedback"
+            );
+            snapshot.generation += 1;
+            frame(&mut playlist, &snapshot, None);
+            playlist.finish_duration(first, Some(Duration::from_secs(99)));
+            assert!(
+                playlist.durations.is_empty(),
+                "reject stale snapshot results"
+            );
+            assert_eq!(
+                playlist.duration_request().expect("refresh retry").path,
+                snapshot.items[0].path
+            );
+            let request = playlist.duration_request().expect("visible request");
+            playlist.finish_duration(request.clone(), Some(Duration::from_secs(161)));
+            for index in 0..300 {
+                let mut offscreen = request.clone();
+                offscreen.path = PathBuf::from(format!("offscreen-{index}.wav"));
+                playlist.finish_duration(offscreen, None);
+            }
+            assert_eq!(playlist.durations.len(), 256);
+            assert_eq!(
+                playlist.durations[&request.path],
+                Some(Duration::from_secs(161))
+            );
+        }
+    }
 
     #[test]
     fn keyboard_focus_reaches_virtualized_rows_without_selecting_them() {
@@ -478,6 +663,12 @@ mod tests {
             assert_eq!(
                 self::texts(&focused)[0].fallback_color,
                 crate::chrome::FOREGROUND
+            );
+            assert!(
+                !focused.shapes.iter().any(|shape| matches!(
+                    &shape.shape, Shape::Rect(rect) if rect.fill == crate::chrome::HOVER
+                )),
+                "keyboard focus keeps white text without a hover background"
             );
             let pos = egui::pos2(width - 32.0, texts[1].pos.y + 7.0);
             frame(vec![Event::PointerMoved(pos)]);
@@ -901,7 +1092,8 @@ mod tests {
     fn texts(output: &egui::FullOutput) -> Vec<&egui::epaint::TextShape> {
         fn visit<'a>(shape: &'a Shape, result: &mut Vec<&'a egui::epaint::TextShape>) {
             match shape {
-                Shape::Text(text) => result.push(text),
+                // These existing navigation assertions inspect names, not duration placeholders.
+                Shape::Text(text) if text.galley.text() != "—" => result.push(text),
                 Shape::Vec(shapes) => shapes.iter().for_each(|shape| visit(shape, result)),
                 _ => {}
             }

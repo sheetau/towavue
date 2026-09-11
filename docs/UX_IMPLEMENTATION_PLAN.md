@@ -28,9 +28,9 @@
 | U09/U10 tooltip／preview | previewを通常tooltipのdelay／前frame所有権から分離した非操作Areaへ変更。tab下中央／seek上中央、同一frameのsize再配置と非active hover／生成要求を実装。旧Tooltip層はpreview対象を遮らず、menu／他overlay／disabledは抑止。60秒delay設定・旧tooltip・3倍率／active状態・離脱と既存dirty tab／drag／見開きを回帰確認。一般説明22箇所もclipped bounds／layer／hitを確認し、元要素外で終了。delay／disabled／切替／click／大きな自分の説明を3倍率で回帰確認。実画面／全OS入力と残留全経路の確認は未完 |
 | U04 popup shadow | 左右中央・濃さ・ぼかしを調整し、描画の粗さを負荷優先で評価。未完 |
 | U12 seek hover | 既存trackと同じ高さ・範囲で、背景と白進捗の間にhover位置まで白alpha64の進捗を表示。3倍率×再生／hover位置の描画順・端clamp・hover非commit・disabledなしと既存drag／keyboard／idle全幅を回帰確認。実画面と入力は未確認 |
-| V04/A02 volume HUD | 変更時のみ少し残る縦barを左中央、余白に応じて上中央横barへ切替可能なら採用。status左の重複messageを除く。音声list外を音量操作対象へ拡張。未完 |
+| V04/A02 volume HUD | 変更／volume Undo時に1.2秒の非操作barを左中央、動画の上余白が十分なら上中央へ表示。status左の重複通知を除き、音声list／scrollbar外のtimeline・status・余白をwheel音量へ接続。3倍率の配置／期限／owner／focus、Undo／既存status維持、event時点の所有権と既存取消を回帰確認。0～200%・再生／保存共有の正式契約を維持。実画面／OS入力は未完 |
 | V02/I02 seek preview | 共通previewでdelay／fade待ちを除去。動画は未生成から固定image slotを確保し、到着後も比率維持fit／一行captionの高さ固定、時刻をProportionalへ変更。未生成→横長→縦長→失敗の最初のhover frameでcaption・画像位置／比率／fontを確認。画像／readingも共通即時表示、既存Shell順／連結を維持。実画面glitchと実入力・全素材の認定は未完 |
-| A01 playlist | 再生中は白文字のみで背景はhoverだけ、右端に曲の長さを表示。未完 |
+| A01 playlist | 再生中の行を白文字のみへ変更し、背景はhover時だけ・keyboard focusは白文字で表示。右端へ可視行のsource durationを非同期表示、未取得／失敗は—。windowごと一本の取消可能workerと既存cacheを使い、snapshot／ticket照合・失敗記憶・label cache上限を追加。3倍率の長名／右端／hover、1万行のvirtualized navigationとUIA、生成素材probe／旧ticket拒否を確認。実画面／全素材は未完 |
 
 画像の選択／pan／zoom追記はI07～I09の既存台帳、100枚原寸・小previewの速度はI03/U10の未達gateを引き継ぐ。今回の可視試験はWelcome画面まで取得したが、activation成功応答後もclick／Ctrl+Oの反映を観測できず、配色や非active実入力の成功証拠にはしない。
 

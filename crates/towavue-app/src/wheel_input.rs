@@ -20,7 +20,7 @@ pub fn begin_frame(context: &Context) {
     });
 }
 
-pub fn volume_delta(context: &Context, targets: &[Response]) -> f32 {
+pub fn volume_delta(context: &Context, targets: &[Response], excluded: Option<egui::Rect>) -> f32 {
     positioned_events(context)
         .into_iter()
         .filter_map(|(position, event)| match event {
@@ -31,11 +31,12 @@ pub fn volume_delta(context: &Context, targets: &[Response]) -> f32 {
                 ..
             } if modifiers.is_none()
                 && position.is_some_and(|pos| {
-                    targets.iter().any(|target| {
-                        target.enabled()
-                            && target.interact_rect.contains(pos)
-                            && context.layer_id_at(pos) == Some(target.layer_id)
-                    })
+                    excluded.is_none_or(|rect| !rect.contains(pos))
+                        && targets.iter().any(|target| {
+                            target.enabled()
+                                && target.interact_rect.contains(pos)
+                                && context.layer_id_at(pos) == Some(target.layer_id)
+                        })
                 }) =>
             {
                 Some(
@@ -638,7 +639,7 @@ mod tests {
                             egui::Sense::hover(),
                         ),
                     ];
-                    deltas.push(volume_delta(ui.ctx(), &targets));
+                    deltas.push(volume_delta(ui.ctx(), &targets, None));
                     if extra_pass && ui.ctx().current_pass_index() == 0 {
                         ui.ctx().request_discard("verify stable wheel origin");
                     }

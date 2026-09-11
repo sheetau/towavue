@@ -92,6 +92,10 @@ fn filmstrip_drag_copies_the_owned_path_once_and_reuses_its_preview() {
     };
     for batched in [false, true] {
         let context = crate::fonts::test_context();
+        context.global_style_mut(|style| {
+            crate::chrome::style(style);
+            style.animation_time = 0.0;
+        });
         context.enable_accesskit();
         let snapshot = snapshot(&root);
         let source = &snapshot.items[0].path;
@@ -112,6 +116,13 @@ fn filmstrip_drag_copies_the_owned_path_once_and_reuses_its_preview() {
             .insert(target.clone(), Ok((texture.clone(), None)));
         let output = frame(&mut strip, &context, &snapshot, source, true, input(vec![])).0;
         let rect = card(&output, "other.png");
+        assert!(
+            output.shapes.iter().any(|shape| matches!(
+                &shape.shape, egui::Shape::Rect(shape)
+                    if shape.rect == rect && shape.fill == crate::chrome::BORDER
+            )),
+            "card uses the shared grayscale surface"
+        );
         let origin = rect.center();
         let moved = origin + egui::vec2(12.0, -120.0);
         let outside = egui::pos2(-20.0, 100.0);
@@ -139,9 +150,11 @@ fn filmstrip_drag_copies_the_owned_path_once_and_reuses_its_preview() {
             assert!(actions.is_empty());
             let floating = Rect::from_min_size(moved - (origin - rect.min), rect.size());
             assert!(
-                output.shapes.iter().any(
-                    |shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == floating)
-                ),
+                output
+                    .shapes
+                    .iter()
+                    .any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect)
+                        if rect.rect == floating && rect.fill == crate::chrome::BORDER)),
                 "floating card"
             );
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() && mesh.calc_bounds().center() == floating.center())), "same preview texture at floating position");

@@ -77,6 +77,12 @@ pub fn title_layout(native: Option<(f32, f32)>, top: f32, density: f32) -> Title
 
 pub fn style(style: &mut egui::Style) {
     style.visuals.panel_fill = BACKGROUND;
+    style.visuals.window_fill = BACKGROUND;
+    style.visuals.window_stroke.color = BORDER;
+    style.visuals.extreme_bg_color = BACKGROUND;
+    style.visuals.text_edit_bg_color = Some(BACKGROUND);
+    style.visuals.faint_bg_color = BORDER;
+    style.visuals.weak_text_color = Some(MUTED);
     style.visuals.selection.bg_fill = HOVER;
     style.visuals.selection.stroke = Stroke::new(1.0, FOREGROUND);
     style.visuals.hyperlink_color = FOREGROUND;
@@ -426,6 +432,41 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn overlay_and_input_surfaces_use_the_shared_grayscale_palette() {
+        let mut themed = egui::Style::default();
+        style(&mut themed);
+        assert_eq!(themed.visuals.window_fill(), BACKGROUND);
+        assert_eq!(themed.visuals.window_stroke().color, BORDER);
+        assert_eq!(themed.visuals.extreme_bg_color, BACKGROUND);
+        assert_eq!(themed.visuals.text_edit_bg_color(), BACKGROUND);
+        assert_eq!(themed.visuals.faint_bg_color, BORDER);
+        assert_eq!(themed.visuals.weak_text_color(), MUTED);
+        for frame in [
+            egui::Frame::window(&themed),
+            egui::Frame::menu(&themed),
+            egui::Frame::popup(&themed),
+        ] {
+            assert_eq!(frame.fill, BACKGROUND);
+            assert_eq!(frame.stroke.color, BORDER);
+        }
+        for density in [1.0, 1.25, 2.0] {
+            let context = egui::Context::default();
+            context.set_pixels_per_point(density);
+            context.global_style_mut(style);
+            for _ in 0..2 {
+                let output = context.run_ui(egui::RawInput::default(), |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.weak("Secondary information");
+                        ui.add(egui::TextEdit::singleline(&mut "Value".to_owned()));
+                    });
+                });
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == BACKGROUND && rect.stroke.color == BORDER)));
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "Secondary information" && text.galley.job.sections[0].format.color == MUTED)));
+            }
+        }
+    }
 
     #[test]
     fn native_caption_semantics_follow_bounds_and_guard_without_custom_widgets() {

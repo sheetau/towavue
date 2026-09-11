@@ -270,7 +270,7 @@ impl Filmstrip {
                                 if active { " (current item)" } else { "" }
                             ));
                         });
-                        ui.painter().rect_filled(rect, 0.0, Color32::from_gray(28));
+                        ui.painter().rect_filled(rect, 0.0, crate::chrome::BORDER);
                         match self.previews.get(&item.path) {
                             Some(Ok((texture, duration))) => {
                                 let scale = (rect.width() / texture.size_vec2().x)

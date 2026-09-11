@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use egui::{Color32, RichText};
+use egui::RichText;
 use towavue_core::{FolderSnapshot, MediaKind};
 
 #[derive(Default)]
@@ -139,9 +139,7 @@ impl Playlist {
                     let item = items[index];
                     let selected = current == Some(item.path.as_path());
                     let name = crate::display_name(&item.path);
-                    let text = RichText::new(format!("{}. {name}", index + 1))
-                        .size(14.0)
-                        .color(Color32::from_gray(if selected { 240 } else { 150 }));
+                    let text = RichText::new(format!("{}. {name}", index + 1)).size(14.0);
                     let response = ui
                         .scope_builder(
                             egui::UiBuilder::new().id(ui.id().with(("audio-row", &item.path))),
@@ -384,7 +382,12 @@ mod tests {
     fn playlist_rows_preserve_order_and_offer_full_width_targets() {
         for width in [240.0, 960.0] {
             let context = egui::Context::default();
-            context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+            context.enable_accesskit();
+            context.global_style_mut(|style| {
+                crate::chrome::style(style);
+                style.animation_time = 0.0;
+                style.interaction.tooltip_delay = 0.0;
+            });
             let mut snapshot = snapshot(10_000);
             snapshot.items[0].path = PathBuf::from("z-first.wav");
             snapshot.items[1].path = PathBuf::from("a-current.wav");
@@ -424,20 +427,56 @@ mod tests {
             assert_eq!(texts[0].galley.job.text, "1. z-first.wav");
             assert_eq!(texts[1].galley.job.text, "2. a-current.wav");
             assert_eq!(texts[1].pos.y - texts[0].pos.y, 32.0);
-            assert_eq!(
-                texts[0].galley.job.sections[0].format.color,
-                Color32::from_gray(150)
-            );
-            assert_eq!(
-                texts[1].galley.job.sections[0].format.color,
-                Color32::from_gray(240)
-            );
+            assert_eq!(texts[0].fallback_color, crate::chrome::MUTED);
+            assert_eq!(texts[1].fallback_color, crate::chrome::FOREGROUND);
             assert_eq!(texts[2].galley.rows.len(), 1);
             assert!(texts[2].galley.elided);
             for text in &texts {
                 assert!(text.pos.x < 30.0, "left aligned");
                 assert!(text.pos.x + text.galley.size().x <= width - 8.0);
             }
+            let first_row = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("playlist accessibility tree")
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("1. z-first.wav"))
+                .expect("first row accessibility node")
+                .0;
+            let hover = egui::pos2(width - 32.0, texts[0].pos.y + 7.0);
+            frame(vec![Event::PointerMoved(hover)]);
+            let (hovered, chosen) = frame(vec![]);
+            assert!(chosen.is_none());
+            assert_eq!(
+                self::texts(&hovered)[0].fallback_color,
+                crate::chrome::FOREGROUND
+            );
+            frame(vec![
+                Event::PointerGone,
+                Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Focus,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: first_row,
+                    data: None,
+                }),
+            ]);
+            let (focused, chosen) = frame(vec![]);
+            assert!(chosen.is_none(), "focus does not select another track");
+            assert_eq!(
+                focused
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("focused playlist accessibility tree")
+                    .focus,
+                first_row
+            );
+            assert_eq!(
+                self::texts(&focused)[0].fallback_color,
+                crate::chrome::FOREGROUND
+            );
             let pos = egui::pos2(width - 32.0, texts[1].pos.y + 7.0);
             frame(vec![Event::PointerMoved(pos)]);
             let mut actions = Vec::new();

@@ -122,7 +122,7 @@ impl State {
                     scope.screen,
                 );
                 let rect = Rect::from_min_size(pointer - drag.offset, egui::vec2(120.0, 80.0));
-                painter.rect_filled(rect, 0.0, Color32::from_gray(28));
+                painter.rect_filled(rect, 0.0, crate::chrome::BORDER);
                 if let Some(texture) = &drag.texture {
                     let scale = (rect.width() / texture.size_vec2().x)
                         .min(rect.height() / texture.size_vec2().y);

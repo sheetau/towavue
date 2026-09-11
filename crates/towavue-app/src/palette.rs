@@ -88,12 +88,13 @@ impl CommandPalette {
             .resizable(false)
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::from_gray(16))
+                    .fill(crate::chrome::BACKGROUND)
+                    .stroke(egui::Stroke::new(1.0, crate::chrome::BORDER))
                     .inner_margin(6)
                     .corner_radius(4),
             )
             .show(context, |ui| {
-                ui.set_width((context.content_rect().width() - 48.0).clamp(120.0, 588.0));
+                ui.set_width((context.content_rect().width() - 50.0).clamp(120.0, 586.0));
                 let previous_query = self.query.clone();
                 ui.memory_mut(|memory| {
                     if !memory.has_focus(query_id) {
@@ -104,6 +105,7 @@ impl CommandPalette {
                     [ui.available_width(), 24.0],
                     egui::TextEdit::singleline(&mut self.query)
                         .id(query_id)
+                        .text_color(crate::chrome::FOREGROUND)
                         .desired_width(f32::INFINITY)
                         .hint_text("> Search commands"),
                 )
@@ -408,7 +410,11 @@ mod tests {
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(rect) if rect.fill == egui::Color32::from_gray(16) => {
+                    egui::Shape::Rect(rect)
+                        if rect.fill == crate::chrome::BACKGROUND
+                            && rect.stroke.color == crate::chrome::BORDER
+                            && rect.corner_radius == egui::CornerRadius::same(4) =>
+                    {
                         Some(rect.rect)
                     }
                     _ => None,
@@ -440,6 +446,10 @@ mod tests {
                     .expect("separate command/shortcut text")
             };
             let file = text("Open file");
+            assert_eq!(
+                text("open").galley.job.sections[0].format.color,
+                crate::chrome::FOREGROUND
+            );
             let folder = text("Open folder");
             let first = text("Ctrl+O");
             let second = text(prefix);

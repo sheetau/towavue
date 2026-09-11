@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U04: overlayと操作状態の共通色（2026-09-11）
+
+eguiのpanel／window／menu／popup／入力欄の背景は共通の黒、枠線と弱い面は#181818、通常・補助文字は#808080、選択・hover・focusの文字は白を使用する。hover面は既存の#4C4C4Cを維持する。command paletteも黒と共通枠線を使い、常時focusする検索文字は白、枠線を含む最大幅600 logical pxを保つ。playlistは文字の固定色を持たず、selectable buttonの状態色に従う。filmstripとdrag cardの下地は#181818へ揃える。
+
+この規則はUIの基準色であり、警告色・無効時の減衰・アニメーション／anti-aliasingの中間色、OS所有のnative dialog、mediaの画素・透過checkerboardは変更しない。描画命令の色・寸法と入力回帰は実画面の全DPI／media検証の代用ではない。
+
 ## U02: native modalの採用範囲（2026-09-11）
 
 草案の「可能ならnative、コード量と操作性で判断」を次のように採用する。すべてを独自UIまたはnativeへ統一すること自体は目的にしない。

@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 U04 grayscale checkpoint: 共通styleのoverlay／入力欄の既定色、palette・playlist・filmstripの固有色を既存tokensへ統一。popup 1／1.25／2倍率、palette最大600px／compact／検索、playlistの通常・選択・hover・focusとクリック、card／drag texture維持を回帰確認。Computer Use接続が復旧し、通常960×576の実画面で無音2曲の行選択・pause、palette検索とEscape、logo menuを確認。全体599 tests／Release成功、f3a9c90のCI34584717553成功。全DPI・全media・filmstripの今回の可視状態と全UX台帳は継続する。
+
 2026-09-11 I03/U10 persisted-thumbnail checkpoint: direct静止画cache PNGに補正済み元寸法を保持し、fresh memoryでも原寸前のpreviewへ再利用する。専用20-byte chunk／CRC／寸法とRGBA上限、1 MiBの読取上限・取消／source stampを検査し、古い寸法なしcacheはthumbnailとして維持。4形式・EXIF8向き・破損matrixと、原寸停止中のdisk preview通知→原寸画素一致／退役を確認。c05c528のCI34582851963は成功。可視UI／cold／全品質・資源と全UX台帳は継続する。
 
 2026-09-11 U10 direct-static-thumbnail checkpoint: memory／disk・JPEG/BMP専用previewの後に、原寸RGBA128 MiB以内の静止画を既存画像decoderで直接縮小する。原寸copy／新workerはなく、既存PNG disk cacheと同key生成leaseを維持。4形式の全sample RGBA・budget／取消／disk、GIFと不正入力fallbackを回帰確認。24MP PNG warm Releaseの最終API取得は約514→141ms。可視操作は更新版Computer Useでもpipe接続不可で保留。c5dccf3のCI34582156898は成功。全UX台帳、PNG本表示の初回／cold／全品質／資源は継続する。

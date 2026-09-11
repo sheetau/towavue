@@ -161,6 +161,14 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
             button: egui::PointerButton::Primary,
             modifiers: egui::Modifiers::NONE,
         };
+        let bar_selection = PixelCrop {
+            x: 400,
+            y: 320,
+            width: 200,
+            height: 160,
+        }
+        .unit_rect((1000, 800));
+        app.image_view.selection = Some(bar_selection);
         frame(
             &mut app,
             vec![egui::Event::PointerMoved(point)],
@@ -175,9 +183,10 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
             app.image_view.pan,
             app.view_drag.is_some()
         );
-        assert!(
-            app.image_view.selection.is_none(),
-            "bar does not start a selection"
+        assert_eq!(
+            app.image_view.selection,
+            Some(bar_selection),
+            "bar does not clear a selection"
         );
         assert_eq!(app.edits, history);
         assert!(output.textures_delta.set.is_empty());
@@ -225,7 +234,24 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
             "selection drag must not pan the image"
         );
         assert_eq!(app.edits, history);
-        app.image_view.selection = None;
+        let outside = egui::pos2(40.0, 40.0);
+        let click = |pressed| egui::Event::PointerButton {
+            pos: outside,
+            pressed,
+            button: egui::PointerButton::Primary,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &mut app,
+            vec![egui::Event::PointerMoved(outside)],
+            density,
+            size,
+        );
+        let output = frame(&mut app, vec![click(true), click(false)], density, size);
+        assert!(app.image_view.selection.is_none());
+        assert_eq!(app.image_view.pan, (0.0, 0.0));
+        assert_eq!(app.edits, history);
+        assert!(output.textures_delta.set.is_empty());
         app.image_view.pan = (10000.0, -10000.0);
         for _ in 0..3 {
             frame(&mut app, vec![], density, egui::vec2(1400.0, 300.0));

@@ -545,6 +545,7 @@ fn color_image(frame: &towavue_runtime_windows::DecodedImageFrame) -> egui::Colo
 #[derive(Clone, Copy)]
 enum SelectionDrag {
     New(UnitPoint),
+    OutsideImage,
     Left,
     Right,
     Top,
@@ -3397,7 +3398,7 @@ where
                 SelectionDrag::Top | SelectionDrag::Bottom => egui::CursorIcon::ResizeVertical,
                 SelectionDrag::Corner { left, top } if left == top => egui::CursorIcon::ResizeNwSe,
                 SelectionDrag::Corner { .. } => egui::CursorIcon::ResizeNeSw,
-                SelectionDrag::New(_) => egui::CursorIcon::Crosshair,
+                SelectionDrag::New(_) | SelectionDrag::OutsideImage => egui::CursorIcon::Crosshair,
             });
         }
         if self.view_drag.is_none()
@@ -3410,6 +3411,11 @@ where
                     image_rect
                         .contains(origin)
                         .then(|| SelectionDrag::New(unit_point(origin, image_rect)))
+                })
+                .or_else(|| {
+                    self.image_view
+                        .selection
+                        .map(|_| SelectionDrag::OutsideImage)
                 })
         {
             self.view_drag = Some(ViewDrag::Selection {
@@ -3484,26 +3490,38 @@ where
                 _ => {}
             }
         }
-        if dragging && released {
+        if dragging
+            && released
+            && !matches!(
+                self.view_drag,
+                Some(ViewDrag::Selection {
+                    mode: SelectionDrag::OutsideImage,
+                    ..
+                })
+            )
+        {
             self.image_view.selection = self.image_view.selection.and_then(|selection| {
                 PixelCrop::from_selection(selection, image_size, self.media_kind?)
                     .map(|crop| crop.unit_rect(image_size))
             });
         }
-        if released && matches!(self.view_drag, Some(ViewDrag::Selection { .. })) {
+        if released && let Some(ViewDrag::Selection { mode, origin, .. }) = self.view_drag {
             self.view_drag = None;
-        }
-        if self.media_kind == Some(MediaKind::Image)
-            && selection_owned
-            && released
-            && !dragging
-            && self
-                .image_view
-                .selection
-                .is_some_and(|selection| selection.contains(point))
-        {
-            self.image_view.crop_preview = true;
-            self.image_view.fit();
+            if !dragging && let Some(selection) = self.image_view.selection {
+                let selected = selection_rect(image_rect, selection);
+                if matches!(mode, SelectionDrag::New(_) | SelectionDrag::OutsideImage)
+                    && !selected.contains(origin)
+                    && !selected.contains(pointer)
+                {
+                    self.image_view.selection = None;
+                } else if self.media_kind == Some(MediaKind::Image)
+                    && !matches!(mode, SelectionDrag::OutsideImage)
+                    && selected.contains(pointer)
+                {
+                    self.image_view.crop_preview = true;
+                    self.image_view.fit();
+                }
+            }
         }
     }
 
@@ -3579,7 +3597,9 @@ where
             SelectionDrag::Right => selection.max.x = point.x.max(selection.min.x),
             SelectionDrag::Top => selection.min.y = point.y.min(selection.max.y),
             SelectionDrag::Bottom => selection.max.y = point.y.max(selection.min.y),
-            SelectionDrag::New(_) | SelectionDrag::Corner { .. } => return,
+            SelectionDrag::New(_) | SelectionDrag::OutsideImage | SelectionDrag::Corner { .. } => {
+                return;
+            }
         }
         if preserve_ratio && image_size.0 > 0 && image_size.1 > 0 {
             match edge {
@@ -3616,7 +3636,9 @@ where
                     selection.min.x = (center - width * 0.5).max(0.0);
                     selection.max.x = (center + width * 0.5).min(1.0);
                 }
-                SelectionDrag::New(_) | SelectionDrag::Corner { .. } => {}
+                SelectionDrag::New(_)
+                | SelectionDrag::OutsideImage
+                | SelectionDrag::Corner { .. } => {}
             }
         }
         self.image_view.selection = Some(selection);

@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I09 outside-click checkpoint: 選択枠から離れた表示面／余白の短いprimary clickで選択を解除する。辺・角優先、画像内の新規drag、余白dragの無変更、取消・無効領域・最初のgesture所有権を維持する。100／125／200%描画経路でbar操作は既存選択を保ち、外側clickだけが選択を解除してpan／dirty／textureを保つことを確認。crop preview撤去／通常zoomと全UX台帳は継続する。
+
 2026-09-12 I09 selection-gesture checkpoint: 角の二辺resize・Shiftで開始比率／対角固定・方向cursorと、画像範囲内の右dragによる選択移動を追加。移動はpixel幅／高さを保ち、画像端でclamp、共通取消で復元する。四隅×Shift有無・保持／同frame完結・上下限・非正方pixel範囲の移動と、100／125／200%の描画経路でpan／dirty保持を確認。可視操作、動画cornerの全品質、外部click解除・crop preview撤去／範囲zoomと全UX台帳は継続する。
 
 2026-09-12 I08 bounded-image-scroll checkpoint: follow-up追記の画像pan制限・右drag Grabbing・縦wheel／Shift横wheel・overflow軸のfloating scrollbarを接続。表示panを一つの位置として共用し、zoom／preview／resize／編集後も画像端でclampする。100／125／200%のFit固定・両軸／片軸overflow・drag取消・wheel／bar・texture／dirty保持と既存の選択辺focusを確認。端の不可視操作領域は画像外panではなくviewportへのclipで保つ。Computer Useはwindow再選択後もactivationエラーで可視確認を保留。実入力・外観／全DPI／UIAと全UX台帳は継続する。

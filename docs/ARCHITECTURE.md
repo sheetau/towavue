@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## I09: 表示面の外側clickによる選択解除（2026-09-12）
+
+visual selectionの外部clickは、選択枠から離れた表示面へのprimary pressと短いreleaseの組として扱う。画像外の余白も含むが、menu／overlay／scrollbarなどが所有する入力は対象外。辺・角のhitを優先し、そこへの短いclickでは解除しない。選択外で始まり選択外で終わるclickだけが選択を解除し、表示pan・zoom・編集履歴は変えない。画像内からのdragは従来どおり新しい範囲を作り、余白からのdragは選択を変更しない。取消・長押し・同frameの後続gestureを誤ってclickへ変換しない。動画は既存のtimeline表示時だけのvisual selection規則を維持する。
+
+範囲内clickのcrop previewから通常zoomへの変更は別の未完作業として保持する。
+
 ## I09: 選択角のresizeと画像内の選択移動（2026-09-12）
 
 共通のvisual selection hit testでは、8 logical pxの既存許容幅内にある最も近い角を辺より優先し、二辺を同時に変更する。対角はdrag開始時の選択へ固定し、反対側へ交差した場合は反転せずそこで縮退する。Shift時は開始時の比率を保ち、pointerが要求する縦横の大きい方まで拡げつつ、対角から画像端までに収める。辺だけのShift操作は従来の反対辺固定・直交軸中央保持を維持する。hoverでは辺／角の向きに合うresize cursor、primary保持中はCrosshairを使う。確定時の画像／動画のpixel整列と取消は既存経路を使う。

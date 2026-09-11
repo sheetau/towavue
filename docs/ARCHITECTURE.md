@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## M01/G01: 固定位置の直接menuと方向領域（2026-09-12）
+
+logoの通常clickはFile／Edit／View／Helpだけを持つroot menu、方向dragは対応sectionの中身だけを同じbutton下のanchorへ開く。pointerのrelease位置はpopup配置に使用せず、選んだsectionをpopupが閉じるまで保持する。command描画・enabled／shortcut・keyboard移動は両入口で共用し、Image jumpはViewの子menuに置く。画面端ではeguiの画面内配置を維持する。
+
+8 logical pxの既存閾値と所有／取消を保ち、上向き0度から時計回りでFile [0,112.5)、Edit [112.5,157.5)、View [157.5,270]を採用する。左上の残りは無効。logo button背景は変えず、線は通常#808080、hover／focus／menu表示中は白、方向選択中は選択矢印のみ白で他を#808080とする。toolbar内のlogo左にも既存の右側gapと同じ余白を置く。native captionやtab寸法の新たな追記は別gateで維持する。
+
 ## U04/G01: 9月12日追記の配色と非アクティブwheel（2026-09-12）
 
 共通HOVERを#4C4C4Cから#2C2C2Cへ置換し、既存のhover／active／open widget・tab／seekbarへ同じ定数を適用する。他の黒／白／#808080／#181818は維持し、DWM所有captionの描画は独自化しない。以降の配色はこの指定を優先する。

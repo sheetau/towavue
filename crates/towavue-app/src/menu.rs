@@ -158,10 +158,8 @@ pub(crate) fn show_section(
     initial: Option<Section>,
 ) -> Option<CommandId> {
     let mut chosen = None;
-    if initial.is_some() {
-        // Reopened parent state must be live before installing a child on its first pass.
-        let root = egui::containers::menu::find_menu_root(ui).id;
-        egui::containers::menu::MenuState::mark_shown(ui.ctx(), root);
+    if let Some(section) = initial {
+        return show_items(ui, section.title(), context, shortcuts).0;
     }
     let keyboard = MenuKeyboard::begin(ui);
     let requested_category = keyboard
@@ -169,64 +167,100 @@ pub(crate) fn show_section(
         .then(|| ui.memory(|memory| memory.focused()))
         .flatten();
     let mut categories = Vec::new();
-    for (title, groups) in MENUS {
-        let category = ui.next_auto_id();
-        if initial.is_some_and(|section| section.title() == *title)
-            || requested_category == Some(category)
-        {
-            let submenu = egui::containers::menu::SubMenu::id_from_widget_id(category);
-            // MenuState drops an open child unless it is marked live before the next lookup.
-            egui::containers::menu::MenuState::mark_shown(ui.ctx(), submenu);
-            egui::containers::menu::MenuState::from_ui(ui, |state, _| {
-                state.open_item = Some(submenu);
-            });
-        }
-        let mut return_to_category = false;
-        let menu = ui.menu_button(*title, |ui| {
-            let keyboard = MenuKeyboard::begin(ui);
-            return_to_category = keyboard.left;
-            let mut items = Vec::new();
-            egui::ScrollArea::vertical()
-                .id_salt(title)
-                .max_height((ui.ctx().content_rect().height() - 64.0).max(100.0))
-                .show(ui, |ui| {
-                    for (index, group) in groups.iter().enumerate() {
-                        if index > 0 {
-                            ui.separator();
-                        }
-                        for id in *group {
-                            let definition = command_definitions()
-                                .iter()
-                                .find(|definition| definition.id == *id)
-                                .expect("menu command is registered");
-                            let shortcut = shortcuts.label(*id, context);
-                            let response = ui.add_enabled(
-                                definition.is_enabled(context),
-                                egui::Button::new(definition.title).shortcut_text(shortcut),
-                            );
-                            if response.enabled() {
-                                items.push(response.id);
-                            }
-                            if response.gained_focus() {
-                                response.scroll_to_me(None);
-                            }
-                            if response.clicked() {
-                                chosen = Some(*id);
-                                ui.close();
-                            }
-                        }
-                    }
-                });
-            keyboard.finish(ui, items);
-        });
-        categories.push(menu.response.id);
-        if return_to_category {
-            egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = None);
-            menu.response.request_focus();
-        }
+    for (title, _) in MENUS.iter().filter(|(title, _)| *title != "Image jump") {
+        let (response, command) = submenu(ui, title, context, shortcuts, requested_category);
+        categories.push(response.id);
+        chosen = chosen.or(command);
     }
     keyboard.finish(ui, categories);
     chosen
+}
+
+fn submenu(
+    ui: &mut egui::Ui,
+    title: &str,
+    context: CommandContext,
+    shortcuts: &ShortcutBindings,
+    requested: Option<egui::Id>,
+) -> (egui::Response, Option<CommandId>) {
+    let category = ui.next_auto_id();
+    if requested == Some(category) {
+        let submenu = egui::containers::menu::SubMenu::id_from_widget_id(category);
+        egui::containers::menu::MenuState::mark_shown(ui.ctx(), submenu);
+        egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = Some(submenu));
+    }
+    let menu = ui.menu_button(title, |ui| show_items(ui, title, context, shortcuts));
+    let (chosen, back) = menu.inner.unwrap_or_default();
+    if back {
+        egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = None);
+        menu.response.request_focus();
+    }
+    (menu.response, chosen)
+}
+
+fn show_items(
+    ui: &mut egui::Ui,
+    title: &str,
+    context: CommandContext,
+    shortcuts: &ShortcutBindings,
+) -> (Option<CommandId>, bool) {
+    let groups = MENUS
+        .iter()
+        .find(|(name, _)| *name == title)
+        .expect("registered menu")
+        .1;
+    let keyboard = MenuKeyboard::begin(ui);
+    let back = keyboard.left;
+    let requested = keyboard
+        .right
+        .then(|| ui.memory(|memory| memory.focused()))
+        .flatten();
+    let mut chosen = None;
+    let mut items = Vec::new();
+    egui::ScrollArea::vertical()
+        .id_salt(title)
+        .max_height((ui.ctx().content_rect().height() - 64.0).max(100.0))
+        .show(ui, |ui| {
+            for (index, group) in groups.iter().enumerate() {
+                if index > 0 {
+                    ui.separator();
+                }
+                for id in *group {
+                    let definition = command_definitions()
+                        .iter()
+                        .find(|definition| definition.id == *id)
+                        .expect("menu command is registered");
+                    let response = ui.add_enabled(
+                        definition.is_enabled(context),
+                        egui::Button::new(definition.title)
+                            .shortcut_text(shortcuts.label(*id, context)),
+                    );
+                    if response.enabled() {
+                        items.push(response.id);
+                    }
+                    if response.gained_focus() {
+                        response.scroll_to_me(None);
+                    }
+                    if response.clicked() {
+                        chosen = Some(*id);
+                        ui.close();
+                    }
+                }
+            }
+            if title == "View" {
+                ui.separator();
+                let (response, command) = submenu(ui, "Image jump", context, shortcuts, requested);
+                if response.gained_focus() {
+                    response.scroll_to_me(None);
+                }
+                if response.enabled() {
+                    items.push(response.id);
+                }
+                chosen = chosen.or(command);
+            }
+        });
+    keyboard.finish(ui, items);
+    (chosen, back)
 }
 
 pub(crate) struct MenuKeyboard {
@@ -444,6 +478,7 @@ mod tests {
         navigate(egui::Key::ArrowLeft, false, "Edit");
         navigate(egui::Key::ArrowDown, false, "View");
         navigate(egui::Key::ArrowRight, false, "Toggle fullscreen");
+        navigate(egui::Key::Tab, true, "Image jump");
         navigate(egui::Key::Tab, true, "Show command palette");
         assert_eq!(
             frame(vec![key(egui::Key::Enter, false)]).1,
@@ -451,8 +486,7 @@ mod tests {
         );
         assert!(text_position(&frame(vec![]).0, "File").is_none());
         assert!(click(&mut frame, egui::pos2(20.0, 15.0)).is_empty());
-        // File -> Help -> Image jump -> View.
-        frame(vec![key(egui::Key::ArrowUp, false)]);
+        // File -> Help -> View.
         frame(vec![key(egui::Key::ArrowUp, false)]);
         frame(vec![key(egui::Key::ArrowUp, false)]);
         frame(vec![key(egui::Key::ArrowRight, false)]);
@@ -512,6 +546,10 @@ mod tests {
         click(&mut frame, egui::pos2(20.0, 15.0));
         let (output, _) = frame(Vec::new());
         let file = text_position(&output, "File").expect("File category is visible");
+        assert!(text_position(&output, "Image jump").is_none());
+        for title in ["Edit", "View", "Help"] {
+            assert!(text_position(&output, title).is_some());
+        }
         click(&mut frame, file);
         let (output, _) = frame(Vec::new());
         let open = text_position(&output, "Open file").expect("Open command is visible");
@@ -600,7 +638,7 @@ mod tests {
         for (category, steps, leading, prefix, expected, kind) in [
             (
                 "Image jump",
-                3,
+                2,
                 0,
                 "jump_images_",
                 JumpImagesForward10,
@@ -746,6 +784,16 @@ mod tests {
                 frame(vec![key(egui::Key::ArrowDown)]);
             }
             frame(vec![key(egui::Key::ArrowRight)]);
+            if category == "Image jump" {
+                frame(vec![egui::Event::Key {
+                    key: egui::Key::Tab,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::SHIFT,
+                }]);
+                frame(vec![key(egui::Key::ArrowRight)]);
+            }
             for _ in 0..leading {
                 frame(vec![key(egui::Key::ArrowDown)]);
             }

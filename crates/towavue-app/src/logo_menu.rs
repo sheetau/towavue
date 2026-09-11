@@ -21,7 +21,7 @@ struct State {
     click_frame: Option<u64>,
     last_frame: u64,
     suppress: bool,
-    anchor: Option<egui::Pos2>,
+    section: Option<Section>,
 }
 
 fn state_id() -> egui::Id {
@@ -48,13 +48,12 @@ fn direction(delta: egui::Vec2) -> Option<Section> {
     if delta.length_sq() < 64.0 {
         return None;
     }
-    if delta.x >= 0.0 {
-        Some(if delta.y >= 0.0 {
-            Section::Edit
-        } else {
-            Section::File
-        })
-    } else if delta.y >= 0.0 {
+    let angle = delta.x.atan2(-delta.y).to_degrees().rem_euclid(360.0);
+    if angle < 112.5 {
+        Some(Section::File)
+    } else if angle < 157.5 {
+        Some(Section::Edit)
+    } else if angle <= 270.0 {
         Some(Section::View)
     } else {
         None
@@ -73,6 +72,7 @@ pub(super) fn show(
         egui::Button::new("")
             .min_size(egui::vec2(28.0, height))
             .stroke(egui::Stroke::NONE)
+            .frame(false)
             .sense(egui::Sense::click_and_drag()),
     );
     let context = ui.ctx();
@@ -168,7 +168,7 @@ pub(super) fn show(
                     }
                     open = direction(*pos - drag.origin)
                         .filter(|_| drag.crossed && context.content_rect().contains(*pos));
-                    state.anchor = open.map(|_| *pos + egui::vec2(8.0, 8.0));
+                    state.section = open;
                 }
             }
             egui::Event::PointerMoved(pos) => {
@@ -202,16 +202,22 @@ pub(super) fn show(
     if (response.clicked() && !suppress)
         || (open.is_none() && !egui::Popup::is_id_open(context, popup))
     {
-        state.anchor = None;
+        state.section = None;
     }
-    let anchor = state.anchor;
+    let section = state.section;
     context.data_mut(|data| data.insert_temp(state_id(), state));
     let shift = context.animate_value_with_time(
         response.id.with("shaft-shift"),
         if selected.is_some() { 1.0 } else { 0.0 },
         0.08,
     );
-    chrome::logo(ui, response.rect, selected, shift);
+    chrome::logo(
+        ui,
+        response.rect,
+        selected,
+        shift,
+        response.hovered() || response.has_focus() || egui::Popup::is_id_open(context, popup),
+    );
     let set_open = if open.is_some() {
         Some(egui::SetOpenCommand::Bool(true))
     } else if response.clicked() && !suppress {
@@ -231,10 +237,7 @@ pub(super) fn show(
                     .with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config),
             );
     }
-    if let Some(anchor) = anchor {
-        popup = popup.at_position(anchor);
-    }
-    let inner = popup.show(|ui| menu::show_section(ui, commands, shortcuts, open));
+    let inner = popup.show(|ui| menu::show_section(ui, commands, shortcuts, section));
     egui::InnerResponse {
         response,
         inner: inner.map(|inner| inner.inner),

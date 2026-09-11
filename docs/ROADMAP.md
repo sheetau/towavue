@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 M01/G01 menu checkpoint: 方向dragのsection中身だけをbutton下へ固定表示し、親の通常clickとcommand描画を共用。Edit方向を45度領域へ、Image jumpをView子menuへ移動。logo背景不変・gray／white線色・左余白を反映し、位置／親非表示／keyboard／取消／再openを回帰確認。初回layout時の無効な子menuへのfocus移動も修正。実画面・native caption／tab寸法と全UX gateは未完。
+
 2026-09-12追記の未反映項目をUX_IMPLEMENTATION_PLANの追記台帳へ追加。hover背景#2C2C2Cと、音声リスト／画像scroll／既存音量領域の非アクティブwheelを修正し、入力回帰とM0を確認した。可視入力の反映は未確認。caption／tab／menu／status／timeline／preview／音量HUD／音声list等の新たな追記も完了条件に含め、従来checkpointで代替しない。
 
 2026-09-12 I03 color-preparation checkpoint: 表示用RGBAの不透明判定を行内32画素単位にまとめ、混在行のegui標準丸めと短絡を維持。全alpha・block境界の一致を確認。100 JPEGの準備中央値は約1ms短縮し、最短33ms切替は約8.3～8.5→7.3～7.5ms。即時切替は約16.7msでほぼ横ばい。中間blank／previewとGPU可視表示・cold／全形式／資源を含む全UX gateは未完。

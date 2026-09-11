@@ -3843,6 +3843,7 @@ where
                 ui.allocate_ui_with_layout(size, row, |ui| {
                     // Keep the scroll origin on a physical pixel when outer padding is zero.
                     ui.spacing_mut().item_spacing.x = (2.0 * density).round() / density;
+                    ui.add_space(ui.spacing().item_spacing.x);
                     ui.visuals_mut().widgets.inactive.weak_bg_fill = chrome::BACKGROUND;
                     let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
                     let menu = logo_menu::show(
@@ -11109,8 +11110,16 @@ mod tests {
                         )
                     };
                     let logo = bounds("towavue menu");
-                    assert_eq!(logo.left(), 0.0, "no title-bar outer padding");
+                    let gap = (2.0 * density).round() / density;
+                    assert!(
+                        (logo.left() - gap).abs() <= 1.0 / 64.0,
+                        "logo outer gap matches the row spacing"
+                    );
                     let label = bounds("a.png");
+                    assert!(
+                        (label.left() - logo.right() - gap).abs() <= 1.0 / density,
+                        "equal gaps around logo: {logo:?}, {label:?}"
+                    );
                     let close = bounds("Close tab: a.png");
                     assert!((logo.width() - 28.0).abs() < 0.01, "{logo:?}");
                     for rect in [logo, label, close] {

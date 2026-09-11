@@ -294,17 +294,25 @@ pub fn tab_drop_gap(tabs: &[Rect], strip: Rect, pointer: Pos2) -> Option<(usize,
     Some((gap, x.clamp(strip.left() + 1.0, strip.right() - 1.0)))
 }
 
-pub fn logo(ui: &Ui, rect: Rect, selected: Option<crate::menu::Section>, shift: f32) {
+pub fn logo(
+    ui: &Ui,
+    rect: Rect,
+    selected: Option<crate::menu::Section>,
+    shift: f32,
+    highlighted: bool,
+) {
     use crate::menu::Section;
     let rect = Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0));
     let point = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (16.0 / 27.68);
     let stroke = |section| {
         Stroke::new(
             1.1,
-            if selected.is_none() || selected == section {
+            if selected.is_some_and(|selected| Some(selected) == section)
+                || (selected.is_none() && highlighted)
+            {
                 FOREGROUND
             } else {
-                Color32::from_white_alpha(100)
+                MUTED
             },
         )
     };

@@ -59,8 +59,8 @@ fn setup(root: &Path) -> (Application<fn(AppEvent)>, egui::Pos2) {
 fn logo_direction_threshold_and_sector_boundaries_match_the_three_arrows() {
     for (delta, expected) in [
         (egui::vec2(7.99, 0.0), None),
-        (egui::vec2(8.0, 0.0), Some(Section::Edit)),
-        (egui::vec2(0.0, 8.0), Some(Section::Edit)),
+        (egui::vec2(8.0, 0.0), Some(Section::File)),
+        (egui::vec2(0.0, 8.0), Some(Section::View)),
         (egui::vec2(0.0, -8.0), Some(Section::File)),
         (egui::vec2(-8.0, 0.0), Some(Section::View)),
         (egui::vec2(-8.0, -8.0), None),
@@ -68,6 +68,22 @@ fn logo_direction_threshold_and_sector_boundaries_match_the_three_arrows() {
         (egui::vec2(-5.0, 10.0), Some(Section::View)),
     ] {
         assert_eq!(direction(delta), expected, "{delta:?}");
+    }
+    for (angle, expected) in [
+        (0.0_f32, Some(Section::File)),
+        (112.49, Some(Section::File)),
+        (112.51, Some(Section::Edit)),
+        (157.49, Some(Section::Edit)),
+        (157.51, Some(Section::View)),
+        (269.99, Some(Section::View)),
+        (270.01, None),
+        (359.99, None),
+    ] {
+        let angle = angle.to_radians();
+        assert_eq!(
+            direction(egui::vec2(angle.sin(), -angle.cos()) * 30.0),
+            expected
+        );
     }
 }
 
@@ -118,6 +134,28 @@ fn logo_drag_opens_each_existing_submenu_without_dispatch_and_keeps_keyboard_nav
                 .platform_output
                 .accesskit_update
                 .expect("tree");
+            assert!(
+                !tree.nodes.iter().any(|(_, node)| matches!(
+                    node.label(),
+                    Some("File" | "Edit" | "View" | "Help")
+                )),
+                "direct menu must not show its parent categories"
+            );
+            let first = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.label()
+                        .is_some_and(|label| label.starts_with(expected))
+                })
+                .expect("direct first item")
+                .1
+                .bounds()
+                .expect("item bounds");
+            assert!(
+                first.x0 < f64::from(origin.x) && first.y0 < 45.0,
+                "direct content stays below the logo: {first:?}"
+            );
             assert!(
                 tree.nodes.iter().any(|(_, node)| node
                     .label()
@@ -624,6 +662,25 @@ fn logo_feedback_preserves_geometry_and_only_highlights_the_selected_arrow() {
     for density in [1.0, 1.25, 2.0] {
         let context = egui::Context::default();
         context.set_pixels_per_point(density);
+        let idle = context.run_ui(Default::default(), |ui| {
+            chrome::logo(
+                ui,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(28.0, 26.0)),
+                None,
+                0.0,
+                false,
+            );
+        });
+        for shape in idle.shapes {
+            match shape.shape {
+                egui::Shape::LineSegment { stroke, .. } => assert_eq!(stroke.color, chrome::MUTED),
+                egui::Shape::Path(path) => assert_eq!(
+                    path.stroke.color,
+                    egui::epaint::ColorMode::Solid(chrome::MUTED)
+                ),
+                _ => {}
+            }
+        }
         for selected in [
             None,
             Some(Section::File),
@@ -637,6 +694,7 @@ fn logo_feedback_preserves_geometry_and_only_highlights_the_selected_arrow() {
                     rect,
                     selected,
                     if selected.is_some() { 1.0 } else { 0.0 },
+                    true,
                 )
             });
             let mut opaque = 0;

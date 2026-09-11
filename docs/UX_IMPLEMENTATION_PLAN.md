@@ -21,7 +21,7 @@
 | U04 配色／tab配置 | hover背景を#2C2C2Cへ変更済み。共通widgetのhover／active／open背景と文字を回帰確認。tab上下3px相当の余白・native内側borderとの整合は未完 |
 | U07 dirty表示／履歴 | close iconを未保存indicatorへ切替。選択だけや元と同じ結果をdirtyにしない契約を全操作で再監査する。未完 |
 | U04 status／focus | loading等の画面内messageをstatus左へ集約し、重複する寸法／形式を除きframe数は右へ。reading drag値の表示、Escape／tab切替時の赤いoutline除去。未完 |
-| M01/G01 menu | button下の固定位置、直接submenu時は親を出さず同じ位置、Image jumpをViewへ、logoのhoverは線色のみ・左右余白統一・Edit方向45度。未完 |
+| M01/G01 menu | button下の固定位置、直接section時は親を出さず中身だけ保持、Image jumpをView子menuへ、logoは背景を変えずgray／white線色・左にも同じgap・Edit方向45度を実装。親非表示／先頭位置・境界角・通常rootの4分類・nested keyboardと全command配置・取消／一回dispatch、3サイズ×3倍率の再openを回帰確認。実画面／全focus・DPI・pixel単位の余白監査は未完 |
 | U03/U04 font／resize | seek preview等のfont適用漏れ、右端resize時の左寄せtext／icon振動を調査。性能を優先し修正可能性を判断する。未完 |
 | G01/I08 非active wheel | 音声list・画像縦／Shift横scroll・既存音量領域のfocus必須条件を除去。非activeで距離／軸／非選曲／focus不変、volume、取消／所有権を回帰確認。OS実入力・Ctrl＋wheel等の他経路は未完 |
 | V03/A02 timeline外観／入力 | #181818の角丸背景、左右上の同幅余白、白50%volume線とRowResize、CTIを内部に収め白1px＋上のplayheadだけdrag可能、選択左右resize／cursor、白20% difference塗り＋左右白1px点線。未完 |

@@ -129,6 +129,8 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
             egui::Modifiers::NONE,
             vec![
                 button(false, end, egui::Modifiers::ALT),
+                button(true, start, egui::Modifiers::NONE),
+                button(false, start, egui::Modifiers::NONE),
                 egui::Event::PointerMoved(end + egui::vec2(100.0, 0.0)),
             ],
         );
@@ -188,7 +190,7 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
         app.edits = original_history.clone();
     }
     context.set_pixels_per_point(1.0);
-    for case in 0..12 {
+    for case in 0..13 {
         let start = start_drag(app);
         let end = start + egui::vec2(40.0, 0.0);
         frame_input(
@@ -248,6 +250,11 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
                 context.set_dragged_id("foreign-video-widget".into());
                 vec![]
             }
+            12 => vec![
+                button(false, end, egui::Modifiers::NONE),
+                button(true, start, egui::Modifiers::ALT),
+                button(false, end, egui::Modifiers::ALT),
+            ],
             _ => unreachable!(),
         };
         frame_input(app, modifiers, events);
@@ -320,6 +327,6 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
     app.image_view = original_view;
     assert_eq!(app.current_position(), position);
     eprintln!(
-        "PASS video Alt-drag: logical scales, ordered release, one commit/Undo, zero/redo, twelve cancellation paths, non-rotation contexts and unchanged time"
+        "PASS video Alt-drag: logical scales, ordered release, one commit/Undo, zero/redo, thirteen cancellation paths, non-rotation contexts and unchanged time"
     );
 }

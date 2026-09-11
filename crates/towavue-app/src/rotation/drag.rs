@@ -29,19 +29,55 @@ pub(crate) struct RotationInput {
 pub(crate) fn rotation_input(ui: &egui::Ui, response: &egui::Response) -> RotationInput {
     let (origin, release) = view_drag_button_positions(response, egui::PointerButton::Primary);
     ui.input(|input| RotationInput {
-        origin, release,
-        alt_press: input.events.iter().any(|event| matches!(event,
-            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers }
-            if Some(*pos) == origin && modifiers_allow_rotation(*modifiers))),
+        origin,
+        release,
+        alt_press: origin.is_some()
+            && input
+                .events
+                .iter()
+                .find_map(|event| match event {
+                    egui::Event::PointerButton {
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } => Some(modifiers_allow_rotation(*modifiers)),
+                    _ => None,
+                })
+                .unwrap_or(false),
         held: modifiers_allow_rotation(input.modifiers),
-        released_with_alt: input.events.iter().any(|event| matches!(event,
-            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers }
-            if Some(*pos) == release && modifiers_allow_rotation(*modifiers))),
-        interrupted: !input.focused || input.events.iter().any(|event| matches!(event,
-            egui::Event::PointerGone | egui::Event::WindowFocused(false)
-            | egui::Event::Key { key: egui::Key::Escape, pressed: true, .. }
-            | egui::Event::MouseWheel { .. }
-            | egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, .. })),
+        released_with_alt: input
+            .events
+            .iter()
+            .find_map(|event| match event {
+                egui::Event::PointerButton {
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers,
+                    ..
+                } => Some(modifiers_allow_rotation(*modifiers)),
+                _ => None,
+            })
+            .unwrap_or(false),
+        interrupted: !input.focused
+            || input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::PointerGone
+                        | egui::Event::WindowFocused(false)
+                        | egui::Event::Key {
+                            key: egui::Key::Escape,
+                            pressed: true,
+                            ..
+                        }
+                        | egui::Event::MouseWheel { .. }
+                        | egui::Event::PointerButton {
+                            button: egui::PointerButton::Secondary,
+                            pressed: true,
+                            ..
+                        }
+                )
+            }),
     })
 }
 
@@ -75,7 +111,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let was_active = self.rotation_drag.is_some();
         if interrupted
             || ui.ctx().dragged_id().is_some_and(|id| id != response.id)
-            || !(held || released_with_alt)
+            || !(if release.is_some() {
+                released_with_alt
+            } else {
+                held
+            })
             || !self.view_drag_allowed(ui.ctx())
         {
             if was_active {

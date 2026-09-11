@@ -206,6 +206,88 @@ fn rotation_drag_cancels_on_modifier_escape_focus_pointer_and_context_interrupti
 }
 
 #[test]
+fn rotation_commits_the_first_release_without_combining_later_gestures() {
+    let start = egui::pos2(200.0, 200.0);
+    let end = egui::pos2(240.0, 200.0);
+    for already_held in [false, true] {
+        for later_alt in [false, true] {
+            let (mut app, _) = application();
+            frame(
+                &mut app,
+                egui::Modifiers::ALT,
+                vec![egui::Event::PointerMoved(start)],
+            );
+            let mut events = vec![button(true, start, egui::Modifiers::ALT)];
+            if already_held {
+                frame(&mut app, egui::Modifiers::ALT, std::mem::take(&mut events));
+            }
+            let later_modifiers = if later_alt {
+                egui::Modifiers::ALT
+            } else {
+                egui::Modifiers::NONE
+            };
+            events.extend([
+                egui::Event::PointerMoved(end),
+                button(false, end, egui::Modifiers::ALT),
+                button(true, egui::pos2(280.0, 200.0), later_modifiers),
+                button(false, egui::pos2(320.0, 200.0), later_modifiers),
+            ]);
+            frame(&mut app, egui::Modifiers::NONE, events);
+            let tab = app.tabs.active().expect("tab").id;
+            assert_eq!(
+                app.edits.get(&tab).map(|edit| edit.operations()),
+                Some(
+                    [EditOperation::RotateImage(
+                        ImageRotation::new(200, (8, 6)).expect("rotation")
+                    )]
+                    .as_slice()
+                ),
+                "already_held={already_held}, later_alt={later_alt}"
+            );
+            assert!(app.rotation_drag.is_none());
+        }
+    }
+}
+
+#[test]
+fn rotation_does_not_borrow_alt_from_a_later_gesture_at_the_same_coordinates() {
+    let start = egui::pos2(200.0, 200.0);
+    let end = egui::pos2(240.0, 200.0);
+    for first_alt in [false, true] {
+        for final_modifiers in [egui::Modifiers::NONE, egui::Modifiers::ALT] {
+            let (mut app, _) = application();
+            frame(
+                &mut app,
+                egui::Modifiers::NONE,
+                vec![egui::Event::PointerMoved(start)],
+            );
+            frame(
+                &mut app,
+                final_modifiers,
+                vec![
+                    button(
+                        true,
+                        start,
+                        if first_alt {
+                            egui::Modifiers::ALT
+                        } else {
+                            egui::Modifiers::NONE
+                        },
+                    ),
+                    button(false, end, egui::Modifiers::NONE),
+                    button(true, start, egui::Modifiers::ALT),
+                    button(false, end, egui::Modifiers::ALT),
+                ],
+            );
+            assert!(
+                app.edits.is_empty() && app.rotation_drag.is_none(),
+                "first_alt={first_alt}"
+            );
+        }
+    }
+}
+
+#[test]
 fn batched_rotation_uses_release_position_and_zero_click_or_invalid_canvas_do_not_edit() {
     let start = egui::pos2(200.0, 200.0);
     let end = egui::pos2(140.0, 300.0);

@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 H1/I06/V05 input-pairing checkpoint: 同frameの後続gestureによって先の選択・pan・Alt回転の終点／click判定／修飾キーが変わる不具合を再現・修正。最初のreleaseで区切り、選択には押下時刻・移動履歴を保持する。前frame保持・原点復帰・長押し・同座標Alt違い・所有権を回帰確認。全606 tests成功、動画GPU preview／Undo／export再読込と通常960×576生成PNGの選択→click preview→Escapeを確認。右button／Alt保持dragの今回の確認は自動入力で、全native timing／mixed-DPIは残る。643606aのCI34590038494成功。全UX goalは未完のまま継続する。
+
 2026-09-11 M01 input-order checkpoint: 可視不発を追跡し、release後のPointerGoneによる確定取消と、batched press／moveの遅延hit-testによるdrag owner移動をそれぞれ回帰で再現・修正。退出は入力順で処理し、logoの所有pressを既存egui APIへ固定する。短いclick・foreign owner取消・3方向・実画像操作面とtabを確認。全603 tests／Release成功、最終通常960×576の生成PNGでView→Escape→Edit→Escape→Fileと通常clickが通る。3a019b7のCI34588315920成功。最大化／混在DPI・全focus/style、全UX台帳の残件は継続する。
 
 2026-09-11 U10 warm-card checkpoint: filmstripの先頭missが後続memory hitまで待たせる現象を可視確認し、既存workerのmemory先行公開→miss逐次生成へ修正。source stamp・duration・世代／取消・64件上限を維持し、表示順・worker数・cache予算は変更しない。旧順序の回帰失敗→成功、全体601 tests／Release成功。新Releaseの実960×576で61 MB PNGだけがLoadingの間に後続warm cardsが表示され、その後PNGも同位置に完成することを確認。旧Releaseでも4静止画形式のfilmstrip／原寸、reading WebPの先行表示→原寸を確認した。eb00c43のCI34586129718成功。cold／全DPI・素材・資源と全UX台帳は継続する。

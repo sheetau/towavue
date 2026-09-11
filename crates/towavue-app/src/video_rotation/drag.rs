@@ -22,7 +22,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return RotationResponse::Inactive;
         }
         if input.interrupted
-            || !(input.held || input.released_with_alt)
+            || !(if input.release.is_some() {
+                input.released_with_alt
+            } else {
+                input.held
+            })
             || ui.ctx().dragged_id().is_some_and(|id| id != response.id)
             || !self.view_drag_allowed(ui.ctx())
             || self

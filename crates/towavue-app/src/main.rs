@@ -555,6 +555,9 @@ enum ViewDrag {
     Selection {
         mode: SelectionDrag,
         before: Option<UnitRect>,
+        origin: egui::Pos2,
+        started_at: f64,
+        moved: bool,
     },
     Pan {
         origin: egui::Pos2,
@@ -3276,13 +3279,57 @@ where
             self.view_drag = Some(ViewDrag::Selection {
                 mode,
                 before: self.image_view.selection,
+                origin,
+                started_at: response.ctx.input(|input| input.time),
+                moved: false,
             });
         }
         let selection_owned = matches!(self.view_drag, Some(ViewDrag::Selection { .. }));
-        // A move and release in one frame can bypass egui's drag-start notification.
-        let dragging = selection_owned
-            && (response.dragged_by(egui::PointerButton::Primary)
-                || (released && !response.clicked_by(egui::PointerButton::Primary)));
+        let options = response.ctx.options(|options| options.input_options);
+        let mut tracking = origin.is_none();
+        // egui's response can describe a later gesture in the same frame. Keep
+        // click eligibility with this selection, including earlier held frames.
+        let dragging = if let Some(ViewDrag::Selection {
+            origin,
+            started_at,
+            moved,
+            ..
+        }) = &mut self.view_drag
+        {
+            response.ctx.input(|input| {
+                for event in &input.events {
+                    if !tracking {
+                        tracking = matches!(
+                            event,
+                            egui::Event::PointerButton {
+                                button: egui::PointerButton::Primary,
+                                pressed: true,
+                                ..
+                            }
+                        );
+                        continue;
+                    }
+                    match event {
+                        egui::Event::PointerMoved(pos) => {
+                            *moved |= origin.distance(*pos) > options.max_click_dist;
+                        }
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed: false,
+                            ..
+                        } => {
+                            *moved |= origin.distance(*pos) > options.max_click_dist;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                *moved || input.time - *started_at > options.max_click_duration
+            })
+        } else {
+            false
+        };
         if dragging {
             match self.view_drag {
                 Some(ViewDrag::Selection {
@@ -3309,7 +3356,8 @@ where
         }
         if self.media_kind == Some(MediaKind::Image)
             && selection_owned
-            && response.clicked_by(egui::PointerButton::Primary)
+            && released
+            && !dragging
             && self
                 .image_view
                 .selection
@@ -7855,6 +7903,9 @@ fn view_drag_button_positions(
                     origin.get_or_insert(*pos);
                 } else {
                     release = Some(*pos);
+                    // Later button events belong to another gesture, including
+                    // a new press after the release of an already-held drag.
+                    break;
                 }
             }
         }
@@ -9386,6 +9437,9 @@ mod tests {
         app.view_drag = Some(ViewDrag::Selection {
             mode: SelectionDrag::Right,
             before: selected,
+            origin: egui::Pos2::ZERO,
+            started_at: 0.0,
+            moved: false,
         });
         frame(&mut app, vec![request(0, 101.0)]);
         assert!(
@@ -10945,6 +10999,9 @@ mod tests {
                     app.view_drag = Some(ViewDrag::Selection {
                         mode: SelectionDrag::Left,
                         before: None,
+                        origin: egui::Pos2::ZERO,
+                        started_at: 0.0,
+                        moved: false,
                     })
                 }
                 11 => app.state = PlaybackState::Loading,
@@ -13630,6 +13687,9 @@ mod tests {
             app.view_drag = (blocked == 4).then_some(ViewDrag::Selection {
                 mode: SelectionDrag::Left,
                 before: None,
+                origin: egui::Pos2::ZERO,
+                started_at: 0.0,
+                moved: false,
             });
             frame(
                 &mut app,
@@ -15864,6 +15924,9 @@ mod tests {
                 app.view_drag = Some(ViewDrag::Selection {
                     mode: edge,
                     before: Some(before),
+                    origin: egui::Pos2::ZERO,
+                    started_at: 0.0,
+                    moved: false,
                 });
                 let collapsed = match edge {
                     SelectionDrag::Left | SelectionDrag::Top => before.max,
@@ -17930,6 +17993,9 @@ mod tests {
                         event(true, start),
                         egui::Event::PointerMoved(end),
                         event(false, end),
+                        event(true, egui::pos2(350.0, 350.0)),
+                        egui::Event::PointerMoved(egui::pos2(400.0, 400.0)),
+                        event(false, egui::pos2(400.0, 400.0)),
                         egui::Event::PointerMoved(egui::pos2(440.0, 440.0)),
                     ],
                 ] {
@@ -18002,6 +18068,116 @@ mod tests {
                     }),
                     "{button:?}, blocked={blocked}"
                 );
+                assert!(app.view_drag.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn selection_classifies_the_first_gesture_before_a_later_click_or_drag() {
+        let Some(_root) = isolated_test_root(
+            "tests::selection_classifies_the_first_gesture_before_a_later_click_or_drag",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.media_kind = Some(MediaKind::Image);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0));
+        let start = egui::pos2(100.0, 100.0);
+        let event = |pressed, pos| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for gesture in 0..4 {
+            let first_drag = gesture != 0;
+            for already_held in [false, true] {
+                if gesture == 3 && !already_held {
+                    continue;
+                }
+                let context = fonts::test_context();
+                let time = std::cell::Cell::new(0.0);
+                let original = UnitRect {
+                    min: UnitPoint { x: 0.1, y: 0.1 },
+                    max: UnitPoint { x: 0.9, y: 0.9 },
+                };
+                app.image_view.selection = Some(original);
+                app.image_view.crop_preview = false;
+                let frame = |app: &mut Application<_>, events| {
+                    let _ = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            time: Some(time.get()),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let response = ui.interact(
+                                screen,
+                                "first-selection".into(),
+                                egui::Sense::click_and_drag(),
+                            );
+                            let pointer = ui.input(|input| input.pointer.hover_pos());
+                            app.update_selection(&response, screen, (500, 500), false, pointer);
+                        },
+                    );
+                };
+                frame(&mut app, vec![egui::Event::PointerMoved(start)]);
+                if already_held {
+                    frame(&mut app, vec![event(true, start)]);
+                    if gesture == 2 {
+                        frame(
+                            &mut app,
+                            vec![egui::Event::PointerMoved(egui::pos2(300.0, 300.0))],
+                        );
+                    }
+                }
+                let end = if gesture == 1 {
+                    egui::pos2(300.0, 300.0)
+                } else {
+                    start
+                };
+                let later_start = egui::pos2(350.0, 350.0);
+                let later_end = if first_drag {
+                    later_start
+                } else {
+                    egui::pos2(400.0, 400.0)
+                };
+                let mut events = Vec::new();
+                if !already_held {
+                    events.push(egui::Event::PointerMoved(egui::pos2(20.0, 20.0)));
+                    events.push(event(true, start));
+                    if gesture == 2 {
+                        events.push(egui::Event::PointerMoved(egui::pos2(300.0, 300.0)));
+                    }
+                }
+                if gesture == 3 {
+                    time.set(1.0);
+                }
+                events.extend([
+                    egui::Event::PointerMoved(end),
+                    event(false, end),
+                    event(true, later_start),
+                    egui::Event::PointerMoved(later_end),
+                    event(false, later_end),
+                ]);
+                frame(&mut app, events);
+                assert_eq!(
+                    app.image_view.selection,
+                    if gesture >= 2 {
+                        None
+                    } else if first_drag {
+                        Some(UnitRect {
+                            min: UnitPoint { x: 0.2, y: 0.2 },
+                            max: UnitPoint { x: 0.6, y: 0.6 },
+                        })
+                    } else {
+                        Some(original)
+                    },
+                    "gesture={gesture}, held={already_held}"
+                );
+                assert_eq!(app.image_view.crop_preview, !first_drag);
                 assert!(app.view_drag.is_none());
             }
         }

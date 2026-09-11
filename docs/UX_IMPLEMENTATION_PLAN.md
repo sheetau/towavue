@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-11 H1/I06/V05 input-pairing checkpoint: 選択・pan・Alt回転の共有入力を最初のreleaseで区切り、後続gestureの位置・修飾キーを混ぜない。選択は押下時刻・移動履歴でclick／dragを判定し、後続clickによる不発・誤previewを修正。複数gesture・同座標のAlt違い・前frame保持・原点復帰・長押し・press前移動・所有権と再描画を自動回帰確認。動画のGPU preview／取消・Undo／保存再読込も成功。通常960×576の生成PNGで選択→範囲内click preview→Escapeの可視確認。可視APIは右button／Alt保持dragに非対応のため、それらの今回の検証は自動入力に限定する。全native timing・mixed-DPI、同frame全gestureの個別再生は認定せず、全UX台帳を継続する。
+
 2026-09-11 U10 warm-card checkpoint: 可視filmstripで左の未生成PNGが後続の取得済みcardまで待たせる場面を確認し、workerのmemory先行公開→元順のmiss生成へ変更。画像／動画／音声の画素・duration、非decode／非disk lookup、source変更・取消と世代破棄を回帰確認する。既存Releaseでは6000×4000の4形式のfilmstrip／Tab・Shift+Tab・原寸表示、2枚reading、WebPのLoading中preview→原寸を可視確認。fresh processの未訪問PNGは原寸表示まで確認したが、先行previewの瞬間は撮影で区別できず未認定。全DPI／cold／全素材・資源と全台帳は継続する。
 
 同checkpointの最終Releaseでも、通常PNGのLoading中縮小preview→原寸、filmstripの未生成61 MB PNGだけがLoadingの間の後続warm cards、完成後の同位置・同選択とEscape復帰を可視確認。通常PNGのこの標本はWelcomeでdisk thumbnailがmemoryへ入った後なので、原寸要求による直接disk lookupの瞬間とは区別する。601 testsとloader回帰10連続が成功した。

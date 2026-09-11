@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## U09/U10/V02/I02: 即時・非操作型media preview（2026-09-12）
+
+seek／image-reading／tab previewは、通常tooltipのdelay・still判定・前frameのtooltip所有権から分離した共通の非操作型Areaを使う。fade待ちを設けず、初回／内容寸法変更はeguiのdiscard passで同一frame内に再配置する。seekはhover位置の上中央、tabはtab中央の下へ4 logical px離してanchorし、画面端では画面内制約を優先する。pointerが離れれば非表示とし、既存seek dragの所有中だけ領域外でも保持する。標準tooltip全般の寿命やinteractive tooltipを強制終了するAPIは追加しない。
+
+preview用hoverはclipped interact rectとlayerを確認し、focusを要求せず、Tooltip層だけでは背後のpreview元を抑止しない。通常の別overlay層・disabled・menu／modalとapp側overlay条件は維持する。tabの生成要求も同じhover判定を用い、非active時に表示だけでなく対象要求も追従する。preview自体はfocusを取得せずclick-throughとする。一般tooltipの残留／全経路と実OS hoverは別途監査する。
+
+動画seek cardは未生成時から160×最大108 logical pxの画像slotを確保する。既存の上方空間制限内で、到着画像は比率を保持して中央へfitし、sprite UVを変更しない。時刻・失敗captionは一行truncateし、画像有無／横長・縦長／失敗でcaptionの高さを変えない。時刻表示は既存Figtree-tabularを含むProportional familyへ統一し、Monospace指定を外す。原寸品質・生成worker／cache／世代と取消契約は変更しない。
+
 ## V03/A02: timeline背景と時間選択合成（2026-09-12）
 
 timeline panelの外側は黒とし、左右・上のmarginを8 logical px、下は0とする。#181818・corner radius 3の背景を置き、その内側3 logical pxを波形・選択・CTIの共通領域とする。内側へ配置してもpanel全体の領域を確保し、既定96px・tab別resize／小窓時上限を維持する。追加borderを出さず、toolbar下とtimeline上（非表示時はstatus上）の二境界を維持する。

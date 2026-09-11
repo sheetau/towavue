@@ -17,6 +17,7 @@ mod hold_speed;
 mod image_navigation;
 mod image_scroll;
 mod logo_menu;
+mod media_preview;
 mod menu;
 mod metadata_export;
 mod palette;
@@ -3733,7 +3734,7 @@ where
             && !self.grid_open
             && !self.filmstrip_open
             && !egui::Popup::is_any_open(root.ctx())
-            && root.input(|input| input.focused && !input.pointer.any_down());
+            && root.input(|input| !input.pointer.any_down());
         let window_rect = root.max_rect();
         let tab_menu_focus = (!self.modal_input_blocked()
             && self.active_export.is_none()
@@ -4020,7 +4021,7 @@ where
                                     }
                                     if preview_allowed && !egui::Popup::is_any_open(tab_ui.ctx()) {
                                         let target = self.tab_preview.target(tab);
-                                        if response.hovered() {
+                                        if media_preview::hover_pos(&response).is_some() {
                                             preview_target = Some(target.clone());
                                         }
                                         self.tab_preview.show(&response, &target);
@@ -4549,7 +4550,10 @@ where
                 1.0,
                 enabled,
             );
-            if let Some(pointer) = response.interact_pointer_pos().or(response.hover_pos()) {
+            if let Some(pointer) = response
+                .interact_pointer_pos()
+                .or_else(|| media_preview::hover_pos(&response))
+            {
                 let target = seekbar::item_index(
                     seekbar::compact_ratio(response.rect, pointer.x),
                     images.len(),
@@ -4639,7 +4643,7 @@ where
         if let Some(pointer) = drag
             .position
             .or(response.interact_pointer_pos())
-            .or(response.hover_pos())
+            .or_else(|| media_preview::hover_pos(&response))
         {
             let ratio = seekbar::compact_ratio(response.rect, pointer.x);
             self.draw_seek_preview(&response, ratio, duration);
@@ -4710,22 +4714,25 @@ where
         seekbar::preview_tooltip(response, ratio).show(|ui| {
             let height =
                 (response.rect.top() - response.ctx.viewport_rect().top() - 40.0).clamp(1.0, 108.0);
-            if let Some(image) = sheet {
-                ui.add(image.max_size(egui::vec2(160.0, height)));
-            } else if let Some((cached, texture)) = &self.hover_thumbnail
-                && self.media_kind == Some(MediaKind::Video)
-                && *cached == bucket
-            {
-                // Reserve space above the track for the caption, frame and tooltip gap.
-                ui.add(
-                    egui::Image::new((texture.id(), texture.size_vec2()))
-                        .max_size(egui::vec2(160.0, height)),
-                );
+            let image = sheet.or_else(|| {
+                self.hover_thumbnail.as_ref().and_then(|(cached, texture)| {
+                    (self.media_kind == Some(MediaKind::Video) && *cached == bucket)
+                        .then(|| egui::Image::new((texture.id(), texture.size_vec2())))
+                })
+            });
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(160.0, height), egui::Sense::hover());
+            if let Some(image) = image {
+                let image = image.max_size(rect.size());
+                if let Some(size) = image.load_and_calc_size(ui, rect.size()) {
+                    image.paint_at(ui, egui::Rect::from_center_size(rect.center(), size));
+                }
             }
-            if !sheet_ready && self.failed_thumbnails.contains(&bucket) {
-                ui.label("Thumbnail unavailable");
-            }
-            ui.monospace(format_time(media_time(duration.mul_f32(ratio))));
+            let caption = if !sheet_ready && self.failed_thumbnails.contains(&bucket) {
+                format!("{} · No preview", format_time(media_time(position)))
+            } else {
+                format_time(media_time(position))
+            };
+            ui.add(egui::Label::new(caption).truncate());
         });
     }
 
@@ -12649,6 +12656,102 @@ mod tests {
     }
 
     #[test]
+    fn pending_seek_preview_keeps_its_caption_and_bounds_when_images_arrive() {
+        let Some(_root) = isolated_test_root(
+            "tests::pending_seek_preview_keeps_its_caption_and_bounds_when_images_arrive",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        app.media_kind = Some(MediaKind::Video);
+        let context = fonts::test_context();
+        context.set_pixels_per_point(1.25);
+        context.global_style_mut(|style| style.interaction.tooltip_delay = 60.0);
+        let track = egui::Rect::from_min_max(egui::pos2(8.0, 260.0), egui::pos2(472.0, 272.0));
+        let textures = [[240, 144], [24, 400]].map(|size| {
+            context.load_texture(
+                "arrival fixture",
+                egui::ColorImage::filled(size, Color32::WHITE),
+                Default::default(),
+            )
+        });
+        let mut time = 0.0;
+        let mut frame = |app: &mut Application<_>, hover| {
+            time += 0.001;
+            context.run_ui(
+                egui::RawInput {
+                    time: Some(time),
+                    focused: false,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    events: vec![egui::Event::PointerMoved(if hover {
+                        track.center()
+                    } else {
+                        egui::pos2(20.0, 20.0)
+                    })],
+                    ..Default::default()
+                },
+                |ui| {
+                    let response = ui.allocate_rect(track, egui::Sense::hover());
+                    app.draw_seek_preview(&response, 0.5, Duration::from_secs(30));
+                },
+            )
+        };
+        frame(&mut app, false);
+        let mut caption_y: Option<f32> = None;
+        for (index, texture) in [None, Some(&textures[0]), Some(&textures[1]), None]
+            .into_iter()
+            .enumerate()
+        {
+            app.hover_thumbnail = texture.map(|texture| (10, texture.clone()));
+            if index == 3 {
+                app.failed_thumbnails.insert(10);
+            }
+            let output = frame(&mut app, true);
+            let caption = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text().starts_with("00:15") => {
+                        Some(text)
+                    }
+                    _ => None,
+                })
+                .expect("caption on the first hover frame, even before image readiness");
+            assert!(caption.pos.y + caption.galley.size().y < track.top());
+            assert!(
+                caption
+                    .galley
+                    .job
+                    .sections
+                    .iter()
+                    .all(|section| section.format.font_id.family == egui::FontFamily::Proportional)
+            );
+            if let Some(y) = caption_y {
+                assert!((caption.pos.y - y).abs() < 0.01);
+            }
+            caption_y = Some(caption.pos.y);
+            if let Some(texture) = texture {
+                let rect = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect) if rect.fill_texture_id() == texture.id() => {
+                            Some(rect.rect)
+                        }
+                        _ => None,
+                    })
+                    .expect("ready image painted without waiting another frame");
+                assert!(rect.bottom() < caption.pos.y);
+                assert!((rect.aspect_ratio() - texture.aspect_ratio()).abs() < 0.01);
+            }
+        }
+        assert!(app.edits.is_empty() && app.session.is_none());
+    }
+
+    #[test]
     fn seek_preview_follows_hover_and_bounds_portrait_images() {
         let Some(_root) =
             isolated_test_root("tests::seek_preview_follows_hover_and_bounds_portrait_images")
@@ -12723,6 +12826,11 @@ mod tests {
                             "{bounds:?}"
                         );
                         assert!(screen.contains_rect(bounds));
+                        assert!(
+                            (bounds.aspect_ratio() - image_size[0] as f32 / image_size[1] as f32)
+                                .abs()
+                                < 0.01
+                        );
                         assert!(bounds.bottom() < track.top());
                         if x == track.center().x {
                             assert!(

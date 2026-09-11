@@ -226,12 +226,7 @@ impl TabPreview {
     }
 
     pub fn show(&self, response: &egui::Response, target: &Target) {
-        let mut tooltip = egui::Tooltip::for_enabled(response).width(240.0);
-        tooltip.popup = tooltip
-            .popup
-            .at_position(response.rect.left_bottom())
-            .align(egui::RectAlign::BOTTOM_START);
-        tooltip.show(|ui| {
+        crate::media_preview::Preview::tab(response).show(|ui| {
             ui.set_max_width(240.0);
             let texture = (self.target.as_ref() == Some(target))
                 .then_some(self.texture.as_ref())
@@ -261,7 +256,7 @@ impl TabPreview {
                 }
             }
             if target.kind == MediaKind::Video {
-                ui.monospace(format!(
+                ui.label(format!(
                     "Preview near {}",
                     crate::format_time(crate::media_time(target.position))
                 ));
@@ -470,6 +465,7 @@ mod tests {
             context.run_ui(
                 egui::RawInput {
                     time: Some(time),
+                    focused: false,
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
                         egui::vec2(960.0, 576.0),
@@ -487,6 +483,10 @@ mod tests {
         for index in 0..3 {
             frame(&mut app, egui::pos2(90.0, 16.0), index as f64 * 0.1);
         }
+        assert!(
+            app.tab_preview.target.is_some(),
+            "inactive hover requests the preview without activating the window"
+        );
         app.tab_preview.target = Some(target);
         app.tab_preview.texture = Some(Ok(texture));
         let mut output = egui::FullOutput::default();

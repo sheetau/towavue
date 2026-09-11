@@ -226,25 +226,8 @@ pub fn compact_ratio(rect: Rect, x: f32) -> f32 {
     ((x - travel.left()) / travel.width().max(f32::EPSILON)).clamp(0.0, 1.0)
 }
 
-pub fn preview_tooltip(response: &Response, ratio: f32) -> egui::Tooltip<'static> {
-    let anchor = egui::pos2(
-        egui::lerp(response.rect.x_range(), ratio),
-        response.rect.top(),
-    );
-    let tooltip = if response.enabled() && timeline_input::is_dragging(response) {
-        egui::Tooltip::for_widget(response)
-    } else {
-        egui::Tooltip::for_enabled(response)
-    };
-    let mut tooltip = tooltip
-        .width(160.0)
-        .layout(egui::Layout::top_down(egui::Align::Center));
-    tooltip.popup = tooltip
-        .popup
-        .at_position(anchor)
-        .align(egui::RectAlign::TOP)
-        .align_alternatives(&[]);
-    tooltip
+pub fn preview_tooltip(response: &Response, ratio: f32) -> crate::media_preview::Preview {
+    crate::media_preview::Preview::seek(response, ratio)
 }
 
 pub fn item_index(ratio: f32, count: usize) -> usize {

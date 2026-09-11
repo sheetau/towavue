@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+I06/I07 original-display-handoff: 同じtabの通常画像移動は旧原寸一枚を表示専用で保持する。新targetのimageや編集履歴としては扱わず、旧path／表示transform／取得済み容量をstatusにも使う。保持中の編集・保存／metadata options・画像／path copy・Explorer表示・view操作を禁止し、navigationは最新要求優先を維持する。3倍率の実draw_ui回帰で旧mesh維持、縮小preview抑止、pointer／command入力で履歴とview不変、古い完了の無視、新原寸への置換、graphics復元対象と失敗／tab移動／closeのtexture解放を確認。読み込み中の新tab stateへ旧画像を渡さない。
+
+NAV100後続計測: 4096×2304 JPEG100枚／31.8MiB、warm filesystem・合成Shell順・直列入力のRelease CPU計測を2回実行。どちらも即時／33ms間隔で新原寸100、blank 0、preview 0、handoff 100。保持画像は新原寸のreadyに数えない。ready中央値は初回18.036／8.458ms、再実行16.929／7.521ms、p95は26.575／10.383msと17.939／8.658ms。先行e2af6ecのblank 100から解消したが、復号速度改善と主張しない。再実行は生成済みRelease test exeの終了コード0も確認。既存cache上限は変えず、旧decoded一画像（既存512MiB上限内）とtextureの追加生存を認める。実GPU表示・物理burstの全画像到達・cold／他形式・peak memory／IrfanView比較は未達のまま。
+
 画像の原寸完成後に残る通知順序のgapを修正。draw_uiの初回passで既に完成した結果を取り込み、previewあり／なしの双方で原寸を優先する。未完了decodeは待たず、旧画像を表示対象として偽装しない。context未準備時と後着wake-upも回帰確認済み。100枚のRelease CPU計測では即時／33ms間隔ともblank_targets=100、preview_targets=96／1、ready中央値16.966／7.676ms。全原寸到達とseamless達成は区別し、gateは未達のまま。表示handoff・全画像到達・実GPU／resource確認を継続する。
 
 動画Ctrl wheelも共通parserへ接続し、非active入力と同frame内の複数pointer基点へ即時反映する。動画固有のmodifier除外、timeline／overlay・右dragの保護を維持。3倍率の生成動画GPU描画で同frame反映・末尾Ctrl解除・残量なし・focus loss／再開・timeline gateを確認。OSから非active窓への実入力は未検証。

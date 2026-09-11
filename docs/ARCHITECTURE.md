@@ -1,10 +1,18 @@
 # towavue アーキテクチャ
 
+## I06/I07: 復号待ちの原寸表示引継ぎ（2026-09-12）
+
+同一tabの通常画像navigationでは、直前に表示した原寸presentationを一枚だけ表示専用handoffとして保持する。path・view・表示transform・取得済み容量も旧sourceと一緒に固定し、原寸の復号／texture準備が成功した同じ処理で新sourceへ置き換える。保持中は中央の縮小previewとloading captionを出さず、旧画像のanimationも進めない。tab target／titleは最新要求先、statusの画像情報／pathは表示中の旧sourceを表す。旧presentationを新targetのself.imageへ戻さない。
+
+保持中の編集・Undo/Redo・保存／書出し／metadata options・画像／pathコピー・Explorer表示と画像view操作はcommand gateで無効にし、直接の編集／書出し／画像コピー入口も保護する。中央描画は入力を扱わない。navigation・tab／window操作は維持し、連打は既存の最新要求優先で最後に表示できた一枚を引き継ぐ。古いgeneration／pathの完了では置換しない。失敗、別sourceのload、tab離脱／transfer、最後のtab closeで解放し、未完了の新targetをretained tabへ保存するときに旧画像を混入させない。graphics復旧では保持中textureも既存decoded pixelsから復元する。
+
+ImagePresentationの既存Arc／texture handleを共有し、handoffのためのRGBAコピー・worker・要求queueは追加しない。ただしcacheからevictされた場合も直前一画像を生存させるため、既存の一画像decoded上限512MiBに収まる旧decodedデータと表示textureの寿命が延び得る。既存decoded cacheの10件／256MiBとtexture cacheの8件／256MiBは変更せず、これらをアプリ全体のpeak memory上限とは呼ばない。初回open、reading mode、表示可能な旧原寸なし、編集中decode待ち／errorはhandoff対象外。直列100枚の全原寸到達と、連打で全要求を表示すること、実GPUでの無ちらつき・資源認定は別々に検証する。
+
 ## I06/I07: 完了済み原寸を描画前に取り込む（2026-09-12）
 
 image_loading中かつUI contextが準備済みなら、draw_uiの最初のlayout passで既存finish_image_loadを呼び、worker mailboxに既にある結果だけを取り込む。RedrawがImagesReadyの処理に先行しても、完成している原寸より空表示／縮小previewを優先しない。通知は引き続き必要であり、後から届いた同じwake-upは空のmailboxとして無害に処理する。context準備前に結果を消費せず、eguiの追加layout passで別の完了結果へ再切替しない。既存のgeneration／path／chunk順序／errorとtexture cache処理を再利用し、UIでの復号待機・filesystem query・新timer／worker／cacheは追加しない。texture準備の既存CPU費用はUI側に残る。
 
-これは完了通知と描画の順序に由来する不要な一回のloading表示を防ぐもので、未完了decodeを高速化したり、古い画像を保持して見かけだけ準備完了にする処理ではない。初回load・cache miss・連打の途中では引き続きpreview／空表示があり得る。100枚原寸のseamless gateは未達のまま保持し、表示handoffとmetadata／編集targetの整合、全画像到達とメモリ上限を次に扱う。
+この先行修正は完了通知と描画の順序に由来する不要な一回のloading表示を防ぐ。未完了decodeの表示引継ぎは上の後続節で扱い、旧画像保持を新画像の準備完了として数えない。初回loadなどhandoff対象外ではpreview／空表示があり得る。100枚原寸のseamless gateには実GPU表示・全画像到達と資源確認も必要なままとする。
 
 ## G01/V05: 動画wheelの即時・非active反映（2026-09-12）
 

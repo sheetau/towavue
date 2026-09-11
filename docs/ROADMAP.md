@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I06/I07 original-display-handoff checkpoint: 同一tabの通常画像navigation中は旧原寸一枚を表示専用で保持し、新しい原寸の準備後に置き換える。旧sourceのpath／transformを保持し、編集・保存／copy等と中央view入力を禁止。最新要求への再移動・古い完了・preview抑止・graphics復元・失敗／tab離脱／close時の解放を3倍率で回帰確認。4096×2304 JPEG100枚のRelease CPU計測2回とも、即時／33ms間隔でblank／preview各0、handoff各100、新原寸到達各100。再実行のready中央値16.929／7.521ms、p95 17.939／8.658ms。単なるdecode高速化や実GPUの無ちらつき認定ではない。追加一画像の生存期間を明記し、実GPU／burst全画像到達／peak memoryと全UX gateを継続する。
+
 2026-09-12 I06/I07 ready-before-draw checkpoint: 原寸結果がworker側で完成してもImagesReady未処理のRedrawで空表示になる経路を再現。初回layout passで完了済み結果だけを取り込み、previewの有無どちらでも原寸meshを同frameへ出す。context未準備時の保持・後着通知でtexture再生成しない回帰も追加。4096×2304 JPEG100枚のRelease CPU計測では即時／33ms間隔ともblank_targets=100、preview_targets=96／1、ready中央値16.966／7.676ms。全原寸を訪問したがseamless gateは未達。event完了とdraw双方がtexture準備し得るため計測labelも区別する。復号待ちの表示handoff・実GPU表示と全UX gateを保持する。
 
 2026-09-12 G01/V05 video-wheel checkpoint: 動画zoomを共通raw event parserへ移し、非active MouseWheelと同frame複数pointer基点を扱う。Ctrl／Alt除外はevent単位、timeline／overlay・drag保護は維持。生成FFV1／SAR素材の3倍率GPU描画で、active／inactive、末尾Ctrl解除、遅延残量なし、focus loss／再開、timelineを閉じた際の抑止を回帰確認。parserで修飾key競合・明示Zoomのfocus条件も確認。OS実入力・全hardware経路と全UX gateを保持する。

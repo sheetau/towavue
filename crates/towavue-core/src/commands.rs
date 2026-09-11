@@ -404,6 +404,7 @@ impl FromStr for KeyStroke {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CommandContext {
+    pub image_transition: bool,
     pub timeline_open: bool,
     pub has_time_selection: bool,
     pub media_kind: Option<MediaKind>,
@@ -423,6 +424,45 @@ pub struct CommandDefinition {
 
 impl CommandDefinition {
     pub fn is_enabled(self, context: CommandContext) -> bool {
+        if context.image_transition
+            && matches!(
+                self.id,
+                CommandId::Undo
+                    | CommandId::Redo
+                    | CommandId::ApplyCrop
+                    | CommandId::RotateClockwise
+                    | CommandId::RotateCounterclockwise
+                    | CommandId::FlipHorizontal
+                    | CommandId::FlipVertical
+                    | CommandId::ResizeImage
+                    | CommandId::FreeRotateImage
+                    | CommandId::Save
+                    | CommandId::ExportAs
+                    | CommandId::MetadataExportOptions
+                    | CommandId::CopyImage
+                    | CommandId::CopyFilePath
+                    | CommandId::RevealFile
+                    | CommandId::ZoomIn
+                    | CommandId::ZoomOut
+                    | CommandId::ActualSize
+                    | CommandId::FitToWindow
+                    | CommandId::CoverWindow
+                    | CommandId::ZoomSelection
+                    | CommandId::SelectAll
+                    | CommandId::ClearSelection
+                    | CommandId::SelectAspectSquare
+                    | CommandId::SelectAspectFourThree
+                    | CommandId::SelectAspectThreeFour
+                    | CommandId::SelectAspectThreeTwo
+                    | CommandId::SelectAspectTwoThree
+                    | CommandId::SelectAspectSixteenNine
+                    | CommandId::SelectAspectNineSixteen
+                    | CommandId::ToggleReadingMode
+                    | CommandId::ToggleImageInterpolation
+            )
+        {
+            return false;
+        }
         let image_reading = context.media_kind == Some(MediaKind::Image) && context.reading_mode;
         (!self.requires_reading_mode || context.reading_mode)
             && (context.media_kind != Some(MediaKind::Video)

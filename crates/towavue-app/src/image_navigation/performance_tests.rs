@@ -284,7 +284,13 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
         let preview = preview.is_some_and(|preview| output.shapes.iter().any(|shape| {
             matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == preview.texture.id())
         }));
-        (full, preview)
+        let held = app.image_handoff.as_ref().is_some_and(|held| {
+            output.shapes.iter().any(|shape| {
+                matches!(&shape.shape,
+                egui::Shape::Mesh(mesh) if mesh.texture_id == held.image.texture.id())
+            })
+        });
+        (full, preview, held)
     };
     let receive = |app: &mut Application<_>, timeout| {
         let mut prepare = Duration::ZERO;
@@ -320,20 +326,23 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
         let mut dispatch = Vec::new();
         let mut blank_targets = 0;
         let mut preview_targets = 0;
+        let mut handoff_targets = 0;
         for index in 1..=100 {
             let start = Instant::now();
             app.dispatch(CommandId::NextSameKind);
             dispatch.push(start.elapsed());
             let mut blank = false;
             let mut preview = false;
+            let mut handoff = false;
             let mut preparation = Duration::ZERO;
             let mut drawing = Duration::ZERO;
             loop {
                 let draw_started = Instant::now();
-                let (full, low_resolution) = draw(&mut app);
+                let (full, low_resolution, held) = draw(&mut app);
                 drawing += draw_started.elapsed();
-                blank |= !full && !low_resolution;
+                blank |= !full && !low_resolution && !held;
                 preview |= low_resolution;
+                handoff |= held;
                 if full {
                     break;
                 }
@@ -348,6 +357,7 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
             draw_time.push(drawing);
             blank_targets += usize::from(blank);
             preview_targets += usize::from(preview);
+            handoff_targets += usize::from(handoff);
             assert!(!app.image_loading && app.image_error.is_none());
             assert_eq!(app.path.as_ref(), Some(&paths[index % 100]));
             assert_eq!(
@@ -364,11 +374,12 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
             values[values.len() / 2].as_secs_f64() * 1000.0
         };
         eprintln!(
-            "NAV100 cadence_ms={} files_mib={:.1} full=100 blank_targets={} preview_targets={} ready_median_ms={:.3} ready_p95_ms={:.3} event_completion_median_ms={:.3} draw_total_median_ms={:.3} dispatch_median_ms={:.3}",
+            "NAV100 cadence_ms={} files_mib={:.1} full=100 blank_targets={} preview_targets={} handoff_targets={} ready_median_ms={:.3} ready_p95_ms={:.3} event_completion_median_ms={:.3} draw_total_median_ms={:.3} dispatch_median_ms={:.3}",
             cadence.as_millis(),
             bytes as f64 / 1048576.0,
             blank_targets,
             preview_targets,
+            handoff_targets,
             median(&ready),
             percentile_95(&ready).as_secs_f64() * 1000.0,
             median(&prepare),

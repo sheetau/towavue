@@ -17,6 +17,7 @@ mod frame_step;
 mod grid;
 mod hold_speed;
 mod hover_help;
+mod image_handoff;
 mod image_navigation;
 mod image_scroll;
 #[cfg(test)]
@@ -783,6 +784,7 @@ struct Application<N> {
     image: Option<ImagePresentation>,
     image_texture_cache: ImageTextureCache,
     image_loader: ImageLoader,
+    image_handoff: Option<image_handoff::ImageHandoff>,
     image_preview_worker: LatestTask,
     image_preview_generation: u64,
     pending_image_previews: BTreeSet<PathBuf>,
@@ -1000,6 +1002,7 @@ where
             pending_image_previews: BTreeSet::new(),
             image_previews: BTreeMap::new(),
             image_loader,
+            image_handoff: None,
             image_generation: 0,
             image_request_offset: 0,
             image_loading: false,
@@ -1258,6 +1261,7 @@ where
     }
 
     fn take_image_tab_state(&mut self) -> RetainedImageTab {
+        self.image_handoff = None;
         self.cancel_view_drag();
         RetainedImageTab {
             path: self.path.clone().expect("displayed image path"),
@@ -1452,6 +1456,7 @@ where
     }
 
     fn load_path_with_transfer(&mut self, path: PathBuf, kind: MediaKind, transferred: bool) {
+        self.image_handoff = None;
         if let Some(id) = self.displayed_tab
             && self.tabs.active().is_some_and(|tab| tab.id == id)
             && let Some(context) = &self.ui_context
@@ -1988,6 +1993,7 @@ where
         }
         let mut images = result.images.into_iter();
         if result.first_index == 0 {
+            self.image_handoff = None;
             self.reset_image_edits();
             let (path, decoded) = images.next().expect("nonempty first chunk");
             match decoded
@@ -2907,6 +2913,10 @@ where
     }
 
     fn draw_image(&mut self, ui: &mut egui::Ui) {
+        if let Some(held) = &self.image_handoff {
+            held.draw(ui);
+            return;
+        }
         self.cancel_stale_rotation_drag();
         self.update_image_sampling();
         if self.image_edit_pending {
@@ -4468,7 +4478,7 @@ where
                         }
                     } else if self.media_kind == Some(MediaKind::Image) {
                         let label = self.command_hint(CommandId::ToggleReadingMode, "Reading mode");
-                        let enabled = self.reading_mode || !self.command_context().has_unsaved_edits;
+                        let enabled = self.image_handoff.is_none() && (self.reading_mode || !self.command_context().has_unsaved_edits);
                         let response = chrome::reading_button(ui, enabled, self.reading_mode);
                         response.widget_info(|| egui::WidgetInfo::labeled(
                             egui::WidgetType::Button, response.enabled(), &label));
@@ -4499,7 +4509,7 @@ where
                     if (self.media_kind == Some(MediaKind::Image) && !self.reading_mode)
                         || self.media_kind == Some(MediaKind::Video)
                     {
-                        let zoom = match self.image_view.zoom {
+                        let zoom = match self.image_handoff.as_ref().map_or(self.image_view.zoom, |held| held.view.zoom) {
                             ZoomMode::Fit => "Fit".into(),
                             ZoomMode::Cover => "Cover".into(),
                             ZoomMode::Actual => "100%".into(),
@@ -4509,7 +4519,7 @@ where
                         };
                         details.push(zoom);
                     }
-                    if let Some(image) = &self.image {
+                    if let Some(image) = self.image_handoff.as_ref().map(|held| &held.image).or(self.image.as_ref()) {
                         let (width, height) = image.dimensions();
                         details.push(format!("{} {width}×{height} · {} frame(s) · {}", image.decoded.format, image.decoded.frames.len(), if self.nearest_images { "Nearest" } else { "Smooth" }));
                     } else if self.session.is_some() {
@@ -4519,7 +4529,7 @@ where
                             details.push("Trim (T)".into());
                         }
                     }
-                    if let Some(path) = &self.path {
+                    if let Some(path) = self.displayed_image_path() {
                         if let Some(snapshot) = &self.folder_snapshot
                             && let Some(index) = snapshot.item_index(path)
                         {
@@ -4528,7 +4538,7 @@ where
                                 details.push("Name fallback".into());
                             }
                         }
-                        if let Some(bytes) = self.status_file_size.bytes(self.status_file_source()) {
+                        if let Some(bytes) = self.image_handoff.as_ref().map_or_else(|| self.status_file_size.bytes(self.status_file_source()), |held| held.bytes) {
                             details.push(format_size(bytes));
                         }
                     }
@@ -4562,7 +4572,7 @@ where
                                     (message.clone(), chrome::FOREGROUND, message)
                                 } else if let Some(message) = self.status_notice() {
                                     (message.clone(), chrome::FOREGROUND, message)
-                                } else if let Some(path) = &self.path {
+                                } else if let Some(path) = self.displayed_image_path() {
                                     let parent = path
                                         .parent()
                                         .and_then(Path::file_name)
@@ -5622,6 +5632,9 @@ where
     }
 
     fn image_copy_request(&self) -> Option<towavue_runtime_windows::ImageCopyRequest> {
+        if self.image_handoff.is_some() {
+            return None;
+        }
         if self.image_edit_pending || self.image_error.is_some() {
             return None;
         }
@@ -5855,6 +5868,9 @@ where
     }
 
     fn push_edit(&mut self, operation: EditOperation) {
+        if self.image_handoff.is_some() {
+            return;
+        }
         self.cancel_hold_speed();
         self.cancel_frame_steps();
         if matches!(operation, EditOperation::Timeline(_)) && !self.prepare_timeline_edit(operation)
@@ -5966,6 +5982,9 @@ where
     }
 
     fn undo_edit(&mut self, redo: bool) {
+        if self.image_handoff.is_some() {
+            return;
+        }
         self.cancel_hold_speed();
         self.cancel_frame_steps();
         let Some(id) = self.tabs.active().map(|tab| tab.id) else {
@@ -6160,6 +6179,9 @@ where
         continuation: Option<GuardedAction>,
         output: ExportOutput,
     ) -> bool {
+        if self.image_handoff.is_some() {
+            return false;
+        }
         if self.active_export.is_some() || self.pending_dialog.is_some() {
             self.set_status(
                 "An export is already running. Wait for it or choose Cancel export.".into(),
@@ -6702,6 +6724,7 @@ where
             self.image_error = None;
             self.image = None;
             self.reading_pages.clear();
+            self.image_handoff = None;
             self.clear_image_previews();
             self.path = None;
             self.refresh_status_file_size();
@@ -6940,6 +6963,7 @@ where
         let Some(kind) = MediaKind::from_path(&path) else {
             return;
         };
+        let handoff = self.take_navigation_handoff(kind);
         if let Some(tab) = self.tabs.active_mut() {
             let id = tab.id;
             tab.target.set_current_path(path.clone(), kind);
@@ -6949,6 +6973,9 @@ where
             self.metadata_export_settings.remove(&id);
         }
         self.load_path(path, kind);
+        if self.image_loading && self.image.is_none() {
+            self.image_handoff = handoff;
+        }
     }
 
     fn toggle_pause(&mut self) {
@@ -7263,11 +7290,16 @@ where
             egui::TextureId::default(),
             egui::epaint::ImageDelta::full(context.fonts(|fonts| fonts.image()), font_options),
         )];
-        for image in self.image.iter().chain(
-            self.reading_pages
-                .iter()
-                .filter_map(|page| page.as_ref().ok()),
-        ) {
+        for image in self
+            .image
+            .iter()
+            .chain(self.image_handoff.iter().map(|held| &held.image))
+            .chain(
+                self.reading_pages
+                    .iter()
+                    .filter_map(|page| page.as_ref().ok()),
+            )
+        {
             textures.push((
                 image.texture.id(),
                 egui::epaint::ImageDelta::full(
@@ -7596,6 +7628,9 @@ where
                     ));
                 }
             }
+            if self.image_handoff.is_some() {
+                return None;
+            }
             if self.image_loading {
                 return Some("Loading images…".into());
             }
@@ -7698,6 +7733,7 @@ where
 
     fn command_context(&self) -> CommandContext {
         CommandContext {
+            image_transition: self.image_handoff.is_some(),
             timeline_open: self.timeline_is_visible(),
             has_time_selection: self.time_selection.is_some(),
             media_kind: self.media_kind,

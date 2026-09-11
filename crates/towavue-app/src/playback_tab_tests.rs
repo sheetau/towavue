@@ -200,6 +200,51 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
                 let id = open_muted(&mut app, self.root.join("tone.wav"), MediaKind::Audio);
                 wait(&mut app, &events, |app| app.media_duration.is_some());
                 tab_focus::tests::hardware_focus(&mut app, "Repeat off", true);
+                let instance = app.media_generation;
+                let generation = app.session.as_ref().expect("audio session").generation();
+                let focus = app
+                    .ui_context
+                    .as_ref()
+                    .expect("UI")
+                    .memory(egui::Memory::focused);
+                let selection = towavue_core::TimeRange::new(
+                    MediaTime::ZERO,
+                    media_time(Duration::from_secs(1)),
+                );
+                app.time_selection = selection;
+                app.image_view.zoom = ZoomMode::Custom(2.0);
+                for paused in [false, true, false] {
+                    if (app.state == PlaybackState::Paused) != paused {
+                        app.toggle_pause();
+                    }
+                    let state = app.state;
+                    let position = app.current_position();
+                    app.open_external(self.root.join("tone.wav"), false);
+                    assert_eq!(app.tabs.active().expect("same audio tab").id, id);
+                    assert_eq!(
+                        app.media_generation, instance,
+                        "external current audio must not reload"
+                    );
+                    assert_eq!(
+                        app.session.as_ref().expect("same session").generation(),
+                        generation
+                    );
+                    assert_eq!(app.state, state);
+                    if paused {
+                        assert_eq!(app.current_position(), position);
+                    } else {
+                        assert!(app.current_position() >= position);
+                    }
+                    assert_eq!(app.time_selection, selection);
+                    assert_eq!(app.image_view.zoom, ZoomMode::Custom(2.0));
+                    assert_eq!(
+                        app.ui_context
+                            .as_ref()
+                            .expect("UI")
+                            .memory(egui::Memory::focused),
+                        focus
+                    );
+                }
                 id
             });
             app.open_external(self.root.join("image.bmp"), true);

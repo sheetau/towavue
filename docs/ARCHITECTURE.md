@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U07: 現在の音声sourceの外部再Open（2026-09-11）
+
+外部Openが既存のcleanな音声playlist tabを選び、そのtabをすでに表示中でpathも一致する場合は、正常／読込中／終端の状態を保持して再loadしない。再生session・clock・位置・選択・view・focusと取得中workerをそのまま使う。Faultedの場合は同じpathでも従来どおり再試行する。背景tabは既存のactivate／保持state復帰経路を使い、別曲への置換では従来の編集／export設定初期化を維持する。
+
+画像・動画の外部Open、明示的な新規tab、dirty／export中のplaylistを別tabで保護する契約は変更しない。source内容の外部変更を監視して自動再loadする機能ではない。
+
 ## V03/A02: 選択再生のtempo入力と出力終端（2026-09-11）
 
 選択再生は同じ編集位置からの通常再生のPCMを選択終端で止める操作とする。選択終端をatempo入力のEOFへ置き換えるとwindow処理の結果が変わるため、最後の編集区間内では選択終端後のsourceも必要に応じて入力する。gain／stretch／Deleteで区切られた実際の区間境界は越えて混ぜず、従来の区間ごとのtempo変換を保つ。出力は整数sample境界の必要数のみで、選択外のPCMをWASAPIへ送らない。

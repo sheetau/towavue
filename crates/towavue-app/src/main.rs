@@ -1165,6 +1165,13 @@ where
         } else {
             self.tabs.open_external(path.clone(), kind)
         };
+        if kind == MediaKind::Audio
+            && self.displayed_tab == Some(id)
+            && self.path.as_ref() == Some(&path)
+            && self.state != PlaybackState::Faulted
+        {
+            return;
+        }
         if replacing_playlist_source {
             self.navigate_to_unchecked(path);
         } else {
@@ -14909,6 +14916,56 @@ mod tests {
         app.open_external(second, true);
         assert_ne!(app.tabs.active().expect("forced new tab").id, original);
         assert_eq!(app.edits[&original], preserved);
+    }
+
+    #[test]
+    fn reopening_current_audio_preserves_live_state_but_failed_open_can_retry() {
+        let Some(root) = isolated_test_root(
+            "tests::reopening_current_audio_preserves_live_state_but_failed_open_can_retry",
+        ) else {
+            return;
+        };
+        let path = root.join("audio.wav");
+        std::fs::write(&path, []).expect("headless path");
+        let mut app = Application::new(None, |_| {}).expect("headless app");
+        app.open_external(path.clone(), false);
+        let id = app.tabs.active().expect("audio tab").id;
+        for state in [
+            PlaybackState::Loading,
+            PlaybackState::Playing,
+            PlaybackState::Paused,
+            PlaybackState::Ended,
+        ] {
+            // Model live orchestration state here; the endpoint trial covers a real session.
+            app.state = state;
+            app.clock = Some(PlaybackClock::paused(
+                media_time(Duration::from_millis(750)),
+                1.0,
+            ));
+            app.time_selection =
+                towavue_core::TimeRange::new(MediaTime::ZERO, media_time(Duration::from_secs(1)));
+            app.playback_selection = app.time_selection;
+            app.filmstrip_open = true;
+            let generation = app.media_generation;
+            app.open_external(path.clone(), false);
+            assert_eq!(app.tabs.active().expect("same tab").id, id);
+            assert_eq!(
+                app.media_generation, generation,
+                "same source must not reload: {state:?}"
+            );
+            assert_eq!(app.state, state);
+            assert_eq!(
+                app.clock.as_ref().expect("retained clock").position(),
+                media_time(Duration::from_millis(750))
+            );
+            assert!(app.time_selection.is_some());
+            assert_eq!(app.playback_selection, app.time_selection);
+            assert!(app.filmstrip_open);
+        }
+        app.state = PlaybackState::Faulted;
+        let generation = app.media_generation;
+        app.open_external(path, false);
+        assert_ne!(app.media_generation, generation, "failed source may retry");
     }
 
     #[test]

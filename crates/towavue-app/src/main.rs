@@ -15,6 +15,7 @@ mod frame_step;
 mod grid;
 mod hold_speed;
 mod image_navigation;
+mod image_scroll;
 mod logo_menu;
 mod menu;
 mod metadata_export;
@@ -2887,6 +2888,11 @@ where
                     (transform.size.0 as u32, transform.size.1 as u32),
                     (viewport.size() * pixels_per_point).into(),
                 ) / pixels_per_point;
+                image_scroll::clamp(
+                    &mut self.image_view,
+                    egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
+                    viewport.size(),
+                );
                 let rect = egui::Rect::from_center_size(
                     viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1),
                     egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
@@ -2911,11 +2917,21 @@ where
         let physical_viewport = viewport.size() * pixels_per_point;
         let mut scale =
             self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
+        image_scroll::clamp(
+            &mut self.image_view,
+            egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
+            viewport.size(),
+        );
         let center = viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
-        let response = ui.interact(
+        let mut response = ui.interact(
             viewport,
             ui.id().with("image-surface"),
             egui::Sense::click_and_drag(),
+        );
+        response.interact_rect = image_scroll::surface(
+            viewport,
+            egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
+            ui.spacing().scroll.bar_width,
         );
 
         let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
@@ -2950,11 +2966,37 @@ where
                 let correction = from_center * (1.0 - scale / old_scale);
                 self.image_view.pan.0 += correction.x;
                 self.image_view.pan.1 += correction.y;
+                image_scroll::clamp(
+                    &mut self.image_view,
+                    egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
+                    viewport.size(),
+                );
             }
         }
-        self.update_pan(&response, pointer);
-
         let displayed = egui::vec2(transform.size.0 * scale, transform.size.1 * scale);
+        response.interact_rect =
+            image_scroll::surface(viewport, displayed, ui.spacing().scroll.bar_width);
+        if displayed.x > viewport.width() || displayed.y > viewport.height() {
+            self.update_pan(&response, pointer);
+            if matches!(self.view_drag, Some(ViewDrag::Pan { .. })) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
+        } else if matches!(self.view_drag, Some(ViewDrag::Pan { .. })) {
+            self.cancel_view_drag();
+        }
+        let enabled = self.view_drag_allowed(ui.ctx()) && self.view_drag.is_none();
+        if enabled {
+            let mut wheel_response = response.clone();
+            wheel_response.interact_rect = viewport;
+            let delta = wheel_input::image_scroll_delta(ui.ctx(), &wheel_response);
+            self.image_view.pan.0 += delta.x;
+            self.image_view.pan.1 += delta.y;
+        }
+        image_scroll::clamp(&mut self.image_view, displayed, viewport.size());
+        let painter = ui.painter_at(viewport);
+        // Compute bar input first, but keep the updated image behind the bars.
+        let image_shape = painter.add(egui::Shape::Noop);
+        image_scroll::bars(ui, viewport, displayed, &mut self.image_view, enabled);
         let center = viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
         let image_rect = egui::Rect::from_center_size(center, displayed);
 
@@ -2962,10 +3004,10 @@ where
             self.update_selection(&response, image_rect, image_size, shift, pointer);
         }
 
-        let painter = ui.painter_at(viewport);
-        painter.add(egui::Shape::mesh(transformed_image_mesh(
-            texture, image_rect, transform,
-        )));
+        painter.set(
+            image_shape,
+            egui::Shape::mesh(transformed_image_mesh(texture, image_rect, transform)),
+        );
         if !self.image_view.crop_preview
             && let Some(selection) = self.image_view.selection
         {
@@ -2982,6 +3024,7 @@ where
                 if offset != egui::Vec2::ZERO {
                     self.image_view.pan.0 += offset.x;
                     self.image_view.pan.1 += offset.y;
+                    image_scroll::clamp(&mut self.image_view, displayed, viewport.size());
                     self.request_redraw();
                 }
             }
@@ -9688,8 +9731,8 @@ mod tests {
         visible(&frame(&mut app, vec![]), 0);
         assert_eq!(
             app.image_view.pan,
-            (330.0, 0.0),
-            "move only enough to reveal the focused handle"
+            (320.0, 0.0),
+            "reveal the focused edge without panning beyond the image"
         );
         for index in [1, 2, 3, 0] {
             frame(
@@ -9718,8 +9761,8 @@ mod tests {
         }
         assert_eq!(
             app.image_view.pan,
-            (-800.0, 600.0),
-            "manual pan is retained"
+            (-320.0, 143.0),
+            "manual pan is clamped to the image bounds"
         );
         frame(
             &mut app,
@@ -11753,7 +11796,7 @@ mod tests {
         }
         app.image_view.crop_preview = false;
         app.image_view.selection = None;
-        app.image_view.actual_size();
+        app.image_view.zoom = ZoomMode::Custom(4.0);
         render(&mut app, 2.0);
         let mut input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -11790,10 +11833,10 @@ mod tests {
                 _ => None,
             })
             .expect("image mesh in wheel frame");
-        assert!((bounds.size() * 2.0 - egui::vec2(400.0, 200.0) * factor).length() < 0.01);
+        assert!((bounds.size() * 2.0 - egui::vec2(400.0, 200.0) * 4.0 * factor).length() < 0.01);
         let anchored = bounds.center() + egui::vec2(30.0, 10.0) * factor;
         assert!((anchored - egui::pos2(230.0, 160.0)).length() < 0.001);
-        assert!((render(&mut app, 2.0) - egui::vec2(400.0, 200.0) * factor).length() < 0.01);
+        assert!((render(&mut app, 2.0) - egui::vec2(400.0, 200.0) * 4.0 * factor).length() < 0.01);
 
         let wheel = |delta, modifiers| egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
@@ -11883,6 +11926,11 @@ mod tests {
                         point + (expected.center() - point) * factor,
                         expected.size() * factor,
                     );
+                    let limit =
+                        (expected.size() - egui::vec2(400.0, 300.0)).max(egui::Vec2::ZERO) * 0.5;
+                    let center = egui::pos2(200.0, 150.0);
+                    let offset = (expected.center() - center).clamp(-limit, limit);
+                    expected = egui::Rect::from_center_size(center + offset, expected.size());
                 }
                 events.push(egui::Event::PointerMoved(egui::pos2(-10.0, -10.0)));
                 let output = wheel_frame(&mut app, 1.0 / 120.0, events, false);

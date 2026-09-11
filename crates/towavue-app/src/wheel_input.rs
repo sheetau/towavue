@@ -112,6 +112,58 @@ pub fn zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
         .collect()
 }
 
+pub fn image_scroll_delta(context: &Context, target: &Response) -> egui::Vec2 {
+    let options = context.options(|options| options.input_options);
+    let page_height = context.input(|input| input.viewport_rect().height());
+    if !target.enabled()
+        || context.input(|input| {
+            !input.focused
+                || input.pointer.any_down()
+                || input.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        Event::WindowFocused(false) | Event::PointerButton { pressed: true, .. }
+                    )
+                })
+        })
+    {
+        return egui::Vec2::ZERO;
+    }
+    positioned_events(context)
+        .into_iter()
+        .filter_map(|(position, event)| {
+            let Event::MouseWheel {
+                unit,
+                mut delta,
+                modifiers,
+                phase: egui::TouchPhase::Move,
+            } = event
+            else {
+                return None;
+            };
+            if modifiers.ctrl
+                || modifiers.alt
+                || modifiers.mac_cmd
+                || !position.is_some_and(|pos| {
+                    target.interact_rect.contains(pos)
+                        && context.layer_id_at(pos) == Some(target.layer_id)
+                })
+            {
+                return None;
+            }
+            delta *= match unit {
+                egui::MouseWheelUnit::Point => 1.0,
+                egui::MouseWheelUnit::Line => options.line_scroll_speed,
+                egui::MouseWheelUnit::Page => page_height,
+            };
+            if modifiers.shift {
+                delta = egui::vec2(delta.x + delta.y, 0.0);
+            }
+            Some(delta)
+        })
+        .fold(egui::Vec2::ZERO, |total, delta| total + delta)
+}
+
 fn positioned_events(context: &Context) -> Vec<(Option<Pos2>, Event)> {
     begin_frame(context);
     let mut position = context.data(|data| {

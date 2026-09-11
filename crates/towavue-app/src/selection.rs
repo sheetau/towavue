@@ -147,8 +147,13 @@ pub fn controls(
         .add_enabled_ui(enabled, |ui| {
             (0..4)
                 .map(|index| {
+                    let mut control_rect =
+                        Rect::from_center_size(centers[index], egui::vec2(14.0, 14.0));
+                    if kind == MediaKind::Image && control_rect.intersects(ui.clip_rect()) {
+                        control_rect = control_rect.intersect(ui.clip_rect());
+                    }
                     let response = ui.interact(
-                        Rect::from_center_size(centers[index], egui::vec2(14.0, 14.0)),
+                        control_rect,
                         identity.with(index),
                         egui::Sense::focusable_noninteractive(),
                     );

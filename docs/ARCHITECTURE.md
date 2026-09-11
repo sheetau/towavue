@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## I08: 画像の有界panとscrollbar（2026-09-12）
+
+follow-up追記を採用し、通常画像の表示panは各軸で±max(表示寸法−viewport寸法, 0)／2 logical pxへ制限する。収まる軸は中央固定とし、拡大・縮小、編集後の寸法変更、window resize、保持state復帰と元寸法付きpreviewにも適用する。Ctrl＋wheelのpointer基点はこの範囲内だけ維持し、余白を作ってまで基点へ追従しない。右dragは少なくとも一軸にはみ出しがある時だけ開始し、保持中はGrabbing cursor、取消時は既存の開始位置復帰を使う。動画とreadingの表示・移動規則は変更しない。
+
+縦wheelは縦pan、Shift＋wheelは横panへ入力回で反映する。Point／Line／Pageの既存換算、event時点の座標／layerと修飾keyを使い、Ctrl／Alt／別gesture・modal／overlay中はscrollしない。新たな平滑化残量やtab別cacheは持たない。表示panを唯一の位置として、既存egui ScrollAreaの両軸barへoverflow／2−panを渡し、bar入力後の位置を同じ描画回へ戻す。barはoverflow軸だけのfloating表示でviewportを縮めず、画像meshより上へ描く。bar上のwheelは受け付け、selection／右dragの開始領域からbarの最大幅を除く。画像textureと編集履歴には触れない。
+
+選択辺focusによる自動revealも画像端で止める。端にある画像用の不可視14px操作領域はviewportに交差する部分だけを公開し、操作領域全体を見せるため画像外の余白を作らない。4辺のID・値・focus／keyboard／UIA編集は維持し、動画の操作領域は変更しない。実windowの全入力・bar外観、全DPI／資源とscrollbarの完全なUIA操作は別の検証残件とする。
+
 ## I07: 画像wheel zoomの即時反映（2026-09-12）
 
 画像のCtrl＋wheelはeguiの平滑化済みzoom_deltaではなく、受信した各MouseWheelの修飾key・単位・量から倍率を計算する。既存InputOptionsのzoom modifier／line speed／zoom speed、Point・Line・Pageの換算と指数倍率を維持し、Moveだけをその描画回で全量反映する。Start／End／Cancelは倍率を変えず、Ctrlなしの後続eventや空frameへ残量を持ち越さない。通常scrollと動画zoomの平滑化には変更を加えない。

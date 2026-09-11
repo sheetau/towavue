@@ -44,7 +44,7 @@ pub const BACKGROUND: Color32 = Color32::BLACK;
 pub const MUTED: Color32 = Color32::from_gray(128);
 pub const FOREGROUND: Color32 = Color32::WHITE;
 pub const BORDER: Color32 = Color32::from_gray(24);
-pub const HOVER: Color32 = Color32::from_gray(76);
+pub const HOVER: Color32 = Color32::from_gray(44);
 pub const TITLE_HEIGHT: f32 = 32.0;
 pub const STATUS_HEIGHT: f32 = 30.0;
 pub const TAB_HEIGHT: f32 = 26.0;
@@ -437,6 +437,16 @@ mod tests {
     fn overlay_and_input_surfaces_use_the_shared_grayscale_palette() {
         let mut themed = egui::Style::default();
         style(&mut themed);
+        assert_eq!(HOVER, Color32::from_rgb(44, 44, 44));
+        for visuals in [
+            themed.visuals.widgets.hovered,
+            themed.visuals.widgets.active,
+            themed.visuals.widgets.open,
+        ] {
+            assert_eq!(visuals.bg_fill, HOVER);
+            assert_eq!(visuals.weak_bg_fill, HOVER);
+            assert_eq!(visuals.fg_stroke.color, FOREGROUND);
+        }
         assert_eq!(themed.visuals.window_fill(), BACKGROUND);
         assert_eq!(themed.visuals.window_stroke().color, BORDER);
         assert_eq!(themed.visuals.extreme_bg_color, BACKGROUND);

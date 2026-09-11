@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U04/G01: 9月12日追記の配色と非アクティブwheel（2026-09-12）
+
+共通HOVERを#4C4C4Cから#2C2C2Cへ置換し、既存のhover／active／open widget・tab／seekbarへ同じ定数を適用する。他の黒／白／#808080／#181818は維持し、DWM所有captionの描画は独自化しない。以降の配色はこの指定を優先する。
+
+OSが対象windowへ届けたwheelは、音声リスト・画像scroll・既存の音量操作領域でwindowのfocused状態だけを理由に捨てない。event時点のpointer位置・layer／enabled・modal／popup・button競合の既存判定を維持し、windowのactive化やkeyboard focus移動を要求しない。WindowFocused(false)の遷移frameでは従来どおり操作／scroll残量を取消し、その後の有効なposition付きwheelを受け付ける。OSの非アクティブscroll設定は変更しない。画像Ctrl＋wheel zoomのfocus条件、音声の音量領域拡張やHUDはこの変更に含めず、追記の残件として扱う。
+
 ## I03: 不透明行のブロック判定（2026-09-12）
 
 appの表示用ColorImage変換は、行内の最大32画素ごとにnative-endian u32のANDを取り、同じendianのalpha maskで全alphaが255か判定する。非不透明blockで打ち切り、画像全体の事前走査はしない。不透明行のpremultiplied構築と混在行のegui標準unmultiplied変換は維持し、透過色の丸めを独自実装しない。unsafe・追加buffer・worker・cache変更はない。全alpha値とblock境界前後の混在画素で標準処理との完全一致を回帰確認する。これはCPU準備の最適化であり、GPU転送や可視切替の完了を意味しない。

@@ -11,6 +11,29 @@
 
 ## 作業台帳
 
+### 2026-09-12追記の差分台帳
+
+追記で指摘された項目は、以前の主経路実装や自動testの成功で完了にしない。以下もgoalの完了条件へ含める。思案中と明記されたファイル検索paletteは引き続き実装対象外。
+
+| 対象 | 採用する追記・現在の状態 |
+| --- | --- |
+| U01 native caption | button下の1px隙間・左右padding・非focus色・fullscreen上端の欠けを再現し是正する。未完 |
+| U04 配色／tab配置 | hover背景を#2C2C2Cへ変更済み。共通widgetのhover／active／open背景と文字を回帰確認。tab上下3px相当の余白・native内側borderとの整合は未完 |
+| U07 dirty表示／履歴 | close iconを未保存indicatorへ切替。選択だけや元と同じ結果をdirtyにしない契約を全操作で再監査する。未完 |
+| U04 status／focus | loading等の画面内messageをstatus左へ集約し、重複する寸法／形式を除きframe数は右へ。reading drag値の表示、Escape／tab切替時の赤いoutline除去。未完 |
+| M01/G01 menu | button下の固定位置、直接submenu時は親を出さず同じ位置、Image jumpをViewへ、logoのhoverは線色のみ・左右余白統一・Edit方向45度。未完 |
+| U03/U04 font／resize | seek preview等のfont適用漏れ、右端resize時の左寄せtext／icon振動を調査。性能を優先し修正可能性を判断する。未完 |
+| G01/I08 非active wheel | 音声list・画像縦／Shift横scroll・既存音量領域のfocus必須条件を除去。非activeで距離／軸／非選曲／focus不変、volume、取消／所有権を回帰確認。OS実入力・Ctrl＋wheel等の他経路は未完 |
+| V03/A02 timeline外観／入力 | #181818の角丸背景、左右上の同幅余白、白50%volume線とRowResize、CTIを内部に収め白1px＋上のplayheadだけdrag可能、選択左右resize／cursor、白20% difference塗り＋左右白1px点線。未完 |
+| U09/U10 tooltip／preview | hover終了後に残るtooltip／tab preview不発を根本調査し、非active hoverと元要素への中央揃えも確認。未完 |
+| U04 popup shadow | 左右中央・濃さ・ぼかしを調整し、描画の粗さを負荷優先で評価。未完 |
+| U12 seek hover | 背景と白進捗の間にhover位置まで白25%相当の進捗を全幅で表示。未完 |
+| V04/A02 volume HUD | 変更時のみ少し残る縦barを左中央、余白に応じて上中央横barへ切替可能なら採用。status左の重複messageを除く。音声list外を音量操作対象へ拡張。未完 |
+| V02/I02 seek preview | 切替時に下端から昇る動画previewのglitchを解消し、画像も含めhover遅延なし・未生成でもtext表示。未完 |
+| A01 playlist | 再生中は白文字のみで背景はhoverだけ、右端に曲の長さを表示。未完 |
+
+画像の選択／pan／zoom追記はI07～I09の既存台帳、100枚原寸・小previewの速度はI03/U10の未達gateを引き継ぐ。今回の可視試験はWelcome画面まで取得したが、activation成功応答後もclick／Ctrl+Oの反映を観測できず、配色や非active実入力の成功証拠にはしない。
+
 2026-09-12 I03 color-preparation checkpoint: 不透明行の判定を最大32画素のAND＋alpha maskへ置換し、混在blockで打切り。透過色の変換はeguiのまま。全alpha値・13種類の幅・block境界前後の単独透過画素で完全一致を確認。100 JPEGの準備中央値は即時6.627／6.645→5.545／5.563ms、最短33msで7.207／7.139→6.280／6.016ms。切替中央値は即時16.746／16.726msでほぼ横ばい、最短33msで7.527／7.254ms（p95 8.419／8.339ms）。同じwarm CPU測定の局所改善であり、blankは両条件100件、previewは96／3・再測定96／5で残る。可視GPU・実入力burst・cold／全形式／資源と全台帳は継続する。
 
 2026-09-12 I03 overlap checkpoint: 移動先が先読みを引き継げるようになった後で、texture準備前への先読み開始を再評価。100 JPEGの即時切替中央値22.598／22.659→16.645／16.592ms、p95 23.432／23.451→17.660／17.739ms。最短33msは7.983／7.987→8.506／8.337msで改善なし（p95 9.272／10.146ms）。現在画像のtexture処理をcontext lockで止め、既存workerが隣画像の原寸とpreviewを準備できることを回帰化。旧開始順で失敗、新開始順で成功。予算・worker・対象順・readingを変えず、同一completion末尾で再submitしない。中間blankは両条件100件、previewは97／6・再測定96／5で残り、可視GPU／burst／cold／全形式／資源と全台帳は継続する。

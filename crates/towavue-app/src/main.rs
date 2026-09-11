@@ -3248,8 +3248,7 @@ where
             return;
         }
         if context.input(|input| {
-            !input.focused
-                || input.pointer.any_down()
+            input.pointer.any_down()
                 || !input.modifiers.is_none()
                 || input.events.iter().any(|event| {
                     matches!(
@@ -12870,6 +12869,22 @@ mod tests {
         }
         for kind in [MediaKind::Audio, MediaKind::Video] {
             app.media_kind = Some(kind);
+            let actions = frame(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(point),
+                    wheel(
+                        egui::MouseWheelUnit::Line,
+                        egui::vec2(0.0, -1.0),
+                        egui::Modifiers::NONE,
+                    ),
+                ],
+                false,
+                0.1,
+            );
+            assert!(
+                matches!(actions.as_slice(), [UiAction::Volume(id, volume)] if *id == tab && (*volume - 0.9).abs() < 0.0001)
+            );
             for (unit, delta, expected) in [
                 (egui::MouseWheelUnit::Line, 1.0, 1.1),
                 (egui::MouseWheelUnit::Page, -2.0, 0.8),
@@ -12948,6 +12963,9 @@ mod tests {
                 egui::vec2(0.0, 1.0),
                 modifiers,
             )];
+            if blocked == 6 {
+                events.insert(0, egui::Event::WindowFocused(false));
+            }
             if blocked == 9 {
                 events.insert(
                     0,

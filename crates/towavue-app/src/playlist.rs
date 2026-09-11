@@ -773,6 +773,50 @@ mod tests {
     }
 
     #[test]
+    fn inactive_playlist_accepts_positioned_wheel_without_selecting_or_focusing() {
+        let context = egui::Context::default();
+        let mut playlist = Playlist::default();
+        let snapshot = snapshot(100);
+        let mut time = 0.0;
+        for index in 0..65 {
+            time += 1.0 / 60.0;
+            let events = if index == 4 {
+                vec![
+                    Event::PointerMoved(egui::pos2(100.0, 80.0)),
+                    Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Line,
+                        delta: egui::vec2(0.0, -3.0),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]
+            } else {
+                vec![]
+            };
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 300.0))),
+                    time: Some(time),
+                    focused: false,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_max_height(200.0);
+                    assert!(
+                        playlist
+                            .show(ui, Some(&snapshot), Some(&snapshot.items[0].path), true)
+                            .is_none()
+                    );
+                },
+            );
+            assert!(context.memory(egui::Memory::focused).is_none());
+        }
+        let expected = context.options(|options| options.input_options.line_scroll_speed) * 3.0;
+        assert!((playlist.scroll_offset - expected).abs() < 0.01);
+    }
+
+    #[test]
     fn empty_playlist_has_no_rows_or_actions() {
         for snapshot in [None, Some(snapshot(0))] {
             let context = egui::Context::default();

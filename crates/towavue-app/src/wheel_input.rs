@@ -117,8 +117,7 @@ pub fn image_scroll_delta(context: &Context, target: &Response) -> egui::Vec2 {
     let page_height = context.input(|input| input.viewport_rect().height());
     if !target.enabled()
         || context.input(|input| {
-            !input.focused
-                || input.pointer.any_down()
+            input.pointer.any_down()
                 || input.events.iter().any(|event| {
                     matches!(
                         event,
@@ -205,8 +204,7 @@ impl Scroll {
             || !ui.is_enabled()
             || egui::Popup::is_any_open(context)
             || context.input(|input| {
-                !input.focused
-                    || input.pointer.any_down()
+                input.pointer.any_down()
                     || input.events.iter().any(|event| {
                         matches!(
                             event,
@@ -259,6 +257,80 @@ impl Scroll {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inactive_image_scroll_keeps_position_modifiers_and_cancellation_gates() {
+        for focused in [true, false] {
+            for (enabled, modifiers, inside, losing_focus, expected) in [
+                (
+                    true,
+                    egui::Modifiers::NONE,
+                    true,
+                    false,
+                    egui::vec2(0.0, -20.0),
+                ),
+                (
+                    true,
+                    egui::Modifiers::SHIFT,
+                    true,
+                    false,
+                    egui::vec2(-20.0, 0.0),
+                ),
+                (false, egui::Modifiers::NONE, true, false, egui::Vec2::ZERO),
+                (true, egui::Modifiers::CTRL, true, false, egui::Vec2::ZERO),
+                (true, egui::Modifiers::NONE, false, false, egui::Vec2::ZERO),
+                (true, egui::Modifiers::NONE, true, true, egui::Vec2::ZERO),
+            ] {
+                let context = Context::default();
+                let rect =
+                    egui::Rect::from_min_max(egui::pos2(20.0, 20.0), egui::pos2(200.0, 160.0));
+                for index in 0..3 {
+                    let mut events = vec![Event::PointerMoved(if inside {
+                        rect.center()
+                    } else {
+                        egui::pos2(350.0, 250.0)
+                    })];
+                    if index == 2 {
+                        if losing_focus {
+                            events.push(Event::WindowFocused(false));
+                        }
+                        events.push(Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(0.0, -20.0),
+                            modifiers,
+                            phase: egui::TouchPhase::Move,
+                        });
+                    }
+                    let _ = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                Pos2::ZERO,
+                                egui::vec2(400.0, 300.0),
+                            )),
+                            focused,
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            ui.add_enabled_ui(enabled, |ui| {
+                                let target = ui.allocate_rect(rect, egui::Sense::hover());
+                                let delta = image_scroll_delta(ui.ctx(), &target);
+                                assert_eq!(
+                                    delta,
+                                    if index == 2 {
+                                        expected
+                                    } else {
+                                        egui::Vec2::ZERO
+                                    }
+                                );
+                            });
+                        },
+                    );
+                    assert!(context.memory(egui::Memory::focused).is_none());
+                }
+            }
+        }
+    }
 
     #[test]
     fn immediate_zoom_preserves_units_event_positions_and_input_ownership() {

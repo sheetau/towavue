@@ -132,6 +132,16 @@ source durationからmax(20, ceil(seconds/5))個の区間を作り、その中�
 
 固定H.264素材のdebug検証で16コマ生成約1.119秒、4コマの終端sheet約0.327秒、memory clone取得約0.56～0.59msを観測した。これはUI表示遅延の保証ではない。実画素と単枚reference、density／端／UV、同textureで16位置を描画して追加uploadなし、世代／優先度／2枚LRU／texture上限を確認する。所有する可視960×576 windowと生成40秒MPEG-4素材では停止中hoverの非Seek、前半／後半thumbnail、クリックSeekとtab hoverを確認した。software decode条件の一例であり、長GOP／全codec／HDR／混在DPI／資源peak・本画面scrubは未認定・未完。
 
+## I03: 実行中の静止画先読みをforegroundへ引き継ぐ（2026-09-11）
+
+ImageLoaderの先読み一件に固有のlease・path・要求generation・実行状態・取消tokenを保持する。新要求の先頭pathが実行中先読みと一致すると、その仕事を新generationへ引き継ぐ。foreground workerは既存cache／小previewを確認後、該当原寸の完了だけをCondvarで待ち、元のArc<DecodedImage>をcacheから受け取る。UI thread・UI mailbox lockを保持して待たず、追加の原寸copy／decoder／workerやcache予算は作らない。未開始のqueued仕事は採用しない。
+
+別path・空要求・closeは取消または所有権の無効化で待機を解き、新要求を古い先読みの完了に従属させない。同pathの再要求でも最新generationだけへ公開する。lease終了は成功／失敗／非対応／source変更のどの経路でも通知し、古いleaseの終了で後続jobを消さない。原寸cache登録後は縮小thumbnail作成を待たずにforegroundを起こす。queued leaseの破棄とcache evictionをUI mailbox lock内で実行しない。
+
+先読みは従来どおり静止画のみ・256 MiB／8件、source stamp照合と取消を維持する。採用後もforegroundの残る512 MiB budgetへ照合し、入り切らない結果はTooLarge、先読み失敗／非対応は通常decodeへ戻す。readingの先頭以外のページの仕事を採用したという意味ではない。cold／OS read強制取消や全window間での原寸job共用は未実装。
+
+実PNGの読取途中で要求を切替え、全画素一致とforeground decode呼出0を回帰確認する。生成6000×4000 PNG、warm Release各7回、同じ100回目の読取／取消確認境界から再開する比較では、明示取消して再要求する基準の中央値118.4876ms／再decode1回に対し、引継ぎは48.1838ms／0回。計時は結果取得で終了し画素比較は含めない。同じ最終codeで強制再始動と採用を比較する制御試験であり、旧exe対比・可視UI end-to-endや任意の移動時刻の性能保証ではない。
+
 ## I03: 静止PNG／WebPのdecoder再利用（2026-09-11）
 
 foregroundとprefetchは、内容推定済みreaderをPNG／WebPの型付きdecoderへ移し、そのinstanceでanimation判定後に静止画も復号する。static_frameはreaderを再度decoder化せずImageDecoderを受け取る。非対応の別backendやPNG先行decodeは追加しない。静止画は従来のImageReader既定limitsを適用し、PNGはheader parseから同じ既定512 MiB上限を使う（APNGのheaderにも適用する）。原寸RGBA budget・EXIF／alpha／16bit→8bit変換・取消・animation first-frame通知を維持する。

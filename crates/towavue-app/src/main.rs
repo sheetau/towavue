@@ -3982,11 +3982,7 @@ where
                                         rect.min,
                                         rect.max - egui::vec2(chrome::TAB_CLOSE_WIDTH, 0.0),
                                     );
-                                    let label = format!(
-                                        "{}{}",
-                                        display_name(tab.target.current_path()),
-                                        if dirty { " *" } else { "" }
-                                    );
+                                    let label = display_name(tab.target.current_path());
                                     // Cached actions and keyboard focus must follow the tab, not its slot.
                                     let mut tab_ui = ui.new_child(
                                         egui::UiBuilder::new()
@@ -4036,12 +4032,7 @@ where
                                         ),
                                         rect.max,
                                     );
-                                    let close = tab_ui
-                                        .put(
-                                            close_rect,
-                                            egui::Button::new(chrome::Icon::Close.text())
-                                                .frame(false),
-                                        )
+                                    let close = chrome::tab_close(&mut tab_ui, close_rect, dirty)
                                         .on_hover_text("Close tab");
                                     if response.hovered() || close.hovered() {
                                         painter.set(
@@ -4068,9 +4059,11 @@ where
                                         )
                                     });
                                     tab_ui.ctx().accesskit_node_builder(close.id, |node| {
-                                        node.set_description(
-                                            tab.target.current_path().display().to_string(),
-                                        );
+                                        node.set_description(format!(
+                                            "{}{}",
+                                            tab.target.current_path().display(),
+                                            if dirty { " — Unsaved changes" } else { "" }
+                                        ));
                                     });
                                     if !self.modal_input_blocked()
                                         && !self.palette_open
@@ -11045,6 +11038,116 @@ mod tests {
         assert_eq!(app.edits[&c], history);
         assert_eq!(app.export_paths[&c], root.join("saved.png"));
         assert!(app.pending_guard.is_none());
+    }
+
+    #[test]
+    fn dirty_tab_indicator_replaces_close_without_changing_its_identity_or_guard() {
+        let Some(root) = isolated_test_root(
+            "tests::dirty_tab_indicator_replaces_close_without_changing_its_identity_or_guard",
+        ) else {
+            return;
+        };
+        for density in [1.0, 1.25, 2.0] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let tab = app.tabs.open_new(root.join("a.png"), MediaKind::Image);
+            app.path = Some(root.join("a.png"));
+            app.media_kind = Some(MediaKind::Image);
+            let context = fonts::test_context();
+            context.enable_accesskit();
+            context.set_pixels_per_point(density);
+            context.global_style_mut(chrome::style);
+            let mut time = 0.0;
+            let mut frame = |app: &mut Application<_>, events| {
+                time += 0.1;
+                context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 300.0),
+                        )),
+                        time: Some(time),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        app.draw_top_bar(ui, &mut Vec::new());
+                    },
+                )
+            };
+            for _ in 0..4 {
+                frame(&mut app, vec![]);
+            }
+            let initial = frame(&mut app, vec![]);
+            let close_node = |output: &egui::FullOutput| {
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("Close tab: a.png"))
+                    .expect("close")
+                    .clone()
+            };
+            let (id, clean) = close_node(&initial);
+            let rect = clean.bounds().expect("close bounds");
+            let contains_glyph = |output: &egui::FullOutput, glyph: &str| {
+                output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == glyph))
+            };
+            assert!(contains_glyph(&initial, "\u{ea76}"));
+            app.image_view.selection = Some(UnitRect::FULL);
+            assert!(!app.edits.get(&tab).is_some_and(EditHistory::is_dirty));
+            app.edits
+                .entry(tab)
+                .or_default()
+                .push(EditOperation::RotateClockwise, MediaKind::Image);
+            let dirty = frame(&mut app, vec![]);
+            let (dirty_id, dirty_node) = close_node(&dirty);
+            assert_eq!(dirty_id, id);
+            assert_eq!(dirty_node.bounds(), Some(rect));
+            assert!(
+                dirty_node
+                    .description()
+                    .expect("description")
+                    .contains("Unsaved changes")
+            );
+            assert!(contains_glyph(&dirty, "\u{ea71}"));
+            assert!(!contains_glyph(&dirty, "a.png *"));
+            let point = egui::pos2(
+                (rect.x0 + rect.x1) as f32 / 2.0,
+                (rect.y0 + rect.y1) as f32 / 2.0,
+            );
+            let hover = frame(&mut app, vec![egui::Event::PointerMoved(point)]);
+            assert!(contains_glyph(&hover, "\u{ea76}"));
+            let focused = frame(
+                &mut app,
+                vec![
+                    egui::Event::PointerGone,
+                    egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Focus,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: id,
+                        data: None,
+                    }),
+                ],
+            );
+            assert!(contains_glyph(&focused, "\u{ea76}"));
+            app.handle_ui_action(UiAction::CloseTab(tab));
+            assert!(app.pending_guard.is_some());
+            app.pending_guard = None;
+            for _ in 0..3 {
+                app.edits
+                    .get_mut(&tab)
+                    .expect("history")
+                    .push(EditOperation::RotateClockwise, MediaKind::Image);
+            }
+            assert!(!app.edits[&tab].is_dirty());
+            assert_eq!(app.edits[&tab].operations().len(), 4);
+            app.handle_ui_action(UiAction::CloseTab(tab));
+            assert!(app.pending_guard.is_none());
+            assert!(app.tabs.tabs().iter().all(|item| item.id != tab));
+        }
     }
 
     #[test]

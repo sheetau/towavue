@@ -240,7 +240,7 @@ fn tab_context_enter_runs_the_target_close_once_through_the_dirty_guard() {
         .entry(target)
         .or_default()
         .push(EditOperation::RotateClockwise, MediaKind::Image);
-    let origin = node(&settle(&mut app), "first.png *");
+    let origin = node(&settle(&mut app), "first.png");
     tree(
         &mut app,
         vec![action(origin, egui::accesskit::Action::ShowContextMenu)],
@@ -477,15 +477,7 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
     let tab = app.tabs.active().expect("tab");
     let active = tab.id;
     let name = display_name(tab.target.current_path());
-    let label = format!(
-        "{name}{}",
-        if app.edits.get(&active).is_some_and(EditHistory::is_dirty) {
-            " *"
-        } else {
-            ""
-        }
-    );
-    for label in [label, format!("Close tab: {name}")] {
+    for label in [name.clone(), format!("Close tab: {name}")] {
         for mode in 0..3 {
             let origin = node(&frame(app, vec![]), &label);
             frame(app, vec![action(origin, egui::accesskit::Action::Focus)]);

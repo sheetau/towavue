@@ -51,6 +51,26 @@ pub const TAB_HEIGHT: f32 = 26.0;
 pub const TAB_CLOSE_WIDTH: f32 = 24.0;
 pub const TAB_PADDING: f32 = 10.0;
 
+pub fn tab_close(ui: &mut Ui, rect: Rect, dirty: bool) -> egui::Response {
+    let response = ui.put(
+        rect,
+        egui::Button::new("").frame(false).min_size(rect.size()),
+    );
+    let glyph = if dirty && !response.hovered() && !response.has_focus() {
+        '\u{ea71}'
+    } else {
+        '\u{ea76}'
+    };
+    ui.painter().text(
+        response.rect.center(),
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        crate::fonts::icon_font(),
+        ui.style().interact(&response).fg_stroke.color,
+    );
+    response
+}
+
 pub struct TitleLayout {
     pub height: f32,
     pub top_padding: f32,
@@ -124,7 +144,6 @@ pub fn modal_heading(ui: &mut Ui, title: &str) {
 pub enum Icon {
     OpenFile,
     OpenFolder,
-    Close,
     Pause,
     Play,
     ExitFullscreen,
@@ -135,7 +154,6 @@ impl Icon {
         let glyph = match self {
             Self::OpenFile => '\u{eaee}',
             Self::OpenFolder => '\u{eaf7}',
-            Self::Close => '\u{ea76}',
             Self::Pause => '\u{ead1}',
             Self::Play => '\u{eb2c}',
             Self::ExitFullscreen => '\u{eb4d}',

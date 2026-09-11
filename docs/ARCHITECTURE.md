@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U07: 未保存indicatorと可逆transformの同一性（2026-09-12）
+
+tab名末尾のasteriskを除き、未保存は既存close領域のdotで示す。領域をhover／keyboard focusするとclose glyphへ戻し、button ID・操作領域・close／dirty guardは維持する。UIAのclose名は維持し、未保存の説明を追加する。
+
+未保存判定は保存済みのoperation snapshotを保持し、履歴cursor一致に加え、連続した直角回転／反転を同じdihedral transformへ正規化して比較する。Undo／Redo用のoperation列は削除しない。crop／resize／自由回転／timeline等を境界として扱い、異なるraster処理を同一視しない。保存中の追加編集や分岐後も、実際にexportしたsnapshotだけを保存済み基準とする。選択／pan／zoomは従来どおり編集履歴へ入れない。任意の画素一致や全timeline同値性の判定を完了したとは扱わない。
+
 ## M01/G01: 固定位置の直接menuと方向領域（2026-09-12）
 
 logoの通常clickはFile／Edit／View／Helpだけを持つroot menu、方向dragは対応sectionの中身だけを同じbutton下のanchorへ開く。pointerのrelease位置はpopup配置に使用せず、選んだsectionをpopupが閉じるまで保持する。command描画・enabled／shortcut・keyboard移動は両入口で共用し、Image jumpはViewの子menuに置く。画面端ではeguiの画面内配置を維持する。

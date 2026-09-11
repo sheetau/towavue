@@ -215,6 +215,7 @@ pub struct EditHistory {
     operations: Vec<EditOperation>,
     cursor: usize,
     saved_cursor: Option<usize>,
+    saved_operations: Vec<EditOperation>,
 }
 
 impl Default for EditHistory {
@@ -223,6 +224,7 @@ impl Default for EditHistory {
             operations: Vec::new(),
             cursor: 0,
             saved_cursor: Some(0),
+            saved_operations: Vec::new(),
         }
     }
 }
@@ -279,13 +281,16 @@ impl EditHistory {
 
     pub fn is_dirty(&self) -> bool {
         self.saved_cursor != Some(self.cursor)
+            && !effective_edits(self.operations()).eq(effective_edits(&self.saved_operations))
     }
 
     pub fn mark_saved(&mut self) {
         self.saved_cursor = Some(self.cursor);
+        self.saved_operations = self.operations().to_vec();
     }
 
     pub fn mark_exported(&mut self, operations: &[EditOperation]) {
+        self.saved_operations = operations.to_vec();
         self.saved_cursor = self
             .operations
             .starts_with(operations)
@@ -293,9 +298,125 @@ impl EditHistory {
     }
 }
 
+#[derive(PartialEq)]
+enum EffectiveEdit {
+    Orientation(u8, bool),
+    Operation(EditOperation),
+}
+
+fn effective_edits(mut operations: &[EditOperation]) -> impl Iterator<Item = EffectiveEdit> + '_ {
+    std::iter::from_fn(move || {
+        // Canonical rotation after horizontal reflection, confined to an uninterrupted run.
+        let (mut turns, mut reflected) = (0_u8, false);
+        while let Some((operation, rest)) = operations.split_first() {
+            match operation {
+                EditOperation::RotateClockwise => turns = (turns + 1) % 4,
+                EditOperation::RotateCounterclockwise => turns = (turns + 3) % 4,
+                EditOperation::FlipHorizontal => {
+                    turns = (4 - turns) % 4;
+                    reflected = !reflected;
+                }
+                EditOperation::FlipVertical => {
+                    turns = (6 - turns) % 4;
+                    reflected = !reflected;
+                }
+                _ => {
+                    if turns != 0 || reflected {
+                        return Some(EffectiveEdit::Orientation(turns, reflected));
+                    }
+                    operations = rest;
+                    return Some(EffectiveEdit::Operation(*operation));
+                }
+            }
+            operations = rest;
+        }
+        (turns != 0 || reflected).then_some(EffectiveEdit::Orientation(turns, reflected))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reversible_orientations_return_to_saved_content_without_erasing_undo() {
+        for length in 0..=6 {
+            for mut word in 0..4_usize.pow(length) {
+                let mut history = EditHistory::default();
+                let mut point = (1, 2);
+                for _ in 0..length {
+                    let operation = match word % 4 {
+                        0 => {
+                            point = (-point.1, point.0);
+                            EditOperation::RotateClockwise
+                        }
+                        1 => {
+                            point = (point.1, -point.0);
+                            EditOperation::RotateCounterclockwise
+                        }
+                        2 => {
+                            point.0 = -point.0;
+                            EditOperation::FlipHorizontal
+                        }
+                        _ => {
+                            point.1 = -point.1;
+                            EditOperation::FlipVertical
+                        }
+                    };
+                    word /= 4;
+                    assert!(history.push(operation, MediaKind::Image));
+                }
+                assert_eq!(
+                    history.is_dirty(),
+                    point != (1, 2),
+                    "{:?}",
+                    history.operations()
+                );
+                assert_eq!(history.operations().len(), length as usize);
+                if length > 0 {
+                    assert!(history.undo());
+                    assert!(history.redo());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn saved_content_survives_branching_but_raster_boundaries_do_not_cancel() {
+        let mut history = EditHistory::default();
+        history.push(EditOperation::RotateClockwise, MediaKind::Image);
+        history.mark_saved();
+        history.undo();
+        for _ in 0..3 {
+            history.push(EditOperation::RotateCounterclockwise, MediaKind::Image);
+        }
+        assert!(!history.is_dirty());
+        assert!(!history.redo());
+        history.push(EditOperation::FlipHorizontal, MediaKind::Image);
+        assert!(history.is_dirty());
+        history.undo();
+        assert!(!history.is_dirty());
+        let resize =
+            EditOperation::Resize(ImageResize::new(2, 3, ResampleFilter::Nearest).expect("resize"));
+        let exported = [EditOperation::RotateClockwise, resize];
+        history.mark_exported(&exported);
+        assert!(history.is_dirty());
+        history.push(resize, MediaKind::Image);
+        assert!(!history.is_dirty());
+        history.push(EditOperation::RotateCounterclockwise, MediaKind::Image);
+        assert!(
+            history.is_dirty(),
+            "rotation cannot cross a raster boundary"
+        );
+        assert!(
+            !effective_edits(&[
+                EditOperation::RotateClockwise,
+                resize,
+                EditOperation::RotateCounterclockwise
+            ])
+            .eq(effective_edits(&[resize]))
+        );
+    }
 
     #[test]
     fn arbitrary_rotation_bounds_contain_the_source_and_keep_exact_quarter_turns() {

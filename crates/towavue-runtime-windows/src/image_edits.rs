@@ -159,6 +159,51 @@ mod tests {
     use towavue_core::{ImageResize, PixelCrop, ResampleFilter};
 
     #[test]
+    fn clean_reversible_histories_preserve_every_source_pixel() {
+        use towavue_core::{EditHistory, MediaKind};
+        let source = DecodedImage {
+            format: "test",
+            frames: vec![DecodedImageFrame {
+                width: 3,
+                height: 2,
+                rgba: (0..6_u8)
+                    .flat_map(|n| [n * 30, 255 - n * 20, n * 10, n * 40])
+                    .collect(),
+                delay: std::time::Duration::from_millis(40),
+            }],
+        };
+        for operations in [
+            vec![EditOperation::RotateClockwise; 4],
+            vec![EditOperation::FlipHorizontal; 2],
+            vec![EditOperation::FlipVertical; 2],
+            vec![
+                EditOperation::RotateClockwise,
+                EditOperation::FlipHorizontal,
+                EditOperation::RotateClockwise,
+                EditOperation::FlipHorizontal,
+            ],
+            vec![
+                EditOperation::RotateClockwise,
+                EditOperation::RotateClockwise,
+                EditOperation::FlipHorizontal,
+                EditOperation::FlipVertical,
+            ],
+        ] {
+            let mut history = EditHistory::default();
+            for operation in operations {
+                history.push(operation, MediaKind::Image);
+            }
+            assert!(!history.is_dirty());
+            let result =
+                render_image_edits(&source, history.operations(), &Cancellation::default())
+                    .expect("reversible edits");
+            assert_eq!(result.dimensions(), source.dimensions());
+            assert_eq!(result.frames[0].rgba, source.frames[0].rgba);
+            assert_eq!(result.frames[0].delay, source.frames[0].delay);
+        }
+    }
+
+    #[test]
     fn free_rotation_preserves_alpha_delays_exact_quarters_and_rejects_obsolete_geometry() {
         use towavue_core::ImageRotation;
         let source = DecodedImage {

@@ -34,6 +34,7 @@ Run from the repository root. Ordinary Cargo builds need no Python, font tooling
 - Monaco's recorded VS Code source revision: `86f5a62f058e3905f74a9fa65d04b2f3b533408e`.
 - SHA-256: `9d25513c861704be650eacef8c4588aceabdc8b668857747b5e42b299e926918` (121972 bytes).
 - Codepoint names come from that same Monaco package's `codiconsLibrary.js`.
+- The tab's unsaved marker uses `close-dirty` / `circle-filled`, U+EA71, from the [matching VS Code mapping](https://github.com/microsoft/vscode/blob/86f5a62f058e3905f74a9fa65d04b2f3b533408e/src/vs/base/common/codiconsLibrary.ts). The existing U+EA76 close glyph replaces it on hover or keyboard focus.
 - Retain [Monaco's MIT notice](LICENSE-Monaco.txt) and the upstream [Codicons artwork license](LICENSE-Codicons.txt), CC BY 4.0, including its Git logo attribution and CC BY 3.0 link. The Codicons license was retrieved at commit `1c47ab36a4bb845c437866405c2fa67b8ca0fe36`.
 
 The app selects a named Codicon family only for icon widgets. It does not add Codicon as a general text fallback or modify the font. The reading button uses book-derived vector page contours in `chrome.rs`, adapted from the Codicon book outline into matching outlined/filled states; preserve the same attribution and CC BY 4.0 notice for this derivative. The reference is `src/icons/book.svg` at the Codicons commit above. The logo remains the owner's custom vector. Caption controls now use native Windows drawing.

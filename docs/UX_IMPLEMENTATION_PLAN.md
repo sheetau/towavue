@@ -19,7 +19,7 @@
 | --- | --- |
 | U01 native caption | button下の1px隙間・左右padding・非focus色・fullscreen上端の欠けを再現し是正する。未完 |
 | U04 配色／tab配置 | hover背景を#2C2C2Cへ変更済み。共通widgetのhover／active／open背景と文字を回帰確認。tab上下3px相当の余白・native内側borderとの整合は未完 |
-| U07 dirty表示／履歴 | close iconを未保存indicatorへ切替。選択だけや元と同じ結果をdirtyにしない契約を全操作で再監査する。未完 |
+| U07 dirty表示／履歴 | close領域を未保存時のCodicon丸印へ切替、hover／focusで×へ戻す。tab名asteriskを除去し、ID／寸法／保存guardを維持。選択は既に非編集。保存snapshotと連続した直角回転／反転の正規形を比較し、4回回転・二重反転等でclean復帰、Undo履歴を保持。5,461通り・分岐／非同期保存・raster境界と代表全RGBA一致、3倍率のUIを確認。任意のcrop／resize／自由回転・timeline／volume等の全同値性と可視監査は未完 |
 | U04 status／focus | loading等の画面内messageをstatus左へ集約し、重複する寸法／形式を除きframe数は右へ。reading drag値の表示、Escape／tab切替時の赤いoutline除去。未完 |
 | M01/G01 menu | button下の固定位置、直接section時は親を出さず中身だけ保持、Image jumpをView子menuへ、logoは背景を変えずgray／white線色・左にも同じgap・Edit方向45度を実装。親非表示／先頭位置・境界角・通常rootの4分類・nested keyboardと全command配置・取消／一回dispatch、3サイズ×3倍率の再openを回帰確認。実画面／全focus・DPI・pixel単位の余白監査は未完 |
 | U03/U04 font／resize | seek preview等のfont適用漏れ、右端resize時の左寄せtext／icon振動を調査。性能を優先し修正可能性を判断する。未完 |

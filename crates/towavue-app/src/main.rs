@@ -2918,13 +2918,7 @@ where
             egui::Sense::click_and_drag(),
         );
 
-        let (shift, zoom, pointer) = ui.input(|input| {
-            (
-                input.modifiers.shift,
-                input.zoom_delta(),
-                input.pointer.hover_pos(),
-            )
-        });
+        let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
         let initial_rect = egui::Rect::from_center_size(
             center,
             egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
@@ -2943,17 +2937,15 @@ where
                 return;
             }
         }
-        if zoom != 1.0
-            && response.hovered()
-            && !self.modal_input_blocked()
-            && !self.palette_open
-            && !self.grid_open
-        {
-            let old_scale = scale;
-            self.image_view
-                .zoom_by(zoom, image_size, physical_viewport.into());
-            scale = self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
-            if let Some(pointer) = pointer {
+        if self.view_drag_allowed(ui.ctx()) && self.view_drag.is_none() {
+            for (pointer, zoom) in wheel_input::zoom_events(ui.ctx(), &response) {
+                let center =
+                    viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
+                let old_scale = scale;
+                self.image_view
+                    .zoom_by(zoom, image_size, physical_viewport.into());
+                scale =
+                    self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
                 let from_center = pointer - center;
                 let correction = from_center * (1.0 - scale / old_scale);
                 self.image_view.pan.0 += correction.x;
@@ -11812,7 +11804,7 @@ mod tests {
         let mut time = 100.0;
         let mut wheel_frame = |app: &mut Application<_>, dt, events, covered| {
             time += dt;
-            let _ = context.run_ui(
+            context.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -11836,7 +11828,7 @@ mod tests {
                             });
                     }
                 },
-            );
+            )
         };
         for (dt, delta) in [(1.0 / 30.0, 60.0), (1.0 / 120.0, 60.0), (1.0 / 60.0, -60.0)] {
             app.image_view.actual_size();
@@ -11846,13 +11838,74 @@ mod tests {
                 vec![wheel(delta, egui::Modifiers::CTRL)],
                 false,
             );
+            let expected = (delta / 200.0).exp();
+            assert!(
+                matches!(app.image_view.zoom, ZoomMode::Custom(scale) if (scale - expected).abs() < 0.0001),
+                "the entire wheel delta must apply in its input frame: {:?}, expected {expected}",
+                app.image_view.zoom
+            );
+            let immediate = app.image_view;
             for _ in 0..90 {
                 wheel_frame(&mut app, dt, vec![], false);
+                assert_eq!(app.image_view, immediate, "no delayed zoom tail");
             }
-            let expected = (delta / 200.0).exp();
             assert!(
                 matches!(app.image_view.zoom, ZoomMode::Custom(scale) if (scale - expected).abs() < 0.0001)
             );
+        }
+        for batched in [false, true] {
+            app.image_view.actual_size();
+            let first = egui::pos2(160.0, 140.0);
+            let second = egui::pos2(240.0, 170.0);
+            wheel_frame(
+                &mut app,
+                1.0 / 120.0,
+                vec![egui::Event::PointerMoved(first)],
+                false,
+            );
+            let mut expected = egui::Rect::from_center_size(
+                egui::pos2(200.0, 150.0),
+                egui::vec2(400.0, 200.0) / context.pixels_per_point(),
+            );
+            let sequence = [
+                (first, 60.0_f32),
+                (second, -60.0),
+                (first, 60.0),
+                (first, -60.0),
+            ];
+            for group in sequence.chunks(if batched { 4 } else { 1 }) {
+                let mut events = Vec::new();
+                for &(point, delta) in group {
+                    events.push(egui::Event::PointerMoved(point));
+                    events.push(wheel(delta, egui::Modifiers::CTRL));
+                    let factor = (delta / 200.0).exp();
+                    expected = egui::Rect::from_center_size(
+                        point + (expected.center() - point) * factor,
+                        expected.size() * factor,
+                    );
+                }
+                events.push(egui::Event::PointerMoved(egui::pos2(-10.0, -10.0)));
+                let output = wheel_frame(&mut app, 1.0 / 120.0, events, false);
+                let bounds = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) if mesh.texture_id == texture => {
+                            Some(mesh.calc_bounds())
+                        }
+                        _ => None,
+                    })
+                    .expect("image in the input frame");
+                assert!((bounds.min - expected.min).length() < 0.001);
+                assert!((bounds.max - expected.max).length() < 0.001);
+                assert!(
+                    output.textures_delta.set.is_empty(),
+                    "zoom must reuse the image texture"
+                );
+            }
+            let before = app.image_view;
+            wheel_frame(&mut app, 1.0 / 120.0, vec![], false);
+            assert_eq!(app.image_view, before);
         }
         for blocked in 0..7 {
             app.image_view.actual_size();

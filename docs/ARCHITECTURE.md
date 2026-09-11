@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## I07: 画像wheel zoomの即時反映（2026-09-12）
+
+画像のCtrl＋wheelはeguiの平滑化済みzoom_deltaではなく、受信した各MouseWheelの修飾key・単位・量から倍率を計算する。既存InputOptionsのzoom modifier／line speed／zoom speed、Point・Line・Pageの換算と指数倍率を維持し、Moveだけをその描画回で全量反映する。Start／End／Cancelは倍率を変えず、Ctrlなしの後続eventや空frameへ残量を持ち越さない。通常scrollと動画zoomの平滑化には変更を加えない。
+
+各event時点のpointer位置と対象layer／rectを使い、frame最後のhoverへまとめない。複数eventは順番に既存倍率上限とpan補正を適用し、同じ描画回のmeshへ反映する。画像texture・原寸画素・編集履歴は変更しない。明示Zoom eventとeguiのmulti-touch倍率経路は保持する。非active／無効なsurface、overlay／modal／popup、別drag／button押下中は背景zoomを行わない。eguiの再layout passで消費済みwheelを再生しない。これは入力の平滑化待ちを除く契約であり、OS入力から実画面までの時間や全GPU／DPIでの連続性能を保証するものではない。
+
 ## I03/I04: 前後移動で全pathを複製しない（2026-09-12）
 
 通常の前後移動は既存FolderSnapshotから現在のraw indexを求め、進行方向のsliceと端からのsliceを順に走査する。同種filter・Shell順・端の循環を保ち、選ばれた一件のpathだけをguardへcopyする。入力ごとの全path Vec生成は行わず、並びのcache・worker・snapshot所有権は増やさない。現在path不在／同種に不一致なら移動せず、候補が自身だけなら従来の同一path guardによるno-opを維持する。音声同種移動のqueue規則と読書modeの見開き送りは変更しない。
@@ -1052,7 +1058,7 @@ Fitは通常画像・reading pageとも表示領域に入る比率をそのま�
 
 画像のActual/100%はsourceの1 pixelを画面の1 physical pixelへ対応させ、Customの倍率も同じ基準にする。appは現在のegui pixels-per-pointでviewportをphysical寸法へ変換してcoreのscale/zoomへ渡し、描画時にlogical寸法へ戻す。Fitは現在のmedia領域、keyboard/menuのzoomは直近表示viewportと編集・crop preview後の寸法を使い、固定window寸法や未編集source寸法を使わない。panとpointer補正はlogical座標のままとし、selection・履歴・source fileは変えない。OS DPI設定の変更や新しいUI scale設定は追加しない。
 
-Ctrl+wheelの画像zoomはeguiがwheel eventから変換したzoom倍率を使い、scroll値の符号をframeごとの固定倍率へ置き換えない。画像surfaceがpointer入力を受ける時だけ適用し、palette・grid・保存確認中や重なったmenu上では背景画像をzoomしない。倍率とcursor基点のpan補正は同じframeの描画へ反映する。回帰testは処理済みscroll値を書き換えず、実際のwheel eventから倍率・pointer位置と入力遮断を検証する。
+Ctrl+wheelの画像zoomはeguiの単位・指数倍率の換算を維持し、scroll値の符号をframeごとの固定倍率へ置き換えない。2026-09-12 I07で平滑化済みzoom_deltaからraw eventごとの即時反映へ変更した。画像surfaceがpointer入力を受ける時だけ適用し、palette・grid・保存確認中やmenu popupでは背景画像をzoomしない。倍率と各eventのcursor基点pan補正は同じframeの描画へ反映する。回帰testは処理済みscroll値を書き換えず、実際のwheel eventから即時倍率・pointer位置と入力遮断を検証する。
 
 固定egui-directx11 0.13.0は頂点・clipにcontextのzoom factorを別途掛ける。FullOutputのpixels-per-pointには既にzoomが含まれるため、runtime adapterは渡す値からzoomを一度除き二重拡大を防ぐ。appの入力・media座標・font生成は完全なpixels-per-pointを使い続ける。補正は固定rendererの契約に閉じ込め、依存更新時は実pixel寸法・clipとpointer hit位置を再検証する。
 

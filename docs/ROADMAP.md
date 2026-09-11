@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I07 immediate-zoom checkpoint: 画像Ctrl＋wheelが平滑化により複数frameへ分割される状態を再現し、raw event量を同じ描画回で全反映する。単位／倍率設定を保ち、各event座標を基点に順序どおり適用し、画像textureは再生成しない。30／120Hz相当の入力回倍率と90frameの残量なし、方向反転／同frame複数入力のmesh、単位・phase・修飾key・入力所有権を確認。通常scroll／動画は変更しない。実Ctrl＋wheelの可視latency／全DPI・連続負荷と全UX台帳は継続する。
+
 2026-09-12 I03/I04 adjacent-path checkpoint: 通常前後移動の全path Vec生成を除き、現在位置から方向順に走査して一件だけguardへ複製する。5万件の混在Shell順・前後／循環／同種filter・dirty保護を既存の選択規則と比較し、Releaseの120要求は約586→340ms。現在位置の線形検索、復号・描画とreading／音声同種queueは変えない。一枚だけの再loadは既存guardで防止済みであり、新規修正とはしない。可視latency・cold／全素材／資源と全UX台帳は継続する。
 
 2026-09-11 U07 same-audio-open checkpoint: 現在のcleanな音声sourceを外部再Openするとsession／位置／選択／focusを初期化する問題を再現・修正。同じ表示tab・pathでFaulted以外なら再loadせず、別曲置換・dirty／export保護・強制新規・失敗時の再試行を維持する。状態matrixと既存source置換回帰、実D3D11／WASAPIで再生／停止中の再Open・世代／位置／選択／focus保持、背景再生／復旧を確認。通常windowの全入口・全UIA／IME／mixed-DPI・全UX台帳は継続する。

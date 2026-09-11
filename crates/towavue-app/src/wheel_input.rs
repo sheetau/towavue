@@ -52,6 +52,66 @@ pub fn volume_delta(context: &Context, targets: &[Response]) -> f32 {
         .sum()
 }
 
+pub fn zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
+    if !target.enabled()
+        || context.input(|input| {
+            !input.focused
+                || input
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, Event::WindowFocused(false)))
+        })
+    {
+        return Vec::new();
+    }
+    if let Some(touch) = context.input(|input| input.multi_touch()) {
+        return context
+            .input(|input| input.pointer.hover_pos())
+            .filter(|_| target.hovered() && touch.zoom_delta != 1.0)
+            .map(|position| (position, touch.zoom_delta))
+            .into_iter()
+            .collect();
+    }
+    if context.input(|input| {
+        input.pointer.any_down()
+            || input
+                .events
+                .iter()
+                .any(|event| matches!(event, Event::PointerButton { pressed: true, .. }))
+    }) {
+        return Vec::new();
+    }
+    let options = context.options(|options| options.input_options);
+    let page_height = context.input(|input| input.viewport_rect().height());
+    positioned_events(context)
+        .into_iter()
+        .filter_map(|(position, event)| {
+            let position = position.filter(|pos| {
+                target.interact_rect.contains(*pos)
+                    && context.layer_id_at(*pos) == Some(target.layer_id)
+            })?;
+            let factor = match event {
+                Event::MouseWheel {
+                    unit,
+                    delta,
+                    modifiers,
+                    phase: egui::TouchPhase::Move,
+                } if modifiers.matches_any(options.zoom_modifier) => {
+                    let points = match unit {
+                        egui::MouseWheelUnit::Point => 1.0,
+                        egui::MouseWheelUnit::Line => options.line_scroll_speed,
+                        egui::MouseWheelUnit::Page => page_height,
+                    };
+                    (options.scroll_zoom_speed * points * (delta.x + delta.y)).exp()
+                }
+                Event::Zoom(factor) => factor,
+                _ => return None,
+            };
+            (factor != 1.0).then_some((position, factor))
+        })
+        .collect()
+}
+
 fn positioned_events(context: &Context) -> Vec<(Option<Pos2>, Event)> {
     begin_frame(context);
     let mut position = context.data(|data| {
@@ -64,7 +124,7 @@ fn positioned_events(context: &Context) -> Vec<(Option<Pos2>, Event)> {
         match event {
             Event::PointerMoved(pos) | Event::PointerButton { pos, .. } => position = Some(pos),
             Event::PointerGone | Event::WindowFocused(false) => position = None,
-            Event::MouseWheel { .. } => result.push((position, event)),
+            Event::MouseWheel { .. } | Event::Zoom(_) => result.push((position, event)),
             _ => {}
         }
     }
@@ -147,6 +207,151 @@ impl Scroll {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn immediate_zoom_preserves_units_event_positions_and_input_ownership() {
+        let context = Context::default();
+        let inside = egui::pos2(100.0, 100.0);
+        let outside = egui::pos2(350.0, 250.0);
+        let wheel = |unit, delta, modifiers, phase| Event::MouseWheel {
+            unit,
+            delta: egui::vec2(0.0, delta),
+            modifiers,
+            phase,
+        };
+        let frame = |events, enabled, focused, extra_pass| {
+            let mut zooms = Vec::new();
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        Pos2::ZERO,
+                        egui::vec2(400.0, 300.0),
+                    )),
+                    events,
+                    focused,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.add_enabled_ui(enabled, |ui| {
+                        begin_frame(ui.ctx());
+                        let target = ui.allocate_rect(
+                            egui::Rect::from_min_size(
+                                egui::pos2(20.0, 20.0),
+                                egui::vec2(200.0, 160.0),
+                            ),
+                            egui::Sense::hover(),
+                        );
+                        zooms.extend(zoom_events(ui.ctx(), &target));
+                        if extra_pass && ui.ctx().current_pass_index() == 0 {
+                            ui.ctx().request_discard("verify wheel is not replayed");
+                        }
+                    });
+                },
+            );
+            zooms
+        };
+        for _ in 0..3 {
+            frame(vec![Event::PointerMoved(inside)], true, true, false);
+        }
+        let options = context.options(|options| options.input_options);
+        for (unit, delta, points) in [
+            (egui::MouseWheelUnit::Point, 60.0, 60.0),
+            (
+                egui::MouseWheelUnit::Line,
+                -2.0,
+                -2.0 * options.line_scroll_speed,
+            ),
+            (egui::MouseWheelUnit::Page, 0.1, 30.0),
+        ] {
+            let zooms = frame(
+                vec![wheel(
+                    unit,
+                    delta,
+                    egui::Modifiers::CTRL,
+                    egui::TouchPhase::Move,
+                )],
+                true,
+                true,
+                true,
+            );
+            assert_eq!(zooms.len(), 1);
+            assert_eq!(zooms[0].0, inside);
+            assert!((zooms[0].1 - (points * options.scroll_zoom_speed).exp()).abs() < 0.0001);
+            assert!(frame(vec![], true, true, false).is_empty());
+        }
+        for phase in [
+            egui::TouchPhase::Start,
+            egui::TouchPhase::End,
+            egui::TouchPhase::Cancel,
+        ] {
+            assert!(
+                frame(
+                    vec![wheel(
+                        egui::MouseWheelUnit::Point,
+                        60.0,
+                        egui::Modifiers::CTRL,
+                        phase
+                    )],
+                    true,
+                    true,
+                    false
+                )
+                .is_empty()
+            );
+        }
+        let zoom = || {
+            wheel(
+                egui::MouseWheelUnit::Point,
+                60.0,
+                egui::Modifiers::CTRL,
+                egui::TouchPhase::Move,
+            )
+        };
+        let zooms = frame(
+            vec![
+                zoom(),
+                Event::PointerMoved(outside),
+                zoom(),
+                Event::PointerMoved(inside),
+                Event::Zoom(1.25),
+                Event::PointerGone,
+                zoom(),
+            ],
+            true,
+            true,
+            false,
+        );
+        assert_eq!(zooms.len(), 2);
+        assert_eq!(zooms[1], (inside, 1.25));
+        assert!(frame(vec![zoom(), Event::PointerMoved(inside)], true, true, false).is_empty());
+        for (enabled, focused, modifiers, press) in [
+            (false, true, egui::Modifiers::CTRL, false),
+            (true, false, egui::Modifiers::CTRL, false),
+            (true, true, egui::Modifiers::NONE, false),
+            (true, true, egui::Modifiers::CTRL, true),
+        ] {
+            let mut events = vec![
+                Event::PointerMoved(inside),
+                wheel(
+                    egui::MouseWheelUnit::Point,
+                    60.0,
+                    modifiers,
+                    egui::TouchPhase::Move,
+                ),
+            ];
+            if press {
+                for pressed in [true, false] {
+                    events.push(Event::PointerButton {
+                        pos: inside,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers,
+                    });
+                }
+            }
+            assert!(frame(events, enabled, focused, false).is_empty());
+        }
+    }
 
     #[test]
     fn scoped_scroll_preserves_distance_and_cancels_without_resuming_old_tail() {

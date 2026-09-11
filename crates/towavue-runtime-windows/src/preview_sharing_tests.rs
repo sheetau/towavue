@@ -22,6 +22,108 @@ fn png() -> Vec<u8> {
 }
 
 #[test]
+fn direct_static_thumbnails_preserve_sampled_pixels_and_bound_original_bytes() {
+    let cache = cache("direct-static-thumbnail");
+    for extension in ["png", "bmp", "webp", "jpg"] {
+        let path = cache.root.join(format!("source.{extension}"));
+        let source = image::RgbaImage::from_fn(480, 320, |x, y| {
+            image::Rgba([x as u8, y as u8, (x ^ y) as u8, (x + y) as u8])
+        });
+        if extension == "jpg" {
+            image::DynamicImage::ImageRgba8(source)
+                .to_rgb8()
+                .save(&path)
+                .expect("owned JPEG");
+        } else {
+            source.save(&path).expect("owned alpha image");
+        }
+        let source_bytes = fs::read(&path).expect("source bytes");
+        let original = crate::decode_image(&path).expect("original");
+        let required = 480 * 320 * 4;
+        assert!(static_thumbnail_png(&path, required - 1, &|| true).is_none());
+        assert!(static_thumbnail_png(&path, required, &|| false).is_none());
+        let polls = std::cell::Cell::new(0);
+        assert!(
+            static_thumbnail_png(&path, required, &|| {
+                polls.set(polls.get() + 1);
+                polls.get() < 5
+            })
+            .is_none()
+        );
+        let direct = decode_png(
+            &static_thumbnail_png(&path, required, &|| true).expect("bounded thumbnail"),
+        )
+        .expect("PNG");
+        assert_eq!((direct.width, direct.height), (240, 160));
+        for y in 0..160_usize {
+            for x in 0..240_usize {
+                let sample = ((y * 2 + 1) * 480 + x * 2 + 1) * 4;
+                let target = (y * 240 + x) * 4;
+                assert_eq!(
+                    &direct.rgba[target..target + 4],
+                    &original.frames[0].rgba[sample..sample + 4],
+                    "{extension} ({x},{y})"
+                );
+            }
+        }
+        assert_eq!(
+            cache
+                .filmstrip(&path, MediaKind::Image)
+                .expect("integrated direct thumbnail")
+                .image,
+            direct
+        );
+        let fresh = PreviewCache::new(cache.root.clone()).expect("fresh memory");
+        assert_eq!(
+            fresh
+                .filmstrip(&path, MediaKind::Image)
+                .expect("disk thumbnail")
+                .image,
+            direct
+        );
+        assert_eq!(fs::read(&path).expect("unchanged source"), source_bytes);
+    }
+    let gif = cache.root.join("animated.gif");
+    {
+        let file = fs::File::create(&gif).expect("owned GIF");
+        let mut encoder = image::codecs::gif::GifEncoder::new(file);
+        encoder
+            .encode_frame(image::Frame::new(image::RgbaImage::from_pixel(
+                32,
+                16,
+                image::Rgba([20, 40, 60, 255]),
+            )))
+            .expect("first frame");
+        encoder
+            .encode_frame(image::Frame::new(image::RgbaImage::from_pixel(
+                32,
+                16,
+                image::Rgba([100, 120, 140, 255]),
+            )))
+            .expect("second frame");
+    }
+    assert!(static_thumbnail_png(&gif, STATIC_THUMBNAIL_BYTE_LIMIT, &|| true).is_none());
+    let fallback = cache
+        .filmstrip(&gif, MediaKind::Image)
+        .expect("animation fallback");
+    assert_eq!((fallback.image.width, fallback.image.height), (240, 120));
+    assert!(
+        fallback
+            .image
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == [20, 40, 60, 255])
+    );
+    let malformed = cache.root.join("bad.png");
+    fs::write(&malformed, b"not an image").expect("owned malformed file");
+    assert!(static_thumbnail_png(&malformed, STATIC_THUMBNAIL_BYTE_LIMIT, &|| true).is_none());
+    assert!(cache.filmstrip(&malformed, MediaKind::Image).is_err());
+    fs::remove_dir_all(&cache.root).expect("remove owned fixtures");
+}
+
+#[test]
 fn static_preview_fallback_does_not_seek_past_the_only_frame() {
     let cache = cache("static-preview-zero-seek");
     for extension in ["jpg", "bmp", "png", "webp"] {

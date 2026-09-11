@@ -16,6 +16,7 @@ use crate::Cancellation;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CACHE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
+const STATIC_THUMBNAIL_BYTE_LIMIT: usize = 128 * 1024 * 1024;
 const IMAGE_PREVIEW_VARIANT: &str = "filmstrip-image-v4";
 #[path = "video_preview_sheet.rs"]
 mod video_sheet;
@@ -235,13 +236,27 @@ impl PreviewCache {
             {
                 preview.image
             } else {
-                self.load_or_generate(key, || {
-                    frame_preview(
-                        source,
-                        Duration::ZERO,
-                        "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
-                        self.cancellation.as_ref(),
-                    )
+                self.load_or_generate(key.clone(), || {
+                    let direct = static_thumbnail_png(source, STATIC_THUMBNAIL_BYTE_LIMIT, &|| {
+                        self.check_cancelled().is_ok()
+                    });
+                    self.check_cancelled()?;
+                    let bytes = if let Some(bytes) = direct {
+                        bytes
+                    } else {
+                        frame_preview(
+                            source,
+                            Duration::ZERO,
+                            "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
+                            self.cancellation.as_ref(),
+                        )?
+                    };
+                    if cache_key(source, IMAGE_PREVIEW_VARIANT)? != key {
+                        return Err(PreviewError::Generate(
+                            "Source changed during preview generation".into(),
+                        ));
+                    }
+                    Ok(bytes)
                 })?
             }
         };
@@ -661,6 +676,27 @@ fn cache_key(source: &Path, variant: &str) -> Result<String, PreviewError> {
     modified.hash(&mut hasher);
     variant.hash(&mut hasher);
     Ok(format!("{:016x}", hasher.finish()))
+}
+
+fn static_thumbnail_png(
+    source: &Path,
+    byte_limit: usize,
+    current: &dyn Fn() -> bool,
+) -> Option<Vec<u8>> {
+    let decoded = crate::image::decode_image_for_prefetch(source, byte_limit, current).ok()??;
+    let frame = decoded.frames.into_iter().next()?;
+    let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;
+    let small = image::DynamicImage::ImageRgba8(image).resize(
+        240,
+        160,
+        image::imageops::FilterType::Nearest,
+    );
+    if !current() {
+        return None;
+    }
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    small.write_to(&mut bytes, image::ImageFormat::Png).ok()?;
+    current().then(|| bytes.into_inner())
 }
 
 fn frame_preview(

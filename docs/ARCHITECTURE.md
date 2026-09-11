@@ -132,6 +132,14 @@ source durationからmax(20, ceil(seconds/5))個の区間を作り、その中�
 
 固定H.264素材のdebug検証で16コマ生成約1.119秒、4コマの終端sheet約0.327秒、memory clone取得約0.56～0.59msを観測した。これはUI表示遅延の保証ではない。実画素と単枚reference、density／端／UV、同textureで16位置を描画して追加uploadなし、世代／優先度／2枚LRU／texture上限を確認する。所有する可視960×576 windowと生成40秒MPEG-4素材では停止中hoverの非Seek、前半／後半thumbnail、クリックSeekとtab hoverを確認した。software decode条件の一例であり、長GOP／全codec／HDR／混在DPI／資源peak・本画面scrubは未認定・未完。
 
+## U10: 静止画サムネイルの直接復号（2026-09-11）
+
+画像filmstripでmemory／diskと既存JPEG・BMP専用previewが使えない場合、既存の静止画専用decode_image_for_prefetchを原寸RGBA上限128 MiBで試す。原寸の向き補正・depth／alpha変換・読取境界取消を再利用し、所有するRGBAをcopyせず画像bufferへ移し、nearestで240×160内へ縮小する。小画像は従来filmstripと同様に拡大する。小さなPNGへencodeして既存load_or_generateのmemory／disk・同key生成lease・取消をそのまま使う。PNG往復自体を除いた経路ではないが、対応静止画のFFmpeg別process／入力準備を除く。
+
+GIF／APNG／animated WebP／AVIFは静止画経路でskipし、上限超過／失敗も従来FFmpegへ戻す。変更中sourceの生成結果はcache key再照合で拒否する。128 MiBはこの直接経路の原寸RGBA判定であり、codecの一時buffer・他worker・fallback processを含む全体peak上限ではない。原寸cacheには登録せず、foregroundの原寸decode・JPEG/BMP先行表示の上限・GPU texture・編集／保存を変えない。原寸読込と同時に別workerが同sourceを復号する可能性は残る。
+
+生成6000×4000 PNG・warm file-cache・各7回Releaseの最終API比較では、従来CLI＋PNG cache取得の中央値514.1387ms、新filmstrip取得140.5008ms。新経路のkey／先行preview試行／stamp照合／PNG保存も含む。fixture warming・空cache作成・assertion／cleanupは除く。480×320のPNG／alpha BMP／WebP／JPEGは全240×160 sampleのRGBAを原寸decoderと照合し、budget境界／途中取消・disk再利用／GIF fallback／不正入力を回帰確認する。nearestは縮小品質より応答を優先するサムネイル用で、従来FFmpeg縮小との全画素一致やcold／可視UI／全素材・peak性能を保証しない。
+
 ## U10/I03: 未訪問静止画のサムネイルへ高速previewを共用（2026-09-11）
 
 filmstripの画像要求は既存memoryを優先し、disk cacheがない時だけforegroundと同じprepare_image_previewを試す。大きなJPEGの1/8復号と24bit非圧縮BMPの疎な行読取、240×160以内・原寸budget・取消・source stamp・同key生成leaseを共用する。得られたRGBAと元寸法をhost共有64件／16 MiBへ入れ、PNG encode／disk保存／FFmpeg別processは追加しない。tab hover／recent／画像seek等のfilmstrip consumerと、その後の原寸読込のpreviewが同じ画素を再利用する。新しいworker・原寸decode・GPU所有は作らない。fast生成結果はmemoryのみのため、そのcacheが失われれば再生成する。

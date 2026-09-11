@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 U10 direct-static-thumbnail checkpoint: memory／disk・JPEG/BMP専用previewの後に、原寸RGBA128 MiB以内の静止画を既存画像decoderで直接縮小する。原寸copy／新workerはなく、既存PNG disk cacheと同key生成leaseを維持。4形式の全sample RGBA・budget／取消／disk、GIFと不正入力fallbackを回帰確認。24MP PNG warm Releaseの最終API取得は約514→141ms。可視操作は更新版Computer Useでもpipe接続不可で保留。c5dccf3のCI34582156898は成功。全UX台帳、PNG本表示の初回／cold／全品質／資源は継続する。
+
 2026-09-11 U10/I03 static-filmstrip checkpoint: 未訪問の大きなJPEG／BMPに既存高速previewを共用し、元寸法付き共有memoryへ供給。memory／disk hitを優先し、fast非対応は従来経路を保つ。JPEG単独画像のNoFrameを再現し、画像先頭の不要な-ss 0を除去。小JPEG／BMP／PNG／WebP fallback・disk再利用、大画像の色／alpha／寸法・本表示共有／取消／source変更を回帰確認。24MP warm Releaseの修正済みCLI対比はJPEG約91→14ms／BMP約280→1.3ms。可視UI／cold／全品質・資源と全UX台帳は継続する。
 
 2026-09-11 I03 reading-prefetch checkpoint: 隣見開き全体をShell順で逐次先読みし、256 MiBを維持してcache件数を8→10へ拡張。warm hitを含むbatch合計予算で先頭優先を保ち、後続ページの実行中decodeも移動先に含まれれば採用する。10実PNGの全画素／原寸Arc再利用・全preview、容量／重複／失敗・途中採用／空取消、2～10枚のapp選択matrixを回帰確認。9b1601aのCI34580771257は成功。可視確認はComputer Use pipe接続不良で保留し、速度改善の測定値は追加しない。全UX台帳、初回表示／cold／UI latency／資源を継続する。

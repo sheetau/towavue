@@ -515,7 +515,7 @@ impl PreviewCache {
         if let Ok(Some(preview)) = self.cached_image(path) {
             return Some(preview);
         }
-        let preview = crate::image::jpeg_preview(path, byte_limit, current).ok()??;
+        let preview = crate::image::first_image_preview(path, byte_limit, current).ok()??;
         if !current() || cache_key(path, IMAGE_PREVIEW_VARIANT).ok().as_ref() != Some(&key) {
             return None;
         }

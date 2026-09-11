@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 I03 BMP-first checkpoint: 24bit非圧縮BMPのsample行だけ読む小さな先行表示を追加。向き／padding／全sample色と原寸不変、破損・上限・取消・alpha fallback、共有cacheと原寸前通知／退役を確認。24MP warm Releaseでpreview約0.9ms／原寸約76ms。PNG／BMPの既存FFmpeg通常経路への置換は測定で遅いため見送る。Computer Use接続不可により可視確認は未実施。PNG等の初回表示・cold／UI latency・資源と全UX台帳を継続する。
+
 2026-09-11 I03 JPEG-quality checkpoint: 通常／progressive・gray・直接RGB・CMYK（黒版ありを含む）の生成9種類を独立decoderの代表色と原寸へ比較し、寸法・不透明alphaも確認。外部生成不要のgray回帰と任意の再生成／色比較テストを追加し、productionは変えない。YCCK／ICC／写真全画素・可視latencyの認定ではない。次は他静止画形式の初回表示と実際の画像移動待ちを進め、全UX台帳を維持する。
 
 2026-09-11 I03 texture-upload checkpoint: managed textureがeguiのimmutable画素を共有し、GPU転送前の全Vec cloneを除去。6000×4000の転送単体Release中央値30.540→22.692ms、一時コピー96MBを削減する。partial updateのpacked-row仮定による実GPUの下行消失も再現し、RowPitchに沿う転送へ修正。7幅×WARP／実GPUの画素、COW／所有権・free、不正入力と既存sampling／inversionを検証する。UI全体・資源peak、他静止画形式の初回表示を含む全UX台帳は継続する。

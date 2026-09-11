@@ -132,6 +132,16 @@ source durationからmax(20, ceil(seconds/5))個の区間を作り、その中�
 
 固定H.264素材のdebug検証で16コマ生成約1.119秒、4コマの終端sheet約0.327秒、memory clone取得約0.56～0.59msを観測した。これはUI表示遅延の保証ではない。実画素と単枚reference、density／端／UV、同textureで16位置を描画して追加uploadなし、世代／優先度／2枚LRU／texture上限を確認する。所有する可視960×576 windowと生成40秒MPEG-4素材では停止中hoverの非Seek、前半／後半thumbnail、クリックSeekとtab hoverを確認した。software decode条件の一例であり、長GOP／全codec／HDR／混在DPI／資源peak・本画面scrubは未認定・未完。
 
+## I03: 非圧縮BMPの疎な先行表示（2026-09-11）
+
+JPEGと同じforeground preview生成枠へ、内容判定による24bit BI_RGB／40-byte BITMAPINFOHEADERのBMPを追加する。[file headerの画素offset](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapfileheader)と[上下方向・4byte stride](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapinfoheader)を検査し、240×160以内の各出力行の中心に対応する原寸scanlineだけを読む。横方向も中心のnearest sampleとし、BGRから不透明RGBAへ変換する。原寸全体の一時allocationや追加worker／process／unsafeはなく、原寸decode・編集・保存はimage crateのまま。
+
+4,194,304画素以上かつ原寸budget内だけを対象にし、row allocationは1 MiB、総sample row読取は32 MiBまで。offsetと全画像末尾を実file長へ照合し、破損header／非対応のpalette・bitfields・alpha・profile形式・small／budget超過は先行previewを諦める。既存のcancellable reader、共有cache／source stamp／generation／mailboxと原寸成功・失敗時のplaceholder退役を共用する。疎なnearest表示のaliasingを許容する一時表示であり、原寸画質を置換しない。cold-storageでの多点Seek負荷は未測定。
+
+生成6000×4000 BMP、warm file-cacheのRelease各7回で先行なし原寸中央値75.8184ms、先行取得0.8922ms、先行あり原寸完了75.7522ms。総時間の差はばらつきの範囲であり、原寸高速化を主張しない。sample行は2,880,000 bytesで原寸72,000,000 bytesの4%。portrait／landscape・top-down／bottom-up・paddingの全sample画素、原寸不変、取消／上限／alpha BMPへのfallback、loader原寸前通知／terminal lifecycleを自動検証。Computer Use接続失敗のためこのcheckpointの可視表示確認は未実施。
+
+PNG／BMPを既存FFmpeg通常decode_fileへ渡す代案は、同じ生成24MPのRelease中央値で約119→434ms／74→199msとなったため採用しない。この測定は通常demux／変換込みの経路であり、FFmpeg codec単体や他の構成の一般的な性能判定ではない。PNG等の初回段階表示、全UI end-to-end／資源評価と全UX台帳は継続する。
+
 ## I03: managed textureの画素共有と行転送（2026-09-11）
 
 vendored egui-directx11はImageDataのArc<ColorImage>をmanaged textureのCPU backingとして保持する。全texture生成では画素Vecをcloneせず、同じimmutable画素を同期CreateTexture2Dへ渡す。partial更新だけArc::make_mutで共有元を保護し、唯一のownerなら同じallocationを更新する。free／置換でbackingを解放する。これはGPU textureのwindow間共有、decode RGBAの直接upload、常駐backing自体の除去ではない。

@@ -11,8 +11,23 @@ use thiserror::Error;
 
 use crate::decode::{self, DecodeError, DecodeOutput};
 
+mod bmp_preview;
 mod jpeg_preview;
-pub(crate) use jpeg_preview::jpeg_preview;
+
+pub(crate) fn first_image_preview(
+    path: &Path,
+    byte_limit: usize,
+    current: &dyn Fn() -> bool,
+) -> Result<Option<crate::CachedImagePreview>, ImageDecodeError> {
+    let reader = image::ImageReader::new(open(path, current)?)
+        .with_guessed_format()
+        .map_err(ImageDecodeError::Open)?;
+    match reader.format() {
+        Some(ImageFormat::Jpeg) => jpeg_preview::jpeg_preview(path, byte_limit, current),
+        Some(ImageFormat::Bmp) => bmp_preview::bmp_preview(reader.into_inner(), byte_limit),
+        _ => Ok(None),
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecodedImageFrame {

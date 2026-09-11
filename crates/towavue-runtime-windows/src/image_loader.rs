@@ -708,15 +708,19 @@ mod tests {
     }
 
     #[test]
-    fn cold_jpeg_preview_is_published_before_original_and_retires_on_terminal_paths() {
-        for mode in ["success", "failure", "cancel", "changed", "closed"] {
-            let root = std::env::temp_dir()
-                .join(format!("towavue-jpeg-first-{}-{mode}", std::process::id()));
+    fn cold_static_preview_is_published_before_original_and_retires_on_terminal_paths() {
+        for (extension, mode) in ["jpg", "bmp"].into_iter().flat_map(|extension| {
+            ["success", "failure", "cancel", "changed", "closed"].map(|mode| (extension, mode))
+        }) {
+            let root = std::env::temp_dir().join(format!(
+                "towavue-static-first-{}-{extension}-{mode}",
+                std::process::id()
+            ));
             std::fs::create_dir_all(&root).expect("owned fixture root");
-            let path = root.join("source.jpg");
+            let path = root.join(format!("source.{extension}"));
             image::RgbImage::from_pixel(2560, 1920, image::Rgb([12, 80, 190]))
                 .save(&path)
-                .expect("large JPEG");
+                .expect("large static image");
             let previews = PreviewCache::new(root.join("cache")).expect("preview cache");
             let shared = Arc::new((
                 Mutex::new(Mailbox {
@@ -727,7 +731,7 @@ mod tests {
             ));
             let mut loader = Some(ImageLoader {
                 shared: Arc::clone(&shared),
-                prefetch_worker: LatestTask::new("jpeg-preview-test").expect("prefetch worker"),
+                prefetch_worker: LatestTask::new("static-preview-test").expect("prefetch worker"),
             });
             let (started_tx, started_rx) = mpsc::channel();
             let (release_tx, release_rx) = mpsc::channel();
@@ -761,7 +765,7 @@ mod tests {
                 .as_ref()
                 .expect("loader")
                 .take_preview()
-                .expect("uncached JPEG first display");
+                .expect("uncached static first display");
             assert_eq!(preview.generation, generation);
             assert_eq!(preview.path, path);
             assert_eq!(preview.preview.source_size, (2560, 1920));
@@ -791,7 +795,7 @@ mod tests {
                     loader.as_ref().expect("loader").request(Vec::new());
                 }
                 "closed" => drop(loader.take()),
-                "changed" => std::fs::write(&path, b"replaced JPEG").expect("replace owned input"),
+                "changed" => std::fs::write(&path, b"replaced image").expect("replace owned input"),
                 _ => {}
             }
             release_tx.send(()).expect("release full decode");

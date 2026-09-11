@@ -83,6 +83,53 @@ pub fn decode_image(path: &Path) -> Result<DecodedImage, ImageDecodeError> {
 
 pub(crate) const IMAGE_BYTE_LIMIT: usize = 512 * 1024 * 1024;
 
+pub(crate) fn first_animation_frame(
+    path: &Path,
+    byte_limit: usize,
+    current: &dyn Fn() -> bool,
+) -> Result<Option<DecodedImageFrame>, ImageDecodeError> {
+    let result = (|| {
+        check_current(current)?;
+        let mut reader = image::ImageReader::new(open(path, current)?);
+        if let Ok(format) = ImageFormat::from_path(path) {
+            reader.set_format(format);
+        }
+        let reader = reader
+            .with_guessed_format()
+            .map_err(ImageDecodeError::Open)?;
+        let mut preview = |_, _, _: &[u8]| {};
+        let frames = match reader.format() {
+            Some(ImageFormat::Gif) => {
+                let mut decoder = GifDecoder::new(reader.into_inner())?;
+                decoder.set_limits(image::Limits::default())?;
+                animated_frames(decoder, byte_limit, current, &mut preview, true)?
+            }
+            Some(ImageFormat::Png) => {
+                let decoder =
+                    PngDecoder::with_limits(reader.into_inner(), image::Limits::default())?;
+                if !decoder.is_apng()? {
+                    return Ok(None);
+                }
+                animated_frames(decoder.apng()?, byte_limit, current, &mut preview, true)?
+            }
+            Some(ImageFormat::WebP) => {
+                let decoder = WebPDecoder::new(reader.into_inner())?;
+                if !decoder.has_animation() {
+                    return Ok(None);
+                }
+                animated_frames(decoder, byte_limit, current, &mut preview, true)?
+            }
+            Some(ImageFormat::Avif) => {
+                ffmpeg_frames(path, byte_limit, current, &mut preview, true)?
+            }
+            _ => return Ok(None),
+        };
+        Ok(frames.into_iter().next())
+    })();
+    check_current(current)?;
+    result
+}
+
 pub(crate) fn decode_image_for_prefetch(
     path: &Path,
     byte_limit: usize,
@@ -154,16 +201,16 @@ pub(crate) fn decode_image_with_preview(
             .map_err(ImageDecodeError::Open)?;
         let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
         let frames = match format {
-            ImageFormat::Avif => ffmpeg_frames(path, byte_limit, is_current, preview)?,
+            ImageFormat::Avif => ffmpeg_frames(path, byte_limit, is_current, preview, false)?,
             ImageFormat::Gif => {
                 let mut decoder = GifDecoder::new(open(path, is_current)?)?;
                 decoder.set_limits(image::Limits::default())?;
-                animated_frames(decoder, byte_limit, is_current, preview)?
+                animated_frames(decoder, byte_limit, is_current, preview, false)?
             }
             ImageFormat::WebP => {
                 let decoder = WebPDecoder::new(reader.into_inner())?;
                 if decoder.has_animation() {
-                    animated_frames(decoder, byte_limit, is_current, preview)?
+                    animated_frames(decoder, byte_limit, is_current, preview, false)?
                 } else {
                     vec![static_frame(decoder, byte_limit, is_current)?]
                 }
@@ -172,7 +219,7 @@ pub(crate) fn decode_image_with_preview(
                 let decoder =
                     PngDecoder::with_limits(reader.into_inner(), image::Limits::default())?;
                 if decoder.is_apng()? {
-                    animated_frames(decoder.apng()?, byte_limit, is_current, preview)?
+                    animated_frames(decoder.apng()?, byte_limit, is_current, preview, false)?
                 } else {
                     vec![static_frame(decoder, byte_limit, is_current)?]
                 }
@@ -202,6 +249,7 @@ fn ffmpeg_frames(
     byte_limit: usize,
     is_current: &(impl Fn() -> bool + ?Sized),
     preview: &mut ImagePreviewCallback<'_>,
+    first_only: bool,
 ) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
     let mut decoded = Vec::new();
     let mut remaining = byte_limit;
@@ -221,13 +269,18 @@ fn ffmpeg_frames(
                 preview(frame.width, frame.height, &frame.rgba);
             }
             decoded.push(frame);
+            if first_only {
+                return false;
+            }
         }
         true
     });
     if let Some(error) = failure {
         return Err(error);
     }
-    result?;
+    if !(first_only && decoded.len() == 1 && matches!(result, Err(DecodeError::ConsumerClosed))) {
+        result?;
+    }
     let presentation_times = decoded
         .iter()
         .map(|frame| frame.presentation_time)
@@ -323,6 +376,7 @@ fn animated_frames<'a>(
     byte_limit: usize,
     is_current: &(impl Fn() -> bool + ?Sized),
     preview: &mut ImagePreviewCallback<'_>,
+    first_only: bool,
 ) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
     let mut frames = Vec::new();
     let mut remaining = byte_limit;
@@ -339,6 +393,9 @@ fn animated_frames<'a>(
             preview(frame.width, frame.height, &frame.rgba);
         }
         frames.push(frame);
+        if first_only {
+            break;
+        }
     }
     Ok(frames)
 }
@@ -689,6 +746,19 @@ mod tests {
             );
             let reference = decode_image(&path).expect("reference decode");
             assert_eq!(reference.frames.len(), 2, "{extension}");
+            let first = first_animation_frame(&path, 32 * 24 * 4, &|| true)
+                .expect("one-frame budget")
+                .expect("first frame");
+            assert_eq!(first.rgba, reference.frames[0].rgba, "{extension}");
+            assert_eq!((first.width, first.height), (32, 24));
+            assert!(matches!(
+                first_animation_frame(&path, 1, &|| true),
+                Err(ImageDecodeError::TooLarge)
+            ));
+            assert!(matches!(
+                first_animation_frame(&path, IMAGE_BYTE_LIMIT, &|| false),
+                Err(ImageDecodeError::Cancelled)
+            ));
             let mut previews = Vec::new();
             let decoded =
                 decode_image_with_preview(&path, IMAGE_BYTE_LIMIT, &|| true, &mut |w, h, rgba| {
@@ -753,6 +823,10 @@ mod tests {
             })
             .expect("decode GIF fixture");
         assert_eq!(previews, vec![(2, 1, decoded.frames[0].rgba.clone())]);
+        assert_eq!(
+            first_animation_frame(&path, 8, &|| true).expect("one-frame budget"),
+            Some(decoded.frames[0].clone())
+        );
         let current = std::cell::Cell::new(true);
         let cancelled = decode_image_with_preview(
             &path,

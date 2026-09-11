@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 I03/U10 animation-prefetch checkpoint: 隣のGIF／APNG／animated WebP／AVIFの先頭だけを既存workerで先読みし、原寸cacheとは別の有界previewへ供給する。4形式の画素・元寸法・原寸全frame／delay維持、一frame予算・取消／世代・非通知・生成集約を回帰確認。全608 tests／Release成功。通常960×576の生成GIFでLoading中のpreview→原寸を可視確認したが、変更前も最初の約200ms観測ではpreviewがあり、可視速度差は未認定。1fefec9のCI34591591601成功。cold／全素材／peak・UI全般と全UX台帳の残件は継続する。
+
 2026-09-11 H1/I06/V05 input-pairing checkpoint: 同frameの後続gestureによって先の選択・pan・Alt回転の終点／click判定／修飾キーが変わる不具合を再現・修正。最初のreleaseで区切り、選択には押下時刻・移動履歴を保持する。前frame保持・原点復帰・長押し・同座標Alt違い・所有権を回帰確認。全606 tests成功、動画GPU preview／Undo／export再読込と通常960×576生成PNGの選択→click preview→Escapeを確認。右button／Alt保持dragの今回の確認は自動入力で、全native timing／mixed-DPIは残る。643606aのCI34590038494成功。全UX goalは未完のまま継続する。
 
 2026-09-11 M01 input-order checkpoint: 可視不発を追跡し、release後のPointerGoneによる確定取消と、batched press／moveの遅延hit-testによるdrag owner移動をそれぞれ回帰で再現・修正。退出は入力順で処理し、logoの所有pressを既存egui APIへ固定する。短いclick・foreign owner取消・3方向・実画像操作面とtabを確認。全603 tests／Release成功、最終通常960×576の生成PNGでView→Escape→Edit→Escape→Fileと通常clickが通る。3a019b7のCI34588315920成功。最大化／混在DPI・全focus/style、全UX台帳の残件は継続する。

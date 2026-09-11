@@ -301,8 +301,17 @@ impl ImageLoader {
                 let image = if let Some(image) = cached {
                     image
                 } else {
-                    let Ok(Some(image)) = decode(&path, remaining, &current) else {
-                        continue;
+                    let image = match decode(&path, remaining, &current) {
+                        Ok(Some(image)) => image,
+                        Ok(None) => {
+                            if let Some(previews) = &previews {
+                                previews.prepare_animation_preview(&path, remaining, &|| {
+                                    current() && ImageStamp::read(&path) == Some(stamp)
+                                });
+                            }
+                            continue;
+                        }
+                        Err(_) => continue,
                     };
                     if image.is_animated() || ImageStamp::read(&path) != Some(stamp) || !current() {
                         continue;
@@ -1290,6 +1299,121 @@ mod tests {
             drop(loader);
             std::fs::remove_dir_all(root).expect("remove owned fixtures");
         }
+    }
+
+    #[test]
+    fn animation_prefetch_seeds_only_a_preview_and_foreground_keeps_all_frames() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-animation-prefetch-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("owned fixtures");
+        let ffmpeg = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+            .join("bin/ffmpeg.exe");
+        for (extension, codec) in [
+            ("gif", "gif"),
+            ("apng", "apng"),
+            ("webp", "libwebp_anim"),
+            ("avif", "libaom-av1"),
+        ] {
+            let path = root.join(format!("source.{extension}"));
+            let output = std::process::Command::new(&ffmpeg)
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=480x320:rate=2:duration=1",
+                    "-frames:v",
+                    "2",
+                    "-c:v",
+                    codec,
+                    "-threads",
+                    "1",
+                ])
+                .arg(&path)
+                .output()
+                .expect("generate animation");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let reference = crate::decode_image(&path).expect("full reference");
+            assert_eq!(reference.frames.len(), 2);
+            let cache =
+                PreviewCache::new(root.join(format!("cache-{extension}"))).expect("preview cache");
+            let (sent, ready) = mpsc::channel();
+            let loader = ImageLoader::new(cache.clone(), move || {
+                let _ = sent.send(());
+            })
+            .expect("loader");
+            loader.prefetch(path.clone());
+            wait_for_prefetch(&loader);
+            let preview = cache
+                .cached_image(&path)
+                .expect("lookup")
+                .unwrap_or_else(|| panic!("prefetched first frame: {extension}"));
+            assert_eq!(preview.source_size, (480, 320));
+            assert_eq!((preview.image.width, preview.image.height), (240, 160));
+            for y in 0..160usize {
+                for x in 0..240usize {
+                    let source = (y * 2 * 480 + x * 2) * 4;
+                    let target = (y * 240 + x) * 4;
+                    assert_eq!(
+                        preview.image.rgba[target..target + 4],
+                        reference.frames[0].rgba[source..source + 4],
+                        "{extension}: {x},{y}"
+                    );
+                }
+            }
+            assert!(
+                loader
+                    .shared
+                    .0
+                    .lock()
+                    .expect("mailbox")
+                    .cache
+                    .lock()
+                    .expect("original cache")
+                    .entries
+                    .is_empty()
+            );
+            assert!(ready.try_recv().is_err());
+            assert!(loader.take_completed().is_none() && loader.take_preview().is_none());
+            assert_eq!(
+                cache
+                    .filmstrip(&path, towavue_core::MediaKind::Image)
+                    .expect("shared filmstrip")
+                    .image,
+                preview.image
+            );
+            assert_eq!(
+                std::fs::read_dir(root.join(format!("cache-{extension}")))
+                    .expect("cache files")
+                    .count(),
+                0
+            );
+            loader.request(vec![path.clone()]);
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let completed = loop {
+                if let Some(completed) = loader.take_completed() {
+                    break completed;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "foreground did not finish"
+                );
+                ready
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("foreground notification");
+            };
+            assert_eq!(
+                completed.images[0].1.as_ref().expect("original").as_ref(),
+                &reference
+            );
+            drop(loader);
+        }
+        std::fs::remove_dir_all(root).expect("remove owned fixtures");
     }
 
     #[test]

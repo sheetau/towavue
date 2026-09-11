@@ -475,7 +475,17 @@ fn unvisited_static_filmstrips_share_the_bounded_first_preview() {
 
 #[test]
 fn static_first_preview_reuses_pixels_without_waiting_for_another_generator() {
-    for extension in ["jpg", "bmp"] {
+    for extension in ["jpg", "bmp", "gif"] {
+        let prepare: fn(
+            &PreviewCache,
+            &Path,
+            usize,
+            &dyn Fn() -> bool,
+        ) -> Option<CachedImagePreview> = if extension == "gif" {
+            PreviewCache::prepare_animation_preview
+        } else {
+            PreviewCache::prepare_image_preview
+        };
         let cache = cache("static-first-sharing");
         let path = cache.root.join(format!("source.{extension}"));
         image::RgbImage::from_pixel(2560, 1920, image::Rgb([12, 80, 190]))
@@ -487,7 +497,8 @@ fn static_first_preview_reuses_pixels_without_waiting_for_another_generator() {
         let worker_path = path.clone();
         let (sent, received) = mpsc::channel();
         let worker = thread::spawn(move || {
-            sent.send(worker_cache.prepare_image_preview(
+            sent.send(prepare(
+                &worker_cache,
                 &worker_path,
                 crate::image::IMAGE_BYTE_LIMIT,
                 &|| true,
@@ -502,31 +513,47 @@ fn static_first_preview_reuses_pixels_without_waiting_for_another_generator() {
                 .expect("foreground must not wait for another generator")
                 .is_none()
         );
-        let preview = cache
-            .prepare_image_preview(&path, crate::image::IMAGE_BYTE_LIMIT, &|| true)
+        let preview = prepare(&cache, &path, crate::image::IMAGE_BYTE_LIMIT, &|| true)
             .expect("generate after release");
         let held = cache.claim_generation(&key).expect("hold generation again");
         assert_eq!(
-            cache
-                .prepare_image_preview(&path, crate::image::IMAGE_BYTE_LIMIT, &|| true)
+            prepare(&cache, &path, crate::image::IMAGE_BYTE_LIMIT, &|| true)
                 .expect("warm reuse")
                 .image,
             preview.image
         );
-        assert!(
-            cache
-                .prepare_image_preview(&path, crate::image::IMAGE_BYTE_LIMIT, &|| false)
-                .is_none()
-        );
+        assert!(prepare(&cache, &path, crate::image::IMAGE_BYTE_LIMIT, &|| false).is_none());
         drop(held);
         fs::write(&path, b"changed input").expect("replace owned source");
-        assert!(
-            cache
-                .prepare_image_preview(&path, crate::image::IMAGE_BYTE_LIMIT, &|| true)
-                .is_none()
-        );
+        assert!(prepare(&cache, &path, crate::image::IMAGE_BYTE_LIMIT, &|| true).is_none());
         assert!(cache.in_flight.0.lock().expect("pending").is_empty());
         fs::remove_dir_all(&cache.root).expect("remove owned cache");
+    }
+}
+
+#[test]
+fn speculative_preview_drops_changed_cancelled_or_failed_results_and_releases_its_lease() {
+    for mode in ["changed", "cancelled", "failed"] {
+        let cache = cache("preview-publication");
+        let path = cache.root.join("source.gif");
+        fs::write(&path, b"source identity").expect("owned source");
+        let current = std::cell::Cell::new(true);
+        let result = cache.prepare_preview(&path, &|| current.get(), || {
+            match mode {
+                "changed" => fs::write(&path, b"new identity").expect("change owned source"),
+                "cancelled" => current.set(false),
+                "failed" => return None,
+                _ => unreachable!(),
+            }
+            Some(CachedImagePreview {
+                source_size: (1, 1),
+                image: preview_pixels(1, 1, &[12, 34, 56, 255]),
+            })
+        });
+        assert!(result.is_none(), "{mode}");
+        assert!(cache.memory.lock().expect("memory").entries.is_empty());
+        assert!(cache.in_flight.0.lock().expect("lease").is_empty());
+        fs::remove_dir_all(&cache.root).expect("remove owned fixtures");
     }
 }
 

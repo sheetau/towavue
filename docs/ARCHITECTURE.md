@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## I03/U10: アニメーションの先頭preview先読み（2026-09-11）
+
+既存の隣画像／次の見開き先読みで原寸cache対象外になったGIF・APNG・animated WebP・AVIFは、同じ一つのspeculative workerで最初の合成済みRGBA frameだけを取得する。GIF／APNG／WebPは原寸と同じimage decoder、AVIFは既存FFmpeg decodeを使用し、最初のvideo frameでconsumerを停止する。この正常な早期停止だけConsumerClosedを受理し、取消・予算超過・他のdecode失敗は成功にしない。単フレームGIF／AVIFもpreview対象に含む。通常静止画の原寸先読みとforegroundの全frame復号・delayは変更しない。
+
+この一時frameは残りの先読みRGBA予算以下だけ受理し、従来のnearest samplingで240×160以内へ縮小後に解放する。先読みbatchの10件／256 MiB原寸枠、host共通64件／16 MiBの縮小枠は増やさず、アニメーションの先頭だけを原寸cacheへ入れない。codec内部のbufferや最初のframe取得前の入力走査を含めたprocess全体のpeak保証ではない。先読みは全frame列を常駐させる機能ではなく、未訪問画像への最初の表示を準備するものとする。
+
+既存のsource key・元寸法・非blocking生成leaseを静止画先行previewと共用する。同keyが生成中なら重複／待機せず、取得済みpreviewは再利用する。decode／縮小中はUI/cache mutexを保持せず、generation・close／取消・source stampを登録前に確認する。失敗・変更・取消は登録せずleaseを解放する。先読みから表示通知・GPU upload・disk encodeを行わない。通常のforeground要求やfilmstrip等がこのmemory previewを使い、原寸完成／失敗時の退役は既存契約を維持する。先読み対象外の画像や先読み完了前の移動について黒い待機をなくす保証はしない。
+
 ## U04: overlayと操作状態の共通色（2026-09-11）
 
 eguiのpanel／window／menu／popup／入力欄の背景は共通の黒、枠線と弱い面は#181818、通常・補助文字は#808080、選択・hover・focusの文字は白を使用する。hover面は既存の#4C4C4Cを維持する。command paletteも黒と共通枠線を使い、常時focusする検索文字は白、枠線を含む最大幅600 logical pxを保つ。playlistは文字の固定色を持たず、selectable buttonの状態色に従う。filmstripとdrag cardの下地は#181818へ揃える。

@@ -2,6 +2,21 @@ use std::collections::VecDeque;
 
 use ffmpeg_next::{ChannelLayout, Error, filter, format::Sample, frame};
 
+pub(crate) fn output_sample_boundary(nanoseconds: i64, sample_rate: u32, rate: f32) -> u64 {
+    // Export's malformed NaN rate still reaches filter validation, not integer division.
+    if rate.is_nan() {
+        return 0;
+    }
+    debug_assert!((0.25..=4.0).contains(&rate));
+    // Every f32 master rate in the validated range is an exact multiple of 2^-25.
+    // Integer ceil avoids padding an aligned join because floating-point seconds rounded up.
+    const SCALE: i128 = 1 << 25;
+    let rate_units = (f64::from(rate) * SCALE as f64) as i128;
+    let numerator = i128::from(nanoseconds.max(0)) * i128::from(sample_rate) * SCALE;
+    let denominator = 1_000_000_000 * rate_units;
+    ((numerator + denominator - 1) / denominator).min(i128::from(u64::MAX)) as u64
+}
+
 pub(crate) struct AudioTempo {
     graph: Option<filter::Graph>,
     sample_rate: u32,
@@ -117,6 +132,42 @@ pub(crate) fn filters(mut rate: f64, precision: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_sample_boundaries_use_exact_master_rate_and_integer_ceil() {
+        for sample_rate in [44100_u32, 48000, 96000, 192000] {
+            for (rate, rate_numerator, rate_denominator) in [
+                (0.25, 1_i128, 4_i128),
+                (0.5, 1, 2),
+                (1.0, 1, 1),
+                (1.25, 5, 4),
+                (1.5, 3, 2),
+                (4.0, 4, 1),
+                (1.1, 9_227_469, 8_388_608),
+            ] {
+                for nanos in (0..2000).map(|ms| ms * 1_000_000).chain([
+                    1,
+                    20_833,
+                    20_834,
+                    999_999_999,
+                    1_000_000_001,
+                    i64::MAX,
+                ]) {
+                    let numerator = i128::from(nanos) * i128::from(sample_rate) * rate_denominator;
+                    let denominator = 1_000_000_000 * rate_numerator;
+                    let expected =
+                        numerator / denominator + i128::from(numerator % denominator != 0);
+                    assert_eq!(
+                        output_sample_boundary(nanos, sample_rate, rate),
+                        expected as u64,
+                        "{nanos} ns / {sample_rate} Hz / {rate}x"
+                    );
+                }
+            }
+        }
+        assert_eq!(output_sample_boundary(-1, 48000, 1.0), 0);
+        assert_eq!(output_sample_boundary(17_000_000, 48000, f32::NAN), 0);
+    }
 
     #[test]
     fn tempo_changes_duration_without_transposing_a_stereo_tone() {

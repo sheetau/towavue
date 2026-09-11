@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## V03/A02: 音声timelineの整数sample境界（2026-09-11）
+
+再生と保存の編集区間境界は共通の整数計算で `ceil(編集ns × sample rate / (10^9 × master rate))` を求め、その差を区間の出力frame数とする。検証済みmaster rate 0.25～4.0のf32はすべて2^-25の整数倍なので、この固定単位へ正確に変換しi128で計算する。秒の浮動小数点丸めにより17ms等の境界へ余分な一sampleを足さない。非整列境界は従来どおり切り上げ、局所stretchのtempo処理・gain・source切出し・真に短いatempo末尾のpaddingは維持する。
+
+この修正は音声producerとexport filterの予定sample数を一致させるもので、初期Seekで失われる低精度PTSの位相復元や、長い削除区間を復号しない最適化ではない。WASAPIの所有権・queue・clockとUI／編集modelは変更しない。
+
 ## G01/U06: native file dialog取消後のfocus（2026-09-11）
 
 file／folder／export pickerの開始成功時に、そのwindowのegui focusとactive tab（Welcomeならなし）・media generationを保持する。取消／失敗後も同じtabとgenerationで、別modal／guardが続かない場合だけfocusを戻す。選択成功、source／tab変更、残るguard、対応するpending dialogがない遅延結果は保持先を破棄する。再描画でボタンを再登録した後の既存accessibility検査により、消えたmenu項目などの非live focusは除去する。勝手な再実行／ファイル再選択はせず、Enter等の次の操作を待つ。

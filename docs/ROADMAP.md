@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-11 V03/A02 sample-boundary checkpoint: 17ms等の整列境界が浮動小数点誤差で1sample切り上がり、再生／保存の継ぎ目に無音挿入・後続sample欠落が起きる問題を再現・修正。master速度を正確な固定単位へ変換し、共通i128計算で出力sample数を求める。生成音声のgain／Delete後の全PCM、4 sample rates×7速度の整数境界、短い選択の出力数と既存stretchを確認。短区間4倍速の選択有無による先頭波形差を新たに観測し、音質残件として保持する。初期Seekの位相・長い削除区間の負荷・全UX台帳は継続する。
+
 2026-09-11 G01/U06 dialog-focus checkpoint: native pickerの取消で元のkeyboard focusが失われる問題を再現・修正。開始時のfocus・tab・media generationを保持し、取消／失敗時に同じ対象で別modalが続かない場合だけ復帰する。選択成功・世代／tab変更・guard・孤立完了では破棄し、勝手にcommandを再実行しない。2回帰と全612 tests／Release成功。通常960×576のWelcomeでOpen File／Open FolderのEnter→Escape→元button復帰→Enter再操作を確認。前回の単発click不発は再現せず、全入口／IME／mixed-DPI・全UX台帳は継続する。
 
 2026-09-11 E01 JPEG simple-text checkpoint: 標準XMPのAlbum／Composer／Genreを既存4項目へ追加。namespaceに基づく単純文字値の読取・Keep／Set／Remove・JPEG保存とUIを接続する。属性／要素形式・特殊文字・混在言語／作者保持、重複／配列／修飾値の拒否、非XMP bytes／画素一致と保存先保護を確認。全610 tests／Release成功。通常960×576で3項目の既存値・Albumへの日本語／特殊文字入力・Cancel復帰を確認。実IME composition／全DPI、残る3項目とEXIF／IPTC／COM・他形式／全品質、全UX台帳は未完のまま継続する。

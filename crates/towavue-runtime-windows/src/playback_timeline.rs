@@ -92,8 +92,7 @@ pub(super) fn decode_audio(
     let source_start = first.source_target(target);
     let source_end = segments.last().expect("nonempty segments").source_end();
     let sample_at = |time: MediaTime| {
-        (time.as_seconds_f64() / f64::from(master_rate) * f64::from(format.sample_rate)).ceil()
-            as u64
+        crate::tempo::output_sample_boundary(time.as_nanoseconds(), format.sample_rate, master_rate)
     };
     let mut emitted = 0_u64;
     let mut index = 0;

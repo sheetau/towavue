@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-11 V03/A02 sample-boundary checkpoint: 再生／保存の編集区間sample数を共通整数計算に変更。17ms等の境界で余分な無音と後続sample欠落を再現し、生成音声の部分gain／Delete全PCM一致を確認。4 sample rates×7速度・非整列／長時間の境界と短区間の選択sample数を回帰化。実WASAPIの無音再生でworker保持・停止／再開・編集clock・復旧も通過。17～84msを4倍速で選択すると、同じ開始から終端を設けない再生とは先頭波形が異なることも観測した。短区間速度処理の音質は未認定で、初期Seek位相・長い削除区間負荷・全codec／UI・全台帳とともに継続する。
+
 2026-09-11 G01/U06 dialog-focus checkpoint: pickerの取消／失敗時に同じtab・media generationの開始元focusを復帰し、別modal／guard・選択成功・対象変更では破棄する。command再実行なしと次のEnter一回だけのdispatchを含む2回帰、全612 tests／Release成功。通常960×576でOpen File／Open FolderのEnter→Escape→focus復帰→Enter再操作を可視確認。前回click不発は再現せず。全入口／実IME／mixed-DPI・全台帳は未完のまま継続する。
 
 2026-09-11 E01 JPEG simple-text checkpoint: Album／Composer／GenreをxmpDMの単純文字値として追加し、計7項目の既存値UI・Keep／Set／Remove・保存へ接続。属性／要素・namespace alias・特殊文字・混在dc値、型違い／重複／修飾の拒否を回帰確認。JPEG関連11 tests、PNG／JPEGのUI／保存4 testsと全610 tests／Release成功。通常960×576で3項目の値表示とAlbum日本語／特殊文字入力・Cancelを確認し、保存の新規実画面試験は行わない。Album artist／Date／Track、他形式・EXIF／IPTC／COM・Extended XMP、全DPI／実IME／品質と全台帳は継続する。

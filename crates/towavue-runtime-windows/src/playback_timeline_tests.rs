@@ -477,56 +477,166 @@ fn selection_bounds_decode_without_rebasing_or_mutating_the_edited_plan() {
 fn selected_audio_stops_at_planned_samples_inside_a_stretched_span() {
     let (directory, path) = fixture(true);
     let plan = plan();
-    let selected = range(375, 1237);
     let format = AudioFormat {
         sample_rate: 48000,
         channels: 2,
     };
-    for rate in [0.25, 1.0, 4.0] {
-        let mut count = 0;
-        let mut samples = Vec::new();
-        timeline::decode_audio(
-            &path,
-            &plan,
-            selected.start(),
-            Some(selected.end()),
-            rate,
-            format,
-            &AtomicBool::new(false),
-            |chunk| {
+    for selected in [range(375, 1237), range(17, 84), range(69, 139)] {
+        for (rate, numerator, denominator) in [(0.25, 1_i64, 4_i64), (1.0, 1, 1), (4.0, 4, 1)] {
+            let mut count = 0;
+            let mut samples = Vec::new();
+            timeline::decode_audio(
+                &path,
+                &plan,
+                selected.start(),
+                Some(selected.end()),
+                rate,
+                format,
+                &AtomicBool::new(false),
+                |chunk| {
+                    assert!(
+                        chunk.presentation_time >= selected.start()
+                            && chunk.presentation_time < selected.end()
+                    );
+                    assert!(chunk.frames <= 1024);
+                    count += chunk.frames;
+                    samples.extend(chunk.bytes);
+                    true
+                },
+            )
+            .expect("selected audio");
+            let at = |time: MediaTime| {
+                let samples = time.as_nanoseconds() * 48000 * denominator;
+                let divisor = 1_000_000_000 * numerator;
+                ((samples + divisor - 1) / divisor) as usize
+            };
+            assert_eq!(count, at(selected.end()) - at(selected.start()));
+            let mut reference = Vec::new();
+            timeline::decode_audio(
+                &path,
+                &plan,
+                selected.start(),
+                None,
+                rate,
+                format,
+                &AtomicBool::new(false),
+                |chunk| {
+                    reference.extend(chunk.bytes);
+                    true
+                },
+            )
+            .expect("same seek reference");
+            if selected == range(375, 1237) || rate == 1.0 {
                 assert!(
-                    chunk.presentation_time >= selected.start()
-                        && chunk.presentation_time < selected.end()
+                    samples[..1024] == reference[..1024],
+                    "selection stop does not rebase its initial PCM: {selected:?}, {rate}x"
                 );
-                assert!(chunk.frames <= 1024);
-                count += chunk.frames;
-                samples.extend(chunk.bytes);
-                true
-            },
-        )
-        .expect("selected audio");
-        let at =
-            |time: MediaTime| (time.as_seconds_f64() / f64::from(rate) * 48000.0).ceil() as usize;
-        assert_eq!(count, at(selected.end()) - at(selected.start()));
-        let mut reference = Vec::new();
-        timeline::decode_audio(
-            &path,
-            &plan,
-            selected.start(),
-            None,
-            rate,
-            format,
-            &AtomicBool::new(false),
-            |chunk| {
-                reference.extend(chunk.bytes);
-                true
-            },
-        )
-        .expect("same seek reference");
-        assert!(
-            samples[..1024] == reference[..1024],
-            "selection stop does not rebase its initial PCM"
-        );
+            }
+        }
     }
+    fs::remove_dir_all(directory).expect("remove owned fixture");
+}
+
+#[test]
+fn sample_aligned_timeline_joins_do_not_pad_or_drop_audio_frames() {
+    let (directory, path) = fixture(true);
+    let edits = vec![
+        EditOperation::Timeline(TimelineEdit::SetVolume(range(17, 35), 0.5)),
+        EditOperation::Timeline(TimelineEdit::Delete(range(69, 84))),
+    ];
+    let plan = EditTimeline::from_operations(time(2000), &edits).expect("plan");
+    let mut source = Vec::new();
+    decode::decode_file(&path, |output| {
+        if let DecodeOutput::Audio(chunk) = output {
+            source.extend(chunk.bytes);
+        }
+        true
+    })
+    .expect("source PCM");
+    let expected: Vec<_> = source
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !(69 * 48..84 * 48).contains(index))
+        .flat_map(|(index, frame)| {
+            let gain = if (17 * 48..35 * 48).contains(&index) {
+                0.5
+            } else {
+                1.0
+            };
+            frame
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(move |sample| f32::from_le_bytes(*sample) * gain)
+        })
+        .collect();
+    let target = directory.join("aligned.wav");
+    crate::export_media(&crate::ExportRequest {
+        source: path.clone(),
+        target: target.clone(),
+        kind: towavue_core::MediaKind::Audio,
+        operations: edits,
+        hardware_encode: false,
+    })
+    .expect("export");
+    let mut exported = Vec::new();
+    decode::decode_file(&target, |output| {
+        if let DecodeOutput::Audio(chunk) = output {
+            exported.extend(chunk.bytes);
+        }
+        true
+    })
+    .expect("export PCM");
+    let mut played = Vec::new();
+    timeline::decode_audio(
+        &path,
+        &plan,
+        MediaTime::ZERO,
+        None,
+        1.0,
+        AudioFormat {
+            sample_rate: 48000,
+            channels: 2,
+        },
+        &AtomicBool::new(false),
+        |chunk| {
+            played.extend(chunk.bytes);
+            true
+        },
+    )
+    .expect("playback PCM");
+    let mut failures = Vec::new();
+    for (name, bytes) in [("playback", played), ("export", exported)] {
+        assert_eq!(bytes.len(), expected.len() * 4, "{name} length");
+        let error = bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(&expected)
+            .map(|(actual, expected)| (f32::from_le_bytes(*actual) - expected).abs())
+            .fold(0.0_f32, f32::max);
+        if error > 1.0 / 32768.0 {
+            failures.push(format!("{name}: {error}"));
+        }
+    }
+    assert!(failures.is_empty(), "sample-axis mismatch: {failures:?}");
+    let saved = fs::read(&target).expect("saved target");
+    assert!(
+        crate::export_media(&crate::ExportRequest {
+            source: path.clone(),
+            target: target.clone(),
+            kind: towavue_core::MediaKind::Audio,
+            operations: vec![
+                EditOperation::Timeline(TimelineEdit::Keep(range(0, 17))),
+                EditOperation::SetRate(f32::NAN),
+            ],
+            hardware_encode: false,
+        })
+        .is_err(),
+        "invalid rate must fail without panicking or overwriting"
+    );
+    assert_eq!(fs::read(&target).expect("protected target"), saved);
     fs::remove_dir_all(directory).expect("remove owned fixture");
 }

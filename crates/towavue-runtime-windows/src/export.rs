@@ -856,9 +856,11 @@ fn timeline_filters(
             }
             // atempo may produce a short tail. Keep every join on the planned sample axis.
             let sample_at = |ns: i64| {
-                (ns as f64 / 1_000_000_000.0 / f64::from(master.rate)
-                    * f64::from(time_base.denominator()))
-                .ceil() as u64
+                crate::tempo::output_sample_boundary(
+                    ns,
+                    time_base.denominator() as u32,
+                    master.rate,
+                )
             };
             let samples =
                 sample_at(edited_ns + span.duration().as_nanoseconds()) - sample_at(edited_ns);

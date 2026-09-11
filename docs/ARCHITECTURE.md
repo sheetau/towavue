@@ -156,6 +156,8 @@ PreviewCacheの既存64件／16 MiB枠とsource stamp、ImageLoaderの世代付�
 
 生成6000×4000 JPEGのwarm file-cache・Release各7回では、先行なし原寸中央値42.377ms、先行ありpreview 12.984ms／原寸55.549ms。早い低画質表示と引換えに原寸完了は約13ms遅くなる。この追加decode・圧縮コピー・software負荷を許容し、大きなJPEGの初期応答を優先する。UI end-to-end、cold-storage、全JPEG方式／色管理・資源peakの保証ではない。他の静止画形式、総decode高速化、libjpeg-turbo採否は引き続き測定対象とする。
 
+追加品質検証では2571×1933の生成9種類（通常／progressiveのYCbCr・gray・CMYK、黒版ありCMYK、直接RGB）を、Pillow 12.3.0による独立復号の4代表色と原寸decoderへ比較し、各RGBA channel差5以内・元寸法・縮小寸法・全alpha不透明を確認する。これは任意fixture生成付きopt-inで、通常CIの実行証拠ではない。外部生成不要のgray黒／白／中間階調回帰は通常テストに含む。production経路は変更せず、YCCK・ICC色管理・写真の全画素誤差・可視表示時間は未検証のままとする。
+
 ## I03/U10: 静止画先読み結果のpreview共用（2026-09-10）
 
 既存の隣画像一件／256 MiBの静止画先読みは、原寸cacheへの登録後、decoded-cache mutexを解放してから同じ原寸の借用frameをPreviewCacheへ渡す。既存の240×160以内の縮小、source metadata key、host全体64件／16 MiBを使い、追加decode／補助process／disk encodeはしない。原寸cache hitでも元寸法付きpreviewを再供給し、縮小側だけがevictionされた場合に再decodeしない。先読みの静止画限定／元画質／枚数／順序は変えず、animation／AVIFの先読みやvideo sheetを追加したという意味ではない。

@@ -11,6 +11,8 @@
 
 ## 作業台帳
 
+2026-09-11 I03 JPEG品質checkpoint: 9種の通常／progressive・gray・直接RGB・CMYK（黒版あり含む）で独立decoderと原寸への代表色比較、寸法・alphaを確認。grayは通常回帰、外部生成matrixは明示opt-inとし、production変更はない。YCCK／ICC・写真全画素・可視latency／他形式の初回表示と全台帳を継続する。
+
 2026-09-11 I03転送checkpoint: rendererの全texture生成でArc<ColorImage>を保持し、余分な画素cloneを省く。partialだけCOWとし、実GPUで再現したRowPitch無視の行消失を修正。7幅のGPU画素・共有元／所有権と既存描画を確認する。24MP転送単体はRelease中央値約31→23ms、UI end-to-end／常駐memory改善を示す値ではない。初回表示・cold・全JPEG品質／資源peakと全台帳は継続する。
 
 2026-09-11 I03 JPEG-first checkpoint: 大きなJPEGの原寸cache missへ同梱FFmpegの縮小復号を追加し、元寸法・EXIFを保つpreviewを一件mailboxで先行通知する。原寸／先読み経路の画質は変えず、非対応時は原寸へ戻す。8向きの寸法・代表色と、原寸前の通知／cache共用／原寸置換・failure／cancel／source変更／closeを回帰化。warm Release標本では約13msでpreview、原寸は約42→55msへ増加する。PNG等の初回preview、cold／UI end-to-end・全JPEG方式／peak、および全台帳は未完のまま維持する。

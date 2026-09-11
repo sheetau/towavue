@@ -125,6 +125,103 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires Pillow-generated fixtures; run scripts/generate-jpeg-preview-fixtures.py"]
+    fn jpeg_preview_matches_independent_encoding_and_color_samples() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/jpeg-preview");
+        for name in [
+            "RGB-False",
+            "RGB-True",
+            "L-False",
+            "L-True",
+            "CMYK-False",
+            "CMYK-True",
+            "CMYK-black-False",
+            "CMYK-black-True",
+            "RGB-direct",
+        ] {
+            let path = root.join(format!("{name}.jpg"));
+            let expected = std::fs::read(path.with_extension("samples"))
+                .expect("run scripts/generate-jpeg-preview-fixtures.py first");
+            assert_eq!(expected.len(), 16, "{name}");
+            let reference = decode_image(&path).expect("original JPEG");
+            let preview = jpeg_preview(&path, IMAGE_BYTE_LIMIT, &|| true)
+                .expect("preview decode")
+                .expect("supported large JPEG");
+            assert_eq!(reference.dimensions(), (2571, 1933), "{name}");
+            assert_eq!(preview.source_size, reference.dimensions(), "{name}");
+            let image = preview.image;
+            assert_eq!((image.width, image.height), (213, 160), "{name}");
+            assert_eq!(image.rgba.len(), 213 * 160 * 4);
+            assert!(
+                image
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .all(|pixel| pixel[3] == 255)
+            );
+            for (index, (x, y)) in [(1, 1), (3, 1), (1, 3), (3, 3)].into_iter().enumerate() {
+                let small =
+                    ((image.height * y / 4 * image.width + image.width * x / 4) * 4) as usize;
+                let full = ((1933 * y / 4 * 2571 + 2571 * x / 4) * 4) as usize;
+                for channel in 0..4 {
+                    let expected = expected[index * 4 + channel];
+                    let original = reference.frames[0].rgba[full + channel];
+                    let reduced = image.rgba[small + channel];
+                    assert!(
+                        original.abs_diff(expected) <= 5,
+                        "{name}: original {original}, expected {expected}"
+                    );
+                    assert!(
+                        reduced.abs_diff(expected) <= 5,
+                        "{name}: preview {reduced}, expected {expected}"
+                    );
+                    assert!(
+                        reduced.abs_diff(original) <= 5,
+                        "{name}: preview {reduced}, original {original}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn jpeg_preview_preserves_grayscale_and_opaque_alpha() {
+        let path =
+            std::env::temp_dir().join(format!("towavue-gray-jpeg-{}.jpg", std::process::id()));
+        image::GrayImage::from_fn(2571, 1933, |x, y| {
+            image::Luma([match (x < 1285, y < 966) {
+                (true, true) => 0,
+                (false, true) => 80,
+                (true, false) => 170,
+                (false, false) => 255,
+            }])
+        })
+        .save(&path)
+        .expect("owned grayscale JPEG");
+        let preview = jpeg_preview(&path, IMAGE_BYTE_LIMIT, &|| true)
+            .expect("grayscale preview")
+            .expect("large grayscale JPEG");
+        assert_eq!(preview.source_size, (2571, 1933));
+        let image = preview.image;
+        assert_eq!((image.width, image.height), (213, 160));
+        assert_eq!(image.rgba.len(), 213 * 160 * 4);
+        for pixel in image.rgba.as_chunks::<4>().0 {
+            assert_eq!(pixel[0], pixel[1]);
+            assert_eq!(pixel[0], pixel[2]);
+            assert_eq!(pixel[3], 255);
+        }
+        for ((x, y), expected) in [(1, 1), (3, 1), (1, 3), (3, 3)]
+            .into_iter()
+            .zip([0, 80, 170, 255])
+        {
+            let small = ((image.height * y / 4 * image.width + image.width * x / 4) * 4) as usize;
+            assert!(image.rgba[small].abs_diff(expected) <= 1);
+        }
+        std::fs::remove_file(path).expect("remove owned grayscale JPEG");
+    }
+
+    #[test]
     fn jpeg_preview_preserves_oriented_geometry_colors_and_limits() {
         let path =
             std::env::temp_dir().join(format!("towavue-reduced-jpeg-{}.jpg", std::process::id()));

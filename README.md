@@ -196,6 +196,13 @@ cargo test --workspace --all-targets
 cargo run -p towavue-app -- path\to\media.mp4
 ```
 
+JPEG先行表示の追加色比較は任意の開発用テストです。Pillow 12.3.0がある環境で次を実行します（アプリの依存関係ではありません）。生成JPEGと独立decoderの代表色は`tests/generated/jpeg-preview`にだけ保存し、Gitには含めません。通常テストには外部生成不要のグレースケール検証を含みます。
+
+```powershell
+python scripts/generate-jpeg-preview-fixtures.py
+cargo test -p towavue-runtime-windows jpeg_preview_matches_independent_encoding_and_color_samples -- --ignored
+```
+
 標準shortcutは画像でLeft／PageUp／Backspace／Aが前、Right／PageDown／Space／Dが次です。動画・音声ではSpaceでpause/resume（再生終了後は先頭から再開）、左右矢印で5秒Seekを維持します。Home/Endはfolderの最初/最後の画像、Ctrl+左右は同種media一枚、Alt+左右は全種media、Fはfilmstrip、Ctrl+Shift+Pはcommand paletteです。画像はShell順で移動し、reading modeの通常移動キーは重複しない見開き単位です。
 
 画像の`Ctrl+1～0`は1～10枚先（0＝10）、Shift併用は手前へジャンプします。`Ctrl+Space`／`Ctrl+Backspace`は5枚先／手前です。画像ファイルだけを数え、読書中も見開き数ではなく枚数で数えます。通常の前後移動は循環しますが、数字／5枚ジャンプは端で止まります。Home/Endと同様、同じ端点なら再読み込みせず、移動先が変わる場合は未保存編集を確認します。各枚数の操作はImage jump menuとpaletteでも選べます。

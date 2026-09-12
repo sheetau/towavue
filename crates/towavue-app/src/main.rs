@@ -26,6 +26,8 @@ mod logo_menu;
 mod media_preview;
 mod menu;
 mod metadata_export;
+#[cfg(test)]
+mod native_input_tests;
 mod palette;
 mod playback_tab;
 #[cfg(test)]

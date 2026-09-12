@@ -89,6 +89,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::FreeRotateImage, "Ctrl+Shift+R"),
         (CommandId::FreeRotateVideo, "Ctrl+Shift+R"),
         (CommandId::CycleAudioRepeat, "Ctrl+R"),
+        (CommandId::ToggleVideoRepeat, "Ctrl+Alt+R"),
         (CommandId::RotateClockwise, "R"),
         (CommandId::RotateCounterclockwise, "L"),
         (CommandId::FlipHorizontal, "H"),
@@ -284,7 +285,9 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 || definition.id.as_str().starts_with("select_aspect_")
                 || matches!(
                     definition.id,
-                    CommandId::FreeRotateImage | CommandId::FreeRotateVideo
+                    CommandId::FreeRotateImage
+                        | CommandId::FreeRotateVideo
+                        | CommandId::ToggleVideoRepeat
                 ))
                 && !declared.contains(&definition.id)
         })
@@ -1672,6 +1675,57 @@ mod tests {
                 image
             ),
             ShortcutMatch::Command(CommandId::ResizeImage)
+        );
+    }
+
+    #[test]
+    fn video_repeat_is_contextual_and_keeps_existing_resize_and_custom_bindings() {
+        let key = "Ctrl+Alt+R".parse::<KeySequence>().expect("repeat key");
+        let bindings = parse("# existing settings\n", defaults()).expect("migrate");
+        for kind in [
+            None,
+            Some(MediaKind::Image),
+            Some(MediaKind::Audio),
+            Some(MediaKind::Video),
+        ] {
+            for timeline_open in [false, true] {
+                let context = CommandContext {
+                    media_kind: kind,
+                    timeline_open,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    bindings.resolve(key.strokes(), context),
+                    if kind == Some(MediaKind::Video) {
+                        ShortcutMatch::Command(CommandId::ToggleVideoRepeat)
+                    } else {
+                        ShortcutMatch::None
+                    }
+                );
+            }
+        }
+        let video = CommandContext {
+            media_kind: Some(MediaKind::Video),
+            timeline_open: true,
+            ..Default::default()
+        };
+        let custom = parse("resize_video = Ctrl+Alt+R\n", defaults()).expect("existing custom key");
+        assert_eq!(
+            custom.resolve(key.strokes(), video),
+            ShortcutMatch::Command(CommandId::ResizeVideo)
+        );
+        let custom = parse("toggle_video_repeat = Ctrl+K R\n", defaults()).expect("custom repeat");
+        assert_eq!(custom.resolve(key.strokes(), video), ShortcutMatch::None);
+        assert_eq!(
+            parse(&serialize(&custom), defaults()).expect("round trip"),
+            custom
+        );
+        assert_eq!(
+            bindings.resolve(
+                "Ctrl+R".parse::<KeySequence>().expect("resize").strokes(),
+                video
+            ),
+            ShortcutMatch::Command(CommandId::ResizeVideo)
         );
     }
 

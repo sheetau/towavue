@@ -10,6 +10,135 @@ fn range(a: i64, b: i64) -> TimeRange {
     TimeRange::new(time(a), time(b)).expect("range")
 }
 
+fn verify_video_repeat<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
+    let tab = app.tabs.active().expect("video tab").id;
+    let history = app.edits[&tab].clone();
+    let path = app.path.clone().expect("path");
+    let selected = range(500, 750);
+    for (position, inside) in [
+        (400, false),
+        (500, true),
+        (600, true),
+        (750, false),
+        (800, false),
+    ] {
+        app.state = PlaybackState::Paused;
+        app.set_time_selection(None);
+        app.seek_to(time(position));
+        app.set_time_selection(Some(selected));
+        app.toggle_pause();
+        assert_eq!(app.state, PlaybackState::Playing);
+        assert_eq!(app.playback_selection, inside.then_some(selected));
+        assert_eq!(
+            app.session.as_ref().expect("session").target(),
+            time(position)
+        );
+        assert_eq!(
+            app.session.as_ref().expect("session").range_end(),
+            inside.then_some(selected.end())
+        );
+        app.toggle_pause();
+    }
+
+    app.process_shortcut("Ctrl+Alt+R".parse().expect("video repeat"));
+    assert!(app.video_repeat);
+    assert!(
+        app.audio_queues.is_empty(),
+        "video repeat has no audio folder queue"
+    );
+    for selection in [None, Some(selected)] {
+        app.set_time_selection(selection);
+        app.seek_to(selection.map_or(time(1800), |range| range.start()));
+        app.toggle_pause();
+        let start = selection.map_or(MediaTime::ZERO, |range| range.start());
+        // Observe two real decoder/clock EOFs, not a synthetic Ended state.
+        for _ in 0..2 {
+            let generation = app.generation;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.generation == generation {
+                app.load_next_frame();
+                app.advance_media();
+                app.decode_finished = app.session.as_ref().expect("session").decode_finished();
+                app.check_eof();
+                assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
+                assert!(Instant::now() < deadline, "video repeat EOF timeout");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(app.session.as_ref().expect("session").target(), start);
+            assert_eq!(app.state, PlaybackState::Playing);
+            assert_eq!(app.path.as_ref(), Some(&path));
+        }
+        app.toggle_pause();
+    }
+
+    // Paused end previews must not start playing just because repeat is enabled.
+    app.seek_to(selected.end());
+    let generation = app.generation;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.pending_time.is_none() {
+        app.load_next_frame();
+        app.check_eof();
+        assert!(Instant::now() < deadline, "paused range preview timeout");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(app.state, PlaybackState::Paused);
+    assert_eq!(
+        app.session.as_ref().expect("session").target(),
+        selected.end()
+    );
+    // Boundary previews use the full source. Inject its late EOF while paused.
+    assert_eq!(app.session.as_ref().expect("session").range_end(), None);
+    app.clock = Some(PlaybackClock::paused(time(2000), 1.0));
+    app.pending_time = None;
+    app.decode_finished = true;
+    app.check_eof();
+    assert_eq!(app.state, PlaybackState::Ended);
+    assert_eq!(app.generation, generation);
+    assert_eq!(app.current_position(), time(2000));
+
+    app.toggle_pause();
+    let other = app.tabs.open_new(path.clone(), MediaKind::Video);
+    app.load_path(path.clone(), MediaKind::Video);
+    assert!(!app.video_repeat, "new tab does not inherit repeat");
+    let saved = app.retained_playback.get_mut(&tab).expect("retained video");
+    assert!(saved.video_repeat);
+    assert_eq!(saved.playback_selection, Some(selected));
+    for _ in 0..2 {
+        let generation = saved.session.as_ref().expect("session").generation();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while saved.session.as_ref().expect("session").generation() == generation {
+            saved.poll();
+            assert!(saved.error.is_none(), "{:?}", saved.error);
+            assert!(Instant::now() < deadline, "retained repeat EOF timeout");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(saved.video_suspended);
+        assert_eq!(saved.state, PlaybackState::Playing);
+        assert_eq!(
+            saved.session.as_ref().expect("session").target(),
+            selected.start()
+        );
+    }
+    app.activate_tab(tab);
+    assert!(app.video_repeat);
+    app.toggle_pause();
+    app.remove_tab(other, false);
+    app.set_time_selection(None);
+    // Navigation replaces media in this tab, but keeps its repeat preference.
+    app.load_path(path, MediaKind::Video);
+    app.media_duration = Some(Duration::from_secs(2));
+    assert!(app.video_repeat);
+    app.dispatch(CommandId::ToggleVideoRepeat);
+    assert!(!app.video_repeat);
+    app.session
+        .as_mut()
+        .expect("session")
+        .set_paused(true)
+        .expect("pause");
+    app.state = PlaybackState::Paused;
+    assert_eq!(app.edits[&tab], history);
+}
+
 fn render<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
     context: &egui::Context,
@@ -374,6 +503,9 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                 .set_paused(true)
                 .expect("pause");
             app.state = PlaybackState::Paused;
+            if !self.audio {
+                verify_video_repeat(&mut app);
+            }
             app.seek_to(time(1200));
             app.timeline_open = true;
             app.handle_ui_action(UiAction::TimeSelection(
@@ -664,12 +796,30 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                 app.session.as_ref().expect("session").timeline(),
                 plan.as_ref()
             );
+            app.video_repeat = true;
             app.activate_tab(other);
             let saved = app
                 .retained_playback
                 .get_mut(&tab)
                 .expect("background selection");
             assert_eq!(saved.playback_selection, Some(range(1000, 2000)));
+            let generation = saved.session.as_ref().expect("session").generation();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while saved.session.as_ref().expect("session").generation() == generation {
+                saved.poll();
+                assert!(saved.error.is_none(), "{:?}", saved.error);
+                assert!(Instant::now() < deadline, "edited selection repeat");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(
+                saved.session.as_ref().expect("session").target(),
+                time(1000)
+            );
+            assert_eq!(
+                saved.session.as_ref().expect("session").timeline(),
+                plan.as_ref()
+            );
+            saved.video_repeat = false;
             let deadline = Instant::now() + Duration::from_secs(3);
             while saved.state == PlaybackState::Playing {
                 saved.poll();

@@ -237,15 +237,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let active = self.tabs.active().map(|tab| tab.id);
         let ids: Vec<_> = self.audio_queues.keys().copied().collect();
         for id in ids {
-            if if active == Some(id) {
+            let selected = if active == Some(id) {
                 self.playback_selection.is_some()
             } else {
                 self.retained_playback
                     .get(&id)
                     .is_some_and(|saved| saved.playback_selection.is_some())
-            } {
-                continue;
-            }
+            };
             let (state, instance, generation, path) = if active == Some(id) {
                 if self.media_kind != Some(MediaKind::Audio) || self.modal_input_blocked() {
                     continue;
@@ -281,6 +279,17 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let queue = self.audio_queues.get_mut(&id).expect("audio queue");
             // Device replacement alone must not restart an already stopped queue.
             if queue.handled_eof == Some(instance) {
+                continue;
+            }
+            if selected {
+                queue.handled_eof = Some(instance);
+                if queue.order.repeat() != RepeatMode::Off {
+                    if active == Some(id) {
+                        self.toggle_pause();
+                    } else {
+                        self.advance_background_audio(id, path);
+                    }
+                }
                 continue;
             }
             if queue.order.repeat() != RepeatMode::One {
@@ -335,23 +344,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         };
         if saved.path == path {
-            if let Some(session) = &mut saved.session {
-                let target = session.range().start;
-                match session
-                    .seek(target)
-                    .and_then(|_| session.set_paused(false).map_err(Into::into))
-                {
-                    Ok(()) => {
-                        saved.clock = Some(PlaybackClock::new(target, session.rate()));
-                        saved.state = PlaybackState::Playing;
-                        saved.audio_drained = !session.has_audio();
-                        saved.decode_finished = false;
-                        saved.pending_time = None;
-                        saved.metrics_recorded = false;
-                    }
-                    Err(error) => saved.fail(error.to_string()),
-                }
-            }
+            saved.restart();
         } else if let Some(renderer) = &self.renderer {
             saved.session.take();
             self.duration_workers.remove(&saved.instance);
@@ -631,6 +624,52 @@ mod tests {
             }
             assert_eq!(app.audio_mode(), (RepeatMode::All, true));
             assert!(!app.command_context().has_unsaved_edits);
+            app.media_kind = Some(MediaKind::Video);
+            context.global_style_mut(chrome::style);
+            for density in [1.0, 1.25, 2.0] {
+                context.set_pixels_per_point(density);
+                for (label, repeated) in [("Video repeat off", true), ("Video repeat on", false)] {
+                    frame(&mut app, vec![]);
+                    let output = frame(&mut app, vec![]).0;
+                    let update = output.platform_output.accesskit_update.expect("video UIA");
+                    let (id, node) = update
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| node.label().is_some_and(|name| name.starts_with(label)))
+                        .expect("video repeat button");
+                    let bounds = node.bounds().expect("repeat bounds");
+                    assert!(bounds.x0 >= 0.0 && bounds.x1 <= f64::from(width));
+                    assert!(!node.is_disabled());
+                    let (_, actions) = frame(
+                        &mut app,
+                        vec![egui::Event::AccessKitActionRequest(
+                            egui::accesskit::ActionRequest {
+                                action: egui::accesskit::Action::Click,
+                                target_tree: egui::accesskit::TreeId::ROOT,
+                                target_node: *id,
+                                data: None,
+                            },
+                        )],
+                    );
+                    assert!(matches!(
+                        actions.as_slice(),
+                        [UiAction::Command(CommandId::ToggleVideoRepeat)]
+                    ));
+                    for action in actions {
+                        app.handle_ui_action(action);
+                    }
+                    assert_eq!(app.video_repeat, repeated);
+                    assert!(!app.command_context().has_unsaved_edits);
+                }
+            }
+            for kind in [MediaKind::Image, MediaKind::Audio] {
+                app.media_kind = Some(kind);
+                app.dispatch(CommandId::ToggleVideoRepeat);
+                assert!(
+                    !app.video_repeat,
+                    "video command is unavailable for other media"
+                );
+            }
         }
     }
 
@@ -740,33 +779,90 @@ mod tests {
                     media_time(Duration::from_millis(80)),
                 )
                 .expect("audition range");
+                for (ms, inside) in [
+                    (0, false),
+                    (20, true),
+                    (40, true),
+                    (80, false),
+                    (100, false),
+                ] {
+                    app.set_time_selection(None);
+                    app.seek_to(media_time(Duration::from_millis(ms)));
+                    app.set_time_selection(Some(selected));
+                    app.toggle_pause();
+                    assert_eq!(app.state, PlaybackState::Playing);
+                    assert_eq!(app.playback_selection, inside.then_some(selected));
+                    assert_eq!(
+                        app.session.as_ref().expect("session").range_end(),
+                        inside.then_some(selected.end())
+                    );
+                    app.toggle_pause();
+                }
                 app.set_time_selection(Some(selected));
-                for _ in 0..3 {
+                for repeat in [RepeatMode::Off, RepeatMode::All, RepeatMode::One] {
+                    assert_eq!(app.audio_mode().0, repeat);
                     app.process_shortcut("Shift+Space".parse().expect("play selected time"));
                     wait(&mut app, &events, |app| app.state == PlaybackState::Ended);
+                    let generation = app.generation;
                     advance(&mut app, &events);
                     assert_eq!(
                         app.path, audition_path,
-                        "selection EOF must not advance or repeat"
+                        "selection EOF must not advance to another file"
                     );
                     assert_eq!(app.media_generation, audition_instance);
-                    assert_eq!(app.state, PlaybackState::Ended);
-                    assert_eq!(app.current_position(), selected.end());
+                    if repeat == RepeatMode::Off {
+                        assert_eq!(app.state, PlaybackState::Ended);
+                        assert_eq!(app.current_position(), selected.end());
+                        assert_eq!(app.generation, generation);
+                    } else {
+                        assert_eq!(app.state, PlaybackState::Playing);
+                        assert_ne!(app.generation, generation);
+                        assert_eq!(
+                            app.session.as_ref().expect("session").target(),
+                            selected.start()
+                        );
+                        wait(&mut app, &events, |app| app.state == PlaybackState::Ended);
+                    }
                     app.dispatch(CommandId::CycleAudioRepeat);
                 }
+                app.dispatch(CommandId::CycleAudioRepeat);
                 app.play_time_selection();
                 app.open_external(self.0.join("image.bmp"), true);
                 let audition_image = app.tabs.active().expect("image").id;
                 wait(&mut app, &events, |app| {
                     app.retained_playback[&audio].state == PlaybackState::Ended
                 });
-                advance(&mut app, &events);
-                assert_eq!(
-                    app.retained_playback[&audio].path,
-                    audition_path.clone().expect("audio path")
-                );
-                assert_eq!(app.retained_playback[&audio].position(), selected.end());
+                for _ in 0..2 {
+                    let generation = app.retained_playback[&audio]
+                        .session
+                        .as_ref()
+                        .expect("session")
+                        .generation();
+                    advance(&mut app, &events);
+                    let saved = &app.retained_playback[&audio];
+                    assert_eq!(saved.path, audition_path.clone().expect("audio path"));
+                    assert_eq!(saved.state, PlaybackState::Playing);
+                    assert_ne!(
+                        saved.session.as_ref().expect("session").generation(),
+                        generation
+                    );
+                    assert_eq!(
+                        saved.session.as_ref().expect("session").target(),
+                        selected.start()
+                    );
+                    assert_eq!(
+                        app.tabs.active().expect("image remains active").id,
+                        audition_image
+                    );
+                    // Arm the next EOF while the background session is playing.
+                    app.advance_audio_queues();
+                    wait(&mut app, &events, |app| {
+                        app.retained_playback[&audio].state == PlaybackState::Ended
+                    });
+                }
                 app.activate_tab(audio);
+                app.dispatch(CommandId::CycleAudioRepeat);
+                app.dispatch(CommandId::CycleAudioRepeat);
                 app.process_shortcut("Escape".parse().expect("leave audition"));
                 assert!(app.playback_selection.is_none());
                 assert!(!app.command_context().has_unsaved_edits);

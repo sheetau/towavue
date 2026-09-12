@@ -117,6 +117,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     app.metadata_export_settings
         .insert(id, metadata_options.clone());
     app.filmstrip_open = true;
+    app.video_repeat = true;
     tab_focus::tests::hardware_focus(app, "Play / replay", true);
     app.time_selection = Some(
         towavue_core::TimeRange::new(MediaTime::ZERO, MediaTime::from_nanoseconds(900_000_000))
@@ -222,6 +223,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     assert_eq!(app.audio_export_settings[&moved], audio_options);
     assert_eq!(app.metadata_export_settings[&moved], metadata_options);
     assert_eq!(app.time_selection, selection);
+    assert!(app.video_repeat, "live transfer keeps video repeat");
     assert!(app.filmstrip_open);
     tab_focus::tests::hardware_focus(app, "Play / replay", false);
     assert_frame(app, position, frame, generation);
@@ -329,8 +331,13 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let request = host.windows[&target]
         .tab_detach_request(moved)
         .expect("return request");
+    assert!(
+        host.windows[&target].video_repeat,
+        "background transfer keeps repeat"
+    );
     host.move_tab(target, source, &request, 1)
         .expect("return background tab");
+    host.windows.get_mut(&source).expect("source").video_repeat = false;
     host.windows
         .get_mut(&target)
         .expect("target")

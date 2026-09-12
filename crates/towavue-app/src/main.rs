@@ -903,6 +903,7 @@ struct Application<N> {
     media_duration: Option<Duration>,
     time_selection: Option<towavue_core::TimeRange>,
     playback_selection: Option<towavue_core::TimeRange>,
+    video_repeat: bool,
     hover_thumbnail: Option<(u64, TextureHandle)>,
     media_generation: u64,
     media_sequence: u64,
@@ -1122,6 +1123,7 @@ where
             media_duration: None,
             time_selection: None,
             playback_selection: None,
+            video_repeat: false,
             hover_thumbnail: None,
             media_generation: 0,
             media_sequence: 0,
@@ -1473,6 +1475,7 @@ where
             timeline_open: self.timeline_open,
             time_selection: self.time_selection,
             playback_selection: self.playback_selection,
+            video_repeat: std::mem::take(&mut self.video_repeat),
             filmstrip_open: self.filmstrip_open,
             filmstrip_view: self.filmstrip.take_view(),
             playlist: std::mem::take(&mut self.playlist),
@@ -1525,6 +1528,7 @@ where
         self.timeline_open = saved.kind == MediaKind::Audio || saved.timeline_open;
         self.time_selection = saved.time_selection;
         self.playback_selection = saved.playback_selection;
+        self.video_repeat = saved.video_repeat;
         self.filmstrip_open = saved.filmstrip_open;
         self.playlist = saved.playlist;
         self.filmstrip.restore_view(saved.filmstrip_view);
@@ -1560,6 +1564,12 @@ where
     }
 
     fn load_path_with_transfer(&mut self, path: PathBuf, kind: MediaKind, transferred: bool) {
+        let video_repeat = kind == MediaKind::Video
+            && self
+                .tabs
+                .active()
+                .is_some_and(|tab| Some(tab.id) == self.displayed_tab)
+            && self.video_repeat;
         self.image_sequence = image_navigation::ImageSequence::default();
         self.image_handoff = None;
         if let Some(id) = self.displayed_tab
@@ -1629,6 +1639,7 @@ where
         self.media_duration = None;
         self.time_selection = None;
         self.playback_selection = None;
+        self.video_repeat = video_repeat;
         self.hover_thumbnail = None;
         self.next_media_instance();
         self.waveform_worker.clear();
@@ -4678,18 +4689,19 @@ where
                             .map(|duration| format_time(MediaTime::ZERO.saturating_add(duration)))
                             .unwrap_or_else(|| "—".into());
                         let position = format_time(self.current_position());
-                        let time_label = if self.media_kind == Some(MediaKind::Audio) && ui.max_rect().width() < 340.0 {
+                        let compact = ui.max_rect().width() < 340.0;
+                        let time_label = if compact {
                             position
                         } else { format!("{position} / {duration}") };
                         let time_text = RichText::new(time_label).size(12.0).color(chrome::MUTED);
-                        if self.media_kind == Some(MediaKind::Audio) && ui.max_rect().width() < 340.0 {
-                            // Reserve three controls and their gaps before truncating a long clock.
-                            let time_width = (ui.available_width() - 114.0).max(0.0);
+                        if compact {
+                            // Keep volume and mode controls visible before truncating a long clock.
+                            let controls_width = if self.media_kind == Some(MediaKind::Audio) { 114.0 } else { 80.0 };
+                            let time_width = (ui.available_width() - controls_width).max(0.0);
                             ui.allocate_ui_with_layout(
                                 egui::vec2(time_width, 24.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
-                                    ui.set_min_width(time_width);
                                     ui.add(egui::Label::new(time_text).truncate())
                                 },
                             ).inner.help_text(format!("{} / {duration}", format_time(self.current_position())));
@@ -4710,6 +4722,13 @@ where
                         volume_targets.push(volume);
                         if self.media_kind == Some(MediaKind::Audio) {
                             self.draw_audio_mode_buttons(ui, actions);
+                        } else if chrome::audio_button(
+                            ui,
+                            chrome::AudioIcon::Repeat,
+                            self.video_repeat,
+                            &self.command_hint(CommandId::ToggleVideoRepeat, if self.video_repeat { "Video repeat on" } else { "Video repeat off" }),
+                        ).clicked() {
+                            actions.push(UiAction::Command(CommandId::ToggleVideoRepeat));
                         }
                     } else if self.media_kind == Some(MediaKind::Image) {
                         let label = self.command_hint(CommandId::ToggleReadingMode, "Reading mode");
@@ -5552,6 +5571,10 @@ where
             CommandId::PreviousSameKind => self.navigate(false, true),
             CommandId::NextSameKind => self.navigate(true, true),
             CommandId::CycleAudioRepeat => self.change_audio_mode(false),
+            CommandId::ToggleVideoRepeat => {
+                self.video_repeat = !self.video_repeat;
+                self.request_redraw();
+            }
             CommandId::ToggleAudioShuffle => self.change_audio_mode(true),
             CommandId::PreviousVideoFrame => self.step_video_frame(false),
             CommandId::NextVideoFrame => self.step_video_frame(true),
@@ -7390,12 +7413,24 @@ where
         let Some(next) = self.state.after_play_pause() else {
             return;
         };
+        let position = self.current_position();
+        let select_range = next == PlaybackState::Playing
+            && self.playback_selection.is_none()
+            && self.time_selection.is_some_and(|range| {
+                position >= range.start()
+                    && position < range.end()
+                    && self
+                        .playback_duration()
+                        .is_some_and(|duration| range.end() <= media_time(duration))
+            });
+        if select_range {
+            self.playback_selection = self.time_selection;
+        }
         let range = self.playback_range();
         if range.end == Some(MediaTime::ZERO) {
             self.set_status("The timeline is empty; Undo restores deleted time".into());
             return;
         }
-        let position = self.current_position();
         let restart = next == PlaybackState::Playing
             && (self.state == PlaybackState::Ended
                 || self.playback_duration().is_some_and(|duration| {
@@ -7406,7 +7441,7 @@ where
         } else {
             range.play_target(position)
         };
-        if restart || target != position {
+        if select_range || restart || target != position {
             self.seek_to(target);
             if self.state == PlaybackState::Faulted {
                 return;
@@ -7933,6 +7968,10 @@ where
             }
             self.state = PlaybackState::Ended;
             self.cancel_hold_speed();
+            if was_playing && self.media_kind == Some(MediaKind::Video) && self.video_repeat {
+                self.toggle_pause();
+                return;
+            }
             if self.playback_selection.is_some() {
                 self.set_status(
                     "Selection ended · Shift+Space restarts · Escape returns to full range".into(),
@@ -11987,7 +12026,11 @@ mod tests {
                             _ => None,
                         })
                         .collect();
-                    assert_eq!(borders.len(), 2, "timeline={timeline}, borders={borders:?}");
+                    assert_eq!(
+                        borders.len(),
+                        2,
+                        "width={width}, density={density}, timeline={timeline}, borders={borders:?}"
+                    );
                     assert!((borders[0] - 32.0).abs() <= 1.0);
                     assert!(borders[1] > 32.0);
                     if timeline {

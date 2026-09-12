@@ -318,6 +318,7 @@ fn run_session_trial(audio: bool, test: &str) {
             assert_eq!(app.playback_rate(), 1.25);
             assert_eq!(app.edits[&tab], history);
             // Reaching EOF during a paused audition restores the rate, without restart.
+            app.video_repeat = true;
             app.seek_to(time(3990));
             if app.state == PlaybackState::Playing {
                 app.toggle_pause();

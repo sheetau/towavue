@@ -22,6 +22,7 @@ pub(super) struct RetainedPlaybackTab {
     pub timeline_open: bool,
     pub time_selection: Option<towavue_core::TimeRange>,
     pub playback_selection: Option<towavue_core::TimeRange>,
+    pub video_repeat: bool,
     pub filmstrip_open: bool,
     pub filmstrip_view: crate::filmstrip::View,
     pub playlist: playlist::Playlist,
@@ -121,6 +122,27 @@ impl RetainedPlaybackTab {
         self.clock = Some(clock);
     }
 
+    pub fn restart(&mut self) {
+        let Some(session) = &mut self.session else {
+            return;
+        };
+        let target = session.range().start;
+        match session
+            .seek(target)
+            .and_then(|_| session.set_paused(false).map_err(Into::into))
+        {
+            Ok(()) => {
+                self.clock = Some(PlaybackClock::new(target, session.rate()));
+                self.state = PlaybackState::Playing;
+                self.audio_drained = !session.has_audio();
+                self.decode_finished = false;
+                self.pending_time = None;
+                self.metrics_recorded = false;
+            }
+            Err(error) => self.fail(error.to_string()),
+        }
+    }
+
     pub fn suspend_video_if_bounded(&mut self) {
         if self.kind != MediaKind::Video || self.video_suspended || self.end().is_none() {
             return;
@@ -199,6 +221,16 @@ impl RetainedPlaybackTab {
                     && self.end().is_none_or(|end| position >= end)
             };
         if finished {
+            if self.kind == MediaKind::Video
+                && self.video_repeat
+                && self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.range().end != Some(session.range().start))
+            {
+                self.restart();
+                return;
+            }
             self.anchor(self.end().unwrap_or(position), true);
             self.state = PlaybackState::Ended;
             if self.playback_selection.is_some() {

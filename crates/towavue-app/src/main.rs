@@ -21,6 +21,8 @@ mod image_handoff;
 mod image_navigation;
 mod image_scroll;
 #[cfg(test)]
+mod image_visibility_tests;
+#[cfg(test)]
 mod image_wheel_tests;
 mod logo_menu;
 mod media_preview;
@@ -8419,13 +8421,16 @@ where
             self.ui_repaint_at = None;
             self.request_redraw();
         }
-        let mut image_changed = self
-            .image
-            .as_mut()
-            .is_some_and(|image| image.advance_animation(now));
+        let images_visible = self.image_animation_visible();
+        let mut image_changed = images_visible
+            && self
+                .image
+                .as_mut()
+                .is_some_and(|image| image.advance_animation(now));
         for image in self
             .reading_pages
             .iter_mut()
+            .filter(|_| images_visible)
             .filter_map(|page| page.as_mut().ok())
         {
             image_changed |= image.advance_animation(now);
@@ -8498,7 +8503,14 @@ where
             .then_some(now + AUDIO_EVENT_POLL_INTERVAL)
     }
 
+    fn image_animation_visible(&self) -> bool {
+        self.window.as_ref().is_none_or(|window| {
+            window.is_visible() != Some(false) && window.is_minimized() != Some(true)
+        })
+    }
+
     fn idle_wakeup(&self, now: Instant) -> Option<Instant> {
+        let images_visible = self.image_animation_visible();
         let next_image_frame = self
             .image
             .iter()
@@ -8507,6 +8519,7 @@ where
                     .iter()
                     .filter_map(|page| page.as_ref().ok()),
             )
+            .filter(|_| images_visible)
             .filter_map(|image| image.next_frame_at)
             .min();
         let folder_poll = self

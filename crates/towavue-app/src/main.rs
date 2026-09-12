@@ -11939,17 +11939,82 @@ mod tests {
                     .env("LOCALAPPDATA", root.join("local"))
                     .output()
                     .expect("run isolated application test");
-            std::fs::remove_dir_all(&root).expect("remove isolated test files");
-            eprint!("{}", String::from_utf8_lossy(&result.stderr));
-            assert!(
-                result.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&result.stdout),
-                String::from_utf8_lossy(&result.stderr)
-            );
+            finish_isolated_test(test_name, &root, result);
             return None;
         };
         Some(canonical_shell_path(&PathBuf::from(root)).expect("canonical test root"))
+    }
+
+    fn finish_isolated_test(test_name: &str, root: &Path, result: std::process::Output) {
+        if result.status.success() {
+            std::fs::remove_dir_all(root).expect("remove isolated test files");
+        }
+        eprint!("{}", String::from_utf8_lossy(&result.stderr));
+        assert!(
+            result.status.success(),
+            "Isolated test {test_name} exited with {} (code: {}). Fixture retained at {}.\n{}\n{}",
+            result.status,
+            result.status.code().map_or_else(
+                || "unavailable".into(),
+                |code| format!("{:#010x}", code as u32)
+            ),
+            root.display(),
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[test]
+    fn isolated_test_failure_retains_native_status_output_and_fixture() {
+        use std::os::windows::process::ExitStatusExt;
+
+        let Some(root) = isolated_test_root(
+            "tests::isolated_test_failure_retains_native_status_output_and_fixture",
+        ) else {
+            return;
+        };
+        let fixture = root.join("failed-child");
+        std::fs::create_dir(&fixture).expect("fixture directory");
+        let evidence = fixture.join("evidence.txt");
+        std::fs::write(&evidence, "retained evidence").expect("fixture evidence");
+        for code in [101, 0xc0000005] {
+            let failure = std::panic::catch_unwind(|| {
+                finish_isolated_test(
+                    "native_failure_probe",
+                    &fixture,
+                    std::process::Output {
+                        status: std::process::ExitStatus::from_raw(code),
+                        stdout: b"stdout evidence".to_vec(),
+                        stderr: b"stderr evidence".to_vec(),
+                    },
+                );
+            })
+            .expect_err("child failure must still fail the test");
+            let message = failure.downcast_ref::<String>().expect("failure message");
+            for expected in [
+                "native_failure_probe".to_owned(),
+                format!("{code:#010x}"),
+                fixture.display().to_string(),
+                "stdout evidence".to_owned(),
+                "stderr evidence".to_owned(),
+            ] {
+                assert!(message.contains(&expected), "missing {expected}: {message}");
+            }
+            assert_eq!(
+                std::fs::read_to_string(&evidence).expect("retained fixture evidence"),
+                "retained evidence"
+            );
+        }
+        finish_isolated_test(
+            "successful_probe",
+            &fixture,
+            std::process::Output {
+                status: std::process::ExitStatus::from_raw(0),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+        );
+        assert!(!fixture.exists(), "successful fixtures are still removed");
     }
 
     #[test]

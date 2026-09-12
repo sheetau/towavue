@@ -43,9 +43,14 @@ fn avif_thumbnail_revision_leaves_other_format_cache_keys_unchanged() {
             .expect("fixture")
             .as_nanos()
             .hash(&mut old);
+        let mut prior_avif = old.clone();
+        "filmstrip-avif-v1".hash(&mut prior_avif);
         IMAGE_PREVIEW_VARIANT.hash(&mut old);
         let old = format!("{:016x}", old.finish());
         let current = cache_key(&source, IMAGE_PREVIEW_VARIANT).expect("current key");
+        if extension.eq_ignore_ascii_case("avif") {
+            assert_ne!(current, format!("{:016x}", prior_avif.finish()));
+        }
         assert_eq!(current == old, !extension.eq_ignore_ascii_case("avif"));
     }
     fs::remove_dir_all(&cache.root).expect("owned fixture cleanup");

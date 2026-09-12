@@ -20,7 +20,7 @@ Images include PNG, APNG, JPEG, GIF, WebP, BMP, TIFF, and AVIF. Video and audio 
 
 Viewing support does not imply lossless export or animation-preserving export for every format. Supported APNG, GIF, and WebP saves retain frames, timing, and loops; APNG also retains separate poster images. Animated WebP saves use lossless full-frame encoding, which can increase file size. GIF encoding can change colors and transparency through palette conversion. Other animated-image export formats remain limited.
 
-AVIF viewing and saving support transparency, quarter-turn orientation, and mirroring in still images and animations. Static AVIF saves preserve the edited 8-bit RGBA pixels; supported sequences, including single-frame sequences, also retain timing and loops. Animation conversion between formats remains limited.
+AVIF viewing and saving support transparency, embedded display cropping, quarter-turn orientation, and mirroring in still images and animations. Static AVIF saves preserve the edited 8-bit RGBA pixels; supported sequences, including single-frame sequences, also retain timing and loops. Animation conversion between formats remains limited.
 
 ## Getting started
 

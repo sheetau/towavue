@@ -3,6 +3,93 @@ use std::io::{Read, Seek, SeekFrom};
 
 pub(crate) mod still;
 
+/// Container cropping is separate from AV1 codec cropping and precedes orientation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CleanAperture {
+    top: u32,
+    bottom: u32,
+    left: u32,
+    right: u32,
+}
+
+impl CleanAperture {
+    pub(crate) fn from_bytes(data: &[u8]) -> Result<Self, Error> {
+        let data: &[u8; 16] = data
+            .try_into()
+            .map_err(|_| invalid("invalid aperture side data"))?;
+        let [top, bottom, left, right] = [0, 4, 8, 12].map(|offset| {
+            u32::from_le_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ])
+        });
+        Ok(Self {
+            top,
+            bottom,
+            left,
+            right,
+        })
+    }
+
+    pub(crate) fn rectangle(self, size: (u32, u32)) -> Result<towavue_core::PixelCrop, Error> {
+        let width = size
+            .0
+            .checked_sub(self.left)
+            .and_then(|value| value.checked_sub(self.right));
+        let height = size
+            .1
+            .checked_sub(self.top)
+            .and_then(|value| value.checked_sub(self.bottom));
+        match (width, height) {
+            (Some(width), Some(height)) if width > 0 && height > 0 => Ok(towavue_core::PixelCrop {
+                x: self.left,
+                y: self.top,
+                width,
+                height,
+            }),
+            _ => Err(invalid("clean aperture lies outside the decoded canvas")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod aperture_tests {
+    use super::*;
+
+    #[test]
+    fn clean_aperture_side_data_rejects_truncation_empty_and_overflowing_bounds() {
+        for data in [&[][..], &[0; 15], &[0; 17]] {
+            assert!(CleanAperture::from_bytes(data).is_err());
+        }
+        let read = |values: [u32; 4]| {
+            CleanAperture::from_bytes(&values.map(u32::to_le_bytes).concat()).expect("side data")
+        };
+        let crop = read([1, 2, 2, 1]).rectangle((7, 5)).expect("valid crop");
+        assert_eq!(
+            crop,
+            towavue_core::PixelCrop {
+                x: 2,
+                y: 1,
+                width: 4,
+                height: 2
+            }
+        );
+        for values in [
+            [5, 0, 0, 0],
+            [0, 0, 7, 0],
+            [0, 0, 4, 4],
+            [0, u32::MAX, 0, 0],
+            [0, 0, u32::MAX, u32::MAX],
+        ] {
+            assert!(read(values).rectangle((7, 5)).is_err());
+        }
+        assert!(CleanAperture::default().rectangle((0, 5)).is_err());
+        assert!(CleanAperture::default().rectangle((7, 0)).is_err());
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
     #[error("{0}")]

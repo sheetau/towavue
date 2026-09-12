@@ -1139,6 +1139,7 @@ fn avif_control_validation_rejects_wrong_alpha_and_edit_lists() {
         time_base: ffmpeg::Rational(1, 1000),
         times: vec![(i64::MIN + 1, 500), (i64::MAX, 500)],
         orientation: None,
+        aperture: None,
     };
     assert!(same_timing(&left, &left));
     let right = Samples {

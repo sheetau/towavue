@@ -62,6 +62,12 @@ pub(super) fn decode(
             }) {
                 return Err(invalid("alpha orientation differs from color"));
             }
+            if alpha
+                .aperture
+                .is_some_and(|aperture| aperture != color_frame.aperture.unwrap_or_default())
+            {
+                return Err(invalid("alpha clean aperture differs from color"));
+            }
             for (pixel, alpha) in color_frame
                 .pixels
                 .as_chunks_mut::<4>()
@@ -81,6 +87,23 @@ pub(super) fn decode(
                     }
                 }
             }
+        }
+        if let Some(aperture) = color_frame.aperture {
+            let crop = aperture.rectangle(color_frame.size)?;
+            let stride = color_frame.size.0 as usize * 4;
+            let row_bytes = crop.width as usize * 4;
+            // Compact merged RGBA in place, before rotation and before any preview.
+            for y in 0..crop.height as usize {
+                check_current(current)?;
+                let start = (crop.y as usize + y) * stride + crop.x as usize * 4;
+                color_frame
+                    .pixels
+                    .copy_within(start..start + row_bytes, y * row_bytes);
+            }
+            color_frame
+                .pixels
+                .truncate(row_bytes * crop.height as usize);
+            color_frame.size = (crop.width, crop.height);
         }
         if let Some(orientation) = color_frame.orientation
             && orientation != crate::VideoOrientation::default()
@@ -201,6 +224,7 @@ struct PlaneFrame {
     duration: Option<i128>,
     pixels: Vec<u8>,
     orientation: Option<crate::VideoOrientation>,
+    aperture: Option<container::CleanAperture>,
 }
 
 // Independent demux cursors permit interleaved or contiguous alpha data without
@@ -215,6 +239,7 @@ struct PlaneDecoder {
     eof: bool,
     byte_limit: usize,
     orientation: Option<crate::VideoOrientation>,
+    aperture: Option<container::CleanAperture>,
 }
 
 impl PlaneDecoder {
@@ -228,6 +253,7 @@ impl PlaneDecoder {
         // files that encode negative DTS corrections in the same field.
         let mut options = ffmpeg::Dictionary::new();
         options.set("max_stts_delta", &u32::MAX.to_string());
+        options.set("err_detect", "explode");
         let input = ffmpeg::format::input_with_dictionary(path, options).map_err(ffmpeg_error)?;
         let mut matching = input.streams().filter(|stream| {
             stream.id() as u32 == track.id
@@ -253,6 +279,11 @@ impl PlaneDecoder {
             .transpose()
             .map_err(ImageDecodeError::Ffmpeg)?;
         let time_base = stream.time_base();
+        let aperture = stream
+            .side_data()
+            .find(|data| data.kind() == ffmpeg::codec::packet::side_data::Type::FRAME_CROPPING)
+            .map(|data| container::CleanAperture::from_bytes(data.data()))
+            .transpose()?;
         if time_base.numerator() <= 0 || time_base.denominator() <= 0 {
             return Err(invalid("invalid image time base"));
         }
@@ -282,6 +313,7 @@ impl PlaneDecoder {
             eof: false,
             byte_limit,
             orientation,
+            aperture,
         })
     }
 
@@ -334,6 +366,7 @@ impl PlaneDecoder {
                             / i128::from(self.time_base.denominator())
                     };
                     return Ok(Some(PlaneFrame {
+                        aperture: self.aperture,
                         orientation: frame
                             .side_data(ffmpeg::util::frame::side_data::Type::DisplayMatrix)
                             .map(|data| crate::VideoOrientation::from_bytes(Some(data.data())))

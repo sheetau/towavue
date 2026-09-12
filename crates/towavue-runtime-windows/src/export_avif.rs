@@ -59,6 +59,7 @@ struct Samples {
     time_base: ffmpeg::Rational,
     times: Vec<(i64, i64)>,
     orientation: Option<crate::VideoOrientation>,
+    aperture: Option<crate::avif_container::CleanAperture>,
 }
 
 #[derive(Clone, Debug)]
@@ -117,6 +118,7 @@ impl Animation {
         // negative-DTS correction heuristic to long image holds.
         let mut options = ffmpeg::Dictionary::new();
         options.set("max_stts_delta", &u32::MAX.to_string());
+        options.set("err_detect", "explode");
         let mut input = ffmpeg::format::input_with_dictionary(path, options).map_err(invalid)?;
         let mut samples = Vec::new();
         for track in &tracks {
@@ -153,6 +155,14 @@ impl Animation {
                 .map_err(invalid)?;
             let size = (decoder.width(), decoder.height());
             crate::image_edits::output_size(size, &[]).map_err(invalid)?;
+            let aperture = stream
+                .side_data()
+                .find(|data| data.kind() == ffmpeg::codec::packet::side_data::Type::FRAME_CROPPING)
+                .map(|data| crate::avif_container::CleanAperture::from_bytes(data.data()))
+                .transpose()?;
+            if let Some(aperture) = aperture {
+                aperture.rectangle(size)?;
+            }
             samples.push(Samples {
                 index: stream.index(),
                 id,
@@ -160,6 +170,7 @@ impl Animation {
                 time_base: stream.time_base(),
                 times: Vec::new(),
                 orientation,
+                aperture,
             });
         }
         loop {
@@ -205,6 +216,9 @@ impl Animation {
         if samples.get(1).is_some_and(|alpha| {
             alpha.size != samples[0].size
                 || alpha
+                    .aperture
+                    .is_some_and(|value| value != samples[0].aperture.unwrap_or_default())
+                || alpha
                     .orientation
                     .is_some_and(|value| value != samples[0].orientation.unwrap_or_default())
                 || !same_timing(&samples[0], alpha)
@@ -212,7 +226,7 @@ impl Animation {
                     != i128::from(samples[0].times[0].0) * i128::from(alpha.time_base.denominator())
         }) {
             return Err(invalid(
-                "alpha dimensions, orientation or sample timing differ from color",
+                "alpha dimensions, aperture, orientation or sample timing differ from color",
             ));
         }
         Ok(Some(Self { tracks, samples }))
@@ -239,6 +253,13 @@ impl Animation {
         let source_alpha = self.samples.get(1);
         let orientation = self.samples[0].orientation.unwrap_or_default();
         let mut source_size = self.samples[0].size;
+        let aperture = self.samples[0]
+            .aperture
+            .map(|value| value.rectangle(source_size))
+            .transpose()?;
+        if let Some(aperture) = aperture {
+            source_size = (aperture.width, aperture.height);
+        }
         if orientation.swaps_axes() {
             source_size = (source_size.1, source_size.0);
         }
@@ -255,16 +276,8 @@ impl Animation {
                 .iter()
                 .any(|operation| matches!(operation, EditOperation::RotateImage(_)));
         let mut filters = if let Some(alpha) = source_alpha {
-            // FFmpeg autorotates both streams when their matrices are present.
-            // Older encoders can omit the alpha matrix: match the color before
-            // merging, equivalent to display's merged-canvas transformation.
-            let alpha_orientation = if alpha.orientation.is_none() {
-                orientation.ffmpeg_filter()
-            } else {
-                ""
-            };
             format!(
-                "[0:{}]scale=flags=bilinear,format=rgba[color];[0:{}]{alpha_orientation}format=gray[alpha];[color][alpha]alphamerge",
+                "[0:{}]scale=flags=bilinear,format=rgba[color];[0:{}]format=gray[alpha];[color][alpha]alphamerge",
                 self.samples[0].index, alpha.index
             )
         } else {
@@ -275,6 +288,19 @@ impl Animation {
         };
         if self.color().premultiplied_with.is_some() {
             filters.push_str(",unpremultiply=inplace=1");
+        }
+        // Match display: merge full-size planes, then apply the color aperture
+        // and orientation once. Omitted legacy alpha transforms follow color.
+        if let Some(crop) = aperture {
+            filters.push_str(&format!(
+                ",crop={}:{}:{}:{}:exact=1",
+                crop.width, crop.height, crop.x, crop.y
+            ));
+        }
+        let orientation = orientation.ffmpeg_filter().trim_end_matches(',');
+        if !orientation.is_empty() {
+            filters.push(',');
+            filters.push_str(orientation);
         }
         for filter in visual_filters(&request.operations) {
             filters.push(',');
@@ -367,6 +393,19 @@ fn encode(
     .collect();
     if avif_path(&request.source) {
         args.extend(["-max_stts_delta".into(), u32::MAX.to_string()]);
+    }
+    if timing.is_some() {
+        // Container transforms are explicit in the merged-RGBA graph above;
+        // retain normal codec cropping without applying the container twice.
+        args.extend([
+            "-apply_cropping".into(),
+            "codec".into(),
+            "-noautorotate".into(),
+            "-display_rotation".into(),
+            "0".into(),
+            "-nodisplay_hflip".into(),
+            "-nodisplay_vflip".into(),
+        ]);
     }
     args.extend([
         "-i".into(),

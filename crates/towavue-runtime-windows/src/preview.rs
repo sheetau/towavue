@@ -796,7 +796,7 @@ fn cache_key(source: &Path, variant: &str) -> Result<String, PreviewError> {
             .and_then(|value| value.to_str())
             .is_some_and(|value| value.eq_ignore_ascii_case("avif"))
     {
-        "filmstrip-avif-v1"
+        "filmstrip-avif-v2"
     } else {
         variant
     };

@@ -56,6 +56,158 @@ fn setup(root: &Path) -> (Application<fn(AppEvent)>, egui::Pos2) {
 }
 
 #[test]
+fn logo_menu_sizes_follow_content_and_pointer_opening_does_not_focus_the_first_item() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "logo_menu::tests::logo_menu_sizes_follow_content_and_pointer_opening_does_not_focus_the_first_item",
+    ) else {
+        return;
+    };
+    let (mut app, origin) = setup(&root);
+    let size = egui::vec2(960.0, 720.0);
+    let mut measured = Vec::new();
+    let mut first_focused = Vec::new();
+    for (delta, title) in [
+        (egui::Vec2::ZERO, "File"),
+        (egui::vec2(24.0, -12.0), "Open file "),
+        (egui::vec2(24.0, 24.0), "Undo "),
+        (egui::vec2(-12.0, 24.0), "Toggle fullscreen "),
+        (egui::Vec2::ZERO, "File"),
+    ] {
+        for _ in 0..4 {
+            frame(&mut app, size, vec![]);
+        }
+        let target = origin + delta;
+        frame(
+            &mut app,
+            size,
+            vec![egui::Event::PointerMoved(origin), pointer(origin, true)],
+        );
+        frame(
+            &mut app,
+            size,
+            vec![egui::Event::PointerMoved(target), pointer(target, false)],
+        );
+        for _ in 0..4 {
+            frame(&mut app, size, vec![]);
+        }
+        let tree = frame(&mut app, size, vec![])
+            .platform_output
+            .accesskit_update
+            .expect("menu tree");
+        let (id, node) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label().is_some_and(|label| label.starts_with(title)))
+            .expect("first item");
+        let bounds = node.bounds().expect("item bounds");
+        measured.push((title, bounds.width(), bounds.height()));
+        first_focused.push(tree.focus == *id);
+        if title == "Open file " {
+            let focused = frame(&mut app, size, vec![key(egui::Key::ArrowDown)])
+                .platform_output
+                .accesskit_update
+                .expect("keyboard entry");
+            assert_eq!(focused.focus, *id, "first arrow selects the first command");
+            let second = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.label()
+                        .is_some_and(|label| label.starts_with("Open folder "))
+                })
+                .expect("second command")
+                .1
+                .bounds()
+                .expect("bounds");
+            let output = frame(
+                &mut app,
+                size,
+                vec![egui::Event::PointerMoved(egui::pos2(
+                    ((second.x0 + second.x1) * 0.5) as f32,
+                    ((second.y0 + second.y1) * 0.5) as f32,
+                ))],
+            );
+            assert_ne!(
+                output
+                    .platform_output
+                    .accesskit_update
+                    .expect("pointer return")
+                    .focus,
+                *id,
+                "hovering another command releases the old keyboard highlight"
+            );
+        }
+        frame(&mut app, size, vec![key(egui::Key::Escape)]);
+        frame(&mut app, size, vec![key(egui::Key::Escape)]);
+    }
+    assert!(
+        measured[0].1 < 160.0 && measured[4].1 < 160.0,
+        "compact root menu: {measured:?}"
+    );
+    assert!(
+        (measured[0].1 - measured[4].1).abs() < 1.0,
+        "root width must not inherit direct menu dimensions"
+    );
+    assert!(
+        measured[1..4]
+            .iter()
+            .all(|(_, width, height)| *width < 560.0 && *height < 30.0),
+        "natural command rows: {measured:?}"
+    );
+    assert_eq!(
+        first_focused, [false; 5],
+        "pointer opening must not pin a keyboard highlight"
+    );
+    for (steps, direct) in [(0, 1), (1, 2), (2, 3)] {
+        for _ in 0..4 {
+            frame(&mut app, size, vec![]);
+        }
+        frame(
+            &mut app,
+            size,
+            vec![egui::Event::PointerMoved(origin), pointer(origin, true)],
+        );
+        frame(&mut app, size, vec![pointer(origin, false)]);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        for _ in 0..=steps {
+            frame(&mut app, size, vec![key(egui::Key::ArrowDown)]);
+        }
+        frame(
+            &mut app,
+            size,
+            vec![
+                egui::Event::PointerMoved(origin),
+                key(egui::Key::ArrowRight),
+            ],
+        );
+        for _ in 0..4 {
+            frame(&mut app, size, vec![]);
+        }
+        let tree = frame(&mut app, size, vec![])
+            .platform_output
+            .accesskit_update
+            .expect("nested menu");
+        let (title, width, height) = measured[direct];
+        let bounds = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label().is_some_and(|label| label.starts_with(title)))
+            .expect("same nested command")
+            .1
+            .bounds()
+            .expect("bounds");
+        assert!(
+            (bounds.width() - width).abs() < 1.0 && (bounds.height() - height).abs() < 1.0,
+            "direct and nested {title} must share geometry: {bounds:?} vs {width}x{height}"
+        );
+        frame(&mut app, size, vec![key(egui::Key::Escape)]);
+        frame(&mut app, size, vec![key(egui::Key::Escape)]);
+    }
+}
+
+#[test]
 fn logo_direction_threshold_and_sector_boundaries_match_the_three_arrows() {
     for (delta, expected) in [
         (egui::vec2(7.99, 0.0), None),

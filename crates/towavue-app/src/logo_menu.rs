@@ -237,7 +237,25 @@ pub(super) fn show(
                     .with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config),
             );
     }
-    let inner = popup.show(|ui| menu::show_section(ui, commands, shortcuts, section));
+    let inner = popup.show(|ui| {
+        let mut builder = egui::UiBuilder::new();
+        if set_open.is_some() {
+            // This popup alternates between categories and direct submenus.
+            let width = ui
+                .spacing()
+                .default_area_size
+                .x
+                .min(context.content_rect().width());
+            ui.set_max_width(
+                (width - egui::Frame::popup(ui.style()).total_margin().sum().x).max(0.0),
+            );
+            builder = builder.sizing_pass();
+        }
+        ui.scope_builder(builder, |ui| {
+            menu::show_section(ui, commands, shortcuts, section)
+        })
+        .inner
+    });
     egui::InnerResponse {
         response,
         inner: inner.map(|inner| inner.inner),

@@ -443,7 +443,8 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         };
-        for _ in 0..5 {
+        // The first arrow enters keyboard navigation after pointer opening.
+        for _ in 0..6 {
             frame(vec![key(egui::Key::ArrowDown)]);
         }
         frame(vec![]);

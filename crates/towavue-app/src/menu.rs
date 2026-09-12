@@ -273,6 +273,27 @@ pub(crate) struct MenuKeyboard {
 
 impl MenuKeyboard {
     pub(crate) fn begin(ui: &egui::Ui) -> Self {
+        let modality = ui.input(|input| {
+            input.events.iter().rev().find_map(|event| match event {
+                egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. } => Some(false),
+                egui::Event::Key { pressed: true, .. } | egui::Event::AccessKitActionRequest(_) => {
+                    Some(true)
+                }
+                _ => None,
+            })
+        });
+        let frame = ui.ctx().cumulative_frame_nr();
+        let keyboard = ui.data_mut(|data| {
+            let state =
+                data.get_temp_mut_or(egui::Id::new("menu-keyboard-input"), (u64::MAX, true));
+            if state.0 != frame {
+                state.0 = frame;
+                if let Some(modality) = modality {
+                    state.1 = modality;
+                }
+            }
+            state.1
+        });
         let (last_pass, items, selected) = ui
             .data(|data| {
                 data.get_temp::<(u64, Vec<egui::Id>, Option<egui::Id>)>(
@@ -288,13 +309,20 @@ impl MenuKeyboard {
             state.open_item.is_none()
         });
         let mut result = Self {
-            active,
+            active: active && keyboard,
             left: false,
             right: false,
             requested_focus: None,
             initial_move: None,
         };
-        if !active {
+        if !keyboard {
+            ui.memory_mut(|memory| {
+                for id in &items {
+                    memory.surrender_focus(*id);
+                }
+            });
+        }
+        if !result.active {
             return result;
         }
         let (backward, forward, left, right) = ui.input_mut(|input| {
@@ -330,15 +358,17 @@ impl MenuKeyboard {
             });
         }
         if (backward || forward) && !items.is_empty() {
-            let current = items
-                .iter()
-                .position(|id| Some(*id) == selected)
-                .unwrap_or(0);
-            let next = if backward {
-                (current + items.len() - 1) % items.len()
-            } else {
-                (current + 1) % items.len()
-            };
+            let current = items.iter().position(|id| Some(*id) == selected);
+            let next = current.map_or_else(
+                || if backward { items.len() - 1 } else { 0 },
+                |current| {
+                    if backward {
+                        (current + items.len() - 1) % items.len()
+                    } else {
+                        (current + 1) % items.len()
+                    }
+                },
+            );
             ui.memory_mut(|memory| memory.request_focus(items[next]));
             result.requested_focus = Some(items[next]);
         }
@@ -780,7 +810,7 @@ mod tests {
             }
             assert!(click(&mut frame, egui::pos2(20.0, 15.0)).is_empty());
             frame(vec![]);
-            for _ in 0..steps {
+            for _ in 0..=steps {
                 frame(vec![key(egui::Key::ArrowDown)]);
             }
             frame(vec![key(egui::Key::ArrowRight)]);

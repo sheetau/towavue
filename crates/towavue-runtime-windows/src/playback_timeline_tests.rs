@@ -690,3 +690,85 @@ fn selection_audio_completion_preserves_final_chunk_rejection_and_cancellation()
     }
     fs::remove_dir_all(directory).expect("remove owned fixture");
 }
+
+#[test]
+fn unscaled_edited_audio_seek_matches_the_continuous_sample_axis() {
+    check_unscaled_audio_seek_sample_axis(false);
+}
+
+#[test]
+#[ignore = "known failure: initial seek into coarse Matroska PTS loses the original sample phase"]
+fn coarse_timestamp_edited_audio_seek_matches_the_continuous_sample_axis() {
+    check_unscaled_audio_seek_sample_axis(true);
+}
+
+fn check_unscaled_audio_seek_sample_axis(coarse_timestamps: bool) {
+    let (directory, path) = fixture(true);
+    let wav = directory.join("source.wav");
+    let executable =
+        PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe");
+    let output = std::process::Command::new(executable)
+        .creation_flags(0x0800_0000)
+        .args(["-v", "error", "-i"])
+        .arg(&path)
+        .args(["-map", "0:a:0", "-c:a", "copy"])
+        .arg(&wav)
+        .output()
+        .expect("sample-timestamp control");
+    assert!(
+        output.status.success(),
+        "remux PCM without changing samples"
+    );
+    let plan = EditTimeline::from_operations(
+        time(2000),
+        &[
+            EditOperation::Timeline(TimelineEdit::SetVolume(range(17, 35), 0.5)),
+            EditOperation::Timeline(TimelineEdit::Delete(range(69, 84))),
+        ],
+    )
+    .expect("unscaled plan");
+    let collect = |path: &Path, target| {
+        let mut bytes = Vec::new();
+        timeline::decode_audio(
+            path,
+            &plan,
+            target,
+            None,
+            1.0,
+            AudioFormat {
+                sample_rate: 48000,
+                channels: 2,
+            },
+            &AtomicBool::new(false),
+            |chunk| {
+                bytes.extend(chunk.bytes);
+                true
+            },
+        )
+        .expect("edited audio samples");
+        bytes
+    };
+    let reference = collect(&wav, MediaTime::ZERO);
+    let mut failures = Vec::new();
+    let source = if coarse_timestamps { &path } else { &wav };
+    let continuous = collect(source, MediaTime::ZERO);
+    assert_eq!(continuous, reference, "identical sequential PCM");
+    for target_ms in [17, 35, 69, 617, 1017, 1500, 1917] {
+        let actual = collect(source, time(target_ms));
+        let first = target_ms as usize * 48;
+        let expected = &continuous[first * 8..];
+        assert_eq!(actual.len(), expected.len(), "length at {target_ms} ms");
+        if actual != expected {
+            let offset = (-48_isize..=48).find(|offset| {
+                let shifted = (first as isize + offset) as usize * 8;
+                actual[..512] == continuous[shifted..shifted + 512]
+            });
+            failures.push(format!(
+                "{} at {target_ms} ms: sample offset {offset:?}",
+                source.extension().expect("extension").to_string_lossy()
+            ));
+        }
+    }
+    fs::remove_dir_all(directory).expect("remove owned fixture");
+    assert!(failures.is_empty(), "sample-axis mismatch: {failures:?}");
+}

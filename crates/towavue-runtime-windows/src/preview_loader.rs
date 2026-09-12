@@ -14,13 +14,26 @@ pub struct LoadedPreview {
     pub result: Result<MediaPreview, String>,
 }
 
+#[derive(Clone)]
+struct PendingPreview {
+    path: PathBuf,
+    kind: MediaKind,
+    check_cache: bool,
+}
+
+struct ActivePreview {
+    path: PathBuf,
+    kind: MediaKind,
+    cancellation: Cancellation,
+}
+
 #[derive(Default)]
 struct Mailbox {
     generation: u64,
-    pending: Option<Vec<(PathBuf, MediaKind)>>,
-    completed: Vec<LoadedPreview>,
+    pending: Vec<PendingPreview>,
+    active: Option<ActivePreview>,
+    completed: Vec<(MediaKind, LoadedPreview)>,
     closed: bool,
-    cancellation: Cancellation,
 }
 
 pub struct PreviewLoader {
@@ -56,20 +69,56 @@ impl PreviewLoader {
     }
 
     pub fn request(&self, paths: Vec<(PathBuf, MediaKind)>) -> u64 {
+        let mut wanted = Vec::new();
+        for item in paths {
+            if !wanted.contains(&item) {
+                wanted.push(item);
+                if wanted.len() == VISIBLE_PREVIEW_LIMIT {
+                    break;
+                }
+            }
+        }
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("preview mailbox");
-        mailbox.cancellation.cancel();
-        mailbox.cancellation = Cancellation::default();
+        if let Some(active) = &mailbox.active
+            && !wanted
+                .iter()
+                .any(|(path, kind)| *path == active.path && *kind == active.kind)
+        {
+            active.cancellation.cancel();
+        }
         mailbox.generation = mailbox.generation.wrapping_add(1);
-        mailbox.pending =
-            (!paths.is_empty()).then(|| paths.into_iter().take(VISIBLE_PREVIEW_LIMIT).collect());
-        mailbox.completed.clear();
+        let generation = mailbox.generation;
+        mailbox.completed.retain_mut(|(kind, preview)| {
+            preview.generation = generation;
+            wanted
+                .iter()
+                .any(|(path, wanted_kind)| *path == preview.path && wanted_kind == kind)
+        });
+        mailbox.pending = wanted
+            .into_iter()
+            .filter(|(path, kind)| {
+                !mailbox
+                    .completed
+                    .iter()
+                    .any(|(ready_kind, preview)| ready_kind == kind && preview.path == *path)
+            })
+            .map(|(path, kind)| PendingPreview {
+                path,
+                kind,
+                // Another preview consumer may have populated the shared cache since our miss.
+                check_cache: true,
+            })
+            .collect();
         ready.notify_one();
-        mailbox.generation
+        generation
     }
 
     pub fn take_completed(&self) -> Vec<LoadedPreview> {
         std::mem::take(&mut self.shared.0.lock().expect("preview mailbox").completed)
+            .into_iter()
+            .map(|(_, preview)| preview)
+            .collect()
     }
 }
 
@@ -78,8 +127,10 @@ impl Drop for PreviewLoader {
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("preview mailbox");
         mailbox.closed = true;
-        mailbox.cancellation.cancel();
-        mailbox.pending = None;
+        if let Some(active) = &mailbox.active {
+            active.cancellation.cancel();
+        }
+        mailbox.pending.clear();
         mailbox.completed.clear();
         ready.notify_one();
         // Cancel the owned child without joining work that may still be inside native probing.
@@ -94,56 +145,67 @@ fn run_worker(
 ) {
     let (mutex, ready) = &*shared;
     loop {
-        let (generation, paths, cancellation) = {
+        let (work, cancellation) = {
             let mut mailbox = ready
                 .wait_while(mutex.lock().expect("preview mailbox"), |mailbox| {
-                    !mailbox.closed && mailbox.pending.is_none()
+                    !mailbox.closed && mailbox.pending.is_empty()
                 })
                 .expect("preview mailbox");
             if mailbox.closed {
                 return;
             }
-            (
-                mailbox.generation,
-                mailbox.pending.take().expect("pending previews"),
-                mailbox.cancellation.clone(),
-            )
+            // Serve all cache hits before generating misses, in the latest requested order.
+            let index = mailbox
+                .pending
+                .iter()
+                .position(|work| work.check_cache)
+                .unwrap_or(0);
+            let work = mailbox.pending[index].clone();
+            let cancellation = Cancellation::default();
+            mailbox.active = Some(ActivePreview {
+                path: work.path.clone(),
+                kind: work.kind,
+                cancellation: cancellation.clone(),
+            });
+            (work, cancellation)
         };
-        let publish = |path, result| {
-            let publish = {
-                let mut mailbox = mutex.lock().expect("preview mailbox");
-                if mailbox.closed || mailbox.generation != generation {
-                    false
-                } else {
-                    mailbox.completed.push(LoadedPreview {
+        let result = if work.check_cache {
+            cached(&work.path, work.kind, &cancellation).map(Ok)
+        } else {
+            Some(generate(&work.path, work.kind, &cancellation))
+        };
+        let publish = {
+            let mut mailbox = mutex.lock().expect("preview mailbox");
+            mailbox.active = None;
+            if mailbox.closed || cancellation.is_cancelled() {
+                false
+            } else if let Some(result) = result {
+                mailbox
+                    .pending
+                    .retain(|pending| pending.path != work.path || pending.kind != work.kind);
+                let generation = mailbox.generation;
+                mailbox.completed.push((
+                    work.kind,
+                    LoadedPreview {
                         generation,
-                        path,
+                        path: work.path,
                         result,
-                    });
-                    true
+                    },
+                ));
+                true
+            } else {
+                if let Some(pending) = mailbox
+                    .pending
+                    .iter_mut()
+                    .find(|pending| pending.path == work.path && pending.kind == work.kind)
+                {
+                    pending.check_cache = false;
                 }
-            };
-            if publish {
-                notify();
+                false
             }
         };
-        let mut missing = Vec::new();
-        for (path, kind) in paths {
-            if cancellation.is_cancelled() {
-                break;
-            }
-            if let Some(preview) = cached(&path, kind, &cancellation) {
-                publish(path, Ok(preview));
-            } else {
-                missing.push((path, kind));
-            }
-        }
-        for (path, kind) in missing {
-            if cancellation.is_cancelled() {
-                break;
-            }
-            let result = generate(&path, kind, &cancellation);
-            publish(path, result);
+        if publish {
+            notify();
         }
     }
 }
@@ -154,6 +216,265 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn overlapping_requests_keep_active_generation_and_reprioritize_the_remaining_work() {
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let loader = PreviewLoader {
+            shared: Arc::clone(&shared),
+        };
+        let (started, started_rx) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel();
+        let (notify, ready) = mpsc::channel();
+        let warmed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_warmed = Arc::clone(&warmed);
+        let worker = thread::spawn(move || {
+            run_worker(
+                shared,
+                || {
+                    let _ = notify.send(());
+                },
+                |path, _, _| {
+                    (path == std::path::Path::new("warming.png")
+                        && worker_warmed.load(std::sync::atomic::Ordering::SeqCst))
+                    .then(|| MediaPreview {
+                        image: crate::PreviewImage {
+                            width: 1,
+                            height: 1,
+                            rgba: vec![9, 0, 0, 255],
+                        },
+                        duration: None,
+                    })
+                },
+                |path, _, cancellation| {
+                    started
+                        .send((path.to_owned(), cancellation.clone()))
+                        .expect("started");
+                    if path == std::path::Path::new("shared.png") {
+                        release_rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .expect("release shared work");
+                    }
+                    Err("fixture".into())
+                },
+            )
+        });
+        let paths = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| (PathBuf::from(name), MediaKind::Image))
+                .collect()
+        };
+        loader.request(paths(&[
+            "shared.png",
+            "obsolete.png",
+            "kept.png",
+            "warming.png",
+        ]));
+        let (path, cancellation) = started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("active work");
+        assert_eq!(path, PathBuf::from("shared.png"));
+        warmed.store(true, std::sync::atomic::Ordering::SeqCst);
+        loader.request(paths(&["new.png", "shared.png", "kept.png", "warming.png"]));
+        let generation =
+            loader.request(paths(&["kept.png", "new.png", "shared.png", "warming.png"]));
+        let retained = !cancellation.is_cancelled();
+        release.send(()).expect("finish shared work");
+        assert!(retained, "scrolling must not cancel a still-needed preview");
+        for _ in 0..4 {
+            ready
+                .recv_timeout(Duration::from_secs(5))
+                .expect("latest results");
+        }
+        let results = loader.take_completed();
+        assert_eq!(
+            results
+                .iter()
+                .map(|item| item.path.as_path())
+                .collect::<Vec<_>>(),
+            ["shared.png", "warming.png", "kept.png", "new.png"].map(std::path::Path::new)
+        );
+        assert!(results.iter().all(|item| item.generation == generation));
+        for name in ["kept.png", "new.png"] {
+            assert_eq!(
+                started_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("remaining work")
+                    .0,
+                PathBuf::from(name)
+            );
+        }
+        assert!(
+            started_rx.try_recv().is_err(),
+            "no duplicate or obsolete generation"
+        );
+        drop(loader);
+        worker.join().expect("worker exits");
+    }
+
+    #[test]
+    fn requests_preserve_unconsumed_results_and_cache_reads_only_for_matching_keys() {
+        for kind in [MediaKind::Image, MediaKind::Video] {
+            let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+            let loader = PreviewLoader {
+                shared: Arc::clone(&shared),
+            };
+            let (started, started_rx) = mpsc::channel();
+            let (release, release_rx) = mpsc::channel();
+            let (notify, ready) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                run_worker(
+                    shared,
+                    || {
+                        let _ = notify.send(());
+                    },
+                    |path, kind, cancellation| {
+                        started.send((path.to_owned(), kind)).expect("cache read");
+                        if path == std::path::Path::new("active") {
+                            release_rx
+                                .recv_timeout(Duration::from_secs(5))
+                                .expect("release cache read");
+                            assert!(!cancellation.is_cancelled(), "retain matching cache lookup");
+                        }
+                        Some(MediaPreview {
+                            image: crate::PreviewImage {
+                                width: 1,
+                                height: 1,
+                                rgba: vec![1, 2, 3, 255],
+                            },
+                            duration: None,
+                        })
+                    },
+                    |_, _, _| panic!("all previews are cache hits"),
+                )
+            });
+            loader.request(
+                ["shared", "removed", "active"]
+                    .map(|name| (name.into(), MediaKind::Image))
+                    .into(),
+            );
+            for name in ["shared", "removed", "active"] {
+                assert_eq!(
+                    started_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("cache start"),
+                    (PathBuf::from(name), MediaKind::Image)
+                );
+            }
+            for _ in 0..2 {
+                ready
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("queued result");
+            }
+            let generation = loader.request(vec![
+                ("shared".into(), kind),
+                ("active".into(), MediaKind::Image),
+            ]);
+            let retained = loader.take_completed();
+            assert_eq!(retained.len(), usize::from(kind == MediaKind::Image));
+            assert!(
+                retained
+                    .iter()
+                    .all(|item| item.path == std::path::Path::new("shared")
+                        && item.generation == generation)
+            );
+            release.send(()).expect("finish cache read");
+            let remaining = if kind == MediaKind::Image { 1 } else { 2 };
+            for _ in 0..remaining {
+                ready
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("remaining result");
+            }
+            let results = loader.take_completed();
+            assert_eq!(results.len(), remaining);
+            assert!(
+                results
+                    .iter()
+                    .all(|item| item.generation == generation && item.result.is_ok())
+            );
+            if kind == MediaKind::Video {
+                assert_eq!(
+                    started_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("changed kind reloaded"),
+                    (PathBuf::from("shared"), kind)
+                );
+            }
+            assert!(
+                started_rx.try_recv().is_err(),
+                "matching results and cache reads are not repeated"
+            );
+            drop(loader);
+            worker.join().expect("worker exits");
+        }
+    }
+
+    #[test]
+    fn removing_then_readding_a_path_does_not_revive_cancelled_work() {
+        for cache_hit in [false, true] {
+            let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+            let loader = PreviewLoader {
+                shared: Arc::clone(&shared),
+            };
+            let (started, started_rx) = mpsc::channel();
+            let (release, release_rx) = mpsc::channel();
+            let (notify, ready) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                let count = std::cell::Cell::new(0_u8);
+                let work = |cancellation: &Cancellation| {
+                    let value = count.get() + 1;
+                    count.set(value);
+                    if value == 1 {
+                        started.send(cancellation.clone()).expect("first work");
+                        release_rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .expect("release obsolete work");
+                        assert!(cancellation.is_cancelled());
+                    } else {
+                        assert!(!cancellation.is_cancelled());
+                    }
+                    MediaPreview {
+                        image: crate::PreviewImage {
+                            width: 1,
+                            height: 1,
+                            rgba: vec![value, 0, 0, 255],
+                        },
+                        duration: None,
+                    }
+                };
+                run_worker(
+                    shared,
+                    || {
+                        let _ = notify.send(());
+                    },
+                    |_, _, cancellation| cache_hit.then(|| work(cancellation)),
+                    |_, _, cancellation| Ok(work(cancellation)),
+                );
+                assert_eq!(count.get(), 2, "only the new request can publish");
+            });
+            loader.request(vec![("same.png".into(), MediaKind::Image)]);
+            let cancellation = started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("active work");
+            loader.request(Vec::new());
+            let generation = loader.request(vec![("same.png".into(), MediaKind::Image)]);
+            assert!(cancellation.is_cancelled());
+            release.send(()).expect("finish obsolete work");
+            ready
+                .recv_timeout(Duration::from_secs(5))
+                .expect("new result");
+            let results = loader.take_completed();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].generation, generation);
+            assert_eq!(
+                results[0].result.as_ref().expect("preview").image.rgba,
+                [2, 0, 0, 255]
+            );
+            drop(loader);
+            worker.join().expect("worker exits");
+        }
+    }
 
     #[test]
     fn cached_previews_publish_before_slow_generation_without_reordering_misses() {
@@ -267,7 +588,7 @@ mod tests {
         });
         let generation = loader.request(
             (0..1000)
-                .map(|i| (PathBuf::from(format!("{i}.png")), MediaKind::Image))
+                .map(|i| (PathBuf::from(format!("{}.png", i / 3)), MediaKind::Image))
                 .collect(),
         );
         for _ in 0..VISIBLE_PREVIEW_LIMIT {
@@ -276,6 +597,14 @@ mod tests {
         }
         let results = loader.take_completed();
         assert_eq!(results.len(), VISIBLE_PREVIEW_LIMIT);
+        assert_eq!(
+            results
+                .iter()
+                .map(|item| &item.path)
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            VISIBLE_PREVIEW_LIMIT
+        );
         assert!(
             results
                 .iter()

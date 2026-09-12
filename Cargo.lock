@@ -2665,6 +2665,7 @@ dependencies = [
  "egui-directx11",
  "ffmpeg-next",
  "flate2",
+ "gif",
  "image",
  "png",
  "quick-xml",

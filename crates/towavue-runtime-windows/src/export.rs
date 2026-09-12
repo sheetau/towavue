@@ -16,6 +16,9 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[path = "export_rotation.rs"]
 mod rotation;
 
+#[path = "export_gif.rs"]
+mod gif_animation;
+
 #[path = "export_audio_options.rs"]
 mod audio_options;
 pub use audio_options::{AudioChannels, AudioExportOptions};
@@ -333,9 +336,29 @@ fn export_audio_cancellable(
                 ImageMetadataFormat::from_path(&request.target) == Some(format)
             }));
     let png_source = request.kind == MediaKind::Image && png_metadata::png_path(&request.source);
-    let source_stamp = (options.normalize_peak || image_metadata || png_source)
+    let gif_source = request.kind == MediaKind::Image && gif_animation::gif_path(&request.source);
+    if gif_source && !metadata.is_empty() {
+        return Err(ExportError::Failed(
+            "GIF metadata editing is not supported yet".into(),
+        ));
+    }
+    let source_stamp = (options.normalize_peak || image_metadata || png_source || gif_source)
         .then(|| audio_options::SourceStamp::read(&request.source))
         .transpose()?;
+    let gif_animation = gif_source
+        .then(|| gif_animation::Animation::read(&request.source, cancelled))
+        .transpose()?;
+    if gif_animation
+        .as_ref()
+        .is_some_and(gif_animation::Animation::is_animated)
+        && !gif_animation::gif_path(&request.target)
+    {
+        return Err(ExportError::Failed(
+            "Animated GIF export currently requires GIF output; conversion must not discard frames"
+                .into(),
+        ));
+    }
+    let gif_animation = gif_animation.filter(|_| gif_animation::gif_path(&request.target));
     let jpeg_metadata = (image_metadata && jpeg_metadata::jpeg_path(&request.source))
         .then(|| jpeg_metadata::JpegMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
@@ -346,6 +369,7 @@ fn export_audio_cancellable(
         .then(|| png_metadata::PngMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
     let mut streams = ExportStreams::probe(request)?;
+    streams.gif_animation = gif_animation.is_some();
     streams.png_animation = png_metadata
         .as_ref()
         .is_some_and(png_metadata::PngMetadata::is_animated);
@@ -451,7 +475,9 @@ fn export_audio_cancellable(
             message
         }));
     }
-    if let Some(png_metadata) = png_metadata {
+    if let Some(gif_animation) = gif_animation {
+        gif_animation.apply(&staging, cancelled)?;
+    } else if let Some(png_metadata) = png_metadata {
         png_metadata.apply(&staging, cancelled)?;
     } else if let Some(jpeg_metadata) = jpeg_metadata {
         jpeg_metadata.apply(&staging, cancelled)?;
@@ -580,6 +606,7 @@ impl Drop for StagedExport {
         let _ = fs::remove_file(self.directory.join("timeline-filter.txt"));
         let _ = fs::remove_file(self.directory.join("metadata.png"));
         let _ = fs::remove_file(self.directory.join("animation.png"));
+        let _ = fs::remove_file(self.directory.join("animation.gif"));
         let _ = fs::remove_file(self.directory.join("animation-source.png"));
         let _ = fs::remove_file(self.directory.join("metadata.jpg"));
         let _ = fs::remove_file(self.directory.join("metadata.webp"));
@@ -667,6 +694,7 @@ fn run_ffmpeg(
 
 #[derive(Clone, Default)]
 struct ExportStreams {
+    gif_animation: bool,
     png_animation: bool,
     png_image_sequence: bool,
     video: Option<(usize, ffmpeg::Rational)>,
@@ -722,6 +750,7 @@ impl ExportStreams {
                 .map(towavue_core::MediaTime::from_nanoseconds);
             Ok(Self {
                 png_animation: false,
+                gif_animation: false,
                 png_image_sequence: false,
                 video,
                 audio: audio.map(|(index, time_base, _)| (index, time_base)),
@@ -769,6 +798,16 @@ fn ffmpeg_arguments(
             &["-ignore_loop", "1", "-f", "apng"]
         };
         arguments.splice(input..input, options.iter().map(|value| (*value).into()));
+    }
+    if streams.gif_animation {
+        let input = arguments
+            .iter()
+            .position(|argument| argument == "-i")
+            .expect("input");
+        arguments.splice(
+            input..input,
+            ["-xerror", "-ignore_loop", "1", "-f", "gif"].map(String::from),
+        );
     }
     arguments.extend(streams.metadata.arguments());
     if request.kind == MediaKind::Audio {
@@ -821,14 +860,18 @@ fn ffmpeg_arguments(
     };
     match request.kind {
         MediaKind::Image => {
-            if streams.png_animation {
-                // Preserve frame order independently of timestamp rounding; restore exact PNG delays in staging.
+            if streams.png_animation || streams.gif_animation {
+                // Preserve frame order independently of timestamp rounding; restore exact source delays in staging.
                 visual.extend(["settb=1/1000".into(), "setpts=N*100".into()]);
+            }
+            if streams.gif_animation {
+                visual.push("split[colors][pixels];[colors]palettegen=stats_mode=single[palette];[pixels][palette]paletteuse=new=1".into());
+                arguments.extend(["-fps_mode", "passthrough", "-gifflags", "0"].map(String::from));
             }
             if !visual.is_empty() {
                 arguments.extend(["-vf".into(), visual.join(",")]);
             }
-            if !streams.png_animation {
+            if !streams.png_animation && !streams.gif_animation {
                 arguments.extend(["-frames:v".into(), "1".into()]);
             }
         }

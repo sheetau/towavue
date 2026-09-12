@@ -59,6 +59,30 @@ fn webp_to_apng_preserves_edited_frames_exact_timing_and_total_plays() {
     ] {
         let bytes = fixture(loops, &delays, dispose);
         fs::write(&source, &bytes).expect("source");
+        let jpeg = root.join("protected.JpEg");
+        fs::write(&jpeg, b"existing JPEG").expect("protected target");
+        for set_title in [false, true] {
+            let mut metadata = MetadataExportOptions::default();
+            if set_title {
+                metadata
+                    .set(MetadataField::Title, Some("Do not flatten".into()))
+                    .expect("title");
+            }
+            let error = export_options_cancellable(
+                &request(&source, &jpeg, vec![]),
+                ExportOptions {
+                    metadata,
+                    ..Default::default()
+                },
+                &AtomicBool::new(false),
+                &|_| panic!("reject animated JPEG conversion before encoding"),
+                &|_| panic!("image has no audio"),
+            )
+            .expect_err("even one animation frame retains timing and must not become JPEG");
+            assert!(error.to_string().contains("discarding frames"), "{error}");
+            assert_eq!(fs::read(&jpeg).expect("target retained"), b"existing JPEG");
+            assert_eq!(fs::read(&source).expect("source retained"), bytes);
+        }
         let original = crate::decode_image(&source).expect("display");
         for operations in [
             vec![],

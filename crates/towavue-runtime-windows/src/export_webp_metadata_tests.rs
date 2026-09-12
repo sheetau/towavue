@@ -373,10 +373,148 @@ fn webp_streaming_cancellation_io_failure_and_staging_cleanup_are_bounded() {
 }
 
 #[test]
-fn webp_keeps_language_author_order_and_noncanonical_source_spelling() {
+fn jpeg_webp_conversion_sets_removes_and_protects_all_xmp_fields() {
+    let root = root("jpeg-webp-xmp-conversion");
+    let webp = root.join("source.webp");
+    let jpeg = root.join("source.jpg");
+    fs::write(&webp, tagged(&fixture(true), &packet())).expect("tagged WebP");
+    let mut request = ExportRequest {
+        source: webp.clone(),
+        target: jpeg.clone(),
+        kind: MediaKind::Image,
+        operations: vec![],
+        hardware_encode: false,
+    };
+    export_media(&request).expect("tagged JPEG");
+    for (source, extension) in [(&webp, "jpg"), (&jpeg, "webp")] {
+        request.source = source.clone();
+        request.target = root.join(format!("converted.{extension}"));
+        request.operations = vec![EditOperation::RotateClockwise];
+        let original = fs::read(source).expect("original");
+        export_media(&request).expect("Keep baseline");
+        let baseline = image::open(&request.target).expect("converted pixels");
+        assert_eq!((baseline.width(), baseline.height()), (24, 32));
+        assert_eq!(
+            read_export_metadata(&request.target, MediaKind::Image)
+                .expect("Keep")
+                .len(),
+            9
+        );
+        for remove in [false, true] {
+            let mut metadata = settings();
+            for field in ImageMetadataFormat::Webp.fields() {
+                let value = if remove {
+                    ""
+                } else {
+                    match field {
+                        MetadataField::Date => "1999",
+                        MetadataField::Track => "-12",
+                        _ => "Replacement 日本語 & <text>\r\n",
+                    }
+                };
+                metadata
+                    .set(*field, Some(value.into()))
+                    .expect("replacement");
+            }
+            export_media_with_options(
+                &request,
+                ExportOptions {
+                    metadata: metadata.clone(),
+                    ..Default::default()
+                },
+            )
+            .expect("cross-format Set/Remove");
+            assert_eq!(image::open(&request.target).expect("pixels"), baseline);
+            let shown =
+                read_export_metadata(&request.target, MediaKind::Image).expect("output XMP");
+            if remove {
+                assert!(shown.is_empty());
+            } else {
+                assert_eq!(shown.len(), 9);
+                for field in ImageMetadataFormat::Webp.fields() {
+                    assert!(shown.iter().any(|value| value.field == *field
+                        && Some(value.value.as_str()) == metadata.get(*field)));
+                }
+            }
+            let bytes = fs::read(&request.target).expect("output bytes");
+            let packet = if jpeg_metadata::jpeg_path(&request.target) {
+                image::codecs::jpeg::JpegDecoder::new(Cursor::new(&bytes))
+                    .expect("JPEG decoder")
+                    .xmp_metadata()
+            } else {
+                image::codecs::webp::WebPDecoder::new(Cursor::new(&bytes))
+                    .expect("WebP decoder")
+                    .xmp_metadata()
+            }
+            .expect("independent XMP extraction");
+            assert_eq!(packet.is_none(), remove);
+            if let Some(packet) = packet {
+                let mut expected = Vec::new();
+                xmp::apply(&mut expected, &metadata).expect("expected values");
+                assert_eq!(packet, xmp::encode(&expected).expect("expected packet"));
+            }
+            assert_eq!(fs::read(source).expect("source retained"), original);
+        }
+        fs::write(&request.target, b"existing target").expect("protected target");
+        for mode in 0..3 {
+            let cancel = AtomicBool::new(mode == 0);
+            let error = export_options_cancellable(
+                &request,
+                ExportOptions::default(),
+                &cancel,
+                &|_| {
+                    if mode == 1 {
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    if mode == 2 {
+                        fs::OpenOptions::new()
+                            .append(true)
+                            .open(source)
+                            .expect("source")
+                            .write_all(b"changed")
+                            .expect("source mutation");
+                    }
+                },
+                &|_| panic!("image has no audio"),
+            )
+            .expect_err("must not publish");
+            if mode == 2 {
+                assert!(error.to_string().contains("source changed"), "{error}");
+            } else {
+                assert!(matches!(error, ExportError::Cancelled), "{error}");
+            }
+            assert_eq!(
+                fs::read(&request.target).expect("protected"),
+                b"existing target"
+            );
+            fs::write(source, &original).expect("restore owned source");
+        }
+        let damaged = if webp_path(source) {
+            tagged(&fixture(true), b"<broken>")
+        } else {
+            original[..original.len() - 1].to_vec()
+        };
+        fs::write(source, &damaged).expect("invalid source");
+        assert!(export_media(&request).is_err());
+        assert_eq!(
+            fs::read(&request.target).expect("protected"),
+            b"existing target"
+        );
+        assert_eq!(fs::read(source).expect("source untouched"), damaged);
+        fs::write(source, &original).expect("restore fixture");
+    }
+    assert!(
+        fs::read_dir(&root)
+            .expect("cleanup")
+            .all(|entry| entry.expect("entry").path().is_file())
+    );
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn jpeg_webp_conversion_keeps_language_author_order_and_noncanonical_source_spelling() {
     let root = root("webp-keep-variants");
     let source = root.join("source.webp");
-    let target = root.join("target.webp");
     let values = vec![
         xmp::Value {
             field: MetadataField::Title,
@@ -412,17 +550,27 @@ fn webp_keeps_language_author_order_and_noncanonical_source_spelling() {
     let packet = xmp::encode(&values).expect("existing text");
     let expected = xmp::parse(&packet, &AtomicBool::new(false)).expect("source ordering");
     fs::write(&source, tagged(&fixture(false), &packet)).expect("source");
-    export_media(&ExportRequest {
-        source,
-        target: target.clone(),
-        kind: MediaKind::Image,
-        operations: vec![],
-        hardware_encode: false,
-    })
-    .expect("Keep");
-    assert_eq!(
-        read(&target, &AtomicBool::new(false)).expect("retained"),
-        expected
-    );
+    let mut current = source;
+    for (index, extension) in ["webp", "JpEg", "WeBp"].into_iter().enumerate() {
+        let original = fs::read(&current).expect("unchanged source");
+        let target = root.join(format!("keep-{index}.{extension}"));
+        export_media(&ExportRequest {
+            source: current.clone(),
+            target: target.clone(),
+            kind: MediaKind::Image,
+            operations: vec![],
+            hardware_encode: false,
+        })
+        .expect("Keep through conversion");
+        let values = if jpeg_metadata::jpeg_path(&target) {
+            jpeg_metadata::read(&target, &AtomicBool::new(false))
+        } else {
+            read(&target, &AtomicBool::new(false))
+        }
+        .expect("retained");
+        assert_eq!(values, expected, "{extension}");
+        assert_eq!(fs::read(&current).expect("source"), original);
+        current = target;
+    }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }

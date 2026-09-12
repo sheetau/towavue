@@ -122,8 +122,7 @@ pub fn read_export_metadata(
             Some(ImageMetadataFormat::Jpeg) => jpeg_metadata::inspect(path),
             Some(ImageMetadataFormat::Webp) => webp_metadata::inspect(path),
             None => Err(ExportError::Failed(
-                "Image metadata currently supports PNG, JPEG or WebP input with the same output format"
-                    .into(),
+                "Image metadata currently supports PNG, JPEG or WebP input".into(),
             )),
         };
     }

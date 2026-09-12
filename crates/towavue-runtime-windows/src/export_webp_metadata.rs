@@ -282,6 +282,25 @@ pub(super) fn inspect(path: &Path) -> Result<Vec<MetadataSourceValue>, ExportErr
     ))
 }
 
+pub(super) fn read_for_jpeg(
+    path: &Path,
+    cancelled: &AtomicBool,
+) -> Result<Vec<xmp::Value>, ExportError> {
+    let info = container(
+        BufReader::new(fs::File::open(path).map_err(ExportError::Output)?),
+        cancelled,
+    )?;
+    if info.animation.is_some() {
+        return Err(invalid(
+            "animated WebP cannot export to JPEG without discarding frames",
+        ));
+    }
+    info.packet
+        .map(|packet| xmp::parse(&packet, cancelled))
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
 fn chunk(output: &mut dyn Write, kind: &[u8; 4], bytes: &[u8]) -> Result<(), ExportError> {
     output.write_all(kind).map_err(ExportError::Output)?;
     output
@@ -430,18 +449,28 @@ impl WebpMetadata {
         options: &MetadataExportOptions,
         cancelled: &AtomicBool,
     ) -> Result<Self, ExportError> {
-        if !webp_path(&request.source) || !webp_path(&request.target) {
-            return Err(invalid("XMP export requires WebP input and WebP output"));
+        if !(webp_path(&request.source) || jpeg_metadata::jpeg_path(&request.source))
+            || !webp_path(&request.target)
+        {
+            return Err(invalid(
+                "XMP export requires JPEG or WebP input and WebP output",
+            ));
         }
-        let info = container(
-            BufReader::new(fs::File::open(&request.source).map_err(ExportError::Output)?),
-            cancelled,
-        )?;
-        let mut values = info
-            .packet
-            .map(|packet| xmp::parse(&packet, cancelled))
-            .transpose()?
-            .unwrap_or_default();
+        let (mut values, animation) = if jpeg_metadata::jpeg_path(&request.source) {
+            (jpeg_metadata::read(&request.source, cancelled)?, None)
+        } else {
+            let info = container(
+                BufReader::new(fs::File::open(&request.source).map_err(ExportError::Output)?),
+                cancelled,
+            )?;
+            (
+                info.packet
+                    .map(|packet| xmp::parse(&packet, cancelled))
+                    .transpose()?
+                    .unwrap_or_default(),
+                info.animation,
+            )
+        };
         xmp::apply(&mut values, options)?;
         let packet = if values.is_empty() {
             Vec::new()
@@ -451,7 +480,7 @@ impl WebpMetadata {
         Ok(Self {
             values,
             packet,
-            animation: info.animation,
+            animation,
         })
     }
 

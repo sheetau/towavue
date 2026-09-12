@@ -332,8 +332,18 @@ fn export_audio_cancellable(
         return Err(ExportError::InvalidTrim);
     }
     check_cancelled(cancelled)?;
+    let xmp_source = request.kind == MediaKind::Image
+        && (jpeg_metadata::jpeg_path(&request.source) || webp_metadata::webp_path(&request.source));
+    let jpeg_target = jpeg_metadata::jpeg_path(&request.target);
+    let webp_target = webp_metadata::webp_path(&request.target);
+    if xmp_source && !metadata.is_empty() && !jpeg_target && !webp_target {
+        return Err(ExportError::Failed(
+            "XMP export requires JPEG or WebP output".into(),
+        ));
+    }
     let image_metadata = request.kind == MediaKind::Image
         && (!metadata.is_empty()
+            || (xmp_source && (jpeg_target || webp_target))
             || ImageMetadataFormat::from_path(&request.source).is_some_and(|format| {
                 ImageMetadataFormat::from_path(&request.target) == Some(format)
             }));
@@ -396,10 +406,10 @@ fn export_audio_cancellable(
     }
     let gif_animation = gif_animation
         .filter(|_| gif_animation::gif_path(&request.target) || gif_to_png || gif_to_webp);
-    let jpeg_metadata = (image_metadata && jpeg_metadata::jpeg_path(&request.source))
+    let jpeg_metadata = (image_metadata && xmp_source && jpeg_target)
         .then(|| jpeg_metadata::JpegMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
-    let webp_metadata = (image_metadata && webp_metadata::webp_path(&request.source))
+    let webp_metadata = (image_metadata && xmp_source && webp_target)
         .then(|| webp_metadata::WebpMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
     let png_to_webp =

@@ -40,10 +40,7 @@ impl MetadataDialog {
     fn options(&self) -> Result<MetadataExportOptions, String> {
         if self.kind == MediaKind::Image {
             if self.image_format().is_none() {
-                return Err(
-                    "Image metadata requires PNG, JPEG or WebP input with the same output format."
-                        .into(),
-                );
+                return Err("Image metadata requires PNG, JPEG or WebP input.".into());
             }
             match &self.current {
                 Some(Ok(_)) => {}
@@ -165,15 +162,15 @@ impl MetadataDialog {
                     ui.label("Set/Remove replaces all matching text variants. Choose a .png or .apng export path; other output formats fail without replacing the target. Reading rejects corrupt text or more than 128 text chunks / 1 MiB stored or expanded text.");
                     ui.label("Supported APNG saves retain all frames, delays and loop count (1 to 65536 frames), including PREVIOUS disposal. A separate default poster receives the same edits and stays outside the animation. Frame compositing is shared with display. Other animation formats are separate capabilities.");
                 } else if image_format == Some(ImageMetadataFormat::Jpeg) {
-                    ui.label("JPEG input and JPEG output only. Applies to the next Save or Export as for this tab's current file. Original file, displayed pixels and edit history stay unchanged.");
+                    ui.label("JPEG input supports JPEG or WebP output. Applies to the next Save or Export as for this tab's current file. Original file, displayed pixels and edit history stay unchanged.");
                     ui.label("Only these 9 XMP fields are edited. EXIF, IPTC and JPEG comments (COM) are not synchronized; unknown or technical source XMP is not copied. Keep preserves supported source values as written, languages and author order, including when all fields are Keep. Existing noncanonical Date/Track values are retained; new values must match the displayed types.");
-                    ui.label("Set replaces all values of the field with one (x-default for language alternatives). Remove deletes all values. Choose a .jpg or .jpeg export path; other output formats fail without replacing the target. Extended XMP, corrupt or oversized metadata is rejected (one packet, 65502 bytes, 128 text values).");
+                    ui.label("Set replaces all values of the field with one (x-default for language alternatives). Remove deletes all values. Choose a .jpg, .jpeg or .webp export path; other output formats fail without replacing the target. Extended XMP, corrupt or oversized metadata is rejected (one packet, 65502 bytes, 128 text values).");
                 } else if image_format == Some(ImageMetadataFormat::Webp) {
-                    ui.label("WebP input and WebP output only. Applies to the next Save or Export as for this tab's current file. Original file, displayed pixels and edit history stay unchanged. Animated WebP retains all frames, exact timing and loops using lossless full-canvas snapshots; compositing and edits are shared with display.");
+                    ui.label("WebP input supports WebP output, or JPEG output for static images. Applies to the next Save or Export as for this tab's current file. Original file, displayed pixels and edit history stay unchanged. Animated WebP retains all frames, exact timing and loops using lossless full-canvas snapshots; compositing and edits are shared with display.");
                     ui.label("Only these 9 XMP fields are edited. Source EXIF, ICC and unknown or technical XMP are not copied or synchronized. Keep preserves supported source values as written, languages and author order, including when all fields are Keep. Existing noncanonical Date/Track values are retained; new values must match the displayed types.");
-                    ui.label("Set replaces all values of the field with one (x-default for language alternatives). Remove deletes all values. Choose a .webp export path; other output formats fail without replacing the target. Corrupt or oversized metadata is rejected (one XMP packet, 65502 bytes, 128 text values).");
+                    ui.label("Set replaces all values of the field with one (x-default for language alternatives). Remove deletes all values. Choose a .webp export path, or .jpg/.jpeg for a static image; animated JPEG conversion and other output formats fail without replacing the target. JPEG cannot retain transparency. Corrupt or oversized metadata is rejected (one XMP packet, 65502 bytes, 128 text values).");
                 } else if self.kind == MediaKind::Image {
-                    ui.label("Image metadata currently supports PNG, JPEG and WebP only, with the same input/output format. Other image formats cannot apply metadata options.");
+                    ui.label("Image metadata supports PNG to PNG and JPEG/WebP output from JPEG or static WebP. Animated WebP metadata requires WebP output. Other image formats cannot apply metadata options.");
                 } else {
                     ui.label("Applies to the next Save, Export as and Export audio only for this tab's current file. Playback, original file and edit history stay unchanged.");
                     ui.label("Set/Remove affects the file and output streams. Unsupported tags or changed values fail before replacing the target. Keep is not a guarantee of complete metadata preservation across formats.");

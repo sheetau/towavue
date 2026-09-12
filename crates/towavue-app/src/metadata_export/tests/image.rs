@@ -167,12 +167,12 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
             "JPEG XMP (x-default): Original title",
             "JPEG XMP (ja): 元の題名",
             "JPEG XMP property: dc:title (language alternatives)",
-            "JPEG input and JPEG output only.",
+            "JPEG input supports JPEG or WebP output.",
             "EXIF, IPTC and JPEG comments (COM) are not synchronized",
             "including when all fields are Keep",
             "Set replaces all values of the field with one",
             "Remove deletes all values",
-            "Choose a .jpg or .jpeg export path",
+            "Choose a .jpg, .jpeg or .webp export path",
         ]
     };
     for expected in expected {
@@ -490,7 +490,25 @@ fn png_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_life
     ) else {
         return;
     };
-    metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(&root, "png", 1);
+    metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
+        &root, "png", "png", 1,
+    );
+}
+
+#[test]
+fn jpeg_webp_metadata_conversion_preserves_save_resave_and_guard_lifecycle() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::image::jpeg_webp_metadata_conversion_preserves_save_resave_and_guard_lifecycle",
+    ) else {
+        return;
+    };
+    for (source, target) in [("jpeg", "webp"), ("webp", "jpeg")] {
+        let directory = root.join(source);
+        std::fs::create_dir(&directory).expect("owned conversion fixtures");
+        metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
+            &directory, source, target, 1,
+        );
+    }
 }
 
 #[test]
@@ -501,13 +519,14 @@ fn jpeg_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lif
         return;
     };
     metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
-        &root, "jpeg", 1,
+        &root, "jpeg", "jpeg", 1,
     );
 }
 
 fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
     root: &Path,
     extension: &str,
+    output_extension: &str,
     frames: usize,
 ) {
     let setting = || {
@@ -524,7 +543,18 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     };
     let source = image_fixture_frames(root, extension, frames);
     let original = std::fs::read(&source).expect("original");
-    let source_values = values(&source);
+    let target = root.join(format!("saved.{output_extension}"));
+    let source_format = ImageMetadataFormat::from_path(&source).expect("source metadata");
+    let target_format = ImageMetadataFormat::from_path(&target).expect("target metadata");
+    let source_values: Vec<_> = values(&source)
+        .into_iter()
+        .map(|mut value| {
+            value.scope = value
+                .scope
+                .replacen(source_format.label(), target_format.label(), 1);
+            value
+        })
+        .collect();
     let (send, events) = std::sync::mpsc::channel();
     let mut app = Application::new(None, move |event| {
         let _ = send.send(event);
@@ -540,7 +570,6 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
         .push(EditOperation::RotateClockwise, MediaKind::Image);
     let history = app.edits.clone();
     let generation = app.media_generation;
-    let target = root.join(format!("saved.{extension}"));
     let intent = || DialogIntent::Export {
         tab,
         source: source.clone(),
@@ -662,10 +691,8 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
             .expect("format failure")
             .contains(if extension == "png" {
                 "PNG input and PNG output"
-            } else if extension == "webp" {
-                "WebP input and WebP output"
             } else {
-                "JPEG input and JPEG output"
+                "XMP export requires JPEG or WebP output"
             })
     );
     assert_eq!(std::fs::read(&bad).expect("protected"), b"existing target");
@@ -707,7 +734,7 @@ fn webp_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lif
         return;
     };
     metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
-        &root, "webp", 1,
+        &root, "webp", "webp", 1,
     );
 }
 
@@ -891,7 +918,7 @@ fn animated_webp_metadata_save_resave_and_guard_preserve_all_frames() {
         return;
     };
     metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
-        &root, "webp", 3,
+        &root, "webp", "webp", 3,
     );
 }
 
@@ -927,7 +954,7 @@ fn webp_metadata_ui_explains_animation_scope_and_validates_typed_fields() {
     for text in [
         "WebP XMP (x-default): 元の題名",
         "WebP XMP property: dc:title",
-        "WebP input and WebP output only",
+        "WebP input supports WebP output, or JPEG output for static images",
         "Animated WebP retains all frames, exact timing and loops",
         "Choose a .webp export path",
     ] {

@@ -781,7 +781,7 @@ fn jpeg_metadata_copy_cancel_write_failure_and_invalid_stage_leave_owned_files_i
         drop(staging);
         assert_eq!(fs::read_dir(&root).expect("cleanup").count(), 2);
     }
-    for extension in ["png", "webp", "avif", "tiff", "bmp", "gif"] {
+    for extension in ["png", "avif", "tiff", "bmp", "gif"] {
         let unsupported = root.join(format!("unsupported.{extension}"));
         fs::write(&unsupported, b"unchanged").expect("sentinel");
         assert!(

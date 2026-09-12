@@ -146,7 +146,7 @@ fn scan(
     }
 }
 
-fn read(path: &Path, cancelled: &AtomicBool) -> Result<Vec<xmp::Value>, ExportError> {
+pub(super) fn read(path: &Path, cancelled: &AtomicBool) -> Result<Vec<xmp::Value>, ExportError> {
     let input = BufReader::new(fs::File::open(path).map_err(ExportError::Output)?);
     scan(input, None, &[], cancelled)?
         .map(|packet| xmp::parse(&packet, cancelled))
@@ -172,12 +172,18 @@ impl JpegMetadata {
         options: &MetadataExportOptions,
         cancelled: &AtomicBool,
     ) -> Result<Self, ExportError> {
-        if !jpeg_path(&request.source) || !jpeg_path(&request.target) {
+        if !(jpeg_path(&request.source) || webp_metadata::webp_path(&request.source))
+            || !jpeg_path(&request.target)
+        {
             return Err(invalid(
-                "XMP text export requires JPEG input and JPEG output",
+                "XMP export requires JPEG or static WebP input and JPEG output",
             ));
         }
-        let mut values = read(&request.source, cancelled)?;
+        let mut values = if jpeg_path(&request.source) {
+            read(&request.source, cancelled)?
+        } else {
+            webp_metadata::read_for_jpeg(&request.source, cancelled)?
+        };
         xmp::apply(&mut values, options)?;
         let packet = if values.is_empty() {
             Vec::new()

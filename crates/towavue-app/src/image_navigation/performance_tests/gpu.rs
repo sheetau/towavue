@@ -3,7 +3,7 @@ use towavue_runtime_windows::VerificationMemory;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
 #[test]
-#[ignore = "generates 100 large JPEGs; requires FFMPEG_DIR, hardware D3D11 and a Release test build"]
+#[ignore = "generates 100 large JPEGs (or TOWAVUE_NAV_IMAGE_FORMAT=png); requires FFMPEG_DIR, hardware D3D11 and a Release test build"]
 fn hundred_large_images_report_gpu_navigation_and_memory() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_navigation::performance_tests::gpu::hundred_large_images_report_gpu_navigation_and_memory",

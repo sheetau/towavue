@@ -192,7 +192,7 @@ fn neighbor_prefetch_runs_before_current_texture_preparation() {
 }
 
 #[test]
-#[ignore = "generates 100 large JPEGs and measures real decoding; requires FFMPEG_DIR and a Release test build"]
+#[ignore = "generates 100 large JPEGs (or TOWAVUE_NAV_IMAGE_FORMAT=png); requires FFMPEG_DIR and a Release test build"]
 fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_navigation::performance_tests::hundred_large_images_report_navigation_gaps_and_preparation_cost",
@@ -203,6 +203,10 @@ fn hundred_large_images_report_navigation_gaps_and_preparation_cost() {
 }
 
 pub(crate) fn large_jpeg_fixture(root: &Path) -> Vec<PathBuf> {
+    large_image_fixture(root, "jpg")
+}
+
+fn large_image_fixture(root: &Path, format: &str) -> Vec<PathBuf> {
     let output = std::process::Command::new(
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe"),
     )
@@ -216,28 +220,34 @@ pub(crate) fn large_jpeg_fixture(root: &Path) -> Vec<PathBuf> {
         "testsrc2=size=4096x2304:rate=30",
         "-frames:v",
         "100",
-        "-c:v",
-        "mjpeg",
-        "-q:v",
-        "3",
         "-threads",
         "2",
     ])
-    .arg(root.join("image-%03d.jpg"))
+    .args(if format == "png" {
+        &["-c:v", "png", "-pix_fmt", "rgb24"][..]
+    } else {
+        &["-c:v", "mjpeg", "-q:v", "3"][..]
+    })
+    .arg(root.join(format!("image-%03d.{format}")))
     .output()
-    .expect("generate owned JPEG sequence");
+    .expect("generate owned image sequence");
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
     (1..=100)
-        .map(|n| root.join(format!("image-{n:03}.jpg")))
+        .map(|n| root.join(format!("image-{n:03}.{format}")))
         .collect()
 }
 
 fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
-    let paths = large_jpeg_fixture(&root);
+    let format = std::env::var("TOWAVUE_NAV_IMAGE_FORMAT").unwrap_or_else(|_| "jpg".into());
+    assert!(matches!(format.as_str(), "jpg" | "png"), "benchmark format");
+    let paths = large_image_fixture(&root, &format);
+    eprintln!(
+        "NAV100_FIXTURE format={format}; generated files, not cold-disk or physical-key evidence"
+    );
     let bytes: u64 = paths
         .iter()
         .map(|path| std::fs::metadata(path).expect("fixture").len())

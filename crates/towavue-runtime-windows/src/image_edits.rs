@@ -246,81 +246,6 @@ impl<'a> ImageEditRenderer<'a> {
         }
         #[cfg(test)]
         RENDER_CALLS.set(RENDER_CALLS.get() + 1);
-        let mut convert = || -> Result<DecodedImageFrame, ffmpeg_next::Error> {
-            if self
-                .graph
-                .as_ref()
-                .is_none_or(|(configured, _)| *configured != size)
-            {
-                ffmpeg_next::init()?;
-                let mut graph = filter::Graph::new();
-                #[cfg(test)]
-                GRAPH_BUILDS.set(GRAPH_BUILDS.get() + 1);
-                // This worker exclusively owns the unconfigured graph; no filter thread exists yet.
-                unsafe {
-                    (*graph.as_mut_ptr()).nb_threads = 1;
-                }
-                graph.add(
-                    &filter::find("buffer").ok_or(ffmpeg_next::Error::FilterNotFound)?,
-                    "in",
-                    &format!(
-                        "video_size={}x{}:pix_fmt=rgba:time_base=1/1:pixel_aspect=1/1",
-                        source.width, source.height
-                    ),
-                )?;
-                graph.add(
-                    &filter::find("buffersink").ok_or(ffmpeg_next::Error::FilterNotFound)?,
-                    "out",
-                    "",
-                )?;
-                let mut filters = crate::export::visual_filters(self.operations);
-                // vflip may expose negative linesize; copy returns an owned positive-stride frame.
-                filters.extend(["format=rgba".into(), "copy".into()]);
-                graph
-                    .output("in", 0)?
-                    .input("out", 0)?
-                    .parse(&filters.join(","))?;
-                graph.validate()?;
-                self.graph = Some((size, graph));
-            }
-            let graph = &mut self.graph.as_mut().expect("configured image graph").1;
-            let mut input = frame::Video::new(Pixel::RGBA, source.width, source.height);
-            // The spatial filters emit one frame immediately; monotonic PTS keeps
-            // reused native filter state distinct without changing the source delays.
-            input.set_pts(Some(self.next_pts));
-            self.next_pts += 1;
-            let stride = input.stride(0);
-            let width = source.width as usize * 4;
-            for (y, row) in source.rgba.chunks_exact(width).enumerate() {
-                input.data_mut(0)[y * stride..y * stride + width].copy_from_slice(row);
-            }
-            graph
-                .get("in")
-                .expect("image source")
-                .source()
-                .add(&input)?;
-            let mut output = frame::Video::empty();
-            graph
-                .get("out")
-                .expect("image sink")
-                .sink()
-                .frame(&mut output)?;
-            let width = output.width() as usize * 4;
-            let mut rgba = Vec::with_capacity(width * output.height() as usize);
-            for y in 0..output.height() as usize {
-                if cancelled() {
-                    return Err(ffmpeg_next::Error::Exit);
-                }
-                let row = y * output.stride(0);
-                rgba.extend_from_slice(&output.data(0)[row..row + width]);
-            }
-            Ok(DecodedImageFrame {
-                width: output.width(),
-                height: output.height(),
-                rgba,
-                delay: source.delay,
-            })
-        };
         if source.width == 0
             || source.height == 0
             || u64::from(source.width) * u64::from(source.height) > 128 * 1024 * 1024
@@ -328,7 +253,104 @@ impl<'a> ImageEditRenderer<'a> {
         {
             return Err("Invalid source image pixels".into());
         }
-        convert().map_err(|error| format!("Could not resample image: {error}"))
+        if self.operations.is_empty() {
+            let mut rgba = Vec::with_capacity(source.rgba.len());
+            for bytes in source.rgba.chunks(65536) {
+                if cancelled() {
+                    return Err("Image edit cancelled".into());
+                }
+                rgba.extend_from_slice(bytes);
+            }
+            return Ok(DecodedImageFrame {
+                width: source.width,
+                height: source.height,
+                rgba,
+                delay: source.delay,
+            });
+        }
+        self.render_filtered(source, cancelled)
+            .map_err(|error| format!("Could not resample image: {error}"))
+    }
+
+    fn render_filtered(
+        &mut self,
+        source: &DecodedImageFrame,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<DecodedImageFrame, ffmpeg_next::Error> {
+        let size = (source.width, source.height);
+        if self
+            .graph
+            .as_ref()
+            .is_none_or(|(configured, _)| *configured != size)
+        {
+            ffmpeg_next::init()?;
+            let mut graph = filter::Graph::new();
+            #[cfg(test)]
+            GRAPH_BUILDS.set(GRAPH_BUILDS.get() + 1);
+            // This worker exclusively owns the unconfigured graph; no filter thread exists yet.
+            unsafe {
+                (*graph.as_mut_ptr()).nb_threads = 1;
+            }
+            graph.add(
+                &filter::find("buffer").ok_or(ffmpeg_next::Error::FilterNotFound)?,
+                "in",
+                &format!(
+                    "video_size={}x{}:pix_fmt=rgba:time_base=1/1:pixel_aspect=1/1",
+                    source.width, source.height
+                ),
+            )?;
+            graph.add(
+                &filter::find("buffersink").ok_or(ffmpeg_next::Error::FilterNotFound)?,
+                "out",
+                "",
+            )?;
+            let mut filters = crate::export::visual_filters(self.operations);
+            // vflip may expose negative linesize; copy returns an owned positive-stride frame.
+            filters.extend(["format=rgba".into(), "copy".into()]);
+            graph
+                .output("in", 0)?
+                .input("out", 0)?
+                .parse(&filters.join(","))?;
+            graph.validate()?;
+            self.graph = Some((size, graph));
+        }
+        let graph = &mut self.graph.as_mut().expect("configured image graph").1;
+        let mut input = frame::Video::new(Pixel::RGBA, source.width, source.height);
+        // The spatial filters emit one frame immediately; monotonic PTS keeps
+        // reused native filter state distinct without changing the source delays.
+        input.set_pts(Some(self.next_pts));
+        self.next_pts += 1;
+        let stride = input.stride(0);
+        let width = source.width as usize * 4;
+        for (y, row) in source.rgba.chunks_exact(width).enumerate() {
+            input.data_mut(0)[y * stride..y * stride + width].copy_from_slice(row);
+        }
+        graph
+            .get("in")
+            .expect("image source")
+            .source()
+            .add(&input)?;
+        let mut output = frame::Video::empty();
+        graph
+            .get("out")
+            .expect("image sink")
+            .sink()
+            .frame(&mut output)?;
+        let width = output.width() as usize * 4;
+        let mut rgba = Vec::with_capacity(width * output.height() as usize);
+        for y in 0..output.height() as usize {
+            if cancelled() {
+                return Err(ffmpeg_next::Error::Exit);
+            }
+            let row = y * output.stride(0);
+            rgba.extend_from_slice(&output.data(0)[row..row + width]);
+        }
+        Ok(DecodedImageFrame {
+            width: output.width(),
+            height: output.height(),
+            rgba,
+            delay: source.delay,
+        })
     }
 }
 
@@ -336,6 +358,66 @@ impl<'a> ImageEditRenderer<'a> {
 mod tests {
     use super::*;
     use towavue_core::{ImageResize, PixelCrop, ResampleFilter};
+
+    #[test]
+    fn unedited_frames_copy_exact_pixels_without_native_filters_and_keep_validation() {
+        let source = DecodedImage {
+            format: "generated",
+            frames: [(257, 67), (3, 2)]
+                .into_iter()
+                .map(|(width, height)| DecodedImageFrame {
+                    width,
+                    height,
+                    rgba: (0..width * height)
+                        .flat_map(|pixel| {
+                            [
+                                (pixel * 11) as u8,
+                                (pixel * 7) as u8,
+                                (255 - pixel % 256) as u8,
+                                (pixel * 13) as u8,
+                            ]
+                        })
+                        .collect(),
+                    delay: std::time::Duration::from_nanos(u64::from(width)),
+                })
+                .collect(),
+        };
+        GRAPH_BUILDS.set(0);
+        let copied = render_image_edits(&source, &[], &Cancellation::default()).expect("copy");
+        assert_eq!(copied, source);
+        assert_eq!(GRAPH_BUILDS.get(), 0, "unedited RGBA needs no native graph");
+        assert!(!std::ptr::eq(
+            copied.frames[0].rgba.as_ptr(),
+            source.frames[0].rgba.as_ptr()
+        ));
+        let checks = std::cell::Cell::new(0);
+        assert!(
+            render_frame_cancellable(&source.frames[0], &[], &|| {
+                checks.set(checks.get() + 1);
+                checks.get() > 2
+            })
+            .is_err(),
+            "cancel between bounded copy chunks"
+        );
+        assert_eq!(checks.get(), 3);
+        assert!(render_frame_cancellable(&source.frames[0], &[], &|| true).is_err());
+        for mutation in 0..4 {
+            let mut frame = source.frames[0].clone();
+            match mutation {
+                0 => {
+                    frame.rgba.pop();
+                }
+                1 => frame.width = 0,
+                2 => {
+                    frame.width = 128 * 1024 * 1024 + 1;
+                    frame.height = 1;
+                }
+                _ => frame.rgba.push(0),
+            }
+            assert!(render_frame_cancellable(&frame, &[], &|| false).is_err());
+        }
+        assert_eq!(GRAPH_BUILDS.get(), 0);
+    }
 
     #[test]
     fn animation_resampling_reuses_graphs_without_changing_frames_or_comparisons() {
@@ -530,6 +612,64 @@ mod tests {
             }
             println!(
                 "ANIMATION-FILTER case={name} frames={count} source={width}x{height} output={output_width}x{output_height} lanczos_flip runs=9 alternating_order fresh_median_ms={:.3} reused_median_ms={:.3} graphs={count}/1",
+                times[0][4], times[1][4]
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "opt-in Release unedited RGBA copy versus the native copy-filter path"]
+    fn unedited_frame_copy_benchmark() {
+        for (count, width, height) in [(32, 640, 360), (4, 3840, 2160)] {
+            let frame = DecodedImageFrame {
+                width,
+                height,
+                rgba: (0..width * height)
+                    .flat_map(|pixel| {
+                        [
+                            (pixel * 11) as u8,
+                            (pixel * 7) as u8,
+                            (255 - pixel % 256) as u8,
+                            (pixel * 13) as u8,
+                        ]
+                    })
+                    .collect(),
+                delay: std::time::Duration::from_millis(17),
+            };
+            let source = vec![frame; count];
+            let mut times = [Vec::new(), Vec::new()];
+            for run in 0..10 {
+                for mode in [run % 2, 1 - run % 2] {
+                    let mut renderer = ImageEditRenderer::new(&[]);
+                    GRAPH_BUILDS.set(0);
+                    let start = std::time::Instant::now();
+                    let copied: Vec<_> = source
+                        .iter()
+                        .map(|frame| {
+                            if mode == 0 {
+                                renderer
+                                    .render_filtered(frame, &|| false)
+                                    .expect("native copy filter")
+                            } else {
+                                renderer
+                                    .render(frame, &|| false)
+                                    .expect("bounded direct copy")
+                            }
+                        })
+                        .collect();
+                    let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+                    assert_eq!(copied, source);
+                    assert_eq!(GRAPH_BUILDS.get(), usize::from(mode == 0));
+                    if run > 0 {
+                        times[mode].push(elapsed);
+                    }
+                }
+            }
+            for samples in &mut times {
+                samples.sort_by(f64::total_cmp);
+            }
+            println!(
+                "UNEDITED-COPY frames={count} size={width}x{height} runs=9 alternating_order filter_median_ms={:.3} direct_median_ms={:.3} graphs=1/0",
                 times[0][4], times[1][4]
             );
         }

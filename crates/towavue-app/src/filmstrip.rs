@@ -91,6 +91,38 @@ impl Filmstrip {
         self.focus_requested = true;
     }
 
+    pub fn prepare_neighbors(&mut self, snapshot: Option<&FolderSnapshot>, current: Option<&Path>) {
+        let Some((snapshot, selected)) = snapshot.and_then(|snapshot| {
+            snapshot
+                .items
+                .iter()
+                .position(|item| Some(item.path.as_path()) == current)
+                .map(|selected| (snapshot, selected))
+        }) else {
+            self.clear();
+            return;
+        };
+        self.cancel_drag();
+        self.focus_requested = false;
+        self.focus = None;
+        self.scroll_offset = 0.0;
+        let mut wanted = Vec::new();
+        for distance in 0..snapshot.items.len() {
+            let before = selected.checked_sub(distance);
+            let after = (distance != 0).then_some(selected + distance);
+            for index in [before, after].into_iter().flatten() {
+                if let Some(item) = snapshot.items.get(index) {
+                    wanted.push((item.path.clone(), item.kind));
+                    if wanted.len() == VISIBLE_PREVIEW_LIMIT {
+                        self.set_visible(wanted);
+                        return;
+                    }
+                }
+            }
+        }
+        self.set_visible(wanted);
+    }
+
     pub fn finish(&mut self, context: &Context) {
         for preview in self.loader.take_completed() {
             if preview.generation != self.generation || !self.visible.contains(&preview.path) {
@@ -201,6 +233,9 @@ impl Filmstrip {
             .fixed_pos(screen.min)
             .constrain(false)
             .show(context, |ui| {
+                if ui.is_sizing_pass() {
+                    context.request_discard("resolve filmstrip sizing before presentation");
+                }
                 if !enabled || egui::Popup::is_any_open(context) {
                     let opacity = ui.opacity();
                     ui.disable();
@@ -719,18 +754,8 @@ mod tests {
         std::fs::remove_dir(root).expect("remove empty owned cache");
     }
 
-    #[test]
-    fn recent_grid_has_offscreen_textures_ready_before_scrolling() {
-        let unique = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "towavue-recent-preparation-{}-{unique}",
-            std::process::id()
-        ));
-        let cache = PreviewCache::new(root.join("cache")).expect("owned cache");
-        let paths: Vec<_> = (0..40)
+    fn bitmap_paths(root: &Path, count: usize) -> Vec<PathBuf> {
+        let paths: Vec<_> = (0..count)
             .map(|index| root.join(format!("{index:02}.bmp")))
             .collect();
         let mut bitmap = vec![0_u8; 62];
@@ -747,6 +772,21 @@ mod tests {
             bitmap[54..].copy_from_slice(&[12, 34, index as u8, 12, 34, index as u8, 0, 0]);
             std::fs::write(path, &bitmap).expect("owned bitmap");
         }
+        paths
+    }
+
+    #[test]
+    fn recent_grid_has_offscreen_textures_ready_before_scrolling() {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "towavue-recent-preparation-{}-{unique}",
+            std::process::id()
+        ));
+        let cache = PreviewCache::new(root.join("cache")).expect("owned cache");
+        let paths = bitmap_paths(&root, 40);
         let (notify, ready) = std::sync::mpsc::channel();
         let mut strip = Filmstrip::new(cache, move || {
             let _ = notify.send(());
@@ -806,6 +846,122 @@ mod tests {
         );
         drop(strip);
         std::fs::remove_dir_all(root).expect("remove owned fixtures and cache");
+    }
+
+    #[test]
+    fn closed_filmstrip_prepares_neighbors_and_reuses_them_on_first_open() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "filmstrip::tests::closed_filmstrip_prepares_neighbors_and_reuses_them_on_first_open",
+        ) else {
+            return;
+        };
+        let (notify, ready) = std::sync::mpsc::channel();
+        let mut app = crate::Application::new(None, move |event| {
+            let _ = notify.send(event);
+        })
+        .expect("app");
+        let paths = bitmap_paths(&root, 80);
+        let current = paths[40].clone();
+        app.tabs.open_new(current.clone(), MediaKind::Image);
+        app.path = Some(current.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.state = towavue_core::PlaybackState::Paused;
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: paths
+                .iter()
+                .map(|path| FolderMediaItem {
+                    identity: ShellIdentity::new(vec![]),
+                    path: path.clone(),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: SystemTime::now(),
+        });
+        let context = crate::fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let draw = |app: &mut crate::Application<_>| {
+            context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut vec![]),
+            )
+        };
+        draw(&mut app);
+        assert!(!app.filmstrip_open);
+        assert_eq!(app.filmstrip.visible.len(), VISIBLE_PREVIEW_LIMIT);
+        assert_eq!(
+            &app.filmstrip.visible[..5],
+            &[
+                paths[40].clone(),
+                paths[39].clone(),
+                paths[41].clone(),
+                paths[38].clone(),
+                paths[42].clone()
+            ]
+        );
+        let generation = app.filmstrip.generation;
+        draw(&mut app);
+        assert_eq!(
+            app.filmstrip.generation, generation,
+            "idle draws do not restart preparation"
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while app.filmstrip.previews.len() != VISIBLE_PREVIEW_LIMIT {
+            ready
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("previews finish without opening the strip");
+            app.filmstrip.finish(&context);
+        }
+        let texture_id = app.filmstrip.previews[&current]
+            .as_ref()
+            .expect("prepared current")
+            .0
+            .id();
+        app.filmstrip_open = true;
+        let output = draw(&mut app);
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id)));
+        app.filmstrip_open = false;
+        for blocked in 0..7 {
+            app.image_loading = blocked == 0;
+            app.image_edit_pending = blocked == 1;
+            app.palette_open = blocked == 2;
+            app.grid_open = blocked == 3;
+            app.state = if blocked == 4 {
+                towavue_core::PlaybackState::Playing
+            } else {
+                towavue_core::PlaybackState::Paused
+            };
+            app.pending_folder = (blocked == 5).then_some((1, crate::FolderIntent::Open));
+            if blocked == 6 {
+                app.image_sequence.steps.push_back(true);
+            }
+            app.prepare_filmstrip(&context);
+            assert!(app.filmstrip.visible.is_empty(), "blocked case {blocked}");
+            assert!(
+                app.filmstrip.previews.is_empty(),
+                "release speculative textures"
+            );
+            app.image_sequence.steps.clear();
+        }
+        app.pending_folder = None;
+        app.prepare_filmstrip(&context);
+        assert_eq!(app.filmstrip.visible.len(), VISIBLE_PREVIEW_LIMIT);
+        app.request_image_paths(vec![paths[0].clone()], 0);
+        assert!(
+            app.filmstrip.visible.is_empty(),
+            "foreground request cancels immediately"
+        );
     }
 
     #[test]

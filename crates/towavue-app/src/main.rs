@@ -999,9 +999,12 @@ where
         });
         let notify = Arc::new(notify);
         let image_notify = Arc::clone(&notify);
-        let image_loader = ImageLoader::new(preview_cache.clone(), move || {
-            image_notify(AppEvent::ImagesReady)
-        })?;
+        let image_idle_notify = Arc::clone(&notify);
+        let image_loader = ImageLoader::with_idle_notify(
+            preview_cache.clone(),
+            move || image_notify(AppEvent::ImagesReady),
+            move || image_idle_notify(AppEvent::FilmstripReady),
+        )?;
         let folder_notify = Arc::clone(&notify);
         let folder_order =
             FolderOrderProvider::with_notify(move || folder_notify(AppEvent::FolderReady))?;
@@ -1972,6 +1975,7 @@ where
     }
 
     fn request_image_paths(&mut self, paths: Vec<PathBuf>, offset: usize) {
+        self.filmstrip.clear_previews();
         self.image_request_offset = offset;
         self.image_loading = !paths.is_empty();
         if paths.is_empty() {
@@ -2910,7 +2914,7 @@ where
                 );
             }
         } else if !self.image_seek_preview_active && self.path.is_some() {
-            self.filmstrip.clear();
+            self.prepare_filmstrip(&context);
         }
         if self.palette_open && !modal_blocked {
             self.draw_command_palette(&context, media_panel.response.rect.top(), actions);
@@ -8321,6 +8325,27 @@ where
         } else {
             "Windowed view".into()
         });
+    }
+
+    fn prepare_filmstrip(&mut self, context: &egui::Context) {
+        if matches!(self.state, PlaybackState::Paused | PlaybackState::Ended)
+            && !self.image_loading
+            && !self.image_edit_pending
+            && self.image_sequence.steps.is_empty()
+            && self.active_export.is_none()
+            && self.pending_folder.is_none()
+            && !self.modal_input_blocked()
+            && !self.palette_open
+            && !self.grid_open
+            && !egui::Popup::is_any_open(context)
+            && context.input(|input| input.raw.hovered_files.is_empty())
+            && self.image_loader.is_idle()
+        {
+            self.filmstrip
+                .prepare_neighbors(self.folder_snapshot.as_ref(), self.path.as_deref());
+        } else {
+            self.filmstrip.clear();
+        }
     }
 
     fn close_filmstrip(&mut self) {

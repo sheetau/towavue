@@ -132,7 +132,15 @@ impl Drop for PrefetchLease {
         {
             mailbox.prefetch = None;
         }
+        mailbox.prefetch_tasks -= 1;
+        let notify = (!mailbox.closed)
+            .then(|| mailbox.idle_notify.clone())
+            .flatten();
         self.shared.1.notify_all();
+        drop(mailbox);
+        if let Some(notify) = notify {
+            notify();
+        }
     }
 }
 
@@ -140,6 +148,7 @@ impl Drop for PrefetchLease {
 struct Mailbox {
     generation: u64,
     pending: Option<(Vec<PathBuf>, usize)>,
+    decoding: bool,
     completed: Option<LoadedImages>,
     preview_ready: Option<LoadedImagePreview>,
     closed: bool,
@@ -147,6 +156,8 @@ struct Mailbox {
     cache: Arc<Mutex<ImageCache>>,
     previews: Option<PreviewCache>,
     prefetch: Option<PrefetchWork>,
+    prefetch_tasks: usize,
+    idle_notify: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 /// Latest-only foreground decoder with independent, bounded speculative decoding.
@@ -160,10 +171,28 @@ impl ImageLoader {
         previews: PreviewCache,
         notify: impl Fn() + Send + 'static,
     ) -> Result<Self, std::io::Error> {
+        Self::new_inner(previews, notify, None)
+    }
+
+    /// Observe work completion separately from image/preview publication.
+    pub fn with_idle_notify(
+        previews: PreviewCache,
+        notify: impl Fn() + Send + 'static,
+        idle_notify: impl Fn() + Send + Sync + 'static,
+    ) -> Result<Self, std::io::Error> {
+        Self::new_inner(previews, notify, Some(Arc::new(idle_notify)))
+    }
+
+    fn new_inner(
+        previews: PreviewCache,
+        notify: impl Fn() + Send + 'static,
+        idle_notify: Option<Arc<dyn Fn() + Send + Sync>>,
+    ) -> Result<Self, std::io::Error> {
         let prefetch_worker = LatestTask::new("towavue-image-prefetch")?;
         let shared = Arc::new((
             Mutex::new(Mailbox {
                 previews: Some(previews),
+                idle_notify,
                 ..Default::default()
             }),
             Condvar::new(),
@@ -269,6 +298,7 @@ impl ImageLoader {
                 decoding: false,
                 cancellation: work_cancellation.clone(),
             });
+            mailbox.prefetch_tasks += 1;
             shared.1.notify_all();
             (
                 mailbox.generation,
@@ -387,6 +417,12 @@ impl ImageLoader {
             .preview_ready
             .take()
     }
+
+    /// Snapshot of this loader's foreground and speculative work, not system-wide idleness.
+    pub fn is_idle(&self) -> bool {
+        let mailbox = self.shared.0.lock().expect("image mailbox");
+        !mailbox.decoding && mailbox.pending.is_none() && mailbox.prefetch_tasks == 0
+    }
 }
 
 impl Drop for ImageLoader {
@@ -428,6 +464,7 @@ fn run_worker(
             if mailbox.closed {
                 return;
             }
+            mailbox.decoding = mailbox.pending.is_some();
             (
                 mailbox.generation,
                 mailbox.pending.take(),
@@ -561,6 +598,15 @@ fn run_worker(
                 });
             }
         }
+        let idle_notify = {
+            let mut mailbox = mutex.lock().expect("image mailbox");
+            mailbox.decoding = false;
+            mailbox.idle_notify.clone()
+        };
+        // Publication precedes optional thumbnail work; wake the UI again once that work ends.
+        if let Some(notify) = idle_notify {
+            notify();
+        }
     }
 }
 
@@ -583,6 +629,91 @@ mod tests {
             )
             .expect("prefetch completion");
         assert!(!timeout.timed_out() && mailbox.prefetch.is_none());
+    }
+
+    #[test]
+    fn idle_state_and_wakeups_follow_foreground_and_prefetch_completion() {
+        let root = std::env::temp_dir().join(format!("towavue-image-idle-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("owned directory");
+        let foreground = root.join("foreground.png");
+        let neighbor = root.join("neighbor.png");
+        std::fs::write(&foreground, [1]).expect("source identity");
+        std::fs::write(&neighbor, [2]).expect("neighbor identity");
+        let (notify, ready) = mpsc::channel();
+        let idle_notify = notify.clone();
+        let shared = Arc::new((
+            Mutex::new(Mailbox {
+                idle_notify: Some(Arc::new(move || {
+                    let _ = idle_notify.send(());
+                })),
+                ..Default::default()
+            }),
+            Condvar::new(),
+        ));
+        let loader = ImageLoader {
+            shared: Arc::clone(&shared),
+            prefetch_worker: LatestTask::new("idle-prefetch-test").expect("prefetch worker"),
+        };
+        let (started, started_rx) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel();
+        let worker_shared = Arc::clone(&shared);
+        let worker = thread::spawn(move || {
+            run_worker(
+                worker_shared,
+                || {
+                    let _ = notify.send(());
+                },
+                |_, _, _, _| {
+                    started.send(()).expect("foreground started");
+                    release_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("release foreground");
+                    Ok((*pixel(42)).clone())
+                },
+            )
+        });
+        assert!(loader.is_idle());
+        loader.request(vec![foreground]);
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("foreground active");
+        assert!(!loader.is_idle(), "taken foreground work is still busy");
+        let (started, started_rx) = mpsc::channel();
+        let (release_prefetch, release_rx) = mpsc::channel();
+        loader.prefetch_with_decode(vec![neighbor], move |_, _, _| {
+            started.send(()).expect("prefetch started");
+            release_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("release prefetch");
+            Ok(Some((*pixel(24)).clone()))
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("prefetch active");
+        release.send(()).expect("finish foreground");
+        for _ in 0..2 {
+            ready
+                .recv_timeout(Duration::from_secs(5))
+                .expect("publication and completion wakeups");
+        }
+        assert!(loader.take_completed().is_some());
+        assert!(
+            !loader.is_idle(),
+            "foreground completion does not hide the active prefetch"
+        );
+        loader.request(Vec::new());
+        assert!(
+            !loader.is_idle(),
+            "cancelled native work must return before reporting idle"
+        );
+        release_prefetch.send(()).expect("finish prefetch");
+        ready
+            .recv_timeout(Duration::from_secs(5))
+            .expect("prefetch completion wakes UI");
+        assert!(loader.is_idle());
+        drop(loader);
+        worker.join().expect("foreground worker exits");
+        std::fs::remove_dir_all(root).expect("remove owned source identities");
     }
 
     #[test]

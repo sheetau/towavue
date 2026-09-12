@@ -469,6 +469,7 @@ impl ImageTextureCache {
         context: &egui::Context,
         path: &Path,
         decoded: Arc<DecodedImage>,
+        options: TextureOptions,
     ) -> Result<ImagePresentation, String> {
         if let Some(index) = self
             .entries
@@ -476,17 +477,18 @@ impl ImageTextureCache {
             .position(|image| image.decoded.as_ptr() == Arc::as_ptr(&decoded))
         {
             let cached = self.entries.remove(index).expect("cached image");
-            let image = ImagePresentation {
+            let mut image = ImagePresentation {
                 decoded,
                 texture: cached.texture.clone(),
                 frame_index: 0,
                 next_frame_at: None,
                 sampling: cached.sampling.clone(),
             };
+            image.update_sampling(options);
             self.entries.push_back(cached);
             return Ok(image);
         }
-        let image = ImagePresentation::from_decoded(context, path, decoded)?;
+        let image = ImagePresentation::from_decoded_frame(context, path, decoded, 0, options)?;
         let bytes = image.decoded.retained_bytes();
         if !image.decoded.is_animated() && bytes <= self.byte_limit {
             while self.entries.len() >= 8
@@ -511,6 +513,7 @@ impl ImageTextureCache {
 }
 
 impl ImagePresentation {
+    #[cfg(test)]
     fn from_decoded(
         context: &egui::Context,
         path: &Path,
@@ -557,6 +560,13 @@ impl ImagePresentation {
 
     fn dimensions(&self) -> (u32, u32) {
         self.decoded.dimensions()
+    }
+
+    fn update_sampling(&mut self, options: TextureOptions) {
+        if self.sampling.replace(options) != options {
+            self.texture
+                .set(color_image(&self.decoded.frames[self.frame_index]), options);
+        }
     }
 
     fn advance_animation(&mut self, now: Instant) -> bool {
@@ -2093,6 +2103,7 @@ where
             self.pending_image_previews.remove(path);
             self.image_previews.remove(path);
         }
+        let options = self.image_sampling();
         let mut images = result.images.into_iter();
         if result.first_index == 0 {
             self.image_handoff = None;
@@ -2100,8 +2111,10 @@ where
             let (path, decoded) = images.next().expect("nonempty first chunk");
             match decoded
                 .map_err(|error| error.to_string())
-                .and_then(|decoded| self.image_texture_cache.load(&context, &path, decoded))
-            {
+                .and_then(|decoded| {
+                    self.image_texture_cache
+                        .load(&context, &path, decoded, options)
+                }) {
                 Ok(image) => {
                     self.image = Some(image);
                     self.image_error = None;
@@ -2120,7 +2133,10 @@ where
         self.reading_pages.extend(images.map(|(path, decoded)| {
             decoded
                 .map_err(|error| error.to_string())
-                .and_then(|decoded| self.image_texture_cache.load(&context, &path, decoded))
+                .and_then(|decoded| {
+                    self.image_texture_cache
+                        .load(&context, &path, decoded, options)
+                })
                 .map_err(|error| format!("{}: {error}", display_name(&path)))
         }));
         if !self.image_loading {
@@ -5868,23 +5884,22 @@ where
         ));
     }
 
-    fn update_image_sampling(&mut self) {
-        let options = if self.nearest_images {
+    fn image_sampling(&self) -> TextureOptions {
+        if self.nearest_images {
             TextureOptions::NEAREST
         } else {
             TextureOptions::LINEAR
-        };
+        }
+    }
+
+    fn update_image_sampling(&mut self) {
+        let options = self.image_sampling();
         for image in self.image.iter_mut().chain(
             self.reading_pages
                 .iter_mut()
                 .filter_map(|page| page.as_mut().ok()),
         ) {
-            if image.sampling.replace(options) != options {
-                image.texture.set(
-                    color_image(&image.decoded.frames[image.frame_index]),
-                    options,
-                );
-            }
+            image.update_sampling(options);
         }
     }
 
@@ -5917,11 +5932,7 @@ where
                 .frame_index
                 .min(decoded.frames.len().saturating_sub(1))
         });
-        let options = if self.nearest_images {
-            TextureOptions::NEAREST
-        } else {
-            TextureOptions::LINEAR
-        };
+        let options = self.image_sampling();
         let mut image =
             ImagePresentation::from_decoded_frame(context, path, decoded, frame_index, options)?;
         if let Some(previous) = &self.image {
@@ -17817,6 +17828,7 @@ mod tests {
                                     delay: Duration::ZERO,
                                 }],
                             }),
+                            TextureOptions::LINEAR,
                         )
                         .expect("in-memory image"),
                 );
@@ -17990,6 +18002,7 @@ mod tests {
                             delay: Duration::ZERO,
                         }],
                     }),
+                    TextureOptions::LINEAR,
                 )
                 .expect("cached current image"),
         );
@@ -18876,6 +18889,105 @@ mod tests {
     }
 
     #[test]
+    fn image_loading_uses_current_sampling_once_and_reuses_warm_textures() {
+        let Some(root) = isolated_test_root(
+            "tests::image_loading_uses_current_sampling_once_and_reuses_warm_textures",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let path = root.join("first.png");
+        app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.reading_mode = true;
+        let images = [
+            tab_transfer::tests::decoded(false),
+            tab_transfer::tests::decoded(false),
+            tab_transfer::tests::decoded(true),
+        ];
+        let mut ids: Option<Vec<egui::TextureId>> = None;
+        let mut previous = None;
+        for nearest in [true, true, false, false, true] {
+            app.nearest_images = nearest;
+            app.image_loading = true;
+            let _ = context.tex_manager().write().take_delta();
+            COLOR_IMAGE_CONVERSIONS.set(0);
+            app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                generation: app.image_generation,
+                first_index: 0,
+                total: 3,
+                images: vec![(path.clone(), Ok(Arc::clone(&images[0])))],
+            });
+            app.update_image_sampling();
+            let static_conversions = usize::from(previous != Some(nearest));
+            assert_eq!(
+                COLOR_IMAGE_CONVERSIONS.get(),
+                static_conversions,
+                "main image converts once on a miss or sampling change, never twice"
+            );
+            assert!(app.image_loading);
+            COLOR_IMAGE_CONVERSIONS.set(0);
+            app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                generation: app.image_generation,
+                first_index: 1,
+                total: 3,
+                images: vec![
+                    (root.join("page.png"), Ok(Arc::clone(&images[1]))),
+                    (root.join("animated.png"), Ok(Arc::clone(&images[2]))),
+                ],
+            });
+            app.update_image_sampling();
+            assert_eq!(
+                COLOR_IMAGE_CONVERSIONS.get(),
+                static_conversions + 1,
+                "the uncached animation converts just its first frame"
+            );
+            assert!(!app.image_loading);
+            let presentations: Vec<_> = app
+                .image
+                .iter()
+                .chain(
+                    app.reading_pages
+                        .iter()
+                        .map(|page| page.as_ref().expect("page")),
+                )
+                .collect();
+            let current_ids: Vec<_> = presentations
+                .iter()
+                .map(|image| image.texture.id())
+                .collect();
+            if let Some(previous_ids) = &ids {
+                assert_eq!(current_ids[..2], previous_ids[..2]);
+                assert_ne!(current_ids[2], previous_ids[2]);
+            }
+            let options = if nearest {
+                TextureOptions::NEAREST
+            } else {
+                TextureOptions::LINEAR
+            };
+            let updates = context.tex_manager().write().take_delta().set;
+            assert_eq!(updates.len(), static_conversions * 2 + 1);
+            for (image, original) in presentations.iter().zip(&images) {
+                assert!(Arc::ptr_eq(&image.decoded, original));
+                assert_eq!(image.sampling.get(), options);
+                if let Some((_, delta)) = updates.iter().find(|(id, _)| *id == image.texture.id()) {
+                    assert_eq!(delta.options, options);
+                    assert!(
+                        delta.image
+                            == egui::ImageData::Color(Arc::new(color_image(&original.frames[0])))
+                    );
+                }
+            }
+            assert_eq!(app.image_texture_cache.entries.len(), 2);
+            ids = Some(current_ids);
+            previous = Some(nearest);
+        }
+    }
+
+    #[test]
     fn image_texture_cache_reuses_only_shared_static_decodes_within_its_limits() {
         let context = fonts::test_context();
         let make_image = |value| {
@@ -18892,14 +19004,24 @@ mod tests {
         let mut cache = ImageTextureCache::new(8);
         let first = make_image(10);
         let first_id = cache
-            .load(&context, Path::new("same.png"), first.clone())
+            .load(
+                &context,
+                Path::new("same.png"),
+                first.clone(),
+                TextureOptions::LINEAR,
+            )
             .expect("first")
             .texture
             .id();
         let _ = context.tex_manager().write().take_delta();
         assert_eq!(
             cache
-                .load(&context, Path::new("same.png"), first.clone())
+                .load(
+                    &context,
+                    Path::new("same.png"),
+                    first.clone(),
+                    TextureOptions::LINEAR
+                )
                 .expect("cached")
                 .texture
                 .id(),
@@ -18911,7 +19033,12 @@ mod tests {
         );
         let second = make_image(20);
         let second_id = cache
-            .load(&context, Path::new("same.png"), second.clone())
+            .load(
+                &context,
+                Path::new("same.png"),
+                second.clone(),
+                TextureOptions::LINEAR,
+            )
             .expect("changed content")
             .texture
             .id();
@@ -18920,15 +19047,30 @@ mod tests {
             "same path with a new decode must not use stale pixels"
         );
         cache
-            .load(&context, Path::new("first.png"), first.clone())
+            .load(
+                &context,
+                Path::new("first.png"),
+                first.clone(),
+                TextureOptions::LINEAR,
+            )
             .expect("refresh LRU");
         cache
-            .load(&context, Path::new("third.png"), make_image(30))
+            .load(
+                &context,
+                Path::new("third.png"),
+                make_image(30),
+                TextureOptions::LINEAR,
+            )
             .expect("evict second");
         assert_eq!(cache.entries.len(), 2);
         assert_ne!(
             cache
-                .load(&context, Path::new("second.png"), second)
+                .load(
+                    &context,
+                    Path::new("second.png"),
+                    second,
+                    TextureOptions::LINEAR
+                )
                 .expect("reupload evicted")
                 .texture
                 .id(),
@@ -18938,22 +19080,42 @@ mod tests {
         animation.frames.push(animation.frames[0].clone());
         let animation = Arc::new(animation);
         let a = cache
-            .load(&context, Path::new("a.gif"), animation.clone())
+            .load(
+                &context,
+                Path::new("a.gif"),
+                animation.clone(),
+                TextureOptions::LINEAR,
+            )
             .expect("animation");
         let b = cache
-            .load(&context, Path::new("a.gif"), animation)
+            .load(
+                &context,
+                Path::new("a.gif"),
+                animation,
+                TextureOptions::LINEAR,
+            )
             .expect("uncached animation");
         assert_ne!(a.texture.id(), b.texture.id());
         assert_eq!(cache.entries.len(), 2);
         let mut cache = ImageTextureCache::new(3);
         cache
-            .load(&context, Path::new("large.png"), first.clone())
+            .load(
+                &context,
+                Path::new("large.png"),
+                first.clone(),
+                TextureOptions::LINEAR,
+            )
             .expect("display larger than cache");
         assert!(cache.entries.is_empty());
         let mut cache = ImageTextureCache::new(100);
         for value in 0..9 {
             cache
-                .load(&context, Path::new("page.png"), make_image(value))
+                .load(
+                    &context,
+                    Path::new("page.png"),
+                    make_image(value),
+                    TextureOptions::LINEAR,
+                )
                 .expect("page");
         }
         assert_eq!(cache.entries.len(), 8);
@@ -18961,7 +19123,12 @@ mod tests {
         let released = Arc::downgrade(&first);
         assert_ne!(
             cache
-                .load(&context, Path::new("same.png"), first)
+                .load(
+                    &context,
+                    Path::new("same.png"),
+                    first,
+                    TextureOptions::LINEAR
+                )
                 .expect("reload after clear")
                 .texture
                 .id(),
@@ -18975,7 +19142,12 @@ mod tests {
         let retained = make_image(42);
         let released = Arc::downgrade(&retained);
         cache
-            .load(&context, Path::new("comparison.png"), retained)
+            .load(
+                &context,
+                Path::new("comparison.png"),
+                retained,
+                TextureOptions::LINEAR,
+            )
             .expect("legacy ownership comparison");
         assert!(released.upgrade().is_some());
         cache.entries.clear();

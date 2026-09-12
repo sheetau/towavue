@@ -24,7 +24,12 @@ fn seed(app: &mut WindowApplication, path: PathBuf, color: [u8; 4]) -> egui::Tex
     });
     app.image = Some(
         app.image_texture_cache
-            .load(app.ui_context.as_ref().expect("context"), &path, decoded)
+            .load(
+                app.ui_context.as_ref().expect("context"),
+                &path,
+                decoded,
+                TextureOptions::LINEAR,
+            )
             .expect("original"),
     );
     app.render_frame();

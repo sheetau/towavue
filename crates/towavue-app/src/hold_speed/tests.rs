@@ -292,7 +292,12 @@ fn run_session_trial(audio: bool, test: &str) {
             });
             let weak = Arc::downgrade(&cached);
             app.image_texture_cache
-                .load(&context, &self.path.with_extension("png"), cached)
+                .load(
+                    &context,
+                    &self.path.with_extension("png"),
+                    cached,
+                    TextureOptions::LINEAR,
+                )
                 .expect("previous image cache");
             let instance = app.media_generation;
             let generation = app.session.as_ref().expect("live session").generation();

@@ -100,7 +100,12 @@ fn last_tab_close_releases_cached_originals_but_other_tabs_keep_them() {
     let unused_weak = Arc::downgrade(&unused);
     let unused_texture = app
         .image_texture_cache
-        .load(&context, &root.join("unused.png"), unused)
+        .load(
+            &context,
+            &root.join("unused.png"),
+            unused,
+            TextureOptions::LINEAR,
+        )
         .expect("unused cached original")
         .texture
         .id();

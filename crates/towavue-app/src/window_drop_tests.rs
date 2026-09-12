@@ -1,5 +1,171 @@
 use super::*;
 
+#[test]
+fn drag_feedback_tracks_local_ownership_and_restores_after_release_or_cancel() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::dropping::tests::drag_feedback_tracks_local_ownership_and_restores_after_release_or_cancel",
+    ) else {
+        return;
+    };
+    let mut host = WindowHost::new(None, None).expect("host");
+    let source = *host.windows.keys().next().expect("source");
+    let app = host.windows.get_mut(&source).expect("source");
+    app.ui_context = Some(fonts::test_context());
+    for name in ["a.png", "b.png", "c.png"] {
+        app.tabs.open_new(root.join(name), MediaKind::Image);
+    }
+    let render = |app: &mut WindowApplication, events| {
+        let context = app.ui_context.clone().expect("context");
+        let mut actions = Vec::new();
+        let _ = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 576.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| app.draw_top_bar(ui, &mut actions),
+        );
+        actions
+    };
+    for _ in 0..3 {
+        render(app, vec![]);
+    }
+    let original = app.tabs.clone();
+    let start = tab_drag::tests::label_center(app, original.tabs()[0].id);
+    let end = tab_drag::tests::label_center(app, original.tabs()[2].id);
+    let no_target = |_: &WindowHost, _, _| None;
+    assert!(host.tab_drag_feedback(no_target).is_none());
+    for cancel in [false, true] {
+        let app = host.windows.get_mut(&source).expect("source");
+        app.platform_cursor = egui::CursorIcon::Text;
+        render(
+            app,
+            vec![egui::Event::PointerMoved(start), pointer(start, true)],
+        );
+        assert!(
+            host.tab_drag_feedback(no_target).is_none(),
+            "below drag threshold"
+        );
+        render(
+            host.windows.get_mut(&source).expect("source"),
+            vec![egui::Event::PointerMoved(end)],
+        );
+        let feedback = host.tab_drag_feedback(no_target).expect("active drag");
+        assert_eq!(feedback.cursor, egui::CursorIcon::Move);
+        assert!(feedback.target.is_none());
+        host.windows
+            .get_mut(&source)
+            .expect("source")
+            .graphics_epoch += 1;
+        assert!(
+            host.tab_drag_feedback(no_target).is_none(),
+            "stale graphics identity before redraw"
+        );
+        host.windows
+            .get_mut(&source)
+            .expect("source")
+            .graphics_epoch -= 1;
+        let mut applied = Vec::new();
+        host.update_tab_cursor_with(Some(feedback), |_, cursor| applied.push(cursor));
+        host.update_tab_cursor_with(Some(feedback), |_, cursor| applied.push(cursor));
+        assert_eq!(
+            applied,
+            [egui::CursorIcon::Move; 2],
+            "reassert after native messages"
+        );
+        for point in [egui::pos2(500.0, 200.0), egui::pos2(-40.0, 90.0)] {
+            render(
+                host.windows.get_mut(&source).expect("source"),
+                vec![egui::Event::PointerMoved(point)],
+            );
+            let feedback = host
+                .tab_drag_feedback(no_target)
+                .expect("owned invalid drag");
+            assert_eq!(
+                feedback.cursor,
+                egui::CursorIcon::NoDrop,
+                "media or unavailable transfer"
+            );
+            host.update_tab_cursor_with(Some(feedback), |_, cursor| applied.push(cursor));
+        }
+        for events in [vec![egui::Event::PointerGone], vec![], vec![]] {
+            render(host.windows.get_mut(&source).expect("source"), events);
+            assert_eq!(
+                host.tab_drag_feedback(no_target)
+                    .expect("capture retained outside")
+                    .cursor,
+                egui::CursorIcon::NoDrop
+            );
+        }
+        let app = host.windows.get_mut(&source).expect("source");
+        render(app, vec![egui::Event::PointerMoved(end)]);
+        if cancel {
+            assert!(tab_drag::cancel(app.ui_context.as_ref().expect("context")));
+            assert!(
+                host.tab_drag_feedback(no_target).is_none(),
+                "native cancel needs no redraw"
+            );
+        } else {
+            let actions = render(app, vec![pointer(end, false)]);
+            assert!(matches!(actions.as_slice(), [UiAction::ReorderTab(_, _)]));
+        }
+        let feedback = host.tab_drag_feedback(no_target);
+        assert!(feedback.is_none());
+        host.update_tab_cursor_with(feedback, |_, cursor| applied.push(cursor));
+        assert_eq!(applied.last(), Some(&egui::CursorIcon::Text));
+        let restored = applied.len();
+        host.update_tab_cursor_with(None, |_, cursor| applied.push(cursor));
+        assert_eq!(applied.len(), restored, "restore once");
+        let app = host.windows.get_mut(&source).expect("source");
+        assert!(render(app, vec![pointer(end, false)]).is_empty());
+        assert_eq!(app.tabs, original);
+    }
+}
+
+#[test]
+fn drag_cursor_restores_the_previous_owner_when_feedback_changes_windows() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "window_host::dropping::tests::drag_cursor_restores_the_previous_owner_when_feedback_changes_windows",
+    ) else {
+        return;
+    };
+    let mut host = WindowHost::new(None, None).expect("host");
+    let first = *host.windows.keys().next().expect("first");
+    let second = host.add_application(None).expect("second");
+    host.windows.get_mut(&first).expect("first").platform_cursor = egui::CursorIcon::Text;
+    host.windows
+        .get_mut(&second)
+        .expect("second")
+        .platform_cursor = egui::CursorIcon::None;
+    let mut applied = Vec::new();
+    for source in [first, second] {
+        host.update_tab_cursor_with(
+            Some(DragFeedback {
+                source,
+                target: None,
+                cursor: egui::CursorIcon::Move,
+            }),
+            |app, icon| applied.push((app.window_key.expect("key"), icon)),
+        );
+    }
+    host.update_tab_cursor_with(None, |app, icon| {
+        applied.push((app.window_key.expect("key"), icon))
+    });
+    assert_eq!(
+        applied,
+        [
+            (first, egui::CursorIcon::Move),
+            (first, egui::CursorIcon::Text),
+            (second, egui::CursorIcon::Move),
+            (second, egui::CursorIcon::None),
+        ]
+    );
+    assert!(host.tab_cursor_owner.is_none());
+}
+
 fn pointer(pos: egui::Pos2, pressed: bool) -> egui::Event {
     egui::Event::PointerButton {
         pos,
@@ -83,6 +249,18 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     assert!(host.window_at_drop(source, outside).is_none());
     host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, point)));
     assert_eq!(host.windows[&target].incoming_tab_pointer, Some(point));
+    assert_eq!(
+        host.tab_drag_feedback(|_, _, _| Some((target, point)))
+            .expect("merge feedback")
+            .cursor,
+        egui::CursorIcon::Move
+    );
+    assert_eq!(
+        host.tab_drag_feedback(|_, _, _| None)
+            .expect("detach feedback")
+            .cursor,
+        egui::CursorIcon::Move
+    );
     frame(
         host.windows.get_mut(&target).expect("target"),
         false,
@@ -94,6 +272,12 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     host.windows.get_mut(&target).expect("target").export_error = Some("injected modal".into());
     host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, point)));
     assert!(host.windows[&target].incoming_tab_pointer.is_none());
+    assert_eq!(
+        host.tab_drag_feedback(|_, _, _| Some((target, point)))
+            .expect("blocked feedback")
+            .cursor,
+        egui::CursorIcon::NoDrop
+    );
     assert!(
         host.merge_tab_drop(source, &request, target, point)
             .is_err()
@@ -172,13 +356,14 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .inner_position()
         .expect("origin");
     let density = app.ui_context.as_ref().expect("context").pixels_per_point();
-    let expected = winit::dpi::PhysicalPosition::new(
-        origin.x + ((outside.x - start.x) * density).round() as i32,
-        origin.y + ((outside.y - start.y) * density).round() as i32,
-    );
     let release = winit::dpi::PhysicalPosition::new(
         origin.x + (outside.x * density).round() as i32,
         origin.y + (outside.y * density).round() as i32,
+    );
+    // Native release and grab offset are separately quantized to physical pixels.
+    let expected = winit::dpi::PhysicalPosition::new(
+        release.x - (start.x * density).round() as i32,
+        release.y - (start.y * density).round() as i32,
     );
     frame(
         app,

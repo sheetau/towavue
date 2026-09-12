@@ -57,6 +57,7 @@ pub(crate) struct WindowHost {
     pending_launches: Vec<towavue_runtime_windows::LaunchRequest>,
     preview_cache: PreviewCache,
     idle_graphics: Option<idle_graphics::IdleGraphics>,
+    tab_cursor_owner: Option<WindowKey>,
 }
 
 impl WindowHost {
@@ -71,6 +72,7 @@ impl WindowHost {
             pending_launches: Vec::new(),
             preview_cache: PreviewCache::local()?,
             idle_graphics: None,
+            tab_cursor_owner: None,
         };
         host.add_application(initial_path)?;
         Ok(host)

@@ -9,6 +9,7 @@ struct Drag {
     widget: egui::Id,
     detached_anchor: egui::Vec2,
     origin: egui::Pos2,
+    pointer: egui::Pos2,
     crossed: bool,
     tabs: Vec<(TabId, PathBuf)>,
     source: (Option<TabId>, u64, u64),
@@ -23,6 +24,7 @@ struct State {
     suppressed: bool,
     finished: Option<u64>,
     last_frame: u64,
+    local_drop: bool,
     #[cfg(test)]
     strip: Option<egui::Rect>,
 }
@@ -127,6 +129,7 @@ impl Layout {
                 widget: *widget,
                 detached_anchor: strip.min.to_vec2() + (origin - rect.min),
                 origin,
+                pointer: origin,
                 crossed: false,
                 tabs: tabs.clone(),
                 source,
@@ -140,6 +143,7 @@ impl Layout {
         if let Some(drag) = &mut state.drag
             && let Some(pointer) = pointer
         {
+            drag.pointer = pointer;
             drag.crossed |= pointer.distance_sq(drag.origin) > 36.0;
             if drag.crossed && down {
                 context.set_dragged_id(drag.widget);
@@ -226,6 +230,7 @@ impl Layout {
             self.state.finished = Some(context.cumulative_frame_nr());
         }
         self.state.last_frame = context.cumulative_frame_nr();
+        self.state.local_drop = self.gap.is_some();
         #[cfg(test)]
         {
             self.state.strip = Some(strip);
@@ -235,13 +240,45 @@ impl Layout {
     }
 }
 
-pub(super) fn active_pointer(context: &egui::Context) -> Option<(TabId, egui::Pos2)> {
+pub(super) fn cancel(context: &egui::Context) -> bool {
+    let drag = context.data_mut(|data| {
+        let state = data.get_temp_mut_or_default::<State>(state_id());
+        let drag = state.drag.take();
+        if drag.is_some() {
+            state.suppressed = true;
+            state.local_drop = false;
+        }
+        drag
+    });
+    if let Some(drag) = drag {
+        if context.dragged_id() == Some(drag.widget) {
+            context.stop_dragging();
+        }
+        true
+    } else {
+        false
+    }
+}
+
+pub(super) fn active_pointer(
+    context: &egui::Context,
+    source: (Option<TabId>, u64, u64),
+) -> Option<(TabId, egui::Pos2, bool)> {
     let state = context.data(|data| data.get_temp::<State>(state_id()))?;
     let drag = state.drag.filter(|drag| drag.crossed)?;
+    if drag.source != source
+        || drag.screen != context.content_rect()
+        || drag.density != context.pixels_per_point()
+        || context.cumulative_frame_nr() > state.last_frame + 1
+    {
+        return None;
+    }
     context.input(|input| {
-        (input.focused && input.pointer.primary_down())
-            .then(|| input.pointer.interact_pos().map(|point| (drag.tab, point)))
-            .flatten()
+        (input.focused && input.pointer.primary_down()).then_some((
+            drag.tab,
+            input.pointer.interact_pos().unwrap_or(drag.pointer),
+            state.local_drop,
+        ))
     })
 }
 

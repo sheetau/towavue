@@ -809,6 +809,7 @@ struct Application<N> {
     fullscreen_controls_keyboard: bool,
     fullscreen_was_maximized: bool,
     viewing_cursor: cursor::ViewingCursor,
+    platform_cursor: egui::CursorIcon,
     pending_dialog: Option<DialogIntent>,
     file_dialog_return_focus: Option<(u64, Option<TabId>, egui::Id)>,
     renderer: Option<FrameRenderer>,
@@ -1026,6 +1027,7 @@ where
             fullscreen_controls_keyboard: false,
             fullscreen_was_maximized: false,
             viewing_cursor: cursor::ViewingCursor::default(),
+            platform_cursor: egui::CursorIcon::Default,
             pending_dialog: None,
             file_dialog_return_focus: None,
             renderer: None,
@@ -2688,6 +2690,7 @@ where
             platform_output.cursor_icon = egui::CursorIcon::None;
             platform_output.cursor_image = None;
         }
+        self.platform_cursor = platform_output.cursor_icon;
         self.ui_state
             .as_mut()
             .expect("UI state exists")
@@ -9072,7 +9075,7 @@ where
             // earlier release that is still queued for the next UI frame.
             let escape = matches!(&event, WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed && event.logical_key == WinitKey::Named(NamedKey::Escape));
-            if (escape
+            if escape
                 || matches!(
                     &event,
                     WindowEvent::Focused(false)
@@ -9080,12 +9083,15 @@ where
                         | WindowEvent::ScaleFactorChanged { .. }
                         | WindowEvent::CloseRequested
                         | WindowEvent::DroppedFile(_)
-                ))
-                && logo_menu::cancel(context)
+                )
             {
-                self.request_redraw();
-                if escape {
-                    return;
+                let tab_cancelled = tab_drag::cancel(context);
+                let menu_cancelled = logo_menu::cancel(context);
+                if tab_cancelled || menu_cancelled {
+                    self.request_redraw();
+                    if escape {
+                        return;
+                    }
                 }
             }
         }

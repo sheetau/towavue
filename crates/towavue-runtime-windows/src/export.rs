@@ -337,14 +337,16 @@ fn export_audio_cancellable(
             }));
     let png_source = request.kind == MediaKind::Image && png_metadata::png_path(&request.source);
     let gif_source = request.kind == MediaKind::Image && gif_animation::gif_path(&request.source);
+    let webp_source = request.kind == MediaKind::Image && webp_metadata::webp_path(&request.source);
     if gif_source && !metadata.is_empty() {
         return Err(ExportError::Failed(
             "GIF metadata editing is not supported yet".into(),
         ));
     }
-    let source_stamp = (options.normalize_peak || image_metadata || png_source || gif_source)
-        .then(|| audio_options::SourceStamp::read(&request.source))
-        .transpose()?;
+    let source_stamp =
+        (options.normalize_peak || image_metadata || png_source || gif_source || webp_source)
+            .then(|| audio_options::SourceStamp::read(&request.source))
+            .transpose()?;
     let gif_animation = gif_source
         .then(|| gif_animation::Animation::read(&request.source, cancelled))
         .transpose()?;
@@ -375,6 +377,9 @@ fn export_audio_cancellable(
         .is_some_and(png_metadata::PngMetadata::is_animated);
     if png_source && !image_metadata {
         png_metadata::require_static(&request.source, cancelled)?;
+    }
+    if webp_source && !image_metadata {
+        webp_metadata::require_static(&request.source, cancelled)?;
     }
     if !image_metadata {
         streams.metadata = metadata.clone();
@@ -415,6 +420,19 @@ fn export_audio_cancellable(
         || streams.timeline.is_some())
     .then_some(request.kind);
     let staging = StagedExport::new(&request.target)?;
+    if let Some(webp_metadata) = &webp_metadata
+        && webp_metadata.is_animated()
+    {
+        webp_metadata.export_animation(request, &staging, cancelled, progress)?;
+        source_stamp
+            .as_ref()
+            .expect("WebP source stamp")
+            .verify(&request.source)?;
+        staging.publish(&request.target, cancelled, trimmed_kind)?;
+        return Ok(ExportOutcome {
+            used_hardware_encoder: false,
+        });
+    }
     let mut staged_request = ExportRequest {
         target: staging.output.clone(),
         ..request.clone()

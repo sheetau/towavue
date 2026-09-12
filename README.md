@@ -18,7 +18,7 @@ A lightweight image viewer, video player, and audio player for Windows — with 
 
 Images include PNG, APNG, JPEG, GIF, WebP, BMP, TIFF, and AVIF. Video and audio support uses FFmpeg, including common MP4, MKV, WebM, MP3, FLAC, WAV, and Opus files. Actual support depends on the file's codec and profile.
 
-Viewing support does not imply lossless export or animation-preserving export for every format. Supported APNG and GIF saves retain frames, timing, and loops; APNG also retains separate poster images. GIF encoding can change colors and transparency through palette conversion. Other animated-image export formats remain limited.
+Viewing support does not imply lossless export or animation-preserving export for every format. Supported APNG, GIF, and WebP saves retain frames, timing, and loops; APNG also retains separate poster images. Animated WebP saves use lossless full-frame encoding, which can increase file size. GIF encoding can change colors and transparency through palette conversion. Other animated-image export formats remain limited.
 
 ## Getting started
 

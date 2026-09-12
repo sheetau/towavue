@@ -2667,6 +2667,7 @@ dependencies = [
  "flate2",
  "gif",
  "image",
+ "image-webp",
  "png",
  "quick-xml",
  "raw-window-handle",

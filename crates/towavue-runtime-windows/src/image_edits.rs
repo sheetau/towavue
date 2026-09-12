@@ -183,6 +183,18 @@ fn render_frame(
     operations: &[EditOperation],
     cancel: &Cancellation,
 ) -> Result<DecodedImageFrame, String> {
+    render_frame_cancellable(source, operations, &|| cancel.is_cancelled())
+}
+
+pub(crate) fn render_frame_cancellable(
+    source: &DecodedImageFrame,
+    operations: &[EditOperation],
+    cancelled: &impl Fn() -> bool,
+) -> Result<DecodedImageFrame, String> {
+    output_size((source.width, source.height), operations)?;
+    if cancelled() {
+        return Err("Image edit cancelled".into());
+    }
     #[cfg(test)]
     RENDER_CALLS.set(RENDER_CALLS.get() + 1);
     let convert = || -> Result<DecodedImageFrame, ffmpeg_next::Error> {
@@ -234,7 +246,7 @@ fn render_frame(
         let width = output.width() as usize * 4;
         let mut rgba = Vec::with_capacity(width * output.height() as usize);
         for y in 0..output.height() as usize {
-            if cancel.is_cancelled() {
+            if cancelled() {
                 return Err(ffmpeg_next::Error::Exit);
             }
             let row = y * output.stride(0);

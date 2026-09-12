@@ -24,6 +24,7 @@ ffmpeg-next = { version = "=9.0.0", default-features = false, features = [
 ] }
 flate2 = "=1.1.10"
 gif = "=0.14.2"
+image-webp = "=0.2.4"
 image = { version = "=0.25.10", default-features = false, features = [
     "bmp",
     "gif",

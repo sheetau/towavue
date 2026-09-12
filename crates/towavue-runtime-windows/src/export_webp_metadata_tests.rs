@@ -351,6 +351,7 @@ fn webp_streaming_cancellation_io_failure_and_staging_cleanup_are_bounded() {
         let staging = StagedExport::new(&target).expect("stage");
         fs::write(&staging.output, &bytes).expect("encoded stage");
         let metadata = WebpMetadata {
+            animation: None,
             values: Vec::new(),
             packet: packet(),
         };

@@ -2,6 +2,10 @@ use super::*;
 use std::os::windows::process::CommandExt;
 
 fn image_fixture(root: &Path, extension: &str) -> PathBuf {
+    image_fixture_frames(root, extension, 1)
+}
+
+fn image_fixture_frames(root: &Path, extension: &str, frames: usize) -> PathBuf {
     let raw = root.join(format!("raw.{extension}"));
     let source = root.join(format!("source.{}", extension.to_ascii_uppercase()));
     let output = std::process::Command::new(
@@ -14,10 +18,15 @@ fn image_fixture(root: &Path, extension: &str) -> PathBuf {
         "-f",
         "lavfi",
         "-i",
-        "testsrc=size=32x24",
+        "testsrc=size=32x24:rate=2",
         "-frames:v",
-        "1",
+        &frames.to_string(),
     ])
+    .args(if frames > 1 {
+        vec!["-c:v", "libwebp_anim"]
+    } else {
+        vec![]
+    })
     .arg(&raw)
     .output()
     .expect("generated image");
@@ -481,7 +490,7 @@ fn png_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_life
     ) else {
         return;
     };
-    metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(&root, "png");
+    metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(&root, "png", 1);
 }
 
 #[test]
@@ -491,12 +500,15 @@ fn jpeg_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lif
     ) else {
         return;
     };
-    metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(&root, "jpeg");
+    metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
+        &root, "jpeg", 1,
+    );
 }
 
 fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
     root: &Path,
     extension: &str,
+    frames: usize,
 ) {
     let setting = || {
         let mut options = super::setting();
@@ -510,7 +522,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
         }
         options
     };
-    let source = image_fixture(root, extension);
+    let source = image_fixture_frames(root, extension, frames);
     let original = std::fs::read(&source).expect("original");
     let source_values = values(&source);
     let (send, events) = std::sync::mpsc::channel();
@@ -556,6 +568,17 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     assert!(app.export_error.is_none(), "{:?}", app.export_error);
     assert!(!app.edits[&tab].is_dirty());
     let pixels = towavue_runtime_windows::decode_image(&target).expect("pixels");
+    assert_eq!(pixels.frames.len(), frames);
+    if frames > 1 {
+        let original = towavue_runtime_windows::decode_image(&source).expect("animation source");
+        let expected = towavue_runtime_windows::render_image_edits(
+            &original,
+            &[EditOperation::RotateClockwise],
+            &towavue_runtime_windows::Cancellation::default(),
+        )
+        .expect("display edits");
+        assert_eq!(pixels.frames, expected.frames);
+    }
     assert_eq!((pixels.frames[0].width, pixels.frames[0].height), (24, 32));
     assert!(
         values(&target)
@@ -616,9 +639,8 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     assert_eq!(
         towavue_runtime_windows::decode_image(&target)
             .expect("Keep pixels")
-            .frames[0]
-            .rgba,
-        pixels.frames[0].rgba
+            .frames,
+        pixels.frames
     );
     apply_ready(&mut app, &events, setting());
     app.edits
@@ -641,7 +663,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
             .contains(if extension == "png" {
                 "PNG input and PNG output"
             } else if extension == "webp" {
-                "static WebP input and WebP output"
+                "WebP input and WebP output"
             } else {
                 "JPEG input and JPEG output"
             })
@@ -684,13 +706,27 @@ fn webp_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lif
     ) else {
         return;
     };
-    metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(&root, "webp");
+    metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
+        &root, "webp", 1,
+    );
 }
 
 #[test]
-fn webp_metadata_ui_explains_static_scope_and_validates_typed_fields() {
+fn animated_webp_metadata_save_resave_and_guard_preserve_all_frames() {
     let Some(root) = crate::tests::isolated_test_root(
-        "metadata_export::tests::image::webp_metadata_ui_explains_static_scope_and_validates_typed_fields",
+        "metadata_export::tests::image::animated_webp_metadata_save_resave_and_guard_preserve_all_frames",
+    ) else {
+        return;
+    };
+    metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
+        &root, "webp", 3,
+    );
+}
+
+#[test]
+fn webp_metadata_ui_explains_animation_scope_and_validates_typed_fields() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::image::webp_metadata_ui_explains_animation_scope_and_validates_typed_fields",
     ) else {
         return;
     };
@@ -719,8 +755,8 @@ fn webp_metadata_ui_explains_static_scope_and_validates_typed_fields() {
     for text in [
         "WebP XMP (x-default): 元の題名",
         "WebP XMP property: dc:title",
-        "Static WebP input and WebP output only",
-        "Animated WebP is rejected",
+        "WebP input and WebP output only",
+        "Animated WebP retains all frames, exact timing and loops",
         "Choose a .webp export path",
     ] {
         assert!(

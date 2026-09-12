@@ -2834,7 +2834,7 @@ where
         } else {
             None
         };
-        egui::CentralPanel::default()
+        let media_panel = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(root, |ui| {
                 if self.path.is_none() {
@@ -2885,6 +2885,7 @@ where
             if !modal_blocked {
                 self.filmstrip.show(
                     &context,
+                    media_panel.response.rect,
                     self.folder_snapshot.as_ref(),
                     self.path.as_deref(),
                     !self.palette_open && !self.grid_open,

@@ -170,19 +170,20 @@ impl Filmstrip {
     pub fn show(
         &mut self,
         context: &Context,
+        media_rect: Rect,
         snapshot: Option<&FolderSnapshot>,
         current: Option<&Path>,
         enabled: bool,
         actions: &mut Vec<UiAction>,
     ) {
-        let screen = context.content_rect();
+        let screen = media_rect.intersect(context.content_rect());
         self.drag.begin(context, snapshot, current, enabled);
         context
             .layer_painter(egui::LayerId::new(
                 egui::Order::Middle,
                 "filmstrip-dim".into(),
             ))
-            .rect_filled(screen, 0.0, Color32::from_black_alpha(140));
+            .rect_filled(screen, 0.0, Color32::from_black_alpha(191));
         let Some(snapshot) = snapshot else {
             context
                 .layer_painter(egui::LayerId::new(
@@ -207,7 +208,7 @@ impl Filmstrip {
         let mut wanted = Vec::new();
         egui::Area::new("filmstrip".into())
             .order(egui::Order::Foreground)
-            .fixed_pos(egui::pos2(screen.left(), screen.center().y - HEIGHT / 2.0))
+            .fixed_pos(screen.min)
             .constrain(false)
             .show(context, |ui| {
                 if !enabled || egui::Popup::is_any_open(context) {
@@ -215,14 +216,19 @@ impl Filmstrip {
                     ui.disable();
                     ui.set_opacity(opacity);
                 }
-                ui.set_width(screen.width());
+                ui.set_clip_rect(screen);
+                ui.set_min_size(screen.size());
+                ui.set_max_size(screen.size());
                 ui.style_mut().always_scroll_the_only_direction = true;
+                ui.spacing_mut().scroll.bar_width = 5.0;
+                ui.spacing_mut().scroll.bar_outer_margin = 8.0;
+                ui.spacing_mut().scroll.dormant_handle_opacity = 0.6;
                 let mut scroll = egui::ScrollArea::horizontal()
                     .id_salt("filmstrip-scroll")
                     .horizontal_scroll_offset(self.scroll_offset)
                     .auto_shrink([false, false])
-                    .max_height(HEIGHT)
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+                    .max_height(screen.height())
+                    .scroll_bar_rect(screen.shrink(8.0));
                 if recenter || self.focus_requested {
                     scroll = scroll.horizontal_scroll_offset(selected.unwrap_or(0) as f32 * STEP);
                 }
@@ -231,13 +237,17 @@ impl Filmstrip {
                     let origin = ui.min_rect().min;
                     ui.set_min_size(egui::vec2(
                         snapshot.items.len() as f32 * STEP + padding * 2.0,
-                        HEIGHT,
+                        viewport.height(),
                     ));
                     for index in visible_range(viewport, padding, snapshot.items.len()) {
                         let item = &snapshot.items[index];
                         wanted.push((item.path.clone(), item.kind));
                         let rect = Rect::from_min_size(
-                            origin + egui::vec2(padding + index as f32 * STEP + 4.0, 24.0),
+                            origin
+                                + egui::vec2(
+                                    padding + index as f32 * STEP + 4.0,
+                                    (viewport.height() - HEIGHT) / 2.0 + 24.0,
+                                ),
                             egui::vec2(120.0, 80.0),
                         );
                         let response = ui.interact(
@@ -641,7 +651,16 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |_| strip.show(&context, snapshot, current, true, &mut actions),
+                |_| {
+                    strip.show(
+                        &context,
+                        context.content_rect(),
+                        snapshot,
+                        current,
+                        true,
+                        &mut actions,
+                    )
+                },
             );
             assert!(actions.is_empty(), "focus requests do not open media");
             output.platform_output.accesskit_update.expect("tree")
@@ -773,6 +792,7 @@ mod tests {
                 |_| {
                     strip.show(
                         &context,
+                        context.content_rect(),
                         Some(snapshot),
                         Some(current),
                         enabled.get(),
@@ -995,6 +1015,7 @@ mod tests {
             let output = context.run_ui(Default::default(), |_| {
                 strip.show(
                     &context,
+                    context.content_rect(),
                     Some(&snapshot),
                     Some(&first),
                     true,
@@ -1105,6 +1126,7 @@ mod tests {
                 |_| {
                     filmstrip.show(
                         &context,
+                        context.content_rect(),
                         Some(&snapshot),
                         Some(&snapshot.items[selected].path),
                         true,
@@ -1151,6 +1173,12 @@ mod tests {
             }
         }
         let before_scroll = filmstrip.visible.clone();
+        let above = egui::pos2(480.0, 80.0);
+        frame(
+            &mut filmstrip,
+            30_000,
+            vec![egui::Event::PointerMoved(above)],
+        );
         frame(
             &mut filmstrip,
             30_000,

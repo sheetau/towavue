@@ -44,6 +44,7 @@ fn frame(
     let output = context.run_ui(input, |_| {
         strip.show(
             context,
+            context.content_rect(),
             Some(snapshot),
             Some(current),
             enabled,
@@ -81,6 +82,152 @@ fn card(output: &egui::FullOutput, name: &str) -> Rect {
         egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
         egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
     )
+}
+
+#[test]
+fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards",
+    ) else {
+        return;
+    };
+    let context = crate::fonts::test_context();
+    let snapshot = snapshot(&root);
+    let current = &snapshot.items[1].path;
+    let mut strip = Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+        .expect("filmstrip");
+    let media = Rect::from_min_max(egui::pos2(0.0, 40.0), egui::pos2(960.0, 536.0));
+    let mut time = 0.0;
+    let mut render = |strip: &mut Filmstrip, enabled, events| {
+        let mut actions = Vec::new();
+        let output = context.run_ui(
+            egui::RawInput {
+                time: Some(time),
+                ..input(events)
+            },
+            |_| {
+                strip.show(
+                    &context,
+                    media,
+                    Some(&snapshot),
+                    Some(current),
+                    enabled,
+                    &mut actions,
+                )
+            },
+        );
+        time += 0.1;
+        assert!(
+            actions.is_empty(),
+            "scrolling must not open or detach media"
+        );
+        output
+    };
+    for _ in 0..3 {
+        render(&mut strip, true, vec![]);
+    }
+    let output = render(&mut strip, true, vec![]);
+    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191) && rect.rect == media
+    )), "75% dim stays inside the media panel");
+    assert!(
+        output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(rect) if rect.rect.top() > media.bottom() - 20.0
+                && rect.fill.a() > 0
+                && rect.rect.bottom() <= media.bottom() - 8.0
+                && rect.rect.width() > 20.0 && rect.rect.height() <= 5.0
+        )),
+        "visible scrollbar is inset from status/resize edges"
+    );
+    for (point, enabled, moves) in [
+        (egui::pos2(480.0, 80.0), true, true),
+        (egui::pos2(480.0, 500.0), true, true),
+        (egui::pos2(480.0, 20.0), true, false),
+        (egui::pos2(480.0, 555.0), true, false),
+        (egui::pos2(480.0, 80.0), false, false),
+    ] {
+        strip.focus = None;
+        for _ in 0..3 {
+            render(&mut strip, enabled, vec![egui::Event::PointerMoved(point)]);
+        }
+        let before = strip.scroll_offset;
+        render(
+            &mut strip,
+            enabled,
+            vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -64.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        for _ in 0..20 {
+            render(&mut strip, enabled, vec![]);
+        }
+        assert_eq!(
+            strip.scroll_offset > before + 1.0,
+            moves,
+            "{point:?}, enabled={enabled}"
+        );
+        assert_eq!(strip.focus.as_deref(), Some(current.as_path()));
+    }
+    strip.focus = None;
+    let grab = egui::pos2(480.0, media.bottom() - 10.0);
+    for _ in 0..3 {
+        render(&mut strip, true, vec![egui::Event::PointerMoved(grab)]);
+    }
+    let before = strip.scroll_offset;
+    render(&mut strip, true, vec![pointer(grab, true)]);
+    let moved = grab + egui::vec2(100.0, 0.0);
+    render(&mut strip, true, vec![egui::Event::PointerMoved(moved)]);
+    render(&mut strip, true, vec![pointer(moved, false)]);
+    assert!(
+        strip.scroll_offset > before + 1.0,
+        "thumb drag scrolls instead of dragging a card"
+    );
+    for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
+        let context = crate::fonts::test_context();
+        let mut app = Application::new(None, |_| {}).expect("app");
+        app.ui_context = Some(context.clone());
+        app.tabs.open_new(current.clone(), kind);
+        app.path = Some(current.clone());
+        app.media_kind = Some(kind);
+        app.folder_snapshot = Some(snapshot.clone());
+        app.filmstrip_open = true;
+        for fullscreen in [false, true] {
+            app.fullscreen = fullscreen;
+            for _ in 0..3 {
+                let output = context.run_ui(input(vec![]), |ui| {
+                    app.draw_ui(ui, &mut Vec::new());
+                });
+                let bounds = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191) => {
+                            Some(rect.rect)
+                        }
+                        _ => None,
+                    })
+                    .expect("filmstrip dim");
+                assert_eq!(bounds.left(), 0.0);
+                assert_eq!(bounds.right(), 960.0);
+                if fullscreen {
+                    assert_eq!(bounds.top(), 0.0, "no reserved tab area in fullscreen");
+                } else {
+                    assert!(bounds.top() >= 24.0, "tab bar remains outside dim");
+                }
+                if fullscreen && kind != MediaKind::Audio {
+                    assert_eq!(bounds.bottom(), 576.0);
+                } else {
+                    assert!(
+                        bounds.bottom() < 556.0,
+                        "status/timeline remain outside dim"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]

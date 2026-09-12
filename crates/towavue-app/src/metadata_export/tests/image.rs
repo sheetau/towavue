@@ -817,6 +817,26 @@ fn avif_to_apng_save_as_and_resave_preserve_animation_and_history() {
 }
 
 #[test]
+fn apng_to_avif_save_as_and_resave_preserve_animation_and_history() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::image::apng_to_avif_save_as_and_resave_preserve_animation_and_history",
+    ) else {
+        return;
+    };
+    animation_conversion_lifecycle(&root, "apng", "avif");
+}
+
+#[test]
+fn gif_to_avif_save_as_and_resave_preserve_animation_and_history() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::image::gif_to_avif_save_as_and_resave_preserve_animation_and_history",
+    ) else {
+        return;
+    };
+    animation_conversion_lifecycle(&root, "gif", "avif");
+}
+
+#[test]
 fn webp_to_avif_save_as_and_resave_preserve_animation_and_history() {
     let Some(root) = crate::tests::isolated_test_root(
         "metadata_export::tests::image::webp_to_avif_save_as_and_resave_preserve_animation_and_history",

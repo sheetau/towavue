@@ -629,6 +629,7 @@ impl SnapshotConversion {
                 SnapshotOutput::Avif(plays) => avif::apply_png_frames(
                     staging,
                     &self.animation.delays,
+                    1000,
                     u32::from(*plays),
                     cancelled,
                     progress,

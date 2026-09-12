@@ -390,10 +390,76 @@ impl PngMetadata {
         };
         if gif_animation::gif_path(target) {
             prepared.gif_controls()?;
+        } else if avif::avif_path(target) {
+            prepared.avif_controls()?;
         } else {
             prepared.webp_controls()?;
         }
         Ok(Some(prepared))
+    }
+
+    fn avif_controls(&self) -> Result<(u32, Vec<u32>), ExportError> {
+        fn gcd(mut a: u64, mut b: u64) -> u64 {
+            while b != 0 {
+                (a, b) = (b, a % b);
+            }
+            a
+        }
+        let animation = self.animation.as_ref().expect("animated source");
+        if !animation.includes_default {
+            return Err(invalid(
+                "AVIF conversion cannot retain a separate poster; use APNG output",
+            ));
+        }
+        let fractions = animation.delays.iter().map(|delay| {
+            let numerator = u64::from(u16::from_be_bytes([delay[0], delay[1]]));
+            let denominator = u64::from(u16::from_be_bytes([delay[2], delay[3]]));
+            let denominator = if denominator == 0 { 100 } else { denominator };
+            if numerator == 0 {
+                return Err(invalid("AVIF export requires positive sample durations; use APNG output to retain zero delays"));
+            }
+            let divisor = gcd(numerator, denominator);
+            Ok((numerator / divisor, denominator / divisor))
+        }).collect::<Result<Vec<_>, ExportError>>()?;
+        let mut timescale = 1;
+        for (_, denominator) in &fractions {
+            timescale = timescale / gcd(timescale, *denominator) * denominator;
+            if timescale > i32::MAX as u64 {
+                return Err(invalid(
+                    "exact frame times exceed the supported AVIF time base; use APNG output",
+                ));
+            }
+        }
+        let ticks = fractions
+            .iter()
+            .map(|(num, den)| {
+                u32::try_from(num * (timescale / den)).map_err(|_| {
+                    invalid("exact frame duration exceeds AVIF sample ticks; use APNG output")
+                })
+            })
+            .collect::<Result<Vec<_>, ExportError>>()?;
+        let duration: u64 = ticks.iter().map(|ticks| u64::from(*ticks)).sum();
+        duration
+            .checked_mul(u64::from(animation.plays))
+            .ok_or_else(|| invalid("repeated AVIF duration exceeds 64 bits; use APNG output"))?;
+        Ok((timescale as u32, ticks))
+    }
+
+    pub(super) fn apply_avif(
+        &self,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+        progress: &(impl Fn(Duration) + Sync),
+    ) -> Result<(), ExportError> {
+        let (timescale, delays) = self.avif_controls()?;
+        avif::apply_png_frames(
+            staging,
+            &delays,
+            timescale,
+            self.animation.as_ref().expect("animation").plays,
+            cancelled,
+            progress,
+        )
     }
 
     fn gif_controls(&self) -> Result<gif_animation::Animation, ExportError> {

@@ -122,6 +122,24 @@ impl Animation {
         self.delays.len() > 1
     }
 
+    pub(super) fn avif_delays(&self) -> Result<Option<Vec<u32>>, ExportError> {
+        // Preserve a timed/looped single frame, but keep ordinary untimed still GIFs static.
+        if self.delays == [0] && self.repeat == gif::Repeat::Finite(0) {
+            return Ok(None);
+        }
+        if self.delays.contains(&0) {
+            return Err(invalid(
+                "AVIF export requires positive sample durations; use GIF output to retain zero delays",
+            ));
+        }
+        Ok(Some(
+            self.delays
+                .iter()
+                .map(|delay| u32::from(*delay) * 10)
+                .collect(),
+        ))
+    }
+
     pub(super) fn apply_png(
         &self,
         staging: &StagedExport,
@@ -141,7 +159,7 @@ impl Animation {
         png_metadata::PngMetadata::from_animation(plays, delays).apply(staging, cancelled)
     }
 
-    fn plays(&self) -> u32 {
+    pub(super) fn plays(&self) -> u32 {
         match self.repeat {
             gif::Repeat::Infinite => 0,
             gif::Repeat::Finite(repeats) => u32::from(repeats) + 1,
@@ -419,7 +437,7 @@ mod tests {
                     actual.frames
                 );
                 assert_eq!(fs::read(&source).expect("source untouched"), before);
-                for extension in ["png", "webp"] {
+                for extension in ["png", "webp", "avif"] {
                     let converted_target = root.join("converted").with_extension(extension);
                     request.target = converted_target.clone();
                     export_media(&request).expect("transparent GIF conversion");
@@ -447,6 +465,100 @@ mod tests {
             }
         }
         fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
+    fn gif_to_avif_preserves_timed_frames_edits_and_repetition() {
+        let root = audio_tests::root("gif-to-avif");
+        let source = root.join("source.gif");
+        let target = root.join("converted.avif");
+        for repeat in [
+            gif::Repeat::Finite(0),
+            gif::Repeat::Finite(u16::MAX),
+            gif::Repeat::Infinite,
+        ] {
+            for delays in [&[1, 7, u16::MAX][..], &[123][..]] {
+                fixture_delays(&source, repeat, delays);
+                let original = crate::decode_image(&source).expect("display");
+                let mut save = request(&source, &target);
+                save.operations = vec![
+                    EditOperation::RotateImage(
+                        towavue_core::ImageRotation::new(137, (4, 3)).expect("rotation"),
+                    ),
+                    EditOperation::Resize(
+                        towavue_core::ImageResize::new(7, 5, towavue_core::ResampleFilter::Lanczos)
+                            .expect("resize"),
+                    ),
+                ];
+                export_media(&save).expect("GIF to AVIF");
+                let expected = crate::render_image_edits(
+                    &original,
+                    &save.operations,
+                    &crate::Cancellation::default(),
+                )
+                .expect("edits");
+                assert_eq!(
+                    crate::decode_image(&target).expect("AVIF").frames,
+                    expected.frames
+                );
+                let resaved = root.join("resaved.avif");
+                export_media(&request(&target, &resaved)).expect("resave");
+                assert_eq!(
+                    crate::decode_image(&resaved).expect("resaved").frames,
+                    expected.frames
+                );
+                let roundtrip = root.join("roundtrip.apng");
+                export_media(&request(&resaved, &roundtrip)).expect("APNG controls");
+                let mut reader =
+                    png::Decoder::new(BufReader::new(fs::File::open(&roundtrip).expect("APNG")))
+                        .read_info()
+                        .expect("independent controls");
+                let control = reader
+                    .info()
+                    .animation_control
+                    .expect("sequence including one frame");
+                assert_eq!(control.num_frames as usize, delays.len());
+                assert_eq!(
+                    control.num_plays,
+                    match repeat {
+                        gif::Repeat::Infinite => 0,
+                        gif::Repeat::Finite(n) => u32::from(n) + 1,
+                    }
+                );
+                let mut pixels = vec![0; reader.output_buffer_size().expect("size")];
+                for delay in delays {
+                    reader.next_frame(&mut pixels).expect("frame");
+                    let frame = reader.info().frame_control.expect("delay");
+                    assert_eq!(
+                        u32::from(frame.delay_num) * 100,
+                        u32::from(*delay) * u32::from(frame.delay_den)
+                    );
+                }
+            }
+        }
+        let before = fs::read(&target).expect("target");
+        for delays in [&[1, 0, 7][..], &[0][..]] {
+            fixture_delays(&source, gif::Repeat::Infinite, delays);
+            assert!(
+                export_cancellable(
+                    &request(&source, &target),
+                    &AtomicBool::new(false),
+                    &|_| panic!("zero delay rejected before encoding")
+                )
+                .is_err()
+            );
+            assert_eq!(fs::read(&target).expect("protected"), before);
+        }
+        fixture_delays(&source, gif::Repeat::Finite(0), &[0]);
+        export_media(&request(&source, &target)).expect("untimed still GIF remains supported");
+        assert_eq!(
+            crate::decode_image(&target)
+                .expect("still AVIF")
+                .frames
+                .len(),
+            1
+        );
+        fs::remove_dir_all(root).expect("owned cleanup");
     }
 
     #[test]
@@ -621,7 +733,7 @@ mod tests {
 
     #[test]
     fn gif_export_rejects_flattening_and_preserves_existing_targets_on_failure() {
-        for extension in ["gif", "png", "webp"] {
+        for extension in ["gif", "png", "webp", "avif"] {
             check_gif_export_failures(extension);
         }
     }
@@ -630,10 +742,10 @@ mod tests {
         let root = audio_tests::root("gif-failures");
         let source = root.join("source.gif");
         let target = root.join("target").with_extension(extension);
-        fixture(&source, gif::Repeat::Infinite);
+        fixture_delays(&source, gif::Repeat::Infinite, &[1, 7, u16::MAX]);
         let before = fs::read(&source).expect("source bytes");
         let cancel = AtomicBool::new(false);
-        for extension in ["bmp", "jpg", "tiff", "avif"] {
+        for extension in ["bmp", "jpg", "tiff"] {
             let target = target.with_extension(extension);
             fs::write(&target, b"existing target").expect("target");
             assert!(
@@ -842,10 +954,14 @@ mod tests {
     }
 
     fn fixture(path: &Path, repeat: gif::Repeat) {
+        fixture_delays(path, repeat, &[0, 1, u16::MAX]);
+    }
+
+    fn fixture_delays(path: &Path, repeat: gif::Repeat, delays: &[u16]) {
         let file = fs::File::create(path).expect("GIF source");
         let mut encoder = gif::Encoder::new(file, 4, 3, &[]).expect("encoder");
         encoder.set_repeat(repeat).expect("repeat");
-        for (index, delay) in [0, 1, u16::MAX].into_iter().enumerate() {
+        for (index, delay) in delays.iter().copied().enumerate() {
             let color = match index {
                 0 => [255, 0, 0, 255],
                 1 => [0, 255, 0, 255],

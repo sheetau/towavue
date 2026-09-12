@@ -692,7 +692,7 @@ fn animation_export_failures(extension: &str) {
         let names: &[_] = if extension == "gif" {
             &["animation.gif"]
         } else if extension == "avif" {
-            &["animation-source.png"]
+            &["avif-source.png"]
         } else {
             &["animation.png", "metadata.png"]
         };

@@ -386,6 +386,15 @@ fn export_audio_cancellable(
     let gif_animation = gif_source
         .then(|| gif_animation::Animation::read(&request.source, cancelled))
         .transpose()?;
+    let gif_avif_delays = if avif_target {
+        gif_animation
+            .as_ref()
+            .map(gif_animation::Animation::avif_delays)
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
     let gif_to_png = gif_animation
         .as_ref()
         .is_some_and(gif_animation::Animation::is_animated)
@@ -403,14 +412,19 @@ fn export_audio_cancellable(
         && !gif_animation::gif_path(&request.target)
         && !gif_to_png
         && !gif_to_webp
+        && gif_avif_delays.is_none()
     {
         return Err(ExportError::Failed(
-            "Animated GIF export requires GIF, APNG (.png/.apng), or WebP output; conversion must not discard frames"
+            "Animated GIF export requires GIF, APNG (.png/.apng), WebP, or AVIF output; conversion must not discard frames"
                 .into(),
         ));
     }
-    let gif_animation = gif_animation
-        .filter(|_| gif_animation::gif_path(&request.target) || gif_to_png || gif_to_webp);
+    let gif_animation = gif_animation.filter(|_| {
+        gif_animation::gif_path(&request.target)
+            || gif_to_png
+            || gif_to_webp
+            || gif_avif_delays.is_some()
+    });
     let jpeg_metadata = (image_metadata && xmp_source && jpeg_target)
         .then(|| jpeg_metadata::JpegMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
@@ -420,7 +434,8 @@ fn export_audio_cancellable(
     let png_to_webp =
         png_source && webp_metadata::webp_path(&request.target) && metadata.is_empty();
     let png_to_gif = png_source && gif_animation::gif_path(&request.target) && metadata.is_empty();
-    let png_metadata = if png_to_webp || png_to_gif {
+    let png_to_avif = png_source && avif_target && metadata.is_empty();
+    let png_metadata = if png_to_webp || png_to_gif || png_to_avif {
         png_metadata::PngMetadata::prepare_conversion(&request.source, &request.target, cancelled)?
     } else {
         (image_metadata && jpeg_metadata.is_none() && webp_metadata.is_none())
@@ -442,7 +457,7 @@ fn export_audio_cancellable(
     streams.png_animation = png_metadata
         .as_ref()
         .is_some_and(png_metadata::PngMetadata::is_animated);
-    if png_source && !image_metadata && !png_to_webp && !png_to_gif {
+    if png_source && !image_metadata && !png_to_webp && !png_to_gif && !png_to_avif {
         png_metadata::require_static(&request.source, cancelled)?;
     }
     if webp_source && !image_metadata && webp_snapshots.is_none() {
@@ -569,7 +584,7 @@ fn export_audio_cancellable(
             used_hardware_encoder: false,
         });
     }
-    if avif_source || avif_target {
+    if avif_source || (avif_target && gif_avif_delays.is_none() && !streams.png_animation) {
         avif::export_still(request, &staging, cancelled, progress)?;
         source_stamp
             .as_ref()
@@ -641,7 +656,16 @@ fn export_audio_cancellable(
         }));
     }
     if let Some(gif_animation) = gif_animation {
-        if gif_to_png {
+        if let Some(delays) = gif_avif_delays {
+            avif::apply_png_frames(
+                &staging,
+                &delays,
+                1000,
+                gif_animation.plays(),
+                cancelled,
+                progress,
+            )?;
+        } else if gif_to_png {
             gif_animation.apply_png(&staging, cancelled)?;
         } else if gif_to_webp {
             gif_animation.apply_webp(&staging, cancelled, progress)?;
@@ -653,6 +677,8 @@ fn export_audio_cancellable(
             png_metadata.apply_webp(&staging, cancelled, progress)?;
         } else if png_to_gif {
             png_metadata.apply_gif(&staging, cancelled)?;
+        } else if png_to_avif {
+            png_metadata.apply_avif(&staging, cancelled, progress)?;
         } else {
             png_metadata.apply(&staging, cancelled)?;
         }
@@ -786,6 +812,7 @@ impl Drop for StagedExport {
         let _ = fs::remove_file(self.directory.join("animation.gif"));
         let _ = fs::remove_file(self.directory.join("animation.webp"));
         let _ = fs::remove_file(self.directory.join("animation-source.png"));
+        let _ = fs::remove_file(self.directory.join("avif-source.png"));
         let _ = fs::remove_file(self.directory.join("metadata.jpg"));
         let _ = fs::remove_file(self.directory.join("metadata.webp"));
         let _ = fs::remove_dir(&self.directory);

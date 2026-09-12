@@ -155,6 +155,106 @@ fn animation_fixture_with_regions(plays: u32, delays: &[[u8; 4]], regions: bool)
 }
 
 #[test]
+fn apng_to_avif_preserves_fractional_timing_composited_edits_and_plays() {
+    let root = root("apng-to-avif");
+    let source = root.join("source.apng");
+    let target = root.join("converted.avif");
+    let delays = [
+        [0, 1, 0, 3],
+        [0, 1, 0, 7],
+        [255, 255, 255, 255],
+        [0, 7, 0, 0],
+    ];
+    for (plays, count) in [(0, 4), (1, 1), (65536, 4), (i32::MAX as u32, 4)] {
+        fs::write(
+            &source,
+            animation_fixture_with_regions(plays, &delays[..count], true),
+        )
+        .expect("source");
+        let mut save = request(&source, &target);
+        save.operations = vec![
+            EditOperation::RotateImage(
+                towavue_core::ImageRotation::new(137, (32, 24)).expect("rotation"),
+            ),
+            EditOperation::Resize(
+                ImageResize::new(13, 11, ResampleFilter::Lanczos).expect("resize"),
+            ),
+        ];
+        export_media(&save).expect("APNG to AVIF");
+        save.target = root.join("reference.apng");
+        export_media(&save).expect("same edited snapshots");
+        let expected = crate::decode_image(&save.target).expect("reference");
+        let actual = crate::decode_image(&target).expect("AVIF");
+        for (a, b) in actual.frames.iter().zip(&expected.frames) {
+            assert_eq!((a.width, a.height, &a.rgba), (b.width, b.height, &b.rgba));
+        }
+        assert_eq!(actual.frames.len(), count);
+        let resaved = root.join("resaved.avif");
+        export_media(&request(&target, &resaved)).expect("resave");
+        assert_eq!(
+            crate::decode_image(&resaved).expect("resaved").frames,
+            actual.frames
+        );
+        let roundtrip = root.join("roundtrip.apng");
+        export_media(&request(&resaved, &roundtrip)).expect("exact APNG roundtrip");
+        let mut reader =
+            png::Decoder::new(BufReader::new(fs::File::open(&roundtrip).expect("APNG")))
+                .read_info()
+                .expect("controls");
+        assert_eq!(
+            reader.info().animation_control.expect("sequence").num_plays,
+            plays
+        );
+        let mut pixels = vec![0; reader.output_buffer_size().expect("size")];
+        for delay in &delays[..count] {
+            reader.next_frame(&mut pixels).expect("frame");
+            let frame = reader.info().frame_control.expect("fraction");
+            let denominator = u16::from_be_bytes([delay[2], delay[3]]);
+            let denominator = if denominator == 0 { 100 } else { denominator };
+            assert_eq!(
+                u64::from(frame.delay_num) * u64::from(denominator),
+                u64::from(frame.delay_den) * u64::from(u16::from_be_bytes([delay[0], delay[1]]))
+            );
+        }
+    }
+    let before = fs::read(&target).expect("target");
+    for (bytes, message) in [
+        (poster_fixture(3), "separate poster"),
+        (animation_fixture(1, &[[0, 0, 0, 1]]), "positive"),
+        (
+            animation_fixture(1, &[[0, 1, 255, 241], [0, 1, 255, 239]]),
+            "time base",
+        ),
+        (
+            animation_fixture(1, &[[255, 255, 0, 1], [0, 1, 255, 241], [0, 1, 0, 2]]),
+            "sample ticks",
+        ),
+        (
+            animation_fixture(
+                i32::MAX as u32,
+                &[
+                    [255, 255, 0, 1],
+                    [255, 255, 0, 1],
+                    [255, 255, 0, 1],
+                    [0, 1, 255, 255],
+                ],
+            ),
+            "64 bits",
+        ),
+    ] {
+        fs::write(&source, bytes).expect("unsupported controls");
+        let error =
+            export_cancellable(&request(&source, &target), &AtomicBool::new(false), &|_| {
+                panic!("preflight must reject")
+            })
+            .expect_err("invalid controls");
+        assert!(error.to_string().contains(message), "{message}: {error}");
+        assert_eq!(fs::read(&target).expect("protected"), before);
+    }
+    fs::remove_dir_all(root).expect("owned cleanup");
+}
+
+#[test]
 fn apng_to_gif_preserves_composited_edits_timing_and_repeats() {
     let root = root("apng-to-gif");
     let source = root.join("source.APNG");
@@ -1144,7 +1244,7 @@ fn apng_unsupported_exports_preserve_targets_and_static_conversions_still_work()
     let source = root.join("source.APNG");
     let bytes = animation_fixture(2, &[[0, 1, 0, 10]; 3]);
     fs::write(&source, &bytes).expect("valid source");
-    for extension in ["jpg", "bmp", "avif"] {
+    for extension in ["jpg", "bmp"] {
         let target = root.join(format!("target.{extension}"));
         fs::write(&target, b"existing target").expect("target");
         assert!(
@@ -1328,6 +1428,11 @@ fn apng_to_gif_protects_targets_on_cancel_corruption_and_staging_failures() {
     animation_conversion_failures("gif");
 }
 
+#[test]
+fn apng_to_avif_protects_targets_on_cancel_corruption_and_staging_failures() {
+    animation_conversion_failures("avif");
+}
+
 fn animation_conversion_failures(extension: &str) {
     let root = root("apng-conversion-protection");
     let source = root.join("source.png");
@@ -1366,6 +1471,8 @@ fn animation_conversion_failures(extension: &str) {
         .expect("animation");
     let animation_name = if extension == "gif" {
         "animation.gif"
+    } else if extension == "avif" {
+        "avif-source.png"
     } else {
         "animation.webp"
     };
@@ -1383,6 +1490,8 @@ fn animation_conversion_failures(extension: &str) {
             fs::write(&staging.output, fixture()).expect("encoded PNG");
             let result = if extension == "gif" {
                 metadata.apply_gif(&staging, &cancel)
+            } else if extension == "avif" {
+                metadata.apply_avif(&staging, &cancel, &|_| {})
             } else {
                 metadata.apply_webp(&staging, &cancel, &|_| {})
             };

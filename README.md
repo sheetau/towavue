@@ -18,9 +18,9 @@ A lightweight image viewer, video player, and audio player for Windows — with 
 
 Images include PNG, APNG, JPEG, GIF, WebP, BMP, TIFF, and AVIF. Video and audio support uses FFmpeg, including common MP4, MKV, WebM, MP3, FLAC, WAV, and Opus files. Actual support depends on the file's codec and profile.
 
-Viewing support does not imply lossless export or animation-preserving export for every format. Supported APNG, GIF, and WebP saves retain frames, timing, and loops. Animations can be converted between APNG, GIF, and WebP, or from AVIF to these formats, within the destination's exact timing and loop limits. Separate APNG poster images require APNG output (.png or .apng). Animated WebP saves use lossless full-frame encoding, which can increase file size. GIF palette conversion can change colors and transparency. Other animated-image export formats remain limited.
+Viewing support does not imply lossless export or animation-preserving export for every format. Supported APNG, GIF, WebP, and AVIF animations can be saved or converted between these formats within the destination's exact timing and loop limits. Separate APNG poster images require APNG output (.png or .apng). Animated WebP saves use lossless full-frame encoding, which can increase file size. GIF palette conversion can change colors and transparency. Other animated-image export formats remain limited.
 
-AVIF viewing and saving support transparency, embedded display cropping, quarter-turn orientation, and mirroring in still images and animations. Static AVIF saves preserve the edited 8-bit RGBA pixels; supported sequences, including single-frame sequences, also retain timing and loops. Animated WebP can be converted to AVIF with edited 8-bit RGBA, timing, and loops retained; zero-delay frames are not supported by this conversion. Other animation imports to AVIF remain limited.
+AVIF viewing and saving support transparency, embedded display cropping, quarter-turn orientation, and mirroring in still images and animations. Static AVIF saves preserve the edited 8-bit RGBA pixels; supported sequences, including single-frame sequences, also retain timing and loops. Animation conversion to AVIF preserves edited 8-bit RGBA but does not support zero-delay frames.
 
 ## Getting started
 

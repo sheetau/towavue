@@ -515,6 +515,20 @@ fn encode(
     progress: &(impl Fn(Duration) + Sync),
 ) -> Result<(), ExportError> {
     let snapshot_output = timing.is_some() && !avif_path(&request.target);
+    let rewrite_timing =
+        !snapshot_output && timing.is_some_and(|timing| timing.packet_durations.is_some());
+    // Coarse source time bases can collapse PNG input timestamps before AV1 encoding.
+    // Owned MP4 output receives strictly increasing placeholders at both frame and
+    // packet boundaries; finish restores the exact presentation times afterward.
+    let timed_filters;
+    let filters = if rewrite_timing {
+        timed_filters = filters
+            .replace("[outv]", ",settb=1/1000,setpts=N[outv]")
+            .replace("[outa]", ",settb=1/1000,setpts=N[outa]");
+        &timed_filters
+    } else {
+        filters
+    };
     let graph = staging.directory.join("timeline-filter.txt");
     fs::write(&graph, filters).map_err(ExportError::Output)?;
     let mut args: Vec<String> = [
@@ -598,12 +612,17 @@ fn encode(
         );
     }
     if let Some(timing) = timing {
+        let encoder_time_base = if rewrite_timing {
+            ffmpeg::Rational(1, 1000)
+        } else {
+            timing.time_base
+        };
         args.extend([
             "-enc_time_base".into(),
             format!(
                 "{}/{}",
-                timing.time_base.numerator(),
-                timing.time_base.denominator()
+                encoder_time_base.numerator(),
+                encoder_time_base.denominator()
             ),
         ]);
         if snapshot_output {
@@ -647,11 +666,12 @@ fn encode(
 pub(super) fn apply_png_frames(
     staging: &StagedExport,
     delays: &[u32],
+    timescale: u32,
     plays: u32,
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
 ) -> Result<(), ExportError> {
-    let source = staging.directory.join("animation-source.png");
+    let source = staging.directory.join("avif-source.png");
     if source.try_exists().map_err(ExportError::Output)? {
         return Err(invalid("snapshot input already exists"));
     }
@@ -692,7 +712,7 @@ pub(super) fn apply_png_frames(
         filters,
         alpha,
         Some(SequenceTiming {
-            time_base: ffmpeg::Rational(1, 1000),
+            time_base: ffmpeg::Rational(1, timescale as i32),
             loops: plays,
             packet_durations: Some(delays),
         }),
@@ -714,7 +734,7 @@ pub(super) fn apply_png_frames(
         || saved.tracks.len() != if alpha { 2 } else { 1 }
         || saved.samples.iter().any(|sample| {
             Some(sample.size) != size
-                || sample.time_base != ffmpeg::Rational(1, 1000)
+                || sample.time_base != ffmpeg::Rational(1, timescale as i32)
                 || sample.times != expected
         })
     {

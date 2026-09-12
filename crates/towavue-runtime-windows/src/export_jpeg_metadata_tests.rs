@@ -515,6 +515,132 @@ fn xmp_rejects_entities_invalid_xml_ambiguous_properties_and_resource_limits() {
 }
 
 #[test]
+fn unedited_jpeg_export_preserves_compressed_pixels_and_non_xmp_markers() {
+    let root = root("jpeg-unedited-export");
+    let source = root.join("source.JPEG");
+    let target = root.join("target.jpg");
+    let mut original = tagged(PACKET.as_bytes());
+    let exif = b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x06\0\0\0\0\0\0\0";
+    for (code, payload) in [
+        (0xe1, exif.as_slice()),
+        (
+            0xe2,
+            b"ICC_PROFILE\0\x01\x01preserved opaque profile".as_slice(),
+        ),
+        (0xed, b"Photoshop 3.0\0preserved opaque IPTC".as_slice()),
+        (0xfe, b"preserved JPEG comment".as_slice()),
+    ] {
+        original.splice(2..2, segment(code, payload));
+    }
+    fs::write(&source, &original).expect("source");
+    let cancel = AtomicBool::new(false);
+    let original_values = read(&source, &cancel).expect("source metadata");
+    for settings in [
+        ExportOptions::default(),
+        options(MetadataField::Title, "new title"),
+        options(MetadataField::Title, ""),
+    ] {
+        let mut expected = original_values.clone();
+        xmp::apply(&mut expected, &settings.metadata).expect("expected values");
+        export_media_with_options(&request(&source, &target), settings).expect("save");
+        let actual = fs::read(&target).expect("output");
+        assert_eq!(without_xmp(&actual), without_xmp(&original));
+        assert_eq!(read(&target, &cancel).expect("metadata"), expected);
+        assert_eq!(
+            image::load_from_memory(&actual).expect("pixels"),
+            image::load_from_memory(&original).expect("source pixels")
+        );
+        let resaved = root.join("resaved.jpeg");
+        export_media(&request(&target, &resaved)).expect("resave");
+        assert_eq!(fs::read(&resaved).expect("resaved bytes"), actual);
+        fs::remove_file(&resaved).expect("owned resave cleanup");
+    }
+    assert_eq!(fs::read(&source).expect("unchanged source"), original);
+    assert_eq!(fs::read_dir(&root).expect("no stage leaks").count(), 2);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn unedited_jpeg_export_rejects_undecodable_samples_and_protects_target() {
+    let root = root("jpeg-undecodable-export");
+    let source = root.join("source.jpg");
+    let target = root.join("target.jpg");
+    let original = fixture();
+    let mut no_samples = original.clone();
+    let sos = no_samples
+        .windows(2)
+        .position(|bytes| bytes == [0xff, 0xda])
+        .expect("SOS");
+    let length = u16::from_be_bytes([no_samples[sos + 2], no_samples[sos + 3]]) as usize;
+    no_samples.drain(sos + 2 + length..no_samples.len() - 2);
+    let mut bad_table = original.clone();
+    let dht = bad_table
+        .windows(2)
+        .position(|bytes| bytes == [0xff, 0xc4])
+        .expect("DHT");
+    bad_table[dht + 5] = 255;
+    for damaged in [no_samples, bad_table] {
+        fs::write(&source, &damaged).expect("damaged source");
+        fs::write(&target, b"existing target").expect("target");
+        read(&source, &AtomicBool::new(false)).expect("marker scanner alone accepts container");
+        let error = export_media(&request(&source, &target)).expect_err("decode must fail");
+        assert!(
+            error.to_string().contains("JPEG decode validation failed"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read(&target).expect("protected target"),
+            b"existing target"
+        );
+        assert_eq!(fs::read(&source).expect("protected source"), damaged);
+        assert_eq!(fs::read_dir(&root).expect("no stage leaks").count(), 2);
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+#[ignore = "requires Pillow-generated fixtures; run scripts/generate-jpeg-preview-fixtures.py"]
+fn unedited_jpeg_export_preserves_progressive_and_color_variants() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/jpeg-preview");
+    let root = root("jpeg-variants-export");
+    let source = root.join("source.jpg");
+    let target = root.join("target.jpg");
+    for name in [
+        "RGB-False",
+        "RGB-True",
+        "L-False",
+        "L-True",
+        "CMYK-False",
+        "CMYK-True",
+        "CMYK-black-False",
+        "CMYK-black-True",
+        "RGB-direct",
+    ] {
+        let original = fs::read(fixtures.join(format!("{name}.jpg"))).expect("generated fixture");
+        fs::write(&source, &original).expect("owned source");
+        export_media(&request(&source, &target)).expect("unedited save");
+        assert_eq!(
+            fs::read(&target).expect("byte-identical copy"),
+            original,
+            "{name}"
+        );
+        export_media_with_options(
+            &request(&source, &target),
+            options(MetadataField::Title, name),
+        )
+        .expect("metadata-only save");
+        assert_eq!(
+            without_xmp(&fs::read(&target).expect("output")),
+            without_xmp(&original),
+            "{name}"
+        );
+        assert_eq!(inspect(&target).expect("new title")[0].value, name);
+        assert_eq!(fs::read(&source).expect("source preserved"), original);
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn jpeg_metadata_splice_preserves_every_non_xmp_byte_and_decoded_pixel() {
     let root = root("jpeg-splice");
     let source = root.join("source.JPEG");

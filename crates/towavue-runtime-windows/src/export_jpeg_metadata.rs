@@ -198,10 +198,18 @@ impl JpegMetadata {
         staging: &StagedExport,
         cancelled: &AtomicBool,
     ) -> Result<(), ExportError> {
+        self.apply_from(&staging.output, staging, cancelled)
+    }
+
+    pub(super) fn apply_from(
+        &self,
+        source: &Path,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+    ) -> Result<(), ExportError> {
         let temporary = staging.directory.join("metadata.jpg");
         {
-            let input =
-                BufReader::new(fs::File::open(&staging.output).map_err(ExportError::Output)?);
+            let input = BufReader::new(fs::File::open(source).map_err(ExportError::Output)?);
             let mut output = std::io::BufWriter::new(
                 fs::OpenOptions::new()
                     .write(true)

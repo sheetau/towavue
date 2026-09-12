@@ -476,6 +476,53 @@ fn export_audio_cancellable(
         || streams.timeline.is_some())
     .then_some(request.kind);
     let staging = StagedExport::new(&request.target)?;
+    if let Some(metadata) = &jpeg_metadata
+        && jpeg_metadata::jpeg_path(&request.source)
+        && request.operations.is_empty()
+    {
+        // Marker validation cannot detect broken compressed samples. Decode to a null sink
+        // before splicing the source, without re-encoding pixels or baking in orientation.
+        let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;
+        let mut arguments: Vec<String> = [
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-abort_on",
+            "empty_output",
+            "-nostdin",
+            "-nostats",
+            "-progress",
+            "pipe:1",
+            "-noautorotate",
+            "-err_detect",
+            "explode",
+            "-i",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        arguments.push(request.source.display().to_string());
+        arguments.extend(
+            ["-map", "0:v:0", "-an", "-frames:v", "1", "-f", "null", "-"].map(String::from),
+        );
+        let output = run_ffmpeg(&executable, arguments, cancelled, progress)?;
+        let stamp = source_stamp.as_ref().expect("JPEG source stamp");
+        stamp.verify(&request.source)?;
+        if !output.status.success() {
+            return Err(ExportError::Failed(format!(
+                "JPEG decode validation failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        metadata.apply_from(&request.source, &staging, cancelled)?;
+        stamp.verify(&request.source)?;
+        staging.publish(&request.target, cancelled, trimmed_kind)?;
+        return Ok(ExportOutcome {
+            used_hardware_encoder: false,
+        });
+    }
     if let Some(conversion) = webp_to_png {
         conversion.export(request, &staging, cancelled, progress)?;
         source_stamp

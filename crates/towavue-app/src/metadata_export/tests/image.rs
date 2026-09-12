@@ -168,6 +168,8 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
             "JPEG XMP (ja): 元の題名",
             "JPEG XMP property: dc:title (language alternatives)",
             "JPEG input supports JPEG or WebP output.",
+            "JPEG output with no image edits preserves compressed pixels",
+            "Remove is not a privacy scrub",
             "EXIF, IPTC and JPEG comments (COM) are not synchronized",
             "including when all fields are Keep",
             "Set replaces all values of the field with one",
@@ -491,7 +493,7 @@ fn png_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_life
         return;
     };
     metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
-        &root, "png", "png", 1,
+        &root, "png", "png", 1, true,
     );
 }
 
@@ -506,7 +508,7 @@ fn jpeg_webp_metadata_conversion_preserves_save_resave_and_guard_lifecycle() {
         let directory = root.join(source);
         std::fs::create_dir(&directory).expect("owned conversion fixtures");
         metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
-            &directory, source, target, 1,
+            &directory, source, target, 1, true,
         );
     }
 }
@@ -518,9 +520,13 @@ fn jpeg_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lif
     ) else {
         return;
     };
-    metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
-        &root, "jpeg", "jpeg", 1,
-    );
+    for rotate in [false, true] {
+        let directory = root.join(if rotate { "rotated" } else { "unedited" });
+        std::fs::create_dir(&directory).expect("owned JPEG fixtures");
+        metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
+            &directory, "jpeg", "jpeg", 1, rotate,
+        );
+    }
 }
 
 fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
@@ -528,6 +534,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     extension: &str,
     output_extension: &str,
     frames: usize,
+    rotate: bool,
 ) {
     let setting = || {
         let mut options = super::setting();
@@ -564,10 +571,10 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     app.path = Some(source.clone());
     app.media_kind = Some(MediaKind::Image);
     app.state = PlaybackState::Paused;
-    app.edits
-        .entry(tab)
-        .or_default()
-        .push(EditOperation::RotateClockwise, MediaKind::Image);
+    let edits = app.edits.entry(tab).or_default();
+    if rotate {
+        edits.push(EditOperation::RotateClockwise, MediaKind::Image);
+    }
     let history = app.edits.clone();
     let generation = app.media_generation;
     let intent = || DialogIntent::Export {
@@ -608,7 +615,18 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
         .expect("display edits");
         assert_eq!(pixels.frames, expected.frames);
     }
-    assert_eq!((pixels.frames[0].width, pixels.frames[0].height), (24, 32));
+    assert_eq!(
+        (pixels.frames[0].width, pixels.frames[0].height),
+        if rotate { (24, 32) } else { (32, 24) }
+    );
+    if !rotate {
+        assert_eq!(
+            pixels.frames,
+            towavue_runtime_windows::decode_image(&source)
+                .expect("source pixels")
+                .frames
+        );
+    }
     assert!(
         values(&target)
             .iter()
@@ -734,7 +752,7 @@ fn webp_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lif
         return;
     };
     metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
-        &root, "webp", "webp", 1,
+        &root, "webp", "webp", 1, true,
     );
 }
 
@@ -918,7 +936,7 @@ fn animated_webp_metadata_save_resave_and_guard_preserve_all_frames() {
         return;
     };
     metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(
-        &root, "webp", "webp", 3,
+        &root, "webp", "webp", 3, true,
     );
 }
 

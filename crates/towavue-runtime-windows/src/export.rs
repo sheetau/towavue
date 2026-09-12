@@ -23,6 +23,8 @@ mod gif_animation;
 mod audio_options;
 pub use audio_options::{AudioChannels, AudioExportOptions};
 
+#[path = "export_avif.rs"]
+mod avif;
 #[path = "export_jpeg_metadata.rs"]
 mod jpeg_metadata;
 #[path = "export_metadata.rs"]
@@ -338,15 +340,32 @@ fn export_audio_cancellable(
     let png_source = request.kind == MediaKind::Image && png_metadata::png_path(&request.source);
     let gif_source = request.kind == MediaKind::Image && gif_animation::gif_path(&request.source);
     let webp_source = request.kind == MediaKind::Image && webp_metadata::webp_path(&request.source);
+    let avif_source = request.kind == MediaKind::Image && avif::avif_path(&request.source);
+    if avif_source && !metadata.is_empty() {
+        return Err(ExportError::Failed(
+            "AVIF metadata editing is not supported yet".into(),
+        ));
+    }
     if gif_source && !metadata.is_empty() {
         return Err(ExportError::Failed(
             "GIF metadata editing is not supported yet".into(),
         ));
     }
-    let source_stamp =
-        (options.normalize_peak || image_metadata || png_source || gif_source || webp_source)
-            .then(|| audio_options::SourceStamp::read(&request.source))
-            .transpose()?;
+    let source_stamp = (options.normalize_peak
+        || image_metadata
+        || png_source
+        || gif_source
+        || webp_source
+        || avif_source)
+        .then(|| audio_options::SourceStamp::read(&request.source))
+        .transpose()?;
+    let avif_animation = avif_source
+        .then(|| avif::Animation::read(&request.source, cancelled))
+        .transpose()?
+        .flatten();
+    if avif_animation.is_some() && !avif::avif_path(&request.target) {
+        return Err(ExportError::Failed("Animated AVIF export currently requires AVIF output; conversion must not discard frames".into()));
+    }
     let gif_animation = gif_source
         .then(|| gif_animation::Animation::read(&request.source, cancelled))
         .transpose()?;
@@ -420,6 +439,17 @@ fn export_audio_cancellable(
         || streams.timeline.is_some())
     .then_some(request.kind);
     let staging = StagedExport::new(&request.target)?;
+    if let Some(animation) = avif_animation {
+        animation.export(request, &staging, cancelled, progress)?;
+        source_stamp
+            .as_ref()
+            .expect("AVIF source stamp")
+            .verify(&request.source)?;
+        staging.publish(&request.target, cancelled, trimmed_kind)?;
+        return Ok(ExportOutcome {
+            used_hardware_encoder: false,
+        });
+    }
     if let Some(webp_metadata) = &webp_metadata
         && webp_metadata.is_animated()
     {

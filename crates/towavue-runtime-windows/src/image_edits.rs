@@ -137,7 +137,10 @@ pub fn render_image_edits(
     })
 }
 
-fn output_size(mut size: (u32, u32), operations: &[EditOperation]) -> Result<(u32, u32), String> {
+pub(crate) fn output_size(
+    mut size: (u32, u32),
+    operations: &[EditOperation],
+) -> Result<(u32, u32), String> {
     if size.0 == 0 || size.1 == 0 || u64::from(size.0) * u64::from(size.1) > 128 * 1024 * 1024 {
         return Err("Invalid source image dimensions".into());
     }

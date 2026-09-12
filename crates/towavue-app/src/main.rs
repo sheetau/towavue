@@ -3420,6 +3420,39 @@ where
         }
     }
 
+    fn finish_queued_media_release(&mut self) {
+        if !matches!(self.media_kind, Some(MediaKind::Audio | MediaKind::Video))
+            || self.renderer.is_none()
+            || self.window.is_none()
+            || self.modal_input_blocked()
+            || self.palette_open
+            || self.grid_open
+            || self.filmstrip_open
+            || self
+                .ui_context
+                .as_ref()
+                .is_some_and(egui::Popup::is_any_open)
+        {
+            return;
+        }
+        if self.ui_state.as_mut().is_some_and(|state| {
+            state.egui_input_mut().events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::PointerButton {
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        ..
+                    }
+                )
+            })
+        }) {
+            // Native cancellation can arrive before RedrawRequested. Apply the
+            // already completed input first, including an entirely queued drag.
+            self.render_frame();
+        }
+    }
+
     fn cancel_view_drag(&mut self) -> bool {
         let mut canceled_press = self.cancel_hold_speed();
         canceled_press |= self.cancel_video_scrub();
@@ -8049,6 +8082,7 @@ where
     }
 
     fn dismiss_overlay_or_fullscreen(&mut self) -> bool {
+        self.finish_queued_media_release();
         if self.modal_input_blocked() {
             return false;
         }
@@ -8842,6 +8876,9 @@ where
     ) {
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
+        }
+        if matches!(event, WindowEvent::Focused(false)) {
+            self.finish_queued_media_release();
         }
         if (self.rotation_drag.is_some()
             || self.video_rotation_drag.is_some()

@@ -31,6 +31,155 @@ fn render<N: Fn(AppEvent) + Send + Sync + 'static>(
 }
 
 #[test]
+fn queued_timeline_release_precedes_native_cancellation() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "timeline_edit::tests::queued_timeline_release_precedes_native_cancellation",
+    ) else {
+        return;
+    };
+    struct Trial;
+    impl ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = Arc::new(
+                event_loop
+                    .create_window(
+                        Window::default_attributes()
+                            .with_visible(false)
+                            .with_inner_size(winit::dpi::LogicalSize::new(960, 576)),
+                    )
+                    .expect("hidden timeline window"),
+            );
+            for kind in [MediaKind::Audio, MediaKind::Video] {
+                let mut renderer = match FrameRenderer::new(&window) {
+                    Ok(renderer) => renderer,
+                    Err(error) => {
+                        eprintln!("SKIP queued timeline release: D3D11 unavailable: {error}");
+                        event_loop.exit();
+                        return;
+                    }
+                };
+                let size = window.inner_size();
+                renderer
+                    .resize_surface(size.width, size.height)
+                    .expect("surface size");
+                let context = crate::fonts::test_context();
+                let mut app = Application::new(None, |_| {}).expect("app");
+                app.ui_state = Some(egui_winit::State::new(
+                    context.clone(),
+                    egui::ViewportId::ROOT,
+                    &window,
+                    Some(window.scale_factor() as f32),
+                    None,
+                    Some(renderer.max_texture_side()),
+                ));
+                app.ui_context = Some(context.clone());
+                app.window = Some(window.clone());
+                app.renderer = Some(renderer);
+                let tab = app.tabs.open_new(PathBuf::from("timeline-fixture"), kind);
+                app.edits.insert(tab, EditHistory::default());
+                app.media_kind = Some(kind);
+                app.media_duration = Some(Duration::from_secs(10));
+                app.state = PlaybackState::Paused;
+                app.timeline_open = true;
+                for escape in [false, true] {
+                    for release_first in [true, false] {
+                        for batched_press in [false, true] {
+                            app.time_selection = None;
+                            app.fullscreen = kind == MediaKind::Audio;
+                            app.ui_state
+                                .as_mut()
+                                .expect("input state")
+                                .egui_input_mut()
+                                .focused = true;
+                            for _ in 0..3 {
+                                app.render_frame();
+                            }
+                            let rect = egui::containers::panel::PanelState::load(
+                                &context,
+                                app.timeline_panel_id(),
+                            )
+                            .expect("timeline panel")
+                            .outer_rect;
+                            let start = egui::pos2(rect.left() + 120.0, rect.bottom() - 12.0);
+                            let end = start + egui::vec2(200.0, 0.0);
+                            let button = |pos, pressed| egui::Event::PointerButton {
+                                pos,
+                                pressed,
+                                button: egui::PointerButton::Primary,
+                                modifiers: egui::Modifiers::NONE,
+                            };
+                            app.ui_state
+                                .as_mut()
+                                .expect("input state")
+                                .egui_input_mut()
+                                .events = vec![
+                                egui::Event::PointerMoved(start),
+                                button(start, true),
+                                egui::Event::PointerMoved(end),
+                            ];
+                            if !batched_press {
+                                app.render_frame();
+                                assert!(crate::timeline_input::is_active(&context));
+                            }
+                            if release_first {
+                                app.ui_state
+                                    .as_mut()
+                                    .expect("input state")
+                                    .egui_input_mut()
+                                    .events
+                                    .push(button(end, false));
+                            }
+                            let frame_before = context.cumulative_frame_nr();
+                            if escape {
+                                app.dismiss_overlay_or_fullscreen();
+                            } else {
+                                app.window_event(
+                                    event_loop,
+                                    window.id(),
+                                    WindowEvent::Focused(false),
+                                );
+                            }
+                            assert_eq!(
+                                context.cumulative_frame_nr() - frame_before,
+                                u64::from(release_first),
+                                "only a queued release requires an immediate frame"
+                            );
+                            if !release_first {
+                                app.ui_state
+                                    .as_mut()
+                                    .expect("input state")
+                                    .egui_input_mut()
+                                    .events
+                                    .push(button(end, false));
+                            }
+                            app.render_frame();
+                            assert_eq!(
+                                app.time_selection.is_some(),
+                                release_first,
+                                "kind={kind:?}, escape={escape}, release_first={release_first}, batched_press={batched_press}"
+                            );
+                            assert!(!crate::timeline_input::is_active(&context));
+                            assert!(!app.edits[&tab].is_dirty());
+                            if escape && kind == MediaKind::Audio {
+                                assert_eq!(app.fullscreen, !release_first);
+                            }
+                        }
+                    }
+                }
+            }
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    EventLoop::builder()
+        .with_any_thread(true)
+        .build()
+        .expect("test event loop")
+        .run_app(&mut Trial)
+        .expect("queued timeline trial");
+}
+
+#[test]
 fn source_identity_remaps_deleted_positions_stretches_and_empty_undo() {
     let mut plan = EditTimeline::new(time(4000), PlaybackRange::default()).expect("plan");
     assert!(plan.apply(TimelineEdit::Delete(range(1000, 2000))));

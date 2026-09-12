@@ -85,6 +85,204 @@ fn finish(app: &mut App, events: &mpsc::Receiver<AppEvent>) {
 }
 
 #[test]
+fn settled_image_comparison_survives_tab_switch_and_window_transfer() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::settled_image_comparison_survives_tab_switch_and_window_transfer",
+    ) else {
+        return;
+    };
+    let (mut source, events) = app();
+    let first = install(&mut source, root.join("edited.png"), decoded(true));
+    source.push_visual_edit(EditOperation::Resize(
+        towavue_core::ImageResize::new(3, 3, towavue_core::ResampleFilter::Nearest)
+            .expect("resize"),
+    ));
+    finish_comparison(&mut source, &events);
+    assert!(source.edits[&first].is_dirty());
+    let pixels = Arc::clone(&source.image.as_ref().expect("edited").decoded);
+    let texture = source.image.as_ref().expect("edited").texture.id();
+    let second = install(&mut source, root.join("neighbor.png"), decoded(false));
+    source.activate_tab(first);
+    let generation = source.image_edit_generation;
+    source.refresh_image_edits();
+    assert_eq!(
+        source.image_edit_generation, generation,
+        "settled comparison remains reusable"
+    );
+    assert_eq!(
+        source.image.as_ref().expect("restored").texture.id(),
+        texture
+    );
+    assert!(Arc::ptr_eq(
+        &source.image.as_ref().expect("restored").decoded,
+        &pixels
+    ));
+    source.activate_tab(second);
+    let generation = source.image_edit_generation;
+    source.activate_tab(first);
+    assert_eq!(
+        source.image_edit_generation,
+        generation.wrapping_add(1),
+        "activation invalidates old worker generation but must not submit a fresh comparison"
+    );
+    let (mut destination, _) = app();
+    let generation = destination.image_edit_generation;
+    let moved = transfer(&mut source, &mut destination, first);
+    assert_eq!(
+        destination.image_edit_generation,
+        generation.wrapping_add(1),
+        "cross-window activation must not repeat a completed comparison"
+    );
+    assert!(destination.edits[&moved].is_dirty());
+    assert!(Arc::ptr_eq(
+        &destination.image.as_ref().expect("moved").decoded,
+        &pixels
+    ));
+}
+
+#[test]
+fn interrupted_or_changed_image_comparisons_restart_after_tab_return() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::interrupted_or_changed_image_comparisons_restart_after_tab_return",
+    ) else {
+        return;
+    };
+    let (mut app, events) = app();
+    let first = install(&mut app, root.join("pending.png"), decoded(true));
+    app.push_visual_edit(EditOperation::Resize(
+        towavue_core::ImageResize::new(3, 3, towavue_core::ResampleFilter::Nearest)
+            .expect("resize"),
+    ));
+    let stale_generation = app.image_edit_generation;
+    let instance = app.media_generation;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    // Receive the materialized pixels, but deliberately leave the comparison unaccepted.
+    while app.image_edit_pending {
+        let event = events
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("render");
+        if matches!(event, AppEvent::ImageEdited(..)) {
+            app.handle_app_event(event);
+        }
+    }
+    assert_eq!(app.image_edit_compared, None);
+    let pixels = Arc::clone(&app.image.as_ref().expect("rendered").decoded);
+    let operations = app.edits[&first].operations().to_vec();
+    let second = install(&mut app, root.join("other.png"), decoded(false));
+    assert!(app.retained_images[&first].comparison.is_none());
+    let generation = app.image_edit_generation;
+    app.activate_tab(first);
+    assert_eq!(
+        app.image_edit_generation,
+        generation.wrapping_add(2),
+        "incomplete comparison must restart"
+    );
+    assert!(
+        !app.image_edit_pending,
+        "already materialized pixels do not need rendering again"
+    );
+    app.handle_app_event(AppEvent::ImageContentCompared(
+        stale_generation,
+        instance,
+        first,
+        operations.clone(),
+        vec![],
+        true,
+    ));
+    assert_eq!(app.image_edit_compared, None);
+    assert!(app.edits[&first].is_dirty());
+    finish_comparison(&mut app, &events);
+    assert_eq!(app.image_edit_compared, Some(false));
+    app.activate_tab(second);
+    app.edits
+        .get_mut(&first)
+        .expect("history")
+        .mark_exported(&[EditOperation::FlipHorizontal]);
+    let generation = app.image_edit_generation;
+    app.activate_tab(first);
+    assert_eq!(
+        app.image_edit_generation,
+        generation.wrapping_add(2),
+        "changed saved snapshot needs new evidence"
+    );
+    assert_eq!(app.image_edit_compared, None);
+    app.handle_app_event(AppEvent::ImageContentCompared(
+        app.image_edit_generation,
+        app.media_generation,
+        first,
+        operations,
+        vec![],
+        true,
+    ));
+    assert_eq!(
+        app.image_edit_compared, None,
+        "wrong baseline must not become reusable evidence"
+    );
+    assert!(app.edits[&first].is_dirty());
+    finish_comparison(&mut app, &events);
+    assert!(Arc::ptr_eq(
+        &app.image.as_ref().expect("same render").decoded,
+        &pixels
+    ));
+}
+
+#[test]
+fn retained_pixel_equivalence_restores_dirty_state_for_the_same_snapshots() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::retained_pixel_equivalence_restores_dirty_state_for_the_same_snapshots",
+    ) else {
+        return;
+    };
+    let (mut app, events) = app();
+    let first = install(&mut app, root.join("uniform.png"), decoded(true));
+    app.push_visual_edit(EditOperation::FlipHorizontal);
+    finish_comparison(&mut app, &events);
+    assert_eq!(app.image_edit_compared, Some(true));
+    assert!(!app.edits[&first].is_dirty());
+    install(&mut app, root.join("neighbor.png"), decoded(false));
+    app.edits
+        .get_mut(&first)
+        .expect("history")
+        .mark_exported(&[]);
+    assert!(
+        app.edits[&first].is_dirty(),
+        "history conservatively invalidates pixel evidence"
+    );
+    let generation = app.image_edit_generation;
+    app.activate_tab(first);
+    assert_eq!(app.image_edit_generation, generation.wrapping_add(1));
+    assert!(
+        !app.edits[&first].is_dirty(),
+        "identical snapshots reuse the accepted match"
+    );
+    assert_eq!(
+        app.edits[&first].operations(),
+        &[EditOperation::FlipHorizontal]
+    );
+}
+
+fn finish_comparison(app: &mut App, events: &mpsc::Receiver<AppEvent>) {
+    let generation = app.image_edit_generation;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let event = events
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("comparison");
+        let finished =
+            matches!(&event, AppEvent::ImageContentCompared(found, ..) if *found == generation);
+        if matches!(
+            event,
+            AppEvent::ImageEdited(..) | AppEvent::ImageContentCompared(..)
+        ) {
+            app.handle_app_event(event);
+        }
+        if finished {
+            break;
+        }
+    }
+}
+
+#[test]
 fn final_image_transfer_clears_source_cache_without_dropping_destination_pixels() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_transfer::tests::final_image_transfer_clears_source_cache_without_dropping_destination_pixels",

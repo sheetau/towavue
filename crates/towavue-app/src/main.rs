@@ -412,6 +412,7 @@ struct RetainedImageTab {
     folder_snapshot: Option<FolderSnapshot>,
     source: Option<Arc<DecodedImage>>,
     operations: Option<Vec<EditOperation>>,
+    comparison: Option<(Vec<EditOperation>, bool)>,
     materialized: bool,
     error: Option<String>,
     resume_loading: bool,
@@ -805,6 +806,7 @@ struct Application<N> {
     image_edit_generation: u64,
     image_edit_operations: Option<Vec<EditOperation>>,
     image_edit_baseline: Option<Vec<EditOperation>>,
+    image_edit_compared: Option<bool>,
     image_edit_pending: bool,
     image_materialized: bool,
     nearest_images: bool,
@@ -1022,6 +1024,7 @@ where
             image_edit_generation: 0,
             image_edit_operations: None,
             image_edit_baseline: None,
+            image_edit_compared: None,
             image_edit_pending: false,
             image_materialized: false,
             nearest_images: false,
@@ -1333,6 +1336,11 @@ where
             folder_snapshot: self.folder_snapshot.take(),
             source: self.image_edit_source.take(),
             operations: self.image_edit_operations.take(),
+            // A submitted comparison may be cancelled on departure; retain only accepted evidence.
+            comparison: self
+                .image_edit_baseline
+                .take()
+                .zip(self.image_edit_compared),
             materialized: self.image_materialized,
             error: self.image_error.take(),
             resume_loading: self.image_loading,
@@ -1357,7 +1365,8 @@ where
         self.folder_snapshot = saved.folder_snapshot;
         self.image_edit_source = saved.source;
         self.image_edit_operations = saved.operations;
-        self.image_edit_baseline = None;
+        self.image_edit_compared = saved.comparison.as_ref().map(|(_, matches)| *matches);
+        self.image_edit_baseline = saved.comparison.map(|(baseline, _)| baseline);
         self.image_materialized = saved.materialized;
         self.image_error = saved.error;
         self.state = saved.state;
@@ -2286,8 +2295,11 @@ where
                     && !self.image_edit_pending
                     && self.tabs.active().is_some_and(|active| active.id == tab)
                     && let Some(history) = self.edits.get_mut(&tab)
+                    && history.operations() == current
+                    && history.saved_operations() == saved
                 {
                     history.set_image_content_match(&current, &saved, matches);
+                    self.image_edit_compared = Some(matches);
                     self.refresh_title();
                     self.request_redraw();
                 }
@@ -5866,6 +5878,7 @@ where
         self.image_edit_operations = None;
         self.image_edit_pending = false;
         self.image_edit_baseline = None;
+        self.image_edit_compared = None;
         self.image_materialized = false;
         self.resize_dialog = None;
         self.rotation_dialog = None;
@@ -5939,12 +5952,19 @@ where
                 self.image_edit_generation = self.image_edit_generation.wrapping_add(1);
                 self.image_edit_operations = None;
                 self.image_edit_baseline = None;
+                self.image_edit_compared = None;
                 return;
             }
         }
         if self.image_edit_operations.as_ref() == Some(&operations)
             && self.image_edit_baseline.as_ref() == Some(&saved)
         {
+            if let Some(matches) = self.image_edit_compared {
+                self.edits
+                    .get_mut(&tab)
+                    .expect("active history")
+                    .set_image_content_match(&operations, &saved, matches);
+            }
             return;
         }
         let Some(source) = self
@@ -5963,6 +5983,7 @@ where
         }
         self.image_edit_operations = Some(operations.clone());
         self.image_edit_baseline = Some(saved.clone());
+        self.image_edit_compared = None;
         self.image_edit_generation = self.image_edit_generation.wrapping_add(1);
         let generation = self.image_edit_generation;
         self.image_edit_pending = render;

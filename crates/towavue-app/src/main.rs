@@ -10923,7 +10923,7 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         };
-        for interruption in 0..8 {
+        for interruption in 0..10 {
             let context = fonts::test_context();
             app.ui_context = Some(context.clone());
             app.timeline_open = true;
@@ -10988,14 +10988,21 @@ mod tests {
                     frame(&mut app, vec![], true, false);
                     egui::Popup::close_id(&context, "seek-blocker".into());
                 }
-                _ => {
+                7 => {
                     frame(&mut app, vec![], true, true);
                 }
+                8 => release.insert(0, escape.clone()),
+                _ => release.insert(0, egui::Event::WindowFocused(false)),
             }
-            assert!(
-                frame(&mut app, release, true, false).is_empty(),
-                "interruption={interruption}"
-            );
+            let actions = frame(&mut app, release, true, false);
+            if matches!(interruption, 1 | 3) {
+                assert!(
+                    matches!(actions.as_slice(), [UiAction::TimeSelection(_, _, Some(_))]),
+                    "release precedes interruption={interruption}"
+                );
+            } else {
+                assert!(actions.is_empty(), "interruption={interruption}");
+            }
             assert!(!timeline_input::is_active(&context));
             frame(&mut app, vec![button(start, true)], true, false);
             frame(&mut app, vec![egui::Event::PointerMoved(end)], true, false);

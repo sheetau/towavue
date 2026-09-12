@@ -751,6 +751,56 @@ mod tests {
     }
 
     #[test]
+    fn selection_release_and_cancellation_follow_event_order() {
+        for interrupt in [
+            egui::Event::WindowFocused(false),
+            egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ] {
+            for release_first in [true, false] {
+                for batched_press in [false, true] {
+                    let context = egui::Context::default();
+                    let selected = TimeRange::new(time(1.0), time(2.0));
+                    frame(&context, vec![], true, selected);
+                    let mut events = vec![
+                        button(120.0, true),
+                        egui::Event::PointerMoved(egui::pos2(320.0, 70.0)),
+                    ];
+                    if !batched_press {
+                        assert!(frame(&context, events.clone(), true, selected).is_empty());
+                        events.clear();
+                    }
+                    if release_first {
+                        events.extend([button(320.0, false), interrupt.clone()]);
+                    } else {
+                        events.extend([interrupt.clone(), button(320.0, false)]);
+                    }
+                    let results = frame(&context, events, true, selected);
+                    assert_eq!(
+                        results.len(),
+                        usize::from(release_first),
+                        "interrupt={interrupt:?}, release_first={release_first}, batched_press={batched_press}"
+                    );
+                    if release_first {
+                        assert_eq!(
+                            results[0].selection,
+                            Some(TimeRange::new(time(2.5), time(7.5)))
+                        );
+                        assert!(results[0].seek.is_none() && results[0].edit.is_none());
+                    }
+                    assert!(!crate::timeline_input::is_active(&context));
+                    assert!(frame(&context, vec![], true, selected).is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn cancellation_retains_selection_and_a_new_press_rechooses_the_gesture() {
         for interruption in 0..4 {
             let context = egui::Context::default();

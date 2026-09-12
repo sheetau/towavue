@@ -97,13 +97,39 @@ pub fn video_seek_drag(response: &Response) -> Drag {
 fn update(response: &Response, kind: Kind) -> Drag {
     let context = &response.ctx;
     let (events, pointer, decided_drag, interrupted) = context.input(|input| {
+        let lost_focus = input.events.contains(&egui::Event::WindowFocused(false));
+        // A later cancellation must not undo an already released gesture.
+        // Without a focus event, an inactive window still cannot start one.
+        let interrupted = (!input.focused && !lost_focus)
+            || input
+                .events
+                .iter()
+                .take_while(|event| {
+                    !matches!(
+                        event,
+                        egui::Event::PointerButton {
+                            button: PointerButton::Primary,
+                            pressed: false,
+                            ..
+                        }
+                    )
+                })
+                .any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::WindowFocused(false)
+                            | egui::Event::Key {
+                                key: egui::Key::Escape,
+                                pressed: true,
+                                ..
+                            }
+                    )
+                });
         (
             input.events.clone(),
             input.pointer.hover_pos(),
             input.pointer.is_decidedly_dragging(),
-            !input.focused
-                || input.key_pressed(egui::Key::Escape)
-                || input.events.contains(&egui::Event::WindowFocused(false)),
+            interrupted,
         )
     });
     if interrupted || !response.enabled() || egui::Popup::is_any_open(context) {

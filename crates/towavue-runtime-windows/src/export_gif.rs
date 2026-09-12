@@ -93,6 +93,28 @@ impl Animation {
         self.delays.len() > 1
     }
 
+    pub(super) fn apply_png(
+        &self,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+    ) -> Result<(), ExportError> {
+        // GIF stores repeats after the initial play; APNG stores total plays.
+        // Finite(0) is the GIF crate's absent-loop-extension representation.
+        let plays = match self.repeat {
+            gif::Repeat::Infinite => 0,
+            gif::Repeat::Finite(repeats) => u32::from(repeats) + 1,
+        };
+        let delays = self
+            .delays
+            .iter()
+            .map(|delay| {
+                let [high, low] = delay.to_be_bytes();
+                [high, low, 0, 100]
+            })
+            .collect();
+        png_metadata::PngMetadata::from_animation(plays, delays).apply(staging, cancelled)
+    }
+
     pub(super) fn apply(
         &self,
         staging: &StagedExport,
@@ -341,6 +363,87 @@ mod tests {
                     actual.frames
                 );
                 assert_eq!(fs::read(&source).expect("source untouched"), before);
+                let png_target = root.join("converted.png");
+                request.target = png_target.clone();
+                export_media(&request).expect("transparent GIF to APNG");
+                let png = crate::decode_image(&png_target).expect("APNG display");
+                assert_eq!(png.frames.len(), expected.frames.len());
+                for (converted, expected) in png.frames.iter().zip(&expected.frames) {
+                    assert_eq!(
+                        (converted.width, converted.height, converted.delay),
+                        (expected.width, expected.height, expected.delay)
+                    );
+                    assert!(
+                        converted
+                            .rgba
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .zip(expected.rgba.as_chunks::<4>().0)
+                            .all(|(a, b)| a == b || a[3] == 0 && b[3] == 0),
+                        "APNG visible pixels: {dispose:?}"
+                    );
+                }
+                request.target = target.clone();
+            }
+        }
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
+    fn gif_to_apng_preserves_edited_frames_exact_delays_and_total_plays() {
+        let root = audio_tests::root("gif-to-apng");
+        let source = root.join("source.gif");
+        for (repeat, plays) in [
+            (gif::Repeat::Finite(0), 1),
+            (gif::Repeat::Finite(1), 2),
+            (gif::Repeat::Finite(u16::MAX), 65536),
+            (gif::Repeat::Infinite, 0),
+        ] {
+            fixture(&source, repeat);
+            let before = fs::read(&source).expect("source");
+            let original = crate::decode_image(&source).expect("display");
+            for extension in ["png", "apng"] {
+                let target = root.join("converted").with_extension(extension);
+                let mut request = request(&source, &target);
+                request.operations = vec![
+                    EditOperation::RotateClockwise,
+                    EditOperation::FlipHorizontal,
+                ];
+                export_media(&request).expect("animated GIF to APNG");
+                let expected = crate::render_image_edits(
+                    &original,
+                    &request.operations,
+                    &crate::Cancellation::default(),
+                )
+                .expect("edited display");
+                let actual = crate::decode_image(&target).expect("saved animation");
+                assert_eq!(actual.frames, expected.frames);
+                let mut reader =
+                    png::Decoder::new(BufReader::new(fs::File::open(&target).expect("APNG")))
+                        .read_info()
+                        .expect("independent PNG controls");
+                let animation = reader.info().animation_control.expect("animated output");
+                assert_eq!(animation.num_frames, 3);
+                assert_eq!(animation.num_plays, plays);
+                let mut pixels = vec![0; reader.output_buffer_size().expect("canvas")];
+                for delay in [0, 1, u16::MAX] {
+                    reader.next_frame(&mut pixels).expect("frame");
+                    let frame = reader.info().frame_control.expect("frame control");
+                    assert_eq!((frame.delay_num, frame.delay_den), (delay, 100));
+                    assert_eq!(frame.blend_op, png::BlendOp::Source);
+                    assert_eq!(frame.dispose_op, png::DisposeOp::None);
+                }
+                drop(reader);
+                let resaved = root.join("resaved.png");
+                export_media(&self::request(&target, &resaved)).expect("APNG resave");
+                assert_eq!(
+                    crate::decode_image(&resaved)
+                        .expect("resaved animation")
+                        .frames,
+                    actual.frames
+                );
+                assert_eq!(fs::read(&source).expect("source intact"), before);
             }
         }
         fs::remove_dir_all(root).expect("owned fixture cleanup");
@@ -348,13 +451,19 @@ mod tests {
 
     #[test]
     fn gif_export_rejects_flattening_and_preserves_existing_targets_on_failure() {
+        for extension in ["gif", "png"] {
+            check_gif_export_failures(extension);
+        }
+    }
+
+    fn check_gif_export_failures(extension: &str) {
         let root = audio_tests::root("gif-failures");
         let source = root.join("source.gif");
-        let target = root.join("target.gif");
+        let target = root.join("target").with_extension(extension);
         fixture(&source, gif::Repeat::Infinite);
         let before = fs::read(&source).expect("source bytes");
         let cancel = AtomicBool::new(false);
-        for extension in ["png", "jpg", "webp", "avif"] {
+        for extension in ["bmp", "jpg", "webp", "avif"] {
             let target = target.with_extension(extension);
             fs::write(&target, b"existing target").expect("target");
             assert!(
@@ -479,6 +588,7 @@ mod tests {
                 repeat: gif::Repeat::Infinite,
             };
             assert!(controls.apply(&staging, &cancel).is_err());
+            assert!(controls.apply_png(&staging, &cancel).is_err());
             assert_eq!(fs::read(&staging.output).expect("output untouched"), bytes);
             assert_eq!(
                 fs::read(&target).expect("target untouched"),
@@ -492,6 +602,13 @@ mod tests {
         fs::write(&temporary, b"occupied").expect("owned occupied path");
         assert!(controls.apply(&staging, &cancel).is_err());
         assert_eq!(fs::read(&temporary).expect("not overwritten"), b"occupied");
+        let temporary_png = staging.directory.join("animation.png");
+        fs::write(&temporary_png, b"occupied PNG").expect("owned occupied path");
+        assert!(controls.apply_png(&staging, &cancel).is_err());
+        assert_eq!(
+            fs::read(&temporary_png).expect("not overwritten"),
+            b"occupied PNG"
+        );
         drop(staging);
         let staging = StagedExport::new(&target).expect("partial-frame staging");
         regions(&staging.output, gif::DisposalMethod::Keep);

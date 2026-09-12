@@ -712,6 +712,118 @@ fn webp_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lif
 }
 
 #[test]
+fn gif_to_apng_save_as_and_resave_preserve_animation_and_history() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::image::gif_to_apng_save_as_and_resave_preserve_animation_and_history",
+    ) else {
+        return;
+    };
+    let source = root.join("source.gif");
+    let generated = std::process::Command::new(
+        PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe"),
+    )
+    .creation_flags(0x0800_0000)
+    .args([
+        "-v",
+        "error",
+        "-n",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=32x24:rate=2",
+        "-frames:v",
+        "3",
+    ])
+    .arg(&source)
+    .output()
+    .expect("owned GIF");
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    let original_bytes = std::fs::read(&source).expect("source bytes");
+    let original = towavue_runtime_windows::decode_image(&source).expect("original animation");
+    assert_eq!(original.frames.len(), 3);
+    let (send, events) = std::sync::mpsc::channel();
+    let mut app = Application::new(None, move |event| {
+        let _ = send.send(event);
+    })
+    .expect("app");
+    let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+    app.path = Some(source.clone());
+    app.media_kind = Some(MediaKind::Image);
+    app.state = PlaybackState::Paused;
+    app.edits
+        .entry(tab)
+        .or_default()
+        .push(EditOperation::RotateClockwise, MediaKind::Image);
+    let expected = towavue_runtime_windows::render_image_edits(
+        &original,
+        &[EditOperation::RotateClockwise],
+        &towavue_runtime_windows::Cancellation::default(),
+    )
+    .expect("edited display");
+    let target = root.join("saved.apng");
+    let generation = app.media_generation;
+    let intent = || DialogIntent::Export {
+        tab,
+        source: source.clone(),
+        kind: MediaKind::Image,
+        generation,
+        output: ExportOutput::Media,
+        continuation: None,
+    };
+    app.pending_dialog = Some(intent());
+    app.finish_dialog(Ok(None));
+    assert!(!target.exists());
+    assert!(app.edits[&tab].is_dirty());
+    app.pending_dialog = Some(intent());
+    app.finish_dialog(Ok(Some(target.clone())));
+    drain_export(&mut app, &events);
+    assert!(app.export_error.is_none(), "{:?}", app.export_error);
+    assert!(!app.edits[&tab].is_dirty());
+    assert_eq!(
+        app.edits[&tab].operations(),
+        &[EditOperation::RotateClockwise]
+    );
+    assert_eq!(app.path.as_ref(), Some(&source));
+    assert_eq!(app.export_paths.get(&tab), Some(&target));
+    assert_eq!(
+        towavue_runtime_windows::decode_image(&target)
+            .expect("APNG")
+            .frames,
+        expected.frames
+    );
+    app.dispatch(CommandId::Save);
+    drain_export(&mut app, &events);
+    assert!(app.export_error.is_none());
+    assert!(!app.edits[&tab].is_dirty());
+    assert_eq!(
+        towavue_runtime_windows::decode_image(&target)
+            .expect("resaved APNG")
+            .frames,
+        expected.frames
+    );
+    let saved = std::fs::read(&target).expect("saved APNG bytes");
+    let unsupported = root.join("unsupported.jpg");
+    app.pending_dialog = Some(intent());
+    app.finish_dialog(Ok(Some(unsupported.clone())));
+    drain_export(&mut app, &events);
+    assert!(app.export_error.is_some());
+    assert!(!unsupported.exists());
+    assert_eq!(app.export_paths.get(&tab), Some(&target));
+    assert_eq!(
+        std::fs::read(&target).expect("previous output retained"),
+        saved
+    );
+    assert_eq!(
+        std::fs::read(&source).expect("original retained"),
+        original_bytes
+    );
+}
+
+#[test]
 fn animated_webp_metadata_save_resave_and_guard_preserve_all_frames() {
     let Some(root) = crate::tests::isolated_test_root(
         "metadata_export::tests::image::animated_webp_metadata_save_resave_and_guard_preserve_all_frames",

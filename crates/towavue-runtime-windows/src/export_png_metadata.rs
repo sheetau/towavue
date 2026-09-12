@@ -321,6 +321,17 @@ pub(super) struct PngMetadata {
 }
 
 impl PngMetadata {
+    pub(super) fn from_animation(plays: u32, delays: Vec<[u8; 4]>) -> Self {
+        Self {
+            chunks: Vec::new(),
+            animation: Some(animation::Animation {
+                plays,
+                delays,
+                includes_default: true,
+            }),
+        }
+    }
+
     pub(super) fn prepare(
         request: &ExportRequest,
         options: &MetadataExportOptions,

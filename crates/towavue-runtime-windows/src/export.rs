@@ -371,17 +371,23 @@ fn export_audio_cancellable(
     let gif_animation = gif_source
         .then(|| gif_animation::Animation::read(&request.source, cancelled))
         .transpose()?;
+    let gif_to_png = gif_animation
+        .as_ref()
+        .is_some_and(gif_animation::Animation::is_animated)
+        && png_metadata::png_path(&request.target);
     if gif_animation
         .as_ref()
         .is_some_and(gif_animation::Animation::is_animated)
         && !gif_animation::gif_path(&request.target)
+        && !gif_to_png
     {
         return Err(ExportError::Failed(
-            "Animated GIF export currently requires GIF output; conversion must not discard frames"
+            "Animated GIF export requires GIF or APNG (.png/.apng) output; conversion must not discard frames"
                 .into(),
         ));
     }
-    let gif_animation = gif_animation.filter(|_| gif_animation::gif_path(&request.target));
+    let gif_animation =
+        gif_animation.filter(|_| gif_animation::gif_path(&request.target) || gif_to_png);
     let jpeg_metadata = (image_metadata && jpeg_metadata::jpeg_path(&request.source))
         .then(|| jpeg_metadata::JpegMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
@@ -537,7 +543,11 @@ fn export_audio_cancellable(
         }));
     }
     if let Some(gif_animation) = gif_animation {
-        gif_animation.apply(&staging, cancelled)?;
+        if gif_to_png {
+            gif_animation.apply_png(&staging, cancelled)?;
+        } else {
+            gif_animation.apply(&staging, cancelled)?;
+        }
     } else if let Some(png_metadata) = png_metadata {
         png_metadata.apply(&staging, cancelled)?;
     } else if let Some(jpeg_metadata) = jpeg_metadata {

@@ -40,7 +40,7 @@ Public installer distribution is not yet available. To run from source, see the 
 | Command palette | Ctrl+Shift+P |
 | Switch tabs | Ctrl+Tab / Ctrl+Shift+Tab |
 | Close / reopen tab | Ctrl+W / Ctrl+Shift+T |
-| Fullscreen | F11 |
+| Fullscreen | F11 / Enter |
 | Filmstrip | F |
 | Previous / next image | Left / Right |
 | Image zoom | Ctrl+wheel |
@@ -50,7 +50,7 @@ Public installer distribution is not yet available. To run from source, see the 
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z |
 | Export as / save to the last export target | Ctrl+Shift+S / Ctrl+S |
 
-Available actions depend on the current media and editing mode. Menus show the active shortcuts. Keyboard bindings are stored in `%APPDATA%\towavue\shortcuts.conf`.
+Available actions depend on the current media and editing mode. Enter retains its usual confirmation or activation behavior in text fields, menus, dialogs, and focused buttons. Menus show the active shortcuts. Keyboard bindings are stored in `%APPDATA%\towavue\shortcuts.conf`.
 
 ## License
 

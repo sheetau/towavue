@@ -7,6 +7,7 @@ use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 const MULTI_BINDING_HEADER: &str = "# towavue shortcuts v2";
 const FRAME_BINDING_HEADER: &str = "# towavue shortcuts v3";
 const IMAGE_BINDING_HEADER: &str = "# towavue shortcuts v4";
+const FULLSCREEN_BINDING_HEADER: &str = "# towavue shortcuts v5";
 
 pub fn load() -> Result<(ShortcutBindings, PathBuf), String> {
     let path = config_path()?;
@@ -143,6 +144,7 @@ pub fn defaults() -> ShortcutBindings {
         );
     }
     for (command, key) in [
+        (CommandId::ToggleFullscreen, "Enter"),
         (CommandId::SeekBackward, "J"),
         (CommandId::TogglePause, "K"),
         (CommandId::SeekForward, "L"),
@@ -164,7 +166,12 @@ pub fn defaults() -> ShortcutBindings {
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
     let mut declared = std::collections::BTreeSet::new();
-    let image_bindings = text.lines().any(|line| line.trim() == IMAGE_BINDING_HEADER);
+    let fullscreen_bindings = text
+        .lines()
+        .any(|line| line.trim() == FULLSCREEN_BINDING_HEADER);
+    let mut implicit_fullscreen = true;
+    let image_bindings =
+        fullscreen_bindings || text.lines().any(|line| line.trim() == IMAGE_BINDING_HEADER);
     let frame_bindings =
         image_bindings || text.lines().any(|line| line.trim() == FRAME_BINDING_HEADER);
     let legacy = !frame_bindings && !text.lines().any(|line| line.trim() == MULTI_BINDING_HEADER);
@@ -197,6 +204,11 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .map_err(|_| format!("invalid shortcut on shortcuts.conf line {}", index + 1))?;
         // Old generated files listed every default. Preserve new alternatives
         // only for unchanged defaults; custom bindings remain exact replacements.
+        if command == CommandId::ToggleFullscreen {
+            implicit_fullscreen = !fullscreen_bindings
+                && sequences.len() == 1
+                && standard.get(command) == sequences.first();
+        }
         let inherit = (legacy
             && matches!(
                 command,
@@ -209,7 +221,8 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::NextImage
                         | CommandId::ToggleReadingAxis
                         | CommandId::ReverseReadingOrder
-                ))
+                )
+            || command == CommandId::ToggleFullscreen && implicit_fullscreen)
             && sequences.len() == 1
             && standard.get(command) == sequences.first();
         if inherit {
@@ -228,6 +241,21 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         for sequence in sequences.into_iter().skip(1) {
             bindings.add(command, sequence);
         }
+    }
+    let enter: KeySequence = "Enter".parse().expect("built-in alternative");
+    if implicit_fullscreen
+        && declared.iter().any(|command| {
+            *command != CommandId::ToggleFullscreen
+                && bindings
+                    .all(*command)
+                    .iter()
+                    .any(|sequence| sequence.strokes().starts_with(enter.strokes()))
+        })
+    {
+        bindings.set(
+            CommandId::ToggleFullscreen,
+            "F11".parse().expect("built-in shortcut"),
+        );
     }
     if !has_apply_crop
         && text.lines().any(|line| {
@@ -302,7 +330,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
 
 fn serialize(bindings: &ShortcutBindings) -> String {
     let mut output = format!(
-        "{IMAGE_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
+        "{FULLSCREEN_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
     );
     for (command, _) in bindings.iter() {
         output.push_str(command.as_str());
@@ -1455,6 +1483,85 @@ mod tests {
             reloaded.get(CommandId::ZoomIn),
             bindings.get(CommandId::ZoomIn)
         );
+    }
+
+    #[test]
+    fn fullscreen_enter_migrates_only_implicit_bindings_and_preserves_custom_prefixes() {
+        let keys = |bindings: &ShortcutBindings| {
+            bindings
+                .all(CommandId::ToggleFullscreen)
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        for header in [
+            "",
+            MULTI_BINDING_HEADER,
+            FRAME_BINDING_HEADER,
+            IMAGE_BINDING_HEADER,
+        ] {
+            let bindings = parse(&format!("{header}\ntoggle_fullscreen = F11\n"), defaults())
+                .expect("old defaults");
+            assert_eq!(keys(&bindings), ["F11", "Enter"]);
+            assert_eq!(
+                parse(&serialize(&bindings), defaults()).expect("round trip"),
+                bindings
+            );
+        }
+        for configured in ["F11", "Ctrl+K Enter", "F11 | Ctrl+Enter"] {
+            let bindings = parse(
+                &format!("# towavue shortcuts v5\ntoggle_fullscreen = {configured}\n"),
+                defaults(),
+            )
+            .expect("explicit binding");
+            assert_eq!(keys(&bindings), configured.split(" | ").collect::<Vec<_>>());
+            assert_eq!(
+                parse(&serialize(&bindings), defaults()).expect("round trip"),
+                bindings
+            );
+        }
+        for declaration in ["", "toggle_fullscreen = F11\n"] {
+            for configured in ["Enter", "Enter F", "Ctrl+O | Enter F"] {
+                let bindings = parse(
+                    &format!("{IMAGE_BINDING_HEADER}\n{declaration}open_file = {configured}\n"),
+                    defaults(),
+                )
+                .expect("custom Enter command");
+                assert_eq!(keys(&bindings), ["F11"]);
+                let enter: KeySequence = "Enter".parse().expect("Enter");
+                assert_eq!(
+                    bindings.resolve(enter.strokes(), CommandContext::default()),
+                    if configured == "Enter" {
+                        ShortcutMatch::Command(CommandId::OpenFile)
+                    } else {
+                        ShortcutMatch::Prefix
+                    }
+                );
+                assert_eq!(
+                    parse(&serialize(&bindings), defaults()).expect("round trip"),
+                    bindings
+                );
+            }
+        }
+        for kind in [
+            None,
+            Some(MediaKind::Image),
+            Some(MediaKind::Video),
+            Some(MediaKind::Audio),
+        ] {
+            for key in ["F11", "Enter"] {
+                assert_eq!(
+                    defaults().resolve(
+                        key.parse::<KeySequence>().expect("key").strokes(),
+                        CommandContext {
+                            media_kind: kind,
+                            ..Default::default()
+                        }
+                    ),
+                    ShortcutMatch::Command(CommandId::ToggleFullscreen)
+                );
+            }
+        }
     }
 
     #[test]

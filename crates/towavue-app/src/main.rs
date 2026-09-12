@@ -8306,6 +8306,7 @@ where
                 || !matches!(
                     stroke.key,
                     Key::Space
+                        | Key::Enter
                         | Key::ArrowLeft
                         | Key::ArrowRight
                         | Key::ArrowUp
@@ -8461,6 +8462,7 @@ where
                 (Key::Character(character), character == '+')
             }
             WinitKey::Named(NamedKey::Space) => (Key::Space, false),
+            WinitKey::Named(NamedKey::Enter) => (Key::Enter, false),
             WinitKey::Named(NamedKey::ArrowLeft) => (Key::ArrowLeft, false),
             WinitKey::Named(NamedKey::ArrowRight) => (Key::ArrowRight, false),
             WinitKey::Named(NamedKey::ArrowUp) => (Key::ArrowUp, false),
@@ -12652,6 +12654,25 @@ mod tests {
         app.image_view.selection = Some(UnitRect::FULL);
         app.timeline_open = true;
         let generation = app.generation;
+        for physical in [
+            winit::keyboard::KeyCode::Enter,
+            winit::keyboard::KeyCode::NumpadEnter,
+        ] {
+            let stroke = app
+                .key_stroke_for(
+                    &WinitKey::Named(NamedKey::Enter),
+                    PhysicalKey::Code(physical),
+                )
+                .expect("mapped Enter");
+            assert_eq!(stroke.to_string(), "Enter");
+            app.process_shortcut(stroke.clone());
+            assert!(app.fullscreen);
+            app.process_shortcut(stroke);
+            assert!(!app.fullscreen);
+            assert_eq!(app.image_view.selection, Some(UnitRect::FULL));
+            assert_eq!(app.state, PlaybackState::Paused);
+            assert_eq!(app.generation, generation);
+        }
         app.dispatch(CommandId::ToggleFullscreen);
         assert!(app.fullscreen);
         for blocked in 0..3 {
@@ -15928,6 +15949,7 @@ mod tests {
         assert!(!app.edits[&tab].is_dirty());
         for key in [
             "Space",
+            "Enter",
             "Tab",
             "Left",
             "Right",
@@ -15943,6 +15965,22 @@ mod tests {
         ] {
             assert!(!app.owns_focused_shortcut(&stroke(key)), "UI owns {key}");
         }
+        let mut activated = false;
+        let _ = context.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| activated |= ui.button("Control").clicked(),
+        );
+        assert!(activated, "Enter still activates the focused control");
+        assert!(!app.fullscreen);
         assert!(!app.owns_focused_shortcut(&stroke("Ctrl+Alt+9")));
         app.shortcuts
             .set(CommandId::RotateClockwise, "K".parse().expect("custom"));
@@ -15979,7 +16017,7 @@ mod tests {
             app.fullscreen = fullscreen;
             app.filmstrip_open = true;
             focus_button();
-            for key in ["F", "R", "Space", "Tab"] {
+            for key in ["F", "R", "Space", "Enter", "Tab"] {
                 assert!(
                     !app.owns_focused_shortcut(&stroke(key)),
                     "unbound and UI keys remain with filmstrip: {key}"
@@ -16002,6 +16040,7 @@ mod tests {
                 egui::Popup::open_id(&context, "shortcut-test-popup".into());
             }
             assert!(!app.owns_focused_shortcut(&stroke("K")));
+            assert!(!app.owns_focused_shortcut(&stroke("Enter")));
             app.palette_open = false;
             app.grid_open = false;
             app.filmstrip_open = false;
@@ -16032,6 +16071,7 @@ mod tests {
                 "text editing owns {key}"
             );
         }
+        assert!(!app.owns_focused_shortcut(&stroke("Enter")));
     }
 
     #[test]

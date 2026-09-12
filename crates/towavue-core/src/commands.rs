@@ -257,6 +257,7 @@ pub struct Modifiers {
 pub enum Key {
     Character(char),
     Space,
+    Enter,
     ArrowLeft,
     ArrowRight,
     ArrowUp,
@@ -337,6 +338,7 @@ impl fmt::Display for KeyStroke {
             Key::Character('|') => formatter.write_str("Pipe"),
             Key::Character(character) => write!(formatter, "{}", character.to_ascii_uppercase()),
             Key::Space => formatter.write_str("Space"),
+            Key::Enter => formatter.write_str("Enter"),
             Key::ArrowLeft => formatter.write_str("Left"),
             Key::ArrowRight => formatter.write_str("Right"),
             Key::ArrowUp => formatter.write_str("Up"),
@@ -373,6 +375,7 @@ impl FromStr for KeyStroke {
                 "shift" => modifiers.shift = true,
                 "win" | "logo" => modifiers.logo = true,
                 "space" if key.is_none() => key = Some(Key::Space),
+                "enter" if key.is_none() => key = Some(Key::Enter),
                 "plus" if key.is_none() => key = Some(Key::Character('+')),
                 "minus" if key.is_none() => key = Some(Key::Character('-')),
                 "left" if key.is_none() => key = Some(Key::ArrowLeft),
@@ -1335,6 +1338,14 @@ mod tests {
         assert_eq!(fullscreen.to_string(), "Ctrl+K F11");
         assert_eq!(fullscreen.strokes()[1].key, Key::F11);
         assert_eq!("toggle_fullscreen".parse(), Ok(CommandId::ToggleFullscreen));
+        for key in ["Enter", "Ctrl+Enter", "Ctrl+K Enter"] {
+            assert_eq!(
+                key.parse::<KeySequence>()
+                    .expect("Enter shortcut")
+                    .to_string(),
+                key
+            );
+        }
     }
 
     fn sequence(character: char) -> KeySequence {

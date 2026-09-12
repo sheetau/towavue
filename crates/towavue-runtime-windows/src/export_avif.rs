@@ -58,6 +58,7 @@ struct Samples {
     size: (u32, u32),
     time_base: ffmpeg::Rational,
     times: Vec<(i64, i64)>,
+    orientation: Option<crate::VideoOrientation>,
 }
 
 #[derive(Clone, Debug)]
@@ -139,6 +140,14 @@ impl Animation {
                 return Err(invalid("AVIF sequence contains a non-AV1 video stream"));
             }
             let id = u32::try_from(stream.id()).map_err(invalid)?;
+            let matrix = stream
+                .side_data()
+                .find(|data| data.kind() == ffmpeg::codec::packet::side_data::Type::DisplayMatrix);
+            let orientation = matrix
+                .as_ref()
+                .map(|data| crate::VideoOrientation::from_bytes(Some(data.data())))
+                .transpose()
+                .map_err(invalid)?;
             let decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
                 .and_then(|context| context.decoder().video())
                 .map_err(invalid)?;
@@ -150,6 +159,7 @@ impl Animation {
                 size,
                 time_base: stream.time_base(),
                 times: Vec::new(),
+                orientation,
             });
         }
         loop {
@@ -194,12 +204,15 @@ impl Animation {
         samples.sort_by_key(|sample| sample.id != color.id);
         if samples.get(1).is_some_and(|alpha| {
             alpha.size != samples[0].size
+                || alpha
+                    .orientation
+                    .is_some_and(|value| value != samples[0].orientation.unwrap_or_default())
                 || !same_timing(&samples[0], alpha)
                 || i128::from(alpha.times[0].0) * i128::from(samples[0].time_base.denominator())
                     != i128::from(samples[0].times[0].0) * i128::from(alpha.time_base.denominator())
         }) {
             return Err(invalid(
-                "alpha dimensions or sample timing differ from color",
+                "alpha dimensions, orientation or sample timing differ from color",
             ));
         }
         Ok(Some(Self { tracks, samples }))
@@ -224,9 +237,13 @@ impl Animation {
             .then(|| u32::try_from(self.samples[0].times[0].1).map_err(invalid))
             .transpose()?;
         let source_alpha = self.samples.get(1);
+        let orientation = self.samples[0].orientation.unwrap_or_default();
+        let mut source_size = self.samples[0].size;
+        if orientation.swaps_axes() {
+            source_size = (source_size.1, source_size.0);
+        }
         let output_size =
-            crate::image_edits::output_size(self.samples[0].size, &request.operations)
-                .map_err(invalid)?;
+            crate::image_edits::output_size(source_size, &request.operations).map_err(invalid)?;
         if let Some(alpha_id) = self.color().premultiplied_with
             && source_alpha.is_none_or(|sample| sample.id != alpha_id)
         {
@@ -238,8 +255,16 @@ impl Animation {
                 .iter()
                 .any(|operation| matches!(operation, EditOperation::RotateImage(_)));
         let mut filters = if let Some(alpha) = source_alpha {
+            // FFmpeg autorotates both streams when their matrices are present.
+            // Older encoders can omit the alpha matrix: match the color before
+            // merging, equivalent to display's merged-canvas transformation.
+            let alpha_orientation = if alpha.orientation.is_none() {
+                orientation.ffmpeg_filter()
+            } else {
+                ""
+            };
             format!(
-                "[0:{}]scale=flags=bilinear,format=rgba[color];[0:{}]format=gray[alpha];[color][alpha]alphamerge",
+                "[0:{}]scale=flags=bilinear,format=rgba[color];[0:{}]{alpha_orientation}format=gray[alpha];[color][alpha]alphamerge",
                 self.samples[0].index, alpha.index
             )
         } else {

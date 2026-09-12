@@ -32,6 +32,35 @@ impl VideoOrientation {
         uv[0].x == uv[1].x
     }
 
+    pub(crate) fn image_orientation(self) -> image::metadata::Orientation {
+        use image::metadata::Orientation::*;
+        match self.corners {
+            [0, 1, 2, 3] => NoTransforms,
+            [3, 0, 1, 2] => Rotate90,
+            [2, 3, 0, 1] => Rotate180,
+            [1, 2, 3, 0] => Rotate270,
+            [1, 0, 3, 2] => FlipHorizontal,
+            [3, 2, 1, 0] => FlipVertical,
+            [0, 3, 2, 1] => Rotate90FlipH,
+            [2, 1, 0, 3] => Rotate270FlipH,
+            _ => unreachable!("validated orthogonal matrix"),
+        }
+    }
+
+    pub(crate) fn ffmpeg_filter(self) -> &'static str {
+        use image::metadata::Orientation::*;
+        match self.image_orientation() {
+            NoTransforms => "",
+            Rotate90 => "transpose=clock,",
+            Rotate180 => "hflip,vflip,",
+            Rotate270 => "transpose=cclock,",
+            FlipHorizontal => "hflip,",
+            FlipVertical => "vflip,",
+            Rotate90FlipH => "transpose=clock,hflip,",
+            Rotate270FlipH => "transpose=clock,vflip,",
+        }
+    }
+
     pub(crate) fn from_bytes(bytes: Option<&[u8]>) -> Result<Self, DecodeError> {
         let Some(bytes) = bytes else {
             return Ok(Self::default());

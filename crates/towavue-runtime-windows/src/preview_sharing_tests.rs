@@ -22,6 +22,36 @@ fn png() -> Vec<u8> {
 }
 
 #[test]
+fn avif_thumbnail_revision_leaves_other_format_cache_keys_unchanged() {
+    let cache = cache("avif-thumbnail-revision");
+    for extension in ["avif", "AVIF", "png", "jpg"] {
+        let source = cache.root.join(format!("source.{extension}"));
+        fs::write(&source, png()).expect("fixture");
+        let metadata = source.metadata().expect("fixture");
+        let mut old = DefaultHasher::new();
+        source
+            .canonicalize()
+            .expect("fixture")
+            .to_string_lossy()
+            .to_lowercase()
+            .hash(&mut old);
+        metadata.len().hash(&mut old);
+        metadata
+            .modified()
+            .expect("fixture")
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("fixture")
+            .as_nanos()
+            .hash(&mut old);
+        IMAGE_PREVIEW_VARIANT.hash(&mut old);
+        let old = format!("{:016x}", old.finish());
+        let current = cache_key(&source, IMAGE_PREVIEW_VARIANT).expect("current key");
+        assert_eq!(current == old, !extension.eq_ignore_ascii_case("avif"));
+    }
+    fs::remove_dir_all(&cache.root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn cached_filmstrip_uses_memory_only_and_preserves_duration_and_source_identity() {
     let cache = cache("filmstrip-memory-priority");
     let image = decode_png(&png()).expect("fixture pixels");

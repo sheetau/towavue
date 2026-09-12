@@ -99,7 +99,7 @@ pub(crate) fn preview_video_frames(
         );
         let filters = format!(
             "{}{filter},format=rgba,copy",
-            orientation_filter(frame_orientation)
+            frame_orientation.ffmpeg_filter()
         );
         let key = format!("{arguments}/{filters}");
         if graph.as_ref().is_none_or(|(current, _)| *current != key) {
@@ -147,21 +147,4 @@ pub(crate) fn preview_video_frames(
         );
     }
     check_cancelled(cancelled)
-}
-
-fn orientation_filter(orientation: VideoOrientation) -> &'static str {
-    let corners = orientation
-        .source_uv()
-        .map(|point| point.x as u8 + 2 * point.y as u8);
-    match corners {
-        [0, 1, 3, 2] => "",
-        [2, 0, 1, 3] => "transpose=clock,",
-        [1, 3, 2, 0] => "transpose=cclock,",
-        [3, 2, 0, 1] => "hflip,vflip,",
-        [1, 0, 2, 3] => "hflip,",
-        [2, 3, 1, 0] => "vflip,",
-        [0, 2, 3, 1] => "transpose=clock,hflip,",
-        [3, 1, 0, 2] => "transpose=clock,vflip,",
-        _ => unreachable!("VideoOrientation only admits quarter turns and reflections"),
-    }
 }

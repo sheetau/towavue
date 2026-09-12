@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "export_avif_orientation_tests.rs"]
+mod orientation_tests;
+
 fn fixture(path: &Path, loops: &str, alpha: bool) {
     let mut args = vec![
         "-f",
@@ -1135,6 +1138,7 @@ fn avif_control_validation_rejects_wrong_alpha_and_edit_lists() {
         size: (1, 1),
         time_base: ffmpeg::Rational(1, 1000),
         times: vec![(i64::MIN + 1, 500), (i64::MAX, 500)],
+        orientation: None,
     };
     assert!(same_timing(&left, &left));
     let right = Samples {

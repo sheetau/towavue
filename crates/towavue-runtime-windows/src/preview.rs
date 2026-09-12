@@ -788,6 +788,18 @@ fn cache_key(source: &Path, variant: &str) -> Result<String, PreviewError> {
         .hash(&mut hasher);
     metadata.len().hash(&mut hasher);
     modified.hash(&mut hasher);
+    // Old AVIF thumbnails can contain unmerged alpha or untransformed pixels.
+    // Invalidate only this format, retaining warm caches for other images.
+    let variant = if variant == IMAGE_PREVIEW_VARIANT
+        && source
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("avif"))
+    {
+        "filmstrip-avif-v1"
+    } else {
+        variant
+    };
     variant.hash(&mut hasher);
     Ok(format!("{:016x}", hasher.finish()))
 }
@@ -797,8 +809,17 @@ fn static_thumbnail_png(
     byte_limit: usize,
     current: &dyn Fn() -> bool,
 ) -> Option<Vec<u8>> {
-    let decoded = crate::image::decode_image_for_prefetch(source, byte_limit, current).ok()??;
-    let frame = decoded.frames.into_iter().next()?;
+    let frame = if image::ImageFormat::from_path(source).ok() == Some(image::ImageFormat::Avif) {
+        // The static prefetch decoder deliberately excludes AVIF sequences.
+        // Decode only their first composited/oriented frame, including alpha.
+        crate::image::first_animation_frame(source, byte_limit, current).ok()??
+    } else {
+        crate::image::decode_image_for_prefetch(source, byte_limit, current)
+            .ok()??
+            .frames
+            .into_iter()
+            .next()?
+    };
     let source_size = (frame.width, frame.height);
     let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;
     let small = image::DynamicImage::ImageRgba8(image).resize(

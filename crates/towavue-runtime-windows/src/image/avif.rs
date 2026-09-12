@@ -55,6 +55,13 @@ pub(super) fn decode(
             {
                 return Err(invalid("alpha geometry or timing differs from color"));
             }
+            // Older libavif files omit alpha transforms. An explicit transform
+            // must agree; rotate the merged canvas once, never just its colors.
+            if alpha.orientation.is_some_and(|orientation| {
+                orientation != color_frame.orientation.unwrap_or_default()
+            }) {
+                return Err(invalid("alpha orientation differs from color"));
+            }
             for (pixel, alpha) in color_frame
                 .pixels
                 .as_chunks_mut::<4>()
@@ -74,6 +81,23 @@ pub(super) fn decode(
                     }
                 }
             }
+        }
+        if let Some(orientation) = color_frame.orientation
+            && orientation != crate::VideoOrientation::default()
+        {
+            check_current(current)?;
+            let image = image::RgbaImage::from_raw(
+                color_frame.size.0,
+                color_frame.size.1,
+                color_frame.pixels,
+            )
+            .ok_or_else(|| invalid("invalid decoded RGBA canvas"))?;
+            let mut image = image::DynamicImage::ImageRgba8(image);
+            image.apply_orientation(orientation.image_orientation());
+            let image = image.into_rgba8();
+            color_frame.size = image.dimensions();
+            color_frame.pixels = image.into_raw();
+            check_current(current)?;
         }
         if let Some(previous) = previous_time {
             if color_frame.time <= previous {
@@ -176,6 +200,7 @@ struct PlaneFrame {
     time: i128,
     duration: Option<i128>,
     pixels: Vec<u8>,
+    orientation: Option<crate::VideoOrientation>,
 }
 
 // Independent demux cursors permit interleaved or contiguous alpha data without
@@ -189,6 +214,7 @@ struct PlaneDecoder {
     scaler: Option<ffmpeg::software::scaling::Context>,
     eof: bool,
     byte_limit: usize,
+    orientation: Option<crate::VideoOrientation>,
 }
 
 impl PlaneDecoder {
@@ -218,6 +244,14 @@ impl PlaneDecoder {
             return Err(invalid("ambiguous or non-AV1 image item/track"));
         }
         let index = stream.index();
+        let matrix = stream
+            .side_data()
+            .find(|data| data.kind() == ffmpeg::codec::packet::side_data::Type::DisplayMatrix);
+        let orientation = matrix
+            .as_ref()
+            .map(|data| crate::VideoOrientation::from_bytes(Some(data.data())))
+            .transpose()
+            .map_err(ImageDecodeError::Ffmpeg)?;
         let time_base = stream.time_base();
         if time_base.numerator() <= 0 || time_base.denominator() <= 0 {
             return Err(invalid("invalid image time base"));
@@ -247,6 +281,7 @@ impl PlaneDecoder {
             scaler: None,
             eof: false,
             byte_limit,
+            orientation,
         })
     }
 
@@ -299,6 +334,12 @@ impl PlaneDecoder {
                             / i128::from(self.time_base.denominator())
                     };
                     return Ok(Some(PlaneFrame {
+                        orientation: frame
+                            .side_data(ffmpeg::util::frame::side_data::Type::DisplayMatrix)
+                            .map(|data| crate::VideoOrientation::from_bytes(Some(data.data())))
+                            .transpose()
+                            .map_err(ImageDecodeError::Ffmpeg)?
+                            .or(self.orientation),
                         size,
                         time: nanos(time),
                         duration: (frame.packet().duration > 0)

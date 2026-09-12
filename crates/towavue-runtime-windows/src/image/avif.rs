@@ -2,6 +2,9 @@ use super::*;
 use crate::avif_container::{self as container, boxes, one};
 use ffmpeg::format::Pixel;
 use ffmpeg_next as ffmpeg;
+use std::path::PathBuf;
+
+mod grid;
 
 impl From<container::Error> for ImageDecodeError {
     fn from(error: container::Error) -> Self {
@@ -30,9 +33,9 @@ pub(super) fn decode(
 ) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
     let (color, alpha, premultiplied) = select(path, current)?;
     ffmpeg::init().map_err(ffmpeg_error)?;
-    let mut color_decoder = PlaneDecoder::new(path, &color, Pixel::RGBA, byte_limit)?;
+    let mut color_decoder = Plane::new(path, &color, Pixel::RGBA, byte_limit)?;
     let mut alpha_decoder = alpha
-        .map(|alpha| PlaneDecoder::new(path, &alpha, Pixel::GRAY8, byte_limit))
+        .map(|alpha| Plane::new(path, &alpha, Pixel::GRAY8, byte_limit))
         .transpose()?;
     let mut frames: Vec<DecodedImageFrame> = Vec::new();
     let mut remaining = byte_limit;
@@ -227,6 +230,64 @@ struct PlaneFrame {
     aperture: Option<container::CleanAperture>,
 }
 
+fn open_input(path: &Path) -> Result<ffmpeg::format::context::Input, ImageDecodeError> {
+    // AVIF holds may use the full unsigned stts range, unlike legacy MOV.
+    let mut options = ffmpeg::Dictionary::new();
+    options.set("max_stts_delta", &u32::MAX.to_string());
+    options.set("err_detect", "explode");
+    ffmpeg::format::input_with_dictionary(path, options).map_err(ffmpeg_error)
+}
+
+enum Plane {
+    Stream(Box<PlaneDecoder>),
+    Grid {
+        path: PathBuf,
+        layout: Option<grid::Grid>,
+        pixel: Pixel,
+        byte_limit: usize,
+    },
+}
+
+impl Plane {
+    fn new(
+        path: &Path,
+        track: &Selection,
+        pixel: Pixel,
+        byte_limit: usize,
+    ) -> Result<Self, ImageDecodeError> {
+        let input = open_input(path)?;
+        if track.timing.is_none()
+            && let Some(layout) = grid::Grid::read(&input, track.id, byte_limit)?
+        {
+            layout.check_container(path)?;
+            return Ok(Self::Grid {
+                path: path.into(),
+                layout: Some(layout),
+                pixel,
+                byte_limit,
+            });
+        }
+        Ok(Self::Stream(Box::new(PlaneDecoder::new(
+            input, track, pixel, byte_limit,
+        )?)))
+    }
+
+    fn next(&mut self, current: &dyn Fn() -> bool) -> Result<Option<PlaneFrame>, ImageDecodeError> {
+        match self {
+            Self::Stream(decoder) => decoder.next(current),
+            Self::Grid {
+                path,
+                layout,
+                pixel,
+                byte_limit,
+            } => layout
+                .take()
+                .map(|grid| grid.decode(path, *pixel, *byte_limit, current))
+                .transpose(),
+        }
+    }
+}
+
 // Independent demux cursors permit interleaved or contiguous alpha data without
 // retaining an entire color/alpha sequence while waiting for its matching track.
 struct PlaneDecoder {
@@ -244,17 +305,11 @@ struct PlaneDecoder {
 
 impl PlaneDecoder {
     fn new(
-        path: &Path,
+        input: ffmpeg::format::context::Input,
         track: &Selection,
         pixel: Pixel,
         byte_limit: usize,
     ) -> Result<Self, ImageDecodeError> {
-        // AVIF holds may use the full unsigned stts range, unlike legacy MOV
-        // files that encode negative DTS corrections in the same field.
-        let mut options = ffmpeg::Dictionary::new();
-        options.set("max_stts_delta", &u32::MAX.to_string());
-        options.set("err_detect", "explode");
-        let input = ffmpeg::format::input_with_dictionary(path, options).map_err(ffmpeg_error)?;
         let mut matching = input.streams().filter(|stream| {
             stream.id() as u32 == track.id
                 && track.timing.is_none_or(|(timescale, duration)| {
@@ -343,12 +398,35 @@ impl PlaneDecoder {
                             .map_err(ffmpeg_error)?,
                         );
                     }
+                    let scaler = self.scaler.as_mut().expect("scaler");
+                    let space: ffmpeg::ffi::AVColorSpace = frame.color_space().into();
+                    let space = match space {
+                        ffmpeg::ffi::AVColorSpace::AVCOL_SPC_UNSPECIFIED
+                        | ffmpeg::ffi::AVColorSpace::AVCOL_SPC_RGB => ffmpeg::ffi::SWS_CS_DEFAULT,
+                        _ => space as i32,
+                    };
+                    let full_range = i32::from(frame.color_range() == ffmpeg::color::Range::JPEG);
+                    // SAFETY: this worker exclusively owns the scaler; coefficient
+                    // tables are immutable FFmpeg storage. Update before scaling,
+                    // including when consecutive frames change color metadata.
+                    let configured = unsafe {
+                        let coefficients = ffmpeg::ffi::sws_getCoefficients(space);
+                        ffmpeg::ffi::sws_setColorspaceDetails(
+                            scaler.as_mut_ptr(),
+                            coefficients,
+                            full_range,
+                            coefficients,
+                            1,
+                            0,
+                            1 << 16,
+                            1 << 16,
+                        )
+                    };
+                    if configured < 0 {
+                        return Err(ffmpeg_error(ffmpeg::Error::from(configured)));
+                    }
                     let mut converted = ffmpeg::frame::Video::empty();
-                    self.scaler
-                        .as_mut()
-                        .expect("scaler")
-                        .run(&frame, &mut converted)
-                        .map_err(ffmpeg_error)?;
+                    scaler.run(&frame, &mut converted).map_err(ffmpeg_error)?;
                     let row_bytes = size.0 as usize * if self.pixel == Pixel::RGBA { 4 } else { 1 };
                     let mut pixels = Vec::with_capacity(row_bytes * size.1 as usize);
                     for row in converted

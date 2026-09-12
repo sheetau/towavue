@@ -7,11 +7,13 @@ mod orientation_tests;
 mod alpha_tests;
 
 #[test]
-#[ignore = "known failure: grid item has no standalone stream; needs TOWAVUE_AVIF_GRID_FIXTURE (libavif sofa_grid1x5_420.avif)"]
+#[ignore = "requires TOWAVUE_AVIF_GRID_FIXTURE (libavif sofa_grid1x5_420.avif)"]
 fn avif_grid_fixture_preserves_all_tiles_preview_and_saved_pixels() {
-    let source =
+    let fixture =
         PathBuf::from(std::env::var_os("TOWAVUE_AVIF_GRID_FIXTURE").expect("grid fixture"));
     let root = audio_tests::root("avif-grid");
+    let source = root.join("source.avif");
+    fs::copy(fixture, &source).expect("owned grid fixture");
     let target = root.join("saved.avif");
     let reference = root.join("reference.rgba");
     audio_tests::ffmpeg(
@@ -19,7 +21,7 @@ fn avif_grid_fixture_preserves_all_tiles_preview_and_saved_pixels() {
             "-i",
             source.to_str().expect("fixture path"),
             "-filter_complex",
-            "[0:0]format=rgba[a];[0:1]format=rgba[b];[0:2]format=rgba[c];[0:3]format=rgba[d];[0:4]format=rgba[e];[a][b][c][d][e]vstack=inputs=5",
+            "[0:0]scale=flags=bilinear,format=rgba[a];[0:1]scale=flags=bilinear,format=rgba[b];[0:2]scale=flags=bilinear,format=rgba[c];[0:3]scale=flags=bilinear,format=rgba[d];[0:4]scale=flags=bilinear,format=rgba[e];[a][b][c][d][e]vstack=inputs=5",
             "-frames:v",
             "1",
             "-f",
@@ -36,7 +38,13 @@ fn avif_grid_fixture_preserves_all_tiles_preview_and_saved_pixels() {
     assert_eq!(decoded.frames.len(), 1);
     assert!(
         decoded.frames[0].rgba == expected,
-        "grid differs from stacked tiles"
+        "grid differs from stacked tiles: {:?}",
+        decoded.frames[0]
+            .rgba
+            .iter()
+            .zip(&expected)
+            .enumerate()
+            .find(|(_, (a, b))| a != b)
     );
     let preview = crate::image::first_animation_frame(&source, 1024 * 770 * 4, &|| true)
         .expect("preview")
@@ -45,6 +53,84 @@ fn avif_grid_fixture_preserves_all_tiles_preview_and_saved_pixels() {
     export_media(&request(&source, &target)).expect("grid save");
     let saved = crate::decode_image(&target).expect("saved decode");
     assert_eq!(saved.frames[0].rgba, decoded.frames[0].rgba);
+    orientation_tests::append_still_properties(&source, &[(b"irot", vec![1])], &[1]);
+    let rotated = image::imageops::rotate270(
+        &image::RgbaImage::from_raw(1024, 770, expected).expect("reference"),
+    );
+    let displayed = crate::decode_image(&source).expect("rotated grid");
+    assert_eq!(displayed.dimensions(), (770, 1024));
+    assert_eq!(displayed.frames[0].rgba, *rotated.as_raw());
+    export_media(&request(&source, &target)).expect("rotated grid save");
+    assert_eq!(
+        crate::decode_image(&target).expect("rotated save").frames[0].rgba,
+        *rotated.as_raw()
+    );
+    let clap = [1000i32, 1, 700, 1, 0, 1, 0, 1]
+        .into_iter()
+        .flat_map(i32::to_be_bytes)
+        .collect();
+    orientation_tests::append_still_properties(&source, &[(b"clap", clap)], &[1]);
+    assert!(
+        crate::decode_image(&source).is_err(),
+        "unsupported grid aperture must not be ignored"
+    );
+    let before = fs::read(&target).expect("saved target");
+    assert!(export_media(&request(&source, &target)).is_err());
+    assert_eq!(fs::read(&target).expect("protected target"), before);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn avif_yuv_range_and_matrix_match_explicit_ffmpeg_conversion() {
+    let root = audio_tests::root("avif-yuv-color");
+    let source = root.join("source.avif");
+    let reference = root.join("reference.rgba");
+    for range in ["pc", "tv"] {
+        for matrix in ["bt709", "smpte170m"] {
+            audio_tests::ffmpeg(
+                &[
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=32x24:rate=1:duration=1",
+                    "-c:v",
+                    "libaom-av1",
+                    "-crf",
+                    "0",
+                    "-cpu-used",
+                    "8",
+                    "-threads",
+                    "1",
+                    "-color_range",
+                    range,
+                    "-colorspace",
+                    matrix,
+                ],
+                &source,
+            );
+            audio_tests::ffmpeg(
+                &[
+                    "-i",
+                    source.to_str().expect("fixture path"),
+                    "-vf",
+                    "scale=flags=bilinear,format=rgba",
+                    "-frames:v",
+                    "1",
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgba",
+                ],
+                &reference,
+            );
+            let decoded = crate::decode_image(&source).expect("YUV AVIF");
+            let expected = fs::read(&reference).expect("reference");
+            assert!(
+                decoded.frames[0].rgba == expected,
+                "range={range}, matrix={matrix}"
+            );
+        }
+    }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
 

@@ -15,7 +15,11 @@ fn orient_still(path: &Path, angle: u8, mirror: Option<u8>, alpha: bool) {
     append_still_properties(path, &properties, if alpha { &[1, 2] } else { &[1] });
 }
 
-fn append_still_properties(path: &Path, properties: &[(&[u8; 4], Vec<u8>)], ids: &[u16]) {
+pub(super) fn append_still_properties(
+    path: &Path,
+    properties: &[(&[u8; 4], Vec<u8>)],
+    ids: &[u16],
+) {
     let mut file = fs::OpenOptions::new()
         .read(true)
         .write(true)

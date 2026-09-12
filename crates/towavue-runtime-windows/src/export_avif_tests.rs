@@ -12,7 +12,7 @@ fn fixture(path: &Path, loops: &str, alpha: bool) {
             "-f",
             "lavfi",
             "-i",
-            "nullsrc=size=32x24:rate=2:duration=1.5,geq=lum='255*X/W',format=gray",
+            "nullsrc=size=32x24:rate=2:duration=1.5,geq=lum='mod(X*8+N*31,256)',format=gray",
             "-map",
             "0:v",
             "-map",
@@ -191,6 +191,105 @@ fn request(source: &Path, target: &Path) -> ExportRequest {
         operations: vec![],
         hardware_encode: false,
     }
+}
+
+#[test]
+fn avif_display_and_preview_merge_auxiliary_alpha() {
+    let root = audio_tests::root("avif-display-alpha");
+    let path = root.join("source.avif");
+    fixture(&path, "3", true);
+    let expected = rgba(&path);
+    let actual = crate::decode_image(&path).expect("display");
+    assert_eq!(actual.frames.len(), 3);
+    assert!(actual.frames[0].rgba != actual.frames[1].rgba);
+    for (index, (expected, actual)) in expected.frames.iter().zip(&actual.frames).enumerate() {
+        assert!(
+            actual.rgba == expected.rgba,
+            "frame {index} must merge alpha"
+        );
+    }
+    let preview = crate::image::first_animation_frame(&path, 32 * 24 * 4, &|| true)
+        .expect("preview")
+        .expect("first frame");
+    assert!(
+        preview.rgba == expected.frames[0].rgba,
+        "preview must merge alpha"
+    );
+    let mut previews = Vec::new();
+    crate::image::decode_image_with_preview(
+        &path,
+        crate::image::IMAGE_BYTE_LIMIT,
+        &|| true,
+        &mut |_, _, rgba| previews.push(rgba.to_vec()),
+    )
+    .expect("progressive preview");
+    assert!(previews.len() == 1 && previews[0] == expected.frames[0].rgba);
+    assert!(matches!(
+        crate::image::decode_image_cancellable(&path, 32 * 24 * 4 * 2, &|| true),
+        Err(crate::ImageDecodeError::TooLarge)
+    ));
+    let current = std::cell::Cell::new(true);
+    assert!(matches!(
+        crate::image::decode_image_with_preview(
+            &path,
+            crate::image::IMAGE_BYTE_LIMIT,
+            &|| current.get(),
+            &mut |_, _, _| current.set(false)
+        ),
+        Err(crate::ImageDecodeError::Cancelled)
+    ));
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn avif_static_primary_and_alpha_items_match_lossless_rgba() {
+    let root = audio_tests::root("avif-still-alpha");
+    let png = root.join("source.png");
+    let path = root.join("source.avif");
+    let pixels = vec![
+        240, 20, 10, 0, 0, 220, 40, 64, 40, 20, 255, 128, 80, 60, 40, 255,
+    ];
+    ::image::save_buffer(&png, &pixels, 2, 2, ::image::ColorType::Rgba8).expect("RGBA fixture");
+    audio_tests::ffmpeg(
+        &[
+            "-i",
+            &png.display().to_string(),
+            "-filter_complex",
+            "[0:v]split[color][alpha];[color]format=gbrp[v];[alpha]alphaextract,format=gray,setparams=colorspace=bt709[a]",
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:v",
+            "libaom-av1",
+            "-crf",
+            "0",
+            "-cpu-used",
+            "8",
+            "-threads",
+            "1",
+            "-colorspace:v:1",
+            "bt709",
+        ],
+        &path,
+    );
+    assert!(
+        Animation::read(&path, &AtomicBool::new(false))
+            .expect("static scan")
+            .is_none()
+    );
+    let decoded = crate::decode_image(&path).expect("static display");
+    assert_eq!(decoded.frames.len(), 1);
+    assert_eq!(decoded.frames[0].rgba, pixels);
+    let preview = crate::image::first_animation_frame(&path, pixels.len(), &|| true)
+        .expect("preview")
+        .expect("frame");
+    assert_eq!(preview.rgba, pixels);
+    assert!(matches!(
+        crate::image::first_animation_frame(&path, pixels.len() - 1, &|| true),
+        Err(crate::ImageDecodeError::TooLarge)
+    ));
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
 
 #[test]

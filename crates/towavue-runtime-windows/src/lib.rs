@@ -1,6 +1,7 @@
 //! Windows-specific media, graphics, audio, and Shell integration boundary.
 
 mod audio;
+mod avif_container;
 mod cancellation;
 mod caption;
 mod decode;

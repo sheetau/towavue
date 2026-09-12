@@ -9,9 +9,10 @@ use image::codecs::webp::WebPDecoder;
 use image::{AnimationDecoder, DynamicImage, Frame, ImageDecoder, ImageError, ImageFormat};
 use thiserror::Error;
 
-use crate::decode::{self, DecodeError, DecodeOutput};
+use crate::decode::DecodeError;
 
 pub(crate) mod apng;
+mod avif;
 mod bmp_preview;
 mod jpeg_preview;
 
@@ -68,6 +69,8 @@ pub enum ImageDecodeError {
     Decode(#[from] ImageError),
     #[error("FFmpeg could not decode image: {0}")]
     Ffmpeg(#[from] DecodeError),
+    #[error("could not decode AVIF: {0}")]
+    Avif(String),
     #[error("could not decode APNG: {0}")]
     Png(#[from] png::DecodingError),
     #[error("could not encode APNG export frames: {0}")]
@@ -125,9 +128,7 @@ pub(crate) fn first_animation_frame(
                 }
                 animated_frames(decoder, byte_limit, current, &mut preview, true)?
             }
-            Some(ImageFormat::Avif) => {
-                ffmpeg_frames(path, byte_limit, current, &mut preview, true)?
-            }
+            Some(ImageFormat::Avif) => avif::decode(path, byte_limit, current, &mut preview, true)?,
             _ => return Ok(None),
         };
         Ok(frames.into_iter().next())
@@ -207,7 +208,7 @@ pub(crate) fn decode_image_with_preview(
             .map_err(ImageDecodeError::Open)?;
         let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
         let frames = match format {
-            ImageFormat::Avif => ffmpeg_frames(path, byte_limit, is_current, preview, false)?,
+            ImageFormat::Avif => avif::decode(path, byte_limit, is_current, preview, false)?,
             ImageFormat::Gif => {
                 let mut decoder = GifDecoder::new(open(path, is_current)?)?;
                 decoder.set_limits(image::Limits::default())?;
@@ -249,72 +250,6 @@ pub(crate) fn decode_image_with_preview(
     // Codec adapters may wrap the reader's cancellation as an ordinary decode error.
     check_current(is_current)?;
     result
-}
-
-fn ffmpeg_frames(
-    path: &Path,
-    byte_limit: usize,
-    is_current: &(impl Fn() -> bool + ?Sized),
-    preview: &mut ImagePreviewCallback<'_>,
-    first_only: bool,
-) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
-    let mut decoded = Vec::new();
-    let mut remaining = byte_limit;
-    let mut failure = None;
-    let result = decode::decode_file(path, |output| {
-        if !is_current() {
-            failure = Some(ImageDecodeError::Cancelled);
-            return false;
-        }
-        if let DecodeOutput::Video(frame) = output {
-            let Some(bytes) = remaining.checked_sub(frame.rgba.len()) else {
-                failure = Some(ImageDecodeError::TooLarge);
-                return false;
-            };
-            remaining = bytes;
-            if decoded.is_empty() {
-                preview(frame.width, frame.height, &frame.rgba);
-            }
-            decoded.push(frame);
-            if first_only {
-                return false;
-            }
-        }
-        true
-    });
-    if let Some(error) = failure {
-        return Err(error);
-    }
-    if !(first_only && decoded.len() == 1 && matches!(result, Err(DecodeError::ConsumerClosed))) {
-        result?;
-    }
-    let presentation_times = decoded
-        .iter()
-        .map(|frame| frame.presentation_time)
-        .collect::<Vec<_>>();
-    let mut frames = Vec::with_capacity(decoded.len());
-    for (index, frame) in decoded.into_iter().enumerate() {
-        let delay = presentation_times
-            .get(index + 1)
-            .and_then(|next| {
-                let nanos = next
-                    .as_nanoseconds()
-                    .saturating_sub(frame.presentation_time.as_nanoseconds());
-                (nanos > 0).then(|| Duration::from_nanos(nanos as u64))
-            })
-            // The last frame (and a first-frame-only preview) has no following PTS.
-            // Preserve its decoder duration instead of inventing a 100 ms tail.
-            .or(frame.duration)
-            .unwrap_or(Duration::from_millis(100))
-            .max(Duration::from_millis(10));
-        frames.push(DecodedImageFrame {
-            width: frame.width,
-            height: frame.height,
-            rgba: frame.rgba,
-            delay,
-        });
-    }
-    Ok(frames)
 }
 
 struct CancellableReader<'a, R> {

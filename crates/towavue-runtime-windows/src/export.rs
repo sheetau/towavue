@@ -428,7 +428,9 @@ fn export_audio_cancellable(
             .transpose()?
     };
     let webp_snapshots = (webp_source
-        && (png_metadata::png_path(&request.target) || gif_animation::gif_path(&request.target))
+        && (png_metadata::png_path(&request.target)
+            || gif_animation::gif_path(&request.target)
+            || avif_target)
         && metadata.is_empty())
     .then(|| {
         webp_metadata::SnapshotConversion::prepare(&request.source, &request.target, cancelled)

@@ -48,6 +48,68 @@ fn request(source: &Path, target: &Path, operations: Vec<EditOperation>) -> Expo
 }
 
 #[test]
+fn webp_to_avif_preserves_edited_animation_and_exact_timing() {
+    let root = crate::export::audio_tests::root("webp-to-avif");
+    let source = root.join("source.webp");
+    let target = root.join("converted.avif");
+    for (plays, delays) in [
+        (0, vec![17, 31, 53]),
+        (3, vec![17, 31, 53]),
+        (65535, vec![65537]),
+        (65535, vec![1, 0xffffff, 53]),
+        (1, vec![0xffffff]),
+    ] {
+        fs::write(&source, fixture(plays, &delays, true)).expect("source");
+        let operations = vec![
+            EditOperation::RotateImage(
+                towavue_core::ImageRotation::new(137, (4, 3)).expect("rotation"),
+            ),
+            EditOperation::Resize(ImageResize::new(7, 5, ResampleFilter::Lanczos).expect("resize")),
+        ];
+        let expected = crate::render_image_edits(
+            &crate::decode_image(&source).expect("display"),
+            &operations,
+            &crate::Cancellation::default(),
+        )
+        .expect("edits");
+        export_media(&request(&source, &target, operations)).expect("AVIF conversion");
+        assert_eq!(
+            crate::decode_image(&target).expect("converted").frames,
+            expected.frames
+        );
+        let resaved = root.join("resaved.avif");
+        export_media(&request(&target, &resaved, vec![])).expect("resave");
+        assert_eq!(
+            crate::decode_image(&resaved).expect("resaved").frames,
+            expected.frames
+        );
+        let roundtrip = root.join("roundtrip.webp");
+        export_media(&request(&target, &roundtrip, vec![])).expect("roundtrip");
+        let info = container(
+            BufReader::new(fs::File::open(&roundtrip).expect("WebP")),
+            &AtomicBool::new(false),
+        )
+        .expect("controls")
+        .animation
+        .expect("sequence");
+        assert_eq!(info.delays, delays);
+        assert_eq!(&info.control[4..], &plays.to_le_bytes());
+    }
+    let before = fs::read(&target).expect("target");
+    fs::write(&source, fixture(1, &[10, 0, 10], false)).expect("zero delay");
+    assert!(
+        export_cancellable(
+            &request(&source, &target, vec![]),
+            &AtomicBool::new(false),
+            &|_| panic!("reject before encoding")
+        )
+        .is_err()
+    );
+    assert_eq!(fs::read(&target).expect("protected"), before);
+    fs::remove_dir_all(root).expect("owned cleanup");
+}
+
+#[test]
 fn webp_to_gif_preserves_edited_frames_centiseconds_and_total_plays() {
     let root = crate::export::audio_tests::root("webp-to-gif");
     let source = root.join("source.webp");
@@ -419,6 +481,12 @@ fn animated_webp_lossy_rgb_and_alpha_sources_save_displayed_pixels_losslessly() 
             crate::decode_image(&png).expect("APNG display").frames,
             original.frames
         );
+        let avif = root.join("converted.avif");
+        export_media(&request(&source, &avif, vec![])).expect("lossy source to AVIF");
+        assert_eq!(
+            crate::decode_image(&avif).expect("AVIF display").frames,
+            original.frames
+        );
     }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
@@ -515,7 +583,7 @@ fn animated_webp_scan_checks_frame_subchunks_geometry_and_resource_boundaries() 
 
 #[test]
 fn animated_webp_export_protects_targets_on_cancel_source_change_and_corruption() {
-    for extension in ["webp", "png", "apng", "gif"] {
+    for extension in ["webp", "png", "apng", "gif", "avif"] {
         animation_export_failures(extension);
     }
 }
@@ -623,6 +691,8 @@ fn animation_export_failures(extension: &str) {
             .expect("animated");
         let names: &[_] = if extension == "gif" {
             &["animation.gif"]
+        } else if extension == "avif" {
+            &["animation-source.png"]
         } else {
             &["animation.png", "metadata.png"]
         };
@@ -662,7 +732,7 @@ fn animation_export_failures(extension: &str) {
             b"existing target"
         );
     }
-    for extension in ["bmp", "jpg", "avif"] {
+    for extension in ["bmp", "jpg"] {
         let target = target.with_extension(extension);
         fs::write(&target, b"existing target").expect("target");
         assert!(export_media(&self::request(&source, &target, vec![])).is_err());

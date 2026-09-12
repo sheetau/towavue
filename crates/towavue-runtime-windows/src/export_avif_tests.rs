@@ -549,7 +549,7 @@ fn avif_single_frame_movie_rewrite_rejects_unexpected_layout_without_writes() {
     let timing = SequenceTiming {
         time_base: ffmpeg::Rational(1, 1000),
         loops: 3,
-        single_duration: Some(375),
+        packet_durations: Some(&[375]),
     };
     assert!(matches!(
         single::finish(&path, timing, false, &AtomicBool::new(true)),
@@ -588,7 +588,7 @@ fn avif_single_frame_movie_rewrite_rejects_unexpected_layout_without_writes() {
     fs::write(&path, &intact).expect("fixture operation");
     for bad in [
         SequenceTiming {
-            single_duration: Some(0),
+            packet_durations: Some(&[0]),
             ..timing
         },
         SequenceTiming {
@@ -600,6 +600,80 @@ fn avif_single_frame_movie_rewrite_rejects_unexpected_layout_without_writes() {
         assert_eq!(fs::read(&path).expect("fixture operation"), intact);
     }
     fs::remove_dir_all(root).expect("fixture operation");
+}
+
+#[test]
+fn avif_movie_rewrite_restores_variable_unsigned_durations_without_moving_media() {
+    let root = audio_tests::root("avif-variable-movie");
+    let path = root.join("sequence.avif");
+    audio_tests::ffmpeg(
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=32x24:rate=2",
+            "-frames:v",
+            "3",
+            "-c:v",
+            "libaom-av1",
+            "-cpu-used",
+            "8",
+            "-threads",
+            "1",
+            "-use_editlist",
+            "0",
+            "-f",
+            "mp4",
+        ],
+        &path,
+    );
+    let original = fs::read(&path).expect("generated movie");
+    let cancel = AtomicBool::new(false);
+    let root_boxes = boxes(
+        &mut fs::File::open(&path).expect("movie"),
+        0,
+        original.len() as u64,
+        &cancel,
+    )
+    .expect("boxes");
+    let mdat = one(&root_boxes, b"mdat").expect("one").expect("media");
+    let delays = [1, u32::MAX, 375];
+    single::finish(
+        &path,
+        SequenceTiming {
+            time_base: ffmpeg::Rational(1, 1000),
+            loops: 65535,
+            packet_durations: Some(&delays),
+        },
+        false,
+        &cancel,
+    )
+    .expect("variable rewrite");
+    let saved = fs::read(&path).expect("rewritten");
+    assert_eq!(
+        &saved[mdat.header as usize..mdat.end as usize],
+        &original[mdat.header as usize..mdat.end as usize]
+    );
+    let animation = Animation::read(&path, &cancel)
+        .expect("controls")
+        .expect("sequence");
+    assert_eq!(animation.color().loops, Some(65535));
+    assert_eq!(
+        animation.samples[0].times,
+        [
+            (0, 1),
+            (1, i64::from(u32::MAX)),
+            (1 + i64::from(u32::MAX), 375)
+        ]
+    );
+    assert_eq!(
+        crate::decode_image(&path)
+            .expect("unchanged media is decodable")
+            .frames
+            .len(),
+        3
+    );
+    fs::remove_dir_all(root).expect("owned cleanup");
 }
 
 #[test]

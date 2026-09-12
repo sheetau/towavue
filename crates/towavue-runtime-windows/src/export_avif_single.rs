@@ -1,14 +1,15 @@
-//! Specialize FFmpeg's single-sample MP4 tables to an AVIF sequence, without
+//! Specialize FFmpeg's owned MP4 tables to an AVIF sequence, without
 //! duplicating frames or changing encoded data/chunk offsets. Only owned output
-//! is accepted: nonfragmented, tail moov, one AV1 sample per color/alpha track.
+//! is accepted: nonfragmented, tail moov, matching AV1 samples per color/alpha track.
 use super::*;
 use std::io::Write;
 
-const LIMIT: usize = 1024 * 1024;
+// Two tracks of up to 65536 timing/size/chunk entries plus fixed headers.
+const LIMIT: usize = 4 * 1024 * 1024;
 
 fn atom(kind: &[u8; 4], payload: &[u8]) -> Result<Vec<u8>, ExportError> {
     if payload.len() > LIMIT {
-        return Err(invalid("single-frame movie metadata exceeds limit"));
+        return Err(invalid("sequence movie metadata exceeds limit"));
     }
     Ok([
         &((payload.len() + 8) as u32).to_be_bytes()[..],
@@ -18,34 +19,41 @@ fn atom(kind: &[u8; 4], payload: &[u8]) -> Result<Vec<u8>, ExportError> {
     .concat())
 }
 
-struct Movie {
+struct Movie<'a> {
     timescale: u32,
-    duration: u32,
+    duration: u64,
+    delays: &'a [u32],
     total: u64,
     loops: u32,
 }
 
 pub(super) fn finish(
     path: &Path,
-    timing: SequenceTiming,
+    timing: SequenceTiming<'_>,
     alpha: bool,
     cancelled: &AtomicBool,
 ) -> Result<(), ExportError> {
     check_cancelled(cancelled)?;
     if timing.time_base.numerator() != 1 || timing.time_base.denominator() <= 0 {
-        return Err(invalid("invalid single-frame time base"));
+        return Err(invalid("invalid sequence time base"));
     }
-    let duration = timing
-        .single_duration
-        .filter(|value| *value > 0)
-        .ok_or_else(|| invalid("missing single-frame duration"))?;
+    let delays = timing
+        .packet_durations
+        .ok_or_else(|| invalid("missing sample durations"))?;
+    if delays.is_empty() || delays.len() > 65536 || delays.contains(&0) {
+        return Err(invalid("AVIF requires 1–65536 positive sample durations"));
+    }
+    let duration: u64 = delays.iter().map(|delay| u64::from(*delay)).sum();
     let movie = Movie {
         timescale: timing.time_base.denominator() as u32,
         duration,
+        delays,
         total: if timing.loops == 0 {
             u64::MAX
         } else {
-            u64::from(duration) * u64::from(timing.loops)
+            duration
+                .checked_mul(u64::from(timing.loops))
+                .ok_or_else(|| invalid("repeated sequence duration exceeds 64 bits"))?
         },
         loops: timing.loops,
     };
@@ -56,9 +64,9 @@ pub(super) fn finish(
         .map_err(ExportError::Output)?;
     let length = file.metadata().map_err(ExportError::Output)?.len();
     let root = boxes(&mut file, 0, length, cancelled)?;
-    let moov = one(&root, b"moov")?.ok_or_else(|| invalid("missing single-frame movie"))?;
-    let ftyp = one(&root, b"ftyp")?.ok_or_else(|| invalid("missing single-frame brands"))?;
-    let mdat = one(&root, b"mdat")?.ok_or_else(|| invalid("missing single-frame media"))?;
+    let moov = one(&root, b"moov")?.ok_or_else(|| invalid("missing sequence movie"))?;
+    let ftyp = one(&root, b"ftyp")?.ok_or_else(|| invalid("missing sequence brands"))?;
+    let mdat = one(&root, b"mdat")?.ok_or_else(|| invalid("missing sequence media"))?;
     if moov.end != length
         || moov.end - moov.header > LIMIT as u64
         || mdat.end > moov.header
@@ -66,7 +74,7 @@ pub(super) fn finish(
             .iter()
             .any(|item| !matches!(&item.kind, b"ftyp" | b"free" | b"mdat" | b"moov"))
     {
-        return Err(invalid("unexpected single-frame muxer layout"));
+        return Err(invalid("unexpected sequence muxer layout"));
     }
     let mut brands = bytes(&mut file, ftyp, 4096)?;
     if brands.len() < 24 || brands.len() % 4 != 0 {
@@ -82,7 +90,7 @@ pub(super) fn finish(
         .filter(|item| item.kind == *b"trak")
         .collect();
     if tracks.len() != if alpha { 2 } else { 1 } {
-        return Err(invalid("unexpected single-frame track count"));
+        return Err(invalid("unexpected sequence track count"));
     }
     let mut data = Vec::new();
     let mut track_index = 0;
@@ -109,7 +117,7 @@ pub(super) fn finish(
     check_cancelled(cancelled)
 }
 
-impl Movie {
+impl Movie<'_> {
     fn rewrite(
         &self,
         file: &mut fs::File,
@@ -129,7 +137,7 @@ impl Movie {
             if data.len() < prefix
                 || (item.kind == *b"stsd" && data[..8] != [0, 0, 0, 0, 0, 0, 0, 1])
             {
-                return Err(invalid("invalid single-frame sample description"));
+                return Err(invalid("invalid sequence sample description"));
             }
             data.truncate(prefix);
             for child in boxes(file, item.start + prefix as u64, item.end, cancelled)? {
@@ -149,7 +157,7 @@ impl Movie {
                 };
                 if !allowed {
                     return Err(invalid(format!(
-                        "unexpected single-frame child {} in {}",
+                        "unexpected sequence child {} in {}",
                         String::from_utf8_lossy(&child.kind),
                         String::from_utf8_lossy(&item.kind)
                     )));
@@ -160,7 +168,7 @@ impl Movie {
                 }
                 if child.kind == *b"fiel" {
                     if bytes(file, child, 2)? != [1, 0] {
-                        return Err(invalid("non-progressive single-frame sample"));
+                        return Err(invalid("non-progressive sequence sample"));
                     }
                     continue; // QuickTime field-order extension is unnecessary for AVIF.
                 }
@@ -177,7 +185,7 @@ impl Movie {
                 // includes repetitions while mdhd/stts describe exactly one cycle.
                 let mut edit = vec![1, 0, 0, u8::from(self.loops != 1)];
                 edit.extend(1u32.to_be_bytes());
-                edit.extend(u64::from(self.duration).to_be_bytes());
+                edit.extend(self.duration.to_be_bytes());
                 edit.extend(0u64.to_be_bytes());
                 edit.extend(65536u32.to_be_bytes());
                 data.extend(atom(b"edts", &atom(b"elst", &edit)?)?);
@@ -213,7 +221,7 @@ impl Movie {
                     }
                     header.extend(
                         if item.kind == *b"mdhd" {
-                            u64::from(self.duration)
+                            self.duration
                         } else {
                             self.total
                         }
@@ -229,13 +237,38 @@ impl Movie {
                     data[8..12].copy_from_slice(if track == 0 { b"pict" } else { b"auxv" });
                 }
                 b"stts" => {
-                    if data.len() != 16 || data[..12] != [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1] {
-                        return Err(invalid("expected one generated sample time"));
+                    if data.len() < 8 || data[..4] != [0; 4] {
+                        return Err(invalid("invalid generated sample times"));
                     }
-                    data[12..16].copy_from_slice(&self.duration.to_be_bytes());
+                    let entries =
+                        u32::from_be_bytes(data[4..8].try_into().expect("count")) as usize;
+                    if data.len() != 8 + entries * 8
+                        || data[8..]
+                            .as_chunks::<8>()
+                            .0
+                            .iter()
+                            .map(|entry| {
+                                u64::from(u32::from_be_bytes(
+                                    entry[..4].try_into().expect("samples"),
+                                ))
+                            })
+                            .sum::<u64>()
+                            != self.delays.len() as u64
+                    {
+                        return Err(invalid("generated sample time count differs"));
+                    }
+                    data = vec![0; 4];
+                    data.extend((self.delays.len() as u32).to_be_bytes());
+                    for delay in self.delays {
+                        data.extend(1u32.to_be_bytes());
+                        data.extend(delay.to_be_bytes());
+                    }
                 }
-                b"stsz" if data.len() < 12 || data[8..12] != 1u32.to_be_bytes() => {
-                    return Err(invalid("expected one generated sample"));
+                b"stsz"
+                    if data.len() < 12
+                        || data[8..12] != (self.delays.len() as u32).to_be_bytes() =>
+                {
+                    return Err(invalid("generated sample count differs"));
                 }
                 _ => {}
             }

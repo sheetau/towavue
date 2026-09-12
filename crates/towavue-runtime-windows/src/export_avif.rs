@@ -5,10 +5,10 @@ use std::io::{Seek, SeekFrom};
 mod single;
 
 #[derive(Clone, Copy)]
-struct SequenceTiming {
+struct SequenceTiming<'a> {
     time_base: ffmpeg::Rational,
     loops: u32,
-    single_duration: Option<u32>,
+    packet_durations: Option<&'a [u32]>,
 }
 
 fn invalid(error: impl std::fmt::Display) -> ExportError {
@@ -346,6 +346,7 @@ impl Animation {
         let single_duration = (self.samples[0].times.len() == 1)
             .then(|| u32::try_from(self.samples[0].times[0].1).map_err(invalid))
             .transpose()?;
+        let packet_durations = single_duration.as_ref().map(std::slice::from_ref);
         let source_alpha = self.samples.get(1);
         let orientation = self.samples[0].orientation.unwrap_or_default();
         let mut source_size = self.samples[0].size;
@@ -421,7 +422,7 @@ impl Animation {
                 Some(SequenceTiming {
                     time_base: self.samples[0].time_base,
                     loops: self.color().loops.unwrap_or(1),
-                    single_duration,
+                    packet_durations,
                 }),
                 cancelled,
                 progress,
@@ -458,7 +459,7 @@ impl Animation {
             Some(SequenceTiming {
                 time_base: self.samples[0].time_base,
                 loops: self.color().loops.unwrap_or(1),
-                single_duration,
+                packet_durations,
             }),
             cancelled,
             progress,
@@ -509,7 +510,7 @@ fn encode(
     staging: &StagedExport,
     filters: &str,
     alpha_output: bool,
-    timing: Option<SequenceTiming>,
+    timing: Option<SequenceTiming<'_>>,
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
 ) -> Result<(), ExportError> {
@@ -607,21 +608,18 @@ fn encode(
         ]);
         if snapshot_output {
             args.extend(["-f", "image2pipe"].map(String::from));
-        } else if timing.single_duration.is_some() {
-            // FFmpeg's AVIF muxer omits moov for one sample. Its MP4 muxer keeps
-            // the sample tables; specialize that owned output to an AVIF sequence.
-            // A placeholder packet time avoids MP4's rescaled-duration limit;
-            // finish restores the exact source ticks, without duplicating frames.
+        } else if timing.packet_durations.is_some() {
+            // Use placeholder packet times in owned MP4 tables, then restore exact
+            // sample durations and AVIF controls without changing encoded samples.
+            // This also keeps moov for a single frame (the AVIF muxer omits it).
             args.extend(
                 [
                     "-f",
                     "mp4",
                     "-use_editlist",
                     "0",
-                    "-frames:v",
-                    "1",
                     "-bsf:v",
-                    "setts=pts=0:dts=0:duration=1",
+                    "setts=pts=N:dts=N:duration=1",
                 ]
                 .map(String::from),
             );
@@ -638,10 +636,89 @@ fn encode(
         return Err(invalid(String::from_utf8_lossy(&result.stderr)));
     }
     if let Some(timing) = timing
-        && timing.single_duration.is_some()
+        && timing.packet_durations.is_some()
         && !snapshot_output
     {
         single::finish(&staging.output, timing, alpha_output, cancelled)?;
+    }
+    check_cancelled(cancelled)
+}
+
+pub(super) fn apply_png_frames(
+    staging: &StagedExport,
+    delays: &[u32],
+    plays: u32,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+) -> Result<(), ExportError> {
+    let source = staging.directory.join("animation-source.png");
+    if source.try_exists().map_err(ExportError::Output)? {
+        return Err(invalid("snapshot input already exists"));
+    }
+    fs::rename(&staging.output, &source).map_err(ExportError::Output)?;
+    let mut size = None;
+    let mut alpha = false;
+    {
+        let mut input = BufReader::new(fs::File::open(&source).map_err(ExportError::Output)?);
+        for _ in delays {
+            check_cancelled(cancelled)?;
+            let (width, height, rgba) = gif_animation::read_png(&mut input)?;
+            let dimensions = (u32::from(width), u32::from(height));
+            if size.is_some_and(|size| size != dimensions) {
+                return Err(invalid("snapshot dimensions differ"));
+            }
+            size = Some(dimensions);
+            alpha |= rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 255);
+        }
+        if input.read(&mut [0]).map_err(ExportError::Output)? != 0 {
+            return Err(invalid("extra PNG snapshots"));
+        }
+    }
+    let request = ExportRequest {
+        source,
+        target: staging.output.clone(),
+        kind: MediaKind::Image,
+        operations: vec![],
+        hardware_encode: false,
+    };
+    let filters = if alpha {
+        "[0:v]format=rgba,split[color][alpha];[color]format=gbrp[outv];[alpha]alphaextract,format=gray,setparams=colorspace=bt709[outa]"
+    } else {
+        "[0:v]format=gbrp[outv]"
+    };
+    encode(
+        &request,
+        staging,
+        filters,
+        alpha,
+        Some(SequenceTiming {
+            time_base: ffmpeg::Rational(1, 1000),
+            loops: plays,
+            packet_durations: Some(delays),
+        }),
+        cancelled,
+        progress,
+    )?;
+    let saved = Animation::read(&staging.output, cancelled)?
+        .ok_or_else(|| invalid("saved animation was flattened"))?;
+    let mut pts = 0;
+    let expected: Vec<_> = delays
+        .iter()
+        .map(|delay| {
+            let sample = (pts, i64::from(*delay));
+            pts += i64::from(*delay);
+            sample
+        })
+        .collect();
+    if saved.color().loops != Some(plays)
+        || saved.tracks.len() != if alpha { 2 } else { 1 }
+        || saved.samples.iter().any(|sample| {
+            Some(sample.size) != size
+                || sample.time_base != ffmpeg::Rational(1, 1000)
+                || sample.times != expected
+        })
+    {
+        return Err(invalid("saved snapshot sequence controls differ"));
     }
     check_cancelled(cancelled)
 }

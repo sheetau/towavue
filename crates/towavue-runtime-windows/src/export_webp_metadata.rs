@@ -547,6 +547,7 @@ pub(super) struct SnapshotConversion {
 enum SnapshotOutput {
     Png(png_metadata::PngMetadata),
     Gif(gif_animation::Animation),
+    Avif(u16),
 }
 
 impl SnapshotConversion {
@@ -564,6 +565,17 @@ impl SnapshotConversion {
             return Ok(None);
         };
         let plays = u16::from_le_bytes(animation.control[4..].try_into().expect("loop count"));
+        if avif::avif_path(target) {
+            if animation.delays.contains(&0) {
+                return Err(invalid(
+                    "AVIF requires positive sample durations; use WebP output to retain zero delays",
+                ));
+            }
+            return Ok(Some(Self {
+                animation,
+                output: SnapshotOutput::Avif(plays),
+            }));
+        }
         if gif_animation::gif_path(target) {
             let gif = gif_animation::Animation::from_milliseconds(plays, &animation.delays)?;
             return Ok(Some(Self {
@@ -614,6 +626,13 @@ impl SnapshotConversion {
             match &self.output {
                 SnapshotOutput::Png(png) => png.apply(staging, cancelled),
                 SnapshotOutput::Gif(gif) => gif.apply(staging, cancelled),
+                SnapshotOutput::Avif(plays) => avif::apply_png_frames(
+                    staging,
+                    &self.animation.delays,
+                    u32::from(*plays),
+                    cancelled,
+                    progress,
+                ),
             }
         })();
         check_cancelled(cancelled)?;

@@ -393,7 +393,7 @@ fn exercise_images(
         .texture
         .set(color_image(&original.frames[1]), TextureOptions::LINEAR);
     let deadline = image.next_frame_at;
-    tab_focus::tests::hardware_focus(app, "Zoom to selection", true);
+    tab_focus::tests::hardware_focus(app, "Selection right (pixels)", true);
     let request = app.tab_detach_request(id).expect("image request");
     let context = host.windows[&target]
         .ui_context
@@ -429,7 +429,7 @@ fn exercise_images(
     assert_eq!(app.edits[&moved], history);
     assert!(app.pending_guard.is_none());
     assert_eq!(app.image.as_ref().expect("image").next_frame_at, deadline);
-    tab_focus::tests::hardware_focus(app, "Zoom to selection", false);
+    tab_focus::tests::hardware_focus(app, "Selection right (pixels)", false);
     draw_image(app, &original, 1);
     app.recover_graphics_device(MediaTime::ZERO);
     host.recover_pending_graphics();

@@ -2725,6 +2725,7 @@ where
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        let previous_selection = self.image_view.selection;
         if root.ctx().current_pass_index() == 0 && self.image_loading && self.ui_context.is_some() {
             // A redraw can overtake the queued decoder wakeup; use an already-ready original.
             self.finish_image_load();
@@ -2979,6 +2980,10 @@ where
                 egui::FontId::proportional(18.0),
                 egui::Color32::WHITE,
             );
+        }
+        if self.image_view.selection != previous_selection {
+            // Windowed status is laid out before the media processes input.
+            context.request_repaint();
         }
     }
 
@@ -4509,6 +4514,7 @@ where
                     })
                 })
             });
+        let selection_status = self.image_selection_status().is_some();
         let eligible = self.fullscreen
             && self.media_kind != Some(MediaKind::Audio)
             && !self.modal_input_blocked()
@@ -4516,7 +4522,12 @@ where
             && !self.grid_open
             && !self.filmstrip_open
             && !egui::Popup::is_any_open(context)
-            && self.view_drag.is_none()
+            && (self.view_drag.is_none()
+                || selection_status
+                    && matches!(
+                        self.view_drag,
+                        Some(ViewDrag::Selection { .. } | ViewDrag::MoveSelection { .. })
+                    ))
             && !over_image_bars;
         let controls_have_focus = || {
             context
@@ -4576,6 +4587,7 @@ where
                 || self.fullscreen_controls_focus_requested
                 || (was_visible && (held || controls_have_focus()))
                 || self.status_notice().is_some()
+                || (selection_status && (!held || self.view_drag.is_some()))
                 || (!held && at_edge));
         if !self.fullscreen_controls_visible {
             return;
@@ -4719,11 +4731,6 @@ where
                             ui.label(label);
                             ui.label("Drag up/down: images per page\nDrag left/right: images on the first page\nRelease to keep; Escape to cancel");
                         }).disabled_help_text("Save or undo unsaved edits before entering reading mode");
-                        if !self.reading_mode && self.image_view.selection.is_some() {
-                            let response = ui.button("Zoom to selection");
-                            tab_focus::observe(&response, "zoom-selection");
-                            if response.clicked() { actions.push(UiAction::Command(CommandId::ZoomSelection)); }
-                        }
                     }
                     let mut details = Vec::new();
                     if self.media_kind == Some(MediaKind::Image) && self.reading_mode && self.reading_drag.is_none() {
@@ -4791,7 +4798,9 @@ where
                                 })
                             }).flatten();
                             let (text, color, tooltip) =
-                                if let Some(message) = selection_hint {
+                                if let Some(message) = self.image_selection_status().filter(|_| self.view_drag.is_some()) {
+                                    (message.clone(), chrome::FOREGROUND, message)
+                                } else if let Some(message) = selection_hint {
                                     (message.clone(), chrome::FOREGROUND, message)
                                 } else if let Some(message) = self.status_notice() {
                                     (message.clone(), chrome::FOREGROUND, message)
@@ -4801,10 +4810,11 @@ where
                                         .and_then(Path::file_name)
                                         .map(|name| name.to_string_lossy())
                                         .unwrap_or_default();
+                                    let suffix = self.image_selection_status().map_or_else(String::new, |value| format!(" · {value}"));
                                     (
-                                        format!("{parent}\\{}", display_name(path)),
+                                        format!("{parent}\\{}{suffix}", display_name(path)),
                                         chrome::MUTED,
-                                        path.display().to_string(),
+                                        format!("{}{suffix}", path.display()),
                                     )
                                 } else {
                                     (
@@ -6726,6 +6736,28 @@ where
         self.request_redraw();
     }
 
+    fn image_selection_status(&self) -> Option<String> {
+        if self.media_kind != Some(MediaKind::Image) || self.reading_mode {
+            return None;
+        }
+        let crop = if let Some(held) = &self.image_handoff {
+            held.selection_crop()?
+        } else {
+            let size = self
+                .visual_transform(self.image.as_ref()?.dimensions())
+                .size;
+            PixelCrop::from_selection(
+                self.image_view.selection?,
+                (size.0 as u32, size.1 as u32),
+                MediaKind::Image,
+            )?
+        };
+        Some(format!(
+            "Selection: x={} y={} · {}×{} px",
+            crop.x, crop.y, crop.width, crop.height
+        ))
+    }
+
     fn zoom_image_selection(&mut self, size: (u32, u32), viewport: egui::Vec2, density: f32) {
         let Some(selection) = self.image_view.selection else {
             return;
@@ -6745,6 +6777,10 @@ where
         );
         self.image_view.pan = ((egui::Vec2::splat(0.5) - center) * pixels * scale).into();
         image_scroll::clamp(&mut self.image_view, pixels * scale, viewport);
+        self.image_view.selection = None;
+        if let Some(context) = &self.ui_context {
+            selection::release_focus(context);
+        }
     }
 
     fn zoom_image(&mut self, factor: f32) {
@@ -15683,7 +15719,63 @@ mod tests {
                 output.platform_output.accesskit_update.expect("tree")
             };
             frame(&mut app, vec![]);
-            assert!(!app.fullscreen_controls_visible);
+            assert!(
+                app.fullscreen_controls_visible,
+                "selection keeps status visible"
+            );
+            for fullscreen in [false, true] {
+                app.fullscreen = fullscreen;
+                app.image_view.selection = None;
+                for _ in 0..3 {
+                    frame(&mut app, vec![]);
+                }
+                let start = egui::pos2(250.0, 80.0);
+                let end = egui::pos2(350.0, 170.0);
+                let button = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    pressed,
+                    button: egui::PointerButton::Primary,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                frame(&mut app, vec![egui::Event::PointerMoved(start)]);
+                frame(&mut app, vec![button(start, true)]);
+                frame(&mut app, vec![egui::Event::PointerMoved(end)]);
+                let tree = frame(&mut app, vec![]);
+                let crop = PixelCrop::from_selection(
+                    app.image_view.selection.expect("drag selection"),
+                    (64, 64),
+                    MediaKind::Image,
+                )
+                .expect("pixel selection");
+                let expected = format!(
+                    "Selection: x={} y={} · {}×{} px",
+                    crop.x, crop.y, crop.width, crop.height
+                );
+                assert!(
+                    tree.nodes
+                        .iter()
+                        .any(|(_, node)| node.value() == Some(expected.as_str())),
+                    "drag metrics are visible: {expected}"
+                );
+                frame(&mut app, vec![button(end, false)]);
+                let tree = frame(&mut app, vec![]);
+                assert!(
+                    tree.nodes.iter().any(|(_, node)| node
+                        .value()
+                        .is_some_and(|value| value.contains(&format!("focus.png · {expected}")))),
+                    "released metrics follow the path"
+                );
+                assert!(
+                    !tree
+                        .nodes
+                        .iter()
+                        .any(|(_, node)| node.label() == Some("Zoom to selection"))
+                );
+                app.image_view.selection = Some(selected);
+                for _ in 0..3 {
+                    frame(&mut app, vec![]);
+                }
+            }
             for (index, label) in ["left", "right", "top", "bottom"].into_iter().enumerate() {
                 let target = app.selection_identity().with(index);
                 frame(
@@ -21077,7 +21169,7 @@ mod tests {
                             max: UnitPoint { x: 0.6, y: 0.6 },
                         })
                     } else {
-                        Some(original)
+                        None
                     },
                     "gesture={gesture}, held={already_held}"
                 );
@@ -21392,6 +21484,11 @@ mod tests {
                     let actual = app.image_view.selection.and_then(|selection| {
                         PixelCrop::from_selection(selection, (400, 400), kind)
                     });
+                    let expected = if kind == MediaKind::Image && start == end {
+                        None // Clicking inside zooms and dismisses only image selection.
+                    } else {
+                        expected
+                    };
                     assert_eq!(
                         actual, expected,
                         "{kind:?}, delivery={delivery}, {start:?} -> {end:?}"

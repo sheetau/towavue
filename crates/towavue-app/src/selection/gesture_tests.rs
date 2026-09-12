@@ -87,7 +87,7 @@ fn outside_click_clears_selection_but_drags_controls_and_cancellation_do_not() {
                 }
                 frame(&mut app, events);
             }
-            if matches!(case, 0 | 1 | 6) {
+            if matches!(case, 0 | 1 | 6 | 7) {
                 assert_eq!(
                     app.image_view.selection, None,
                     "start={start:?}, case={case}"

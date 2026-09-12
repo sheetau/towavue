@@ -119,7 +119,6 @@ pub(super) fn wants_controls(context: &Context) -> bool {
             Id::new(("media-button", crate::chrome::Icon::Play as u8)),
             Id::new(("media-button", crate::chrome::Icon::ExitFullscreen as u8)),
             Id::new("reading-mode"),
-            Id::new("zoom-selection"),
             Id::new((
                 "media-value",
                 Id::new("compact-seek-bar"),

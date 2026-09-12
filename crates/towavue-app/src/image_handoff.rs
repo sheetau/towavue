@@ -12,6 +12,14 @@ pub(super) struct ImageHandoff {
 }
 
 impl ImageHandoff {
+    pub fn selection_crop(&self) -> Option<PixelCrop> {
+        PixelCrop::from_selection(
+            self.view.selection?,
+            (self.transform.size.0 as u32, self.transform.size.1 as u32),
+            MediaKind::Image,
+        )
+    }
+
     pub fn draw(&self, ui: &egui::Ui) {
         let viewport = ui.max_rect();
         let density = ui.ctx().pixels_per_point();

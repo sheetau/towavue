@@ -80,6 +80,20 @@ fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
             .entry(tab)
             .or_default()
             .push(EditOperation::RotateClockwise, MediaKind::Image);
+        app.image_view.selection = Some(
+            PixelCrop {
+                x: 18,
+                y: 32,
+                width: 54,
+                height: 96,
+            }
+            .unit_rect((90, 160)),
+        );
+        let selection_status = app.image_selection_status();
+        assert_eq!(
+            selection_status.as_deref(),
+            Some("Selection: x=18 y=32 · 54×96 px")
+        );
         let old = app.image.as_ref().expect("original").texture.id();
         for _ in 0..3 {
             frame(&mut app, &context);
@@ -93,6 +107,11 @@ fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
         };
         let before = bounds(&frame(&mut app, &context)).expect("original mesh");
         navigate_pending(&mut app, root.join("next.png"));
+        assert_eq!(
+            app.image_selection_status(),
+            selection_status,
+            "handoff reports displayed pixels, not the pending source"
+        );
         let first_generation = app.image_generation;
         let view = app.image_view;
         let history = app.edits.clone();
@@ -124,7 +143,7 @@ fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
                 .shapes
                 .iter()
                 .any(|shape| matches!(&shape.shape, egui::Shape::Text(text)
-            if text.galley.text().ends_with("old.png")))
+            if text.galley.text().ends_with("old.png · Selection: x=18 y=32 · 54×96 px")))
         );
         assert!(
             !output

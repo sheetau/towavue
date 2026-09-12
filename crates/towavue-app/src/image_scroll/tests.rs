@@ -55,9 +55,9 @@ fn inset_scrollbar_gutters_do_not_capture_background_drags() {
 }
 
 #[test]
-fn selection_zoom_keeps_the_full_image_and_selection_in_the_input_frame() {
+fn selection_zoom_keeps_the_full_image_and_clears_selection_in_the_input_frame() {
     let Some(root) = crate::tests::isolated_test_root(
-        "image_scroll::tests::selection_zoom_keeps_the_full_image_and_selection_in_the_input_frame",
+        "image_scroll::tests::selection_zoom_keeps_the_full_image_and_clears_selection_in_the_input_frame",
     ) else {
         return;
     };
@@ -144,7 +144,29 @@ fn selection_zoom_keeps_the_full_image_and_selection_in_the_input_frame() {
                 for _ in 0..3 {
                     frame(&mut app, density, vec![]);
                 }
-                let before = mesh(&frame(&mut app, density, vec![]));
+                let output = frame(&mut app, density, vec![]);
+                let before = mesh(&output);
+                let crop = PixelCrop::from_selection(
+                    selected,
+                    (pixels.x as u32, pixels.y as u32),
+                    MediaKind::Image,
+                )
+                .expect("edited selection");
+                let expected = format!(
+                    "Selection: x={} y={} · {}×{} px",
+                    crop.x, crop.y, crop.width, crop.height
+                );
+                assert!(
+                    output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree")
+                        .nodes
+                        .iter()
+                        .any(|(_, node)| node.value().is_some_and(|text| text.contains(&expected))),
+                    "status follows edited dimensions: {expected}"
+                );
                 let start = selection_rect(before.calc_bounds(), selected).center();
                 let button = |pressed| egui::Event::PointerButton {
                     pos: start,
@@ -183,9 +205,22 @@ fn selection_zoom_keeps_the_full_image_and_selection_in_the_input_frame() {
                     zoomed.vertices.iter().map(|v| v.uv).collect::<Vec<_>>(),
                     before.vertices.iter().map(|v| v.uv).collect::<Vec<_>>()
                 );
-                assert_eq!(app.image_view.selection, Some(selected));
+                assert!(app.image_view.selection.is_none());
                 assert_eq!(app.edits, history);
-                assert!(output.textures_delta.set.is_empty());
+                assert!(
+                    output
+                        .textures_delta
+                        .set
+                        .iter()
+                        .all(|(id, _)| *id == egui::TextureId::Managed(0)),
+                    "only the font atlas may change for new status glyphs: {:?}",
+                    output
+                        .textures_delta
+                        .set
+                        .iter()
+                        .map(|(id, _)| id)
+                        .collect::<Vec<_>>()
+                );
                 assert!(
                     output
                         .platform_output

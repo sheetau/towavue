@@ -85,6 +85,116 @@ fn finish(app: &mut App, events: &mpsc::Receiver<AppEvent>) {
 }
 
 #[test]
+fn failed_reedit_rerenders_after_tab_return_or_window_transfer() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::failed_reedit_rerenders_after_tab_return_or_window_transfer",
+    ) else {
+        return;
+    };
+    for moved in [false, true] {
+        for retry_succeeds in [false, true] {
+            let (mut source, events) = app();
+            let original = decoded(true);
+            let id = install(&mut source, root.join("reedit.png"), Arc::clone(&original));
+            let resize = |size| {
+                EditOperation::Resize(
+                    towavue_core::ImageResize::new(
+                        size,
+                        size,
+                        towavue_core::ResampleFilter::Nearest,
+                    )
+                    .expect("resize"),
+                )
+            };
+            source.push_visual_edit(resize(3));
+            finish_comparison(&mut source, &events);
+            let saved = source.edits[&id].operations().to_vec();
+            source
+                .edits
+                .get_mut(&id)
+                .expect("history")
+                .mark_exported(&saved);
+            let old_pixels = Arc::clone(&source.image.as_ref().expect("first resize").decoded);
+            source.push_visual_edit(resize(4));
+            source.image_edit_worker.clear();
+            source.finish_image_edits(
+                source.image_edit_generation,
+                Err("second resize failed".into()),
+            );
+            assert!(source.image_error.is_some() && source.image_copy_request().is_none());
+            assert!(Arc::ptr_eq(
+                &source
+                    .image
+                    .as_ref()
+                    .expect("last successful pixels")
+                    .decoded,
+                &old_pixels
+            ));
+            let operations = source.edits[&id].operations().to_vec();
+            let (mut target, events, id) = if moved {
+                let (mut destination, destination_events) = app();
+                let moved_id = transfer(&mut source, &mut destination, id);
+                (destination, destination_events, moved_id)
+            } else {
+                install(&mut source, root.join("neighbor.png"), decoded(false));
+                source.activate_tab(id);
+                (source, events, id)
+            };
+            assert!(
+                target.image_edit_pending,
+                "a failed re-edit must render, not compare the preceding successful pixels"
+            );
+            assert!(target.image_copy_request().is_none());
+            assert!(target.edits[&id].is_dirty());
+            assert_eq!(target.edits[&id].operations(), operations);
+            assert_eq!(target.edits[&id].saved_operations(), saved);
+            assert!(Arc::ptr_eq(
+                target
+                    .image_edit_source
+                    .as_ref()
+                    .expect("original retained"),
+                &original
+            ));
+            if retry_succeeds {
+                finish_comparison(&mut target, &events);
+                let expected = towavue_runtime_windows::render_image_edits(
+                    &original,
+                    &operations,
+                    &Default::default(),
+                )
+                .expect("expected edit");
+                assert_eq!(
+                    *target.image.as_ref().expect("retried pixels").decoded,
+                    expected
+                );
+                assert_eq!(
+                    target.image_copy_request().expect("retried copy").size,
+                    (4, 4)
+                );
+                assert!(
+                    target.edits[&id].is_dirty(),
+                    "the old saved pixels cannot mark a different edit clean"
+                );
+            } else {
+                target.image_edit_worker.clear();
+                target.finish_image_edits(target.image_edit_generation, Err("retry failed".into()));
+                assert!(target.image_error.is_some() && target.image_copy_request().is_none());
+                assert!(target.edits[&id].is_dirty());
+            }
+            target.undo_edit(false);
+            finish(&mut target, &events);
+            assert!(target.image_error.is_none());
+            assert_eq!(target.image_copy_request().expect("undo copy").size, (3, 3));
+            assert_eq!(
+                target.image.as_ref().expect("saved pixels").decoded,
+                old_pixels
+            );
+            assert!(!target.edits[&id].is_dirty());
+        }
+    }
+}
+
+#[test]
 fn settled_image_comparison_survives_tab_switch_and_window_transfer() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_transfer::tests::settled_image_comparison_survives_tab_switch_and_window_transfer",

@@ -5978,6 +5978,7 @@ where
         };
         let render = materialize
             && (self.image_edit_pending
+                || self.image_error.is_some()
                 || !self.image_materialized
                 || self.image_edit_operations.as_ref() != Some(&operations));
         if materialize {

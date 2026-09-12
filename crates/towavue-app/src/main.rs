@@ -3351,7 +3351,7 @@ where
         let preview = self.video_rotation_dialog.is_some()
             || self.video_rotation_drag.is_some()
             || self.video_resize_dialog.is_some();
-        let full = if preview {
+        let mut full = if preview {
             fitted_video_rect(viewport, size, transform.pixel_aspect(pixel_aspect))
         } else {
             video_view::rect(
@@ -3380,7 +3380,22 @@ where
         }
         let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
         volume_targets.push(response.clone());
+        let before_selection = self.image_view;
         self.update_selection(&response, full, size, shift, pointer);
+        if self.image_view != before_selection {
+            full = video_view::rect(
+                viewport,
+                size,
+                transform.pixel_aspect(pixel_aspect),
+                ui.ctx().pixels_per_point(),
+                self.image_view,
+            );
+            self.video_rect =
+                video_view::clipped(viewport, full, transform.uv).map(|(rect, uv)| {
+                    self.video_uv = uv;
+                    rect
+                });
+        }
         if !self.visual_selection_enabled() {
             self.hold_response(&response, actions);
             selection::release_focus(ui.ctx());
@@ -3692,9 +3707,7 @@ where
                         egui::CursorIcon::Crosshair
                     }
                 });
-            } else if self.media_kind == Some(MediaKind::Image)
-                && selection_rect(image_rect, selection).contains(pointer)
-            {
+            } else if selection_rect(image_rect, selection).contains(pointer) {
                 response.ctx.set_cursor_icon(egui::CursorIcon::ZoomIn);
             }
         }
@@ -3811,15 +3824,21 @@ where
                     && !selected.contains(pointer)
                 {
                     self.image_view.selection = None;
-                } else if self.media_kind == Some(MediaKind::Image)
-                    && matches!(mode, SelectionDrag::New(_))
+                } else if matches!(mode, SelectionDrag::New(_))
                     && selected.contains(origin)
                     && selected.contains(pointer)
                 {
-                    self.zoom_image_selection(
+                    let pixel_aspect = if self.media_kind == Some(MediaKind::Video) {
+                        image_rect.width() * image_size.1 as f32
+                            / (image_rect.height() * image_size.0 as f32)
+                    } else {
+                        1.0
+                    };
+                    self.zoom_visual_selection(
                         image_size,
                         response.rect.size(),
                         response.ctx.pixels_per_point(),
+                        pixel_aspect,
                     );
                 }
             }
@@ -5764,14 +5783,25 @@ where
                 }
             }
             CommandId::ZoomSelection => {
-                if let Some(image) = &self.image
+                let geometry = if self.media_kind == Some(MediaKind::Video) {
+                    self.session
+                        .as_ref()
+                        .and_then(PlaybackSession::video_geometry)
+                } else {
+                    self.image.as_ref().map(|image| {
+                        let (width, height) = image.dimensions();
+                        (width, height, 1.0)
+                    })
+                };
+                if let Some((width, height, aspect)) = geometry
                     && let Some(context) = &self.ui_context
                 {
-                    let transform = self.visual_transform(image.dimensions());
-                    self.zoom_image_selection(
+                    let transform = self.visual_transform((width, height));
+                    self.zoom_visual_selection(
                         (transform.size.0 as u32, transform.size.1 as u32),
                         self.image_viewport,
                         context.pixels_per_point(),
+                        transform.pixel_aspect(aspect),
                     );
                     self.request_redraw();
                 }
@@ -6781,18 +6811,27 @@ where
         ))
     }
 
-    fn zoom_image_selection(&mut self, size: (u32, u32), viewport: egui::Vec2, density: f32) {
+    fn zoom_visual_selection(
+        &mut self,
+        size: (u32, u32),
+        viewport: egui::Vec2,
+        density: f32,
+        pixel_aspect: f32,
+    ) {
         let Some(selection) = self.image_view.selection else {
             return;
         };
         if viewport.min_elem() <= 0.0 {
             return;
         }
-        let pixels = egui::vec2(size.0 as f32, size.1 as f32);
+        let pixels = egui::vec2(size.0 as f32 * pixel_aspect, size.1 as f32);
         let selected = pixels * egui::vec2(selection.width(), selection.height());
         let target = (viewport * density / selected.max(egui::Vec2::splat(1.0))).min_elem();
         self.image_view.zoom = ZoomMode::Custom(target);
-        let scale = self.image_view.scale(size, (viewport * density).into()) / density;
+        let scale = self.image_view.scale(
+            size,
+            (viewport.x * density / pixel_aspect, viewport.y * density),
+        ) / density;
         self.image_view.zoom = ZoomMode::Custom(scale * density);
         let center = egui::vec2(
             (selection.min.x + selection.max.x) * 0.5,
@@ -21615,8 +21654,8 @@ mod tests {
                     let actual = app.image_view.selection.and_then(|selection| {
                         PixelCrop::from_selection(selection, (400, 400), kind)
                     });
-                    let expected = if kind == MediaKind::Image && start == end {
-                        None // Clicking inside zooms and dismisses only image selection.
+                    let expected = if start == end {
+                        None // Clicking inside zooms and dismisses visual selection.
                     } else {
                         expected
                     };
@@ -21627,7 +21666,7 @@ mod tests {
                     assert!(app.view_drag.is_none());
                     assert_eq!(
                         matches!(app.image_view.zoom, ZoomMode::Custom(_)),
-                        kind == MediaKind::Image && start == end
+                        start == end
                     );
                 }
             }

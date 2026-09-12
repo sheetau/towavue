@@ -259,15 +259,15 @@ fn selection_zoom_keeps_the_full_image_and_clears_selection_in_the_input_frame()
         }
         .unit_rect((600, 400)),
     );
-    app.zoom_image_selection((600, 400), viewport.size(), 2.0);
+    app.zoom_visual_selection((600, 400), viewport.size(), 2.0, 1.0);
     assert_eq!(app.image_view.zoom, ZoomMode::Custom(64.0));
     assert_eq!(app.image_view.pan, (9400.0, 6250.0));
     let limited = app.image_view;
-    app.zoom_image_selection((600, 400), egui::Vec2::ZERO, 2.0);
+    app.zoom_visual_selection((600, 400), egui::Vec2::ZERO, 2.0, 1.0);
     assert_eq!(app.image_view, limited);
     app.image_view.selection = None;
     let no_selection = app.image_view;
-    app.zoom_image_selection((600, 400), viewport.size(), 2.0);
+    app.zoom_visual_selection((600, 400), viewport.size(), 2.0, 1.0);
     assert_eq!(app.image_view, no_selection);
 }
 

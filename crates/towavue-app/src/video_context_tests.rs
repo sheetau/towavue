@@ -69,7 +69,7 @@ fn video_visual_commands_and_selection_follow_the_visible_timeline() {
     let context = fonts::test_context();
     app.ui_context = Some(context.clone());
     app.shortcuts = shortcuts::defaults();
-    for key in ["R", "H", "V", "Ctrl+Y", "Ctrl+A"] {
+    for key in ["R", "H", "V", "Ctrl+Y", "Ctrl+A", "Ctrl+Shift+Y"] {
         let key = key.parse::<towavue_core::KeySequence>().expect("key");
         assert_eq!(
             app.shortcuts.resolve(key.strokes(), app.command_context()),
@@ -83,6 +83,7 @@ fn video_visual_commands_and_selection_follow_the_visible_timeline() {
         CommandId::FlipVertical,
         CommandId::ApplyCrop,
         CommandId::SelectAll,
+        CommandId::ZoomSelection,
     ] {
         app.handle_ui_action(UiAction::Command(command));
     }

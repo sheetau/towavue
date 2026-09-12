@@ -31,6 +31,138 @@ const PRESETS: &[(CommandId, (u32, u32))] = &[
     (CommandId::SelectAspectNineSixteen, (9, 16)),
 ];
 
+fn verify_video_selection_zoom<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
+    let context = app.ui_context.as_ref().expect("UI").clone();
+    context.global_style_mut(chrome::style);
+    let saved_view = app.image_view;
+    let saved_timeline = app.timeline_open;
+    let saved_time = app.time_selection;
+    app.timeline_open = true;
+    app.time_selection =
+        towavue_core::TimeRange::new(MediaTime::ZERO, MediaTime::from_nanoseconds(500_000_000));
+    let history = app.edits.clone();
+    let position = app.current_position();
+    let state = app.state;
+    let generation = app.generation;
+    let session_generation = app.session.as_ref().expect("session").generation();
+    let frame_time = app.session.as_ref().expect("session").current_video_time();
+    let time_selection = app.time_selection;
+    let geometry = app
+        .session
+        .as_ref()
+        .expect("session")
+        .video_geometry()
+        .expect("geometry");
+    let transform = app.visual_transform((geometry.0, geometry.1));
+    let pixels = egui::vec2(
+        transform.size.0 * transform.pixel_aspect(geometry.2),
+        transform.size.1,
+    );
+    let viewport = egui::Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(600.0, 360.0));
+    let frame = |app: &mut Application<_>, events| {
+        context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(viewport),
+                events,
+                ..Default::default()
+            },
+            |ui| app.draw_video_edit_overlay(ui, &mut Vec::new(), &mut Vec::new()),
+        )
+    };
+    for density in [1.0, 1.25, 2.0] {
+        context.set_pixels_per_point(density);
+        for mode in 0..3 {
+            app.image_view.fit();
+            let selected = UnitRect {
+                min: UnitPoint { x: 0.2, y: 0.2 },
+                max: UnitPoint { x: 0.6, y: 0.6 },
+            };
+            app.image_view.selection = Some(selected);
+            for _ in 0..3 {
+                frame(app, vec![]);
+            }
+            let before = app.video_rect.expect("fit rect");
+            let pointer = selection_rect(before, selected).center();
+            frame(app, vec![egui::Event::PointerMoved(pointer)]);
+            assert_eq!(
+                frame(app, vec![]).platform_output.cursor_icon,
+                egui::CursorIcon::ZoomIn
+            );
+            let button = |pressed| egui::Event::PointerButton {
+                pos: pointer,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            };
+            if mode == 2 {
+                app.process_shortcut("Ctrl+Shift+Y".parse().expect("zoom selection"));
+                frame(app, vec![]);
+            } else if mode == 1 {
+                assert_eq!(
+                    frame(app, vec![button(true)]).platform_output.cursor_icon,
+                    egui::CursorIcon::Crosshair
+                );
+                assert_eq!(app.image_view.zoom, ZoomMode::Fit);
+                frame(app, vec![button(false)]);
+            } else {
+                frame(app, vec![button(true), button(false)]);
+            }
+            let scale = (viewport.size() / (pixels * 0.4)).min_elem();
+            let displayed = pixels * scale;
+            let limit = (displayed - viewport.size()).max(egui::Vec2::ZERO) * 0.5;
+            let pan = (pixels * 0.1 * scale).clamp(-limit, limit);
+            assert!(
+                matches!(app.image_view.zoom, ZoomMode::Custom(value) if (value - scale * density).abs() < 0.001)
+            );
+            assert!(
+                (egui::vec2(app.image_view.pan.0, app.image_view.pan.1) - pan).length() < 0.001
+            );
+            let full = egui::Rect::from_center_size(viewport.center() + pan, displayed);
+            let (expected_rect, expected_uv) =
+                crate::video_view::clipped(viewport, full, transform.uv)
+                    .expect("visible selection");
+            let actual = app.video_rect.expect("same-frame zoomed rect");
+            assert!(
+                (actual.min - expected_rect.min).length() < 0.001
+                    && (actual.max - expected_rect.max).length() < 0.001
+            );
+            for (actual, expected) in app.video_uv.iter().zip(expected_uv) {
+                assert!(
+                    (actual.x - expected.x).abs() < 0.0001
+                        && (actual.y - expected.y).abs() < 0.0001
+                );
+            }
+            assert!(app.image_view.selection.is_none());
+            assert_eq!(app.edits, history);
+            assert_eq!(
+                (
+                    app.state,
+                    app.generation,
+                    app.current_position(),
+                    app.time_selection
+                ),
+                (state, generation, position, time_selection)
+            );
+            assert_eq!(
+                app.session.as_ref().expect("session").generation(),
+                session_generation
+            );
+            assert_eq!(
+                app.session.as_ref().expect("session").current_video_time(),
+                frame_time
+            );
+            let zoomed = app.image_view;
+            app.dispatch(CommandId::ZoomSelection);
+            assert_eq!(app.image_view, zoomed, "no selection is a no-op");
+            frame(app, vec![]);
+            assert_eq!(app.video_rect, Some(actual));
+        }
+    }
+    app.image_view = saved_view;
+    app.timeline_open = saved_timeline;
+    app.time_selection = saved_time;
+}
+
 #[test]
 fn video_aspect_presets_follow_pixel_aspect_rotation_and_visual_context_without_editing_time() {
     let Some(root) = crate::tests::isolated_test_root(
@@ -95,6 +227,7 @@ fn video_aspect_presets_follow_pixel_aspect_rotation_and_visual_context_without_
                 .video_geometry()
                 .expect("geometry");
             assert_eq!(geometry, (120, 80, 1.5));
+            verify_video_selection_zoom(&mut app);
             app.timeline_open = false;
             app.dispatch(CommandId::SelectAspectSquare);
             assert!(
@@ -128,6 +261,7 @@ fn video_aspect_presets_follow_pixel_aspect_rotation_and_visual_context_without_
                 })
             );
             app.dispatch(CommandId::RotateClockwise);
+            verify_video_selection_zoom(&mut app);
             let history = app.edits[&tab].clone();
             for (command, aspect) in PRESETS {
                 app.dispatch(*command);
@@ -165,6 +299,7 @@ fn video_aspect_presets_follow_pixel_aspect_rotation_and_visual_context_without_
             assert_eq!(app.edits[&tab].operations(), history.operations());
             app.dispatch(CommandId::Redo);
             assert_eq!(app.visual_transform((120, 80)).size, (80.0, 52.0));
+            verify_video_selection_zoom(&mut app);
             eprintln!(
                 "PASS aspect video: actual SAR, rotated presets, context, time-selection isolation, crop and Undo/Redo"
             );

@@ -494,6 +494,7 @@ impl CommandDefinition {
                         | CommandId::ActualSize
                         | CommandId::FitToWindow
                         | CommandId::CoverWindow
+                        | CommandId::ZoomSelection
                 ))
             && (!matches!(
                 self.id,
@@ -600,11 +601,7 @@ const COMMANDS: &[CommandDefinition] = &[
     ),
     command(CommandId::SelectAll, "Select whole media", ANY_MEDIA),
     command(CommandId::ClearSelection, "Clear selection", ANY_MEDIA),
-    command(
-        CommandId::ZoomSelection,
-        "Zoom to selection",
-        &[MediaKind::Image],
-    ),
+    command(CommandId::ZoomSelection, "Zoom to selection", VISUAL_MEDIA),
     command(
         CommandId::ToggleReadingMode,
         "Toggle reading mode",

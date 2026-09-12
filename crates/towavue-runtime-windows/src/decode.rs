@@ -33,6 +33,8 @@ const DECODED_QUEUE_CAPACITY: usize = 2;
 #[derive(Debug)]
 pub struct VideoFrame {
     pub presentation_time: MediaTime,
+    /// Positive source frame duration, when the decoder supplies one.
+    pub duration: Option<Duration>,
     pub width: u32,
     pub height: u32,
     pub pixel_aspect: f32,
@@ -1554,6 +1556,7 @@ fn copy_video_frame(
 
     Ok(VideoFrame {
         presentation_time: timestamp_to_media_time(decoded.timestamp(), time_base),
+        duration: frame_duration(decoded.packet().duration, time_base),
         width: rgba.width(),
         height: rgba.height(),
         pixel_aspect: pixel_aspect(decoded.aspect_ratio()),
@@ -1610,6 +1613,15 @@ fn timestamp_to_media_time(timestamp: Option<i64>, time_base: Rational) -> Media
     MediaTime::from_nanoseconds(nanoseconds.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
 }
 
+fn frame_duration(duration: i64, time_base: Rational) -> Option<Duration> {
+    if duration <= 0 || time_base.numerator() <= 0 || time_base.denominator() <= 0 {
+        return None;
+    }
+    Some(Duration::from_nanos(
+        timestamp_to_media_time(Some(duration), time_base).as_nanoseconds() as u64,
+    ))
+}
+
 fn decoder_is_drained(error: ffmpeg::Error) -> bool {
     error == ffmpeg::Error::Eof
         || matches!(error, ffmpeg::Error::Other { errno } if errno == ffmpeg::error::EAGAIN)
@@ -1633,6 +1645,28 @@ mod tests {
         let time = timestamp_to_media_time(Some(90_000), Rational::new(1, 90_000));
 
         assert_eq!(time.as_nanoseconds(), 1_000_000_000);
+    }
+
+    #[test]
+    fn video_frame_duration_uses_positive_source_ticks_and_valid_time_bases() {
+        assert_eq!(
+            super::frame_duration(45000, Rational(1, 90000)),
+            Some(std::time::Duration::from_millis(500))
+        );
+        assert_eq!(
+            super::frame_duration(1, Rational(1001, 30000)),
+            Some(std::time::Duration::from_nanos(33_366_666))
+        );
+        for (duration, time_base) in [
+            (0, Rational(1, 1000)),
+            (-1, Rational(1, 1000)),
+            (1, Rational(0, 1000)),
+            (1, Rational(-1, 1000)),
+            (1, Rational(1, 0)),
+            (1, Rational(1, -1000)),
+        ] {
+            assert_eq!(super::frame_duration(duration, time_base), None);
+        }
     }
 
     #[test]

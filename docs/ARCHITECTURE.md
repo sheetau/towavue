@@ -43,6 +43,7 @@ Keep the single-D3D11-device design: hardware decode, video processing, image/UI
 ## Images, reading, and previews
 
 - Decode static images and animations to safe RGBA frames with delays. EXIF orientation is applied. AVIF uses the existing FFmpeg path; animated PNG uses the runtime compositor.
+- FFmpeg-backed image timing uses a positive next-PTS interval, or the decoded source frame duration when no such interval exists (including the last frame and first-frame-only previews). Only unknown timing falls back to 100 ms; viewing retains its 10 ms minimum. Software frame duration is a safe value, not a native-frame reference.
 - APNG snapshots the affected region immediately before PREVIOUS blending, publishes the displayed canvas, then restores it. First animation PREVIOUS acts as BACKGROUND. An independent default poster is not an animation frame. OVER uses the image crate's pixel operation.
 - APNG expands low-bit/palette colors and strips 16-bit to 8-bit. Retained RGBA has a caller budget; canvas + raw frame + PREVIOUS region have a 512 MiB working limit. Neither is a whole-process memory cap.
 - Foreground loading is latest-only. A separate prefetch worker can hand an in-progress decode to foreground rather than decoding twice. Normal prefetch uses up to nine neighbors; reading prefetch covers the next spread within budget.

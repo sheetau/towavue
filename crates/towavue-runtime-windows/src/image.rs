@@ -296,15 +296,17 @@ fn ffmpeg_frames(
     for (index, frame) in decoded.into_iter().enumerate() {
         let delay = presentation_times
             .get(index + 1)
-            .map(|next| {
-                Duration::from_nanos(
-                    next.as_nanoseconds()
-                        .saturating_sub(frame.presentation_time.as_nanoseconds())
-                        .max(0) as u64,
-                )
-                .max(Duration::from_millis(10))
+            .and_then(|next| {
+                let nanos = next
+                    .as_nanoseconds()
+                    .saturating_sub(frame.presentation_time.as_nanoseconds());
+                (nanos > 0).then(|| Duration::from_nanos(nanos as u64))
             })
-            .unwrap_or(Duration::from_millis(100));
+            // The last frame (and a first-frame-only preview) has no following PTS.
+            // Preserve its decoder duration instead of inventing a 100 ms tail.
+            .or(frame.duration)
+            .unwrap_or(Duration::from_millis(100))
+            .max(Duration::from_millis(10));
         frames.push(DecodedImageFrame {
             width: frame.width,
             height: frame.height,
@@ -753,10 +755,26 @@ mod tests {
             );
             let reference = decode_image(&path).expect("reference decode");
             assert_eq!(reference.frames.len(), 2, "{extension}");
+            assert!(
+                reference
+                    .frames
+                    .iter()
+                    .all(|frame| frame.delay == Duration::from_millis(500)),
+                "{extension} must retain the last frame's duration too: {:?}",
+                reference
+                    .frames
+                    .iter()
+                    .map(|frame| frame.delay)
+                    .collect::<Vec<_>>()
+            );
             let first = first_animation_frame(&path, 32 * 24 * 4, &|| true)
                 .expect("one-frame budget")
                 .expect("first frame");
             assert_eq!(first.rgba, reference.frames[0].rgba, "{extension}");
+            assert_eq!(
+                first.delay, reference.frames[0].delay,
+                "{extension} preview timing"
+            );
             assert_eq!((first.width, first.height), (32, 24));
             assert!(matches!(
                 first_animation_frame(&path, 1, &|| true),
@@ -800,6 +818,65 @@ mod tests {
             );
             assert_eq!(previews, 0);
             fs::remove_file(path).expect("remove owned animation");
+        }
+    }
+
+    #[test]
+    fn avif_variable_frame_timing_keeps_the_tail_and_first_preview_duration() {
+        use std::os::windows::process::CommandExt;
+        let ffmpeg =
+            std::path::PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+                .join("bin/ffmpeg.exe");
+        for loops in ["0", "1", "3"] {
+            let path = temporary_path("avif");
+            let output = std::process::Command::new(&ffmpeg)
+                .creation_flags(0x08000000)
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=32x24:rate=2:duration=1.5",
+                    "-vf",
+                    "settb=1/1000,setpts='if(eq(N,0),0,if(eq(N,1),125,875))'",
+                    "-fps_mode",
+                    "passthrough",
+                    "-enc_time_base",
+                    "1/1000",
+                    "-c:v",
+                    "libaom-av1",
+                    "-cpu-used",
+                    "8",
+                    "-threads",
+                    "1",
+                    "-loop",
+                    loops,
+                ])
+                .arg(&path)
+                .output()
+                .expect("generate VFR AVIF");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let decoded = decode_image(&path).expect("variable-timing AVIF");
+            assert_eq!(
+                decoded
+                    .frames
+                    .iter()
+                    .map(|frame| frame.delay)
+                    .collect::<Vec<_>>(),
+                [125, 750, 500].map(Duration::from_millis),
+                "loop count {loops}"
+            );
+            let preview = first_animation_frame(&path, 32 * 24 * 4, &|| true)
+                .expect("preview")
+                .expect("AVIF frame");
+            assert_eq!(preview.delay, decoded.frames[0].delay);
+            assert_eq!(preview.rgba, decoded.frames[0].rgba);
+            std::fs::remove_file(path).expect("owned fixture cleanup");
         }
     }
 

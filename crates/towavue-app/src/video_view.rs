@@ -76,6 +76,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         ui: &egui::Ui,
         response: &egui::Response,
         full: egui::Rect,
+        size: (u32, u32),
     ) {
         if !self.visual_selection_enabled() {
             return;
@@ -94,6 +95,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 center += correction;
             }
         }
-        self.update_pan(response, ui.input(|input| input.pointer.hover_pos()));
+        let pointer = ui.input(|input| input.pointer.hover_pos());
+        if !self.move_visual_selection(response, full, size, pointer) {
+            self.update_pan(response, pointer);
+        }
     }
 }

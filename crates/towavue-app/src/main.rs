@@ -3226,7 +3226,7 @@ where
         let displayed = egui::vec2(transform.size.0 * scale, transform.size.1 * scale);
         response.interact_rect =
             image_scroll::surface(viewport, displayed, ui.spacing().scroll.bar_width);
-        let selection_moved = self.move_image_selection(
+        let selection_moved = self.move_visual_selection(
             &response,
             egui::Rect::from_center_size(
                 viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1),
@@ -3343,7 +3343,7 @@ where
             && self.video_resize_dialog.is_none()
             && matches!(rotation, rotation::RotationResponse::Inactive)
         {
-            self.update_video_view(ui, &response, full);
+            self.update_video_view(ui, &response, full, size);
         }
         let (transform, operations) = self.video_presentation((width, height));
         self.video_raster_operations = operations;
@@ -3620,7 +3620,7 @@ where
         }
     }
 
-    fn move_image_selection(
+    fn move_visual_selection(
         &mut self,
         response: &egui::Response,
         image_rect: egui::Rect,
@@ -3641,15 +3641,19 @@ where
         let Some(ViewDrag::MoveSelection { origin, before }) = self.view_drag else {
             return false;
         };
+        let kind = self.media_kind.unwrap_or(MediaKind::Image);
+        let step = if kind == MediaKind::Video { 2 } else { 1 };
         if let Some(pointer) = release.or(pointer)
-            && let Some(mut crop) = PixelCrop::from_selection(before, size, MediaKind::Image)
+            && let Some(mut crop) = PixelCrop::from_selection(before, size, kind)
         {
             let delta =
                 (pointer - origin) / image_rect.size() * egui::vec2(size.0 as f32, size.1 as f32);
-            crop.x =
-                (crop.x as f32 + delta.x.round()).clamp(0.0, (size.0 - crop.width) as f32) as u32;
-            crop.y =
-                (crop.y as f32 + delta.y.round()).clamp(0.0, (size.1 - crop.height) as f32) as u32;
+            let translate = |start: u32, delta: f32, limit: u32| {
+                (start as f32 + (delta / step as f32).round() * step as f32)
+                    .clamp(0.0, (limit / step * step) as f32) as u32
+            };
+            crop.x = translate(crop.x, delta.x, size.0 - crop.width);
+            crop.y = translate(crop.y, delta.y, size.1 - crop.height);
             self.image_view.selection = Some(crop.unit_rect(size));
         }
         response.ctx.set_cursor_icon(egui::CursorIcon::AllScroll);

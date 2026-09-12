@@ -5,6 +5,167 @@ fn close(actual: f32, expected: f32) {
 }
 
 #[test]
+fn video_right_drag_moves_selection_on_its_pixel_grid_without_panning() {
+    let Some(_) = crate::tests::isolated_test_root(
+        "video_view::tests::video_right_drag_moves_selection_on_its_pixel_grid_without_panning",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.media_kind = Some(MediaKind::Video);
+    app.timeline_open = true;
+    let viewport = egui::Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(600.0, 360.0));
+    let crop = PixelCrop {
+        x: 20,
+        y: 12,
+        width: 40,
+        height: 24,
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        pressed,
+        button: egui::PointerButton::Secondary,
+        modifiers: egui::Modifiers::NONE,
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for (size, aspect, zoom) in [
+            ((120, 80), 1.5, ZoomMode::Fit),
+            ((80, 120), 2.0 / 3.0, ZoomMode::Fit),
+            ((121, 81), 1.5, ZoomMode::Fit),
+            ((120, 80), 1.5, ZoomMode::Custom(8.0 * density)),
+        ] {
+            let context = fonts::test_context();
+            context.set_pixels_per_point(density);
+            let original = crop.unit_rect(size);
+            app.image_view.fit();
+            app.image_view.zoom = zoom;
+            let full = rect(viewport, size, aspect, density, app.image_view);
+            let start = selection_rect(full, original).center();
+            let frame = |app: &mut Application<_>, events, focused| {
+                context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(viewport),
+                        events,
+                        focused,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let response = ui.interact(
+                            viewport,
+                            "video-move".into(),
+                            egui::Sense::click_and_drag(),
+                        );
+                        app.update_video_view(ui, &response, full, size);
+                        app.update_selection(
+                            &response,
+                            full,
+                            size,
+                            false,
+                            ui.input(|input| input.pointer.hover_pos()),
+                        );
+                    },
+                )
+            };
+            for delta in [
+                egui::vec2(11.4, -3.4),
+                egui::Vec2::splat(1000.0),
+                egui::Vec2::splat(-1000.0),
+            ] {
+                let end = start + delta / egui::vec2(size.0 as f32, size.1 as f32) * full.size();
+                let expected = PixelCrop {
+                    x: (20.0 + (delta.x / 2.0).round() * 2.0)
+                        .clamp(0.0, ((size.0 - 40) / 2 * 2) as f32) as u32,
+                    y: (12.0 + (delta.y / 2.0).round() * 2.0)
+                        .clamp(0.0, ((size.1 - 24) / 2 * 2) as f32) as u32,
+                    ..crop
+                }
+                .unit_rect(size);
+                for mode in 0..4 {
+                    app.image_view.selection = Some(original);
+                    app.image_view.pan = (0.0, 0.0);
+                    frame(&mut app, vec![egui::Event::PointerMoved(start)], true);
+                    if mode == 0 {
+                        frame(
+                            &mut app,
+                            vec![
+                                button(start, true),
+                                egui::Event::PointerMoved(end),
+                                button(end, false),
+                            ],
+                            true,
+                        );
+                    } else {
+                        let output = frame(&mut app, vec![button(start, true)], true);
+                        assert_eq!(
+                            output.platform_output.cursor_icon,
+                            egui::CursorIcon::AllScroll
+                        );
+                        assert!(matches!(
+                            app.view_drag,
+                            Some(ViewDrag::MoveSelection { .. })
+                        ));
+                        let output = frame(&mut app, vec![egui::Event::PointerMoved(end)], true);
+                        assert_eq!(
+                            output.platform_output.cursor_icon,
+                            egui::CursorIcon::AllScroll
+                        );
+                        assert_eq!(app.image_view.selection, Some(expected));
+                        if mode == 2 {
+                            frame(&mut app, vec![], false);
+                        } else if mode == 3 {
+                            app.filmstrip_open = true;
+                            frame(&mut app, vec![], true);
+                            app.filmstrip_open = false;
+                        }
+                        frame(&mut app, vec![button(end, false)], true);
+                    }
+                    assert_eq!(
+                        app.image_view.selection,
+                        Some(if mode >= 2 { original } else { expected })
+                    );
+                    assert_eq!(app.image_view.pan, (0.0, 0.0));
+                    assert_eq!(app.image_view.zoom, zoom);
+                    assert!(app.view_drag.is_none());
+                    assert!(app.edits.is_empty());
+                }
+            }
+            // Press ownership does not change when an outside drag crosses the selection.
+            app.image_view.selection = Some(original);
+            let outside = full.intersect(viewport).right_bottom() - egui::vec2(1.0, 1.0);
+            frame(&mut app, vec![egui::Event::PointerMoved(outside)], true);
+            frame(
+                &mut app,
+                vec![
+                    button(outside, true),
+                    egui::Event::PointerMoved(start),
+                    button(start, false),
+                ],
+                true,
+            );
+            assert_eq!(app.image_view.selection, Some(original));
+            assert_eq!(
+                app.image_view.pan,
+                ((start - outside).x, (start - outside).y)
+            );
+            app.image_view.pan = (0.0, 0.0);
+            app.timeline_open = false;
+            frame(
+                &mut app,
+                vec![
+                    button(start, true),
+                    egui::Event::PointerMoved(start + egui::vec2(50.0, 10.0)),
+                    button(start + egui::vec2(50.0, 10.0), false),
+                ],
+                true,
+            );
+            assert_eq!(app.image_view.selection, Some(original));
+            assert_eq!(app.image_view.pan, (0.0, 0.0));
+            app.timeline_open = true;
+        }
+    }
+}
+
+#[test]
 fn video_view_fit_cover_actual_and_custom_use_physical_rows_and_exact_sar() {
     let viewport = egui::Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(701.0, 403.0));
     for density in [1.0, 1.25, 2.0] {

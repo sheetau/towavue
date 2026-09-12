@@ -157,6 +157,74 @@ fn verify_video_selection_zoom<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mu
             frame(app, vec![]);
             assert_eq!(app.video_rect, Some(actual));
         }
+        // Exercise right-drag through the real overlay after the same native edits.
+        let size = (transform.size.0 as u32, transform.size.1 as u32);
+        let crop = PixelCrop {
+            x: 4,
+            y: 6,
+            width: 20,
+            height: 18,
+        };
+        app.image_view.fit();
+        app.image_view.selection = Some(crop.unit_rect(size));
+        for _ in 0..3 {
+            frame(app, vec![]);
+        }
+        let full = app.video_rect.expect("fit rect");
+        let uv = app.video_uv;
+        let start = selection_rect(full, crop.unit_rect(size)).center();
+        let end = start + egui::vec2(6.0 / size.0 as f32, -4.0 / size.1 as f32) * full.size();
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            pressed,
+            button: egui::PointerButton::Secondary,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(app, vec![egui::Event::PointerMoved(start)]);
+        assert_eq!(
+            frame(app, vec![button(start, true)])
+                .platform_output
+                .cursor_icon,
+            egui::CursorIcon::AllScroll
+        );
+        frame(
+            app,
+            vec![egui::Event::PointerMoved(end), button(end, false)],
+        );
+        assert_eq!(
+            app.image_view.selection,
+            Some(
+                PixelCrop {
+                    x: 10,
+                    y: 2,
+                    ..crop
+                }
+                .unit_rect(size)
+            )
+        );
+        assert_eq!(app.image_view.pan, (0.0, 0.0));
+        assert_eq!(app.image_view.zoom, ZoomMode::Fit);
+        assert!(app.view_drag.is_none());
+        assert_eq!(app.video_rect, Some(full));
+        assert_eq!(app.video_uv, uv);
+        assert_eq!(app.edits, history);
+        assert_eq!(
+            (
+                app.state,
+                app.generation,
+                app.current_position(),
+                app.time_selection
+            ),
+            (state, generation, position, time_selection)
+        );
+        assert_eq!(
+            app.session.as_ref().expect("session").generation(),
+            session_generation
+        );
+        assert_eq!(
+            app.session.as_ref().expect("session").current_video_time(),
+            frame_time
+        );
     }
     app.image_view = saved_view;
     app.timeline_open = saved_timeline;

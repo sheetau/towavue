@@ -285,7 +285,7 @@ fn selection_translation_keeps_pixel_extent_and_cancels_without_panning() {
                     egui::Sense::click_and_drag(),
                 );
                 let pointer = ui.input(|input| input.pointer.hover_pos());
-                owned = app.move_image_selection(&response, image, (1000, 500), pointer);
+                owned = app.move_visual_selection(&response, image, (1000, 500), pointer);
             },
         );
         (owned, output)

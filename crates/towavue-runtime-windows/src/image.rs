@@ -15,6 +15,8 @@ pub(crate) mod apng;
 mod avif;
 mod bmp_preview;
 mod jpeg_preview;
+mod png_preview;
+pub(crate) use png_preview::png_thumbnail;
 
 pub(crate) fn first_image_preview(
     path: &Path,

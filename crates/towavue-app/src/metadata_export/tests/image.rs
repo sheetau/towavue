@@ -495,7 +495,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
 ) {
     let setting = || {
         let mut options = super::setting();
-        if extension == "jpeg" {
+        if extension != "png" {
             options
                 .set(MetadataField::Date, Some("2024-02-29T12:34+09:00".into()))
                 .expect("Date");
@@ -575,7 +575,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     remove
         .set(MetadataField::Title, Some(String::new()))
         .expect("remove");
-    if extension == "jpeg" {
+    if extension != "png" {
         for field in [MetadataField::Date, MetadataField::Track] {
             remove
                 .set(field, Some(String::new()))
@@ -591,7 +591,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
             .iter()
             .all(|value| value.field != MetadataField::Title)
     );
-    if extension == "jpeg" {
+    if extension != "png" {
         assert!(
             values(&target)
                 .iter()
@@ -635,6 +635,8 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
             .expect("format failure")
             .contains(if extension == "png" {
                 "PNG input and PNG output"
+            } else if extension == "webp" {
+                "static WebP input and WebP output"
             } else {
                 "JPEG input and JPEG output"
             })
@@ -668,4 +670,102 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     app.request_guarded(GuardedAction::CloseTab(tab));
     assert!(!app.metadata_export_settings.contains_key(&tab));
     assert_eq!(std::fs::read(&source).expect("source retained"), original);
+}
+
+#[test]
+fn webp_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::image::webp_metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle",
+    ) else {
+        return;
+    };
+    metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycle(&root, "webp");
+}
+
+#[test]
+fn webp_metadata_ui_explains_static_scope_and_validates_typed_fields() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::image::webp_metadata_ui_explains_static_scope_and_validates_typed_fields",
+    ) else {
+        return;
+    };
+    let source = image_fixture(&root, "webp");
+    let (send, events) = std::sync::mpsc::channel();
+    let mut app = Application::new(None, move |event| {
+        let _ = send.send(event);
+    })
+    .expect("app");
+    let context = fonts::test_context();
+    context.enable_accesskit();
+    app.ui_context = Some(context);
+    let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+    app.path = Some(source);
+    app.media_kind = Some(MediaKind::Image);
+    app.open_metadata_export_options();
+    read_ready(&mut app, &events);
+    let size = egui::vec2(640.0, 900.0);
+    for _ in 0..3 {
+        frame(&mut app, size, vec![]);
+    }
+    let tree = frame(&mut app, size, vec![])
+        .platform_output
+        .accesskit_update
+        .expect("tree");
+    for text in [
+        "WebP XMP (x-default): 元の題名",
+        "WebP XMP property: dc:title",
+        "Static WebP input and WebP output only",
+        "Animated WebP is rejected",
+        "Choose a .webp export path",
+    ] {
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.value().is_some_and(|value| value.contains(text))),
+            "{text}"
+        );
+    }
+    for (field, invalid, valid) in [
+        (MetadataField::Date, "2023-02-29", "2024-02-29"),
+        (MetadataField::Track, "2/12", "+0002"),
+    ] {
+        click(&mut app, "Title");
+        click(&mut app, field.label());
+        click(&mut app, "Set value");
+        set_value(&mut app, invalid);
+        assert!(
+            app.metadata_dialog
+                .as_ref()
+                .expect("dialog")
+                .options()
+                .is_err()
+        );
+        let tree = frame(&mut app, size, vec![])
+            .platform_output
+            .accesskit_update
+            .expect("invalid");
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("Apply metadata") && node.is_disabled())
+        );
+        set_value(&mut app, valid);
+        assert_eq!(
+            app.metadata_dialog
+                .as_ref()
+                .expect("dialog")
+                .options()
+                .expect("valid")
+                .get(field),
+            Some(valid)
+        );
+        click(&mut app, field.label());
+        click(&mut app, "Title");
+    }
+    click(&mut app, "Apply metadata");
+    assert_eq!(
+        app.metadata_export_settings[&tab].get(MetadataField::Track),
+        Some("+0002")
+    );
+    assert!(app.edits.is_empty());
 }

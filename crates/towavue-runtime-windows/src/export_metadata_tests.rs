@@ -1,4 +1,22 @@
 use super::*;
+
+#[test]
+fn webp_metadata_exposes_the_shared_xmp_fields_and_validation() {
+    for extension in ["webp", "WeBp", "WEBP"] {
+        let format = ImageMetadataFormat::from_path(Path::new(&format!("image.{extension}")))
+            .expect("WebP metadata capability");
+        assert_eq!(format.fields(), ImageMetadataFormat::Jpeg.fields());
+        let mut options = MetadataExportOptions::default();
+        options
+            .set(MetadataField::Date, Some("2023-02-29".into()))
+            .expect("text");
+        assert!(format.validate_options(&options).is_err());
+        options
+            .set(MetadataField::Date, Some("2024-02-29".into()))
+            .expect("text");
+        format.validate_options(&options).expect("valid date");
+    }
+}
 use crate::export::audio_tests::{ffmpeg, fixture, pcm, root};
 use std::os::windows::process::CommandExt;
 

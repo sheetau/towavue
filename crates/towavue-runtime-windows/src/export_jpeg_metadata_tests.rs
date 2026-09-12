@@ -298,7 +298,7 @@ fn jpeg_metadata_capability_and_xml_validation_match_export_contract() {
         ImageMetadataFormat::from_path(Path::new("source.PnG")),
         Some(ImageMetadataFormat::Png)
     );
-    for path in ["source", "source.webp", "source.jpg.pngx"] {
+    for path in ["source", "source.tiff", "source.jpg.pngx"] {
         assert!(ImageMetadataFormat::from_path(Path::new(path)).is_none());
         assert!(read_export_metadata(Path::new(path), MediaKind::Image).is_err());
     }

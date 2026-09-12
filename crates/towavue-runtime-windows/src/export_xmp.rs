@@ -4,6 +4,17 @@ use quick_xml::name::{LocalName, ResolveResult};
 use quick_xml::reader::NsReader;
 
 pub(super) const LIMIT: usize = 65502;
+pub(super) const FIELDS: [MetadataField; 9] = [
+    MetadataField::Title,
+    MetadataField::Artist,
+    MetadataField::Album,
+    MetadataField::Composer,
+    MetadataField::Genre,
+    MetadataField::Date,
+    MetadataField::Track,
+    MetadataField::Comment,
+    MetadataField::Copyright,
+];
 const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const DC: &str = "http://purl.org/dc/elements/1.1/";
 const DM: &str = "http://ns.adobe.com/xmp/1.0/DynamicMedia/";
@@ -14,7 +25,7 @@ const META: &str = "adobe:ns:meta/";
 mod typed;
 
 fn invalid(message: impl std::fmt::Display) -> ExportError {
-    ExportError::Failed(format!("JPEG XMP text: {message}"))
+    ExportError::Failed(format!("XMP metadata: {message}"))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -196,6 +207,38 @@ pub(super) struct Value {
     pub text: String,
 }
 
+pub(super) fn display_values(
+    values: Vec<Value>,
+    format: ImageMetadataFormat,
+) -> Vec<MetadataSourceValue> {
+    let mut creator = 0;
+    values
+        .into_iter()
+        .map(|value| {
+            let label = format.label();
+            let scope = if let Some(language) = value.language {
+                // The XMP reader accepts only ASCII language tags.
+                format!(
+                    "{label} XMP ({}{})",
+                    &language[..language.len().min(63)],
+                    if language.len() > 63 { "…" } else { "" }
+                )
+            } else if value.field == MetadataField::Artist {
+                creator += 1;
+                format!("{label} XMP (creator {creator})")
+            } else {
+                format!("{label} XMP")
+            };
+            MetadataSourceValue {
+                field: value.field,
+                scope,
+                truncated: value.text.len() > 1024,
+                value: value.text[..value.text.floor_char_boundary(1024)].to_owned(),
+            }
+        })
+        .collect()
+}
+
 fn alt(field: MetadataField) -> bool {
     matches!(
         field,
@@ -328,9 +371,9 @@ pub(super) fn apply(
 ) -> Result<(), ExportError> {
     for field in MetadataField::ALL {
         if let Some(text) = options.get(field) {
-            if !ImageMetadataFormat::Jpeg.fields().contains(&field) {
+            if !FIELDS.contains(&field) {
                 return Err(invalid(format!(
-                    "'{}' is not supported; JPEG currently supports Title, Artist, Album, Composer, Genre, Date, Track, Comment and Copyright",
+                    "'{}' is not supported; XMP currently supports Title, Artist, Album, Composer, Genre, Date, Track, Comment and Copyright",
                     field.label()
                 )));
             }
@@ -404,7 +447,7 @@ pub(super) fn encode(values: &[Value]) -> Result<Vec<u8>, ExportError> {
     }
     result.push_str("</rdf:Description></rdf:RDF></x:xmpmeta>");
     if result.len() > LIMIT {
-        return Err(invalid("serialized packet exceeds JPEG APP1 capacity"));
+        return Err(invalid("serialized packet exceeds 65502 bytes"));
     }
     Ok(result.into_bytes())
 }

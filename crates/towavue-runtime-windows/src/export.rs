@@ -26,6 +26,8 @@ mod jpeg_metadata;
 mod metadata;
 #[path = "export_png_metadata.rs"]
 mod png_metadata;
+#[path = "export_webp_metadata.rs"]
+mod webp_metadata;
 #[path = "export_xmp.rs"]
 mod xmp;
 pub use metadata::{
@@ -336,7 +338,10 @@ fn export_audio_cancellable(
     let jpeg_metadata = (image_metadata && jpeg_metadata::jpeg_path(&request.source))
         .then(|| jpeg_metadata::JpegMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
-    let png_metadata = (image_metadata && jpeg_metadata.is_none())
+    let webp_metadata = (image_metadata && webp_metadata::webp_path(&request.source))
+        .then(|| webp_metadata::WebpMetadata::prepare(request, metadata, cancelled))
+        .transpose()?;
+    let png_metadata = (image_metadata && jpeg_metadata.is_none() && webp_metadata.is_none())
         .then(|| png_metadata::PngMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
     let mut streams = ExportStreams::probe(request)?;
@@ -437,6 +442,8 @@ fn export_audio_cancellable(
         png_metadata.apply(&staging, cancelled)?;
     } else if let Some(jpeg_metadata) = jpeg_metadata {
         jpeg_metadata.apply(&staging, cancelled)?;
+    } else if let Some(webp_metadata) = webp_metadata {
+        webp_metadata.apply(&staging, cancelled)?;
     } else {
         metadata.verify(&staging.output)?;
     }
@@ -560,6 +567,7 @@ impl Drop for StagedExport {
         let _ = fs::remove_file(self.directory.join("timeline-filter.txt"));
         let _ = fs::remove_file(self.directory.join("metadata.png"));
         let _ = fs::remove_file(self.directory.join("metadata.jpg"));
+        let _ = fs::remove_file(self.directory.join("metadata.webp"));
         let _ = fs::remove_dir(&self.directory);
     }
 }

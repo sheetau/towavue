@@ -72,6 +72,7 @@ pub struct MetadataSourceValue {
 pub enum ImageMetadataFormat {
     Png,
     Jpeg,
+    Webp,
 }
 
 impl ImageMetadataFormat {
@@ -80,6 +81,8 @@ impl ImageMetadataFormat {
             Some(Self::Png)
         } else if jpeg_metadata::jpeg_path(path) {
             Some(Self::Jpeg)
+        } else if webp_metadata::webp_path(path) {
+            Some(Self::Webp)
         } else {
             None
         }
@@ -88,22 +91,20 @@ impl ImageMetadataFormat {
     pub fn fields(self) -> &'static [MetadataField] {
         match self {
             Self::Png => &MetadataField::ALL,
-            Self::Jpeg => &[
-                MetadataField::Title,
-                MetadataField::Artist,
-                MetadataField::Album,
-                MetadataField::Composer,
-                MetadataField::Genre,
-                MetadataField::Date,
-                MetadataField::Track,
-                MetadataField::Comment,
-                MetadataField::Copyright,
-            ],
+            Self::Jpeg | Self::Webp => &xmp::FIELDS,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Png => "PNG",
+            Self::Jpeg => "JPEG",
+            Self::Webp => "WebP",
         }
     }
 
     pub fn validate_options(self, options: &MetadataExportOptions) -> Result<(), ExportError> {
-        if self == Self::Jpeg {
+        if matches!(self, Self::Jpeg | Self::Webp) {
             xmp::apply(&mut Vec::new(), options)?;
         }
         Ok(())
@@ -119,8 +120,9 @@ pub fn read_export_metadata(
         return match ImageMetadataFormat::from_path(path) {
             Some(ImageMetadataFormat::Png) => png_metadata::inspect(path),
             Some(ImageMetadataFormat::Jpeg) => jpeg_metadata::inspect(path),
+            Some(ImageMetadataFormat::Webp) => webp_metadata::inspect(path),
             None => Err(ExportError::Failed(
-                "Image metadata currently supports PNG or JPEG input with the same output format"
+                "Image metadata currently supports PNG, JPEG or static WebP input with the same output format"
                     .into(),
             )),
         };

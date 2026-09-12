@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+E01 静止WebP XMP: JPEGと共通の9項目・型検査・既存値表示をWebPへ接続。全Keep／設定未使用も同形式保存時に保持し、XMP chunk／RIFF長／VP8X flagだけを書換える。simple VP8／VP8Lには必要時のみVP8Xを追加し、既存encode後の画像bitstreamを再処理しない。64KiB単位の取消、chunk数／XMP予算、寸法・flag・境界・padding検査とstage再読取照合を共用する。アニメーションの1枚化を成功とせず、本経路で明示拒否する。
+
+検証: 非対応だった旧capability回帰の失敗を確認後、lossless opaque／alphaのbitstream・画素保持と独立decoderによるXMP取得、拡張chunkのpayload／順序保持、実FFmpeg回転出力のKeep／Set／Remove一致、言語／作者順／非canonical Date・Track保持を確認。切断・不正RIFF・重複・flag／寸法不整合・animation・XMP過大・chunk数過大、bounded取消／I/O失敗／検証不一致時のstage整理と保存先保護を回帰化。UI説明・型不正時のApply無効化、Save／再Save／all Keep／Remove／形式不一致／guard／tab/source lifecycleを確認。これは自動UI回帰であり、native入力／DPIの実機確認とは区別する。Album artist、他形式・EXIF／IPTC／COM／ICC・未知XMPの完全保持、animation-preserving exportと全UX台帳を継続する。
+
 E01 JPEG Date/Track: DateをxmpDM:releaseDate（撮影時刻ではなく公開日）、TrackをxmpDM:trackNumberへ対応させ、JPEG UIを9項目へ拡張。SetはXMP Date／Integerの型検査を共有し、年月・暦・時分秒・任意timezone／小数秒と符号付き任意長十進整数を扱う。省略成分の補完・UTC変換・文字の正規化はしない。既存sourceの非canonical表記はKeepで保持し、Remove／空Setで削除できる。PNG・動画／音声の自由文字値は変えない。
 
 検証: 旧コードの対応項目不足で失敗する回帰を確認後、属性／要素の読取、非canonical Keep、Set／Remove、JPEG回転保存の非XMP bytes／画素一致、失敗時source／target保護を通過。年・閏年・時刻・timezone・小数・切断文字列・1024桁整数／不正文字を型テストし、PNGの自由文保持も確認。UIでは説明・元の値・不正Set時のApply無効／直接dispatch拒否、有効値・Keep／RemoveとSave／再Save／guard／tab/source lifecycleを検証。通常windowの操作試験はアクティブ化エラーで未確認。Album artist、他形式・EXIF／IPTC／COM同期・Extended XMP、全native/DPI/IME／品質を含む全台帳は継続する。

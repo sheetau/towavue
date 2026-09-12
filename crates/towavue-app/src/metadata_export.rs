@@ -41,7 +41,7 @@ impl MetadataDialog {
         if self.kind == MediaKind::Image {
             if self.image_format().is_none() {
                 return Err(
-                    "Image metadata requires PNG or JPEG input with the same output format.".into(),
+                    "Image metadata requires PNG, JPEG or static WebP input with the same output format.".into(),
                 );
             }
             match &self.current {
@@ -120,8 +120,8 @@ impl MetadataDialog {
                         MetadataField::Date => "Creation Time (text, no date conversion)",
                         _ => field.label(),
                     }));
-                } else if image_format == Some(ImageMetadataFormat::Jpeg) {
-                    ui.label(format!("JPEG XMP property: {}", match field {
+                } else if let Some(format @ (ImageMetadataFormat::Jpeg | ImageMetadataFormat::Webp)) = image_format {
+                    ui.label(format!("{} XMP property: {}", format.label(), match field {
                         MetadataField::Title => "dc:title (language alternatives)",
                         MetadataField::Artist => "dc:creator (ordered authors)",
                         MetadataField::Album => "xmpDM:album (text)",
@@ -131,7 +131,7 @@ impl MetadataDialog {
                         MetadataField::Track => "xmpDM:trackNumber (decimal integer with optional sign, not track/total)",
                         MetadataField::Comment => "dc:description (language alternatives)",
                         MetadataField::Copyright => "dc:rights (language alternatives)",
-                        _ => unreachable!("JPEG field selector is restricted"),
+                        _ => unreachable!("XMP field selector is restricted"),
                     }));
                 }
                 let draft = &mut self.fields[self.selected];
@@ -166,8 +166,12 @@ impl MetadataDialog {
                     ui.label("JPEG input and JPEG output only. Applies to the next Save or Export as for this tab's current file. Original file, displayed pixels and edit history stay unchanged.");
                     ui.label("Only these 9 XMP fields are edited. EXIF, IPTC and JPEG comments (COM) are not synchronized; unknown or technical source XMP is not copied. Keep preserves supported source values as written, languages and author order, including when all fields are Keep. Existing noncanonical Date/Track values are retained; new values must match the displayed types.");
                     ui.label("Set replaces all values of the field with one (x-default for language alternatives). Remove deletes all values. Choose a .jpg or .jpeg export path; other output formats fail without replacing the target. Extended XMP, corrupt or oversized metadata is rejected (one packet, 65502 bytes, 128 text values).");
+                } else if image_format == Some(ImageMetadataFormat::Webp) {
+                    ui.label("Static WebP input and WebP output only. Applies to the next Save or Export as for this tab's current file. Original file, displayed pixels and edit history stay unchanged. Animated WebP is rejected.");
+                    ui.label("Only these 9 XMP fields are edited. Source EXIF, ICC and unknown or technical XMP are not copied or synchronized. Keep preserves supported source values as written, languages and author order, including when all fields are Keep. Existing noncanonical Date/Track values are retained; new values must match the displayed types.");
+                    ui.label("Set replaces all values of the field with one (x-default for language alternatives). Remove deletes all values. Choose a .webp export path; other output formats fail without replacing the target. Corrupt or oversized metadata is rejected (one XMP packet, 65502 bytes, 128 text values).");
                 } else if self.kind == MediaKind::Image {
-                    ui.label("Image metadata currently supports PNG and JPEG only, with the same input/output format. Other image formats cannot apply metadata options.");
+                    ui.label("Image metadata currently supports PNG, JPEG and static WebP only, with the same input/output format. Other image formats cannot apply metadata options.");
                 } else {
                     ui.label("Applies to the next Save, Export as and Export audio only for this tab's current file. Playback, original file and edit history stay unchanged.");
                     ui.label("Set/Remove affects the file and output streams. Unsupported tags or changed values fail before replacing the target. Keep is not a guarantee of complete metadata preservation across formats.");

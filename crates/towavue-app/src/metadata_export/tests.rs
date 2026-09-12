@@ -182,6 +182,7 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
         (MediaKind::Audio, "audio.wav"),
         (MediaKind::Image, "image.PNG"),
         (MediaKind::Image, "image.JPEG"),
+        (MediaKind::Image, "image.WEBP"),
     ] {
         let context = fonts::test_context();
         context.enable_accesskit();
@@ -239,10 +240,14 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
             }
             click(&mut app, "Set value");
             let value = match (ImageMetadataFormat::from_path(Path::new(filename)), field) {
-                (Some(ImageMetadataFormat::Jpeg), MetadataField::Date) => {
-                    "2024-02-29T12:34+09:00".into()
-                }
-                (Some(ImageMetadataFormat::Jpeg), MetadataField::Track) => "+0002".into(),
+                (
+                    Some(ImageMetadataFormat::Jpeg | ImageMetadataFormat::Webp),
+                    MetadataField::Date,
+                ) => "2024-02-29T12:34+09:00".into(),
+                (
+                    Some(ImageMetadataFormat::Jpeg | ImageMetadataFormat::Webp),
+                    MetadataField::Track,
+                ) => "+0002".into(),
                 _ => format!("{} 日本語\nsecond line", field.label()),
             };
             set_value(&mut app, &value);

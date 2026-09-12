@@ -1,5 +1,13 @@
 # towavue アーキテクチャ
 
+## E01: 静止WebPのXMP編集（2026-09-12）
+
+静止WebP→WebP保存へJPEGと同じ9項目のXMP読取・Keep／Set／Removeを接続する。共通XMP codec／型検査・UIを再利用し、全Keep／設定未使用の同形式保存も対象とする。[WebP container仕様](https://developers.google.com/speed/webp/docs/riff_container)に従い、RIFF長、chunk境界・zero padding、単一bitstream／VP8X／XMP、寸法・feature flagと必要chunk順を検査する。標準XMP一packet・65502 bytes／128値／32階層等の既存予算を共用し、他metadata予算の拡大は行わない。
+
+既存encodeのstageへXMP chunkを差し替え、RIFF長とVP8XのXMP flagだけを更新する。simple VP8／VP8Lにはbitstream headerの寸法・alpha情報からVP8Xを先頭へ追加する。その他のstage chunk payload／順序は保持し、画像をmetadata処理で再decode／再encodeしない。読取・複写は64KiBごとの取消と65536 chunk上限を持ち、全画像fileをメモリへ保持しない。新stageのXMPを再読取照合し、既存source stamp／publish保護を共用する。
+
+現在のImage exportは1枚出力であるため、WebPのANIM／ANMF／animation flagは本経路で明示拒否し、Apply／保存を成功扱いにしない。アニメーション保持の実装を完了とせず残件へ維持する。既存の非canonical Date／TrackのKeep、source/tab設定lifecycleと非破壊編集は維持。元EXIF／ICC／未知／技術XMPの追加copy・整合、JPEGとのcross-format metadata移送、Album artist・他画像形式・全native/DPI/IME／品質は別の未完事項とする。
+
 ## E01: JPEG XMPの公開日とTrack（2026-09-12）
 
 JPEGの対応項目へDateとTrackを追加する。[Adobe Dynamic Media schema](https://developer.adobe.com/xmp/docs/xmp-namespaces/xmp-dm/)のxmpDM:releaseDateとxmpDM:trackNumberに対応させ、Dateは公開日であって撮影日時やfilesystem時刻ではないことをUIで明示する。[XMP基本型](https://developer.adobe.com/xmp/docs/xmp-namespaces/xmp-data-types/)に従い、Set時のDateは4桁年・年月・年月日または年月日T時分（任意の秒・小数秒・timezone）、Trackは任意長の十進数字列と任意の先頭符号とする。暦・時分秒・timezoneの範囲を検査し、月日／timezone補完、UTC変換、数値の正規化、Trackの分数表記への暗黙変換はしない。既存の文字数予算を維持する。

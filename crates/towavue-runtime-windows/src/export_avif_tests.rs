@@ -281,6 +281,13 @@ fn avif_static_primary_and_alpha_items_match_lossless_rgba() {
     let decoded = crate::decode_image(&path).expect("static display");
     assert_eq!(decoded.frames.len(), 1);
     assert_eq!(decoded.frames[0].rgba, pixels);
+    let saved = root.join("saved.avif");
+    export_media(&request(&path, &saved)).expect("static AVIF save");
+    let output = crate::decode_image(&saved).expect("saved display");
+    assert_eq!(
+        output.frames[0].rgba, pixels,
+        "static save must retain RGBA"
+    );
     let preview = crate::image::first_animation_frame(&path, pixels.len(), &|| true)
         .expect("preview")
         .expect("frame");
@@ -350,6 +357,169 @@ fn avif_export_retains_variable_timing_and_repeat_on_resave() {
             assert!(same_timing(&original.samples[0], &saved.samples[0]));
         }
     }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn avif_static_edits_and_format_conversion_preserve_displayed_pixels() {
+    use towavue_core::{ImageResize, ImageRotation, PixelCrop, ResampleFilter};
+    let root = audio_tests::root("avif-static-edits");
+    let png = root.join("original.png");
+    let source = root.join("source.avif");
+    let target = root.join("saved.avif");
+    for alpha in [false, true] {
+        let original = ::image::RgbaImage::from_fn(16, 12, |x, y| {
+            ::image::Rgba([
+                (x * 17) as u8,
+                (y * 23) as u8,
+                (x * 7 + y * 13) as u8,
+                if alpha {
+                    ((x * 31 + y * 37) % 256) as u8
+                } else {
+                    255
+                },
+            ])
+        });
+        original.save(&png).expect("original PNG");
+        export_media(&request(&png, &source)).expect("PNG to AVIF");
+        let decoded = crate::decode_image(&source).expect("AVIF source");
+        assert!(decoded.frames[0].rgba == original.as_raw().as_slice());
+        let mut operations = vec![
+            vec![],
+            vec![EditOperation::RotateClockwise],
+            vec![
+                EditOperation::Crop(PixelCrop {
+                    x: 1,
+                    y: 2,
+                    width: 11,
+                    height: 7,
+                }),
+                EditOperation::FlipHorizontal,
+            ],
+            vec![EditOperation::RotateImage(
+                ImageRotation::new(137, (16, 12)).expect("rotation"),
+            )],
+        ];
+        for filter in [
+            ResampleFilter::Nearest,
+            ResampleFilter::Bilinear,
+            ResampleFilter::Bicubic,
+            ResampleFilter::Lanczos,
+        ] {
+            operations.push(vec![EditOperation::Resize(
+                ImageResize::new(21, 9, filter).expect("resize"),
+            )]);
+        }
+        for operations in operations {
+            let mut edited_request = request(&source, &target);
+            edited_request.operations = operations;
+            let expected = crate::render_image_edits(
+                &decoded,
+                &edited_request.operations,
+                &crate::Cancellation::default(),
+            )
+            .expect("display edits");
+            export_media(&edited_request).expect("AVIF save");
+            for extension in ["avif", "png", "webp"] {
+                let resaved = root.join(format!("resaved.{extension}"));
+                export_media(&request(&target, &resaved)).expect("static format resave");
+                let actual = crate::decode_image(&resaved).expect("saved pixels");
+                assert_eq!(actual.frames.len(), 1);
+                assert_eq!(actual.dimensions(), expected.dimensions());
+                if extension == "webp" {
+                    assert!(
+                        actual.frames[0]
+                            .rgba
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .map(|pixel| pixel[3])
+                            .eq(expected.frames[0]
+                                .rgba
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .map(|pixel| pixel[3])),
+                        "WebP alpha"
+                    );
+                } else {
+                    assert!(
+                        actual.frames[0].rgba == expected.frames[0].rgba,
+                        "alpha={alpha}, {extension}, operations={:?}",
+                        edited_request.operations
+                    );
+                }
+            }
+        }
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn avif_static_save_protects_targets_and_owned_staging() {
+    let root = audio_tests::root("avif-static-protection");
+    let png = root.join("source.png");
+    let source = root.join("source.avif");
+    let target = root.join("target.avif");
+    ::image::RgbaImage::from_pixel(16, 12, ::image::Rgba([100, 20, 240, 60]))
+        .save(&png)
+        .expect("fixture");
+    export_media(&request(&png, &source)).expect("source AVIF");
+    fs::write(&target, b"existing target").expect("target");
+    for input in [&png, &source] {
+        for before in [false, true] {
+            let cancel = AtomicBool::new(before);
+            let result = export_cancellable(&request(input, &target), &cancel, &|time| {
+                if time > Duration::ZERO {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            });
+            assert!(matches!(result, Err(ExportError::Cancelled)), "{result:?}");
+            assert_eq!(fs::read(&target).expect("target"), b"existing target");
+        }
+        let intact = fs::read(input).expect("source");
+        let changed = AtomicBool::new(false);
+        let result =
+            export_cancellable(&request(input, &target), &AtomicBool::new(false), &|time| {
+                if time > Duration::ZERO && !changed.swap(true, Ordering::Relaxed) {
+                    use std::io::Write;
+                    fs::OpenOptions::new()
+                        .append(true)
+                        .open(input)
+                        .expect("source")
+                        .write_all(b"changed")
+                        .expect("change source");
+                }
+            });
+        assert!(changed.load(Ordering::Relaxed) && result.is_err());
+        assert_eq!(fs::read(&target).expect("target"), b"existing target");
+        fs::write(input, intact).expect("restore owned source");
+    }
+    for occupied in ["output.avif", "animation-source.png"] {
+        let stage = StagedExport::new(&target).expect("stage");
+        let occupied = stage.directory.join(occupied);
+        fs::write(&occupied, b"occupied").expect("occupied path");
+        assert!(
+            export_still(
+                &request(&source, &target),
+                &stage,
+                &AtomicBool::new(false),
+                &|_| {}
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&occupied).expect("preserved stage"), b"occupied");
+    }
+    fs::write(&source, b"damaged source").expect("corrupt input");
+    assert!(export_media(&request(&source, &target)).is_err());
+    assert_eq!(fs::read(&target).expect("target"), b"existing target");
+    assert!(fs::read_dir(&root).expect("root").all(|entry| {
+        !entry
+            .expect("entry")
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".towavue-export-")
+    }));
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
 

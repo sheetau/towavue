@@ -248,68 +248,15 @@ impl Animation {
         } else {
             filters.push_str(",format=gbrp[outv]");
         }
-        let graph = staging.directory.join("timeline-filter.txt");
-        fs::write(&graph, filters).map_err(ExportError::Output)?;
-        let loops = self.color().loops.unwrap_or(1);
-        let time_base = self.samples[0].time_base;
-        let mut args: Vec<String> = [
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-nostats",
-            "-progress",
-            "pipe:1",
-            "-xerror",
-            "-err_detect",
-            "explode",
-            "-i",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect();
-        args.extend([
-            request.source.display().to_string(),
-            "-/filter_complex".into(),
-            graph.display().to_string(),
-            "-map".into(),
-            "[outv]".into(),
-        ]);
-        if alpha_output {
-            args.extend(["-map", "[outa]"].map(String::from));
-            // Alpha extraction retains RGB frame properties, but monochrome AV1
-            // cannot signal the identity RGB matrix used by the color track.
-            args.extend(["-colorspace:v:1", "bt709"].map(String::from));
-        }
-        args.extend(
-            [
-                "-map_metadata",
-                "-1",
-                "-c:v",
-                "libaom-av1",
-                "-crf",
-                "0",
-                "-cpu-used",
-                "6",
-                "-threads",
-                "1",
-                "-fps_mode",
-                "passthrough",
-                "-enc_time_base",
-            ]
-            .map(String::from),
-        );
-        args.extend([
-            format!("{}/{}", time_base.numerator(), time_base.denominator()),
-            "-loop".into(),
-            loops.to_string(),
-            staging.output.display().to_string(),
-        ]);
-        let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;
-        let result = run_ffmpeg(&executable, args, cancelled, progress)?;
-        if !result.status.success() {
-            return Err(invalid(String::from_utf8_lossy(&result.stderr)));
-        }
+        encode(
+            request,
+            staging,
+            &filters,
+            alpha_output,
+            Some((self.samples[0].time_base, self.color().loops.unwrap_or(1))),
+            cancelled,
+            progress,
+        )?;
         if self.color().loops.is_none() {
             // Preserve an undeclared repetition policy without changing box offsets.
             let mut file = fs::OpenOptions::new()
@@ -349,6 +296,173 @@ impl Animation {
         }
         check_cancelled(cancelled)
     }
+}
+
+fn encode(
+    request: &ExportRequest,
+    staging: &StagedExport,
+    filters: &str,
+    alpha_output: bool,
+    timing: Option<(ffmpeg::Rational, u32)>,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+) -> Result<(), ExportError> {
+    let graph = staging.directory.join("timeline-filter.txt");
+    fs::write(&graph, filters).map_err(ExportError::Output)?;
+    let mut args: Vec<String> = [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-nostats",
+        "-progress",
+        "pipe:1",
+        "-xerror",
+        "-err_detect",
+        "explode",
+        "-i",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    args.extend([
+        request.source.display().to_string(),
+        "-/filter_complex".into(),
+        graph.display().to_string(),
+        "-map".into(),
+        "[outv]".into(),
+    ]);
+    if alpha_output {
+        args.extend(["-map", "[outa]"].map(String::from));
+        // Alpha extraction retains RGB frame properties, but monochrome AV1
+        // cannot signal the identity RGB matrix used by the color track.
+        args.extend(["-colorspace:v:1", "bt709"].map(String::from));
+    }
+    args.extend(
+        [
+            "-map_metadata",
+            "-1",
+            "-c:v",
+            "libaom-av1",
+            "-crf",
+            "0",
+            "-cpu-used",
+            "6",
+            "-threads",
+            "1",
+            "-fps_mode",
+            "passthrough",
+        ]
+        .map(String::from),
+    );
+    if let Some((time_base, loops)) = timing {
+        args.extend([
+            "-enc_time_base".into(),
+            format!("{}/{}", time_base.numerator(), time_base.denominator()),
+            "-loop".into(),
+            loops.to_string(),
+        ]);
+    } else {
+        args.extend(["-frames:v", "1"].map(String::from));
+    }
+    args.push(staging.output.display().to_string());
+    let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;
+    let result = run_ffmpeg(&executable, args, cancelled, progress)?;
+    if !result.status.success() {
+        return Err(invalid(String::from_utf8_lossy(&result.stderr)));
+    }
+    check_cancelled(cancelled)
+}
+
+pub(super) fn export_still(
+    request: &ExportRequest,
+    staging: &StagedExport,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+) -> Result<(), ExportError> {
+    use image::ImageEncoder;
+    let current = || !cancelled.load(Ordering::Relaxed);
+    check_cancelled(cancelled)?;
+    let decoded = crate::image::decode_image_cancellable(
+        &request.source,
+        crate::image::IMAGE_BYTE_LIMIT,
+        &current,
+    );
+    check_cancelled(cancelled)?;
+    let decoded = decoded.map_err(invalid)?;
+    if decoded.frames.len() != 1 {
+        return Err(invalid("static export must not discard animation frames"));
+    }
+    let frame = crate::image_edits::render_frame_cancellable(
+        &decoded.frames[0],
+        &request.operations,
+        &|| !current(),
+    );
+    check_cancelled(cancelled)?;
+    let frame = frame.map_err(invalid)?;
+    drop(decoded);
+    // Reuse the same decoded and edited RGBA pixels as display, including associated alpha.
+    // This owned PNG is also the input for alpha-capable static format conversion.
+    let source = staging.directory.join("animation-source.png");
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&source)
+        .map_err(ExportError::Output)?;
+    image::codecs::png::PngEncoder::new(file)
+        .write_image(
+            &frame.rgba,
+            frame.width,
+            frame.height,
+            image::ExtendedColorType::Rgba8,
+        )
+        .map_err(invalid)?;
+    check_cancelled(cancelled)?;
+    let staged = ExportRequest {
+        source,
+        operations: vec![],
+        target: staging.output.clone(),
+        ..request.clone()
+    };
+    if avif_path(&request.target) {
+        let alpha = frame
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 255);
+        let filters = if alpha {
+            "[0:v]format=rgba,split[color][alpha];[color]format=gbrp[outv];[alpha]alphaextract,format=gray,setparams=colorspace=bt709[outa]"
+        } else {
+            "[0:v]format=gbrp[outv]"
+        };
+        encode(&staged, staging, filters, alpha, None, cancelled, progress)?;
+        let output = crate::image::decode_image_cancellable(
+            &staging.output,
+            crate::image::IMAGE_BYTE_LIMIT,
+            &current,
+        );
+        check_cancelled(cancelled)?;
+        let output = output.map_err(invalid)?;
+        if output.frames.len() != 1
+            || output.dimensions() != (frame.width, frame.height)
+            || output.frames[0].rgba != frame.rgba
+        {
+            return Err(invalid("saved static RGBA pixels differ"));
+        }
+    } else {
+        let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;
+        let output = run_ffmpeg(
+            &executable,
+            staging.arguments(&staged, false, &ExportStreams::default())?,
+            cancelled,
+            progress,
+        )?;
+        if !output.status.success() {
+            return Err(invalid(String::from_utf8_lossy(&output.stderr)));
+        }
+    }
+    check_cancelled(cancelled)
 }
 
 fn same_timing(left: &Samples, right: &Samples) -> bool {

@@ -341,6 +341,7 @@ fn export_audio_cancellable(
     let gif_source = request.kind == MediaKind::Image && gif_animation::gif_path(&request.source);
     let webp_source = request.kind == MediaKind::Image && webp_metadata::webp_path(&request.source);
     let avif_source = request.kind == MediaKind::Image && avif::avif_path(&request.source);
+    let avif_target = request.kind == MediaKind::Image && avif::avif_path(&request.target);
     if avif_source && !metadata.is_empty() {
         return Err(ExportError::Failed(
             "AVIF metadata editing is not supported yet".into(),
@@ -356,7 +357,8 @@ fn export_audio_cancellable(
         || png_source
         || gif_source
         || webp_source
-        || avif_source)
+        || avif_source
+        || avif_target)
         .then(|| audio_options::SourceStamp::read(&request.source))
         .transpose()?;
     let avif_animation = avif_source
@@ -457,6 +459,17 @@ fn export_audio_cancellable(
         source_stamp
             .as_ref()
             .expect("WebP source stamp")
+            .verify(&request.source)?;
+        staging.publish(&request.target, cancelled, trimmed_kind)?;
+        return Ok(ExportOutcome {
+            used_hardware_encoder: false,
+        });
+    }
+    if avif_source || avif_target {
+        avif::export_still(request, &staging, cancelled, progress)?;
+        source_stamp
+            .as_ref()
+            .expect("AVIF source stamp")
             .verify(&request.source)?;
         staging.publish(&request.target, cancelled, trimmed_kind)?;
         return Ok(ExportOutcome {

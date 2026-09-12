@@ -8504,6 +8504,11 @@ where
     }
 
     fn image_animation_visible(&self) -> bool {
+        if self.image_edit_pending
+            || (self.image_edit_source.is_some() && self.image_error.is_some())
+        {
+            return false;
+        }
         self.window.as_ref().is_none_or(|window| {
             window.is_visible() != Some(false) && window.is_minimized() != Some(true)
         })

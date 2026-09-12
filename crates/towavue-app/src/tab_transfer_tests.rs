@@ -85,6 +85,118 @@ fn finish(app: &mut App, events: &mpsc::Receiver<AppEvent>) {
 }
 
 #[test]
+fn image_animation_suspends_until_resampling_finishes_or_undo_recovers() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::image_animation_suspends_until_resampling_finishes_or_undo_recovers",
+    ) else {
+        return;
+    };
+    for succeeds in [false, true] {
+        let (mut app, _) = app();
+        let original = decoded(true);
+        install(
+            &mut app,
+            root.join("animation-edit.png"),
+            Arc::clone(&original),
+        );
+        app.folder_watcher = None;
+        app.nearest_images = true;
+        app.update_image_sampling();
+        let resize = EditOperation::Resize(
+            towavue_core::ImageResize::new(3, 3, towavue_core::ResampleFilter::Nearest)
+                .expect("resize"),
+        );
+        app.push_visual_edit(resize);
+        app.image_edit_worker.clear();
+        let start = Instant::now() - Duration::from_millis(3500);
+        let deadline = start + Duration::from_secs(1);
+        app.image.as_mut().expect("image").next_frame_at = Some(deadline);
+        let context = app.ui_context.clone().expect("context");
+        let _ = context.tex_manager().write().take_delta();
+        let assert_suspended = |app: &mut App| {
+            let now = Instant::now();
+            app.status_message = Some(("notice".into(), now));
+            app.schedule();
+            let image = app.image.as_ref().expect("retained pixels");
+            assert_eq!(
+                image.next_frame_at,
+                Some(deadline),
+                "non-displayed animation must not advance"
+            );
+            assert_eq!(image.frame_index, 0);
+            assert!(context.tex_manager().write().take_delta().set.is_empty());
+            assert_eq!(
+                app.idle_wakeup(now),
+                Some(now + STATUS_MESSAGE_DURATION),
+                "status expiry survives without the animation wakeup"
+            );
+        };
+        assert_suspended(&mut app);
+        if succeeds {
+            let resized = towavue_runtime_windows::render_image_edits(
+                &original,
+                &[resize],
+                &Default::default(),
+            )
+            .expect("resized animation");
+            app.finish_image_edits(app.image_edit_generation, Ok(Arc::new(resized)));
+        } else {
+            app.finish_image_edits(app.image_edit_generation, Err("resampling failed".into()));
+            assert_suspended(&mut app);
+            app.undo_edit(false);
+            assert!(Arc::ptr_eq(
+                &app.image.as_ref().expect("original pixels").decoded,
+                &original
+            ));
+        }
+        app.update_image_sampling();
+        let _ = context.tex_manager().write().take_delta();
+        let now = Instant::now();
+        app.schedule();
+        let image = app.image.as_ref().expect("resumed animation");
+        let next = image.next_frame_at.expect("animation deadline");
+        assert!(next > now);
+        assert_eq!(
+            (next - start).as_millis() % 2000,
+            if image.frame_index == 0 { 1000 } else { 0 }
+        );
+        assert_eq!(image.sampling.get(), TextureOptions::NEAREST);
+        assert_eq!(
+            app.image_copy_request().expect("resumed copy").size,
+            if succeeds { (3, 3) } else { (2, 2) }
+        );
+        let updates = context.tex_manager().write().take_delta().set;
+        assert_eq!(updates.len(), usize::from(image.frame_index != 0));
+        for (_, delta) in updates {
+            assert_eq!(delta.options, TextureOptions::NEAREST);
+            assert!(
+                delta.image
+                    == egui::ImageData::Color(Arc::new(color_image(
+                        &image.decoded.frames[image.frame_index]
+                    )))
+            );
+        }
+    }
+    // A failed first reading page must not freeze other successfully decoded pages.
+    let (mut app, _) = app();
+    install(&mut app, root.join("reading.png"), decoded(true));
+    let mut page = app.image.take().expect("reading page");
+    let deadline = Instant::now() - Duration::from_millis(2500);
+    page.next_frame_at = Some(deadline);
+    app.reading_pages = vec![Ok(page)];
+    app.reading_mode = true;
+    app.image_error = Some("first page failed".into());
+    app.schedule();
+    assert!(
+        app.reading_pages[0]
+            .as_ref()
+            .expect("valid page")
+            .next_frame_at
+            > Some(deadline)
+    );
+}
+
+#[test]
 fn failed_reedit_rerenders_after_tab_return_or_window_transfer() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_transfer::tests::failed_reedit_rerenders_after_tab_return_or_window_transfer",

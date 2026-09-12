@@ -68,6 +68,56 @@ fn open_muted<N: Fn(AppEvent) + Send + Sync + 'static>(
     id
 }
 
+fn recover_failed_playback<N: Fn(AppEvent) + Send + Sync + 'static>(
+    app: &mut Application<N>,
+    events: &mpsc::Receiver<AppEvent>,
+) {
+    let tab = app.tabs.active().expect("failed tab").id;
+    let history = app.edits[&tab].clone();
+    let path = app.path.clone();
+    let view = app.image_view;
+    let selection = app.time_selection;
+    let error = app.playback_error.clone().expect("original playback error");
+    let position = app.current_position();
+    let epoch = app.graphics_epoch;
+    let generation = app.generation;
+    app.recover_graphics_device(position);
+    assert!(app.renderer.is_some());
+    assert!(app.graphics_epoch > epoch);
+    assert_ne!(app.generation, generation, "pipeline rebuilt on new device");
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        service(app, events);
+        assert_eq!(app.state, PlaybackState::Faulted);
+        assert_eq!(app.playback_error.as_deref(), Some(error.as_str()));
+        assert_eq!(app.current_position(), position);
+        assert_eq!(app.edits[&tab], history);
+        assert_eq!(app.path, path);
+        assert_eq!(app.image_view, view);
+        assert_eq!(app.time_selection, selection);
+        if app.media_kind == Some(MediaKind::Audio) || app.pending_time.is_some() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "recovered failed video frame");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        app.clock
+            .as_ref()
+            .expect("stopped clock")
+            .paused_at
+            .is_some()
+    );
+    if let Some((_, shown)) = &mut app.status_message {
+        *shown = Instant::now() - STATUS_MESSAGE_DURATION;
+    }
+    assert_eq!(
+        app.status_notice(),
+        Some(format!("Could not play media: {error}")),
+        "the failure stays visible after the temporary notice expires"
+    );
+}
+
 fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
     let source =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
@@ -422,6 +472,19 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
                     "failed active media must stop WASAPI output"
                 );
             }
+            recover_failed_playback(&mut app, &events);
+            let stopped = app.current_position();
+            app.activate_tab(image);
+            assert!(app.playback_error.is_none(), "image is unaffected");
+            app.recover_graphics_device(MediaTime::ZERO);
+            let saved = &app.retained_playback[&first];
+            assert_eq!(saved.state, PlaybackState::Faulted);
+            assert_eq!(saved.error.as_deref(), Some("owned active fault"));
+            assert_eq!(saved.position(), stopped);
+            app.activate_tab(first);
+            assert_eq!(app.state, PlaybackState::Faulted);
+            assert_eq!(app.playback_error.as_deref(), Some("owned active fault"));
+            assert_eq!(app.current_position(), stopped);
             app.remove_tab(second, false);
             app.handle_app_event(AppEvent::Playback(
                 second_instance,
@@ -490,6 +553,20 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
                 );
                 let stopped = app.current_position();
                 assert_eq!(app.current_position(), stopped);
+                recover_failed_playback(&mut app, &events);
+                let selection = app.time_selection.expect("audio time selection");
+                app.playback_selection = Some(selection);
+                app.seek_to(selection.end());
+                app.fail("owned fault at playback end".into());
+                assert!(
+                    !app.session
+                        .as_ref()
+                        .expect("ended audio")
+                        .range()
+                        .contains(app.current_position()),
+                    "exercise recovery at the exclusive playback end"
+                );
+                recover_failed_playback(&mut app, &events);
                 app.remove_tab(music, false);
             }
             app.activate_tab(image);

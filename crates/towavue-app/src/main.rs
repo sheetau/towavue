@@ -7714,7 +7714,9 @@ where
         }
         self.renderer = Some(renderer);
         self.restore_ui_textures = true;
-        self.playback_error = None;
+        if self.state != PlaybackState::Faulted {
+            self.playback_error = None;
+        }
         self.refresh_title();
         self.filmstrip.clear_previews();
         self.waveform = None;
@@ -7726,7 +7728,9 @@ where
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        if self.state == PlaybackState::Ended || !session.range().contains(position) {
+        if self.state != PlaybackState::Faulted
+            && (self.state == PlaybackState::Ended || !session.range().contains(position))
+        {
             self.state = PlaybackState::Paused;
         }
         if let Err(error) = session.set_paused(self.state != PlaybackState::Playing) {

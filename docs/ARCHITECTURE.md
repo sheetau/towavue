@@ -27,7 +27,7 @@ Keep the single-D3D11-device design: hardware decode, video processing, image/UI
 - Results are scoped to owner and generation. Cancellation is cooperative at I/O/decode/conversion boundaries, not a promise to interrupt arbitrary FFmpeg or OS calls immediately.
 - Volume and rate apply to playback and export. Rate changes preserve pitch but may re-prime; they are not guaranteed gapless.
 - Device removal pauses affected sessions and rebuilds all host surfaces on one new device before restoration. Failed recovery retains edits and stopped positions; Retry must not command dead workers. Endpoint recovery preserves the same ownership discipline.
-- Fatal playback errors pause the affected active or retained clock and best-effort pause its output without replacing the original error. Late first-frame or audio-drain events must not start a clock unless playback is Playing.
+- Fatal playback errors pause the affected active or retained clock and best-effort pause its output without replacing the original error. Late first-frame or audio-drain events must not start a clock unless playback is Playing. Successful graphics restoration does not clear an existing playback failure or turn it into a resumable pause, including at a playback-range boundary.
 - HDR/10-bit presentation must follow an explicit validated color path; do not treat unverified passthrough or ignored metadata as HDR support.
 
 ## Windows, tabs, and input

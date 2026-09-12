@@ -375,9 +375,9 @@ pub(super) struct WebpMetadata {
     animation: Option<animation::Animation>,
 }
 
-pub(super) fn apply_gif_animation(
+pub(super) fn apply_png_frames(
     staging: &StagedExport,
-    delays: &[u16],
+    delays: Vec<u32>,
     plays: u16,
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
@@ -385,10 +385,7 @@ pub(super) fn apply_gif_animation(
     let result = (|| {
         let mut control = [0; 6];
         control[4..].copy_from_slice(&plays.to_le_bytes());
-        let animation = animation::Animation {
-            control,
-            delays: delays.iter().map(|delay| u32::from(*delay) * 10).collect(),
-        };
+        let animation = animation::Animation { control, delays };
         let temporary = staging.directory.join("animation.webp");
         {
             let mut input = BufReader::new(animation::Cancellable {
@@ -410,7 +407,7 @@ pub(super) fn apply_gif_animation(
                 progress,
             )?;
             if input.read(&mut [0]).map_err(ExportError::Output)? != 0 {
-                return Err(invalid("extra encoded GIF frames"));
+                return Err(invalid("extra encoded PNG frames"));
             }
         }
         let info = container(

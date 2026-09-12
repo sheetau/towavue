@@ -402,9 +402,15 @@ fn export_audio_cancellable(
     let webp_metadata = (image_metadata && webp_metadata::webp_path(&request.source))
         .then(|| webp_metadata::WebpMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
-    let png_metadata = (image_metadata && jpeg_metadata.is_none() && webp_metadata.is_none())
-        .then(|| png_metadata::PngMetadata::prepare(request, metadata, cancelled))
-        .transpose()?;
+    let png_to_webp =
+        png_source && webp_metadata::webp_path(&request.target) && metadata.is_empty();
+    let png_metadata = if png_to_webp {
+        png_metadata::PngMetadata::prepare_webp(&request.source, cancelled)?
+    } else {
+        (image_metadata && jpeg_metadata.is_none() && webp_metadata.is_none())
+            .then(|| png_metadata::PngMetadata::prepare(request, metadata, cancelled))
+            .transpose()?
+    };
     let webp_to_png =
         (webp_source && png_metadata::png_path(&request.target) && metadata.is_empty())
             .then(|| webp_metadata::PngConversion::prepare(&request.source, cancelled))
@@ -415,7 +421,7 @@ fn export_audio_cancellable(
     streams.png_animation = png_metadata
         .as_ref()
         .is_some_and(png_metadata::PngMetadata::is_animated);
-    if png_source && !image_metadata {
+    if png_source && !image_metadata && !png_to_webp {
         png_metadata::require_static(&request.source, cancelled)?;
     }
     if webp_source && !image_metadata && webp_to_png.is_none() {
@@ -575,7 +581,11 @@ fn export_audio_cancellable(
             gif_animation.apply(&staging, cancelled)?;
         }
     } else if let Some(png_metadata) = png_metadata {
-        png_metadata.apply(&staging, cancelled)?;
+        if png_to_webp {
+            png_metadata.apply_webp(&staging, cancelled, progress)?;
+        } else {
+            png_metadata.apply(&staging, cancelled)?;
+        }
     } else if let Some(jpeg_metadata) = jpeg_metadata {
         jpeg_metadata.apply(&staging, cancelled)?;
     } else if let Some(webp_metadata) = webp_metadata {

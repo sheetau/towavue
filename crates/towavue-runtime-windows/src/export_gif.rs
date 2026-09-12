@@ -130,9 +130,12 @@ impl Animation {
         cancelled: &AtomicBool,
         progress: &(impl Fn(Duration) + Sync),
     ) -> Result<(), ExportError> {
-        webp_metadata::apply_gif_animation(
+        webp_metadata::apply_png_frames(
             staging,
-            &self.delays,
+            self.delays
+                .iter()
+                .map(|delay| u32::from(*delay) * 10)
+                .collect(),
             self.webp_plays()?,
             cancelled,
             progress,

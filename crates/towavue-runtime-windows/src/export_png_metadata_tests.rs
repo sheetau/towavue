@@ -155,6 +155,127 @@ fn animation_fixture_with_regions(plays: u32, delays: &[[u8; 4]], regions: bool)
 }
 
 #[test]
+fn apng_to_webp_preserves_animation_and_rejects_unrepresentable_controls() {
+    let root = root("apng-to-webp");
+    let source = root.join("source.APNG");
+    let target = root.join("converted.webp");
+    let delays = [
+        [0, 0, 0, 0],
+        [0, 1, 3, 232],
+        [255, 255, 255, 255],
+        [255, 255, 0, 4],
+        [0, 7, 0, 0],
+    ];
+    for (plays, count, regions) in [(0, 5, false), (1, 1, false), (3, 5, true), (65535, 5, true)] {
+        let bytes = animation_fixture_with_regions(plays, &delays[..count], regions);
+        fs::write(&source, &bytes).expect("source");
+        let original = crate::decode_image(&source).expect("display");
+        let mut request = request(&source, &target);
+        request.operations = vec![
+            EditOperation::Crop(PixelCrop {
+                x: 2,
+                y: 2,
+                width: 28,
+                height: 20,
+            }),
+            EditOperation::RotateClockwise,
+            EditOperation::FlipHorizontal,
+            EditOperation::Resize(
+                ImageResize::new(30, 42, ResampleFilter::Nearest).expect("resize"),
+            ),
+        ];
+        export_media(&request).expect("APNG to animated WebP");
+        let expected = crate::render_image_edits(
+            &original,
+            &request.operations,
+            &crate::Cancellation::default(),
+        )
+        .expect("displayed edits");
+        assert_eq!(
+            crate::decode_image(&target).expect("converted").frames,
+            expected.frames
+        );
+        let resaved = root.join("resaved.webp");
+        export_media(&self::request(&target, &resaved)).expect("WebP resave");
+        assert_eq!(
+            crate::decode_image(&resaved).expect("resaved").frames,
+            expected.frames
+        );
+        for output in [&target, &resaved] {
+            let mut decoder =
+                image_webp::WebPDecoder::new(BufReader::new(fs::File::open(output).expect("WebP")))
+                    .expect("independent controls");
+            assert_eq!(decoder.num_frames() as usize, count);
+            assert_eq!(
+                decoder.loop_count(),
+                match plays {
+                    0 => image_webp::LoopCount::Forever,
+                    plays => image_webp::LoopCount::Times(
+                        std::num::NonZeroU16::new(plays as u16).expect("plays")
+                    ),
+                }
+            );
+            let mut pixels = vec![0; decoder.output_buffer_size().expect("canvas")];
+            for delay in [0, 1, 1000, 16383750, 70].into_iter().take(count) {
+                assert_eq!(decoder.read_frame(&mut pixels).expect("frame"), delay);
+            }
+        }
+        assert_eq!(fs::read(&source).expect("source untouched"), bytes);
+        assert!(
+            read_export_metadata(&target, MediaKind::Image)
+                .expect("no metadata transfer")
+                .is_empty()
+        );
+    }
+    fs::write(
+        &source,
+        animation_fixture_with_regions(3, &[[0, 1, 0, 10]; 3], true),
+    )
+    .expect("partial frames");
+    for filter in [
+        ResampleFilter::Nearest,
+        ResampleFilter::Bilinear,
+        ResampleFilter::Bicubic,
+        ResampleFilter::Lanczos,
+    ] {
+        let mut request = request(&source, &target);
+        request.operations = vec![
+            EditOperation::RotateImage(
+                towavue_core::ImageRotation::new(137, (32, 24)).expect("rotation"),
+            ),
+            EditOperation::Resize(ImageResize::new(17, 13, filter).expect("resize")),
+        ];
+        export_media(&request).expect("rotated/resampled WebP");
+        let webp = crate::decode_image(&target).expect("WebP pixels");
+        request.target = root.join("reference.apng");
+        export_media(&request).expect("same edited snapshots in APNG");
+        assert_eq!(
+            webp.frames,
+            crate::decode_image(&request.target)
+                .expect("APNG pixels")
+                .frames
+        );
+    }
+    let before = fs::read(&target).expect("existing WebP");
+    for (bytes, message) in [
+        (poster_fixture(3), "separate poster"),
+        (animation_fixture(65536, &[[0, 1, 0, 100]]), "65535"),
+        (animation_fixture(1, &[[0, 1, 0, 3]]), "whole milliseconds"),
+        (animation_fixture(1, &[[255, 255, 0, 1]]), "24-bit"),
+    ] {
+        fs::write(&source, bytes).expect("unrepresentable source");
+        let error =
+            export_cancellable(&request(&source, &target), &AtomicBool::new(false), &|_| {
+                panic!("unrepresentable controls must fail before encoding");
+            })
+            .expect_err("conversion limit");
+        assert!(error.to_string().contains(message), "{error}");
+        assert_eq!(fs::read(&target).expect("target preserved"), before);
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn apng_export_preserves_all_edited_frames_delays_and_loop_count() {
     let root = root("apng-export");
     let source = root.join("source.png");
@@ -923,7 +1044,7 @@ fn apng_unsupported_exports_preserve_targets_and_static_conversions_still_work()
     let source = root.join("source.APNG");
     let bytes = animation_fixture(2, &[[0, 1, 0, 10]; 3]);
     fs::write(&source, &bytes).expect("valid source");
-    for extension in ["jpg", "gif", "webp", "avif"] {
+    for extension in ["jpg", "gif", "bmp", "avif"] {
         let target = root.join(format!("target.{extension}"));
         fs::write(&target, b"existing target").expect("target");
         assert!(
@@ -935,6 +1056,14 @@ fn apng_unsupported_exports_preserve_targets_and_static_conversions_still_work()
         assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
     }
     fs::write(&source, fixture()).expect("static source alias");
+    export_media(&request(&source, &root.join("static.webp"))).expect("static WebP conversion");
+    assert_eq!(
+        crate::decode_image(&root.join("static.webp"))
+            .expect("static WebP")
+            .frames
+            .len(),
+        1
+    );
     export_media(&request(&source, &root.join("static.jpg"))).expect("static conversion");
     export_media(&request(&source, &root.join("static.apng"))).expect("static PNG output alias");
     assert_eq!(
@@ -1080,6 +1209,90 @@ fn apng_assembly_is_bounded_and_preserves_compressed_pixels_on_failure_and_succe
         );
         assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
     }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn apng_to_webp_protects_targets_on_cancel_corruption_and_staging_failures() {
+    let root = root("apng-webp-protection");
+    let source = root.join("source.png");
+    let target = root.join("target.webp");
+    let bytes = animation_fixture_with_regions(3, &[[0, 1, 0, 10]; 3], true);
+    fs::write(&target, b"existing target").expect("target");
+    for before in [true, false] {
+        fs::write(&source, &bytes).expect("source");
+        let cancel = AtomicBool::new(before);
+        assert!(matches!(
+            export_cancellable(&request(&source, &target), &cancel, &|_| cancel
+                .store(true, Ordering::Relaxed)),
+            Err(ExportError::Cancelled)
+        ));
+        assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
+    }
+    let changed = AtomicBool::new(false);
+    assert!(
+        export_cancellable(&request(&source, &target), &AtomicBool::new(false), &|_| {
+            if !changed.swap(true, Ordering::Relaxed) {
+                fs::OpenOptions::new()
+                    .append(true)
+                    .open(&source)
+                    .expect("source")
+                    .write_all(&[0])
+                    .expect("mutate source");
+            }
+        })
+        .expect_err("source change")
+        .to_string()
+        .contains("source changed")
+    );
+    assert!(changed.load(Ordering::Relaxed));
+    assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
+    fs::write(&source, &bytes).expect("restore source");
+    let cancel = AtomicBool::new(false);
+    let metadata = PngMetadata::prepare_webp(&source, &cancel)
+        .expect("prepare")
+        .expect("animation");
+    for name in ["animation-source.png", "animation.webp"] {
+        let staging = StagedExport::new(&target).expect("stage");
+        let occupied = staging.directory.join(name);
+        fs::write(&occupied, b"occupied").expect("occupied file");
+        if name == "animation-source.png" {
+            assert!(
+                metadata
+                    .prepare_animation_source(&request(&source, &target), &staging, &cancel)
+                    .is_err()
+            );
+        } else {
+            fs::write(&staging.output, fixture()).expect("encoded PNG");
+            assert!(metadata.apply_webp(&staging, &cancel, &|_| {}).is_err());
+        }
+        assert_eq!(fs::read(&occupied).expect("occupied retained"), b"occupied");
+    }
+    assert!(
+        export_media_with_options(
+            &request(&source, &target),
+            ExportOptions {
+                metadata: title("unsupported transfer"),
+                ..Default::default()
+            }
+        )
+        .is_err()
+    );
+    let damaged = map_chunks(&bytes, |kind, data| {
+        if &kind == b"IDAT" {
+            *data = vec![0; 4];
+        }
+        true
+    });
+    for invalid in [damaged, bytes[..bytes.len() - 1].to_vec()] {
+        fs::write(&source, invalid).expect("corrupt source");
+        assert!(export_media(&request(&source, &target)).is_err());
+        assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
+    }
+    assert_eq!(
+        fs::read_dir(&root).expect("no owned stages remain").count(),
+        2
+    );
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
 

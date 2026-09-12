@@ -370,6 +370,66 @@ impl PngMetadata {
         self.animation.is_some()
     }
 
+    pub(super) fn prepare_webp(
+        path: &Path,
+        cancelled: &AtomicBool,
+    ) -> Result<Option<Self>, ExportError> {
+        let (_, animation) = scan_contents(
+            BufReader::new(fs::File::open(path).map_err(ExportError::Output)?),
+            None,
+            None,
+            cancelled,
+        )?;
+        let Some(animation) = animation else {
+            return Ok(None);
+        };
+        let prepared = Self {
+            chunks: Vec::new(),
+            animation: Some(animation),
+        };
+        prepared.webp_controls()?;
+        Ok(Some(prepared))
+    }
+
+    fn webp_controls(&self) -> Result<(u16, Vec<u32>), ExportError> {
+        let animation = self.animation.as_ref().expect("animated source");
+        if !animation.includes_default {
+            return Err(invalid(
+                "WebP cannot retain a separate poster; use APNG output",
+            ));
+        }
+        let plays = u16::try_from(animation.plays)
+            .map_err(|_| invalid("WebP is limited to 65535 finite total plays; use APNG output"))?;
+        let delays = animation.delays.iter().map(|delay| {
+            let numerator = u32::from(u16::from_be_bytes([delay[0], delay[1]])) * 1000;
+            let denominator = u32::from(u16::from_be_bytes([delay[2], delay[3]]));
+            let denominator = if denominator == 0 { 100 } else { denominator };
+            if !numerator.is_multiple_of(denominator) {
+                return Err(invalid(
+                    "WebP frame delays require whole milliseconds; use APNG output to retain exact timing",
+                ));
+            }
+            let milliseconds = numerator / denominator;
+            if milliseconds > 0xffffff {
+                return Err(invalid(
+                    "frame delay exceeds WebP's 24-bit millisecond limit; use APNG output",
+                ));
+            }
+            Ok(milliseconds)
+        }).collect::<Result<Vec<_>, ExportError>>()?;
+        Ok((plays, delays))
+    }
+
+    pub(super) fn apply_webp(
+        &self,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+        progress: &(impl Fn(Duration) + Sync),
+    ) -> Result<(), ExportError> {
+        let (plays, delays) = self.webp_controls()?;
+        webp_metadata::apply_png_frames(staging, delays, plays, cancelled, progress)
+    }
+
     pub(super) fn prepare_animation_source(
         &self,
         request: &ExportRequest,

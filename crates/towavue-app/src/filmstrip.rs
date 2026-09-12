@@ -441,7 +441,11 @@ impl Filmstrip {
                             if !ui.is_rect_visible(rect) {
                                 return;
                             }
-                            if enabled && let Some(kind) = MediaKind::from_path(path) {
+                            if enabled
+                                && wanted.len() < VISIBLE_PREVIEW_LIMIT
+                                && let Some(kind) = MediaKind::from_path(path)
+                                && !wanted.iter().any(|(existing, _)| existing == path)
+                            {
                                 wanted.push((path.clone(), kind));
                             }
                             let image_rect = Rect::from_min_size(
@@ -524,6 +528,19 @@ impl Filmstrip {
                 ui.add_space(8.0);
             }
         });
+        // Prepare the rest of the recent list after visible cards, using the same bounded worker.
+        if enabled {
+            for path in paths {
+                if wanted.len() == VISIBLE_PREVIEW_LIMIT {
+                    break;
+                }
+                if let Some(kind) = MediaKind::from_path(path)
+                    && !wanted.iter().any(|(existing, _)| existing == path)
+                {
+                    wanted.push((path.clone(), kind));
+                }
+            }
+        }
         self.set_visible(wanted);
     }
 
@@ -553,7 +570,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recent_grid_uses_visible_shared_previews_and_blocks_background_actions() {
+    fn recent_grid_prepares_all_recent_previews_and_blocks_background_actions() {
         let root = std::env::temp_dir().join(format!("towavue-recent-grid-{}", std::process::id()));
         let mut filmstrip = Filmstrip::new(PreviewCache::new(root.clone()).expect("cache"), || {})
             .expect("preview worker");
@@ -584,7 +601,7 @@ mod tests {
         for _ in 0..3 {
             frame(&mut filmstrip, true, vec![]);
         }
-        assert!(!filmstrip.visible.is_empty() && filmstrip.visible.len() < paths.len());
+        assert_eq!(filmstrip.visible, paths);
         let texture = context.load_texture(
             "recent-fixture",
             egui::ColorImage::filled([2, 1], Color32::RED),
@@ -649,6 +666,146 @@ mod tests {
         assert!(filmstrip.visible.is_empty() && filmstrip.previews.is_empty());
         drop(filmstrip);
         std::fs::remove_dir(root).expect("remove empty owned cache");
+    }
+
+    #[test]
+    fn recent_grid_preparation_is_bounded_unique_and_visible_first() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-recent-limit-{}", std::process::id()));
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.clone()).expect("cache"), || {}).expect("worker");
+        let mut paths: Vec<_> = (0..100)
+            .map(|index| root.join(format!("{index:03}.png")))
+            .collect();
+        paths.insert(0, root.join("unsupported.txt"));
+        paths.push(paths[0].clone());
+        paths.extend_from_within(1..3);
+        let context = crate::fonts::test_context();
+        let mut offset = 0.0;
+        for _ in 0..3 {
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(660.0, 260.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let scroll = egui::ScrollArea::vertical()
+                        .vertical_scroll_offset(offset)
+                        .show(ui, |ui| strip.show_recent(ui, &paths, true, &mut vec![]));
+                    offset = (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
+                },
+            );
+        }
+        assert_eq!(strip.visible.len(), VISIBLE_PREVIEW_LIMIT);
+        let unique: std::collections::HashSet<_> = strip.visible.iter().collect();
+        assert_eq!(unique.len(), strip.visible.len());
+        assert!(
+            !strip.visible.contains(&paths[0]),
+            "unsupported entries are skipped"
+        );
+        assert!(
+            paths[90..101].contains(&strip.visible[0]),
+            "visible bottom rows precede offscreen preparation: {:?}",
+            strip.visible[0]
+        );
+        assert!(
+            strip.visible.contains(&paths[3]),
+            "prepare earlier offscreen entries too"
+        );
+        drop(strip);
+        std::fs::remove_dir(root).expect("remove empty owned cache");
+    }
+
+    #[test]
+    fn recent_grid_has_offscreen_textures_ready_before_scrolling() {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "towavue-recent-preparation-{}-{unique}",
+            std::process::id()
+        ));
+        let cache = PreviewCache::new(root.join("cache")).expect("owned cache");
+        let paths: Vec<_> = (0..40)
+            .map(|index| root.join(format!("{index:02}.bmp")))
+            .collect();
+        let mut bitmap = vec![0_u8; 62];
+        bitmap[..2].copy_from_slice(b"BM");
+        bitmap[2..6].copy_from_slice(&62_u32.to_le_bytes());
+        bitmap[10..14].copy_from_slice(&54_u32.to_le_bytes());
+        bitmap[14..18].copy_from_slice(&40_u32.to_le_bytes());
+        bitmap[18..22].copy_from_slice(&2_u32.to_le_bytes());
+        bitmap[22..26].copy_from_slice(&1_u32.to_le_bytes());
+        bitmap[26..28].copy_from_slice(&1_u16.to_le_bytes());
+        bitmap[28..30].copy_from_slice(&24_u16.to_le_bytes());
+        bitmap[34..38].copy_from_slice(&8_u32.to_le_bytes());
+        for (index, path) in paths.iter().enumerate() {
+            bitmap[54..].copy_from_slice(&[12, 34, index as u8, 12, 34, index as u8, 0, 0]);
+            std::fs::write(path, &bitmap).expect("owned bitmap");
+        }
+        let (notify, ready) = std::sync::mpsc::channel();
+        let mut strip = Filmstrip::new(cache, move || {
+            let _ = notify.send(());
+        })
+        .expect("worker");
+        let context = crate::fonts::test_context();
+        let frame = |strip: &mut Filmstrip, offset| {
+            let mut max_scroll = 0.0;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(660.0, 260.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let scroll = egui::ScrollArea::vertical()
+                        .vertical_scroll_offset(offset)
+                        .show(ui, |ui| strip.show_recent(ui, &paths, true, &mut vec![]));
+                    max_scroll = (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
+                },
+            );
+            (output, max_scroll)
+        };
+        for _ in 0..3 {
+            frame(&mut strip, 0.0);
+        }
+        assert_eq!(strip.visible.len(), paths.len(), "prepare offscreen rows");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while strip.previews.len() != paths.len() {
+            ready
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("all recent previews complete without scrolling");
+            strip.finish(&context);
+        }
+        for path in &paths {
+            assert!(strip.previews[path].is_ok(), "{}", path.display());
+        }
+        let texture = &strip.previews[paths.last().expect("last path")]
+            .as_ref()
+            .expect("offscreen texture")
+            .0;
+        let texture_id = texture.id();
+        let contains_texture = |output: &egui::FullOutput| {
+            output.shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id)
+            })
+        };
+        let (before, max_scroll) = frame(&mut strip, 0.0);
+        assert!(!contains_texture(&before));
+        assert!(contains_texture(&frame(&mut strip, max_scroll).0));
+        assert_eq!(
+            strip.previews.len(),
+            paths.len(),
+            "retain prepared textures"
+        );
+        drop(strip);
+        std::fs::remove_dir_all(root).expect("remove owned fixtures and cache");
     }
 
     #[test]

@@ -2533,7 +2533,7 @@ where
                 .as_ref()
                 .map_or(presentation_time, PlaybackSession::target);
             let mut clock = PlaybackClock::new(presentation_time.max(target), self.playback_rate());
-            clock.set_paused(self.state == PlaybackState::Paused);
+            clock.set_paused(self.state != PlaybackState::Playing);
             self.clock = Some(clock);
         }
         self.pending_time = Some(presentation_time);
@@ -7749,31 +7749,36 @@ where
     }
 
     fn poll_audio(&mut self) {
-        match self
+        if let Some(event) = self
             .session
             .as_ref()
             .and_then(PlaybackSession::try_audio_event)
         {
-            Some(AudioOutputEvent::Drained) => {
+            self.handle_audio_event(event);
+        }
+    }
+
+    fn handle_audio_event(&mut self, event: AudioOutputEvent) {
+        match event {
+            AudioOutputEvent::Drained => {
                 if let Some(position) = self
                     .session
                     .as_ref()
                     .and_then(PlaybackSession::audio_position)
                 {
                     let mut clock = PlaybackClock::new(position, self.playback_rate());
-                    clock.set_paused(self.state == PlaybackState::Paused);
+                    clock.set_paused(self.state != PlaybackState::Playing);
                     self.clock = Some(clock);
                 }
                 self.audio_drained = true;
                 self.check_eof();
             }
-            Some(AudioOutputEvent::EndpointChanged) => {
+            AudioOutputEvent::EndpointChanged => {
                 eprintln!("towavue: recovering changed or invalidated audio endpoint");
                 self.seek_to(self.current_position());
                 self.pending_seek_started = None;
             }
-            Some(AudioOutputEvent::Failed(error)) => self.fail(error),
-            None => {}
+            AudioOutputEvent::Failed(error) => self.fail(error),
         }
     }
 
@@ -7874,6 +7879,12 @@ where
     fn fail(&mut self, error: String) {
         self.cancel_hold_speed();
         self.cancel_frame_steps();
+        if let Some(session) = &mut self.session {
+            let _ = session.set_paused(true);
+        }
+        if let Some(clock) = &mut self.clock {
+            clock.set_paused(true);
+        }
         self.pending_seek_started = None;
         eprintln!("towavue: {error}");
         self.playback_error = Some(error.clone());
@@ -18061,6 +18072,43 @@ mod tests {
         assert!(app.seek_latencies[0] >= Duration::from_millis(300));
         app.record_seek_presentation(true);
         assert_eq!(app.seek_latencies.len(), 1);
+    }
+
+    #[test]
+    fn active_playback_failure_stops_the_clock_without_discarding_edits() {
+        let Some(root) = isolated_test_root(
+            "tests::active_playback_failure_stops_the_clock_without_discarding_edits",
+        ) else {
+            return;
+        };
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let path = root.join("faulted-media");
+            let tab = app.tabs.open_new(path.clone(), kind);
+            app.path = Some(path.clone());
+            app.media_kind = Some(kind);
+            app.state = PlaybackState::Playing;
+            let mut history = EditHistory::default();
+            history.push(EditOperation::SetVolume(0.5), kind);
+            app.edits.insert(tab, history.clone());
+            app.clock = Some(PlaybackClock::new(media_time(Duration::from_secs(2)), 1.0));
+            app.fail("owned playback fault".into());
+            assert!(
+                app.clock
+                    .as_ref()
+                    .expect("clock retained")
+                    .paused_at
+                    .is_some(),
+                "a fault must stop the active clock"
+            );
+            let position = app.current_position();
+            app.schedule();
+            assert_eq!(app.current_position(), position);
+            assert_eq!(app.state, PlaybackState::Faulted);
+            assert_eq!(app.edits[&tab], history);
+            assert_eq!(app.path, Some(path));
+            assert_eq!(app.playback_error.as_deref(), Some("owned playback fault"));
+        }
     }
 
     #[test]

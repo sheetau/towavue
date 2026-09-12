@@ -6,13 +6,13 @@ Last consolidated: 2026-09-12. This is the only current-status and handoff docum
 
 The owner's goal is to finish the missing functionality, operations, and UI from the local concept/follow-up drafts, with accepted tracked decisions taking precedence. The goal is not complete. M0–M7 foundations are implemented; the active work is UX/functionality improvement, not another launch-preparation milestone.
 
-Current focus is media/UI state and resource usage, particularly image replacement/edit recovery and all-tab costs. Next: remaining resampling/long-animation costs, media-state/recovery combinations and UI behavior below; animation conversion limits and broader metadata remain open. The Shell ValueSet activation abort remains unresolved; controlled worker-lifetime trials do not reproduce it, so do not repeat them or redesign apartment ownership without new evidence. Do not repeat physical-input audits until delivery conditions change.
+Current focus is media/UI state, failure recovery and all-tab resource usage. Next: remaining resampling/long-animation costs, media-state/recovery combinations and UI behavior below; animation conversion limits and broader metadata remain open. The Shell ValueSet activation abort remains unresolved; controlled worker-lifetime trials do not reproduce it, so do not repeat them or redesign apartment ownership without new evidence. Do not repeat physical-input audits until delivery conditions change.
 
 Publication, signing, and release recertification are deferred. An eventual assisted per-user installer is the accepted format, but not authorization to publish now. Windows 10 physical testing is optional; no installation into the owner's environment for that purpose. The owner permits visible-window interaction and clipboard use for scoped work, not unrelated writes or input.
 
 ## Handoff
 
-- Latest change: **2026-09-12 image-load sampling preparation**, based on e1160db. Main/reading-page loads use final sampling immediately; Nearest misses convert once and matching static cache hits convert zero times. Cache ownership/budgets and animation independence are unchanged. App: 409 passed / 12 ignored; fmt and app/all-target Clippy passed. Runtime/core were unchanged; the last full workspace checkpoint was 776 passed / 31 ignored. Native Shell abort remains unresolved (dump 43412 below).
+- Latest change: **2026-09-12 active playback failure**, based on 3db5fda. Fatal errors stop the active clock/output; late first-frame and audio-drain events leave the failed clock paused. App: 410 passed / 12 ignored; the opt-in native D3D11/muted WASAPI retained-playback trial also passed without a skip; fmt and app/all-target Clippy passed. Runtime/core were unchanged; the last full workspace checkpoint was 776 passed / 31 ignored. Native Shell abort remains unresolved (dump 43412 below).
 - No build or owned media job was left running at that checkpoint. No distribution work should be resumed merely because old logs list it as next.
 - Native input delivery must change before repeating physical-operation audits. The independent control and limitations are recorded below; do not bypass the supported tool through private injection or relabel synthetic egui input as OS verification.
 - Build setup and alternate FFmpeg prefixes belong in DEVELOPMENT/environment, not machine-specific paths here.
@@ -63,6 +63,7 @@ Keep results that prevent redoing an investigation. Find exact test names/condit
 
 | Topic | Evidence / location | Limit or next decision |
 |---|---|---|
+| Playback failure | `active_playback_failure_stops_the_clock_without_discarding_edits` reproduced the running faulted clock and verifies stopped position, retained path/history/error. Extended `playback_tab_tests` verifies actual muted WASAPI output stops before natural EOF, a real first decoded frame after failure creates a paused clock, and a native Drained event delivered after failure leaves it paused. Existing independent background playback, shared-device recovery, stale-event and close cleanup checks pass | Injected faults and controlled completion delivery with generated media; not actual codec failure, endpoint disconnection or physical input. Preserve the original error if best-effort output pause itself fails |
 | APNG frame loss | c17b0a3 reproduced three frames saved as one; independent-PNG assembly preserves controls/payload | Do not return to the old single-image export path or assume native APNG encoder disposal is equivalent |
 | APNG PREVIOUS | 994f0a9: explicit 2×1 BACKGROUND→PREVIOUS golden exposes stale canvas restoration in image 0.25.10; runtime compositor fixes it; one-frame/Adam7 tests pass | Existing `export_png_metadata_tests.rs` covers first/consecutive PREVIOUS, palette/gray/16→8 conversion, preview/budgets/cancel; full color fidelity remains open |
 | Separate APNG poster | 2d72e75: FFmpeg cannot demux the valid partial-first-animation-frame fixture directly; stream runtime-composited poster + animation through one FFmpeg job | Actual edits, text Keep/Set/Remove, exact pixels/controls, resave, corruption/I/O/cancel/source-change target protection tested; extra disk/encoding cost |
@@ -113,7 +114,7 @@ Keep results that prevent redoing an investigation. Find exact test names/condit
 
 Keep at most a few meaningful handoffs here; older details are in Git.
 
-- **2026-09-12 — image preparation (from e1160db):** select final frame/sampling for edit/Undo and ordinary loads; unchanged static cache hits avoid conversion.
+- **2026-09-12 — playback failure (from 3db5fda):** stop active clock/output and prevent late frame/drain events from restarting failed playback.
+- **3db5fda — image preparation:** select final frame/sampling for edit/Undo and ordinary loads; unchanged static cache hits avoid conversion.
 - **6cb8040 — resampling animation:** suspend non-displayed animation updates/timers until resampling completes or Undo clears edit failure; preserve phase/sampling.
 - **e8ca310 — failed re-edit recovery:** prevent stale materialized pixels from replacing failed edits or clearing dirty state during tab/window restoration.
-- **bc8078c — borrowed image comparison:** exact source-pixel views remove crop/flip/quarter-turn render copies; tiled mixed-axis traversal and Release timing verified.

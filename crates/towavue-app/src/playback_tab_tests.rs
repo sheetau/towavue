@@ -391,21 +391,105 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
                 PlaybackEvent::VideoFailed(first_generation, "stale before hiding".into()),
             ));
             assert!(app.playback_error.is_none());
+            app.toggle_pause();
+            wait(&mut app, &events, |app| {
+                app.current_position() > paused_position.saturating_add(Duration::from_millis(40))
+            });
+            app.fail("owned active fault".into());
+            assert!(app.clock.as_ref().expect("fault clock").paused_at.is_some());
+            if self.audio {
+                std::thread::sleep(Duration::from_millis(80));
+                service(&mut app, &events);
+                let stopped = app
+                    .session
+                    .as_ref()
+                    .expect("audio session")
+                    .audio_position()
+                    .expect("audio clock");
+                assert!(
+                    stopped.saturating_add(Duration::from_millis(200))
+                        < media_time(app.media_duration.expect("video duration")),
+                    "verify a pause before natural EOF"
+                );
+                std::thread::sleep(Duration::from_millis(80));
+                service(&mut app, &events);
+                assert_eq!(
+                    app.session
+                        .as_ref()
+                        .expect("audio session")
+                        .audio_position(),
+                    Some(stopped),
+                    "failed active media must stop WASAPI output"
+                );
+            }
             app.remove_tab(second, false);
             app.handle_app_event(AppEvent::Playback(
                 second_instance,
                 PlaybackEvent::Failed(first_generation, "closed background".into()),
             ));
             assert_eq!(app.tabs.active().expect("first").id, first);
-            assert!(app.playback_error.is_none());
+            assert_eq!(app.playback_error.as_deref(), Some("owned active fault"));
             let new = open_muted(&mut app, self.root.join("second.mp4"), MediaKind::Video);
             assert!(
                 app.media_generation > second_instance && app.media_generation > first_instance
+            );
+            app.fail("owned early fault".into());
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while app.pending_time.is_none() {
+                service(&mut app, &events);
+                assert!(Instant::now() < deadline, "late first video frame");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(app.state, PlaybackState::Faulted);
+            assert_eq!(app.playback_error.as_deref(), Some("owned early fault"));
+            assert!(
+                app.clock
+                    .as_ref()
+                    .expect("late-frame clock")
+                    .paused_at
+                    .is_some(),
+                "a frame arriving after failure must not restart the clock"
             );
             app.remove_tab(new, false);
             if let Some(music) = music {
                 app.activate_tab(music);
                 tab_focus::tests::hardware_focus(&mut app, "Repeat off", false);
+                let end = app.media_duration.expect("audio duration");
+                app.seek_to(media_time(end.saturating_sub(Duration::from_millis(50))));
+                if app.state != PlaybackState::Playing {
+                    app.toggle_pause();
+                }
+                let deadline = Instant::now() + Duration::from_secs(8);
+                let drained = loop {
+                    if let Some(event) = app
+                        .session
+                        .as_ref()
+                        .expect("audio session")
+                        .try_audio_event()
+                    {
+                        assert!(
+                            matches!(event, AudioOutputEvent::Drained),
+                            "expected normal native audio completion"
+                        );
+                        break event;
+                    }
+                    assert!(Instant::now() < deadline, "native audio drain");
+                    std::thread::sleep(Duration::from_millis(5));
+                };
+                app.fail("owned fault before drain delivery".into());
+                app.handle_audio_event(drained);
+                assert!(app.audio_drained);
+                assert_eq!(app.state, PlaybackState::Faulted);
+                assert!(
+                    app.clock
+                        .as_ref()
+                        .expect("drained clock")
+                        .paused_at
+                        .is_some(),
+                    "late audio completion must not restart the failed clock"
+                );
+                let stopped = app.current_position();
+                assert_eq!(app.current_position(), stopped);
                 app.remove_tab(music, false);
             }
             app.activate_tab(image);

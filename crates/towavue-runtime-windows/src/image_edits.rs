@@ -3,6 +3,8 @@ use towavue_core::EditOperation;
 
 use crate::{Cancellation, DecodedImage, DecodedImageFrame};
 
+mod pixel_view;
+
 #[cfg(test)]
 thread_local! { static RENDER_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
@@ -28,6 +30,12 @@ pub fn compare_image_edits(
         let size = (frame.width, frame.height);
         if output_size(size, current)? != output_size(size, saved)? {
             return Ok(false);
+        }
+        if let Some(matches) = pixel_view::compare(frame, current, frame, saved, cancel) {
+            if !matches? {
+                return Ok(false);
+            }
+            continue;
         }
         let render = |operations: &[EditOperation]| {
             if operations.is_empty() {
@@ -69,6 +77,12 @@ pub fn compare_rendered_image_edits(
         }
         if output_size((source.width, source.height), saved)? != (current.width, current.height) {
             return Ok(false);
+        }
+        if let Some(matches) = pixel_view::compare(current, &[], source, saved, cancel) {
+            if !matches? {
+                return Ok(false);
+            }
+            continue;
         }
         let saved = if saved.is_empty() {
             std::borrow::Cow::Borrowed(source)
@@ -276,6 +290,270 @@ pub(crate) fn render_frame_cancellable(
 mod tests {
     use super::*;
     use towavue_core::{ImageResize, PixelCrop, ResampleFilter};
+
+    #[test]
+    fn orthogonal_comparison_reads_source_pixels_without_rendering() {
+        let cancel = Cancellation::default();
+        let source = DecodedImage {
+            format: "test",
+            frames: vec![
+                DecodedImageFrame {
+                    width: 5,
+                    height: 3,
+                    rgba: [23, 42, 67, 255].repeat(15),
+                    delay: std::time::Duration::from_millis(40),
+                },
+                DecodedImageFrame {
+                    width: 5,
+                    height: 3,
+                    rgba: (0..15_u8)
+                        .flat_map(|n| [n * 11, n * 7, 255 - n, n * 13])
+                        .collect(),
+                    delay: std::time::Duration::from_millis(70),
+                },
+            ],
+        };
+        RENDER_CALLS.set(0);
+        assert!(
+            !compare_image_edits(&source, &[EditOperation::FlipHorizontal], &[], &cancel)
+                .expect("compare")
+        );
+        assert_eq!(
+            RENDER_CALLS.get(),
+            0,
+            "orthogonal comparison must not render either frame"
+        );
+
+        let mut cases = vec![vec![]];
+        for _ in 0..3 {
+            for operations in cases.clone() {
+                let size = output_size((5, 3), &operations).expect("dimensions");
+                for operation in [
+                    EditOperation::RotateClockwise,
+                    EditOperation::RotateCounterclockwise,
+                    EditOperation::FlipHorizontal,
+                    EditOperation::FlipVertical,
+                    EditOperation::Crop(PixelCrop {
+                        x: u32::from(size.0 > 1),
+                        y: u32::from(size.1 > 1),
+                        width: size.0.saturating_sub(1).max(1),
+                        height: size.1.saturating_sub(1).max(1),
+                    }),
+                ] {
+                    let mut next = operations.clone();
+                    next.push(operation);
+                    if !cases.contains(&next) {
+                        cases.push(next);
+                    }
+                }
+            }
+        }
+        let rendered: Vec<_> = cases
+            .iter()
+            .map(|operations| {
+                render_image_edits(&source, operations, &cancel).expect("reference render")
+            })
+            .collect();
+        RENDER_CALLS.set(0);
+        for (i, current) in cases.iter().enumerate() {
+            for (j, saved) in cases.iter().enumerate() {
+                let expected = rendered[i] == rendered[j];
+                assert_eq!(
+                    compare_image_edits(&source, current, saved, &cancel)
+                        .expect("source comparison"),
+                    expected,
+                    "current={current:?}, saved={saved:?}"
+                );
+                assert_eq!(
+                    compare_rendered_image_edits(&source, &rendered[i], saved, &cancel)
+                        .expect("rendered comparison"),
+                    expected,
+                    "rendered current={current:?}, saved={saved:?}"
+                );
+            }
+        }
+        assert_eq!(
+            RENDER_CALLS.get(),
+            0,
+            "all crop/flip/quarter-turn comparisons borrow pixels"
+        );
+        cancel.cancel();
+        assert!(compare_image_edits(&source, &[], &[], &cancel).is_err());
+        assert!(compare_rendered_image_edits(&source, &rendered[0], &[], &cancel).is_err());
+    }
+
+    #[test]
+    fn orthogonal_comparison_checks_long_rows_and_rejects_invalid_views() {
+        let cancel = Cancellation::default();
+        let mut source = DecodedImage {
+            format: "test",
+            frames: vec![DecodedImageFrame {
+                width: 16386,
+                height: 2,
+                rgba: [23, 42, 67, 255].repeat(16386 * 2),
+                delay: std::time::Duration::ZERO,
+            }],
+        };
+        let left = EditOperation::Crop(PixelCrop {
+            x: 0,
+            y: 0,
+            width: 16385,
+            height: 2,
+        });
+        let right = EditOperation::Crop(PixelCrop {
+            x: 1,
+            y: 0,
+            width: 16385,
+            height: 2,
+        });
+        for tail in [false, true] {
+            if tail {
+                *source.frames[0].rgba.last_mut().expect("last alpha") ^= 1;
+            }
+            for suffix in [
+                vec![],
+                vec![EditOperation::FlipHorizontal],
+                vec![EditOperation::RotateClockwise],
+            ] {
+                let current = [vec![left], suffix.clone()].concat();
+                let saved = [vec![right], suffix].concat();
+                assert_eq!(
+                    compare_image_edits(&source, &current, &saved, &cancel).expect("chunked view"),
+                    !tail
+                );
+            }
+        }
+        for crop in [
+            PixelCrop {
+                x: u32::MAX,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+            PixelCrop {
+                x: 0,
+                y: 2,
+                width: 1,
+                height: 1,
+            },
+            PixelCrop {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 1,
+            },
+        ] {
+            assert!(
+                compare_image_edits(&source, &[EditOperation::Crop(crop)], &[], &cancel).is_err()
+            );
+        }
+        source.frames[0].rgba.pop();
+        assert!(
+            compare_image_edits(&source, &[EditOperation::FlipHorizontal], &[], &cancel).is_err()
+        );
+        source.frames[0] = DecodedImageFrame {
+            width: 67,
+            height: 67,
+            rgba: [23, 42, 67, 255].repeat(67 * 67),
+            delay: std::time::Duration::ZERO,
+        };
+        for tail in [false, true] {
+            if tail {
+                *source.frames[0].rgba.last_mut().expect("corner alpha") ^= 1;
+                source.frames[0].rgba[(64 * 67 + 65) * 4 + 3] ^= 1;
+            }
+            for rotation in [
+                EditOperation::RotateClockwise,
+                EditOperation::RotateCounterclockwise,
+            ] {
+                for saved in [vec![], vec![EditOperation::FlipVertical]] {
+                    RENDER_CALLS.set(0);
+                    assert_eq!(
+                        compare_image_edits(&source, &[rotation], &saved, &cancel)
+                            .expect("partial edge tiles"),
+                        !tail
+                    );
+                    assert_eq!(RENDER_CALLS.get(), 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "opt-in Release comparison against the previous FFmpeg-rendered path"]
+    fn orthogonal_comparison_benchmark() {
+        let cancel = Cancellation::default();
+        for (name, current, saved) in [
+            ("flip", vec![EditOperation::FlipHorizontal], vec![]),
+            (
+                "quarter-turn",
+                vec![EditOperation::RotateClockwise],
+                vec![EditOperation::RotateCounterclockwise],
+            ),
+            (
+                "quarter-square",
+                vec![EditOperation::RotateClockwise],
+                vec![],
+            ),
+            (
+                "crop",
+                vec![EditOperation::Crop(PixelCrop {
+                    x: 0,
+                    y: 0,
+                    width: 4095,
+                    height: 2303,
+                })],
+                vec![EditOperation::Crop(PixelCrop {
+                    x: 1,
+                    y: 1,
+                    width: 4095,
+                    height: 2303,
+                })],
+            ),
+        ] {
+            let height = if name == "quarter-square" { 4096 } else { 2304 };
+            let source = DecodedImageFrame {
+                width: 4096,
+                height,
+                rgba: [23, 42, 67, 255].repeat(4096 * height as usize),
+                delay: std::time::Duration::ZERO,
+            };
+            let mut times = [Vec::new(), Vec::new()];
+            for run in 0..10 {
+                for mode in [run % 2, 1 - run % 2] {
+                    let start = std::time::Instant::now();
+                    let matches = if mode == 0 {
+                        let render = |operations: &[EditOperation]| {
+                            if operations.is_empty() {
+                                std::borrow::Cow::Borrowed(&source)
+                            } else {
+                                std::borrow::Cow::Owned(
+                                    render_frame(&source, operations, &cancel).expect("old render"),
+                                )
+                            }
+                        };
+                        equal_frames(&render(&current), &render(&saved), &cancel)
+                            .expect("old comparison")
+                    } else {
+                        pixel_view::compare(&source, &current, &source, &saved, &cancel)
+                            .expect("orthogonal view")
+                            .expect("new comparison")
+                    };
+                    assert!(matches);
+                    if run > 0 {
+                        times[mode].push(start.elapsed().as_secs_f64() * 1000.0);
+                    }
+                }
+            }
+            for samples in &mut times {
+                samples.sort_by(f64::total_cmp);
+            }
+            println!(
+                "ORTHOGONAL-COMPARE case={name} source=4096x{height} uniform_rgba runs=9 alternating_order old_median_ms={:.3} view_median_ms={:.3}",
+                times[0][4], times[1][4]
+            );
+        }
+    }
 
     #[test]
     fn rendered_comparison_reuses_current_pixels_and_checks_every_frame() {

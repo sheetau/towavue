@@ -184,30 +184,19 @@ impl Filmstrip {
                 "filmstrip-dim".into(),
             ))
             .rect_filled(screen, 0.0, Color32::from_black_alpha(191));
-        let Some(snapshot) = snapshot else {
-            context
-                .layer_painter(egui::LayerId::new(
-                    egui::Order::Foreground,
-                    "filmstrip-loading".into(),
-                ))
-                .text(
-                    screen.center(),
-                    Align2::CENTER_CENTER,
-                    "Loading folder order…",
-                    FontId::proportional(14.0),
-                    Color32::WHITE,
-                );
-            return;
-        };
         let recenter = current != self.focus.as_deref();
         self.focus = current.map(Path::to_owned);
-        let selected = snapshot
-            .items
-            .iter()
-            .position(|item| Some(item.path.as_path()) == current);
+        let selected = snapshot.and_then(|snapshot| {
+            snapshot
+                .items
+                .iter()
+                .position(|item| Some(item.path.as_path()) == current)
+        });
         let mut wanted = Vec::new();
-        egui::Area::new("filmstrip".into())
+        let area = egui::Area::new("filmstrip".into())
             .order(egui::Order::Foreground)
+            .movable(false)
+            .sense(egui::Sense::click())
             .fixed_pos(screen.min)
             .constrain(false)
             .show(context, |ui| {
@@ -219,6 +208,16 @@ impl Filmstrip {
                 ui.set_clip_rect(screen);
                 ui.set_min_size(screen.size());
                 ui.set_max_size(screen.size());
+                let Some(snapshot) = snapshot else {
+                    ui.painter().text(
+                        screen.center(),
+                        Align2::CENTER_CENTER,
+                        "Loading folder order…",
+                        FontId::proportional(14.0),
+                        Color32::WHITE,
+                    );
+                    return;
+                };
                 ui.style_mut().always_scroll_the_only_direction = true;
                 ui.spacing_mut().scroll.bar_width = 5.0;
                 ui.spacing_mut().scroll.bar_outer_margin = 8.0;
@@ -344,11 +343,11 @@ impl Filmstrip {
                                 .truncate(),
                             );
                         }
-                        if response.clicked() && !active {
-                            actions.push(UiAction::OpenMedia(item.path.clone(), false));
+                        if response.clicked() {
+                            actions.push(UiAction::OpenFilmstripMedia(item.path.clone(), false));
                         }
                         if response.middle_clicked() {
-                            actions.push(UiAction::OpenMedia(item.path.clone(), true));
+                            actions.push(UiAction::OpenFilmstripMedia(item.path.clone(), true));
                         }
                         let mut tooltip = item.path.display().to_string();
                         tooltip.push_str(
@@ -362,6 +361,9 @@ impl Filmstrip {
                 });
                 self.scroll_offset = output.state.offset.x;
             });
+        if enabled && !egui::Popup::is_any_open(context) && area.response.clicked() {
+            actions.push(UiAction::CloseFilmstrip);
+        }
         self.set_visible(wanted);
         self.drag.finish(context, actions);
     }
@@ -750,7 +752,7 @@ mod tests {
     }
 
     #[test]
-    fn accessible_items_follow_paths_and_keep_current_item_noop() {
+    fn accessible_items_follow_paths_and_current_item_dismisses_without_navigation() {
         let root = std::env::temp_dir().join(format!(
             "towavue-filmstrip-accessibility-{}",
             std::process::id()
@@ -890,10 +892,13 @@ mod tests {
         assert_eq!(frame(&snapshot, &first, vec![]).0.focus, id);
         assert!(
             frame(&snapshot, &first, vec![click()]).1
-                == [UiAction::OpenMedia(target.clone(), false)]
+                == [UiAction::OpenFilmstripMedia(target.clone(), false)]
         );
         frame(&snapshot, &target, vec![]);
-        assert!(frame(&snapshot, &target, vec![click()]).1.is_empty());
+        assert!(
+            frame(&snapshot, &target, vec![click()]).1
+                == [UiAction::OpenFilmstripMedia(target.clone(), false)]
+        );
         snapshot.items.remove(0);
         frame(&snapshot, &first, vec![]);
         assert!(frame(&snapshot, &first, vec![click()]).1.is_empty());
@@ -1145,7 +1150,7 @@ mod tests {
             assert!(filmstrip.visible.contains(&snapshot.items[selected].path));
         }
         for (button, x, expected) in [
-            (egui::PointerButton::Primary, 480.0, None),
+            (egui::PointerButton::Primary, 480.0, Some((30_000, false))),
             (egui::PointerButton::Primary, 608.0, Some((30_001, false))),
             (egui::PointerButton::Middle, 480.0, Some((30_000, true))),
         ] {
@@ -1166,7 +1171,7 @@ mod tests {
             }
             if let Some((index, new_tab)) = expected {
                 assert!(
-                    matches!(actions.as_slice(), [UiAction::OpenMedia(path, actual)] if path == &snapshot.items[index].path && *actual == new_tab)
+                    matches!(actions.as_slice(), [UiAction::OpenFilmstripMedia(path, actual)] if path == &snapshot.items[index].path && *actual == new_tab)
                 );
             } else {
                 assert!(actions.is_empty());

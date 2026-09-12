@@ -219,6 +219,8 @@ enum UiAction {
     CloseTab(TabId),
     DropTab(TabId, egui::Pos2, egui::Vec2),
     OpenMedia(PathBuf, bool),
+    OpenFilmstripMedia(PathBuf, bool),
+    CloseFilmstrip,
     OpenWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
     Seek(MediaTime),
     CommitVideoScrub(MediaTime),
@@ -5344,6 +5346,51 @@ where
                     self.open_external(path, true);
                 } else {
                     self.request_guarded(GuardedAction::Navigate(path));
+                }
+            }
+            UiAction::OpenFilmstripMedia(path, background) => {
+                if !self.filmstrip_open
+                    || self.palette_open
+                    || self.grid_open
+                    || self
+                        .ui_context
+                        .as_ref()
+                        .is_some_and(egui::Popup::is_any_open)
+                {
+                    return;
+                }
+                let Some(kind) = self.folder_snapshot.as_ref().and_then(|snapshot| {
+                    snapshot
+                        .items
+                        .iter()
+                        .find(|item| item.path == path)
+                        .map(|item| item.kind)
+                }) else {
+                    return;
+                };
+                let Some(active) = self.tabs.active().map(|tab| tab.id) else {
+                    return;
+                };
+                self.close_filmstrip();
+                if background {
+                    let added = self.tabs.open_new(path, kind);
+                    self.edits.entry(added).or_default();
+                    // Register only the path; activation loads it without interrupting this tab.
+                    self.tabs.activate(active);
+                } else if self.path.as_ref() != Some(&path) {
+                    self.request_guarded(GuardedAction::Navigate(path));
+                }
+            }
+            UiAction::CloseFilmstrip => {
+                if self.filmstrip_open
+                    && !self.palette_open
+                    && !self.grid_open
+                    && !self
+                        .ui_context
+                        .as_ref()
+                        .is_some_and(egui::Popup::is_any_open)
+                {
+                    self.close_filmstrip();
                 }
             }
             UiAction::Seek(target) => self.seek_to(target),
@@ -16289,7 +16336,7 @@ mod tests {
                     .is_disabled()
             );
             assert!(
-                matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if path == &second)
+                matches!(actions.as_slice(), [UiAction::OpenFilmstripMedia(path, false)] if path == &second)
             );
         }
     }

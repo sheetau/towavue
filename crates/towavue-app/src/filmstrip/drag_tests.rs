@@ -231,6 +231,174 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
 }
 
 #[test]
+fn filmstrip_clicks_dismiss_and_background_open_preserves_the_current_edit() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_clicks_dismiss_and_background_open_preserves_the_current_edit",
+    ) else {
+        return;
+    };
+    let snapshot = snapshot(&root);
+    for item in &snapshot.items {
+        std::fs::write(&item.path, b"owned path fixture").expect("fixture");
+    }
+    for (button, target_index) in [
+        (egui::PointerButton::Primary, 0),
+        (egui::PointerButton::Middle, 1),
+        (egui::PointerButton::Primary, 1),
+    ] {
+        let context = crate::fonts::test_context();
+        context.enable_accesskit();
+        let source = &snapshot.items[0].path;
+        let target = &snapshot.items[target_index].path;
+        let mut app = Application::new(None, |_| {}).expect("app");
+        app.ui_context = Some(context.clone());
+        let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+        app.path = Some(source.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.displayed_tab = Some(tab);
+        app.folder_snapshot = Some(snapshot.clone());
+        app.filmstrip_open = true;
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let history = app.edits[&tab].clone();
+        let generation = app.media_generation;
+        for _ in 0..3 {
+            frame(
+                &mut app.filmstrip,
+                &context,
+                &snapshot,
+                source,
+                true,
+                input(vec![]),
+            );
+        }
+        let output = frame(
+            &mut app.filmstrip,
+            &context,
+            &snapshot,
+            source,
+            true,
+            input(vec![]),
+        )
+        .0;
+        let point = card(&output, &display_name(target)).center();
+        for pressed in [true, false] {
+            let (_, actions) = frame(
+                &mut app.filmstrip,
+                &context,
+                &snapshot,
+                source,
+                true,
+                input(vec![
+                    egui::Event::PointerMoved(point),
+                    egui::Event::PointerButton {
+                        pos: point,
+                        button,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]),
+            );
+            for action in actions {
+                app.handle_ui_action(action);
+            }
+        }
+        assert!(
+            !app.filmstrip_open,
+            "selecting even the current card dismisses filmstrip"
+        );
+        assert_eq!(app.tabs.active().expect("current tab").id, tab);
+        assert_eq!(app.path.as_ref(), Some(source));
+        assert_eq!(app.media_generation, generation);
+        assert_eq!(app.edits[&tab], history);
+        if button == egui::PointerButton::Middle {
+            assert_eq!(app.tabs.tabs().len(), 2);
+            let added = &app.tabs.tabs()[1];
+            assert_eq!(added.target.current_path(), target);
+            assert!(!app.edits[&added.id].is_dirty());
+            assert!(app.pending_guard.is_none());
+            assert!(
+                !app.image_loading,
+                "background opening does not decode or disturb active media"
+            );
+        } else {
+            assert_eq!(app.tabs.tabs().len(), 1);
+            assert_eq!(app.pending_guard.is_some(), target_index != 0);
+            if target_index != 0 {
+                app.resolve_guard(GuardDecision::Cancel);
+                assert_eq!(app.path.as_ref(), Some(source));
+                assert_eq!(app.edits[&tab], history);
+            }
+        }
+    }
+}
+
+#[test]
+fn filmstrip_empty_space_dismisses_without_opening_and_respects_disabled_loading_and_drag() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_empty_space_dismisses_without_opening_and_respects_disabled_loading_and_drag",
+    ) else {
+        return;
+    };
+    let snapshot = snapshot(&root);
+    let media = Rect::from_min_max(egui::pos2(0.0, 40.0), egui::pos2(960.0, 536.0));
+    for (loading, enabled, outside, drag) in [
+        (false, true, false, false),
+        (true, true, false, false),
+        (false, false, false, false),
+        (true, false, false, false),
+        (false, true, true, false),
+        (false, true, false, true),
+    ] {
+        let context = crate::fonts::test_context();
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                .expect("filmstrip");
+        let mut render = |events| {
+            let mut actions = Vec::new();
+            let _ = context.run_ui(input(events), |_| {
+                strip.show(
+                    &context,
+                    media,
+                    (!loading).then_some(&snapshot),
+                    Some(&snapshot.items[0].path),
+                    enabled,
+                    &mut actions,
+                )
+            });
+            actions
+        };
+        let point = egui::pos2(480.0, if outside { 20.0 } else { 80.0 });
+        for _ in 0..3 {
+            render(vec![egui::Event::PointerMoved(point)]);
+        }
+        assert!(render(vec![pointer(point, true)]).is_empty());
+        let release = if drag {
+            point + egui::vec2(100.0, 0.0)
+        } else {
+            point
+        };
+        if drag {
+            assert!(render(vec![egui::Event::PointerMoved(release)]).is_empty());
+        }
+        let actions = render(vec![pointer(release, false)]);
+        if enabled && !outside && !drag {
+            assert!(
+                actions == [UiAction::CloseFilmstrip],
+                "empty space closes only the filmstrip"
+            );
+        } else {
+            assert!(
+                actions.is_empty(),
+                "disabled/outside/drag release cannot dismiss"
+            );
+        }
+    }
+}
+
+#[test]
 fn filmstrip_drag_copies_the_owned_path_once_and_reuses_its_preview() {
     let Some(root) = crate::tests::isolated_test_root(
         "filmstrip::drag_tests::filmstrip_drag_copies_the_owned_path_once_and_reuses_its_preview",

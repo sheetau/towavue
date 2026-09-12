@@ -332,7 +332,8 @@ fn export_audio_cancellable(
             || ImageMetadataFormat::from_path(&request.source).is_some_and(|format| {
                 ImageMetadataFormat::from_path(&request.target) == Some(format)
             }));
-    let source_stamp = (options.normalize_peak || image_metadata)
+    let png_source = request.kind == MediaKind::Image && png_metadata::png_path(&request.source);
+    let source_stamp = (options.normalize_peak || image_metadata || png_source)
         .then(|| audio_options::SourceStamp::read(&request.source))
         .transpose()?;
     let jpeg_metadata = (image_metadata && jpeg_metadata::jpeg_path(&request.source))
@@ -345,6 +346,12 @@ fn export_audio_cancellable(
         .then(|| png_metadata::PngMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
     let mut streams = ExportStreams::probe(request)?;
+    streams.png_animation = png_metadata
+        .as_ref()
+        .is_some_and(png_metadata::PngMetadata::is_animated);
+    if png_source && !image_metadata {
+        png_metadata::require_static(&request.source, cancelled)?;
+    }
     if !image_metadata {
         streams.metadata = metadata.clone();
     }
@@ -566,6 +573,7 @@ impl Drop for StagedExport {
         let _ = fs::remove_file(&self.output);
         let _ = fs::remove_file(self.directory.join("timeline-filter.txt"));
         let _ = fs::remove_file(self.directory.join("metadata.png"));
+        let _ = fs::remove_file(self.directory.join("animation.png"));
         let _ = fs::remove_file(self.directory.join("metadata.jpg"));
         let _ = fs::remove_file(self.directory.join("metadata.webp"));
         let _ = fs::remove_dir(&self.directory);
@@ -652,6 +660,7 @@ fn run_ffmpeg(
 
 #[derive(Clone, Default)]
 struct ExportStreams {
+    png_animation: bool,
     video: Option<(usize, ffmpeg::Rational)>,
     audio: Option<(usize, ffmpeg::Rational)>,
     audio_channels: Option<u16>,
@@ -704,6 +713,7 @@ impl ExportStreams {
                 .and_then(|duration| duration.checked_mul(1000))
                 .map(towavue_core::MediaTime::from_nanoseconds);
             Ok(Self {
+                png_animation: false,
                 video,
                 audio: audio.map(|(index, time_base, _)| (index, time_base)),
                 audio_channels: audio.map(|(_, _, channels)| channels),
@@ -739,6 +749,21 @@ fn ffmpeg_arguments(
         "-map_metadata".into(),
         "0".into(),
     ];
+    if streams.png_animation {
+        let input = arguments
+            .iter()
+            .position(|argument| argument == "-i")
+            .expect("input argument");
+        arguments.splice(
+            input..input,
+            [
+                "-ignore_loop".into(),
+                "1".into(),
+                "-f".into(),
+                "apng".into(),
+            ],
+        );
+    }
     arguments.extend(streams.metadata.arguments());
     if request.kind == MediaKind::Audio {
         arguments.extend(["-vn".into(), "-sn".into(), "-dn".into()]);
@@ -769,14 +794,37 @@ fn ffmpeg_arguments(
             arguments.extend(["-map".into(), format!("0:{index}")]);
         }
     }
-    let visual = visual_filters(&request.operations);
-    let codecs = codec_arguments(request, hardware);
+    let mut visual = visual_filters(&request.operations);
+    let codecs = if streams.png_animation {
+        [
+            "-c:v",
+            "png",
+            "-f",
+            "image2pipe",
+            "-pix_fmt",
+            "rgba",
+            "-fps_mode",
+            "passthrough",
+            "-enc_time_base",
+            "1/1000",
+        ]
+        .map(String::from)
+        .to_vec()
+    } else {
+        codec_arguments(request, hardware)
+    };
     match request.kind {
         MediaKind::Image => {
+            if streams.png_animation {
+                // Preserve frame order independently of timestamp rounding; restore exact PNG delays in staging.
+                visual.extend(["settb=1/1000".into(), "setpts=N*100".into()]);
+            }
             if !visual.is_empty() {
                 arguments.extend(["-vf".into(), visual.join(",")]);
             }
-            arguments.extend(["-frames:v".into(), "1".into()]);
+            if !streams.png_animation {
+                arguments.extend(["-frames:v".into(), "1".into()]);
+            }
         }
         MediaKind::Video => {
             let mut video = video_filters(
@@ -939,6 +987,7 @@ fn codec_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
         (MediaKind::Image, "webp", _) => &["-c:v", "libwebp"],
         (MediaKind::Image, "jpg" | "jpeg", _) => &["-c:v", "mjpeg"],
         (MediaKind::Image, "png", _) => &["-c:v", "png"],
+        (MediaKind::Image, "apng", _) => &["-c:v", "apng", "-f", "apng"],
         (MediaKind::Image, "gif", _) => &["-c:v", "gif"],
         (MediaKind::Image, "tif" | "tiff", _) => &["-c:v", "tiff"],
         (MediaKind::Image, "bmp", _) => &["-c:v", "bmp"],

@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+E01 APNG保持保存: PNG系sourceのanimation制御chunkをCRC付きstream scanで検査し、対応APNGの全frameを独立RGBA8 PNGへ圧縮してから、元のdelay分数／loop値でAPNGへ組み立てる。`.png`／`.apng`とtext Keep／Set／Removeを接続。組立は64KiB bufferで圧縮画素を変更せず、既存stage／source stamp／publish保護を使う。独立frame方式のため差分圧縮より保存・一時disk量が大きくなり得る。
+
+検証範囲: 旧3→1frameの失敗、可変／zero／微小delay、無限／有限／最大有効loop値、alpha・部分frameのSOURCE／OVER／BACKGROUND、crop・直角回転・resize、全frameの保存側復号基準とのRGBA一致・再保存・元bytes維持、破損／切断／数・CRC不一致／取消／I/O失敗／保存先保護を確認する。表示decoderとのalpha-overは最大1階調差を観測し、PREVIOUSの後続frameでは大きな不一致を再現した。PREVIOUS／単一frame／独立poster／PNG系以外へのAPNG保存を明示拒否して未完gateに残す。PNG/APNGメタデータUI説明とaliasを回帰化する。これは全APNG対応・全素材の1階調以内保証・native入力認定ではない。GIF／WebP等のanimation保存、RGBA16／ICC・全UI／品質／資源台帳を継続する。
+
 U07/I07 materialized共有: 表示用の編集結果をArcで通知し、その同じallocationを現在側の比較へ再利用する。既存表示の再比較もoperation key一致時だけ共有し、非materializeのcrop／orientationは従来の処理を使う。元・表示の所有を延長するだけで画素copy／新cache／新workerは増やさない。小型2frame回帰で現在側のrender呼出しが2→0、保存側に編集があれば2回だけ残ること、最終byte・delay・寸法・frame数・buffer長の差と取消を確認。appでもworker結果とinstalled imageのArc一致を検証する。
 
 Release測定: opt-in `large_rendered_comparison_benchmark` を `TOWAVUE_IMAGE_COMPARE_BENCH=recompute/reuse` で各2個の独立processに実行。4096×2304 uniform RGBAをNearestで縮小→元サイズへ拡大し、表示用materialize後の比較を9回測る。中央値48.445／48.082→1.059／1.132ms、比較フェーズのrender回数9→0。materializeは46.084～46.812ms、元＋表示の論理RGBAは双方72MiB。外側で10msごとに取得したOS high-water counterの最大観測commitは207.152／207.172→170.820／170.773MiB、working setは211.969／211.988→175.777／175.750MiB。pollの最大観測値をプロセス全期間の完全追跡とはしない。GUI／GPUなし、既定保存snapshotが空の生成素材に限定し、全画像・animation・任意の保存編集・UI遅延・全資源gateは継続する。

@@ -1,6 +1,9 @@
 use super::*;
 use std::io::Write;
 
+#[path = "export_png_animation.rs"]
+mod animation;
+
 const SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 const TEXT_LIMIT: usize = 1024 * 1024;
 const TEXT_COUNT_LIMIT: usize = 128;
@@ -29,7 +32,9 @@ fn keyword(field: MetadataField) -> &'static str {
 pub(super) fn png_path(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("png") || extension.eq_ignore_ascii_case("apng")
+        })
 }
 
 fn terminated<'a>(data: &mut &'a [u8]) -> Result<&'a [u8], ExportError> {
@@ -149,12 +154,21 @@ fn write_chunk(writer: &mut dyn Write, kind: &[u8; 4], data: &[u8]) -> std::io::
     writer.write_all(&crc.finalize().to_be_bytes())
 }
 
-/// Streams all image bytes, retaining only bounded text. Rewriting never decodes IDAT.
+/// Streams image bytes with bounded text and animation controls. Rewriting never decodes IDAT.
 fn scan(
-    mut reader: impl Read,
-    mut replacement: Option<(&mut dyn Write, &[TextChunk])>,
+    reader: impl Read,
+    replacement: Option<(&mut dyn Write, &[TextChunk])>,
     cancelled: &AtomicBool,
 ) -> Result<Vec<TextChunk>, ExportError> {
+    Ok(scan_contents(reader, replacement, None, cancelled)?.0)
+}
+
+fn scan_contents(
+    mut reader: impl Read,
+    mut replacement: Option<(&mut dyn Write, &[TextChunk])>,
+    expected_animation: Option<&animation::Animation>,
+    cancelled: &AtomicBool,
+) -> Result<(Vec<TextChunk>, Option<animation::Animation>), ExportError> {
     check_cancelled(cancelled)?;
     let mut signature = [0; 8];
     reader
@@ -172,6 +186,7 @@ fn scan(
     let mut expanded = 0;
     let mut first = true;
     let mut image_seen = false;
+    let mut animation = animation::Scan::default();
     let mut buffer = [0; 65536];
     loop {
         check_cancelled(cancelled)?;
@@ -192,6 +207,7 @@ fn scan(
         }
         first = false;
         image_seen |= &kind == b"IDAT";
+        let prefix_length = animation::Scan::prefix_length(&kind, length)?;
         let is_text = matches!(&kind, b"tEXt" | b"zTXt" | b"iTXt");
         if is_text {
             text_count += 1;
@@ -214,6 +230,7 @@ fn scan(
         let mut crc = crc32fast::Hasher::new();
         crc.update(&kind);
         let mut data = Vec::new();
+        let mut prefix = Vec::new();
         let mut remaining = length;
         while remaining > 0 {
             check_cancelled(cancelled)?;
@@ -222,6 +239,8 @@ fn scan(
                 .read_exact(&mut buffer[..count])
                 .map_err(ExportError::Output)?;
             crc.update(&buffer[..count]);
+            let prefix_count = count.min(prefix_length - prefix.len());
+            prefix.extend_from_slice(&buffer[..prefix_count]);
             if is_text {
                 data.extend_from_slice(&buffer[..count]);
             } else if let Some((writer, _)) = &mut replacement {
@@ -238,6 +257,7 @@ fn scan(
         if crc.finalize() != u32::from_be_bytes(checksum) {
             return Err(invalid("chunk CRC mismatch"));
         }
+        animation.observe(&kind, &prefix, length)?;
         if is_text {
             let (field, text) = parse_text(kind, &data, cancelled)?;
             expanded += text.len();
@@ -261,7 +281,11 @@ fn scan(
             if reader.read(&mut buffer[..1]).map_err(ExportError::Output)? != 0 {
                 return Err(invalid("trailing bytes after IEND"));
             }
-            return Ok(texts);
+            let animation = animation.finish()?;
+            if expected_animation.is_some_and(|expected| animation.as_ref() != Some(expected)) {
+                return Err(invalid("staged animation differs from source controls"));
+            }
+            return Ok((texts, animation));
         }
     }
 }
@@ -293,6 +317,7 @@ pub(super) fn inspect(path: &Path) -> Result<Vec<MetadataSourceValue>, ExportErr
 
 pub(super) struct PngMetadata {
     chunks: Vec<TextChunk>,
+    animation: Option<animation::Animation>,
 }
 
 impl PngMetadata {
@@ -306,7 +331,21 @@ impl PngMetadata {
                 "image text export currently requires PNG input and PNG output",
             ));
         }
-        let mut chunks = read(&request.source, cancelled)?;
+        let (mut chunks, animation) = scan_contents(
+            BufReader::new(fs::File::open(&request.source).map_err(ExportError::Output)?),
+            None,
+            None,
+            cancelled,
+        )?;
+        if animation.as_ref().is_some_and(|animation| {
+            animation.delays.len() == 1
+                || !animation.includes_default
+                || animation.has_previous_disposal
+        }) {
+            return Err(invalid(
+                "single-frame APNG, a separate default poster or PREVIOUS disposal is not yet supported for export",
+            ));
+        }
         chunks.retain(|chunk| options.get(chunk.field).is_none());
         for field in MetadataField::ALL {
             if let Some(text) = options.get(field).filter(|text| !text.is_empty()) {
@@ -322,7 +361,11 @@ impl PngMetadata {
                 });
             }
         }
-        Ok(Self { chunks })
+        Ok(Self { chunks, animation })
+    }
+
+    pub(super) fn is_animated(&self) -> bool {
+        self.animation.is_some()
     }
 
     pub(super) fn apply(
@@ -330,6 +373,24 @@ impl PngMetadata {
         staging: &StagedExport,
         cancelled: &AtomicBool,
     ) -> Result<(), ExportError> {
+        if let Some(animation) = &self.animation {
+            let temporary = staging.directory.join("animation.png");
+            {
+                let input =
+                    BufReader::new(fs::File::open(&staging.output).map_err(ExportError::Output)?);
+                let mut output = std::io::BufWriter::new(
+                    fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&temporary)
+                        .map_err(ExportError::Output)?,
+                );
+                animation.assemble(input, &mut output, cancelled)?;
+                output.flush().map_err(ExportError::Output)?;
+            }
+            check_cancelled(cancelled)?;
+            fs::rename(&temporary, &staging.output).map_err(ExportError::Output)?;
+        }
         let temporary = staging.directory.join("metadata.png");
         {
             let input =
@@ -341,15 +402,41 @@ impl PngMetadata {
                     .open(&temporary)
                     .map_err(ExportError::Output)?,
             );
-            scan(input, Some((&mut output, &self.chunks)), cancelled)?;
+            scan_contents(
+                input,
+                Some((&mut output, &self.chunks)),
+                self.animation.as_ref(),
+                cancelled,
+            )?;
             output.flush().map_err(ExportError::Output)?;
         }
-        if read(&temporary, cancelled)? != self.chunks {
-            return Err(invalid("staged text did not retain the requested values"));
+        let (texts, animation) = scan_contents(
+            BufReader::new(fs::File::open(&temporary).map_err(ExportError::Output)?),
+            None,
+            None,
+            cancelled,
+        )?;
+        if texts != self.chunks || animation != self.animation {
+            return Err(invalid(
+                "staged text or animation did not retain the requested values",
+            ));
         }
         check_cancelled(cancelled)?;
         fs::rename(&temporary, &staging.output).map_err(ExportError::Output)
     }
+}
+
+pub(super) fn require_static(path: &Path, cancelled: &AtomicBool) -> Result<(), ExportError> {
+    let (_, animation) = scan_contents(
+        BufReader::new(fs::File::open(path).map_err(ExportError::Output)?),
+        None,
+        None,
+        cancelled,
+    )?;
+    if animation.is_some() {
+        return Err(invalid("animation export requires PNG or APNG output"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 use super::*;
 use crate::export::audio_tests::root;
 use std::io::Cursor;
+use std::os::windows::process::CommandExt;
 use towavue_core::{ImageResize, PixelCrop, ResampleFilter};
 
 fn fixture() -> Vec<u8> {
@@ -90,6 +91,279 @@ fn title(value: &str) -> MetadataExportOptions {
     options
 }
 
+fn animation_fixture(plays: u32, delays: &[[u8; 4]]) -> Vec<u8> {
+    animation_fixture_with_regions(plays, delays, false)
+}
+
+fn animation_fixture_with_regions(plays: u32, delays: &[[u8; 4]], regions: bool) -> Vec<u8> {
+    let mut result = SIGNATURE.to_vec();
+    let mut sequence = 0u32;
+    for (index, delay) in delays.iter().enumerate() {
+        let (width, height, x_offset, y_offset, dispose, blend) = if regions && index > 0 {
+            (16, 12, index as u32 * 2, index as u32, index as u8 % 2, 1)
+        } else {
+            (32, 24, 0, 0, 0, 0)
+        };
+        let pixels = image::RgbaImage::from_fn(width, height, |x, y| {
+            image::Rgba([(x * 7) as u8, (y * 9) as u8, (index * 73) as u8, 128])
+        });
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(pixels)
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("frame PNG");
+        let encoded = encoded.into_inner();
+        if index == 0 {
+            result.extend_from_slice(&encoded[8..33]);
+            result.extend(chunk(
+                b"acTL",
+                &[
+                    &(delays.len() as u32).to_be_bytes()[..],
+                    &plays.to_be_bytes(),
+                ]
+                .concat(),
+            ));
+        }
+        let mut control = Vec::new();
+        for number in [sequence, width, height, x_offset, y_offset] {
+            control.extend_from_slice(&number.to_be_bytes());
+        }
+        sequence += 1;
+        control.extend_from_slice(delay);
+        control.extend_from_slice(&[dispose, blend]);
+        result.extend(chunk(b"fcTL", &control));
+        let mut offset = 33;
+        while offset < encoded.len() {
+            let length = u32::from_be_bytes(encoded[offset..offset + 4].try_into().expect("length"))
+                as usize;
+            if &encoded[offset + 4..offset + 8] == b"IDAT" {
+                let data = &encoded[offset + 8..offset + 8 + length];
+                if index == 0 {
+                    result.extend(chunk(b"IDAT", data));
+                } else {
+                    result.extend(chunk(
+                        b"fdAT",
+                        &[&sequence.to_be_bytes()[..], data].concat(),
+                    ));
+                    sequence += 1;
+                }
+            }
+            offset += length + 12;
+        }
+    }
+    result.extend(chunk(b"tEXt", b"Title\0Animated title"));
+    result.extend(chunk(b"IEND", &[]));
+    result
+}
+
+#[test]
+fn apng_export_preserves_all_edited_frames_delays_and_loop_count() {
+    let root = root("apng-export");
+    let source = root.join("source.png");
+    let target = root.join("output.png");
+    let bytes = animation_fixture(2, &[[0, 1, 0, 7], [0, 0, 0, 0], [0, 5, 0, 13]]);
+    fs::write(&source, &bytes).expect("source APNG");
+    let decoded = crate::decode_image(&source).expect("source animation");
+    assert_eq!(decoded.frames.len(), 3);
+    let mut request = request(&source, &target);
+    request.operations = vec![EditOperation::RotateClockwise];
+    export_media(&request).expect("APNG save");
+    let actual = crate::decode_image(&target).expect("exported animation");
+    assert_eq!(
+        actual.frames.len(),
+        3,
+        "saving must not flatten the animation"
+    );
+    let expected = crate::render_image_edits(
+        &decoded,
+        &request.operations,
+        &crate::Cancellation::default(),
+    )
+    .expect("edited frames");
+    assert_eq!(actual.frames, expected.frames);
+    let cancel = AtomicBool::new(false);
+    let original = scan_contents(Cursor::new(&bytes), None, None, &cancel)
+        .expect("controls")
+        .1;
+    assert_eq!(
+        scan_contents(
+            Cursor::new(fs::read(&target).expect("output")),
+            None,
+            None,
+            &cancel
+        )
+        .expect("saved controls")
+        .1,
+        original
+    );
+    for (plays, regions) in [(0, false), (1, true), (i32::MAX as u32, true)] {
+        let bytes = animation_fixture_with_regions(
+            plays,
+            &[
+                [0, 1, 0, 0],
+                [255, 255, 255, 255],
+                [0, 1, 255, 255],
+                [0, 19, 0, 100],
+            ],
+            regions,
+        );
+        let source = root.join("source.APNG");
+        fs::write(&source, &bytes).expect("source alias");
+        request.source = source.clone();
+        request.target = root.join("output.APNG");
+        request.operations = vec![
+            EditOperation::Crop(PixelCrop {
+                x: 2,
+                y: 2,
+                width: 28,
+                height: 20,
+            }),
+            EditOperation::RotateClockwise,
+            EditOperation::Resize(
+                ImageResize::new(30, 42, ResampleFilter::Nearest).expect("resize"),
+            ),
+        ];
+        let decoded = crate::decode_image(&source).expect("composited source");
+        let expected = crate::render_image_edits(
+            &decoded,
+            &request.operations,
+            &crate::Cancellation::default(),
+        )
+        .expect("edited animation");
+        // The existing display decoder and FFmpeg round alpha-over differently.
+        // Keep a strict export-decoder reference as well as the display comparison.
+        let raw = Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"))
+            .creation_flags(CREATE_NO_WINDOW)
+            .args(["-v", "error", "-ignore_loop", "1", "-i"])
+            .arg(&source)
+            .args([
+                "-fps_mode",
+                "passthrough",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgba",
+                "pipe:1",
+            ])
+            .output()
+            .expect("reference decode");
+        assert!(
+            raw.status.success(),
+            "{}",
+            String::from_utf8_lossy(&raw.stderr)
+        );
+        assert_eq!(raw.stdout.len(), decoded.frames.len() * 32 * 24 * 4);
+        let mut export_source = decoded.clone();
+        for (frame, rgba) in export_source
+            .frames
+            .iter_mut()
+            .zip(raw.stdout.as_chunks::<{ 32 * 24 * 4 }>().0)
+        {
+            frame.rgba.copy_from_slice(rgba);
+        }
+        let export_expected = crate::render_image_edits(
+            &export_source,
+            &request.operations,
+            &crate::Cancellation::default(),
+        )
+        .expect("export decoder reference");
+        let source_controls = scan_contents(Cursor::new(&bytes), None, None, &cancel)
+            .expect("source controls")
+            .1;
+        for value in [Some("新しい title"), None, Some("")] {
+            let metadata = value.map(title).unwrap_or_default();
+            export_media_with_options(
+                &request,
+                ExportOptions {
+                    metadata,
+                    ..Default::default()
+                },
+            )
+            .expect("APNG metadata save");
+            let actual = crate::decode_image(&request.target).expect("reopen alias");
+            assert_eq!(actual.frames.len(), expected.frames.len());
+            assert!(
+                actual.frames == export_expected.frames,
+                "all frames must match the export decoder reference: plays={plays}, differences={:?}",
+                actual
+                    .frames
+                    .iter()
+                    .zip(&export_expected.frames)
+                    .map(|(a, b)| (
+                        a.delay,
+                        b.delay,
+                        a.rgba
+                            .iter()
+                            .zip(&b.rgba)
+                            .enumerate()
+                            .find(|(_, (x, y))| x != y),
+                        a.rgba
+                            .iter()
+                            .zip(&b.rgba)
+                            .map(|(x, y)| x.abs_diff(*y))
+                            .max()
+                    ))
+                    .collect::<Vec<_>>()
+            );
+            for (index, (actual, expected)) in
+                actual.frames.iter().zip(&expected.frames).enumerate()
+            {
+                assert_eq!(
+                    (actual.width, actual.height, actual.delay),
+                    (expected.width, expected.height, expected.delay)
+                );
+                let maximum = actual
+                    .rgba
+                    .iter()
+                    .zip(&expected.rgba)
+                    .map(|(a, b)| a.abs_diff(*b))
+                    .max()
+                    .expect("pixels");
+                assert!(
+                    maximum <= u8::from(regions),
+                    "display decoder difference: plays={plays}, frame={index}, maximum={maximum}"
+                );
+            }
+            let (texts, controls) = scan_contents(
+                Cursor::new(fs::read(&request.target).expect("saved bytes")),
+                None,
+                None,
+                &cancel,
+            )
+            .expect("saved controls");
+            assert_eq!(controls, source_controls);
+            assert_eq!(
+                texts.first().map(|text| text.text.as_str()),
+                match value {
+                    Some("") => None,
+                    Some(value) => Some(value),
+                    None => Some("Animated title"),
+                }
+            );
+            // A second save must retain the same timing and already-composited pixels.
+            let resave = root.join("resaved.png");
+            export_media(&self::request(&request.target, &resave)).expect("resave");
+            assert_eq!(
+                crate::decode_image(&resave).expect("resaved").frames,
+                actual.frames
+            );
+            assert_eq!(
+                scan_contents(
+                    Cursor::new(fs::read(&resave).expect("resaved bytes")),
+                    None,
+                    None,
+                    &cancel
+                )
+                .expect("resaved controls")
+                .1,
+                source_controls
+            );
+        }
+        assert_eq!(fs::read(&source).expect("source unchanged"), bytes);
+    }
+    assert_eq!(fs::read(&source).expect("source unchanged"), bytes);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
 #[test]
 fn png_text_inspection_reads_all_encodings_variants_and_bounds_display_only() {
     let root = root("png-inspect");
@@ -118,6 +392,341 @@ fn png_text_inspection_reads_all_encodings_variants_and_bounds_display_only() {
     );
     assert_eq!(fs::read(&source).expect("unchanged"), bytes);
     assert!(read_export_metadata(&source.with_extension("jpg"), MediaKind::Image).is_err());
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+fn map_chunks(bytes: &[u8], mut change: impl FnMut([u8; 4], &mut Vec<u8>) -> bool) -> Vec<u8> {
+    let mut output = bytes[..8].to_vec();
+    let mut position = 8;
+    while position < bytes.len() {
+        let length =
+            u32::from_be_bytes(bytes[position..position + 4].try_into().expect("length")) as usize;
+        let kind = bytes[position + 4..position + 8].try_into().expect("kind");
+        let mut data = bytes[position + 8..position + 8 + length].to_vec();
+        if change(kind, &mut data) {
+            output.extend(chunk(&kind, &data));
+        }
+        position += length + 12;
+    }
+    output
+}
+
+#[test]
+fn apng_scan_rejects_corrupt_controls_sequences_bounds_and_truncation() {
+    let bytes = animation_fixture(2, &[[0, 1, 0, 10]; 3]);
+    let cancel = AtomicBool::new(false);
+    let parse = |bytes: &[u8]| scan_contents(Cursor::new(bytes), None, None, &cancel);
+    for end in 0..bytes.len() {
+        assert!(parse(&bytes[..end]).is_err(), "truncated at {end}");
+    }
+    for (kind, offset, value) in [
+        (*b"acTL", 0, 0u32),
+        (*b"acTL", 0, 2),
+        (*b"acTL", 0, 65537),
+        (*b"acTL", 4, u32::MAX),
+        (*b"fcTL", 0, 9),
+        (*b"fcTL", 4, 0),
+        (*b"fcTL", 4, 33),
+        (*b"fcTL", 12, u32::MAX),
+        (*b"fdAT", 0, 0),
+    ] {
+        let bad = map_chunks(&bytes, |found, data| {
+            if found == kind {
+                data[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+            }
+            true
+        });
+        assert!(
+            parse(&bad).is_err(),
+            "{kind:?} offset={offset} value={value}"
+        );
+    }
+    for offset in [24, 25] {
+        let bad = map_chunks(&bytes, |kind, data| {
+            if &kind == b"fcTL" {
+                data[offset] = 3;
+            }
+            true
+        });
+        assert!(parse(&bad).is_err());
+    }
+    for kind in [*b"acTL", *b"fcTL", *b"fdAT"] {
+        let short = map_chunks(&bytes, |found, data| {
+            if found == kind {
+                data.truncate(3);
+            }
+            true
+        });
+        assert!(parse(&short).is_err());
+        let absent = map_chunks(&bytes, |found, _| found != kind);
+        assert!(parse(&absent).is_err());
+    }
+    let mut duplicate = bytes.clone();
+    duplicate.splice(33..33, bytes[33..53].iter().copied());
+    assert!(parse(&duplicate).is_err());
+    let mut crc = bytes.clone();
+    crc[52] ^= 1;
+    assert!(parse(&crc).is_err());
+    let extra = [&bytes[..], &[0]].concat();
+    assert!(parse(&extra).is_err());
+    let (_, animation) = parse(&bytes).expect("valid");
+    let animation = animation.expect("animation");
+    assert_eq!(animation.plays, 2);
+    assert_eq!(animation.delays, [[0, 1, 0, 10]; 3]);
+    assert!(animation.includes_default);
+}
+
+#[test]
+fn apng_unsupported_exports_preserve_targets_and_static_conversions_still_work() {
+    let root = root("apng-unsupported");
+    let source = root.join("source.APNG");
+    let target = root.join("target.png");
+    let bytes = animation_fixture(2, &[[0, 1, 0, 10]; 3]);
+    let previous = map_chunks(&bytes, |kind, data| {
+        if &kind == b"fcTL" {
+            data[24] = 2;
+        }
+        true
+    });
+    let mut first = true;
+    let poster = map_chunks(&bytes, |kind, data| {
+        if &kind == b"acTL" {
+            data[..4].copy_from_slice(&2u32.to_be_bytes());
+        }
+        if &kind == b"fcTL" && first {
+            first = false;
+            return false;
+        }
+        if matches!(&kind, b"fcTL" | b"fdAT") {
+            let sequence = u32::from_be_bytes(data[..4].try_into().expect("sequence"));
+            data[..4].copy_from_slice(&(sequence - 1).to_be_bytes());
+        }
+        true
+    });
+    for (bytes, message) in [
+        (animation_fixture(1, &[[0, 1, 0, 10]]), "single-frame"),
+        (previous, "PREVIOUS"),
+        (poster, "poster"),
+    ] {
+        fs::write(&source, &bytes).expect("unsupported source");
+        assert!(
+            read_export_metadata(&source, MediaKind::Image).is_ok(),
+            "inspection is not export approval"
+        );
+        fs::write(&target, b"existing target").expect("target");
+        assert!(
+            export_media(&request(&source, &target))
+                .expect_err("unsupported export")
+                .to_string()
+                .contains(message)
+        );
+        assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
+        assert_eq!(fs::read(&source).expect("source preserved"), bytes);
+    }
+    fs::write(&source, &bytes).expect("valid source");
+    for extension in ["jpg", "gif", "webp", "avif"] {
+        let target = root.join(format!("target.{extension}"));
+        fs::write(&target, b"existing target").expect("target");
+        assert!(
+            export_media(&request(&source, &target))
+                .expect_err("no flattening")
+                .to_string()
+                .contains("PNG or APNG")
+        );
+        assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
+    }
+    fs::write(&source, fixture()).expect("static source alias");
+    export_media(&request(&source, &root.join("static.jpg"))).expect("static conversion");
+    export_media(&request(&source, &root.join("static.apng"))).expect("static PNG output alias");
+    assert_eq!(
+        crate::decode_image(&root.join("static.apng"))
+            .expect("static reopen")
+            .frames
+            .len(),
+        1
+    );
+    assert!(!fs::read_dir(&root).expect("no stage").any(|entry| {
+        entry
+            .expect("entry")
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".towavue-export-")
+    }));
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn apng_assembly_is_bounded_and_preserves_compressed_pixels_on_failure_and_success() {
+    struct CancelWriter<'a>(&'a AtomicBool);
+    impl Write for CancelWriter<'_> {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            assert!(data.len() <= 65536);
+            if data.len() == 65536 {
+                self.0.store(true, Ordering::Relaxed);
+            }
+            Ok(data.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let bytes = animation_fixture(2, &[[0, 1, 0, 10]; 2]);
+    let cancel = AtomicBool::new(false);
+    let (_, animation) = scan_contents(Cursor::new(&bytes), None, None, &cancel).expect("source");
+    let animation = animation.expect("animation");
+    let png = fixture();
+    let frames = [&png[..], &png[..]].concat();
+    let mut output = Vec::new();
+    animation
+        .assemble(Cursor::new(&frames), &mut output, &cancel)
+        .expect("assemble");
+    assert_eq!(
+        scan_contents(Cursor::new(&output), None, None, &cancel)
+            .expect("result")
+            .1,
+        Some(animation::Animation {
+            plays: 2,
+            delays: vec![[0, 1, 0, 10]; 2],
+            includes_default: true,
+            has_previous_disposal: false
+        })
+    );
+    let compressed = |bytes: &[u8]| {
+        let mut data = Vec::new();
+        map_chunks(bytes, |kind, bytes| {
+            if &kind == b"IDAT" {
+                data.extend_from_slice(bytes);
+            } else if &kind == b"fdAT" {
+                data.extend_from_slice(&bytes[4..]);
+            }
+            true
+        });
+        data
+    };
+    assert_eq!(compressed(&output), compressed(&png).repeat(2));
+    for end in 0..frames.len() {
+        assert!(
+            animation
+                .assemble(Cursor::new(&frames[..end]), &mut std::io::sink(), &cancel)
+                .is_err(),
+            "truncated frames {end}"
+        );
+    }
+    assert!(
+        animation
+            .assemble(
+                Cursor::new([&frames[..], &png].concat()),
+                &mut std::io::sink(),
+                &cancel
+            )
+            .is_err()
+    );
+    let changed_size = map_chunks(&png, |kind, data| {
+        if &kind == b"IHDR" {
+            data[3] += 1;
+        }
+        true
+    });
+    assert!(
+        animation
+            .assemble(
+                Cursor::new([&png[..], &changed_size].concat()),
+                &mut std::io::sink(),
+                &cancel
+            )
+            .is_err()
+    );
+    let mut corrupt = frames.clone();
+    corrupt[32] ^= 1;
+    assert!(
+        animation
+            .assemble(Cursor::new(corrupt), &mut std::io::sink(), &cancel)
+            .is_err()
+    );
+    assert!(
+        animation
+            .assemble(Cursor::new(&frames), &mut &mut [0u8; 4][..], &cancel)
+            .is_err()
+    );
+    let mut large = png.clone();
+    large.splice(33..33, chunk(b"vpAg", &vec![0; 200_000]));
+    assert!(matches!(
+        animation.assemble(
+            Cursor::new([&large[..], &png].concat()),
+            &mut CancelWriter(&cancel),
+            &cancel
+        ),
+        Err(ExportError::Cancelled)
+    ));
+    cancel.store(false, Ordering::Relaxed);
+    let root = root("apng-stage-protection");
+    let source = root.join("source.png");
+    let target = root.join("target.png");
+    fs::write(&source, &bytes).expect("source");
+    fs::write(&target, b"existing target").expect("target");
+    let metadata =
+        PngMetadata::prepare(&request(&source, &target), &title("new"), &cancel).expect("prepare");
+    for encoded in [&png[..], &frames[..]] {
+        let staging = StagedExport::new(&target).expect("stage");
+        fs::write(&staging.output, encoded).expect("encoded");
+        if encoded.len() == frames.len() {
+            fs::write(staging.directory.join("animation.png"), b"occupied")
+                .expect("occupied stage");
+        }
+        assert!(metadata.apply(&staging, &cancel).is_err());
+        assert_eq!(fs::read(&staging.output).expect("stage unchanged"), encoded);
+        drop(staging);
+        assert_eq!(
+            fs::read(&target).expect("target preserved"),
+            b"existing target"
+        );
+        assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn apng_export_cancellation_and_source_changes_never_replace_target() {
+    let root = root("apng-source-protection");
+    let source = root.join("source.png");
+    let target = root.join("target.png");
+    let bytes = animation_fixture(2, &[[0, 1, 0, 10]; 3]);
+    for change_source in [false, true] {
+        fs::write(&source, &bytes).expect("source");
+        fs::write(&target, b"existing target").expect("target");
+        let cancel = AtomicBool::new(false);
+        let changed = AtomicBool::new(false);
+        let result = export_cancellable(&request(&source, &target), &cancel, &|_| {
+            if !changed.swap(true, Ordering::Relaxed) {
+                if change_source {
+                    fs::OpenOptions::new()
+                        .append(true)
+                        .open(&source)
+                        .expect("owned source")
+                        .write_all(&[0])
+                        .expect("change length");
+                } else {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            }
+        });
+        assert!(changed.load(Ordering::Relaxed), "actual encoder progress");
+        if change_source {
+            assert!(
+                result
+                    .expect_err("stale source")
+                    .to_string()
+                    .contains("source changed")
+            );
+        } else {
+            assert!(matches!(result, Err(ExportError::Cancelled)));
+        }
+        assert_eq!(
+            fs::read(&target).expect("target remains"),
+            b"existing target"
+        );
+        assert_eq!(fs::read_dir(&root).expect("no stages").count(), 2);
+    }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
 

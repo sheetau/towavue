@@ -91,6 +91,7 @@ fn png_metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_
         return;
     };
     metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scope(&root, "png");
+    metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scope(&root, "apng");
 }
 
 #[test]
@@ -139,14 +140,17 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
         .iter()
         .filter_map(|(_, node)| node.label().or_else(|| node.value()))
         .collect();
-    let expected = if extension == "png" {
+    let expected = if matches!(extension, "png" | "apng") {
         vec![
             "PNG text: 元の題名",
             "PNG keyword: Title",
             "PNG input and PNG output only.",
             "EXIF, XMP",
             "including when all fields are Keep",
-            "Choose a .png export path",
+            "Choose a .png or .apng export path",
+            "Supported APNG saves retain all frames, delays and loop count",
+            "PREVIOUS disposal",
+            "Alpha-over rounding can differ from display",
         ]
     } else {
         vec![

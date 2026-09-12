@@ -718,6 +718,20 @@ fn gif_to_apng_save_as_and_resave_preserve_animation_and_history() {
     ) else {
         return;
     };
+    gif_conversion_lifecycle(&root, "apng");
+}
+
+#[test]
+fn gif_to_webp_save_as_and_resave_preserve_animation_and_history() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::image::gif_to_webp_save_as_and_resave_preserve_animation_and_history",
+    ) else {
+        return;
+    };
+    gif_conversion_lifecycle(&root, "webp");
+}
+
+fn gif_conversion_lifecycle(root: &Path, extension: &str) {
     let source = root.join("source.gif");
     let generated = std::process::Command::new(
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe"),
@@ -764,7 +778,7 @@ fn gif_to_apng_save_as_and_resave_preserve_animation_and_history() {
         &towavue_runtime_windows::Cancellation::default(),
     )
     .expect("edited display");
-    let target = root.join("saved.apng");
+    let target = root.join("saved").with_extension(extension);
     let generation = app.media_generation;
     let intent = || DialogIntent::Export {
         tab,
@@ -791,7 +805,7 @@ fn gif_to_apng_save_as_and_resave_preserve_animation_and_history() {
     assert_eq!(app.export_paths.get(&tab), Some(&target));
     assert_eq!(
         towavue_runtime_windows::decode_image(&target)
-            .expect("APNG")
+            .expect("converted animation")
             .frames,
         expected.frames
     );
@@ -801,7 +815,7 @@ fn gif_to_apng_save_as_and_resave_preserve_animation_and_history() {
     assert!(!app.edits[&tab].is_dirty());
     assert_eq!(
         towavue_runtime_windows::decode_image(&target)
-            .expect("resaved APNG")
+            .expect("resaved animation")
             .frames,
         expected.frames
     );
@@ -826,7 +840,10 @@ fn gif_to_apng_save_as_and_resave_preserve_animation_and_history() {
     assert_eq!(app.media_kind, Some(MediaKind::Image));
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while app.image_loading {
-        assert!(std::time::Instant::now() < deadline, "reopen saved APNG");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "reopen saved {extension}"
+        );
         if let Ok(event) = events.recv_timeout(Duration::from_millis(20)) {
             app.handle_app_event(event);
         }
@@ -837,7 +854,11 @@ fn gif_to_apng_save_as_and_resave_preserve_animation_and_history() {
         Some(&canonical_shell_path(&target).expect("saved path"))
     );
     assert_eq!(
-        app.image.as_ref().expect("reopened APNG").decoded.frames,
+        app.image
+            .as_ref()
+            .expect("reopened animation")
+            .decoded
+            .frames,
         expected.frames
     );
 }

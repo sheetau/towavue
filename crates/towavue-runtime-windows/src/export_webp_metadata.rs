@@ -375,6 +375,58 @@ pub(super) struct WebpMetadata {
     animation: Option<animation::Animation>,
 }
 
+pub(super) fn apply_gif_animation(
+    staging: &StagedExport,
+    delays: &[u16],
+    plays: u16,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+) -> Result<(), ExportError> {
+    let result = (|| {
+        let mut control = [0; 6];
+        control[4..].copy_from_slice(&plays.to_le_bytes());
+        let animation = animation::Animation {
+            control,
+            delays: delays.iter().map(|delay| u32::from(*delay) * 10).collect(),
+        };
+        let temporary = staging.directory.join("animation.webp");
+        {
+            let mut input = BufReader::new(animation::Cancellable {
+                file: fs::File::open(&staging.output).map_err(ExportError::Output)?,
+                cancelled,
+            });
+            animation.write(
+                &temporary,
+                |delay| {
+                    let (width, height, rgba) = gif_animation::read_png(&mut input)?;
+                    Ok(crate::DecodedImageFrame {
+                        width: u32::from(width),
+                        height: u32::from(height),
+                        rgba,
+                        delay: Duration::from_millis(u64::from(delay)),
+                    })
+                },
+                cancelled,
+                progress,
+            )?;
+            if input.read(&mut [0]).map_err(ExportError::Output)? != 0 {
+                return Err(invalid("extra encoded GIF frames"));
+            }
+        }
+        let info = container(
+            BufReader::new(fs::File::open(&temporary).map_err(ExportError::Output)?),
+            cancelled,
+        )?;
+        if info.animation.as_ref() != Some(&animation) {
+            return Err(invalid("converted animation controls differ"));
+        }
+        check_cancelled(cancelled)?;
+        fs::rename(&temporary, &staging.output).map_err(ExportError::Output)
+    })();
+    check_cancelled(cancelled)?;
+    result
+}
+
 impl WebpMetadata {
     pub(super) fn prepare(
         request: &ExportRequest,

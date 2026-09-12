@@ -100,10 +100,7 @@ impl Animation {
     ) -> Result<(), ExportError> {
         // GIF stores repeats after the initial play; APNG stores total plays.
         // Finite(0) is the GIF crate's absent-loop-extension representation.
-        let plays = match self.repeat {
-            gif::Repeat::Infinite => 0,
-            gif::Repeat::Finite(repeats) => u32::from(repeats) + 1,
-        };
+        let plays = self.plays();
         let delays = self
             .delays
             .iter()
@@ -113,6 +110,33 @@ impl Animation {
             })
             .collect();
         png_metadata::PngMetadata::from_animation(plays, delays).apply(staging, cancelled)
+    }
+
+    fn plays(&self) -> u32 {
+        match self.repeat {
+            gif::Repeat::Infinite => 0,
+            gif::Repeat::Finite(repeats) => u32::from(repeats) + 1,
+        }
+    }
+
+    pub(super) fn webp_plays(&self) -> Result<u16, ExportError> {
+        u16::try_from(self.plays()).map_err(|_| invalid(
+            "65536 total plays exceed WebP's 65535-play limit; use GIF or APNG to retain repetition"))
+    }
+
+    pub(super) fn apply_webp(
+        &self,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+        progress: &(impl Fn(Duration) + Sync),
+    ) -> Result<(), ExportError> {
+        webp_metadata::apply_gif_animation(
+            staging,
+            &self.delays,
+            self.webp_plays()?,
+            cancelled,
+            progress,
+        )
     }
 
     pub(super) fn apply(
@@ -173,7 +197,7 @@ impl Animation {
     }
 }
 
-fn read_png(
+pub(super) fn read_png(
     input: &mut (impl std::io::BufRead + std::io::Seek),
 ) -> Result<(u16, u16, Vec<u8>), ExportError> {
     let mut decoder = png::Decoder::new(input);
@@ -363,30 +387,144 @@ mod tests {
                     actual.frames
                 );
                 assert_eq!(fs::read(&source).expect("source untouched"), before);
-                let png_target = root.join("converted.png");
-                request.target = png_target.clone();
-                export_media(&request).expect("transparent GIF to APNG");
-                let png = crate::decode_image(&png_target).expect("APNG display");
-                assert_eq!(png.frames.len(), expected.frames.len());
-                for (converted, expected) in png.frames.iter().zip(&expected.frames) {
-                    assert_eq!(
-                        (converted.width, converted.height, converted.delay),
-                        (expected.width, expected.height, expected.delay)
-                    );
-                    assert!(
-                        converted
-                            .rgba
-                            .as_chunks::<4>()
-                            .0
-                            .iter()
-                            .zip(expected.rgba.as_chunks::<4>().0)
-                            .all(|(a, b)| a == b || a[3] == 0 && b[3] == 0),
-                        "APNG visible pixels: {dispose:?}"
-                    );
+                for extension in ["png", "webp"] {
+                    let converted_target = root.join("converted").with_extension(extension);
+                    request.target = converted_target.clone();
+                    export_media(&request).expect("transparent GIF conversion");
+                    let converted =
+                        crate::decode_image(&converted_target).expect("converted display");
+                    assert_eq!(converted.frames.len(), expected.frames.len());
+                    for (converted, expected) in converted.frames.iter().zip(&expected.frames) {
+                        assert_eq!(
+                            (converted.width, converted.height, converted.delay),
+                            (expected.width, expected.height, expected.delay)
+                        );
+                        assert!(
+                            converted
+                                .rgba
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .zip(expected.rgba.as_chunks::<4>().0)
+                                .all(|(a, b)| a == b || a[3] == 0 && b[3] == 0),
+                            "{extension} visible pixels: {dispose:?}"
+                        );
+                    }
                 }
                 request.target = target.clone();
             }
         }
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
+    fn gif_to_webp_preserves_edited_frames_delays_and_repetition_limits() {
+        let root = audio_tests::root("gif-to-webp");
+        let source = root.join("source.gif");
+        let target = root.join("converted.webp");
+        for repeat in [
+            gif::Repeat::Finite(0),
+            gif::Repeat::Finite(1),
+            gif::Repeat::Finite(u16::MAX - 1),
+            gif::Repeat::Infinite,
+        ] {
+            fixture(&source, repeat);
+            let before = fs::read(&source).expect("source");
+            let original = crate::decode_image(&source).expect("display");
+            let mut request = request(&source, &target);
+            request.operations = vec![
+                EditOperation::RotateClockwise,
+                EditOperation::FlipHorizontal,
+            ];
+            export_media(&request).expect("GIF to animated WebP");
+            let expected = crate::render_image_edits(
+                &original,
+                &request.operations,
+                &crate::Cancellation::default(),
+            )
+            .expect("edited display");
+            let actual = crate::decode_image(&target).expect("WebP display");
+            assert_eq!(actual.frames, expected.frames);
+            let resaved = root.join("resaved.webp");
+            export_media(&self::request(&target, &resaved)).expect("WebP resave");
+            assert_eq!(
+                crate::decode_image(&resaved).expect("resaved").frames,
+                actual.frames
+            );
+            for output in [&target, &resaved] {
+                let mut decoder = image_webp::WebPDecoder::new(BufReader::new(
+                    fs::File::open(output).expect("WebP"),
+                ))
+                .expect("independent controls");
+                assert_eq!(decoder.num_frames(), 3);
+                let expected_loop = match repeat {
+                    gif::Repeat::Infinite => image_webp::LoopCount::Forever,
+                    gif::Repeat::Finite(n) => image_webp::LoopCount::Times(
+                        std::num::NonZeroU16::new(n + 1).expect("total plays"),
+                    ),
+                };
+                assert_eq!(decoder.loop_count(), expected_loop);
+                let mut pixels = vec![0; decoder.output_buffer_size().expect("canvas")];
+                for delay in [0, 10, 655350] {
+                    assert_eq!(decoder.read_frame(&mut pixels).expect("frame"), delay);
+                }
+            }
+            assert_eq!(fs::read(&source).expect("source intact"), before);
+        }
+        fixture(&source, gif::Repeat::Finite(u16::MAX));
+        let before = fs::read(&target).expect("existing WebP");
+        let error =
+            export_cancellable(&request(&source, &target), &AtomicBool::new(false), &|_| {
+                panic!("unrepresentable repeat must fail before encoding")
+            })
+            .expect_err("repeat limit");
+        assert!(error.to_string().contains("65536 total plays"));
+        assert_eq!(fs::read(&target).expect("existing output retained"), before);
+
+        regions(&source, gif::DisposalMethod::Previous);
+        let mut graded_alpha = false;
+        for operations in [
+            vec![EditOperation::RotateImage(
+                towavue_core::ImageRotation::new(137, (4, 3)).expect("free rotation"),
+            )],
+            vec![EditOperation::Resize(
+                towavue_core::ImageResize::new(7, 5, towavue_core::ResampleFilter::Bilinear)
+                    .expect("bilinear"),
+            )],
+            vec![EditOperation::Resize(
+                towavue_core::ImageResize::new(7, 5, towavue_core::ResampleFilter::Bicubic)
+                    .expect("bicubic"),
+            )],
+            vec![EditOperation::Resize(
+                towavue_core::ImageResize::new(7, 5, towavue_core::ResampleFilter::Lanczos)
+                    .expect("Lanczos"),
+            )],
+        ] {
+            let mut request = request(&source, &target);
+            request.operations = operations;
+            export_media(&request).expect("WebP with interpolated alpha");
+            let actual = crate::decode_image(&target).expect("WebP pixels");
+            request.target = root.join("reference.apng");
+            export_media(&request).expect("same edited PNG snapshots in APNG");
+            assert_eq!(
+                actual.frames,
+                crate::decode_image(&request.target)
+                    .expect("APNG pixels")
+                    .frames
+            );
+            graded_alpha |= actual.frames.iter().any(|frame| {
+                frame
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|p| p[3] > 0 && p[3] < 255)
+            });
+        }
+        assert!(
+            graded_alpha,
+            "conversion must retain non-binary edited alpha"
+        );
         fs::remove_dir_all(root).expect("owned fixture cleanup");
     }
 
@@ -451,7 +589,7 @@ mod tests {
 
     #[test]
     fn gif_export_rejects_flattening_and_preserves_existing_targets_on_failure() {
-        for extension in ["gif", "png"] {
+        for extension in ["gif", "png", "webp"] {
             check_gif_export_failures(extension);
         }
     }
@@ -463,7 +601,7 @@ mod tests {
         fixture(&source, gif::Repeat::Infinite);
         let before = fs::read(&source).expect("source bytes");
         let cancel = AtomicBool::new(false);
-        for extension in ["bmp", "jpg", "webp", "avif"] {
+        for extension in ["bmp", "jpg", "tiff", "avif"] {
             let target = target.with_extension(extension);
             fs::write(&target, b"existing target").expect("target");
             assert!(
@@ -589,6 +727,7 @@ mod tests {
             };
             assert!(controls.apply(&staging, &cancel).is_err());
             assert!(controls.apply_png(&staging, &cancel).is_err());
+            assert!(controls.apply_webp(&staging, &cancel, &|_| {}).is_err());
             assert_eq!(fs::read(&staging.output).expect("output untouched"), bytes);
             assert_eq!(
                 fs::read(&target).expect("target untouched"),
@@ -608,6 +747,13 @@ mod tests {
         assert_eq!(
             fs::read(&temporary_png).expect("not overwritten"),
             b"occupied PNG"
+        );
+        let temporary_webp = staging.directory.join("animation.webp");
+        fs::write(&temporary_webp, b"occupied WebP").expect("owned occupied path");
+        assert!(controls.apply_webp(&staging, &cancel, &|_| {}).is_err());
+        assert_eq!(
+            fs::read(&temporary_webp).expect("not overwritten"),
+            b"occupied WebP"
         );
         drop(staging);
         let staging = StagedExport::new(&target).expect("partial-frame staging");

@@ -71,11 +71,59 @@ impl Animation {
                 .output_buffer_size()
                 .ok_or_else(|| invalid("invalid frame size"))?
         ];
+        self.write(
+            &staging.output,
+            |delay| {
+                if decoder.read_frame(&mut pixels).map_err(failed)? != delay {
+                    return Err(invalid("decoded animation timing differs"));
+                }
+                let rgba = if decoder.has_alpha() {
+                    std::mem::take(&mut pixels)
+                } else {
+                    pixels
+                        .as_chunks::<3>()
+                        .0
+                        .iter()
+                        .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
+                        .collect()
+                };
+                let source = crate::DecodedImageFrame {
+                    width,
+                    height,
+                    rgba,
+                    delay: Duration::from_millis(u64::from(delay)),
+                };
+                let edited = crate::image_edits::render_frame_cancellable(
+                    &source,
+                    &request.operations,
+                    &|| cancelled.load(Ordering::Relaxed),
+                )
+                .map_err(failed)?;
+                if decoder.has_alpha() {
+                    pixels = source.rgba;
+                } else {
+                    drop(source);
+                }
+                Ok(edited)
+            },
+            cancelled,
+            progress,
+        )
+    }
+
+    pub(super) fn write(
+        &self,
+        path: &Path,
+        mut next_frame: impl FnMut(u32) -> Result<crate::DecodedImageFrame, ExportError>,
+        cancelled: &AtomicBool,
+        progress: &(impl Fn(Duration) + Sync),
+    ) -> Result<(), ExportError> {
+        check_cancelled(cancelled)?;
         let mut output = std::io::BufWriter::new(
             fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
-                .open(&staging.output)
+                .open(path)
                 .map_err(ExportError::Output)?,
         );
         output
@@ -85,35 +133,7 @@ impl Animation {
         let mut elapsed = Duration::ZERO;
         for delay in &self.delays {
             check_cancelled(cancelled)?;
-            if decoder.read_frame(&mut pixels).map_err(failed)? != *delay {
-                return Err(invalid("decoded animation timing differs"));
-            }
-            let rgba = if decoder.has_alpha() {
-                std::mem::take(&mut pixels)
-            } else {
-                pixels
-                    .as_chunks::<3>()
-                    .0
-                    .iter()
-                    .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
-                    .collect()
-            };
-            let source = crate::DecodedImageFrame {
-                width,
-                height,
-                rgba,
-                delay: Duration::from_millis(u64::from(*delay)),
-            };
-            let edited =
-                crate::image_edits::render_frame_cancellable(&source, &request.operations, &|| {
-                    cancelled.load(Ordering::Relaxed)
-                })
-                .map_err(failed)?;
-            if decoder.has_alpha() {
-                pixels = source.rgba;
-            } else {
-                drop(source);
-            }
+            let edited = next_frame(*delay)?;
             let size = (edited.width, edited.height);
             if size.0 > 16384 || size.1 > 16384 {
                 return Err(invalid("WebP frame dimensions exceed 16384"));
@@ -277,9 +297,9 @@ fn failed(error: impl std::fmt::Display) -> ExportError {
     invalid(&error.to_string())
 }
 
-struct Cancellable<'a> {
-    file: fs::File,
-    cancelled: &'a AtomicBool,
+pub(super) struct Cancellable<'a> {
+    pub(super) file: fs::File,
+    pub(super) cancelled: &'a AtomicBool,
 }
 impl Read for Cancellable<'_> {
     fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {

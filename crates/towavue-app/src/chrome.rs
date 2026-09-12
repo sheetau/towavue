@@ -118,10 +118,11 @@ pub fn style(style: &mut egui::Style) {
     style.visuals.weak_text_color = Some(MUTED);
     style.visuals.selection.bg_fill = HOVER;
     style.visuals.selection.stroke = Stroke::new(1.0, FOREGROUND);
-    style.visuals.window_shadow.offset[0] = 0;
+    style.spacing.scroll.bar_width = 5.0;
+    style.visuals.window_shadow.offset = [0, 8];
     style.visuals.window_shadow.blur = 18;
     style.visuals.window_shadow.color = Color32::from_black_alpha(112);
-    style.visuals.popup_shadow.offset[0] = 0;
+    style.visuals.popup_shadow.offset = [0, 4];
     style.visuals.popup_shadow.blur = 10;
     style.visuals.popup_shadow.color = Color32::from_black_alpha(112);
     style.visuals.hyperlink_color = FOREGROUND;
@@ -419,12 +420,13 @@ mod tests {
         let mut styled = old.clone();
         super::style(&mut styled);
         let mut counts = Vec::new();
-        for (before, after) in [
-            (old.visuals.window_shadow, styled.visuals.window_shadow),
-            (old.visuals.popup_shadow, styled.visuals.popup_shadow),
+        for (before, after, offset) in [
+            (old.visuals.window_shadow, styled.visuals.window_shadow, 8),
+            (old.visuals.popup_shadow, styled.visuals.popup_shadow, 4),
         ] {
             assert_eq!(after.offset[0], 0);
-            assert_eq!(after.offset[1], before.offset[1]);
+            assert_eq!(after.offset[1], offset);
+            assert!(after.offset[1] < before.offset[1]);
             assert_eq!(after.spread, before.spread);
             assert_eq!(after.margin().left, after.margin().right);
             assert!(after.color.a() > before.color.a());

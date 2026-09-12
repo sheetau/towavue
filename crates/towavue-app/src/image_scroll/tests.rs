@@ -1,6 +1,60 @@
 use super::*;
 
 #[test]
+fn inset_scrollbar_gutters_do_not_capture_background_drags() {
+    let context = fonts::test_context();
+    context.global_style_mut(chrome::style);
+    let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
+    let background = egui::Id::new("scrollbar-gutter-background");
+    let mut view = ImageViewState::default();
+    let mut time = 0.0;
+    for density in [1.0, 1.25, 2.0] {
+        let mut frame = |events| {
+            time += 0.1;
+            let mut input = egui::RawInput {
+                screen_rect: Some(viewport),
+                time: Some(time),
+                events,
+                ..Default::default()
+            };
+            input
+                .viewports
+                .get_mut(&egui::ViewportId::ROOT)
+                .expect("viewport")
+                .native_pixels_per_point = Some(density);
+            let _ = context.run_ui(input, |ui| {
+                ui.interact(viewport, background, egui::Sense::click_and_drag());
+                super::bars(ui, viewport, egui::vec2(1000.0, 800.0), &mut view, true);
+            });
+            assert_eq!(view.pan, (0.0, 0.0), "gutters must not scroll the image");
+        };
+        for point in [
+            egui::pos2(399.0, 150.0),
+            egui::pos2(200.0, 299.0),
+            egui::pos2(389.5, 1.0),
+            egui::pos2(389.5, 299.0),
+            egui::pos2(1.0, 289.5),
+            egui::pos2(399.0, 289.5),
+        ] {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: point,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(vec![egui::Event::PointerMoved(point)]);
+            frame(vec![]);
+            frame(vec![button(true)]);
+            frame(vec![egui::Event::PointerMoved(
+                point + egui::vec2(30.0, 30.0),
+            )]);
+            assert_eq!(context.dragged_id(), Some(background));
+            frame(vec![button(false)]);
+        }
+    }
+}
+
+#[test]
 fn selection_zoom_keeps_the_full_image_and_selection_in_the_input_frame() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_scroll::tests::selection_zoom_keeps_the_full_image_and_selection_in_the_input_frame",
@@ -190,6 +244,7 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
         return;
     };
     let context = fonts::test_context();
+    context.global_style_mut(chrome::style);
     context.enable_accesskit();
     let mut app = Application::new(None, |_| {}).expect("app");
     let path = root.join("scroll.png");
@@ -293,6 +348,19 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
         }
         let output = frame(&mut app, vec![], density, size);
         assert_eq!(bars(&output).len(), 2);
+        for bar in bars(&output) {
+            assert!(bar.x0 >= 8.0 && bar.y0 >= 8.0, "inset start: {bar:?}");
+            assert!(
+                bar.x1 <= f64::from(size.x - 8.0) && bar.y1 <= f64::from(size.y - 8.0),
+                "inset end: {bar:?}"
+            );
+        }
+        assert!(
+            bars(&output)
+                .iter()
+                .all(|bar| (bar.width().min(bar.height()) - 5.0).abs() < 0.01),
+            "scrollbar hit width follows the shared narrow style"
+        );
         let limit = (egui::vec2(1000.0, 800.0) / density - size) * 0.5;
         frame(&mut app, vec![button(start, true)], density, size);
         let output = frame(
@@ -373,6 +441,46 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
         assert_eq!(app.edits, history);
         assert!(output.textures_delta.set.is_empty());
         assert_eq!(app.image.as_ref().expect("image").texture.id(), texture);
+        assert!(!app.fullscreen_controls_visible, "bars own the bottom edge");
+        for bar in bars(&output) {
+            let axis = usize::from(bar.width() < bar.height());
+            let center = egui::pos2(
+                ((bar.x0 + bar.x1) * 0.5) as f32,
+                ((bar.y0 + bar.y1) * 0.5) as f32,
+            );
+            let press = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(center)],
+                density,
+                size,
+            );
+            frame(&mut app, vec![press(center, true)], density, size);
+            let mut end = center;
+            for direction in [-1.0, 1.0] {
+                end[axis] = size[axis] * (0.5 + direction);
+                frame(
+                    &mut app,
+                    vec![egui::Event::PointerMoved(end)],
+                    density,
+                    size,
+                );
+                assert!(
+                    (egui::Vec2::from(app.image_view.pan)[axis] + direction * limit[axis]).abs()
+                        < 0.02,
+                    "inset bars still reach the full image limits"
+                );
+                assert!(app.view_drag.is_none(), "bar drag is not image selection");
+                assert!(!app.fullscreen_controls_visible);
+                assert_eq!(app.image_view.selection, Some(bar_selection));
+            }
+            frame(&mut app, vec![press(end, false)], density, size);
+        }
         app.image_view.pan = (0.0, 0.0);
         let selected = PixelCrop {
             x: 400,
@@ -445,7 +553,12 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
             "only the overflowing axis has a bar"
         );
         assert_eq!(app.image_view.pan.0, 0.0);
-        assert!((app.image_view.pan.1 + (800.0 / density - 300.0) * 0.5).abs() < 0.01);
+        assert!(
+            (app.image_view.pan.1 + (800.0 / density - 300.0) * 0.5).abs() < 0.01,
+            "resize limit: density={density}, pan={:?}, viewport={:?}",
+            app.image_view.pan,
+            app.image_viewport
+        );
         frame(&mut app, vec![], density, egui::vec2(1400.0, 1200.0));
         assert_eq!(
             app.image_view.pan,

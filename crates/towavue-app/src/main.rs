@@ -4488,6 +4488,27 @@ where
         volume_targets: &mut Vec<egui::Response>,
     ) {
         let screen = context.content_rect();
+        let over_image_bars = self.fullscreen
+            && self.media_kind == Some(MediaKind::Image)
+            && self.image.as_ref().is_some_and(|image| {
+                let transform = self.visual_transform(image.dimensions());
+                let size = (transform.size.0 as u32, transform.size.1 as u32);
+                let density = context.pixels_per_point();
+                let scale = self
+                    .image_view
+                    .scale(size, (screen.size() * density).into())
+                    / density;
+                let surface = image_scroll::surface(
+                    screen,
+                    egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
+                    context.global_style().spacing.scroll.bar_width,
+                );
+                context.input(|input| {
+                    input.pointer.hover_pos().is_some_and(|pointer| {
+                        screen.contains(pointer) && !surface.contains(pointer)
+                    })
+                })
+            });
         let eligible = self.fullscreen
             && self.media_kind != Some(MediaKind::Audio)
             && !self.modal_input_blocked()
@@ -4495,7 +4516,8 @@ where
             && !self.grid_open
             && !self.filmstrip_open
             && !egui::Popup::is_any_open(context)
-            && self.view_drag.is_none();
+            && self.view_drag.is_none()
+            && !over_image_bars;
         let controls_have_focus = || {
             context
                 .memory(egui::Memory::focused)

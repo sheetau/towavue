@@ -117,6 +117,8 @@ Keep a media-first grayscale UI: Figtree, proportional Japanese fallback, tabula
 
 Media notices go in the left status area; image information stays right. Fullscreen uses the bottom bar. Save progress occupies the toolbar boundary, not ordinary image-navigation loading. Volume uses a 1.2s thin HUD without replacing the path notice.
 
+Image scrollbar tracks and hit regions are inset without shrinking the displayed image viewport or its pan range. Fullscreen controls yield while the pointer is over the image-bar strip, so they do not cover its drag targets.
+
 Media previews are immediate, noninteractive and clipped to valid hover ownership; help tooltips keep their delay and close on clipped/covered/changed targets. The logo's directional menus and normal click/keyboard entry share context/dispatch. Exact widget values live with UI code and regression tests.
 
 ## Distribution boundary

@@ -2,6 +2,47 @@ use super::*;
 use std::fs;
 
 #[test]
+#[ignore = "Release measurement; set TOWAVUE_PREVIEW_BENCH_IMAGE to a static PNG"]
+fn png_static_decode_reports_full_decode_comparison() {
+    let path = std::path::PathBuf::from(
+        std::env::var_os("TOWAVUE_PREVIEW_BENCH_IMAGE").expect("PNG path"),
+    );
+    let expected = decode_image(&path).expect("reference decode");
+    for rows in [false, true, true, false] {
+        let mut samples = Vec::new();
+        for _ in 0..5 {
+            let started = std::time::Instant::now();
+            let pixels = if rows {
+                super::super::png_static::decode(
+                    open(&path, &|| true).expect("open"),
+                    IMAGE_BYTE_LIMIT,
+                    &|| true,
+                )
+                .expect("PNG decode")
+                .expect("static PNG")
+                .rgba
+            } else {
+                let mut decoder =
+                    PngDecoder::new(open(&path, &|| true).expect("open")).expect("PNG header");
+                let orientation = decoder.orientation().expect("orientation");
+                let mut image = DynamicImage::from_decoder(decoder).expect("pixels");
+                image.apply_orientation(orientation);
+                image.into_rgba8().into_raw()
+            };
+            let total = started.elapsed();
+            assert_eq!(pixels, expected.frames[0].rgba);
+            samples.push(total.as_secs_f64() * 1000.0);
+        }
+        samples.sort_by(f64::total_cmp);
+        eprintln!(
+            "PNG_DECODE rows={rows} size={:?} median_ms={:.3}",
+            expected.dimensions(),
+            samples[2]
+        );
+    }
+}
+
+#[test]
 #[ignore = "Release measurement; set TOWAVUE_PREVIEW_BENCH_IMAGE to a large PNG"]
 fn png_row_thumbnail_reports_full_decode_comparison() {
     let path = std::path::PathBuf::from(
@@ -71,6 +112,17 @@ fn compare(path: &Path) {
         .expect("streaming preview")
         .expect("static PNG");
     let reference = decode_image(path).expect("original decode");
+    let mut decoder = PngDecoder::new(open(path, &|| true).expect("open")).expect("PNG");
+    let orientation = decoder.orientation().expect("orientation");
+    let mut legacy = DynamicImage::from_decoder(decoder).expect("independent full decode");
+    legacy.apply_orientation(orientation);
+    assert_eq!(reference.frames[0].rgba, legacy.into_rgba8().into_raw());
+    assert_eq!(
+        decode_image_for_prefetch(path, IMAGE_BYTE_LIMIT, &|| true)
+            .expect("prefetch")
+            .expect("static PNG"),
+        reference
+    );
     assert_eq!(preview.source_size, reference.dimensions());
     let frame = &reference.frames[0];
     let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone())

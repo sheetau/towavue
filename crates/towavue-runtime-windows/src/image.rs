@@ -16,6 +16,7 @@ mod avif;
 mod bmp_preview;
 mod jpeg_preview;
 mod png_preview;
+mod png_static;
 pub(crate) use png_preview::png_thumbnail;
 
 pub(crate) fn first_image_preview(
@@ -73,7 +74,7 @@ pub enum ImageDecodeError {
     Ffmpeg(#[from] DecodeError),
     #[error("could not decode AVIF: {0}")]
     Avif(String),
-    #[error("could not decode APNG: {0}")]
+    #[error("could not decode PNG: {0}")]
     Png(#[from] png::DecodingError),
     #[error("could not encode APNG export frames: {0}")]
     PngEncode(#[from] png::EncodingError),
@@ -157,12 +158,11 @@ pub(crate) fn decode_image_for_prefetch(
         let frame = match format {
             ImageFormat::Gif | ImageFormat::Avif => return Ok(None),
             ImageFormat::Png => {
-                let decoder =
-                    PngDecoder::with_limits(reader.into_inner(), image::Limits::default())?;
-                if decoder.is_apng()? {
+                let Some(frame) = png_static::decode(reader.into_inner(), byte_limit, is_current)?
+                else {
                     return Ok(None);
-                }
-                static_frame(decoder, byte_limit, is_current)?
+                };
+                frame
             }
             ImageFormat::WebP => {
                 let decoder = WebPDecoder::new(reader.into_inner())?;
@@ -225,13 +225,12 @@ pub(crate) fn decode_image_with_preview(
                 }
             }
             ImageFormat::Png => {
-                let decoder =
-                    PngDecoder::with_limits(reader.into_inner(), image::Limits::default())?;
-                if decoder.is_apng()? {
-                    drop(decoder);
-                    apng::decode(path, byte_limit, is_current, preview, false)?
+                if let Some(frame) =
+                    png_static::decode(reader.into_inner(), byte_limit, is_current)?
+                {
+                    vec![frame]
                 } else {
-                    vec![static_frame(decoder, byte_limit, is_current)?]
+                    apng::decode(path, byte_limit, is_current, preview, false)?
                 }
             }
             _ => vec![static_frame(

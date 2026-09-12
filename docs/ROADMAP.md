@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 I01/E01 PREVIOUS修正: image crateのBACKGROUND前snapshotが後続PREVIOUSで復元される不具合を2×1の明示画素で再現。圧縮復号は既存png 0.18.1を直接pinし、APNG合成だけruntimeで管理する。frame表示後に消去／合成前領域の復元を行い、先頭・連続PREVIOUS、Adam7、実保存／再読込を確認して保存制限を解除。独立PNG組立により単一frameのAPNGもdelay／loop／編集画素を保持して保存する。色種・bit深度変換、preview／budget／取消／poster境界を回帰化。独立poster保存・OVER丸め・16bit／ICC・他animation形式と全native/UI／品質／資源gateを継続する。
+
 2026-09-12 E01 APNG checkpoint: 旧保存が3frameを1frameへ落とす回帰を再現し、対応APNGの全frame保存とdelay分数／loop値の保持、PNG／APNG alias、text Keep／Set／Removeへ接続する。独立RGBA8 PNG列から圧縮bytesを変えずに組み立て、frame欠落／余分なframe・CRC・形式不一致・取消・書込失敗を検査する。PREVIOUS合成の表示／保存decoder不一致を検出したため、単一frame／posterと併せて明示拒否し、対応gateを残す。alpha-overの最大1階調差は生成素材の観測値であり全素材の上限保証ではない。GIF／WebP等の保存・色管理／16bit・全native/UI／資源gateを継続する。
 
 2026-09-12 U07/I07 comparison-reuse checkpoint: materialized表示と比較へ同じArcを渡し、現在側の再生成・一時bufferを省く。通知順序と既存snapshot／世代の保護は維持。2frameのrender呼出し削減、最終byte・delay等の差、appのArc一致を確認。4096×2304生成画像のRelease比較2回で中央値48.445／48.082→1.059／1.132ms、観測OS peak commit207.152／207.172→170.820／170.773MiB。元＋表示72MiBとmaterialize約46msは変わらない。別process・9比較・保存snapshot空のCPU試験であり、UI／GPU／全素材の性能認定ではない。全UX gateを継続。

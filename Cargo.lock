@@ -2666,6 +2666,7 @@ dependencies = [
  "ffmpeg-next",
  "flate2",
  "image",
+ "png",
  "quick-xml",
  "raw-window-handle",
  "thiserror 2.0.20",

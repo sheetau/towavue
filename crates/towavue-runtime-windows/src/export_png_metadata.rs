@@ -337,13 +337,12 @@ impl PngMetadata {
             None,
             cancelled,
         )?;
-        if animation.as_ref().is_some_and(|animation| {
-            animation.delays.len() == 1
-                || !animation.includes_default
-                || animation.has_previous_disposal
-        }) {
+        if animation
+            .as_ref()
+            .is_some_and(|animation| !animation.includes_default)
+        {
             return Err(invalid(
-                "single-frame APNG, a separate default poster or PREVIOUS disposal is not yet supported for export",
+                "APNG with a separate default poster is not yet supported for export",
             ));
         }
         chunks.retain(|chunk| options.get(chunk.field).is_none());

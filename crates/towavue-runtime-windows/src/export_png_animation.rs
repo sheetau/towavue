@@ -7,7 +7,6 @@ pub(super) struct Animation {
     pub(super) plays: u32,
     pub(super) delays: Vec<[u8; 4]>,
     pub(super) includes_default: bool,
-    pub(super) has_previous_disposal: bool,
 }
 
 impl Animation {
@@ -209,7 +208,6 @@ impl Scan {
                     plays: number(data, 4),
                     delays: Vec::new(),
                     includes_default: false,
-                    has_previous_disposal: false,
                 });
             }
             b"fcTL" | b"fdAT" => {
@@ -241,7 +239,6 @@ impl Scan {
                     if first {
                         animation.includes_default = !self.image_seen;
                     }
-                    animation.has_previous_disposal |= data[24] == 2;
                     animation
                         .delays
                         .push(data[20..24].try_into().expect("delay"));

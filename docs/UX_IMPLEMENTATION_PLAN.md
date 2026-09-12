@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+I01/E01 PREVIOUS合成と単一frame保存: BACKGROUNDで消した青色が後続PREVIOUSで戻る旧表示を、2×1の期待RGBAで再現。png 0.18.1を既存transitive依存と同版で直接利用し、APNGの圧縮復号を維持したまま合成／表示後disposalをruntimeへ移す。PREVIOUSは当該frameの合成直前の領域を復元し、先頭ではBACKGROUND扱いとする。静止PNGは従来経路。先頭／連続PREVIOUS・Adam7の明示画素と保存後一致、部分領域の半透明OVER・編集保存／resaveを確認して拒否制限を解除。単一frameも独立PNG組立で制御情報を残せるため、旧拒否の失敗を確認後、有限／無限loopとdelay／編集画素を保持する保存を通した。
+
+追加回帰: 展開後のgray／gray-alpha／RGB／RGBA／palette、低bit深度・16→8bit変換、全frame retained予算・first-only予算、previewからの取消・IEND切断・独立posterをanimationに混ぜない境界を検証。作業canvas＋raw＋PREVIOUS領域に512MiB上限を設け、取消確認を読取／合成へ維持する。OVER自体のimage crate演算は変更しておらず、FFmpegとの丸め差は別gate。独立posterの保存・RGBA16／ICC完全保持・GIF／WebP等・全native/UI/品質/資源台帳は継続する。
+
 E01 APNG保持保存: PNG系sourceのanimation制御chunkをCRC付きstream scanで検査し、対応APNGの全frameを独立RGBA8 PNGへ圧縮してから、元のdelay分数／loop値でAPNGへ組み立てる。`.png`／`.apng`とtext Keep／Set／Removeを接続。組立は64KiB bufferで圧縮画素を変更せず、既存stage／source stamp／publish保護を使う。独立frame方式のため差分圧縮より保存・一時disk量が大きくなり得る。
 
 検証範囲: 旧3→1frameの失敗、可変／zero／微小delay、無限／有限／最大有効loop値、alpha・部分frameのSOURCE／OVER／BACKGROUND、crop・直角回転・resize、全frameの保存側復号基準とのRGBA一致・再保存・元bytes維持、破損／切断／数・CRC不一致／取消／I/O失敗／保存先保護を確認する。表示decoderとのalpha-overは最大1階調差を観測し、PREVIOUSの後続frameでは大きな不一致を再現した。PREVIOUS／単一frame／独立poster／PNG系以外へのAPNG保存を明示拒否して未完gateに残す。PNG/APNGメタデータUI説明とaliasを回帰化する。これは全APNG対応・全素材の1階調以内保証・native入力認定ではない。GIF／WebP等のanimation保存、RGBA16／ICC・全UI／品質／資源台帳を継続する。

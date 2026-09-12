@@ -32,6 +32,7 @@ image = { version = "=0.25.10", default-features = false, features = [
     "webp",
 ] }
 quick-xml = "=0.41.0"
+png = "=0.18.1"
 raw-window-handle = "=0.6.2"
 thiserror = "=2.0.20"
 towavue-core = { path = "../towavue-core" }

@@ -1,10 +1,16 @@
 # towavue アーキテクチャ
 
+## I01/E01: APNG合成のruntime管理（2026-09-12）
+
+2×1の明示画素fixtureで、image 0.25.10のBACKGROUND→PREVIOUSが消去前の画素を復元することを再現した。APNGの圧縮データは既存依存と同版のpng 0.18.1を直接pinして復号し、runtimeでframe領域のSOURCE／OVER合成と表示後のNONE／BACKGROUND／PREVIOUSを管理する。PREVIOUS用にはそのframeを合成する直前の領域だけ保存し、表示結果を通知／保持してから復元する。先頭PREVIOUSはBACKGROUND扱い。OVERの画素演算は従来image crateと同じものを維持し、別件の丸め変更を混ぜない。
+
+通常PNGは既存decoderのまま、APNGだけheaderを開き直してこの経路へ渡す。既存の取消reader／preview／先頭frameのみ／retained RGBA予算を維持し、canvas・raw frame・PREVIOUS領域の作業bufferにも既存512MiB上限を適用する。PNG crateの展開／16→8bit変換後の灰色・RGB・alphaを扱う。明示画素と実exportの一致を確認し、PREVIOUS保存拒否を解除した。先頭／連続PREVIOUS、Adam7、alpha付き部分frameも回帰対象とする。独立frame組立で制御情報を維持できることを検証し、単一frame APNGも保存対象とした。独立posterの保存対応、色管理／16bit完全保持、表示とFFmpegのOVER丸め整合は別gateとして継続する。
+
 ## E01: APNGのframe・delay・loop保持保存（2026-09-12）
 
-PNG系の保存では拡張子だけで静止画と判断せず、既存のCRC付きstream scanでacTL／fcTL／fdATを検査する。2frame以上かつ既定画像が先頭animation frameで、PREVIOUS disposalを含まないAPNGを、`.png`／`.apng`へ全frame編集保存する。FFmpegには一周分をframe順で渡し、固定の中間timestampで重複・間引きを避け、RGBA8の独立PNG列へ圧縮する。stream処理で先頭IDATと後続fdATを組み立て、全canvas・SOURCE blend・NONE disposal、元の各delay分子／分母とnum_playsを制御chunkへ格納する。圧縮画素bytesを変更せず、各CRC・寸法／形式・frame数を検査する。既存PNG textのKeep／Set／Remove、再読取による制御／text一致、source stamp、取消、原子的publishの保護を維持する。metadataやanimation組立で画素を再圧縮しない。
+PNG系の保存では拡張子だけで静止画と判断せず、既存のCRC付きstream scanでacTL／fcTL／fdATを検査する。1frame以上かつ既定画像が先頭animation frameであるAPNGを、`.png`／`.apng`へ全frame編集保存する。FFmpegには一周分をframe順で渡し、固定の中間timestampで重複・間引きを避け、RGBA8の独立PNG列へ圧縮する。stream処理で先頭IDATと後続fdATを組み立て、全canvas・SOURCE blend・NONE disposal、元の各delay分子／分母とnum_playsを制御chunkへ格納する。圧縮画素bytesを変更せず、各CRC・寸法／形式・frame数を検査する。既存PNG textのKeep／Set／Remove、再読取による制御／text一致、source stamp、取消、原子的publishの保護を維持する。metadataやanimation組立で画素を再圧縮しない。
 
-保持する制御情報は最大65,536frameのdelay列とloop値で、全画像の追加decodeは行わない。組立は64KiB bufferで処理するが、独立frame圧縮なので差分圧縮より出力／一時disk量が増え得る。単一frame APNG、animation外のposter、PREVIOUS disposal、PNG系以外へのAPNG保存は、保持／復号整合の対応まで明示的に拒否する。静止PNGの他形式保存は維持する。生成素材のalpha-overでimage crate表示とFFmpeg復号の最大1階調差を観測し、PREVIOUS後続frameでは大差も検出したため、後者を対応済みとしない。保存はFFmpeg復号＋既存編集の全RGBAを基準に厳密照合し、表示decoderとの比較を別に記録する。RGBA16／色管理の完全保持、GIF／WebP等のanimation保存、全素材の品質・性能は別gateとして残す。制御chunkの意味は[W3C PNG仕様](https://www.w3.org/TR/png-3/#animation-information)、入力の一周処理は[FFmpeg APNG demuxer](https://ffmpeg.org/ffmpeg-formats.html#apng)を参照する。
+保持する制御情報は最大65,536frameのdelay列とloop値で、全画像の追加decodeは行わない。組立は64KiB bufferで処理するが、独立frame圧縮なので差分圧縮より出力／一時disk量が増え得る。animation外のposter、PNG系以外へのAPNG保存は、保持対応まで明示的に拒否する。静止PNGの他形式保存は維持する。生成素材のalpha-overで表示とFFmpeg復号の最大1階調差を観測している。PREVIOUS後続frameの大差は上記runtime合成で修正した。保存はFFmpeg復号＋既存編集の全RGBAを基準に厳密照合し、表示decoderとの比較を別に記録する。RGBA16／色管理の完全保持、GIF／WebP等のanimation保存、全素材の品質・性能は別gateとして残す。制御chunkの意味は[W3C PNG仕様](https://www.w3.org/TR/png-3/#animation-information)、入力の一周処理は[FFmpeg APNG demuxer](https://ffmpeg.org/ffmpeg-formats.html#apng)を参照する。
 
 ## U07/I07: 表示用materialized画像を比較へ共有（2026-09-12）
 

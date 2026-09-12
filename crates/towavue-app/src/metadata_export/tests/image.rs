@@ -149,7 +149,7 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
             "including when all fields are Keep",
             "Choose a .png or .apng export path",
             "Supported APNG saves retain all frames, delays and loop count",
-            "PREVIOUS disposal",
+            "including PREVIOUS disposal",
             "Alpha-over rounding can differ from display",
         ]
     } else {

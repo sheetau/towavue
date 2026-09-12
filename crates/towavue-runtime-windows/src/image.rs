@@ -11,6 +11,7 @@ use thiserror::Error;
 
 use crate::decode::{self, DecodeError, DecodeOutput};
 
+mod apng;
 mod bmp_preview;
 mod jpeg_preview;
 
@@ -67,6 +68,8 @@ pub enum ImageDecodeError {
     Decode(#[from] ImageError),
     #[error("FFmpeg could not decode image: {0}")]
     Ffmpeg(#[from] DecodeError),
+    #[error("could not decode APNG: {0}")]
+    Png(#[from] png::DecodingError),
     #[error("image format could not be determined")]
     UnknownFormat,
     #[error("decoded image contained no frames")]
@@ -110,7 +113,8 @@ pub(crate) fn first_animation_frame(
                 if !decoder.is_apng()? {
                     return Ok(None);
                 }
-                animated_frames(decoder.apng()?, byte_limit, current, &mut preview, true)?
+                drop(decoder);
+                apng::decode(path, byte_limit, current, &mut preview, true)?
             }
             Some(ImageFormat::WebP) => {
                 let decoder = WebPDecoder::new(reader.into_inner())?;
@@ -219,7 +223,8 @@ pub(crate) fn decode_image_with_preview(
                 let decoder =
                     PngDecoder::with_limits(reader.into_inner(), image::Limits::default())?;
                 if decoder.is_apng()? {
-                    animated_frames(decoder.apng()?, byte_limit, is_current, preview, false)?
+                    drop(decoder);
+                    apng::decode(path, byte_limit, is_current, preview, false)?
                 } else {
                     vec![static_frame(decoder, byte_limit, is_current)?]
                 }

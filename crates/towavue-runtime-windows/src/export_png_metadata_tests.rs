@@ -100,7 +100,7 @@ fn animation_fixture_with_regions(plays: u32, delays: &[[u8; 4]], regions: bool)
     let mut sequence = 0u32;
     for (index, delay) in delays.iter().enumerate() {
         let (width, height, x_offset, y_offset, dispose, blend) = if regions && index > 0 {
-            (16, 12, index as u32 * 2, index as u32, index as u8 % 2, 1)
+            (16, 12, index as u32 * 2, index as u32, index as u8 % 3, 1)
         } else {
             (32, 24, 0, 0, 0, 0)
         };
@@ -412,6 +412,277 @@ fn map_chunks(bytes: &[u8], mut change: impl FnMut([u8; 4], &mut Vec<u8>) -> boo
 }
 
 #[test]
+fn apng_previous_restores_the_canvas_after_background_disposal() {
+    let root = root("apng-previous-golden");
+    let source = root.join("source.png");
+    let red = [255, 0, 0, 255];
+    let blue = [0, 0, 255, 255];
+    let green = [0, 255, 0, 255];
+    let clear = [0, 0, 0, 0];
+    let frames = [
+        (0u32, 2u32, 0u8, red),
+        (0, 1, 1, blue),
+        (0, 1, 2, green),
+        (1, 1, 0, clear),
+    ];
+    let mut bytes = SIGNATURE.to_vec();
+    bytes.extend(chunk(
+        b"IHDR",
+        &[
+            &2u32.to_be_bytes()[..],
+            &1u32.to_be_bytes(),
+            &[8, 6, 0, 0, 0],
+        ]
+        .concat(),
+    ));
+    bytes.extend(chunk(
+        b"acTL",
+        &[&4u32.to_be_bytes()[..], &2u32.to_be_bytes()].concat(),
+    ));
+    let mut sequence = 0u32;
+    for (index, (x, width, dispose, pixel)) in frames.into_iter().enumerate() {
+        let mut control = Vec::new();
+        for number in [sequence, width, 1, x, 0] {
+            control.extend_from_slice(&number.to_be_bytes());
+        }
+        sequence += 1;
+        control.extend_from_slice(&[0, 1, 0, 10, dispose, 0]);
+        bytes.extend(chunk(b"fcTL", &control));
+        let data = compressed(&[&[0][..], &pixel.repeat(width as usize)].concat());
+        if index == 0 {
+            bytes.extend(chunk(b"IDAT", &data));
+        } else {
+            bytes.extend(chunk(
+                b"fdAT",
+                &[&sequence.to_be_bytes()[..], &data].concat(),
+            ));
+            sequence += 1;
+        }
+    }
+    bytes.extend(chunk(b"IEND", &[]));
+    fs::write(&source, &bytes).expect("golden source");
+    let decoded = crate::decode_image(&source).expect("animation");
+    let expected = [[red, red], [blue, red], [green, red], [clear, clear]];
+    assert_eq!(decoded.frames.len(), expected.len());
+    for (index, (actual, expected)) in decoded.frames.iter().zip(expected).enumerate() {
+        assert_eq!(
+            actual.rgba,
+            expected.concat(),
+            "explicit canvas for frame {index}"
+        );
+    }
+    let target = root.join("saved.png");
+    export_media(&request(&source, &target)).expect("PREVIOUS save is supported");
+    assert_eq!(
+        crate::decode_image(&target).expect("saved").frames,
+        decoded.frames
+    );
+    // A 2x1 Adam7 image has one pixel in pass 1 and one in pass 6.
+    let interlaced = map_chunks(&bytes, |kind, data| {
+        if &kind == b"IHDR" {
+            data[12] = 1;
+        }
+        if &kind == b"IDAT" {
+            *data = compressed(&[&[0][..], &red, &[0], &red].concat());
+        }
+        true
+    });
+    fs::write(&source, &interlaced).expect("interlaced source");
+    assert_eq!(
+        crate::decode_image(&source).expect("Adam7 PREVIOUS").frames,
+        decoded.frames
+    );
+    export_media(&request(&source, &target)).expect("interlaced save");
+    assert_eq!(
+        crate::decode_image(&target).expect("saved Adam7").frames,
+        decoded.frames
+    );
+    for first_previous in [false, true] {
+        let mut frame = 0;
+        let variant = map_chunks(&bytes, |kind, data| {
+            if &kind == b"fcTL" {
+                if first_previous {
+                    if frame == 0 {
+                        data[24] = 2;
+                    }
+                } else if frame != 0 {
+                    data[24] = 2;
+                }
+                frame += 1;
+            }
+            true
+        });
+        fs::write(&source, &variant).expect("PREVIOUS variant");
+        let decoded = crate::decode_image(&source).expect("variant");
+        let expected = if first_previous {
+            [[red, red], [blue, clear], [green, clear], [clear, clear]]
+        } else {
+            [[red, red], [blue, red], [green, red], [red, clear]]
+        };
+        for (index, (actual, expected)) in decoded.frames.iter().zip(expected).enumerate() {
+            assert_eq!(
+                actual.rgba,
+                expected.concat(),
+                "first_previous={first_previous}, frame={index}"
+            );
+        }
+        export_media(&request(&source, &target)).expect("variant save");
+        assert_eq!(
+            crate::decode_image(&target).expect("saved variant").frames,
+            decoded.frames
+        );
+        assert_eq!(fs::read(&source).expect("source unchanged"), variant);
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn apng_decoder_preserves_expanded_color_types_and_depth_conversion() {
+    use png::{BitDepth, ColorType};
+    let root = root("apng-color-types");
+    let source = root.join("source.png");
+    let cases = [
+        (
+            ColorType::Grayscale,
+            BitDepth::One,
+            vec![0x40],
+            vec![0, 0, 0, 255, 255, 255, 255, 255],
+        ),
+        (
+            ColorType::Grayscale,
+            BitDepth::Eight,
+            vec![17, 235],
+            vec![17, 17, 17, 255, 235, 235, 235, 255],
+        ),
+        (
+            ColorType::GrayscaleAlpha,
+            BitDepth::Eight,
+            vec![17, 128, 235, 64],
+            vec![17, 17, 17, 128, 235, 235, 235, 64],
+        ),
+        (
+            ColorType::Rgb,
+            BitDepth::Eight,
+            vec![10, 20, 30, 40, 50, 60],
+            vec![10, 20, 30, 255, 40, 50, 60, 255],
+        ),
+        (
+            ColorType::Rgba,
+            BitDepth::Eight,
+            vec![10, 20, 30, 128, 40, 50, 60, 64],
+            vec![10, 20, 30, 128, 40, 50, 60, 64],
+        ),
+        (
+            ColorType::Indexed,
+            BitDepth::One,
+            vec![0x40],
+            vec![10, 20, 30, 255, 40, 50, 60, 128],
+        ),
+        (
+            ColorType::Rgba,
+            BitDepth::Sixteen,
+            vec![10, 1, 20, 2, 30, 3, 128, 4, 40, 5, 50, 6, 60, 7, 64, 8],
+            vec![10, 20, 30, 128, 40, 50, 60, 64],
+        ),
+    ];
+    for (color, depth, pixels, expected) in cases {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 2, 1);
+            encoder.set_color(color);
+            encoder.set_depth(depth);
+            encoder.set_animated(2, 0).expect("animation");
+            if color == ColorType::Indexed {
+                encoder.set_palette(vec![10, 20, 30, 40, 50, 60]);
+                encoder.set_trns(vec![255, 128]);
+            }
+            let mut writer = encoder.write_header().expect("header");
+            writer.set_frame_delay(1, 7).expect("delay");
+            writer.write_image_data(&pixels).expect("first frame");
+            writer
+                .set_dispose_op(png::DisposeOp::Previous)
+                .expect("previous");
+            writer.write_image_data(&pixels).expect("second frame");
+            writer.finish().expect("finish");
+        }
+        fs::write(&source, &bytes).expect("source");
+        let decoded = crate::decode_image(&source).expect("color frames");
+        assert_eq!(decoded.frames.len(), 2);
+        for frame in &decoded.frames {
+            assert_eq!(frame.rgba, expected, "{color:?} {depth:?}");
+        }
+        let first = crate::image::first_animation_frame(&source, 8, &|| true)
+            .expect("preview")
+            .expect("animated");
+        assert_eq!(first, decoded.frames[0]);
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn apng_decoder_keeps_preview_budget_cancellation_and_poster_boundaries() {
+    let root = root("apng-decode-boundaries");
+    let source = root.join("source.png");
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, 2, 1);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_animated(2, 1).expect("animated");
+        encoder.set_sep_def_img(true).expect("separate poster");
+        let mut writer = encoder.write_header().expect("header");
+        writer.write_image_data(&[255; 8]).expect("poster");
+        writer.set_frame_delay(0, 0).expect("minimum delay");
+        writer
+            .write_image_data(&[0; 8])
+            .expect("first animation frame");
+        writer.write_image_data(&[128; 8]).expect("second frame");
+        writer.finish().expect("finish");
+    }
+    fs::write(&source, &bytes).expect("source");
+    let decoded = crate::image::decode_image_cancellable(&source, 16, &|| true)
+        .expect("exact retained budget");
+    assert_eq!(decoded.retained_bytes(), 16);
+    assert_eq!(decoded.frames[0].rgba, [0; 8]);
+    assert_eq!(decoded.frames[0].delay, Duration::from_millis(10));
+    assert_eq!(
+        crate::image::first_animation_frame(&source, 8, &|| true)
+            .expect("preview")
+            .expect("animation"),
+        decoded.frames[0]
+    );
+    for budget in [0, 7, 15] {
+        assert!(matches!(
+            crate::image::decode_image_cancellable(&source, budget, &|| true),
+            Err(crate::ImageDecodeError::TooLarge)
+        ));
+    }
+    let current = AtomicBool::new(true);
+    let mut previews = 0;
+    let result = crate::image::decode_image_with_preview(
+        &source,
+        16,
+        &|| current.load(Ordering::Relaxed),
+        &mut |width, height, pixels| {
+            previews += 1;
+            assert_eq!((width, height), (2, 1));
+            assert_eq!(pixels, [0; 8]);
+            current.store(false, Ordering::Relaxed);
+        },
+    );
+    assert!(matches!(result, Err(crate::ImageDecodeError::Cancelled)));
+    assert_eq!(previews, 1);
+    fs::write(&source, &bytes[..bytes.len() - 1]).expect("truncated IEND");
+    assert!(crate::decode_image(&source).is_err());
+    assert!(
+        crate::image::first_animation_frame(&source, 8, &|| true)
+            .expect("first-only does not read the tail")
+            .is_some()
+    );
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn apng_scan_rejects_corrupt_controls_sequences_bounds_and_truncation() {
     let bytes = animation_fixture(2, &[[0, 1, 0, 10]; 3]);
     let cancel = AtomicBool::new(false);
@@ -477,17 +748,66 @@ fn apng_scan_rejects_corrupt_controls_sequences_bounds_and_truncation() {
 }
 
 #[test]
+fn apng_single_frame_save_preserves_controls_and_edited_pixels() {
+    let root = root("apng-single-frame");
+    let source = root.join("source.png");
+    let target = root.join("saved.apng");
+    let cancel = AtomicBool::new(false);
+    for plays in [0, 1, 3] {
+        let bytes = animation_fixture(plays, &[[0, 7, 0, 13]]);
+        fs::write(&source, &bytes).expect("source");
+        let decoded = crate::decode_image(&source).expect("single animation frame");
+        let mut request = request(&source, &target);
+        request.operations.push(EditOperation::RotateClockwise);
+        let expected = crate::render_image_edits(
+            &decoded,
+            &request.operations,
+            &crate::Cancellation::default(),
+        )
+        .expect("edited frame");
+        export_media(&request).expect("single-frame APNG save");
+        assert_eq!(
+            crate::decode_image(&target).expect("reopen").frames,
+            expected.frames
+        );
+        let control = scan_contents(Cursor::new(&bytes), None, None, &cancel)
+            .expect("source controls")
+            .1;
+        assert_eq!(
+            scan_contents(
+                Cursor::new(fs::read(&target).expect("saved")),
+                None,
+                None,
+                &cancel
+            )
+            .expect("saved controls")
+            .1,
+            control
+        );
+        let resave = root.join("resaved.png");
+        export_media(&self::request(&target, &resave)).expect("single-frame resave");
+        assert_eq!(
+            scan_contents(
+                Cursor::new(fs::read(&resave).expect("resaved")),
+                None,
+                None,
+                &cancel
+            )
+            .expect("resaved controls")
+            .1,
+            control
+        );
+        assert_eq!(fs::read(&source).expect("source unchanged"), bytes);
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn apng_unsupported_exports_preserve_targets_and_static_conversions_still_work() {
     let root = root("apng-unsupported");
     let source = root.join("source.APNG");
     let target = root.join("target.png");
     let bytes = animation_fixture(2, &[[0, 1, 0, 10]; 3]);
-    let previous = map_chunks(&bytes, |kind, data| {
-        if &kind == b"fcTL" {
-            data[24] = 2;
-        }
-        true
-    });
     let mut first = true;
     let poster = map_chunks(&bytes, |kind, data| {
         if &kind == b"acTL" {
@@ -503,11 +823,8 @@ fn apng_unsupported_exports_preserve_targets_and_static_conversions_still_work()
         }
         true
     });
-    for (bytes, message) in [
-        (animation_fixture(1, &[[0, 1, 0, 10]]), "single-frame"),
-        (previous, "PREVIOUS"),
-        (poster, "poster"),
-    ] {
+    {
+        let bytes = poster;
         fs::write(&source, &bytes).expect("unsupported source");
         assert!(
             read_export_metadata(&source, MediaKind::Image).is_ok(),
@@ -518,7 +835,7 @@ fn apng_unsupported_exports_preserve_targets_and_static_conversions_still_work()
             export_media(&request(&source, &target))
                 .expect_err("unsupported export")
                 .to_string()
-                .contains(message)
+                .contains("poster")
         );
         assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
         assert_eq!(fs::read(&source).expect("source preserved"), bytes);
@@ -588,7 +905,6 @@ fn apng_assembly_is_bounded_and_preserves_compressed_pixels_on_failure_and_succe
             plays: 2,
             delays: vec![[0, 1, 0, 10]; 2],
             includes_default: true,
-            has_previous_disposal: false
         })
     );
     let compressed = |bytes: &[u8]| {

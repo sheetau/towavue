@@ -1,7 +1,6 @@
 use super::*;
 use crate::export::audio_tests::root;
 use std::io::Cursor;
-use std::os::windows::process::CommandExt;
 use towavue_core::{ImageResize, PixelCrop, ResampleFilter};
 
 fn fixture() -> Vec<u8> {
@@ -229,43 +228,6 @@ fn apng_export_preserves_all_edited_frames_delays_and_loop_count() {
             &crate::Cancellation::default(),
         )
         .expect("edited animation");
-        // The existing display decoder and FFmpeg round alpha-over differently.
-        // Keep a strict export-decoder reference as well as the display comparison.
-        let raw = Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"))
-            .creation_flags(CREATE_NO_WINDOW)
-            .args(["-v", "error", "-ignore_loop", "1", "-i"])
-            .arg(&source)
-            .args([
-                "-fps_mode",
-                "passthrough",
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "rgba",
-                "pipe:1",
-            ])
-            .output()
-            .expect("reference decode");
-        assert!(
-            raw.status.success(),
-            "{}",
-            String::from_utf8_lossy(&raw.stderr)
-        );
-        assert_eq!(raw.stdout.len(), decoded.frames.len() * 32 * 24 * 4);
-        let mut export_source = decoded.clone();
-        for (frame, rgba) in export_source
-            .frames
-            .iter_mut()
-            .zip(raw.stdout.as_chunks::<{ 32 * 24 * 4 }>().0)
-        {
-            frame.rgba.copy_from_slice(rgba);
-        }
-        let export_expected = crate::render_image_edits(
-            &export_source,
-            &request.operations,
-            &crate::Cancellation::default(),
-        )
-        .expect("export decoder reference");
         let source_controls = scan_contents(Cursor::new(&bytes), None, None, &cancel)
             .expect("source controls")
             .1;
@@ -282,12 +244,12 @@ fn apng_export_preserves_all_edited_frames_delays_and_loop_count() {
             let actual = crate::decode_image(&request.target).expect("reopen alias");
             assert_eq!(actual.frames.len(), expected.frames.len());
             assert!(
-                actual.frames == export_expected.frames,
-                "all frames must match the export decoder reference: plays={plays}, differences={:?}",
+                actual.frames == expected.frames,
+                "all frames must match the displayed edits: plays={plays}, differences={:?}",
                 actual
                     .frames
                     .iter()
-                    .zip(&export_expected.frames)
+                    .zip(&expected.frames)
                     .map(|(a, b)| (
                         a.delay,
                         b.delay,
@@ -304,25 +266,6 @@ fn apng_export_preserves_all_edited_frames_delays_and_loop_count() {
                     ))
                     .collect::<Vec<_>>()
             );
-            for (index, (actual, expected)) in
-                actual.frames.iter().zip(&expected.frames).enumerate()
-            {
-                assert_eq!(
-                    (actual.width, actual.height, actual.delay),
-                    (expected.width, expected.height, expected.delay)
-                );
-                let maximum = actual
-                    .rgba
-                    .iter()
-                    .zip(&expected.rgba)
-                    .map(|(a, b)| a.abs_diff(*b))
-                    .max()
-                    .expect("pixels");
-                assert!(
-                    maximum <= u8::from(regions),
-                    "display decoder difference: plays={plays}, frame={index}, maximum={maximum}"
-                );
-            }
             let (texts, controls) = scan_contents(
                 Cursor::new(fs::read(&request.target).expect("saved bytes")),
                 None,
@@ -1187,137 +1130,150 @@ fn apng_export_cancellation_and_source_changes_never_replace_target() {
 }
 
 #[test]
-fn apng_poster_preparation_streams_frames_and_preserves_targets_on_failure() {
-    let root = root("apng-poster-preparation");
+fn apng_preparation_streams_frames_and_preserves_targets_on_failure() {
+    let root = root("apng-preparation");
     let source = root.join("source.png");
     let target = root.join("target.png");
-    let bytes = poster_fixture(3);
-    fs::write(&source, &bytes).expect("source");
-    fs::write(&target, b"existing target").expect("target");
-    let cancel = AtomicBool::new(false);
-    let request = request(&source, &target);
-    let metadata = PngMetadata::prepare(&request, &title("new"), &cancel).expect("prepare");
-    let mut stream = Vec::new();
-    crate::image::apng::write_frames(&source, &mut stream, &|| true).expect("stream frames");
-    let mut remaining = stream.as_slice();
-    let mut frames = Vec::new();
-    while !remaining.is_empty() {
-        assert!(remaining.starts_with(SIGNATURE));
-        let mut end = 8;
-        loop {
-            let size = u32::from_be_bytes(remaining[end..end + 4].try_into().expect("chunk size"))
-                as usize;
-            let last = &remaining[end + 4..end + 8] == b"IEND";
-            end += size + 12;
-            if last {
-                break;
-            }
-        }
-        frames.push(
-            image::load_from_memory(&remaining[..end])
-                .expect("independent PNG")
-                .to_rgba8(),
-        );
-        remaining = &remaining[end..];
-    }
-    assert_eq!(frames.len(), 4);
-    assert_eq!(frames[0], image::open(&source).expect("poster").to_rgba8());
-    for (png, frame) in frames[1..]
-        .iter()
-        .zip(crate::decode_image(&source).expect("animation").frames)
-    {
-        assert_eq!(png.as_raw(), &frame.rgba);
-    }
-    let mut assembled = Vec::new();
-    metadata
-        .animation
-        .as_ref()
-        .expect("animation controls")
-        .assemble(Cursor::new(&stream), &mut assembled, &cancel)
-        .expect("assemble poster and frames");
-    assert_eq!(
-        scan_contents(Cursor::new(assembled), None, None, &cancel)
-            .expect("controls")
-            .1,
-        metadata.animation
-    );
-
-    struct CancelOnSecondPng<'a> {
-        cancel: &'a AtomicBool,
-        signatures: usize,
-    }
-    impl Write for CancelOnSecondPng<'_> {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            if bytes == SIGNATURE {
-                self.signatures += 1;
-                if self.signatures == 2 {
-                    self.cancel.store(true, Ordering::Relaxed);
+    for (has_poster, bytes) in [
+        (
+            false,
+            animation_fixture_with_regions(2, &[[0, 1, 0, 10]; 3], true),
+        ),
+        (true, poster_fixture(3)),
+    ] {
+        fs::write(&source, &bytes).expect("source");
+        fs::write(&target, b"existing target").expect("target");
+        let cancel = AtomicBool::new(false);
+        let request = request(&source, &target);
+        let metadata = PngMetadata::prepare(&request, &title("new"), &cancel).expect("prepare");
+        let mut stream = Vec::new();
+        crate::image::apng::write_frames(&source, &mut stream, &|| true).expect("stream frames");
+        let mut remaining = stream.as_slice();
+        let mut frames = Vec::new();
+        while !remaining.is_empty() {
+            assert!(remaining.starts_with(SIGNATURE));
+            let mut end = 8;
+            loop {
+                let size =
+                    u32::from_be_bytes(remaining[end..end + 4].try_into().expect("chunk size"))
+                        as usize;
+                let last = &remaining[end + 4..end + 8] == b"IEND";
+                end += size + 12;
+                if last {
+                    break;
                 }
             }
-            Ok(bytes.len())
+            frames.push(
+                image::load_from_memory(&remaining[..end])
+                    .expect("independent PNG")
+                    .to_rgba8(),
+            );
+            remaining = &remaining[end..];
         }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
+        assert_eq!(frames.len(), 3 + usize::from(has_poster));
+        if has_poster {
+            assert_eq!(frames[0], image::open(&source).expect("poster").to_rgba8());
         }
-    }
-    let mut writer = CancelOnSecondPng {
-        cancel: &cancel,
-        signatures: 0,
-    };
-    assert!(matches!(
-        crate::image::apng::write_frames(&source, &mut writer, &|| !cancel.load(Ordering::Relaxed)),
-        Err(crate::ImageDecodeError::Cancelled)
-    ));
-    assert_eq!(writer.signatures, 2);
-    cancel.store(false, Ordering::Relaxed);
-    assert!(crate::image::apng::write_frames(&source, &mut &mut [0u8; 4][..], &|| true).is_err());
-    for occupied in [false, true] {
-        let staging = StagedExport::new(&target).expect("stage");
-        let intermediate = staging.directory.join("animation-source.png");
-        if occupied {
-            fs::write(&intermediate, b"occupied").expect("occupied stage");
-        } else {
-            cancel.store(true, Ordering::Relaxed);
+        for (png, frame) in frames[usize::from(has_poster)..]
+            .iter()
+            .zip(crate::decode_image(&source).expect("animation").frames)
+        {
+            assert_eq!(png.as_raw(), &frame.rgba);
         }
-        assert!(
-            metadata
-                .prepare_animation_source(&request, &staging, &cancel)
-                .is_err()
+        let mut assembled = Vec::new();
+        metadata
+            .animation
+            .as_ref()
+            .expect("animation controls")
+            .assemble(Cursor::new(&stream), &mut assembled, &cancel)
+            .expect("assemble frames with optional poster");
+        assert_eq!(
+            scan_contents(Cursor::new(assembled), None, None, &cancel)
+                .expect("controls")
+                .1,
+            metadata.animation
         );
-        if occupied {
+
+        struct CancelOnSecondPng<'a> {
+            cancel: &'a AtomicBool,
+            signatures: usize,
+        }
+        impl Write for CancelOnSecondPng<'_> {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if bytes == SIGNATURE {
+                    self.signatures += 1;
+                    if self.signatures == 2 {
+                        self.cancel.store(true, Ordering::Relaxed);
+                    }
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut writer = CancelOnSecondPng {
+            cancel: &cancel,
+            signatures: 0,
+        };
+        assert!(matches!(
+            crate::image::apng::write_frames(&source, &mut writer, &|| !cancel
+                .load(Ordering::Relaxed)),
+            Err(crate::ImageDecodeError::Cancelled)
+        ));
+        assert_eq!(writer.signatures, 2);
+        cancel.store(false, Ordering::Relaxed);
+        assert!(
+            crate::image::apng::write_frames(&source, &mut &mut [0u8; 4][..], &|| true).is_err()
+        );
+        for occupied in [false, true] {
+            let staging = StagedExport::new(&target).expect("stage");
+            let intermediate = staging.directory.join("animation-source.png");
+            if occupied {
+                fs::write(&intermediate, b"occupied").expect("occupied stage");
+            } else {
+                cancel.store(true, Ordering::Relaxed);
+            }
+            assert!(
+                metadata
+                    .prepare_animation_source(&request, &staging, &cancel)
+                    .is_err()
+            );
+            if occupied {
+                assert_eq!(
+                    fs::read(&intermediate).expect("occupied intermediate"),
+                    b"occupied"
+                );
+            }
+            cancel.store(false, Ordering::Relaxed);
+            drop(staging);
+            assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
             assert_eq!(
-                fs::read(&intermediate).expect("occupied intermediate"),
-                b"occupied"
+                fs::read(&target).expect("target preserved"),
+                b"existing target"
             );
         }
-        cancel.store(false, Ordering::Relaxed);
-        drop(staging);
-        assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
+        let malformed = map_chunks(&bytes, |kind, data| {
+            if &kind == b"IDAT" {
+                *data = vec![0; 4];
+            }
+            true
+        });
+        fs::write(&source, &malformed).expect("malformed default image with valid CRC");
+        PngMetadata::prepare(&request, &title("new"), &cancel).expect("container scan");
+        assert!(
+            export_media(&request)
+                .expect_err("default image decoding fails")
+                .to_string()
+                .contains("animation frame preparation failed")
+        );
+        assert_eq!(fs::read(&source).expect("source preserved"), malformed);
         assert_eq!(
             fs::read(&target).expect("target preserved"),
             b"existing target"
         );
+        assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
     }
-    let malformed = map_chunks(&bytes, |kind, data| {
-        if &kind == b"IDAT" {
-            *data = vec![0; 4];
-        }
-        true
-    });
-    fs::write(&source, &malformed).expect("malformed poster with valid CRC");
-    PngMetadata::prepare(&request, &title("new"), &cancel).expect("container scan");
-    assert!(
-        export_media(&request)
-            .expect_err("poster decoding fails")
-            .to_string()
-            .contains("animation frame preparation failed")
-    );
-    assert_eq!(fs::read(&source).expect("source preserved"), malformed);
-    assert_eq!(
-        fs::read(&target).expect("target preserved"),
-        b"existing target"
-    );
-    assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
 

@@ -365,13 +365,11 @@ impl PngMetadata {
         staging: &StagedExport,
         cancelled: &AtomicBool,
     ) -> Result<Option<PathBuf>, ExportError> {
-        if !self
-            .animation
-            .as_ref()
-            .is_some_and(|animation| !animation.includes_default)
-        {
+        if !self.is_animated() {
             return Ok(None);
         }
+        // Share display compositing for every APNG: FFmpeg rounds OVER differently,
+        // and cannot demux some valid partial first frames with a separate poster.
         let source = staging.directory.join("animation-source.png");
         {
             let mut output = std::io::BufWriter::new(

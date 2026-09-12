@@ -69,15 +69,19 @@ impl Animation {
             }
             Ok((*delay / 10) as u16)
         }).collect::<Result<Vec<_>, ExportError>>()?;
-        Ok(Self {
-            delays,
-            // WebP counts total plays; GIF counts repeats after the first play.
-            repeat: if plays == 0 {
-                gif::Repeat::Infinite
-            } else {
-                gif::Repeat::Finite(plays - 1)
-            },
-        })
+        Self::from_centiseconds(u32::from(plays), delays)
+    }
+
+    pub(super) fn from_centiseconds(plays: u32, delays: Vec<u16>) -> Result<Self, ExportError> {
+        // Source formats count total plays; GIF counts repeats after the first play.
+        let repeat = if plays == 0 {
+            gif::Repeat::Infinite
+        } else {
+            gif::Repeat::Finite(u16::try_from(plays - 1).map_err(|_| {
+                invalid("GIF is limited to 65536 finite total plays; retain the source format")
+            })?)
+        };
+        Ok(Self { delays, repeat })
     }
 
     pub(super) fn read(path: &Path, cancelled: &AtomicBool) -> Result<Self, ExportError> {
@@ -96,6 +100,11 @@ impl Animation {
                     return Err(invalid("animation exceeds 65536 frames"));
                 }
                 delays.push(frame.delay);
+                // Reading the exact pixel count can leave the LZW end code in the next
+                // sub-block. Drain it before next_frame_info would skip that remainder.
+                if decoder.fill_buffer(&mut [0]).map_err(invalid)? {
+                    return Err(invalid("frame contains excess indexed pixels"));
+                }
             }
             if delays.is_empty() {
                 return Err(invalid("no image frames"));
@@ -1115,6 +1124,66 @@ mod tests {
                 "255 visible colors and one transparent entry must all survive: {differences:?}"
             );
         }
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
+    fn quantized_gif_frames_pass_strict_lzw_readback() {
+        let mut encoded = Vec::new();
+        {
+            let mut encoder = gif::Encoder::new(&mut encoded, 32, 24, &[]).expect("encoder");
+            for index in 0..3 {
+                let mut pixels: Vec<u8> = (0..24)
+                    .flat_map(|y| (0..32).flat_map(move |x| [x * 7, y * 9, index * 73, 128]))
+                    .collect();
+                encoder
+                    .write_frame(&palette_frame(32, 24, &mut pixels))
+                    .expect("frame");
+            }
+            encoder.into_inner().expect("trailer");
+        }
+        let mut options = gif::DecodeOptions::new();
+        options.check_lzw_end_code(true);
+        let mut decoder = options
+            .read_info(std::io::Cursor::new(&encoded))
+            .expect("decoder");
+        for _ in 0..3 {
+            assert!(decoder.read_next_frame().expect("strict frame").is_some());
+            assert!(!decoder.fill_buffer(&mut [0]).expect("strict LZW tail"));
+        }
+        assert!(decoder.read_next_frame().expect("strict end").is_none());
+        let root = audio_tests::root("gif-strict-tail");
+        let path = root.join("quantized.gif");
+        fs::write(&path, &encoded).expect("owned source");
+        assert_eq!(
+            Animation::read(&path, &AtomicBool::new(false))
+                .expect("strict production scan")
+                .delays
+                .len(),
+            3
+        );
+        let mut excess = Vec::new();
+        {
+            let mut encoder =
+                gif::Encoder::new(&mut excess, 1, 1, &[0, 0, 0, 255, 255, 255]).expect("encoder");
+            let frame = gif::Frame {
+                width: 1,
+                height: 1,
+                buffer: vec![0, 1].into(),
+                ..Default::default()
+            };
+            encoder
+                .write_frame(&frame)
+                .expect("extra pixel with a valid end code");
+            encoder.into_inner().expect("trailer");
+        }
+        fs::write(&path, excess).expect("extra pixel fixture");
+        assert!(
+            Animation::read(&path, &AtomicBool::new(false))
+                .expect_err("excess pixels")
+                .to_string()
+                .contains("excess indexed pixels")
+        );
         fs::remove_dir_all(root).expect("owned fixture cleanup");
     }
 

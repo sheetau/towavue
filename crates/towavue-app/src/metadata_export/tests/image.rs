@@ -797,6 +797,16 @@ fn webp_to_gif_save_as_and_resave_preserve_animation_and_history() {
 }
 
 #[test]
+fn apng_to_gif_save_as_and_resave_preserve_animation_and_history() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::image::apng_to_gif_save_as_and_resave_preserve_animation_and_history",
+    ) else {
+        return;
+    };
+    animation_conversion_lifecycle(&root, "apng", "gif");
+}
+
+#[test]
 fn apng_to_webp_save_as_and_resave_preserve_animation_and_history() {
     let Some(root) = crate::tests::isolated_test_root(
         "metadata_export::tests::image::apng_to_webp_save_as_and_resave_preserve_animation_and_history",

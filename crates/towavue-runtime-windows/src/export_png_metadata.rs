@@ -370,8 +370,9 @@ impl PngMetadata {
         self.animation.is_some()
     }
 
-    pub(super) fn prepare_webp(
+    pub(super) fn prepare_conversion(
         path: &Path,
+        target: &Path,
         cancelled: &AtomicBool,
     ) -> Result<Option<Self>, ExportError> {
         let (_, animation) = scan_contents(
@@ -387,8 +388,41 @@ impl PngMetadata {
             chunks: Vec::new(),
             animation: Some(animation),
         };
-        prepared.webp_controls()?;
+        if gif_animation::gif_path(target) {
+            prepared.gif_controls()?;
+        } else {
+            prepared.webp_controls()?;
+        }
         Ok(Some(prepared))
+    }
+
+    fn gif_controls(&self) -> Result<gif_animation::Animation, ExportError> {
+        let animation = self.animation.as_ref().expect("animated source");
+        if !animation.includes_default {
+            return Err(invalid(
+                "GIF cannot retain a separate poster; use APNG output",
+            ));
+        }
+        let delays = animation.delays.iter().map(|delay| {
+            let numerator = u32::from(u16::from_be_bytes([delay[0], delay[1]])) * 100;
+            let denominator = u32::from(u16::from_be_bytes([delay[2], delay[3]]));
+            let denominator = if denominator == 0 { 100 } else { denominator };
+            if !numerator.is_multiple_of(denominator) {
+                return Err(invalid("GIF frame delays require whole centiseconds; use APNG output to retain exact timing"));
+            }
+            u16::try_from(numerator / denominator).map_err(|_| invalid(
+                "frame delay exceeds GIF's 65535-centisecond limit; use APNG output"
+            ))
+        }).collect::<Result<Vec<_>, ExportError>>()?;
+        gif_animation::Animation::from_centiseconds(animation.plays, delays)
+    }
+
+    pub(super) fn apply_gif(
+        &self,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+    ) -> Result<(), ExportError> {
+        self.gif_controls()?.apply(staging, cancelled)
     }
 
     fn webp_controls(&self) -> Result<(u16, Vec<u32>), ExportError> {

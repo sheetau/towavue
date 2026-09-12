@@ -155,6 +155,106 @@ fn animation_fixture_with_regions(plays: u32, delays: &[[u8; 4]], regions: bool)
 }
 
 #[test]
+fn apng_to_gif_preserves_composited_edits_timing_and_repeats() {
+    let root = root("apng-to-gif");
+    let source = root.join("source.APNG");
+    let target = root.join("converted.GIF");
+    let delays = [
+        [0, 0, 0, 0],
+        [0, 1, 0, 100],
+        [255, 255, 255, 255],
+        [255, 255, 0, 100],
+        [0, 7, 0, 0],
+    ];
+    for (plays, count, regions) in [(0, 5, false), (1, 1, false), (3, 5, true), (65536, 5, true)] {
+        let bytes = animation_fixture_with_regions(plays, &delays[..count], regions);
+        fs::write(&source, &bytes).expect("source");
+        for filter in [ResampleFilter::Nearest, ResampleFilter::Lanczos] {
+            let mut request = request(&source, &target);
+            request.operations = vec![
+                EditOperation::RotateImage(
+                    towavue_core::ImageRotation::new(137, (32, 24)).expect("rotation"),
+                ),
+                // At most 143 colors per frame, allowing an exact GIF palette comparison.
+                EditOperation::Resize(ImageResize::new(13, 11, filter).expect("resize")),
+            ];
+            export_media(&request).expect("APNG to GIF");
+            request.target = root.join("reference.apng");
+            export_media(&request).expect("same edited snapshots as APNG");
+            let expected = crate::decode_image(&request.target).expect("reference pixels");
+            let output = crate::decode_image(&target).expect("GIF pixels");
+            assert_eq!(output.frames.len(), expected.frames.len());
+            for (actual, expected) in output.frames.iter().zip(&expected.frames) {
+                assert_eq!(
+                    (actual.width, actual.height),
+                    (expected.width, expected.height)
+                );
+                for (actual, expected) in actual
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(expected.rgba.as_chunks::<4>().0)
+                {
+                    if expected[3] < 128 {
+                        assert_eq!(actual[3], 0, "transparent snapshots clear prior colors");
+                    } else {
+                        assert_eq!(&actual[..3], &expected[..3], "exact-fit palette");
+                        assert_eq!(actual[3], 255);
+                    }
+                }
+            }
+            let resaved = root.join("resaved.gif");
+            export_media(&self::request(&target, &resaved)).expect("GIF resave");
+            assert_eq!(
+                crate::decode_image(&resaved)
+                    .expect("resaved pixels")
+                    .frames,
+                output.frames
+            );
+            for path in [&target, &resaved] {
+                let mut decoder = gif::DecodeOptions::new()
+                    .read_info(fs::File::open(path).expect("GIF"))
+                    .expect("independent controls");
+                for delay in [0, 1, 100, 65535, 7].into_iter().take(count) {
+                    let frame = decoder.read_next_frame().expect("decode").expect("frame");
+                    assert_eq!(frame.delay, delay);
+                    assert_eq!(frame.dispose, gif::DisposalMethod::Background);
+                }
+                assert!(decoder.read_next_frame().expect("end").is_none());
+                assert_eq!(
+                    decoder.repeat(),
+                    if plays == 0 {
+                        gif::Repeat::Infinite
+                    } else {
+                        gif::Repeat::Finite((plays - 1) as u16)
+                    }
+                );
+            }
+            assert_eq!(fs::read(&source).expect("source retained"), bytes);
+        }
+    }
+    let before = fs::read(&target).expect("existing target");
+    for (bytes, message) in [
+        (poster_fixture(3), "separate poster"),
+        (animation_fixture(65537, &[[0, 1, 0, 100]]), "65536"),
+        (animation_fixture(1, &[[0, 1, 0, 3]]), "centiseconds"),
+        (animation_fixture(1, &[[0, 1, 3, 232]]), "centiseconds"),
+        (animation_fixture(1, &[[255, 255, 0, 1]]), "65535"),
+    ] {
+        fs::write(&source, bytes).expect("unrepresentable source");
+        let error =
+            export_cancellable(&request(&source, &target), &AtomicBool::new(false), &|_| {
+                panic!("reject before encoding")
+            })
+            .expect_err("conversion limit");
+        assert!(error.to_string().contains(message), "{error}");
+        assert_eq!(fs::read(&target).expect("protected target"), before);
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn apng_to_webp_preserves_animation_and_rejects_unrepresentable_controls() {
     let root = root("apng-to-webp");
     let source = root.join("source.APNG");
@@ -1044,7 +1144,7 @@ fn apng_unsupported_exports_preserve_targets_and_static_conversions_still_work()
     let source = root.join("source.APNG");
     let bytes = animation_fixture(2, &[[0, 1, 0, 10]; 3]);
     fs::write(&source, &bytes).expect("valid source");
-    for extension in ["jpg", "gif", "bmp", "avif"] {
+    for extension in ["jpg", "bmp", "avif"] {
         let target = root.join(format!("target.{extension}"));
         fs::write(&target, b"existing target").expect("target");
         assert!(
@@ -1056,6 +1156,12 @@ fn apng_unsupported_exports_preserve_targets_and_static_conversions_still_work()
         assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
     }
     fs::write(&source, fixture()).expect("static source alias");
+    let gif = root.join("static.gif");
+    export_media(&request(&source, &gif)).expect("static GIF conversion unchanged");
+    assert_eq!(
+        crate::decode_image(&gif).expect("static GIF").frames.len(),
+        1
+    );
     export_media(&request(&source, &root.join("static.webp"))).expect("static WebP conversion");
     assert_eq!(
         crate::decode_image(&root.join("static.webp"))
@@ -1214,9 +1320,18 @@ fn apng_assembly_is_bounded_and_preserves_compressed_pixels_on_failure_and_succe
 
 #[test]
 fn apng_to_webp_protects_targets_on_cancel_corruption_and_staging_failures() {
-    let root = root("apng-webp-protection");
+    animation_conversion_failures("webp");
+}
+
+#[test]
+fn apng_to_gif_protects_targets_on_cancel_corruption_and_staging_failures() {
+    animation_conversion_failures("gif");
+}
+
+fn animation_conversion_failures(extension: &str) {
+    let root = root("apng-conversion-protection");
     let source = root.join("source.png");
-    let target = root.join("target.webp");
+    let target = root.join("target").with_extension(extension);
     let bytes = animation_fixture_with_regions(3, &[[0, 1, 0, 10]; 3], true);
     fs::write(&target, b"existing target").expect("target");
     for before in [true, false] {
@@ -1230,29 +1345,31 @@ fn apng_to_webp_protects_targets_on_cancel_corruption_and_staging_failures() {
         assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
     }
     let changed = AtomicBool::new(false);
-    assert!(
-        export_cancellable(&request(&source, &target), &AtomicBool::new(false), &|_| {
-            if !changed.swap(true, Ordering::Relaxed) {
-                fs::OpenOptions::new()
-                    .append(true)
-                    .open(&source)
-                    .expect("source")
-                    .write_all(&[0])
-                    .expect("mutate source");
-            }
-        })
-        .expect_err("source change")
-        .to_string()
-        .contains("source changed")
-    );
+    let error = export_cancellable(&request(&source, &target), &AtomicBool::new(false), &|_| {
+        if !changed.swap(true, Ordering::Relaxed) {
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&source)
+                .expect("source")
+                .write_all(&[0])
+                .expect("mutate source");
+        }
+    })
+    .expect_err("source change");
+    assert!(error.to_string().contains("source changed"), "{error}");
     assert!(changed.load(Ordering::Relaxed));
     assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
     fs::write(&source, &bytes).expect("restore source");
     let cancel = AtomicBool::new(false);
-    let metadata = PngMetadata::prepare_webp(&source, &cancel)
+    let metadata = PngMetadata::prepare_conversion(&source, &target, &cancel)
         .expect("prepare")
         .expect("animation");
-    for name in ["animation-source.png", "animation.webp"] {
+    let animation_name = if extension == "gif" {
+        "animation.gif"
+    } else {
+        "animation.webp"
+    };
+    for name in ["animation-source.png", animation_name] {
         let staging = StagedExport::new(&target).expect("stage");
         let occupied = staging.directory.join(name);
         fs::write(&occupied, b"occupied").expect("occupied file");
@@ -1264,7 +1381,12 @@ fn apng_to_webp_protects_targets_on_cancel_corruption_and_staging_failures() {
             );
         } else {
             fs::write(&staging.output, fixture()).expect("encoded PNG");
-            assert!(metadata.apply_webp(&staging, &cancel, &|_| {}).is_err());
+            let result = if extension == "gif" {
+                metadata.apply_gif(&staging, &cancel)
+            } else {
+                metadata.apply_webp(&staging, &cancel, &|_| {})
+            };
+            assert!(result.is_err());
         }
         assert_eq!(fs::read(&occupied).expect("occupied retained"), b"occupied");
     }

@@ -414,8 +414,9 @@ fn export_audio_cancellable(
         .transpose()?;
     let png_to_webp =
         png_source && webp_metadata::webp_path(&request.target) && metadata.is_empty();
-    let png_metadata = if png_to_webp {
-        png_metadata::PngMetadata::prepare_webp(&request.source, cancelled)?
+    let png_to_gif = png_source && gif_animation::gif_path(&request.target) && metadata.is_empty();
+    let png_metadata = if png_to_webp || png_to_gif {
+        png_metadata::PngMetadata::prepare_conversion(&request.source, &request.target, cancelled)?
     } else {
         (image_metadata && jpeg_metadata.is_none() && webp_metadata.is_none())
             .then(|| png_metadata::PngMetadata::prepare(request, metadata, cancelled))
@@ -434,7 +435,7 @@ fn export_audio_cancellable(
     streams.png_animation = png_metadata
         .as_ref()
         .is_some_and(png_metadata::PngMetadata::is_animated);
-    if png_source && !image_metadata && !png_to_webp {
+    if png_source && !image_metadata && !png_to_webp && !png_to_gif {
         png_metadata::require_static(&request.source, cancelled)?;
     }
     if webp_source && !image_metadata && webp_snapshots.is_none() {
@@ -643,6 +644,8 @@ fn export_audio_cancellable(
     } else if let Some(png_metadata) = png_metadata {
         if png_to_webp {
             png_metadata.apply_webp(&staging, cancelled, progress)?;
+        } else if png_to_gif {
+            png_metadata.apply_gif(&staging, cancelled)?;
         } else {
             png_metadata.apply(&staging, cancelled)?;
         }

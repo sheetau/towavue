@@ -375,8 +375,11 @@ fn export_audio_cancellable(
         .then(|| avif::Animation::read(&request.source, cancelled))
         .transpose()?
         .flatten();
-    if avif_animation.is_some() && !avif::avif_path(&request.target) {
-        return Err(ExportError::Failed("Animated AVIF export currently requires AVIF output; conversion must not discard frames".into()));
+    if avif_animation.is_some()
+        && !avif::avif_path(&request.target)
+        && !png_metadata::png_path(&request.target)
+    {
+        return Err(ExportError::Failed("Animated AVIF export requires AVIF or APNG (.png/.apng) output; conversion must not discard frames".into()));
     }
     let gif_animation = gif_source
         .then(|| gif_animation::Animation::read(&request.source, cancelled))

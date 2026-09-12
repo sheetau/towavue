@@ -239,6 +239,46 @@ impl Animation {
             .expect("color track")
     }
 
+    fn png_controls(&self) -> Result<png_metadata::PngMetadata, ExportError> {
+        let samples = &self.samples[0];
+        let delays = samples
+            .times
+            .iter()
+            .enumerate()
+            .map(|(index, (pts, duration))| {
+                // Match display timing: the next PTS determines the hold, with the
+                // declared sample duration used only for the final frame.
+                let ticks = samples
+                    .times
+                    .get(index + 1)
+                    .map_or(i128::from(*duration), |next| {
+                        i128::from(next.0) - i128::from(*pts)
+                    });
+                let numerator = ticks * i128::from(samples.time_base.numerator());
+                let denominator = i128::from(samples.time_base.denominator());
+                let (mut divisor, mut remainder) = (numerator, denominator);
+                while remainder != 0 {
+                    (divisor, remainder) = (remainder, divisor % remainder);
+                }
+                let fraction = u16::try_from(numerator / divisor)
+                    .ok()
+                    .zip(u16::try_from(denominator / divisor).ok());
+                let Some((numerator, denominator)) = fraction else {
+                    return Err(invalid(
+                        "frame delay cannot be represented exactly in APNG; use AVIF output",
+                    ));
+                };
+                let [a, b] = numerator.to_be_bytes();
+                let [c, d] = denominator.to_be_bytes();
+                Ok([a, b, c, d])
+            })
+            .collect::<Result<Vec<_>, ExportError>>()?;
+        Ok(png_metadata::PngMetadata::from_animation(
+            self.color().loops.unwrap_or(1),
+            delays,
+        ))
+    }
+
     pub(super) fn export(
         &self,
         request: &ExportRequest,
@@ -247,6 +287,9 @@ impl Animation {
         progress: &(impl Fn(Duration) + Sync),
     ) -> Result<(), ExportError> {
         use std::io::Write;
+        let png = png_metadata::png_path(&request.target)
+            .then(|| self.png_controls())
+            .transpose()?;
         let single_duration = (self.samples[0].times.len() == 1)
             .then(|| u32::try_from(self.samples[0].times[0].1).map_err(invalid))
             .transpose()?;
@@ -314,6 +357,34 @@ impl Animation {
         for filter in visual_filters(&request.operations) {
             filters.push(',');
             filters.push_str(&filter);
+        }
+        if let Some(png) = png {
+            filters.push_str(",format=rgba[outv]");
+            encode(
+                request,
+                staging,
+                &filters,
+                false,
+                Some(SequenceTiming {
+                    time_base: self.samples[0].time_base,
+                    loops: self.color().loops.unwrap_or(1),
+                    single_duration,
+                }),
+                cancelled,
+                progress,
+            )?;
+            let size = {
+                let reader = png::Decoder::new(BufReader::new(
+                    fs::File::open(&staging.output).map_err(ExportError::Output)?,
+                ))
+                .read_info()
+                .map_err(invalid)?;
+                (reader.info().width, reader.info().height)
+            };
+            if size != output_size {
+                return Err(invalid("saved frame dimensions differ"));
+            }
+            return png.apply(staging, cancelled);
         }
         if alpha_output {
             filters.push_str(",split[color][alpha];[color]format=gbrp[outv];[alpha]alphaextract,format=gray,setparams=colorspace=bt709[outa]");
@@ -383,6 +454,7 @@ fn encode(
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
 ) -> Result<(), ExportError> {
+    let png_output = timing.is_some() && png_metadata::png_path(&request.target);
     let graph = staging.directory.join("timeline-filter.txt");
     fs::write(&graph, filters).map_err(ExportError::Output)?;
     let mut args: Vec<String> = [
@@ -430,23 +502,41 @@ fn encode(
         // cannot signal the identity RGB matrix used by the color track.
         args.extend(["-colorspace:v:1", "bt709"].map(String::from));
     }
-    args.extend(
-        [
-            "-map_metadata",
-            "-1",
-            "-c:v",
-            "libaom-av1",
-            "-crf",
-            "0",
-            "-cpu-used",
-            "6",
-            "-threads",
-            "1",
-            "-fps_mode",
-            "passthrough",
-        ]
-        .map(String::from),
-    );
+    if png_output {
+        args.extend(
+            [
+                "-map_metadata",
+                "-1",
+                "-c:v",
+                "png",
+                "-pix_fmt",
+                "rgba",
+                "-threads",
+                "1",
+                "-fps_mode",
+                "passthrough",
+            ]
+            .map(String::from),
+        );
+    } else {
+        args.extend(
+            [
+                "-map_metadata",
+                "-1",
+                "-c:v",
+                "libaom-av1",
+                "-crf",
+                "0",
+                "-cpu-used",
+                "6",
+                "-threads",
+                "1",
+                "-fps_mode",
+                "passthrough",
+            ]
+            .map(String::from),
+        );
+    }
     if let Some(timing) = timing {
         args.extend([
             "-enc_time_base".into(),
@@ -456,7 +546,9 @@ fn encode(
                 timing.time_base.denominator()
             ),
         ]);
-        if timing.single_duration.is_some() {
+        if png_output {
+            args.extend(["-f", "image2pipe"].map(String::from));
+        } else if timing.single_duration.is_some() {
             // FFmpeg's AVIF muxer omits moov for one sample. Its MP4 muxer keeps
             // the sample tables; specialize that owned output to an AVIF sequence.
             // A placeholder packet time avoids MP4's rescaled-duration limit;
@@ -488,6 +580,7 @@ fn encode(
     }
     if let Some(timing) = timing
         && timing.single_duration.is_some()
+        && !png_output
     {
         single::finish(&staging.output, timing, alpha_output, cancelled)?;
     }

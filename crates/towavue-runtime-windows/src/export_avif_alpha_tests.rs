@@ -165,6 +165,16 @@ fn avif_premultiplied_alpha_matches_display_preview_and_edited_saves() {
         .expect("edited display");
         export_media(&save).expect("premultiplied save");
         export_media(&request(&target, &resaved)).expect("resave");
+        if animated {
+            let png = root.join("converted.apng");
+            let mut conversion = request(&source, &png);
+            conversion.operations = save.operations.clone();
+            export_media(&conversion).expect("premultiplied APNG conversion");
+            assert_eq!(
+                crate::decode_image(&png).expect("converted").frames,
+                expected.frames
+            );
+        }
         for path in [&target, &resaved] {
             let actual = crate::decode_image(path).expect("saved decode");
             assert_eq!(actual.frames.len(), expected.frames.len());

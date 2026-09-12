@@ -352,10 +352,13 @@ fn avif_sequence_aperture_keeps_alpha_timing_orientation_and_resaved_pixels() {
                     let displayed = crate::decode_image(&source).expect("aperture display");
                     export_media(&request(&source, &target)).expect("aperture save");
                     export_media(&request(&target, &resaved)).expect("aperture resave");
+                    let png = root.join("converted.apng");
+                    export_media(&request(&source, &png)).expect("aperture APNG conversion");
                     for (stage, image) in [
                         displayed,
                         crate::decode_image(&target).expect("saved"),
                         crate::decode_image(&resaved).expect("resaved"),
+                        crate::decode_image(&png).expect("converted"),
                     ]
                     .into_iter()
                     .enumerate()

@@ -504,10 +504,10 @@ fn avif_single_frame_export_retains_duration_limits_and_protects_targets() {
             b"occupied"
         );
     }
-    let png = root.join("saved.png");
-    fs::write(&png, b"other target").expect("fixture operation");
-    assert!(export_media(&request(&source, &png)).is_err());
-    assert_eq!(fs::read(&png).expect("fixture operation"), b"other target");
+    let jpeg = root.join("saved.jpg");
+    fs::write(&jpeg, b"other target").expect("fixture operation");
+    assert!(export_media(&request(&source, &jpeg)).is_err());
+    assert_eq!(fs::read(&jpeg).expect("fixture operation"), b"other target");
     assert!(
         fs::read_dir(&root)
             .expect("fixture operation")
@@ -624,6 +624,96 @@ fn avif_animation_scan_reads_finite_infinite_and_alpha_track_controls() {
                 assert_eq!(animation.tracks[1].alpha_for, Some(animation.tracks[0].id));
             }
         }
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn avif_to_apng_preserves_edited_alpha_frames_and_exact_controls() {
+    let root = audio_tests::root("avif-to-apng");
+    let source = root.join("source.avif");
+    for (plays, alpha, single) in [(0, false, false), (3, true, false), (1, true, true)] {
+        if single {
+            single_fixture(&source, plays, alpha, 1230);
+        } else {
+            fixture(&source, &plays.to_string(), alpha);
+        }
+        let bytes = fs::read(&source).expect("source bytes");
+        let original = crate::decode_image(&source).expect("display");
+        for operations in [
+            vec![],
+            vec![
+                EditOperation::RotateClockwise,
+                EditOperation::FlipHorizontal,
+            ],
+            vec![
+                EditOperation::RotateImage(
+                    towavue_core::ImageRotation::new(137, (32, 24)).expect("rotation"),
+                ),
+                EditOperation::Resize(
+                    towavue_core::ImageResize::new(17, 13, towavue_core::ResampleFilter::Lanczos)
+                        .expect("resize"),
+                ),
+            ],
+        ] {
+            let expected =
+                crate::render_image_edits(&original, &operations, &crate::Cancellation::default())
+                    .expect("edited pixels");
+            for extension in ["png", "apng"] {
+                let target = root.join("converted").with_extension(extension);
+                let mut request = request(&source, &target);
+                request.operations = operations.clone();
+                export_media(&request).expect("AVIF to APNG");
+                assert_eq!(
+                    crate::decode_image(&target).expect("output pixels").frames,
+                    expected.frames
+                );
+                let mut decoder =
+                    png::Decoder::new(BufReader::new(fs::File::open(&target).expect("PNG")))
+                        .read_info()
+                        .expect("independent controls");
+                let control = decoder
+                    .info()
+                    .animation_control
+                    .expect("animation even for one frame");
+                assert_eq!(control.num_plays, plays);
+                assert_eq!(control.num_frames as usize, original.frames.len());
+                let mut pixels = vec![0; decoder.output_buffer_size().expect("size")];
+                for _ in &original.frames {
+                    decoder.next_frame(&mut pixels).expect("frame");
+                    let frame = decoder.info().frame_control.expect("control");
+                    assert_eq!(
+                        (frame.delay_num, frame.delay_den),
+                        if single { (123, 100) } else { (1, 2) }
+                    );
+                    assert_eq!(frame.blend_op, png::BlendOp::Source);
+                    assert_eq!(frame.dispose_op, png::DisposeOp::None);
+                }
+                drop(decoder);
+                let resaved = root.join("resaved.apng");
+                export_media(&self::request(&target, &resaved)).expect("APNG resave");
+                assert_eq!(
+                    crate::decode_image(&resaved).expect("resaved").frames,
+                    expected.frames
+                );
+            }
+        }
+        assert_eq!(fs::read(&source).expect("source retained"), bytes);
+    }
+    let target = root.join("protected.apng");
+    fs::write(&target, b"existing target").expect("target");
+    for duration in [65537, u32::MAX] {
+        single_fixture(&source, 1, false, duration);
+        let error =
+            export_cancellable(&request(&source, &target), &AtomicBool::new(false), &|_| {
+                panic!("reject before encoding")
+            })
+            .expect_err("APNG timing limit");
+        assert!(
+            error.to_string().contains("cannot be represented exactly"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
     }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
@@ -924,6 +1014,29 @@ fn avif_export_retains_variable_timing_and_repeat_on_resave() {
             assert_eq!(saved.color().loops, loops);
             assert!(same_timing(&original.samples[0], &saved.samples[0]));
         }
+        let png = root.join("converted.apng");
+        export_media(&request(&source, &png)).expect("VFR APNG conversion");
+        assert_eq!(
+            crate::decode_image(&png).expect("converted").frames,
+            crate::decode_image(&source).expect("display").frames
+        );
+        let mut decoder = png::Decoder::new(BufReader::new(fs::File::open(&png).expect("PNG")))
+            .read_info()
+            .expect("controls");
+        assert_eq!(
+            decoder
+                .info()
+                .animation_control
+                .expect("animation")
+                .num_plays,
+            loops.unwrap_or(1)
+        );
+        let mut pixels = vec![0; decoder.output_buffer_size().expect("size")];
+        for fraction in [(1, 8), (3, 4), (1, 2)] {
+            decoder.next_frame(&mut pixels).expect("frame");
+            let control = decoder.info().frame_control.expect("control");
+            assert_eq!((control.delay_num, control.delay_den), fraction);
+        }
     }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
@@ -1093,9 +1206,18 @@ fn avif_static_save_protects_targets_and_owned_staging() {
 
 #[test]
 fn avif_export_failure_and_cancel_preserve_existing_target() {
+    animation_export_failures("avif");
+}
+
+#[test]
+fn avif_to_apng_protects_targets_on_cancel_source_change_and_corruption() {
+    animation_export_failures("apng");
+}
+
+fn animation_export_failures(extension: &str) {
     let root = audio_tests::root("avif-protection");
     let source = root.join("source.avif");
-    let target = root.join("saved.avif");
+    let target = root.join("saved").with_extension(extension);
     fixture(&source, "3", true);
     fs::write(&target, b"existing target").expect("fixture operation");
     for before in [false, true] {
@@ -1174,7 +1296,7 @@ fn avif_export_failure_and_cancel_preserve_existing_target() {
             b"occupied"
         );
     }
-    let other = target.with_extension("png");
+    let other = target.with_extension("webp");
     fs::write(&other, b"other target").expect("fixture operation");
     assert!(export_media(&request(&source, &other)).is_err());
     assert_eq!(

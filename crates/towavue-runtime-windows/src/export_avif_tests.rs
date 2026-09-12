@@ -34,6 +34,406 @@ fn fixture(path: &Path, loops: &str, alpha: bool) {
     audio_tests::ffmpeg(&args, path);
 }
 
+// Independently reduce an FFmpeg three-sample sequence to its first sample.
+// Keep media offsets stable by replacing unused table entries with sibling free boxes.
+fn single_fixture(path: &Path, loops: u32, alpha: bool, duration: u32) {
+    use std::io::Write;
+    fixture(path, &loops.to_string(), alpha);
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .expect("fixture operation");
+    let length = file.metadata().expect("fixture operation").len();
+    let mut pending =
+        boxes(&mut file, 0, length, &AtomicBool::new(false)).expect("fixture operation");
+    while let Some(item) = pending.pop() {
+        if matches!(
+            &item.kind,
+            b"moov" | b"trak" | b"mdia" | b"minf" | b"stbl" | b"edts"
+        ) {
+            pending.extend(
+                boxes(&mut file, item.start, item.end, &AtomicBool::new(false))
+                    .expect("fixture operation"),
+            );
+            continue;
+        }
+        if !matches!(
+            &item.kind,
+            b"stts"
+                | b"stsz"
+                | b"stsc"
+                | b"stco"
+                | b"co64"
+                | b"stss"
+                | b"tkhd"
+                | b"mdhd"
+                | b"mvhd"
+                | b"elst"
+        ) {
+            continue;
+        }
+        let mut data = bytes(&mut file, item, 4096).expect("fixture operation");
+        match &item.kind {
+            b"stts" => {
+                data.truncate(16);
+                data[4..8].copy_from_slice(&1u32.to_be_bytes());
+                data[8..12].copy_from_slice(&1u32.to_be_bytes());
+                data[12..16].copy_from_slice(&duration.to_be_bytes());
+            }
+            b"stsz" => {
+                data.truncate(16);
+                data[8..12].copy_from_slice(&1u32.to_be_bytes());
+            }
+            b"stsc" => {
+                data.truncate(20);
+                data[4..8].copy_from_slice(&1u32.to_be_bytes());
+                data[12..16].copy_from_slice(&1u32.to_be_bytes());
+            }
+            b"stco" | b"stss" | b"co64" => {
+                data.truncate(if item.kind == *b"co64" { 16 } else { 12 });
+                data[4..8].copy_from_slice(&1u32.to_be_bytes());
+            }
+            b"mdhd" => {
+                assert_eq!(data[0], 0);
+                data[12..16].copy_from_slice(&1000u32.to_be_bytes());
+                data[16..20].copy_from_slice(&duration.to_be_bytes());
+            }
+            b"elst" => {
+                let offset = 8;
+                if data[0] == 1 {
+                    data[offset..offset + 8].copy_from_slice(&u64::from(duration).to_be_bytes());
+                } else {
+                    data[offset..offset + 4].copy_from_slice(&duration.to_be_bytes());
+                }
+            }
+            b"tkhd" | b"mvhd" => {
+                let total = if loops == 0 {
+                    u64::MAX
+                } else {
+                    u64::from(duration) * u64::from(loops)
+                };
+                let wide = data[0] == 1;
+                let offset = if item.kind == *b"tkhd" {
+                    if wide { 28 } else { 20 }
+                } else {
+                    if wide { 24 } else { 16 }
+                };
+                if item.kind == *b"mvhd" {
+                    let scale = if wide { 20 } else { 12 };
+                    data[scale..scale + 4].copy_from_slice(&1000u32.to_be_bytes());
+                }
+                if wide {
+                    data[offset..offset + 8].copy_from_slice(&total.to_be_bytes());
+                } else {
+                    data[offset..offset + 4].copy_from_slice(&(total as u32).to_be_bytes());
+                }
+            }
+            _ => unreachable!(),
+        }
+        let size = data.len() as u64 + 8;
+        file.seek(SeekFrom::Start(item.header))
+            .expect("fixture operation");
+        file.write_all(&(size as u32).to_be_bytes())
+            .expect("fixture operation");
+        file.write_all(&item.kind).expect("fixture operation");
+        file.write_all(&data).expect("fixture operation");
+        let remaining = item.end - item.header - size;
+        if remaining != 0 {
+            assert!(remaining >= 8);
+            file.write_all(&(remaining as u32).to_be_bytes())
+                .expect("fixture operation");
+            file.write_all(b"free").expect("fixture operation");
+        }
+    }
+    if duration == u32::MAX {
+        // Version-zero mdhd reserves UINT_MAX for unknown duration. Relocate
+        // the fixture's movie with version-one mdhd, keeping media offsets fixed.
+        fn widen(file: &mut fs::File, item: BoxRange, duration: u32) -> Vec<u8> {
+            let mut data = bytes(file, item, 1024 * 1024).expect("fixture operation");
+            if matches!(&item.kind, b"moov" | b"trak" | b"mdia") {
+                data.clear();
+                for child in boxes(file, item.start, item.end, &AtomicBool::new(false))
+                    .expect("fixture operation")
+                {
+                    data.extend(widen(file, child, duration));
+                }
+            } else if item.kind == *b"mdhd" {
+                assert_eq!(data[0], 0);
+                let mut wide = vec![1, 0, 0, 0];
+                wide.extend([0; 16]);
+                wide.extend(&data[12..16]);
+                wide.extend(u64::from(duration).to_be_bytes());
+                wide.extend(&data[20..]);
+                data = wide;
+            }
+            [
+                &((data.len() + 8) as u32).to_be_bytes()[..],
+                &item.kind,
+                &data,
+            ]
+            .concat()
+        }
+        let root = boxes(&mut file, 0, length, &AtomicBool::new(false)).expect("fixture operation");
+        let movie = one(&root, b"moov")
+            .expect("fixture operation")
+            .expect("fixture operation");
+        let wide = widen(&mut file, movie, duration);
+        file.seek(SeekFrom::End(0)).expect("fixture operation");
+        file.write_all(&wide).expect("fixture operation");
+        file.seek(SeekFrom::Start(movie.header + 4))
+            .expect("fixture operation");
+        file.write_all(b"free").expect("fixture operation");
+    }
+}
+
+#[test]
+fn avif_single_frame_sequence_keeps_pixels_duration_and_repetition() {
+    let root = audio_tests::root("avif-single-sequence");
+    let source = root.join("source.avif");
+    let target = root.join("saved.avif");
+    for loops in [Some(0), Some(1), Some(3), None] {
+        for alpha in [false, true] {
+            single_fixture(&source, loops.unwrap_or(1), alpha, 375);
+            if loops.is_none() {
+                let mut data = fs::read(&source).expect("fixture operation");
+                let positions: Vec<_> = data
+                    .windows(4)
+                    .enumerate()
+                    .filter(|(_, kind)| *kind == b"edts")
+                    .map(|(i, _)| i)
+                    .collect();
+                assert_eq!(positions.len(), if alpha { 2 } else { 1 });
+                for position in positions {
+                    data[position..position + 4].copy_from_slice(b"free");
+                }
+                fs::write(&source, data).expect("fixture operation");
+            }
+            let before = Animation::read(&source, &AtomicBool::new(false))
+                .expect("fixture operation")
+                .expect("fixture operation");
+            assert_eq!(before.samples[0].times, [(0, 375)]);
+            assert_eq!(before.color().loops, loops);
+            let mut save = request(&source, &target);
+            save.operations = vec![EditOperation::RotateClockwise];
+            let expected = crate::render_image_edits(
+                &crate::decode_image(&source).expect("fixture operation"),
+                &save.operations,
+                &crate::Cancellation::default(),
+            )
+            .expect("fixture operation");
+            export_media(&save).expect("save one-frame sequence");
+            let after = Animation::read(&target, &AtomicBool::new(false))
+                .expect("fixture operation")
+                .expect("fixture operation");
+            assert!(same_timing(&before.samples[0], &after.samples[0]));
+            assert_eq!(after.color().loops, loops);
+            let actual = crate::decode_image(&target).expect("fixture operation");
+            assert_eq!(actual.frames.len(), 1);
+            assert_eq!(actual.frames[0].rgba, expected.frames[0].rgba);
+            assert_eq!(actual.frames[0].delay, Duration::from_millis(375));
+            let resaved = root.join("resaved.avif");
+            export_media(&request(&target, &resaved)).expect("fixture operation");
+            let rescan = Animation::read(&resaved, &AtomicBool::new(false))
+                .expect("fixture operation")
+                .expect("fixture operation");
+            assert_eq!(rescan.color().loops, loops);
+            assert!(same_timing(&before.samples[0], &rescan.samples[0]));
+            assert_eq!(
+                crate::decode_image(&resaved)
+                    .expect("fixture operation")
+                    .frames[0]
+                    .rgba,
+                actual.frames[0].rgba
+            );
+        }
+    }
+    fs::remove_dir_all(root).expect("fixture operation");
+}
+
+#[test]
+fn avif_single_frame_export_retains_duration_limits_and_protects_targets() {
+    let root = audio_tests::root("avif-single-protection");
+    let source = root.join("source.avif");
+    let target = root.join("saved.avif");
+    for duration in [1, 10001, u32::MAX] {
+        single_fixture(&source, 0, false, duration);
+        let original = Animation::read(&source, &AtomicBool::new(false))
+            .expect("fixture operation")
+            .expect("fixture operation");
+        let mut save = request(&source, &target);
+        save.operations = vec![EditOperation::RotateImage(
+            towavue_core::ImageRotation::new(130, (32, 24)).expect("fixture operation"),
+        )];
+        export_media(&save).expect("fixture operation");
+        let saved = Animation::read(&target, &AtomicBool::new(false))
+            .expect("fixture operation")
+            .expect("fixture operation");
+        assert!(same_timing(&original.samples[0], &saved.samples[0]));
+        assert_eq!(saved.samples.len(), 2, "rotation adds alpha");
+        let decoded = crate::decode_image(&target).expect("saved long hold");
+        assert_eq!(decoded.frames.len(), 1);
+        assert_eq!(
+            decoded.frames[0].delay,
+            Duration::from_millis(u64::from(duration.max(10)))
+        );
+    }
+    single_fixture(&source, 3, true, 375);
+    fs::write(&target, b"existing target").expect("fixture operation");
+    for before in [false, true] {
+        let cancel = AtomicBool::new(before);
+        let result = export_cancellable(&request(&source, &target), &cancel, &|time| {
+            if time > Duration::ZERO {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        });
+        assert!(matches!(result, Err(ExportError::Cancelled)), "{result:?}");
+        assert_eq!(
+            fs::read(&target).expect("fixture operation"),
+            b"existing target"
+        );
+    }
+    let changed = AtomicBool::new(false);
+    let result = export_cancellable(
+        &request(&source, &target),
+        &AtomicBool::new(false),
+        &|time| {
+            if time > Duration::ZERO && !changed.swap(true, Ordering::Relaxed) {
+                use std::io::Write;
+                fs::OpenOptions::new()
+                    .append(true)
+                    .open(&source)
+                    .expect("fixture operation")
+                    .write_all(b"changed")
+                    .expect("fixture operation");
+            }
+        },
+    );
+    assert!(changed.load(Ordering::Relaxed) && result.is_err());
+    assert_eq!(
+        fs::read(&target).expect("fixture operation"),
+        b"existing target"
+    );
+    single_fixture(&source, 3, true, 375);
+    let animation = Animation::read(&source, &AtomicBool::new(false))
+        .expect("fixture operation")
+        .expect("fixture operation");
+    {
+        let stage = StagedExport::new(&target).expect("fixture operation");
+        fs::write(&stage.output, b"occupied").expect("fixture operation");
+        assert!(
+            animation
+                .export(
+                    &request(&source, &target),
+                    &stage,
+                    &AtomicBool::new(false),
+                    &|_| {}
+                )
+                .is_err()
+        );
+        assert_eq!(
+            fs::read(&stage.output).expect("fixture operation"),
+            b"occupied"
+        );
+    }
+    let png = root.join("saved.png");
+    fs::write(&png, b"other target").expect("fixture operation");
+    assert!(export_media(&request(&source, &png)).is_err());
+    assert_eq!(fs::read(&png).expect("fixture operation"), b"other target");
+    assert!(
+        fs::read_dir(&root)
+            .expect("fixture operation")
+            .all(|entry| {
+                !entry
+                    .expect("fixture operation")
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".towavue-export-")
+            })
+    );
+    fs::remove_dir_all(root).expect("fixture operation");
+}
+
+#[test]
+fn avif_single_frame_movie_rewrite_rejects_unexpected_layout_without_writes() {
+    let root = audio_tests::root("avif-single-movie");
+    let path = root.join("encoded.mp4");
+    audio_tests::ffmpeg(
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=32x24:rate=2",
+            "-frames:v",
+            "1",
+            "-c:v",
+            "libaom-av1",
+            "-cpu-used",
+            "8",
+            "-threads",
+            "1",
+            "-use_editlist",
+            "0",
+        ],
+        &path,
+    );
+    let intact = fs::read(&path).expect("fixture operation");
+    let timing = SequenceTiming {
+        time_base: ffmpeg::Rational(1, 1000),
+        loops: 3,
+        single_duration: Some(375),
+    };
+    assert!(matches!(
+        single::finish(&path, timing, false, &AtomicBool::new(true)),
+        Err(ExportError::Cancelled)
+    ));
+    assert_eq!(fs::read(&path).expect("fixture operation"), intact);
+    for kind in [b"stts", b"stsz", b"stsd", b"tkhd", b"hdlr"] {
+        let mut data = intact.clone();
+        let offset = data
+            .windows(4)
+            .position(|window| window == kind)
+            .expect("fixture operation");
+        let field = match kind {
+            b"stts" | b"stsz" => offset + 12,
+            b"stsd" => offset + 8,
+            b"tkhd" => offset + 16,
+            b"hdlr" => offset + 12,
+            _ => unreachable!(),
+        };
+        data[field..field + 4].copy_from_slice(&2u32.to_be_bytes());
+        fs::write(&path, &data).expect("fixture operation");
+        assert!(
+            single::finish(&path, timing, false, &AtomicBool::new(false)).is_err(),
+            "{kind:?}"
+        );
+        assert_eq!(fs::read(&path).expect("fixture operation"), data);
+    }
+    for data in [
+        intact[..intact.len() - 1].to_vec(),
+        [intact.as_slice(), b"\0\0\0\x08free"].concat(),
+    ] {
+        fs::write(&path, &data).expect("fixture operation");
+        assert!(single::finish(&path, timing, false, &AtomicBool::new(false)).is_err());
+        assert_eq!(fs::read(&path).expect("fixture operation"), data);
+    }
+    fs::write(&path, &intact).expect("fixture operation");
+    for bad in [
+        SequenceTiming {
+            single_duration: Some(0),
+            ..timing
+        },
+        SequenceTiming {
+            time_base: ffmpeg::Rational(0, 1),
+            ..timing
+        },
+    ] {
+        assert!(single::finish(&path, bad, false, &AtomicBool::new(false)).is_err());
+        assert_eq!(fs::read(&path).expect("fixture operation"), intact);
+    }
+    fs::remove_dir_all(root).expect("fixture operation");
+}
+
 #[test]
 fn avif_animation_scan_reads_finite_infinite_and_alpha_track_controls() {
     let root = audio_tests::root("avif-controls");

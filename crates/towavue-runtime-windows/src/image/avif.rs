@@ -198,7 +198,11 @@ impl PlaneDecoder {
         pixel: Pixel,
         byte_limit: usize,
     ) -> Result<Self, ImageDecodeError> {
-        let input = ffmpeg::format::input(path).map_err(ffmpeg_error)?;
+        // AVIF holds may use the full unsigned stts range, unlike legacy MOV
+        // files that encode negative DTS corrections in the same field.
+        let mut options = ffmpeg::Dictionary::new();
+        options.set("max_stts_delta", &u32::MAX.to_string());
+        let input = ffmpeg::format::input_with_dictionary(path, options).map_err(ffmpeg_error)?;
         let mut matching = input.streams().filter(|stream| {
             stream.id() as u32 == track.id
                 && track.timing.is_none_or(|(timescale, duration)| {

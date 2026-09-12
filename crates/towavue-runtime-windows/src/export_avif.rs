@@ -1,6 +1,16 @@
 use super::*;
 use std::io::{Seek, SeekFrom};
 
+#[path = "export_avif_single.rs"]
+mod single;
+
+#[derive(Clone, Copy)]
+struct SequenceTiming {
+    time_base: ffmpeg::Rational,
+    loops: u32,
+    single_duration: Option<u32>,
+}
+
 fn invalid(error: impl std::fmt::Display) -> ExportError {
     ExportError::Failed(format!("AVIF export: {error}"))
 }
@@ -102,7 +112,11 @@ impl Animation {
             return Err(invalid("second track is not linked alpha"));
         }
         ffmpeg::init().map_err(invalid)?;
-        let mut input = ffmpeg::format::input(path).map_err(invalid)?;
+        // AVIF sample durations are unsigned; do not apply MOV's legacy
+        // negative-DTS correction heuristic to long image holds.
+        let mut options = ffmpeg::Dictionary::new();
+        options.set("max_stts_delta", &u32::MAX.to_string());
+        let mut input = ffmpeg::format::input_with_dictionary(path, options).map_err(invalid)?;
         let mut samples = Vec::new();
         for track in &tracks {
             // The demuxer also exposes primary still items, often with the same ID.
@@ -206,11 +220,9 @@ impl Animation {
         progress: &(impl Fn(Duration) + Sync),
     ) -> Result<(), ExportError> {
         use std::io::Write;
-        if self.samples[0].times.len() < 2 {
-            return Err(invalid(
-                "single-frame AVIF sequences need a sequence-preserving muxer",
-            ));
-        }
+        let single_duration = (self.samples[0].times.len() == 1)
+            .then(|| u32::try_from(self.samples[0].times[0].1).map_err(invalid))
+            .transpose()?;
         let source_alpha = self.samples.get(1);
         let output_size =
             crate::image_edits::output_size(self.samples[0].size, &request.operations)
@@ -253,7 +265,11 @@ impl Animation {
             staging,
             &filters,
             alpha_output,
-            Some((self.samples[0].time_base, self.color().loops.unwrap_or(1))),
+            Some(SequenceTiming {
+                time_base: self.samples[0].time_base,
+                loops: self.color().loops.unwrap_or(1),
+                single_duration,
+            }),
             cancelled,
             progress,
         )?;
@@ -303,7 +319,7 @@ fn encode(
     staging: &StagedExport,
     filters: &str,
     alpha_output: bool,
-    timing: Option<(ffmpeg::Rational, u32)>,
+    timing: Option<SequenceTiming>,
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
 ) -> Result<(), ExportError> {
@@ -320,12 +336,15 @@ fn encode(
         "-xerror",
         "-err_detect",
         "explode",
-        "-i",
     ]
     .into_iter()
     .map(String::from)
     .collect();
+    if avif_path(&request.source) {
+        args.extend(["-max_stts_delta".into(), u32::MAX.to_string()]);
+    }
     args.extend([
+        "-i".into(),
         request.source.display().to_string(),
         "-/filter_complex".into(),
         graph.display().to_string(),
@@ -355,13 +374,36 @@ fn encode(
         ]
         .map(String::from),
     );
-    if let Some((time_base, loops)) = timing {
+    if let Some(timing) = timing {
         args.extend([
             "-enc_time_base".into(),
-            format!("{}/{}", time_base.numerator(), time_base.denominator()),
-            "-loop".into(),
-            loops.to_string(),
+            format!(
+                "{}/{}",
+                timing.time_base.numerator(),
+                timing.time_base.denominator()
+            ),
         ]);
+        if timing.single_duration.is_some() {
+            // FFmpeg's AVIF muxer omits moov for one sample. Its MP4 muxer keeps
+            // the sample tables; specialize that owned output to an AVIF sequence.
+            // A placeholder packet time avoids MP4's rescaled-duration limit;
+            // finish restores the exact source ticks, without duplicating frames.
+            args.extend(
+                [
+                    "-f",
+                    "mp4",
+                    "-use_editlist",
+                    "0",
+                    "-frames:v",
+                    "1",
+                    "-bsf:v",
+                    "setts=pts=0:dts=0:duration=1",
+                ]
+                .map(String::from),
+            );
+        } else {
+            args.extend(["-loop".into(), timing.loops.to_string()]);
+        }
     } else {
         args.extend(["-frames:v", "1"].map(String::from));
     }
@@ -370,6 +412,11 @@ fn encode(
     let result = run_ffmpeg(&executable, args, cancelled, progress)?;
     if !result.status.success() {
         return Err(invalid(String::from_utf8_lossy(&result.stderr)));
+    }
+    if let Some(timing) = timing
+        && timing.single_duration.is_some()
+    {
+        single::finish(&staging.output, timing, alpha_output, cancelled)?;
     }
     check_cancelled(cancelled)
 }

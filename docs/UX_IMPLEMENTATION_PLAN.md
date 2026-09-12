@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+U07 画像内容の同値: 保存snapshotと現在の編集結果を、既存image-edit workerで一frameずつ寸法・delay・全RGBA比較する。通常の未編集navigationへ仕事を追加せず、materialize結果の通知を先に送り、その後に比較する。比較中は従来dirty、失敗／取消では同値扱いにしない。worker世代・media instance・tab・現在／保存snapshotでstale結果を拒否し、履歴変更時に証拠を無効化する。tab復帰／保存基準更新時は比較を再要求するが、保持済みの表示を再materializeしない。
+
+検証: 全体crop・等倍resize・直角自由回転の復元、別crop手順が同じ領域へ達するケースで、全frameの直接比較と実PNG書出し画素一致を確認。先頭frameが均一でも後続が違えば不一致とし、縮小後の拡大で情報が失われた画像・寸法差・無効crop・取消を区別する。coreの証拠失効／保存基準差、appの非blocking比較・Undo／Redo・stale通知・保存基準更新／guard／close、既存tab transfer／animation frame保持を回帰確認する。描画完了通知の後に別の比較通知が届くため、既存試験の単一通知待ちを有界の描画完了待ちへ更新。比較は追加処理であり、全素材の速度／peak memory・native入力／DPI・animation保持export等の全台帳は継続する。
+
 U07 時間軸内容の同値: 元source durationが既知なら、現在／保存snapshotのEditTimelineのsource範囲・出力長・区間音量を比較する。区間音量／正確なStretchの復元、Keepとtrimの別手順、明示EOFを認識し、全体volume／rate・raster内容の一致も要求する。未知／無効durationや構築失敗は従来比較へ戻す。結果を履歴変更時だけ保持し、dirty照会で時間軸を毎回作らない。durationはpath／generation一致後にactive／retained履歴へ渡し、別sourceの値を混ぜない。
 
 検証: 区間音量を戻してplanが元と一致してもdirtyが残る旧挙動を再現。Undo／Redo・分岐／export基準・未知／短すぎるduration・1ns差・同じ長さで異なるsource区間・無効planを回帰化。appの区間音量／Stretch復元とExit／close guard、active／backgroundへのduration通知・stale拒否・元値無効化を確認。実FFmpegの区間復元とKeep対trimの別手順で、動画保存／音声抽出の全PCM・RGBA frame列が一致。画像crop／resize／自由回転の一般的な画素同値、全codec品質とnative入力／DPI等の全台帳は未完のまま継続する。

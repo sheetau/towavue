@@ -218,6 +218,7 @@ pub struct EditHistory {
     saved_operations: Vec<EditOperation>,
     source_duration: Option<MediaTime>,
     timeline_matches_saved: bool,
+    image_matches_saved: bool,
 }
 
 impl Default for EditHistory {
@@ -229,11 +230,28 @@ impl Default for EditHistory {
             saved_operations: Vec::new(),
             source_duration: None,
             timeline_matches_saved: false,
+            image_matches_saved: false,
         }
     }
 }
 
 impl EditHistory {
+    pub fn saved_operations(&self) -> &[EditOperation] {
+        &self.saved_operations
+    }
+
+    /// Accept pixel evidence only for the two operation snapshots actually compared.
+    pub fn set_image_content_match(
+        &mut self,
+        current: &[EditOperation],
+        saved: &[EditOperation],
+        matches: bool,
+    ) {
+        if self.operations() == current && self.saved_operations == saved {
+            self.image_matches_saved = matches;
+        }
+    }
+
     /// Bind the original source duration, never the edited timeline duration.
     pub fn set_source_duration(&mut self, duration: Option<MediaTime>) {
         let duration = duration.filter(|duration| *duration > MediaTime::ZERO);
@@ -244,6 +262,7 @@ impl EditHistory {
     }
 
     fn refresh_timeline_equivalence(&mut self) {
+        self.image_matches_saved = false;
         self.timeline_matches_saved = false;
         let Some(duration) = self.source_duration else {
             return;
@@ -316,6 +335,7 @@ impl EditHistory {
     pub fn is_dirty(&self) -> bool {
         self.saved_cursor != Some(self.cursor)
             && !self.timeline_matches_saved
+            && !self.image_matches_saved
             && !effective_edits(self.operations()).eq(effective_edits(&self.saved_operations))
     }
 
@@ -323,6 +343,7 @@ impl EditHistory {
         self.saved_cursor = Some(self.cursor);
         self.saved_operations = self.operations().to_vec();
         self.timeline_matches_saved = false;
+        self.image_matches_saved = false;
     }
 
     pub fn mark_exported(&mut self, operations: &[EditOperation]) {
@@ -403,6 +424,38 @@ fn compare_edits(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pixel_evidence_is_scoped_to_current_and_saved_snapshots_and_invalidated_by_edits() {
+        let resize =
+            EditOperation::Resize(ImageResize::new(4, 4, ResampleFilter::Nearest).expect("resize"));
+        let mut history = EditHistory::default();
+        history.push(resize, MediaKind::Image);
+        assert!(history.is_dirty());
+        history.set_image_content_match(&[resize], &[], true);
+        assert!(!history.is_dirty());
+        history.push(EditOperation::FlipHorizontal, MediaKind::Image);
+        assert!(history.is_dirty());
+        history.set_image_content_match(&[resize], &[], true);
+        assert!(history.is_dirty(), "old current snapshot");
+        history.undo();
+        assert!(
+            history.is_dirty(),
+            "Undo invalidates untracked pixel evidence"
+        );
+        history.set_image_content_match(&[resize], &[], true);
+        assert!(!history.is_dirty());
+        history.redo();
+        assert!(history.is_dirty());
+        history.mark_exported(&[resize]);
+        history.set_image_content_match(&[resize, EditOperation::FlipHorizontal], &[], true);
+        assert!(history.is_dirty(), "old saved snapshot");
+        history.set_image_content_match(&[resize, EditOperation::FlipHorizontal], &[resize], true);
+        assert!(!history.is_dirty());
+        assert_eq!(history.operations().len(), 2);
+        history.set_image_content_match(&[resize, EditOperation::FlipHorizontal], &[resize], false);
+        assert!(history.is_dirty());
+    }
 
     #[test]
     fn restored_timeline_volume_matches_original_content_with_known_duration() {

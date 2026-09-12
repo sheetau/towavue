@@ -261,6 +261,14 @@ enum AppEvent {
     RecentFilesReady,
     ImageCopied(Result<(u32, u32), String>),
     ImageEdited(u64, Result<DecodedImage, String>),
+    ImageContentCompared(
+        u64,
+        u64,
+        TabId,
+        Vec<EditOperation>,
+        Vec<EditOperation>,
+        bool,
+    ),
     Export(ExportEvent),
     Playback(u64, PlaybackEvent),
     Duration(PathBuf, u64, Result<Duration, String>),
@@ -756,6 +764,7 @@ struct Application<N> {
     image_edit_source: Option<Arc<DecodedImage>>,
     image_edit_generation: u64,
     image_edit_operations: Option<Vec<EditOperation>>,
+    image_edit_baseline: Option<Vec<EditOperation>>,
     image_edit_pending: bool,
     image_materialized: bool,
     nearest_images: bool,
@@ -972,6 +981,7 @@ where
             image_edit_source: None,
             image_edit_generation: 0,
             image_edit_operations: None,
+            image_edit_baseline: None,
             image_edit_pending: false,
             image_materialized: false,
             nearest_images: false,
@@ -1307,6 +1317,7 @@ where
         self.folder_snapshot = saved.folder_snapshot;
         self.image_edit_source = saved.source;
         self.image_edit_operations = saved.operations;
+        self.image_edit_baseline = None;
         self.image_materialized = saved.materialized;
         self.image_error = saved.error;
         self.state = saved.state;
@@ -1318,6 +1329,14 @@ where
         }
         if saved.resume_editing {
             self.image_edit_operations = None;
+        }
+        if saved.resume_editing
+            || self
+                .tabs
+                .active()
+                .and_then(|tab| self.edits.get(&tab.id))
+                .is_some_and(EditHistory::is_dirty)
+        {
             self.refresh_image_edits();
         }
         self.refresh_title();
@@ -2218,6 +2237,20 @@ where
             }
             AppEvent::ImageEdited(generation, result) => {
                 self.finish_image_edits(generation, result)
+            }
+            AppEvent::ImageContentCompared(generation, instance, tab, current, saved, matches) => {
+                if generation == self.image_edit_generation
+                    && instance == self.media_generation
+                    && self.media_kind == Some(MediaKind::Image)
+                    && self.image_error.is_none()
+                    && !self.image_edit_pending
+                    && self.tabs.active().is_some_and(|active| active.id == tab)
+                    && let Some(history) = self.edits.get_mut(&tab)
+                {
+                    history.set_image_content_match(&current, &saved, matches);
+                    self.refresh_title();
+                    self.request_redraw();
+                }
             }
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(generation, event) => {
@@ -5745,6 +5778,7 @@ where
         self.image_edit_source = None;
         self.image_edit_operations = None;
         self.image_edit_pending = false;
+        self.image_edit_baseline = None;
         self.image_materialized = false;
         self.resize_dialog = None;
         self.rotation_dialog = None;
@@ -5787,12 +5821,21 @@ where
             .and_then(|tab| self.edits.get(&tab.id))
             .map_or(&[][..], EditHistory::operations)
             .to_vec();
-        if !operations.iter().any(|operation| {
+        let Some(tab) = self.tabs.active().map(|tab| tab.id) else {
+            return;
+        };
+        let history = self.edits.get(&tab);
+        let dirty = history.is_some_and(EditHistory::is_dirty);
+        let saved = history
+            .map_or(&[][..], EditHistory::saved_operations)
+            .to_vec();
+        let materialize = operations.iter().any(|operation| {
             matches!(
                 operation,
                 EditOperation::Resize(_) | EditOperation::RotateImage(_)
             )
-        }) {
+        });
+        if !materialize {
             if let Some(source) = self.image_edit_source.take() {
                 self.image_edit_worker.clear();
                 self.image_edit_generation = self.image_edit_generation.wrapping_add(1);
@@ -5801,11 +5844,20 @@ where
                 self.image_edit_operations = None;
                 if let Err(error) = self.install_edited_image(source) {
                     self.image_error = Some(error);
+                    return;
                 }
             }
-            return;
+            if !dirty {
+                self.image_edit_worker.clear();
+                self.image_edit_generation = self.image_edit_generation.wrapping_add(1);
+                self.image_edit_operations = None;
+                self.image_edit_baseline = None;
+                return;
+            }
         }
-        if self.image_edit_operations.as_ref() == Some(&operations) {
+        if self.image_edit_operations.as_ref() == Some(&operations)
+            && self.image_edit_baseline.as_ref() == Some(&saved)
+        {
             return;
         }
         let Some(source) = self
@@ -5815,17 +5867,47 @@ where
         else {
             return;
         };
-        self.image_edit_source = Some(Arc::clone(&source));
+        let render = materialize
+            && (self.image_edit_pending
+                || !self.image_materialized
+                || self.image_edit_operations.as_ref() != Some(&operations));
+        if materialize {
+            self.image_edit_source = Some(Arc::clone(&source));
+        }
         self.image_edit_operations = Some(operations.clone());
+        self.image_edit_baseline = Some(saved.clone());
         self.image_edit_generation = self.image_edit_generation.wrapping_add(1);
         let generation = self.image_edit_generation;
-        self.image_edit_pending = true;
+        self.image_edit_pending = render;
         self.image_error = None;
         let notify = Arc::clone(&self.notify);
+        let instance = self.media_generation;
         self.image_edit_worker.submit(move |cancel| {
-            let result = towavue_runtime_windows::render_image_edits(&source, &operations, &cancel);
-            if !cancel.is_cancelled() {
+            if render {
+                let result =
+                    towavue_runtime_windows::render_image_edits(&source, &operations, &cancel);
+                let success = result.is_ok();
+                if cancel.is_cancelled() {
+                    return;
+                }
                 notify(AppEvent::ImageEdited(generation, result));
+                if !success {
+                    return;
+                }
+            }
+            if dirty {
+                let matches = towavue_runtime_windows::compare_image_edits(
+                    &source,
+                    &operations,
+                    &saved,
+                    &cancel,
+                )
+                .unwrap_or(false);
+                if !cancel.is_cancelled() {
+                    notify(AppEvent::ImageContentCompared(
+                        generation, instance, tab, operations, saved, matches,
+                    ));
+                }
             }
         });
     }
@@ -6372,6 +6454,11 @@ where
                                 .entry(export.tab)
                                 .or_default()
                                 .mark_exported(&export.request.operations);
+                            if self.media_kind == Some(MediaKind::Image)
+                                && self.tabs.active().is_some_and(|tab| tab.id == export.tab)
+                            {
+                                self.refresh_image_edits();
+                            }
                         }
                         let encoder = if outcome.used_hardware_encoder {
                             "hardware"
@@ -19046,6 +19133,142 @@ mod tests {
     }
 
     #[test]
+    fn image_pixel_comparison_updates_dirty_guard_without_losing_history_or_accepting_stale_results()
+     {
+        use towavue_core::{ImageResize, ResampleFilter};
+        use towavue_runtime_windows::DecodedImageFrame;
+        let (send, events) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            let _ = send.send(event);
+        })
+        .expect("app");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let path = PathBuf::from("pixel-comparison.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.displayed_tab = Some(tab);
+        app.media_kind = Some(MediaKind::Image);
+        let source = Arc::new(DecodedImage {
+            format: "test",
+            frames: vec![DecodedImageFrame {
+                width: 4,
+                height: 4,
+                rgba: [23, 42, 67, 255].repeat(16),
+                delay: Duration::from_millis(70),
+            }],
+        });
+        app.image =
+            Some(ImagePresentation::from_decoded(&context, &path, source.clone()).expect("image"));
+        let drain = |app: &mut Application<_>| {
+            let wanted = app.image_edit_generation;
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let event = events
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .expect("comparison completion");
+                let compared = matches!(&event, AppEvent::ImageContentCompared(generation, ..) if *generation == wanted);
+                app.handle_app_event(event);
+                if compared {
+                    break;
+                }
+            }
+        };
+        let full_crop = EditOperation::Crop(PixelCrop {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 4,
+        });
+        app.push_visual_edit(full_crop);
+        assert!(
+            app.edits[&tab].is_dirty(),
+            "pending comparison is not proof"
+        );
+        assert!(
+            !app.image_edit_pending,
+            "comparison does not block UI as resampling"
+        );
+        drain(&mut app);
+        assert!(!app.command_context().has_unsaved_edits);
+        let old_generation = app.image_edit_generation;
+        app.undo_edit(false);
+        app.undo_edit(true);
+        assert!(app.edits[&tab].is_dirty());
+        app.handle_app_event(AppEvent::ImageContentCompared(
+            old_generation,
+            app.media_generation,
+            tab,
+            vec![full_crop],
+            vec![],
+            true,
+        ));
+        assert!(
+            app.edits[&tab].is_dirty(),
+            "old worker cannot establish equality"
+        );
+        drain(&mut app);
+        assert!(!app.edits[&tab].is_dirty());
+        let resize = |size| {
+            EditOperation::Resize(
+                ImageResize::new(size, size, ResampleFilter::Nearest).expect("resize"),
+            )
+        };
+        app.push_visual_edit(resize(2));
+        drain(&mut app);
+        assert!(app.edits[&tab].is_dirty());
+        app.push_visual_edit(resize(4));
+        drain(&mut app);
+        assert!(!app.edits[&tab].is_dirty(), "uniform pixels are restored");
+        assert_eq!(
+            app.image.as_ref().expect("rendered").decoded.frames,
+            source.frames
+        );
+        assert_eq!(app.edits[&tab].operations().len(), 3);
+        let current = app.edits[&tab].operations().to_vec();
+        app.edits
+            .get_mut(&tab)
+            .expect("history")
+            .mark_exported(&[resize(3)]);
+        app.handle_app_event(AppEvent::ImageContentCompared(
+            app.image_edit_generation,
+            app.media_generation,
+            tab,
+            current.clone(),
+            vec![],
+            true,
+        ));
+        assert!(app.edits[&tab].is_dirty(), "saved snapshot changed");
+        app.refresh_image_edits();
+        assert!(
+            !app.image_edit_pending,
+            "baseline-only change does not rerender the display"
+        );
+        drain(&mut app);
+        assert!(app.edits[&tab].is_dirty());
+        app.request_guarded(GuardedAction::Exit);
+        assert!(app.pending_guard.is_some());
+        app.handle_ui_action(UiAction::ResolveGuard(GuardDecision::Cancel));
+        app.edits.get_mut(&tab).expect("history").mark_exported(&[]);
+        app.refresh_image_edits();
+        drain(&mut app);
+        assert!(!app.edits[&tab].is_dirty());
+        app.request_guarded(GuardedAction::CloseTab(tab));
+        assert!(app.pending_guard.is_none());
+        assert!(!app.tabs.tabs().iter().any(|item| item.id == tab));
+        app.handle_app_event(AppEvent::ImageContentCompared(
+            app.image_edit_generation,
+            app.media_generation,
+            tab,
+            current,
+            vec![],
+            true,
+        ));
+        assert!(!app.edits.contains_key(&tab));
+        assert_eq!(source.frames[0].rgba, [23, 42, 67, 255].repeat(16));
+    }
+
+    #[test]
     fn resized_images_materialize_ordered_edits_and_restore_original_animation_on_undo() {
         use towavue_core::{ImageResize, ResampleFilter};
         use towavue_runtime_windows::DecodedImageFrame;
@@ -19107,10 +19330,16 @@ mod tests {
         assert!(app.image_edit_pending);
         assert!(app.image_copy_request().is_none());
         app.dispatch(CommandId::ApplyCrop);
-        let event = receiver
-            .recv_timeout(Duration::from_secs(10))
-            .expect("processed frames");
-        app.handle_app_event(event);
+        let materialization_deadline = Instant::now() + Duration::from_secs(10);
+        while app.image_edit_pending {
+            app.handle_app_event(
+                receiver
+                    .recv_timeout(
+                        materialization_deadline.saturating_duration_since(Instant::now()),
+                    )
+                    .expect("processed frames"),
+            );
+        }
         assert!(!app.image_edit_pending && app.image_materialized);
         let image = app.image.as_ref().expect("resized image");
         assert_eq!(image.dimensions(), (6, 8));
@@ -19138,11 +19367,16 @@ mod tests {
             width: 4,
             height: 5,
         }));
-        app.handle_app_event(
-            receiver
-                .recv_timeout(Duration::from_secs(10))
-                .expect("crop"),
-        );
+        let materialization_deadline = Instant::now() + Duration::from_secs(10);
+        while app.image_edit_pending {
+            app.handle_app_event(
+                receiver
+                    .recv_timeout(
+                        materialization_deadline.saturating_duration_since(Instant::now()),
+                    )
+                    .expect("crop"),
+            );
+        }
         assert_eq!(app.image.as_ref().expect("cropped").dimensions(), (4, 5));
         app.undo_edit(false);
         let stale_generation = app.image_edit_generation;

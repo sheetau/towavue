@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U07: 画像の保存snapshotとの画素比較（2026-09-12）
+
+操作列から同値と確定できない画像編集は、既存のimage-edit workerで元DecodedImageへ現在／保存snapshotの処理を適用し、全frameの寸法・delay・RGBAを厳密比較する。hashや近似画質では判定しない。元データは既存Arcを共有し、比較は一frameずつ・取消可能とし、通常navigation／無編集表示へ追加decodeや比較を入れない。materializeが必要な編集は先に既存の表示用結果を通知し、同workerの後続処理で比較する。新threadは作らない。比較の処理負荷と待機時間は残り、速度改善とは主張しない。
+
+比較前・取消・失敗時は従来の未保存判定を維持する。結果はimage worker世代・media instance・tabと現在／保存operation snapshotが一致する場合だけ履歴へ反映する。push／Undo／Redo／export基準変更で同値証拠を無効化し、tab復帰や保存基準更新では必要な比較を再要求する。履歴や元file、表示frame、保存出力を比較結果によって書換えない。全animation frameを比べるが、animation保持exportの未完を解消したことにはしない。
+
 ## U07: 元durationに基づく時間軸内容の同値（2026-09-12）
 
 元ファイルの正のdurationを取得した履歴は、再生・exportと同じEditTimelineのsource範囲・出力時間・区間音量の列を保存snapshotと厳密比較する。区間音量の復元、正確に戻るStretch、異なるKeep／Delete手順、明示的な元EOFと未指定終端が同じ結果なら未保存を解除する。整数丸めによる1nsの差や異なるsource範囲は同一視しない。全体volume／rateとraster操作も別途一致が必要で、画像内容の一般的な同値判定とはしない。

@@ -3,6 +3,57 @@ use towavue_core::EditOperation;
 
 use crate::{Cancellation, DecodedImage, DecodedImageFrame};
 
+/// Compare full rendered content one frame at a time without retaining another animation.
+pub fn compare_image_edits(
+    source: &DecodedImage,
+    current: &[EditOperation],
+    saved: &[EditOperation],
+    cancel: &Cancellation,
+) -> Result<bool, String> {
+    if current.iter().chain(saved).any(|operation| {
+        matches!(
+            operation,
+            EditOperation::RotateVideo(_) | EditOperation::ResizeVideo(_)
+        )
+    }) {
+        return Err("Video raster edits cannot be compared as image frames".into());
+    }
+    for frame in &source.frames {
+        if cancel.is_cancelled() {
+            return Err("Image comparison cancelled".into());
+        }
+        let size = (frame.width, frame.height);
+        if output_size(size, current)? != output_size(size, saved)? {
+            return Ok(false);
+        }
+        let render = |operations: &[EditOperation]| {
+            if operations.is_empty() {
+                Ok(std::borrow::Cow::Borrowed(frame))
+            } else {
+                render_frame(frame, operations, cancel).map(std::borrow::Cow::Owned)
+            }
+        };
+        let current = render(current)?;
+        let saved = render(saved)?;
+        if current.width != saved.width
+            || current.height != saved.height
+            || current.delay != saved.delay
+            || current.rgba.len() != saved.rgba.len()
+        {
+            return Ok(false);
+        }
+        for (current, saved) in current.rgba.chunks(65536).zip(saved.rgba.chunks(65536)) {
+            if cancel.is_cancelled() {
+                return Err("Image comparison cancelled".into());
+            }
+            if current != saved {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(!source.frames.is_empty())
+}
+
 pub fn render_image_edits(
     source: &DecodedImage,
     operations: &[EditOperation],
@@ -157,6 +208,131 @@ fn render_frame(
 mod tests {
     use super::*;
     use towavue_core::{ImageResize, PixelCrop, ResampleFilter};
+
+    #[test]
+    fn pixel_comparison_handles_crop_resize_rotation_all_frames_and_cancellation() {
+        let uniform = DecodedImageFrame {
+            width: 4,
+            height: 4,
+            rgba: [23, 42, 67, 255].repeat(16),
+            delay: std::time::Duration::from_millis(40),
+        };
+        let varied = DecodedImageFrame {
+            width: 4,
+            height: 4,
+            rgba: (0..16_u8)
+                .flat_map(|n| [n * 11, n * 7, 255 - n * 9, n * 13])
+                .collect(),
+            delay: std::time::Duration::from_millis(80),
+        };
+        let source = DecodedImage {
+            format: "test",
+            frames: vec![uniform.clone(), varied],
+        };
+        let original = source.clone();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("towavue-pixel-equivalence-{unique}"));
+        std::fs::create_dir(&root).expect("owned fixture root");
+        let source_path = root.join("source.png");
+        image::save_buffer(
+            &source_path,
+            &source.frames[1].rgba,
+            4,
+            4,
+            image::ColorType::Rgba8,
+        )
+        .expect("PNG source");
+        let original_file = std::fs::read(&source_path).expect("source bytes");
+        let cancel = Cancellation::default();
+        let resize = |size| {
+            EditOperation::Resize(
+                ImageResize::new(size, size, ResampleFilter::Nearest).expect("resize"),
+            )
+        };
+        let crop = |x, y, size| {
+            EditOperation::Crop(PixelCrop {
+                x,
+                y,
+                width: size,
+                height: size,
+            })
+        };
+        for (current, saved) in [
+            (vec![crop(0, 0, 4)], vec![]),
+            (vec![resize(4)], vec![]),
+            (vec![crop(1, 0, 3), crop(0, 1, 2)], vec![crop(1, 1, 2)]),
+            (
+                vec![
+                    EditOperation::RotateImage(
+                        towavue_core::ImageRotation::new(900, (4, 4)).expect("rotate"),
+                    ),
+                    EditOperation::RotateImage(
+                        towavue_core::ImageRotation::new(-900, (4, 4)).expect("rotate"),
+                    ),
+                ],
+                vec![],
+            ),
+        ] {
+            assert!(compare_image_edits(&source, &current, &saved, &cancel).expect("compare"));
+            assert_eq!(
+                render_image_edits(&source, &current, &cancel).expect("current"),
+                render_image_edits(&source, &saved, &cancel).expect("saved")
+            );
+            let mut request = crate::ExportRequest {
+                source: source_path.clone(),
+                target: root.join("saved.png"),
+                kind: towavue_core::MediaKind::Image,
+                operations: saved,
+                hardware_encode: false,
+            };
+            crate::export_media(&request).expect("saved PNG");
+            let baseline = crate::decode_image(&request.target).expect("saved pixels");
+            request.target = root.join("current.png");
+            request.operations = current;
+            crate::export_media(&request).expect("current PNG");
+            assert_eq!(
+                crate::decode_image(&request.target).expect("current pixels"),
+                baseline
+            );
+        }
+        for current in [
+            vec![EditOperation::FlipHorizontal],
+            vec![resize(2), resize(4)],
+            vec![crop(0, 0, 3)],
+            vec![EditOperation::RotateImage(
+                towavue_core::ImageRotation::new(1, (4, 4)).expect("rotate"),
+            )],
+        ] {
+            assert!(
+                !compare_image_edits(&source, &current, &[], &cancel)
+                    .expect("different pixels or dimensions")
+            );
+        }
+        assert!(
+            compare_image_edits(
+                &DecodedImage {
+                    format: "test",
+                    frames: vec![uniform]
+                },
+                &[resize(2), resize(4)],
+                &[],
+                &cancel
+            )
+            .expect("uniform content restored")
+        );
+        assert!(compare_image_edits(&source, &[crop(3, 3, 4)], &[], &cancel).is_err());
+        cancel.cancel();
+        assert!(compare_image_edits(&source, &[], &[], &cancel).is_err());
+        assert_eq!(source, original);
+        assert_eq!(
+            std::fs::read(&source_path).expect("source retained"),
+            original_file
+        );
+        std::fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
 
     #[test]
     fn clean_reversible_histories_preserve_every_source_pixel() {

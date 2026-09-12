@@ -17813,6 +17813,18 @@ mod tests {
                 assert!(video_history.push(EditOperation::RotateClockwise, MediaKind::Video));
                 app.edits.insert(video_tab, video_history.clone());
                 app.load_path(video, MediaKind::Video);
+                // Duration discovery legitimately enriches history. Settle that
+                // asynchronous input before comparing state across GPU recovery.
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while app.media_duration.is_none() {
+                    let event = notifications
+                        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        .expect("generated video duration");
+                    app.handle_app_event(event);
+                }
+                assert_eq!(app.media_duration, Some(Duration::from_secs(2)));
+                video_history.set_source_duration(Some(media_time(Duration::from_secs(2))));
+                assert_eq!(app.edits[&video_tab], video_history);
                 for paused in [false, true] {
                     if paused {
                         app.toggle_pause();

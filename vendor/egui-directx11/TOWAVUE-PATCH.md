@@ -33,14 +33,20 @@ Local changes:
   following ordinary meshes by exact readback on WARP and an owned offscreen
   hardware device. Hardware creation failure reports an explicit skip; shader,
   draw and pixel failures after creation fail the test.
-- Retain the incoming immutable `Arc<ColorImage>` for managed textures instead
-  of cloning its pixel allocation at upload. Partial updates use copy-on-write
-  only when another owner still holds that image. Free releases this backing.
-- Restore all rows of a discarded mapping using the returned `RowPitch`, not
-  packed CPU offsets. Validate image lengths, texture dimensions and partial
-  bounds before accessing GPU or CPU pixel storage. Offscreen WARP/hardware
-  readback covers seven row widths, repeated partial updates, unchanged shared
-  snapshots, unique-buffer reuse, invalid input and backing release.
+- Use DEFAULT managed textures without a retained CPU pixel shadow. Whole
+  uploads borrow the incoming image only through synchronous creation; partial
+  updates upload a validated rectangle with its packed source row pitch through
+  [UpdateSubresource](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-updatesubresource).
+  The renderer retains only GPU resources, dimensions and sampling options.
+  Partial updates require the serialized same-device immediate context used by
+  towavue; deferred contexts fail explicitly because offset source handling has
+  a documented driver-dependent caveat. No full-image copy-on-write or discarded
+  mapping is needed. Driver upload/storage allocations are not a process cap.
+- Validate image lengths, dimensions and partial bounds before GPU access.
+  Offscreen WARP/hardware readback covers seven row widths, repeated partial
+  updates, unchanged external snapshots and released source allocations.
+  WARP also covers empty updates, invalid input, deferred-context rejection,
+  GPU use after source release and texture removal.
 
 The public marker is additive; native device ownership APIs are unchanged.
 Upstream vertex/index buffer upload and normal blending remain unchanged.

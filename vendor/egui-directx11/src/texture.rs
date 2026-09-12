@@ -8,7 +8,7 @@
 //
 // Nekomaru, March 2024
 
-use std::{collections::HashMap, mem, sync::Arc};
+use std::{collections::HashMap, mem};
 
 use egui::{Color32, ImageData, TextureId, TexturesDelta};
 
@@ -23,14 +23,14 @@ use windows::{
 struct ManagedTexture {
     tex: ID3D11Texture2D,
     srv: ID3D11ShaderResourceView,
-    image: Arc<egui::ColorImage>,
+    size: [usize; 2],
     options: egui::TextureOptions,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::slice;
+    use std::{slice, sync::Arc};
     use windows::Win32::Graphics::Direct3D::{
         D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP,
     };
@@ -129,10 +129,7 @@ mod tests {
                 let Texture::Managed(managed) = &texture else {
                     unreachable!()
                 };
-                assert!(
-                    Arc::ptr_eq(&managed.image, &original),
-                    "whole upload must not copy pixels"
-                );
+                assert_eq!(Arc::strong_count(&original), 1, "upload releases source");
                 assert_eq!(readback(&device, &context, &managed.tex)?, original.pixels);
                 let x = width / 2;
                 let patch = Arc::new(egui::ColorImage::new(
@@ -148,10 +145,6 @@ mod tests {
                 let Texture::Managed(managed) = &texture else {
                     unreachable!()
                 };
-                assert!(
-                    !Arc::ptr_eq(&managed.image, &original),
-                    "shared pixels detach before mutation"
-                );
                 let mut expected = original.pixels.clone();
                 expected[width + x] = Color32::RED;
                 expected[2 * width + x] = Color32::GREEN;
@@ -170,8 +163,8 @@ mod tests {
                     ),
                     "external snapshot unchanged"
                 );
-                let unique = Arc::as_ptr(&managed.image);
                 let patch = Arc::new(egui::ColorImage::filled([width, 1], Color32::BLUE));
+                let released = Arc::downgrade(&patch);
                 TexturePool::update_partial(
                     &context,
                     &mut texture,
@@ -181,10 +174,9 @@ mod tests {
                 let Texture::Managed(managed) = &texture else {
                     unreachable!()
                 };
-                assert_eq!(
-                    unique,
-                    Arc::as_ptr(&managed.image),
-                    "unique backing edits in place"
+                assert!(
+                    released.upgrade().is_none(),
+                    "partial upload releases source"
                 );
                 expected[..width].fill(Color32::BLUE);
                 assert_eq!(readback(&device, &context, &managed.tex)?, expected);
@@ -215,11 +207,35 @@ mod tests {
         )?;
         assert_eq!(
             Arc::strong_count(&original),
-            2,
-            "renderer retains one shared backing"
+            1,
+            "completed upload must not retain a full CPU backing"
         );
         drop(original);
+        assert!(
+            weak.upgrade().is_none(),
+            "GPU texture outlives source pixels"
+        );
         let texture = pool.pool.get_mut(&id).unwrap();
+        // A nonzero deferred-context destination offset is deliberately unsupported.
+        // This offscreen context belongs to the same test-owned device.
+        let mut deferred = None;
+        unsafe { device.CreateDeferredContext(0, Some(&mut deferred))? };
+        let deferred = deferred.unwrap();
+        assert!(
+            TexturePool::update_partial(
+                &deferred,
+                texture,
+                ImageData::Color(Arc::new(egui::ColorImage::filled([1, 1], Color32::RED))),
+                [1, 1],
+            )
+            .is_err()
+        );
+        TexturePool::update_partial(
+            &context,
+            texture,
+            ImageData::Color(Arc::new(egui::ColorImage::new([0, 0], Vec::new()))),
+            [0, 0],
+        )?;
         let mut malformed = (*make()).clone();
         malformed.pixels.pop();
         assert!(
@@ -271,10 +287,6 @@ mod tests {
                 ..Default::default()
             },
         )?;
-        assert!(
-            weak.upgrade().is_none(),
-            "free releases the shared CPU backing"
-        );
         assert!(pool.get_srv(id).is_none());
         Ok(())
     }
@@ -308,7 +320,7 @@ impl TexturePool {
         self.pool
             .iter()
             .filter_map(|(id, texture)| match texture {
-                Texture::Managed(texture) => Some((*id, texture.image.size)),
+                Texture::Managed(texture) => Some((*id, texture.size)),
                 Texture::User { .. } => None,
             })
             .collect()
@@ -397,45 +409,44 @@ impl TexturePool {
         };
 
         let ImageData::Color(patch) = image;
-        let width = old.image.width();
+        let [width, height] = old.size;
         if patch.width().checked_mul(patch.height()) != Some(patch.pixels.len())
             || nx.checked_add(patch.width()).is_none_or(|end| end > width)
             || ny
                 .checked_add(patch.height())
-                .is_none_or(|end| end > old.image.height())
+                .is_none_or(|end| end > height)
         {
             return Err(E_INVALIDARG.into());
         }
         if patch.width() == 0 || patch.height() == 0 {
             return Ok(());
         }
-        // Whole uploads retain egui's shared immutable pixels. Only partial edits
-        // detach the backing image if another owner still references it.
-        let pixels = &mut Arc::make_mut(&mut old.image).pixels;
-        for y in 0..patch.height() {
-            let start = (ny + y) * width + nx;
-            let source = y * patch.width();
-            pixels[start..start + patch.width()]
-                .copy_from_slice(&patch.pixels[source..source + patch.width()]);
-        }
-
-        // The caller exclusively owns this managed texture and immediate context.
-        // WRITE_DISCARD requires restoring every row; the mapped row pitch can
-        // exceed the packed CPU width. No mapped pointer survives Unmap.
-        let subr = unsafe {
-            let mut output = D3D11_MAPPED_SUBRESOURCE::default();
-            ctx.Map(&old.tex, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut output))?;
-            output
+        let region = D3D11_BOX {
+            left: nx as u32,
+            top: ny as u32,
+            front: 0,
+            right: (nx + patch.width()) as u32,
+            bottom: (ny + patch.height()) as u32,
+            back: 1,
         };
-        for (y, row) in pixels.chunks_exact(width).enumerate() {
-            unsafe {
-                subr.pData
-                    .cast::<u8>()
-                    .add(y * subr.RowPitch as usize)
-                    .copy_from_nonoverlapping(row.as_ptr().cast(), mem::size_of_val(row));
+        // The caller serializes this same-device immediate context. Reject deferred
+        // contexts: offset boxes have a documented driver-dependent source-offset bug.
+        // The bounds/packed source above fit this DEFAULT RGBA8 texture. The call
+        // snapshots source bytes before returning; neither a CPU shadow nor Map is
+        // needed, and untouched texels remain on the GPU. No pointer escapes.
+        unsafe {
+            if ctx.GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE {
+                return Err(E_INVALIDARG.into());
             }
+            ctx.UpdateSubresource(
+                &old.tex,
+                0,
+                Some(&region),
+                patch.pixels.as_ptr().cast(),
+                (patch.width() * mem::size_of::<Color32>()) as u32,
+                0,
+            );
         }
-        unsafe { ctx.Unmap(&old.tex, 0) };
         Ok(())
     }
 
@@ -467,9 +478,8 @@ impl TexturePool {
                 Count: 1,
                 Quality: 0,
             },
-            Usage: D3D11_USAGE_DYNAMIC,
+            Usage: D3D11_USAGE_DEFAULT,
             BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as _,
-            CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as _,
             ..Default::default()
         };
 
@@ -481,7 +491,7 @@ impl TexturePool {
 
         let mut tex = None;
         // The immutable, validated CPU image remains alive for this synchronous
-        // device upload and is retained for later partial updates. D3D keeps no
+        // device upload only. Later partial updates upload their own region. D3D keeps no
         // pointer to its storage after CreateTexture2D returns.
         unsafe { device.CreateTexture2D(&desc, Some(&subresource_data), Some(&mut tex)) }?;
         let tex = tex.unwrap();
@@ -493,7 +503,7 @@ impl TexturePool {
         Ok(Texture::Managed(ManagedTexture {
             tex,
             srv,
-            image,
+            size: [width, height],
             options,
         }))
     }

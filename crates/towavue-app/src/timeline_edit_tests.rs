@@ -159,6 +159,101 @@ fn render<N: Fn(AppEvent) + Send + Sync + 'static>(
     (output, actions)
 }
 
+fn verify_selection_press<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
+    let context = crate::fonts::test_context();
+    context.global_style_mut(chrome::style);
+    let previous_context = app.ui_context.replace(context.clone());
+    let tab = app.tabs.active().expect("tab").id;
+    let history = app.edits[&tab].clone();
+    for (reverse, cancel) in [(false, false), (true, false), (false, true), (true, true)] {
+        app.set_time_selection(None);
+        app.seek_to(time(1200));
+        let original = Some(range(100, 200));
+        app.set_time_selection(original);
+        for _ in 0..3 {
+            render(app, &context, vec![]);
+        }
+        let panel = egui::containers::panel::PanelState::load(&context, app.timeline_panel_id())
+            .expect("timeline")
+            .outer_rect;
+        let track = egui::Rect::from_min_max(
+            panel.min + egui::vec2(8.0, 8.0),
+            panel.max - egui::vec2(8.0, 0.0),
+        );
+        let point =
+            |fraction| egui::pos2(egui::lerp(track.x_range(), fraction), track.bottom() - 24.0);
+        let origin = point(if reverse { 0.75 } else { 0.25 });
+        let end = point(if reverse { 0.25 } else { 0.75 });
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            pressed,
+            button: egui::PointerButton::Primary,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let generation = app.generation;
+        let (_, actions) = render(
+            app,
+            &context,
+            vec![egui::Event::PointerMoved(origin), button(origin, true)],
+        );
+        assert!(matches!(actions.as_slice(), [UiAction::Seek(_)]));
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+        assert_ne!(
+            app.generation, generation,
+            "mousedown seeks the real pipeline"
+        );
+        assert_eq!(
+            app.session.as_ref().expect("session").target(),
+            time(if reverse { 1500 } else { 500 })
+        );
+        assert_eq!(app.time_selection, original);
+        let pressed_generation = app.generation;
+        let (_, actions) = render(app, &context, vec![egui::Event::PointerMoved(end)]);
+        assert!(
+            actions.is_empty(),
+            "selection preview does not repeatedly seek"
+        );
+        let events = if cancel {
+            vec![egui::Event::WindowFocused(false), button(end, false)]
+        } else {
+            vec![button(end, false)]
+        };
+        let (_, actions) = render(app, &context, events);
+        if cancel {
+            assert!(actions.is_empty());
+        }
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+        assert_eq!(
+            app.time_selection,
+            if cancel {
+                original
+            } else {
+                Some(range(500, 1500))
+            },
+            "release uses the generation after press seek"
+        );
+        assert_eq!(
+            app.session.as_ref().expect("session").target(),
+            time(if cancel && reverse { 1500 } else { 500 })
+        );
+        if cancel {
+            assert_eq!(
+                app.generation, pressed_generation,
+                "cancel keeps the press seek without starting another pipeline"
+            );
+        }
+        assert_eq!(app.state, PlaybackState::Paused);
+        assert_eq!(app.edits[&tab], history);
+    }
+    app.set_time_selection(None);
+    app.seek_to(time(1200));
+    app.ui_context = previous_context;
+}
+
 #[test]
 fn queued_timeline_release_precedes_native_cancellation() {
     let Some(_root) = crate::tests::isolated_test_root(
@@ -508,6 +603,9 @@ fn run_app_trial(root: PathBuf, audio: bool) {
             }
             app.seek_to(time(1200));
             app.timeline_open = true;
+            if !self.audio {
+                verify_selection_press(&mut app);
+            }
             app.handle_ui_action(UiAction::TimeSelection(
                 tab,
                 app.generation,

@@ -70,8 +70,14 @@ pub(super) fn show(
         )
     };
     let mut output = Output::default();
-    let mut preview = selection;
-    let mut head = position;
+    let frame = ui.ctx().cumulative_frame_nr();
+    let preview_id = response.id.with("cti-preview");
+    let (mut head, mut preview) = ui.ctx().data(|data| {
+        data.get_temp::<(u64, MediaTime, Option<TimeRange>)>(preview_id)
+            .filter(|(painted, _, _)| *painted == frame)
+            .map_or((position, selection), |(_, head, preview)| (head, preview))
+    });
+    let pixel = 1.0 / ui.ctx().pixels_per_point();
     let bands = adjustment::bands(duration, plan);
     let mut gain_preview = None;
     let drag = if enabled {
@@ -87,7 +93,7 @@ pub(super) fn show(
         if modifiers.alt && !modifiers.ctrl && !modifiers.shift {
             return selected.map_or(Gesture::Select, Gesture::Stretch);
         }
-        if playhead_rect(rect, x_at(position)).contains(origin) {
+        if playhead_rect(rect, cti_x(rect, x_at(position), pixel)).contains(origin) {
             return Gesture::Seek;
         }
         if !modifiers.any()
@@ -110,8 +116,9 @@ pub(super) fn show(
         Gesture::Select
     };
     let cursor = |mode| match mode {
-        Gesture::Seek => egui::CursorIcon::Grab,
-        Gesture::Resize(..) | Gesture::Stretch(_) => egui::CursorIcon::ResizeHorizontal,
+        Gesture::Seek | Gesture::Resize(..) | Gesture::Stretch(_) => {
+            egui::CursorIcon::ResizeHorizontal
+        }
         Gesture::Band(..) | Gesture::Gain(..) => egui::CursorIcon::ResizeRow,
         Gesture::Select => egui::CursorIcon::Crosshair,
     };
@@ -130,21 +137,19 @@ pub(super) fn show(
         let mut mode = ui.ctx().data_mut(|data| {
             *data.get_temp_mut_or_insert_with(mode_id, || choose(origin, drag.modifiers))
         });
+        let mut began_selection = drag.started && matches!(mode, Gesture::Select);
         if let Gesture::Band(range, gain) = mode
             && let Some(direction) = drag.direction
         {
             mode = if direction.y.abs() > direction.x.abs() {
                 Gesture::Gain(range, gain)
             } else {
+                began_selection = true;
                 Gesture::Select
             };
             ui.ctx().data_mut(|data| data.insert_temp(mode_id, mode));
         }
-        ui.ctx().set_cursor_icon(if matches!(mode, Gesture::Seek) {
-            egui::CursorIcon::Grabbing
-        } else {
-            cursor(mode)
-        });
+        ui.ctx().set_cursor_icon(cursor(mode));
         if drag.dragging && matches!(mode, Gesture::Gain(..) | Gesture::Stretch(_)) {
             let edit = match mode {
                 Gesture::Gain(range, original) => {
@@ -209,18 +214,29 @@ pub(super) fn show(
             let a = at(origin.x);
             let b = at(pointer.x);
             preview = TimeRange::new(a.min(b), a.max(b));
+            head = a.min(b);
+            if began_selection || (drag.released && head != a) {
+                output.seek = Some(head);
+            }
             if drag.released {
                 output.selection = Some(preview);
             }
         } else if matches!(mode, Gesture::Seek | Gesture::Select | Gesture::Band(..)) {
-            head = at(pointer.x);
-            if drag.released {
+            head = if matches!(mode, Gesture::Select) {
+                at(origin.x)
+            } else {
+                at(pointer.x)
+            };
+            if began_selection || (drag.released && !matches!(mode, Gesture::Select)) {
                 output.seek = Some(head);
-                if !drag.dragging && selection.is_some() {
-                    output.selection = Some(None);
-                }
+            }
+            if drag.released && !drag.dragging && selection.is_some() {
+                output.selection = Some(None);
             }
         }
+        // A discarded UI pass must not paint the pre-gesture CTI/selection again.
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(preview_id, (frame, head, preview)));
         if drag.released {
             ui.ctx().data_mut(|data| data.remove::<Gesture>(mode_id));
         }
@@ -261,30 +277,25 @@ pub(super) fn show(
             crate::chrome::FOREGROUND,
         );
     }
-    let pixel = 1.0 / ui.ctx().pixels_per_point();
-    let x = (x_at(head) / pixel).floor() * pixel;
-    let x = x.clamp(rect.left(), (rect.right() - pixel).max(rect.left()));
-    painter.rect_filled(
+    let x = cti_x(rect, x_at(head), pixel);
+    let marker = playhead_rect(rect, x);
+    let mut cti = egui::Mesh::default();
+    for point in [
+        marker.left_top(),
+        marker.right_top(),
+        egui::pos2(x, marker.bottom()),
+    ] {
+        cti.colored_vertex(point, crate::chrome::FOREGROUND);
+    }
+    cti.add_triangle(0, 1, 2);
+    cti.add_colored_rect(
         Rect::from_min_max(
-            egui::pos2(x, rect.top()),
-            egui::pos2((x + pixel).min(rect.right()), rect.bottom()),
+            egui::pos2((x - pixel * 0.5).max(rect.left()), rect.top()),
+            egui::pos2((x + pixel * 0.5).min(rect.right()), rect.bottom()),
         ),
-        0.0,
         crate::chrome::FOREGROUND,
     );
-    let marker = playhead_rect(rect, x_at(head));
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            marker.left_top(),
-            marker.right_top(),
-            egui::pos2(
-                x_at(head).clamp(marker.left(), marker.right()),
-                marker.bottom(),
-            ),
-        ],
-        crate::chrome::FOREGROUND,
-        egui::Stroke::NONE,
-    ));
+    painter.add(cti);
     for start in [true, false] {
         let selection = output.selection.unwrap_or(selection);
         let current = selection.map_or(if start { MediaTime::ZERO } else { duration }, |range| {
@@ -354,6 +365,12 @@ pub(super) fn show(
         output.edit = adjustment::values(ui, response, duration, selection, plan, enabled);
     }
     output
+}
+
+fn cti_x(rect: Rect, x: f32, pixel: f32) -> f32 {
+    let left =
+        ((x / pixel).floor() * pixel).clamp(rect.left(), (rect.right() - pixel).max(rect.left()));
+    left + pixel.min(rect.width()) * 0.5
 }
 
 fn playhead_rect(rect: Rect, x: f32) -> Rect {
@@ -555,14 +572,25 @@ mod tests {
                         results.extend(frame(&context, vec![event], true, None));
                     }
                 }
-                assert_eq!(results.len(), 1);
                 if seek {
+                    assert_eq!(results.len(), 1);
                     assert_eq!(results[0].seek, Some(time(5.0)));
                     assert!(results[0].selection.is_none());
                 } else {
-                    assert!(results[0].seek.is_none());
+                    assert_eq!(results.len(), if batched { 1 } else { 2 });
+                    let seeks: Vec<_> = results.iter().filter_map(|result| result.seek).collect();
+                    let start_time = time(f64::from((start - 20.0) / 40.0));
+                    let left_time = time(f64::from((start.min(end) - 20.0) / 40.0));
                     assert_eq!(
-                        results[0].selection,
+                        seeks,
+                        if !batched && start > end {
+                            vec![start_time, left_time]
+                        } else {
+                            vec![left_time]
+                        }
+                    );
+                    assert_eq!(
+                        results.last().expect("selection commit").selection,
                         Some(TimeRange::new(
                             time(f64::from((start.min(end) - 20.0) / 40.0)),
                             time(f64::from((start.max(end) - 20.0) / 40.0))
@@ -670,10 +698,10 @@ mod tests {
             let context = egui::Context::default();
             context.set_pixels_per_point(density);
             let rect = Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 100.0));
-            for position in [time(0.0), time(5.0), time(10.0)] {
+            for position in [time(0.0), time(1.003), time(5.0), time(9.997), time(10.0)] {
                 let x = 20.0 + position.as_seconds_f64() as f32 * 40.0;
                 for (pointer, expected) in [
-                    (egui::pos2(x, 34.0), egui::CursorIcon::Grab),
+                    (egui::pos2(x, 34.0), egui::CursorIcon::ResizeHorizontal),
                     (egui::pos2(x, 70.0), egui::CursorIcon::Crosshair),
                     (egui::pos2(120.0, 70.0), egui::CursorIcon::ResizeHorizontal),
                     (egui::pos2(320.0, 70.0), egui::CursorIcon::ResizeHorizontal),
@@ -714,31 +742,35 @@ mod tests {
                         );
                     }
                     assert_eq!(output.platform_output.cursor_icon, expected);
-                    let stem = output
+                    let cti = output
                         .shapes
                         .iter()
                         .find_map(|shape| match &shape.shape {
-                            egui::Shape::Rect(shape) if shape.fill == crate::chrome::FOREGROUND => {
-                                Some(shape.rect)
+                            egui::Shape::Mesh(mesh)
+                                if mesh.vertices.len() == 7
+                                    && mesh.vertices.iter().all(|vertex| {
+                                        vertex.color == crate::chrome::FOREGROUND
+                                    }) =>
+                            {
+                                Some(mesh)
                             }
                             _ => None,
                         })
-                        .expect("CTI stem");
+                        .expect("one CTI mesh");
+                    assert_eq!(cti.indices.len(), 9);
+                    let stem = Rect::from_points(
+                        &cti.vertices[3..]
+                            .iter()
+                            .map(|vertex| vertex.pos)
+                            .collect::<Vec<_>>(),
+                    );
                     assert!(rect.contains_rect(stem));
                     assert!((stem.width() * density - 1.0).abs() < 0.001);
-                    let marker = output
-                        .shapes
-                        .iter()
-                        .find_map(|shape| match &shape.shape {
-                            egui::Shape::Path(shape)
-                                if shape.closed && shape.fill == crate::chrome::FOREGROUND =>
-                            {
-                                Some(&shape.points)
-                            }
-                            _ => None,
-                        })
-                        .expect("playhead triangle");
-                    assert_eq!(marker.len(), 3);
+                    assert_eq!(stem.top(), rect.top());
+                    assert_eq!(stem.bottom(), rect.bottom());
+                    let marker: Vec<_> =
+                        cti.vertices[..3].iter().map(|vertex| vertex.pos).collect();
+                    assert!((marker[2].x - stem.center().x).abs() < 0.0001);
                     assert!(
                         marker
                             .iter()
@@ -772,7 +804,10 @@ mod tests {
                         egui::Event::PointerMoved(egui::pos2(320.0, 70.0)),
                     ];
                     if !batched_press {
-                        assert!(frame(&context, events.clone(), true, selected).is_empty());
+                        let press = frame(&context, events.clone(), true, selected);
+                        assert_eq!(press.len(), 1);
+                        assert_eq!(press[0].seek, Some(time(2.5)));
+                        assert!(press[0].selection.is_none() && press[0].edit.is_none());
                         events.clear();
                     }
                     if release_first {
@@ -791,7 +826,8 @@ mod tests {
                             results[0].selection,
                             Some(TimeRange::new(time(2.5), time(7.5)))
                         );
-                        assert!(results[0].seek.is_none() && results[0].edit.is_none());
+                        assert_eq!(results[0].seek, batched_press.then_some(time(2.5)));
+                        assert!(results[0].edit.is_none());
                     }
                     assert!(!crate::timeline_input::is_active(&context));
                     assert!(frame(&context, vec![], true, selected).is_empty());
@@ -860,7 +896,7 @@ mod tests {
                 results[0].selection,
                 Some(TimeRange::new(time(2.5), time(7.5)))
             );
-            assert!(results[0].seek.is_none());
+            assert_eq!(results[0].seek, Some(time(2.5)));
         }
     }
 
@@ -944,7 +980,14 @@ mod tests {
                 assert!(
                     frame(
                         &context,
-                        vec![egui::Event::PointerMoved(origin + egui::vec2(80.0, 25.0))],
+                        vec![egui::Event::PointerMoved(
+                            origin
+                                + if stretch {
+                                    egui::vec2(80.0, 25.0)
+                                } else {
+                                    egui::vec2(0.0, 25.0)
+                                }
+                        )],
                         true,
                         selected
                     )
@@ -981,6 +1024,97 @@ mod tests {
                     }
                 }
                 assert!(frame(&context, vec![button(300.0, false)], true, selected).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn selection_press_and_held_preview_keep_the_cti_through_discarded_passes() {
+        let rect = Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 100.0));
+        for density in [1.0, 1.25, 2.0] {
+            for reverse in [false, true] {
+                let context = egui::Context::default();
+                context.set_pixels_per_point(density);
+                let draw = |events| {
+                    let mut results = Vec::new();
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(500.0, 200.0),
+                            )),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let response = ui.interact(
+                                rect,
+                                "cti-press-test".into(),
+                                egui::Sense::click_and_drag(),
+                            );
+                            let result =
+                                show(ui, &response, time(10.0), time(9.0), None, None, true);
+                            if result.seek.is_some()
+                                || result.selection.is_some()
+                                || result.edit.is_some()
+                            {
+                                results.push(result);
+                            }
+                            if context.current_pass_index() == 0 {
+                                context.request_discard("test final CTI paint");
+                            }
+                        },
+                    );
+                    let axis = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Mesh(mesh) if mesh.vertices.len() == 7 => {
+                                Some(mesh.vertices[2].pos.x)
+                            }
+                            _ => None,
+                        })
+                        .expect("CTI mesh survives the discarded input pass");
+                    (results, axis, output.platform_output.cursor_icon)
+                };
+                draw(vec![]);
+                let start = if reverse { 320.0 } else { 120.0 };
+                let end = if reverse { 120.0 } else { 320.0 };
+                let (press, axis, _) = draw(vec![button(start, true)]);
+                assert_eq!(press.len(), 1);
+                assert_eq!(press[0].seek, Some(time(if reverse { 7.5 } else { 2.5 })));
+                assert_eq!(axis, cti_x(rect, start, 1.0 / density));
+                let (held, axis, cursor) =
+                    draw(vec![egui::Event::PointerMoved(egui::pos2(end, 70.0))]);
+                assert!(
+                    held.is_empty(),
+                    "held selection does not restart the pipeline"
+                );
+                assert_eq!(axis, cti_x(rect, 120.0, 1.0 / density));
+                assert_eq!(cursor, egui::CursorIcon::Crosshair);
+                let (released, axis, _) = draw(vec![button(end, false)]);
+                assert_eq!(released.len(), 1);
+                assert_eq!(
+                    released[0].selection,
+                    Some(TimeRange::new(time(2.5), time(7.5)))
+                );
+                assert_eq!(released[0].seek, reverse.then_some(time(2.5)));
+                assert_eq!(axis, cti_x(rect, 120.0, 1.0 / density));
+                assert!(draw(vec![]).0.is_empty());
+                let (_, axis, cursor) = draw(vec![
+                    egui::Event::PointerButton {
+                        pos: egui::pos2(380.0, 34.0),
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::PointerMoved(egui::pos2(220.0, 70.0)),
+                ]);
+                assert_eq!(cursor, egui::CursorIcon::ResizeHorizontal);
+                assert_eq!(axis, cti_x(rect, 220.0, 1.0 / density));
+                let (released, _, _) = draw(vec![button(220.0, false)]);
+                assert_eq!(released.len(), 1);
+                assert_eq!(released[0].seek, Some(time(5.0)));
             }
         }
     }
@@ -1037,7 +1171,7 @@ mod tests {
                 );
                 assert!(results[0].edit.is_none());
             }
-            assert!(results[0].seek.is_none());
+            assert_eq!(results[0].seek, (!vertical).then_some(time(2.5)));
         }
     }
 

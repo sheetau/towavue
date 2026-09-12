@@ -5113,7 +5113,7 @@ where
                 let background = ui.available_rect_before_wrap();
                 ui.set_min_size(background.size());
                 ui.painter().rect_filled(background, 3.0, chrome::BORDER);
-                let rect = background.shrink(3.0);
+                let rect = background;
                 if let Some(waveform) = &self.waveform {
                     if let Some(plan) = self.session.as_ref().and_then(PlaybackSession::timeline) {
                         let painter = ui.painter().with_clip_rect(rect);
@@ -11235,7 +11235,9 @@ mod tests {
                 true,
                 false,
             );
-            assert!(frame(&mut app, vec![button(start, true)], true, false).is_empty());
+            assert!(
+                matches!(frame(&mut app, vec![button(start, true)], true, false).as_slice(), [UiAction::Seek(time)] if time.as_seconds_f64() > 1.0 && time.as_seconds_f64() < 3.0)
+            );
             assert!(frame(&mut app, vec![egui::Event::PointerMoved(end)], true, false).is_empty());
             assert!(timeline_input::is_active(&context));
             let mut release = vec![button(end, false)];
@@ -11381,7 +11383,15 @@ mod tests {
                         assert!(frame(vec![]).is_empty());
                     }
                     assert!(frame(vec![egui::Event::PointerMoved(start)]).is_empty());
-                    assert!(frame(vec![event(start, true)]).is_empty());
+                    let press = frame(vec![event(start, true)]);
+                    if timeline && button == egui::PointerButton::Primary {
+                        let expected = if drag { 1.0..3.0 } else { 7.0..9.0 };
+                        assert!(
+                            matches!(press.as_slice(), [UiAction::Seek(time)] if expected.contains(&time.as_seconds_f64()))
+                        );
+                    } else {
+                        assert!(press.is_empty());
+                    }
                     assert!(frame(vec![egui::Event::PointerMoved(end)]).is_empty());
                     let actions = frame(vec![
                         event(end, false),
@@ -11398,9 +11408,7 @@ mod tests {
                                 matches!(actions.as_slice(), [UiAction::TimeSelection(_, _, Some(range))] if range.end().as_seconds_f64() > 7.0 && range.end().as_seconds_f64() < 9.0)
                             );
                         } else {
-                            assert!(
-                                matches!(actions.as_slice(), [UiAction::Seek(time)] if time.as_seconds_f64() > 7.0 && time.as_seconds_f64() < 9.0)
-                            );
+                            assert!(actions.is_empty(), "timeline click already sought on press");
                         }
                     } else {
                         assert!(
@@ -12053,7 +12061,7 @@ mod tests {
                         assert_eq!(width - background.right(), 8.0);
                         assert!((background.top() - borders[1] - 8.0).abs() <= 1.0 / density);
                         assert!((background.bottom() - 270.0).abs() <= 1.0 / density);
-                        let track = background.shrink(3.0);
+                        let track = background;
                         let waveform = output
                             .shapes
                             .iter()

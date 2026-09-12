@@ -260,7 +260,7 @@ enum AppEvent {
     FileRevealed(std::io::Result<PathBuf>),
     RecentFilesReady,
     ImageCopied(Result<(u32, u32), String>),
-    ImageEdited(u64, Result<DecodedImage, String>),
+    ImageEdited(u64, Result<Arc<DecodedImage>, String>),
     ImageContentCompared(
         u64,
         u64,
@@ -5882,26 +5882,43 @@ where
         self.image_error = None;
         let notify = Arc::clone(&self.notify);
         let instance = self.media_generation;
+        let rendered = (!render && materialize && self.image_materialized)
+            .then(|| self.image.as_ref().map(|image| Arc::clone(&image.decoded)))
+            .flatten();
         self.image_edit_worker.submit(move |cancel| {
-            if render {
+            let rendered = if render {
                 let result =
-                    towavue_runtime_windows::render_image_edits(&source, &operations, &cancel);
-                let success = result.is_ok();
+                    towavue_runtime_windows::render_image_edits(&source, &operations, &cancel)
+                        .map(Arc::new);
                 if cancel.is_cancelled() {
                     return;
                 }
-                notify(AppEvent::ImageEdited(generation, result));
-                if !success {
-                    return;
+                match result {
+                    Ok(rendered) => {
+                        notify(AppEvent::ImageEdited(generation, Ok(Arc::clone(&rendered))));
+                        Some(rendered)
+                    }
+                    Err(error) => {
+                        notify(AppEvent::ImageEdited(generation, Err(error)));
+                        return;
+                    }
                 }
-            }
+            } else {
+                rendered
+            };
             if dirty {
-                let matches = towavue_runtime_windows::compare_image_edits(
-                    &source,
-                    &operations,
-                    &saved,
-                    &cancel,
-                )
+                let matches = if let Some(rendered) = rendered {
+                    towavue_runtime_windows::compare_rendered_image_edits(
+                        &source, &rendered, &saved, &cancel,
+                    )
+                } else {
+                    towavue_runtime_windows::compare_image_edits(
+                        &source,
+                        &operations,
+                        &saved,
+                        &cancel,
+                    )
+                }
                 .unwrap_or(false);
                 if !cancel.is_cancelled() {
                     notify(AppEvent::ImageContentCompared(
@@ -5912,12 +5929,12 @@ where
         });
     }
 
-    fn finish_image_edits(&mut self, generation: u64, result: Result<DecodedImage, String>) {
+    fn finish_image_edits(&mut self, generation: u64, result: Result<Arc<DecodedImage>, String>) {
         if generation != self.image_edit_generation || !self.image_edit_pending {
             return;
         }
         self.image_edit_pending = false;
-        match result.and_then(|decoded| self.install_edited_image(Arc::new(decoded))) {
+        match result.and_then(|decoded| self.install_edited_image(decoded)) {
             Ok(()) => {
                 self.image_materialized = true;
                 self.set_status("Image resampled (source unchanged)".into());
@@ -19168,7 +19185,22 @@ mod tests {
                     .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                     .expect("comparison completion");
                 let compared = matches!(&event, AppEvent::ImageContentCompared(generation, ..) if *generation == wanted);
+                let materialized = match &event {
+                    AppEvent::ImageEdited(generation, Ok(image)) if *generation == wanted => {
+                        Some(Arc::clone(image))
+                    }
+                    _ => None,
+                };
                 app.handle_app_event(event);
+                if let Some(materialized) = materialized {
+                    assert!(
+                        Arc::ptr_eq(
+                            &materialized,
+                            &app.image.as_ref().expect("installed image").decoded
+                        ),
+                        "display installs the shared worker allocation"
+                    );
+                }
                 if compared {
                     break;
                 }

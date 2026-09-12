@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+U07/I07 materialized共有: 表示用の編集結果をArcで通知し、その同じallocationを現在側の比較へ再利用する。既存表示の再比較もoperation key一致時だけ共有し、非materializeのcrop／orientationは従来の処理を使う。元・表示の所有を延長するだけで画素copy／新cache／新workerは増やさない。小型2frame回帰で現在側のrender呼出しが2→0、保存側に編集があれば2回だけ残ること、最終byte・delay・寸法・frame数・buffer長の差と取消を確認。appでもworker結果とinstalled imageのArc一致を検証する。
+
+Release測定: opt-in `large_rendered_comparison_benchmark` を `TOWAVUE_IMAGE_COMPARE_BENCH=recompute/reuse` で各2個の独立processに実行。4096×2304 uniform RGBAをNearestで縮小→元サイズへ拡大し、表示用materialize後の比較を9回測る。中央値48.445／48.082→1.059／1.132ms、比較フェーズのrender回数9→0。materializeは46.084～46.812ms、元＋表示の論理RGBAは双方72MiB。外側で10msごとに取得したOS high-water counterの最大観測commitは207.152／207.172→170.820／170.773MiB、working setは211.969／211.988→175.777／175.750MiB。pollの最大観測値をプロセス全期間の完全追跡とはしない。GUI／GPUなし、既定保存snapshotが空の生成素材に限定し、全画像・animation・任意の保存編集・UI遅延・全資源gateは継続する。
+
 U07 画像内容の同値: 保存snapshotと現在の編集結果を、既存image-edit workerで一frameずつ寸法・delay・全RGBA比較する。通常の未編集navigationへ仕事を追加せず、materialize結果の通知を先に送り、その後に比較する。比較中は従来dirty、失敗／取消では同値扱いにしない。worker世代・media instance・tab・現在／保存snapshotでstale結果を拒否し、履歴変更時に証拠を無効化する。tab復帰／保存基準更新時は比較を再要求するが、保持済みの表示を再materializeしない。
 
 検証: 全体crop・等倍resize・直角自由回転の復元、別crop手順が同じ領域へ達するケースで、全frameの直接比較と実PNG書出し画素一致を確認。先頭frameが均一でも後続が違えば不一致とし、縮小後の拡大で情報が失われた画像・寸法差・無効crop・取消を区別する。coreの証拠失効／保存基準差、appの非blocking比較・Undo／Redo・stale通知・保存基準更新／guard／close、既存tab transfer／animation frame保持を回帰確認する。描画完了通知の後に別の比較通知が届くため、既存試験の単一通知待ちを有界の描画完了待ちへ更新。比較は追加処理であり、全素材の速度／peak memory・native入力／DPI・animation保持export等の全台帳は継続する。

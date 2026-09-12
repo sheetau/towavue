@@ -157,7 +157,7 @@ fn free_rotation_worker_keeps_animation_original_pixels_and_undo_redo_tab_genera
         &app.image.as_ref().expect("source after failure").decoded,
         &source
     ));
-    app.finish_image_edits(stale, Ok(expected));
+    app.finish_image_edits(stale, Ok(Arc::new(expected)));
     assert!(!app.image_materialized && app.image_error.is_none());
     app.remove_tab(tab, false);
     app.remove_tab(other, false);

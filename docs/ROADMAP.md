@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 U07/I07 comparison-reuse checkpoint: materialized表示と比較へ同じArcを渡し、現在側の再生成・一時bufferを省く。通知順序と既存snapshot／世代の保護は維持。2frameのrender呼出し削減、最終byte・delay等の差、appのArc一致を確認。4096×2304生成画像のRelease比較2回で中央値48.445／48.082→1.059／1.132ms、観測OS peak commit207.152／207.172→170.820／170.773MiB。元＋表示72MiBとmaterialize約46msは変わらない。別process・9比較・保存snapshot空のCPU試験であり、UI／GPU／全素材の性能認定ではない。全UX gateを継続。
+
 2026-09-12 U07 image-content checkpoint: 操作列だけで同値と認定できない画像編集を、既存workerで全frameの寸法・delay・RGBA比較へ接続。全体crop／等倍resize／直角自由回転の復元と別crop手順、情報を失う縮小拡大、後続animation frame差、取消／無効操作を区別する。実PNG出力一致、core証拠失効、appの非blocking比較・stale／保存基準差拒否・Undo／guard／closeを確認。保持済み画像のtab復帰で不要な再materializeが発生した回帰を修正し、既存transfer試験も維持。通常687tests／fmt／Clippy／Release通過。全素材の比較速度／peak資源、native入力／DPI・animation保持export等の全UX gateは継続。
 
 2026-09-12 U07 timeline-equivalence checkpoint: 元source durationが既知なら現在／保存snapshotのEditTimeline結果とraster／全体音量・速度を比較し、区間音量／正確なStretchの復元、Keep対trim、明示EOFを認識する。未知／無効値では推定せず、比較結果は履歴変更時に保持する。active／retainedのpath・generation一致後のduration通知と再描画を接続。旧dirty残留を再現後、復元・Undo／分岐／export基準・1ns差・異なるsource区間・stale通知／背景tab分離、実動画／音声抽出の全PCM・RGBA一致を検証。通常684tests／fmt／Clippy／Release通過。画像処理の一般的な同値、全codec品質・native入力／DPI等の全UX gateは継続。

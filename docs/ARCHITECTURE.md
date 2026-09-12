@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U07/I07: 表示用materialized画像を比較へ共有（2026-09-12）
+
+画像workerのmaterialize完了結果はArcで表示と同値比較へ共有し、現在側の同じ処理を再実行しない。既に保持したmaterialized画像は現在のoperation keyが一致するときだけ比較へ渡す。通常crop／orientationの表示専用transformは未適用画素なので、この再利用経路へ入れない。保存側は従来どおり一frameずつ処理し、全frame数・寸法・delay・RGBAを照合する。表示用通知が先、比較結果が後という順序と世代／snapshot／取消保護を維持する。
+
+Arcは既存表示frameの生存を比較完了まで延ばすが、新しい全画像コピーは作らない。比較前のmaterialize時間は短縮したと主張しない。Releaseの大画像試験は比較フェーズの再生成あり／共有ありを別に計測し、processのメモリ観測値と論理RGBA buffer量を区別する。全UI入力遅延／driver資源や全素材の性能は別gateとして維持する。
+
 ## U07: 画像の保存snapshotとの画素比較（2026-09-12）
 
 操作列から同値と確定できない画像編集は、既存のimage-edit workerで元DecodedImageへ現在／保存snapshotの処理を適用し、全frameの寸法・delay・RGBAを厳密比較する。hashや近似画質では判定しない。元データは既存Arcを共有し、比較は一frameずつ・取消可能とし、通常navigation／無編集表示へ追加decodeや比較を入れない。materializeが必要な編集は先に既存の表示用結果を通知し、同workerの後続処理で比較する。新threadは作らない。比較の処理負荷と待機時間は残り、速度改善とは主張しない。

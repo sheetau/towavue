@@ -3,6 +3,9 @@ use towavue_core::EditOperation;
 
 use crate::{Cancellation, DecodedImage, DecodedImageFrame};
 
+#[cfg(test)]
+thread_local! { static RENDER_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
 /// Compare full rendered content one frame at a time without retaining another animation.
 pub fn compare_image_edits(
     source: &DecodedImage,
@@ -35,23 +38,71 @@ pub fn compare_image_edits(
         };
         let current = render(current)?;
         let saved = render(saved)?;
-        if current.width != saved.width
-            || current.height != saved.height
-            || current.delay != saved.delay
-            || current.rgba.len() != saved.rgba.len()
-        {
+        if !equal_frames(&current, &saved, cancel)? {
             return Ok(false);
-        }
-        for (current, saved) in current.rgba.chunks(65536).zip(saved.rgba.chunks(65536)) {
-            if cancel.is_cancelled() {
-                return Err("Image comparison cancelled".into());
-            }
-            if current != saved {
-                return Ok(false);
-            }
         }
     }
     Ok(!source.frames.is_empty())
+}
+
+/// Reuse the fully rendered current snapshot; only the saved snapshot needs rendering.
+pub fn compare_rendered_image_edits(
+    source: &DecodedImage,
+    current: &DecodedImage,
+    saved: &[EditOperation],
+    cancel: &Cancellation,
+) -> Result<bool, String> {
+    if saved.iter().any(|operation| {
+        matches!(
+            operation,
+            EditOperation::RotateVideo(_) | EditOperation::ResizeVideo(_)
+        )
+    }) {
+        return Err("Video raster edits cannot be compared as image frames".into());
+    }
+    if source.frames.is_empty() || source.frames.len() != current.frames.len() {
+        return Ok(false);
+    }
+    for (source, current) in source.frames.iter().zip(&current.frames) {
+        if cancel.is_cancelled() {
+            return Err("Image comparison cancelled".into());
+        }
+        if output_size((source.width, source.height), saved)? != (current.width, current.height) {
+            return Ok(false);
+        }
+        let saved = if saved.is_empty() {
+            std::borrow::Cow::Borrowed(source)
+        } else {
+            std::borrow::Cow::Owned(render_frame(source, saved, cancel)?)
+        };
+        if !equal_frames(current, &saved, cancel)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn equal_frames(
+    current: &DecodedImageFrame,
+    saved: &DecodedImageFrame,
+    cancel: &Cancellation,
+) -> Result<bool, String> {
+    if current.width != saved.width
+        || current.height != saved.height
+        || current.delay != saved.delay
+        || current.rgba.len() != saved.rgba.len()
+    {
+        return Ok(false);
+    }
+    for (current, saved) in current.rgba.chunks(65536).zip(saved.rgba.chunks(65536)) {
+        if cancel.is_cancelled() {
+            return Err("Image comparison cancelled".into());
+        }
+        if current != saved {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 pub fn render_image_edits(
@@ -132,6 +183,8 @@ fn render_frame(
     operations: &[EditOperation],
     cancel: &Cancellation,
 ) -> Result<DecodedImageFrame, String> {
+    #[cfg(test)]
+    RENDER_CALLS.set(RENDER_CALLS.get() + 1);
     let convert = || -> Result<DecodedImageFrame, ffmpeg_next::Error> {
         ffmpeg_next::init()?;
         let mut graph = filter::Graph::new();
@@ -208,6 +261,118 @@ fn render_frame(
 mod tests {
     use super::*;
     use towavue_core::{ImageResize, PixelCrop, ResampleFilter};
+
+    #[test]
+    fn rendered_comparison_reuses_current_pixels_and_checks_every_frame() {
+        let source = DecodedImage {
+            format: "test",
+            frames: (0..2)
+                .map(|index| DecodedImageFrame {
+                    width: 4,
+                    height: 4,
+                    rgba: [23, 42, 67, 255].repeat(16),
+                    delay: std::time::Duration::from_millis(40 + index * 10),
+                })
+                .collect(),
+        };
+        let cancel = Cancellation::default();
+        let operations = [EditOperation::Resize(
+            ImageResize::new(4, 4, ResampleFilter::Nearest).expect("resize"),
+        )];
+        let rendered = render_image_edits(&source, &operations, &cancel).expect("materialized");
+        for saved in [&[][..], &operations[..]] {
+            RENDER_CALLS.set(0);
+            assert!(compare_image_edits(&source, &operations, saved, &cancel).expect("old path"));
+            let recomputed = RENDER_CALLS.get();
+            RENDER_CALLS.set(0);
+            assert!(
+                compare_rendered_image_edits(&source, &rendered, saved, &cancel)
+                    .expect("shared path")
+            );
+            assert_eq!(
+                recomputed - RENDER_CALLS.get(),
+                source.frames.len(),
+                "no current-side rendering"
+            );
+            assert_eq!(RENDER_CALLS.get(), if saved.is_empty() { 0 } else { 2 });
+        }
+        for change in 0..5 {
+            let mut different = rendered.clone();
+            match change {
+                0 => {
+                    *different.frames[1].rgba.last_mut().expect("last byte") ^= 1;
+                }
+                1 => different.frames[1].delay += std::time::Duration::from_nanos(1),
+                2 => different.frames[1].width += 1,
+                3 => {
+                    different.frames.pop();
+                }
+                _ => {
+                    different.frames[1].rgba.pop();
+                }
+            }
+            assert!(
+                !compare_rendered_image_edits(&source, &different, &[], &cancel)
+                    .expect("different content")
+            );
+        }
+        let invalid = [EditOperation::Crop(PixelCrop {
+            x: 3,
+            y: 3,
+            width: 4,
+            height: 4,
+        })];
+        assert!(compare_rendered_image_edits(&source, &rendered, &invalid, &cancel).is_err());
+        cancel.cancel();
+        assert!(compare_rendered_image_edits(&source, &rendered, &[], &cancel).is_err());
+    }
+
+    #[test]
+    #[ignore = "opt-in Release large-image comparison timing and process-memory observation"]
+    fn large_rendered_comparison_benchmark() {
+        let mode = std::env::var("TOWAVUE_IMAGE_COMPARE_BENCH").unwrap_or_else(|_| "reuse".into());
+        assert!(matches!(mode.as_str(), "reuse" | "recompute"));
+        let source = DecodedImage {
+            format: "generated",
+            frames: vec![DecodedImageFrame {
+                width: 4096,
+                height: 2304,
+                rgba: [23, 42, 67, 255].repeat(4096 * 2304),
+                delay: std::time::Duration::ZERO,
+            }],
+        };
+        let operations = [(2048, 1152), (4096, 2304)].map(|(width, height)| {
+            EditOperation::Resize(
+                ImageResize::new(width, height, ResampleFilter::Nearest).expect("resize"),
+            )
+        });
+        let cancel = Cancellation::default();
+        let start = std::time::Instant::now();
+        let rendered = render_image_edits(&source, &operations, &cancel).expect("materialize");
+        let materialize_ms = start.elapsed().as_secs_f64() * 1000.0;
+        RENDER_CALLS.set(0);
+        let mut times = Vec::new();
+        for _ in 0..9 {
+            let start = std::time::Instant::now();
+            let matches = if mode == "reuse" {
+                compare_rendered_image_edits(&source, &rendered, &[], &cancel)
+            } else {
+                compare_image_edits(&source, &operations, &[], &cancel)
+            };
+            assert!(matches.expect("equal uniform pixels"));
+            times.push(start.elapsed().as_secs_f64() * 1000.0);
+        }
+        times.sort_by(f64::total_cmp);
+        assert_eq!(RENDER_CALLS.get(), if mode == "reuse" { 0 } else { 9 });
+        println!(
+            "IMAGE-COMPARE mode={mode} source=4096x2304 runs=9 materialize_ms={materialize_ms:.3} compare_median_ms={:.3} min_ms={:.3} max_ms={:.3} render_calls={} retained_rgba_bytes={}",
+            times[4],
+            times[0],
+            times[8],
+            RENDER_CALLS.get(),
+            source.retained_bytes() + rendered.retained_bytes()
+        );
+    }
 
     #[test]
     fn pixel_comparison_handles_crop_resize_rotation_all_frames_and_cancellation() {

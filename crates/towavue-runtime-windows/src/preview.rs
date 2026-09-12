@@ -291,17 +291,39 @@ impl PreviewCache {
             if let Some(image) = cached {
                 self.check_cancelled()?;
                 image
-            } else if !self.root.join(format!("{key}.png")).is_file()
+            } else if image::ImageFormat::from_path(source).ok() != Some(image::ImageFormat::Jpeg)
+                && !self.root.join(format!("{key}.png")).is_file()
                 && let Some(preview) =
                     self.prepare_image_preview(source, crate::image::IMAGE_BYTE_LIMIT, &|| {
                         self.check_cancelled().is_ok()
                     })
             {
+                // Plain BMP row sampling is cheaper than encoding/reloading a cache PNG.
                 preview.image
             } else {
                 self.load_or_generate(key.clone(), || {
-                    let direct = static_thumbnail_png(source, STATIC_THUMBNAIL_BYTE_LIMIT, &|| {
-                        self.check_cancelled().is_ok()
+                    let current = || self.check_cancelled().is_ok();
+                    let direct = crate::image::first_image_preview(
+                        source,
+                        crate::image::IMAGE_BYTE_LIMIT,
+                        &current,
+                    )
+                    .ok()
+                    .flatten()
+                    .and_then(|preview| {
+                        let image = image::RgbaImage::from_raw(
+                            preview.image.width,
+                            preview.image.height,
+                            preview.image.rgba,
+                        )?;
+                        thumbnail_png(
+                            image::DynamicImage::ImageRgba8(image),
+                            preview.source_size,
+                            &current,
+                        )
+                    })
+                    .or_else(|| {
+                        static_thumbnail_png(source, STATIC_THUMBNAIL_BYTE_LIMIT, &current)
                     });
                     self.check_cancelled()?;
                     let bytes = if let Some(bytes) = direct {
@@ -849,6 +871,14 @@ fn static_thumbnail_png(
             ),
         )
     };
+    thumbnail_png(small, source_size, current)
+}
+
+fn thumbnail_png(
+    small: image::DynamicImage,
+    source_size: (u32, u32),
+    current: &dyn Fn() -> bool,
+) -> Option<Vec<u8>> {
     if !current() {
         return None;
     }
@@ -884,7 +914,7 @@ fn thumbnail_source_size(bytes: &[u8]) -> Option<(u32, u32)> {
     let bytes = u64::from(width)
         .checked_mul(u64::from(height))?
         .checked_mul(4)?;
-    (width != 0 && height != 0 && bytes <= STATIC_THUMBNAIL_BYTE_LIMIT as u64)
+    (width != 0 && height != 0 && bytes <= crate::image::IMAGE_BYTE_LIMIT as u64)
         .then_some((width, height))
 }
 

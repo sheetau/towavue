@@ -799,8 +799,66 @@ fn unvisited_static_filmstrips_share_the_bounded_first_preview() {
         );
         assert_eq!(
             fs::read_dir(&cache.root).expect("cache files").count(),
-            1,
-            "fast path does not encode a disk thumbnail"
+            if extension == "jpg" { 2 } else { 1 },
+            "persist JPEG; keep cheap BMP sampling memory-only"
+        );
+        let reopened = PreviewCache::new(cache.root.clone()).expect("new session cache");
+        let persisted = reopened.cached_image(&path).expect("disk lookup");
+        if extension == "jpg" {
+            let persisted = persisted.expect("reuse fast JPEG without decoding the original");
+            assert_eq!(persisted.source_size, shared.source_size);
+            assert_eq!(persisted.image, first.image);
+        } else {
+            assert!(
+                persisted.is_none(),
+                "BMP does not create a slower disk cache"
+            );
+        }
+        let foreground =
+            PreviewCache::new(cache.root.join("foreground")).expect("foreground cache");
+        assert_eq!(
+            foreground
+                .prepare_image_preview(&path, crate::image::IMAGE_BYTE_LIMIT, &|| true)
+                .expect("speculative first preview")
+                .image,
+            first.image
+        );
+        assert_eq!(
+            fs::read_dir(&foreground.root)
+                .expect("foreground directory")
+                .count(),
+            0,
+            "foreground speculation must not encode or persist a thumbnail"
+        );
+        let occupied = cache.root.join("occupied");
+        fs::write(&occupied, b"preserve occupied path").expect("owned collision");
+        let blocked = PreviewCache::new(occupied.clone()).expect("optional storage");
+        assert_eq!(
+            blocked
+                .filmstrip(&path, MediaKind::Image)
+                .expect("memory fallback")
+                .image,
+            first.image
+        );
+        assert_eq!(
+            fs::read(&occupied).expect("unchanged collision"),
+            b"preserve occupied path"
+        );
+        fs::remove_file(&occupied).expect("remove owned collision");
+        fs::create_dir(&occupied).expect("make storage available");
+        assert_eq!(
+            blocked
+                .filmstrip(&path, MediaKind::Image)
+                .expect("memory reuse")
+                .image,
+            first.image
+        );
+        assert_eq!(
+            fs::read_dir(&occupied)
+                .expect("available directory")
+                .count(),
+            0,
+            "memory hits do not retry failed persistence"
         );
         let disk = PreviewCache::new(cache.root.join("disk")).expect("existing disk cache");
         let stored = disk
@@ -835,6 +893,94 @@ fn unvisited_static_filmstrips_share_the_bounded_first_preview() {
         assert!(cache.in_flight.0.lock().expect("pending").is_empty());
         fs::remove_dir_all(&cache.root).expect("remove owned fixtures");
     }
+}
+
+#[test]
+fn persisted_fast_preview_keeps_large_source_geometry_without_a_full_canvas() {
+    let root = cache("large-fast-preview-geometry").root;
+    let cache = PreviewCache::new(root.join("cache")).expect("cache separate from source");
+    let path = root.join("large.jpg");
+    let (width, height) = (8000_u32, 6000_u32);
+    image::GrayImage::new(width, height)
+        .save(&path)
+        .expect("owned grayscale JPEG");
+    let preview = cache
+        .filmstrip(&path, MediaKind::Image)
+        .expect("reduced JPEG")
+        .image;
+    assert_eq!((preview.width, preview.height), (213, 160));
+    let reopened = PreviewCache::new(cache.root.clone()).expect("fresh memory");
+    let saved = reopened
+        .cached_image(&path)
+        .expect("disk lookup")
+        .expect("persisted fast preview");
+    assert_eq!(saved.source_size, (width, height));
+    assert_eq!(saved.image, preview);
+    fs::remove_dir_all(root).expect("remove owned JPEG and cache");
+}
+
+#[test]
+#[ignore = "Release comparison of fast-preview generation, persistence and fresh-memory disk reuse"]
+fn fast_preview_persistence_reports_generation_and_reopen_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("run this measurement with --release");
+    }
+    for extension in ["jpg", "bmp"] {
+        let root = cache("fast-preview-persistence-measurement").root;
+        let source = root.join(format!("source.{extension}"));
+        image::RgbImage::from_fn(6000, 4000, |x, y| {
+            image::Rgb([(x % 251) as u8, (y % 253) as u8, ((x ^ y) % 255) as u8])
+        })
+        .save(&source)
+        .expect("owned large source");
+        let expected =
+            crate::image::first_image_preview(&source, crate::image::IMAGE_BYTE_LIMIT, &|| true)
+                .expect("fast decoder")
+                .expect("supported format")
+                .image;
+        // Warm source files; separate empty caches on each sample. The former path is the
+        // same non-persisting preparation method; new-session reuse has fresh cache memory.
+        for (phase, card_request) in [false, true, true, false].into_iter().enumerate() {
+            let mut generation = Vec::new();
+            let mut reopen = Vec::new();
+            for sample in 0..3 {
+                let store =
+                    PreviewCache::new(root.join(format!("{phase}-{sample}"))).expect("empty cache");
+                let start = std::time::Instant::now();
+                let image = if card_request {
+                    store
+                        .filmstrip(&source, MediaKind::Image)
+                        .expect("card preview")
+                        .image
+                } else {
+                    store
+                        .prepare_image_preview(&source, crate::image::IMAGE_BYTE_LIMIT, &|| true)
+                        .expect("former fast preview")
+                        .image
+                };
+                generation.push(start.elapsed().as_secs_f64() * 1000.0);
+                assert_eq!(image, expected);
+                if card_request {
+                    let fresh = PreviewCache::new(store.root.clone()).expect("new session memory");
+                    let start = std::time::Instant::now();
+                    let image = fresh
+                        .filmstrip(&source, MediaKind::Image)
+                        .expect("new-session preview");
+                    reopen.push(start.elapsed().as_secs_f64() * 1000.0);
+                    assert_eq!(image.image, expected);
+                }
+            }
+            generation.sort_by(f64::total_cmp);
+            reopen.sort_by(f64::total_cmp);
+            println!(
+                "FAST_PREVIEW_PERSIST {extension} 6000x4000 card_request={card_request} generation_ms={:.3} reopen_ms={:?}",
+                generation[1],
+                reopen.get(1)
+            );
+        }
+        fs::remove_dir_all(root).expect("remove owned source and caches");
+    }
+    Ok(())
 }
 
 #[test]

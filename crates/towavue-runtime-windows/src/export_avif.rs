@@ -68,6 +68,12 @@ pub(super) struct Animation {
     samples: Vec<Samples>,
 }
 
+enum SnapshotOutput {
+    Png(png_metadata::PngMetadata),
+    Webp { plays: u16, delays: Vec<u32> },
+    Gif(gif_animation::Animation),
+}
+
 impl Animation {
     pub(super) fn read(path: &Path, cancelled: &AtomicBool) -> Result<Option<Self>, ExportError> {
         check_cancelled(cancelled)?;
@@ -239,9 +245,9 @@ impl Animation {
             .expect("color track")
     }
 
-    fn png_controls(&self) -> Result<png_metadata::PngMetadata, ExportError> {
+    fn frame_durations(&self) -> impl Iterator<Item = (i128, i128)> + '_ {
         let samples = &self.samples[0];
-        let delays = samples
+        samples
             .times
             .iter()
             .enumerate()
@@ -256,6 +262,33 @@ impl Animation {
                     });
                 let numerator = ticks * i128::from(samples.time_base.numerator());
                 let denominator = i128::from(samples.time_base.denominator());
+                (numerator, denominator)
+            })
+    }
+
+    fn integer_delays(
+        &self,
+        units: u32,
+        limit: u32,
+        format: &str,
+    ) -> Result<Vec<u32>, ExportError> {
+        self.frame_durations()
+            .map(|(numerator, denominator)| {
+                let scaled = numerator * i128::from(units);
+                if scaled % denominator != 0 || scaled / denominator > i128::from(limit) {
+                    return Err(invalid(format!(
+                        "frame delay cannot be represented exactly in {format}; use AVIF output"
+                    )));
+                }
+                Ok((scaled / denominator) as u32)
+            })
+            .collect()
+    }
+
+    fn png_controls(&self) -> Result<png_metadata::PngMetadata, ExportError> {
+        let delays = self
+            .frame_durations()
+            .map(|(numerator, denominator)| {
                 let (mut divisor, mut remainder) = (numerator, denominator);
                 while remainder != 0 {
                     (divisor, remainder) = (remainder, divisor % remainder);
@@ -287,9 +320,29 @@ impl Animation {
         progress: &(impl Fn(Duration) + Sync),
     ) -> Result<(), ExportError> {
         use std::io::Write;
-        let png = png_metadata::png_path(&request.target)
-            .then(|| self.png_controls())
-            .transpose()?;
+        let plays = self.color().loops.unwrap_or(1);
+        let snapshots = if png_metadata::png_path(&request.target) {
+            Some(SnapshotOutput::Png(self.png_controls()?))
+        } else if webp_metadata::webp_path(&request.target) {
+            Some(SnapshotOutput::Webp {
+                plays: u16::try_from(plays).map_err(|_| {
+                    invalid("WebP is limited to 65535 finite total plays; use AVIF output")
+                })?,
+                delays: self.integer_delays(1000, 0xffffff, "WebP")?,
+            })
+        } else if gif_animation::gif_path(&request.target) {
+            Some(SnapshotOutput::Gif(
+                gif_animation::Animation::from_centiseconds(
+                    plays,
+                    self.integer_delays(100, u32::from(u16::MAX), "GIF")?
+                        .into_iter()
+                        .map(|delay| delay as u16)
+                        .collect(),
+                )?,
+            ))
+        } else {
+            None
+        };
         let single_duration = (self.samples[0].times.len() == 1)
             .then(|| u32::try_from(self.samples[0].times[0].1).map_err(invalid))
             .transpose()?;
@@ -358,7 +411,7 @@ impl Animation {
             filters.push(',');
             filters.push_str(&filter);
         }
-        if let Some(png) = png {
+        if let Some(snapshots) = snapshots {
             filters.push_str(",format=rgba[outv]");
             encode(
                 request,
@@ -384,7 +437,13 @@ impl Animation {
             if size != output_size {
                 return Err(invalid("saved frame dimensions differ"));
             }
-            return png.apply(staging, cancelled);
+            return match snapshots {
+                SnapshotOutput::Png(png) => png.apply(staging, cancelled),
+                SnapshotOutput::Webp { plays, delays } => {
+                    webp_metadata::apply_png_frames(staging, delays, plays, cancelled, progress)
+                }
+                SnapshotOutput::Gif(gif) => gif.apply(staging, cancelled),
+            };
         }
         if alpha_output {
             filters.push_str(",split[color][alpha];[color]format=gbrp[outv];[alpha]alphaextract,format=gray,setparams=colorspace=bt709[outa]");
@@ -454,7 +513,7 @@ fn encode(
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
 ) -> Result<(), ExportError> {
-    let png_output = timing.is_some() && png_metadata::png_path(&request.target);
+    let snapshot_output = timing.is_some() && !avif_path(&request.target);
     let graph = staging.directory.join("timeline-filter.txt");
     fs::write(&graph, filters).map_err(ExportError::Output)?;
     let mut args: Vec<String> = [
@@ -502,7 +561,7 @@ fn encode(
         // cannot signal the identity RGB matrix used by the color track.
         args.extend(["-colorspace:v:1", "bt709"].map(String::from));
     }
-    if png_output {
+    if snapshot_output {
         args.extend(
             [
                 "-map_metadata",
@@ -546,7 +605,7 @@ fn encode(
                 timing.time_base.denominator()
             ),
         ]);
-        if png_output {
+        if snapshot_output {
             args.extend(["-f", "image2pipe"].map(String::from));
         } else if timing.single_duration.is_some() {
             // FFmpeg's AVIF muxer omits moov for one sample. Its MP4 muxer keeps
@@ -580,7 +639,7 @@ fn encode(
     }
     if let Some(timing) = timing
         && timing.single_duration.is_some()
-        && !png_output
+        && !snapshot_output
     {
         single::finish(&staging.output, timing, alpha_output, cancelled)?;
     }

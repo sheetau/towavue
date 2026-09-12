@@ -629,6 +629,181 @@ fn avif_animation_scan_reads_finite_infinite_and_alpha_track_controls() {
 }
 
 #[test]
+fn avif_to_webp_and_gif_preserve_frames_edits_and_destination_controls() {
+    let root = audio_tests::root("avif-webp-gif");
+    let source = root.join("source.avif");
+    for extension in ["webp", "gif"] {
+        let target = root.join("converted").with_extension(extension);
+        let limit = if extension == "webp" { 65535 } else { 65536 };
+        let longest = if extension == "webp" {
+            0xffffff
+        } else {
+            655350
+        };
+        for (plays, alpha, single, duration) in [
+            (0, false, false, 500),
+            (3, true, false, 500),
+            (1, true, true, 1230),
+            (limit, true, true, 10),
+            (1, true, true, longest),
+        ] {
+            if single {
+                single_fixture(&source, plays, alpha, duration);
+            } else {
+                fixture(&source, &plays.to_string(), alpha);
+            }
+            assert_eq!(
+                Animation::read(&source, &AtomicBool::new(false))
+                    .expect("source controls")
+                    .expect("sequence")
+                    .color()
+                    .loops,
+                Some(plays)
+            );
+            let original = crate::decode_image(&source).expect("source");
+            let mut request = request(&source, &target);
+            request.operations = vec![
+                EditOperation::RotateImage(
+                    towavue_core::ImageRotation::new(137, (32, 24)).expect("rotation"),
+                ),
+                EditOperation::Resize(
+                    towavue_core::ImageResize::new(13, 11, towavue_core::ResampleFilter::Lanczos)
+                        .expect("resize"),
+                ),
+            ];
+            let expected = crate::render_image_edits(
+                &original,
+                &request.operations,
+                &crate::Cancellation::default(),
+            )
+            .expect("edited display");
+            export_media(&request).expect("AVIF conversion");
+            let actual = crate::decode_image(&target).expect("converted");
+            assert_eq!(actual.frames.len(), expected.frames.len());
+            for (actual, expected) in actual.frames.iter().zip(&expected.frames) {
+                assert_eq!(
+                    (actual.width, actual.height, actual.delay),
+                    (expected.width, expected.height, expected.delay)
+                );
+                for (actual, expected) in actual
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(expected.rgba.as_chunks::<4>().0)
+                {
+                    if extension == "webp" {
+                        assert_eq!(actual, expected);
+                    } else if expected[3] < 128 {
+                        assert_eq!(actual[3], 0);
+                    } else {
+                        assert_eq!(&actual[..3], &expected[..3]);
+                        assert_eq!(actual[3], 255);
+                    }
+                }
+            }
+            let resaved = root.join("resaved").with_extension(extension);
+            export_media(&self::request(&target, &resaved)).expect("resave");
+            assert_eq!(
+                crate::decode_image(&resaved).expect("resaved").frames,
+                actual.frames
+            );
+            if extension == "webp" {
+                let mut decoder = image_webp::WebPDecoder::new(BufReader::new(
+                    fs::File::open(&target).expect("WebP"),
+                ))
+                .expect("controls");
+                assert_eq!(
+                    decoder.loop_count(),
+                    if plays == 0 {
+                        image_webp::LoopCount::Forever
+                    } else {
+                        image_webp::LoopCount::Times(
+                            std::num::NonZeroU16::new(plays as u16).expect("finite"),
+                        )
+                    }
+                );
+                let mut pixels = vec![0; decoder.output_buffer_size().expect("size")];
+                for _ in &original.frames {
+                    assert_eq!(decoder.read_frame(&mut pixels).expect("frame"), duration);
+                }
+            } else {
+                let mut decoder = gif::DecodeOptions::new()
+                    .read_info(fs::File::open(&target).expect("GIF"))
+                    .expect("controls");
+                for _ in &original.frames {
+                    assert_eq!(
+                        u32::from(
+                            decoder
+                                .read_next_frame()
+                                .expect("decode")
+                                .expect("frame")
+                                .delay
+                        ) * 10,
+                        duration
+                    );
+                }
+                assert!(decoder.read_next_frame().expect("end").is_none());
+                assert_eq!(
+                    decoder.repeat(),
+                    if plays == 0 {
+                        gif::Repeat::Infinite
+                    } else {
+                        gif::Repeat::Finite((plays - 1) as u16)
+                    }
+                );
+            }
+        }
+        let before = fs::read(&target).expect("target");
+        let mut rejected = vec![(limit + 1, 10), (1, longest + 10)];
+        if extension == "gif" {
+            rejected.push((1, 1));
+        }
+        for (plays, duration) in rejected {
+            single_fixture(&source, plays, true, duration);
+            assert!(
+                export_cancellable(
+                    &request(&source, &target),
+                    &AtomicBool::new(false),
+                    &|_| panic!("reject before encoding")
+                )
+                .is_err()
+            );
+            assert_eq!(fs::read(&target).expect("protected"), before);
+        }
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn avif_conversion_delays_use_exact_pts_intervals_without_rounding() {
+    let root = audio_tests::root("avif-conversion-delays");
+    let source = root.join("source.avif");
+    fixture(&source, "1", false);
+    let mut animation = Animation::read(&source, &AtomicBool::new(false))
+        .expect("controls")
+        .expect("sequence");
+    animation.samples[0].time_base = ffmpeg::Rational(1, 30000);
+    animation.samples[0].times = vec![(0, 1001), (1001, 1001), (2002, 1001)];
+    assert!(animation.integer_delays(1000, 0xffffff, "WebP").is_err());
+    assert!(animation.integer_delays(100, 65535, "GIF").is_err());
+    animation.samples[0].times = vec![(0, 1), (300, 1), (1200, 1500)];
+    assert_eq!(
+        animation
+            .integer_delays(1000, 0xffffff, "WebP")
+            .expect("milliseconds"),
+        [10, 30, 50]
+    );
+    assert_eq!(
+        animation
+            .integer_delays(100, 65535, "GIF")
+            .expect("centiseconds"),
+        [1, 3, 5]
+    );
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn avif_to_apng_preserves_edited_alpha_frames_and_exact_controls() {
     let root = audio_tests::root("avif-to-apng");
     let source = root.join("source.avif");
@@ -1037,6 +1212,37 @@ fn avif_export_retains_variable_timing_and_repeat_on_resave() {
             let control = decoder.info().frame_control.expect("control");
             assert_eq!((control.delay_num, control.delay_den), fraction);
         }
+        let webp = root.join("converted.webp");
+        export_media(&request(&source, &webp)).expect("VFR WebP conversion");
+        assert_eq!(
+            crate::decode_image(&webp).expect("converted").frames,
+            crate::decode_image(&source).expect("display").frames
+        );
+        let mut decoder =
+            image_webp::WebPDecoder::new(BufReader::new(fs::File::open(&webp).expect("WebP")))
+                .expect("controls");
+        assert_eq!(
+            decoder.loop_count(),
+            match loops {
+                Some(0) => image_webp::LoopCount::Forever,
+                _ => image_webp::LoopCount::Times(
+                    std::num::NonZeroU16::new(loops.unwrap_or(1) as u16).expect("finite"),
+                ),
+            }
+        );
+        let mut pixels = vec![0; decoder.output_buffer_size().expect("size")];
+        for delay in [125, 750, 500] {
+            assert_eq!(decoder.read_frame(&mut pixels).expect("frame"), delay);
+        }
+        let gif = root.join("converted.gif");
+        fs::write(&gif, b"existing target").expect("target");
+        assert!(
+            export_cancellable(&request(&source, &gif), &cancel, &|_| panic!(
+                "fractional centiseconds must fail before encoding"
+            ),)
+            .is_err()
+        );
+        assert_eq!(fs::read(&gif).expect("protected"), b"existing target");
     }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
@@ -1214,6 +1420,12 @@ fn avif_to_apng_protects_targets_on_cancel_source_change_and_corruption() {
     animation_export_failures("apng");
 }
 
+#[test]
+fn avif_to_webp_and_gif_protect_targets_on_cancel_source_change_and_corruption() {
+    animation_export_failures("webp");
+    animation_export_failures("gif");
+}
+
 fn animation_export_failures(extension: &str) {
     let root = audio_tests::root("avif-protection");
     let source = root.join("source.avif");
@@ -1296,7 +1508,7 @@ fn animation_export_failures(extension: &str) {
             b"occupied"
         );
     }
-    let other = target.with_extension("webp");
+    let other = target.with_extension("jpg");
     fs::write(&other, b"other target").expect("fixture operation");
     assert!(export_media(&request(&source, &other)).is_err());
     assert_eq!(

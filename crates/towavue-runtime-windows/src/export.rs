@@ -378,8 +378,10 @@ fn export_audio_cancellable(
     if avif_animation.is_some()
         && !avif::avif_path(&request.target)
         && !png_metadata::png_path(&request.target)
+        && !webp_metadata::webp_path(&request.target)
+        && !gif_animation::gif_path(&request.target)
     {
-        return Err(ExportError::Failed("Animated AVIF export requires AVIF or APNG (.png/.apng) output; conversion must not discard frames".into()));
+        return Err(ExportError::Failed("Animated AVIF export requires AVIF, APNG (.png/.apng), WebP, or GIF output; conversion must not discard frames".into()));
     }
     let gif_animation = gif_source
         .then(|| gif_animation::Animation::read(&request.source, cancelled))

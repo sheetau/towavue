@@ -221,10 +221,13 @@ impl Drop for FolderOrderProvider {
 fn run_requests(
     shared: Arc<(Mutex<Mailbox>, ShellWake)>,
     notify: impl Fn(),
-    mut resolve: impl FnMut(&Path, u64) -> FolderSnapshot,
+    mut resolve: impl FnMut(&Path, u64) -> Option<FolderSnapshot>,
 ) {
     let (mutex, ready) = &*shared;
     loop {
+        if mutex.lock().expect("Shell mailbox").closed {
+            return;
+        }
         // SAFETY: pump only this worker's queue, outside the mailbox lock. Shell/COM may
         // retain apartment-affine helper windows after a folder snapshot has completed.
         unsafe { pump_messages() };
@@ -239,7 +242,9 @@ fn run_requests(
             ready.wait();
             continue;
         };
-        let snapshot = resolve(&request.folder, request.generation);
+        let Some(snapshot) = resolve(&request.folder, request.generation) else {
+            continue;
+        };
         let publish = {
             let mut mailbox = mutex.lock().expect("Shell mailbox");
             if mailbox.closed {
@@ -262,30 +267,70 @@ fn run_requests(
 }
 
 fn shell_worker(shared: Arc<(Mutex<Mailbox>, ShellWake)>, notify: impl Fn()) {
-    // SAFETY: this worker owns every COM interface it creates and never moves one across threads.
-    // It initializes and uninitializes the apartment on this same thread.
-    let initialized = unsafe { OleInitialize(None).is_ok() };
+    // Opening Welcome or dropping a newly created provider needs no COM work.
+    // Keep the apartment for actual requests, and release it after all local interfaces.
+    let mut apartment = None;
     let mut last_live_window = None;
+    let current_shared = Arc::clone(&shared);
     run_requests(shared, notify, |folder, generation| {
-        if initialized {
-            shell_snapshot(folder, generation, &mut last_live_window).unwrap_or_else(|| {
-                eprintln!(
-                    "towavue: Shell view unavailable for {}; using natural-name order",
-                    folder.display()
-                );
-                fallback_snapshot(folder, generation)
-            })
+        let current = || request_is_current(&current_shared, generation);
+        if !current() {
+            return None;
+        }
+        if apartment.get_or_insert_with(ShellApartment::new).0 {
+            if let Some(snapshot) =
+                shell_snapshot(folder, generation, &mut last_live_window, &current)
+            {
+                return Some(snapshot);
+            }
+            if !current() {
+                return None;
+            }
+            eprintln!(
+                "towavue: Shell view unavailable for {}; using natural-name order",
+                folder.display()
+            );
         } else {
             eprintln!(
                 "towavue: Shell STA initialization failed for {}; using natural-name order",
                 folder.display()
             );
-            fallback_snapshot(folder, generation)
         }
+        fallback_snapshot(folder, generation, &current)
     });
-    if initialized {
-        // SAFETY: balances this thread's successful OleInitialize call after COM objects drop.
-        unsafe { OleUninitialize() };
+}
+
+fn request_is_current(shared: &(Mutex<Mailbox>, ShellWake), generation: u64) -> bool {
+    let mailbox = shared.0.lock().expect("Shell mailbox");
+    !mailbox.closed && mailbox.generation == generation
+}
+
+#[cfg(test)]
+thread_local! {
+    static SHELL_INITIALIZATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SHELL_UNINITIALIZATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+struct ShellApartment(bool);
+
+impl ShellApartment {
+    fn new() -> Self {
+        #[cfg(test)]
+        SHELL_INITIALIZATIONS.set(SHELL_INITIALIZATIONS.get() + 1);
+        // SAFETY: this local guard never leaves its Shell worker. All COM interfaces
+        // are local to request calls and drop before this guard, including on unwind.
+        Self(unsafe { OleInitialize(None).is_ok() })
+    }
+}
+
+impl Drop for ShellApartment {
+    fn drop(&mut self) {
+        if self.0 {
+            // SAFETY: balances this guard's successful initialization on its owning thread.
+            unsafe { OleUninitialize() };
+            #[cfg(test)]
+            SHELL_UNINITIALIZATIONS.set(SHELL_UNINITIALIZATIONS.get() + 1);
+        }
     }
 }
 
@@ -293,13 +338,22 @@ fn shell_snapshot(
     folder: &Path,
     generation: u64,
     last_live_window: &mut Option<HWND>,
+    current: &impl Fn() -> bool,
 ) -> Option<FolderSnapshot> {
+    if !current() {
+        return None;
+    }
     let folder = canonical_shell_path(folder).ok()?;
+    if !current() {
+        return None;
+    }
     let folder_pidl = parse_path(&folder)?;
 
     // SAFETY: all COM and PIDL values remain on the initialized STA worker.
     unsafe {
-        if let Some((view, window)) = matching_live_view(folder_pidl.as_ptr(), *last_live_window) {
+        if let Some((view, window)) =
+            matching_live_view(folder_pidl.as_ptr(), *last_live_window, current)
+        {
             *last_live_window = Some(window);
             if let Some(snapshot) = capture_view(
                 &view,
@@ -307,12 +361,19 @@ fn shell_snapshot(
                 &folder_pidl,
                 FolderSnapshotSource::LiveExplorerView,
                 generation,
+                current,
             ) {
                 return Some(snapshot);
             }
         }
 
+        if !current() {
+            return None;
+        }
         let browser = HiddenExplorerBrowser::new()?;
+        if !current() {
+            return None;
+        }
         if let Err(error) = browser
             .browser
             .BrowseToIDList(folder_pidl.as_ptr(), SBSP_ABSOLUTE)
@@ -322,6 +383,9 @@ fn shell_snapshot(
         }
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
+            if !current() {
+                return None;
+            }
             pump_messages();
             if let Ok(view) = browser.browser.GetCurrentView::<IFolderView2>()
                 && view_matches(&view, folder_pidl.as_ptr())
@@ -331,6 +395,7 @@ fn shell_snapshot(
                     &folder_pidl,
                     FolderSnapshotSource::PersistedShellView,
                     generation,
+                    current,
                 )
             {
                 return Some(snapshot);
@@ -346,13 +411,20 @@ fn shell_snapshot(
 unsafe fn matching_live_view(
     folder_pidl: *const ITEMIDLIST,
     last_live_window: Option<HWND>,
+    current: &impl Fn() -> bool,
 ) -> Option<(IFolderView2, HWND)> {
     unsafe {
+        if !current() {
+            return None;
+        }
         let windows: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_ALL).ok()?;
         let foreground = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
         let mut recent = None;
         let mut first = None;
         for index in 0..windows.Count().ok()? {
+            if !current() {
+                return None;
+            }
             let Ok(dispatch) = windows.Item(&VARIANT::from(index)) else {
                 continue;
             };
@@ -422,11 +494,18 @@ unsafe fn capture_view(
     folder_pidl: &OwnedPidl,
     source: FolderSnapshotSource,
     generation: u64,
+    current: &impl Fn() -> bool,
 ) -> Option<FolderSnapshot> {
     unsafe {
+        if !current() {
+            return None;
+        }
         let array: IShellItemArray = view.Items(SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER).ok()?;
         let mut items = Vec::new();
         for index in 0..array.GetCount().ok()? {
+            if !current() {
+                return None;
+            }
             let item = array.GetItemAt(index).ok()?;
             let Some(path) = shell_item_path(&item) else {
                 continue;
@@ -442,6 +521,9 @@ unsafe fn capture_view(
             });
         }
 
+        if !current() {
+            return None;
+        }
         let count = view.GetSortColumnCount().ok()?.max(0) as usize;
         let mut native_columns = vec![SORTCOLUMN::default(); count];
         view.GetSortColumns(&mut native_columns).ok()?;
@@ -481,30 +563,51 @@ fn property_key(key: PROPERTYKEY) -> PropertyKey {
     }
 }
 
-fn fallback_snapshot(folder: &Path, generation: u64) -> FolderSnapshot {
+fn fallback_snapshot(
+    folder: &Path,
+    generation: u64,
+    current: &impl Fn() -> bool,
+) -> Option<FolderSnapshot> {
+    if !current() {
+        return None;
+    }
     let folder = canonical_shell_path(folder).unwrap_or_else(|_| folder.to_owned());
-    let mut items = std::fs::read_dir(&folder)
+    if !current() {
+        return None;
+    }
+    let mut items = Vec::new();
+    for entry in std::fs::read_dir(&folder)
         .into_iter()
         .flatten()
         .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            let kind = MediaKind::from_path(&path)?;
-            let identity = parse_path(&path)
-                .map(|pidl| pidl.identity())
-                .unwrap_or_else(|| path_identity(&path));
-            Some(FolderMediaItem {
-                identity,
-                path,
-                kind,
-            })
-        })
-        .collect::<Vec<_>>();
+    {
+        if !current() {
+            return None;
+        }
+        let path = entry.path();
+        let Some(kind) = MediaKind::from_path(&path) else {
+            continue;
+        };
+        let identity = parse_path(&path)
+            .map(|pidl| pidl.identity())
+            .unwrap_or_else(|| path_identity(&path));
+        items.push(FolderMediaItem {
+            identity,
+            path,
+            kind,
+        });
+    }
+    if !current() {
+        return None;
+    }
     items.sort_by(|left, right| natural_path_cmp(&left.path, &right.path));
+    if !current() {
+        return None;
+    }
     let folder_identity = parse_path(&folder)
         .map(|pidl| pidl.identity())
         .unwrap_or_else(|| path_identity(&folder));
-    FolderSnapshot {
+    Some(FolderSnapshot {
         folder_identity,
         folder_path: folder,
         items,
@@ -512,7 +615,7 @@ fn fallback_snapshot(folder: &Path, generation: u64) -> FolderSnapshot {
         source: FolderSnapshotSource::NaturalNameFallback,
         generation,
         captured_at: SystemTime::now(),
-    }
+    })
 }
 
 fn natural_path_cmp(left: &Path, right: &Path) -> Ordering {
@@ -861,75 +964,172 @@ mod tests {
     }
 
     #[test]
-    fn asynchronous_requests_replace_queued_work_and_reject_stale_results() {
+    fn closed_shell_worker_never_initializes_an_apartment() {
+        for queued in [false, true] {
+            let worker = thread::spawn(move || {
+                let shared = Arc::new((
+                    Mutex::new(Mailbox::default()),
+                    ShellWake::new().expect("wake"),
+                ));
+                let provider = FolderOrderProvider {
+                    shared: Arc::clone(&shared),
+                };
+                if queued {
+                    provider.request(Some("discarded".into()));
+                }
+                drop(provider);
+                shell_worker(shared, || panic!("closed worker must not notify"));
+                assert_eq!(
+                    SHELL_INITIALIZATIONS.get(),
+                    0,
+                    "closing before startup must not start COM work"
+                );
+            });
+            worker.join().expect("closed worker");
+        }
+    }
+
+    #[test]
+    fn shell_apartment_is_reused_and_balanced_on_unwind() {
+        thread::spawn(|| {
+            let result = std::panic::catch_unwind(|| {
+                let mut apartment = None;
+                for _ in 0..2 {
+                    assert!(
+                        apartment.get_or_insert_with(ShellApartment::new).0,
+                        "fresh STA initialization"
+                    );
+                }
+                assert_eq!(SHELL_INITIALIZATIONS.get(), 1);
+                assert_eq!(SHELL_UNINITIALIZATIONS.get(), 0);
+                panic!("test worker failure after initialization");
+            });
+            assert!(result.is_err());
+            assert_eq!(SHELL_UNINITIALIZATIONS.get(), 1);
+        })
+        .join()
+        .expect("apartment owner");
+    }
+
+    #[test]
+    fn cancelled_shell_requests_skip_later_phases_and_fallback_items() {
         let shared = Arc::new((
             Mutex::new(Mailbox::default()),
-            ShellWake::new().expect("wake event"),
+            ShellWake::new().expect("wake"),
         ));
         let provider = FolderOrderProvider {
             shared: Arc::clone(&shared),
         };
-        let (started_tx, started_rx) = mpsc::channel();
-        let (resume_tx, resume_rx) = mpsc::channel();
-        let (ready_tx, ready_rx) = mpsc::channel();
-        let worker = thread::spawn(move || {
-            run_requests(
-                shared,
-                || {
-                    ready_tx.send(()).expect("completion notification");
-                },
-                |path, generation| {
-                    started_tx.send(path.to_owned()).expect("started request");
-                    if path == Path::new("first") {
-                        resume_rx
-                            .recv_timeout(Duration::from_secs(5))
-                            .expect("release first request");
-                    }
-                    FolderSnapshot {
-                        folder_identity: ShellIdentity::new(Vec::new()),
-                        folder_path: path.to_owned(),
-                        items: Vec::new(),
-                        sort_columns: Vec::new(),
-                        source: FolderSnapshotSource::PersistedShellView,
-                        generation,
-                        captured_at: SystemTime::now(),
-                    }
-                },
-            )
-        });
-        provider.request(Some("first".into()));
-        assert_eq!(
-            started_rx
-                .recv_timeout(Duration::from_secs(5))
-                .expect("first starts"),
-            PathBuf::from("first")
-        );
-        provider.request(Some("middle".into()));
-        let generation = provider.request(Some("last".into()));
-        assert!(provider.take_completed().is_none());
-        resume_tx.send(()).expect("resume worker");
-        ready_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("latest result");
-        let result = provider.take_completed().expect("completed snapshot");
-        assert_eq!(result.generation, generation);
-        assert_eq!(result.folder_path, PathBuf::from("last"));
-        assert_eq!(
-            started_rx
-                .recv_timeout(Duration::from_secs(5))
-                .expect("last starts"),
-            PathBuf::from("last")
-        );
-        assert!(started_rx.try_recv().is_err());
-        assert!(ready_rx.try_recv().is_err());
-        provider.request(Some("ready".into()));
-        ready_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("completed slot");
+        let first = provider.request(Some("first".into()));
+        assert!(request_is_current(&shared, first));
+        let next = provider.request(Some("next".into()));
+        assert!(!request_is_current(&shared, first));
+        assert!(request_is_current(&shared, next));
         provider.request(None);
-        assert!(provider.take_completed().is_none());
+        assert!(!request_is_current(&shared, next));
+        let generation = provider.request(Some("closed".into()));
         drop(provider);
-        worker.join().expect("closed worker exits");
+        let current = || request_is_current(&shared, generation);
+        assert!(!current());
+        assert!(
+            shell_snapshot(Path::new("never accessed"), generation, &mut None, &current).is_none()
+        );
+        assert!(fallback_snapshot(Path::new("never accessed"), generation, &current).is_none());
+
+        let root = test_directory("cancelled-fallback");
+        fs::create_dir(&root).expect("owned directory");
+        for name in ["first.png", "second.png"] {
+            fs::write(root.join(name), []).expect("fixture");
+        }
+        let phases = std::cell::Cell::new(0);
+        let snapshot = fallback_snapshot(&root, 1, &|| {
+            phases.set(phases.get() + 1);
+            phases.get() < 3
+        });
+        assert!(snapshot.is_none());
+        assert_eq!(
+            phases.get(),
+            3,
+            "stop before resolving the first enumerated item"
+        );
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
+    fn asynchronous_requests_replace_queued_work_and_reject_stale_results() {
+        for abandon_first in [false, true] {
+            let shared = Arc::new((
+                Mutex::new(Mailbox::default()),
+                ShellWake::new().expect("wake event"),
+            ));
+            let provider = FolderOrderProvider {
+                shared: Arc::clone(&shared),
+            };
+            let (started_tx, started_rx) = mpsc::channel();
+            let (resume_tx, resume_rx) = mpsc::channel();
+            let (ready_tx, ready_rx) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                run_requests(
+                    shared,
+                    || {
+                        ready_tx.send(()).expect("completion notification");
+                    },
+                    |path, generation| {
+                        started_tx.send(path.to_owned()).expect("started request");
+                        if path == Path::new("first") {
+                            resume_rx
+                                .recv_timeout(Duration::from_secs(5))
+                                .expect("release first request");
+                            if abandon_first {
+                                return None;
+                            }
+                        }
+                        Some(FolderSnapshot {
+                            folder_identity: ShellIdentity::new(Vec::new()),
+                            folder_path: path.to_owned(),
+                            items: Vec::new(),
+                            sort_columns: Vec::new(),
+                            source: FolderSnapshotSource::PersistedShellView,
+                            generation,
+                            captured_at: SystemTime::now(),
+                        })
+                    },
+                )
+            });
+            provider.request(Some("first".into()));
+            assert_eq!(
+                started_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("first starts"),
+                PathBuf::from("first")
+            );
+            provider.request(Some("middle".into()));
+            let generation = provider.request(Some("last".into()));
+            assert!(provider.take_completed().is_none());
+            resume_tx.send(()).expect("resume worker");
+            ready_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("latest result");
+            let result = provider.take_completed().expect("completed snapshot");
+            assert_eq!(result.generation, generation);
+            assert_eq!(result.folder_path, PathBuf::from("last"));
+            assert_eq!(
+                started_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("last starts"),
+                PathBuf::from("last")
+            );
+            assert!(started_rx.try_recv().is_err());
+            assert!(ready_rx.try_recv().is_err());
+            provider.request(Some("ready".into()));
+            ready_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("completed slot");
+            provider.request(None);
+            assert!(provider.take_completed().is_none());
+            drop(provider);
+            worker.join().expect("closed worker exits");
+        }
     }
 
     #[test]
@@ -955,7 +1155,7 @@ mod tests {
                     resume_rx
                         .recv_timeout(Duration::from_secs(5))
                         .expect("release after close");
-                    FolderSnapshot {
+                    Some(FolderSnapshot {
                         folder_identity: ShellIdentity::new(Vec::new()),
                         folder_path: path.to_owned(),
                         items: Vec::new(),
@@ -963,7 +1163,7 @@ mod tests {
                         source: FolderSnapshotSource::PersistedShellView,
                         generation,
                         captured_at: SystemTime::now(),
-                    }
+                    })
                 },
             )
         });
@@ -1185,7 +1385,7 @@ mod tests {
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
                 pump_messages();
-                if let Some(found) = matching_live_view(folder_pidl, None) {
+                if let Some(found) = matching_live_view(folder_pidl, None, &|| true) {
                     return found;
                 }
                 assert!(
@@ -1200,7 +1400,7 @@ mod tests {
     unsafe fn wait_for_live_close(folder_pidl: *const ITEMIDLIST) {
         unsafe {
             let deadline = Instant::now() + Duration::from_secs(5);
-            while matching_live_view(folder_pidl, None).is_some() {
+            while matching_live_view(folder_pidl, None, &|| true).is_some() {
                 pump_messages();
                 assert!(
                     Instant::now() < deadline,
@@ -1251,6 +1451,7 @@ mod tests {
                     folder_pidl,
                     FolderSnapshotSource::PersistedShellView,
                     1,
+                    &|| true,
                 ) && snapshot.items.len() == 4
                     && snapshot.sort_columns == expected
                 {

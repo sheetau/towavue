@@ -84,6 +84,8 @@ Keep the single-D3D11-device design: hardware decode, video processing, image/UI
 
 Use live Explorer view order first, preferring a foreground matching window; otherwise resolve persisted Shell view/default template through IExplorerBrowser with EBO_NOPERSISTVIEWSTATE. Read public IFolderView2 sort metadata and enumeration; never parse registry Bags or substitute name sorting silently.
 
+Initialize the Shell worker's STA only for a current folder request; retain it across requests and balance it on the owning thread, including unwind. Close/invalidation checks stop stale work between native phases, while waiting for a hidden view, and between enumerated items. Cancellation does not trigger filename-order fallback. The request loop remains message-aware when idle; provider drop signals closure without joining a possibly blocked Shell extension on the UI thread. These checks do not interrupt an in-flight native call or prove process-wide shutdown safety.
+
 A shared immutable FolderSnapshot feeds filmstrip, playlist, and navigation. Filter supported media after Shell enumeration. Only on Shell failure use Windows natural-name fallback and label it. Empty-folder Open must not replace current media/history/navigation.
 
 Shell work stays on a dedicated STA with message-aware waiting (MsgWaitForMultipleObjectsEx), not a condition variable that starves COM windows. Use generation/path checks, latest-request mailboxes, and debounced directory notifications. Refresh order on media load and filmstrip opening; reconcile by item identity/path, not old index.

@@ -697,7 +697,6 @@ fn unscaled_edited_audio_seek_matches_the_continuous_sample_axis() {
 }
 
 #[test]
-#[ignore = "known failure: initial seek into coarse Matroska PTS loses the original sample phase"]
 fn coarse_timestamp_edited_audio_seek_matches_the_continuous_sample_axis() {
     check_unscaled_audio_seek_sample_axis(true);
 }

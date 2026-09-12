@@ -23,6 +23,8 @@ mod frame_step;
 pub use frame_step::adjacent_video_frame;
 mod preview_frames;
 pub(crate) use preview_frames::preview_video_frames;
+#[cfg(test)]
+mod audio_seek_tests;
 
 const OUTPUT_AUDIO_CHANNELS: usize = 2;
 const BYTES_PER_F32: usize = size_of::<f32>();
@@ -189,6 +191,36 @@ struct StreamConfig {
     display_matrix: Option<Vec<u8>>,
 }
 
+impl StreamConfig {
+    fn pcm_preroll(&self, target: MediaTime) -> Option<(MediaTime, usize)> {
+        // Parameters owns (or retains its stream owner for) this valid allocation.
+        // This immutable borrow stays on the demux owner thread before workers
+        // start; it neither mutates native state nor lets a pointer escape.
+        let parameters = unsafe { &*self.parameters.as_ptr() };
+        if target <= MediaTime::ZERO
+            || parameters.sample_rate <= 0
+            || parameters.ch_layout.nb_channels <= 0
+            || i64::from(self.time_base.numerator()) * i64::from(parameters.sample_rate)
+                <= i64::from(self.time_base.denominator())
+        {
+            return Option::None;
+        }
+        use codec::Id::*;
+        let sample_bytes = match self.parameters.id() {
+            PCM_U8 | PCM_S8 => 1,
+            PCM_S16LE | PCM_S16BE | PCM_U16LE | PCM_U16BE => 2,
+            PCM_S24LE | PCM_S24BE | PCM_U24LE | PCM_U24BE => 3,
+            PCM_S32LE | PCM_S32BE | PCM_U32LE | PCM_U32BE | PCM_F32LE | PCM_F32BE => 4,
+            PCM_S64LE | PCM_S64BE | PCM_F64LE | PCM_F64BE => 8,
+            _ => return Option::None,
+        };
+        Some((
+            target,
+            sample_bytes * parameters.ch_layout.nb_channels as usize,
+        ))
+    }
+}
+
 enum ParallelVideoConfig {
     Software(StreamConfig),
     Hardware(StreamConfig, GraphicsDevice),
@@ -312,9 +344,41 @@ struct AudioPipeline {
     output_format: AudioFormat,
     next_presentation_time: MediaTime,
     next_sample: i64,
+    pcm_preroll: Option<(MediaTime, usize)>,
 }
 
 impl AudioPipeline {
+    fn skip_pcm_preroll(&mut self, packet: &ffmpeg::Packet) -> Result<bool, DecodeError> {
+        let Some((target, frame_bytes)) = self.pcm_preroll else {
+            return Ok(false);
+        };
+        // Skip-sample or parameter-change side data can alter decoded sample
+        // counts. Let the decoder handle this packet and the remaining prefix.
+        if packet.side_data().next().is_some() {
+            self.pcm_preroll = None;
+            return Ok(false);
+        }
+        if !packet.size().is_multiple_of(frame_bytes) {
+            return Err(ffmpeg::Error::InvalidData.into());
+        }
+        // Scalar PCM has an exact sample count even when container PTS is rounded.
+        // Count the prefix without decoding it; reuse the sequential timestamp/gap
+        // rules instead of assuming equally sized packets or a PTS-aligned phase.
+        let previous = self.next_sample;
+        self.sample_presentation_time(packet.pts(), packet.size() / frame_bytes);
+        let target_sample = target.as_nanoseconds().rescale_with(
+            (1, 1_000_000_000),
+            (1, self.decoder.rate() as i32),
+            Rounding::Up,
+        );
+        if self.next_sample <= target_sample {
+            return Ok(true);
+        }
+        self.next_sample = previous;
+        self.pcm_preroll = None;
+        Ok(false)
+    }
+
     fn sample_presentation_time(&mut self, timestamp: Option<i64>, samples: usize) -> MediaTime {
         let sample_base = Rational(1, self.output_format.sample_rate as i32);
         let sample = if let Some(timestamp) = timestamp {
@@ -645,7 +709,11 @@ impl ParallelInput {
             }
             return Err(DecodeError::NoMediaStream);
         }
-        if self.started && minimum_time <= MediaTime::ZERO {
+        let pcm_preroll = video.is_none()
+            && audio
+                .as_ref()
+                .is_some_and(|audio| audio.pcm_preroll(minimum_time).is_some());
+        if self.started && (minimum_time <= MediaTime::ZERO || pcm_preroll) {
             if input.format().name() == "mpegts" {
                 seek_byte_position(input, 0)?;
             } else {
@@ -654,12 +722,13 @@ impl ParallelInput {
             }
         }
         self.started = true;
-        let seek_target =
-            if stream == Some(DecodeStream::Video) && maximum_time == Some(minimum_time) {
-                minimum_time.saturating_sub(Duration::from_nanos(1))
-            } else {
-                minimum_time
-            };
+        let seek_target = if pcm_preroll {
+            MediaTime::ZERO
+        } else if stream == Some(DecodeStream::Video) && maximum_time == Some(minimum_time) {
+            minimum_time.saturating_sub(Duration::from_nanos(1))
+        } else {
+            minimum_time
+        };
         seek_input(input, seek_target, video.is_some(), cancelled)?;
         check_cancelled(cancelled)?;
         run_parallel_workers(
@@ -690,6 +759,10 @@ fn run_parallel_workers(
         ParallelVideoConfig::Hardware(config, _) => config.index,
     });
     let audio_stream_index = audio.as_ref().map(|config| config.index);
+    let pcm_preroll = audio
+        .as_ref()
+        .filter(|_| video.is_none())
+        .and_then(|config| config.pcm_preroll(minimum_time));
     let mut video_finished = video.is_none();
     let mut audio_finished = audio.is_none();
     let (video_packet_tx, video_packet_rx) = mpsc::sync_channel(PACKET_QUEUE_CAPACITY);
@@ -755,9 +828,12 @@ fn run_parallel_workers(
             thread::Builder::new()
                 .name("towavue-audio-decode".to_owned())
                 .spawn_scoped(scope, move || {
-                    if let Err(error) =
-                        run_parallel_audio_worker(audio, audio_packet_rx, &audio_output_tx)
-                    {
+                    if let Err(error) = run_parallel_audio_worker(
+                        audio,
+                        audio_packet_rx,
+                        &audio_output_tx,
+                        pcm_preroll,
+                    ) {
                         let _ = audio_output_tx.send(ParallelDecodeOutput::Failed(error));
                     }
                 })
@@ -1026,14 +1102,19 @@ fn run_parallel_audio_worker(
     config: StreamConfig,
     packets: mpsc::Receiver<ffmpeg::Packet>,
     output: &SyncSender<ParallelDecodeOutput>,
+    pcm_preroll: Option<(MediaTime, usize)>,
 ) -> Result<(), DecodeError> {
     let mut pipeline = create_audio_pipeline_from(config)?;
+    pipeline.pcm_preroll = pcm_preroll;
     let mut summary = DecodeSummary::default();
     let mut emit_audio = |decoded| match decoded {
         DecodeOutput::Audio(chunk) => output.send(ParallelDecodeOutput::Audio(chunk)).is_ok(),
         DecodeOutput::Video(_) => unreachable!("audio worker emitted video"),
     };
     for packet in packets {
+        if pipeline.skip_pcm_preroll(&packet)? {
+            continue;
+        }
         pipeline.decoder.send_packet(&packet)?;
         pipeline.receive(&mut emit_audio, &mut summary)?;
     }
@@ -1516,6 +1597,7 @@ fn create_audio_pipeline_from(config: StreamConfig) -> Result<AudioPipeline, Dec
         output_format,
         next_presentation_time: MediaTime::ZERO,
         next_sample: ffmpeg::ffi::AV_NOPTS_VALUE,
+        pcm_preroll: None,
     })
 }
 

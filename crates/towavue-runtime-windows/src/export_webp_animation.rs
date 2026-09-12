@@ -71,44 +71,67 @@ impl Animation {
                 .output_buffer_size()
                 .ok_or_else(|| invalid("invalid frame size"))?
         ];
-        self.write(
-            &staging.output,
-            |delay| {
-                if decoder.read_frame(&mut pixels).map_err(failed)? != delay {
-                    return Err(invalid("decoded animation timing differs"));
-                }
-                let rgba = if decoder.has_alpha() {
-                    std::mem::take(&mut pixels)
-                } else {
-                    pixels
-                        .as_chunks::<3>()
-                        .0
-                        .iter()
-                        .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
-                        .collect()
-                };
-                let source = crate::DecodedImageFrame {
-                    width,
-                    height,
-                    rgba,
-                    delay: Duration::from_millis(u64::from(delay)),
-                };
-                let edited = crate::image_edits::render_frame_cancellable(
-                    &source,
-                    &request.operations,
-                    &|| cancelled.load(Ordering::Relaxed),
-                )
+        let mut next_frame = |delay| {
+            if decoder.read_frame(&mut pixels).map_err(failed)? != delay {
+                return Err(invalid("decoded animation timing differs"));
+            }
+            let rgba = if decoder.has_alpha() {
+                std::mem::take(&mut pixels)
+            } else {
+                pixels
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
+                    .collect()
+            };
+            let source = crate::DecodedImageFrame {
+                width,
+                height,
+                rgba,
+                delay: Duration::from_millis(u64::from(delay)),
+            };
+            let edited =
+                crate::image_edits::render_frame_cancellable(&source, &request.operations, &|| {
+                    cancelled.load(Ordering::Relaxed)
+                })
                 .map_err(failed)?;
-                if decoder.has_alpha() {
-                    pixels = source.rgba;
-                } else {
-                    drop(source);
-                }
-                Ok(edited)
-            },
-            cancelled,
-            progress,
-        )
+            if decoder.has_alpha() {
+                pixels = source.rgba;
+            } else {
+                drop(source);
+            }
+            Ok(edited)
+        };
+        if png_metadata::png_path(&request.target) {
+            use image::ImageEncoder;
+            let mut output = std::io::BufWriter::new(
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&staging.output)
+                    .map_err(ExportError::Output)?,
+            );
+            let mut elapsed = Duration::ZERO;
+            for delay in &self.delays {
+                check_cancelled(cancelled)?;
+                let frame = next_frame(*delay)?;
+                image::codecs::png::PngEncoder::new(&mut output)
+                    .write_image(
+                        &frame.rgba,
+                        frame.width,
+                        frame.height,
+                        image::ExtendedColorType::Rgba8,
+                    )
+                    .map_err(failed)?;
+                elapsed += Duration::from_millis(u64::from((*delay).max(10)));
+                progress(elapsed);
+            }
+            output.flush().map_err(ExportError::Output)?;
+            check_cancelled(cancelled)
+        } else {
+            self.write(&staging.output, next_frame, cancelled, progress)
+        }
     }
 
     pub(super) fn write(

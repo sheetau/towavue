@@ -405,6 +405,11 @@ fn export_audio_cancellable(
     let png_metadata = (image_metadata && jpeg_metadata.is_none() && webp_metadata.is_none())
         .then(|| png_metadata::PngMetadata::prepare(request, metadata, cancelled))
         .transpose()?;
+    let webp_to_png =
+        (webp_source && png_metadata::png_path(&request.target) && metadata.is_empty())
+            .then(|| webp_metadata::PngConversion::prepare(&request.source, cancelled))
+            .transpose()?
+            .flatten();
     let mut streams = ExportStreams::probe(request)?;
     streams.gif_animation = gif_animation.is_some();
     streams.png_animation = png_metadata
@@ -413,7 +418,7 @@ fn export_audio_cancellable(
     if png_source && !image_metadata {
         png_metadata::require_static(&request.source, cancelled)?;
     }
-    if webp_source && !image_metadata {
+    if webp_source && !image_metadata && webp_to_png.is_none() {
         webp_metadata::require_static(&request.source, cancelled)?;
     }
     if !image_metadata {
@@ -455,6 +460,17 @@ fn export_audio_cancellable(
         || streams.timeline.is_some())
     .then_some(request.kind);
     let staging = StagedExport::new(&request.target)?;
+    if let Some(conversion) = webp_to_png {
+        conversion.export(request, &staging, cancelled, progress)?;
+        source_stamp
+            .as_ref()
+            .expect("WebP source stamp")
+            .verify(&request.source)?;
+        staging.publish(&request.target, cancelled, trimmed_kind)?;
+        return Ok(ExportOutcome {
+            used_hardware_encoder: false,
+        });
+    }
     if let Some(animation) = avif_animation {
         animation.export(request, &staging, cancelled, progress)?;
         source_stamp

@@ -513,6 +513,69 @@ impl WebpMetadata {
     }
 }
 
+pub(super) struct PngConversion {
+    animation: animation::Animation,
+    png: png_metadata::PngMetadata,
+}
+
+impl PngConversion {
+    pub(super) fn prepare(
+        path: &Path,
+        cancelled: &AtomicBool,
+    ) -> Result<Option<Self>, ExportError> {
+        let Some(animation) = container(
+            BufReader::new(fs::File::open(path).map_err(ExportError::Output)?),
+            cancelled,
+        )?
+        .animation
+        else {
+            return Ok(None);
+        };
+        let delays = animation
+            .delays
+            .iter()
+            .map(|delay| {
+                // Reduce milliseconds/1000 before checking APNG's unsigned 16-bit fraction.
+                // Rounding or splitting a hold would change timing or frame count.
+                let (mut divisor, mut remainder) = (*delay, 1000);
+                while remainder != 0 {
+                    (divisor, remainder) = (remainder, divisor % remainder);
+                }
+                let numerator = u16::try_from(*delay / divisor).map_err(|_| {
+                    invalid(&format!(
+                        "{delay} ms frame delay cannot be represented exactly in APNG; use WebP output"
+                    ))
+                })?;
+                let denominator = (1000 / divisor) as u16;
+                let [a, b] = numerator.to_be_bytes();
+                let [c, d] = denominator.to_be_bytes();
+                Ok([a, b, c, d])
+            })
+            .collect::<Result<Vec<_>, ExportError>>()?;
+        let plays = u16::from_le_bytes(animation.control[4..].try_into().expect("loop count"));
+        Ok(Some(Self {
+            animation,
+            png: png_metadata::PngMetadata::from_animation(u32::from(plays), delays),
+        }))
+    }
+
+    pub(super) fn export(
+        &self,
+        request: &ExportRequest,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+        progress: &(impl Fn(Duration) + Sync),
+    ) -> Result<(), ExportError> {
+        let result = (|| {
+            self.animation
+                .export(request, staging, cancelled, progress)?;
+            self.png.apply(staging, cancelled)
+        })();
+        check_cancelled(cancelled)?;
+        result
+    }
+}
+
 pub(super) fn require_static(path: &Path, cancelled: &AtomicBool) -> Result<(), ExportError> {
     if container(
         BufReader::new(fs::File::open(path).map_err(ExportError::Output)?),
@@ -522,7 +585,7 @@ pub(super) fn require_static(path: &Path, cancelled: &AtomicBool) -> Result<(), 
     .is_some()
     {
         return Err(invalid(
-            "animated WebP conversion must preserve frames; use WebP output",
+            "animated WebP conversion must preserve frames; use WebP or APNG (.png/.apng) output",
         ));
     }
     Ok(())

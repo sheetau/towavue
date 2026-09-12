@@ -718,7 +718,7 @@ fn gif_to_apng_save_as_and_resave_preserve_animation_and_history() {
     ) else {
         return;
     };
-    gif_conversion_lifecycle(&root, "apng");
+    animation_conversion_lifecycle(&root, "gif", "apng");
 }
 
 #[test]
@@ -728,11 +728,21 @@ fn gif_to_webp_save_as_and_resave_preserve_animation_and_history() {
     ) else {
         return;
     };
-    gif_conversion_lifecycle(&root, "webp");
+    animation_conversion_lifecycle(&root, "gif", "webp");
 }
 
-fn gif_conversion_lifecycle(root: &Path, extension: &str) {
-    let source = root.join("source.gif");
+#[test]
+fn webp_to_apng_save_as_and_resave_preserve_animation_and_history() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::image::webp_to_apng_save_as_and_resave_preserve_animation_and_history",
+    ) else {
+        return;
+    };
+    animation_conversion_lifecycle(&root, "webp", "apng");
+}
+
+fn animation_conversion_lifecycle(root: &Path, source_extension: &str, extension: &str) {
+    let source = root.join("source").with_extension(source_extension);
     let generated = std::process::Command::new(
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe"),
     )
@@ -750,7 +760,7 @@ fn gif_conversion_lifecycle(root: &Path, extension: &str) {
     ])
     .arg(&source)
     .output()
-    .expect("owned GIF");
+    .expect("owned animation");
     assert!(
         generated.status.success(),
         "{}",

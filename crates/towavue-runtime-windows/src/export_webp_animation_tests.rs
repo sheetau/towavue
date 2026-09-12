@@ -48,6 +48,87 @@ fn request(source: &Path, target: &Path, operations: Vec<EditOperation>) -> Expo
 }
 
 #[test]
+fn webp_to_apng_preserves_edited_frames_exact_timing_and_total_plays() {
+    let root = crate::export::audio_tests::root("webp-to-apng");
+    let source = root.join("source.webp");
+    for (loops, delays, dispose) in [
+        (0, vec![0, 1, 65535, 655350, 16777000], false),
+        (1, vec![17], false),
+        (3, vec![7, 31, 53, 53], true),
+        (u16::MAX, vec![17, 23], true),
+    ] {
+        let bytes = fixture(loops, &delays, dispose);
+        fs::write(&source, &bytes).expect("source");
+        let original = crate::decode_image(&source).expect("display");
+        for operations in [
+            vec![],
+            vec![EditOperation::RotateClockwise, EditOperation::FlipVertical],
+            vec![EditOperation::RotateImage(
+                towavue_core::ImageRotation::new(137, (4, 3)).expect("rotation"),
+            )],
+            vec![EditOperation::Resize(
+                ImageResize::new(7, 5, ResampleFilter::Lanczos).expect("resize"),
+            )],
+        ] {
+            let expected =
+                crate::render_image_edits(&original, &operations, &crate::Cancellation::default())
+                    .expect("edited pixels");
+            for extension in ["png", "apng"] {
+                let target = root.join("converted").with_extension(extension);
+                export_media(&request(&source, &target, operations.clone())).expect("WebP to APNG");
+                assert_eq!(
+                    crate::decode_image(&target).expect("converted").frames,
+                    expected.frames
+                );
+                let mut reader =
+                    png::Decoder::new(BufReader::new(fs::File::open(&target).expect("PNG")))
+                        .read_info()
+                        .expect("independent APNG controls");
+                let control = reader.info().animation_control.expect("animation");
+                assert_eq!(control.num_frames as usize, delays.len());
+                assert_eq!(control.num_plays, u32::from(loops));
+                let mut pixels = vec![0; reader.output_buffer_size().expect("canvas")];
+                for delay in &delays {
+                    reader.next_frame(&mut pixels).expect("frame");
+                    let control = reader.info().frame_control.expect("frame control");
+                    assert_eq!(
+                        u64::from(control.delay_num) * 1000,
+                        u64::from(*delay) * u64::from(control.delay_den)
+                    );
+                    assert_ne!(control.delay_den, 0);
+                    assert_eq!(control.blend_op, png::BlendOp::Source);
+                    assert_eq!(control.dispose_op, png::DisposeOp::None);
+                }
+                drop(reader);
+                let resaved = root.join("resaved.apng");
+                export_media(&request(&target, &resaved, vec![])).expect("APNG resave");
+                assert_eq!(
+                    crate::decode_image(&resaved).expect("resaved").frames,
+                    expected.frames
+                );
+            }
+        }
+        assert_eq!(fs::read(&source).expect("source retained"), bytes);
+    }
+    let target = root.join("converted.apng");
+    let before = fs::read(&target).expect("existing target");
+    for delay in [65537, 0xffffff] {
+        fs::write(&source, fixture(1, &[delay], false)).expect("long irreducible delay");
+        let error = export_cancellable(
+            &request(&source, &target, vec![]),
+            &AtomicBool::new(false),
+            &|_| {
+                panic!("unrepresentable timing must fail before encoding");
+            },
+        )
+        .expect_err("exact APNG timing limit");
+        assert!(error.to_string().contains("cannot be represented exactly"));
+        assert_eq!(fs::read(&target).expect("target preserved"), before);
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn animated_webp_export_preserves_pixels_timing_loops_metadata_and_resave() {
     let root = crate::export::audio_tests::root("webp-animation");
     let source = root.join("source.WeBp");
@@ -206,6 +287,12 @@ fn animated_webp_lossy_rgb_and_alpha_sources_save_displayed_pixels_losslessly() 
             crate::decode_image(&target).expect("saved display").frames,
             original.frames
         );
+        let png = root.join("converted.apng");
+        export_media(&request(&source, &png, vec![])).expect("lossy source to APNG");
+        assert_eq!(
+            crate::decode_image(&png).expect("APNG display").frames,
+            original.frames
+        );
     }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
@@ -302,9 +389,15 @@ fn animated_webp_scan_checks_frame_subchunks_geometry_and_resource_boundaries() 
 
 #[test]
 fn animated_webp_export_protects_targets_on_cancel_source_change_and_corruption() {
+    for extension in ["webp", "png", "apng"] {
+        animation_export_failures(extension);
+    }
+}
+
+fn animation_export_failures(extension: &str) {
     let root = crate::export::audio_tests::root("webp-animation-failure");
     let source = root.join("source.webp");
-    let target = root.join("target.webp");
+    let target = root.join("target").with_extension(extension);
     let bytes = fixture(3, &[17, 31, 53], true);
     fs::write(&source, &bytes).expect("source");
     fs::write(&target, b"existing target").expect("target");
@@ -353,16 +446,25 @@ fn animated_webp_export_protects_targets_on_cancel_source_change_and_corruption(
     let mut wide = bytes.clone();
     wide[24..27].copy_from_slice(&16384u32.to_le_bytes()[..3]);
     fs::write(&source, wide).expect("wide animation canvas");
-    assert!(
-        export_media(&request)
-            .expect_err("output dimension limit")
-            .to_string()
-            .contains("16384")
-    );
-    assert_eq!(
-        fs::read(&target).expect("wide target preserved"),
-        b"existing target"
-    );
+    if extension == "webp" {
+        assert!(
+            export_media(&request)
+                .expect_err("output dimension limit")
+                .to_string()
+                .contains("16384")
+        );
+        assert_eq!(
+            fs::read(&target).expect("wide target preserved"),
+            b"existing target"
+        );
+    } else {
+        export_media(&request).expect("APNG does not have WebP's 16384 output limit");
+        assert_eq!(
+            crate::decode_image(&target).expect("wide APNG").frames[0].width,
+            16385
+        );
+        fs::write(&target, b"existing target").expect("restore target");
+    }
     fs::write(&source, &bytes).expect("restore fixture");
     let controls = container(Cursor::new(&bytes), &AtomicBool::new(false))
         .expect("source controls")
@@ -381,7 +483,47 @@ fn animated_webp_export_protects_targets_on_cancel_source_change_and_corruption(
             b"occupied"
         );
     }
-    for extension in ["png", "gif", "jpg", "avif"] {
+    if extension != "webp" {
+        let conversion = PngConversion::prepare(&source, &AtomicBool::new(false))
+            .expect("prepare")
+            .expect("animated");
+        for name in ["animation.png", "metadata.png"] {
+            let staging = StagedExport::new(&target).expect("occupied PNG staging");
+            let occupied = staging.directory.join(name);
+            fs::write(&occupied, b"occupied").expect("occupied file");
+            assert!(
+                conversion
+                    .export(&request, &staging, &AtomicBool::new(false), &|_| {})
+                    .is_err()
+            );
+            assert_eq!(
+                fs::read(&occupied).expect("owned file retained"),
+                b"occupied"
+            );
+        }
+        let mut metadata = MetadataExportOptions::default();
+        metadata
+            .set(
+                MetadataField::Title,
+                Some("Unsupported cross-format metadata".into()),
+            )
+            .expect("title");
+        assert!(
+            export_media_with_options(
+                &request,
+                ExportOptions {
+                    metadata,
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(
+            fs::read(&target).expect("metadata failure preserves target"),
+            b"existing target"
+        );
+    }
+    for extension in ["bmp", "gif", "jpg", "avif"] {
         let target = target.with_extension(extension);
         fs::write(&target, b"existing target").expect("target");
         assert!(export_media(&self::request(&source, &target, vec![])).is_err());

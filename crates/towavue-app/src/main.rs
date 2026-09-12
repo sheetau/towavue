@@ -5018,14 +5018,6 @@ where
                             Color32::from_white_alpha(150),
                         );
                     }
-                } else {
-                    ui.painter().text(
-                        rect.center(),
-                        Align2::CENTER_CENTER,
-                        "No audio waveform",
-                        egui::TextStyle::Body.resolve(ui.style()),
-                        Color32::GRAY,
-                    );
                 }
                 let response = ui.allocate_rect(rect, egui::Sense::click_and_drag())
                     .help_text("Drag to select time · Shift+Space plays selection · drag playhead to seek · drag volume line up/down · Alt+drag selection to stretch · Delete removes · Ctrl+Y keeps");
@@ -7870,6 +7862,8 @@ where
             }
         } else if self.media_kind.is_some() && self.state == PlaybackState::Loading {
             return Some("Loading media…".into());
+        } else if self.timeline_is_visible() && self.waveform_loading {
+            return Some("Loading waveform…".into());
         }
         self.pending_folder
             .as_ref()
@@ -13104,6 +13098,82 @@ mod tests {
                 !texts
                     .iter()
                     .any(|(pos, text)| pos.y < 540.0 && text.contains("playback fixture error"))
+            );
+            app.state = PlaybackState::Paused;
+            app.playback_error = None;
+            app.fullscreen = false;
+            app.timeline_open = true;
+            app.waveform = None;
+            app.waveform_loading = true;
+            app.status_message = None;
+            assert_eq!(app.status_notice().as_deref(), Some("Loading waveform…"));
+            for width in [480.0, 960.0] {
+                for density in [1.0, 1.25, 2.0] {
+                    let texts = draw(&mut app, width, density);
+                    let notices: Vec<_> = texts
+                        .iter()
+                        .filter(|(_, text)| text.contains("waveform"))
+                        .collect();
+                    assert_eq!(notices.len(), 1, "waveform notice must not be duplicated");
+                    assert!(notices[0].0.y > 540.0 && notices[0].0.x < width / 2.0);
+                    assert_eq!(notices[0].1, "Loading waveform…");
+                }
+            }
+            app.fullscreen = true;
+            assert_eq!(
+                app.status_notice().as_deref(),
+                (kind == MediaKind::Audio).then_some("Loading waveform…"),
+                "hidden video timeline does not displace the path for background work"
+            );
+            app.fullscreen = false;
+            let source = app.path.clone().expect("media path");
+            app.handle_app_event(AppEvent::Waveform(
+                source.clone(),
+                app.media_generation.wrapping_add(1),
+                Err("stale result".into()),
+            ));
+            assert!(app.waveform_loading);
+            assert!(app.status_message.is_none());
+            app.set_status("Copied fixture".into());
+            assert_eq!(app.status_notice().as_deref(), Some("Copied fixture"));
+            app.handle_app_event(AppEvent::Waveform(
+                source.clone(),
+                app.media_generation,
+                Ok(towavue_runtime_windows::PreviewImage {
+                    width: 2,
+                    height: 1,
+                    rgba: vec![255; 8],
+                }),
+            ));
+            assert!(!app.waveform_loading && app.waveform.is_some());
+            assert_eq!(app.status_notice().as_deref(), Some("Copied fixture"));
+            app.status_message = None;
+            assert!(app.status_notice().is_none());
+            app.waveform = None;
+            app.waveform_loading = true;
+            app.handle_app_event(AppEvent::Waveform(
+                source,
+                app.media_generation,
+                Err("fixture has no audio".into()),
+            ));
+            assert!(!app.waveform_loading);
+            let texts = draw(&mut app, 960.0, 1.0);
+            assert!(
+                texts.iter().any(|(pos, text)| pos.y > 540.0
+                    && text == "Waveform unavailable: fixture has no audio")
+            );
+            assert!(
+                !texts
+                    .iter()
+                    .any(|(pos, text)| pos.y < 540.0 && text.contains("waveform"))
+            );
+            app.status_message.as_mut().expect("error notice").1 =
+                Instant::now() - STATUS_MESSAGE_DURATION;
+            assert!(app.status_notice().is_none());
+            assert!(
+                !draw(&mut app, 960.0, 1.0)
+                    .iter()
+                    .any(|(_, text)| text.contains("waveform"))
             );
         }
     }

@@ -794,6 +794,7 @@ unsafe fn pump_messages() {
 
 #[cfg(test)]
 mod tests {
+    mod lifetime_tests;
     #[test]
     fn missing_reveal_target_reports_failure_without_opening_explorer() {
         let path = std::env::temp_dir()

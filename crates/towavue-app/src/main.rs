@@ -8473,10 +8473,9 @@ where
                 } else {
                     Instant::now()
                 };
-                let due_at = self.ui_repaint_at.map_or(due_at, |ui| due_at.min(ui));
                 let due_at = self
-                    .background_wakeup(Instant::now())
-                    .map_or(due_at, |background| due_at.min(background));
+                    .idle_wakeup(now)
+                    .map_or(due_at, |other| due_at.min(other));
                 if due_at <= Instant::now() {
                     window.request_redraw();
                     return ControlFlow::Wait;

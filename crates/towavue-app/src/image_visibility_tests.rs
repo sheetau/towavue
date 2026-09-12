@@ -41,6 +41,11 @@ fn visibility_trial(show: bool) {
             let context = fonts::test_context();
             app.ui_context = Some(context.clone());
             app.window = Some(Arc::clone(&window));
+            if self.show {
+                window.set_visible(true);
+                assert_video_wait_preserves_ui_deadlines(&mut app);
+                window.set_visible(false);
+            }
             app.media_kind = Some(MediaKind::Image);
             app.state = PlaybackState::Paused;
             let decoded = Arc::new(DecodedImage {
@@ -84,6 +89,7 @@ fn visibility_trial(show: bool) {
                 } else {
                     assert_eq!(window.is_visible(), Some(false));
                 }
+                assert_video_wait_preserves_ui_deadlines(&mut app);
                 let deadline = app.image.as_ref().expect("image").next_frame_at;
                 app.schedule();
                 assert_eq!(
@@ -144,4 +150,62 @@ fn visibility_trial(show: bool) {
         .expect("event loop")
         .run_app(&mut Trial { show })
         .expect("visibility trial");
+}
+
+fn assert_video_wait_preserves_ui_deadlines<N: Fn(AppEvent) + Send + Sync + 'static>(
+    app: &mut Application<N>,
+) {
+    app.media_kind = Some(MediaKind::Video);
+    app.state = PlaybackState::Playing;
+    app.audio_drained = true;
+    let presentation_time = media_time(Duration::from_secs(60));
+    app.pending_time = Some(presentation_time);
+    app.clock = Some(PlaybackClock::new(MediaTime::ZERO, 1.0));
+    let frame_due = app.clock.as_ref().expect("clock").due_at(presentation_time);
+    assert_eq!(app.schedule(), ControlFlow::WaitUntil(frame_due));
+
+    let now = Instant::now();
+    app.status_message = Some(("notice".into(), now));
+    assert_eq!(
+        app.schedule(),
+        ControlFlow::WaitUntil(now + STATUS_MESSAGE_DURATION),
+        "a distant video frame must not postpone status expiry"
+    );
+    app.prefix_started = Some(now);
+    assert_eq!(
+        app.schedule(),
+        ControlFlow::WaitUntil(now + PREFIX_TIMEOUT),
+        "shortcut expiry must win over the video and status deadlines"
+    );
+    app.ui_repaint_at = Some(now + PREFIX_TIMEOUT / 2);
+    assert_eq!(
+        app.schedule(),
+        ControlFlow::WaitUntil(now + PREFIX_TIMEOUT / 2)
+    );
+    app.pending_time = Some(MediaTime::ZERO);
+    assert_eq!(
+        app.schedule(),
+        ControlFlow::Wait,
+        "a due frame still redraws"
+    );
+    app.pending_time = Some(presentation_time);
+
+    // Expiry is consumed even without a redraw; no stale deadline spins the loop.
+    app.status_message = Some(("old notice".into(), now - STATUS_MESSAGE_DURATION));
+    app.prefix_started = Some(now - PREFIX_TIMEOUT);
+    app.ui_repaint_at = Some(now);
+    assert_eq!(app.schedule(), ControlFlow::WaitUntil(frame_due));
+    assert!(app.status_message.is_none());
+    assert!(app.prefix_started.is_none());
+    assert!(app.ui_repaint_at.is_none());
+    assert_eq!(app.pending_time, Some(presentation_time));
+    assert_eq!(
+        app.clock.as_ref().expect("clock").due_at(presentation_time),
+        frame_due
+    );
+
+    app.pending_time = None;
+    app.clock = None;
+    app.media_kind = Some(MediaKind::Image);
+    app.state = PlaybackState::Paused;
 }

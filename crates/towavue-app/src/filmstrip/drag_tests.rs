@@ -333,6 +333,7 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
         return;
     };
     let context = crate::fonts::test_context();
+    context.enable_accesskit();
     let snapshot = snapshot(&root);
     let current = &snapshot.items[1].path;
     let mut strip = Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
@@ -368,6 +369,22 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
         render(&mut strip, true, vec![]);
     }
     let output = render(&mut strip, true, vec![]);
+    let bounds = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("tree")
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == egui::accesskit::Role::ScrollBar)
+        .expect("scrollbar")
+        .1
+        .bounds()
+        .expect("bounds");
+    assert!(bounds.x0 >= f64::from(media.left() + 8.0));
+    assert!(bounds.x1 <= f64::from(media.right() - 8.0));
+    assert!(bounds.y1 <= f64::from(media.bottom() - 8.0));
+    assert!((bounds.height() - 5.0).abs() < 0.01);
     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
         egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191) && rect.rect == media
     )), "75% dim stays inside the media panel");
@@ -383,9 +400,14 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
     for (point, enabled, moves) in [
         (egui::pos2(480.0, 80.0), true, true),
         (egui::pos2(480.0, 500.0), true, true),
+        (egui::pos2(2.0, 280.0), true, true),
+        (egui::pos2(958.0, 280.0), true, true),
+        (egui::pos2(480.0, 42.0), true, true),
+        (egui::pos2(480.0, 534.0), true, true),
         (egui::pos2(480.0, 20.0), true, false),
         (egui::pos2(480.0, 555.0), true, false),
         (egui::pos2(480.0, 80.0), false, false),
+        (egui::pos2(480.0, 534.0), false, false),
     ] {
         strip.focus = None;
         for _ in 0..3 {
@@ -426,6 +448,22 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
         strip.scroll_offset > before + 1.0,
         "thumb drag scrolls instead of dragging a card"
     );
+    for gutter in [
+        egui::pos2(480.0, media.bottom() - 1.0),
+        egui::pos2(media.left() + 1.0, media.bottom() - 10.0),
+        egui::pos2(media.right() - 1.0, media.bottom() - 10.0),
+    ] {
+        strip.focus = None;
+        for _ in 0..3 {
+            render(&mut strip, true, vec![egui::Event::PointerMoved(gutter)]);
+        }
+        let before = strip.scroll_offset;
+        render(&mut strip, true, vec![pointer(gutter, true)]);
+        let end = gutter + egui::vec2(100.0, 0.0);
+        render(&mut strip, true, vec![egui::Event::PointerMoved(end)]);
+        render(&mut strip, true, vec![pointer(end, false)]);
+        assert_eq!(strip.scroll_offset, before, "gutters must not drag the bar");
+    }
     for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
         let context = crate::fonts::test_context();
         let mut app = Application::new(None, |_| {}).expect("app");
@@ -485,6 +523,7 @@ fn filmstrip_clicks_dismiss_and_background_open_preserves_the_current_edit() {
     for (button, target_index) in [
         (egui::PointerButton::Primary, 0),
         (egui::PointerButton::Middle, 1),
+        (egui::PointerButton::Middle, 0),
         (egui::PointerButton::Primary, 1),
     ] {
         let context = crate::fonts::test_context();
@@ -525,6 +564,11 @@ fn filmstrip_clicks_dismiss_and_background_open_preserves_the_current_edit() {
         )
         .0;
         let point = card(&output, &display_name(target)).center();
+        let offset = app.filmstrip.scroll_offset;
+        let focus = app.filmstrip.focus.clone();
+        let visible = app.filmstrip.visible.clone();
+        let return_focus = Some((generation, egui::Id::new("filmstrip-origin")));
+        app.filmstrip_return_focus = return_focus;
         for pressed in [true, false] {
             let (_, actions) = frame(
                 &mut app.filmstrip,
@@ -546,15 +590,20 @@ fn filmstrip_clicks_dismiss_and_background_open_preserves_the_current_edit() {
                 app.handle_ui_action(action);
             }
         }
-        assert!(
-            !app.filmstrip_open,
-            "selecting even the current card dismisses filmstrip"
+        assert_eq!(
+            app.filmstrip_open,
+            button == egui::PointerButton::Middle,
+            "primary clicks dismiss; background opening keeps filmstrip open"
         );
         assert_eq!(app.tabs.active().expect("current tab").id, tab);
         assert_eq!(app.path.as_ref(), Some(source));
         assert_eq!(app.media_generation, generation);
         assert_eq!(app.edits[&tab], history);
         if button == egui::PointerButton::Middle {
+            assert_eq!(app.filmstrip.scroll_offset, offset);
+            assert_eq!(app.filmstrip.focus, focus);
+            assert_eq!(app.filmstrip.visible, visible);
+            assert_eq!(app.filmstrip_return_focus, return_focus);
             assert_eq!(app.tabs.tabs().len(), 2);
             let added = &app.tabs.tabs()[1];
             assert_eq!(added.target.current_path(), target);
@@ -564,6 +613,21 @@ fn filmstrip_clicks_dismiss_and_background_open_preserves_the_current_edit() {
                 !app.image_loading,
                 "background opening does not decode or disturb active media"
             );
+            for _ in 0..3 {
+                let output = context.run_ui(input(vec![]), |ui| {
+                    app.draw_ui(ui, &mut Vec::new());
+                });
+                assert!(app.filmstrip_open);
+                assert!(
+                    output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191)
+                    )),
+                    "filmstrip remains drawn after background opening"
+                );
+                assert_eq!(app.tabs.active().expect("current tab").id, tab);
+                assert_eq!(app.filmstrip.scroll_offset, offset);
+                assert_eq!(app.edits[&tab], history);
+            }
         } else {
             assert_eq!(app.tabs.tabs().len(), 1);
             assert_eq!(app.pending_guard.is_some(), target_index != 0);

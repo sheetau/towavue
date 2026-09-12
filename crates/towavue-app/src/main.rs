@@ -5386,14 +5386,17 @@ where
                 let Some(active) = self.tabs.active().map(|tab| tab.id) else {
                     return;
                 };
-                self.close_filmstrip();
                 if background {
                     let added = self.tabs.open_new(path, kind);
                     self.edits.entry(added).or_default();
                     // Register only the path; activation loads it without interrupting this tab.
                     self.tabs.activate(active);
-                } else if self.path.as_ref() != Some(&path) {
-                    self.request_guarded(GuardedAction::Navigate(path));
+                    self.request_redraw();
+                } else {
+                    self.close_filmstrip();
+                    if self.path.as_ref() != Some(&path) {
+                        self.request_guarded(GuardedAction::Navigate(path));
+                    }
                 }
             }
             UiAction::CloseFilmstrip => {

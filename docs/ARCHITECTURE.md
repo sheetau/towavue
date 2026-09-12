@@ -119,6 +119,8 @@ Media notices go in the left status area; image information stays right. Fullscr
 
 Image scrollbar tracks and hit regions are inset without shrinking the displayed image viewport or its pan range. Fullscreen controls yield while the pointer is over the image-bar strip, so they do not cover its drag targets.
 
+Filmstrip primary clicks dismiss it, including the current item; navigating elsewhere retains the unsaved guard. Middle-click registers an unloaded background tab while keeping filmstrip, its scroll/focus, and the current media/edits intact. Its inset scrollbar leaves non-draggable gutters that still accept panel wheel input.
+
 Media previews are immediate, noninteractive and clipped to valid hover ownership; help tooltips keep their delay and close on clipped/covered/changed targets. The logo's directional menus and normal click/keyboard entry share context/dispatch. Exact widget values live with UI code and regression tests.
 
 ## Distribution boundary

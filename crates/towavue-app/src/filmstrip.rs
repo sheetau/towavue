@@ -221,19 +221,36 @@ impl Filmstrip {
                 };
                 ui.style_mut().always_scroll_the_only_direction = true;
                 ui.spacing_mut().scroll.bar_width = 5.0;
-                ui.spacing_mut().scroll.bar_outer_margin = 8.0;
                 ui.spacing_mut().scroll.dormant_handle_opacity = 0.6;
+                let inset = screen.shrink(8.0_f32.min(screen.size().min_elem().max(0.0) * 0.25));
+                // Keep wheel ownership across the full dimmed panel, including
+                // the gutter outside the inset scroll area's hit regions.
+                let gutter_scroll = if ui.is_enabled()
+                    && ui.rect_contains_pointer(screen)
+                    && ui.input(|input| {
+                        input
+                            .pointer
+                            .hover_pos()
+                            .is_some_and(|p| !inset.contains(p))
+                    }) {
+                    let delta =
+                        ui.input_mut(|input| std::mem::take(&mut input.smooth_scroll_delta));
+                    delta.x + delta.y
+                } else {
+                    0.0
+                };
+                let mut scroll_ui = ui.new_child(egui::UiBuilder::new().max_rect(inset));
+                let ui = &mut scroll_ui;
                 let mut scroll = egui::ScrollArea::horizontal()
                     .id_salt("filmstrip-scroll")
-                    .horizontal_scroll_offset(self.scroll_offset)
+                    .horizontal_scroll_offset(self.scroll_offset - gutter_scroll)
                     .auto_shrink([false, false])
-                    .max_height(screen.height())
-                    .scroll_bar_rect(screen.shrink(8.0));
+                    .max_height(inset.height());
                 if recenter || self.focus_requested {
                     scroll = scroll.horizontal_scroll_offset(selected.unwrap_or(0) as f32 * STEP);
                 }
                 let output = scroll.show_viewport(ui, |ui, viewport| {
-                    let padding = ((screen.width() - STEP) / 2.0).max(0.0);
+                    let padding = ((inset.width() - STEP) / 2.0).max(0.0);
                     let origin = ui.min_rect().min;
                     ui.set_min_size(egui::vec2(
                         snapshot.items.len() as f32 * STEP + padding * 2.0,

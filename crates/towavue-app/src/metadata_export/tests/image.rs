@@ -821,6 +821,25 @@ fn gif_to_apng_save_as_and_resave_preserve_animation_and_history() {
         std::fs::read(&source).expect("original retained"),
         original_bytes
     );
+    app.ui_context = Some(fonts::test_context());
+    app.open_external(target.clone(), true);
+    assert_eq!(app.media_kind, Some(MediaKind::Image));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while app.image_loading {
+        assert!(std::time::Instant::now() < deadline, "reopen saved APNG");
+        if let Ok(event) = events.recv_timeout(Duration::from_millis(20)) {
+            app.handle_app_event(event);
+        }
+    }
+    assert!(app.image_error.is_none(), "{:?}", app.image_error);
+    assert_eq!(
+        app.path.as_ref(),
+        Some(&canonical_shell_path(&target).expect("saved path"))
+    );
+    assert_eq!(
+        app.image.as_ref().expect("reopened APNG").decoded.frames,
+        expected.frames
+    );
 }
 
 #[test]

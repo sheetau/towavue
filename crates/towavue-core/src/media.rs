@@ -11,7 +11,7 @@ impl MediaKind {
     pub fn from_path(path: &Path) -> Option<Self> {
         let extension = path.extension()?.to_str()?.to_ascii_lowercase();
         match extension.as_str() {
-            "avif" | "bmp" | "gif" | "jpeg" | "jpg" | "png" | "tif" | "tiff" | "webp" => {
+            "apng" | "avif" | "bmp" | "gif" | "jpeg" | "jpg" | "png" | "tif" | "tiff" | "webp" => {
                 Some(Self::Image)
             }
             "3gp" | "avi" | "m2ts" | "m4v" | "mkv" | "mov" | "mp4" | "mpeg" | "mpg" | "mts"
@@ -33,6 +33,12 @@ mod tests {
             MediaKind::from_path(Path::new("photo.JPEG")),
             Some(MediaKind::Image)
         );
+        for path in ["animation.apng", "ANIMATION.APNG"] {
+            assert_eq!(
+                MediaKind::from_path(Path::new(path)),
+                Some(MediaKind::Image)
+            );
+        }
         assert_eq!(
             MediaKind::from_path(Path::new("movie.MKV")),
             Some(MediaKind::Video)

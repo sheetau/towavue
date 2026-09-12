@@ -516,10 +516,20 @@ impl ImagePresentation {
         path: &Path,
         decoded: Arc<DecodedImage>,
     ) -> Result<Self, String> {
-        let first = decoded
+        Self::from_decoded_frame(context, path, decoded, 0, TextureOptions::LINEAR)
+    }
+
+    fn from_decoded_frame(
+        context: &egui::Context,
+        path: &Path,
+        decoded: Arc<DecodedImage>,
+        frame_index: usize,
+        options: TextureOptions,
+    ) -> Result<Self, String> {
+        let frame = decoded
             .frames
-            .first()
-            .ok_or_else(|| "decoded image contained no frames".to_owned())?;
+            .get(frame_index)
+            .ok_or_else(|| "decoded image did not contain the requested frame".to_owned())?;
         let limit = context.input(|input| input.max_texture_side);
         if decoded
             .frames
@@ -532,16 +542,16 @@ impl ImagePresentation {
         }
         let texture = context.load_texture(
             format!("image:{}", path.display()),
-            color_image(first),
-            TextureOptions::LINEAR,
+            color_image(frame),
+            options,
         );
-        let next_frame_at = decoded.is_animated().then(|| Instant::now() + first.delay);
+        let next_frame_at = decoded.is_animated().then(|| Instant::now() + frame.delay);
         Ok(Self {
             decoded,
             texture,
-            frame_index: 0,
+            frame_index,
             next_frame_at,
-            sampling: std::rc::Rc::new(std::cell::Cell::new(TextureOptions::LINEAR)),
+            sampling: std::rc::Rc::new(std::cell::Cell::new(options)),
         })
     }
 
@@ -584,7 +594,12 @@ impl ImagePresentation {
     }
 }
 
+#[cfg(test)]
+thread_local! { static COLOR_IMAGE_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
 fn color_image(frame: &towavue_runtime_windows::DecodedImageFrame) -> egui::ColorImage {
+    #[cfg(test)]
+    COLOR_IMAGE_CONVERSIONS.set(COLOR_IMAGE_CONVERSIONS.get() + 1);
     let size = [frame.width as usize, frame.height as usize];
     assert_eq!(size[0] * size[1] * 4, frame.rgba.len());
     let mut pixels = Vec::with_capacity(size[0] * size[1]);
@@ -5897,16 +5912,20 @@ where
         let (Some(context), Some(path)) = (&self.ui_context, &self.path) else {
             return Err("Image view is unavailable".into());
         };
-        let mut image = ImagePresentation::from_decoded(context, path, decoded)?;
+        let frame_index = self.image.as_ref().map_or(0, |previous| {
+            previous
+                .frame_index
+                .min(decoded.frames.len().saturating_sub(1))
+        });
+        let options = if self.nearest_images {
+            TextureOptions::NEAREST
+        } else {
+            TextureOptions::LINEAR
+        };
+        let mut image =
+            ImagePresentation::from_decoded_frame(context, path, decoded, frame_index, options)?;
         if let Some(previous) = &self.image {
-            image.frame_index = previous.frame_index.min(image.decoded.frames.len() - 1);
             image.next_frame_at = previous.next_frame_at;
-            if image.frame_index != 0 {
-                image.texture.set(
-                    color_image(&image.decoded.frames[image.frame_index]),
-                    TextureOptions::LINEAR,
-                );
-            }
         }
         self.image = Some(image);
         self.image_error = None;

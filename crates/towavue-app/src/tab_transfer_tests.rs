@@ -85,6 +85,101 @@ fn finish(app: &mut App, events: &mpsc::Receiver<AppEvent>) {
 }
 
 #[test]
+fn edited_image_install_converts_only_the_selected_frame_with_current_sampling() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::edited_image_install_converts_only_the_selected_frame_with_current_sampling",
+    ) else {
+        return;
+    };
+    for nearest in [true, false] {
+        for index in [1, 0] {
+            let (mut app, _) = app();
+            let original = decoded(true);
+            install(&mut app, root.join("install.png"), Arc::clone(&original));
+            app.nearest_images = nearest;
+            app.update_image_sampling();
+            let deadline = Instant::now() + Duration::from_secs(60);
+            let image = app.image.as_mut().expect("image");
+            image.frame_index = index;
+            image.next_frame_at = Some(deadline);
+            let resize = EditOperation::Resize(
+                towavue_core::ImageResize::new(3, 3, towavue_core::ResampleFilter::Nearest)
+                    .expect("resize"),
+            );
+            let resized = Arc::new(
+                towavue_runtime_windows::render_image_edits(
+                    &original,
+                    &[resize],
+                    &Default::default(),
+                )
+                .expect("resized"),
+            );
+            for pixels in [resized, Arc::clone(&original)] {
+                let context = app.ui_context.clone().expect("context");
+                let _ = context.tex_manager().write().take_delta();
+                COLOR_IMAGE_CONVERSIONS.set(0);
+                app.install_edited_image(Arc::clone(&pixels))
+                    .expect("install edited/undo image");
+                app.update_image_sampling();
+                assert_eq!(
+                    COLOR_IMAGE_CONVERSIONS.get(),
+                    1,
+                    "only the selected frame is converted, with final sampling"
+                );
+                let image = app.image.as_ref().expect("installed");
+                assert!(Arc::ptr_eq(&image.decoded, &pixels));
+                assert_eq!(image.frame_index, index);
+                assert_eq!(image.next_frame_at, Some(deadline));
+                let options = if nearest {
+                    TextureOptions::NEAREST
+                } else {
+                    TextureOptions::LINEAR
+                };
+                assert_eq!(image.sampling.get(), options);
+                let updates = context.tex_manager().write().take_delta().set;
+                assert_eq!(updates.len(), 1);
+                assert_eq!(updates[0].0, image.texture.id());
+                assert_eq!(updates[0].1.options, options);
+                assert!(
+                    updates[0].1.image
+                        == egui::ImageData::Color(Arc::new(color_image(&pixels.frames[index])))
+                );
+                let copy = app.image_copy_request().expect("current frame copy");
+                assert_eq!(copy.frame_index, index);
+                assert!(Arc::ptr_eq(&copy.image, &pixels));
+            }
+            let image = app.image.as_ref().expect("valid image").clone();
+            let mut oversized = (*original).clone();
+            oversized.frames[1].width = app
+                .ui_context
+                .as_ref()
+                .expect("context")
+                .input(|input| input.max_texture_side as u32)
+                + 1;
+            for invalid in [
+                DecodedImage {
+                    format: "empty",
+                    frames: vec![],
+                },
+                oversized,
+            ] {
+                COLOR_IMAGE_CONVERSIONS.set(0);
+                assert!(app.install_edited_image(Arc::new(invalid)).is_err());
+                assert_eq!(COLOR_IMAGE_CONVERSIONS.get(), 0);
+                assert_eq!(
+                    app.image.as_ref().expect("retained image").texture.id(),
+                    image.texture.id()
+                );
+                assert!(Arc::ptr_eq(
+                    &app.image.as_ref().expect("retained pixels").decoded,
+                    &image.decoded
+                ));
+            }
+        }
+    }
+}
+
+#[test]
 fn image_animation_suspends_until_resampling_finishes_or_undo_recovers() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_transfer::tests::image_animation_suspends_until_resampling_finishes_or_undo_recovers",

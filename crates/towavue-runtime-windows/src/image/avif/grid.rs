@@ -8,11 +8,12 @@ struct Tile {
 }
 
 pub(super) struct Grid {
-    size: (u32, u32),
+    pub(super) size: (u32, u32),
     coded: (u32, u32),
     origin: (u32, u32),
     tiles: Vec<Tile>,
     orientation: Option<crate::VideoOrientation>,
+    pub(super) aperture: Option<container::CleanAperture>,
 }
 
 fn unsigned(value: i32) -> Result<u32, ImageDecodeError> {
@@ -20,26 +21,6 @@ fn unsigned(value: i32) -> Result<u32, ImageDecodeError> {
 }
 
 impl Grid {
-    pub(super) fn check_container(&self, path: &Path) -> Result<(), ImageDecodeError> {
-        // The pinned demuxer does not expose grid clean apertures. Until those
-        // associations are implemented, do not silently save uncropped pixels.
-        let mut file = File::open(path).map_err(ImageDecodeError::Open)?;
-        let length = file.metadata().map_err(ImageDecodeError::Open)?.len();
-        let root = boxes(&mut file, 0, length, &|| true)?;
-        let meta = one(&root, b"meta")?.ok_or_else(|| invalid("missing grid metadata"))?;
-        let children = boxes(&mut file, meta.start + 4, meta.end, &|| true)?;
-        if let Some(properties) = one(&children, b"iprp")? {
-            let properties = boxes(&mut file, properties.start, properties.end, &|| true)?;
-            if let Some(values) = one(&properties, b"ipco")? {
-                let values = boxes(&mut file, values.start, values.end, &|| true)?;
-                if values.iter().any(|value| value.kind == *b"clap") {
-                    return Err(invalid("grid clean aperture is not supported"));
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub(super) fn read(
         input: &ffmpeg::format::context::Input,
         id: u32,
@@ -145,6 +126,7 @@ impl Grid {
                     ),
                     tiles,
                     orientation,
+                    aperture: None,
                 };
                 grid.validate(limit)?;
                 result = Some(grid);
@@ -229,7 +211,7 @@ impl Grid {
             time: 0,
             duration: None,
             orientation: self.orientation,
-            aperture: None,
+            aperture: self.aperture,
         })
     }
 
@@ -280,6 +262,7 @@ mod tests {
                 })
                 .collect(),
             orientation: None,
+            aperture: None,
         }
     }
 

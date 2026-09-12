@@ -13,6 +13,42 @@ pub(crate) struct CleanAperture {
 }
 
 impl CleanAperture {
+    pub(crate) fn from_clap(data: &[u8], size: (u32, u32)) -> Result<Self, Error> {
+        let data: &[u8; 32] = data.try_into().map_err(|_| invalid("invalid clap size"))?;
+        let values: [u32; 8] = std::array::from_fn(|i| {
+            let i = i * 4;
+            u32::from_be_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]])
+        });
+        let axis = |canvas: u32, extent: u32, divisor: u32, offset: u32, offset_divisor: u32| {
+            if divisor == 0 || offset_divisor == 0 || extent == 0 || !extent.is_multiple_of(divisor)
+            {
+                return Err(invalid("invalid or fractional clean aperture extent"));
+            }
+            let extent = extent / divisor;
+            let denominator = 2 * i128::from(offset_divisor);
+            let numerator = (i128::from(canvas) - i128::from(extent)) * i128::from(offset_divisor)
+                + 2 * i128::from(offset as i32);
+            if numerator < 0 || numerator % denominator != 0 {
+                return Err(invalid("outside or fractional clean aperture origin"));
+            }
+            let start =
+                u32::try_from(numerator / denominator).map_err(|_| invalid("aperture overflow"))?;
+            let end = canvas
+                .checked_sub(start)
+                .and_then(|value| value.checked_sub(extent))
+                .ok_or_else(|| invalid("clean aperture lies outside canvas"))?;
+            Ok((start, end))
+        };
+        let (left, right) = axis(size.0, values[0], values[1], values[4], values[5])?;
+        let (top, bottom) = axis(size.1, values[2], values[3], values[6], values[7])?;
+        Ok(Self {
+            top,
+            bottom,
+            left,
+            right,
+        })
+    }
+
     pub(crate) fn from_bytes(data: &[u8]) -> Result<Self, Error> {
         let data: &[u8; 16] = data
             .try_into()
@@ -57,6 +93,46 @@ impl CleanAperture {
 #[cfg(test)]
 mod aperture_tests {
     use super::*;
+
+    #[test]
+    fn clap_rationals_preserve_integer_bounds_and_reject_ambiguous_geometry() {
+        let read = |values: [u32; 8], size| {
+            CleanAperture::from_clap(&values.map(u32::to_be_bytes).concat(), size)
+        };
+        let values = [4, 1, 2, 1, 1, 2, u32::MAX, 2];
+        let rect = read(values, (7, 5))
+            .expect("half-pixel center offsets")
+            .rectangle((7, 5))
+            .expect("crop");
+        assert_eq!((rect.x, rect.y, rect.width, rect.height), (2, 1, 4, 2));
+        for index in [1, 3, 5, 7] {
+            let mut invalid = values;
+            invalid[index] = 0;
+            assert!(read(invalid, (7, 5)).is_err());
+        }
+        for (index, value) in [
+            (0, 0),
+            (0, 8),
+            (1, 3),
+            (4, 0),
+            (4, (-99i32) as u32),
+            (6, i32::MAX as u32),
+        ] {
+            let mut invalid = values;
+            invalid[index] = value;
+            assert!(
+                read(invalid, (7, 5)).is_err(),
+                "index={index}, value={value}"
+            );
+        }
+        assert!(CleanAperture::from_clap(&[0; 31], (7, 5)).is_err());
+        assert!(CleanAperture::from_clap(&[0; 33], (7, 5)).is_err());
+        let full = [u32::MAX, 1, u32::MAX, 1, 0, u32::MAX, 0, u32::MAX];
+        assert_eq!(
+            read(full, (u32::MAX, u32::MAX)).expect("wide arithmetic"),
+            CleanAperture::default()
+        );
+    }
 
     #[test]
     fn clean_aperture_side_data_rejects_truncation_empty_and_overflowing_bounds() {

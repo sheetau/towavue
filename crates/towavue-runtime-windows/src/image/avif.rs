@@ -33,9 +33,9 @@ pub(super) fn decode(
 ) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
     let (color, alpha, premultiplied) = select(path, current)?;
     ffmpeg::init().map_err(ffmpeg_error)?;
-    let mut color_decoder = Plane::new(path, &color, Pixel::RGBA, byte_limit)?;
+    let mut color_decoder = Plane::new(path, &color, Pixel::RGBA, byte_limit, current)?;
     let mut alpha_decoder = alpha
-        .map(|alpha| Plane::new(path, &alpha, Pixel::GRAY8, byte_limit))
+        .map(|alpha| Plane::new(path, &alpha, Pixel::GRAY8, byte_limit, current))
         .transpose()?;
     let mut frames: Vec<DecodedImageFrame> = Vec::new();
     let mut remaining = byte_limit;
@@ -254,12 +254,13 @@ impl Plane {
         track: &Selection,
         pixel: Pixel,
         byte_limit: usize,
+        current: &dyn Fn() -> bool,
     ) -> Result<Self, ImageDecodeError> {
         let input = open_input(path)?;
         if track.timing.is_none()
-            && let Some(layout) = grid::Grid::read(&input, track.id, byte_limit)?
+            && let Some(mut layout) = grid::Grid::read(&input, track.id, byte_limit)?
         {
-            layout.check_container(path)?;
+            layout.aperture = container::still::aperture(path, track.id, layout.size, current)?;
             return Ok(Self::Grid {
                 path: path.into(),
                 layout: Some(layout),

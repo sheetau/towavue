@@ -53,6 +53,7 @@ fn avif_grid_fixture_preserves_all_tiles_preview_and_saved_pixels() {
     export_media(&request(&source, &target)).expect("grid save");
     let saved = crate::decode_image(&target).expect("saved decode");
     assert_eq!(saved.frames[0].rgba, decoded.frames[0].rgba);
+    let intact = fs::read(&source).expect("grid fixture");
     orientation_tests::append_still_properties(&source, &[(b"irot", vec![1])], &[1]);
     let rotated = image::imageops::rotate270(
         &image::RgbaImage::from_raw(1024, 770, expected).expect("reference"),
@@ -69,10 +70,40 @@ fn avif_grid_fixture_preserves_all_tiles_preview_and_saved_pixels() {
         .into_iter()
         .flat_map(i32::to_be_bytes)
         .collect();
+    fs::write(&source, &intact).expect("restore grid");
     orientation_tests::append_still_properties(&source, &[(b"clap", clap)], &[1]);
+    orientation_tests::append_still_properties(&source, &[(b"irot", vec![1])], &[1]);
+    let original =
+        image::RgbaImage::from_raw(1024, 770, decoded.frames[0].rgba.clone()).expect("reference");
+    let cropped = image::imageops::rotate270(
+        &image::imageops::crop_imm(&original, 12, 35, 1000, 700).to_image(),
+    );
+    let displayed = crate::decode_image(&source).expect("grid aperture");
+    assert_eq!(displayed.dimensions(), (700, 1000));
+    assert_eq!(displayed.frames[0].rgba, *cropped.as_raw());
+    let preview = crate::image::first_animation_frame(&source, 1024 * 770 * 4, &|| true)
+        .expect("cropped preview")
+        .expect("frame");
+    assert_eq!(preview.rgba, *cropped.as_raw());
+    export_media(&request(&source, &target)).expect("grid aperture save");
+    assert_eq!(
+        crate::decode_image(&target).expect("saved aperture").frames[0].rgba,
+        *cropped.as_raw()
+    );
+    let invalid = [0; 32].to_vec();
+    fs::write(&source, &intact).expect("restore grid");
+    orientation_tests::append_still_properties(&source, &[(b"clap", invalid.clone())], &[]);
+    assert_eq!(
+        crate::decode_image(&source)
+            .expect("unassociated property")
+            .frames[0]
+            .rgba,
+        decoded.frames[0].rgba
+    );
+    orientation_tests::append_still_properties(&source, &[(b"clap", invalid)], &[1]);
     assert!(
         crate::decode_image(&source).is_err(),
-        "unsupported grid aperture must not be ignored"
+        "invalid associated aperture"
     );
     let before = fs::read(&target).expect("saved target");
     assert!(export_media(&request(&source, &target)).is_err());

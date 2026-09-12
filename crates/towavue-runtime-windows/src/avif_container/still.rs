@@ -39,6 +39,79 @@ fn full_children(
     Ok((header[0], boxes(file, item.start + 4, item.end, current)?))
 }
 
+fn visit_properties(
+    file: &mut fs::File,
+    meta: &[BoxRange],
+    current: &dyn Fn() -> bool,
+    mut visit: impl FnMut(&mut fs::File, u32, BoxRange) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let properties = one(meta, b"iprp")?.ok_or_else(|| invalid("missing item properties"))?;
+    let properties = boxes(file, properties.start, properties.end, current)?;
+    let values = one(&properties, b"ipco")?.ok_or_else(|| invalid("missing property container"))?;
+    let values = boxes(file, values.start, values.end, current)?;
+    for association in properties.iter().filter(|item| &item.kind == b"ipma") {
+        let payload = bytes(file, *association, 1024 * 1024)?;
+        let mut payload = payload.as_slice();
+        let control = number(&mut payload, 4)?;
+        if control & 0x00fffffe != 0 || control >> 24 > 1 {
+            return Err(invalid("unsupported property association flags/version"));
+        }
+        let id_width = if control >> 24 == 0 { 2 } else { 4 };
+        let wide = control & 1 != 0;
+        let count = number(&mut payload, 4)?;
+        if count > 65536 {
+            return Err(invalid("too many property associations"));
+        }
+        for _ in 0..count {
+            check_current(current)?;
+            let id = number(&mut payload, id_width)?;
+            let count = number(&mut payload, 1)?;
+            for _ in 0..count {
+                let index = number(&mut payload, if wide { 2 } else { 1 })?
+                    & if wide { 0x7fff } else { 0x7f };
+                if index == 0 {
+                    continue;
+                }
+                let value = values
+                    .get(index as usize - 1)
+                    .ok_or_else(|| invalid("invalid property index"))?;
+                visit(file, id, *value)?;
+            }
+        }
+        if !payload.is_empty() {
+            return Err(invalid("invalid property association size"));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn aperture(
+    path: &std::path::Path,
+    id: u32,
+    size: (u32, u32),
+    current: &dyn Fn() -> bool,
+) -> Result<Option<CleanAperture>, Error> {
+    let mut file = fs::File::open(path)?;
+    let length = file.metadata()?.len();
+    let root = boxes(&mut file, 0, length, current)?;
+    let meta = one(&root, b"meta")?.ok_or_else(|| invalid("missing image metadata"))?;
+    let (version, meta) = full_children(&mut file, meta, current)?;
+    if version != 0 {
+        return Err(invalid("unsupported meta version"));
+    }
+    let mut aperture = None;
+    visit_properties(&mut file, &meta, current, |file, item, value| {
+        if item == id && value.kind == *b"clap" {
+            if aperture.is_some() {
+                return Err(invalid("multiple clean aperture properties"));
+            }
+            aperture = Some(CleanAperture::from_clap(&bytes(file, value, 32)?, size)?);
+        }
+        Ok(())
+    })?;
+    Ok(aperture)
+}
+
 pub(crate) fn read(
     file: &mut fs::File,
     root: &[BoxRange],
@@ -101,52 +174,18 @@ pub(crate) fn read(
     }
     let mut alpha = None;
     if !auxiliaries.is_empty() {
-        let properties = one(&meta, b"iprp")?.ok_or_else(|| invalid("missing item properties"))?;
-        let properties = boxes(file, properties.start, properties.end, current)?;
-        let values =
-            one(&properties, b"ipco")?.ok_or_else(|| invalid("missing property container"))?;
-        let values = boxes(file, values.start, values.end, current)?;
-        for association in properties.iter().filter(|item| &item.kind == b"ipma") {
-            let payload = bytes(file, *association, 1024 * 1024)?;
-            let mut payload = payload.as_slice();
-            let control = number(&mut payload, 4)?;
-            if control & 0x00fffffe != 0 || control >> 24 > 1 {
-                return Err(invalid("unsupported property association flags/version"));
-            }
-            let id_width = if control >> 24 == 0 { 2 } else { 4 };
-            let wide = control & 1 != 0;
-            let count = number(&mut payload, 4)?;
-            if count > 65536 {
-                return Err(invalid("too many property associations"));
-            }
-            for _ in 0..count {
-                check_current(current)?;
-                let id = number(&mut payload, id_width)?;
-                let count = number(&mut payload, 1)?;
-                for _ in 0..count {
-                    let index = number(&mut payload, if wide { 2 } else { 1 })?
-                        & if wide { 0x7fff } else { 0x7f };
-                    if index == 0 {
-                        continue;
+        visit_properties(file, &meta, current, |file, id, value| {
+            if auxiliaries.contains(&id) && &value.kind == b"auxC" {
+                let value = bytes(file, value, 4096)?;
+                if value == b"\0\0\0\0urn:mpeg:mpegB:cicp:systems:auxiliary:alpha\0" {
+                    if alpha.is_some_and(|previous| previous != id) {
+                        return Err(invalid("multiple alpha items"));
                     }
-                    let value = values
-                        .get(index as usize - 1)
-                        .ok_or_else(|| invalid("invalid property index"))?;
-                    if auxiliaries.contains(&id) && &value.kind == b"auxC" {
-                        let value = bytes(file, *value, 4096)?;
-                        if value == b"\0\0\0\0urn:mpeg:mpegB:cicp:systems:auxiliary:alpha\0" {
-                            if alpha.is_some_and(|previous| previous != id) {
-                                return Err(invalid("multiple alpha items"));
-                            }
-                            alpha = Some(id);
-                        }
-                    }
+                    alpha = Some(id);
                 }
             }
-            if !payload.is_empty() {
-                return Err(invalid("invalid property association size"));
-            }
-        }
+            Ok(())
+        })?;
     }
     if alpha == Some(color) || (premultiplied_with.is_some() && premultiplied_with != alpha) {
         return Err(invalid("invalid premultiplied alpha item"));
@@ -219,6 +258,90 @@ mod tests {
             b"meta",
             [vec![0; 4], primary, references, properties].concat(),
         )
+    }
+
+    #[test]
+    fn clean_aperture_follows_only_selected_item_associations() {
+        let root = std::env::temp_dir().join(format!(
+            "towavue-avif-apertures-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("timestamp")
+                .as_nanos()
+        ));
+        fs::create_dir(&root).expect("owned test directory");
+        let path = root.join("metadata.avif");
+        for wide_id in [false, true] {
+            for wide_index in [false, true] {
+                let selected: u32 = if wide_id { 70000 } else { 1 };
+                let index: u16 = if wide_index { 129 } else { 1 };
+                let mut values = Vec::new();
+                for _ in 1..index {
+                    values.extend(atom(b"free", vec![]));
+                }
+                values.extend(atom(
+                    b"clap",
+                    [4u32, 1, 2, 1, 1, 2, u32::MAX, 2]
+                        .map(u32::to_be_bytes)
+                        .concat(),
+                ));
+                values.extend(atom(b"clap", vec![0; 32]));
+                let fixture = |duplicate: bool| {
+                    let mut associations = vec![u8::from(wide_id), 0, 0, u8::from(wide_index)];
+                    associations.extend(2u32.to_be_bytes());
+                    for (id, property, count) in [
+                        (selected, index, if duplicate { 2 } else { 1 }),
+                        (selected + 1, index + 1, 1),
+                    ] {
+                        if wide_id {
+                            associations.extend(id.to_be_bytes());
+                        } else {
+                            associations.extend((id as u16).to_be_bytes());
+                        }
+                        associations.push(count);
+                        for _ in 0..count {
+                            if wide_index {
+                                associations.extend((property | 0x8000).to_be_bytes());
+                            } else {
+                                associations.push(property as u8 | 0x80);
+                            }
+                        }
+                    }
+                    atom(
+                        b"meta",
+                        [
+                            vec![0; 4],
+                            atom(
+                                b"iprp",
+                                [atom(b"ipco", values.clone()), atom(b"ipma", associations)]
+                                    .concat(),
+                            ),
+                        ]
+                        .concat(),
+                    )
+                };
+                fs::write(&path, fixture(false)).expect("fixture");
+                let rect = aperture(&path, selected, (7, 5), &|| true)
+                    .expect("unrelated invalid aperture is ignored")
+                    .expect("selected aperture")
+                    .rectangle((7, 5))
+                    .expect("integer crop");
+                assert_eq!((rect.x, rect.y, rect.width, rect.height), (2, 1, 4, 2));
+                assert!(aperture(&path, selected + 1, (7, 5), &|| true).is_err());
+                assert_eq!(
+                    aperture(&path, selected + 2, (7, 5), &|| true).expect("no association"),
+                    None
+                );
+                assert!(matches!(
+                    aperture(&path, selected, (7, 5), &|| false),
+                    Err(Error::Cancelled)
+                ));
+                fs::write(&path, fixture(true)).expect("duplicate fixture");
+                assert!(aperture(&path, selected, (7, 5), &|| true).is_err());
+            }
+        }
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
     }
 
     #[test]

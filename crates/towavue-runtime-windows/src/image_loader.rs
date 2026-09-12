@@ -45,6 +45,8 @@ struct ImageCache {
     entries: VecDeque<(PathBuf, ImageStamp, Arc<DecodedImage>)>,
     byte_limit: usize,
     bytes: usize,
+    #[cfg(test)]
+    before_lookup: Option<Box<dyn FnMut() + Send>>,
 }
 
 impl Default for ImageCache {
@@ -59,24 +61,33 @@ impl ImageCache {
             entries: VecDeque::new(),
             byte_limit,
             bytes: 0,
+            #[cfg(test)]
+            before_lookup: None,
         }
     }
 
-    fn take(
+    fn get(
         &mut self,
         path: &Path,
         stamp: Option<ImageStamp>,
         remaining: usize,
     ) -> Option<Result<Arc<DecodedImage>, ImageDecodeError>> {
+        #[cfg(test)]
+        if let Some(before_lookup) = &mut self.before_lookup {
+            before_lookup();
+        }
         let index = self.entries.iter().position(|entry| entry.0 == path)?;
-        let (_, cached_stamp, image) = self.entries.remove(index)?;
-        self.bytes -= image.retained_bytes();
-        (Some(cached_stamp) == stamp).then(|| {
-            if image.retained_bytes() <= remaining {
-                Ok(image)
-            } else {
-                Err(ImageDecodeError::TooLarge)
-            }
+        if Some(self.entries[index].1) != stamp {
+            let (_, _, removed) = self.entries.remove(index)?;
+            self.bytes -= removed.retained_bytes();
+            return None;
+        }
+        // A request can become obsolete during lookup; do not consume a newer request's hit.
+        let image = &self.entries[index].2;
+        Some(if image.retained_bytes() <= remaining {
+            Ok(Arc::clone(image))
+        } else {
+            Err(ImageDecodeError::TooLarge)
         })
     }
 
@@ -444,7 +455,7 @@ fn run_worker(
             let cached = cache
                 .lock()
                 .expect("image cache")
-                .take(&path, stamp, remaining);
+                .get(&path, stamp, remaining);
             let preview_current =
                 || is_current() && stamp.is_some() && ImageStamp::read(&path) == stamp;
             let publish_preview = |preview| {
@@ -495,7 +506,7 @@ fn run_worker(
                     cache
                         .lock()
                         .expect("image cache")
-                        .take(&path, stamp, remaining)
+                        .get(&path, stamp, remaining)
                 } else {
                     None
                 }
@@ -643,7 +654,7 @@ mod tests {
             let mut cache = cache.lock().expect("cache");
             assert!(cache.bytes <= budget && cache.entries.len() <= 10);
             let retained = cache
-                .take(&paths[0], ImageStamp::read(&paths[0]), budget)
+                .get(&paths[0], ImageStamp::read(&paths[0]), budget)
                 .expect("priority retained")
                 .expect("warm image");
             assert!(Arc::ptr_eq(&warm, &retained));
@@ -651,7 +662,7 @@ mod tests {
             for (index, path) in paths.iter().enumerate().take(successful + 1).skip(3) {
                 assert_eq!(
                     cache
-                        .take(path, ImageStamp::read(path), budget)
+                        .get(path, ImageStamp::read(path), budget)
                         .expect("batch page retained")
                         .expect("image")
                         .frames[0]
@@ -860,6 +871,119 @@ mod tests {
             worker.join().expect("shutdown");
         }
         std::fs::remove_dir_all(root).expect("remove owned fixtures");
+    }
+
+    #[test]
+    fn obsolete_foreground_lookup_preserves_pixels_for_the_new_request() {
+        let mut outcomes = Vec::new();
+        for mode in ["cached", "adopted", "budget"] {
+            let path = std::env::temp_dir().join(format!(
+                "towavue-prefetch-lookup-{mode}-{}.png",
+                std::process::id()
+            ));
+            std::fs::write(&path, [1]).expect("owned source identity");
+            let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+            let loader = Arc::new(ImageLoader {
+                shared: Arc::clone(&shared),
+                prefetch_worker: LatestTask::new("obsolete-lookup-test").expect("prefetch worker"),
+            });
+            let cache = Arc::clone(&shared.0.lock().expect("mailbox").cache);
+            let image = pixel(42);
+            let (started_tx, started_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            if mode == "adopted" {
+                let image = Arc::clone(&image);
+                loader.prefetch_with_decode(vec![path.clone()], move |_, _, _| {
+                    started_tx.send(()).expect("prefetch started");
+                    release_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("release prefetch");
+                    Ok(Some((*image).clone()))
+                });
+                started_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("running prefetch");
+            } else {
+                cache.lock().expect("cache").insert(
+                    path.clone(),
+                    ImageStamp::read(&path).expect("stamp"),
+                    Arc::clone(&image),
+                );
+            }
+            let (lookup_tx, lookup_rx) = mpsc::channel();
+            let (generation_tx, generation_rx) = mpsc::channel();
+            let weak_loader = Arc::downgrade(&loader);
+            let requested_path = path.clone();
+            let mut lookups = 0;
+            cache.lock().expect("cache").before_lookup = Some(Box::new(move || {
+                if mode == "adopted" && lookups == 0 {
+                    lookup_tx.send(()).expect("initial cache miss");
+                }
+                if lookups == usize::from(mode == "adopted") {
+                    let generation = weak_loader
+                        .upgrade()
+                        .expect("live loader")
+                        .request(vec![requested_path.clone()]);
+                    generation_tx
+                        .send(generation)
+                        .expect("replacement generation");
+                }
+                lookups += 1;
+            }));
+            let (ready_tx, ready_rx) = mpsc::channel();
+            let decodes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let decoded = Arc::clone(&decodes);
+            let worker = thread::spawn(move || {
+                run_worker(
+                    shared,
+                    || {
+                        let _ = ready_tx.send(());
+                    },
+                    |_, _, _, _| {
+                        decoded.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        Ok((*pixel(99)).clone())
+                    },
+                );
+            });
+            let original = loader.request_with_retained_bytes(
+                vec![path.clone()],
+                if mode == "budget" {
+                    IMAGE_BYTE_LIMIT - 3
+                } else {
+                    0
+                },
+            );
+            if mode == "adopted" {
+                lookup_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("foreground checked cache");
+                release_tx.send(()).expect("publish prefetch");
+            }
+            let replacement = generation_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("replaced during lookup");
+            assert_ne!(original, replacement);
+            ready_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("foreground result");
+            let result = loader.take_completed().expect("completed");
+            assert_eq!(result.generation, replacement);
+            outcomes.push((
+                mode,
+                result.images[0].1.as_ref().expect("image").frames[0]
+                    .rgba
+                    .clone(),
+                decodes.load(std::sync::atomic::Ordering::SeqCst),
+            ));
+            drop(loader);
+            worker.join().expect("foreground shutdown");
+            std::fs::remove_file(path).expect("remove owned fixture");
+        }
+        assert_eq!(
+            outcomes,
+            ["cached", "adopted", "budget"].map(|mode| (mode, vec![42; 4], 0)),
+            "obsolete cache reads must not force a second decode"
+        );
     }
 
     #[test]
@@ -2100,17 +2224,17 @@ mod tests {
         cache.insert("first".into(), stamp, Arc::clone(&first));
         cache.insert("second".into(), stamp, pixel(2));
         let hit = cache
-            .take(Path::new("first"), Some(stamp), 8)
+            .get(Path::new("first"), Some(stamp), 8)
             .expect("cache hit")
             .expect("within request budget");
         assert!(Arc::ptr_eq(&hit, &first), "cache must not copy RGBA");
         cache.insert("first".into(), stamp, hit);
         cache.insert("third".into(), stamp, pixel(3));
-        assert!(cache.take(Path::new("second"), Some(stamp), 8).is_none());
+        assert!(cache.get(Path::new("second"), Some(stamp), 8).is_none());
         assert_eq!(cache.bytes, 8);
         assert!(
             cache
-                .take(
+                .get(
                     Path::new("first"),
                     Some(ImageStamp {
                         modified: stamp.modified + Duration::from_secs(1),
@@ -2126,7 +2250,7 @@ mod tests {
             vec![1; 4],
             "eviction must not invalidate the UI owner"
         );
-        assert!(cache.take(Path::new("third"), None, 8).is_none());
+        assert!(cache.get(Path::new("third"), None, 8).is_none());
         assert_eq!(cache.bytes, 0);
         let mut animated = (*pixel(9)).clone();
         animated.frames.push(animated.frames[0].clone());
@@ -2142,12 +2266,15 @@ mod tests {
         }
         assert_eq!(cache.entries.len(), 10);
         assert_eq!(cache.bytes, 40);
-        assert!(cache.take(Path::new("0"), Some(stamp), 100).is_none());
+        assert!(cache.get(Path::new("0"), Some(stamp), 100).is_none());
         assert!(matches!(
-            cache.take(Path::new("10"), Some(stamp), 3),
+            cache.get(Path::new("10"), Some(stamp), 3),
             Some(Err(ImageDecodeError::TooLarge))
         ));
-        assert_eq!(cache.bytes, 36);
+        assert_eq!(
+            cache.bytes, 40,
+            "a smaller request must not evict reusable pixels"
+        );
         let retained = cache.entries[0].2.clone();
         assert_eq!(Arc::strong_count(&retained), 2);
         drop(cache);

@@ -116,7 +116,7 @@ Shell work stays on a dedicated STA with message-aware waiting (MsgWaitForMultip
 
 ## UI conventions
 
-Keep a media-first grayscale UI: Figtree, proportional Japanese fallback, tabular numeric glyphs, Codicon, #2C2C2C hover backgrounds, centered shadow offset, and stable left-aligned status values. Tabs reserve 3 logical px top/bottom and the native 1 physical px boundary.
+Keep a media-first grayscale UI: Figtree, proportional Japanese fallback, tabular numeric glyphs, Codicon, #2C2C2C hover backgrounds, centered shadow offset, and stable left-aligned status values. Play/pause use solid vector counterparts to the Codicon outlines, retaining shared button interaction and focus roles. Tabs reserve 3 logical px top/bottom and the native 1 physical px boundary.
 
 Media notices go in the left status area; image information stays right. Fullscreen uses the bottom bar. Save progress occupies the toolbar boundary, not ordinary image-navigation loading. Volume uses a 1.2s thin HUD without replacing the path notice.
 

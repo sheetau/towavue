@@ -26,6 +26,15 @@ impl Read for Reader<'_> {
     }
 }
 
+impl std::io::Seek for Reader<'_> {
+    fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
+        if self.cancelled.load(Ordering::Relaxed) {
+            return Err(std::io::Error::other("GIF export cancelled"));
+        }
+        std::io::Seek::seek(&mut self.file, position)
+    }
+}
+
 fn decoder<'a>(
     path: &Path,
     cancelled: &'a AtomicBool,
@@ -54,7 +63,8 @@ impl Animation {
     pub(super) fn read(path: &Path, cancelled: &AtomicBool) -> Result<Self, ExportError> {
         let result = (|| {
             let mut decoder = decoder(path, cancelled)?;
-            if u64::from(decoder.width()) * u64::from(decoder.height()) * 4 > 512 * 1024 * 1024 {
+            let (width, height) = (decoder.width(), decoder.height());
+            if u64::from(width) * u64::from(height) * 4 > 512 * 1024 * 1024 {
                 return Err(invalid("canvas exceeds 512 MiB"));
             }
             let mut delays = Vec::new();
@@ -90,33 +100,39 @@ impl Animation {
     ) -> Result<(), ExportError> {
         let temporary = staging.directory.join("animation.gif");
         let result = (|| {
-            let mut decoded = decoder(&staging.output, cancelled)?;
+            let mut input = BufReader::new(Reader {
+                file: fs::File::open(&staging.output).map_err(ExportError::Output)?,
+                cancelled,
+            });
+            let (width, height, mut pixels) = read_png(&mut input)?;
             let file = fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&temporary)
                 .map_err(ExportError::Output)?;
-            let mut encoded = gif::Encoder::new(
-                std::io::BufWriter::new(file),
-                decoded.width(),
-                decoded.height(),
-                decoded.global_palette().unwrap_or_default(),
-            )
-            .map_err(invalid)?;
+            let mut encoded = gif::Encoder::new(std::io::BufWriter::new(file), width, height, &[])
+                .map_err(invalid)?;
             encoded.set_repeat(self.repeat).map_err(invalid)?;
-            // Re-encode palette indices, not colors: preserve encoder pixels and disposal
-            // while restoring source delays (including zero) independently of FFmpeg timestamps.
-            for delay in &self.delays {
+            // FFmpeg emits full-canvas RGBA PNG snapshots. Clear each before the next
+            // snapshot so newly transparent pixels cannot expose a previous frame's colors.
+            for (index, delay) in self.delays.iter().enumerate() {
                 check_cancelled(cancelled)?;
-                let mut frame = decoded
-                    .read_next_frame()
-                    .map_err(invalid)?
-                    .ok_or_else(|| invalid("encoder omitted animation frames"))?
-                    .clone();
+                if index != 0 {
+                    // Release the previous RGBA canvas before allocating another.
+                    drop(pixels);
+                    let (w, h, next) = read_png(&mut input)?;
+                    if (w, h) != (width, height) {
+                        return Err(invalid("encoded frame dimensions differ"));
+                    }
+                    pixels = next;
+                }
+                let mut frame = palette_frame(width, height, &mut pixels);
                 frame.delay = *delay;
+                frame.dispose = gif::DisposalMethod::Background;
+                check_cancelled(cancelled)?;
                 encoded.write_frame(&frame).map_err(invalid)?;
             }
-            if decoded.read_next_frame().map_err(invalid)?.is_some() {
+            if input.read(&mut [0]).map_err(ExportError::Output)? != 0 {
                 return Err(invalid("encoder added animation frames"));
             }
             encoded
@@ -133,6 +149,81 @@ impl Animation {
         check_cancelled(cancelled)?;
         result
     }
+}
+
+fn read_png(
+    input: &mut (impl std::io::BufRead + std::io::Seek),
+) -> Result<(u16, u16, Vec<u8>), ExportError> {
+    let mut decoder = png::Decoder::new(input);
+    decoder.set_limits(png::Limits {
+        bytes: 512 * 1024 * 1024,
+    });
+    let mut reader = decoder.read_info().map_err(invalid)?;
+    let info = reader.info();
+    let width = u16::try_from(info.width).map_err(invalid)?;
+    let height = u16::try_from(info.height).map_err(invalid)?;
+    if info.color_type != png::ColorType::Rgba
+        || info.bit_depth != png::BitDepth::Eight
+        || info.animation_control.is_some()
+    {
+        return Err(invalid("expected static RGBA8 PNG snapshot"));
+    }
+    let bytes = usize::from(width) * usize::from(height) * 4;
+    if bytes > 512 * 1024 * 1024 {
+        return Err(invalid("canvas exceeds 512 MiB"));
+    }
+    let mut pixels = vec![0; bytes];
+    reader.next_frame(&mut pixels).map_err(invalid)?;
+    reader.finish().map_err(invalid)?;
+    Ok((width, height, pixels))
+}
+
+fn palette_frame(width: u16, height: u16, pixels: &mut [u8]) -> gif::Frame<'static> {
+    // Match the previous GIF alpha threshold. Normalize invisible RGB before palette
+    // construction so hidden colors cannot consume entries intended for visible pixels.
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        if pixel[3] < 128 {
+            pixel.fill(0);
+        } else {
+            pixel[3] = 255;
+        }
+    }
+    let mut frame = gif::Frame::from_rgba_speed(width, height, pixels, 10);
+    // NeuQuant is used only beyond 256 RGBA colors. It can map an opaque color to
+    // the transparent entry; keep that pixel visible using the closest opaque entry.
+    if let Some(transparent) = frame.transparent {
+        let palette = frame
+            .palette
+            .as_ref()
+            .expect("RGBA frame has a local palette");
+        for (index, pixel) in frame
+            .buffer
+            .to_mut()
+            .iter_mut()
+            .zip(pixels.as_chunks::<4>().0)
+        {
+            if pixel[3] == 0 {
+                *index = transparent;
+            } else if *index == transparent {
+                *index = palette
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != usize::from(transparent))
+                    .min_by_key(|(_, color)| {
+                        color
+                            .iter()
+                            .zip(pixel)
+                            .map(|(a, b)| (i32::from(*a) - i32::from(*b)).pow(2))
+                            .sum::<i32>()
+                    })
+                    .expect("opaque entry")
+                    .0 as u8;
+            }
+        }
+    }
+    frame
 }
 
 #[cfg(test)]
@@ -368,7 +459,17 @@ mod tests {
         let target = root.join("target.gif");
         fixture(&source, gif::Repeat::Finite(3));
         fs::write(&target, b"existing target").expect("target");
-        let bytes = fs::read(&source).expect("source bytes");
+        let mut bytes = Vec::new();
+        for _ in 0..3 {
+            let mut encoder = png::Encoder::new(&mut bytes, 4, 3);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().expect("PNG header");
+            writer
+                .write_image_data(&[255, 0, 0, 255].repeat(12))
+                .expect("PNG frame");
+            writer.finish().expect("PNG end");
+        }
         let cancel = AtomicBool::new(false);
         for count in [2, 4] {
             let staging = StagedExport::new(&target).expect("staging");
@@ -391,6 +492,26 @@ mod tests {
         fs::write(&temporary, b"occupied").expect("owned occupied path");
         assert!(controls.apply(&staging, &cancel).is_err());
         assert_eq!(fs::read(&temporary).expect("not overwritten"), b"occupied");
+        drop(staging);
+        let staging = StagedExport::new(&target).expect("partial-frame staging");
+        regions(&staging.output, gif::DisposalMethod::Keep);
+        let partial = fs::read(&staging.output).expect("partial frames");
+        let controls = Animation::read(&staging.output, &cancel).expect("partial controls");
+        assert!(
+            controls
+                .apply(&staging, &cancel)
+                .expect_err("only RGBA PNG snapshots may use normalized disposal")
+                .to_string()
+                .contains("GIF export")
+        );
+        assert_eq!(
+            fs::read(&staging.output).expect("output untouched"),
+            partial
+        );
+        assert_eq!(
+            fs::read(&target).expect("target untouched"),
+            b"existing target"
+        );
         drop(staging);
         assert_eq!(fs::read_dir(&root).expect("stages cleaned").count(), 2);
 
@@ -496,6 +617,333 @@ mod tests {
             Animation::read(&source, &cancel),
             Err(ExportError::Cancelled)
         ));
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
+    fn gif_export_clears_transparent_overlays_background_holes_and_previous_restore() {
+        let root = audio_tests::root("gif-opacity");
+        let source = root.join("source.gif");
+        let target = root.join("target.gif");
+        let disposals = [
+            gif::DisposalMethod::Any,
+            gif::DisposalMethod::Keep,
+            gif::DisposalMethod::Background,
+            gif::DisposalMethod::Previous,
+        ];
+        for first in disposals {
+            for second in disposals {
+                for fill_hole in [false, true] {
+                    let mut encoder = gif::Encoder::new(
+                        fs::File::create(&source).expect("source"),
+                        3,
+                        2,
+                        &[255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0],
+                    )
+                    .expect("encoder");
+                    for (width, height, left, top, dispose, pixels) in [
+                        (3, 2, 0, 0, first, vec![0; 6]),
+                        (1, 1, 1, 0, second, vec![1]),
+                        (
+                            3,
+                            2,
+                            0,
+                            0,
+                            gif::DisposalMethod::Keep,
+                            vec![3, if fill_hole { 1 } else { 3 }, 3, 3, 3, 3],
+                        ),
+                        (1, 1, 0, 1, gif::DisposalMethod::Previous, vec![3]),
+                    ] {
+                        encoder
+                            .write_frame(&gif::Frame {
+                                width,
+                                height,
+                                left,
+                                top,
+                                dispose,
+                                delay: 5,
+                                transparent: Some(3),
+                                buffer: pixels.into(),
+                                ..Default::default()
+                            })
+                            .expect("frame");
+                    }
+                    encoder.into_inner().expect("trailer");
+                    let original = crate::decode_image(&source).expect("display");
+                    export_media(&request(&source, &target)).expect("save");
+                    let saved = crate::decode_image(&target).expect("saved");
+                    assert_eq!(saved.frames.len(), original.frames.len());
+                    for (saved, original) in saved.frames.iter().zip(&original.frames) {
+                        assert_eq!(saved.delay, original.delay);
+                        assert!(
+                            saved
+                                .rgba
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .zip(original.rgba.as_chunks::<4>().0)
+                                .all(|(a, b)| a == b || a[3] == 0 && b[3] == 0),
+                            "first={first:?}, second={second:?}, fill={fill_hole}, saved={:?}, expected={:?}",
+                            saved.rgba,
+                            original.rgba
+                        );
+                    }
+                }
+            }
+        }
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
+    fn gif_opaque_palette_keeps_all_256_colors_through_edits_and_resave() {
+        use towavue_core::{ImageResize, ResampleFilter};
+        let root = audio_tests::root("gif-full-palette");
+        let source = root.join("source.gif");
+        let target = root.join("target.gif");
+        let palette: Vec<u8> = (0..256)
+            .flat_map(|i| {
+                [
+                    (i & 7) as u8 * 36,
+                    ((i >> 3) & 7) as u8 * 36,
+                    ((i >> 6) & 3) as u8 * 85,
+                ]
+            })
+            .collect();
+        let mut encoder =
+            gif::Encoder::new(fs::File::create(&source).expect("source"), 16, 16, &palette)
+                .expect("encoder");
+        for index in 0..3 {
+            let frame = gif::Frame {
+                width: 16,
+                height: 16,
+                delay: 2 + index,
+                palette: (index == 1).then(|| {
+                    palette
+                        .as_chunks::<3>()
+                        .0
+                        .iter()
+                        .rev()
+                        .flatten()
+                        .copied()
+                        .collect()
+                }),
+                buffer: (0..256)
+                    .map(|i| (i + usize::from(index)) as u8)
+                    .collect::<Vec<_>>()
+                    .into(),
+                ..Default::default()
+            };
+            encoder.write_frame(&frame).expect("frame");
+        }
+        encoder.into_inner().expect("trailer");
+        let decoded = crate::decode_image(&source).expect("source pixels");
+        for operations in [
+            vec![],
+            vec![
+                EditOperation::RotateClockwise,
+                EditOperation::FlipVertical,
+                EditOperation::Resize(
+                    ImageResize::new(32, 32, ResampleFilter::Nearest).expect("resize"),
+                ),
+            ],
+        ] {
+            let mut request = request(&source, &target);
+            request.operations = operations;
+            export_media(&request).expect("save");
+            let actual = crate::decode_image(&target).expect("saved pixels");
+            let expected = crate::render_image_edits(
+                &decoded,
+                &request.operations,
+                &crate::Cancellation::default(),
+            )
+            .expect("displayed edits");
+            assert!(
+                actual.frames == expected.frames,
+                "opaque GIF must not lose a color to an unused transparent palette entry"
+            );
+            let resave = root.join("resaved.gif");
+            export_media(&self::request(&target, &resave)).expect("resave");
+            assert_eq!(
+                crate::decode_image(&resave).expect("resaved pixels").frames,
+                actual.frames
+            );
+        }
+        let rotation = towavue_core::ImageRotation::new(130, (16, 16)).expect("free rotation");
+        let mut request = request(&source, &target);
+        request.operations = vec![EditOperation::RotateImage(rotation)];
+        export_media(&request).expect("rotation introduces transparency");
+        let rotated = crate::decode_image(&target).expect("rotated");
+        assert_eq!(rotated.frames.len(), decoded.frames.len());
+        for frame in rotated.frames {
+            assert_eq!((frame.width, frame.height), rotation.size());
+            assert_eq!(
+                frame.rgba[3], 0,
+                "rotated canvas corner must remain transparent"
+            );
+            assert!(
+                frame
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|pixel| pixel[3] == 255)
+            );
+        }
+        let mut encoder =
+            gif::Encoder::new(fs::File::create(&source).expect("source"), 16, 16, &palette)
+                .expect("encoder");
+        for index in 0..3 {
+            encoder
+                .write_frame(&gif::Frame {
+                    width: 16,
+                    height: 16,
+                    delay: 2 + index,
+                    transparent: Some(255),
+                    dispose: gif::DisposalMethod::Background,
+                    buffer: (0..256)
+                        .map(|i| (i + usize::from(index)) as u8)
+                        .collect::<Vec<_>>()
+                        .into(),
+                    ..Default::default()
+                })
+                .expect("255 colors plus transparency");
+        }
+        encoder.into_inner().expect("trailer");
+        let original = crate::decode_image(&source).expect("transparent source");
+        export_media(&self::request(&source, &target)).expect("transparent palette save");
+        let saved = crate::decode_image(&target).expect("transparent saved");
+        assert_eq!(saved.frames.len(), original.frames.len());
+        for (saved, original) in saved.frames.iter().zip(&original.frames) {
+            assert_eq!(saved.delay, original.delay);
+            let differences: Vec<_> = saved
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(original.rgba.as_chunks::<4>().0)
+                .enumerate()
+                .filter(|(_, (a, b))| a != b && !(a[3] == 0 && b[3] == 0))
+                .collect();
+            assert!(
+                differences.is_empty(),
+                "255 visible colors and one transparent entry must all survive: {differences:?}"
+            );
+        }
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
+    fn gif_quantization_preserves_alpha_threshold_and_fully_transparent_frames() {
+        let mut pixels: Vec<u8> = (0..4096)
+            .flat_map(|i| {
+                [
+                    (i % 64 * 4) as u8,
+                    (i / 64 * 4) as u8,
+                    (i % 251) as u8,
+                    if i % 7 == 0 { 127 } else { 128 },
+                ]
+            })
+            .collect();
+        let alpha: Vec<_> = pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[3] >= 128)
+            .collect();
+        let frame = palette_frame(64, 64, &mut pixels);
+        assert_eq!(frame.palette.as_ref().expect("palette").len(), 768);
+        let transparent = frame.transparent.expect("transparent entry");
+        for (index, opaque) in frame.buffer.iter().zip(alpha) {
+            assert_eq!(
+                *index != transparent,
+                opaque,
+                "quantization must not punch opaque holes"
+            );
+        }
+        let mut invisible: Vec<u8> = (0..256).flat_map(|i| [i as u8, 25, 73, 0]).collect();
+        let frame = palette_frame(16, 16, &mut invisible);
+        assert_eq!(frame.palette.as_ref().expect("palette").len(), 3);
+        assert!(
+            frame
+                .buffer
+                .iter()
+                .all(|index| Some(*index) == frame.transparent)
+        );
+    }
+
+    #[test]
+    fn gif_png_staging_rejects_corruption_dimensions_extra_data_and_cancellation() {
+        fn png(width: u32, height: u32, color: png::ColorType) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            let mut encoder = png::Encoder::new(&mut bytes, width, height);
+            encoder.set_color(color);
+            let mut writer = encoder.write_header().expect("header");
+            // Invalid oversized headers must be rejected before any image allocation.
+            if width <= 4 && height <= 4 {
+                writer
+                    .write_image_data(&vec![
+                        42;
+                        width as usize * height as usize * color.samples()
+                    ])
+                    .expect("pixels");
+                writer.finish().expect("end");
+            } else {
+                writer
+                    .write_chunk(png::chunk::IDAT, &[])
+                    .expect("empty oversized image");
+                drop(writer);
+            }
+            bytes
+        }
+        let first = png(2, 2, png::ColorType::Rgba);
+        let mut corrupt = first.clone();
+        corrupt[29] ^= 1; // IHDR checksum.
+        let root = audio_tests::root("gif-png-validation");
+        let target = root.join("target.gif");
+        fs::write(&target, b"existing target").expect("target");
+        for (bytes, frames, cancelled, error) in [
+            (corrupt, 1, false, "CRC"),
+            (first[..first.len() - 1].to_vec(), 1, false, "GIF export"),
+            (
+                [first.as_slice(), &[0]].concat(),
+                1,
+                false,
+                "added animation frames",
+            ),
+            (
+                [first.clone(), png(3, 2, png::ColorType::Rgba)].concat(),
+                2,
+                false,
+                "dimensions differ",
+            ),
+            (png(2, 2, png::ColorType::Rgb), 1, false, "RGBA8"),
+            (png(65536, 1, png::ColorType::Rgba), 1, false, "GIF export"),
+            (png(16384, 8193, png::ColorType::Rgba), 1, false, "512 MiB"),
+            (first, 1, true, "cancelled"),
+        ] {
+            let staging = StagedExport::new(&target).expect("staging");
+            fs::write(&staging.output, &bytes).expect("staged input");
+            let controls = Animation {
+                delays: vec![1; frames],
+                repeat: gif::Repeat::Infinite,
+            };
+            let result = controls
+                .apply(&staging, &AtomicBool::new(cancelled))
+                .expect_err("reject invalid snapshot");
+            assert!(
+                result.to_string().contains(error),
+                "expected {error}: {result}"
+            );
+            assert_eq!(
+                fs::read(&staging.output).expect("staged input preserved"),
+                bytes
+            );
+            assert_eq!(
+                fs::read(&target).expect("target preserved"),
+                b"existing target"
+            );
+        }
+        assert_eq!(fs::read_dir(&root).expect("stages cleaned").count(), 1);
         fs::remove_dir_all(root).expect("owned fixture cleanup");
     }
 

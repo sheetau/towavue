@@ -840,7 +840,7 @@ fn ffmpeg_arguments(
         }
     }
     let mut visual = visual_filters(&request.operations);
-    let codecs = if streams.png_animation {
+    let codecs = if streams.png_animation || streams.gif_animation {
         [
             "-c:v",
             "png",
@@ -863,10 +863,6 @@ fn ffmpeg_arguments(
             if streams.png_animation || streams.gif_animation {
                 // Preserve frame order independently of timestamp rounding; restore exact source delays in staging.
                 visual.extend(["settb=1/1000".into(), "setpts=N*100".into()]);
-            }
-            if streams.gif_animation {
-                visual.push("split[colors][pixels];[colors]palettegen=stats_mode=single[palette];[pixels][palette]paletteuse=new=1".into());
-                arguments.extend(["-fps_mode", "passthrough", "-gifflags", "0"].map(String::from));
             }
             if !visual.is_empty() {
                 arguments.extend(["-vf".into(), visual.join(",")]);

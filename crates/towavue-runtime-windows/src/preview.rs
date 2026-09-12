@@ -530,12 +530,11 @@ impl PreviewCache {
             eprintln!("towavue: could not prune preview cache: {error}");
         }
         self.check_cancelled()?;
-        if stored.is_ok() {
-            self.memory
-                .lock()
-                .expect("preview memory")
-                .insert_encoded(key, image.clone(), &bytes);
-        }
+        // Disk failures must not force every waiting caller to decode the same media.
+        self.memory
+            .lock()
+            .expect("preview memory")
+            .insert_encoded(key, image.clone(), &bytes);
         Ok(image)
     }
 
@@ -1260,14 +1259,28 @@ mod tests {
             fs::read(&cache_path).expect("collision"),
             b"preserve this file"
         );
+        assert_eq!(
+            cache
+                .cached_filmstrip(&source, MediaKind::Image)
+                .expect("memory lookup")
+                .expect("pixels survive disk failure")
+                .image,
+            preview.image
+        );
         fs::remove_file(&cache_path).expect("remove own collision fixture");
         assert_eq!(
             cache
                 .filmstrip(&source, MediaKind::Image)
-                .expect("retry after cache path is available")
+                .expect("reuse memory after cache path is available")
                 .image,
             preview.image
         );
+        assert!(!cache_path.exists(), "a memory hit must not retry disk I/O");
+        // A new cache (or a later eviction) can retry optional persistence.
+        PreviewCache::new(cache_path.clone())
+            .expect("available cache")
+            .filmstrip(&source, MediaKind::Image)
+            .expect("retry persistence");
         let key = cache_key(&source, "filmstrip-image-v4").expect("cache key");
         assert!(cache_path.join(format!("{key}.png")).is_file());
         assert_eq!(fs::read(&source).expect("unchanged source"), source_bytes);
@@ -1304,14 +1317,27 @@ mod tests {
             expected
         );
         assert_eq!(fs::read(&temporary).expect("held file"), b"held cache file");
+        assert_eq!(
+            cache
+                .load_or_generate("busy".into(), || panic!(
+                    "busy disk must not cause another decode"
+                ))
+                .expect("memory while disk is busy"),
+            expected
+        );
         drop(lock);
         fs::remove_file(&temporary).expect("release temporary fixture");
         assert_eq!(
             cache
-                .load_or_generate("busy".into(), || Ok(bytes.clone()))
-                .expect("retry cache storage"),
+                .load_or_generate("busy".into(), || panic!("reuse memory after lock release"))
+                .expect("memory reuse"),
             expected
         );
+        assert!(!temporary.exists(), "memory hit does not write the cache");
+        let cache = PreviewCache::new(root.clone()).expect("fresh cache retries persistence");
+        cache
+            .load_or_generate("busy".into(), || Ok(bytes.clone()))
+            .expect("retry storage");
         assert_eq!(
             cache
                 .load_or_generate("busy".into(), || panic!("valid cache must be reused"))

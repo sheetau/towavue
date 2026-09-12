@@ -22,6 +22,113 @@ fn png() -> Vec<u8> {
 }
 
 #[test]
+fn unavailable_disk_cache_still_coalesces_and_reuses_generated_pixels() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let root = cache("preview-memory-without-disk").root;
+    let occupied = root.join("occupied");
+    fs::write(&occupied, b"preserve occupied path").expect("owned collision");
+    let cache = PreviewCache::new(occupied.clone()).expect("optional disk storage");
+    let bytes = png();
+    let expected = decode_png(&bytes).expect("expected pixels");
+    let generated = AtomicUsize::new(0);
+    let ready = std::sync::Barrier::new(4);
+    thread::scope(|scope| {
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                scope.spawn(|| {
+                    ready.wait();
+                    cache
+                        .clone()
+                        .load_or_generate("shared".into(), || {
+                            generated.fetch_add(1, Ordering::Relaxed);
+                            Ok(bytes.clone())
+                        })
+                        .expect("preview without disk")
+                })
+            })
+            .collect();
+        for worker in workers {
+            assert_eq!(worker.join().expect("worker"), expected);
+        }
+    });
+    assert_eq!(
+        generated.load(Ordering::Relaxed),
+        1,
+        "one decode across simultaneous callers even if persistence fails"
+    );
+    assert_eq!(
+        cache
+            .load_or_generate("shared".into(), || panic!("reuse memory"))
+            .expect("memory hit"),
+        expected
+    );
+    let cancellation = Cancellation::default();
+    cancellation.cancel();
+    assert!(matches!(
+        cache
+            .cancellable(cancellation)
+            .load_or_generate("shared".into(), || panic!("cancelled")),
+        Err(PreviewError::Cancelled)
+    ));
+    assert_eq!(
+        fs::read(&occupied).expect("occupied path"),
+        b"preserve occupied path"
+    );
+    fs::remove_file(occupied).expect("remove owned collision");
+    fs::remove_dir(root).expect("remove owned directory");
+}
+
+#[test]
+#[ignore = "Release measurement; set TOWAVUE_PREVIEW_BENCH_IMAGE to a large PNG"]
+fn large_image_preview_reuse_without_disk_reports_repeated_request_cost() {
+    let source =
+        PathBuf::from(std::env::var_os("TOWAVUE_PREVIEW_BENCH_IMAGE").expect("large PNG path"));
+    let dimensions = image::image_dimensions(&source).expect("source dimensions");
+    assert!(dimensions.0.max(dimensions.1) >= 4000);
+    let root = cache("preview-no-disk-measurement").root;
+    let occupied = root.join("occupied");
+    fs::write(&occupied, b"preserve cache collision").expect("owned collision");
+    let mut expected = None;
+    // Same-binary ABBA comparison; clearing memory models the previous failure path.
+    // Each batch includes first generation and three requests for the same image.
+    for retain in [false, true, true, false] {
+        let cache = PreviewCache::new(occupied.clone()).expect("optional disk cache");
+        let mut samples = Vec::new();
+        for _ in 0..3 {
+            *cache.memory.lock().expect("memory") = PreviewMemory::default();
+            let started = std::time::Instant::now();
+            for _ in 0..4 {
+                if !retain {
+                    *cache.memory.lock().expect("memory") = PreviewMemory::default();
+                }
+                let image = cache
+                    .filmstrip(&source, MediaKind::Image)
+                    .expect("preview")
+                    .image;
+                if let Some(expected) = &expected {
+                    assert_eq!(&image, expected);
+                } else {
+                    expected = Some(image);
+                }
+            }
+            samples.push(started.elapsed().as_secs_f64() * 1000.0);
+        }
+        samples.sort_by(f64::total_cmp);
+        println!(
+            "preview-no-disk source={}x{} retain_memory={retain} requests=4 batch_median_ms={:.3}",
+            dimensions.0, dimensions.1, samples[1]
+        );
+    }
+    assert_eq!(
+        fs::read(&occupied).expect("collision"),
+        b"preserve cache collision"
+    );
+    fs::remove_file(occupied).expect("remove owned collision");
+    fs::remove_dir(root).expect("remove owned measurement directory");
+}
+
+#[test]
 fn avif_thumbnail_revision_leaves_other_format_cache_keys_unchanged() {
     let cache = cache("avif-thumbnail-revision");
     for extension in ["avif", "AVIF", "png", "jpg"] {

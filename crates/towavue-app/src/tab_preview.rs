@@ -461,7 +461,7 @@ mod tests {
             TextureOptions::LINEAR,
         );
         let texture_id = texture.id();
-        let frame = |app: &mut crate::Application<_>, pointer, time| {
+        let frame = |app: &mut crate::Application<_>, pointer, time, external_drag| {
             context.run_ui(
                 egui::RawInput {
                     time: Some(time),
@@ -471,6 +471,11 @@ mod tests {
                         egui::vec2(960.0, 576.0),
                     )),
                     events: vec![egui::Event::PointerMoved(pointer)],
+                    hovered_files: if external_drag {
+                        vec![egui::HoveredFile::default()]
+                    } else {
+                        Vec::new()
+                    },
                     ..Default::default()
                 },
                 |ui| {
@@ -481,7 +486,7 @@ mod tests {
             )
         };
         for index in 0..3 {
-            frame(&mut app, egui::pos2(90.0, 16.0), index as f64 * 0.1);
+            frame(&mut app, egui::pos2(90.0, 16.0), index as f64 * 0.1, false);
         }
         assert!(
             app.tab_preview.target.is_some(),
@@ -491,7 +496,7 @@ mod tests {
         app.tab_preview.texture = Some(Ok(texture));
         let mut output = egui::FullOutput::default();
         for index in 3..8 {
-            output = frame(&mut app, egui::pos2(90.0, 16.0), index as f64 * 0.1);
+            output = frame(&mut app, egui::pos2(90.0, 16.0), index as f64 * 0.1, false);
         }
         let rect = output
             .shapes
@@ -509,15 +514,52 @@ mod tests {
             history
         );
         assert!(app.pending_guard.is_none() && app.session.is_none());
-        frame(&mut app, egui::pos2(400.0, 300.0), 1.0);
+        let target = app.tab_preview.target.clone().expect("hovered tab");
+        let generation = app.tab_preview.generation;
+        let output = frame(&mut app, egui::pos2(90.0, 16.0), 0.8, true);
+        assert!(app.tab_preview.target.is_none() && app.tab_preview.texture.is_none());
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill_texture_id() == texture_id)), "drop overlay must release the displayed preview");
+        app.tab_preview
+            .finish(&context, target, generation, Err("stale result".into()));
+        assert!(
+            app.tab_preview.texture.is_none(),
+            "late results must not restore hidden previews"
+        );
+        let generation = app.tab_preview.generation;
+        frame(&mut app, egui::pos2(90.0, 16.0), 0.9, true);
+        assert_eq!(
+            app.tab_preview.generation, generation,
+            "no request/cancel churn while dragging"
+        );
+        frame(&mut app, egui::pos2(90.0, 16.0), 1.0, false);
+        assert!(
+            app.tab_preview.target.is_some(),
+            "hover resumes after drag leaves"
+        );
+        assert_eq!(app.tabs, tabs);
+        assert_eq!(
+            app.edits[&tabs.active().expect("active").id].operations(),
+            history
+        );
+        frame(&mut app, egui::pos2(400.0, 300.0), 1.1, false);
         assert!(app.tab_preview.target.is_none() && app.tab_preview.texture.is_none());
         for overlay in 0..3 {
-            frame(&mut app, egui::pos2(90.0, 16.0), 2.0 + overlay as f64);
+            frame(
+                &mut app,
+                egui::pos2(90.0, 16.0),
+                2.0 + overlay as f64,
+                false,
+            );
             assert!(app.tab_preview.target.is_some());
             app.palette_open = overlay == 0;
             app.grid_open = overlay == 1;
             app.filmstrip_open = overlay == 2;
-            frame(&mut app, egui::pos2(90.0, 16.0), 2.5 + overlay as f64);
+            frame(
+                &mut app,
+                egui::pos2(90.0, 16.0),
+                2.5 + overlay as f64,
+                false,
+            );
             assert!(app.tab_preview.target.is_none() && app.tab_preview.texture.is_none());
             app.palette_open = false;
             app.grid_open = false;

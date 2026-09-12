@@ -32,6 +32,12 @@ fn text_content(ui: &mut Ui, text: impl Into<WidgetText>) {
 }
 
 fn show(response: &Response, content: impl FnOnce(&mut Ui)) {
+    if response
+        .ctx
+        .input(|input| !input.raw.hovered_files.is_empty())
+    {
+        return;
+    }
     let open = response.is_tooltip_open();
     let own_layer = egui::LayerId::new(egui::Order::Tooltip, Tooltip::tooltip_id(response.id, 0));
     // Help belongs to the visible source, not an unclipped rect or a path toward the popup.

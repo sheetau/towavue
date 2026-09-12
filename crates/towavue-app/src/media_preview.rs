@@ -6,6 +6,13 @@ pub struct Preview {
 }
 
 pub fn hover_pos(response: &Response) -> Option<egui::Pos2> {
+    // The drop overlay owns this hover even though it is painted without hit testing.
+    if response
+        .ctx
+        .input(|input| !input.raw.hovered_files.is_empty())
+    {
+        return None;
+    }
     response.ctx.pointer_hover_pos().filter(|&pointer| {
         response.enabled()
             && response.interact_rect.contains(pointer)
@@ -36,6 +43,7 @@ impl Preview {
         let dragging = self.seek.is_some() && crate::timeline_input::is_dragging(&response);
         if !response.enabled()
             || egui::Popup::is_any_open(context)
+            || context.input(|input| !input.raw.hovered_files.is_empty())
             || !(dragging
                 || (hover_pos(&response).is_some()
                     && !context.input(|input| input.pointer.any_down())))
@@ -89,6 +97,83 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_file_drag_suppresses_hover_content_until_it_leaves() {
+        use crate::hover_help::HoverHelp;
+
+        for focused in [true, false] {
+            for mode in 0..3 {
+                let context = crate::fonts::test_context();
+                context.global_style_mut(|style| {
+                    style.interaction.tooltip_delay = 0.0;
+                    style.interaction.show_tooltips_only_when_still = false;
+                });
+                let source =
+                    egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(120.0, 30.0));
+                let mut time = 0.0;
+                let mut frame = |external_drag| {
+                    time += 0.1;
+                    let mut hovered = false;
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(500.0, 400.0),
+                            )),
+                            time: Some(time),
+                            focused,
+                            events: vec![egui::Event::PointerMoved(source.center())],
+                            hovered_files: if external_drag {
+                                vec![egui::HoveredFile {
+                                    mime: "image/png".into(),
+                                    ..Default::default()
+                                }]
+                            } else {
+                                Vec::new()
+                            },
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let response =
+                                ui.interact(source, "hover-source".into(), egui::Sense::hover());
+                            hovered = hover_pos(&response).is_some();
+                            match mode {
+                                0 => {
+                                    Preview::tab(&response).show(|ui| ui.label("Hover content"));
+                                }
+                                1 => {
+                                    Preview::seek(&response, 0.5)
+                                        .show(|ui| ui.label("Hover content"));
+                                }
+                                _ => {
+                                    response.help_text("Hover content");
+                                }
+                            }
+                        },
+                    );
+                    let shown = output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Hover content"));
+                    (hovered, shown)
+                };
+                frame(false);
+                frame(false);
+                assert!(
+                    frame(false).1,
+                    "seed hover content: {mode}, focused={focused}"
+                );
+                let (hovered, shown) = frame(true);
+                assert!(
+                    !hovered,
+                    "external drag must not request background previews"
+                );
+                assert!(!shown, "external drag must hide content: {mode}");
+                assert!(!frame(true).1, "no stale content while drag remains");
+                frame(false);
+                assert!(frame(false).1, "hover resumes after external drag leaves");
+                assert!(context.memory(egui::Memory::focused).is_none());
+            }
+        }
+    }
 
     #[test]
     fn previews_replace_previous_tooltips_immediately_and_reanchor_size_changes() {

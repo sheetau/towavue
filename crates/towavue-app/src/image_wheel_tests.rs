@@ -116,6 +116,78 @@ fn image_wheel_reaches_the_rendered_view_without_requiring_window_focus() {
                 "wheel must not focus a widget"
             );
 
+            // Batching OS events into one redraw must not reorder zoom and pan, or
+            // cancel a reversal at a scroll boundary before either event is applied.
+            for (name, events) in [
+                (
+                    "vertical boundary reversal",
+                    vec![
+                        wheel(egui::Modifiers::NONE, 10000.0),
+                        wheel(egui::Modifiers::NONE, -30.0),
+                    ],
+                ),
+                (
+                    "horizontal boundary reversal",
+                    vec![
+                        wheel(egui::Modifiers::SHIFT, -10000.0),
+                        wheel(egui::Modifiers::SHIFT, 30.0),
+                    ],
+                ),
+                (
+                    "pan before anchored zoom",
+                    vec![
+                        wheel(egui::Modifiers::NONE, 30.0),
+                        wheel(egui::Modifiers::CTRL, 60.0),
+                    ],
+                ),
+                (
+                    "interleaved pan and zoom",
+                    vec![
+                        wheel(egui::Modifiers::SHIFT, -40.0),
+                        wheel(egui::Modifiers::CTRL, 60.0),
+                        egui::Event::PointerMoved(point + egui::vec2(30.0, -20.0)),
+                        wheel(egui::Modifiers::NONE, 50.0),
+                        wheel(egui::Modifiers::CTRL, -30.0),
+                    ],
+                ),
+                (
+                    "zoom follows changing scrollbar geometry",
+                    vec![
+                        wheel(egui::Modifiers::CTRL, -400.0),
+                        egui::Event::PointerMoved(egui::pos2(399.0, 150.0)),
+                        wheel(egui::Modifiers::CTRL, 60.0),
+                    ],
+                ),
+            ] {
+                app.image_view = view;
+                frame(&mut app, vec![egui::Event::PointerMoved(point)], focused);
+                for event in &events {
+                    frame(&mut app, vec![event.clone()], focused);
+                }
+                let expected = app.image_view;
+                let expected_mesh = mesh(&frame(&mut app, vec![], focused));
+                app.image_view = view;
+                frame(&mut app, vec![egui::Event::PointerMoved(point)], focused);
+                let output = frame(&mut app, events, focused);
+                assert_eq!(app.image_view.zoom, expected.zoom);
+                assert_eq!(app.image_view.selection, expected.selection);
+                // egui rounds scroll content geometry to its sub-point layout grid.
+                assert!(
+                    (egui::Vec2::from(app.image_view.pan) - egui::Vec2::from(expected.pan))
+                        .length()
+                        < 0.02,
+                    "{name} at {density}x, focused={focused}"
+                );
+                let actual_mesh = mesh(&output);
+                assert!((actual_mesh.min - expected_mesh.min).length() < 0.02);
+                assert!((actual_mesh.max - expected_mesh.max).length() < 0.02);
+                let actual = app.image_view;
+                frame(&mut app, vec![], focused);
+                assert_eq!(app.image_view, actual, "no delayed burst tail");
+            }
+            app.image_view = view;
+            frame(&mut app, vec![egui::Event::PointerMoved(point)], focused);
+
             // A focus-loss transition cancels the entire frame, including later positioned input.
             frame(
                 &mut app,

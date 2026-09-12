@@ -3116,18 +3116,37 @@ where
             }
         }
         if self.view_input_allowed(ui.ctx()) && self.view_drag.is_none() {
-            for (pointer, zoom) in wheel_input::zoom_events(ui.ctx(), &response) {
-                let center =
-                    viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
-                let old_scale = scale;
-                self.image_view
-                    .zoom_by(zoom, image_size, physical_viewport.into());
-                scale =
-                    self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
-                let from_center = pointer - center;
-                let correction = from_center * (1.0 - scale / old_scale);
-                self.image_view.pan.0 += correction.x;
-                self.image_view.pan.1 += correction.y;
+            let mut wheel_response = response.clone();
+            wheel_response.interact_rect = viewport;
+            // Clamp each event in arrival order: combining deltas loses reversals at
+            // a boundary, and applying all zoom first changes later cursor anchors.
+            for (pointer, event) in wheel_input::image_events(ui.ctx(), &wheel_response) {
+                match event {
+                    wheel_input::ViewWheel::Zoom(zoom) => {
+                        let surface = image_scroll::surface(
+                            viewport,
+                            egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
+                            ui.spacing().scroll.bar_width,
+                        );
+                        if !surface.contains(pointer) {
+                            continue;
+                        }
+                        let center = viewport.center()
+                            + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
+                        let old_scale = scale;
+                        self.image_view
+                            .zoom_by(zoom, image_size, physical_viewport.into());
+                        scale = self.image_view.scale(image_size, physical_viewport.into())
+                            / pixels_per_point;
+                        let correction = (pointer - center) * (1.0 - scale / old_scale);
+                        self.image_view.pan.0 += correction.x;
+                        self.image_view.pan.1 += correction.y;
+                    }
+                    wheel_input::ViewWheel::Pan(delta) => {
+                        self.image_view.pan.0 += delta.x;
+                        self.image_view.pan.1 += delta.y;
+                    }
+                }
                 image_scroll::clamp(
                     &mut self.image_view,
                     egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
@@ -3156,13 +3175,6 @@ where
             self.cancel_view_drag();
         }
         let enabled = self.view_drag_allowed(ui.ctx()) && self.view_drag.is_none();
-        if self.view_input_allowed(ui.ctx()) && self.view_drag.is_none() {
-            let mut wheel_response = response.clone();
-            wheel_response.interact_rect = viewport;
-            let delta = wheel_input::image_scroll_delta(ui.ctx(), &wheel_response);
-            self.image_view.pan.0 += delta.x;
-            self.image_view.pan.1 += delta.y;
-        }
         image_scroll::clamp(&mut self.image_view, displayed, viewport.size());
         self.update_selection(
             &response,

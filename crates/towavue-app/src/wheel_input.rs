@@ -53,21 +53,33 @@ pub fn volume_delta(context: &Context, targets: &[Response], excluded: Option<eg
         .sum()
 }
 
-pub fn zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
-    zoom_events_filtered(context, target, |_| true)
+pub enum ViewWheel {
+    Zoom(f32),
+    Pan(egui::Vec2),
+}
+
+pub fn image_events(context: &Context, target: &Response) -> Vec<(Pos2, ViewWheel)> {
+    view_events_filtered(context, target, true, |_| true)
 }
 
 pub fn video_zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
-    zoom_events_filtered(context, target, |modifiers| {
+    view_events_filtered(context, target, false, |modifiers| {
         modifiers.ctrl && !modifiers.alt && !modifiers.mac_cmd
     })
+    .into_iter()
+    .filter_map(|(position, event)| match event {
+        ViewWheel::Zoom(factor) => Some((position, factor)),
+        ViewWheel::Pan(_) => None,
+    })
+    .collect()
 }
 
-fn zoom_events_filtered(
+fn view_events_filtered(
     context: &Context,
     target: &Response,
+    include_scroll: bool,
     allowed: impl Fn(egui::Modifiers) -> bool,
-) -> Vec<(Pos2, f32)> {
+) -> Vec<(Pos2, ViewWheel)> {
     if !target.enabled()
         || context.input(|input| {
             input
@@ -84,7 +96,7 @@ fn zoom_events_filtered(
         return context
             .input(|input| input.pointer.hover_pos())
             .filter(|_| gesture_allowed && target.hovered() && touch.zoom_delta != 1.0)
-            .map(|position| (position, touch.zoom_delta))
+            .map(|position| (position, ViewWheel::Zoom(touch.zoom_delta)))
             .into_iter()
             .collect();
     }
@@ -106,77 +118,45 @@ fn zoom_events_filtered(
                 target.interact_rect.contains(*pos)
                     && context.layer_id_at(*pos) == Some(target.layer_id)
             })?;
-            let factor = match event {
+            let action = match event {
                 Event::MouseWheel {
                     unit,
                     delta,
                     modifiers,
                     phase: egui::TouchPhase::Move,
-                } if modifiers.matches_any(options.zoom_modifier) && allowed(modifiers) => {
+                } => {
                     let points = match unit {
                         egui::MouseWheelUnit::Point => 1.0,
                         egui::MouseWheelUnit::Line => options.line_scroll_speed,
                         egui::MouseWheelUnit::Page => page_height,
                     };
-                    (options.scroll_zoom_speed * points * (delta.x + delta.y)).exp()
+                    if modifiers.matches_any(options.zoom_modifier) && allowed(modifiers) {
+                        ViewWheel::Zoom(
+                            (options.scroll_zoom_speed * points * (delta.x + delta.y)).exp(),
+                        )
+                    } else if include_scroll
+                        && !modifiers.ctrl
+                        && !modifiers.alt
+                        && !modifiers.mac_cmd
+                    {
+                        ViewWheel::Pan(if modifiers.shift {
+                            egui::vec2(delta.x + delta.y, 0.0) * points
+                        } else {
+                            delta * points
+                        })
+                    } else {
+                        return None;
+                    }
                 }
-                Event::Zoom(factor) if gesture_allowed => factor,
+                Event::Zoom(factor) if gesture_allowed => ViewWheel::Zoom(factor),
                 _ => return None,
             };
-            (factor != 1.0).then_some((position, factor))
+            match action {
+                ViewWheel::Zoom(1.0) => None,
+                _ => Some((position, action)),
+            }
         })
         .collect()
-}
-
-pub fn image_scroll_delta(context: &Context, target: &Response) -> egui::Vec2 {
-    let options = context.options(|options| options.input_options);
-    let page_height = context.input(|input| input.viewport_rect().height());
-    if !target.enabled()
-        || context.input(|input| {
-            input.pointer.any_down()
-                || input.events.iter().any(|event| {
-                    matches!(
-                        event,
-                        Event::WindowFocused(false) | Event::PointerButton { pressed: true, .. }
-                    )
-                })
-        })
-    {
-        return egui::Vec2::ZERO;
-    }
-    positioned_events(context)
-        .into_iter()
-        .filter_map(|(position, event)| {
-            let Event::MouseWheel {
-                unit,
-                mut delta,
-                modifiers,
-                phase: egui::TouchPhase::Move,
-            } = event
-            else {
-                return None;
-            };
-            if modifiers.ctrl
-                || modifiers.alt
-                || modifiers.mac_cmd
-                || !position.is_some_and(|pos| {
-                    target.interact_rect.contains(pos)
-                        && context.layer_id_at(pos) == Some(target.layer_id)
-                })
-            {
-                return None;
-            }
-            delta *= match unit {
-                egui::MouseWheelUnit::Point => 1.0,
-                egui::MouseWheelUnit::Line => options.line_scroll_speed,
-                egui::MouseWheelUnit::Page => page_height,
-            };
-            if modifiers.shift {
-                delta = egui::vec2(delta.x + delta.y, 0.0);
-            }
-            Some(delta)
-        })
-        .fold(egui::Vec2::ZERO, |total, delta| total + delta)
 }
 
 fn positioned_events(context: &Context) -> Vec<(Option<Pos2>, Event)> {
@@ -274,6 +254,16 @@ impl Scroll {
 mod tests {
     use super::*;
 
+    fn zoom_events(context: &Context, target: &Response) -> Vec<(Pos2, f32)> {
+        image_events(context, target)
+            .into_iter()
+            .filter_map(|(position, event)| match event {
+                ViewWheel::Zoom(factor) => Some((position, factor)),
+                ViewWheel::Pan(_) => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn inactive_image_scroll_keeps_position_modifiers_and_cancellation_gates() {
         for focused in [true, false] {
@@ -330,7 +320,13 @@ mod tests {
                         |ui| {
                             ui.add_enabled_ui(enabled, |ui| {
                                 let target = ui.allocate_rect(rect, egui::Sense::hover());
-                                let delta = image_scroll_delta(ui.ctx(), &target);
+                                let delta = image_events(ui.ctx(), &target)
+                                    .into_iter()
+                                    .filter_map(|(_, event)| match event {
+                                        ViewWheel::Pan(delta) => Some(delta),
+                                        ViewWheel::Zoom(_) => None,
+                                    })
+                                    .fold(egui::Vec2::ZERO, |total, delta| total + delta);
                                 assert_eq!(
                                     delta,
                                     if index == 2 {

@@ -7,7 +7,6 @@ pub(crate) mod tests;
 struct Drag {
     tab: TabId,
     widget: egui::Id,
-    offset: egui::Vec2,
     detached_anchor: egui::Vec2,
     origin: egui::Pos2,
     crossed: bool,
@@ -29,14 +28,12 @@ struct State {
 }
 
 fn state_id() -> egui::Id {
-    egui::Id::new("tab-drag-projection")
+    egui::Id::new("tab-drag-state")
 }
 
 pub(super) struct Layout {
     state: State,
-    rectangles: Vec<egui::Rect>,
     gap: Option<(usize, f32)>,
-    pub(super) floating: Option<TabId>,
 }
 
 impl Layout {
@@ -54,6 +51,22 @@ impl Layout {
             .unwrap_or_default();
         let screen = context.content_rect();
         let density = context.pixels_per_point();
+        let overflowing = rectangles
+            .first()
+            .is_some_and(|rect| rect.left() < strip.left())
+            || rectangles
+                .last()
+                .is_some_and(|rect| rect.right() > strip.right());
+        let press_strip = if overflowing {
+            // Reserve the floating scrollbar even when press/move/release arrive in one frame.
+            strip.with_max_y(
+                strip.bottom()
+                    - ui.spacing().scroll.bar_width
+                    - ui.spacing().scroll.bar_outer_margin,
+            )
+        } else {
+            strip
+        };
         let (pointer, down, released, focused, escape, events) = ui.input(|input| {
             (
                 input.pointer.interact_pos(),
@@ -100,13 +113,18 @@ impl Layout {
             && let Some((tab, widget, rect)) = state
                 .widgets
                 .iter()
-                .find(|(_, _, rect)| rect.intersect(strip).contains(origin))
+                .find(|(_, _, rect)| rect.intersect(press_strip).contains(origin))
             && tabs.iter().any(|(id, _)| id == tab)
+            && ((!down && released)
+                || context.read_response(*widget).is_some_and(|response| {
+                    response.is_pointer_button_down_on()
+                        || response.drag_stopped()
+                        || response.clicked()
+                }))
         {
             state.drag = Some(Drag {
                 tab: *tab,
                 widget: *widget,
-                offset: origin - rect.min,
                 detached_anchor: strip.min.to_vec2() + (origin - rect.min),
                 origin,
                 crossed: false,
@@ -127,47 +145,16 @@ impl Layout {
                 context.set_dragged_id(drag.widget);
             }
         }
-        let mut projected = rectangles.clone();
-        let mut gap = None;
-        let floating = state
+        let gap = state
             .drag
             .as_ref()
-            .filter(|drag| drag.crossed && ui.input(|input| input.pointer.hover_pos().is_some()))
-            .map(|drag| drag.tab);
-        if let Some(drag) = &state.drag
-            && drag.crossed
-            && floating.is_some()
-            && let Some(pointer) = pointer
-            && let Some(from) = tabs.iter().position(|(tab, _)| *tab == drag.tab)
-        {
-            gap = chrome::tab_drop_gap(&rectangles, strip, pointer);
-            if let Some((gap, _)) = gap {
-                let to = gap - usize::from(gap > from);
-                for (index, rect) in projected.iter_mut().enumerate() {
-                    let slot = if index > from && index <= to {
-                        index - 1
-                    } else if index < from && index >= to {
-                        index + 1
-                    } else {
-                        index
-                    };
-                    *rect = rectangles[slot];
-                }
-            }
-            projected[from] =
-                egui::Rect::from_min_size(pointer - drag.offset, rectangles[from].size());
-        }
+            .filter(|drag| drag.crossed)
+            .and_then(|_| {
+                ui.input(|input| input.pointer.hover_pos())
+                    .and_then(|pointer| chrome::tab_drop_gap(&rectangles, strip, pointer))
+            });
         state.widgets.clear();
-        Self {
-            state,
-            rectangles: projected,
-            gap,
-            floating,
-        }
-    }
-
-    pub(super) fn rect(&self, index: usize) -> egui::Rect {
-        self.rectangles[index]
+        Self { state, gap }
     }
 
     pub(super) fn register(&mut self, tab: TabId, response: &egui::Response) {

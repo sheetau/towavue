@@ -263,9 +263,135 @@ fn incoming_tabs_scroll_without_pointer_capture_and_accept_empty_welcome() {
 }
 
 #[test]
-fn tab_drag_projects_the_grabbed_offset_and_neighbors_without_mutating_tabs() {
+fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
     let Some(root) = crate::tests::isolated_test_root(
-        "tab_drag::tests::tab_drag_projects_the_grabbed_offset_and_neighbors_without_mutating_tabs",
+        "tab_drag::tests::tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover",
+    ) else {
+        return;
+    };
+    let size = egui::vec2(640.0, 576.0);
+    for (delta, modifiers) in [
+        (egui::vec2(0.0, -80.0), egui::Modifiers::NONE),
+        (egui::vec2(0.0, -80.0), egui::Modifiers::SHIFT),
+        (egui::vec2(-80.0, 0.0), egui::Modifiers::NONE),
+    ] {
+        let mut app = setup(&root);
+        let first = app.tabs.tabs()[0].id;
+        for index in 0..14 {
+            app.tabs
+                .open_new(root.join(format!("scroll-{index}.png")), MediaKind::Image);
+        }
+        app.tabs.activate(first);
+        let tabs = app.tabs.clone();
+        for _ in 0..30 {
+            frame(&mut app, size, true, vec![]);
+        }
+        let (output, _) = frame(&mut app, size, true, vec![]);
+        let bounds = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree")
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == egui::accesskit::Role::ScrollBar)
+            .expect("tab scrollbar")
+            .1
+            .bounds()
+            .expect("bar bounds");
+        let grab = egui::pos2(
+            bounds.x0 as f32 + 5.0,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        );
+        let initial = state(&app).widgets;
+        frame(&mut app, size, true, vec![egui::Event::PointerMoved(grab)]);
+        frame(&mut app, size, true, vec![pointer(grab, true)]);
+        let moved = grab + egui::vec2(40.0, 0.0);
+        let (_, actions) = frame(&mut app, size, true, vec![egui::Event::PointerMoved(moved)]);
+        assert!(
+            state(&app).drag.is_none(),
+            "scrollbar must not start a tab drag"
+        );
+        assert!(actions.is_empty());
+        assert!(
+            frame(&mut app, size, true, vec![pointer(moved, false)])
+                .1
+                .is_empty()
+        );
+        for _ in 0..30 {
+            frame(&mut app, size, true, vec![]);
+        }
+        let (hovered, _) = frame(&mut app, size, true, vec![]);
+        assert!(state(&app).widgets[0].2.left() < initial[0].2.left() - 20.0);
+        let bar_height = |output: &egui::FullOutput| {
+            output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Rect(rect)
+                        if rect.rect.width() > 10.0
+                            && rect.rect.height() <= 12.0
+                            && rect.fill.a() > 0
+                            && rect.rect.contains(moved) =>
+                    {
+                        Some(rect.rect.height())
+                    }
+                    _ => None,
+                })
+                .reduce(f32::max)
+                .expect("visible scrollbar")
+        };
+        let hovered_height = bar_height(&hovered);
+        assert!(
+            hovered_height <= 2.01,
+            "tab scrollbar stays thin: {hovered_height}"
+        );
+        let strip = state(&app).strip.expect("strip");
+        let wheel = strip.center();
+        frame(&mut app, size, true, vec![egui::Event::PointerMoved(wheel)]);
+        let before = state(&app).widgets[0].2.left();
+        frame(
+            &mut app,
+            size,
+            true,
+            vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta,
+                phase: egui::TouchPhase::Move,
+                modifiers,
+            }],
+        );
+        for _ in 0..30 {
+            frame(&mut app, size, true, vec![]);
+        }
+        assert!(
+            state(&app).widgets[0].2.left() < before - 20.0,
+            "wheel {delta:?}/{modifiers:?}"
+        );
+        assert!(state(&app).drag.is_none());
+        assert_eq!(app.tabs, tabs);
+        let (_, actions) = frame(
+            &mut app,
+            size,
+            true,
+            vec![
+                pointer(grab, true),
+                egui::Event::PointerMoved(wheel),
+                pointer(wheel, false),
+            ],
+        );
+        assert!(
+            actions.is_empty(),
+            "batched scrollbar press never becomes a tab action"
+        );
+        assert!(state(&app).drag.is_none());
+    }
+}
+
+#[test]
+fn tab_drag_keeps_tab_geometry_fixed_until_release() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::tab_drag_keeps_tab_geometry_fixed_until_release",
     ) else {
         return;
     };
@@ -288,44 +414,40 @@ fn tab_drag_projects_the_grabbed_offset_and_neighbors_without_mutating_tabs() {
         vec![egui::Event::PointerMoved(target)],
     );
     assert!(actions.is_empty());
-    let projected = state(&app);
-    assert_eq!(projected.drag.as_ref().expect("drag").tab, original[0].0);
-    assert_eq!(
-        projected.widgets[0].2.min,
-        original[0].2.min + (target - start)
-    );
-    assert_eq!(projected.widgets[1].2.min, original[0].2.min);
-    assert_eq!(projected.widgets[2].2.min, original[1].2.min);
+    let dragging = state(&app);
+    assert_eq!(dragging.drag.as_ref().expect("drag").tab, original[0].0);
+    assert_eq!(dragging.widgets, original);
     assert_eq!(app.tabs, tabs);
     let tree = output.platform_output.accesskit_update.expect("tree");
     let label = tree
         .nodes
         .iter()
         .find(|(_, node)| node.label() == Some("a.png"))
-        .expect("floating semantics");
+        .expect("stable tab semantics");
     assert_eq!(
         label.1.bounds().expect("bounds").x0 as f32,
-        projected.widgets[0].2.left()
+        original[0].2.left()
     );
     let over_media = target + egui::vec2(0.0, 90.0);
-    let (floating_output, actions) = frame(
+    let (output, actions) = frame(
         &mut app,
         size,
         true,
         vec![egui::Event::PointerMoved(over_media)],
     );
     assert!(actions.is_empty());
-    let label = state(&app).widgets[0].2;
+    assert_eq!(state(&app).widgets, original);
+    let label = original[0].2;
     let full = egui::Rect::from_min_max(
         label.min,
         label.max + egui::vec2(chrome::TAB_CLOSE_WIDTH, 0.0),
     );
     assert!(
-        floating_output.shapes.iter().any(
+        output.shapes.iter().any(
             |clipped| matches!(&clipped.shape, egui::Shape::Rect(shape) if shape.rect == full)
-                && clipped.clip_rect == egui::Rect::from_min_size(egui::Pos2::ZERO, size)
+                && clipped.clip_rect.height() < size.y
         ),
-        "floating background must escape the strip clip, like its label"
+        "the tab stays clipped to the strip while the pointer crosses the media"
     );
     frame(
         &mut app,
@@ -519,9 +641,9 @@ fn tab_drag_batched_move_release_still_commits_once() {
 }
 
 #[test]
-fn tab_drag_scrolls_clipped_tabs_without_losing_the_grabbed_offset() {
+fn tab_drag_edge_scroll_moves_the_strip_without_projecting_neighbors() {
     let Some(root) = crate::tests::isolated_test_root(
-        "tab_drag::tests::tab_drag_scrolls_clipped_tabs_without_losing_the_grabbed_offset",
+        "tab_drag::tests::tab_drag_edge_scroll_moves_the_strip_without_projecting_neighbors",
     ) else {
         return;
     };
@@ -553,12 +675,14 @@ fn tab_drag_scrolls_clipped_tabs_without_losing_the_grabbed_offset() {
                 vec![egui::Event::PointerMoved(start), pointer(start, true)],
             );
             frame(&mut app, size, true, vec![egui::Event::PointerMoved(right)]);
-            let float_left = state(&app).widgets[0].2.left();
             for _ in 0..12 {
                 frame(&mut app, size, true, vec![]);
             }
             let scrolled = state(&app);
-            assert_eq!(scrolled.widgets[0].2.left(), float_left);
+            let displacement = scrolled.widgets[0].2.left() - initial.widgets[0].2.left();
+            for (before, after) in initial.widgets.iter().zip(&scrolled.widgets) {
+                assert!((after.2.left() - before.2.left() - displacement).abs() < 0.01);
+            }
             assert!(
                 scrolled.widgets.last().expect("last").2.left()
                     < initial.widgets.last().expect("last").2.left() - 20.0,
@@ -676,6 +800,6 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
         0
     );
     eprintln!(
-        "PASS hardware tab drag: floating tab/neighbor projection, reorder/return and unchanged history/transport/session generation; CPU transfers 0"
+        "PASS hardware tab drag: release-only reorder/return and unchanged history/transport/session generation; CPU transfers 0"
     );
 }

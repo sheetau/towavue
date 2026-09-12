@@ -4028,7 +4028,6 @@ where
             && !self.filmstrip_open
             && !egui::Popup::is_any_open(root.ctx())
             && root.input(|input| !input.pointer.any_down());
-        let window_rect = root.max_rect();
         let tab_menu_focus = (!self.modal_input_blocked()
             && self.active_export.is_none()
             && !self.palette_open
@@ -4121,6 +4120,8 @@ where
                     let append_right =
                         ui.cursor().left() + (ui.available_width() - controls_width).max(20.0);
                     let width = chrome::tab_width(strip_width, self.tabs.tabs().len());
+                    ui.style_mut().always_scroll_the_only_direction = true;
+                    ui.spacing_mut().scroll.bar_width = ui.spacing().scroll.floating_width;
                     egui::ScrollArea::horizontal()
                         .id_salt("tab-strip")
                         .max_width(strip_width)
@@ -4166,23 +4167,9 @@ where
                                         self.tabs.active().is_some_and(|item| item.id == tab.id);
                                     let dirty =
                                         self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty);
-                                    let rect = drag_layout.rect(index);
-                                    let floating = drag_layout.floating == Some(tab.id);
-                                    let layer = if floating {
-                                        egui::LayerId::new(
-                                            egui::Order::Foreground,
-                                            "floating-tab".into(),
-                                        )
-                                    } else {
-                                        ui.layer_id()
-                                    };
-                                    let clip = if floating {
-                                        window_rect
-                                    } else {
-                                        ui.clip_rect()
-                                    };
-                                    let mut painter = ui.painter().clone().with_layer_id(layer);
-                                    painter.set_clip_rect(clip);
+                                    let rect = tab_rects[index];
+                                    let clip = ui.clip_rect();
+                                    let painter = ui.painter().clone();
                                     if active {
                                         let focus = (tab.id, index, width, strip_width);
                                         let focus_id = ui.id().with("visible-active-tab");
@@ -4216,7 +4203,6 @@ where
                                     let mut tab_ui = ui.new_child(
                                         egui::UiBuilder::new()
                                             .id(ui.id().with(("media-tab", tab.id)))
-                                            .layer_id(layer)
                                             .max_rect(rect),
                                     );
                                     tab_ui.set_clip_rect(clip);

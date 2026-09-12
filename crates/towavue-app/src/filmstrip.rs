@@ -195,6 +195,7 @@ impl Filmstrip {
         let mut wanted = Vec::new();
         let area = egui::Area::new("filmstrip".into())
             .order(egui::Order::Foreground)
+            .fade_in(false)
             .movable(false)
             .sense(egui::Sense::click())
             .fixed_pos(screen.min)
@@ -238,6 +239,7 @@ impl Filmstrip {
                         snapshot.items.len() as f32 * STEP + padding * 2.0,
                         viewport.height(),
                     ));
+                    let mut cards = Vec::new();
                     for index in visible_range(viewport, padding, snapshot.items.len()) {
                         let item = &snapshot.items[index];
                         wanted.push((item.path.clone(), item.kind));
@@ -280,6 +282,17 @@ impl Filmstrip {
                                 if active { " (current item)" } else { "" }
                             ));
                         });
+                        cards.push((index, response));
+                    }
+                    let highlighted = cards
+                        .iter()
+                        .find(|(_, response)| response.hovered())
+                        .or_else(|| cards.iter().find(|(_, response)| response.has_focus()))
+                        .map(|(index, _)| *index)
+                        .or(selected);
+                    for (index, response) in cards {
+                        let item = &snapshot.items[index];
+                        let rect = response.rect;
                         ui.painter().rect_filled(rect, 0.0, crate::chrome::BORDER);
                         match self.previews.get(&item.path) {
                             Some(Ok((texture, duration))) => {
@@ -323,24 +336,27 @@ impl Filmstrip {
                                 );
                             }
                         }
-                        if active || response.hovered() || response.has_focus() {
+                        if highlighted == Some(index) {
                             ui.painter().rect_stroke(
                                 rect.expand(3.0),
                                 2.0,
                                 egui::Stroke::new(1.0, Color32::WHITE),
                                 egui::StrokeKind::Inside,
                             );
-                            let name_rect = Rect::from_min_size(
-                                rect.min - egui::vec2(0.0, 22.0),
-                                egui::vec2(rect.width(), 20.0),
+                            let mut label = egui::text::LayoutJob::simple(
+                                display_name(&item.path),
+                                egui::TextStyle::Body.resolve(ui.style()),
+                                Color32::WHITE,
+                                screen.width().min(192.0),
                             );
-                            ui.put(
-                                name_rect,
-                                egui::Label::new(
-                                    egui::RichText::new(display_name(&item.path))
-                                        .color(Color32::WHITE),
-                                )
-                                .truncate(),
+                            label.wrap.max_rows = 2;
+                            label.wrap.break_anywhere = true;
+                            label.halign = egui::Align::Center;
+                            let label = ui.fonts_mut(|fonts| fonts.layout_job(label));
+                            ui.painter().galley(
+                                egui::pos2(rect.center().x, rect.bottom() + 10.0),
+                                label,
+                                Color32::WHITE,
                             );
                         }
                         if response.clicked() {

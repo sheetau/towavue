@@ -4840,6 +4840,7 @@ where
         parent: Option<egui::LayerId>,
         actions: &mut Vec<UiAction>,
     ) {
+        let enabled = !self.modal_input_blocked() && !self.filmstrip_open;
         if self.media_kind == Some(MediaKind::Image) {
             let Some(snapshot) = &self.folder_snapshot else {
                 return;
@@ -4856,7 +4857,6 @@ where
             } else {
                 0.0
             };
-            let enabled = !self.modal_input_blocked();
             let (response, commit, _) =
                 seekbar::show(context, status, progress, parent, enabled, false);
             let value = seekbar::value_input(
@@ -4940,7 +4940,6 @@ where
         };
         let progress = (self.current_position().as_seconds_f64() / duration.as_secs_f64())
             .clamp(0.0, 1.0) as f32;
-        let enabled = !self.modal_input_blocked();
         let (response, drag) = seekbar::show_drag(context, status, progress, parent, enabled, true);
         if drag.open_timeline {
             actions.push(UiAction::Command(CommandId::ToggleTimeline));
@@ -8284,7 +8283,6 @@ where
         };
         if self.palette_open
             || self.grid_open
-            || self.filmstrip_open
             || self.modal_input_blocked()
             || egui::Popup::is_any_open(context)
             || !context.egui_wants_keyboard_input()
@@ -8294,6 +8292,18 @@ where
             || stroke.key == Key::Tab
         {
             return false;
+        }
+        if self.filmstrip_open {
+            let mut entered = self.entered_shortcut.clone();
+            entered.push(stroke.clone());
+            return self
+                .shortcuts
+                .all(CommandId::ToggleFilmstrip)
+                .iter()
+                .any(|binding| {
+                    binding.strokes().starts_with(&entered)
+                        || binding.strokes().starts_with(std::slice::from_ref(stroke))
+                });
         }
         self.prefix_started.is_some()
             || ((stroke.modifiers.control
@@ -15957,6 +15967,35 @@ mod tests {
         assert!(app.owns_focused_shortcut(&stroke("Ctrl+Alt+9")));
         app.cancel_shortcut_prefix();
         assert!(!app.owns_focused_shortcut(&stroke("Space")));
+        app.filmstrip_open = true;
+        assert!(
+            app.owns_focused_shortcut(&stroke("F")),
+            "focused filmstrip must retain its close shortcut"
+        );
+        app.process_shortcut(stroke("F"));
+        assert!(!app.filmstrip_open);
+        app.shortcuts.set(
+            CommandId::ToggleFilmstrip,
+            "Ctrl+F Space".parse().expect("custom filmstrip chord"),
+        );
+        for fullscreen in [false, true] {
+            app.fullscreen = fullscreen;
+            app.filmstrip_open = true;
+            focus_button();
+            for key in ["F", "R", "Space", "Tab"] {
+                assert!(
+                    !app.owns_focused_shortcut(&stroke(key)),
+                    "unbound and UI keys remain with filmstrip: {key}"
+                );
+            }
+            assert!(app.owns_focused_shortcut(&stroke("Ctrl+F")));
+            app.process_shortcut(stroke("Ctrl+F"));
+            assert!(app.filmstrip_open);
+            assert!(app.owns_focused_shortcut(&stroke("Space")));
+            app.process_shortcut(stroke("Space"));
+            assert!(!app.filmstrip_open);
+        }
+        app.fullscreen = false;
         for blocked in 0..5 {
             app.palette_open = blocked == 0;
             app.grid_open = blocked == 1;

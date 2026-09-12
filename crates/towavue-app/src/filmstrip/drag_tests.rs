@@ -85,6 +85,247 @@ fn card(output: &egui::FullOutput, name: &str) -> Rect {
 }
 
 #[test]
+fn filmstrip_highlights_one_target_and_centers_two_line_names_below_the_preview() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_highlights_one_target_and_centers_two_line_names_below_the_preview",
+    ) else {
+        return;
+    };
+    let context = crate::fonts::test_context();
+    context.enable_accesskit();
+    let mut snapshot = snapshot(&root);
+    snapshot.items[1].path = root.join(format!("{}.png", "長いファイル名と詳細な説明-".repeat(6)));
+    let current = &snapshot.items[0].path;
+    let name = display_name(&snapshot.items[1].path);
+    let mut strip = Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+        .expect("filmstrip");
+    for _ in 0..3 {
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            current,
+            true,
+            input(vec![]),
+        );
+    }
+    let output = frame(
+        &mut strip,
+        &context,
+        &snapshot,
+        current,
+        true,
+        input(vec![]),
+    )
+    .0;
+    let rect = card(&output, &name);
+    for _ in 0..2 {
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            current,
+            true,
+            input(vec![egui::Event::PointerMoved(rect.center())]),
+        );
+    }
+    let output = frame(
+        &mut strip,
+        &context,
+        &snapshot,
+        current,
+        true,
+        input(vec![]),
+    )
+    .0;
+    let outlines = |output: &egui::FullOutput| {
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect)
+                    if rect.stroke.color == Color32::WHITE && rect.stroke.width == 1.0 =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        outlines(&output),
+        [rect.expand(3.0)],
+        "hover replaces the current-item outline"
+    );
+    let text = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == name => Some(text),
+            _ => None,
+        })
+        .expect("one filename label");
+    assert_eq!(text.galley.rows.len(), 2);
+    let bounds = text.galley.rect.translate(text.pos.to_vec2());
+    assert!(bounds.top() >= rect.bottom() + 8.0);
+    assert!(bounds.width() > rect.width());
+    assert!((bounds.center().x - rect.center().x).abs() < 1.0);
+    let third = card(&output, "third.png");
+    let third_id = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("tree")
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("third.png"))
+        .expect("third card")
+        .0;
+    let output = frame(
+        &mut strip,
+        &context,
+        &snapshot,
+        current,
+        true,
+        input(vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Focus,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: third_id,
+                data: None,
+            },
+        )]),
+    )
+    .0;
+    assert_eq!(
+        outlines(&output),
+        [rect.expand(3.0)],
+        "hover wins over a different keyboard focus"
+    );
+    frame(
+        &mut strip,
+        &context,
+        &snapshot,
+        current,
+        true,
+        input(vec![egui::Event::PointerGone]),
+    );
+    // egui keeps the last interaction position until the frame after PointerGone.
+    let output = frame(
+        &mut strip,
+        &context,
+        &snapshot,
+        current,
+        true,
+        input(vec![]),
+    )
+    .0;
+    assert_eq!(
+        outlines(&output),
+        [third.expand(3.0)],
+        "keyboard target remains after pointer leaves"
+    );
+    context.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    let _ = context.run_ui(input(vec![]), |_| {});
+    let reopened = frame(
+        &mut strip,
+        &context,
+        &snapshot,
+        current,
+        true,
+        input(vec![]),
+    )
+    .0;
+    assert_eq!(
+        outlines(&reopened),
+        [card(&reopened, "source.png").expand(3.0)],
+        "returning filmstrip is immediately opaque with the current item selected"
+    );
+}
+
+#[test]
+fn filmstrip_disables_underlying_seek_hover_and_input_until_closed() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_disables_underlying_seek_hover_and_input_until_closed",
+    ) else {
+        return;
+    };
+    let context = crate::fonts::test_context();
+    context.enable_accesskit();
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.ui_context = Some(context.clone());
+    app.folder_snapshot = Some(snapshot(&root));
+    app.path = Some(root.join("source.png"));
+    app.media_kind = Some(MediaKind::Image);
+    let render = |app: &mut Application<_>, events| {
+        let mut actions = Vec::new();
+        let output = context.run_ui(input(events), |_| {
+            app.draw_seek_bar(
+                &context,
+                Rect::from_min_max(egui::pos2(0.0, 550.0), egui::pos2(960.0, 576.0)),
+                None,
+                &mut actions,
+            );
+        });
+        (output, actions)
+    };
+    let position = egui::pos2(900.0, 550.0);
+    for open in [false, true, false] {
+        app.filmstrip_open = open;
+        for _ in 0..3 {
+            render(&mut app, vec![egui::Event::PointerMoved(position)]);
+        }
+        let (output, _) = render(&mut app, vec![]);
+        assert_eq!(
+            output.platform_output.cursor_icon == egui::CursorIcon::PointingHand,
+            !open,
+            "seek hover cursor, filmstrip={open}"
+        );
+        assert_eq!(
+            output
+                .shapes
+                .iter()
+                .any(|shape| matches!(shape.shape, egui::Shape::Circle(_))),
+            !open,
+            "seek hover thumb, filmstrip={open}"
+        );
+        let (id, node) = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree")
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Image position"))
+            .expect("seek slider");
+        assert_eq!(node.is_disabled(), open);
+        let (_, actions) = render(
+            &mut app,
+            vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::SetValue,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: *id,
+                    data: Some(egui::accesskit::ActionData::NumericValue(3.0)),
+                },
+            )],
+        );
+        assert_eq!(
+            actions.is_empty(),
+            open,
+            "accessible seek, filmstrip={open}"
+        );
+        render(&mut app, vec![pointer(position, true)]);
+        let (_, actions) = render(&mut app, vec![pointer(position, false)]);
+        assert_eq!(actions.is_empty(), open, "pointer seek, filmstrip={open}");
+    }
+}
+
+#[test]
 fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards() {
     let Some(root) = crate::tests::isolated_test_root(
         "filmstrip::drag_tests::filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards",

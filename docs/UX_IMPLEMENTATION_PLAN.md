@@ -13,6 +13,8 @@
 
 ### 2026-09-12追記の差分台帳
 
+U07 全体再生設定の同値性: 全体音量・速度・trim開始／終端は再生・保存と同じ最終EditState値で比較し、上書き済みの操作や他の編集との記録順だけの違いで未保存にしない。開始未指定と0は同じ範囲とし、音量／速度は既存clamp後の厳密比較。保存済みsnapshot・Undo／Redo・分岐を保持し、raster／timeline操作列は従来どおり区別する。旧実装で100%音量復元のdirty残留を再現し、coreの復元／分岐／export snapshot／近接float／非同値編集、appのdirty context／Exit・close確認とUndo／Redoを検証。実FFmpegの動画／音声抽出で、設定復元およびcrop・区間音量を含む別順序履歴の全PCM／RGBA frame列が一致する。元durationが必要なtrim終端未指定と明示EOF、区間編集全般／crop／resize／自由回転の同値、実入力／DPIを含む全台帳は未完のまま維持する。
+
 E01 静止WebP XMP: JPEGと共通の9項目・型検査・既存値表示をWebPへ接続。全Keep／設定未使用も同形式保存時に保持し、XMP chunk／RIFF長／VP8X flagだけを書換える。simple VP8／VP8Lには必要時のみVP8Xを追加し、既存encode後の画像bitstreamを再処理しない。64KiB単位の取消、chunk数／XMP予算、寸法・flag・境界・padding検査とstage再読取照合を共用する。アニメーションの1枚化を成功とせず、本経路で明示拒否する。
 
 検証: 非対応だった旧capability回帰の失敗を確認後、lossless opaque／alphaのbitstream・画素保持と独立decoderによるXMP取得、拡張chunkのpayload／順序保持、実FFmpeg回転出力のKeep／Set／Remove一致、言語／作者順／非canonical Date・Track保持を確認。切断・不正RIFF・重複・flag／寸法不整合・animation・XMP過大・chunk数過大、bounded取消／I/O失敗／検証不一致時のstage整理と保存先保護を回帰化。UI説明・型不正時のApply無効化、Save／再Save／all Keep／Remove／形式不一致／guard／tab/source lifecycleを確認。これは自動UI回帰であり、native入力／DPIの実機確認とは区別する。Album artist、他形式・EXIF／IPTC／COM／ICC・未知XMPの完全保持、animation-preserving exportと全UX台帳を継続する。

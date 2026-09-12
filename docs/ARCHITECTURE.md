@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U07: 保存済みの実効再生設定との比較（2026-09-12）
+
+全体SetVolume／SetRate／SetTrimStart／SetTrimEndは、再生・保存と同じEditStateの最終値で未保存を比較する。履歴列からこれらを除いたraster／timeline操作列は従来の可逆orientation比較を維持する。全体設定はraster／timelineとの記録順によらず最終値が適用されるため、これらの間に挟まれた上書き済みの設定は内容差として数えない。trim開始未指定と明示0は同じPlaybackRangeとする。音量・速度は既存clamp後の厳密比較であり、近似float比較は行わない。
+
+Undo／Redoの操作は削除せず、export snapshotと分岐後の基準も維持する。区間ごとのVolume／Stretch／Keep／Deleteはここでは正規化せず、crop／resize／自由回転も引き続き処理順を保つ。元durationを持たないEditHistoryではtrim終端の「未指定」と「明示的な元終端」の同値を推定しない。全timeline／画素同値の判定、native入力と全UX gateは未完のまま残す。
+
 ## E01: 静止WebPのXMP編集（2026-09-12）
 
 静止WebP→WebP保存へJPEGと同じ9項目のXMP読取・Keep／Set／Removeを接続する。共通XMP codec／型検査・UIを再利用し、全Keep／設定未使用の同形式保存も対象とする。[WebP container仕様](https://developers.google.com/speed/webp/docs/riff_container)に従い、RIFF長、chunk境界・zero padding、単一bitstream／VP8X／XMP、寸法・feature flagと必要chunk順を検査する。標準XMP一packet・65502 bytes／128値／32階層等の既存予算を共用し、他metadata予算の拡大は行わない。

@@ -13909,6 +13909,56 @@ mod tests {
     }
 
     #[test]
+    fn restored_global_settings_clear_dirty_context_and_leave_guard_but_keep_undo() {
+        let Some(root) = isolated_test_root(
+            "tests::restored_global_settings_clear_dirty_context_and_leave_guard_but_keep_undo",
+        ) else {
+            return;
+        };
+        for (kind, name) in [
+            (MediaKind::Audio, "source.wav"),
+            (MediaKind::Video, "source.mp4"),
+        ] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let source = root.join(name);
+            let tab = app.tabs.open_new(source.clone(), kind);
+            app.path = Some(source);
+            app.media_kind = Some(kind);
+            app.media_duration = Some(Duration::from_secs(30));
+            app.state = PlaybackState::Paused;
+            for (change, restore) in [
+                (EditOperation::SetVolume(0.5), EditOperation::SetVolume(1.0)),
+                (EditOperation::SetRate(2.0), EditOperation::SetRate(1.0)),
+                (
+                    EditOperation::SetTrimStart(media_time(Duration::from_secs(2))),
+                    EditOperation::SetTrimStart(MediaTime::ZERO),
+                ),
+            ] {
+                app.push_edit(change);
+                assert!(app.command_context().has_unsaved_edits);
+                app.request_guarded(GuardedAction::Exit);
+                assert!(app.pending_guard.is_some() && !app.exit_requested);
+                app.handle_ui_action(UiAction::ResolveGuard(GuardDecision::Cancel));
+                app.push_edit(restore);
+                assert!(!app.command_context().has_unsaved_edits);
+                let count = app.edits[&tab].operations().len();
+                app.dispatch(CommandId::Undo);
+                assert!(app.command_context().has_unsaved_edits);
+                app.dispatch(CommandId::Redo);
+                assert!(!app.command_context().has_unsaved_edits);
+                assert_eq!(app.edits[&tab].operations().len(), count);
+                app.request_guarded(GuardedAction::Exit);
+                assert!(app.pending_guard.is_none() && app.exit_requested);
+                app.exit_requested = false;
+            }
+            assert_eq!(app.state, PlaybackState::Paused);
+            app.request_guarded(GuardedAction::CloseTab(tab));
+            assert!(app.pending_guard.is_none());
+            assert!(!app.tabs.tabs().iter().any(|item| item.id == tab));
+        }
+    }
+
+    #[test]
     fn navigation_to_current_media_keeps_view_playback_and_edits() {
         let Some(root) =
             isolated_test_root("tests::navigation_to_current_media_keeps_view_playback_and_edits")

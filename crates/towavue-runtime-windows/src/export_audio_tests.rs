@@ -98,6 +98,110 @@ fn range(start: i64, end: i64) -> TimeRange {
 }
 
 #[test]
+fn global_playback_equivalent_histories_export_identical_audio_and_video() {
+    let root = root("global-settings-equivalence");
+    let source = root.join("source.mkv");
+    fixture(&source);
+    let original = fs::read(&source).expect("source");
+    let spatial = EditOperation::Crop(PixelCrop {
+        x: 2,
+        y: 2,
+        width: 32,
+        height: 24,
+    });
+    let temporal = EditOperation::Timeline(TimelineEdit::SetVolume(range(100, 300), 0.5));
+    let baseline = vec![
+        spatial,
+        temporal,
+        EditOperation::SetVolume(0.7),
+        EditOperation::SetRate(1.25),
+        EditOperation::SetTrimStart(time(100)),
+        EditOperation::SetTrimEnd(time(1000)),
+    ];
+    let equivalent = vec![
+        EditOperation::SetVolume(0.2),
+        EditOperation::SetRate(2.0),
+        EditOperation::SetTrimStart(time(0)),
+        EditOperation::SetTrimEnd(time(500)),
+        spatial,
+        EditOperation::SetVolume(0.7),
+        temporal,
+        EditOperation::SetRate(1.25),
+        EditOperation::SetTrimStart(time(100)),
+        EditOperation::SetTrimEnd(time(1000)),
+    ];
+    let pixels = |path: &Path| {
+        let output = Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"))
+            .creation_flags(CREATE_NO_WINDOW)
+            .args(["-v", "error", "-i"])
+            .arg(path)
+            .args([
+                "-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1",
+            ])
+            .output()
+            .expect("video decode");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    for (baseline, equivalent) in [
+        (baseline, equivalent),
+        (
+            Vec::new(),
+            vec![
+                EditOperation::SetVolume(0.2),
+                EditOperation::SetRate(2.0),
+                EditOperation::SetTrimStart(time(100)),
+                EditOperation::SetVolume(1.0),
+                EditOperation::SetRate(1.0),
+                EditOperation::SetTrimStart(time(0)),
+            ],
+        ),
+    ] {
+        let mut history = towavue_core::EditHistory::default();
+        for operation in &equivalent {
+            history.push(*operation, MediaKind::Video);
+        }
+        history.mark_exported(&baseline);
+        assert!(!history.is_dirty());
+        assert_eq!(
+            history.timeline(time(1200)),
+            towavue_core::EditTimeline::from_operations(time(1200), &baseline)
+        );
+        for (output, extension) in [
+            (ExportOutput::Media, "mkv"),
+            (ExportOutput::AudioOnly, "wav"),
+        ] {
+            let target = root.join(format!("baseline.{extension}"));
+            let mut request = ExportRequest {
+                source: source.clone(),
+                target: target.clone(),
+                kind: MediaKind::Video,
+                operations: baseline.clone(),
+                hardware_encode: false,
+            };
+            export_media_with_output(&request, output).expect("baseline export");
+            let expected_audio = pcm(&target);
+            assert!(expected_audio.iter().any(|value| *value != 0));
+            let expected_video = (output == ExportOutput::Media).then(|| pixels(&target));
+            request.target = root.join(format!("equivalent.{extension}"));
+            request.operations = equivalent.clone();
+            export_media_with_output(&request, output).expect("equivalent export");
+            assert_eq!(pcm(&request.target), expected_audio);
+            if let Some(expected) = expected_video {
+                assert!(!expected.is_empty());
+                assert_eq!(pixels(&request.target), expected);
+            }
+        }
+    }
+    assert_eq!(fs::read(&source).expect("source retained"), original);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn audio_only_exports_best_stream_all_formats_and_ignores_only_spatial_edits() {
     let root = root("formats");
     let source = root.join("source 日本語 & multi.mkv");

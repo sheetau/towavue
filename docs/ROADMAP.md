@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 U07 global-settings checkpoint: 全体音量・速度・trimを保存済みの実効値へ戻すと未保存を解除し、Undo／Redoとexport snapshotは保持する。上書き済み設定をraster／timeline処理の記録順から分離し、他の編集差分を消さない。旧実装のdirty残留を再現し、core復元／分岐／近接float、appのExit・close確認／Undo、実動画／音声抽出のPCM・全RGBA frame列一致を検証。通常681tests／fmt／Clippy／Release通過。trimの暗黙EOF、全区間編集・rasterの同値、native入力／DPI／品質と全UX gateは継続。
+
 2026-09-12 E01 static WebP checkpoint: JPEGと同じ9項目のXMP読取・Keep／Set／Removeと同形式Saveを実装。bounded RIFF検査／書換えとstage再照合により、既存encode後のbitstream／他chunk payloadを保持する。opaque／alpha、独立decoder、実FFmpeg回転書出し、言語・作者順・非canonical値のKeep、不正／過大／animation入力、取消・I/O失敗・stage整理・保存先保護を確認。UI説明／型検査とSave／再Save／guard／tab/source lifecycleも通過。全677通常tests、fmt／Clippy／Release通過。アニメーション保持・他形式／未知metadataの完全保持、実入力／DPI／品質と全UX gateは継続し、公開準備は再開しない。
 
 2026-09-12 E01 JPEG Date/Track checkpoint: JPEGのDateをxmpDM:releaseDate（公開日）、TrackをxmpDM:trackNumberへ対応し、9項目の既存値UI・Keep／Set／Remove・Saveへ接続。Setは暦／時刻／timezone付きDateと符号付き十進整数を検査し、補完・UTC変換・正規化はしない。既存の非canonical表記はKeepで保持しRemoveで削除できる。実JPEGの属性／要素読取、回転保存の非XMP bytes／画素一致とsource／target保護、型の境界、UIのApply無効化／直接dispatch拒否、再Save／guard／tab/source lifecycleを検証。全669通常tests／fmt／Clippy／Release通過。可視キー・wheel試験はcomputer-useの再取得／再試行でもアクティブ化に失敗したため未確認。Album artist・他形式／EXIF／IPTC／COM／Extended XMP、全native/DPI/IME／品質と他UX gateは継続。

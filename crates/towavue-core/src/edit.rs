@@ -302,14 +302,20 @@ impl EditHistory {
 enum EffectiveEdit {
     Orientation(u8, bool),
     Operation(EditOperation),
+    Playback(PlaybackRange, f32, f32),
 }
 
 fn effective_edits(mut operations: &[EditOperation]) -> impl Iterator<Item = EffectiveEdit> + '_ {
+    let state = EditState::from_operations(operations);
     std::iter::from_fn(move || {
-        // Canonical rotation after horizontal reflection, confined to an uninterrupted run.
+        // Global playback settings are applied once; raster/timeline operations remain barriers.
         let (mut turns, mut reflected) = (0_u8, false);
         while let Some((operation, rest)) = operations.split_first() {
             match operation {
+                EditOperation::SetVolume(_)
+                | EditOperation::SetRate(_)
+                | EditOperation::SetTrimStart(_)
+                | EditOperation::SetTrimEnd(_) => {}
                 EditOperation::RotateClockwise => turns = (turns + 1) % 4,
                 EditOperation::RotateCounterclockwise => turns = (turns + 3) % 4,
                 EditOperation::FlipHorizontal => {
@@ -332,11 +338,121 @@ fn effective_edits(mut operations: &[EditOperation]) -> impl Iterator<Item = Eff
         }
         (turns != 0 || reflected).then_some(EffectiveEdit::Orientation(turns, reflected))
     })
+    .chain(std::iter::once(EffectiveEdit::Playback(
+        state.playback_range(),
+        state.volume,
+        state.rate,
+    )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn global_playback_settings_return_to_saved_content_without_erasing_undo() {
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            for (changed, restored) in [
+                (EditOperation::SetVolume(0.5), EditOperation::SetVolume(1.0)),
+                (EditOperation::SetRate(2.0), EditOperation::SetRate(1.0)),
+                (
+                    EditOperation::SetTrimStart(MediaTime::from_nanoseconds(100)),
+                    EditOperation::SetTrimStart(MediaTime::ZERO),
+                ),
+            ] {
+                let mut history = EditHistory::default();
+                history.push(changed, kind);
+                assert!(history.is_dirty());
+                history.push(restored, kind);
+                assert!(!history.is_dirty(), "{kind:?}: {restored:?}");
+                assert_eq!(history.operations(), &[changed, restored]);
+                assert!(history.undo());
+                assert!(history.is_dirty());
+                assert!(history.redo());
+                assert!(!history.is_dirty());
+            }
+        }
+    }
+
+    #[test]
+    fn global_playback_equivalence_preserves_export_snapshots_and_edit_boundaries() {
+        let time = MediaTime::from_nanoseconds;
+        let range = crate::TimeRange::new(time(100), time(200)).expect("range");
+        let crop = EditOperation::Crop(PixelCrop {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        });
+        let timeline = EditOperation::Timeline(crate::TimelineEdit::SetVolume(range, 0.5));
+        let exported = [
+            EditOperation::SetVolume(0.5),
+            crop,
+            timeline,
+            EditOperation::SetRate(2.0),
+            EditOperation::SetTrimEnd(time(900)),
+        ];
+        let mut history = EditHistory::default();
+        for operation in [
+            EditOperation::SetRate(0.5),
+            crop,
+            EditOperation::SetTrimEnd(time(500)),
+            timeline,
+            EditOperation::SetVolume(0.2),
+        ] {
+            history.push(operation, MediaKind::Video);
+        }
+        history.mark_exported(&exported);
+        assert!(
+            history.is_dirty(),
+            "export snapshot is not the live revision"
+        );
+        for operation in [
+            EditOperation::SetVolume(0.5),
+            EditOperation::SetRate(2.0),
+            EditOperation::SetTrimEnd(time(900)),
+        ] {
+            history.push(operation, MediaKind::Video);
+        }
+        assert!(!history.is_dirty());
+        history.undo();
+        assert!(history.is_dirty());
+        history.push(EditOperation::SetTrimEnd(time(900)), MediaKind::Video);
+        assert!(
+            !history.is_dirty(),
+            "equivalent branch matches the actual export"
+        );
+        assert!(!history.redo());
+        for operation in [
+            crop,
+            timeline,
+            EditOperation::Timeline(crate::TimelineEdit::Stretch(range, time(200))),
+        ] {
+            history.push(operation, MediaKind::Video);
+            assert!(
+                history.is_dirty(),
+                "raster and timeline operations still matter"
+            );
+            history.undo();
+            assert!(!history.is_dirty());
+        }
+        history.push(
+            EditOperation::SetVolume(f32::from_bits(0.5_f32.to_bits() + 1)),
+            MediaKind::Video,
+        );
+        assert!(history.is_dirty(), "no approximate float equality");
+        history.undo();
+        history.push(EditOperation::SetVolume(f32::NAN), MediaKind::Video);
+        assert!(
+            history.is_dirty(),
+            "invalid value cannot establish equivalence"
+        );
+        let mut clamped = EditHistory::default();
+        clamped.push(EditOperation::SetVolume(2.0), MediaKind::Audio);
+        clamped.mark_saved();
+        clamped.push(EditOperation::SetVolume(3.0), MediaKind::Audio);
+        assert!(!clamped.is_dirty(), "use the same clamp as playback/export");
+    }
 
     #[test]
     fn reversible_orientations_return_to_saved_content_without_erasing_undo() {

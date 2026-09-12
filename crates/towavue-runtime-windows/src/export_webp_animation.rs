@@ -71,6 +71,7 @@ impl Animation {
                 .output_buffer_size()
                 .ok_or_else(|| invalid("invalid frame size"))?
         ];
+        let mut renderer = crate::image_edits::ImageEditRenderer::new(&request.operations);
         let mut next_frame = |delay| {
             if decoder.read_frame(&mut pixels).map_err(failed)? != delay {
                 return Err(invalid("decoded animation timing differs"));
@@ -91,10 +92,8 @@ impl Animation {
                 rgba,
                 delay: Duration::from_millis(u64::from(delay)),
             };
-            let edited =
-                crate::image_edits::render_frame_cancellable(&source, &request.operations, &|| {
-                    cancelled.load(Ordering::Relaxed)
-                })
+            let edited = renderer
+                .render(&source, &|| cancelled.load(Ordering::Relaxed))
                 .map_err(failed)?;
             if decoder.has_alpha() {
                 pixels = source.rgba;

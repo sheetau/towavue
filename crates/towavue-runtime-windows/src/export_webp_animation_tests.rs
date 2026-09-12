@@ -99,7 +99,13 @@ fn webp_to_apng_preserves_edited_frames_exact_timing_and_total_plays() {
                     .expect("edited pixels");
             for extension in ["png", "apng"] {
                 let target = root.join("converted").with_extension(extension);
+                crate::image_edits::GRAPH_BUILDS.set(0);
                 export_media(&request(&source, &target, operations.clone())).expect("WebP to APNG");
+                assert_eq!(
+                    crate::image_edits::GRAPH_BUILDS.get(),
+                    1,
+                    "one edit graph for the full converted animation"
+                );
                 assert_eq!(
                     crate::decode_image(&target).expect("converted").frames,
                     expected.frames
@@ -203,6 +209,7 @@ fn animated_webp_export_preserves_pixels_timing_loops_metadata_and_resave() {
             metadata
                 .set(MetadataField::Title, Some("Animation title".into()))
                 .expect("title");
+            crate::image_edits::GRAPH_BUILDS.set(0);
             export_media_with_options(
                 &request,
                 ExportOptions {
@@ -211,6 +218,11 @@ fn animated_webp_export_preserves_pixels_timing_loops_metadata_and_resave() {
                 },
             )
             .expect("animation save");
+            assert_eq!(
+                crate::image_edits::GRAPH_BUILDS.get(),
+                1,
+                "one edit graph for the full saved animation"
+            );
             let actual = crate::decode_image(&target).expect("saved display");
             let expected = crate::render_image_edits(
                 &original,

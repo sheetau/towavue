@@ -7,6 +7,8 @@ mod pixel_view;
 
 #[cfg(test)]
 thread_local! { static RENDER_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+#[cfg(test)]
+thread_local! { pub(crate) static GRAPH_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
 /// Compare full rendered content one frame at a time without retaining another animation.
 pub fn compare_image_edits(
@@ -23,6 +25,8 @@ pub fn compare_image_edits(
     }) {
         return Err("Video raster edits cannot be compared as image frames".into());
     }
+    let mut current_renderer = ImageEditRenderer::new(current);
+    let mut saved_renderer = ImageEditRenderer::new(saved);
     for frame in &source.frames {
         if cancel.is_cancelled() {
             return Err("Image comparison cancelled".into());
@@ -37,15 +41,16 @@ pub fn compare_image_edits(
             }
             continue;
         }
-        let render = |operations: &[EditOperation]| {
-            if operations.is_empty() {
-                Ok(std::borrow::Cow::Borrowed(frame))
-            } else {
-                render_frame(frame, operations, cancel).map(std::borrow::Cow::Owned)
-            }
+        let current = if current.is_empty() {
+            std::borrow::Cow::Borrowed(frame)
+        } else {
+            std::borrow::Cow::Owned(current_renderer.render(frame, &|| cancel.is_cancelled())?)
         };
-        let current = render(current)?;
-        let saved = render(saved)?;
+        let saved = if saved.is_empty() {
+            std::borrow::Cow::Borrowed(frame)
+        } else {
+            std::borrow::Cow::Owned(saved_renderer.render(frame, &|| cancel.is_cancelled())?)
+        };
         if !equal_frames(&current, &saved, cancel)? {
             return Ok(false);
         }
@@ -71,6 +76,7 @@ pub fn compare_rendered_image_edits(
     if source.frames.is_empty() || source.frames.len() != current.frames.len() {
         return Ok(false);
     }
+    let mut saved_renderer = ImageEditRenderer::new(saved);
     for (source, current) in source.frames.iter().zip(&current.frames) {
         if cancel.is_cancelled() {
             return Err("Image comparison cancelled".into());
@@ -87,7 +93,7 @@ pub fn compare_rendered_image_edits(
         let saved = if saved.is_empty() {
             std::borrow::Cow::Borrowed(source)
         } else {
-            std::borrow::Cow::Owned(render_frame(source, saved, cancel)?)
+            std::borrow::Cow::Owned(saved_renderer.render(source, &|| cancel.is_cancelled())?)
         };
         if !equal_frames(current, &saved, cancel)? {
             return Ok(false);
@@ -134,6 +140,7 @@ pub fn render_image_edits(
     }
     let mut frames = Vec::with_capacity(source.frames.len());
     let mut retained = 0_u64;
+    let mut renderer = ImageEditRenderer::new(operations);
     for frame in &source.frames {
         if cancel.is_cancelled() {
             return Err("Image edit cancelled".into());
@@ -143,7 +150,7 @@ pub fn render_image_edits(
         if retained > 512 * 1024 * 1024 {
             return Err("Resampled image exceeds 512 MiB".into());
         }
-        frames.push(render_frame(frame, operations, cancel)?);
+        frames.push(renderer.render(frame, &|| cancel.is_cancelled())?);
     }
     Ok(DecodedImage {
         format: source.format,
@@ -195,6 +202,7 @@ pub(crate) fn output_size(
     Ok(size)
 }
 
+#[cfg(test)]
 fn render_frame(
     source: &DecodedImageFrame,
     operations: &[EditOperation],
@@ -208,88 +216,324 @@ pub(crate) fn render_frame_cancellable(
     operations: &[EditOperation],
     cancelled: &impl Fn() -> bool,
 ) -> Result<DecodedImageFrame, String> {
-    output_size((source.width, source.height), operations)?;
-    if cancelled() {
-        return Err("Image edit cancelled".into());
+    ImageEditRenderer::new(operations).render(source, cancelled)
+}
+
+pub(crate) struct ImageEditRenderer<'a> {
+    operations: &'a [EditOperation],
+    graph: Option<((u32, u32), filter::Graph)>,
+    next_pts: i64,
+}
+
+impl<'a> ImageEditRenderer<'a> {
+    pub(crate) fn new(operations: &'a [EditOperation]) -> Self {
+        Self {
+            operations,
+            graph: None,
+            next_pts: 0,
+        }
     }
-    #[cfg(test)]
-    RENDER_CALLS.set(RENDER_CALLS.get() + 1);
-    let convert = || -> Result<DecodedImageFrame, ffmpeg_next::Error> {
-        ffmpeg_next::init()?;
-        let mut graph = filter::Graph::new();
-        // This worker exclusively owns the unconfigured graph; no filter thread exists yet.
-        unsafe {
-            (*graph.as_mut_ptr()).nb_threads = 1;
+
+    pub(crate) fn render(
+        &mut self,
+        source: &DecodedImageFrame,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<DecodedImageFrame, String> {
+        let size = (source.width, source.height);
+        output_size(size, self.operations)?;
+        if cancelled() {
+            return Err("Image edit cancelled".into());
         }
-        graph.add(
-            &filter::find("buffer").ok_or(ffmpeg_next::Error::FilterNotFound)?,
-            "in",
-            &format!(
-                "video_size={}x{}:pix_fmt=rgba:time_base=1/1:pixel_aspect=1/1",
-                source.width, source.height
-            ),
-        )?;
-        graph.add(
-            &filter::find("buffersink").ok_or(ffmpeg_next::Error::FilterNotFound)?,
-            "out",
-            "",
-        )?;
-        let mut filters = crate::export::visual_filters(operations);
-        // vflip may expose negative linesize; copy returns an owned positive-stride frame.
-        filters.extend(["format=rgba".into(), "copy".into()]);
-        graph
-            .output("in", 0)?
-            .input("out", 0)?
-            .parse(&filters.join(","))?;
-        graph.validate()?;
-        let mut input = frame::Video::new(Pixel::RGBA, source.width, source.height);
-        input.set_pts(Some(0));
-        let stride = input.stride(0);
-        let width = source.width as usize * 4;
-        for (y, row) in source.rgba.chunks_exact(width).enumerate() {
-            input.data_mut(0)[y * stride..y * stride + width].copy_from_slice(row);
-        }
-        graph
-            .get("in")
-            .expect("image source")
-            .source()
-            .add(&input)?;
-        let mut output = frame::Video::empty();
-        graph
-            .get("out")
-            .expect("image sink")
-            .sink()
-            .frame(&mut output)?;
-        let width = output.width() as usize * 4;
-        let mut rgba = Vec::with_capacity(width * output.height() as usize);
-        for y in 0..output.height() as usize {
-            if cancelled() {
-                return Err(ffmpeg_next::Error::Exit);
+        #[cfg(test)]
+        RENDER_CALLS.set(RENDER_CALLS.get() + 1);
+        let mut convert = || -> Result<DecodedImageFrame, ffmpeg_next::Error> {
+            if self
+                .graph
+                .as_ref()
+                .is_none_or(|(configured, _)| *configured != size)
+            {
+                ffmpeg_next::init()?;
+                let mut graph = filter::Graph::new();
+                #[cfg(test)]
+                GRAPH_BUILDS.set(GRAPH_BUILDS.get() + 1);
+                // This worker exclusively owns the unconfigured graph; no filter thread exists yet.
+                unsafe {
+                    (*graph.as_mut_ptr()).nb_threads = 1;
+                }
+                graph.add(
+                    &filter::find("buffer").ok_or(ffmpeg_next::Error::FilterNotFound)?,
+                    "in",
+                    &format!(
+                        "video_size={}x{}:pix_fmt=rgba:time_base=1/1:pixel_aspect=1/1",
+                        source.width, source.height
+                    ),
+                )?;
+                graph.add(
+                    &filter::find("buffersink").ok_or(ffmpeg_next::Error::FilterNotFound)?,
+                    "out",
+                    "",
+                )?;
+                let mut filters = crate::export::visual_filters(self.operations);
+                // vflip may expose negative linesize; copy returns an owned positive-stride frame.
+                filters.extend(["format=rgba".into(), "copy".into()]);
+                graph
+                    .output("in", 0)?
+                    .input("out", 0)?
+                    .parse(&filters.join(","))?;
+                graph.validate()?;
+                self.graph = Some((size, graph));
             }
-            let row = y * output.stride(0);
-            rgba.extend_from_slice(&output.data(0)[row..row + width]);
+            let graph = &mut self.graph.as_mut().expect("configured image graph").1;
+            let mut input = frame::Video::new(Pixel::RGBA, source.width, source.height);
+            // The spatial filters emit one frame immediately; monotonic PTS keeps
+            // reused native filter state distinct without changing the source delays.
+            input.set_pts(Some(self.next_pts));
+            self.next_pts += 1;
+            let stride = input.stride(0);
+            let width = source.width as usize * 4;
+            for (y, row) in source.rgba.chunks_exact(width).enumerate() {
+                input.data_mut(0)[y * stride..y * stride + width].copy_from_slice(row);
+            }
+            graph
+                .get("in")
+                .expect("image source")
+                .source()
+                .add(&input)?;
+            let mut output = frame::Video::empty();
+            graph
+                .get("out")
+                .expect("image sink")
+                .sink()
+                .frame(&mut output)?;
+            let width = output.width() as usize * 4;
+            let mut rgba = Vec::with_capacity(width * output.height() as usize);
+            for y in 0..output.height() as usize {
+                if cancelled() {
+                    return Err(ffmpeg_next::Error::Exit);
+                }
+                let row = y * output.stride(0);
+                rgba.extend_from_slice(&output.data(0)[row..row + width]);
+            }
+            Ok(DecodedImageFrame {
+                width: output.width(),
+                height: output.height(),
+                rgba,
+                delay: source.delay,
+            })
+        };
+        if source.width == 0
+            || source.height == 0
+            || u64::from(source.width) * u64::from(source.height) > 128 * 1024 * 1024
+            || source.rgba.len() as u64 != u64::from(source.width) * u64::from(source.height) * 4
+        {
+            return Err("Invalid source image pixels".into());
         }
-        Ok(DecodedImageFrame {
-            width: output.width(),
-            height: output.height(),
-            rgba,
-            delay: source.delay,
-        })
-    };
-    if source.width == 0
-        || source.height == 0
-        || u64::from(source.width) * u64::from(source.height) > 128 * 1024 * 1024
-        || source.rgba.len() as u64 != u64::from(source.width) * u64::from(source.height) * 4
-    {
-        return Err("Invalid source image pixels".into());
+        convert().map_err(|error| format!("Could not resample image: {error}"))
     }
-    convert().map_err(|error| format!("Could not resample image: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use towavue_core::{ImageResize, PixelCrop, ResampleFilter};
+
+    #[test]
+    fn animation_resampling_reuses_graphs_without_changing_frames_or_comparisons() {
+        let cancel = Cancellation::default();
+        for varying_size in [false, true] {
+            let source = DecodedImage {
+                format: "generated",
+                frames: (0..6)
+                    .map(|index| {
+                        let (width, height) = if varying_size && (3..5).contains(&index) {
+                            (23, 21)
+                        } else {
+                            (27, 19)
+                        };
+                        DecodedImageFrame {
+                            width,
+                            height,
+                            rgba: (0..width * height)
+                                .flat_map(|pixel| {
+                                    [
+                                        (pixel * 11 + index * 31) as u8,
+                                        (pixel * 7 + index * 17) as u8,
+                                        (255 - pixel % 256) as u8,
+                                        (pixel * 13 + index * 61) as u8,
+                                    ]
+                                })
+                                .collect(),
+                            delay: std::time::Duration::from_millis(u64::from(index * 13)),
+                        }
+                    })
+                    .collect(),
+            };
+            let builds = if varying_size { 3 } else { 1 };
+            for filter in [
+                ResampleFilter::Nearest,
+                ResampleFilter::Bilinear,
+                ResampleFilter::Bicubic,
+                ResampleFilter::Lanczos,
+            ] {
+                let operations = [
+                    EditOperation::FlipVertical,
+                    EditOperation::Crop(PixelCrop {
+                        x: 1,
+                        y: 1,
+                        width: 20,
+                        height: 15,
+                    }),
+                    EditOperation::Resize(ImageResize::new(17, 13, filter).expect("resize")),
+                    EditOperation::RotateImage(
+                        towavue_core::ImageRotation::new(137, (17, 13)).expect("rotation"),
+                    ),
+                    EditOperation::RotateClockwise,
+                ];
+                let expected: Vec<_> = source
+                    .frames
+                    .iter()
+                    .map(|frame| {
+                        render_frame(frame, &operations, &cancel).expect("fresh graph reference")
+                    })
+                    .collect();
+                GRAPH_BUILDS.set(0);
+                let rendered =
+                    render_image_edits(&source, &operations, &cancel).expect("shared graphs");
+                assert_eq!(
+                    rendered.frames, expected,
+                    "{filter:?}, varying={varying_size}"
+                );
+                assert_eq!(GRAPH_BUILDS.get(), builds, "one graph per input-size run");
+                GRAPH_BUILDS.set(0);
+                assert!(
+                    compare_rendered_image_edits(&source, &rendered, &operations, &cancel)
+                        .expect("saved comparison")
+                );
+                assert_eq!(GRAPH_BUILDS.get(), builds, "saved-side graph reused");
+                GRAPH_BUILDS.set(0);
+                assert!(
+                    compare_image_edits(&source, &operations, &operations, &cancel)
+                        .expect("both comparisons")
+                );
+                assert_eq!(
+                    GRAPH_BUILDS.get(),
+                    2 * builds,
+                    "independent current/saved graphs"
+                );
+                let mut different = rendered.clone();
+                *different
+                    .frames
+                    .last_mut()
+                    .expect("last frame")
+                    .rgba
+                    .last_mut()
+                    .expect("last byte") ^= 1;
+                assert!(
+                    !compare_rendered_image_edits(&source, &different, &operations, &cancel)
+                        .expect("late difference")
+                );
+                let mut invalid = source.clone();
+                invalid.frames.last_mut().expect("last frame").rgba.pop();
+                assert!(render_image_edits(&invalid, &operations, &cancel).is_err());
+                let mut renderer = ImageEditRenderer::new(&operations);
+                renderer
+                    .render(&source.frames[0], &|| false)
+                    .expect("prime graph");
+                let checks = std::cell::Cell::new(0);
+                assert!(
+                    renderer
+                        .render(&source.frames[1], &|| {
+                            checks.set(checks.get() + 1);
+                            checks.get() > 3
+                        })
+                        .is_err(),
+                    "cancellation while copying a reused graph's output"
+                );
+                assert_eq!(
+                    renderer
+                        .render(&source.frames[2], &|| false)
+                        .expect("no stale frame"),
+                    expected[2]
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "opt-in Release animation filter-setup comparison using generated RGBA frames"]
+    fn animation_filter_reuse_benchmark() {
+        let cancel = Cancellation::default();
+        for (name, count, width, height, output_width, output_height) in [
+            ("small-animation", 96, 320, 240, 240, 180),
+            ("hd-animation", 12, 1920, 1080, 1280, 720),
+        ] {
+            let source = DecodedImage {
+                format: "generated",
+                frames: (0..count)
+                    .map(|index| DecodedImageFrame {
+                        width,
+                        height,
+                        rgba: (0..width * height)
+                            .flat_map(|pixel| {
+                                [
+                                    (pixel * 11 + index * 31) as u8,
+                                    (pixel * 7 + index * 17) as u8,
+                                    (255 - pixel % 256) as u8,
+                                    (pixel * 13 + index * 61) as u8,
+                                ]
+                            })
+                            .collect(),
+                        delay: std::time::Duration::from_millis(10 + u64::from(index)),
+                    })
+                    .collect(),
+            };
+            let operations = [
+                EditOperation::Resize(
+                    ImageResize::new(output_width, output_height, ResampleFilter::Lanczos)
+                        .expect("resize"),
+                ),
+                EditOperation::FlipVertical,
+            ];
+            let expected = render_image_edits(&source, &operations, &cancel).expect("reference");
+            let mut times = [Vec::new(), Vec::new()];
+            for run in 0..10 {
+                for mode in [run % 2, 1 - run % 2] {
+                    GRAPH_BUILDS.set(0);
+                    let start = std::time::Instant::now();
+                    let rendered = if mode == 0 {
+                        DecodedImage {
+                            format: source.format,
+                            frames: source
+                                .frames
+                                .iter()
+                                .map(|frame| {
+                                    render_frame(frame, &operations, &cancel).expect("fresh graph")
+                                })
+                                .collect(),
+                        }
+                    } else {
+                        render_image_edits(&source, &operations, &cancel).expect("shared graph")
+                    };
+                    let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+                    assert_eq!(rendered, expected);
+                    assert_eq!(
+                        GRAPH_BUILDS.get(),
+                        if mode == 0 { count as usize } else { 1 }
+                    );
+                    if run > 0 {
+                        times[mode].push(elapsed);
+                    }
+                }
+            }
+            for samples in &mut times {
+                samples.sort_by(f64::total_cmp);
+            }
+            println!(
+                "ANIMATION-FILTER case={name} frames={count} source={width}x{height} output={output_width}x{output_height} lanczos_flip runs=9 alternating_order fresh_median_ms={:.3} reused_median_ms={:.3} graphs={count}/1",
+                times[0][4], times[1][4]
+            );
+        }
+    }
 
     #[test]
     fn orthogonal_comparison_reads_source_pixels_without_rendering() {

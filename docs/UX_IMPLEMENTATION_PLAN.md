@@ -13,6 +13,8 @@
 
 ### 2026-09-12追記の差分台帳
 
+E01 独立poster保存: 表紙付きAPNGを保存可能にし、表紙とanimation双方のcrop／resize／直角・任意角回転、半透明部分frame・先頭PREVIOUS、1～3frame・有限／無限loop、正確なdelay列、text Keep／Set／Remove、再保存を回帰確認する。表紙はframe数に含めず、初期canvasへ持ち越さない。部分領域から始まる入力はFFmpeg demuxerが拒否するため、runtime合成器が表紙＋一周を独立PNG列へ一枚ずつstage生成し、既存FFmpegで同じ編集を処理する。全RGBA列の追加保持はなく、512MiB作業buffer上限は維持するが圧縮処理・一時disk量は増える。途中取消、書込失敗、破損poster、stage衝突、実encoder進捗時の取消／元source変更に対する保存先保護を検証。以下の旧poster拒否記録を更新するもので、posterなしOVER丸め・16bit／ICC・GIF／WebP等と全native/UI／品質／資源gateは継続する。
+
 I01/E01 PREVIOUS合成と単一frame保存: BACKGROUNDで消した青色が後続PREVIOUSで戻る旧表示を、2×1の期待RGBAで再現。png 0.18.1を既存transitive依存と同版で直接利用し、APNGの圧縮復号を維持したまま合成／表示後disposalをruntimeへ移す。PREVIOUSは当該frameの合成直前の領域を復元し、先頭ではBACKGROUND扱いとする。静止PNGは従来経路。先頭／連続PREVIOUS・Adam7の明示画素と保存後一致、部分領域の半透明OVER・編集保存／resaveを確認して拒否制限を解除。単一frameも独立PNG組立で制御情報を残せるため、旧拒否の失敗を確認後、有限／無限loopとdelay／編集画素を保持する保存を通した。
 
 追加回帰: 展開後のgray／gray-alpha／RGB／RGBA／palette、低bit深度・16→8bit変換、全frame retained予算・first-only予算、previewからの取消・IEND切断・独立posterをanimationに混ぜない境界を検証。作業canvas＋raw＋PREVIOUS領域に512MiB上限を設け、取消確認を読取／合成へ維持する。OVER自体のimage crate演算は変更しておらず、FFmpegとの丸め差は別gate。独立posterの保存・RGBA16／ICC完全保持・GIF／WebP等・全native/UI/品質/資源台帳は継続する。

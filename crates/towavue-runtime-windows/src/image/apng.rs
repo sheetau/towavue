@@ -8,6 +8,72 @@ pub(super) fn decode(
     preview: &mut ImagePreviewCallback<'_>,
     first_only: bool,
 ) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
+    let mut frames = Vec::new();
+    read_frames(
+        path,
+        Some(byte_limit),
+        current,
+        first_only,
+        false,
+        &mut |width, height, rgba, delay| {
+            if frames.is_empty() {
+                preview(width, height, rgba);
+            }
+            check_current(current)?;
+            frames.push(DecodedImageFrame {
+                width,
+                height,
+                rgba: rgba.to_vec(),
+                delay,
+            });
+            Ok(())
+        },
+    )?;
+    Ok(frames)
+}
+
+pub(crate) fn write_frames(
+    path: &Path,
+    writer: &mut dyn std::io::Write,
+    current: &dyn Fn() -> bool,
+) -> Result<(), ImageDecodeError> {
+    let result = read_frames(
+        path,
+        None,
+        current,
+        false,
+        true,
+        &mut |width, height, rgba, _| {
+            let mut encoder = png::Encoder::new(&mut *writer, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.set_compression(png::Compression::Fast);
+            let mut encoder = encoder.write_header()?;
+            {
+                let mut stream = encoder.stream_writer()?;
+                for chunk in rgba.chunks(65536) {
+                    check_current(current)?;
+                    std::io::Write::write_all(&mut stream, chunk)
+                        .map_err(png::EncodingError::from)?;
+                }
+                stream.finish()?;
+            }
+            encoder.finish()?;
+            Ok(())
+        },
+    );
+    check_current(current)?;
+    result
+}
+
+fn read_frames(
+    path: &Path,
+    byte_limit: Option<usize>,
+    current: &dyn Fn() -> bool,
+    first_only: bool,
+    include_poster: bool,
+    visit: &mut impl FnMut(u32, u32, &[u8], Duration) -> Result<(), ImageDecodeError>,
+) -> Result<(), ImageDecodeError> {
     let mut decoder = png::Decoder::new(open(path, current)?);
     decoder.set_limits(png::Limits {
         bytes: IMAGE_BYTE_LIMIT,
@@ -27,7 +93,7 @@ pub(super) fn decode(
     let raw_bytes = reader
         .output_buffer_size()
         .ok_or(ImageDecodeError::TooLarge)?;
-    if canvas_bytes > byte_limit
+    if canvas_bytes > byte_limit.unwrap_or(IMAGE_BYTE_LIMIT)
         || canvas_bytes
             .checked_add(raw_bytes)
             .is_none_or(|bytes| bytes > IMAGE_BYTE_LIMIT)
@@ -36,19 +102,32 @@ pub(super) fn decode(
     }
     let mut raw = vec![0; raw_bytes];
     let mut canvas = vec![0; canvas_bytes];
-    let mut frames = Vec::new();
     let mut remaining = byte_limit;
     // The default image need not be part of the animation.
-    if reader.info().frame_control.is_none() {
+    let has_poster = reader.info().frame_control.is_none();
+    let emit_poster = has_poster && include_poster;
+    if has_poster && !emit_poster {
         reader.next_frame(&mut raw)?;
     }
-    for index in 0..frame_count {
+    for index in 0..u64::from(frame_count) + u64::from(emit_poster) {
         check_current(current)?;
-        remaining = remaining
-            .checked_sub(canvas_bytes)
-            .ok_or(ImageDecodeError::TooLarge)?;
+        if let Some(bytes) = &mut remaining {
+            *bytes = bytes
+                .checked_sub(canvas_bytes)
+                .ok_or(ImageDecodeError::TooLarge)?;
+        }
         let output = reader.next_frame(&mut raw)?;
-        let control = reader.info().frame_control.ok_or(ImageDecodeError::Empty)?;
+        let control = if emit_poster && index == 0 {
+            png::FrameControl {
+                width,
+                height,
+                dispose_op: png::DisposeOp::Background,
+                blend_op: png::BlendOp::Source,
+                ..Default::default()
+            }
+        } else {
+            reader.info().frame_control.ok_or(ImageDecodeError::Empty)?
+        };
         let (x, y, w, h) = (
             control.x_offset as usize,
             control.y_offset as usize,
@@ -62,11 +141,12 @@ pub(super) fn decode(
         {
             return Err(ImageDecodeError::UnknownFormat);
         }
-        let dispose = if index == 0 && control.dispose_op == png::DisposeOp::Previous {
-            png::DisposeOp::Background
-        } else {
-            control.dispose_op
-        };
+        let dispose =
+            if index == u64::from(emit_poster) && control.dispose_op == png::DisposeOp::Previous {
+                png::DisposeOp::Background
+            } else {
+                control.dispose_op
+            };
         let mut previous = Vec::new();
         if dispose == png::DisposeOp::Previous {
             let region_bytes = w * h * 4;
@@ -117,16 +197,7 @@ pub(super) fn decode(
         };
         let delay = Duration::from_secs_f64(f64::from(control.delay_num) / f64::from(denominator))
             .max(Duration::from_millis(10));
-        if frames.is_empty() {
-            preview(width, height, &canvas);
-        }
-        check_current(current)?;
-        frames.push(DecodedImageFrame {
-            width,
-            height,
-            rgba: canvas.clone(),
-            delay,
-        });
+        visit(width, height, &canvas, delay)?;
         if first_only {
             break;
         }
@@ -147,5 +218,5 @@ pub(super) fn decode(
         reader.finish()?;
     }
     check_current(current)?;
-    Ok(frames)
+    Ok(())
 }

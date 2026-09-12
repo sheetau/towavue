@@ -21,7 +21,11 @@ impl Animation {
         let mut sequence = 0u32;
         let mut buffer = [0; 65536];
         writer.write_all(SIGNATURE).map_err(ExportError::Output)?;
-        for (index, delay) in self.delays.iter().enumerate() {
+        let images = (!self.includes_default)
+            .then_some(None)
+            .into_iter()
+            .chain(self.delays.iter().map(Some));
+        for (index, delay) in images.enumerate() {
             check_cancelled(cancelled)?;
             let mut signature = [0; 8];
             reader
@@ -62,15 +66,17 @@ impl Animation {
                         )
                         .map_err(ExportError::Output)?;
                     }
-                    let mut control = sequence.to_be_bytes().to_vec();
-                    sequence = sequence
-                        .checked_add(1)
-                        .ok_or_else(|| invalid("APNG sequence limit"))?;
-                    control.extend_from_slice(&canvas[..8]);
-                    control.extend_from_slice(&[0; 8]);
-                    control.extend_from_slice(delay);
-                    control.extend_from_slice(&[0, 0]);
-                    write_chunk(writer, b"fcTL", &control).map_err(ExportError::Output)?;
+                    if let Some(delay) = delay {
+                        let mut control = sequence.to_be_bytes().to_vec();
+                        sequence = sequence
+                            .checked_add(1)
+                            .ok_or_else(|| invalid("APNG sequence limit"))?;
+                        control.extend_from_slice(&canvas[..8]);
+                        control.extend_from_slice(&[0; 8]);
+                        control.extend_from_slice(delay);
+                        control.extend_from_slice(&[0, 0]);
+                        write_chunk(writer, b"fcTL", &control).map_err(ExportError::Output)?;
+                    }
                 }
                 image_seen |= &kind == b"IDAT";
                 let copy = (index == 0 && &kind != b"IEND") || &kind == b"IDAT";

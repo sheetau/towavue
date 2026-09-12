@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 E01 独立poster保存: 表紙をanimationへ混ぜず、同じcrop／resize／直角・任意角回転を適用して保存する。部分領域から始まる表紙付きAPNGのFFmpeg demuxer未実装を再現し、runtimeでposterと一周の合成frameを中間PNG列へ逐次出力してから既存FFmpegへ渡す。表紙／全frame画素、delay／loop／frame数、text変更／削除、再保存、取消／I/O失敗／元source変更時の保存先保護を確認。追加圧縮・一時disk量は発生する。posterなしOVER丸め・16bit／ICC・他animation形式と全native/UI／品質／資源gateを継続する。以下は各時点の履歴であり、旧poster拒否は本変更で解除する。
+
 2026-09-12 I01/E01 PREVIOUS修正: image crateのBACKGROUND前snapshotが後続PREVIOUSで復元される不具合を2×1の明示画素で再現。圧縮復号は既存png 0.18.1を直接pinし、APNG合成だけruntimeで管理する。frame表示後に消去／合成前領域の復元を行い、先頭・連続PREVIOUS、Adam7、実保存／再読込を確認して保存制限を解除。独立PNG組立により単一frameのAPNGもdelay／loop／編集画素を保持して保存する。色種・bit深度変換、preview／budget／取消／poster境界を回帰化。独立poster保存・OVER丸め・16bit／ICC・他animation形式と全native/UI／品質／資源gateを継続する。
 
 2026-09-12 E01 APNG checkpoint: 旧保存が3frameを1frameへ落とす回帰を再現し、対応APNGの全frame保存とdelay分数／loop値の保持、PNG／APNG alias、text Keep／Set／Removeへ接続する。独立RGBA8 PNG列から圧縮bytesを変えずに組み立て、frame欠落／余分なframe・CRC・形式不一致・取消・書込失敗を検査する。PREVIOUS合成の表示／保存decoder不一致を検出したため、単一frame／posterと併せて明示拒否し、対応gateを残す。alpha-overの最大1階調差は生成素材の観測値であり全素材の上限保証ではない。GIF／WebP等の保存・色管理／16bit・全native/UI／資源gateを継続する。

@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## E01: 独立APNG posterの編集保存（2026-09-12）
+
+独立したdefault imageはanimation frame数・delay列に含めない。表紙付きで最初のanimation frameが部分領域の場合、同梱FFmpegのAPNG demuxerが未実装エラーとなることを生成fixtureで確認した。既存の全source検査後、runtimeのAPNG合成器からposter、続いて一周のanimationを独立RGBA8 PNGとしてowned stageの一ファイルへ逐次出力する。表紙表示後はcanvasを消去し、animationへ表紙画素を混ぜない。全RGBA frame列は保持せず、canvas・raw・PREVIOUS領域の512MiB作業上限と読取／合成／64KiB単位の圧縮入力の取消を維持する。追加のPNG圧縮・一時disk量は発生し、この上限はprocess全体のpeak保証ではない。
+
+このPNG列を一つの既存FFmpeg処理へ渡し、表紙と全frameに同じ編集列を適用する。組立時はposterのIDATより前にacTL、後に最初のfcTL／fdATを置き、元のloop／delay／frame数と独立性を保存する。posterとanimationの出力IHDR一致・CRC・個数、text再読取、元sourceのstamp、取消・publish保護を維持する。追加の中間PNGは既存Dropで整理する。通常PNG／posterなしAPNGの入力経路は変更しない。poster付きの合成は表示と同じ演算となるが、posterなしFFmpeg経路のOVER丸め・RGBA16／色管理の完全保持・他animation形式は別gateを維持する。
+
 ## I01/E01: APNG合成のruntime管理（2026-09-12）
 
 2×1の明示画素fixtureで、image 0.25.10のBACKGROUND→PREVIOUSが消去前の画素を復元することを再現した。APNGの圧縮データは既存依存と同版のpng 0.18.1を直接pinして復号し、runtimeでframe領域のSOURCE／OVER合成と表示後のNONE／BACKGROUND／PREVIOUSを管理する。PREVIOUS用にはそのframeを合成する直前の領域だけ保存し、表示結果を通知／保持してから復元する。先頭PREVIOUSはBACKGROUND扱い。OVERの画素演算は従来image crateと同じものを維持し、別件の丸め変更を混ぜない。

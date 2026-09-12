@@ -391,10 +391,16 @@ fn export_audio_cancellable(
         || streams.timeline.is_some())
     .then_some(request.kind);
     let staging = StagedExport::new(&request.target)?;
-    let staged_request = ExportRequest {
+    let mut staged_request = ExportRequest {
         target: staging.output.clone(),
         ..request.clone()
     };
+    if let Some(png_metadata) = &png_metadata
+        && let Some(source) = png_metadata.prepare_animation_source(request, &staging, cancelled)?
+    {
+        staged_request.source = source;
+        streams.png_image_sequence = true;
+    }
     let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;
     if options.normalize_peak {
         let gain = audio_options::analyze(
@@ -574,6 +580,7 @@ impl Drop for StagedExport {
         let _ = fs::remove_file(self.directory.join("timeline-filter.txt"));
         let _ = fs::remove_file(self.directory.join("metadata.png"));
         let _ = fs::remove_file(self.directory.join("animation.png"));
+        let _ = fs::remove_file(self.directory.join("animation-source.png"));
         let _ = fs::remove_file(self.directory.join("metadata.jpg"));
         let _ = fs::remove_file(self.directory.join("metadata.webp"));
         let _ = fs::remove_dir(&self.directory);
@@ -661,6 +668,7 @@ fn run_ffmpeg(
 #[derive(Clone, Default)]
 struct ExportStreams {
     png_animation: bool,
+    png_image_sequence: bool,
     video: Option<(usize, ffmpeg::Rational)>,
     audio: Option<(usize, ffmpeg::Rational)>,
     audio_channels: Option<u16>,
@@ -714,6 +722,7 @@ impl ExportStreams {
                 .map(towavue_core::MediaTime::from_nanoseconds);
             Ok(Self {
                 png_animation: false,
+                png_image_sequence: false,
                 video,
                 audio: audio.map(|(index, time_base, _)| (index, time_base)),
                 audio_channels: audio.map(|(_, _, channels)| channels),
@@ -754,15 +763,12 @@ fn ffmpeg_arguments(
             .iter()
             .position(|argument| argument == "-i")
             .expect("input argument");
-        arguments.splice(
-            input..input,
-            [
-                "-ignore_loop".into(),
-                "1".into(),
-                "-f".into(),
-                "apng".into(),
-            ],
-        );
+        let options: &[&str] = if streams.png_image_sequence {
+            &["-f", "image2pipe"]
+        } else {
+            &["-ignore_loop", "1", "-f", "apng"]
+        };
+        arguments.splice(input..input, options.iter().map(|value| (*value).into()));
     }
     arguments.extend(streams.metadata.arguments());
     if request.kind == MediaKind::Audio {

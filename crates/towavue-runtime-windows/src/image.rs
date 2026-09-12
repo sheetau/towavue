@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::decode::{self, DecodeError, DecodeOutput};
 
-mod apng;
+pub(crate) mod apng;
 mod bmp_preview;
 mod jpeg_preview;
 
@@ -70,6 +70,8 @@ pub enum ImageDecodeError {
     Ffmpeg(#[from] DecodeError),
     #[error("could not decode APNG: {0}")]
     Png(#[from] png::DecodingError),
+    #[error("could not encode APNG export frames: {0}")]
+    PngEncode(#[from] png::EncodingError),
     #[error("image format could not be determined")]
     UnknownFormat,
     #[error("decoded image contained no frames")]

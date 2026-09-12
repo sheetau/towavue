@@ -150,6 +150,7 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
             "Choose a .png or .apng export path",
             "Supported APNG saves retain all frames, delays and loop count",
             "including PREVIOUS disposal",
+            "A separate default poster receives the same edits and stays outside the animation",
             "Alpha-over rounding can differ from display",
         ]
     } else {

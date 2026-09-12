@@ -802,44 +802,183 @@ fn apng_single_frame_save_preserves_controls_and_edited_pixels() {
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
 
+fn poster_fixture(frames: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, 4, 3);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .set_animated(frames, if frames == 1 { 0 } else { 3 })
+            .expect("animation");
+        encoder.set_sep_def_img(true).expect("poster");
+        let mut writer = encoder.write_header().expect("header");
+        let poster = image::RgbaImage::from_fn(4, 3, |x, y| {
+            image::Rgba([x as u8 * 40, y as u8 * 70, 201, 128])
+        });
+        writer
+            .write_image_data(poster.as_raw())
+            .expect("poster data");
+        writer.set_frame_dimension(2, 2).expect("partial animation");
+        writer.set_frame_position(1, 1).expect("animation offset");
+        for index in 0..frames {
+            writer.set_frame_delay(index as u16 + 1, 7).expect("delay");
+            writer.set_blend_op(png::BlendOp::Over).expect("alpha over");
+            writer
+                .set_dispose_op(if index == 0 {
+                    png::DisposeOp::Previous
+                } else {
+                    png::DisposeOp::None
+                })
+                .expect("disposal");
+            writer
+                .write_image_data(&[20, index as u8 * 70, 0, 128].repeat(4))
+                .expect("animation data");
+        }
+        writer.finish().expect("finish");
+    }
+    let end = bytes.len() - 12;
+    bytes.splice(end..end, chunk(b"tEXt", b"Title\0Poster title"));
+    bytes
+}
+
+#[test]
+fn apng_poster_save_preserves_separate_edited_poster_and_animation() {
+    let root = root("apng-poster-save");
+    let source = root.join("source.apng");
+    let target = root.join("saved.png");
+    for count in [1, 2, 3] {
+        let bytes = poster_fixture(count);
+        fs::write(&source, &bytes).expect("source");
+        let original = crate::decode_image(&source).expect("original animation");
+        let poster = image::open(&source).expect("default image").to_rgba8();
+        assert_ne!(poster.as_raw(), &original.frames[0].rgba);
+        let poster = crate::DecodedImage {
+            format: "PNG",
+            frames: vec![crate::DecodedImageFrame {
+                width: 4,
+                height: 3,
+                rgba: poster.into_raw(),
+                delay: Duration::ZERO,
+            }],
+        };
+        let mut request = request(&source, &target);
+        request.operations = vec![
+            EditOperation::Crop(PixelCrop {
+                x: 1,
+                y: 0,
+                width: 3,
+                height: 2,
+            }),
+            EditOperation::RotateClockwise,
+            EditOperation::Resize(ImageResize::new(6, 9, ResampleFilter::Nearest).expect("resize")),
+        ];
+        if count == 3 {
+            request.operations.push(EditOperation::RotateImage(
+                towavue_core::ImageRotation::new(130, (6, 9)).expect("free rotation"),
+            ));
+        }
+        let expected = crate::render_image_edits(
+            &original,
+            &request.operations,
+            &crate::Cancellation::default(),
+        )
+        .expect("edited animation");
+        let expected_poster = crate::render_image_edits(
+            &poster,
+            &request.operations,
+            &crate::Cancellation::default(),
+        )
+        .expect("edited poster");
+        export_media(&request).expect("poster save");
+        assert_eq!(
+            crate::decode_image(&target)
+                .expect("saved animation")
+                .frames,
+            expected.frames
+        );
+        assert_eq!(
+            image::open(&target)
+                .expect("saved poster")
+                .to_rgba8()
+                .as_raw(),
+            &expected_poster.frames[0].rgba
+        );
+        let cancel = AtomicBool::new(false);
+        let controls = scan_contents(Cursor::new(&bytes), None, None, &cancel)
+            .expect("original controls")
+            .1;
+        assert!(!controls.as_ref().expect("animation").includes_default);
+        assert_eq!(
+            scan_contents(
+                Cursor::new(fs::read(&target).expect("saved bytes")),
+                None,
+                None,
+                &cancel
+            )
+            .expect("saved controls")
+            .1,
+            controls
+        );
+        for value in [None, Some("Edited title"), Some("")] {
+            export_media_with_options(
+                &request,
+                ExportOptions {
+                    metadata: value.map(title).unwrap_or_default(),
+                    ..Default::default()
+                },
+            )
+            .expect("poster metadata save");
+            let texts = read_export_metadata(&target, MediaKind::Image).expect("metadata");
+            assert_eq!(
+                texts.first().map(|text| text.value.as_str()),
+                match value {
+                    None => Some("Poster title"),
+                    Some("") => None,
+                    Some(value) => Some(value),
+                }
+            );
+            let resave = root.join("resaved.apng");
+            export_media(&self::request(&target, &resave)).expect("poster resave");
+            assert_eq!(
+                crate::decode_image(&resave)
+                    .expect("resaved animation")
+                    .frames,
+                expected.frames
+            );
+            assert_eq!(
+                image::open(&resave)
+                    .expect("resaved poster")
+                    .to_rgba8()
+                    .as_raw(),
+                &expected_poster.frames[0].rgba
+            );
+            assert_eq!(
+                scan_contents(
+                    Cursor::new(fs::read(&resave).expect("resaved bytes")),
+                    None,
+                    None,
+                    &cancel
+                )
+                .expect("resaved controls")
+                .1,
+                controls
+            );
+            assert_eq!(
+                read_export_metadata(&resave, MediaKind::Image).expect("resaved text"),
+                texts
+            );
+        }
+        assert_eq!(fs::read(&source).expect("original unchanged"), bytes);
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
 #[test]
 fn apng_unsupported_exports_preserve_targets_and_static_conversions_still_work() {
     let root = root("apng-unsupported");
     let source = root.join("source.APNG");
-    let target = root.join("target.png");
     let bytes = animation_fixture(2, &[[0, 1, 0, 10]; 3]);
-    let mut first = true;
-    let poster = map_chunks(&bytes, |kind, data| {
-        if &kind == b"acTL" {
-            data[..4].copy_from_slice(&2u32.to_be_bytes());
-        }
-        if &kind == b"fcTL" && first {
-            first = false;
-            return false;
-        }
-        if matches!(&kind, b"fcTL" | b"fdAT") {
-            let sequence = u32::from_be_bytes(data[..4].try_into().expect("sequence"));
-            data[..4].copy_from_slice(&(sequence - 1).to_be_bytes());
-        }
-        true
-    });
-    {
-        let bytes = poster;
-        fs::write(&source, &bytes).expect("unsupported source");
-        assert!(
-            read_export_metadata(&source, MediaKind::Image).is_ok(),
-            "inspection is not export approval"
-        );
-        fs::write(&target, b"existing target").expect("target");
-        assert!(
-            export_media(&request(&source, &target))
-                .expect_err("unsupported export")
-                .to_string()
-                .contains("poster")
-        );
-        assert_eq!(fs::read(&target).expect("preserved"), b"existing target");
-        assert_eq!(fs::read(&source).expect("source preserved"), bytes);
-    }
     fs::write(&source, &bytes).expect("valid source");
     for extension in ["jpg", "gif", "webp", "avif"] {
         let target = root.join(format!("target.{extension}"));
@@ -1006,43 +1145,179 @@ fn apng_export_cancellation_and_source_changes_never_replace_target() {
     let root = root("apng-source-protection");
     let source = root.join("source.png");
     let target = root.join("target.png");
-    let bytes = animation_fixture(2, &[[0, 1, 0, 10]; 3]);
-    for change_source in [false, true] {
-        fs::write(&source, &bytes).expect("source");
-        fs::write(&target, b"existing target").expect("target");
-        let cancel = AtomicBool::new(false);
-        let changed = AtomicBool::new(false);
-        let result = export_cancellable(&request(&source, &target), &cancel, &|_| {
-            if !changed.swap(true, Ordering::Relaxed) {
-                if change_source {
-                    fs::OpenOptions::new()
-                        .append(true)
-                        .open(&source)
-                        .expect("owned source")
-                        .write_all(&[0])
-                        .expect("change length");
-                } else {
-                    cancel.store(true, Ordering::Relaxed);
+    for bytes in [animation_fixture(2, &[[0, 1, 0, 10]; 3]), poster_fixture(3)] {
+        for change_source in [false, true] {
+            fs::write(&source, &bytes).expect("source");
+            fs::write(&target, b"existing target").expect("target");
+            let cancel = AtomicBool::new(false);
+            let changed = AtomicBool::new(false);
+            let result = export_cancellable(&request(&source, &target), &cancel, &|_| {
+                if !changed.swap(true, Ordering::Relaxed) {
+                    if change_source {
+                        fs::OpenOptions::new()
+                            .append(true)
+                            .open(&source)
+                            .expect("owned source")
+                            .write_all(&[0])
+                            .expect("change length");
+                    } else {
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                }
+            });
+            assert!(changed.load(Ordering::Relaxed), "actual encoder progress");
+            if change_source {
+                assert!(
+                    result
+                        .expect_err("stale source")
+                        .to_string()
+                        .contains("source changed")
+                );
+            } else {
+                assert!(matches!(result, Err(ExportError::Cancelled)));
+            }
+            assert_eq!(
+                fs::read(&target).expect("target remains"),
+                b"existing target"
+            );
+            assert_eq!(fs::read_dir(&root).expect("no stages").count(), 2);
+        }
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn apng_poster_preparation_streams_frames_and_preserves_targets_on_failure() {
+    let root = root("apng-poster-preparation");
+    let source = root.join("source.png");
+    let target = root.join("target.png");
+    let bytes = poster_fixture(3);
+    fs::write(&source, &bytes).expect("source");
+    fs::write(&target, b"existing target").expect("target");
+    let cancel = AtomicBool::new(false);
+    let request = request(&source, &target);
+    let metadata = PngMetadata::prepare(&request, &title("new"), &cancel).expect("prepare");
+    let mut stream = Vec::new();
+    crate::image::apng::write_frames(&source, &mut stream, &|| true).expect("stream frames");
+    let mut remaining = stream.as_slice();
+    let mut frames = Vec::new();
+    while !remaining.is_empty() {
+        assert!(remaining.starts_with(SIGNATURE));
+        let mut end = 8;
+        loop {
+            let size = u32::from_be_bytes(remaining[end..end + 4].try_into().expect("chunk size"))
+                as usize;
+            let last = &remaining[end + 4..end + 8] == b"IEND";
+            end += size + 12;
+            if last {
+                break;
+            }
+        }
+        frames.push(
+            image::load_from_memory(&remaining[..end])
+                .expect("independent PNG")
+                .to_rgba8(),
+        );
+        remaining = &remaining[end..];
+    }
+    assert_eq!(frames.len(), 4);
+    assert_eq!(frames[0], image::open(&source).expect("poster").to_rgba8());
+    for (png, frame) in frames[1..]
+        .iter()
+        .zip(crate::decode_image(&source).expect("animation").frames)
+    {
+        assert_eq!(png.as_raw(), &frame.rgba);
+    }
+    let mut assembled = Vec::new();
+    metadata
+        .animation
+        .as_ref()
+        .expect("animation controls")
+        .assemble(Cursor::new(&stream), &mut assembled, &cancel)
+        .expect("assemble poster and frames");
+    assert_eq!(
+        scan_contents(Cursor::new(assembled), None, None, &cancel)
+            .expect("controls")
+            .1,
+        metadata.animation
+    );
+
+    struct CancelOnSecondPng<'a> {
+        cancel: &'a AtomicBool,
+        signatures: usize,
+    }
+    impl Write for CancelOnSecondPng<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes == SIGNATURE {
+                self.signatures += 1;
+                if self.signatures == 2 {
+                    self.cancel.store(true, Ordering::Relaxed);
                 }
             }
-        });
-        assert!(changed.load(Ordering::Relaxed), "actual encoder progress");
-        if change_source {
-            assert!(
-                result
-                    .expect_err("stale source")
-                    .to_string()
-                    .contains("source changed")
-            );
-        } else {
-            assert!(matches!(result, Err(ExportError::Cancelled)));
+            Ok(bytes.len())
         }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut writer = CancelOnSecondPng {
+        cancel: &cancel,
+        signatures: 0,
+    };
+    assert!(matches!(
+        crate::image::apng::write_frames(&source, &mut writer, &|| !cancel.load(Ordering::Relaxed)),
+        Err(crate::ImageDecodeError::Cancelled)
+    ));
+    assert_eq!(writer.signatures, 2);
+    cancel.store(false, Ordering::Relaxed);
+    assert!(crate::image::apng::write_frames(&source, &mut &mut [0u8; 4][..], &|| true).is_err());
+    for occupied in [false, true] {
+        let staging = StagedExport::new(&target).expect("stage");
+        let intermediate = staging.directory.join("animation-source.png");
+        if occupied {
+            fs::write(&intermediate, b"occupied").expect("occupied stage");
+        } else {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        assert!(
+            metadata
+                .prepare_animation_source(&request, &staging, &cancel)
+                .is_err()
+        );
+        if occupied {
+            assert_eq!(
+                fs::read(&intermediate).expect("occupied intermediate"),
+                b"occupied"
+            );
+        }
+        cancel.store(false, Ordering::Relaxed);
+        drop(staging);
+        assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
         assert_eq!(
-            fs::read(&target).expect("target remains"),
+            fs::read(&target).expect("target preserved"),
             b"existing target"
         );
-        assert_eq!(fs::read_dir(&root).expect("no stages").count(), 2);
     }
+    let malformed = map_chunks(&bytes, |kind, data| {
+        if &kind == b"IDAT" {
+            *data = vec![0; 4];
+        }
+        true
+    });
+    fs::write(&source, &malformed).expect("malformed poster with valid CRC");
+    PngMetadata::prepare(&request, &title("new"), &cancel).expect("container scan");
+    assert!(
+        export_media(&request)
+            .expect_err("poster decoding fails")
+            .to_string()
+            .contains("animation frame preparation failed")
+    );
+    assert_eq!(fs::read(&source).expect("source preserved"), malformed);
+    assert_eq!(
+        fs::read(&target).expect("target preserved"),
+        b"existing target"
+    );
+    assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
 

@@ -337,14 +337,6 @@ impl PngMetadata {
             None,
             cancelled,
         )?;
-        if animation
-            .as_ref()
-            .is_some_and(|animation| !animation.includes_default)
-        {
-            return Err(invalid(
-                "APNG with a separate default poster is not yet supported for export",
-            ));
-        }
         chunks.retain(|chunk| options.get(chunk.field).is_none());
         for field in MetadataField::ALL {
             if let Some(text) = options.get(field).filter(|text| !text.is_empty()) {
@@ -365,6 +357,40 @@ impl PngMetadata {
 
     pub(super) fn is_animated(&self) -> bool {
         self.animation.is_some()
+    }
+
+    pub(super) fn prepare_animation_source(
+        &self,
+        request: &ExportRequest,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+    ) -> Result<Option<PathBuf>, ExportError> {
+        if !self
+            .animation
+            .as_ref()
+            .is_some_and(|animation| !animation.includes_default)
+        {
+            return Ok(None);
+        }
+        let source = staging.directory.join("animation-source.png");
+        {
+            let mut output = std::io::BufWriter::new(
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&source)
+                    .map_err(ExportError::Output)?,
+            );
+            let result = crate::image::apng::write_frames(&request.source, &mut output, &|| {
+                !cancelled.load(Ordering::Relaxed)
+            });
+            check_cancelled(cancelled)?;
+            result.map_err(|error| {
+                invalid(&format!("animation frame preparation failed: {error}"))
+            })?;
+            output.flush().map_err(ExportError::Output)?;
+        }
+        Ok(Some(source))
     }
 
     pub(super) fn apply(

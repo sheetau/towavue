@@ -6,6 +6,48 @@ mod orientation_tests;
 #[path = "export_avif_alpha_tests.rs"]
 mod alpha_tests;
 
+#[test]
+#[ignore = "known failure: grid item has no standalone stream; needs TOWAVUE_AVIF_GRID_FIXTURE (libavif sofa_grid1x5_420.avif)"]
+fn avif_grid_fixture_preserves_all_tiles_preview_and_saved_pixels() {
+    let source =
+        PathBuf::from(std::env::var_os("TOWAVUE_AVIF_GRID_FIXTURE").expect("grid fixture"));
+    let root = audio_tests::root("avif-grid");
+    let target = root.join("saved.avif");
+    let reference = root.join("reference.rgba");
+    audio_tests::ffmpeg(
+        &[
+            "-i",
+            source.to_str().expect("fixture path"),
+            "-filter_complex",
+            "[0:0]format=rgba[a];[0:1]format=rgba[b];[0:2]format=rgba[c];[0:3]format=rgba[d];[0:4]format=rgba[e];[a][b][c][d][e]vstack=inputs=5",
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
+        ],
+        &reference,
+    );
+    let expected = fs::read(reference).expect("reference pixels");
+    assert_eq!(expected.len(), 1024 * 770 * 4);
+    let decoded = crate::decode_image(&source).expect("grid display");
+    assert_eq!(decoded.dimensions(), (1024, 770));
+    assert_eq!(decoded.frames.len(), 1);
+    assert!(
+        decoded.frames[0].rgba == expected,
+        "grid differs from stacked tiles"
+    );
+    let preview = crate::image::first_animation_frame(&source, 1024 * 770 * 4, &|| true)
+        .expect("preview")
+        .expect("frame");
+    assert_eq!(preview.rgba, decoded.frames[0].rgba);
+    export_media(&request(&source, &target)).expect("grid save");
+    let saved = crate::decode_image(&target).expect("saved decode");
+    assert_eq!(saved.frames[0].rgba, decoded.frames[0].rgba);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
 fn fixture(path: &Path, loops: &str, alpha: bool) {
     let mut args = vec![
         "-f",

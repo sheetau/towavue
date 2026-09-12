@@ -6,6 +6,9 @@ mod orientation_tests;
 #[path = "export_avif_alpha_tests.rs"]
 mod alpha_tests;
 
+#[path = "export_avif_grid_tests.rs"]
+mod grid_tests;
+
 #[test]
 #[ignore = "requires TOWAVUE_AVIF_GRID_FIXTURE (libavif sofa_grid1x5_420.avif)"]
 fn avif_grid_fixture_preserves_all_tiles_preview_and_saved_pixels() {

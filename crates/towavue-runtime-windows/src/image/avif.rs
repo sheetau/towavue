@@ -296,6 +296,7 @@ struct PlaneDecoder {
     decoder: ffmpeg::codec::decoder::Video,
     index: usize,
     time_base: ffmpeg::Rational,
+    timed: bool,
     pixel: Pixel,
     scaler: Option<ffmpeg::software::scaling::Context>,
     eof: bool,
@@ -364,6 +365,7 @@ impl PlaneDecoder {
             decoder,
             index,
             time_base,
+            timed: track.timing.is_some(),
             pixel,
             scaler: None,
             eof: false,
@@ -437,12 +439,22 @@ impl PlaneDecoder {
                     {
                         pixels.extend_from_slice(&row[..row_bytes]);
                     }
-                    let time = frame
-                        .timestamp()
-                        .ok_or_else(|| invalid("missing presentation time"))?;
                     let nanos = |time: i64| {
                         i128::from(time) * i128::from(self.time_base.numerator()) * 1_000_000_000
                             / i128::from(self.time_base.denominator())
+                    };
+                    // Item streams receive synthetic demux timestamps; they are
+                    // not timed tracks and must match an untimed grid plane.
+                    let (time, duration) = if self.timed {
+                        let time = frame
+                            .timestamp()
+                            .ok_or_else(|| invalid("missing presentation time"))?;
+                        (
+                            nanos(time),
+                            (frame.packet().duration > 0).then(|| nanos(frame.packet().duration)),
+                        )
+                    } else {
+                        (0, None)
                     };
                     return Ok(Some(PlaneFrame {
                         aperture: self.aperture,
@@ -453,9 +465,8 @@ impl PlaneDecoder {
                             .map_err(ImageDecodeError::Ffmpeg)?
                             .or(self.orientation),
                         size,
-                        time: nanos(time),
-                        duration: (frame.packet().duration > 0)
-                            .then(|| nanos(frame.packet().duration)),
+                        time,
+                        duration,
                         pixels,
                     }));
                 }

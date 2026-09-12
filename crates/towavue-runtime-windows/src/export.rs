@@ -421,11 +421,14 @@ fn export_audio_cancellable(
             .then(|| png_metadata::PngMetadata::prepare(request, metadata, cancelled))
             .transpose()?
     };
-    let webp_to_png =
-        (webp_source && png_metadata::png_path(&request.target) && metadata.is_empty())
-            .then(|| webp_metadata::PngConversion::prepare(&request.source, cancelled))
-            .transpose()?
-            .flatten();
+    let webp_snapshots = (webp_source
+        && (png_metadata::png_path(&request.target) || gif_animation::gif_path(&request.target))
+        && metadata.is_empty())
+    .then(|| {
+        webp_metadata::SnapshotConversion::prepare(&request.source, &request.target, cancelled)
+    })
+    .transpose()?
+    .flatten();
     let mut streams = ExportStreams::probe(request)?;
     streams.gif_animation = gif_animation.is_some();
     streams.png_animation = png_metadata
@@ -434,7 +437,7 @@ fn export_audio_cancellable(
     if png_source && !image_metadata && !png_to_webp {
         png_metadata::require_static(&request.source, cancelled)?;
     }
-    if webp_source && !image_metadata && webp_to_png.is_none() {
+    if webp_source && !image_metadata && webp_snapshots.is_none() {
         webp_metadata::require_static(&request.source, cancelled)?;
     }
     if !image_metadata {
@@ -523,7 +526,7 @@ fn export_audio_cancellable(
             used_hardware_encoder: false,
         });
     }
-    if let Some(conversion) = webp_to_png {
+    if let Some(conversion) = webp_snapshots {
         conversion.export(request, &staging, cancelled, progress)?;
         source_stamp
             .as_ref()

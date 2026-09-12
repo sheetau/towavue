@@ -787,6 +787,16 @@ fn webp_to_apng_save_as_and_resave_preserve_animation_and_history() {
 }
 
 #[test]
+fn webp_to_gif_save_as_and_resave_preserve_animation_and_history() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::image::webp_to_gif_save_as_and_resave_preserve_animation_and_history",
+    ) else {
+        return;
+    };
+    animation_conversion_lifecycle(&root, "webp", "gif");
+}
+
+#[test]
 fn apng_to_webp_save_as_and_resave_preserve_animation_and_history() {
     let Some(root) = crate::tests::isolated_test_root(
         "metadata_export::tests::image::apng_to_webp_save_as_and_resave_preserve_animation_and_history",
@@ -798,6 +808,12 @@ fn apng_to_webp_save_as_and_resave_preserve_animation_and_history() {
 
 fn animation_conversion_lifecycle(root: &Path, source_extension: &str, extension: &str) {
     let source = root.join("source").with_extension(source_extension);
+    // GIF's exact-fit palette can represent every pixel of this smaller fixture.
+    let input = if extension == "gif" {
+        "testsrc=size=16x12:rate=2"
+    } else {
+        "testsrc=size=32x24:rate=2"
+    };
     let generated = std::process::Command::new(
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe"),
     )
@@ -809,7 +825,7 @@ fn animation_conversion_lifecycle(root: &Path, source_extension: &str, extension
         "-f",
         "lavfi",
         "-i",
-        "testsrc=size=32x24:rate=2",
+        input,
         "-frames:v",
         "3",
     ])

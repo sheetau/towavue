@@ -539,14 +539,20 @@ impl WebpMetadata {
     }
 }
 
-pub(super) struct PngConversion {
+pub(super) struct SnapshotConversion {
     animation: animation::Animation,
-    png: png_metadata::PngMetadata,
+    output: SnapshotOutput,
 }
 
-impl PngConversion {
+enum SnapshotOutput {
+    Png(png_metadata::PngMetadata),
+    Gif(gif_animation::Animation),
+}
+
+impl SnapshotConversion {
     pub(super) fn prepare(
         path: &Path,
+        target: &Path,
         cancelled: &AtomicBool,
     ) -> Result<Option<Self>, ExportError> {
         let Some(animation) = container(
@@ -557,6 +563,14 @@ impl PngConversion {
         else {
             return Ok(None);
         };
+        let plays = u16::from_le_bytes(animation.control[4..].try_into().expect("loop count"));
+        if gif_animation::gif_path(target) {
+            let gif = gif_animation::Animation::from_milliseconds(plays, &animation.delays)?;
+            return Ok(Some(Self {
+                animation,
+                output: SnapshotOutput::Gif(gif),
+            }));
+        }
         let delays = animation
             .delays
             .iter()
@@ -578,10 +592,12 @@ impl PngConversion {
                 Ok([a, b, c, d])
             })
             .collect::<Result<Vec<_>, ExportError>>()?;
-        let plays = u16::from_le_bytes(animation.control[4..].try_into().expect("loop count"));
         Ok(Some(Self {
             animation,
-            png: png_metadata::PngMetadata::from_animation(u32::from(plays), delays),
+            output: SnapshotOutput::Png(png_metadata::PngMetadata::from_animation(
+                u32::from(plays),
+                delays,
+            )),
         }))
     }
 
@@ -595,7 +611,10 @@ impl PngConversion {
         let result = (|| {
             self.animation
                 .export(request, staging, cancelled, progress)?;
-            self.png.apply(staging, cancelled)
+            match &self.output {
+                SnapshotOutput::Png(png) => png.apply(staging, cancelled),
+                SnapshotOutput::Gif(gif) => gif.apply(staging, cancelled),
+            }
         })();
         check_cancelled(cancelled)?;
         result
@@ -611,7 +630,7 @@ pub(super) fn require_static(path: &Path, cancelled: &AtomicBool) -> Result<(), 
     .is_some()
     {
         return Err(invalid(
-            "animated WebP conversion must preserve frames; use WebP or APNG (.png/.apng) output",
+            "animated WebP conversion must preserve frames; use WebP, APNG (.png/.apng), or GIF output",
         ));
     }
     Ok(())

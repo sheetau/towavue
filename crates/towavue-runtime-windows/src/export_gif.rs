@@ -60,6 +60,26 @@ pub(super) struct Animation {
 }
 
 impl Animation {
+    pub(super) fn from_milliseconds(plays: u16, delays: &[u32]) -> Result<Self, ExportError> {
+        let delays = delays.iter().map(|delay| {
+            if !delay.is_multiple_of(10) || *delay / 10 > u32::from(u16::MAX) {
+                return Err(invalid(format!(
+                    "{delay} ms frame delay cannot be represented exactly in GIF; use WebP output"
+                )));
+            }
+            Ok((*delay / 10) as u16)
+        }).collect::<Result<Vec<_>, ExportError>>()?;
+        Ok(Self {
+            delays,
+            // WebP counts total plays; GIF counts repeats after the first play.
+            repeat: if plays == 0 {
+                gif::Repeat::Infinite
+            } else {
+                gif::Repeat::Finite(plays - 1)
+            },
+        })
+    }
+
     pub(super) fn read(path: &Path, cancelled: &AtomicBool) -> Result<Self, ExportError> {
         let result = (|| {
             let mut decoder = decoder(path, cancelled)?;

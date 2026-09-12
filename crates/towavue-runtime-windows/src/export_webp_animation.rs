@@ -102,7 +102,7 @@ impl Animation {
             }
             Ok(edited)
         };
-        if png_metadata::png_path(&request.target) {
+        if png_metadata::png_path(&request.target) || gif_animation::gif_path(&request.target) {
             use image::ImageEncoder;
             let mut output = std::io::BufWriter::new(
                 fs::OpenOptions::new()

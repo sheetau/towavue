@@ -48,6 +48,96 @@ fn request(source: &Path, target: &Path, operations: Vec<EditOperation>) -> Expo
 }
 
 #[test]
+fn webp_to_gif_preserves_edited_frames_centiseconds_and_total_plays() {
+    let root = crate::export::audio_tests::root("webp-to-gif");
+    let source = root.join("source.webp");
+    let target = root.join("converted.GiF");
+    for (plays, delays, dispose) in [
+        (0, vec![0, 10, 655350], false),
+        (1, vec![90], false),
+        (3, vec![20, 30, 40, 50], true),
+        (u16::MAX, vec![10, 20, 30], true),
+    ] {
+        let bytes = fixture(plays, &delays, dispose);
+        fs::write(&source, &bytes).expect("source");
+        let original = crate::decode_image(&source).expect("display");
+        for operations in [
+            vec![],
+            vec![EditOperation::RotateClockwise, EditOperation::FlipVertical],
+            vec![EditOperation::Resize(
+                ImageResize::new(7, 5, ResampleFilter::Lanczos).expect("resize"),
+            )],
+        ] {
+            let expected =
+                crate::render_image_edits(&original, &operations, &crate::Cancellation::default())
+                    .expect("edited frames");
+            crate::image_edits::GRAPH_BUILDS.set(0);
+            export_media(&request(&source, &target, operations.clone())).expect("WebP to GIF");
+            assert_eq!(
+                crate::image_edits::GRAPH_BUILDS.get(),
+                usize::from(!operations.is_empty())
+            );
+            let output = crate::decode_image(&target).expect("GIF display");
+            assert_eq!(output.frames.len(), expected.frames.len());
+            for (output, expected) in output.frames.iter().zip(&expected.frames) {
+                assert_eq!(
+                    (output.width, output.height),
+                    (expected.width, expected.height)
+                );
+                for (output, expected) in output
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(expected.rgba.as_chunks::<4>().0)
+                {
+                    if expected[3] < 128 {
+                        assert_eq!(output[3], 0, "transparent snapshots clear old colors");
+                    } else {
+                        assert_eq!(&output[..3], &expected[..3], "exact-fit palette");
+                        assert_eq!(output[3], 255);
+                    }
+                }
+            }
+            let mut decoder = gif::DecodeOptions::new()
+                .read_info(fs::File::open(&target).expect("GIF"))
+                .expect("independent controls");
+            for delay in &delays {
+                let frame = decoder.read_next_frame().expect("decode").expect("frame");
+                assert_eq!(u32::from(frame.delay) * 10, *delay);
+                assert_eq!(frame.dispose, gif::DisposalMethod::Background);
+            }
+            assert!(decoder.read_next_frame().expect("end").is_none());
+            assert_eq!(
+                decoder.repeat(),
+                if plays == 0 {
+                    gif::Repeat::Infinite
+                } else {
+                    gif::Repeat::Finite(plays - 1)
+                }
+            );
+            assert_eq!(fs::read(&source).expect("source retained"), bytes);
+        }
+    }
+    let before = fs::read(&target).expect("existing target");
+    for delay in [1, 19, 655351, 655360, 0xffffff] {
+        fs::write(&source, fixture(1, &[delay], false)).expect("unsupported timing");
+        let error = export_cancellable(
+            &request(&source, &target, vec![]),
+            &AtomicBool::new(false),
+            &|_| panic!("reject unrepresentable timing before encoding"),
+        )
+        .expect_err("GIF time limit");
+        assert!(
+            error.to_string().contains("cannot be represented exactly"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&target).expect("protected target"), before);
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn webp_to_apng_preserves_edited_frames_exact_timing_and_total_plays() {
     let root = crate::export::audio_tests::root("webp-to-apng");
     let source = root.join("source.webp");
@@ -425,7 +515,7 @@ fn animated_webp_scan_checks_frame_subchunks_geometry_and_resource_boundaries() 
 
 #[test]
 fn animated_webp_export_protects_targets_on_cancel_source_change_and_corruption() {
-    for extension in ["webp", "png", "apng"] {
+    for extension in ["webp", "png", "apng", "gif"] {
         animation_export_failures(extension);
     }
 }
@@ -434,7 +524,12 @@ fn animation_export_failures(extension: &str) {
     let root = crate::export::audio_tests::root("webp-animation-failure");
     let source = root.join("source.webp");
     let target = root.join("target").with_extension(extension);
-    let bytes = fixture(3, &[17, 31, 53], true);
+    let delays = if extension == "gif" {
+        [10, 30, 50]
+    } else {
+        [17, 31, 53]
+    };
+    let bytes = fixture(3, &delays, true);
     fs::write(&source, &bytes).expect("source");
     fs::write(&target, b"existing target").expect("target");
     let request = request(&source, &target, vec![]);
@@ -494,9 +589,12 @@ fn animation_export_failures(extension: &str) {
             b"existing target"
         );
     } else {
-        export_media(&request).expect("APNG does not have WebP's 16384 output limit");
+        export_media(&request).expect("snapshot output does not have WebP's 16384 limit");
         assert_eq!(
-            crate::decode_image(&target).expect("wide APNG").frames[0].width,
+            crate::decode_image(&target)
+                .expect("wide snapshot output")
+                .frames[0]
+                .width,
             16385
         );
         fs::write(&target, b"existing target").expect("restore target");
@@ -520,11 +618,16 @@ fn animation_export_failures(extension: &str) {
         );
     }
     if extension != "webp" {
-        let conversion = PngConversion::prepare(&source, &AtomicBool::new(false))
+        let conversion = SnapshotConversion::prepare(&source, &target, &AtomicBool::new(false))
             .expect("prepare")
             .expect("animated");
-        for name in ["animation.png", "metadata.png"] {
-            let staging = StagedExport::new(&target).expect("occupied PNG staging");
+        let names: &[_] = if extension == "gif" {
+            &["animation.gif"]
+        } else {
+            &["animation.png", "metadata.png"]
+        };
+        for name in names {
+            let staging = StagedExport::new(&target).expect("occupied snapshot staging");
             let occupied = staging.directory.join(name);
             fs::write(&occupied, b"occupied").expect("occupied file");
             assert!(
@@ -559,7 +662,7 @@ fn animation_export_failures(extension: &str) {
             b"existing target"
         );
     }
-    for extension in ["bmp", "gif", "jpg", "avif"] {
+    for extension in ["bmp", "jpg", "avif"] {
         let target = target.with_extension(extension);
         fs::write(&target, b"existing target").expect("target");
         assert!(export_media(&self::request(&source, &target, vec![])).is_err());

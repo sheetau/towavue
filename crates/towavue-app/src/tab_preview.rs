@@ -26,6 +26,7 @@ pub struct TabPreview {
     target: Option<Target>,
     texture: Option<Result<TextureHandle, String>>,
     sheet_uv: Option<egui::Rect>,
+    sheet_layout: Option<towavue_runtime_windows::VideoSheetLayout>,
     positions: BTreeMap<TabId, LastPosition>,
 }
 
@@ -37,6 +38,7 @@ impl TabPreview {
             target: None,
             texture: None,
             sheet_uv: None,
+            sheet_layout: None,
             positions: BTreeMap::new(),
         })
     }
@@ -95,6 +97,7 @@ impl TabPreview {
             self.generation = self.generation.wrapping_add(1);
             self.texture = None;
             self.sheet_uv = None;
+            self.sheet_layout = None;
         }
     }
 
@@ -103,6 +106,23 @@ impl TabPreview {
         N: Fn(crate::AppEvent) + Send + Sync + 'static,
     {
         if self.target == target {
+            return;
+        }
+        if let (Some(previous), Some(next)) = (&self.target, &target)
+            && previous.tab == next.tab
+            && previous.path == next.path
+            && previous.kind == MediaKind::Video
+            && next.kind == MediaKind::Video
+            && matches!(self.texture, Some(Ok(_)))
+            && let Some([left, top, right, bottom]) = self
+                .sheet_layout
+                .and_then(|layout| layout.uv(next.position))
+        {
+            self.sheet_uv = Some(egui::Rect::from_min_max(
+                egui::pos2(left, top),
+                egui::pos2(right, bottom),
+            ));
+            self.target = target;
             return;
         }
         self.clear();
@@ -182,6 +202,7 @@ impl TabPreview {
             return;
         }
         self.sheet_uv = None;
+        self.sheet_layout = None;
         self.texture = Some(result.and_then(|image| {
             let limit = context.input(|input| input.max_texture_side);
             if image.width as usize > limit || image.height as usize > limit {
@@ -210,6 +231,7 @@ impl TabPreview {
             return;
         }
         let mut uv = None;
+        let mut layout = None;
         let pixels = result.and_then(|sheet| {
             let [left, top, right, bottom] = sheet
                 .layout
@@ -219,10 +241,14 @@ impl TabPreview {
                 egui::pos2(left, top),
                 egui::pos2(right, bottom),
             ));
+            layout = Some(sheet.layout);
             Ok(sheet.image)
         });
         self.finish(context, target, generation, pixels);
-        self.sheet_uv = uv;
+        if matches!(self.texture, Some(Ok(_))) {
+            self.sheet_uv = uv;
+            self.sheet_layout = layout;
+        }
     }
 
     pub fn show(&self, response: &egui::Response, target: &Target) {
@@ -373,6 +399,165 @@ mod tests {
         assert_eq!(target.position, Duration::from_millis(72500));
         tabs.open_new("other.png".into(), MediaKind::Image);
         assert_eq!(preview.target(&tabs.tabs()[0]), target);
+    }
+
+    #[test]
+    fn advancing_within_a_video_sheet_reuses_the_uploaded_texture() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-tab-sheet-reuse-{}", std::process::id()));
+        let cache = PreviewCache::new(root.clone()).expect("cache");
+        let context = crate::fonts::test_context();
+        let mut tabs = TabSet::default();
+        tabs.open_new(root.join("missing.mp4"), MediaKind::Video);
+        let mut preview = TabPreview::new().expect("worker");
+        let mut target = preview.target(tabs.active().expect("tab"));
+        let layout = towavue_runtime_windows::VideoSheetLayout::for_position(
+            Duration::from_secs(100),
+            Duration::ZERO,
+        )
+        .expect("layout");
+        let sheet = || towavue_runtime_windows::VideoPreviewSheet {
+            layout,
+            image: PreviewImage {
+                width: 960,
+                height: 640,
+                rgba: vec![255; 960 * 640 * 4],
+            },
+        };
+        preview.target = Some(target.clone());
+        preview.finish_sheet(&context, target.clone(), preview.generation, Ok(sheet()));
+        let stale = target.clone();
+        let generation = preview.generation;
+        let texture_id = preview
+            .texture
+            .as_ref()
+            .expect("result")
+            .as_ref()
+            .expect("texture")
+            .id();
+        let _ = context.tex_manager().write().take_delta();
+        let notify = Arc::new(|_| {});
+        for seconds in [7, 37, 79, 0] {
+            target.position = Duration::from_secs(seconds);
+            preview.request(Some(target.clone()), &cache, notify.clone());
+            assert_eq!(preview.generation, generation, "no replacement job");
+            assert_eq!(preview.target.as_ref(), Some(&target));
+            assert_eq!(
+                preview
+                    .texture
+                    .as_ref()
+                    .expect("result")
+                    .as_ref()
+                    .expect("texture")
+                    .id(),
+                texture_id
+            );
+            let [left, top, right, bottom] = layout.uv(target.position).expect("cell");
+            assert_eq!(
+                preview.sheet_uv,
+                Some(egui::Rect::from_min_max(
+                    egui::pos2(left, top),
+                    egui::pos2(right, bottom)
+                ))
+            );
+        }
+        target.position = Duration::from_secs(40);
+        preview.request(Some(target.clone()), &cache, notify.clone());
+        preview.finish_sheet(&context, stale, generation, Ok(sheet()));
+        let delta = context.tex_manager().write().take_delta();
+        assert!(
+            delta.set.is_empty() && delta.free.is_empty(),
+            "UV-only changes"
+        );
+        preview.request(None, &cache, notify.clone());
+        assert!(preview.target.is_none() && preview.texture.is_none());
+        assert_eq!(
+            context.tex_manager().write().take_delta().free,
+            vec![texture_id]
+        );
+        preview.finish_sheet(&context, target.clone(), generation, Ok(sheet()));
+        assert!(
+            preview.texture.is_none(),
+            "late sheet cannot revive a closed hover"
+        );
+
+        for changed in 0..4 {
+            preview.target = Some(target.clone());
+            preview.finish_sheet(&context, target.clone(), preview.generation, Ok(sheet()));
+            let generation = preview.generation;
+            let mut next = target.clone();
+            match changed {
+                0 => next.position = Duration::from_secs(80),
+                1 => next.path = root.join("other.mp4"),
+                2 => next.tab = tabs.open_new(next.path.clone(), MediaKind::Video),
+                _ => next.kind = MediaKind::Image,
+            }
+            preview.request(Some(next.clone()), &cache, notify.clone());
+            assert_ne!(preview.generation, generation, "different sheet or owner");
+            assert_eq!(preview.target, Some(next));
+            assert!(preview.texture.is_none() && preview.sheet_uv.is_none());
+            preview.clear();
+        }
+        drop(preview);
+        std::fs::remove_dir(root).expect("remove empty owned cache");
+    }
+
+    #[test]
+    fn failed_sheets_and_single_frames_cannot_enable_sheet_reuse() {
+        let context = crate::fonts::test_context();
+        let mut tabs = TabSet::default();
+        tabs.open_new("video.mp4".into(), MediaKind::Video);
+        let mut preview = TabPreview::new().expect("worker");
+        let target = preview.target(tabs.active().expect("tab"));
+        let layout = towavue_runtime_windows::VideoSheetLayout::for_position(
+            Duration::from_secs(100),
+            Duration::ZERO,
+        )
+        .expect("layout");
+        let pixels = || PreviewImage {
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4],
+        };
+        preview.target = Some(target.clone());
+        for case in 0..4 {
+            preview.finish_sheet(
+                &context,
+                target.clone(),
+                preview.generation,
+                Ok(towavue_runtime_windows::VideoPreviewSheet {
+                    layout,
+                    image: pixels(),
+                }),
+            );
+            match case {
+                0 => preview.finish(&context, target.clone(), preview.generation, Ok(pixels())),
+                _ => {
+                    let result = match case {
+                        1 => Err("decode failed".to_owned()),
+                        2 => Ok(towavue_runtime_windows::VideoPreviewSheet {
+                            layout,
+                            image: PreviewImage {
+                                width: context.input(|input| input.max_texture_side) as u32 + 1,
+                                height: 1,
+                                rgba: Vec::new(),
+                            },
+                        }),
+                        _ => Ok(towavue_runtime_windows::VideoPreviewSheet {
+                            layout: towavue_runtime_windows::VideoSheetLayout::for_position(
+                                Duration::from_secs(100),
+                                Duration::from_secs(80),
+                            )
+                            .expect("other sheet"),
+                            image: pixels(),
+                        }),
+                    };
+                    preview.finish_sheet(&context, target.clone(), preview.generation, result);
+                }
+            }
+            assert!(preview.sheet_layout.is_none() && preview.sheet_uv.is_none());
+            assert_eq!(matches!(preview.texture, Some(Ok(_))), case == 0);
+        }
     }
 
     #[test]

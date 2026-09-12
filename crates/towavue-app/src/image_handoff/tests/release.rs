@@ -26,7 +26,7 @@ fn final_image_close_releases_originals_with_other_media_tabs_remaining() {
             let image = app.image.as_ref().expect("original").clone();
             let weak = Arc::downgrade(&image.decoded);
             let texture = image.texture.id();
-            app.image_texture_cache.entries.push_back(image);
+            app.image_texture_cache.entries.push_back(image.into());
             frame(&mut app, &context);
             let path = root.join(if kind == MediaKind::Audio {
                 "other.wav"
@@ -95,7 +95,7 @@ fn last_tab_close_releases_cached_originals_but_other_tabs_keep_them() {
     let original = app.image.as_ref().expect("original").clone();
     let retained = Arc::downgrade(&original.decoded);
     let texture = original.texture.id();
-    app.image_texture_cache.entries.push_back(original);
+    app.image_texture_cache.entries.push_back(original.into());
     let unused = decoded(32, 32, [80, 90, 100, 255]);
     let unused_weak = Arc::downgrade(&unused);
     let unused_texture = app
@@ -113,7 +113,7 @@ fn last_tab_close_releases_cached_originals_but_other_tabs_keep_them() {
         app.image.as_ref().expect("live original").texture.id(),
         texture
     );
-    assert!(retained.upgrade().is_some() && unused_weak.upgrade().is_some());
+    assert!(retained.upgrade().is_some() && unused_weak.upgrade().is_none());
     assert_eq!(app.image_texture_cache.entries.len(), 2);
 
     let other_path = root.join("new-active.png");

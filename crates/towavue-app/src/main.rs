@@ -419,9 +419,34 @@ struct RetainedImageTab {
     status_message: Option<(String, Instant)>,
 }
 
+struct CachedImageTexture {
+    decoded: std::sync::Weak<DecodedImage>,
+    texture: TextureHandle,
+    sampling: std::rc::Rc<std::cell::Cell<TextureOptions>>,
+    bytes: usize,
+    #[cfg(test)]
+    retained_for_comparison: Option<Arc<DecodedImage>>,
+}
+
+impl From<ImagePresentation> for CachedImageTexture {
+    fn from(image: ImagePresentation) -> Self {
+        Self {
+            decoded: Arc::downgrade(&image.decoded),
+            bytes: image.decoded.retained_bytes(),
+            texture: image.texture,
+            sampling: image.sampling,
+            #[cfg(test)]
+            retained_for_comparison: None,
+        }
+    }
+}
+
 struct ImageTextureCache {
-    entries: VecDeque<ImagePresentation>,
+    // Original pixels are owned by the decoder cache and live presentations, not GPU caching.
+    entries: VecDeque<CachedImageTexture>,
     byte_limit: usize,
+    #[cfg(test)]
+    retain_originals_for_comparison: bool,
 }
 
 impl ImageTextureCache {
@@ -429,6 +454,8 @@ impl ImageTextureCache {
         Self {
             entries: VecDeque::new(),
             byte_limit,
+            #[cfg(test)]
+            retain_originals_for_comparison: false,
         }
     }
 
@@ -441,27 +468,38 @@ impl ImageTextureCache {
         if let Some(index) = self
             .entries
             .iter()
-            .position(|image| Arc::ptr_eq(&image.decoded, &decoded))
+            .position(|image| image.decoded.as_ptr() == Arc::as_ptr(&decoded))
         {
-            let image = self.entries.remove(index).expect("cached image");
-            self.entries.push_back(image.clone());
+            let cached = self.entries.remove(index).expect("cached image");
+            let image = ImagePresentation {
+                decoded,
+                texture: cached.texture.clone(),
+                frame_index: 0,
+                next_frame_at: None,
+                sampling: cached.sampling.clone(),
+            };
+            self.entries.push_back(cached);
             return Ok(image);
         }
         let image = ImagePresentation::from_decoded(context, path, decoded)?;
         let bytes = image.decoded.retained_bytes();
         if !image.decoded.is_animated() && bytes <= self.byte_limit {
             while self.entries.len() >= 8
-                || self
-                    .entries
-                    .iter()
-                    .map(|image| image.decoded.retained_bytes())
-                    .sum::<usize>()
-                    + bytes
+                || self.entries.iter().map(|image| image.bytes).sum::<usize>() + bytes
                     > self.byte_limit
             {
                 self.entries.pop_front();
             }
-            self.entries.push_back(image.clone());
+            self.entries.push_back(image.clone().into());
+            // Reproduce the old ownership in the same benchmark binary, without
+            // changing decoder/cache budgets or contaminating application behavior.
+            #[cfg(test)]
+            if self.retain_originals_for_comparison {
+                self.entries
+                    .back_mut()
+                    .expect("cached image")
+                    .retained_for_comparison = Some(Arc::clone(&image.decoded));
+            }
         }
         Ok(image)
     }
@@ -18457,6 +18495,7 @@ mod tests {
         }
         assert_eq!(cache.entries.len(), 8);
         cache.entries.clear();
+        let released = Arc::downgrade(&first);
         assert_ne!(
             cache
                 .load(&context, Path::new("same.png"), first)
@@ -18465,6 +18504,19 @@ mod tests {
                 .id(),
             first_id
         );
+        assert!(
+            released.upgrade().is_none(),
+            "the texture cache must not retain originals after their last consumer releases them"
+        );
+        cache.retain_originals_for_comparison = true;
+        let retained = make_image(42);
+        let released = Arc::downgrade(&retained);
+        cache
+            .load(&context, Path::new("comparison.png"), retained)
+            .expect("legacy ownership comparison");
+        assert!(released.upgrade().is_some());
+        cache.entries.clear();
+        assert!(released.upgrade().is_none());
     }
 
     #[test]

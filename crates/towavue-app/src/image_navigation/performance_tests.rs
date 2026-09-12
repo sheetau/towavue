@@ -247,6 +247,12 @@ fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
         let _ = notify.send(event);
     })
     .expect("app");
+    app.image_texture_cache.retain_originals_for_comparison =
+        std::env::var_os("TOWAVUE_VERIFY_RETAIN_TEXTURE_ORIGINALS").is_some();
+    eprintln!(
+        "NAV100_CACHE retain_originals={}",
+        app.image_texture_cache.retain_originals_for_comparison
+    );
     let context = fonts::test_context();
     app.ui_context = Some(context.clone());
     app.fullscreen = true;
@@ -479,7 +485,7 @@ fn measure(root: PathBuf, mut renderer: Option<FrameRenderer>) {
             .image_texture_cache
             .entries
             .iter()
-            .map(|image| Arc::downgrade(&image.decoded))
+            .map(|image| image.decoded.clone())
             .collect();
         let textures: Vec<_> = app
             .image_texture_cache

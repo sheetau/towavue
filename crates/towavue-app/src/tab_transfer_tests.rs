@@ -101,7 +101,7 @@ fn final_image_transfer_clears_source_cache_without_dropping_destination_pixels(
     let image = source.image.as_ref().expect("original").clone();
     let weak = Arc::downgrade(&image.decoded);
     let texture = image.texture.id();
-    source.image_texture_cache.entries.push_back(image);
+    source.image_texture_cache.entries.push_back(image.into());
     let moved = transfer(&mut source, &mut destination, id);
     assert_eq!(source.tabs.active().expect("remaining audio").id, audio);
     assert_eq!(source.media_generation, audio_instance);

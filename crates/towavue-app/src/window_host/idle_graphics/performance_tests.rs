@@ -128,7 +128,7 @@ impl Trial {
                     .image_texture_cache
                     .entries
                     .iter()
-                    .map(|image| Arc::downgrade(&image.decoded))
+                    .map(|image| image.decoded.clone())
                     .collect();
                 self.textures = app
                     .image_texture_cache

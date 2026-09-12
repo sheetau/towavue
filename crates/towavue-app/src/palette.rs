@@ -20,6 +20,7 @@ impl CommandPalette {
         context: &egui::Context,
         commands: CommandContext,
         shortcuts: &ShortcutBindings,
+        top: f32,
     ) -> (Option<CommandId>, bool) {
         let mut chosen = None;
         let query_id = egui::Id::new("command-palette-query");
@@ -82,9 +83,19 @@ impl CommandPalette {
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
             )
         });
+        let backdrop = egui::Area::new("command-palette-backdrop".into())
+            .order(egui::Order::Foreground)
+            .fixed_pos(context.content_rect().min)
+            .movable(false)
+            .sense(egui::Sense::CLICK | egui::Sense::DRAG)
+            .show(context, |ui| ui.set_min_size(context.content_rect().size()));
         egui::Window::new("Command palette")
             .id("command-palette".into())
-            .anchor(egui::Align2::CENTER_TOP, [0.0, 34.0])
+            .order(egui::Order::Foreground)
+            .anchor(
+                egui::Align2::CENTER_TOP,
+                [0.0, top - context.content_rect().top()],
+            )
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
@@ -191,7 +202,10 @@ impl CommandPalette {
                         }
                     });
             });
-        (chosen, close)
+        (
+            chosen,
+            close || (!egui::Popup::is_any_open(context) && backdrop.response.clicked()),
+        )
     }
 }
 
@@ -237,6 +251,7 @@ mod tests {
                                 ..Default::default()
                             },
                             &ShortcutBindings::default(),
+                            0.0,
                         ),
                         (None, false),
                     );
@@ -320,7 +335,10 @@ mod tests {
                         ..Default::default()
                     },
                     |_| {
-                        assert_eq!(palette.show(&context, commands, &shortcuts), (None, false));
+                        assert_eq!(
+                            palette.show(&context, commands, &shortcuts, 0.0),
+                            (None, false)
+                        );
                     },
                 )
             };
@@ -358,11 +376,14 @@ mod tests {
 
     #[test]
     fn compact_palette_keeps_search_and_shortcut_columns_inside_the_window() {
-        for size in [
+        for (size, top) in [
             egui::vec2(960.0, 576.0),
             egui::vec2(480.0, 300.0),
             egui::vec2(240.0, 180.0),
-        ] {
+        ]
+        .into_iter()
+        .flat_map(|size| [0.0, 30.0].map(|top| (size, top)))
+        {
             let context = egui::Context::default();
             context.global_style_mut(|style| {
                 crate::chrome::style(style);
@@ -396,7 +417,9 @@ mod tests {
                         ..Default::default()
                     },
                     |_| {
-                        if let (Some(command), _) = palette.show(&context, commands, &shortcuts) {
+                        if let (Some(command), _) =
+                            palette.show(&context, commands, &shortcuts, top)
+                        {
                             chosen.push(command);
                         }
                     },
@@ -423,7 +446,7 @@ mod tests {
                 })
                 .expect("dark palette panel");
             assert!(panel.left() >= 0.0 && panel.right() <= size.x);
-            assert!(panel.top() >= 32.0 && panel.bottom() <= size.y);
+            assert!((panel.top() - top).abs() <= 1.0 && panel.bottom() <= size.y);
             assert!(panel.width() <= 600.0);
             assert!(
                 output.platform_output.ime.is_some(),
@@ -495,6 +518,113 @@ mod tests {
     }
 
     #[test]
+    fn outside_click_closes_palette_without_activating_the_background() {
+        let context = egui::Context::default();
+        let mut palette = CommandPalette::default();
+        let mut open = true;
+        let outside = egui::pos2(40.0, 540.0);
+        let frame = |palette: &mut CommandPalette, open: &mut bool, events| {
+            let mut background_clicked = false;
+            let mut closed = false;
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    background_clicked |= ui
+                        .put(
+                            egui::Rect::from_min_size(
+                                egui::pos2(10.0, 520.0),
+                                egui::vec2(100.0, 40.0),
+                            ),
+                            egui::Button::new("Background"),
+                        )
+                        .clicked();
+                    if *open {
+                        let (command, close) = palette.show(
+                            &context,
+                            CommandContext {
+                                palette_open: true,
+                                ..Default::default()
+                            },
+                            &ShortcutBindings::default(),
+                            0.0,
+                        );
+                        assert!(command.is_none());
+                        if close {
+                            *open = false;
+                            closed = true;
+                        }
+                    }
+                },
+            );
+            (background_clicked, closed)
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for _ in 0..3 {
+            frame(&mut palette, &mut open, vec![]);
+        }
+        let inside = context
+            .read_response("command-palette-query".into())
+            .expect("query")
+            .rect
+            .center();
+        frame(
+            &mut palette,
+            &mut open,
+            vec![egui::Event::PointerMoved(inside), button(inside, true)],
+        );
+        frame(
+            &mut palette,
+            &mut open,
+            vec![egui::Event::PointerMoved(outside)],
+        );
+        assert_eq!(
+            frame(&mut palette, &mut open, vec![button(outside, false)]),
+            (false, false),
+            "a drag from the query is not a backdrop click"
+        );
+        frame(
+            &mut palette,
+            &mut open,
+            vec![egui::Event::PointerMoved(outside)],
+        );
+        assert_eq!(
+            frame(&mut palette, &mut open, vec![button(outside, true)]),
+            (false, false)
+        );
+        assert_eq!(
+            frame(&mut palette, &mut open, vec![button(outside, false)]),
+            (false, true)
+        );
+        assert!(!open);
+        assert_eq!(
+            frame(&mut palette, &mut open, vec![]),
+            (false, false),
+            "no click-through after closing"
+        );
+        for _ in 0..2 {
+            frame(&mut palette, &mut open, vec![]);
+        }
+        frame(&mut palette, &mut open, vec![button(outside, true)]);
+        assert_eq!(
+            frame(&mut palette, &mut open, vec![button(outside, false)]),
+            (true, false),
+            "a fresh click reaches the background once the palette is closed"
+        );
+    }
+
+    #[test]
     fn palette_accepts_text_navigation_enter_and_empty_results_across_layout_passes() {
         let context = egui::Context::default();
         let mut palette = CommandPalette::default();
@@ -522,7 +652,7 @@ mod tests {
             };
             let mut chosen = Vec::new();
             let _ = context.run_ui(input, |_| {
-                if let (Some(command), _) = palette.show(&context, commands, &shortcuts) {
+                if let (Some(command), _) = palette.show(&context, commands, &shortcuts, 0.0) {
                     chosen.push(command);
                 }
             });
@@ -557,7 +687,7 @@ mod tests {
                 ..Default::default()
             },
             |_| {
-                closed |= palette.show(&context, commands, &shortcuts).1;
+                closed |= palette.show(&context, commands, &shortcuts, 0.0).1;
             },
         );
         assert!(closed);
@@ -579,7 +709,10 @@ mod tests {
                     ..Default::default()
                 },
                 |_| {
-                    assert_eq!(palette.show(&context, commands, &shortcuts), (None, false));
+                    assert_eq!(
+                        palette.show(&context, commands, &shortcuts, 0.0),
+                        (None, false)
+                    );
                 },
             )
         };
@@ -645,7 +778,7 @@ mod tests {
                     ..Default::default()
                 },
                 |_| {
-                    let (chosen, close) = palette.show(&context, commands, &shortcuts);
+                    let (chosen, close) = palette.show(&context, commands, &shortcuts, 0.0);
                     result.0 = result.0.or(chosen);
                     result.1 |= close;
                 },

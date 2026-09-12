@@ -2901,7 +2901,7 @@ where
             self.filmstrip.clear();
         }
         if self.palette_open && !modal_blocked {
-            self.draw_command_palette(&context, actions);
+            self.draw_command_palette(&context, media_panel.response.rect.top(), actions);
         }
         if !modal_blocked {
             self.draw_grid_menu(&context, actions);
@@ -5173,9 +5173,14 @@ where
         }
     }
 
-    fn draw_command_palette(&mut self, context: &egui::Context, actions: &mut Vec<UiAction>) {
+    fn draw_command_palette(
+        &mut self,
+        context: &egui::Context,
+        top: f32,
+        actions: &mut Vec<UiAction>,
+    ) {
         let commands = self.command_context();
-        let (chosen, close) = self.palette.show(context, commands, &self.shortcuts);
+        let (chosen, close) = self.palette.show(context, commands, &self.shortcuts, top);
         if let Some(command) = chosen {
             actions.push(UiAction::Command(command));
         }
@@ -16558,7 +16563,7 @@ mod tests {
                         response.request_focus();
                     }
                     if app.palette_open {
-                        app.draw_command_palette(&context, &mut actions);
+                        app.draw_command_palette(&context, 0.0, &mut actions);
                     }
                     app.draw_grid_menu(&context, &mut actions);
                 },

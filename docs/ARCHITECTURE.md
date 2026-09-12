@@ -1,5 +1,11 @@
 # towavue アーキテクチャ
 
+## U07: 元durationに基づく時間軸内容の同値（2026-09-12）
+
+元ファイルの正のdurationを取得した履歴は、再生・exportと同じEditTimelineのsource範囲・出力時間・区間音量の列を保存snapshotと厳密比較する。区間音量の復元、正確に戻るStretch、異なるKeep／Delete手順、明示的な元EOFと未指定終端が同じ結果なら未保存を解除する。整数丸めによる1nsの差や異なるsource範囲は同一視しない。全体volume／rateとraster操作も別途一致が必要で、画像内容の一般的な同値判定とはしない。
+
+durationは編集後の長さでなく元sourceの値とし、appのpath／generation照合済み通知と編集入口から履歴へ渡す。未取得・無効・時間軸構築失敗では既存の操作比較へ戻し、同値を推定しない。比較結果は編集・Undo／Redo・export snapshot・duration変更で再計算し、dirty表示やguardの毎frame照会では時間軸を再構築しない。元file変更で履歴を破棄する既存lifecycleと、tab移動時の履歴保持を維持する。
+
 ## U07: 保存済みの実効再生設定との比較（2026-09-12）
 
 全体SetVolume／SetRate／SetTrimStart／SetTrimEndは、再生・保存と同じEditStateの最終値で未保存を比較する。履歴列からこれらを除いたraster／timeline操作列は従来の可逆orientation比較を維持する。全体設定はraster／timelineとの記録順によらず最終値が適用されるため、これらの間に挟まれた上書き済みの設定は内容差として数えない。trim開始未指定と明示0は同じPlaybackRangeとする。音量・速度は既存clamp後の厳密比較であり、近似float比較は行わない。

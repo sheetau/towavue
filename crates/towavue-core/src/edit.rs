@@ -216,6 +216,8 @@ pub struct EditHistory {
     cursor: usize,
     saved_cursor: Option<usize>,
     saved_operations: Vec<EditOperation>,
+    source_duration: Option<MediaTime>,
+    timeline_matches_saved: bool,
 }
 
 impl Default for EditHistory {
@@ -225,11 +227,40 @@ impl Default for EditHistory {
             cursor: 0,
             saved_cursor: Some(0),
             saved_operations: Vec::new(),
+            source_duration: None,
+            timeline_matches_saved: false,
         }
     }
 }
 
 impl EditHistory {
+    /// Bind the original source duration, never the edited timeline duration.
+    pub fn set_source_duration(&mut self, duration: Option<MediaTime>) {
+        let duration = duration.filter(|duration| *duration > MediaTime::ZERO);
+        if self.source_duration != duration {
+            self.source_duration = duration;
+            self.refresh_timeline_equivalence();
+        }
+    }
+
+    fn refresh_timeline_equivalence(&mut self) {
+        self.timeline_matches_saved = false;
+        let Some(duration) = self.source_duration else {
+            return;
+        };
+        if !effective_edits_without_timeline(self.operations())
+            .eq(effective_edits_without_timeline(&self.saved_operations))
+        {
+            return;
+        }
+        if let (Some(current), Some(saved)) = (
+            crate::EditTimeline::from_operations(duration, self.operations()),
+            crate::EditTimeline::from_operations(duration, &self.saved_operations),
+        ) {
+            self.timeline_matches_saved = current == saved;
+        }
+    }
+
     pub fn timeline(&self, source_duration: MediaTime) -> Option<crate::EditTimeline> {
         crate::EditTimeline::from_operations(source_duration, self.operations())
     }
@@ -252,6 +283,7 @@ impl EditHistory {
         }
         self.operations.push(operation);
         self.cursor += 1;
+        self.refresh_timeline_equivalence();
         true
     }
 
@@ -260,6 +292,7 @@ impl EditHistory {
             return false;
         }
         self.cursor -= 1;
+        self.refresh_timeline_equivalence();
         true
     }
 
@@ -268,6 +301,7 @@ impl EditHistory {
             return false;
         }
         self.cursor += 1;
+        self.refresh_timeline_equivalence();
         true
     }
 
@@ -281,12 +315,14 @@ impl EditHistory {
 
     pub fn is_dirty(&self) -> bool {
         self.saved_cursor != Some(self.cursor)
+            && !self.timeline_matches_saved
             && !effective_edits(self.operations()).eq(effective_edits(&self.saved_operations))
     }
 
     pub fn mark_saved(&mut self) {
         self.saved_cursor = Some(self.cursor);
         self.saved_operations = self.operations().to_vec();
+        self.timeline_matches_saved = false;
     }
 
     pub fn mark_exported(&mut self, operations: &[EditOperation]) {
@@ -295,6 +331,7 @@ impl EditHistory {
             .operations
             .starts_with(operations)
             .then_some(operations.len());
+        self.refresh_timeline_equivalence();
     }
 }
 
@@ -305,13 +342,27 @@ enum EffectiveEdit {
     Playback(PlaybackRange, f32, f32),
 }
 
-fn effective_edits(mut operations: &[EditOperation]) -> impl Iterator<Item = EffectiveEdit> + '_ {
+fn effective_edits(operations: &[EditOperation]) -> impl Iterator<Item = EffectiveEdit> + '_ {
+    compare_edits(operations, false)
+}
+
+fn effective_edits_without_timeline(
+    operations: &[EditOperation],
+) -> impl Iterator<Item = EffectiveEdit> + '_ {
+    compare_edits(operations, true)
+}
+
+fn compare_edits(
+    mut operations: &[EditOperation],
+    skip_timeline: bool,
+) -> impl Iterator<Item = EffectiveEdit> + '_ {
     let state = EditState::from_operations(operations);
     std::iter::from_fn(move || {
         // Global playback settings are applied once; raster/timeline operations remain barriers.
         let (mut turns, mut reflected) = (0_u8, false);
         while let Some((operation, rest)) = operations.split_first() {
             match operation {
+                EditOperation::Timeline(_) if skip_timeline => {}
                 EditOperation::SetVolume(_)
                 | EditOperation::SetRate(_)
                 | EditOperation::SetTrimStart(_)
@@ -339,7 +390,11 @@ fn effective_edits(mut operations: &[EditOperation]) -> impl Iterator<Item = Eff
         (turns != 0 || reflected).then_some(EffectiveEdit::Orientation(turns, reflected))
     })
     .chain(std::iter::once(EffectiveEdit::Playback(
-        state.playback_range(),
+        if skip_timeline {
+            PlaybackRange::default()
+        } else {
+            state.playback_range()
+        },
         state.volume,
         state.rate,
     )))
@@ -348,6 +403,125 @@ fn effective_edits(mut operations: &[EditOperation]) -> impl Iterator<Item = Eff
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restored_timeline_volume_matches_original_content_with_known_duration() {
+        let time = MediaTime::from_nanoseconds;
+        let range = crate::TimeRange::new(time(100), time(300)).expect("range");
+        let mut history = EditHistory::default();
+        history.push(
+            EditOperation::Timeline(crate::TimelineEdit::SetVolume(range, 0.5)),
+            MediaKind::Audio,
+        );
+        history.push(
+            EditOperation::Timeline(crate::TimelineEdit::SetVolume(range, 1.0)),
+            MediaKind::Audio,
+        );
+        assert_eq!(
+            history.timeline(time(1000)),
+            crate::EditTimeline::from_operations(time(1000), &[])
+        );
+        assert!(history.is_dirty(), "duration is not known yet");
+        history.set_source_duration(Some(time(1000)));
+        assert!(
+            !history.is_dirty(),
+            "restored playback content must not remain dirty"
+        );
+        assert_eq!(history.operations().len(), 2);
+        history.undo();
+        assert!(history.is_dirty());
+        history.redo();
+        assert!(!history.is_dirty());
+        for duration in [None, Some(time(0)), Some(time(-1)), Some(time(200))] {
+            history.set_source_duration(duration);
+            assert!(
+                history.is_dirty(),
+                "unknown/invalid/too-short source duration"
+            );
+        }
+        history.set_source_duration(Some(time(1000)));
+        assert!(!history.is_dirty());
+    }
+
+    #[test]
+    fn timeline_equivalence_tracks_duration_rounding_export_and_branch_changes() {
+        let time = MediaTime::from_nanoseconds;
+        let range = |start, end| crate::TimeRange::new(time(start), time(end)).expect("range");
+        let mut history = EditHistory::default();
+        history.set_source_duration(Some(time(1000)));
+        history.push(EditOperation::SetTrimEnd(time(1000)), MediaKind::Audio);
+        assert!(!history.is_dirty(), "explicit original EOF");
+        history.set_source_duration(Some(time(1001)));
+        assert!(history.is_dirty(), "one nanosecond was trimmed");
+        history.set_source_duration(Some(time(1000)));
+        for edit in [
+            crate::TimelineEdit::Stretch(range(100, 300), time(400)),
+            crate::TimelineEdit::Stretch(range(100, 500), time(200)),
+        ] {
+            history.push(EditOperation::Timeline(edit), MediaKind::Audio);
+        }
+        assert!(!history.is_dirty(), "exact stretch restoration");
+        history.undo();
+        assert!(history.is_dirty());
+        history.push(
+            EditOperation::Timeline(crate::TimelineEdit::Stretch(range(100, 500), time(201))),
+            MediaKind::Audio,
+        );
+        assert!(history.is_dirty(), "one nanosecond is not equivalent");
+        history.undo();
+        history.push(
+            EditOperation::Timeline(crate::TimelineEdit::Stretch(range(100, 500), time(200))),
+            MediaKind::Audio,
+        );
+        assert!(!history.is_dirty());
+        assert!(!history.redo());
+        history.mark_saved();
+        history.push(
+            EditOperation::Timeline(crate::TimelineEdit::Keep(range(100, 800))),
+            MediaKind::Audio,
+        );
+        assert!(history.is_dirty());
+        let exported = [
+            EditOperation::SetTrimStart(time(100)),
+            EditOperation::SetTrimEnd(time(800)),
+        ];
+        history.mark_exported(&exported);
+        assert!(
+            !history.is_dirty(),
+            "same source segment through a different edit path"
+        );
+        history.undo();
+        assert!(
+            history.is_dirty(),
+            "saved content is the export, not the current cursor"
+        );
+        history.redo();
+        assert!(!history.is_dirty());
+        for edit in [
+            crate::TimelineEdit::Delete(range(0, 1)),
+            crate::TimelineEdit::SetVolume(range(0, 100), 0.5),
+        ] {
+            history.push(EditOperation::Timeline(edit), MediaKind::Audio);
+            assert!(history.is_dirty());
+            history.undo();
+            assert!(!history.is_dirty());
+        }
+        history.mark_exported(&[
+            EditOperation::SetTrimStart(time(101)),
+            EditOperation::SetTrimEnd(time(801)),
+        ]);
+        assert!(
+            history.is_dirty(),
+            "same length but different source samples"
+        );
+        history.mark_exported(&[EditOperation::Timeline(crate::TimelineEdit::Keep(range(
+            0, 2000,
+        )))]);
+        assert!(
+            history.is_dirty(),
+            "invalid saved plan cannot establish equivalence"
+        );
+    }
 
     #[test]
     fn global_playback_settings_return_to_saved_content_without_erasing_undo() {

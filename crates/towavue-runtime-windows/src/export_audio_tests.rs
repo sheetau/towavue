@@ -152,6 +152,22 @@ fn global_playback_equivalent_histories_export_identical_audio_and_video() {
         (
             Vec::new(),
             vec![
+                EditOperation::Timeline(TimelineEdit::SetVolume(range(100, 300), 0.5)),
+                EditOperation::Timeline(TimelineEdit::SetVolume(range(100, 300), 1.0)),
+                EditOperation::Timeline(TimelineEdit::Stretch(range(100, 300), time(400))),
+                EditOperation::Timeline(TimelineEdit::Stretch(range(100, 500), time(200))),
+            ],
+        ),
+        (
+            vec![
+                EditOperation::SetTrimStart(time(100)),
+                EditOperation::SetTrimEnd(time(800)),
+            ],
+            vec![EditOperation::Timeline(TimelineEdit::Keep(range(100, 800)))],
+        ),
+        (
+            Vec::new(),
+            vec![
                 EditOperation::SetVolume(0.2),
                 EditOperation::SetRate(2.0),
                 EditOperation::SetTrimStart(time(100)),
@@ -162,6 +178,7 @@ fn global_playback_equivalent_histories_export_identical_audio_and_video() {
         ),
     ] {
         let mut history = towavue_core::EditHistory::default();
+        history.set_source_duration(Some(time(1200)));
         for operation in &equivalent {
             history.push(*operation, MediaKind::Video);
         }

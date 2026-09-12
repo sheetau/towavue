@@ -2233,24 +2233,37 @@ where
                     match result {
                         Ok(duration) => {
                             self.media_duration = Some(duration);
+                            if let Some(history) = self
+                                .tabs
+                                .active()
+                                .and_then(|tab| self.edits.get_mut(&tab.id))
+                            {
+                                history.set_source_duration(Some(media_time(duration)));
+                            }
                             self.sync_playback_edits();
                             self.request_redraw();
                         }
                         Err(error) => self.set_status(format!("Duration unavailable: {error}")),
                     }
-                } else if let Some(saved) = self
+                } else if let Some((id, saved)) = self
                     .retained_playback
-                    .values_mut()
-                    .find(|saved| saved.instance == generation && saved.path == path)
+                    .iter_mut()
+                    .find(|(_, saved)| saved.instance == generation && saved.path == path)
                 {
                     match result {
-                        Ok(duration) => saved.duration = Some(duration),
+                        Ok(duration) => {
+                            saved.duration = Some(duration);
+                            if let Some(history) = self.edits.get_mut(id) {
+                                history.set_source_duration(Some(media_time(duration)));
+                            }
+                        }
                         Err(error) => {
                             saved.status =
                                 Some((format!("Duration unavailable: {error}"), Instant::now()))
                         }
                     }
                     saved.poll();
+                    self.request_redraw();
                 }
             }
             AppEvent::StatusFileSize(ticket, bytes) => {
@@ -5913,7 +5926,9 @@ where
             return;
         };
         let id = tab.id;
-        if self.edits.entry(id).or_default().push(operation, kind) {
+        let history = self.edits.entry(id).or_default();
+        history.set_source_duration(self.media_duration.map(media_time));
+        if history.push(operation, kind) {
             let retained_selection = match (operation, self.time_selection) {
                 (
                     EditOperation::Timeline(towavue_core::TimelineEdit::SetVolume(_, _)),
@@ -13933,6 +13948,42 @@ mod tests {
                     EditOperation::SetTrimStart(media_time(Duration::from_secs(2))),
                     EditOperation::SetTrimStart(MediaTime::ZERO),
                 ),
+                (
+                    EditOperation::Timeline(towavue_core::TimelineEdit::SetVolume(
+                        towavue_core::TimeRange::new(
+                            media_time(Duration::from_secs(1)),
+                            media_time(Duration::from_secs(3)),
+                        )
+                        .expect("range"),
+                        0.5,
+                    )),
+                    EditOperation::Timeline(towavue_core::TimelineEdit::SetVolume(
+                        towavue_core::TimeRange::new(
+                            media_time(Duration::from_secs(1)),
+                            media_time(Duration::from_secs(3)),
+                        )
+                        .expect("range"),
+                        1.0,
+                    )),
+                ),
+                (
+                    EditOperation::Timeline(towavue_core::TimelineEdit::Stretch(
+                        towavue_core::TimeRange::new(
+                            media_time(Duration::from_secs(1)),
+                            media_time(Duration::from_secs(3)),
+                        )
+                        .expect("range"),
+                        media_time(Duration::from_secs(4)),
+                    )),
+                    EditOperation::Timeline(towavue_core::TimelineEdit::Stretch(
+                        towavue_core::TimeRange::new(
+                            media_time(Duration::from_secs(1)),
+                            media_time(Duration::from_secs(5)),
+                        )
+                        .expect("range"),
+                        media_time(Duration::from_secs(2)),
+                    )),
+                ),
             ] {
                 app.push_edit(change);
                 assert!(app.command_context().has_unsaved_edits);
@@ -13955,6 +14006,74 @@ mod tests {
             app.request_guarded(GuardedAction::CloseTab(tab));
             assert!(app.pending_guard.is_none());
             assert!(!app.tabs.tabs().iter().any(|item| item.id == tab));
+        }
+    }
+
+    #[test]
+    fn source_duration_updates_only_the_matching_active_or_retained_history() {
+        let Some(root) = isolated_test_root(
+            "tests::source_duration_updates_only_the_matching_active_or_retained_history",
+        ) else {
+            return;
+        };
+        for background in [false, true] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let source = root.join("source.wav");
+            let tab = app.tabs.open_new(source.clone(), MediaKind::Audio);
+            app.path = Some(source.clone());
+            app.media_kind = Some(MediaKind::Audio);
+            app.state = PlaybackState::Paused;
+            let generation = app.media_generation;
+            let duration = Duration::from_secs(30);
+            app.edits.entry(tab).or_default().push(
+                EditOperation::SetTrimEnd(media_time(duration)),
+                MediaKind::Audio,
+            );
+            assert!(app.edits[&tab].is_dirty(), "unknown source EOF");
+            let other = if background {
+                let saved = app.take_playback_tab_state();
+                app.retained_playback.insert(tab, saved);
+                let other_path = root.join("other.wav");
+                let other = app.tabs.open_new(other_path.clone(), MediaKind::Audio);
+                app.path = Some(other_path);
+                app.media_generation += 1;
+                app.edits.entry(other).or_default().push(
+                    EditOperation::SetTrimEnd(media_time(duration)),
+                    MediaKind::Audio,
+                );
+                Some(other)
+            } else {
+                None
+            };
+            for (path, instance) in [
+                (root.join("wrong.wav"), generation),
+                (source.clone(), generation + 10),
+            ] {
+                app.handle_app_event(AppEvent::Duration(path, instance, Ok(duration)));
+                assert!(
+                    app.edits[&tab].is_dirty(),
+                    "stale duration cannot clear dirty state"
+                );
+            }
+            app.handle_app_event(AppEvent::Duration(source, generation, Ok(duration)));
+            assert!(!app.edits[&tab].is_dirty());
+            assert_eq!(app.edits[&tab].operations().len(), 1);
+            if let Some(other) = other {
+                assert!(app.edits[&other].is_dirty());
+                assert_eq!(app.retained_playback[&tab].duration, Some(duration));
+                assert_eq!(app.media_duration, None);
+            } else {
+                assert_eq!(app.media_duration, Some(duration));
+                assert!(!app.command_context().has_unsaved_edits);
+            }
+            app.edits
+                .get_mut(&tab)
+                .expect("history")
+                .set_source_duration(None);
+            assert!(
+                app.edits[&tab].is_dirty(),
+                "invalidating duration clears cached equivalence"
+            );
         }
     }
 

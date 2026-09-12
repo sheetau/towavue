@@ -13,6 +13,10 @@
 
 ### 2026-09-12追記の差分台帳
 
+U07 時間軸内容の同値: 元source durationが既知なら、現在／保存snapshotのEditTimelineのsource範囲・出力長・区間音量を比較する。区間音量／正確なStretchの復元、Keepとtrimの別手順、明示EOFを認識し、全体volume／rate・raster内容の一致も要求する。未知／無効durationや構築失敗は従来比較へ戻す。結果を履歴変更時だけ保持し、dirty照会で時間軸を毎回作らない。durationはpath／generation一致後にactive／retained履歴へ渡し、別sourceの値を混ぜない。
+
+検証: 区間音量を戻してplanが元と一致してもdirtyが残る旧挙動を再現。Undo／Redo・分岐／export基準・未知／短すぎるduration・1ns差・同じ長さで異なるsource区間・無効planを回帰化。appの区間音量／Stretch復元とExit／close guard、active／backgroundへのduration通知・stale拒否・元値無効化を確認。実FFmpegの区間復元とKeep対trimの別手順で、動画保存／音声抽出の全PCM・RGBA frame列が一致。画像crop／resize／自由回転の一般的な画素同値、全codec品質とnative入力／DPI等の全台帳は未完のまま継続する。
+
 U07 全体再生設定の同値性: 全体音量・速度・trim開始／終端は再生・保存と同じ最終EditState値で比較し、上書き済みの操作や他の編集との記録順だけの違いで未保存にしない。開始未指定と0は同じ範囲とし、音量／速度は既存clamp後の厳密比較。保存済みsnapshot・Undo／Redo・分岐を保持し、raster／timeline操作列は従来どおり区別する。旧実装で100%音量復元のdirty残留を再現し、coreの復元／分岐／export snapshot／近接float／非同値編集、appのdirty context／Exit・close確認とUndo／Redoを検証。実FFmpegの動画／音声抽出で、設定復元およびcrop・区間音量を含む別順序履歴の全PCM／RGBA frame列が一致する。元durationが必要なtrim終端未指定と明示EOF、区間編集全般／crop／resize／自由回転の同値、実入力／DPIを含む全台帳は未完のまま維持する。
 
 E01 静止WebP XMP: JPEGと共通の9項目・型検査・既存値表示をWebPへ接続。全Keep／設定未使用も同形式保存時に保持し、XMP chunk／RIFF長／VP8X flagだけを書換える。simple VP8／VP8Lには必要時のみVP8Xを追加し、既存encode後の画像bitstreamを再処理しない。64KiB単位の取消、chunk数／XMP予算、寸法・flag・境界・padding検査とstage再読取照合を共用する。アニメーションの1枚化を成功とせず、本経路で明示拒否する。

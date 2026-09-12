@@ -4,6 +4,8 @@
 
 ## 現在の優先順位と完了条件（2026-09-09 16:01 owner指定）
 
+2026-09-12 U07 timeline-equivalence checkpoint: 元source durationが既知なら現在／保存snapshotのEditTimeline結果とraster／全体音量・速度を比較し、区間音量／正確なStretchの復元、Keep対trim、明示EOFを認識する。未知／無効値では推定せず、比較結果は履歴変更時に保持する。active／retainedのpath・generation一致後のduration通知と再描画を接続。旧dirty残留を再現後、復元・Undo／分岐／export基準・1ns差・異なるsource区間・stale通知／背景tab分離、実動画／音声抽出の全PCM・RGBA一致を検証。通常684tests／fmt／Clippy／Release通過。画像処理の一般的な同値、全codec品質・native入力／DPI等の全UX gateは継続。
+
 2026-09-12 U07 global-settings checkpoint: 全体音量・速度・trimを保存済みの実効値へ戻すと未保存を解除し、Undo／Redoとexport snapshotは保持する。上書き済み設定をraster／timeline処理の記録順から分離し、他の編集差分を消さない。旧実装のdirty残留を再現し、core復元／分岐／近接float、appのExit・close確認／Undo、実動画／音声抽出のPCM・全RGBA frame列一致を検証。通常681tests／fmt／Clippy／Release通過。trimの暗黙EOF、全区間編集・rasterの同値、native入力／DPI／品質と全UX gateは継続。
 
 2026-09-12 E01 static WebP checkpoint: JPEGと同じ9項目のXMP読取・Keep／Set／Removeと同形式Saveを実装。bounded RIFF検査／書換えとstage再照合により、既存encode後のbitstream／他chunk payloadを保持する。opaque／alpha、独立decoder、実FFmpeg回転書出し、言語・作者順・非canonical値のKeep、不正／過大／animation入力、取消・I/O失敗・stage整理・保存先保護を確認。UI説明／型検査とSave／再Save／guard／tab/source lifecycleも通過。全677通常tests、fmt／Clippy／Release通過。アニメーション保持・他形式／未知metadataの完全保持、実入力／DPI／品質と全UX gateは継続し、公開準備は再開しない。

@@ -10,6 +10,8 @@ struct Item {
     data: Vec<u8>,
     properties: Vec<([u8; 4], Vec<u8>)>,
     inputs: Vec<u16>,
+    auxiliary_for: Option<u16>,
+    premultiplied_with: Option<u16>,
 }
 
 // Encode only the AV1 payloads with FFmpeg. Build item identities, associations,
@@ -69,6 +71,8 @@ fn encoded(root: &Path, image: DynamicImage, alpha: bool) -> Item {
         data,
         properties,
         inputs: vec![],
+        auxiliary_for: None,
+        premultiplied_with: None,
     }
 }
 
@@ -101,6 +105,8 @@ fn grid(tiles: Vec<u16>, alpha: bool) -> Item {
             ),
         ],
         inputs: tiles,
+        auxiliary_for: None,
+        premultiplied_with: None,
     }
 }
 
@@ -142,21 +148,24 @@ fn fixture(items: &[Item], path: &Path) {
         );
         data.extend(&item.data);
         associations.extend(id);
-        associations.push(item.properties.len() as u8 + u8::from(index == 1));
+        associations.push(item.properties.len() as u8 + u8::from(item.auxiliary_for.is_some()));
         for (kind, value) in &item.properties {
             property_count += 1;
             assert!(property_count < 128);
             properties.extend(atom(kind, value));
             associations.push(property_count | if matches!(kind, b"av1C") { 0x80 } else { 0 });
         }
-        if index == 1 {
+        if let Some(color) = item.auxiliary_for {
             property_count += 1;
             properties.extend(atom(
                 b"auxC",
                 b"\0\0\0\0urn:mpeg:mpegB:cicp:systems:auxiliary:alpha\0",
             ));
             associations.push(property_count);
-            references.extend(atom(b"auxl", &[0, 2, 0, 1, 0, 1]));
+            references.extend(atom(
+                b"auxl",
+                &[id.to_vec(), vec![0, 1], color.to_be_bytes().to_vec()].concat(),
+            ));
         }
         if !item.inputs.is_empty() {
             references.extend(atom(
@@ -167,6 +176,12 @@ fn fixture(items: &[Item], path: &Path) {
                     item.inputs.iter().flat_map(|id| id.to_be_bytes()).collect(),
                 ]
                 .concat(),
+            ));
+        }
+        if let Some(alpha) = item.premultiplied_with {
+            references.extend(atom(
+                b"prem",
+                &[id.to_vec(), vec![0, 1], alpha.to_be_bytes().to_vec()].concat(),
             ));
         }
     }
@@ -235,7 +250,13 @@ fn generated_avif_color_alpha_grids_and_mixed_planes_preserve_pixels() {
     let source = root.join("grid.avif");
     let target = root.join("saved.avif");
     let resaved = root.join("resaved.avif");
-    for (color_grid, alpha_grid) in [(true, true), (true, false), (false, true), (false, false)] {
+    for (color_grid, alpha_grid, tile_alpha) in [
+        (true, true, true),
+        (true, true, false),
+        (true, false, false),
+        (false, true, false),
+        (false, false, false),
+    ] {
         let mut items = single.clone();
         for (index, is_grid) in [color_grid, alpha_grid].into_iter().enumerate() {
             if is_grid {
@@ -251,35 +272,78 @@ fn generated_avif_color_alpha_grids_and_mixed_planes_preserve_pixels() {
                 items.extend(tiles[index].clone());
             }
         }
+        if tile_alpha {
+            let alpha_ids = items.remove(1).inputs;
+            for color in &mut items[0].inputs {
+                *color -= 1;
+            }
+            for (color, alpha) in items[0].inputs.clone().into_iter().zip(alpha_ids) {
+                items[alpha as usize - 2].auxiliary_for = Some(color);
+            }
+        } else {
+            items[1].auxiliary_for = Some(1);
+        }
         fixture(&items, &source);
         let intact = fs::read(&source).expect("fixture bytes");
         let clap = [121u32, 1, 119, 1, 0, 1, 0, 1]
             .map(u32::to_be_bytes)
             .concat();
-        for transforms in [0, 1, 2] {
+        for transforms in if tile_alpha {
+            &[0, 1][..]
+        } else {
+            &[0, 1, 2][..]
+        } {
             fs::write(&source, &intact).expect("restore fixture");
-            let expected = if transforms == 0 {
+            let expected = if *transforms == 0 {
                 expected.clone()
             } else {
                 orientation_tests::append_still_properties(
                     &source,
                     &[(b"clap", clap.clone()), (b"irot", vec![1])],
-                    if transforms == 1 { &[1] } else { &[1, 2] },
+                    if *transforms == 1 { &[1] } else { &[1, 2] },
                 );
                 image::imageops::rotate270(
                     &image::imageops::crop_imm(&expected, 2, 2, 121, 119).to_image(),
                 )
             };
             let decoded = crate::decode_image(&source).unwrap_or_else(|error| {
-                panic!("color_grid={color_grid}, alpha_grid={alpha_grid}, transforms={transforms}: {error}")
+                panic!("color_grid={color_grid}, alpha_grid={alpha_grid}, tile_alpha={tile_alpha}, transforms={transforms}: {error}")
             });
             assert_eq!(decoded.dimensions(), expected.dimensions());
             assert_eq!(decoded.frames.len(), 1);
-            assert_eq!(decoded.frames[0].rgba, *expected.as_raw());
+            assert!(
+                decoded.frames[0].rgba == *expected.as_raw(),
+                "color_grid={color_grid}, alpha_grid={alpha_grid}, tile_alpha={tile_alpha}, transforms={transforms}: first mismatch {:?}",
+                decoded.frames[0]
+                    .rgba
+                    .iter()
+                    .zip(expected.as_raw())
+                    .position(|(a, b)| a != b)
+            );
             let preview = crate::image::first_animation_frame(&source, 128 * 128 * 4, &|| true)
                 .expect("preview")
                 .expect("frame");
             assert_eq!(preview.rgba, *expected.as_raw());
+            if tile_alpha {
+                let cache_path = root.join(format!("cache-{transforms}"));
+                crate::PreviewCache::new(cache_path.clone())
+                    .expect("cache")
+                    .filmstrip(&source, MediaKind::Image)
+                    .expect("persist tile alpha");
+                let cached = crate::PreviewCache::new(cache_path)
+                    .expect("fresh cache")
+                    .cached_image(&source)
+                    .expect("lookup")
+                    .expect("persisted preview");
+                assert_eq!(cached.source_size, expected.dimensions());
+                assert_eq!(
+                    cached.image.rgba,
+                    DynamicImage::ImageRgba8(expected.clone())
+                        .resize(240, 160, image::imageops::FilterType::Nearest)
+                        .into_rgba8()
+                        .into_raw()
+                );
+            }
             assert!(matches!(
                 crate::image::first_animation_frame(&source, 128 * 128 * 4, &|| false),
                 Err(crate::ImageDecodeError::Cancelled)
@@ -304,11 +368,108 @@ fn generated_avif_color_alpha_grids_and_mixed_planes_preserve_pixels() {
         }
         fs::write(&source, &intact).expect("restore fixture");
         // Explicit alpha-only geometry must not silently shift the alpha pixels.
-        orientation_tests::append_still_properties(&source, &[(b"clap", clap)], &[2]);
+        orientation_tests::append_still_properties(
+            &source,
+            &[(b"clap", clap)],
+            if tile_alpha { &[7] } else { &[2] },
+        );
         assert!(crate::decode_image(&source).is_err());
         let before = fs::read(&target).expect("saved target");
         assert!(export_media(&request(&source, &target)).is_err());
         assert_eq!(fs::read(&target).expect("protected target"), before);
+        if tile_alpha {
+            for defect in 0..3 {
+                let mut damaged = items.clone();
+                match defect {
+                    0 => damaged[5].auxiliary_for = None,
+                    1 => damaged.push(damaged[5].clone()),
+                    _ => {
+                        damaged[5] = single[1].clone();
+                        damaged[5].auxiliary_for = Some(2);
+                    }
+                }
+                fixture(&damaged, &source);
+                assert!(
+                    crate::decode_image(&source).is_err(),
+                    "tile-alpha defect {defect}"
+                );
+                assert!(export_media(&request(&source, &target)).is_err());
+                assert_eq!(fs::read(&target).expect("protected target"), before);
+            }
+            let premultiplied = RgbaImage::from_fn(128, 128, |x, y| {
+                let mut pixel = *pixels.get_pixel(x, y);
+                for channel in 0..3 {
+                    pixel[channel] =
+                        ((u32::from(pixel[channel]) * u32::from(pixel[3]) + 127) / 255) as u8;
+                }
+                pixel
+            });
+            let prem_tiles: Vec<_> = (0..4)
+                .map(|i| {
+                    encoded(
+                        &root,
+                        plane(
+                            image::imageops::crop_imm(
+                                &premultiplied,
+                                i % 2 * 64,
+                                i / 2 * 64,
+                                64,
+                                64,
+                            )
+                            .to_image(),
+                            false,
+                        ),
+                        false,
+                    )
+                })
+                .collect();
+            for count in [1, 4] {
+                let mut prem_items = items.clone();
+                for i in 0..count {
+                    prem_items[i + 1] = prem_tiles[i].clone();
+                    prem_items[i + 1].premultiplied_with = Some(i as u16 + 6);
+                }
+                fixture(&prem_items, &source);
+                let restored = RgbaImage::from_fn(125, 123, |x, y| {
+                    if y / 64 * 2 + x / 64 >= count as u32 {
+                        return *pixels.get_pixel(x, y);
+                    }
+                    let mut pixel = *premultiplied.get_pixel(x, y);
+                    for channel in 0..3 {
+                        pixel[channel] = if pixel[3] == 0 {
+                            0
+                        } else {
+                            (f64::from(pixel[channel]) * 255.0 / f64::from(pixel[3]))
+                                .round()
+                                .min(255.0) as u8
+                        };
+                    }
+                    pixel
+                });
+                assert_eq!(
+                    crate::decode_image(&source)
+                        .expect("per-tile premultiplication")
+                        .frames[0]
+                        .rgba,
+                    *restored.as_raw()
+                );
+                let preview = crate::image::first_animation_frame(&source, 128 * 128 * 4, &|| true)
+                    .expect("prem preview")
+                    .expect("frame");
+                assert_eq!(preview.rgba, *restored.as_raw());
+                let mut edited = request(&source, &target);
+                edited.operations = vec![EditOperation::FlipHorizontal];
+                export_media(&edited).expect("prem tile save");
+                export_media(&request(&target, &resaved)).expect("prem tile resave");
+                assert_eq!(
+                    crate::decode_image(&resaved)
+                        .expect("prem saved pixels")
+                        .frames[0]
+                        .rgba,
+                    image::imageops::flip_horizontal(&restored).into_raw()
+                );
+            }
+        }
     }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }

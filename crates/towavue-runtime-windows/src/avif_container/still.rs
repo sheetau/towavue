@@ -137,9 +137,40 @@ pub(crate) fn read(
     if !primary.is_empty() || color == 0 {
         return Err(invalid("invalid primary item"));
     }
-    let mut auxiliaries = Vec::new();
-    let mut premultiplied_with = None;
-    if let Some(references) = one(&meta, b"iref")? {
+    Ok(associations(file, &meta, &[color], current)?
+        .remove(&color)
+        .expect("requested primary item"))
+}
+
+pub(crate) fn item_alphas(
+    path: &std::path::Path,
+    colors: &[u32],
+    current: &dyn Fn() -> bool,
+) -> Result<std::collections::BTreeMap<u32, Still>, Error> {
+    let mut file = fs::File::open(path)?;
+    let length = file.metadata()?.len();
+    let root = boxes(&mut file, 0, length, current)?;
+    let meta = one(&root, b"meta")?.ok_or_else(|| invalid("missing image metadata"))?;
+    let (version, meta) = full_children(&mut file, meta, current)?;
+    if version != 0 {
+        return Err(invalid("unsupported meta version"));
+    }
+    associations(&mut file, &meta, colors, current)
+}
+
+fn associations(
+    file: &mut fs::File,
+    meta: &[BoxRange],
+    colors: &[u32],
+    current: &dyn Fn() -> bool,
+) -> Result<std::collections::BTreeMap<u32, Still>, Error> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut pending: BTreeMap<_, (BTreeSet<u32>, Option<u32>)> = colors
+        .iter()
+        .map(|&id| (id, (BTreeSet::new(), None)))
+        .collect();
+    let mut link_count = 0;
+    if let Some(references) = one(meta, b"iref")? {
         let (version, references) = full_children(file, references, current)?;
         let width = match version {
             0 => 2,
@@ -157,12 +188,18 @@ pub(crate) fn read(
             let count = number(&mut payload, 2)?;
             for _ in 0..count {
                 let to = number(&mut payload, width)?;
-                if &reference.kind == b"auxl" && to == color {
-                    auxiliaries.push(from);
+                if &reference.kind == b"auxl"
+                    && let Some((auxiliaries, _)) = pending.get_mut(&to)
+                    && auxiliaries.insert(from)
+                {
+                    link_count += 1;
+                    if link_count > 65536 {
+                        return Err(invalid("too many auxiliary links"));
+                    }
                 }
                 if &reference.kind == b"prem"
-                    && from == color
-                    && premultiplied_with.replace(to).is_some()
+                    && let Some((_, premultiplied)) = pending.get_mut(&from)
+                    && premultiplied.replace(to).is_some()
                 {
                     return Err(invalid("multiple premultiplied references"));
                 }
@@ -172,29 +209,44 @@ pub(crate) fn read(
             }
         }
     }
-    let mut alpha = None;
-    if !auxiliaries.is_empty() {
-        visit_properties(file, &meta, current, |file, id, value| {
-            if auxiliaries.contains(&id) && &value.kind == b"auxC" {
+    let candidates: BTreeSet<_> = pending
+        .values()
+        .flat_map(|(ids, _)| ids.iter().copied())
+        .collect();
+    let mut alpha_items = BTreeSet::new();
+    if !candidates.is_empty() {
+        visit_properties(file, meta, current, |file, id, value| {
+            if candidates.contains(&id) && &value.kind == b"auxC" {
                 let value = bytes(file, value, 4096)?;
                 if value == b"\0\0\0\0urn:mpeg:mpegB:cicp:systems:auxiliary:alpha\0" {
-                    if alpha.is_some_and(|previous| previous != id) {
-                        return Err(invalid("multiple alpha items"));
-                    }
-                    alpha = Some(id);
+                    alpha_items.insert(id);
                 }
             }
             Ok(())
         })?;
     }
-    if alpha == Some(color) || (premultiplied_with.is_some() && premultiplied_with != alpha) {
-        return Err(invalid("invalid premultiplied alpha item"));
-    }
-    Ok(Still {
-        color,
-        alpha,
-        premultiplied: premultiplied_with.is_some(),
-    })
+    pending
+        .into_iter()
+        .map(|(color, (auxiliaries, premultiplied))| {
+            check_current(current)?;
+            let mut matches = auxiliaries.intersection(&alpha_items);
+            let alpha = matches.next().copied();
+            if matches.next().is_some() {
+                return Err(invalid("multiple alpha items"));
+            }
+            if alpha == Some(color) || (premultiplied.is_some() && premultiplied != alpha) {
+                return Err(invalid("invalid premultiplied alpha item"));
+            }
+            Ok((
+                color,
+                Still {
+                    color,
+                    alpha,
+                    premultiplied: premultiplied.is_some(),
+                },
+            ))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -368,6 +420,16 @@ mod tests {
             assert_eq!(parsed.color, if wide { 70000 } else { 1 });
             assert_eq!(parsed.alpha, Some(parsed.color + 1));
             assert!(parsed.premultiplied);
+            let ids = [parsed.color, parsed.color + 1, parsed.color];
+            let batch = item_alphas(&path, &ids, &|| true).expect("batch associations");
+            assert_eq!(batch.len(), 2);
+            assert_eq!(batch[&parsed.color].alpha, parsed.alpha);
+            assert!(batch[&parsed.color].premultiplied);
+            assert!(batch[&(parsed.color + 1)].alpha.is_none());
+            assert!(matches!(
+                item_alphas(&path, &ids, &|| false),
+                Err(Error::Cancelled)
+            ));
             let association = payload
                 .windows(4)
                 .position(|kind| kind == b"ipma")

@@ -37,6 +37,14 @@ pub(super) fn decode(
     let mut alpha_decoder = alpha
         .map(|alpha| Plane::new(path, &alpha, Pixel::GRAY8, byte_limit, current))
         .transpose()?;
+    if alpha_decoder.is_none()
+        && let Plane::Grid {
+            layout: Some(layout),
+            ..
+        } = &mut color_decoder
+    {
+        layout.read_tile_alpha(path, current)?;
+    }
     let mut frames: Vec<DecodedImageFrame> = Vec::new();
     let mut remaining = byte_limit;
     let mut previous_time = None;
@@ -52,44 +60,7 @@ pub(super) fn decode(
             let alpha = alpha_decoder
                 .next(current)?
                 .ok_or_else(|| invalid("missing alpha frame"))?;
-            if color_frame.size != alpha.size
-                || color_frame.time != alpha.time
-                || color_frame.duration != alpha.duration
-            {
-                return Err(invalid("alpha geometry or timing differs from color"));
-            }
-            // Older libavif files omit alpha transforms. An explicit transform
-            // must agree; rotate the merged canvas once, never just its colors.
-            if alpha.orientation.is_some_and(|orientation| {
-                orientation != color_frame.orientation.unwrap_or_default()
-            }) {
-                return Err(invalid("alpha orientation differs from color"));
-            }
-            if alpha
-                .aperture
-                .is_some_and(|aperture| aperture != color_frame.aperture.unwrap_or_default())
-            {
-                return Err(invalid("alpha clean aperture differs from color"));
-            }
-            for (pixel, alpha) in color_frame
-                .pixels
-                .as_chunks_mut::<4>()
-                .0
-                .iter_mut()
-                .zip(alpha.pixels)
-            {
-                pixel[3] = alpha;
-                if premultiplied {
-                    for channel in &mut pixel[..3] {
-                        *channel = if alpha == 0 {
-                            0
-                        } else {
-                            ((u32::from(*channel) * 255 + u32::from(alpha) / 2) / u32::from(alpha))
-                                .min(255) as u8
-                        };
-                    }
-                }
-            }
+            color_frame.merge_alpha(alpha, premultiplied)?;
         }
         if let Some(aperture) = color_frame.aperture {
             let crop = aperture.rectangle(color_frame.size)?;
@@ -228,6 +199,48 @@ struct PlaneFrame {
     pixels: Vec<u8>,
     orientation: Option<crate::VideoOrientation>,
     aperture: Option<container::CleanAperture>,
+}
+
+impl PlaneFrame {
+    fn merge_alpha(&mut self, alpha: Self, premultiplied: bool) -> Result<(), ImageDecodeError> {
+        if self.size != alpha.size || self.time != alpha.time || self.duration != alpha.duration {
+            return Err(invalid("alpha geometry or timing differs from color"));
+        }
+        // Older libavif files omit alpha transforms. An explicit transform
+        // must agree; rotate the merged canvas once, never just its colors.
+        if alpha
+            .orientation
+            .is_some_and(|orientation| orientation != self.orientation.unwrap_or_default())
+        {
+            return Err(invalid("alpha orientation differs from color"));
+        }
+        if alpha
+            .aperture
+            .is_some_and(|aperture| aperture != self.aperture.unwrap_or_default())
+        {
+            return Err(invalid("alpha clean aperture differs from color"));
+        }
+        for (pixel, alpha) in self
+            .pixels
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(alpha.pixels)
+        {
+            pixel[3] = alpha;
+            if premultiplied {
+                for channel in &mut pixel[..3] {
+                    *channel = if alpha == 0 {
+                        0
+                    } else {
+                        ((u32::from(*channel) * 255 + u32::from(alpha) / 2) / u32::from(alpha))
+                            .min(255) as u8
+                    };
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn open_input(path: &Path) -> Result<ffmpeg::format::context::Input, ImageDecodeError> {

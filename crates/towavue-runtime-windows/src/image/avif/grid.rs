@@ -5,6 +5,7 @@ struct Tile {
     id: u32,
     position: (u32, u32),
     size: (u32, u32),
+    alpha: Option<(u32, bool)>,
 }
 
 pub(super) struct Grid {
@@ -14,6 +15,35 @@ pub(super) struct Grid {
     tiles: Vec<Tile>,
     orientation: Option<crate::VideoOrientation>,
     pub(super) aperture: Option<container::CleanAperture>,
+}
+
+fn decode_tile(
+    path: &Path,
+    id: u32,
+    size: (u32, u32),
+    pixel: Pixel,
+    limit: usize,
+    current: &dyn Fn() -> bool,
+) -> Result<PlaneFrame, ImageDecodeError> {
+    let mut decoder = PlaneDecoder::new(
+        open_input(path)?,
+        &Selection { id, timing: None },
+        pixel,
+        limit,
+    )?;
+    let frame = decoder
+        .next(current)?
+        .ok_or_else(|| invalid("empty grid tile"))?;
+    if frame.size != size
+        || frame.aperture.is_some()
+        || frame
+            .orientation
+            .is_some_and(|value| value != crate::VideoOrientation::default())
+        || decoder.next(current)?.is_some()
+    {
+        return Err(invalid("invalid grid tile frame or transform"));
+    }
+    Ok(frame)
 }
 
 fn unsigned(value: i32) -> Result<u32, ImageDecodeError> {
@@ -88,6 +118,7 @@ impl Grid {
                         id: stream.id as u32,
                         position: (unsigned(offset.horizontal)?, unsigned(offset.vertical)?),
                         size: (unsigned(parameters.width)?, unsigned(parameters.height)?),
+                        alpha: None,
                     });
                 }
                 let mut orientation = None;
@@ -133,6 +164,25 @@ impl Grid {
             }
         }
         Ok(result)
+    }
+
+    pub(super) fn read_tile_alpha(
+        &mut self,
+        path: &Path,
+        current: &dyn Fn() -> bool,
+    ) -> Result<(), ImageDecodeError> {
+        let ids: Vec<_> = self.tiles.iter().map(|tile| tile.id).collect();
+        let links = container::still::item_alphas(path, &ids, current)?;
+        for tile in &mut self.tiles {
+            let link = &links[&tile.id];
+            tile.alpha = link.alpha.map(|id| (id, link.premultiplied));
+        }
+        if self.tiles.iter().any(|tile| tile.alpha.is_some())
+            && self.tiles.iter().any(|tile| tile.alpha.is_none())
+        {
+            return Err(invalid("incomplete tile alpha associations"));
+        }
+        Ok(())
     }
 
     fn validate(&self, limit: usize) -> Result<(), ImageDecodeError> {
@@ -182,26 +232,12 @@ impl Grid {
         let mut pixels = vec![0; self.size.0 as usize * self.size.1 as usize * channels];
         for tile in &self.tiles {
             check_current(current)?;
-            let mut decoder = PlaneDecoder::new(
-                open_input(path)?,
-                &Selection {
-                    id: tile.id,
-                    timing: None,
-                },
-                pixel,
-                limit,
-            )?;
-            let frame = decoder
-                .next(current)?
-                .ok_or_else(|| invalid("empty grid tile"))?;
-            if frame.size != tile.size
-                || frame.aperture.is_some()
-                || frame
-                    .orientation
-                    .is_some_and(|value| value != crate::VideoOrientation::default())
-                || decoder.next(current)?.is_some()
-            {
-                return Err(invalid("invalid grid tile frame or transform"));
+            let mut frame = decode_tile(path, tile.id, tile.size, pixel, limit, current)?;
+            if let Some((alpha, premultiplied)) = tile.alpha {
+                frame.merge_alpha(
+                    decode_tile(path, alpha, tile.size, Pixel::GRAY8, limit, current)?,
+                    premultiplied,
+                )?;
             }
             self.copy_tile(tile, &frame.pixels, channels, &mut pixels, current)?;
         }
@@ -259,6 +295,7 @@ mod tests {
                     id: index + 1,
                     position: (index % 2 * 3, index / 2 * 2),
                     size: (3, 2),
+                    alpha: None,
                 })
                 .collect(),
             orientation: None,

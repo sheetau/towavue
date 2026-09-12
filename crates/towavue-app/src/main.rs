@@ -4093,13 +4093,13 @@ where
         let native = self
             .native_caption
             .as_ref()
-            .map(|caption| (caption.controls_bounds(), caption.top_inset()));
+            .map(|caption| caption.controls_bounds());
         let layout = chrome::title_layout(
-            native.map(|(bounds, inset)| (bounds.bottom(), inset)),
+            root.input(|input| input.safe_area_insets().0.top) * density,
             root.max_rect().top(),
             density,
         );
-        let controls_width = native.map_or(154.0, |(bounds, _)| bounds.width() / density);
+        let controls_width = native.map_or(154.0, |bounds| bounds.width() / density);
         let panel = egui::Panel::top("tabs")
             .exact_size(layout.height)
             .show_separator_line(false)
@@ -11945,6 +11945,75 @@ mod tests {
     }
 
     #[test]
+    fn top_bar_keeps_tab_and_content_geometry_below_the_maximized_safe_area() {
+        let Some(_) = isolated_test_root(
+            "tests::top_bar_keeps_tab_and_content_geometry_below_the_maximized_safe_area",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("app");
+        app.tabs
+            .open_new(PathBuf::from("title-layout.png"), MediaKind::Image);
+        for (density, inset) in [(1.0, 0.0), (1.0, 8.0), (1.25, 8.0), (2.0, 0.0), (2.0, 6.5)] {
+            let context = fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.enable_accesskit();
+            context.global_style_mut(chrome::style);
+            for _ in 0..3 {
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(800.0, 400.0),
+                        )),
+                        safe_area_insets: Some(egui::SafeAreaInsets(egui::epaint::MarginF32 {
+                            top: inset,
+                            ..Default::default()
+                        })),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        app.draw_top_bar(ui, &mut Vec::new());
+                        assert!(
+                            (ui.available_rect_before_wrap().top() - inset - chrome::TITLE_HEIGHT)
+                                .abs()
+                                < 0.01,
+                            "density={density} inset={inset} remaining={:?} root={:?}",
+                            ui.available_rect_before_wrap(),
+                            ui.max_rect()
+                        );
+                    },
+                );
+                let tree = output.platform_output.accesskit_update.expect("tree");
+                for label in [
+                    "towavue menu",
+                    "title-layout.png",
+                    "Close tab: title-layout.png",
+                ] {
+                    let bounds = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| node.label() == Some(label))
+                        .expect("title control")
+                        .1
+                        .bounds()
+                        .expect("bounds");
+                    assert!(
+                        ((bounds.y0 + bounds.y1) as f32 * 0.5 - inset - 16.0).abs()
+                            <= 1.0 / density
+                    );
+                    assert!(
+                        ((bounds.y1 - bounds.y0) as f32
+                            - chrome::title_layout(0.0, 0.0, density).tab_height)
+                            .abs()
+                            <= 1.0 / density
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn chrome_aligns_tabs_and_keeps_only_two_panel_boundaries() {
         let Some(root) =
             isolated_test_root("tests::chrome_aligns_tabs_and_keeps_only_two_panel_boundaries")
@@ -12039,7 +12108,7 @@ mod tests {
                     for rect in [logo, label, close] {
                         assert!((rect.center().y - 16.0).abs() <= 1.0 / density, "{rect:?}");
                         assert!(
-                            (rect.height() - chrome::title_layout(None, 0.0, density).tab_height)
+                            (rect.height() - chrome::title_layout(0.0, 0.0, density).tab_height)
                                 .abs()
                                 <= 1.0 / density
                         );

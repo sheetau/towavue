@@ -188,23 +188,11 @@ impl NativeCaption {
         if self.state.fullscreen.get() {
             return buttons;
         }
-        // SAFETY: same-thread message to the retained window. Windows writes only
-        // this initialized stack structure and does not retain its address.
+        let Some((info, origin)) = titlebar_info(self.handle) else {
+            return buttons;
+        };
+        // SAFETY: scalar query on the retained UI-thread window.
         unsafe {
-            let mut info = TITLEBARINFOEX {
-                cbSize: size_of::<TITLEBARINFOEX>() as u32,
-                ..Default::default()
-            };
-            SendMessageW(
-                self.handle,
-                WM_GETTITLEBARINFOEX,
-                None,
-                Some(LPARAM((&mut info as *mut TITLEBARINFOEX) as isize)),
-            );
-            let mut origin = POINT::default();
-            if !ClientToScreen(self.handle, &mut origin).as_bool() {
-                return buttons;
-            }
             let maximized = IsZoomed(self.handle).as_bool();
             for (index, action, label) in [
                 (2, CaptionAction::Minimize, "Minimize window"),
@@ -294,7 +282,57 @@ impl NativeCaption {
     }
 }
 
+fn titlebar_info(handle: HWND) -> Option<(TITLEBARINFOEX, POINT)> {
+    let mut info = TITLEBARINFOEX {
+        cbSize: size_of::<TITLEBARINFOEX>() as u32,
+        ..Default::default()
+    };
+    let mut origin = POINT::default();
+    // SAFETY: callers retain this UI-thread window. Windows writes only initialized
+    // stack outputs and does not retain their addresses across the synchronous call.
+    unsafe {
+        SendMessageW(
+            handle,
+            WM_GETTITLEBARINFOEX,
+            None,
+            Some(LPARAM((&mut info as *mut TITLEBARINFOEX) as isize)),
+        );
+        ClientToScreen(handle, &mut origin)
+            .as_bool()
+            .then_some((info, origin))
+    }
+}
+
 fn caption_bounds(handle: HWND) -> RECT {
+    let mut client = RECT::default();
+    // SAFETY: stack output for this UI-thread window; failure leaves an empty rect.
+    unsafe {
+        let _ = GetClientRect(handle, &mut client);
+    }
+    if let Some((info, origin)) = titlebar_info(handle) {
+        let mut left = client.right;
+        let mut bottom = 0;
+        for index in [2, 3, 5] {
+            let rect = info.rgrect[index];
+            if info.rgstate[index] & 0x18000 == 0
+                && rect.right > rect.left
+                && rect.bottom > rect.top
+            {
+                left = left.min(rect.left - origin.x);
+                bottom = bottom.max(rect.bottom - origin.y);
+            }
+        }
+        if left < client.right && bottom > 0 {
+            // Reserve the buttons, not DWM's wider approximate strip. Keep the
+            // native outer edge exposed and include the entire button height.
+            return RECT {
+                left: left.max(0),
+                top: 0,
+                right: client.right,
+                bottom,
+            };
+        }
+    }
     let mut buttons = RECT::default();
     let mut outer = RECT::default();
     let mut origin = POINT::default();
@@ -310,11 +348,6 @@ fn caption_bounds(handle: HWND) -> RECT {
             && GetWindowRect(handle, &mut outer).is_ok()
             && ClientToScreen(handle, &mut origin).as_bool()
     };
-    let mut client = RECT::default();
-    // SAFETY: stack output for this UI-thread window; failure leaves an empty rect.
-    unsafe {
-        let _ = GetClientRect(handle, &mut client);
-    }
     if valid && buttons.right > buttons.left {
         RECT {
             left: (outer.left + buttons.left - origin.x).max(0),
@@ -907,6 +940,111 @@ mod tests {
                     );
                     assert!(window.fullscreen().is_none());
                     assert!(caption.windowed_size.get().is_none());
+                    if std::env::var_os("TOWAVUE_CAPTION_VISIBLE_GEOMETRY").is_some() {
+                        for monitor in &monitors {
+                            let _ = ShowWindow(handle, SW_SHOWNORMAL);
+                            let position = monitor.position();
+                            window.set_outer_position(winit::dpi::PhysicalPosition::new(
+                                position.x + 20,
+                                position.y + 20,
+                            ));
+                            caption
+                                .resize_client(
+                                    winit::dpi::LogicalSize::new(960.0, 576.0)
+                                        .to_physical(window.scale_factor()),
+                                )
+                                .expect("visible trial size");
+                            for maximized in [false, true, false] {
+                                let _ = ShowWindow(
+                                    handle,
+                                    if maximized {
+                                        SW_SHOWMAXIMIZED
+                                    } else {
+                                        SW_SHOWNORMAL
+                                    },
+                                );
+                                let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+                                let mut visible = RECT::default();
+                                DwmGetWindowAttribute(
+                                    handle,
+                                    windows::Win32::Graphics::Dwm::DWMWA_EXTENDED_FRAME_BOUNDS,
+                                    (&mut visible as *mut RECT).cast(),
+                                    size_of::<RECT>() as u32,
+                                )
+                                .expect("visible frame");
+                                let mut origin = POINT::default();
+                                assert!(ClientToScreen(handle, &mut origin).as_bool());
+                                eprintln!(
+                                    "  visible frame in client: ({}, {})..({}, {})",
+                                    visible.left - origin.x,
+                                    visible.top - origin.y,
+                                    visible.right - origin.x,
+                                    visible.bottom - origin.y
+                                );
+                                let buttons = caption.accessible_buttons();
+                                assert_eq!(buttons.len(), 3);
+                                let reserved = caption.controls_bounds();
+                                assert_eq!(reserved.left(), buttons[0].bounds.left());
+                                let size = window.inner_size();
+                                surface
+                                    .resize(size.width, size.height)
+                                    .expect("updated caption cutout");
+                                let region = CreateRectRgn(0, 0, 0, 0);
+                                assert!(!region.is_invalid());
+                                assert_ne!(
+                                    windows::Win32::Graphics::Gdi::GetWindowRgn(
+                                        surface.handle,
+                                        region
+                                    )
+                                    .0,
+                                    0
+                                );
+                                eprintln!(
+                                    "CAPTION geometry: maximized={maximized} density={} inset={} reserved={:?}",
+                                    window.scale_factor(),
+                                    caption.top_inset(),
+                                    caption.controls_bounds()
+                                );
+                                for button in buttons {
+                                    eprintln!("  {:?}: {:?}", button.action, button.bounds);
+                                    assert!(
+                                        caption.controls_bounds().contains_rect(button.bounds),
+                                        "the child cutout must not cover native buttons"
+                                    );
+                                    let center = button.bounds.center();
+                                    for y in [center.y, button.bounds.bottom() - 1.0] {
+                                        assert!(
+                                            !windows::Win32::Graphics::Gdi::PtInRegion(
+                                                region,
+                                                center.x as i32,
+                                                y as i32
+                                            )
+                                            .as_bool()
+                                        );
+                                    }
+                                    let packed = u32::from((origin.x + center.x as i32) as u16)
+                                        | (u32::from((origin.y + center.y as i32) as u16) << 16);
+                                    let expected = match button.action {
+                                        CaptionAction::Minimize => HTMINBUTTON,
+                                        CaptionAction::ToggleMaximize => HTMAXBUTTON,
+                                        CaptionAction::Close => HTCLOSE,
+                                    };
+                                    assert_eq!(
+                                        SendMessageW(
+                                            handle,
+                                            WM_NCHITTEST,
+                                            None,
+                                            Some(LPARAM(packed as isize))
+                                        )
+                                        .0,
+                                        expected as isize
+                                    );
+                                }
+                                let _ = DeleteObject(region.into());
+                            }
+                        }
+                        let _ = ShowWindow(handle, SW_HIDE);
+                    }
                     let state = caption.state.clone();
                     assert_eq!(Rc::strong_count(&state), 4);
                     drop(surface);

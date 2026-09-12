@@ -78,21 +78,12 @@ pub struct TitleLayout {
     pub tab_height: f32,
 }
 
-pub fn title_layout(native: Option<(f32, f32)>, top: f32, density: f32) -> TitleLayout {
-    // DWM owns the physical button height. Leave its clipped maximized top
-    // outside the row, and place our one-pixel separator immediately below it.
-    let (height, top_padding) = native.map_or((TITLE_HEIGHT, 0.0), |(bottom, inset)| {
-        (
-            (bottom + 1.0) / density - top,
-            (inset / density - top).max(0.0),
-        )
-    });
-    let border = if native.is_none_or(|(_, inset)| inset == 0.0) {
-        1.0 / density
-    } else {
-        0.0
-    };
-    let top_padding = top_padding + border;
+pub fn title_layout(top_inset: f32, top: f32, density: f32) -> TitleLayout {
+    // The invisible maximized strip is not part of our fixed-height toolbar.
+    // egui may already have removed it through the root safe area.
+    let hidden = (top_inset / density - top).max(0.0);
+    let height = TITLE_HEIGHT + hidden;
+    let top_padding = hidden + 1.0 / density;
     let available = (height - 1.0 / density - top_padding).max(0.0);
     let gap = 3.0_f32.min(available / 4.0);
     let tab_height = available - 2.0 * gap;
@@ -621,30 +612,35 @@ mod tests {
     }
 
     #[test]
-    fn title_row_follows_native_bounds_without_double_counting_safe_area() {
-        for (density, bottom, inset) in [
-            (1.0, 30.0, 0.0),
-            (1.0, 30.0, 8.0),
-            (1.25, 37.0, 0.0),
-            (1.5, 44.0, 10.0),
-            (2.0, 57.0, 0.0),
-            (2.0, 57.0, 13.0),
+    fn title_row_keeps_its_visible_height_without_double_counting_safe_area() {
+        for (density, inset) in [
+            (1.0, 0.0),
+            (1.0, 8.0),
+            (1.25, 0.0),
+            (1.5, 10.0),
+            (2.0, 0.0),
+            (2.0, 13.0),
         ] {
             for top in [0.0, inset / density] {
-                let layout = super::title_layout(Some((bottom, inset)), top, density);
+                let layout = super::title_layout(inset, top, density);
                 let row_top = (top + layout.top_padding) * density;
                 let row_bottom = row_top + layout.tab_height * density;
-                assert!(((top + layout.height) * density - bottom - 1.0).abs() < 0.001);
+                let visible_top = (inset / density).max(top);
+                assert!((top + layout.height - visible_top - super::TITLE_HEIGHT).abs() < 0.001);
                 assert!(row_top >= inset - 0.001);
-                assert!(row_bottom <= bottom + 0.001);
-                let border = if inset == 0.0 { 1.0 } else { 0.0 };
-                assert!((row_top - inset - border - 3.0 * density).abs() < 0.001);
-                assert!((bottom - row_bottom - 3.0 * density).abs() < 0.001);
+                assert!((row_top - visible_top * density - 1.0 - 3.0 * density).abs() < 0.001);
+                assert!(
+                    ((top + layout.height) * density - 1.0 - row_bottom - 3.0 * density).abs()
+                        < 0.001
+                );
+                assert!(
+                    (layout.tab_height - (super::TITLE_HEIGHT - 6.0 - 2.0 / density)).abs() < 0.001
+                );
                 assert!(layout.tab_height >= 16.0);
             }
         }
         for density in [1.0, 1.25, 2.0] {
-            let layout = super::title_layout(None, 0.0, density);
+            let layout = super::title_layout(0.0, 0.0, density);
             assert_eq!(layout.height, super::TITLE_HEIGHT);
             assert_eq!(layout.top_padding, 3.0 + 1.0 / density);
             assert!(

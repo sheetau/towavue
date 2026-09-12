@@ -89,7 +89,7 @@ fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
             }
             .unit_rect((90, 160)),
         );
-        let selection_status = app.image_selection_status();
+        let selection_status = app.visual_selection_status();
         assert_eq!(
             selection_status.as_deref(),
             Some("Selection: x=18 y=32 · 54×96 px")
@@ -108,7 +108,7 @@ fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
         let before = bounds(&frame(&mut app, &context)).expect("original mesh");
         navigate_pending(&mut app, root.join("next.png"));
         assert_eq!(
-            app.image_selection_status(),
+            app.visual_selection_status(),
             selection_status,
             "handoff reports displayed pixels, not the pending source"
         );

@@ -121,7 +121,7 @@ Keep a media-first grayscale UI: Figtree, proportional Japanese fallback, tabula
 
 Media notices go in the left status area; image information stays right. Fullscreen uses the bottom bar. Save progress occupies the toolbar boundary, not ordinary image-navigation loading. Volume uses a 1.2s thin HUD without replacing the path notice.
 
-Image selection reports pixel position and size from the edited/displayed geometry, including retained navigation handoffs. While dragging, metrics take priority; after release they follow the path, with existing notices and focused-edge descriptions retaining their priority. A selection reveals fullscreen status without taking focus or interrupting scrollbar/other gestures. Windowed selection changes schedule a repaint because status is laid out before media input.
+Visual selection reports pixel position and size from the edited/displayed geometry, including retained image navigation handoffs. Video metrics appear only while its timeline is visible and use the even-pixel crop grid, not SAR-expanded display width. While dragging, metrics take priority; after release they follow the path, with existing notices and focused-edge descriptions retaining their priority. An image selection reveals fullscreen status without taking focus or interrupting scrollbar/other gestures. Windowed selection changes schedule a repaint because status is laid out before media input.
 
 Image scrollbar tracks and hit regions are inset without shrinking the displayed image viewport or its pan range. Fullscreen controls yield while the pointer is over the image-bar strip, so they do not cover its drag targets.
 

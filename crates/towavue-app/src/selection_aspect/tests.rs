@@ -32,6 +32,49 @@ const PRESETS: &[(CommandId, (u32, u32))] = &[
 ];
 
 fn verify_video_selection_zoom<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
+    let verify_status = |app: &mut Application<_>, expected: &str| {
+        assert_eq!(app.visual_selection_status().as_deref(), Some(expected));
+        let notice = app.status_message.take();
+        // This fixture discards worker notifications; model the ready status bar
+        // without letting its unrelated pending-order/waveform notices mask the path.
+        let pending_folder = app.pending_folder.take();
+        let waveform_loading = std::mem::replace(&mut app.waveform_loading, false);
+        let status_context = fonts::test_context();
+        status_context
+            .set_pixels_per_point(app.ui_context.as_ref().expect("UI").pixels_per_point());
+        status_context.enable_accesskit();
+        let output = status_context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 300.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+            },
+        );
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .expect("status tree");
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.value().is_some_and(|text| {
+                    if app.view_drag.is_some() {
+                        text == expected
+                    } else {
+                        text.contains(&format!(" · {expected}"))
+                    }
+                })),
+            "drag metrics or released path suffix: {expected}"
+        );
+        app.status_message = notice;
+        app.pending_folder = pending_folder;
+        app.waveform_loading = waveform_loading;
+    };
     let context = app.ui_context.as_ref().expect("UI").clone();
     context.global_style_mut(chrome::style);
     let saved_view = app.image_view;
@@ -187,6 +230,7 @@ fn verify_video_selection_zoom<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mu
                 .cursor_icon,
             egui::CursorIcon::AllScroll
         );
+        verify_status(app, "Selection: x=4 y=6 · 20×18 px");
         frame(
             app,
             vec![egui::Event::PointerMoved(end), button(end, false)],
@@ -205,6 +249,13 @@ fn verify_video_selection_zoom<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mu
         assert_eq!(app.image_view.pan, (0.0, 0.0));
         assert_eq!(app.image_view.zoom, ZoomMode::Fit);
         assert!(app.view_drag.is_none());
+        verify_status(app, "Selection: x=10 y=2 · 20×18 px");
+        app.timeline_open = false;
+        assert!(
+            app.visual_selection_status().is_none(),
+            "hidden visual selection has no status"
+        );
+        app.timeline_open = true;
         assert_eq!(app.video_rect, Some(full));
         assert_eq!(app.video_uv, uv);
         assert_eq!(app.edits, history);

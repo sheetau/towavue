@@ -4548,7 +4548,7 @@ where
                     })
                 })
             });
-        let selection_status = self.image_selection_status().is_some();
+        let selection_status = self.visual_selection_status().is_some();
         let eligible = self.fullscreen
             && self.media_kind != Some(MediaKind::Audio)
             && !self.modal_input_blocked()
@@ -4840,7 +4840,7 @@ where
                                 })
                             }).flatten();
                             let (text, color, tooltip) =
-                                if let Some(message) = self.image_selection_status().filter(|_| self.view_drag.is_some()) {
+                                if let Some(message) = self.visual_selection_status().filter(|_| self.view_drag.is_some()) {
                                     (message.clone(), chrome::FOREGROUND, message)
                                 } else if let Some(message) = selection_hint {
                                     (message.clone(), chrome::FOREGROUND, message)
@@ -4852,7 +4852,7 @@ where
                                         .and_then(Path::file_name)
                                         .map(|name| name.to_string_lossy())
                                         .unwrap_or_default();
-                                    let suffix = self.image_selection_status().map_or_else(String::new, |value| format!(" · {value}"));
+                                    let suffix = self.visual_selection_status().map_or_else(String::new, |value| format!(" · {value}"));
                                     (
                                         format!("{parent}\\{}{suffix}", display_name(path)),
                                         chrome::MUTED,
@@ -6793,20 +6793,29 @@ where
         self.request_redraw();
     }
 
-    fn image_selection_status(&self) -> Option<String> {
-        if self.media_kind != Some(MediaKind::Image) || self.reading_mode {
+    fn visual_selection_status(&self) -> Option<String> {
+        let kind = self.media_kind?;
+        if kind == MediaKind::Audio || self.reading_mode || !self.visual_selection_enabled() {
             return None;
         }
-        let crop = if let Some(held) = &self.image_handoff {
+        let crop = if kind == MediaKind::Image
+            && let Some(held) = &self.image_handoff
+        {
             held.selection_crop()?
         } else {
-            let size = self
-                .visual_transform(self.image.as_ref()?.dimensions())
-                .size;
+            let source_size = match kind {
+                MediaKind::Image => self.image.as_ref()?.dimensions(),
+                MediaKind::Video => {
+                    let (width, height, _) = self.session.as_ref()?.video_geometry()?;
+                    (width, height)
+                }
+                MediaKind::Audio => return None,
+            };
+            let size = self.visual_transform(source_size).size;
             PixelCrop::from_selection(
                 self.image_view.selection?,
                 (size.0 as u32, size.1 as u32),
-                MediaKind::Image,
+                kind,
             )?
         };
         Some(format!(

@@ -3393,7 +3393,6 @@ where
         }
         if context.input(|input| {
             input.pointer.any_down()
-                || !input.modifiers.is_none()
                 || input.events.iter().any(|event| {
                     matches!(
                         event,
@@ -3407,9 +3406,13 @@ where
         let excluded = (self.media_kind == Some(MediaKind::Audio))
             .then_some(self.playlist.scroll_rect)
             .flatten();
-        let delta = wheel_input::volume_delta(context, targets, excluded);
         let before = self.edit_state().volume;
-        let volume = (before + delta * 0.1).clamp(0.0, 2.0);
+        // Preserve reversals at either limit, but publish only the final setting.
+        let volume = wheel_input::volume_deltas(context, targets, excluded)
+            .into_iter()
+            .fold(before, |volume, delta| {
+                (volume + delta * 0.1).clamp(0.0, 2.0)
+            });
         if volume != before {
             actions.push(UiAction::Volume(tab.id, volume));
         }
@@ -13834,6 +13837,122 @@ mod tests {
             !is_hud(&frame(&mut app)),
             "new source must not inherit the HUD"
         );
+    }
+
+    #[test]
+    fn volume_wheel_preserves_boundary_reversals_and_event_modifiers() {
+        let Some(root) = isolated_test_root(
+            "tests::volume_wheel_preserves_boundary_reversals_and_event_modifiers",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("headless application");
+        let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
+        let context = fonts::test_context();
+        let point = egui::pos2(100.0, 100.0);
+        let frame = |app: &Application<_>, events, modifiers, focused| {
+            let mut actions = Vec::new();
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(400.0, 300.0),
+                    )),
+                    events,
+                    modifiers,
+                    focused,
+                    ..Default::default()
+                },
+                |ui| {
+                    let response = ui.allocate_rect(
+                        egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(200.0, 160.0)),
+                        egui::Sense::hover(),
+                    );
+                    app.volume_wheel(ui.ctx(), &[response], &mut actions);
+                },
+            );
+            actions
+        };
+        let wheel = |delta, modifiers, phase| egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, delta),
+            modifiers,
+            phase,
+        };
+        let normal = |delta| wheel(delta, egui::Modifiers::NONE, egui::TouchPhase::Move);
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            app.media_kind = Some(kind);
+            for focused in [true, false] {
+                for _ in 0..3 {
+                    frame(
+                        &app,
+                        vec![egui::Event::PointerMoved(point)],
+                        egui::Modifiers::NONE,
+                        focused,
+                    );
+                }
+                for (events, modifiers, expected) in [
+                    (
+                        vec![normal(100.0), normal(-1.0)],
+                        egui::Modifiers::NONE,
+                        Some(1.9),
+                    ),
+                    (
+                        vec![normal(-100.0), normal(1.0)],
+                        egui::Modifiers::NONE,
+                        Some(0.1),
+                    ),
+                    (vec![normal(1.0), normal(-1.0)], egui::Modifiers::NONE, None),
+                    // Ctrl can be pressed after the unmodified wheel, within one frame.
+                    (
+                        vec![
+                            normal(-1.0),
+                            wheel(10.0, egui::Modifiers::CTRL, egui::TouchPhase::Move),
+                        ],
+                        egui::Modifiers::CTRL,
+                        Some(0.9),
+                    ),
+                    (
+                        vec![
+                            wheel(10.0, egui::Modifiers::CTRL, egui::TouchPhase::Move),
+                            normal(-1.0),
+                        ],
+                        egui::Modifiers::NONE,
+                        Some(0.9),
+                    ),
+                    (
+                        vec![
+                            wheel(10.0, egui::Modifiers::SHIFT, egui::TouchPhase::Move),
+                            normal(-1.0),
+                        ],
+                        egui::Modifiers::SHIFT,
+                        Some(0.9),
+                    ),
+                    (
+                        vec![
+                            wheel(10.0, egui::Modifiers::NONE, egui::TouchPhase::Start),
+                            wheel(10.0, egui::Modifiers::NONE, egui::TouchPhase::End),
+                            wheel(10.0, egui::Modifiers::NONE, egui::TouchPhase::Cancel),
+                        ],
+                        egui::Modifiers::NONE,
+                        None,
+                    ),
+                ] {
+                    let actions = frame(&app, events, modifiers, focused);
+                    match expected {
+                        Some(expected) => assert!(
+                            matches!(actions.as_slice(), [UiAction::Volume(id, volume)] if *id == tab && (*volume - expected).abs() < 0.0001),
+                            "{kind:?}, focused={focused}: expected {expected}"
+                        ),
+                        None => assert!(actions.is_empty(), "no effective volume change"),
+                    }
+                    assert!(
+                        frame(&app, vec![], modifiers, focused).is_empty(),
+                        "no delayed input"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

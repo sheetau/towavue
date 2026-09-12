@@ -20,7 +20,11 @@ pub fn begin_frame(context: &Context) {
     });
 }
 
-pub fn volume_delta(context: &Context, targets: &[Response], excluded: Option<egui::Rect>) -> f32 {
+pub fn volume_deltas(
+    context: &Context,
+    targets: &[Response],
+    excluded: Option<egui::Rect>,
+) -> Vec<f32> {
     positioned_events(context)
         .into_iter()
         .filter_map(|(position, event)| match event {
@@ -28,7 +32,7 @@ pub fn volume_delta(context: &Context, targets: &[Response], excluded: Option<eg
                 unit,
                 delta,
                 modifiers,
-                ..
+                phase: egui::TouchPhase::Move,
             } if modifiers.is_none()
                 && position.is_some_and(|pos| {
                     excluded.is_none_or(|rect| !rect.contains(pos))
@@ -50,7 +54,7 @@ pub fn volume_delta(context: &Context, targets: &[Response], excluded: Option<eg
             }
             _ => None,
         })
-        .sum()
+        .collect()
 }
 
 pub enum ViewWheel {
@@ -773,7 +777,11 @@ mod tests {
                             egui::Sense::hover(),
                         ),
                     ];
-                    deltas.push(volume_delta(ui.ctx(), &targets, None));
+                    deltas.push(
+                        volume_deltas(ui.ctx(), &targets, None)
+                            .into_iter()
+                            .sum::<f32>(),
+                    );
                     if extra_pass && ui.ctx().current_pass_index() == 0 {
                         ui.ctx().request_discard("verify stable wheel origin");
                     }

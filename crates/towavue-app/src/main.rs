@@ -15005,6 +15005,86 @@ mod tests {
             .entry(tab)
             .or_default()
             .push(EditOperation::RotateClockwise, MediaKind::Image);
+        for density in [1.0, 1.25, 2.0] {
+            let context = fonts::test_context();
+            context.global_style_mut(chrome::style);
+            context.set_pixels_per_point(density);
+            context.enable_accesskit();
+            let origin = egui::pos2(20.0, 284.0);
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let mut target = None;
+            let mut time = 0.0;
+            for step in 0..7 {
+                let events = match step {
+                    2 => vec![button(origin, true), button(origin, false)],
+                    3 => vec![button(origin, true)],
+                    4 => vec![egui::Event::PointerMoved(origin - egui::vec2(0.0, 30.0))],
+                    5 => vec![button(origin - egui::vec2(0.0, 30.0), false)],
+                    6 => vec![egui::Event::AccessKitActionRequest(
+                        egui::accesskit::ActionRequest {
+                            action: egui::accesskit::Action::Click,
+                            target_tree: egui::accesskit::TreeId::ROOT,
+                            target_node: target.expect("reading button"),
+                            data: None,
+                        },
+                    )],
+                    _ => vec![egui::Event::PointerMoved(origin)],
+                };
+                let mut actions = Vec::new();
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 300.0),
+                        )),
+                        time: Some(time),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        app.draw_status_bar(ui, &mut actions, &mut Vec::new());
+                    },
+                );
+                time += 0.1;
+                let tree = output.platform_output.accesskit_update.expect("tree");
+                let (id, node) = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| {
+                        node.label()
+                            .is_some_and(|label| label.starts_with("Reading mode"))
+                    })
+                    .expect("reading button");
+                target = Some(*id);
+                assert!(node.is_disabled());
+                let pages: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Path(page) => Some(page),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(pages.len(), 2);
+                assert!(
+                    pages
+                        .iter()
+                        .all(|page| page.stroke.color
+                            == egui::epaint::ColorMode::Solid(chrome::MUTED))
+                );
+                assert!(
+                    actions.is_empty(),
+                    "dirty reading button cannot click or drag"
+                );
+                assert!(!app.reading_mode && app.reading_drag.is_none());
+                assert!(app.command_context().has_unsaved_edits);
+            }
+        }
         app.edits.get_mut(&tab).expect("history").mark_saved();
         let edits = app.edits.clone();
         let context = fonts::test_context();

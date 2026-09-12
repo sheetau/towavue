@@ -3427,6 +3427,11 @@ where
         canceled_press |= self.video_rotation_drag.take().is_some();
         canceled_press |= self.finish_reading_drag(true);
         canceled_press |= self.ui_context.as_ref().is_some_and(timeline_input::cancel);
+        canceled_press |= self.ui_context.as_ref().is_some_and(|context| {
+            let panel = self.timeline_panel_id();
+            timeline_edit::resizing_panel(context, panel)
+                && timeline_edit::cancel_panel_resize(context, panel)
+        });
         if let Some(state) = &mut self.ui_state {
             // Commands and focus changes can precede the frame that would start the drag.
             state.egui_input_mut().events.retain(|event| {
@@ -4977,10 +4982,12 @@ where
             return;
         }
         let max_height = root.available_height() * 0.6;
-        egui::Panel::bottom(self.timeline_panel_id())
+        let panel = self.timeline_panel_id();
+        let resizable = timeline_edit::panel_resize_enabled(root, panel);
+        egui::Panel::bottom(panel)
             .default_size(96.0)
             .size_range(64.0_f32.min(max_height)..=max_height)
-            .resizable(true)
+            .resizable(resizable)
             .frame(egui::Frame::NONE.fill(chrome::BACKGROUND).inner_margin(egui::Margin { left: 8, right: 8, top: 8, bottom: 0 }))
             .show(root, |ui| {
                 let background = ui.available_rect_before_wrap();
@@ -6892,7 +6899,9 @@ where
         if let Some(context) = &self.ui_context {
             tab_focus::forget(context, id);
             context.data_mut(|data| {
-                data.remove::<egui::containers::panel::PanelState>(egui::Id::new(("timeline", id)))
+                let panel = egui::Id::new(("timeline", id));
+                data.remove::<egui::containers::panel::PanelState>(panel);
+                data.remove::<bool>(panel.with("cancel-resize"));
             });
         }
         if let Some(saved) = self.retained_playback.remove(&id) {
@@ -8987,10 +8996,10 @@ where
             || self.view_drag.is_some()
             || self.rotation_drag.is_some()
             || self.video_rotation_drag.is_some()
-            || self
-                .ui_context
-                .as_ref()
-                .is_some_and(timeline_input::is_active))
+            || self.ui_context.as_ref().is_some_and(|context| {
+                timeline_input::is_active(context)
+                    || timeline_edit::resizing_panel(context, self.timeline_panel_id())
+            }))
             && !self.palette_open
             && !self.modal_input_blocked()
             && let WindowEvent::KeyboardInput { event, .. } = &event
@@ -11150,6 +11159,7 @@ mod tests {
         let position = app.current_position();
         let generation = app.generation;
         let context = fonts::test_context();
+        let repeat_layout = std::cell::Cell::new(false);
         let frame = |app: &mut Application<_>, size, events| {
             let mut actions = Vec::new();
             let _ = context.run_ui(
@@ -11158,7 +11168,12 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ui| app.draw_ui(ui, &mut actions),
+                |ui| {
+                    app.draw_ui(ui, &mut actions);
+                    if repeat_layout.get() && context.current_pass_index() == 0 {
+                        context.request_discard("verify resize cancellation across layout passes");
+                    }
+                },
             );
             assert!(actions.is_empty(), "resize must not seek or edit");
             egui::containers::panel::PanelState::load(&context, app.timeline_panel_id())
@@ -11187,7 +11202,67 @@ mod tests {
         ] {
             frame(&mut app, size, events);
         }
-        let after = frame(&mut app, size, vec![]);
+        let mut after = frame(&mut app, size, vec![]);
+        app.ui_context = Some(context.clone());
+        repeat_layout.set(true);
+        for interruption in 0..6 {
+            let start = after.center_top();
+            let end = start - egui::vec2(0.0, 60.0);
+            for events in [
+                vec![egui::Event::PointerMoved(start)],
+                vec![button(start, true)],
+                vec![egui::Event::PointerMoved(end)],
+            ] {
+                frame(&mut app, size, events);
+            }
+            let escape = egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let events = match interruption {
+                0 => vec![escape],
+                1 => vec![egui::Event::WindowFocused(false)],
+                2 => {
+                    assert!(
+                        app.cancel_view_drag(),
+                        "native cancellation owns panel resize"
+                    );
+                    vec![]
+                }
+                3 => {
+                    app.pending_guard = Some(GuardedAction::Exit);
+                    vec![]
+                }
+                4 => vec![escape, button(end, false)],
+                _ => vec![button(end, false), escape],
+            };
+            frame(&mut app, size, events);
+            if interruption == 5 {
+                assert!(
+                    !app.cancel_view_drag(),
+                    "a completed resize must not consume a later native Escape"
+                );
+            }
+            app.pending_guard = None;
+            frame(&mut app, size, vec![button(end, false)]);
+            let cancelled = frame(&mut app, size, vec![]);
+            if interruption == 5 {
+                assert!(
+                    (cancelled.height() - after.height() - 60.0).abs() <= 1.0,
+                    "a release before Escape must keep its committed height"
+                );
+                after = cancelled;
+            } else {
+                assert!(
+                    (cancelled.height() - after.height()).abs() <= 1.0,
+                    "interruption={interruption} must restore the pre-drag timeline height: {after:?} -> {cancelled:?}"
+                );
+            }
+        }
+        repeat_layout.set(false);
         let other = app.tabs.open_new(root.join("other.mp4"), MediaKind::Video);
         let other_panel = app.timeline_panel_id();
         let other_rect = frame(&mut app, size, vec![]);
@@ -11196,8 +11271,14 @@ mod tests {
         let restored = frame(&mut app, size, vec![]);
         assert!((restored.height() - after.height()).abs() <= 1.0);
         app.ui_context = Some(context.clone());
+        context.data_mut(|data| data.insert_temp(other_panel.with("cancel-resize"), true));
         app.remove_tab(other, false);
         assert!(egui::containers::panel::PanelState::load(&context, other_panel).is_none());
+        assert!(
+            context
+                .data(|data| data.get_temp::<bool>(other_panel.with("cancel-resize")))
+                .is_none()
+        );
         assert!(
             after.height() > before.height() + 70.0,
             "{before:?} -> {after:?}"

@@ -1,6 +1,64 @@
 use super::*;
 use towavue_core::{EditTimeline, PlaybackRange};
 
+pub(super) fn resizing_panel(context: &egui::Context, panel: egui::Id) -> bool {
+    // egui 0.35's Panel keeps the pre-drag size until its resize handle releases.
+    // Its handle ID is internal; the rendered resize regression guards this dependency.
+    context.dragged_id() == Some(panel.with("__resize"))
+}
+
+pub(super) fn cancel_panel_resize(context: &egui::Context, panel: egui::Id) -> bool {
+    if !context
+        .read_response(panel.with("__resize"))
+        .is_some_and(|response| response.dragged() || response.drag_stopped())
+    {
+        return false;
+    }
+    context.stop_dragging();
+    context.data_mut(|data| data.insert_temp(panel.with("cancel-resize"), true));
+    true
+}
+
+pub(super) fn panel_resize_enabled(ui: &egui::Ui, panel: egui::Id) -> bool {
+    let enabled = ui.is_enabled() && !egui::Popup::is_any_open(ui.ctx());
+    let interrupted = ui.input(|input| {
+        input
+            .events
+            .iter()
+            .take_while(|event| {
+                !matches!(
+                    event,
+                    egui::Event::PointerButton {
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        ..
+                    }
+                )
+            })
+            .any(|event| {
+                matches!(
+                    event,
+                    egui::Event::WindowFocused(false)
+                        | egui::Event::Key {
+                            key: egui::Key::Escape,
+                            pressed: true,
+                            ..
+                        }
+                )
+            })
+    });
+    if !enabled || interrupted {
+        cancel_panel_resize(ui.ctx(), panel);
+    }
+    // stop_dragging also reports drag_stopped. Suppress Panel's release calculation
+    // for this pass so cancellation cannot persist the pointer's final height.
+    let cancelled = ui.ctx().data_mut(|data| {
+        data.remove_temp::<bool>(panel.with("cancel-resize"))
+            .unwrap_or(false)
+    });
+    enabled && !cancelled
+}
+
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn set_time_selection(&mut self, selection: Option<towavue_core::TimeRange>) {
         if self.time_selection != selection {

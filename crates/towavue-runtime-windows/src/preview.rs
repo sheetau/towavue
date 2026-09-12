@@ -832,11 +832,11 @@ fn static_thumbnail_png(
             // Decode only their first composited/oriented frame, including alpha.
             crate::image::first_animation_frame(source, byte_limit, current).ok()??
         } else {
-            crate::image::decode_image_for_prefetch(source, byte_limit, current)
-                .ok()??
-                .frames
-                .into_iter()
-                .next()?
+            match crate::image::decode_image_for_prefetch(source, byte_limit, current).ok()? {
+                Some(image) => image.frames.into_iter().next()?,
+                // Animation is excluded from original-image prefetch, not from thumbnails.
+                None => crate::image::first_animation_frame(source, byte_limit, current).ok()??,
+            }
         };
         let source_size = (frame.width, frame.height);
         let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;

@@ -21,6 +21,204 @@ fn png() -> Vec<u8> {
     bytes.into_inner()
 }
 
+fn animation_fixture(root: &Path, extension: &str, size: (u32, u32), poster: bool) -> PathBuf {
+    let path = root.join(format!("animation.{extension}"));
+    let frames: Vec<_> = [0, 1]
+        .into_iter()
+        .map(|index| {
+            image::RgbaImage::from_fn(size.0, size.1, |x, y| {
+                image::Rgba([
+                    (x % 251) as u8,
+                    (y % 253) as u8,
+                    if index == 0 { 200 } else { 30 },
+                    if x < size.0 / 4 { 0 } else { 255 },
+                ])
+            })
+        })
+        .collect();
+    if extension == "gif" {
+        let mut encoder =
+            image::codecs::gif::GifEncoder::new(fs::File::create(&path).expect("GIF"));
+        encoder
+            .encode_frames(frames.into_iter().map(|frame| {
+                image::Frame::from_parts(frame, 0, 0, image::Delay::from_numer_denom_ms(500, 1))
+            }))
+            .expect("GIF frames");
+    } else if extension == "webp" {
+        let input = animation_fixture(root, "apng", size, false);
+        let result = hidden_command(
+            &tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
+            ["-v", "error", "-i"],
+        )
+        .arg(input)
+        .args(["-c:v", "libwebp_anim", "-lossless", "1", "-threads", "1"])
+        .arg(&path)
+        .output()
+        .expect("WebP fixture");
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    } else {
+        let mut encoder = png::Encoder::new(fs::File::create(&path).expect("APNG"), size.0, size.1);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_animated(2, 0).expect("animation");
+        encoder.set_sep_def_img(poster).expect("poster flag");
+        let mut writer = encoder.write_header().expect("APNG header");
+        if poster {
+            writer
+                .write_image_data(
+                    image::RgbaImage::from_pixel(size.0, size.1, image::Rgba([0, 255, 0, 255]))
+                        .as_raw(),
+                )
+                .expect("poster");
+        }
+        for frame in frames {
+            writer.set_frame_delay(1, 2).expect("delay");
+            writer.write_image_data(frame.as_raw()).expect("APNG frame");
+        }
+        writer.finish().expect("APNG finish");
+    }
+    path
+}
+
+#[test]
+fn animated_thumbnails_use_the_first_composited_frame_with_bounded_native_decoding() {
+    for (extension, poster) in [
+        ("gif", false),
+        ("apng", false),
+        ("png", true),
+        ("webp", false),
+    ] {
+        let root = cache("native-animation-thumbnail").root;
+        let source = animation_fixture(&root, extension, (320, 200), poster);
+        let reference = crate::decode_image(&source).expect("original animation");
+        assert_eq!(reference.frames.len(), 2, "{extension}");
+        let first = &reference.frames[0];
+        let expected = image::DynamicImage::ImageRgba8(
+            image::RgbaImage::from_raw(first.width, first.height, first.rgba.clone())
+                .expect("first frame"),
+        )
+        .resize(240, 160, image::imageops::FilterType::Nearest)
+        .into_rgba8();
+        let bytes = static_thumbnail_png(&source, 320 * 200 * 4, &|| true)
+            .expect("native thumbnail without external FFmpeg fallback");
+        assert_eq!(thumbnail_source_size(&bytes), Some((320, 200)));
+        let preview = decode_png(&bytes).expect("thumbnail PNG");
+        assert_eq!((preview.width, preview.height), expected.dimensions());
+        assert_eq!(
+            &preview.rgba,
+            expected.as_raw(),
+            "first frame, alpha and sampling: {extension}"
+        );
+        assert!(
+            preview
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel[3] == 0)
+        );
+        assert!(static_thumbnail_png(&source, 1, &|| true).is_none());
+        assert!(static_thumbnail_png(&source, STATIC_THUMBNAIL_BYTE_LIMIT, &|| false).is_none());
+        let previews = PreviewCache::new(root.join("cache")).expect("cache");
+        assert_eq!(
+            previews
+                .filmstrip(&source, MediaKind::Image)
+                .expect("card")
+                .image,
+            preview
+        );
+        assert_eq!(
+            PreviewCache::new(root.join("cache"))
+                .expect("reopened cache")
+                .filmstrip(&source, MediaKind::Image)
+                .expect("persisted card")
+                .image,
+            preview
+        );
+        fs::write(&source, b"broken animation").expect("corrupt owned source");
+        assert!(static_thumbnail_png(&source, STATIC_THUMBNAIL_BYTE_LIMIT, &|| true).is_none());
+        fs::remove_dir_all(root).expect("remove owned animation and cache");
+    }
+}
+
+#[test]
+#[ignore = "Release comparison; generates owned GIF/APNG/WebP fixtures and runs the former helper path"]
+fn animation_thumbnail_native_generation_reports_helper_comparison() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("run this measurement with --release");
+    }
+    for (extension, size) in [
+        ("gif", (1920, 1080)),
+        ("apng", (4000, 2400)),
+        ("webp", (1920, 1080)),
+    ] {
+        let root = cache("animation-thumbnail-measurement").root;
+        let source = animation_fixture(&root, extension, size, false);
+        let reference = crate::decode_image(&source).expect("reference animation");
+        let frame = &reference.frames[0];
+        let expected = image::DynamicImage::ImageRgba8(
+            image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone())
+                .expect("reference pixels"),
+        )
+        .resize(240, 160, image::imageops::FilterType::Nearest)
+        .into_rgba8();
+        drop(reference);
+        let baseline = || {
+            frame_preview(
+                &source,
+                Duration::ZERO,
+                "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
+                None,
+            )
+        };
+        let supported = match baseline() {
+            Ok(bytes) => {
+                let image = decode_png(&bytes).expect("helper PNG");
+                assert_eq!((image.width, image.height), expected.dimensions());
+                true
+            }
+            Err(error) => {
+                println!("ANIMATION_THUMBNAIL {extension} helper unavailable: {error}");
+                false
+            }
+        };
+        // Warm filesystem, uncached generation, same-binary ABBA. Helper includes process startup;
+        // neither path includes disk-cache persistence, GPU upload, UI or the initial fixture work.
+        for native in [false, true, true, false] {
+            if !native && !supported {
+                continue;
+            }
+            let mut samples = Vec::new();
+            for _ in 0..3 {
+                let start = std::time::Instant::now();
+                let bytes = if native {
+                    static_thumbnail_png(&source, STATIC_THUMBNAIL_BYTE_LIMIT, &|| true)
+                        .expect("native thumbnail")
+                } else {
+                    baseline().expect("helper thumbnail")
+                };
+                samples.push(start.elapsed().as_secs_f64() * 1000.0);
+                let image = decode_png(&bytes).expect("thumbnail pixels");
+                assert_eq!((image.width, image.height), expected.dimensions());
+                if native {
+                    assert_eq!(&image.rgba, expected.as_raw());
+                }
+            }
+            samples.sort_by(f64::total_cmp);
+            println!(
+                "ANIMATION_THUMBNAIL {extension} {}x{} native={native} median_ms={:.3}",
+                size.0, size.1, samples[1]
+            );
+        }
+        fs::remove_dir_all(root).expect("remove owned measurement fixtures");
+    }
+    Ok(())
+}
+
 #[test]
 fn unavailable_disk_cache_still_coalesces_and_reuses_generated_pixels() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -468,7 +666,24 @@ fn direct_static_thumbnails_preserve_sampled_pixels_and_bound_original_bytes() {
             )))
             .expect("second frame");
     }
-    assert!(static_thumbnail_png(&gif, STATIC_THUMBNAIL_BYTE_LIMIT, &|| true).is_none());
+    let first = crate::decode_image(&gif)
+        .expect("original GIF")
+        .frames
+        .remove(0);
+    let preview = decode_png(
+        &static_thumbnail_png(&gif, STATIC_THUMBNAIL_BYTE_LIMIT, &|| true)
+            .expect("native first-frame thumbnail"),
+    )
+    .expect("GIF thumbnail PNG");
+    assert_eq!((preview.width, preview.height), (240, 120));
+    assert!(
+        preview
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == first.rgba[..4])
+    );
     let fallback = cache
         .filmstrip(&gif, MediaKind::Image)
         .expect("animation fallback");

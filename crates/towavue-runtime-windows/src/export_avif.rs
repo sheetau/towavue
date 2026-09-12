@@ -287,7 +287,16 @@ impl Animation {
             )
         };
         if self.color().premultiplied_with.is_some() {
-            filters.push_str(",unpremultiply=inplace=1");
+            // Match the display decoder's RGBA8 rounding and zero-alpha rule.
+            // alphamerge labels its output straight: unpremultiply would insert
+            // another premultiplication, losing low-alpha color precision.
+            filters.push_str(",format=gbrap,geq=");
+            for channel in ["r", "g", "b"] {
+                filters.push_str(&format!(
+                    "{channel}='if(gt(alpha(X,Y),0),min(255,floor({channel}(X,Y)*255/alpha(X,Y)+0.5)),0)':"
+                ));
+            }
+            filters.push_str("a='alpha(X,Y)',format=rgba");
         }
         // Match display: merge full-size planes, then apply the color aperture
         // and orientation once. Omitted legacy alpha transforms follow color.

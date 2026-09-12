@@ -3,6 +3,9 @@ use super::*;
 #[path = "export_avif_orientation_tests.rs"]
 mod orientation_tests;
 
+#[path = "export_avif_alpha_tests.rs"]
+mod alpha_tests;
+
 fn fixture(path: &Path, loops: &str, alpha: bool) {
     let mut args = vec![
         "-f",

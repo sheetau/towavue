@@ -134,6 +134,122 @@ fn native_compressed_fixture(directory: &Path, rate: u32, codec: &str, extension
 }
 
 #[test]
+fn coarse_flac_seek_preserves_sequential_samples_without_decoding_the_prefix() {
+    for (rate, channels) in [(32_000, 1), (44_100, 2), (48_000, 2), (96_000, 2)] {
+        let (directory, source, _) = fixture(rate, channels, "flac", 4, 1001);
+        let mut input = ParallelInput::open(&source, &|| false).expect("reused FLAC input");
+        for ns in [
+            2_917_000_000,
+            17_000_000,
+            617_000_000,
+            1_017_000_000,
+            0,
+            3_917_000_000,
+            4_000_000_000,
+        ] {
+            let target = MediaTime::from_nanoseconds(ns);
+            let end = target.saturating_add(Duration::from_millis(250));
+            let expected = samples(&source, target, end, MediaTime::ZERO).0;
+            let (actual, summary) = collect(&mut input, target, end, target);
+            assert_eq!(
+                actual.len(),
+                expected.len(),
+                "FLAC/{rate}/{channels} at {ns}: sample count"
+            );
+            assert!(
+                actual == expected,
+                "FLAC/{rate}/{channels} at {ns}: sequential samples differ"
+            );
+            assert!(
+                summary.audio_frames < u64::from(rate),
+                "FLAC prefix was decoded"
+            );
+        }
+        let checks = AtomicUsize::new(0);
+        let result = input.decode_software(
+            MediaTime::from_nanoseconds(3_917_000_000),
+            None,
+            Some(DecodeStream::Audio),
+            &|| checks.fetch_add(1, Ordering::Relaxed) > 10,
+            |_| true,
+        );
+        assert!(matches!(result, Err(DecodeError::ConsumerClosed)));
+        let target = MediaTime::from_nanoseconds(17_000_000);
+        let end = target.saturating_add(Duration::from_millis(250));
+        assert!(
+            collect(&mut input, target, end, target).0
+                == samples(&source, target, end, MediaTime::ZERO).0
+        );
+        drop(input);
+        fs::remove_dir_all(directory).expect("remove owned fixtures");
+    }
+}
+
+#[test]
+fn flac_prefix_headers_preserve_variable_counts_gaps_and_invalid_header_fallback() {
+    let (directory, source, _) = fixture(48_000, 2, "flac", 1, 1001);
+    let mut input = format::input(&source).expect("FLAC input");
+    let config = best_stream_config(&input, Type::Audio).expect("FLAC config");
+    let mut pipeline = create_audio_pipeline(&input)
+        .expect("pipeline")
+        .expect("audio");
+    pipeline.sample_preroll = config.sample_preroll(MediaTime::from_nanoseconds(2_000_000_000));
+    pipeline.flac_samples = FlacPacketSamples::new();
+    let mut sequential = create_audio_pipeline(&input)
+        .expect("sequential pipeline")
+        .expect("audio");
+    let mut summary = DecodeSummary::default();
+    let mut counts = std::collections::BTreeSet::new();
+    let mut first = None;
+    for (index, (_, mut packet)) in input.packets().enumerate() {
+        if index >= 3 {
+            packet.set_pts(packet.pts().map(|pts| pts + 100));
+        }
+        first.get_or_insert_with(|| ffmpeg::Packet::copy(packet.data().expect("packet")));
+        let before = summary.audio_frames;
+        sequential
+            .decoder
+            .send_packet(&packet)
+            .expect("decode packet");
+        sequential
+            .receive(&mut |_| true, &mut summary)
+            .expect("decode samples");
+        counts.insert(summary.audio_frames - before);
+        assert!(pipeline.skip_sample_preroll(&packet).expect("FLAC count"));
+        assert_eq!(
+            pipeline.next_sample, sequential.next_sample,
+            "header and decoded sample axis"
+        );
+    }
+    assert!(counts.len() >= 2, "fixture includes a short final block");
+    let first = first.expect("first packet");
+    let parser = pipeline.flac_samples.as_mut().expect("FLAC parser");
+    assert!(parser.samples(&mut pipeline.decoder, &first).is_some());
+    assert!(
+        parser
+            .samples(&mut pipeline.decoder, &ffmpeg::Packet::copy(&[0; 15]))
+            .is_none()
+    );
+    let mut damaged = ffmpeg::Packet::copy(first.data().expect("packet"));
+    damaged.data_mut().expect("owned packet")[0] = 0;
+    assert!(
+        parser.samples(&mut pipeline.decoder, &damaged).is_none(),
+        "invalid header cannot reuse the preceding duration"
+    );
+    let previous = pipeline.next_sample;
+    assert!(
+        !pipeline
+            .skip_sample_preroll(&damaged)
+            .expect("decoder fallback")
+    );
+    assert!(pipeline.sample_preroll.is_none());
+    assert_eq!(pipeline.next_sample, previous);
+    drop(config);
+    drop(input);
+    fs::remove_dir_all(directory).expect("remove owned fixtures");
+}
+
+#[test]
 fn compressed_audio_preroll_keeps_seek_samples_and_rewinds_reused_inputs() {
     for (codec, extension, rate) in [
         ("libmp3lame", "mp3", 48_000),
@@ -332,16 +448,16 @@ fn pcm_preroll_counts_variable_packets_and_keeps_sequential_gap_rules() {
     let precise_config = best_stream_config(&precise, Type::Audio).expect("precise config");
     assert!(
         precise_config
-            .pcm_preroll(MediaTime::from_nanoseconds(50_000_000))
+            .sample_preroll(MediaTime::from_nanoseconds(50_000_000))
             .is_none()
     );
     let config = best_stream_config(&input, Type::Audio).expect("PCM config");
-    assert!(config.pcm_preroll(MediaTime::ZERO).is_none());
+    assert!(config.sample_preroll(MediaTime::ZERO).is_none());
     let mut pipeline = create_audio_pipeline(&input)
         .expect("pipeline")
         .expect("audio");
-    pipeline.pcm_preroll = config.pcm_preroll(MediaTime::from_nanoseconds(150_000_000));
-    assert!(pipeline.pcm_preroll.is_some());
+    pipeline.sample_preroll = config.sample_preroll(MediaTime::from_nanoseconds(150_000_000));
+    assert!(pipeline.sample_preroll.is_some());
     let mut sequential = create_audio_pipeline(&input)
         .expect("sequential pipeline")
         .expect("audio");
@@ -358,7 +474,10 @@ fn pcm_preroll_counts_variable_packets_and_keeps_sequential_gap_rules() {
         let previous = sequential.next_sample;
         sequential.sample_presentation_time(packet.pts(), count);
         let skip = sequential.next_sample <= 7200;
-        assert_eq!(pipeline.skip_pcm_preroll(&packet).expect("PCM count"), skip);
+        assert_eq!(
+            pipeline.skip_sample_preroll(&packet).expect("PCM count"),
+            skip
+        );
         if !skip {
             assert_eq!(
                 pipeline.next_sample, previous,
@@ -369,11 +488,11 @@ fn pcm_preroll_counts_variable_packets_and_keeps_sequential_gap_rules() {
         assert_eq!(pipeline.next_sample, sequential.next_sample);
         sample += count as i64;
     }
-    assert!(pipeline.pcm_preroll.is_none(), "target packet reached");
-    pipeline.pcm_preroll = config.pcm_preroll(MediaTime::from_nanoseconds(150_000_000));
+    assert!(pipeline.sample_preroll.is_none(), "target packet reached");
+    pipeline.sample_preroll = config.sample_preroll(MediaTime::from_nanoseconds(150_000_000));
     assert!(
         pipeline
-            .skip_pcm_preroll(&ffmpeg::Packet::copy(&[0; 3]))
+            .skip_sample_preroll(&ffmpeg::Packet::copy(&[0; 3]))
             .is_err()
     );
     let mut packet = ffmpeg::Packet::copy(&[0; 200]);
@@ -393,10 +512,10 @@ fn pcm_preroll_counts_variable_packets_and_keeps_sequential_gap_rules() {
     }
     assert!(
         !pipeline
-            .skip_pcm_preroll(&packet)
+            .skip_sample_preroll(&packet)
             .expect("side data fallback")
     );
-    assert!(pipeline.pcm_preroll.is_none());
+    assert!(pipeline.sample_preroll.is_none());
     assert_eq!(
         pipeline.next_sample, previous,
         "decoder owns side-data counting"

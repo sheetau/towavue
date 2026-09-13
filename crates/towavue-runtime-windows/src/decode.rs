@@ -19,7 +19,9 @@ use windows::core::Interface;
 
 use crate::{GraphicsDevice, VideoOrientation};
 
+mod flac_preroll;
 mod frame_step;
+use flac_preroll::FlacPacketSamples;
 pub use frame_step::adjacent_video_frame;
 mod preview_frames;
 pub(crate) use preview_frames::preview_video_frames;
@@ -192,7 +194,7 @@ struct StreamConfig {
 }
 
 impl StreamConfig {
-    fn pcm_preroll(&self, target: MediaTime) -> Option<(MediaTime, usize)> {
+    fn sample_preroll(&self, target: MediaTime) -> Option<(MediaTime, PrerollSamples)> {
         // Parameters owns (or retains its stream owner for) this valid allocation.
         // This immutable borrow stays on the demux owner thread before workers
         // start; it neither mutates native state nor lets a pointer escape.
@@ -206,6 +208,9 @@ impl StreamConfig {
             return Option::None;
         }
         use codec::Id::*;
+        if self.parameters.id() == FLAC {
+            return Some((target, PrerollSamples::Flac));
+        }
         let sample_bytes = match self.parameters.id() {
             PCM_U8 | PCM_S8 => 1,
             PCM_S16LE | PCM_S16BE | PCM_U16LE | PCM_U16BE => 2,
@@ -216,7 +221,7 @@ impl StreamConfig {
         };
         Some((
             target,
-            sample_bytes * parameters.ch_layout.nb_channels as usize,
+            PrerollSamples::Pcm(sample_bytes * parameters.ch_layout.nb_channels as usize),
         ))
     }
 }
@@ -336,6 +341,12 @@ impl VideoPipeline {
     }
 }
 
+#[derive(Clone, Copy)]
+enum PrerollSamples {
+    Pcm(usize),
+    Flac,
+}
+
 struct AudioPipeline {
     stream_index: usize,
     time_base: Rational,
@@ -344,28 +355,45 @@ struct AudioPipeline {
     output_format: AudioFormat,
     next_presentation_time: MediaTime,
     next_sample: i64,
-    pcm_preroll: Option<(MediaTime, usize)>,
+    sample_preroll: Option<(MediaTime, PrerollSamples)>,
+    flac_samples: Option<FlacPacketSamples>,
 }
 
 impl AudioPipeline {
-    fn skip_pcm_preroll(&mut self, packet: &ffmpeg::Packet) -> Result<bool, DecodeError> {
-        let Some((target, frame_bytes)) = self.pcm_preroll else {
+    fn skip_sample_preroll(&mut self, packet: &ffmpeg::Packet) -> Result<bool, DecodeError> {
+        let Some((target, source)) = self.sample_preroll else {
             return Ok(false);
         };
         // Skip-sample or parameter-change side data can alter decoded sample
         // counts. Let the decoder handle this packet and the remaining prefix.
         if packet.side_data().next().is_some() {
-            self.pcm_preroll = None;
+            self.sample_preroll = None;
             return Ok(false);
         }
-        if !packet.size().is_multiple_of(frame_bytes) {
-            return Err(ffmpeg::Error::InvalidData.into());
-        }
-        // Scalar PCM has an exact sample count even when container PTS is rounded.
+        let samples = match source {
+            PrerollSamples::Pcm(frame_bytes) => {
+                if !packet.size().is_multiple_of(frame_bytes) {
+                    return Err(ffmpeg::Error::InvalidData.into());
+                }
+                packet.size() / frame_bytes
+            }
+            PrerollSamples::Flac => {
+                let Some(samples) = self
+                    .flac_samples
+                    .as_mut()
+                    .and_then(|parser| parser.samples(&mut self.decoder, packet))
+                else {
+                    self.sample_preroll = None;
+                    return Ok(false);
+                };
+                samples
+            }
+        };
+        // PCM sizes and FLAC headers give sample counts despite rounded PTS.
         // Count the prefix without decoding it; reuse the sequential timestamp/gap
         // rules instead of assuming equally sized packets or a PTS-aligned phase.
         let previous = self.next_sample;
-        self.sample_presentation_time(packet.pts(), packet.size() / frame_bytes);
+        self.sample_presentation_time(packet.pts(), samples);
         let target_sample = target.as_nanoseconds().rescale_with(
             (1, 1_000_000_000),
             (1, self.decoder.rate() as i32),
@@ -375,7 +403,7 @@ impl AudioPipeline {
             return Ok(true);
         }
         self.next_sample = previous;
-        self.pcm_preroll = None;
+        self.sample_preroll = None;
         Ok(false)
     }
 
@@ -709,10 +737,10 @@ impl ParallelInput {
             }
             return Err(DecodeError::NoMediaStream);
         }
-        let pcm_preroll = video.is_none()
+        let sample_preroll = video.is_none()
             && audio
                 .as_ref()
-                .is_some_and(|audio| audio.pcm_preroll(minimum_time).is_some());
+                .is_some_and(|audio| audio.sample_preroll(minimum_time).is_some());
         let compressed_preroll = video.is_none()
             && audio.as_ref().is_some_and(|audio| {
                 matches!(
@@ -720,7 +748,7 @@ impl ParallelInput {
                     codec::Id::AAC | codec::Id::MP3 | codec::Id::OPUS | codec::Id::VORBIS
                 )
             });
-        let seek_target = if pcm_preroll {
+        let seek_target = if sample_preroll {
             MediaTime::ZERO
         } else if compressed_preroll {
             // Warm overlap/reservoir state before clipping at the requested target.
@@ -772,10 +800,10 @@ fn run_parallel_workers(
         ParallelVideoConfig::Hardware(config, _) => config.index,
     });
     let audio_stream_index = audio.as_ref().map(|config| config.index);
-    let pcm_preroll = audio
+    let sample_preroll = audio
         .as_ref()
         .filter(|_| video.is_none())
-        .and_then(|config| config.pcm_preroll(minimum_time));
+        .and_then(|config| config.sample_preroll(minimum_time));
     let mut video_finished = video.is_none();
     let mut audio_finished = audio.is_none();
     let (video_packet_tx, video_packet_rx) = mpsc::sync_channel(PACKET_QUEUE_CAPACITY);
@@ -845,7 +873,7 @@ fn run_parallel_workers(
                         audio,
                         audio_packet_rx,
                         &audio_output_tx,
-                        pcm_preroll,
+                        sample_preroll,
                     ) {
                         let _ = audio_output_tx.send(ParallelDecodeOutput::Failed(error));
                     }
@@ -1115,17 +1143,20 @@ fn run_parallel_audio_worker(
     config: StreamConfig,
     packets: mpsc::Receiver<ffmpeg::Packet>,
     output: &SyncSender<ParallelDecodeOutput>,
-    pcm_preroll: Option<(MediaTime, usize)>,
+    sample_preroll: Option<(MediaTime, PrerollSamples)>,
 ) -> Result<(), DecodeError> {
     let mut pipeline = create_audio_pipeline_from(config)?;
-    pipeline.pcm_preroll = pcm_preroll;
+    pipeline.sample_preroll = sample_preroll;
+    if matches!(sample_preroll, Some((_, PrerollSamples::Flac))) {
+        pipeline.flac_samples = FlacPacketSamples::new();
+    }
     let mut summary = DecodeSummary::default();
     let mut emit_audio = |decoded| match decoded {
         DecodeOutput::Audio(chunk) => output.send(ParallelDecodeOutput::Audio(chunk)).is_ok(),
         DecodeOutput::Video(_) => unreachable!("audio worker emitted video"),
     };
     for packet in packets {
-        if pipeline.skip_pcm_preroll(&packet)? {
+        if pipeline.skip_sample_preroll(&packet)? {
             continue;
         }
         pipeline.decoder.send_packet(&packet)?;
@@ -1654,7 +1685,8 @@ fn create_audio_pipeline_from(config: StreamConfig) -> Result<AudioPipeline, Dec
         output_format,
         next_presentation_time: MediaTime::ZERO,
         next_sample: ffmpeg::ffi::AV_NOPTS_VALUE,
-        pcm_preroll: None,
+        sample_preroll: None,
+        flac_samples: None,
     })
 }
 

@@ -27,13 +27,26 @@ struct ManagedTexture {
     options: egui::TextureOptions,
 }
 
+#[cfg(feature = "render-verification")]
+thread_local! {
+    static UPLOAD_TIMES: std::cell::Cell<[std::time::Duration; 3]> = const {
+        std::cell::Cell::new([std::time::Duration::ZERO; 3])
+    };
+}
+
 #[cfg(test)]
 mod tests {
+    mod upload;
+
     use super::*;
     use std::{slice, sync::Arc};
     use windows::Win32::Graphics::Direct3D::{
         D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP,
     };
+
+    thread_local! {
+        pub(super) static IMMUTABLE_UPLOAD_PROBE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
 
     fn device(driver: D3D_DRIVER_TYPE) -> Result<Option<(ID3D11Device, ID3D11DeviceContext)>> {
         let mut device = None;
@@ -315,6 +328,13 @@ pub struct TexturePool {
 }
 
 impl TexturePool {
+    /// Cumulative calling-thread wall time: native creation, source drop, whole pool update.
+    /// The first two are contained in the third; no pixels or resource retention.
+    #[cfg(feature = "render-verification")]
+    pub fn verification_upload_times(&self) -> [std::time::Duration; 3] {
+        UPLOAD_TIMES.get()
+    }
+
     #[cfg(feature = "render-verification")]
     pub fn verification_managed_textures(&self) -> Vec<(TextureId, [usize; 2])> {
         self.pool
@@ -370,6 +390,8 @@ impl TexturePool {
     }
 
     pub fn update(&mut self, ctx: &ID3D11DeviceContext, delta: TexturesDelta) -> Result<()> {
+        #[cfg(feature = "render-verification")]
+        let started = std::time::Instant::now();
         for (tid, delta) in delta.set {
             if delta.is_whole() && delta.image.width() > 0 && delta.image.height() > 0 {
                 self.pool.insert(
@@ -394,6 +416,12 @@ impl TexturePool {
                 self.pool.remove(&tid);
             }
         }
+        #[cfg(feature = "render-verification")]
+        UPLOAD_TIMES.set({
+            let mut times = UPLOAD_TIMES.get();
+            times[2] += started.elapsed();
+            times
+        });
         Ok(())
     }
 
@@ -483,6 +511,18 @@ impl TexturePool {
             ..Default::default()
         };
 
+        // Test-only comparison through the real upload path; production must
+        // retain DEFAULT usage because managed textures support partial updates.
+        #[cfg(test)]
+        let desc = D3D11_TEXTURE2D_DESC {
+            Usage: if tests::IMMUTABLE_UPLOAD_PROBE.get() {
+                D3D11_USAGE_IMMUTABLE
+            } else {
+                desc.Usage
+            },
+            ..desc
+        };
+
         let subresource_data = D3D11_SUBRESOURCE_DATA {
             pSysMem: image.pixels.as_ptr() as _,
             SysMemPitch: (width * mem::size_of::<Color32>()) as u32,
@@ -493,12 +533,25 @@ impl TexturePool {
         // The immutable, validated CPU image remains alive for this synchronous
         // device upload only. Later partial updates upload their own region. D3D keeps no
         // pointer to its storage after CreateTexture2D returns.
+        #[cfg(feature = "render-verification")]
+        let started = std::time::Instant::now();
         unsafe { device.CreateTexture2D(&desc, Some(&subresource_data), Some(&mut tex)) }?;
         let tex = tex.unwrap();
 
         let mut srv = None;
         unsafe { device.CreateShaderResourceView(&tex, None, Some(&mut srv)) }?;
         let srv = srv.unwrap();
+
+        #[cfg(feature = "render-verification")]
+        {
+            let creation = started.elapsed();
+            let started = std::time::Instant::now();
+            drop(image);
+            let mut times = UPLOAD_TIMES.get();
+            times[0] += creation;
+            times[1] += started.elapsed();
+            UPLOAD_TIMES.set(times);
+        }
 
         Ok(Texture::Managed(ManagedTexture {
             tex,

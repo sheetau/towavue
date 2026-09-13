@@ -119,6 +119,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             let mut preparation = Vec::new();
             let mut original_gpu = Vec::new();
             let mut original_layout = Vec::new();
+            let mut previous_conversion_time = COLOR_IMAGE_CONVERSION_TIME.get();
             loop {
                 // Fixed schedule, independent of image completion: no initial prefetch wait.
                 while sent + 1 < self.paths.len()
@@ -181,6 +182,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 let path = full.then(|| app.path.clone().expect("displayed source"));
                 let token = app.image_sequence_token(&output);
                 // Never read back or emit pixels from reference media; only submit to a hidden surface.
+                let upload_before = renderer.verification_upload_times();
                 let gpu_time = gpu::submit(&app, &context, output, &mut renderer, false);
                 if let Some(path) = path
                     && visited.last() != Some(&path)
@@ -198,7 +200,25 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                             layout.as_secs_f64() * 1000.0,
                             gpu_time.as_secs_f64() * 1000.0,
                         );
+                        let stages = gpu::SUBMISSION_STAGES.get();
+                        let upload_after = renderer.verification_upload_times();
+                        let upload: [f64; 3] = std::array::from_fn(|i| {
+                            (upload_after[i] - upload_before[i]).as_secs_f64() * 1000.0
+                        });
+                        eprintln!(
+                            "REFERENCE_TRACE_PREPARATION color_conversion_ms={:.3} surface_clear_ms={:.3} render_ui_ms={:.3} present_ms={:.3} native_texture_creation_ms={:.3} source_release_ms={:.3} texture_pool_update_ms={:.3}; conversion is since previous original; native creation/release are within pool update, pool update within render_ui; CPU wall times, no GPU timestamps",
+                            (COLOR_IMAGE_CONVERSION_TIME.get() - previous_conversion_time)
+                                .as_secs_f64()
+                                * 1000.0,
+                            stages[0].as_secs_f64() * 1000.0,
+                            stages[1].as_secs_f64() * 1000.0,
+                            stages[2].as_secs_f64() * 1000.0,
+                            upload[0],
+                            upload[1],
+                            upload[2],
+                        );
                     }
+                    previous_conversion_time = COLOR_IMAGE_CONVERSION_TIME.get();
                     let index = if self.reverse {
                         self.paths.len() - 1 - index
                     } else {

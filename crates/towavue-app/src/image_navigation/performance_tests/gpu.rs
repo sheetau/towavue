@@ -2,6 +2,12 @@ use super::*;
 use towavue_runtime_windows::VerificationMemory;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+thread_local! {
+    pub(super) static SUBMISSION_STAGES: std::cell::Cell<[Duration; 3]> = const {
+        std::cell::Cell::new([Duration::ZERO; 3])
+    };
+}
+
 #[test]
 #[ignore = "generates 100 large JPEGs (or TOWAVUE_NAV_IMAGE_FORMAT=png); requires FFMPEG_DIR, hardware D3D11 and a Release test build"]
 fn hundred_large_images_report_gpu_navigation_and_memory() {
@@ -61,7 +67,10 @@ pub(super) fn submit<N: Fn(AppEvent) + Send + Sync + 'static>(
         .resize_surface(width, height)
         .expect("surface size");
     renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
+    let surface = started.elapsed();
+    let render_started = Instant::now();
     renderer.render_ui(context, output).expect("GPU UI");
+    let render = render_started.elapsed();
     if verify && let (Some(image), Some(bounds)) = (image, bounds) {
         let pixels = renderer
             .verification_surface_rgba()
@@ -92,7 +101,9 @@ pub(super) fn submit<N: Fn(AppEvent) + Send + Sync + 'static>(
             }
         }
     }
+    let present_started = Instant::now();
     renderer.present_surface().expect("Present");
+    SUBMISSION_STAGES.set([surface, render, present_started.elapsed()]);
     started.elapsed()
 }
 

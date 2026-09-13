@@ -687,6 +687,12 @@ impl Renderer {
         self.texture_pool.verification_managed_textures()
     }
 
+    #[cfg(feature = "render-verification")]
+    /// Calling-thread cumulative creation/source-release/pool-update wall times; nested, not additive.
+    pub fn verification_upload_times(&self) -> [std::time::Duration; 3] {
+        self.texture_pool.verification_upload_times()
+    }
+
     fn setup(
         &mut self,
         ctx: &ID3D11DeviceContext,

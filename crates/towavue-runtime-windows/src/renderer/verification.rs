@@ -31,6 +31,12 @@ impl Drop for MappedSurface<'_> {
 }
 
 impl FrameRenderer {
+    /// Calling-thread totals: native texture/SRV creation, source release, pool update.
+    /// Creation/release are included in pool update; these are CPU wall times.
+    pub fn verification_upload_times(&self) -> [std::time::Duration; 3] {
+        self.ui_renderer.verification_upload_times()
+    }
+
     /// Inventory of renderer-owned managed textures, not driver allocations or user/video views.
     pub fn verification_managed_textures(&self) -> Vec<(egui::TextureId, [usize; 2])> {
         self.ui_renderer.verification_managed_textures()

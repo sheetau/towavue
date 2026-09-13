@@ -47,6 +47,13 @@ Local changes:
   updates, unchanged external snapshots and released source allocations.
   WARP also covers empty updates, invalid input, deferred-context rejection,
   GPU use after source release and texture removal.
+- `render-verification` exposes calling-thread cumulative CPU wall times for
+  native texture/SRV creation, source release and pool updates. These intervals
+  are nested, not additive; failed operations are not complete samples. The
+  default build contains no timing calls. A generated-image, opt-in Release
+  test compares DEFAULT/IMMUTABLE creation through the same upload code and
+  verifies every pixel offscreen; its test-only usage override is not a change
+  to the production DEFAULT/partial-update contract.
 
 The public marker is additive; native device ownership APIs are unchanged.
 Upstream vertex/index buffer upload and normal blending remain unchanged.

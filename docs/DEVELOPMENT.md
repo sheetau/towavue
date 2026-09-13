@@ -57,6 +57,8 @@ Generate fixtures only when missing or their inputs change. Reuse completed chec
 
 Tests are colocated with implementations or under the crate's tests directory. Search for the behavior/test before creating another fixture or diagnostic.
 
+For isolated image-color experiments, `cargo run -p towavue-app --example image-color-cost --release --locked --offline` uses the same conversion source as the app and checks every output pixel against egui. It generates its own inputs by default; an explicit `TOWAVUE_COLOR_REFERENCE_PATH` instead selects one read-only static file, checking its length/mtime and emitting no paths or pixels. Conversion timings exclude decode, GPU work and equality checks; they do not replace full navigation measurements. Candidate strategies live only in the example. This small target avoids rebuilding the application test binary for each conversion experiment.
+
 User settings live under `%APPDATA%\towavue` (shortcuts.conf, grid.conf, recent-files.txt). Preview disk cache is under `%LOCALAPPDATA%\towavue\preview-cache`. Build output, `tests/generated`, and local FFmpeg are ignored. Never clear user settings or media to make a test pass.
 
 For bug reports retain reproduction, expected/actual result, build, Windows/GPU/driver/DPI, and codec/dimensions/duration. Use disposable generated media, not private files. For Explorer ordering include Sort By, whether Explorer was open, and reported snapshot source.

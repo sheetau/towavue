@@ -33,6 +33,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
     let before = stamps();
     struct Trial<'a> {
         paths: &'a [PathBuf],
+        reverse: bool,
         source: PathBuf,
         completed: bool,
     }
@@ -50,7 +51,13 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             let context = fonts::test_context();
             app.ui_context = Some(context.clone());
             app.fullscreen = true;
-            app.tabs.open_new(self.paths[0].clone(), MediaKind::Image);
+            let first = &self.paths[if self.reverse {
+                self.paths.len() - 1
+            } else {
+                0
+            }];
+            app.image_navigation_forward = !self.reverse;
+            app.tabs.open_new(first.clone(), MediaKind::Image);
             app.folder_snapshot = Some(FolderSnapshot {
                 folder_identity: towavue_core::ShellIdentity::new(vec![]),
                 folder_path: self.source.clone(),
@@ -69,7 +76,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 captured_at: std::time::SystemTime::UNIX_EPOCH,
             });
             let started = Instant::now();
-            app.load_path(self.paths[0].clone(), MediaKind::Image);
+            app.load_path(first.clone(), MediaKind::Image);
             let cadence = Duration::from_millis(33);
             let mut sent = 0;
             let mut visited = Vec::new();
@@ -88,7 +95,11 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 while sent + 1 < self.paths.len()
                     && started.elapsed() >= cadence * (sent as u32 + 1)
                 {
-                    app.dispatch(CommandId::NextSameKind);
+                    app.dispatch(if self.reverse {
+                        CommandId::PreviousSameKind
+                    } else {
+                        CommandId::NextSameKind
+                    });
                     sent += 1;
                     max_queue = max_queue.max(app.image_sequence.steps.len());
                 }
@@ -150,6 +161,11 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                         .iter()
                         .position(|candidate| candidate == &path)
                         .expect("source index");
+                    let index = if self.reverse {
+                        self.paths.len() - 1 - index
+                    } else {
+                        index
+                    };
                     latency.push(started.elapsed().saturating_sub(cadence * index as u32));
                     preparation.push(std::mem::take(&mut event_preparation));
                     original_layout.push(layout);
@@ -172,12 +188,19 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 std::thread::sleep(Duration::from_millis(1));
             }
             latency.sort_unstable();
+            let complete_order = visited.len() == self.paths.len()
+                && visited.iter().enumerate().all(|(index, path)| {
+                    path == &self.paths[if self.reverse {
+                        self.paths.len() - 1 - index
+                    } else {
+                        index
+                    }]
+                });
             eprintln!(
-                "REFERENCE_NAV images={} commands={} presented={} complete_order={} blank_frames={blanks} preview_frames={previews} max_queue={max_queue} failed={failed} elapsed_ms={:.3} ready_after_scheduled_command_median_ms={:.3} p95_ms={:.3}; read-only originals, hidden GPU Present, lexical synthetic order, 33ms commands without prewarming, no readback/screenshots or physical-key/IrfanView evidence",
+                "REFERENCE_NAV images={} commands={} presented={} complete_order={complete_order} blank_frames={blanks} preview_frames={previews} max_queue={max_queue} failed={failed} elapsed_ms={:.3} ready_after_scheduled_command_median_ms={:.3} p95_ms={:.3}; reverse={}; read-only originals, hidden GPU Present, lexical synthetic order, 33ms commands without prewarming, no readback/screenshots or physical-key/IrfanView evidence",
                 self.paths.len(),
                 sent,
                 visited.len(),
-                visited == self.paths,
                 started.elapsed().as_secs_f64() * 1000.0,
                 latency
                     .get(latency.len() / 2)
@@ -188,6 +211,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 latency
                     .last()
                     .map_or(0.0, |_| percentile_95(&latency).as_secs_f64() * 1000.0),
+                self.reverse,
             );
             memory.report();
             eprintln!(
@@ -212,13 +236,14 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                     );
                 }
             }
-            self.completed = !failed && visited == self.paths && blanks == 0 && previews == 0;
+            self.completed = !failed && complete_order && blanks == 0 && previews == 0;
             event_loop.exit();
         }
         fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
     }
     let mut trial = Trial {
         paths: &paths,
+        reverse: std::env::var_os("TOWAVUE_NAV_REFERENCE_REVERSE").is_some(),
         source,
         completed: false,
     };

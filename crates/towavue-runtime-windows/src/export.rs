@@ -502,6 +502,20 @@ fn export_audio_cancellable(
         || streams.timeline.is_some())
     .then_some(request.kind);
     let staging = StagedExport::new(&request.target)?;
+    if let Some(animation) = &gif_animation
+        && gif_animation::gif_path(&request.target)
+        && request.operations.is_empty()
+    {
+        animation.copy_unedited(&request.source, &staging, cancelled, progress)?;
+        source_stamp
+            .as_ref()
+            .expect("GIF source stamp")
+            .verify(&request.source)?;
+        staging.publish(&request.target, cancelled, trimmed_kind)?;
+        return Ok(ExportOutcome {
+            used_hardware_encoder: false,
+        });
+    }
     if let Some(metadata) = &jpeg_metadata
         && jpeg_metadata::jpeg_path(&request.source)
         && request.operations.is_empty()

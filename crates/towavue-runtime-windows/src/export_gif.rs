@@ -122,6 +122,55 @@ impl Animation {
         self.delays.len() > 1
     }
 
+    pub(super) fn copy_unedited(
+        &self,
+        source: &Path,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+        progress: &(impl Fn(Duration) + Sync),
+    ) -> Result<(), ExportError> {
+        let result = (|| {
+            check_cancelled(cancelled)?;
+            progress(Duration::ZERO);
+            let mut input = Reader {
+                file: fs::File::open(source).map_err(ExportError::Output)?,
+                cancelled,
+            };
+            let mut output = std::io::BufWriter::new(
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&staging.output)
+                    .map_err(ExportError::Output)?,
+            );
+            let mut buffer = [0; 65536];
+            loop {
+                check_cancelled(cancelled)?;
+                let count = input.read(&mut buffer).map_err(ExportError::Output)?;
+                if count == 0 {
+                    break;
+                }
+                output
+                    .write_all(&buffer[..count])
+                    .map_err(ExportError::Output)?;
+            }
+            output.flush().map_err(ExportError::Output)?;
+            drop(output);
+            if Self::read(&staging.output, cancelled)? != *self {
+                return Err(invalid("copied animation controls differ"));
+            }
+            progress(Duration::from_millis(
+                self.delays
+                    .iter()
+                    .map(|delay| u64::from((*delay).max(1)) * 10)
+                    .sum(),
+            ));
+            Ok(())
+        })();
+        check_cancelled(cancelled)?;
+        result
+    }
+
     pub(super) fn avif_delays(&self) -> Result<Option<Vec<u32>>, ExportError> {
         // Preserve a timed/looped single frame, but keep ordinary untimed still GIFs static.
         if self.delays == [0] && self.repeat == gif::Repeat::Finite(0) {
@@ -366,6 +415,132 @@ mod tests {
     }
 
     #[test]
+    fn unedited_gif_save_preserves_extensions_palettes_interlace_and_all_bytes() {
+        let root = audio_tests::root("gif-unedited-copy");
+        let source = root.join("source.GIF");
+        let target = root.join("saved.gif");
+        for (count, repeat) in [
+            (1, gif::Repeat::Finite(0)),
+            (3, gif::Repeat::Finite(7)),
+            (3, gif::Repeat::Infinite),
+        ] {
+            let mut encoder = gif::Encoder::new(
+                fs::File::create(&source).expect("source"),
+                4,
+                4,
+                &[255, 0, 0, 0, 255, 0, 0, 0, 255, 17, 53, 89],
+            )
+            .expect("encoder");
+            if repeat != gif::Repeat::Finite(0) {
+                encoder.set_repeat(repeat).expect("repeat");
+            }
+            encoder
+                .write_raw_extension(gif::AnyExtension(0xfe), &[&vec![b'C'; 70000]])
+                .expect("large comment");
+            encoder
+                .write_raw_extension(
+                    gif::AnyExtension(0xff),
+                    &[b"TOWAVUETEST", b"opaque application payload"],
+                )
+                .expect("application extension");
+            for index in 0..count {
+                let width = if index == 0 { 4 } else { 2 };
+                encoder
+                    .write_frame(&gif::Frame {
+                        width,
+                        height: 4,
+                        left: if index == 0 { 0 } else { 1 },
+                        interlaced: true,
+                        delay: [0, 7, u16::MAX][index],
+                        transparent: Some(3),
+                        dispose: [
+                            gif::DisposalMethod::Keep,
+                            gif::DisposalMethod::Previous,
+                            gif::DisposalMethod::Background,
+                        ][index],
+                        palette: (index == 1)
+                            .then(|| vec![0, 0, 255, 255, 0, 0, 0, 255, 0, 89, 53, 17]),
+                        buffer: (0..usize::from(width) * 4)
+                            .map(|i| (i % 4) as u8)
+                            .collect::<Vec<_>>()
+                            .into(),
+                        ..Default::default()
+                    })
+                    .expect("frame");
+                encoder
+                    .write_raw_extension(gif::AnyExtension(0xfe), &[b"between frames"])
+                    .expect("comment");
+            }
+            encoder.into_inner().expect("trailer");
+            let original = fs::read(&source).expect("source bytes");
+            let pixels = crate::decode_image(&source).expect("display").frames;
+            export_media(&request(&source, &target)).expect("save");
+            assert!(
+                fs::read(&target).expect("saved bytes") == original,
+                "byte-exact unedited copy"
+            );
+            assert_eq!(
+                crate::decode_image(&target).expect("saved display").frames,
+                pixels
+            );
+            let resaved = root.join("resaved.gif");
+            export_media(&request(&target, &resaved)).expect("resave");
+            assert!(fs::read(&resaved).expect("resaved bytes") == original);
+            assert!(fs::read(&source).expect("source unchanged") == original);
+            let controls = Animation::read(&source, &AtomicBool::new(false)).expect("controls");
+            let staging = StagedExport::new(&target).expect("stage");
+            fs::write(&staging.output, b"occupied").expect("occupied stage");
+            assert!(
+                controls
+                    .copy_unedited(&source, &staging, &AtomicBool::new(false), &|_| {})
+                    .is_err()
+            );
+            assert_eq!(
+                fs::read(&staging.output).expect("occupied preserved"),
+                b"occupied"
+            );
+            assert!(fs::read(&target).expect("target preserved") == original);
+            drop(staging);
+            for change_source in [false, true] {
+                fs::write(&target, b"existing target").expect("protected target");
+                let cancel = AtomicBool::new(false);
+                let copied = AtomicBool::new(false);
+                let result = export_cancellable(&request(&source, &target), &cancel, &|time| {
+                    if time > Duration::ZERO {
+                        copied.store(true, Ordering::Relaxed);
+                        if change_source {
+                            fs::write(&source, b"changed after copying").expect("source mutation");
+                        } else {
+                            cancel.store(true, Ordering::Relaxed);
+                        }
+                    }
+                });
+                assert!(
+                    copied.load(Ordering::Relaxed),
+                    "copy and staged validation completed"
+                );
+                if change_source {
+                    assert!(
+                        result
+                            .expect_err("source stamp")
+                            .to_string()
+                            .contains("source changed")
+                    );
+                } else {
+                    assert!(matches!(result, Err(ExportError::Cancelled)));
+                }
+                assert_eq!(
+                    fs::read(&target).expect("target retained"),
+                    b"existing target"
+                );
+                fs::write(&source, &original).expect("restore owned fixture");
+            }
+        }
+        assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 3);
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
     fn gif_export_preserves_transparent_regions_disposal_and_duplicate_frames() {
         use towavue_core::{ImageResize, PixelCrop, ResampleFilter};
         let root = audio_tests::root("gif-regions");
@@ -400,6 +575,13 @@ mod tests {
             ] {
                 request.operations = operations;
                 export_media(&request).expect("region save");
+                if request.operations.is_empty() {
+                    assert_eq!(
+                        fs::read(&target).expect("unedited bytes"),
+                        before,
+                        "unedited GIF saves must retain compressed data and frame structure"
+                    );
+                }
                 let actual = crate::decode_image(&target).expect("saved display");
                 let expected = crate::render_image_edits(
                     &original,

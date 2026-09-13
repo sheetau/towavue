@@ -162,6 +162,8 @@ pub enum Icon {
     Pause,
     Play,
     ExitFullscreen,
+    Speaker,
+    Muted,
 }
 
 impl Icon {
@@ -171,9 +173,30 @@ impl Icon {
             Self::OpenFolder => '\u{eaf7}',
             Self::Pause | Self::Play => return egui::RichText::new(""),
             Self::ExitFullscreen => '\u{eb4d}',
+            Self::Speaker => '\u{eb75}',
+            Self::Muted => '\u{eb24}',
         };
         egui::RichText::new(glyph).font(crate::fonts::icon_font())
     }
+}
+
+pub fn tab_label(label: String, active: bool, muted: Option<bool>) -> egui::Atoms<'static> {
+    let text = egui::RichText::new(label);
+    let mut atoms = egui::Atoms::new((
+        if active { text.color(FOREGROUND) } else { text },
+        egui::Atom::grow(),
+    ));
+    if let Some(muted) = muted {
+        atoms.push_left(egui::Atom {
+            size: Some(egui::vec2(4.0, 0.0)),
+            ..Default::default()
+        });
+        let icon = if muted { Icon::Muted } else { Icon::Speaker }
+            .text()
+            .size(14.0);
+        atoms.push_left(if active { icon.color(FOREGROUND) } else { icon });
+    }
+    atoms
 }
 
 pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
@@ -582,10 +605,16 @@ mod tests {
             let context = crate::fonts::test_context();
             context.set_pixels_per_point(density);
             context.global_style_mut(super::style);
-            for height in [16.0, 23.0, 24.0, 25.5] {
+            for (height, audio) in [16.0, 23.0, 24.0, 25.5]
+                .into_iter()
+                .flat_map(|height| [None, Some(false), Some(true)].map(|audio| (height, audio)))
+            {
                 let row =
                     egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(150.0, height));
-                let _ = context.run_ui(Default::default(), |ui| {
+                let output = context.run_ui(Default::default(), |ui| {
+                    ui.fonts_mut(|fonts| {
+                        assert!(fonts.has_glyphs(&crate::fonts::icon_font(), "\u{eb24}\u{eb75}"))
+                    });
                     ui.spacing_mut().button_padding = egui::vec2(super::TAB_PADDING, 0.0);
                     ui.spacing_mut().interact_size.y = height;
                     let close_rect = egui::Rect::from_min_max(
@@ -601,16 +630,53 @@ mod tests {
                     let label_rect = egui::Rect::from_min_max(row.min, close_rect.left_bottom());
                     let response = ui.put(
                         label_rect,
-                        egui::Button::new(("Tab label", egui::Atom::grow()))
+                        egui::Button::new(super::tab_label("Tab label".into(), true, audio))
                             .truncate()
                             .gap(0.0),
                     );
                     assert!(
                         row.contains_rect(response.rect),
-                        "label overflow: {height}, {:?}",
+                        "label overflow: {height}, {audio:?}, {:?}",
                         response.rect
                     );
                 });
+                let icon = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text)
+                        if text.galley.text() == "\u{eb75}" || text.galley.text() == "\u{eb24}" =>
+                    {
+                        Some(text)
+                    }
+                    _ => None,
+                });
+                if let Some(muted) = audio {
+                    let icon = icon.expect("audio icon");
+                    assert_eq!(
+                        icon.galley.text(),
+                        if muted { "\u{eb24}" } else { "\u{eb75}" }
+                    );
+                    assert_eq!(
+                        icon.galley.job.sections[0].format.font_id,
+                        egui::FontId::new(14.0, crate::fonts::icon_font().family)
+                    );
+                    let bounds = icon.galley.rect.translate(icon.pos.to_vec2());
+                    assert!(row.contains_rect(bounds));
+                    let title = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.text() == "Tab label" => {
+                                Some(text)
+                            }
+                            _ => None,
+                        })
+                        .expect("title");
+                    assert!(
+                        title.pos.x >= bounds.right() + 3.0,
+                        "icon precedes title with a gap"
+                    );
+                } else {
+                    assert!(icon.is_none());
+                }
             }
         }
     }

@@ -16,6 +16,30 @@ impl Default for PlaybackVolume {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn tab_audio_indicator(&self, tab: &towavue_core::Tab) -> Option<bool> {
+        let id = tab.id;
+        let (state, drained, session) = if self.tabs.active().is_some_and(|tab| tab.id == id) {
+            if self.path.as_deref() != Some(tab.target.current_path()) {
+                return None;
+            }
+            (self.state, self.audio_drained, self.session.as_ref())
+        } else {
+            let saved = self.retained_playback.get(&id)?;
+            if saved.path != tab.target.current_path() {
+                return None;
+            }
+            (saved.state, saved.audio_drained, saved.session.as_ref())
+        };
+        (state == PlaybackState::Playing
+            && !drained
+            && session.is_some_and(PlaybackSession::has_audio))
+        .then(|| {
+            self.playback_volumes
+                .get(&id)
+                .is_some_and(|volume| volume.level == 0.0)
+        })
+    }
+
     pub(super) fn playback_volume(&self) -> f32 {
         self.tabs
             .active()
@@ -112,6 +136,8 @@ mod tests {
             let session = app.session.as_ref().expect("live audio session");
             assert_eq!(session.verification_volume(), (level, Some(level)));
             assert_eq!(app.playback_volume(), level);
+            let tab = app.tabs.active().expect("active tab");
+            assert_eq!(app.tab_audio_indicator(tab), Some(level == 0.0));
             assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
         }
 
@@ -147,6 +173,30 @@ mod tests {
                 app.load_path(self.path.clone(), MediaKind::Audio);
                 app.media_duration = Some(Duration::from_secs(10));
                 check(&app, 0.3);
+                for state in [
+                    PlaybackState::Paused,
+                    PlaybackState::Ended,
+                    PlaybackState::Faulted,
+                ] {
+                    let old = std::mem::replace(&mut app.state, state);
+                    assert_eq!(
+                        app.tab_audio_indicator(app.tabs.active().expect("tab")),
+                        None
+                    );
+                    app.state = old;
+                }
+                app.audio_drained = true;
+                assert_eq!(
+                    app.tab_audio_indicator(app.tabs.active().expect("tab")),
+                    None
+                );
+                app.audio_drained = false;
+                let session = app.session.take();
+                assert_eq!(
+                    app.tab_audio_indicator(app.tabs.active().expect("tab")),
+                    None
+                );
+                app.session = session;
                 let generation = app.generation;
                 app.handle_ui_action(UiAction::Volume(first, 0.6));
                 check(&app, 0.6);
@@ -196,6 +246,80 @@ mod tests {
                         .verification_volume(),
                     (0.6, Some(0.6))
                 );
+                let first_tab = app
+                    .tabs
+                    .tabs()
+                    .iter()
+                    .find(|tab| tab.id == first)
+                    .expect("background tab");
+                assert_eq!(app.tab_audio_indicator(first_tab), Some(false));
+                app.retained_playback
+                    .get_mut(&first)
+                    .expect("background")
+                    .state = PlaybackState::Paused;
+                assert_eq!(app.tab_audio_indicator(first_tab), None);
+                app.retained_playback
+                    .get_mut(&first)
+                    .expect("background")
+                    .state = PlaybackState::Playing;
+                let context = app.ui_context.clone().expect("context");
+                context.enable_accesskit();
+                for _ in 0..3 {
+                    let mut actions = Vec::new();
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(960.0, 576.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| app.draw_top_bar(ui, &mut actions),
+                    );
+                    assert!(actions.is_empty());
+                    let tree = output
+                        .platform_output
+                        .accesskit_update
+                        .expect("tab accessibility");
+                    for description in ["Playing audio", "Playing audio — Muted"] {
+                        let nodes: Vec<_> = tree
+                            .nodes
+                            .iter()
+                            .filter(|(_, node)| node.description() == Some(description))
+                            .collect();
+                        assert_eq!(nodes.len(), 1);
+                        assert_eq!(
+                            nodes[0].1.label(),
+                            Some("silence.wav"),
+                            "icons do not pollute the accessible filename"
+                        );
+                    }
+                }
+                let saved = &app.retained_playback[&first];
+                let instance = saved.instance;
+                let generation = saved.session.as_ref().expect("background").generation();
+                app.handle_background_playback(
+                    instance,
+                    PlaybackEvent::Failed(generation, "Injected background failure".into()),
+                );
+                assert_eq!(app.retained_playback[&first].state, PlaybackState::Faulted);
+                let first_tab = app
+                    .tabs
+                    .tabs()
+                    .iter()
+                    .find(|tab| tab.id == first)
+                    .expect("tab");
+                assert_eq!(app.tab_audio_indicator(first_tab), None);
+                app.retained_playback
+                    .get_mut(&first)
+                    .expect("background")
+                    .restart();
+                assert_eq!(app.tab_audio_indicator(first_tab), Some(false));
+                // The injected fault is not part of the subsequent recovery trial.
+                app.retained_playback
+                    .get_mut(&first)
+                    .expect("background")
+                    .error = None;
                 app.activate_tab(first);
                 check(&app, 0.6);
                 assert_eq!(app.edits[&first], history);

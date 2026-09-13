@@ -2515,15 +2515,20 @@ where
         {
             return;
         }
+        let previous = (saved.state, saved.audio_drained);
         match event {
             PlaybackEvent::DeviceRemoved(_, reason) => {
                 eprintln!("towavue: recovering background D3D11 device: {reason}");
                 self.recover_graphics_device(self.current_position());
+                return;
             }
             PlaybackEvent::Failed(_, error) | PlaybackEvent::VideoFailed(_, error) => {
                 saved.fail(error)
             }
             _ => saved.poll(),
+        }
+        if previous != (saved.state, saved.audio_drained) {
+            self.request_redraw();
         }
     }
 
@@ -4270,6 +4275,7 @@ where
                                         rect.max - egui::vec2(chrome::TAB_CLOSE_WIDTH, 0.0),
                                     );
                                     let label = display_name(tab.target.current_path());
+                                    let audio = self.tab_audio_indicator(tab);
                                     // Cached actions and keyboard focus must follow the tab, not its slot.
                                     let mut tab_ui = ui.new_child(
                                         egui::UiBuilder::new()
@@ -4287,13 +4293,10 @@ where
                                         egui::Stroke::NONE;
                                     let response = tab_ui.put(
                                         label_rect,
-                                        egui::Button::new((
-                                            if active {
-                                                RichText::new(label).color(chrome::FOREGROUND)
-                                            } else {
-                                                RichText::new(label)
-                                            },
-                                            egui::Atom::grow(),
+                                        egui::Button::new(chrome::tab_label(
+                                            label.clone(),
+                                            active,
+                                            audio,
                                         ))
                                         .fill(Color32::TRANSPARENT)
                                         .stroke(egui::Stroke::NONE)
@@ -4301,6 +4304,22 @@ where
                                         .truncate()
                                         .sense(egui::Sense::click_and_drag()),
                                     );
+                                    response.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::WidgetType::Button,
+                                            tab_ui.is_enabled(),
+                                            &label,
+                                        )
+                                    });
+                                    if let Some(muted) = audio {
+                                        tab_ui.ctx().accesskit_node_builder(response.id, |node| {
+                                            node.set_description(if muted {
+                                                "Playing audio — Muted"
+                                            } else {
+                                                "Playing audio"
+                                            });
+                                        });
+                                    }
                                     if response.clicked() {
                                         actions.push(UiAction::ActivateTab(tab.id));
                                     }
@@ -8733,8 +8752,14 @@ where
             return ControlFlow::Poll;
         }
         self.poll_audio();
+        let mut background_changed = false;
         for saved in self.retained_playback.values_mut() {
+            let previous = (saved.state, saved.audio_drained);
             saved.poll();
+            background_changed |= previous != (saved.state, saved.audio_drained);
+        }
+        if background_changed {
+            self.request_redraw();
         }
         self.check_eof();
         let now = Instant::now();

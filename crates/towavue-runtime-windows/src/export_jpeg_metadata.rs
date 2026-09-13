@@ -147,11 +147,18 @@ fn scan(
 }
 
 pub(super) fn read(path: &Path, cancelled: &AtomicBool) -> Result<Vec<xmp::Value>, ExportError> {
-    let input = BufReader::new(fs::File::open(path).map_err(ExportError::Output)?);
-    scan(input, None, &[], cancelled)?
+    read_packet(path, cancelled)?
         .map(|packet| xmp::parse(&packet, cancelled))
         .transpose()
         .map(Option::unwrap_or_default)
+}
+
+pub(super) fn read_packet(
+    path: &Path,
+    cancelled: &AtomicBool,
+) -> Result<Option<Vec<u8>>, ExportError> {
+    let input = BufReader::new(fs::File::open(path).map_err(ExportError::Output)?);
+    scan(input, None, &[], cancelled)
 }
 
 pub(super) fn inspect(path: &Path) -> Result<Vec<MetadataSourceValue>, ExportError> {
@@ -180,29 +187,22 @@ impl JpegMetadata {
             ));
         }
         let source_packet = if jpeg_path(&request.source) {
-            scan(
-                BufReader::new(fs::File::open(&request.source).map_err(ExportError::Output)?),
-                None,
-                &[],
-                cancelled,
-            )?
-        } else {
-            None
-        };
-        let mut values = if jpeg_path(&request.source) {
-            source_packet
-                .as_deref()
-                .map(|packet| xmp::parse(packet, cancelled))
-                .transpose()?
-                .unwrap_or_default()
+            read_packet(&request.source, cancelled)?
         } else {
             webp_metadata::read_for_jpeg(&request.source, cancelled)?
         };
+        let mut values = source_packet
+            .as_deref()
+            .map(|packet| xmp::parse(packet, cancelled))
+            .transpose()?
+            .unwrap_or_default();
         xmp::apply(&mut values, options)?;
-        let packet = if request.operations.is_empty()
-            && let Some(packet) = source_packet
-        {
-            xmp::rewrite_unedited(&packet, options, cancelled)?
+        let packet = if let Some(packet) = source_packet {
+            if request.operations.is_empty() && jpeg_path(&request.source) {
+                xmp::rewrite_unedited(&packet, options, cancelled)?
+            } else {
+                xmp::rewrite_edited(&packet, options, cancelled)?
+            }
         } else if values.is_empty() {
             Vec::new()
         } else {
@@ -238,7 +238,16 @@ impl JpegMetadata {
             scan(input, Some(&mut output), &self.packet, cancelled)?;
             output.flush().map_err(ExportError::Output)?;
         }
-        if read(&temporary, cancelled)? != self.values {
+        let packet = read_packet(&temporary, cancelled)?;
+        if packet.as_deref().unwrap_or_default() != self.packet {
+            return Err(invalid("staged XMP differs from the prepared packet"));
+        }
+        if packet
+            .map(|packet| xmp::parse(&packet, cancelled))
+            .transpose()?
+            .unwrap_or_default()
+            != self.values
+        {
             return Err(invalid("staged XMP did not retain requested text values"));
         }
         check_cancelled(cancelled)?;

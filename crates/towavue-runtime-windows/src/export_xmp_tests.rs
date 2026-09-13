@@ -1,6 +1,77 @@
 use super::*;
 
 #[test]
+fn edited_xmp_keeps_rights_scopes_but_drops_geometry_and_asset_identity() {
+    let cancel = AtomicBool::new(false);
+    let terms = r#"<q:UsageTerms><r:Alt><r:li xml:lang="en">Keep &amp; attribute</r:li><r:li xml:lang="fr"><![CDATA[Termes <originaux>]]></r:li></r:Alt></q:UsageTerms>"#;
+    let packet = format!(
+        "<r:RDF xmlns:r=\"{RDF}\"><r:Description xmlns:q=\"{RIGHTS}\" xmlns:d=\"{DC}\" xmlns:t=\"http://ns.adobe.com/tiff/1.0/\" xmlns:mm=\"http://ns.adobe.com/xap/1.0/mm/\" xml:lang=\"fr\" q:Marked=\"True\" t:Orientation=\"6\" mm:DocumentID=\"original-asset\"><d:rights><r:Alt><r:li xml:lang=\"x-default\">Notice</r:li></r:Alt></d:rights>{terms}<q:Owner><r:Bag><r:li>Owner A</r:li><r:li>Owner B</r:li></r:Bag></q:Owner><q:WebStatement>https://example.invalid/rights</q:WebStatement><q:Certificate>original-certificate</q:Certificate><q:Unknown>unknown-rights-field</q:Unknown><q:Marked xmlns:q=\"urn:not-rights\">foreign-property</q:Marked><t:ImageWidth>1234</t:ImageWidth></r:Description></r:RDF>"
+    );
+    for replacement in [None, Some("New notice"), Some("")] {
+        let mut options = MetadataExportOptions::default();
+        options
+            .set(MetadataField::Copyright, replacement.map(str::to_owned))
+            .expect("copyright");
+        options
+            .set(MetadataField::Title, Some("New title".into()))
+            .expect("new title");
+        let output = rewrite_edited(packet.as_bytes(), &options, &cancel).expect("edited metadata");
+        let text = std::str::from_utf8(&output).expect("UTF-8");
+        for preserved in [
+            terms,
+            "q:Marked=\"True\"",
+            "Owner A",
+            "Owner B",
+            "https://example.invalid/rights",
+            "xml:lang=\"fr\"",
+        ] {
+            assert!(text.contains(preserved), "missing {preserved}");
+        }
+        for stale in [
+            "t:Orientation=",
+            "original-asset",
+            "original-certificate",
+            "unknown-rights-field",
+            "foreign-property",
+            "<t:ImageWidth>",
+        ] {
+            assert!(!text.contains(stale), "stale {stale}");
+        }
+        let mut expected = parse(packet.as_bytes(), &cancel).expect("original");
+        apply(&mut expected, &options).expect("requested");
+        assert_eq!(parse(&output, &cancel).expect("readback"), expected);
+        assert_eq!(
+            rewrite_edited(&output, &options, &cancel).expect("resave"),
+            output
+        );
+        assert!(matches!(
+            rewrite_edited(&output, &options, &AtomicBool::new(true)),
+            Err(ExportError::Cancelled)
+        ));
+    }
+    let technical_only = format!(
+        "<r:RDF xmlns:r=\"{RDF}\"><r:Description xmlns:t=\"http://ns.adobe.com/tiff/1.0/\" t:Orientation=\"6\"/></r:RDF>"
+    );
+    assert!(
+        rewrite_edited(
+            technical_only.as_bytes(),
+            &MetadataExportOptions::default(),
+            &cancel
+        )
+        .expect("no transferable properties")
+        .is_empty()
+    );
+    assert!(
+        rewrite_edited(
+            b"<!DOCTYPE x><x/>",
+            &MetadataExportOptions::default(),
+            &cancel
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn unedited_xmp_rewrite_preserves_opaque_structure_and_namespace_scopes() {
     let opaque = r#"<p:opaque p:flag="a&amp;b">before<![CDATA[<raw>]]><p:part xmlns:d="urn:not-dc"><d:title>nested title</d:title></p:part>after<!--keep--></p:opaque>"#;
     let packet = format!(

@@ -285,7 +285,7 @@ pub(super) fn inspect(path: &Path) -> Result<Vec<MetadataSourceValue>, ExportErr
 pub(super) fn read_for_jpeg(
     path: &Path,
     cancelled: &AtomicBool,
-) -> Result<Vec<xmp::Value>, ExportError> {
+) -> Result<Option<Vec<u8>>, ExportError> {
     let info = container(
         BufReader::new(fs::File::open(path).map_err(ExportError::Output)?),
         cancelled,
@@ -295,10 +295,7 @@ pub(super) fn read_for_jpeg(
             "animated WebP cannot export to JPEG without discarding frames",
         ));
     }
-    info.packet
-        .map(|packet| xmp::parse(&packet, cancelled))
-        .transpose()
-        .map(Option::unwrap_or_default)
+    Ok(info.packet)
 }
 
 fn chunk(output: &mut dyn Write, kind: &[u8; 4], bytes: &[u8]) -> Result<(), ExportError> {
@@ -456,28 +453,30 @@ impl WebpMetadata {
                 "XMP export requires JPEG or WebP input and WebP output",
             ));
         }
-        let (mut values, animation, source_packet) = if jpeg_metadata::jpeg_path(&request.source) {
-            (jpeg_metadata::read(&request.source, cancelled)?, None, None)
+        let (animation, source_packet) = if jpeg_metadata::jpeg_path(&request.source) {
+            (
+                None,
+                jpeg_metadata::read_packet(&request.source, cancelled)?,
+            )
         } else {
             let info = container(
                 BufReader::new(fs::File::open(&request.source).map_err(ExportError::Output)?),
                 cancelled,
             )?;
-            (
-                info.packet
-                    .as_deref()
-                    .map(|packet| xmp::parse(packet, cancelled))
-                    .transpose()?
-                    .unwrap_or_default(),
-                info.animation,
-                info.packet,
-            )
+            (info.animation, info.packet)
         };
+        let mut values = source_packet
+            .as_deref()
+            .map(|packet| xmp::parse(packet, cancelled))
+            .transpose()?
+            .unwrap_or_default();
         xmp::apply(&mut values, options)?;
-        let packet = if request.operations.is_empty()
-            && let Some(packet) = source_packet
-        {
-            xmp::rewrite_unedited(&packet, options, cancelled)?
+        let packet = if let Some(packet) = source_packet {
+            if request.operations.is_empty() && webp_path(&request.source) {
+                xmp::rewrite_unedited(&packet, options, cancelled)?
+            } else {
+                xmp::rewrite_edited(&packet, options, cancelled)?
+            }
         } else if values.is_empty() {
             Vec::new()
         } else {
@@ -609,7 +608,20 @@ impl WebpMetadata {
             );
             rewrite(input, &mut output, &info, &self.packet, cancelled)?;
         }
-        if read(&temporary, cancelled)? != self.values {
+        let packet = container(
+            BufReader::new(fs::File::open(&temporary).map_err(ExportError::Output)?),
+            cancelled,
+        )?
+        .packet;
+        if packet.as_deref().unwrap_or_default() != self.packet {
+            return Err(invalid("staged XMP differs from the prepared packet"));
+        }
+        if packet
+            .map(|packet| xmp::parse(&packet, cancelled))
+            .transpose()?
+            .unwrap_or_default()
+            != self.values
+        {
             return Err(invalid("staged XMP did not retain requested values"));
         }
         check_cancelled(cancelled)?;

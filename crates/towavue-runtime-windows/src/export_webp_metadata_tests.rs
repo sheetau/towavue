@@ -86,6 +86,79 @@ fn non_xmp(bytes: &[u8]) -> Vec<([u8; 4], Vec<u8>)> {
 }
 
 #[test]
+fn edited_static_and_animated_webp_keep_rights_only_packets() {
+    let root = root("webp-edited-rights");
+    let packet = br#"<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:q="http://ns.adobe.com/xap/1.0/rights/" xmlns:t="http://ns.adobe.com/tiff/1.0/" q:Marked="True" t:ImageWidth="1234"><q:UsageTerms><r:Alt><r:li xml:lang="en">Keep attribution</r:li></r:Alt></q:UsageTerms></r:Description></r:RDF>"#;
+    let cancel = AtomicBool::new(false);
+    for animated in [false, true] {
+        let source = root.join(format!("source-{animated}.webp"));
+        let target = root.join(format!("target-{animated}.webp"));
+        if animated {
+            animation::Animation {
+                control: [0, 0, 0, 0, 3, 0],
+                delays: vec![17, 31],
+            }
+            .write(
+                &source,
+                |delay| {
+                    Ok(crate::DecodedImageFrame {
+                        width: 3,
+                        height: 2,
+                        rgba: [17, 53, delay as u8, 127].repeat(6),
+                        delay: Duration::from_millis(u64::from(delay)),
+                    })
+                },
+                &cancel,
+                &|_| {},
+            )
+            .expect("animation");
+        } else {
+            fs::write(&source, fixture(true)).expect("static source");
+        }
+        let plain_source = root.join(format!("plain-{animated}.webp"));
+        let plain_target = root.join(format!("baseline-{animated}.webp"));
+        fs::copy(&source, &plain_source).expect("metadata-free control");
+        export_media(&ExportRequest {
+            source: plain_source,
+            target: plain_target.clone(),
+            kind: MediaKind::Image,
+            operations: vec![EditOperation::RotateClockwise],
+            hardware_encode: false,
+        })
+        .expect("baseline encoding");
+        let bytes = tagged(&fs::read(&source).expect("source"), packet);
+        fs::write(&source, &bytes).expect("rights-only source");
+        assert!(read(&source, &cancel).expect("editable fields").is_empty());
+        let original = container(Cursor::new(&bytes), &cancel).expect("source controls");
+        // Static WebP export retains its lossy encoder; compare identical raster
+        // export without XMP, not a falsely lossless rotation of the input.
+        let expected = image::open(&plain_target)
+            .expect("baseline pixels")
+            .to_rgba8();
+        export_media(&ExportRequest {
+            source: source.clone(),
+            target: target.clone(),
+            kind: MediaKind::Image,
+            operations: vec![EditOperation::RotateClockwise],
+            hardware_encode: false,
+        })
+        .expect("edited default export");
+        let bytes = fs::read(&target).expect("saved file");
+        let saved = container(Cursor::new(&bytes), &cancel).expect("saved controls");
+        assert_eq!(saved.animation, original.animation);
+        let text =
+            String::from_utf8(saved.packet.expect("rights-only XMP retained")).expect("UTF-8");
+        assert!(text.contains("Keep attribution") && text.contains("q:Marked=\"True\""));
+        assert!(!text.contains("t:ImageWidth="));
+        assert!(
+            image::open(&target).expect("saved pixels").to_rgba8() == expected,
+            "metadata rewrite must not change the encoded pixels"
+        );
+    }
+    fs::remove_dir_all(root).expect("owned fixtures");
+}
+
+#[test]
 fn webp_rewrite_preserves_lossless_bitstreams_pixels_and_extended_payloads() {
     let packet = packet();
     for alpha in [false, true] {
@@ -646,7 +719,12 @@ fn jpeg_webp_conversion_sets_removes_and_protects_all_xmp_fields() {
             if let Some(packet) = packet {
                 let mut expected = Vec::new();
                 xmp::apply(&mut expected, &metadata).expect("expected values");
-                assert_eq!(packet, xmp::encode(&expected).expect("expected packet"));
+                // Namespace scopes/lexical XML can survive the selective rewrite;
+                // the cross-format contract is the requested property values.
+                assert_eq!(
+                    xmp::parse(&packet, &AtomicBool::new(false)).expect("actual packet"),
+                    expected
+                );
             }
             assert_eq!(fs::read(source).expect("source retained"), original);
         }

@@ -788,6 +788,64 @@ fn jpeg_metadata_splice_preserves_every_non_xmp_byte_and_decoded_pixel() {
 }
 
 #[test]
+fn edited_jpeg_webp_exports_preserve_rights_without_stale_technical_xmp() {
+    let root = root("edited-rights");
+    let source = root.join("source.jpg");
+    let rights = r#"<q:Owner xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Bag><r:li>Original owner</r:li></r:Bag></q:Owner><q:UsageTerms xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Alt><r:li xml:lang="en">Keep attribution</r:li><r:li xml:lang="fr">Attribution requise</r:li></r:Alt></q:UsageTerms><q:WebStatement xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/rights</q:WebStatement><q:Certificate xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/original-certificate</q:Certificate>"#;
+    let packet = PACKET
+        .replace(
+            "r:about=\"\"",
+            "r:about=\"\" xmlns:q=\"http://ns.adobe.com/xap/1.0/rights/\" q:Marked=\"True\"",
+        )
+        .replace("</r:Description>", &format!("{rights}</r:Description>"));
+    fs::write(&source, tagged(packet.as_bytes())).expect("source rights");
+    for extension in ["jpg", "webp"] {
+        let target = root.join(format!("edited.{extension}"));
+        let mut edited = request(&source, &target);
+        edited.operations.push(EditOperation::RotateClockwise);
+        export_media_with_options(&edited, options(MetadataField::Title, "Edited title"))
+            .expect("edited export");
+        let bytes = fs::read(&target).expect("output");
+        for text in [
+            "Original owner",
+            "Keep attribution",
+            "Attribution requise",
+            "https://example.invalid/rights",
+            "q:Marked=\"True\"",
+            "Edited title",
+        ] {
+            assert!(
+                bytes
+                    .windows(text.len())
+                    .any(|part| part == text.as_bytes()),
+                "{extension}: missing {text}"
+            );
+        }
+        for text in ["t:Orientation=", "original-certificate"] {
+            assert!(
+                !bytes
+                    .windows(text.len())
+                    .any(|part| part == text.as_bytes()),
+                "{extension}: stale {text}"
+            );
+        }
+        let pixels = image::open(&target).expect("edited pixels");
+        assert_eq!((pixels.width(), pixels.height()), (24, 32));
+        if extension == "webp" {
+            let back = root.join("back.jpg");
+            export_media(&request(&target, &back)).expect("WebP to JPEG");
+            let bytes = fs::read(back).expect("round trip");
+            assert!(
+                bytes
+                    .windows(b"Original owner".len())
+                    .any(|part| part == b"Original owner")
+            );
+        }
+    }
+    fs::remove_dir_all(root).expect("owned fixtures");
+}
+
+#[test]
 fn jpeg_export_metadata_set_keep_remove_matches_default_rotated_jpeg_pixels() {
     let root = root("jpeg-export");
     let source = root.join("source.jpg");

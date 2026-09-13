@@ -20,6 +20,7 @@ const DC: &str = "http://purl.org/dc/elements/1.1/";
 const DM: &str = "http://ns.adobe.com/xmp/1.0/DynamicMedia/";
 const XML: &str = "http://www.w3.org/XML/1998/namespace";
 const META: &str = "adobe:ns:meta/";
+const RIGHTS: &str = "http://ns.adobe.com/xap/1.0/rights/";
 
 #[path = "export_xmp_typed.rs"]
 mod typed;
@@ -53,6 +54,14 @@ impl Name {
             (DM, "trackNumber") => Some(MetadataField::Track),
             _ => None,
         }
+    }
+
+    fn rights_property(&self) -> bool {
+        self.0 == RIGHTS
+            && matches!(
+                self.1.as_str(),
+                "Owner" | "UsageTerms" | "WebStatement" | "Marked"
+            )
     }
 }
 
@@ -485,12 +494,31 @@ pub(super) fn rewrite_unedited(
     options: &MetadataExportOptions,
     cancelled: &AtomicBool,
 ) -> Result<Vec<u8>, ExportError> {
+    rewrite(packet, options, cancelled, true)
+}
+
+/// Carry descriptive text and standard rights expressions across raster/format
+/// changes, not technical geometry, asset identifiers or original certificates.
+pub(super) fn rewrite_edited(
+    packet: &[u8],
+    options: &MetadataExportOptions,
+    cancelled: &AtomicBool,
+) -> Result<Vec<u8>, ExportError> {
+    rewrite(packet, options, cancelled, false)
+}
+
+fn rewrite(
+    packet: &[u8],
+    options: &MetadataExportOptions,
+    cancelled: &AtomicBool,
+    unchanged_pixels: bool,
+) -> Result<Vec<u8>, ExportError> {
     let original = parse(packet, cancelled)?;
     let mut expected = original.clone();
     apply(&mut expected, options)?;
     // Empty RDF lists have no parsed values, but Remove must still delete the property.
     let removes = FIELDS.iter().any(|field| options.get(*field) == Some(""));
-    if expected == original && !removes {
+    if unchanged_pixels && expected == original && !removes {
         return Ok(packet.to_vec());
     }
     let changed: Vec<_> = expected
@@ -514,6 +542,13 @@ pub(super) fn rewrite_unedited(
     let mut skip = None;
     let mut inserted = false;
     let mut reusable_description = false;
+    let mut retained_property = false;
+    let remove = |key: &Name| {
+        key.field().map_or_else(
+            || !unchanged_pixels && !key.rights_property(),
+            |field| options.get(field).is_some(),
+        )
+    };
     loop {
         check_cancelled(cancelled)?;
         let event = reader.read_event().map_err(invalid)?;
@@ -524,16 +559,12 @@ pub(super) fn rewrite_unedited(
                 if depth == 0 {
                     rdf_depth = usize::from(!key.is(RDF, "RDF"));
                 }
-                if skip.is_none()
-                    && depth == rdf_depth + 2
-                    && key
-                        .field()
-                        .is_some_and(|field| options.get(field).is_some())
-                {
+                if skip.is_none() && depth == rdf_depth + 2 && remove(&key) {
                     if !empty {
                         skip = Some(depth);
                     }
                 } else if skip.is_none() {
+                    retained_property |= depth == rdf_depth + 2;
                     if depth == rdf_depth + 1 {
                         reusable_description = !inserted && !additions.is_empty();
                         let mut attributes = Vec::new();
@@ -551,11 +582,14 @@ pub(super) fn rewrite_unedited(
                                 reusable_description = false;
                             }
                             if key
-                                .and_then(|key| key.field())
-                                .is_some_and(|field| options.get(field).is_some())
+                                .as_ref()
+                                .is_some_and(|key| key.0 != RDF && key.0 != XML && remove(key))
                             {
                                 removed = true;
                             } else {
+                                retained_property |= key.as_ref().is_some_and(|key| {
+                                    key.field().is_some() || key.rights_property()
+                                });
                                 attributes.push((
                                     attribute.key.as_ref().to_vec(),
                                     attribute.value.into_owned(),
@@ -627,6 +661,9 @@ pub(super) fn rewrite_unedited(
     let output = writer.into_inner();
     if parse(&output, cancelled)? != expected {
         return Err(invalid("rewritten packet differs from requested values"));
+    }
+    if !unchanged_pixels && !retained_property && expected.is_empty() {
+        return Ok(Vec::new());
     }
     Ok(output)
 }

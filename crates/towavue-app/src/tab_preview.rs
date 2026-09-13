@@ -7,6 +7,123 @@ use egui::{TextureHandle, TextureOptions};
 use towavue_core::{MediaKind, Tab, TabId, TabSet};
 use towavue_runtime_windows::{LatestTask, PreviewCache, PreviewImage};
 
+#[cfg(test)]
+mod reading_tests;
+
+pub(super) enum RetainedPreview {
+    Image(TextureHandle),
+    Reading {
+        pages: Vec<(Option<TextureHandle>, egui::Vec2)>,
+        settings: towavue_core::ReadingSettings,
+    },
+}
+
+impl RetainedPreview {
+    fn image(&self) -> Option<&TextureHandle> {
+        match self {
+            Self::Image(image) => Some(image),
+            Self::Reading { .. } => None,
+        }
+    }
+
+    fn show_reading(&self, ui: &mut egui::Ui) -> bool {
+        let Self::Reading { pages, settings } = self else {
+            return false;
+        };
+        let sizes: Vec<_> = pages.iter().map(|page| page.1).collect();
+        let rects = crate::reading_page_rects(
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(240.0, 160.0)),
+            &sizes,
+            settings.axis,
+            settings.reversed,
+        );
+        let spread = rects
+            .iter()
+            .copied()
+            .reduce(egui::Rect::union)
+            .expect("reading pages");
+        let (rect, _) = ui.allocate_exact_size(spread.size(), egui::Sense::hover());
+        for ((texture, _), page) in pages.iter().zip(rects) {
+            if let Some(texture) = texture {
+                ui.painter().image(
+                    texture.id(),
+                    page.translate(rect.min - spread.min),
+                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+        }
+        true
+    }
+}
+
+impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
+    pub(super) fn retained_tab_preview(&self, tab: TabId, path: &Path) -> Option<RetainedPreview> {
+        let (image, others, reading, settings, snapshot, loading) =
+            if self.displayed_tab == Some(tab) && self.path.as_deref() == Some(path) {
+                (
+                    self.image.as_ref(),
+                    &self.reading_pages,
+                    self.reading_mode,
+                    self.reading_settings,
+                    self.folder_snapshot.as_ref(),
+                    self.image_loading,
+                )
+            } else {
+                let saved = self.retained_images.get(&tab).filter(|saved| {
+                    saved.path == path && saved.graphics_epoch == self.graphics_epoch
+                })?;
+                (
+                    saved.image.as_ref(),
+                    &saved.reading_pages,
+                    saved.reading_mode,
+                    saved.reading_settings,
+                    saved.folder_snapshot.as_ref(),
+                    saved.resume_loading,
+                )
+            };
+        if !reading {
+            return image.map(|image| RetainedPreview::Image(image.texture.clone()));
+        }
+        let pending_size = image.map_or(egui::Vec2::splat(1.0), |image| image.texture.size_vec2());
+        let mut pages: Vec<_> = others
+            .iter()
+            .map(|page| match page {
+                Ok(image) => (Some(image.texture.clone()), image.texture.size_vec2()),
+                Err(_) => (None, egui::Vec2::splat(1.0)),
+            })
+            .collect();
+        // Loader results omit the current source and follow unreversed Shell order.
+        // Insert that source before applying the reading axis/order to the joined layout.
+        let ordered = snapshot
+            .map(|snapshot| {
+                snapshot.reading_items(
+                    path,
+                    towavue_core::ReadingSettings {
+                        reversed: false,
+                        ..settings
+                    },
+                )
+            })
+            .unwrap_or_default();
+        let index = ordered
+            .iter()
+            .position(|item| item.path == path)
+            .unwrap_or(0);
+        if loading {
+            pages.resize(ordered.len().max(1) - 1, (None, pending_size));
+        }
+        pages.insert(
+            index.min(pages.len()),
+            (image.map(|image| image.texture.clone()), pending_size),
+        );
+        pages
+            .iter()
+            .any(|page| page.0.is_some())
+            .then_some(RetainedPreview::Reading { pages, settings })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
     pub tab: TabId,
@@ -270,14 +387,21 @@ impl TabPreview {
         &self,
         response: &egui::Response,
         target: &Target,
-        retained: Option<&TextureHandle>,
+        retained: Option<&RetainedPreview>,
     ) {
         crate::media_preview::Preview::tab(response).show(|ui| {
             ui.set_max_width(240.0);
+            if retained.is_some_and(|preview| preview.show_reading(ui)) {
+                ui.add(egui::Label::new(target.path.display().to_string()).wrap());
+                return;
+            }
             let cached = (self.target.as_ref() == Some(target))
                 .then_some(self.texture.as_ref())
                 .flatten();
-            let texture = retained.map(Ok).or_else(|| cached.map(Result::as_ref));
+            let texture = retained
+                .and_then(RetainedPreview::image)
+                .map(Ok)
+                .or_else(|| cached.map(Result::as_ref));
             let sheet_uv = if retained.is_some() {
                 None
             } else {

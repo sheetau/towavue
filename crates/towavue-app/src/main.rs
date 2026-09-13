@@ -4364,25 +4364,10 @@ where
                                             self.tab_preview.target_with_playback(tab, background);
                                         let retained_image =
                                             if hovered && target.kind == MediaKind::Image {
-                                                if self.displayed_tab == Some(tab.id)
-                                                    && self.path.as_deref()
-                                                        == Some(target.path.as_path())
-                                                {
-                                                    self.image.as_ref()
-                                                } else {
-                                                    self.retained_images
-                                                        .get(&tab.id)
-                                                        .filter(|saved| {
-                                                            saved.path == target.path
-                                                                && saved.graphics_epoch
-                                                                    == self.graphics_epoch
-                                                        })
-                                                        .and_then(|saved| saved.image.as_ref())
-                                                }
+                                                self.retained_tab_preview(tab.id, &target.path)
                                             } else {
                                                 None
-                                            }
-                                            .map(|image| image.texture.clone());
+                                            };
                                         if hovered {
                                             if background.is_some_and(|saved| {
                                                 saved.state == PlaybackState::Playing

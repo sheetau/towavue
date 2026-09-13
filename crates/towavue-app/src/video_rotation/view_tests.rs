@@ -63,6 +63,11 @@ fn immediate_wheel<N: Fn(AppEvent) + Send + Sync + 'static>(
                 point + (expected.center() - point) * factor,
                 expected.size() * factor,
             );
+            let limit = (expected.size() - viewport.size()).max(egui::Vec2::ZERO) * 0.5;
+            expected = egui::Rect::from_center_size(
+                viewport.center() + (expected.center() - viewport.center()).clamp(-limit, limit),
+                expected.size(),
+            );
             events.extend([
                 egui::Event::PointerMoved(point),
                 egui::Event::MouseWheel {
@@ -99,7 +104,7 @@ fn immediate_wheel<N: Fn(AppEvent) + Send + Sync + 'static>(
         let view = app.image_view;
         app.timeline_open = false;
         frame_input_focused(app, egui::Modifiers::CTRL, wheel(viewport.center()), false);
-        assert_eq!(app.image_view, view, "viewing mode still blocks zoom");
+        assert_ne!(app.image_view.zoom, view.zoom, "viewing mode permits zoom");
         app.timeline_open = true;
     }
     app.image_view = saved;
@@ -139,11 +144,14 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
         assert!(matches!(app.image_view.zoom, ZoomMode::Custom(_)));
         let zoomed = full(app, viewport);
         assert!(zoomed.width() > fit.width());
-        let before = (pointer - fit.min) / fit.size();
-        let after = (pointer - zoomed.min) / zoomed.size();
+        let ratio = zoomed.width() / fit.width();
+        let anchored = pointer + (fit.center() - pointer) * ratio;
+        let limit = (zoomed.size() - viewport.size()).max(egui::Vec2::ZERO) * 0.5;
+        let expected_center =
+            viewport.center() + (anchored - viewport.center()).clamp(-limit, limit);
         assert!(
-            (before - after).length() < 0.0001,
-            "cursor anchor {before:?}/{after:?}"
+            (zoomed.center() - expected_center).length() < 0.0001,
+            "cursor anchor yields to centered/bounded axes"
         );
         assert!(viewport.contains_rect(app.video_rect.expect("clipped zoom")));
         assert_eq!(
@@ -159,7 +167,12 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
             app,
             vec![egui::Event::PointerMoved(end), secondary(end, false)],
         );
-        assert_eq!(app.image_view.pan, (view.pan.0 + 25.0, view.pan.1 + 15.0));
+        assert_eq!(
+            app.image_view.pan,
+            egui::vec2(view.pan.0 + 25.0, view.pan.1 + 15.0)
+                .clamp(-limit, limit)
+                .into()
+        );
         assert_eq!(app.image_view.selection, saved_view.selection);
         let panned = app.image_view;
         frame(
@@ -247,10 +260,19 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
         let closed = app.image_view;
         app.dispatch(CommandId::ActualSize);
         frame_input(app, egui::Modifiers::CTRL, wheel(start));
-        assert_eq!(
-            app.image_view, closed,
-            "viewing mode retains and cannot change zoom"
+        assert_ne!(
+            app.image_view.zoom, closed.zoom,
+            "viewing zoom remains usable"
         );
+        app.dispatch(CommandId::FitToWindow);
+        frame(app, vec![]);
+        assert_eq!(
+            app.image_view.zoom,
+            ZoomMode::Fit,
+            "Fit recovers zoom after closing the timeline"
+        );
+        assert_eq!(app.image_view.pan, (0.0, 0.0));
+        let closed = app.image_view;
         app.fullscreen = true;
         frame(app, vec![]);
         assert_eq!(
@@ -264,16 +286,16 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
         app.image_view.pan = (10_000.0, 10_000.0);
         frame(app, vec![]);
         assert!(
-            app.video_rect.is_none(),
-            "offscreen video does not draw over chrome"
+            app.video_rect.is_some(),
+            "stale offscreen pan is brought back into bounds"
         );
         frame(
             app,
             vec![egui::Event::PointerMoved(start), secondary(start, true)],
         );
         assert!(
-            matches!(app.view_drag, Some(ViewDrag::Pan { .. })),
-            "empty viewport still allows recovery pan"
+            app.view_drag.is_none(),
+            "Fit does not allow an unneeded pan"
         );
         app.cancel_view_drag();
         frame(app, vec![secondary(start, false)]);

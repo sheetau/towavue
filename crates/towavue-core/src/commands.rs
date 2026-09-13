@@ -489,11 +489,6 @@ impl CommandDefinition {
                         | CommandId::FlipVertical
                         | CommandId::FreeRotateVideo
                         | CommandId::ResizeVideo
-                        | CommandId::ZoomIn
-                        | CommandId::ZoomOut
-                        | CommandId::ActualSize
-                        | CommandId::FitToWindow
-                        | CommandId::CoverWindow
                         | CommandId::ZoomSelection
                 ))
             && (!matches!(
@@ -1091,11 +1086,6 @@ mod tests {
                     CommandId::RotateCounterclockwise,
                     CommandId::FlipHorizontal,
                     CommandId::FlipVertical,
-                    CommandId::ZoomIn,
-                    CommandId::ZoomOut,
-                    CommandId::ActualSize,
-                    CommandId::FitToWindow,
-                    CommandId::CoverWindow,
                 ] {
                     let definition = command_definitions()
                         .iter()
@@ -1112,6 +1102,11 @@ mod tests {
                     CommandId::Redo,
                     CommandId::Save,
                     CommandId::ClearSelection,
+                    CommandId::ZoomIn,
+                    CommandId::ZoomOut,
+                    CommandId::ActualSize,
+                    CommandId::FitToWindow,
+                    CommandId::CoverWindow,
                 ] {
                     assert!(
                         command_definitions()

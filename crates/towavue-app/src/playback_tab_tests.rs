@@ -230,7 +230,8 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
                 .metrics()
                 .presented_frame_count;
             assert!(first_geometry.is_some());
-            app.image_view.zoom = ZoomMode::Custom(2.0);
+            // Keep the fixture larger than the viewport so its nonzero pan is valid.
+            app.image_view.zoom = ZoomMode::Custom(8.0);
             app.image_view.pan = (31.0, -17.0);
             app.image_view.selection = Some(UnitRect::FULL);
             let view = app.image_view;

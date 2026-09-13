@@ -12,12 +12,14 @@ pub(super) fn rect(
     size: (u32, u32),
     pixel_aspect: f32,
     density: f32,
-    view: ImageViewState,
+    mut view: ImageViewState,
 ) -> egui::Rect {
     let scale = view.scale(size, scale_viewport(viewport.size(), pixel_aspect, density)) / density;
+    let displayed = egui::vec2(size.0 as f32 * pixel_aspect, size.1 as f32) * scale;
+    image_scroll::clamp(&mut view, displayed, viewport.size());
     egui::Rect::from_center_size(
         viewport.center() + egui::vec2(view.pan.0, view.pan.1),
-        egui::vec2(size.0 as f32 * pixel_aspect, size.1 as f32) * scale,
+        displayed,
     )
 }
 
@@ -67,8 +69,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         );
         let before = self.image_view.scale(size, viewport);
         self.image_view.zoom_by(factor, size, viewport);
+        let after = self.image_view.scale(size, viewport);
+        let displayed = egui::vec2(
+            size.0 as f32 * transform.pixel_aspect(aspect),
+            size.1 as f32,
+        ) * (after / context.pixels_per_point());
+        image_scroll::clamp(&mut self.image_view, displayed, self.image_viewport);
         self.request_redraw();
-        self.image_view.scale(size, viewport) / before
+        after / before
     }
 
     pub(super) fn update_video_view(
@@ -78,26 +86,39 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         full: egui::Rect,
         size: (u32, u32),
     ) {
-        if !self.visual_selection_enabled() {
-            return;
-        }
+        let viewport = response.rect;
+        let mut displayed = full.size();
+        image_scroll::clamp(&mut self.image_view, displayed, viewport.size());
         if !self.view_input_allowed(ui.ctx()) {
             self.cancel_view_drag();
             return;
         }
         if self.view_drag.is_none() && !ui.input(|input| input.pointer.any_down()) {
-            let mut center = full.center();
             for (pointer, zoom) in wheel_input::video_zoom_events(ui.ctx(), response) {
+                let before = egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
+                let center = viewport.center() + before;
                 let ratio = self.zoom_video(zoom);
                 let correction = (pointer - center) * (1.0 - ratio);
-                self.image_view.pan.0 += correction.x;
-                self.image_view.pan.1 += correction.y;
-                center += correction;
+                self.image_view.pan = (before + correction).into();
+                displayed *= ratio;
+                // Clamp every event, so a reversal in the same frame starts from
+                // the visible boundary, not an accumulated offscreen position.
+                image_scroll::clamp(&mut self.image_view, displayed, viewport.size());
             }
         }
         let pointer = ui.input(|input| input.pointer.hover_pos());
-        if !self.move_visual_selection(response, full, size, pointer) {
-            self.update_pan(response, pointer);
+        if !self.visual_selection_enabled()
+            || !self.move_visual_selection(response, full, size, pointer)
+        {
+            if displayed.x > viewport.width() || displayed.y > viewport.height() {
+                self.update_pan(response, pointer);
+                if matches!(self.view_drag, Some(ViewDrag::Pan { .. })) {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                }
+            } else if matches!(self.view_drag, Some(ViewDrag::Pan { .. })) {
+                self.cancel_view_drag();
+            }
         }
+        image_scroll::clamp(&mut self.image_view, displayed, viewport.size());
     }
 }

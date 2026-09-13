@@ -143,9 +143,10 @@ fn video_right_drag_moves_selection_on_its_pixel_grid_without_panning() {
                 true,
             );
             assert_eq!(app.image_view.selection, Some(original));
+            let limit = (full.size() - viewport.size()).max(egui::Vec2::ZERO) * 0.5;
             assert_eq!(
                 app.image_view.pan,
-                ((start - outside).x, (start - outside).y)
+                (start - outside).clamp(-limit, limit).into()
             );
             app.image_view.pan = (0.0, 0.0);
             app.timeline_open = false;
@@ -159,7 +160,10 @@ fn video_right_drag_moves_selection_on_its_pixel_grid_without_panning() {
                 true,
             );
             assert_eq!(app.image_view.selection, Some(original));
-            assert_eq!(app.image_view.pan, (0.0, 0.0));
+            assert_eq!(
+                app.image_view.pan,
+                egui::vec2(50.0, 10.0).clamp(-limit, limit).into()
+            );
             app.timeline_open = true;
         }
     }
@@ -190,8 +194,22 @@ fn video_view_fit_cover_actual_and_custom_use_physical_rows_and_exact_sar() {
                 view.pan = (9.0, -12.0);
                 let custom = rect(viewport, size, aspect, density, view);
                 close(custom.height() * density, size.1 as f32 * 0.37);
-                close(custom.center().x, viewport.center().x + 9.0);
-                close(custom.center().y, viewport.center().y - 12.0);
+                let limit = (custom.size() - viewport.size()).max(egui::Vec2::ZERO) * 0.5;
+                close(
+                    custom.center().x,
+                    viewport.center().x + 9.0_f32.min(limit.x),
+                );
+                close(
+                    custom.center().y,
+                    viewport.center().y - 12.0_f32.min(limit.y),
+                );
+                for pan in [(10_000.0, -10_000.0), (-10_000.0, 10_000.0)] {
+                    view.pan = pan;
+                    let bounded = rect(viewport, size, aspect, density, view);
+                    let expected = egui::vec2(pan.0, pan.1).clamp(-limit, limit);
+                    close(bounded.center().x, viewport.center().x + expected.x);
+                    close(bounded.center().y, viewport.center().y + expected.y);
+                }
                 let larger = rect(viewport.expand(40.0), size, aspect, density, view);
                 close(larger.height(), custom.height());
             }

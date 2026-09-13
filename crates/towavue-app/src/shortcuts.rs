@@ -1058,7 +1058,7 @@ mod tests {
         for (kind, reading, enabled) in [
             (Some(MediaKind::Image), false, true),
             (Some(MediaKind::Image), true, false),
-            (Some(MediaKind::Video), false, false),
+            (Some(MediaKind::Video), false, true),
             (Some(MediaKind::Audio), false, false),
             (None, false, false),
         ] {
@@ -1099,7 +1099,7 @@ mod tests {
     }
 
     #[test]
-    fn video_zoom_keys_require_timeline_and_preserve_custom_bindings() {
+    fn video_zoom_keys_work_without_timeline_and_preserve_custom_bindings() {
         let mut bindings = defaults();
         for (command, key) in [
             (CommandId::ZoomIn, "Plus"),
@@ -1111,7 +1111,7 @@ mod tests {
             let key = key.parse::<KeySequence>().expect("key");
             for (kind, timeline, enabled) in [
                 (MediaKind::Video, true, true),
-                (MediaKind::Video, false, false),
+                (MediaKind::Video, false, true),
                 (MediaKind::Image, false, true),
                 (MediaKind::Audio, true, false),
             ] {
@@ -1134,7 +1134,7 @@ mod tests {
             bindings.set(command, custom.clone());
             let context = CommandContext {
                 media_kind: Some(MediaKind::Video),
-                timeline_open: true,
+                timeline_open: false,
                 ..Default::default()
             };
             assert_eq!(

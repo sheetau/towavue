@@ -679,6 +679,11 @@ mod tests {
         assert!(run(&mut palette, vec![key(egui::Key::Enter)]).is_empty());
         assert_eq!(palette.selected, None);
         palette.query = "zoom".into();
+        assert_eq!(
+            run(&mut palette, vec![key(egui::Key::Enter)]),
+            vec![CommandId::ZoomIn]
+        );
+        palette.query = "crop".into();
         assert!(run(&mut palette, vec![key(egui::Key::Enter)]).is_empty());
         assert_eq!(palette.selected, None);
         let mut closed = false;

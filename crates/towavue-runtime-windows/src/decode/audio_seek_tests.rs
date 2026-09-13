@@ -322,6 +322,120 @@ fn vorbis_prefix_counts_match_decoder_priming_and_preserve_timestamp_gaps() {
 }
 
 #[test]
+fn aac_seek_without_noise_substitution_matches_sequential_samples() {
+    compare_aac_noise_substitution(false);
+}
+
+#[test]
+#[ignore = "diagnostic separation of AAC noise synthesis and coarse container timestamps"]
+fn aac_noise_substitution_reports_container_seek_differences() {
+    compare_aac_noise_substitution(true);
+}
+
+fn compare_aac_noise_substitution(include_matroska: bool) {
+    for rate in [44_100, 48_000] {
+        let (directory, source, _) = fixture(rate, 2, "pcm_f32le", 4, 1001);
+        let executable =
+            PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe");
+        for pns in ["0", "1"] {
+            let encoded = directory.join(format!("pns-{pns}.m4a"));
+            let result = std::process::Command::new(&executable)
+                .creation_flags(0x0800_0000)
+                .args(["-v", "error", "-n", "-i"])
+                .arg(&source)
+                .args(["-c:a", "aac", "-aac_pns", pns])
+                .arg(&encoded)
+                .output()
+                .expect("AAC control fixture");
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let mut files = vec![encoded.clone()];
+            if include_matroska {
+                let remuxed = directory.join(format!("pns-{pns}.mkv"));
+                let result = std::process::Command::new(&executable)
+                    .creation_flags(0x0800_0000)
+                    .args(["-v", "error", "-n", "-i"])
+                    .arg(&encoded)
+                    .args(["-c:a", "copy"])
+                    .arg(&remuxed)
+                    .output()
+                    .expect("AAC container control");
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                files.push(remuxed);
+            }
+            for encoded in files {
+                let extension = encoded.extension().expect("container").to_string_lossy();
+                for ns in [17_000_000, 617_000_000, 1_017_000_000, 2_917_000_000] {
+                    let target = MediaTime::from_nanoseconds(ns);
+                    let end = target.saturating_add(Duration::from_millis(250));
+                    let expected = samples(&encoded, target, end, MediaTime::ZERO).0;
+                    let actual = samples(&encoded, target, end, target).0;
+                    if extension == "m4a" {
+                        assert_eq!(
+                            actual.len(),
+                            expected.len(),
+                            "AAC/{rate}/{extension}/PNS={pns} at {ns}: sample count"
+                        );
+                        if pns == "0" {
+                            assert!(
+                                actual == expected,
+                                "AAC/{rate}/{extension} at {ns}: samples differ without PNS"
+                            );
+                        }
+                    }
+                    assert!(
+                        actual == samples(&encoded, target, end, target).0,
+                        "identical seek starts must be deterministic"
+                    );
+                    let error = actual
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .zip(expected.as_chunks::<4>().0)
+                        .map(|(a, b)| (f32::from_ne_bytes(*a) - f32::from_ne_bytes(*b)).abs())
+                        .fold(0.0f32, f32::max);
+                    eprintln!(
+                        "AAC/{rate}/{extension}/PNS={pns} at {ns}: samples {}/{}, maximum sample error {error}",
+                        actual.len() / 8,
+                        expected.len() / 8
+                    );
+                    if extension == "mkv" && pns == "0" {
+                        let (offset, residual) = (-32_i32..=32)
+                            .map(|offset| {
+                                let a = &actual[(offset.max(0) as usize * 8)..];
+                                let b = &expected[((-offset).max(0) as usize * 8)..];
+                                let error = a
+                                    .as_chunks::<4>()
+                                    .0
+                                    .iter()
+                                    .zip(b.as_chunks::<4>().0)
+                                    .map(|(a, b)| {
+                                        (f32::from_ne_bytes(*a) - f32::from_ne_bytes(*b)).abs()
+                                    })
+                                    .fold(0.0f32, f32::max);
+                                (offset, error)
+                            })
+                            .min_by(|a, b| a.1.total_cmp(&b.1))
+                            .expect("alignment comparison");
+                        eprintln!(
+                            "AAC/{rate}/{extension} at {ns}: best sample offset {offset}, full-overlap residual {residual}"
+                        );
+                    }
+                }
+            }
+        }
+        fs::remove_dir_all(directory).expect("remove owned fixtures");
+    }
+}
+
+#[test]
 fn compressed_audio_preroll_keeps_seek_samples_and_rewinds_reused_inputs() {
     for (codec, extension, rate) in [
         ("libmp3lame", "mp3", 48_000),

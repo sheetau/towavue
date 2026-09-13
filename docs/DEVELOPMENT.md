@@ -53,6 +53,7 @@ Generate fixtures only when missing or their inputs change. Reuse completed chec
 | Window, media, graphics, Shell, export | `crates/towavue-runtime-windows/src/` |
 | UI, workers, tab state | `crates/towavue-app/src/` |
 | Native image renderer patch | `vendor/egui-directx11/`, [patch notes](../vendor/egui-directx11/TOWAVUE-PATCH.md) |
+| PNG row-hook patch | `vendor/png/`, [source, scope and checks](../vendor/png/TOWAVUE-PATCH.md); preserve the pinned version and upstream unsafe prohibition |
 | Generated media and specialized checks | `scripts/`, `tests/`; find the relevant test with rg |
 
 Tests are colocated with implementations or under the crate's tests directory. Search for the behavior/test before creating another fixture or diagnostic.

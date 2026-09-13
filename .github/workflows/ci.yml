@@ -85,6 +85,9 @@ jobs:
       - name: Verify per-texture interpolation with offscreen WARP
         run: cargo +1.98.0 test -p egui-directx11 --lib --locked --offline
 
+      - name: Verify PNG row-hook buffer transitions
+        run: cargo +1.98.0 test --manifest-path vendor/png/Cargo.toml --lib row_filter_tests --features towavue-row-filter --locked
+
       - name: Verify Rust third-party notices
         shell: pwsh
         run: |

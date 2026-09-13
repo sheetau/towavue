@@ -6,7 +6,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use towavue_runtime_windows::DecodedImageFrame;
 
-#[path = "stages/paeth.rs"]
+#[path = "../../src/image/png_static/paeth.rs"]
 mod paeth;
 
 #[derive(Clone, Copy)]

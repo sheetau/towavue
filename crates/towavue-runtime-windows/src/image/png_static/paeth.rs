@@ -1,4 +1,4 @@
-//! Experimental stable SSE2 Paeth reconstruction for four-byte PNG pixels.
+//! SSE2 Paeth reconstruction for four-byte PNG pixels, behind a safe row API.
 
 use std::arch::x86_64::*;
 
@@ -95,7 +95,29 @@ mod tests {
             for _ in 0..16 {
                 let mut actual: Vec<u8> = (0..width * 4).map(|_| byte()).collect();
                 let mut expected = actual.clone();
-                png::benchable_apis::unfilter(png::Filter::Paeth, 4, &previous, &mut expected);
+                for i in 0..expected.len() {
+                    let a = if i >= 4 {
+                        i16::from(expected[i - 4])
+                    } else {
+                        0
+                    };
+                    let b = i16::from(previous[i]);
+                    let c = if i >= 4 {
+                        i16::from(previous[i - 4])
+                    } else {
+                        0
+                    };
+                    let p = a + b - c;
+                    let (pa, pb, pc) = ((p - a).abs(), (p - b).abs(), (p - c).abs());
+                    let predictor = if pa <= pb && pa <= pc {
+                        a
+                    } else if pb <= pc {
+                        b
+                    } else {
+                        c
+                    };
+                    expected[i] = expected[i].wrapping_add(predictor as u8);
+                }
                 unfilter_rgba(&previous, &mut actual);
                 assert!(actual == expected, "generated rows differ at width {width}");
                 previous = actual;

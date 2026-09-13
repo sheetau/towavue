@@ -121,6 +121,7 @@ pub fn style(style: &mut egui::Style) {
     style.visuals.popup_shadow.blur = 10;
     style.visuals.popup_shadow.color = Color32::from_black_alpha(112);
     style.visuals.hyperlink_color = FOREGROUND;
+    style.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     for (visuals, foreground, background) in [
         (&mut style.visuals.widgets.noninteractive, MUTED, BORDER),
         (&mut style.visuals.widgets.inactive, MUTED, BORDER),
@@ -473,6 +474,77 @@ pub fn logo(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn clickable_controls_use_pointer_without_overriding_disabled_or_specialized_cursors() {
+        for density in [1.0, 1.25, 2.0] {
+            for enabled in [false, true] {
+                for control in 0..6 {
+                    let context = crate::fonts::test_context();
+                    context.global_style_mut(super::style);
+                    let mut target = Pos2::ZERO;
+                    let mut text = String::from("Name");
+                    for pass in 0..3 {
+                        let mut input = egui::RawInput {
+                            screen_rect: Some(Rect::from_min_size(
+                                Pos2::ZERO,
+                                egui::vec2(320.0, 200.0),
+                            )),
+                            events: if pass == 0 {
+                                vec![]
+                            } else {
+                                vec![egui::Event::PointerMoved(target)]
+                            },
+                            ..Default::default()
+                        };
+                        input
+                            .viewports
+                            .entry(egui::ViewportId::ROOT)
+                            .or_default()
+                            .native_pixels_per_point = Some(density);
+                        let output = context.run_ui(input, |ui| {
+                            ui.add_enabled_ui(enabled, |ui| {
+                                let response = match control {
+                                    0 => button(ui, Icon::Play, "Play / replay"),
+                                    1 => reading_button(ui, true, false),
+                                    2 => {
+                                        let rect = Rect::from_min_size(
+                                            ui.cursor().min,
+                                            egui::vec2(24.0, 24.0),
+                                        );
+                                        tab_close(ui, rect, false)
+                                    }
+                                    3 => ui.button("Save"),
+                                    4 => ui.text_edit_singleline(&mut text),
+                                    _ => ui
+                                        .button("Drag")
+                                        .on_hover_cursor(egui::CursorIcon::ResizeHorizontal),
+                                };
+                                target = response.rect.center();
+                                assert!(!response.clicked());
+                            });
+                        });
+                        if pass > 0 {
+                            assert_eq!(output.pixels_per_point, density);
+                            assert_eq!(
+                                output.platform_output.cursor_icon,
+                                if !enabled {
+                                    egui::CursorIcon::Default
+                                } else if control == 4 {
+                                    egui::CursorIcon::Text
+                                } else if control == 5 {
+                                    egui::CursorIcon::ResizeHorizontal
+                                } else {
+                                    egui::CursorIcon::PointingHand
+                                },
+                                "control={control}, enabled={enabled}, density={density}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn transport_buttons_use_solid_shapes_without_changing_their_hit_bounds() {
         for density in [1.0, 1.25, 2.0] {

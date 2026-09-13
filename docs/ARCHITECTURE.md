@@ -37,6 +37,7 @@ Keep the single-D3D11-device design: hardware decode, video processing, image/UI
 
 ## Windows, tabs, and input
 
+- Enabled buttons, thumbnail cards and form choices use PointingHand on hover; disabled controls do not. Prefer the shared button style, with explicit feedback for custom hit regions and non-button form widgets. Preserve text input and specialized selection/resize/pan/host-drag cursors; native caption pointer handling remains OS-owned.
 - Keep content panels/input fields black and floating windows, menus, tooltips and the palette on shared #0c0c0c; tabs retain their separate state colors. Compact seek track/progress span the full width in idle and active states; only the handle center's travel is inset, with unchanged pointer/value mapping. A committed pointer position remains painted throughout its release frame, including discarded passes, then yields to the updated transport/folder position; do not replay the seek action.
 - The host shares graphics across windows. Normal launches from the same SID/session/executable forward path-only requests with acknowledgment; failure must not silently create a duplicate host. No live-state transfer between independent old processes.
 - Tabs own history, export target/options, image/view/reading state, transport, focus role, and scroll positions. Background audio continues. Hidden video limits decode work and retains a frame without pinning an entire decoder surface pool.

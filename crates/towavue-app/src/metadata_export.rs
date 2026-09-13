@@ -120,7 +120,7 @@ impl MetadataDialog {
                             if !fields.contains(&field) { continue; }
                             if ui.selectable_value(&mut self.selected, index, field.label()).clicked() { ui.close(); }
                         }
-                    }).response;
+                    }).response.on_hover_cursor(egui::CursorIcon::PointingHand);
                 if self.first_frame { response.request_focus(); self.first_frame = false; }
                 reveal_focus(&response);
                 let field = MetadataField::ALL[self.selected];
@@ -147,7 +147,7 @@ impl MetadataDialog {
                 }
                 let draft = &mut self.fields[self.selected];
                 for (mode, label) in [(Mode::Keep, "Keep source value"), (Mode::Set, "Set value"), (Mode::Remove, "Remove value")] {
-                    let response = ui.radio_value(&mut draft.mode, mode, label);
+                    let response = ui.radio_value(&mut draft.mode, mode, label).on_hover_cursor(egui::CursorIcon::PointingHand);
                     reveal_focus(&response);
                 }
                 if draft.mode == Mode::Set {

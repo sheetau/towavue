@@ -320,11 +320,13 @@ impl Filmstrip {
                                 ),
                             egui::vec2(120.0, 80.0),
                         );
-                        let response = ui.interact(
-                            rect,
-                            ui.id().with(("filmstrip-item", &item.path)),
-                            egui::Sense::click_and_drag(),
-                        );
+                        let response = ui
+                            .interact(
+                                rect,
+                                ui.id().with(("filmstrip-item", &item.path)),
+                                egui::Sense::click_and_drag(),
+                            )
+                            .on_hover_cursor(egui::CursorIcon::PointingHand);
                         let active = selected == Some(index);
                         self.drag.observe(&response, &item.path);
                         if active
@@ -486,6 +488,7 @@ impl Filmstrip {
                                 egui::vec2(cell_width, cell_width * 2.0 / 3.0 + 24.0),
                                 egui::Sense::click(),
                             );
+                            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
                             response.widget_info(|| {
                                 egui::WidgetInfo::labeled(
                                     egui::WidgetType::Button,
@@ -850,6 +853,34 @@ mod tests {
             node.description(),
             Some(paths[0].to_string_lossy().as_ref())
         );
+        let bounds = node.bounds().expect("card bounds");
+        let position = egui::pos2((bounds.x0 + 20.0) as f32, (bounds.y0 + 20.0) as f32);
+        for (step, enabled) in [true, false, true].into_iter().enumerate() {
+            if step == 2 {
+                // egui hit testing uses the previous frame's disabled widget list.
+                let (output, actions) = frame(&mut filmstrip, true, vec![]);
+                assert!(actions.is_empty());
+                assert_eq!(
+                    output.platform_output.cursor_icon,
+                    egui::CursorIcon::Default
+                );
+            }
+            let (output, actions) = frame(
+                &mut filmstrip,
+                enabled,
+                vec![egui::Event::PointerMoved(position)],
+            );
+            assert!(actions.is_empty());
+            assert_eq!(
+                output.platform_output.cursor_icon,
+                if enabled {
+                    egui::CursorIcon::PointingHand
+                } else {
+                    egui::CursorIcon::Default
+                },
+                "recent card step={step}, enabled={enabled}, position={position:?}"
+            );
+        }
         let event = egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
             action: egui::accesskit::Action::Click,
             target_tree: egui::accesskit::TreeId::ROOT,
@@ -1517,6 +1548,7 @@ mod tests {
         let first = snapshot.items[0].path.clone();
         let target = snapshot.items[1].path.clone();
         let enabled = std::cell::Cell::new(true);
+        let cursor = std::cell::Cell::new(egui::CursorIcon::Default);
         let mut frame = |snapshot: &FolderSnapshot, current: &Path, events| {
             let mut actions = Vec::new();
             let output = context.run_ui(
@@ -1539,6 +1571,7 @@ mod tests {
                     )
                 },
             );
+            cursor.set(output.platform_output.cursor_icon);
             (
                 output.platform_output.accesskit_update.expect("tree"),
                 actions,
@@ -1560,6 +1593,8 @@ mod tests {
             ((bounds.x0 + bounds.x1) / 2.0) as f32,
             ((bounds.y0 + bounds.y1) / 2.0) as f32,
         );
+        frame(&snapshot, &first, vec![egui::Event::PointerMoved(position)]);
+        assert_eq!(cursor.get(), egui::CursorIcon::PointingHand);
         frame(
             &snapshot,
             &first,
@@ -1575,6 +1610,7 @@ mod tests {
         assert_eq!(frame(&snapshot, &first, vec![]).0.focus, id);
         enabled.set(false);
         assert_ne!(frame(&snapshot, &first, vec![]).0.focus, id);
+        assert_eq!(cursor.get(), egui::CursorIcon::Default);
         for button in [egui::PointerButton::Primary, egui::PointerButton::Middle] {
             for pressed in [true, false] {
                 let (_, actions) = frame(

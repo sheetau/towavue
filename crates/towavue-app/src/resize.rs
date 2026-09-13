@@ -77,7 +77,9 @@ impl ResizeDialog {
         {
             self.width = self.round(f64::from(value) * self.ratio);
         }
-        let ratio = ui.checkbox(&mut self.keep_ratio, "Keep aspect ratio");
+        let ratio = ui
+            .checkbox(&mut self.keep_ratio, "Keep aspect ratio")
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
         if self.reveal_focus(ratio).changed()
             && self.keep_ratio
             && let Ok(value) = self.width.parse::<u32>()
@@ -101,7 +103,11 @@ impl ResizeDialog {
                     }
                 }
             });
-        self.reveal_focus(filter.response);
+        self.reveal_focus(
+            filter
+                .response
+                .on_hover_cursor(egui::CursorIcon::PointingHand),
+        );
         if previous != (self.width.clone(), self.height.clone(), self.filter) {
             ui.ctx().request_repaint();
         }

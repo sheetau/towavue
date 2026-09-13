@@ -46,12 +46,12 @@ impl AudioExportDialog {
             ui.set_width((context.content_rect().width() - 48.0).clamp(1.0, 340.0));
             chrome::modal_heading(ui, "Audio export options");
             egui::ScrollArea::vertical().max_height((context.content_rect().height() - 128.0).max(20.0)).min_scrolled_height(20.0).show_styled(ui, |ui| {
-                let response = ui.checkbox(&mut self.options.normalize_peak, "Normalize peak (-1 dBFS)");
+                let response = ui.checkbox(&mut self.options.normalize_peak, "Normalize peak (-1 dBFS)").on_hover_cursor(egui::CursorIcon::PointingHand);
                 if self.first_frame { response.request_focus(); self.first_frame = false; }
                 reveal_focus(&response);
                 ui.label("Output channels");
                 for (value, label) in [(AudioChannels::Keep, "Keep source channels"), (AudioChannels::Mono, "Mono"), (AudioChannels::Stereo, "Stereo")] {
-                    let response = ui.radio_value(&mut self.options.channels, value, label);
+                    let response = ui.radio_value(&mut self.options.channels, value, label).on_hover_cursor(egui::CursorIcon::PointingHand);
                     reveal_focus(&response);
                 }
                 ui.separator();

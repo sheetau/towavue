@@ -10,7 +10,9 @@ use crate::image::{
 use crate::{CachedImagePreview, DecodedImage, ImageDecodeError, LatestTask, PreviewCache};
 
 const CACHE_BYTE_LIMIT: usize = 256 * 1024 * 1024;
-const CACHE_ENTRY_LIMIT: usize = 10;
+// Three maximum-size reading spreads; the byte limit still bounds retained pixels.
+const CACHE_ENTRY_LIMIT: usize = 30;
+const PREFETCH_ENTRY_LIMIT: usize = 10;
 
 pub struct LoadedImages {
     pub generation: u64,
@@ -271,7 +273,7 @@ impl ImageLoader {
         + 'static,
     ) {
         let mut unique = Vec::new();
-        for path in paths.into_iter().take(CACHE_ENTRY_LIMIT) {
+        for path in paths.into_iter().take(PREFETCH_ENTRY_LIMIT) {
             if !unique.contains(&path) {
                 unique.push(path);
             }
@@ -2392,25 +2394,110 @@ mod tests {
         too_large.frames[0].rgba = vec![9; 12];
         cache.insert("large".into(), stamp, Arc::new(too_large));
         assert!(cache.entries.is_empty());
-        let mut cache = ImageCache::new(100);
-        for index in 0..11 {
+        let mut cache = ImageCache::new(1000);
+        for index in 0..31 {
             cache.insert(index.to_string().into(), stamp, pixel(index));
         }
-        assert_eq!(cache.entries.len(), 10);
-        assert_eq!(cache.bytes, 40);
+        assert_eq!(cache.entries.len(), 30);
+        assert_eq!(cache.bytes, 120);
         assert!(cache.get(Path::new("0"), Some(stamp), 100).is_none());
         assert!(matches!(
             cache.get(Path::new("10"), Some(stamp), 3),
             Some(Err(ImageDecodeError::TooLarge))
         ));
         assert_eq!(
-            cache.bytes, 40,
+            cache.bytes, 120,
             "a smaller request must not evict reusable pixels"
         );
         let retained = cache.entries[0].2.clone();
         assert_eq!(Arc::strong_count(&retained), 2);
         drop(cache);
         assert_eq!(Arc::strong_count(&retained), 1);
+    }
+
+    #[test]
+    fn reading_spreads_reuse_originals_after_forward_prefetch_and_back_navigation() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-reading-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("owned fixtures");
+        let paths: Vec<_> = (0..30)
+            .map(|index| {
+                let path = root.join(format!("{index}.png"));
+                std::fs::write(&path, [index as u8]).expect("source stamp");
+                path
+            })
+            .collect();
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let loader = ImageLoader {
+            shared: Arc::clone(&shared),
+            prefetch_worker: LatestTask::new("reading-cache-prefetch").expect("prefetch worker"),
+        };
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let decoded = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = Arc::clone(&decoded);
+        let worker = thread::spawn(move || {
+            run_worker(
+                shared,
+                || {
+                    let _ = ready_tx.send(());
+                },
+                |path, _, _, _| {
+                    count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    Ok((*pixel(std::fs::read(path).expect("fixture")[0])).clone())
+                },
+            )
+        });
+        let load = |paths: &[PathBuf]| {
+            let generation = loader.request(paths.to_vec());
+            let mut images = Vec::new();
+            while images.len() < paths.len() {
+                ready_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("page ready");
+                if let Some(result) = loader.take_completed() {
+                    assert_eq!(result.generation, generation);
+                    assert_eq!(result.first_index, images.len());
+                    images.extend(
+                        result
+                            .images
+                            .into_iter()
+                            .map(|(_, image)| image.expect("decoded page")),
+                    );
+                }
+            }
+            images
+        };
+        let first = load(&paths[..10]);
+        let second = load(&paths[10..20]);
+        let count = Arc::clone(&decoded);
+        loader.prefetch_with_decode(paths[20..].to_vec(), move |path, _, _| {
+            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(Some(
+                (*pixel(std::fs::read(path).expect("fixture")[0])).clone(),
+            ))
+        });
+        wait_for_prefetch(&loader);
+        assert_eq!(decoded.load(std::sync::atomic::Ordering::Relaxed), 30);
+        for (paths, originals) in [(&paths[..10], first), (&paths[10..20], second)] {
+            let restored = load(paths);
+            assert_eq!(
+                decoded.load(std::sync::atomic::Ordering::Relaxed),
+                30,
+                "cached spread must not decode again"
+            );
+            assert!(
+                originals
+                    .iter()
+                    .zip(&restored)
+                    .all(|(original, restored)| Arc::ptr_eq(original, restored))
+            );
+        }
+        drop(loader);
+        worker.join().expect("worker exits");
+        for path in paths {
+            std::fs::remove_file(path).expect("remove owned fixture");
+        }
+        std::fs::remove_dir(root).expect("remove empty fixture directory");
     }
 
     #[test]

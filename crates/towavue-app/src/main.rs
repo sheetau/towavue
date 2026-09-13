@@ -500,7 +500,8 @@ impl ImageTextureCache {
         let image = ImagePresentation::from_decoded_frame(context, path, decoded, 0, options)?;
         let bytes = image.decoded.retained_bytes();
         if !image.decoded.is_animated() && bytes <= self.byte_limit {
-            while self.entries.len() >= 8
+            // Match the three-spread decoded cache without increasing its pixel budget.
+            while self.entries.len() >= 30
                 || self.entries.iter().map(|image| image.bytes).sum::<usize>() + bytes
                     > self.byte_limit
             {
@@ -2214,7 +2215,7 @@ where
         let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
         let current = images.iter().position(|item| &item.path == path)?;
         if !self.reading_mode {
-            // Leave one of the ten decoded-cache slots for the current image.
+            // Keep ordinary navigation speculation bounded to nine neighbors.
             let count = images.len().saturating_sub(1).min(9);
             let mut selected = Vec::with_capacity(count);
             'neighbors: for distance in 1..=count {
@@ -19878,18 +19879,53 @@ mod tests {
             )
             .expect("display larger than cache");
         assert!(cache.entries.is_empty());
-        let mut cache = ImageTextureCache::new(100);
-        for value in 0..9 {
-            cache
-                .load(
-                    &context,
-                    Path::new("page.png"),
-                    make_image(value),
-                    TextureOptions::LINEAR,
-                )
-                .expect("page");
+        let mut cache = ImageTextureCache::new(1000);
+        let pages: Vec<_> = (0..30).map(make_image).collect();
+        let ids: Vec<_> = pages
+            .iter()
+            .map(|page| {
+                cache
+                    .load(
+                        &context,
+                        Path::new("page.png"),
+                        page.clone(),
+                        TextureOptions::LINEAR,
+                    )
+                    .expect("page")
+                    .texture
+                    .id()
+            })
+            .collect();
+        for (page, id) in pages.iter().zip(&ids).take(10) {
+            assert_eq!(
+                cache
+                    .load(
+                        &context,
+                        Path::new("page.png"),
+                        page.clone(),
+                        TextureOptions::LINEAR
+                    )
+                    .expect("previous spread")
+                    .texture
+                    .id(),
+                *id
+            );
         }
-        assert_eq!(cache.entries.len(), 8);
+        cache
+            .load(
+                &context,
+                Path::new("next.png"),
+                make_image(31),
+                TextureOptions::LINEAR,
+            )
+            .expect("next page");
+        assert_eq!(cache.entries.len(), 30);
+        assert!(
+            !cache
+                .entries
+                .iter()
+                .any(|entry| entry.texture.id() == ids[10])
+        );
         cache.entries.clear();
         let released = Arc::downgrade(&first);
         assert_ne!(

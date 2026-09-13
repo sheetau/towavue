@@ -890,6 +890,8 @@ fn run_parallel_workers(
         .as_ref()
         .filter(|_| video.is_none())
         .and_then(|config| config.sample_preroll(minimum_time));
+    let trusted_audio_axis =
+        video.is_none() && (minimum_time <= MediaTime::ZERO || sample_preroll.is_some());
     let mut video_finished = video.is_none();
     let mut audio_finished = audio.is_none();
     let (video_packet_tx, video_packet_rx) = mpsc::sync_channel(PACKET_QUEUE_CAPACITY);
@@ -962,6 +964,7 @@ fn run_parallel_workers(
                         sample_preroll,
                         audio_checkpoints,
                         resume,
+                        trusted_audio_axis,
                     ) {
                         let _ = audio_output_tx.send(ParallelDecodeOutput::Failed(error));
                     }
@@ -1234,7 +1237,16 @@ fn run_parallel_audio_worker(
     sample_preroll: Option<(MediaTime, PrerollSamples)>,
     checkpoints: &mut AudioCheckpoints,
     resume: Option<(i64, ffmpeg::Packet)>,
+    trusted_axis: bool,
 ) -> Result<(), DecodeError> {
+    // A video-GOP/direct seek may start with an approximate audio sample axis.
+    // Learn only after a sequential start or the exact prefix/checkpoint path,
+    // and only for independently decodable PCM/FLAC packets at coarse time bases.
+    let mut learn = trusted_axis
+        && matches!(
+            config.sample_preroll(MediaTime::from_nanoseconds(1)),
+            Some((_, PrerollSamples::Pcm(_) | PrerollSamples::Flac))
+        );
     let mut pipeline = create_audio_pipeline_from(config)?;
     pipeline.sample_preroll = sample_preroll;
     if matches!(
@@ -1258,21 +1270,33 @@ fn run_parallel_audio_worker(
     for packet in first_packet.into_iter().chain(packets) {
         let next_sample = pipeline.next_sample;
         let counted = pipeline.skip_sample_preroll(&packet)?;
+        // Side data can change parameters or trimming state. Do not carry a
+        // bookmark past that boundary into a fresh decoder using initial config.
+        learn &= packet.side_data().next().is_none();
+        if !counted {
+            pipeline.decoder.send_packet(&packet)?;
+            if learn {
+                let mut chunks = 0;
+                pipeline.receive(
+                    &mut |decoded| {
+                        chunks += 1;
+                        emit_audio(decoded)
+                    },
+                    &mut summary,
+                )?;
+                // A delayed/multi-frame decoder would need more than the scalar
+                // pre-packet axis. Keep the existing decode path in that case.
+                learn = chunks == 1;
+            } else {
+                pipeline.receive(&mut emit_audio, &mut summary)?;
+            }
+        }
         checkpoints.observe(
             &packet,
             next_sample,
             pipeline.output_format.sample_rate,
-            counted
-                && matches!(
-                    sample_preroll,
-                    Some((_, PrerollSamples::Pcm(_) | PrerollSamples::Flac))
-                ),
+            learn,
         );
-        if counted {
-            continue;
-        }
-        pipeline.decoder.send_packet(&packet)?;
-        pipeline.receive(&mut emit_audio, &mut summary)?;
     }
     pipeline.decoder.send_eof()?;
     pipeline.receive(&mut emit_audio, &mut summary)?;

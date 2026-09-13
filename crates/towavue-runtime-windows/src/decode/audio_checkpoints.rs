@@ -155,7 +155,7 @@ impl AudioCheckpoints {
         packet: &ffmpeg::Packet,
         next_sample: i64,
         sample_rate: u32,
-        counted: bool,
+        verified: bool,
     ) {
         #[cfg(test)]
         {
@@ -177,7 +177,7 @@ impl AudioCheckpoints {
             self.points.push_back(point);
         }
         if self.stamp.is_some()
-            && counted
+            && verified
             && next_sample >= self.next_checkpoint
             && position >= 0
             && self
@@ -293,6 +293,63 @@ mod tests {
                 );
             }
         }
+        std::fs::remove_dir_all(directory).expect("remove owned fixtures");
+    }
+
+    #[test]
+    fn decoded_checkpoints_stop_at_side_data_and_require_a_trusted_start() {
+        let (directory, source, _) = fixture(48_000, 1, "pcm_s16le", 4, 1001);
+        let mut input = format::input(&source).expect("input");
+        let mut packets: Vec<_> = input.packets().map(|(_, packet)| packet).collect();
+        let boundary = packets[80].position();
+        // This owned packet retains the ten-byte skip-sample allocation. No
+        // pointer escapes initialization or is accessed by concurrent workers.
+        unsafe {
+            use ffmpeg::codec::packet::Mut;
+            let data = ffmpeg::ffi::av_packet_new_side_data(
+                packets[80].as_mut_ptr(),
+                ffmpeg::ffi::AVPacketSideDataType::AV_PKT_DATA_SKIP_SAMPLES,
+                10,
+            );
+            assert!(!data.is_null());
+            std::slice::from_raw_parts_mut(data, 10).fill(0);
+            *data = 1;
+        }
+        for trusted in [true, false] {
+            let config = best_stream_config(&input, Type::Audio).expect("config");
+            let mut cache = AudioCheckpoints::new(&source);
+            let (packet_tx, packet_rx) = mpsc::channel();
+            for packet in &packets {
+                packet_tx.send(packet.clone()).expect("test packets");
+            }
+            drop(packet_tx);
+            let (output_tx, output_rx) = mpsc::sync_channel(packets.len() + 1);
+            run_parallel_audio_worker(
+                config, packet_rx, &output_tx, None, &mut cache, None, trusted,
+            )
+            .expect("decode through the side-data boundary");
+            drop(output_tx);
+            let output: Vec<_> = output_rx.into_iter().collect();
+            assert!(
+                output
+                    .iter()
+                    .any(|output| matches!(output, ParallelDecodeOutput::Audio(chunk)
+                if chunk.presentation_time > MediaTime::from_nanoseconds(3_000_000_000)))
+            );
+            if trusted {
+                assert!(!cache.points.is_empty(), "learned ordinary decoded packets");
+                assert!(
+                    cache.points.iter().all(|point| point.position < boundary),
+                    "no fresh-decoder checkpoint after state-changing side data"
+                );
+            } else {
+                assert!(
+                    cache.points.is_empty(),
+                    "never learn an approximate start axis"
+                );
+            }
+        }
+        drop((packets, input));
         std::fs::remove_dir_all(directory).expect("remove owned fixtures");
     }
 }

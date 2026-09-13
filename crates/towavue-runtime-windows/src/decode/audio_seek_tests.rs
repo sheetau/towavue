@@ -1096,6 +1096,28 @@ fn pcm_packet_scan_reports_exact_seek_anchor_cost() {
                 reused.audio_checkpoints.worker_packets
             );
         }
+        let mut played = ParallelInput::open(&source, &|| false).expect("playback benchmark input");
+        assert!(collect(&mut played, target, end, MediaTime::ZERO).0 == reference);
+        let decoded_packets = played.audio_checkpoints.worker_packets;
+        let mut elapsed = Vec::new();
+        for _ in 0..3 {
+            let before = played.audio_checkpoints.resumes;
+            let start = Instant::now();
+            let actual = collect(&mut played, target, end, target).0;
+            elapsed.push(start.elapsed().as_secs_f64() * 1000.0);
+            assert!(
+                actual == reference,
+                "ordinary playback bookmark preserves PCM"
+            );
+            assert_eq!(played.audio_checkpoints.resumes, before + 1);
+        }
+        elapsed.sort_by(f64::total_cmp);
+        println!(
+            "PCM_PLAYED_CHECKPOINT target_ms={target_ms} median_ms={:.3} decoded_packets={decoded_packets} probe_packets={} worker_packets={}",
+            elapsed[1],
+            played.audio_checkpoints.probe_packets,
+            played.audio_checkpoints.worker_packets
+        );
     }
     fs::remove_dir_all(directory).expect("remove owned fixtures");
 }
@@ -1237,6 +1259,37 @@ fn counted_packet_checkpoints_restore_exact_pcm_and_flac_seek_phase() {
             "reuse after probe cancellation"
         );
         drop(input);
+        let mut played = ParallelInput::open(&source, &|| false).expect("normal playback input");
+        collect(
+            &mut played,
+            MediaTime::ZERO,
+            MediaTime::from_nanoseconds(10_000_000_000),
+            MediaTime::ZERO,
+        );
+        let played_packets = played.audio_checkpoints.worker_packets;
+        assert_eq!(played.audio_checkpoints.resumes, 0, "no initial seek");
+        let actual = collect(&mut played, target, end, target).0;
+        assert!(actual == samples(&source, target, end, MediaTime::ZERO).0);
+        assert_eq!(
+            played.audio_checkpoints.resumes, 1,
+            "{codec}/{variant}: reuse normal playback"
+        );
+        assert!(played.audio_checkpoints.worker_packets < played_packets / 2);
+        drop(played);
+        if variant == "interleaved" {
+            let mut combined = ParallelInput::open(&source, &|| false).expect("combined input");
+            combined
+                .decode_software(target, Some(end), None, &|| false, |_| true)
+                .expect("video-GOP audio start");
+            assert!(
+                collect(&mut combined, target, end, target).0
+                    == samples(&source, target, end, MediaTime::ZERO).0
+            );
+            assert_eq!(
+                combined.audio_checkpoints.resumes, 0,
+                "an approximate video-GOP audio axis must not seed checkpoints"
+            );
+        }
         fs::remove_dir_all(directory).expect("remove owned fixtures");
     }
 }

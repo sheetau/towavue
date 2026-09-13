@@ -154,7 +154,22 @@ fn incoming_tabs_show_clipped_gaps_and_reject_stale_layouts_without_activation()
                     egui::Shape::LineSegment { points, stroke }
                     if *points == [egui::pos2(x, layout.strip.top()), egui::pos2(x, layout.strip.bottom())]
                         && stroke.width == 2.0 && stroke.color == chrome::FOREGROUND)));
-                assert!(incoming_gap(&context, &ids, point + egui::vec2(0.0, 100.0)).is_none());
+                for y in [100.0, 300.0, 575.0] {
+                    let body = egui::pos2(point.x, y);
+                    assert_eq!(incoming_gap(&context, &ids, body), Some(gap));
+                    app.incoming_tab_pointer = Some(body);
+                    let (output, actions) = frame(&mut app, size, false, vec![]);
+                    assert!(actions.is_empty());
+                    let body_layout = context
+                        .data(|data| data.get_temp::<DropStrip>("incoming-tab-strip".into()))
+                        .expect("body layout");
+                    let (body_gap, x) = body_layout.gap(body).expect("body gap");
+                    assert_eq!(body_gap, gap);
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::LineSegment { points, stroke }
+                        if *points == [egui::pos2(x, body_layout.strip.top()), egui::pos2(x, body_layout.strip.bottom())]
+                            && stroke.width == 2.0 && stroke.color == chrome::FOREGROUND)));
+                }
             }
             assert_eq!(app.tabs, original);
             let point = drop_point(&context, 1);
@@ -203,10 +218,19 @@ fn incoming_tabs_append_in_unused_toolbar_space_without_expanding_native_control
                 egui::Shape::LineSegment { points, stroke }
                 if *points == [egui::pos2(x, layout.strip.top()), egui::pos2(x, layout.strip.bottom())]
                     && stroke.width == 2.0 && stroke.color == chrome::FOREGROUND)));
+            for y in [point.y, 300.0, 575.0] {
+                assert_eq!(
+                    incoming_gap(&context, &ids, egui::pos2(width - 1.0, y)),
+                    Some(ids.len())
+                );
+                assert_eq!(incoming_gap(&context, &ids, egui::pos2(1.0, y)), Some(0));
+            }
             for outside in [
-                egui::pos2(width - 30.0, point.y),
-                egui::pos2(10.0, point.y),
-                point + egui::vec2(0.0, 100.0),
+                egui::pos2(-1.0, 100.0),
+                egui::pos2(width + 1.0, 100.0),
+                egui::pos2(100.0, -1.0),
+                egui::pos2(100.0, 577.0),
+                egui::pos2(f32::NAN, 100.0),
             ] {
                 assert!(incoming_gap(&context, &ids, outside).is_none());
             }
@@ -249,10 +273,15 @@ fn incoming_tabs_scroll_without_pointer_capture_and_accept_empty_welcome() {
         frame(&mut app, size, false, vec![]);
     }
     let stopped = state(&app).widgets.last().expect("last").2.left();
+    app.incoming_tab_pointer = Some(egui::pos2(strip.right() - 2.0, 300.0));
     for _ in 0..3 {
         frame(&mut app, size, false, vec![]);
     }
-    assert_eq!(state(&app).widgets.last().expect("last").2.left(), stopped);
+    assert_eq!(
+        state(&app).widgets.last().expect("last").2.left(),
+        stopped,
+        "body hover must not edge-scroll the strip"
+    );
     assert_eq!(app.tabs, original);
     app.tabs = Default::default();
     for _ in 0..3 {
@@ -260,6 +289,10 @@ fn incoming_tabs_scroll_without_pointer_capture_and_accept_empty_welcome() {
     }
     let context = app.ui_context.as_ref().expect("context");
     assert_eq!(incoming_gap(context, &[], drop_point(context, 0)), Some(0));
+    assert_eq!(
+        incoming_gap(context, &[], egui::pos2(240.0, 300.0)),
+        Some(0)
+    );
 }
 
 #[test]

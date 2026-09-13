@@ -216,6 +216,7 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .or_default()
         .push(EditOperation::FlipHorizontal, MediaKind::Image);
     let edits = app.edits[&tab].clone();
+    app.filmstrip_open = true;
     let original_count = host.windows.len();
     for key in [source, target] {
         for _ in 0..3 {
@@ -284,9 +285,19 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     );
     assert_eq!(host.windows[&source].edits[&tab], edits);
     host.windows.get_mut(&target).expect("target").export_error = None;
-    assert!(
-        host.merge_tab_drop(source, &request, target, point + egui::vec2(0.0, 100.0))
-            .is_err()
+    host.windows
+        .get_mut(&target)
+        .expect("target")
+        .filmstrip_open = true;
+    let body = point + egui::vec2(0.0, 100.0);
+    assert_eq!(host.windows[&target].incoming_gap(body), Some(1));
+    host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, body)));
+    assert_eq!(host.windows[&target].incoming_tab_pointer, Some(body));
+    assert_eq!(
+        host.tab_drag_feedback(|_, _, _| Some((target, body)))
+            .expect("body feedback")
+            .cursor,
+        egui::CursorIcon::Move
     );
     host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, point)));
     assert_eq!(host.windows[&target].incoming_tab_pointer, Some(point));
@@ -296,7 +307,7 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         vec![pointer(outside, false)],
     );
     assert!(host.windows[&source].pending_tab_drop.is_some());
-    host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, point)));
+    host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, body)));
     assert_eq!(
         host.windows.len(),
         original_count,
@@ -309,6 +320,10 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let moved = app.tabs.active().expect("moved tab").id;
     assert_eq!(app.tabs.tabs()[1].id, moved);
     assert_eq!(app.edits[&moved], edits);
+    assert!(
+        app.filmstrip_open,
+        "the transferred tab retains its overlay"
+    );
     assert!(Arc::ptr_eq(
         &app.image.as_ref().expect("image").decoded,
         &decoded
@@ -335,7 +350,7 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .tab_detach_request(moved)
         .expect("return request");
     let returned = host
-        .merge_tab_drop(target, &request, welcome, point)
+        .merge_tab_drop(target, &request, welcome, point + egui::vec2(0.0, 100.0))
         .expect("Welcome insertion");
     assert_eq!(host.windows[&welcome].tabs.tabs()[0].id, returned);
     assert_eq!(host.windows[&welcome].edits[&returned], edits);
@@ -410,6 +425,6 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     host.remove_closed();
     assert_eq!(host.windows.len(), original_count);
     eprintln!(
-        "PASS hosted tab drop: captured drag/hover/release merges dirty in-memory animation at the indicated gap without a new HWND; hidden native GPU indicator and Welcome insertion; modal/body/stale-release rejection; source and destination neighbors retained; OS hit selection injected for hidden windows"
+        "PASS hosted tab drop: captured drag/hover/body-release merges dirty in-memory animation at the indicated gap without a new HWND, including filmstrip-open hosts; hidden native GPU indicator and Welcome body insertion; modal/stale-release rejection; source and destination neighbors retained; OS hit selection injected for hidden windows"
     );
 }

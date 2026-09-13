@@ -18,7 +18,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && !self.modal_input_blocked()
             && !self.palette_open
             && !self.grid_open
-            && !self.filmstrip_open
             && self
                 .ui_context
                 .as_ref()
@@ -194,7 +193,7 @@ impl WindowHost {
             .windows
             .get(&target)
             .and_then(|app| app.incoming_gap(point))
-            .ok_or("drop on an available tab strip")?;
+            .ok_or("drop on an available window")?;
         self.move_tab(source, target, request, gap)
     }
 

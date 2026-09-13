@@ -4378,6 +4378,27 @@ where
                                             });
                                         let target =
                                             self.tab_preview.target_with_playback(tab, background);
+                                        let retained_image =
+                                            if hovered && target.kind == MediaKind::Image {
+                                                if self.displayed_tab == Some(tab.id)
+                                                    && self.path.as_deref()
+                                                        == Some(target.path.as_path())
+                                                {
+                                                    self.image.as_ref()
+                                                } else {
+                                                    self.retained_images
+                                                        .get(&tab.id)
+                                                        .filter(|saved| {
+                                                            saved.path == target.path
+                                                                && saved.graphics_epoch
+                                                                    == self.graphics_epoch
+                                                        })
+                                                        .and_then(|saved| saved.image.as_ref())
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                            .map(|image| image.texture.clone());
                                         if hovered {
                                             if background.is_some_and(|saved| {
                                                 saved.state == PlaybackState::Playing
@@ -4386,15 +4407,24 @@ where
                                                     .ctx()
                                                     .request_repaint_after(Duration::from_secs(1));
                                             }
-                                            preview_target = Some(target.clone());
-                                            // Select an already cached sheet cell before painting it.
-                                            self.tab_preview.request(
-                                                Some(target.clone()),
-                                                &self.preview_cache,
-                                                Arc::clone(&self.notify),
-                                            );
+                                            if retained_image.is_some() {
+                                                // Borrow this tab's displayed pixels without a new decode/upload.
+                                                self.tab_preview.clear();
+                                            } else {
+                                                preview_target = Some(target.clone());
+                                                // Select an already cached sheet cell before painting it.
+                                                self.tab_preview.request(
+                                                    Some(target.clone()),
+                                                    &self.preview_cache,
+                                                    Arc::clone(&self.notify),
+                                                );
+                                            }
                                         }
-                                        self.tab_preview.show(&response, &target);
+                                        self.tab_preview.show(
+                                            &response,
+                                            &target,
+                                            retained_image.as_ref(),
+                                        );
                                     }
                                     if let Some((target, focus)) = tab_menu_focus
                                         && target == tab.id

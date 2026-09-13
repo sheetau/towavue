@@ -266,24 +266,34 @@ impl TabPreview {
         }
     }
 
-    pub fn show(&self, response: &egui::Response, target: &Target) {
+    pub fn show(
+        &self,
+        response: &egui::Response,
+        target: &Target,
+        retained: Option<&TextureHandle>,
+    ) {
         crate::media_preview::Preview::tab(response).show(|ui| {
             ui.set_max_width(240.0);
-            let texture = (self.target.as_ref() == Some(target))
+            let cached = (self.target.as_ref() == Some(target))
                 .then_some(self.texture.as_ref())
                 .flatten();
+            let texture = retained.map(Ok).or_else(|| cached.map(Result::as_ref));
+            let sheet_uv = if retained.is_some() {
+                None
+            } else {
+                self.sheet_uv
+            };
             match texture {
                 Some(Ok(texture)) => {
-                    let size = self
-                        .sheet_uv
-                        .map_or_else(|| texture.size_vec2(), |_| egui::vec2(240.0, 160.0));
+                    let size =
+                        sheet_uv.map_or_else(|| texture.size_vec2(), |_| egui::vec2(240.0, 160.0));
                     let mut image = egui::Image::new((texture.id(), size))
-                        .uv(self.sheet_uv.unwrap_or(egui::Rect::from_min_max(
+                        .uv(sheet_uv.unwrap_or(egui::Rect::from_min_max(
                             egui::Pos2::ZERO,
                             egui::pos2(1.0, 1.0),
                         )))
                         .max_size(egui::vec2(240.0, 160.0));
-                    if self.sheet_uv.is_some() {
+                    if sheet_uv.is_some() {
                         image = image.rotate(0.0, egui::vec2(0.5, 0.5));
                     }
                     ui.add(image);
@@ -802,6 +812,146 @@ mod tests {
         }
         assert!(app.tab_preview.target.is_none());
         assert_eq!(app.tabs.active().expect("still active").id, image);
+    }
+
+    #[test]
+    fn loaded_image_hover_reuses_current_pixels_without_a_preview_job() {
+        let mut app = crate::Application::new(None, |_| {}).expect("headless app");
+        let context = crate::fonts::test_context();
+        context.global_style_mut(crate::chrome::style);
+        app.ui_context = Some(context.clone());
+        let path = PathBuf::from("current-animation.gif");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.displayed_tab = Some(tab);
+        app.media_kind = Some(MediaKind::Image);
+        let decoded = Arc::new(towavue_runtime_windows::DecodedImage {
+            animation_plays: 1,
+            format: "test",
+            frames: [10, 30]
+                .into_iter()
+                .map(|color| towavue_runtime_windows::DecodedImageFrame {
+                    width: 2,
+                    height: 1,
+                    rgba: [color, 0, 0, 255].repeat(2),
+                    delay: Duration::from_millis(10),
+                })
+                .collect(),
+        });
+        app.image =
+            Some(crate::ImagePresentation::from_decoded(&context, &path, decoded).expect("image"));
+        let texture = app.image.as_ref().expect("image").texture.id();
+        let mut time = 0.0;
+        let mut frame = |app: &mut crate::Application<_>, pointer| {
+            time += 0.1;
+            context.run_ui(
+                egui::RawInput {
+                    time: Some(time),
+                    focused: false,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events: vec![egui::Event::PointerMoved(pointer)],
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut actions = Vec::new();
+                    app.draw_top_bar(ui, &mut actions);
+                    assert!(actions.is_empty());
+                },
+            )
+        };
+        let pointer = egui::pos2(90.0, 16.0);
+        for _ in 0..3 {
+            frame(&mut app, pointer);
+        }
+        let painted = |output: &egui::FullOutput, texture| {
+            output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill_texture_id() == texture))
+        };
+        let _ = context.tex_manager().write().take_delta();
+        assert!(
+            painted(&frame(&mut app, pointer), texture),
+            "reuse the loaded image instead of waiting for a file thumbnail"
+        );
+        assert!(
+            app.tab_preview.target.is_none(),
+            "no background thumbnail job"
+        );
+        assert!(
+            context.tex_manager().write().take_delta().set.is_empty(),
+            "hover does not upload pixels"
+        );
+        let image = app.image.as_mut().expect("image");
+        let end = image.next_frame_at.expect("animation") + Duration::from_secs(1);
+        assert!(image.advance_animation(end));
+        assert!(image.next_frame_at.is_none());
+        let _ = context.tex_manager().write().take_delta();
+        assert!(painted(&frame(&mut app, pointer), texture));
+        assert!(context.tex_manager().write().take_delta().set.is_empty());
+        let original = app.image.as_ref().expect("image").decoded.clone();
+        let edited = towavue_runtime_windows::render_image_edits(
+            &original,
+            &[towavue_core::EditOperation::RotateClockwise],
+            &Default::default(),
+        )
+        .expect("edited pixels");
+        app.install_edited_image(Arc::new(edited))
+            .expect("edited presentation");
+        let edited_texture = app.image.as_ref().expect("edited").texture.id();
+        let _ = context.tex_manager().write().take_delta();
+        assert!(painted(&frame(&mut app, pointer), edited_texture));
+        assert!(!painted(&frame(&mut app, pointer), texture));
+        assert!(context.tex_manager().write().take_delta().set.is_empty());
+        app.tabs.open_new("other.png".into(), MediaKind::Image);
+        app.retain_image_tab();
+        app.path = Some("other.png".into());
+        app.displayed_tab = app.tabs.active().map(|tab| tab.id);
+        assert!(
+            painted(&frame(&mut app, pointer), edited_texture),
+            "background tab keeps its retained frame"
+        );
+        assert!(app.tab_preview.target.is_none());
+        assert!(
+            app.retained_images[&tab]
+                .image
+                .as_ref()
+                .expect("retained")
+                .next_frame_at
+                .is_none()
+        );
+        app.retained_images
+            .get_mut(&tab)
+            .expect("retained")
+            .graphics_epoch = app.graphics_epoch.wrapping_add(1);
+        assert!(
+            !painted(&frame(&mut app, pointer), edited_texture),
+            "stale graphics epoch must use the fallback"
+        );
+        assert!(app.tab_preview.target.is_some());
+        let saved = app.retained_images.get_mut(&tab).expect("retained");
+        saved.graphics_epoch = app.graphics_epoch;
+        saved.path = "stale-path.gif".into();
+        assert!(
+            !painted(&frame(&mut app, pointer), edited_texture),
+            "a retained image for another path is not a match"
+        );
+        app.retained_images.get_mut(&tab).expect("retained").path = path;
+        assert!(painted(&frame(&mut app, pointer), edited_texture));
+        assert!(
+            app.tab_preview.target.is_none(),
+            "loaded pixels cancel fallback work"
+        );
+        let generation = app.tab_preview.generation;
+        assert!(painted(&frame(&mut app, pointer), edited_texture));
+        assert_eq!(
+            app.tab_preview.generation, generation,
+            "steady hover does not churn jobs"
+        );
+        assert!(
+            !painted(&frame(&mut app, egui::pos2(900.0, 400.0)), edited_texture),
+            "leaving the tab hides its borrowed image"
+        );
     }
 
     #[test]

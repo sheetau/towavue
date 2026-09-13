@@ -5,6 +5,19 @@ use super::*;
 #[cfg(target_arch = "x86_64")]
 mod paeth;
 
+/// Use the same bounded row reconstruction for originals and streamed thumbnails.
+#[cfg(target_arch = "x86_64")]
+pub(super) fn configure_row_filter<R: std::io::BufRead + Seek>(reader: &mut png::Reader<R>) {
+    reader.set_row_filter(Some(|filter, bpp, previous, current| {
+        if matches!(filter, png::Filter::Paeth) && bpp == 4 && !previous.is_empty() {
+            paeth::unfilter_rgba(previous, current);
+            true
+        } else {
+            false
+        }
+    }));
+}
+
 /// Decode static PNG rows directly into the retained RGBA8 canvas. APNG keeps
 /// its separate compositor; Adam7 needs the decoder's full raw interlace buffer.
 pub(super) fn decode(
@@ -23,14 +36,7 @@ pub(super) fn decode(
     decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info()?;
     #[cfg(target_arch = "x86_64")]
-    reader.set_row_filter(Some(|filter, bpp, previous, current| {
-        if matches!(filter, png::Filter::Paeth) && bpp == 4 && !previous.is_empty() {
-            paeth::unfilter_rgba(previous, current);
-            true
-        } else {
-            false
-        }
-    }));
+    configure_row_filter(&mut reader);
     let info = reader.info();
     if info.animation_control.is_some() {
         return Ok(None);

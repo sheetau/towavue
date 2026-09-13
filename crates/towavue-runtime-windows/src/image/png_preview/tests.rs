@@ -142,6 +142,34 @@ fn compare(path: &Path) {
 }
 
 #[test]
+fn png_paeth_thumbnail_matches_unhooked_decode_for_four_byte_pixel_strides() {
+    let path = path("paeth");
+    // The PNG byte stride also covers 16-bit gray+alpha, not only RGBA8.
+    // Force Paeth instead of relying on the encoder's adaptive filter choices.
+    for (color, depth) in [
+        (png::ColorType::Rgba, png::BitDepth::Eight),
+        (png::ColorType::GrayscaleAlpha, png::BitDepth::Sixteen),
+    ] {
+        for width in [1, 2, 7, 503] {
+            let height = 317;
+            let pixels: Vec<_> = (0..width * height * 4)
+                .map(|index| ((index * 719 + index / 31 * 391) % 256) as u8)
+                .collect();
+            let mut encoder =
+                png::Encoder::new(File::create(&path).expect("fixture"), width, height);
+            encoder.set_color(color);
+            encoder.set_depth(depth);
+            encoder.set_filter(png::Filter::Paeth);
+            let mut writer = encoder.write_header().expect("header");
+            writer.write_image_data(&pixels).expect("pixels");
+            writer.finish().expect("finish");
+            compare(&path);
+        }
+    }
+    fs::remove_file(path).expect("owned fixture");
+}
+
+#[test]
 fn png_row_thumbnail_matches_full_decode_for_colors_depths_and_all_orientations() {
     let path = path("colors");
     for (width, height) in [(503, 317), (7, 5), (1, 1)] {

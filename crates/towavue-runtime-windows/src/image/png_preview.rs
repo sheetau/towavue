@@ -21,6 +21,8 @@ pub(crate) fn png_thumbnail(
             png::Decoder::new_with_limits(reader.into_inner(), png::Limits { bytes: byte_limit });
         decoder.set_transformations(png::Transformations::EXPAND);
         let mut reader = decoder.read_info()?;
+        #[cfg(target_arch = "x86_64")]
+        super::png_static::configure_row_filter(&mut reader);
         let info = reader.info();
         if info.interlaced || info.animation_control.is_some() {
             return Ok(None);

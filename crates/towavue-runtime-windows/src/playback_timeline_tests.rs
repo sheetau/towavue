@@ -474,6 +474,89 @@ fn selection_bounds_decode_without_rebasing_or_mutating_the_edited_plan() {
 }
 
 #[test]
+fn short_stretched_spans_keep_signal_and_export_equivalent_joins() {
+    let (directory, path) = fixture(true);
+    let format = AudioFormat {
+        sample_rate: 48000,
+        channels: 2,
+    };
+    let mut source = Vec::new();
+    decode::decode_file(&path, |output| {
+        if let DecodeOutput::Audio(chunk) = output {
+            source.extend(chunk.bytes);
+        }
+        true
+    })
+    .expect("source PCM");
+    for (length, stretched) in [(1, 4), (4, 1), (10, 20), (50, 200)] {
+        let edits = vec![EditOperation::Timeline(TimelineEdit::Stretch(
+            range(17, 17 + length),
+            time(stretched),
+        ))];
+        let plan = EditTimeline::from_operations(time(2000), &edits).expect("short stretch");
+        let mut actual = Vec::new();
+        timeline::decode_audio(
+            &path,
+            &plan,
+            time(0),
+            None,
+            1.0,
+            format,
+            &AtomicBool::new(false),
+            |chunk| {
+                actual.extend(chunk.bytes);
+                true
+            },
+        )
+        .expect("short stretched playback");
+        let start = 17 * 48 * 8;
+        let end = (17 + stretched) as usize * 48 * 8;
+        assert_eq!(actual.len(), (2000 - length + stretched) as usize * 48 * 8);
+        assert_eq!(&actual[..start], &source[..start]);
+        assert_eq!(&actual[end..], &source[(17 + length) as usize * 48 * 8..]);
+        assert!(
+            actual[start..end]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|sample| f32::from_le_bytes(*sample).abs() > 0.001),
+            "short stretched interval must retain its signal"
+        );
+        let target = directory.join(format!("stretch-{length}-{stretched}.wav"));
+        crate::export_media(&crate::ExportRequest {
+            source: path.clone(),
+            target: target.clone(),
+            kind: towavue_core::MediaKind::Audio,
+            operations: edits,
+            hardware_encode: false,
+        })
+        .expect("short stretched export");
+        let mut exported = Vec::new();
+        decode::decode_file(&target, |output| {
+            if let DecodeOutput::Audio(chunk) = output {
+                exported.extend(chunk.bytes);
+            }
+            true
+        })
+        .expect("export PCM");
+        assert_eq!(actual.len(), exported.len());
+        assert!(
+            actual
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(exported.as_chunks::<4>().0)
+                .all(
+                    |(a, b)| (f32::from_le_bytes(*a) - f32::from_le_bytes(*b)).abs()
+                        <= 1.0 / 32768.0
+                ),
+            "playback/export samples differ"
+        );
+    }
+    fs::remove_dir_all(directory).expect("remove owned fixture");
+}
+
+#[test]
 fn selected_audio_stops_at_planned_samples_inside_a_stretched_span() {
     let (directory, path) = fixture(true);
     let plan = plan();

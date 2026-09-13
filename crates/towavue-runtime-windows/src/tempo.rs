@@ -21,6 +21,7 @@ pub(crate) struct AudioTempo {
     graph: Option<filter::Graph>,
     sample_rate: u32,
     input_frames: i64,
+    finished: bool,
 }
 
 impl AudioTempo {
@@ -32,10 +33,17 @@ impl AudioTempo {
         )
     }
 
-    pub(crate) fn timeline(sample_rate: u32, rate: f64) -> Result<Self, Error> {
+    pub(crate) fn timeline(sample_rate: u32, rate: f64, output_frames: u64) -> Result<Self, Error> {
         Self::from_chain(
             sample_rate,
-            (rate != 1.0).then(|| filters(rate, 9).join(",")),
+            (rate != 1.0).then(|| {
+                // atempo can otherwise flush no audio for sub-window spans.
+                // Supply EOF context, bounded by the caller's exact output interval.
+                format!(
+                    "{},atrim=end_sample={output_frames}",
+                    timeline_filters(rate, 9, sample_rate).join(",")
+                )
+            }),
         )
     }
 
@@ -63,10 +71,15 @@ impl AudioTempo {
             graph,
             sample_rate,
             input_frames: 0,
+            finished: false,
         })
     }
 
     pub(crate) fn push(&mut self, bytes: &[u8], output: &mut VecDeque<u8>) -> Result<(), Error> {
+        // A bounded timeline sink can finish before the source span is exhausted.
+        if self.finished {
+            return Ok(());
+        }
         let Some(graph) = &mut self.graph else {
             output.extend(bytes);
             return Ok(());
@@ -86,18 +99,23 @@ impl AudioTempo {
             .expect("audio source")
             .source()
             .add(&input)?;
-        Self::drain(graph, output)
+        self.finished = Self::drain(graph, output)?;
+        Ok(())
     }
 
     pub(crate) fn finish(&mut self, output: &mut VecDeque<u8>) -> Result<(), Error> {
+        if self.finished {
+            return Ok(());
+        }
         if let Some(graph) = &mut self.graph {
             graph.get("in").expect("audio source").source().flush()?;
             Self::drain(graph, output)?;
         }
+        self.finished = true;
         Ok(())
     }
 
-    fn drain(graph: &mut filter::Graph, output: &mut VecDeque<u8>) -> Result<(), Error> {
+    fn drain(graph: &mut filter::Graph, output: &mut VecDeque<u8>) -> Result<bool, Error> {
         loop {
             let mut frame = frame::Audio::empty();
             match graph
@@ -107,12 +125,25 @@ impl AudioTempo {
                 .frame(&mut frame)
             {
                 Ok(()) => output.extend(&frame.data(0)[..frame.samples() * 8]),
-                Err(Error::Eof) => return Ok(()),
-                Err(Error::Other { errno }) if errno == ffmpeg_next::error::EAGAIN => return Ok(()),
+                Err(Error::Eof) => return Ok(true),
+                Err(Error::Other { errno }) if errno == ffmpeg_next::error::EAGAIN => {
+                    return Ok(false);
+                }
                 Err(error) => return Err(error),
             }
         }
     }
+}
+
+pub(crate) fn timeline_filters(rate: f64, precision: usize, sample_rate: u32) -> Vec<String> {
+    // FFmpeg atempo uses a power-of-two window >= sample_rate / 24.
+    // Two windows of EOF context per stage release short spans without an
+    // unbounded silence source if a truncated file ends before its planned span.
+    let padding = u64::from(sample_rate / 24).next_power_of_two() * 2;
+    filters(rate, precision)
+        .into_iter()
+        .flat_map(|filter| [format!("apad=pad_len={padding}"), filter])
+        .collect()
 }
 
 pub(crate) fn filters(mut rate: f64, precision: usize) -> Vec<String> {
@@ -170,6 +201,65 @@ mod tests {
     }
 
     #[test]
+    fn short_tempo_spans_retain_signal_with_bounded_eof_context() {
+        for frames in [48, 480, 2400, 48000] {
+            let source: Vec<_> = (0..frames)
+                .flat_map(|index| {
+                    let value = (index as f64 * 440.0 * std::f64::consts::TAU / 48000.0).sin()
+                        as f32
+                        * 0.25;
+                    [value, -value].into_iter().flat_map(f32::to_le_bytes)
+                })
+                .collect();
+            for rate in [0.0625, 0.25, 0.5, 1.5, 2.0, 4.0, 16.0] {
+                let expected = (frames as f64 / rate).ceil() as usize;
+                for limit in [0, expected / 2, expected] {
+                    let mut tempo = AudioTempo::timeline(48000, rate, limit as u64).expect("tempo");
+                    let mut output = VecDeque::new();
+                    for chunk in source.chunks(127 * 8) {
+                        tempo.push(chunk, &mut output).expect("push");
+                    }
+                    tempo.finish(&mut output).expect("flush");
+                    let produced = output.len() / 8;
+                    assert_eq!(produced, limit, "frames={frames} rate={rate}");
+                    let nonzero = output
+                        .make_contiguous()
+                        .as_chunks::<8>()
+                        .0
+                        .iter()
+                        .filter(|frame| {
+                            f32::from_le_bytes(frame[..4].try_into().expect("sample")).abs()
+                                > 0.0001
+                        })
+                        .count();
+                    assert!(
+                        nonzero >= frames.min(limit) / 2,
+                        "short span must not disappear: frames={frames} rate={rate} limit={limit}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn truncated_tempo_input_has_finite_tail_and_finishes_once() {
+        let mut tempo = AudioTempo::timeline(48000, 0.25, 48000 * 60).expect("tempo");
+        let mut output = VecDeque::new();
+        tempo.push(&[0; 48 * 8], &mut output).expect("short input");
+        tempo.finish(&mut output).expect("finite EOF context");
+        assert!(
+            output.len() < 48000 * 8,
+            "do not synthesize the entire missing minute"
+        );
+        let length = output.len();
+        tempo.finish(&mut output).expect("already finished");
+        tempo
+            .push(&[0; 48 * 8], &mut output)
+            .expect("already finished");
+        assert_eq!(output.len(), length);
+    }
+
+    #[test]
     fn tempo_changes_duration_without_transposing_a_stereo_tone() {
         const SAMPLE_RATE: u32 = 48_000;
         let source = (0..SAMPLE_RATE * 4)
@@ -181,8 +271,17 @@ mod tests {
                 [value, -value].into_iter().flat_map(f32::to_le_bytes)
             })
             .collect::<Vec<_>>();
-        for rate in [0.25, 0.5, 1.0, 1.5, 2.0, 4.0] {
-            let mut tempo = AudioTempo::new(SAMPLE_RATE, rate).expect("tempo filter");
+        for (rate, bounded) in [0.25, 0.5, 1.0, 1.5, 2.0, 4.0]
+            .into_iter()
+            .flat_map(|rate| [(rate, false), (rate, true)])
+        {
+            let expected_frames = f64::from(SAMPLE_RATE) * 4.0 / f64::from(rate);
+            let mut tempo = if bounded {
+                AudioTempo::timeline(SAMPLE_RATE, f64::from(rate), expected_frames.ceil() as u64)
+            } else {
+                AudioTempo::new(SAMPLE_RATE, rate)
+            }
+            .expect("tempo filter");
             let mut output = VecDeque::new();
             for chunk in source.chunks(1024 * 8) {
                 tempo.push(chunk, &mut output).expect("filter input");
@@ -192,7 +291,9 @@ mod tests {
             if rate == 1.0 {
                 assert_eq!(bytes, source);
             }
-            let expected_frames = f64::from(SAMPLE_RATE) * 4.0 / f64::from(rate);
+            if bounded {
+                assert_eq!(bytes.len() / 8, expected_frames.ceil() as usize);
+            }
             assert!(
                 (bytes.len() as f64 / 8.0 - expected_frames).abs() < 0.08 * f64::from(SAMPLE_RATE),
                 "duration at {rate}x"

@@ -1279,7 +1279,11 @@ fn timeline_filters(
             ];
             let rate = span.rate() * f64::from(master.rate);
             if rate != 1.0 {
-                audio.extend(tempo_filters(rate, 9));
+                audio.extend(crate::tempo::timeline_filters(
+                    rate,
+                    9,
+                    time_base.denominator() as u32,
+                ));
             }
             let volume = f64::from(span.volume()) * f64::from(master.volume);
             if volume != 1.0 {

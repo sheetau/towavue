@@ -332,7 +332,7 @@ fn normalization_uses_edited_best_audio_and_matches_video_and_audio_only_without
         "same edited samples in both export modes"
     );
     let reference = root.join("unscaled-reference.wav");
-    let graph = "[0:2]asplit=2[a][b];[a]atrim=start_pts=9600:end_pts=19200,asetpts=PTS-STARTPTS,aformat=sample_fmts=flt,volume=0.125,apad=whole_len=9600,atrim=end_sample=9600[x];[b]atrim=start_pts=28800:end_pts=48000,asetpts=PTS-STARTPTS,aformat=sample_fmts=flt,atempo=2,volume=0.5,apad=whole_len=9600,atrim=end_sample=9600[y];[x][y]concat=n=2:v=0:a=1[out]";
+    let graph = "[0:2]asplit=2[a][b];[a]atrim=start_pts=9600:end_pts=19200,asetpts=PTS-STARTPTS,aformat=sample_fmts=flt,volume=0.125,apad=whole_len=9600,atrim=end_sample=9600[x];[b]atrim=start_pts=28800:end_pts=48000,asetpts=PTS-STARTPTS,aformat=sample_fmts=flt,apad=pad_len=4096,atempo=2,volume=0.5,apad=whole_len=9600,atrim=end_sample=9600[y];[x][y]concat=n=2:v=0:a=1[out]";
     ffmpeg(
         &[
             "-i",

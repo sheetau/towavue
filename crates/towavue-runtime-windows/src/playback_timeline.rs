@@ -112,6 +112,7 @@ pub(super) fn decode_audio(
                 tempo = Some(crate::tempo::AudioTempo::timeline(
                     format.sample_rate,
                     rate,
+                    limit - emitted,
                 )?);
             }
             let complete = if let Some(chunk) = &chunk {

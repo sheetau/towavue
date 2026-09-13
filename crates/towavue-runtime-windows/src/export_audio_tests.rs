@@ -343,7 +343,7 @@ fn audio_only_keeps_trim_rate_volume_and_edited_timeline_samples() {
         EditOperation::RotateClockwise,
     ];
     export_media_with_output(&request, ExportOutput::AudioOnly).expect("edited derivative");
-    let graph = "[0:2]asplit=2[a][b];[a]atrim=start_pts=0:end_pts=19200,asetpts=PTS-STARTPTS,aformat=sample_fmts=flt,volume=0.125,apad=whole_len=19200,atrim=end_sample=19200[x];[b]atrim=start_pts=38400:end_pts=57600,asetpts=PTS-STARTPTS,aformat=sample_fmts=flt,atempo=2,volume=0.5,apad=whole_len=9600,atrim=end_sample=9600[y];[x][y]concat=n=2:v=0:a=1[out]";
+    let graph = "[0:2]asplit=2[a][b];[a]atrim=start_pts=0:end_pts=19200,asetpts=PTS-STARTPTS,aformat=sample_fmts=flt,volume=0.125,apad=whole_len=19200,atrim=end_sample=19200[x];[b]atrim=start_pts=38400:end_pts=57600,asetpts=PTS-STARTPTS,aformat=sample_fmts=flt,apad=pad_len=4096,atempo=2,volume=0.5,apad=whole_len=9600,atrim=end_sample=9600[y];[x][y]concat=n=2:v=0:a=1[out]";
     ffmpeg(
         &[
             "-i",

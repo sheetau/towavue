@@ -639,11 +639,23 @@ mod tests {
             sample_rate: 48_000,
             channels: 2,
         };
-        let (wake_tx, wake_rx) = mpsc::channel();
-        let output =
-            match AudioOutput::start_with_settings(format, MediaTime::ZERO, 0.0, 1.0, move || {
-                let _ = wake_tx.send(());
-            }) {
+        for (rate, frames) in [
+            (1.0, 4800),
+            (0.25, 4800),
+            (4.0, 4800),
+            (0.25, 48),
+            (4.0, 48),
+        ] {
+            let (wake_tx, wake_rx) = mpsc::channel();
+            let output = match AudioOutput::start_with_settings(
+                format,
+                MediaTime::ZERO,
+                0.0,
+                rate,
+                move || {
+                    let _ = wake_tx.send(());
+                },
+            ) {
                 Ok(output) => output,
                 Err(AudioOutputError::Wasapi(error)) => {
                     eprintln!("SKIP live drain: no usable default render endpoint: {error}");
@@ -651,28 +663,30 @@ mod tests {
                 }
                 Err(error) => panic!("audio setup failed: {error}"),
             };
-        output
-            .push(AudioChunk {
-                format,
-                frames: 4800,
-                bytes: vec![0; 4800 * 8],
-                presentation_time: MediaTime::ZERO,
-            })
-            .expect("queue silence");
-        output.finish().expect("finish audio");
-        wake_rx
-            .recv_timeout(Duration::from_secs(3))
-            .expect("audio wakes its consumer without polling");
-        let event = output.event_rx.try_recv().expect("result precedes wake");
-        assert_eq!(event, AudioOutputEvent::Drained);
-        let position = output.position();
-        output
-            .set_paused(true)
-            .expect("pause video tail after audio drain");
-        output
-            .set_paused(false)
-            .expect("resume video tail after audio drain");
-        assert_eq!(output.position(), position);
+            output
+                .push(AudioChunk {
+                    format,
+                    frames,
+                    bytes: vec![0; frames * 8],
+                    presentation_time: MediaTime::ZERO,
+                })
+                .expect("queue silence");
+            output.finish().expect("finish audio");
+            wake_rx
+                .recv_timeout(Duration::from_secs(3))
+                .expect("audio wakes its consumer without polling");
+            let event = output.event_rx.try_recv().expect("result precedes wake");
+            assert_eq!(event, AudioOutputEvent::Drained);
+            let position = output.position();
+            output
+                .set_paused(true)
+                .expect("pause video tail after audio drain");
+            output
+                .set_paused(false)
+                .expect("resume video tail after audio drain");
+            assert_eq!(output.position(), position);
+            eprintln!("PASS live drain: frames={frames}, rate={rate}, muted default endpoint");
+        }
     }
 
     #[test]

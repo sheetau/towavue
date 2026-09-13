@@ -99,7 +99,9 @@ impl ImageCache {
             self.bytes -= removed.retained_bytes();
         }
         let bytes = image.retained_bytes();
-        if image.is_animated() || bytes > self.byte_limit {
+        // Completed frames are immutable; animation clocks and mutable display
+        // textures belong to each presentation. Account for all frames, not just one.
+        if bytes > self.byte_limit {
             return;
         }
         while self.entries.len() >= CACHE_ENTRY_LIMIT || self.bytes + bytes > self.byte_limit {
@@ -1689,6 +1691,20 @@ mod tests {
                 completed.images[0].1.as_ref().expect("original").as_ref(),
                 &reference
             );
+            let original = completed.images[0].1.as_ref().expect("original");
+            loader.request(vec![path.clone()]);
+            let restored = loop {
+                if let Some(completed) = loader.take_completed() {
+                    break completed;
+                }
+                ready
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("return navigation notification");
+            };
+            assert!(
+                Arc::ptr_eq(original, restored.images[0].1.as_ref().expect("restored")),
+                "completed {extension} frames must be reused without decoding again"
+            );
             drop(loader);
         }
         std::fs::remove_dir_all(root).expect("remove owned fixtures");
@@ -2388,12 +2404,29 @@ mod tests {
         assert_eq!(cache.bytes, 0);
         let mut animated = (*pixel(9)).clone();
         animated.frames.push(animated.frames[0].clone());
-        cache.insert("animation".into(), stamp, Arc::new(animated));
-        assert!(cache.entries.is_empty());
-        let mut too_large = (*pixel(9)).clone();
-        too_large.frames[0].rgba = vec![9; 12];
+        let animated = Arc::new(animated);
+        cache.insert("animation".into(), stamp, Arc::clone(&animated));
+        assert_eq!(cache.bytes, 8, "count every retained animation frame");
+        assert!(matches!(
+            cache.get(Path::new("animation"), Some(stamp), 7),
+            Some(Err(ImageDecodeError::TooLarge))
+        ));
+        let hit = cache
+            .get(Path::new("animation"), Some(stamp), 8)
+            .expect("animation cache hit")
+            .expect("whole animation fits");
+        assert!(Arc::ptr_eq(&hit, &animated));
+        let mut too_large = (*animated).clone();
+        too_large.frames.push(too_large.frames[0].clone());
         cache.insert("large".into(), stamp, Arc::new(too_large));
-        assert!(cache.entries.is_empty());
+        assert_eq!(
+            cache.bytes, 8,
+            "oversized input preserves useful cached frames"
+        );
+        cache.insert("replacement".into(), stamp, pixel(10));
+        assert_eq!(cache.bytes, 4);
+        assert!(cache.get(Path::new("animation"), Some(stamp), 8).is_none());
+        assert_eq!(animated.frames.len(), 2, "eviction preserves live owners");
         let mut cache = ImageCache::new(1000);
         for index in 0..31 {
             cache.insert(index.to_string().into(), stamp, pixel(index));
@@ -2443,7 +2476,17 @@ mod tests {
                 },
                 |path, _, _, _| {
                     count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Ok((*pixel(std::fs::read(path).expect("fixture")[0])).clone())
+                    let value = std::fs::read(path).expect("fixture")[0];
+                    let mut image = (*pixel(value)).clone();
+                    if value % 2 == 1 {
+                        image.frames.push(image.frames[0].clone());
+                        image.frames[1].rgba = vec![value + 1; 4];
+                        image.animation_plays = 2;
+                        for frame in &mut image.frames {
+                            frame.delay = Duration::from_millis(50);
+                        }
+                    }
+                    Ok(image)
                 },
             )
         });

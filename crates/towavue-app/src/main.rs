@@ -19845,9 +19845,12 @@ mod tests {
             second_id
         );
         let mut animation = (*make_image(40)).clone();
+        animation.animation_plays = 2;
+        animation.frames[0].delay = Duration::from_millis(50);
         animation.frames.push(animation.frames[0].clone());
+        animation.frames[1].rgba = vec![80; 4];
         let animation = Arc::new(animation);
-        let a = cache
+        let mut a = cache
             .load(
                 &context,
                 Path::new("a.gif"),
@@ -19864,6 +19867,15 @@ mod tests {
             )
             .expect("uncached animation");
         assert_ne!(a.texture.id(), b.texture.id());
+        assert!(Arc::ptr_eq(&a.decoded, &b.decoded));
+        let other_deadline = b.next_frame_at;
+        assert!(a.advance_animation(a.next_frame_at.expect("first deadline")));
+        assert_eq!(a.frame_index, 1);
+        assert_eq!(b.frame_index, 0);
+        assert_eq!(b.next_frame_at, other_deadline);
+        assert_eq!(b.plays_left, 2);
+        a.update_sampling(TextureOptions::NEAREST);
+        assert_eq!(b.sampling.get(), TextureOptions::LINEAR);
         assert_eq!(cache.entries.len(), 2);
         let mut cache = ImageTextureCache::new(3);
         cache

@@ -104,6 +104,109 @@ fn draw(renderer: &mut FrameRenderer, session: &mut PlaybackSession) -> Vec<u8> 
 }
 
 #[test]
+fn window_surfaces_do_not_stretch_old_ui_during_resize() {
+    // winit permits only one event loop per process, even after it exits.
+    if std::env::var_os("TOWAVUE_RESIZE_TEST_CHILD").is_none() {
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "renderer::shared_renderer_tests::window_surfaces_do_not_stretch_old_ui_during_resize",
+                "--nocapture",
+            ])
+            .env("TOWAVUE_RESIZE_TEST_CHILD", "1")
+            .output()
+            .expect("isolated resize test");
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        return;
+    }
+    struct Trial(bool);
+    impl ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let windows: Vec<_> = (0..2)
+                .map(|_| {
+                    Arc::new(
+                        event_loop
+                            .create_window(
+                                Window::default_attributes()
+                                    .with_visible(false)
+                                    .with_inner_size(winit::dpi::PhysicalSize::new(640, 128)),
+                            )
+                            .expect("owned hidden window"),
+                    )
+                })
+                .collect();
+            let mut first = match FrameRenderer::new(windows[0].as_ref()) {
+                Ok(renderer) => renderer,
+                Err(error) => {
+                    eprintln!("SKIP native resize contract: D3D11 unavailable: {error}");
+                    self.0 = true;
+                    event_loop.exit();
+                    return;
+                }
+            };
+            let caption = NativeCaption::new(windows[1].clone()).expect("caption");
+            let mut second =
+                FrameRenderer::with_native_caption_on_device(&caption, first.graphics_device())
+                    .expect("shared caption renderer");
+            assert_eq!(first.graphics_device.device, second.graphics_device.device);
+            for renderer in [&mut first, &mut second] {
+                let chain: windows::Win32::Graphics::Dxgi::IDXGISwapChain1 =
+                    renderer.swap_chain.cast().expect("swap chain 1");
+                // Query the live, owned swap chain; this is a presentation-policy
+                // check, not a screenshot or physical interactive-resize claim.
+                let desc = unsafe { chain.GetDesc1() }.expect("live descriptor");
+                assert_eq!(
+                    desc.Scaling,
+                    windows::Win32::Graphics::Dxgi::DXGI_SCALING_NONE,
+                    "old UI pixels must not be stretched before the next sized frame"
+                );
+                assert_eq!(desc.SwapEffect, DXGI_SWAP_EFFECT_FLIP_DISCARD);
+                assert_eq!(desc.BufferCount, 2);
+                let background = unsafe { chain.GetBackgroundColor() }.expect("background");
+                assert_eq!(
+                    (background.r, background.g, background.b, background.a),
+                    (0.0, 0.0, 0.0, 1.0)
+                );
+                for (width, height) in [(640, 128), (673, 128), (627, 128), (640, 128)] {
+                    renderer.resize_surface(width, height).expect("resize");
+                    renderer
+                        .clear([0.25, 0.5, 0.75, 1.0])
+                        .expect("clear sized buffer");
+                    assert_eq!(pixels(renderer).len(), width as usize * height as usize * 4);
+                    renderer.present_surface().expect("present sized surface");
+                    let desc = unsafe { chain.GetDesc1() }.expect("resized descriptor");
+                    assert_eq!((desc.Width, desc.Height), (width, height));
+                    assert_eq!(
+                        desc.Scaling,
+                        windows::Win32::Graphics::Dxgi::DXGI_SCALING_NONE
+                    );
+                }
+            }
+            self.0 = true;
+            eprintln!(
+                "PASS native resize policy: standalone and shared caption surfaces, four sizes, unscaled flip-discard and opaque black background"
+            );
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    let mut builder = EventLoop::builder();
+    builder.with_any_thread(true);
+    let event_loop = builder.build().expect("event loop");
+    let mut trial = Trial(false);
+    event_loop
+        .run_app(&mut trial)
+        .expect("native resize contract");
+    assert!(trial.0);
+}
+
+#[test]
 #[ignore = "requires native hidden windows and hardware D3D11VA; generated silent video only"]
 fn shared_window_surfaces_preserve_live_hardware_session() {
     struct Trial {

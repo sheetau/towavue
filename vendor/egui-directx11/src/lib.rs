@@ -169,6 +169,9 @@ fn sampler_description(options: egui::TextureOptions) -> D3D11_SAMPLER_DESC {
 }
 
 #[cfg(test)]
+mod resize_tests;
+
+#[cfg(test)]
 mod sampling_tests {
     use super::*;
 

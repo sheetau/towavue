@@ -24,22 +24,22 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC,
     D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0, D3D11_VIDEO_PROCESSOR_STREAM,
     D3D11_VIDEO_USAGE_PLAYBACK_NORMAL, D3D11_VIEWPORT, D3D11_VPIV_DIMENSION_TEXTURE2D,
-    D3D11_VPOV_DIMENSION_TEXTURE2D, D3D11CreateDeviceAndSwapChain, ID3D11Buffer,
-    ID3D11DepthStencilView, ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout,
-    ID3D11Multithread, ID3D11PixelShader, ID3D11RenderTargetView, ID3D11SamplerState,
-    ID3D11Texture2D, ID3D11VertexShader, ID3D11VideoContext, ID3D11VideoContext1,
-    ID3D11VideoDevice, ID3D11VideoProcessor, ID3D11VideoProcessorEnumerator,
-    ID3D11VideoProcessorEnumerator1,
+    D3D11_VPOV_DIMENSION_TEXTURE2D, D3D11CreateDevice, ID3D11Buffer, ID3D11DepthStencilView,
+    ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout, ID3D11Multithread, ID3D11PixelShader,
+    ID3D11RenderTargetView, ID3D11SamplerState, ID3D11Texture2D, ID3D11VertexShader,
+    ID3D11VideoContext, ID3D11VideoContext1, ID3D11VideoDevice, ID3D11VideoProcessor,
+    ID3D11VideoProcessorEnumerator, ID3D11VideoProcessorEnumerator1,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
-    DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
-    DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_MODE_DESC,
-    DXGI_RATIONAL, DXGI_SAMPLE_DESC,
+    DXGI_ALPHA_MODE_IGNORE, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+    DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709, DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
+    DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_RATIONAL,
+    DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
-    DXGI_PRESENT, DXGI_SWAP_CHAIN_DESC, DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_DISCARD,
-    DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice, IDXGIFactory, IDXGISwapChain,
+    DXGI_PRESENT, DXGI_RGBA, DXGI_SCALING_NONE, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG,
+    DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice, IDXGIFactory2,
+    IDXGISwapChain,
 };
 use windows::core::{BOOL, Interface, PCSTR, s};
 
@@ -401,55 +401,40 @@ impl FrameRenderer {
         caption_surface: Option<crate::caption::CaptionSurface>,
         graphics_device: Option<GraphicsDevice>,
     ) -> Result<Self, RenderError> {
-        let description = DXGI_SWAP_CHAIN_DESC {
-            BufferDesc: DXGI_MODE_DESC {
-                Width: 1,
-                Height: 1,
-                RefreshRate: DXGI_RATIONAL::default(),
-                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
-                ..Default::default()
-            },
+        let description = DXGI_SWAP_CHAIN_DESC1 {
+            Width: 1,
+            Height: 1,
+            Format: DXGI_FORMAT_R8G8B8A8_UNORM,
             SampleDesc: DXGI_SAMPLE_DESC {
                 Count: 1,
                 Quality: 0,
             },
             BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
             BufferCount: 2,
-            OutputWindow: hwnd,
-            Windowed: BOOL(1),
+            Scaling: DXGI_SCALING_NONE,
             SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
-            Flags: 0,
+            AlphaMode: DXGI_ALPHA_MODE_IGNORE,
+            ..Default::default()
         };
 
         let mut device = None;
         let mut context = None;
-        let mut swap_chain = None;
         let mut feature_level = D3D_FEATURE_LEVEL::default();
         // The returned COM interfaces are owned by this renderer and are used only
         // on the winit event-loop thread where the renderer is constructed.
         unsafe {
             if let Some(shared) = graphics_device {
-                // Use the factory belonging to this device, not merely the same adapter.
-                // All interfaces are owned; the shared immediate context is already
-                // multithread-protected for decode workers. Each HWND owns one swap chain.
-                let dxgi_device: IDXGIDevice = shared.device.cast()?;
-                let factory: IDXGIFactory = dxgi_device.GetAdapter()?.GetParent()?;
-                factory
-                    .CreateSwapChain(&shared.device, &description, &mut swap_chain)
-                    .ok()?;
                 context = Some(shared.device.GetImmediateContext()?);
                 feature_level = shared.device.GetFeatureLevel();
                 device = Some(shared.device);
             } else {
-                D3D11CreateDeviceAndSwapChain(
+                D3D11CreateDevice(
                     None,
                     D3D_DRIVER_TYPE_HARDWARE,
                     HMODULE::default(),
                     D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
                     None,
                     D3D11_SDK_VERSION,
-                    Some(&description),
-                    Some(&mut swap_chain),
                     Some(&mut device),
                     Some(&mut feature_level),
                     Some(&mut context),
@@ -465,6 +450,21 @@ impl FrameRenderer {
             let _ = multithread.SetMultithreadProtected(true);
         }
         let dxgi_device: IDXGIDevice = device.cast()?;
+        // Use the device's own factory and one owned flip chain per HWND. During
+        // resize, keep the old UI anchored until ResizeBuffers and the next draw;
+        // legacy CreateSwapChain implicitly stretches it to the new window size.
+        // The HWND and shared device outlive this chain on the event-loop thread.
+        let swap_chain = unsafe {
+            let factory: IDXGIFactory2 = dxgi_device.GetAdapter()?.GetParent()?;
+            let chain = factory.CreateSwapChainForHwnd(&device, hwnd, &description, None, None)?;
+            chain.SetBackgroundColor(&DXGI_RGBA {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            })?;
+            chain.cast()?
+        };
         // GetAdapter returns an owned COM reference and GetDesc copies the LUID;
         // both temporary values are released before this constructor returns.
         let adapter_luid = unsafe { dxgi_device.GetAdapter()?.GetDesc()?.AdapterLuid };
@@ -481,7 +481,7 @@ impl FrameRenderer {
                 },
             },
             context,
-            swap_chain: swap_chain.expect("D3D11 returned success without a swap chain"),
+            swap_chain,
             buffer_dimensions: None,
             video_processor: None,
             software_texture: None,

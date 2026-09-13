@@ -256,6 +256,15 @@ fn video_resize_modal_filters_ratio_budget_and_compact_escape() {
         },
         inputs: resize::ResizeDialog::for_video((64, 48), 1.5),
     };
+    for density in [1.0, 1.5, 2.0] {
+        for size in [egui::vec2(480.0, 180.0), egui::vec2(320.0, 240.0)] {
+            resize::tests::keyboard_focus_stays_visible(density, size, |context| {
+                dialog.show(context).is_none()
+            });
+            assert_eq!(dialog.value().expect("unchanged resize").size(), (96, 48));
+            dialog.inputs = resize::ResizeDialog::for_video((64, 48), 1.5);
+        }
+    }
     let context = fonts::test_context();
     context.enable_accesskit();
     let draw = |dialog: &mut VideoResizeDialog, compact, events| {

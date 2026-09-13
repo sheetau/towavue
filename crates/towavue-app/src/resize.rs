@@ -72,15 +72,13 @@ impl ResizeDialog {
         {
             self.width = self.round(f64::from(value) * self.ratio);
         }
-        if ui
-            .checkbox(&mut self.keep_ratio, "Keep aspect ratio")
-            .changed()
+        if scroll_on_focus(ui.checkbox(&mut self.keep_ratio, "Keep aspect ratio")).changed()
             && self.keep_ratio
             && let Ok(value) = self.width.parse::<u32>()
         {
             self.height = self.round(f64::from(value) / self.ratio);
         }
-        egui::ComboBox::from_label("Resampling filter")
+        let filter = egui::ComboBox::from_label("Resampling filter")
             .selected_text(filter_name(self.filter))
             .show_ui(ui, |ui| {
                 for filter in [
@@ -97,6 +95,7 @@ impl ResizeDialog {
                     }
                 }
             });
+        scroll_on_focus(filter.response);
         if previous != (self.width.clone(), self.height.clone(), self.filter) {
             ui.ctx().request_repaint();
         }
@@ -128,13 +127,14 @@ impl ResizeDialog {
                         }
                     }
                     ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(value.is_some(), egui::Button::new("Apply resize"))
-                            .clicked()
+                        if scroll_on_focus(
+                            ui.add_enabled(value.is_some(), egui::Button::new("Apply resize")),
+                        )
+                        .clicked()
                         {
                             action = Some(value);
                         }
-                        if ui.button("Cancel").clicked() {
+                        if scroll_on_focus(ui.button("Cancel")).clicked() {
                             action = Some(None);
                         }
                     });
@@ -149,6 +149,13 @@ impl ResizeDialog {
         }
         action
     }
+}
+
+pub(super) fn scroll_on_focus(response: egui::Response) -> egui::Response {
+    if response.gained_focus() {
+        response.scroll_to_me(None);
+    }
+    response
 }
 
 pub(super) fn text_input(ui: &mut egui::Ui, label: &str, value: &mut String) -> egui::Response {
@@ -210,7 +217,7 @@ fn text_input_rows(
     if changed {
         response.mark_changed();
     }
-    response
+    scroll_on_focus(response)
 }
 
 fn filter_name(filter: ResampleFilter) -> &'static str {
@@ -422,6 +429,100 @@ pub(crate) mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn compact_resize_keyboard_navigation_keeps_focused_controls_visible() {
+        for density in [1.0, 1.5, 2.0] {
+            for size in [egui::vec2(480.0, 180.0), egui::vec2(320.0, 240.0)] {
+                let mut dialog = ResizeDialog::new((600, 800), 1);
+                keyboard_focus_stays_visible(density, size, |context| {
+                    dialog.show(context).is_none()
+                });
+            }
+        }
+    }
+
+    pub(crate) fn keyboard_focus_stays_visible(
+        density: f32,
+        size: egui::Vec2,
+        mut show: impl FnMut(&egui::Context) -> bool,
+    ) {
+        let context = crate::fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.enable_accesskit();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+        let mut time = 0.0;
+        let mut frame = |events| {
+            time += 0.1;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| assert!(show(ui.ctx()), "navigation must not apply or cancel"),
+            );
+            output.platform_output.accesskit_update.expect("tree")
+        };
+        for _ in 0..3 {
+            frame(vec![]);
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        let mut filter_seen = false;
+        for shift in [false, true] {
+            for _ in 0..7 {
+                for pressed in [true, false] {
+                    frame(vec![egui::Event::Key {
+                        key: egui::Key::Tab,
+                        physical_key: None,
+                        pressed,
+                        repeat: false,
+                        modifiers: egui::Modifiers {
+                            shift,
+                            ..egui::Modifiers::NONE
+                        },
+                    }]);
+                }
+                for _ in 0..5 {
+                    frame(vec![]);
+                }
+                let tree = frame(vec![]);
+                if let Some((_, node)) = tree.nodes.iter().find(|(id, _)| *id == tree.focus) {
+                    filter_seen |= node.role() == egui::accesskit::Role::ComboBox;
+                    let label = node.label().unwrap_or("unlabelled control");
+                    seen.insert(label.to_owned());
+                    let bounds = node.bounds().expect("focused control bounds");
+                    assert!(
+                        bounds.x0 >= 0.0
+                            && bounds.x1 <= f64::from(screen.right())
+                            && bounds.y0 >= 0.0
+                            && bounds.y1 <= f64::from(screen.bottom()),
+                        "density {density}, size {size:?}, shift {shift}, {label}: {bounds:?}"
+                    );
+                    let focused = context.memory(egui::Memory::focused).expect("focus");
+                    let response = context.read_response(focused).expect("focused response");
+                    // Scroll clipping and widget bounds can round to adjacent physical pixels.
+                    assert!(
+                        response.interact_rect.height() >= response.rect.height() - 1.0 / density,
+                        "{label} is clipped: {:?} vs {:?}",
+                        response.interact_rect,
+                        response.rect
+                    );
+                }
+            }
+        }
+        assert!(filter_seen, "Tab must reach the resampling filter");
+        for label in [
+            "Width in pixels",
+            "Height in pixels",
+            "Keep aspect ratio",
+            "Apply resize",
+            "Cancel",
+        ] {
+            assert!(seen.contains(label), "Tab must reach {label}: {seen:?}");
         }
     }
 

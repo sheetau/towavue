@@ -157,6 +157,55 @@ fn queued_destinations_precede_speculation_without_expanding_neighbors() {
 }
 
 #[test]
+fn directional_prefetch_control_preserves_bounds_queue_priority_and_reading() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::sequence_tests::directional_prefetch_control_preserves_bounds_queue_priority_and_reading",
+    ) else {
+        return;
+    };
+    let (mut app, _, paths) = fixture(&root);
+    app.verification_directional_prefetch = true;
+    for (forward, expected) in [
+        (true, vec![1, 2, 3, 4, 5, 6, 7, 8, 99]),
+        (false, vec![99, 98, 97, 96, 95, 94, 93, 92, 1]),
+    ] {
+        app.image_navigation_forward = forward;
+        assert_eq!(
+            app.image_prefetch_paths(),
+            Some(expected.into_iter().map(|i| paths[i].clone()).collect())
+        );
+    }
+    app.image_navigation_forward = true;
+    app.image_sequence.steps.extend([false, true, true]);
+    assert_eq!(
+        app.image_prefetch_paths(),
+        Some(
+            [99, 1, 2, 3, 4, 5, 6, 7, 8]
+                .map(|i| paths[i].clone())
+                .to_vec()
+        )
+    );
+    app.image_sequence.steps.clear();
+    app.reading_mode = true;
+    let spread = app.image_prefetch_paths();
+    app.verification_directional_prefetch = false;
+    assert_eq!(app.image_prefetch_paths(), spread);
+    app.reading_mode = false;
+    app.verification_directional_prefetch = true;
+    for size in [3, 2, 1] {
+        app.folder_snapshot
+            .as_mut()
+            .expect("snapshot")
+            .items
+            .truncate(size);
+        assert_eq!(
+            app.image_prefetch_paths(),
+            (size > 1).then(|| paths[1..size].to_vec())
+        );
+    }
+}
+
+#[test]
 fn next_image_burst_keeps_the_first_unpresented_original() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_navigation::sequence_tests::next_image_burst_keeps_the_first_unpresented_original",

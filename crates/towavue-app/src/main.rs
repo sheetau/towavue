@@ -879,6 +879,8 @@ struct Application<N> {
     image_request_offset: usize,
     image_loading: bool,
     image_navigation_forward: bool,
+    #[cfg(test)]
+    verification_directional_prefetch: bool,
     image_sequence: image_navigation::ImageSequence,
     image_error: Option<String>,
     playback_error: Option<String>,
@@ -1105,6 +1107,8 @@ where
             image_request_offset: 0,
             image_loading: false,
             image_navigation_forward: true,
+            #[cfg(test)]
+            verification_directional_prefetch: false,
             image_sequence: image_navigation::ImageSequence::default(),
             image_error: None,
             playback_error: None,
@@ -2222,6 +2226,17 @@ where
             // Keep ordinary navigation speculation bounded to nine neighbors.
             let count = images.len().saturating_sub(1).min(9);
             let mut selected = Vec::with_capacity(count);
+            #[cfg(test)]
+            if self.verification_directional_prefetch {
+                // Controlled eight-ahead/one-back comparison; keep the same entry count.
+                for distance in 1..count {
+                    selected.push(if self.image_navigation_forward {
+                        (current + distance) % images.len()
+                    } else {
+                        (current + images.len() - distance) % images.len()
+                    });
+                }
+            }
             'neighbors: for distance in 1..=count {
                 for forward in [
                     self.image_navigation_forward,

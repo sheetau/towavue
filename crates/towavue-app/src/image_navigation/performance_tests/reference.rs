@@ -144,6 +144,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
         trace_index: Option<usize>,
         idle_frame_interval: Duration,
         cache_mib: usize,
+        directional_prefetch: bool,
         source: PathBuf,
         completed: bool,
     }
@@ -158,6 +159,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 let _ = send.send(event);
             })
             .expect("isolated app");
+            app.verification_directional_prefetch = self.directional_prefetch;
             app.image_loader
                 .verification_set_cache_byte_limit(self.cache_mib * 1024 * 1024)
                 .expect("unused reference loader");
@@ -406,8 +408,8 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 self.reverse,
             );
             eprintln!(
-                "REFERENCE_CACHE decoded_mib={}; verification-only budget; texture and per-canvas limits unchanged",
-                self.cache_mib
+                "REFERENCE_CACHE decoded_mib={} directional_prefetch={}; verification-only policy; entry count, texture and per-canvas limits unchanged",
+                self.cache_mib, self.directional_prefetch
             );
             memory.report();
             eprintln!(
@@ -483,6 +485,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 mib
             })
             .unwrap_or(256),
+        directional_prefetch: std::env::var_os("TOWAVUE_NAV_DIRECTIONAL_PREFETCH").is_some(),
         source,
         completed: false,
     };

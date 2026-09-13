@@ -373,6 +373,103 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "diagnostic: compare reflected EOF context without changing production audio"]
+    fn reflected_tempo_eof_context_reports_signal_and_silence_coverage() {
+        const SAMPLE_RATE: u32 = 48_000;
+        let context_frames = (SAMPLE_RATE as usize / 24).next_power_of_two() * 2;
+        println!(
+            "input_frames,silent_input_tail,rate,context,output_frames,trailing_quiet,final_quarter_rms,peak"
+        );
+        for frames in [48_usize, 480, 2400, 9600, 48000] {
+            for silent_tail in [0, frames / 4] {
+                let source: Vec<_> = (0..frames)
+                    .flat_map(|index| {
+                        let value = if index >= frames - silent_tail {
+                            0.0
+                        } else {
+                            ((index + 1) as f64 * 440.0 * std::f64::consts::TAU
+                                / f64::from(SAMPLE_RATE))
+                            .sin() as f32
+                                * 0.25
+                        };
+                        [value, -value].into_iter().flat_map(f32::to_le_bytes)
+                    })
+                    .collect();
+                for rate in [0.25, 0.5, 1.5, 4.0] {
+                    let limit = (frames as f64 / rate).ceil() as usize;
+                    for reflected in [false, true] {
+                        let mut tempo = AudioTempo::timeline(SAMPLE_RATE, rate, limit as u64)
+                            .expect("bounded tempo");
+                        let mut output = VecDeque::new();
+                        for chunk in source.chunks(127 * 8) {
+                            tempo.push(chunk, &mut output).expect("source");
+                        }
+                        if reflected {
+                            // Reflect only a bounded input tail, keeping stereo frames together.
+                            // The candidate is diagnostic-only: it can fill intentional silence.
+                            let tail = frames.min(context_frames);
+                            let context: Vec<_> = (0..context_frames)
+                                .flat_map(|index| {
+                                    let phase = index % (tail * 2);
+                                    let frame = if phase < tail {
+                                        frames - 1 - phase
+                                    } else {
+                                        frames - tail + phase - tail
+                                    };
+                                    source[frame * 8..(frame + 1) * 8].iter().copied()
+                                })
+                                .collect();
+                            for chunk in context.chunks(127 * 8) {
+                                tempo.push(chunk, &mut output).expect("reflected context");
+                            }
+                        }
+                        tempo.finish(&mut output).expect("finite EOF");
+                        assert_eq!(output.len(), limit * 8);
+                        let samples: Vec<_> = output
+                            .make_contiguous()
+                            .as_chunks::<8>()
+                            .0
+                            .iter()
+                            .map(|frame| {
+                                let left = f32::from_le_bytes(frame[..4].try_into().expect("left"));
+                                let right =
+                                    f32::from_le_bytes(frame[4..].try_into().expect("right"));
+                                assert!(left.is_finite() && (left + right).abs() < 0.00001);
+                                left
+                            })
+                            .collect();
+                        let trailing = samples
+                            .iter()
+                            .rev()
+                            .take_while(|v| v.abs() <= 0.0001)
+                            .count();
+                        let quarter = &samples[limit * 3 / 4..];
+                        let rms = (quarter.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>()
+                            / quarter.len() as f64)
+                            .sqrt();
+                        let peak = samples.iter().fold(0.0_f32, |peak, v| peak.max(v.abs()));
+                        if frames == 2400 && silent_tail == 600 && rate == 0.25 {
+                            // The original final quarter is deliberately silent. Reflection
+                            // fills it with signal, despite improving tone-only EOF.
+                            // Keep this counterexample when reassessing boundary treatments.
+                            if reflected {
+                                assert!(rms > 0.1 && trailing == 0);
+                            } else {
+                                assert_eq!(rms, 0.0);
+                                assert!(trailing >= limit / 4);
+                            }
+                        }
+                        println!(
+                            "{frames},{silent_tail},{rate},{},{limit},{trailing},{rms:.6},{peak:.6}",
+                            if reflected { "reflected" } else { "zero" }
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn ordinary_tempo_keeps_short_input_and_exact_duration_after_queue_consumption() {
         for rate in [0.0, -1.0, 0.24, 4.01, f32::NAN, f32::INFINITY] {
             assert!(matches!(

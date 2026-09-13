@@ -569,9 +569,15 @@ pub(crate) struct CaptionSurface {
     _parent: Arc<Window>,
     parent_handle: HWND,
     state: Rc<CaptionState>,
+    clip: Cell<Option<(u32, u32, Option<RECT>)>>,
 }
 
 impl CaptionSurface {
+    pub(crate) fn refresh_clip(&self, width: u32, height: u32) -> windows::core::Result<()> {
+        let cutout = (!self.state.fullscreen.get()).then(|| caption_bounds(self.parent_handle));
+        self.update_clip(width, height, cutout)
+    }
+
     pub(crate) fn new(caption: &NativeCaption) -> windows::core::Result<Self> {
         // SAFETY: standard window class; no borrowed creation data. The child is
         // owned below and remains on the parent's thread for its entire lifetime.
@@ -596,6 +602,7 @@ impl CaptionSurface {
             _parent: caption.window.clone(),
             parent_handle: caption.handle,
             state: caption.state.clone(),
+            clip: Cell::new(None),
         };
         // SAFETY: callback retains no data and is removed by native child destruction.
         if !unsafe { SetWindowSubclass(handle, Some(surface_proc), SUBCLASS_ID, 0) }.as_bool() {
@@ -605,8 +612,7 @@ impl CaptionSurface {
     }
 
     pub(crate) fn resize(&self, width: u32, height: u32) -> windows::core::Result<()> {
-        // SAFETY: the child belongs to this UI thread. Successful SetWindowRgn takes
-        // ownership of its region; temporary and failed regions are deleted here.
+        // SAFETY: the retained child belongs to this UI thread.
         unsafe {
             SetWindowPos(
                 self.handle,
@@ -617,12 +623,28 @@ impl CaptionSurface {
                 height as i32,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             )?;
+        }
+        self.refresh_clip(width, height)
+    }
+
+    fn update_clip(
+        &self,
+        width: u32,
+        height: u32,
+        cutout: Option<RECT>,
+    ) -> windows::core::Result<()> {
+        let geometry = (width, height, cutout);
+        if self.clip.get() == Some(geometry) {
+            return Ok(());
+        }
+        // SAFETY: the child belongs to this UI thread. Successful SetWindowRgn takes
+        // ownership of its region; temporary and failed regions are deleted here.
+        unsafe {
             let region = CreateRectRgn(0, 0, width as i32, height as i32);
             if region.is_invalid() {
                 return Err(windows::core::Error::from_thread());
             }
-            if !self.state.fullscreen.get() {
-                let bounds = caption_bounds(self.parent_handle);
+            if let Some(bounds) = cutout {
                 let cutout = CreateRectRgn(bounds.left, bounds.top, bounds.right, bounds.bottom);
                 let combined = CombineRgn(Some(region), Some(region), Some(cutout), RGN_DIFF);
                 let _ = DeleteObject(cutout.into());
@@ -635,10 +657,12 @@ impl CaptionSurface {
                 let _ = DeleteObject(region.into());
                 return Err(windows::core::Error::from_thread());
             }
+            self.clip.set(Some(geometry));
             // The parent's previous paint may have been clipped by the old child
             // region. Repaint the newly exposed caption after updating that region.
-            let bounds = caption_bounds(self.parent_handle);
-            let _ = InvalidateRect(Some(self.parent_handle), Some(&bounds), false);
+            if let Some(bounds) = cutout {
+                let _ = InvalidateRect(Some(self.parent_handle), Some(&bounds), false);
+            }
         }
         Ok(())
     }
@@ -800,6 +824,76 @@ mod tests {
                 let handle = caption.handle;
                 let surface = CaptionSurface::new(&caption).expect("input-transparent child");
                 surface.resize(960, 576).expect("clipped surface");
+                // Exercise late native geometry without resizing the client/child.
+                // Deterministic rectangles isolate region synchronization from DWM timing.
+                for cutout in [
+                    Some(RECT {
+                        left: 840,
+                        top: 0,
+                        right: 960,
+                        bottom: 32,
+                    }),
+                    Some(RECT {
+                        left: 760,
+                        top: 0,
+                        right: 960,
+                        bottom: 40,
+                    }),
+                    Some(RECT {
+                        left: 860,
+                        top: 0,
+                        right: 960,
+                        bottom: 24,
+                    }),
+                    None,
+                ] {
+                    surface
+                        .update_clip(960, 576, cutout)
+                        .expect("late caption clip");
+                    // SAFETY: same-thread hidden test window; owned temporary region,
+                    // scalar geometry queries and no global input or foreign handles.
+                    unsafe {
+                        let region = CreateRectRgn(0, 0, 0, 0);
+                        assert!(!region.is_invalid());
+                        let result =
+                            windows::Win32::Graphics::Gdi::GetWindowRgn(surface.handle, region);
+                        let matches = [
+                            (759, 16),
+                            (780, 36),
+                            (850, 30),
+                            (880, 12),
+                            (959, 39),
+                            (100, 100),
+                        ]
+                        .into_iter()
+                        .all(|(x, y)| {
+                            let expected = cutout.is_none_or(|bounds| {
+                                x < bounds.left
+                                    || x >= bounds.right
+                                    || y < bounds.top
+                                    || y >= bounds.bottom
+                            });
+                            windows::Win32::Graphics::Gdi::PtInRegion(region, x, y).as_bool()
+                                == expected
+                        });
+                        let _ = DeleteObject(region.into());
+                        assert_ne!(result.0, 0);
+                        assert!(matches, "late native cutout is applied: {cutout:?}");
+                        assert!(ValidateRect(Some(handle), None).as_bool());
+                        surface
+                            .update_clip(960, 576, cutout)
+                            .expect("unchanged clip");
+                        assert!(
+                            !windows::Win32::Graphics::Gdi::GetUpdateRect(handle, None, false)
+                                .as_bool(),
+                            "unchanged geometry does not invalidate the parent again"
+                        );
+                    }
+                    assert_eq!(window.inner_size(), winit::dpi::PhysicalSize::new(960, 576));
+                }
+                surface
+                    .refresh_clip(960, 576)
+                    .expect("restore native geometry");
                 caption.set_drag_region(Some(egui::Rect::from_min_max(
                     egui::pos2(250.0, 8.0),
                     egui::pos2(700.0, 32.0),

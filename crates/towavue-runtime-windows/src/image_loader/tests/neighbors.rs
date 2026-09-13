@@ -56,6 +56,7 @@ fn cached_navigation_keeps_the_useful_decode_and_replaces_its_batch_tail() {
             Ok(Some((*pixel(42)).clone()))
         }
     };
+    loader.verification_trace_path(paths[3].clone(), std::time::Instant::now());
     loader.prefetch_with_decode(vec![paths[1].clone(), paths[2].clone()], decode.clone());
     started_rx
         .recv_timeout(Duration::from_secs(5))
@@ -82,6 +83,41 @@ fn cached_navigation_keeps_the_useful_decode_and_replaces_its_batch_tail() {
     wait_for_prefetch(&loader);
     let decoded_paths = calls.lock().expect("calls").clone();
     let metrics = loader.verification_metrics();
+    let trace = loader
+        .verification_trace_snapshot()
+        .expect("selected neighbor trace");
+    assert_eq!(trace.dropped, 0);
+    assert_eq!(trace.events.len(), 5);
+    assert_eq!(
+        trace.events[0].kind,
+        TraceKind::Planned {
+            position: 1,
+            worker_decoding: true
+        }
+    );
+    assert_eq!(
+        trace.events[1].kind,
+        TraceKind::Considered {
+            remaining_bytes: 4,
+            preceding_cached_bytes: 4,
+            cache_hit: false
+        }
+    );
+    assert_eq!(trace.events[2].kind, TraceKind::PrefetchDecodeStarted);
+    assert!(matches!(
+        trace.events[3].kind,
+        TraceKind::PrefetchReturned {
+            outcome: verification::Outcome::Completed,
+            ..
+        }
+    ));
+    assert_eq!(trace.events[4].kind, TraceKind::OriginalCached);
+    assert!(
+        trace
+            .events
+            .windows(2)
+            .all(|events| events[0].elapsed <= events[1].elapsed)
+    );
     assert_eq!(cache.lock().expect("cache").bytes, 8);
     drop(loader);
     worker.join().expect("foreground shutdown");

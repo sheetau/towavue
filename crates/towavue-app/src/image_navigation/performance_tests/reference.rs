@@ -31,9 +31,34 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             .collect::<Vec<_>>()
     };
     let before = stamps();
+    // Inspect only the 24-byte signature/IHDR prefix, before starting the clock.
+    // Selecting a source by metadata avoids paths or reference pixels in output.
+    let trace_index = std::env::var_os("TOWAVUE_NAV_TRACE_LARGEST_PNG").map(|_| {
+        use std::io::Read;
+        paths
+            .iter()
+            .enumerate()
+            .filter_map(|(index, path)| {
+                let mut prefix = [0; 24];
+                std::fs::File::open(path)
+                    .expect("read-only header")
+                    .read_exact(&mut prefix)
+                    .expect("reference header prefix");
+                if &prefix[..8] != b"\x89PNG\r\n\x1a\n" || &prefix[12..16] != b"IHDR" {
+                    return None;
+                }
+                let width = u32::from_be_bytes(prefix[16..20].try_into().expect("width"));
+                let height = u32::from_be_bytes(prefix[20..24].try_into().expect("height"));
+                Some((index, u64::from(width) * u64::from(height)))
+            })
+            .max_by_key(|&(_, area)| area)
+            .expect("PNG reference required")
+            .0
+    });
     struct Trial<'a> {
         paths: &'a [PathBuf],
         reverse: bool,
+        trace_index: Option<usize>,
         source: PathBuf,
         completed: bool,
     }
@@ -76,6 +101,10 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 captured_at: std::time::SystemTime::UNIX_EPOCH,
             });
             let started = Instant::now();
+            if let Some(index) = self.trace_index {
+                app.image_loader
+                    .verification_trace_path(self.paths[index].clone(), started);
+            }
             app.load_path(first.clone(), MediaKind::Image);
             let cadence = Duration::from_millis(33);
             let mut sent = 0;
@@ -161,6 +190,15 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                         .iter()
                         .position(|candidate| candidate == &path)
                         .expect("source index");
+                    if Some(index) == self.trace_index {
+                        eprintln!(
+                            "REFERENCE_TRACE_PRESENT at_ms={:.3} completion_events_since_previous_original_ms={:.3} layout_ms={:.3} gpu_submit_present_ms={:.3}; event preparation excludes results drained inside layout; GPU is CPU wall time including upload/render/Present, not pure upload",
+                            started.elapsed().as_secs_f64() * 1000.0,
+                            event_preparation.as_secs_f64() * 1000.0,
+                            layout.as_secs_f64() * 1000.0,
+                            gpu_time.as_secs_f64() * 1000.0,
+                        );
+                    }
                     let index = if self.reverse {
                         self.paths.len() - 1 - index
                     } else {
@@ -214,6 +252,31 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 self.reverse,
             );
             memory.report();
+            if let Some(index) = self.trace_index {
+                let command_index = if self.reverse {
+                    self.paths.len() - 1 - index
+                } else {
+                    index
+                };
+                let trace = app
+                    .image_loader
+                    .verification_trace_snapshot()
+                    .expect("selected trace");
+                eprintln!(
+                    "REFERENCE_TRACE index={index} command_index={command_index} scheduled_ms={:.3} dropped={}; selected largest PNG by IHDR area, trace times include scheduling; no paths or pixels",
+                    (cadence * command_index as u32).as_secs_f64() * 1000.0,
+                    trace.dropped
+                );
+                for event in trace.events {
+                    eprintln!(
+                        "REFERENCE_TRACE_EVENT at_ms={:.3} generation={} {:?}",
+                        event.elapsed.as_secs_f64() * 1000.0,
+                        event.generation,
+                        event.kind
+                    );
+                }
+                assert_eq!(trace.dropped, 0, "selected trace must not be truncated");
+            }
             eprintln!(
                 "REFERENCE_LOADER {:?}; idle={}; aggregate snapshot at final Present; decoder-return outcomes, not cache insertions; unfinished calls have no elapsed time; decode and wait times overlap and must not be summed; no paths or pixels",
                 app.image_loader.verification_metrics(),
@@ -244,6 +307,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
     let mut trial = Trial {
         paths: &paths,
         reverse: std::env::var_os("TOWAVUE_NAV_REFERENCE_REVERSE").is_some(),
+        trace_index,
         source,
         completed: false,
     };

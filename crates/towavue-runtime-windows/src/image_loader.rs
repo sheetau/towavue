@@ -16,6 +16,8 @@ const PREFETCH_ENTRY_LIMIT: usize = 10;
 
 #[cfg(any(test, feature = "render-verification"))]
 pub(crate) mod verification;
+#[cfg(any(test, feature = "render-verification"))]
+use verification::ImageLoadTraceKind as TraceKind;
 
 pub struct LoadedImages {
     pub generation: u64,
@@ -156,6 +158,8 @@ impl Drop for PrefetchLease {
 struct Mailbox {
     #[cfg(any(test, feature = "render-verification"))]
     metrics: verification::ImageLoadMetrics,
+    #[cfg(any(test, feature = "render-verification"))]
+    trace: Option<verification::Trace>,
     generation: u64,
     pending: Option<(Vec<PathBuf>, usize, bool)>,
     decoding: bool,
@@ -180,6 +184,23 @@ impl ImageLoader {
     #[cfg(any(test, feature = "render-verification"))]
     pub fn verification_metrics(&self) -> verification::ImageLoadMetrics {
         self.shared.0.lock().expect("image mailbox").metrics
+    }
+
+    #[cfg(any(test, feature = "render-verification"))]
+    pub fn verification_trace_path(&self, path: PathBuf, origin: std::time::Instant) {
+        self.shared.0.lock().expect("image mailbox").trace =
+            Some(verification::Trace::new(path, origin));
+    }
+
+    #[cfg(any(test, feature = "render-verification"))]
+    pub fn verification_trace_snapshot(&self) -> Option<verification::ImageLoadTrace> {
+        self.shared
+            .0
+            .lock()
+            .expect("image mailbox")
+            .trace
+            .as_ref()
+            .map(verification::Trace::snapshot)
     }
 
     pub fn new(
@@ -265,6 +286,10 @@ impl ImageLoader {
         mailbox.clear_cache |= clear_cache;
         mailbox.generation = mailbox.generation.wrapping_add(1);
         let generation = mailbox.generation;
+        #[cfg(any(test, feature = "render-verification"))]
+        for path in &paths {
+            mailbox.trace(path, TraceKind::Requested);
+        }
         if let Some(work) = &mut mailbox.prefetch {
             if work.decoding
                 && (paths.contains(&work.path)
@@ -327,6 +352,19 @@ impl ImageLoader {
         let work_cancellation = crate::Cancellation::default();
         let (mut generation, cache, previews) = {
             let mut mailbox = shared.0.lock().expect("image mailbox");
+            #[cfg(any(test, feature = "render-verification"))]
+            {
+                let worker_decoding = mailbox.prefetch.as_ref().is_some_and(|work| work.decoding);
+                for (position, path) in unique.iter().enumerate() {
+                    mailbox.trace(
+                        path,
+                        TraceKind::Planned {
+                            position,
+                            worker_decoding,
+                        },
+                    );
+                }
+            }
             if let Some(work) = &mut mailbox.prefetch
                 && work.decoding
                 && !work.cancellation.is_cancelled()
@@ -371,6 +409,8 @@ impl ImageLoader {
             let _lease = lease;
             let byte_limit = cache.lock().expect("image cache").byte_limit;
             let mut remaining = byte_limit;
+            #[cfg(any(test, feature = "render-verification"))]
+            let mut preceding_cached_bytes = 0;
             let mut paths: VecDeque<_> = unique.into();
             loop {
                 let path = {
@@ -394,6 +434,10 @@ impl ImageLoader {
                         paths = pending;
                         generation = next_generation;
                         remaining = byte_limit;
+                        #[cfg(any(test, feature = "render-verification"))]
+                        {
+                            preceding_cached_bytes = 0;
+                        }
                     }
                     // An adopted job without a replacement plan finishes only its current page.
                     if next_generation != generation || remaining == 0 {
@@ -429,18 +473,25 @@ impl ImageLoader {
                     .iter()
                     .find(|entry| entry.0 == path && entry.1 == stamp)
                     .map(|entry| Arc::clone(&entry.2));
+                #[cfg(any(test, feature = "render-verification"))]
+                let was_cached = cached.is_some();
+                #[cfg(any(test, feature = "render-verification"))]
+                shared.0.lock().expect("image mailbox").trace(
+                    &path,
+                    TraceKind::Considered {
+                        remaining_bytes: remaining,
+                        preceding_cached_bytes,
+                        cache_hit: was_cached,
+                    },
+                );
                 let image = if let Some(image) = cached {
                     image
                 } else {
                     #[cfg(any(test, feature = "render-verification"))]
                     let started = {
-                        shared
-                            .0
-                            .lock()
-                            .expect("image mailbox")
-                            .metrics
-                            .prefetch
-                            .calls += 1;
+                        let mut mailbox = shared.0.lock().expect("image mailbox");
+                        mailbox.metrics.prefetch.calls += 1;
+                        mailbox.trace(&path, TraceKind::PrefetchDecodeStarted);
                         std::time::Instant::now()
                     };
                     let result = decode(&path, remaining, &current);
@@ -456,13 +507,9 @@ impl ImageLoader {
                             }
                             (true, Err(_)) => verification::Outcome::Failed,
                         };
-                        shared
-                            .0
-                            .lock()
-                            .expect("image mailbox")
-                            .metrics
-                            .prefetch
-                            .record(elapsed, outcome);
+                        let mut mailbox = shared.0.lock().expect("image mailbox");
+                        mailbox.metrics.prefetch.record(elapsed, outcome);
+                        mailbox.trace(&path, TraceKind::PrefetchReturned { elapsed, outcome });
                     }
                     let image = match result {
                         Ok(Some(image)) => image,
@@ -485,6 +532,10 @@ impl ImageLoader {
                     continue;
                 }
                 remaining -= image.retained_bytes();
+                #[cfg(any(test, feature = "render-verification"))]
+                if was_cached {
+                    preceding_cached_bytes += image.retained_bytes();
+                }
                 {
                     let mut cache = cache.lock().expect("image cache");
                     if cancellation.is_cancelled() || work_cancellation.is_cancelled() {
@@ -494,6 +545,8 @@ impl ImageLoader {
                 }
                 {
                     let mut mailbox = shared.0.lock().expect("image mailbox");
+                    #[cfg(any(test, feature = "render-verification"))]
+                    mailbox.trace(&path, TraceKind::OriginalCached);
                     if let Some(work) = &mut mailbox.prefetch
                         && Arc::ptr_eq(&work.id, &id)
                     {
@@ -606,11 +659,9 @@ fn run_worker(
                 .get(&path, stamp, remaining);
             #[cfg(any(test, feature = "render-verification"))]
             if matches!(cached, Some(Ok(_))) {
-                mutex
-                    .lock()
-                    .expect("image mailbox")
-                    .metrics
-                    .initial_cache_hits += 1;
+                let mut mailbox = mutex.lock().expect("image mailbox");
+                mailbox.metrics.initial_cache_hits += 1;
+                mailbox.trace(&path, TraceKind::ForegroundCacheHit);
             }
             let preview_current =
                 || is_current() && stamp.is_some() && ImageStamp::read(&path) == stamp;
@@ -657,6 +708,9 @@ fn run_worker(
                             });
                         #[cfg(any(test, feature = "render-verification"))]
                         {
+                            if waiting && !waited {
+                                mailbox.trace(&path, TraceKind::WaitStarted);
+                            }
                             waited |= waiting;
                         }
                         waiting
@@ -669,6 +723,7 @@ fn run_worker(
                     let mut mailbox = mutex.lock().expect("image mailbox");
                     mailbox.metrics.prefetch_waits += 1;
                     mailbox.metrics.prefetch_wait_elapsed += elapsed;
+                    mailbox.trace(&path, TraceKind::WaitFinished { elapsed });
                 }
                 let cached = if is_current() {
                     cache
@@ -680,7 +735,9 @@ fn run_worker(
                 };
                 #[cfg(any(test, feature = "render-verification"))]
                 if matches!(cached, Some(Ok(_))) {
-                    mutex.lock().expect("image mailbox").metrics.late_cache_hits += 1;
+                    let mut mailbox = mutex.lock().expect("image mailbox");
+                    mailbox.metrics.late_cache_hits += 1;
+                    mailbox.trace(&path, TraceKind::ForegroundCacheHit);
                 }
                 cached
             });
@@ -700,12 +757,9 @@ fn run_worker(
             let result = cached.unwrap_or_else(|| {
                 #[cfg(any(test, feature = "render-verification"))]
                 let started = {
-                    mutex
-                        .lock()
-                        .expect("image mailbox")
-                        .metrics
-                        .foreground
-                        .calls += 1;
+                    let mut mailbox = mutex.lock().expect("image mailbox");
+                    mailbox.metrics.foreground.calls += 1;
+                    mailbox.trace(&path, TraceKind::ForegroundDecodeStarted);
                     std::time::Instant::now()
                 };
                 let result = decode(&path, remaining, &is_current, &mut first_frame).map(Arc::new);
@@ -720,12 +774,9 @@ fn run_worker(
                         }
                         (true, Err(_)) => verification::Outcome::Failed,
                     };
-                    mutex
-                        .lock()
-                        .expect("image mailbox")
-                        .metrics
-                        .foreground
-                        .record(elapsed, outcome);
+                    let mut mailbox = mutex.lock().expect("image mailbox");
+                    mailbox.metrics.foreground.record(elapsed, outcome);
+                    mailbox.trace(&path, TraceKind::ForegroundReturned { elapsed, outcome });
                 }
                 result
             });
@@ -1501,6 +1552,7 @@ mod tests {
             shared: Arc::clone(&shared),
             prefetch_worker: LatestTask::new("handoff-test").expect("prefetch worker"),
         };
+        loader.verification_trace_path(path.clone(), std::time::Instant::now());
         let (ready_tx, ready_rx) = mpsc::channel();
         let worker = thread::spawn(move || {
             run_worker(
@@ -1528,6 +1580,20 @@ mod tests {
         let previous = loader.request(vec![path.clone()]);
         let generation = loader.request(vec![path.clone()]);
         assert_ne!(generation, previous);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !loader
+            .verification_trace_snapshot()
+            .expect("trace")
+            .events
+            .iter()
+            .any(|event| event.generation == generation && event.kind == TraceKind::WaitStarted)
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "foreground did not wait on adopted decode"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
         release_tx.send(()).expect("finish prefetch");
         ready_rx
             .recv_timeout(Duration::from_secs(5))
@@ -1537,6 +1603,21 @@ mod tests {
         let still_current = current_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("currency result");
+        let trace = loader.verification_trace_snapshot().expect("trace");
+        assert!(
+            trace
+                .events
+                .iter()
+                .any(|event| event.generation == generation
+                    && matches!(event.kind, TraceKind::WaitFinished { .. }))
+        );
+        assert!(
+            trace
+                .events
+                .iter()
+                .any(|event| event.generation == generation
+                    && event.kind == TraceKind::ForegroundCacheHit)
+        );
         drop(loader);
         worker.join().expect("foreground shutdown");
         std::fs::remove_file(path).expect("remove owned fixture");
@@ -2623,6 +2704,7 @@ mod tests {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let (cancelled_tx, cancelled_rx) = mpsc::channel();
+        loader.verification_trace_path(first.clone(), std::time::Instant::now());
         loader.prefetch_with_decode(vec![first.clone()], move |_, budget, current| {
             assert_eq!(budget, CACHE_BYTE_LIMIT);
             started_tx.send(()).expect("prefetch started");
@@ -2738,6 +2820,34 @@ mod tests {
         assert_eq!(metrics.prefetch.superseded, 1);
         assert!(metrics.prefetch.superseded_elapsed > Duration::ZERO);
         assert!(metrics.prefetch.elapsed >= metrics.prefetch.superseded_elapsed);
+        let trace = loader
+            .verification_trace_snapshot()
+            .expect("selected source trace");
+        assert_eq!(trace.dropped, 0);
+        for kind in [
+            TraceKind::Requested,
+            TraceKind::ForegroundCacheHit,
+            TraceKind::ForegroundDecodeStarted,
+        ] {
+            assert!(
+                trace.events.iter().any(|event| event.kind == kind),
+                "missing {kind:?}"
+            );
+        }
+        assert!(trace.events.iter().any(|event| matches!(
+            event.kind,
+            TraceKind::PrefetchReturned {
+                outcome: verification::Outcome::Superseded,
+                ..
+            }
+        )));
+        assert!(trace.events.iter().any(|event| matches!(
+            event.kind,
+            TraceKind::ForegroundReturned {
+                outcome: verification::Outcome::Completed,
+                ..
+            }
+        )));
         drop(loader);
         foreground.join().expect("foreground exits");
         std::fs::remove_file(first).expect("remove owned fixture");

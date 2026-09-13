@@ -262,8 +262,12 @@ fn unedited_webp_export_preserves_bitstreams_and_ancillary_chunks() {
         inputs.push(fs::read(&generated).expect("animation bytes"));
         fs::remove_file(generated).expect("owned fixture");
     }
+    let opaque = r#"<p:opaque xmlns:p="urn:opaque">before<p:item p:key="value"/>after</p:opaque>"#;
+    let packet = String::from_utf8(packet())
+        .expect("UTF-8")
+        .replace("</rdf:Description>", &format!("{opaque}</rdf:Description>"));
     for input in inputs {
-        let mut parts = chunks(&tagged(&input, &packet()));
+        let mut parts = chunks(&tagged(&input, packet.as_bytes()));
         parts[0].1[0] |= 32 | 8;
         parts[0].1.extend_from_slice(&[12, 34]);
         parts.insert(1, (*b"ICCP", vec![1, 2, 3]));
@@ -280,6 +284,7 @@ fn unedited_webp_export_preserves_bitstreams_and_ancillary_chunks() {
             .set(MetadataField::Title, Some("Replacement".into()))
             .expect("set");
         for metadata in [MetadataExportOptions::default(), replace, remove] {
+            let keep_all = metadata.is_empty();
             let mut expected = read(&source, &AtomicBool::new(false)).expect("source XMP");
             xmp::apply(&mut expected, &metadata).expect("expected XMP");
             export_media_with_options(
@@ -296,11 +301,23 @@ fn unedited_webp_export_preserves_bitstreams_and_ancillary_chunks() {
                 non_xmp(&original),
                 "compressed data and ancillary chunks"
             );
-            let mut expected_header = parts[0].1.clone();
-            if expected.is_empty() {
-                expected_header[0] &= !4;
+            assert_eq!(
+                chunks(&actual)[0].1,
+                parts[0].1,
+                "opaque XMP still needs the XMP flag after removing all editable fields"
+            );
+            let saved_packet = container(Cursor::new(&actual), &AtomicBool::new(false))
+                .expect("output container")
+                .packet
+                .expect("opaque XMP");
+            assert!(
+                std::str::from_utf8(&saved_packet)
+                    .expect("UTF-8")
+                    .contains(opaque)
+            );
+            if keep_all {
+                assert_eq!(saved_packet, packet.as_bytes());
             }
-            assert_eq!(chunks(&actual)[0].1, expected_header);
             assert_eq!(
                 read(&target, &AtomicBool::new(false)).expect("saved XMP"),
                 expected

@@ -179,13 +179,31 @@ impl JpegMetadata {
                 "XMP export requires JPEG or static WebP input and JPEG output",
             ));
         }
+        let source_packet = if jpeg_path(&request.source) {
+            scan(
+                BufReader::new(fs::File::open(&request.source).map_err(ExportError::Output)?),
+                None,
+                &[],
+                cancelled,
+            )?
+        } else {
+            None
+        };
         let mut values = if jpeg_path(&request.source) {
-            read(&request.source, cancelled)?
+            source_packet
+                .as_deref()
+                .map(|packet| xmp::parse(packet, cancelled))
+                .transpose()?
+                .unwrap_or_default()
         } else {
             webp_metadata::read_for_jpeg(&request.source, cancelled)?
         };
         xmp::apply(&mut values, options)?;
-        let packet = if values.is_empty() {
+        let packet = if request.operations.is_empty()
+            && let Some(packet) = source_packet
+        {
+            xmp::rewrite_unedited(&packet, options, cancelled)?
+        } else if values.is_empty() {
             Vec::new()
         } else {
             xmp::encode(&values)?

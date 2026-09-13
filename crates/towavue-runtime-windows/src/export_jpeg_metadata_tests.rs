@@ -287,6 +287,83 @@ fn jpeg_metadata_inspection_is_bounded_but_default_keep_preserves_full_languages
 }
 
 #[test]
+fn unedited_jpeg_xmp_keeps_unselected_properties_but_edits_drop_technical_tags() {
+    let root = root("jpeg-opaque-xmp");
+    let source = root.join("source.jpg");
+    let target = root.join("saved.jpg");
+    let opaque = r#"<p:opaque xmlns:p="urn:opaque">before<p:item p:key="value"/>after</p:opaque>"#;
+    let packet = PACKET.replace("</r:Description>", &format!("{opaque}</r:Description>"));
+    let original = tagged(packet.as_bytes());
+    fs::write(&source, &original).expect("source");
+    let cancel = AtomicBool::new(false);
+    for edited in [false, true] {
+        let mut request = request(&source, &target);
+        if edited {
+            request.operations.push(EditOperation::RotateClockwise);
+        }
+        for metadata in [
+            MetadataExportOptions::default(),
+            options(MetadataField::Title, "Updated").metadata,
+            options(MetadataField::Title, "").metadata,
+        ] {
+            export_media_with_options(
+                &request,
+                ExportOptions {
+                    metadata: metadata.clone(),
+                    ..Default::default()
+                },
+            )
+            .expect("save");
+            let bytes = fs::read(&target).expect("saved bytes");
+            let saved = scan(Cursor::new(&bytes), None, &[], &cancel)
+                .expect("markers")
+                .expect("XMP");
+            let text = std::str::from_utf8(&saved).expect("UTF-8");
+            assert_eq!(text.contains(opaque), !edited);
+            assert_eq!(text.contains("t:Orientation=\"6\""), !edited);
+            if !edited {
+                assert_eq!(without_xmp(&bytes), without_xmp(&original));
+                if metadata.is_empty() {
+                    assert_eq!(saved, packet.as_bytes());
+                }
+            }
+            let mut expected = xmp::parse(packet.as_bytes(), &cancel).expect("source values");
+            xmp::apply(&mut expected, &metadata).expect("options");
+            assert_eq!(read(&target, &cancel).expect("values"), expected);
+            assert_eq!(fs::read(&source).expect("source unchanged"), original);
+        }
+    }
+    let converted = root.join("converted.webp");
+    export_media(&request(&source, &converted)).expect("unedited format conversion");
+    let bytes = fs::read(&converted).expect("converted bytes");
+    let mut decoder =
+        image::codecs::webp::WebPDecoder::new(Cursor::new(&bytes)).expect("WebP decoder");
+    let converted_packet = image::ImageDecoder::xmp_metadata(&mut decoder)
+        .expect("XMP")
+        .expect("supported fields");
+    let text = std::str::from_utf8(&converted_packet).expect("UTF-8");
+    assert!(
+        !text.contains(opaque) && !text.contains("Orientation"),
+        "format conversion does not carry opaque technical tags"
+    );
+    let large = format!(
+        "<r:RDF xmlns:r=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><r:Description xmlns:p=\"urn:opaque\"><p:data>{}</p:data></r:Description></r:RDF>",
+        "x".repeat(xmp::LIMIT - 180)
+    );
+    fs::write(&source, tagged(large.as_bytes())).expect("bounded source packet");
+    let before = fs::read(&target).expect("protected target");
+    assert!(
+        export_media_with_options(
+            &request(&source, &target),
+            options(MetadataField::Title, "Added")
+        )
+        .is_err()
+    );
+    assert_eq!(fs::read(&target).expect("target"), before);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn jpeg_metadata_capability_and_xml_validation_match_export_contract() {
     for extension in ["jpg", "jpeg", "JPG", "JPEG"] {
         assert_eq!(

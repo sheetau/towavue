@@ -456,8 +456,8 @@ impl WebpMetadata {
                 "XMP export requires JPEG or WebP input and WebP output",
             ));
         }
-        let (mut values, animation) = if jpeg_metadata::jpeg_path(&request.source) {
-            (jpeg_metadata::read(&request.source, cancelled)?, None)
+        let (mut values, animation, source_packet) = if jpeg_metadata::jpeg_path(&request.source) {
+            (jpeg_metadata::read(&request.source, cancelled)?, None, None)
         } else {
             let info = container(
                 BufReader::new(fs::File::open(&request.source).map_err(ExportError::Output)?),
@@ -465,14 +465,20 @@ impl WebpMetadata {
             )?;
             (
                 info.packet
-                    .map(|packet| xmp::parse(&packet, cancelled))
+                    .as_deref()
+                    .map(|packet| xmp::parse(packet, cancelled))
                     .transpose()?
                     .unwrap_or_default(),
                 info.animation,
+                info.packet,
             )
         };
         xmp::apply(&mut values, options)?;
-        let packet = if values.is_empty() {
+        let packet = if request.operations.is_empty()
+            && let Some(packet) = source_packet
+        {
+            xmp::rewrite_unedited(&packet, options, cancelled)?
+        } else if values.is_empty() {
             Vec::new()
         } else {
             xmp::encode(&values)?

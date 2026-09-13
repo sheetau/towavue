@@ -24,6 +24,10 @@ const META: &str = "adobe:ns:meta/";
 #[path = "export_xmp_typed.rs"]
 mod typed;
 
+#[cfg(test)]
+#[path = "export_xmp_tests.rs"]
+mod tests;
+
 fn invalid(message: impl std::fmt::Display) -> ExportError {
     ExportError::Failed(format!("XMP metadata: {message}"))
 }
@@ -403,8 +407,19 @@ fn escaped(text: &str) -> String {
 }
 
 pub(super) fn encode(values: &[Value]) -> Result<Vec<u8>, ExportError> {
+    let result = format!(
+        "<x:xmpmeta xmlns:x=\"{META}\"><rdf:RDF xmlns:rdf=\"{RDF}\">{}</rdf:RDF></x:xmpmeta>",
+        description(values)
+    );
+    if result.len() > LIMIT {
+        return Err(invalid("serialized packet exceeds 65502 bytes"));
+    }
+    Ok(result.into_bytes())
+}
+
+fn description(values: &[Value]) -> String {
     let mut result = format!(
-        "<x:xmpmeta xmlns:x=\"{META}\"><rdf:RDF xmlns:rdf=\"{RDF}\"><rdf:Description rdf:about=\"\" xmlns:dc=\"{DC}\" xmlns:xmpDM=\"{DM}\">"
+        "<rdf:Description xmlns:rdf=\"{RDF}\" rdf:about=\"\" xmlns:dc=\"{DC}\" xmlns:xmpDM=\"{DM}\">"
     );
     for (field, local) in [
         (MetadataField::Title, "title"),
@@ -445,9 +460,132 @@ pub(super) fn encode(values: &[Value]) -> Result<Vec<u8>, ExportError> {
             ));
         }
     }
-    result.push_str("</rdf:Description></rdf:RDF></x:xmpmeta>");
-    if result.len() > LIMIT {
-        return Err(invalid("serialized packet exceeds 65502 bytes"));
+    result.push_str("</rdf:Description>");
+    result
+}
+
+/// Change only requested top-level properties; keep opaque XML and namespace scopes.
+/// Call only when source pixels and format are unchanged, so technical tags stay valid.
+pub(super) fn rewrite_unedited(
+    packet: &[u8],
+    options: &MetadataExportOptions,
+    cancelled: &AtomicBool,
+) -> Result<Vec<u8>, ExportError> {
+    let mut expected = parse(packet, cancelled)?;
+    apply(&mut expected, options)?;
+    if options.is_empty() {
+        return Ok(packet.to_vec());
     }
-    Ok(result.into_bytes())
+    let changed: Vec<_> = expected
+        .iter()
+        .filter(|value| options.get(value.field).is_some())
+        .cloned()
+        .collect();
+    let additions = if changed.is_empty() {
+        String::new()
+    } else {
+        description(&changed)
+    };
+    let mut reader = NsReader::from_reader(packet);
+    let mut writer = quick_xml::Writer::new(Vec::new());
+    if packet.starts_with(b"\xef\xbb\xbf") {
+        writer.get_mut().extend_from_slice(b"\xef\xbb\xbf");
+    }
+    let mut depth = 0;
+    let mut rdf_depth = 0;
+    let mut skip = None;
+    loop {
+        check_cancelled(cancelled)?;
+        let event = reader.read_event().map_err(invalid)?;
+        let empty = matches!(&event, Event::Empty(_));
+        match event {
+            Event::Start(mut start) | Event::Empty(mut start) => {
+                let key = name(reader.resolver().resolve_element(start.name()))?;
+                if depth == 0 {
+                    rdf_depth = usize::from(!key.is(RDF, "RDF"));
+                }
+                if skip.is_none()
+                    && depth == rdf_depth + 2
+                    && key
+                        .field()
+                        .is_some_and(|field| options.get(field).is_some())
+                {
+                    if !empty {
+                        skip = Some(depth);
+                    }
+                } else if skip.is_none() {
+                    if depth == rdf_depth + 1 {
+                        let mut attributes = Vec::new();
+                        let mut removed = false;
+                        for attribute in start.attributes() {
+                            let attribute = attribute.map_err(invalid)?;
+                            let namespace = attribute.key.as_ref() == b"xmlns"
+                                || attribute.key.as_ref().starts_with(b"xmlns:");
+                            if !namespace
+                                && name(reader.resolver().resolve_attribute(attribute.key))?
+                                    .field()
+                                    .is_some_and(|field| options.get(field).is_some())
+                            {
+                                removed = true;
+                            } else {
+                                attributes.push((
+                                    attribute.key.as_ref().to_vec(),
+                                    attribute.value.into_owned(),
+                                ));
+                            }
+                        }
+                        if removed {
+                            start = start.into_owned();
+                            start.clear_attributes();
+                            for (key, value) in &attributes {
+                                start.push_attribute((key.as_slice(), value.as_slice()));
+                            }
+                        }
+                    }
+                    if empty && depth == rdf_depth {
+                        writer
+                            .write_event(Event::Start(start.borrow()))
+                            .map_err(invalid)?;
+                        writer.get_mut().extend_from_slice(additions.as_bytes());
+                        writer
+                            .write_event(Event::End(start.to_end()))
+                            .map_err(invalid)?;
+                    } else {
+                        writer
+                            .write_event(if empty {
+                                Event::Empty(start)
+                            } else {
+                                Event::Start(start)
+                            })
+                            .map_err(invalid)?;
+                    }
+                }
+                if !empty {
+                    depth += 1;
+                }
+            }
+            Event::End(end) => {
+                depth -= 1;
+                if skip == Some(depth) {
+                    skip = None;
+                } else if skip.is_none() {
+                    if depth == rdf_depth {
+                        writer.get_mut().extend_from_slice(additions.as_bytes());
+                    }
+                    writer.write_event(Event::End(end)).map_err(invalid)?;
+                }
+            }
+            Event::Eof => break,
+            event if skip.is_none() => writer.write_event(event).map_err(invalid)?,
+            _ => {}
+        }
+        if writer.get_ref().len() > LIMIT {
+            return Err(invalid("rewritten packet exceeds 65502 bytes"));
+        }
+    }
+    let output = writer.into_inner();
+    if parse(&output, cancelled)? != expected {
+        return Err(invalid("rewritten packet differs from requested values"));
+    }
+    Ok(output)
 }

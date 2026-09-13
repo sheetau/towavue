@@ -8,6 +8,10 @@ struct TrialWorker {
 
 impl TrialWorker {
     fn start() -> Self {
+        Self::spawn(true)
+    }
+
+    fn spawn(initialize_before_ready: bool) -> Self {
         let shared = Arc::new((
             Mutex::new(Mailbox::default()),
             ShellWake::new().expect("wake"),
@@ -18,10 +22,10 @@ impl TrialWorker {
         let (initialized, ready) = mpsc::channel();
         let (finished, stopped) = mpsc::channel();
         let thread = thread::spawn(move || {
-            // Establish a deterministic first STA. The extra balanced OLE reference
-            // lives on this same worker and does not change its apartment identity.
-            let apartment = ShellApartment::new();
-            assert!(apartment.0, "test STA initialization");
+            // The overlap trial establishes an STA before readiness; restart trials
+            // retain production's lazy initialization without an extra OLE reference.
+            let apartment = initialize_before_ready.then(ShellApartment::new);
+            assert!(apartment.as_ref().is_none_or(|apartment| apartment.0));
             initialized.send(()).expect("ready observer");
             shell_worker(shared, || {});
             drop(apartment);
@@ -30,7 +34,7 @@ impl TrialWorker {
         });
         ready
             .recv_timeout(Duration::from_secs(10))
-            .expect("STA ready");
+            .expect("worker ready");
         Self {
             provider,
             stopped,
@@ -42,6 +46,69 @@ impl TrialWorker {
         drop(self.provider);
         (self.stopped, self.thread)
     }
+}
+
+#[test]
+#[ignore = "native Shell teardown/restart stress; run alone"]
+fn restarting_shell_worker_during_teardown_preserves_native_snapshots() {
+    let root = test_directory("restarting-lifetimes");
+    fs::create_dir(&root).expect("owned fixture folder");
+    fs::write(root.join("item.jpg"), []).expect("owned file");
+    eprintln!("SHELL_RESTART fixture={}", root.display());
+    let snapshot = |provider: &FolderOrderProvider| {
+        let (reply, response) = mpsc::channel();
+        provider.enqueue(Some(root.clone()), Some(reply));
+        response
+            .recv_timeout(Duration::from_secs(10))
+            .expect("native snapshot")
+    };
+    for round in 0..48 {
+        // Unlike the overlapping-lifetime trial, do not establish a secondary
+        // apartment before closing the old provider, or add an extra OLE reference.
+        let phase = ["warmed", "pending", "parsed-only"][round % 3];
+        let stopped = if phase == "parsed-only" {
+            let folder = root.clone();
+            let (parsed, ready) = mpsc::channel();
+            let (finished, stopped) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                let apartment = ShellApartment::new();
+                assert!(apartment.0);
+                // Isolate cancellation after path parsing but before live-view
+                // lookup or creation of an IExplorerBrowser changes COM state.
+                drop(parse_path(&folder).expect("parsed folder"));
+                parsed.send(()).expect("parse observer");
+                drop(apartment);
+                assert_eq!(SHELL_INITIALIZATIONS.get(), SHELL_UNINITIALIZATIONS.get());
+                finished.send(()).expect("shutdown observer");
+            });
+            ready.recv_timeout(Duration::from_secs(10)).expect("parsed");
+            (stopped, worker)
+        } else {
+            let first = TrialWorker::spawn(false);
+            if phase == "warmed" {
+                let snapshot = snapshot(&first.provider);
+                assert_ne!(snapshot.source, FolderSnapshotSource::NaturalNameFallback);
+            } else {
+                first.provider.request(Some(root.clone()));
+                thread::sleep(Duration::from_millis([0, 1, 5, 10][round / 3 % 4]));
+            }
+            first.close()
+        };
+        let delay = [0, 1, 5, 10][round / 12];
+        thread::sleep(Duration::from_millis(delay));
+        let next = TrialWorker::spawn(false);
+        let snapshot = snapshot(&next.provider);
+        assert_ne!(snapshot.source, FolderSnapshotSource::NaturalNameFallback);
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(snapshot.items[0].path, root.join("item.jpg"));
+        join(stopped);
+        join(next.close());
+        eprintln!(
+            "SHELL_RESTART round={} phase={phase} delay_ms={delay} completed",
+            round + 1
+        );
+    }
+    fs::remove_dir_all(root).expect("remove owned fixture after workers exit");
 }
 
 fn join((stopped, thread): (mpsc::Receiver<()>, thread::JoinHandle<()>)) {

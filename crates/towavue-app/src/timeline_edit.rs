@@ -242,47 +242,74 @@ fn remap_position(
 pub(super) fn waveform_regions(
     rect: egui::Rect,
     source_duration: Duration,
-    plan: &EditTimeline,
+    plan: Option<&EditTimeline>,
     master_volume: f32,
+    preview: Option<(towavue_core::TimeRange, f32)>,
 ) -> Vec<(egui::Rect, egui::Rect)> {
     let source_seconds = source_duration.as_secs_f64();
-    let duration = plan.duration().as_seconds_f64();
+    let duration = plan.map_or(source_seconds, |plan| plan.duration().as_seconds_f64());
     if source_seconds <= 0.0 || duration <= 0.0 {
         return Vec::new();
     }
-    let mut offset = 0.0;
-    plan.spans()
-        .iter()
-        .filter_map(|span| {
-            let start = offset;
-            offset += span.duration().as_seconds_f64();
-            let gain = span.volume() * master_volume;
+    let mut regions = Vec::new();
+    let mut append = |start: f64, end: f64, source_start: f64, source_end: f64, saved_gain: f32| {
+        // Split only display geometry at preview boundaries. No timeline clone,
+        // PCM decode, waveform rasterization or texture update is needed.
+        let mut cuts = [start, start, end, end];
+        if let Some((range, _)) = preview {
+            cuts[1] = range.start().as_seconds_f64().clamp(start, end);
+            cuts[2] = range.end().as_seconds_f64().clamp(start, end);
+        }
+        cuts.sort_by(f64::total_cmp);
+        for pair in cuts.windows(2).filter(|pair| pair[0] < pair[1]) {
+            let gain = master_volume
+                * preview
+                    .filter(|(range, _)| {
+                        pair[0] >= range.start().as_seconds_f64()
+                            && pair[1] <= range.end().as_seconds_f64()
+                    })
+                    .map_or(saved_gain, |(_, gain)| gain);
             if gain <= 0.0 {
-                return None;
+                continue;
             }
             let destination = egui::Rect::from_center_size(
                 egui::pos2(
-                    rect.left() + rect.width() * ((start + offset) / (2.0 * duration)) as f32,
+                    rect.left() + rect.width() * ((pair[0] + pair[1]) / (2.0 * duration)) as f32,
                     rect.center().y,
                 ),
                 egui::vec2(
-                    rect.width() * ((offset - start) / duration) as f32,
+                    rect.width() * ((pair[1] - pair[0]) / duration) as f32,
                     rect.height() * gain,
                 ),
             );
+            let source_at = |time| {
+                (source_start + (source_end - source_start) * ((time - start) / (end - start)))
+                    / source_seconds
+            };
             let uv = egui::Rect::from_min_max(
-                egui::pos2(
-                    (span.source().start().as_seconds_f64() / source_seconds) as f32,
-                    0.0,
-                ),
-                egui::pos2(
-                    (span.source().end().as_seconds_f64() / source_seconds) as f32,
-                    1.0,
-                ),
+                egui::pos2(source_at(pair[0]) as f32, 0.0),
+                egui::pos2(source_at(pair[1]) as f32, 1.0),
             );
-            Some((destination, uv))
-        })
-        .collect()
+            regions.push((destination, uv));
+        }
+    };
+    if let Some(plan) = plan {
+        let mut offset = 0.0;
+        for span in plan.spans() {
+            let start = offset;
+            offset += span.duration().as_seconds_f64();
+            append(
+                start,
+                offset,
+                span.source().start().as_seconds_f64(),
+                span.source().end().as_seconds_f64(),
+                span.volume(),
+            );
+        }
+    } else {
+        append(0.0, source_seconds, 0.0, source_seconds, 1.0);
+    }
+    regions
 }
 
 #[cfg(test)]

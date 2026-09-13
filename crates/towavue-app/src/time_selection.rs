@@ -44,6 +44,7 @@ pub(super) struct Output {
     pub selection: Option<Option<TimeRange>>,
     pub seek: Option<MediaTime>,
     pub edit: Option<TimelineEdit>,
+    pub gain_preview: Option<(TimeRange, f32)>,
 }
 
 pub(super) fn show(
@@ -79,7 +80,12 @@ pub(super) fn show(
     });
     let pixel = 1.0 / ui.ctx().pixels_per_point();
     let bands = adjustment::bands(duration, plan);
-    let mut gain_preview = None;
+    let gain_preview_id = response.id.with("gain-preview");
+    let mut gain_preview = ui.ctx().data(|data| {
+        data.get_temp::<(u64, (TimeRange, f32))>(gain_preview_id)
+            .filter(|(painted, _)| enabled && *painted == frame)
+            .map(|(_, preview)| preview)
+    });
     let drag = if enabled {
         crate::timeline_input::seek_drag(response)
     } else {
@@ -370,6 +376,15 @@ pub(super) fn show(
         && !crate::timeline_input::is_active(ui.ctx())
     {
         output.edit = adjustment::values(ui, response, duration, selection, plan, enabled);
+    }
+    output.gain_preview = gain_preview.or(match output.edit {
+        Some(TimelineEdit::SetVolume(range, gain)) => Some((range, gain)),
+        _ => None,
+    });
+    if let Some(preview) = output.gain_preview {
+        // Preserve release paint in discarded passes without repeating the edit.
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(gain_preview_id, (frame, preview)));
     }
     output
 }

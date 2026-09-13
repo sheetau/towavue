@@ -460,13 +460,141 @@ fn source_identity_remaps_deleted_positions_stretches_and_empty_undo() {
 }
 
 #[test]
+fn gain_drag_updates_waveform_mesh_before_commit_without_reloading_pixels() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "timeline_edit::tests::gain_drag_updates_waveform_mesh_before_commit_without_reloading_pixels",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for cancel in [false, true] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let context = fonts::test_context();
+            context.set_pixels_per_point(density);
+            app.ui_context = Some(context.clone());
+            app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
+            app.media_kind = Some(MediaKind::Audio);
+            app.media_duration = Some(Duration::from_secs(10));
+            app.state = PlaybackState::Paused;
+            app.time_selection = Some(range(2000, 6000));
+            let texture = context.load_texture(
+                "waveform",
+                egui::ColorImage::filled([16, 4], Color32::WHITE),
+                TextureOptions::LINEAR,
+            );
+            let id = texture.id();
+            app.waveform = Some(texture);
+            let frame = |app: &mut Application<_>, events| {
+                let mut actions = Vec::new();
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(640.0, 300.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        app.draw_timeline(ui, &mut actions);
+                        if context.current_pass_index() == 0 {
+                            context
+                                .request_discard("verify live gain paint and release continuity");
+                        }
+                    },
+                );
+                let mesh = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) if mesh.texture_id == id => Some(mesh.clone()),
+                        _ => None,
+                    })
+                    .expect("waveform mesh");
+                (output, actions, mesh)
+            };
+            frame(&mut app, vec![]);
+            let (_, _, before) = frame(&mut app, vec![]);
+            let rect = before.calc_bounds();
+            let start = egui::pos2(rect.left() + rect.width() * 0.4, rect.center().y);
+            let end = start - egui::vec2(0.0, (rect.height() - 44.0) * 0.5);
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(start), button(start, true)],
+            );
+            let generation = app.generation;
+            let (output, actions, dragging) = frame(&mut app, vec![egui::Event::PointerMoved(end)]);
+            assert!(actions.is_empty());
+            assert_eq!(
+                dragging.vertices.len(),
+                12,
+                "split the selected interval before committing"
+            );
+            let selected = egui::Rect::from_points(
+                &dragging.vertices[4..8]
+                    .iter()
+                    .map(|vertex| vertex.pos)
+                    .collect::<Vec<_>>(),
+            );
+            assert!((selected.height() / rect.height() - 3.0).abs() < 0.001);
+            assert!(
+                output
+                    .textures_delta
+                    .set
+                    .iter()
+                    .all(|(texture, _)| *texture != id)
+            );
+            assert!(app.edits.is_empty() && !app.waveform_loading);
+            assert_eq!(app.generation, generation);
+            let events = if cancel {
+                vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]
+            } else {
+                vec![button(end, false)]
+            };
+            let (_, actions, released) = frame(&mut app, events);
+            if cancel {
+                assert!(actions.is_empty());
+                assert_eq!(released.vertices, before.vertices);
+            } else {
+                assert_eq!(released.vertices, dragging.vertices);
+                assert!(matches!(
+                    actions.as_slice(),
+                    [UiAction::TimeAdjustment(
+                        _,
+                        _,
+                        _,
+                        TimelineEdit::SetVolume(_, 3.0)
+                    )]
+                ));
+            }
+            assert!(
+                app.edits.is_empty(),
+                "drawing must not apply the pending action"
+            );
+        }
+    }
+}
+
+#[test]
 fn waveform_regions_follow_source_uv_edited_width_gain_and_mute() {
     let mut plan = EditTimeline::new(time(4000), PlaybackRange::default()).expect("plan");
     assert!(plan.apply(TimelineEdit::Delete(range(1000, 2000))));
     assert!(plan.apply(TimelineEdit::Stretch(range(1000, 2000), time(2000))));
     assert!(plan.apply(TimelineEdit::SetVolume(range(1000, 3000), 0.5)));
     let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(400.0, 100.0));
-    let regions = waveform_regions(rect, Duration::from_secs(4), &plan, 2.0);
+    let regions = waveform_regions(rect, Duration::from_secs(4), Some(&plan), 2.0, None);
     assert_eq!(regions.len(), 3);
     for ((destination, uv), (left, width, height, u0, u1)) in regions.iter().zip([
         (10.0, 100.0, 200.0, 0.0, 0.25),
@@ -486,12 +614,75 @@ fn waveform_regions_follow_source_uv_edited_width_gain_and_mute() {
     }
     assert!(plan.apply(TimelineEdit::SetVolume(range(1000, 3000), 0.0)));
     assert_eq!(
-        waveform_regions(rect, Duration::from_secs(4), &plan, 1.0).len(),
+        waveform_regions(rect, Duration::from_secs(4), Some(&plan), 1.0, None).len(),
         2
     );
-    assert!(waveform_regions(rect, Duration::from_secs(4), &plan, 0.0).is_empty());
+    assert!(waveform_regions(rect, Duration::from_secs(4), Some(&plan), 0.0, None).is_empty());
     assert!(plan.apply(TimelineEdit::Delete(range(0, 4000))));
-    assert!(waveform_regions(rect, Duration::from_secs(4), &plan, 1.0).is_empty());
+    assert!(waveform_regions(rect, Duration::from_secs(4), Some(&plan), 1.0, None).is_empty());
+}
+
+#[test]
+fn waveform_gain_preview_matches_committed_geometry_across_edits() {
+    let source_duration = Duration::from_secs(4);
+    let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(400.0, 100.0));
+    let mut plan = EditTimeline::new(time(4000), PlaybackRange::default()).expect("plan");
+    assert_eq!(
+        waveform_regions(
+            rect,
+            source_duration,
+            None,
+            1.0,
+            Some((range(500, 2500), 3.0))
+        ),
+        waveform_regions(
+            rect,
+            source_duration,
+            Some(&plan),
+            1.0,
+            Some((range(500, 2500), 3.0))
+        )
+    );
+    assert!(plan.apply(TimelineEdit::Delete(range(1000, 2000))));
+    assert!(plan.apply(TimelineEdit::Stretch(range(1000, 2000), time(2000))));
+    assert!(plan.apply(TimelineEdit::SetVolume(range(1000, 3000), 0.0)));
+    for gain in [0.0, 0.5, 3.0] {
+        let selection = range(500, 2500);
+        let preview = waveform_regions(
+            rect,
+            source_duration,
+            Some(&plan),
+            2.0,
+            Some((selection, gain)),
+        );
+        let mut committed = plan.clone();
+        assert!(committed.apply(TimelineEdit::SetVolume(selection, gain)));
+        let expected = waveform_regions(rect, source_duration, Some(&committed), 2.0, None);
+        assert_eq!(preview.len(), expected.len());
+        for ((destination, uv), (expected_destination, expected_uv)) in
+            preview.into_iter().zip(expected)
+        {
+            for (actual, expected) in [destination.min, destination.max, uv.min, uv.max]
+                .into_iter()
+                .zip([
+                    expected_destination.min,
+                    expected_destination.max,
+                    expected_uv.min,
+                    expected_uv.max,
+                ])
+            {
+                assert!(
+                    (actual - expected).length() < 0.0001,
+                    "{actual:?} != {expected:?}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        plan.spans()[1].volume(),
+        0.0,
+        "preview leaves saved gain untouched"
+    );
 }
 
 #[test]
@@ -784,30 +975,31 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                     .iter()
                     .any(|(_, node)| node.label().is_some_and(|label| label.starts_with("Trim ")))
             );
-            let meshes: Vec<_> = output
+            let regions: Vec<_> = output
                 .shapes
                 .iter()
                 .filter_map(|shape| match &shape.shape {
                     egui::Shape::Mesh(mesh) if mesh.texture_id == texture => {
-                        Some((shape.clip_rect, mesh))
+                        Some(mesh.vertices.as_chunks::<4>().0.iter())
                     }
                     _ => None,
                 })
+                .flatten()
                 .collect();
             assert_eq!(
-                meshes.len(),
+                regions.len(),
                 if self.audio { 0 } else { 3 },
                 "only audible retained waveform source regions"
             );
-            let uv: Vec<_> = meshes
+            let uv: Vec<_> = regions
                 .iter()
-                .map(|(_, mesh)| {
+                .map(|vertices| {
                     (
-                        mesh.vertices
+                        vertices
                             .iter()
                             .map(|vertex| vertex.uv.x)
                             .fold(f32::INFINITY, f32::min),
-                        mesh.vertices
+                        vertices
                             .iter()
                             .map(|vertex| vertex.uv.x)
                             .fold(f32::NEG_INFINITY, f32::max),

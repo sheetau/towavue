@@ -5174,35 +5174,22 @@ where
                 ui.set_min_size(background.size());
                 ui.painter().rect_filled(background, 3.0, chrome::BORDER);
                 let rect = background;
-                if let Some(waveform) = &self.waveform {
-                    if let Some(plan) = self.session.as_ref().and_then(PlaybackSession::timeline) {
-                        let painter = ui.painter().with_clip_rect(rect);
-                        for (destination, uv) in timeline_edit::waveform_regions(
-                            rect,
-                            self.media_duration.unwrap_or_default(),
-                            plan,
-                            self.edit_state().volume,
-                        ) {
-                            painter.image(
-                                waveform.id(),
-                                destination,
-                                uv,
-                                Color32::from_white_alpha(150),
-                            );
-                        }
-                    } else {
-                        ui.painter().image(
-                            waveform.id(),
-                            rect,
-                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                            Color32::from_white_alpha(150),
-                        );
-                    }
-                }
+                // Reserve the waveform's layer below selection and gain controls.
+                let waveform_painter = ui.painter().with_clip_rect(rect);
+                let waveform_slot = waveform_painter.add(egui::Shape::Noop);
                 let response = ui.allocate_rect(rect, egui::Sense::click_and_drag())
                     .help_text("Drag to select time · Shift+Space plays selection · drag playhead to seek · drag volume line up/down · Alt+drag selection to stretch · Delete removes · Ctrl+Y keeps");
                 let duration = self.playback_duration().unwrap_or_default();
                 if duration.is_zero() {
+                    if let Some(waveform) = &self.waveform
+                        && self.session.as_ref().and_then(PlaybackSession::timeline).is_none()
+                    {
+                        waveform_painter.set(waveform_slot, egui::Shape::image(
+                            waveform.id(), rect,
+                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                            Color32::from_white_alpha(150),
+                        ));
+                    }
                     return;
                 }
                 let enabled = !self.modal_input_blocked()
@@ -5216,6 +5203,21 @@ where
                     self.session.as_ref().and_then(PlaybackSession::timeline),
                     enabled,
                 );
+                if let Some(waveform) = &self.waveform {
+                    let mut mesh = egui::Mesh::with_texture(waveform.id());
+                    for (destination, uv) in timeline_edit::waveform_regions(
+                        rect,
+                        self.media_duration.unwrap_or(duration),
+                        self.session.as_ref().and_then(PlaybackSession::timeline),
+                        self.edit_state().volume,
+                        result.gain_preview,
+                    ) {
+                        mesh.add_rect_with_uv(destination, uv, Color32::from_white_alpha(150));
+                    }
+                    if !mesh.is_empty() {
+                        waveform_painter.set(waveform_slot, egui::Shape::mesh(mesh));
+                    }
+                }
                 if self.playback_selection.is_some() {
                     ui.ctx().accesskit_node_builder(response.id, |node| node.set_description("Selection playback; Space pauses or resumes, Escape returns to full range"));
                 }

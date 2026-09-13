@@ -401,12 +401,22 @@ pub fn logo(
     shift: f32,
     highlighted: bool,
 ) {
-    use crate::menu::Section;
     let rect = Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0));
-    let point = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (16.0 / 27.68);
+    paint_logo(ui.painter(), rect, selected, shift, highlighted);
+}
+
+pub(super) fn paint_logo(
+    painter: &egui::Painter,
+    rect: Rect,
+    selected: Option<crate::menu::Section>,
+    shift: f32,
+    highlighted: bool,
+) {
+    use crate::menu::Section;
+    let point = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (rect.width() / 27.68);
     let stroke = |section| {
         Stroke::new(
-            1.1,
+            1.1 * (rect.width() / 16.0),
             if selected.is_some_and(|selected| Some(selected) == section)
                 || (selected.is_none() && highlighted)
             {
@@ -426,8 +436,7 @@ pub fn logo(
         ((2.17, 25.5), (10.21, 17.47), Section::View),
         ((17.47, 10.21), (25.5, 2.17), Section::File),
     ] {
-        ui.painter()
-            .line_segment([point(a.0, a.1), point(b.0, b.1)], stroke(Some(section)));
+        painter.line_segment([point(a.0, a.1), point(b.0, b.1)], stroke(Some(section)));
     }
     for (coordinates, section) in [
         (
@@ -465,7 +474,7 @@ pub fn logo(
             Some(Section::View),
         ),
     ] {
-        ui.painter().add(egui::Shape::line(
+        painter.add(egui::Shape::line(
             coordinates.into_iter().map(|(x, y)| point(x, y)).collect(),
             stroke(section),
         ));

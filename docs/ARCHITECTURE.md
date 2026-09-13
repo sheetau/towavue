@@ -169,6 +169,8 @@ Filmstrip shows only the highlighted filename, centered above its thumbnail and 
 
 Media previews are immediate, noninteractive and clipped to valid hover ownership; help tooltips keep their delay and close on clipped/covered/changed targets. The logo's directional menus and normal click/keyboard entry share context/dispatch. Exact widget values live with UI code and regression tests.
 
+External file hover dims the full client surface by 80% and centers a compact dotted guide with the shared app logo and "Open with towavue". The guide adapts/clips to small viewports and is paint-only: native file/folder drops remain valid across the whole window, subject to the existing modal guard. Blocked drops show that guard's instruction instead. Leaving or dropping removes the guide; underlying hover previews remain suppressed during file hover. This does not add a child window, drag bitmap or custom native cursor.
+
 ## Distribution boundary
 
 The application is MIT OR Apache-2.0; dependencies retain their licenses. The desired eventual distribution is an assisted per-user Setup.exe with selectable destination, not a standalone exe or Electron migration. Publication remains separately scoped.

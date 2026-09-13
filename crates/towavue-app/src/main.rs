@@ -11,6 +11,7 @@ mod chrome;
 mod chrome_resize_tests;
 mod cursor;
 mod export_progress;
+mod file_drop;
 mod filmstrip;
 mod fonts;
 mod frame_step;
@@ -3024,31 +3025,7 @@ where
             self.image_loading || self.state == PlaybackState::Loading,
             !self.fullscreen,
         );
-        if context.input(|input| !input.raw.hovered_files.is_empty()) {
-            let painter = context.layer_painter(egui::LayerId::new(
-                egui::Order::Tooltip,
-                egui::Id::new("external-file-drop"),
-            ));
-            let rect = context.content_rect().shrink(8.0);
-            painter.rect_filled(rect, 6.0, egui::Color32::from_black_alpha(190));
-            painter.rect_stroke(
-                rect,
-                6.0,
-                egui::Stroke::new(1.0, chrome::MUTED),
-                egui::StrokeKind::Inside,
-            );
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                if self.modal_input_blocked() {
-                    "Close the dialog before dropping files"
-                } else {
-                    "Drop to open media files or a folder"
-                },
-                egui::FontId::proportional(18.0),
-                egui::Color32::WHITE,
-            );
-        }
+        file_drop::draw(&context, self.modal_input_blocked());
         if self.image_view.selection != previous_selection {
             // Windowed status is laid out before the media processes input.
             context.request_repaint();

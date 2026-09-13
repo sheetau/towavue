@@ -891,6 +891,7 @@ struct Application<N> {
     edits: BTreeMap<TabId, EditHistory>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
+    loading_progress: export_progress::LoadingProgress,
     export_error: Option<String>,
     grid_layouts: grid::GridLayouts,
     grid_path: PathBuf,
@@ -1116,6 +1117,7 @@ where
             edits: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
+            loading_progress: export_progress::LoadingProgress::default(),
             export_error: None,
             grid_layouts,
             grid_path,
@@ -4475,7 +4477,13 @@ where
                     }
                 });
             });
-        export_progress::draw(root, panel.response.rect, self.active_export.as_mut());
+        let loading = self.toolbar_loading(root.ctx());
+        export_progress::draw(
+            root,
+            panel.response.rect,
+            self.active_export.as_mut(),
+            loading,
+        );
         self.tab_preview.request(
             preview_target,
             &self.preview_cache,

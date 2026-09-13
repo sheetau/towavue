@@ -102,8 +102,15 @@ mod tests {
                 !app.waveform_detail.started,
                 "release preview must not refine the pre-edit plan"
             );
-            frame(&mut app);
+            let started = frame(&mut app);
+            assert!(
+                started.viewport_output[&egui::ViewportId::ROOT]
+                    .repaint_delay
+                    .is_zero(),
+                "the toolbar must observe work started later in this frame"
+            );
             assert!(app.waveform_detail.started);
+            assert!(app.waveform_detail.is_pending());
             let event = receive
                 .recv_timeout(Duration::from_secs(10))
                 .expect("native envelope worker completion");
@@ -126,6 +133,7 @@ mod tests {
                 .values
                 .clone()
                 .expect("installed envelope");
+            assert!(!app.waveform_detail.is_pending());
             let expected = app.waveform_detail.mesh(rect, density).expect("sharp mesh");
             let output = frame(&mut app);
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.vertices == expected.vertices)));
@@ -209,6 +217,16 @@ mod tests {
                 "old-edit completion cannot install"
             );
             app.waveform_detail.started = true;
+            let failed_key = app.waveform_detail.key.clone().expect("pending key");
+            app.install_detailed_waveform(
+                generation,
+                failed_key,
+                Err("injected refinement failure".into()),
+            );
+            assert!(
+                !app.waveform_detail.is_pending(),
+                "failed detail must not leave a loading indicator running"
+            );
             let pending = app.waveform_detail.take_retained();
             assert!(
                 !pending.started,
@@ -235,10 +253,14 @@ pub(super) struct Detail {
     key: Option<Key>,
     changed: Option<Instant>,
     started: bool,
+    finished: bool,
     values: Option<Arc<[f32]>>,
 }
 
 impl Detail {
+    pub(super) fn is_pending(&self) -> bool {
+        self.started && !self.finished
+    }
     pub(super) fn restart_pending(&mut self) {
         if self.values.is_none() {
             self.started = false;
@@ -346,6 +368,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 let notify = Arc::clone(&self.notify);
                 let generation = self.media_generation;
                 detail.started = true;
+                detail.finished = false;
+                // The toolbar was painted before the timeline submitted this job.
+                context.request_repaint();
                 self.waveform_worker.submit(move |cancellation| {
                     let result = towavue_runtime_windows::timeline_waveform(
                         &key.path,
@@ -386,6 +411,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         {
             return;
         }
+        self.waveform_detail.finished = true;
         match result {
             Ok(values) => self.waveform_detail.values = Some(values.into()),
             Err(error) => self.set_status(format!("Detailed waveform unavailable: {error}")),

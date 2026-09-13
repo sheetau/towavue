@@ -1,5 +1,79 @@
 use crate::*;
 
+#[derive(Clone, Copy, PartialEq)]
+enum LoadingOwner {
+    Media(Option<TabId>, u64),
+    Folder(u64),
+}
+
+#[derive(Default)]
+pub(super) struct LoadingProgress {
+    owner: Option<LoadingOwner>,
+    started: f64,
+}
+
+impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn toolbar_loading(
+        &mut self,
+        context: &egui::Context,
+    ) -> Option<(&'static str, f64)> {
+        let label = if self.media_kind == Some(MediaKind::Image) && self.image_loading {
+            Some("Loading images")
+        } else if matches!(self.media_kind, Some(MediaKind::Audio | MediaKind::Video))
+            && self.state == PlaybackState::Loading
+        {
+            Some("Loading media")
+        } else if self.timeline_is_visible() && self.waveform_loading {
+            Some("Loading waveform")
+        } else if self.timeline_is_visible() && self.waveform_detail.is_pending() {
+            Some("Refining waveform")
+        } else {
+            None
+        };
+        let pending = label
+            .map(|label| {
+                (
+                    LoadingOwner::Media(
+                        self.tabs.active().map(|tab| tab.id),
+                        self.media_generation,
+                    ),
+                    label,
+                )
+            })
+            .or_else(|| {
+                self.pending_folder.as_ref().map(|(generation, intent)| {
+                    (
+                        LoadingOwner::Folder(*generation),
+                        match intent {
+                            FolderIntent::Open => "Opening folder",
+                            FolderIntent::Refresh(_) => "Loading folder order",
+                        },
+                    )
+                })
+            });
+        let progress = &mut self.loading_progress;
+        let Some((owner, label)) = pending.filter(|_| self.active_export.is_none()) else {
+            progress.owner = None;
+            return None;
+        };
+        let now = context.input(|input| input.time);
+        if progress.owner != Some(owner) {
+            progress.owner = Some(owner);
+            progress.started = now;
+        }
+        // Do not flash a completed cached navigation, inherit another tab's
+        // animation, or pretend an unknown amount of decode work is a percentage.
+        let elapsed = (now - progress.started).max(0.0);
+        const DELAY: f64 = 0.2;
+        if elapsed < DELAY {
+            context.request_repaint_after(Duration::from_secs_f64(DELAY - elapsed));
+            None
+        } else {
+            Some((label, elapsed - DELAY))
+        }
+    }
+}
+
 pub(super) struct ExportProgress {
     duration: Option<Duration>,
     normalized: bool,
@@ -64,7 +138,12 @@ impl ExportProgress {
     }
 }
 
-pub(super) fn draw(ui: &egui::Ui, panel: egui::Rect, export: Option<&mut ActiveExport>) {
+pub(super) fn draw(
+    ui: &egui::Ui,
+    panel: egui::Rect,
+    export: Option<&mut ActiveExport>,
+    loading: Option<(&'static str, f64)>,
+) {
     let density = ui.ctx().pixels_per_point();
     let bottom = (panel.bottom() * density).round() / density;
     let track = egui::Rect::from_min_max(
@@ -77,6 +156,19 @@ pub(super) fn draw(ui: &egui::Ui, panel: egui::Rect, export: Option<&mut ActiveE
         egui::Stroke::new(1.0 / density, chrome::BORDER),
     );
     let Some(export) = export else {
+        if let Some((label, elapsed)) = loading {
+            let (start, end) = indeterminate_span(elapsed);
+            paint_span(ui, track, start, end);
+            ui.ctx().request_repaint_after(Duration::from_millis(60));
+            accessibility(
+                ui,
+                track,
+                "toolbar-media-loading",
+                "Media loading",
+                label,
+                None,
+            );
+        }
         return;
     };
     let progress = &mut export.progress;
@@ -93,9 +185,31 @@ pub(super) fn draw(ui: &egui::Ui, panel: egui::Rect, export: Option<&mut ActiveE
             ui.ctx().request_repaint_after(Duration::from_millis(60));
             elapsed
         };
-        let offset = ((elapsed / 1.6).fract() * 0.75) as f32;
-        (offset, offset + 0.25)
+        indeterminate_span(elapsed)
     };
+    paint_span(ui, track, start, end);
+    accessibility(
+        ui,
+        track,
+        "toolbar-export-progress",
+        "Export progress",
+        if export.cancelling {
+            "Cancelling export"
+        } else if export.analyzing_audio {
+            "Analyzing audio (estimated progress)"
+        } else {
+            "Encoding (estimated progress)"
+        },
+        fraction,
+    );
+}
+
+fn indeterminate_span(elapsed: f64) -> (f32, f32) {
+    let offset = ((elapsed / 1.6).fract() * 0.75) as f32;
+    (offset, offset + 0.25)
+}
+
+fn paint_span(ui: &egui::Ui, track: egui::Rect, start: f32, end: f32) {
     ui.painter().rect_filled(
         egui::Rect::from_min_max(
             egui::pos2(egui::lerp(track.x_range(), start), track.top()),
@@ -104,29 +218,32 @@ pub(super) fn draw(ui: &egui::Ui, panel: egui::Rect, export: Option<&mut ActiveE
         0.0,
         chrome::FOREGROUND,
     );
-    ui.ctx()
-        .accesskit_node_builder(egui::Id::new("toolbar-export-progress"), |node| {
-            node.set_role(egui::accesskit::Role::ProgressIndicator);
-            node.set_label("Export progress");
-            node.set_value(if export.cancelling {
-                "Cancelling export"
-            } else if export.analyzing_audio {
-                "Analyzing audio (estimated progress)"
-            } else {
-                "Encoding (estimated progress)"
-            });
-            node.set_bounds(egui::accesskit::Rect::new(
-                track.left().into(),
-                track.top().into(),
-                track.right().into(),
-                track.bottom().into(),
-            ));
-            if let Some(fraction) = fraction {
-                node.set_min_numeric_value(0.0);
-                node.set_max_numeric_value(100.0);
-                node.set_numeric_value(f64::from(fraction) * 100.0);
-            }
-        });
+}
+
+fn accessibility(
+    ui: &egui::Ui,
+    track: egui::Rect,
+    id: &'static str,
+    label: &str,
+    value: &str,
+    fraction: Option<f32>,
+) {
+    ui.ctx().accesskit_node_builder(egui::Id::new(id), |node| {
+        node.set_role(egui::accesskit::Role::ProgressIndicator);
+        node.set_label(label);
+        node.set_value(value);
+        node.set_bounds(egui::accesskit::Rect::new(
+            track.left().into(),
+            track.top().into(),
+            track.right().into(),
+            track.bottom().into(),
+        ));
+        if let Some(fraction) = fraction {
+            node.set_min_numeric_value(0.0);
+            node.set_max_numeric_value(100.0);
+            node.set_numeric_value(f64::from(fraction) * 100.0);
+        }
+    });
 }
 
 #[cfg(test)]

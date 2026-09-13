@@ -86,6 +86,126 @@ fn indicator(output: &egui::FullOutput) -> Option<&egui::accesskit::Node> {
         .find_map(|(_, node)| (node.label() == Some("Export progress")).then_some(node))
 }
 
+fn loading_indicator(output: &egui::FullOutput) -> Option<&egui::accesskit::Node> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("tree")
+        .nodes
+        .iter()
+        .find_map(|(_, node)| (node.label() == Some("Media loading")).then_some(node))
+}
+
+#[test]
+fn toolbar_loading_waits_for_sustained_foreground_work_and_clears_without_flashes() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "export_progress::tests::toolbar_loading_waits_for_sustained_foreground_work_and_clears_without_flashes",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = Application::new(None, |_| {}).expect("app");
+        context(&mut app);
+        let path = root.join("image.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.state = PlaybackState::Paused;
+        let size = egui::vec2(960.0, 540.0);
+        paint(&mut app, size, density, 0.0, vec![]);
+        app.image_loading = true;
+        for time in [0.1, 0.25] {
+            let output = paint(&mut app, size, density, time, vec![]);
+            assert!(fill(&output).is_none() && loading_indicator(&output).is_none());
+        }
+        let output = paint(&mut app, size, density, 0.35, vec![]);
+        let node =
+            loading_indicator(&output).expect("sustained loading belongs on the toolbar boundary");
+        assert_eq!(node.value(), Some("Loading images"));
+        assert!(
+            node.numeric_value().is_none(),
+            "unknown totals are not percentages"
+        );
+        let first = fill(&output).expect("white loading segment");
+        assert!((first.height() * density - 1.0).abs() < 0.001);
+        let next = paint(&mut app, size, density, 0.65, vec![]);
+        assert!(fill(&next).expect("moving segment").left() > first.left());
+        app.image_loading = false;
+        let output = paint(&mut app, size, density, 0.7, vec![]);
+        assert!(fill(&output).is_none() && loading_indicator(&output).is_none());
+        for index in 0..6 {
+            app.image_loading = true;
+            app.next_media_instance();
+            let time = 1.0 + index as f64 * 0.1;
+            let output = paint(&mut app, size, density, time, vec![]);
+            assert!(
+                fill(&output).is_none(),
+                "brief navigation never flashes an inherited spinner"
+            );
+        }
+        app.image_loading = false;
+        app.media_kind = Some(MediaKind::Video);
+        app.state = PlaybackState::Loading;
+        paint(&mut app, size, density, 2.0, vec![]);
+        assert_eq!(
+            loading_indicator(&paint(&mut app, size, density, 2.25, vec![]))
+                .expect("media loading")
+                .value(),
+            Some("Loading media")
+        );
+        app.state = PlaybackState::Paused;
+        app.waveform_loading = true;
+        app.timeline_open = true;
+        assert_eq!(
+            loading_indicator(&paint(&mut app, size, density, 2.3, vec![]))
+                .expect("continuous waveform stage")
+                .value(),
+            Some("Loading waveform")
+        );
+        app.timeline_open = false;
+        assert!(loading_indicator(&paint(&mut app, size, density, 2.4, vec![])).is_none());
+        app.thumbnail_loading = Some(5);
+        assert!(
+            fill(&paint(&mut app, size, density, 3.0, vec![])).is_none(),
+            "background previews are excluded"
+        );
+        app.timeline_open = true;
+        app.active_export = Some(active(&path, tab, MediaKind::Image, None, false));
+        let output = paint(&mut app, size, density, 3.4, vec![]);
+        assert!(
+            indicator(&output).is_some() && loading_indicator(&output).is_none(),
+            "export owns the shared boundary"
+        );
+        app.active_export.take();
+        app.waveform_loading = false;
+        assert!(fill(&paint(&mut app, size, density, 3.5, vec![])).is_none());
+        app.pending_folder = Some((71, FolderIntent::Open));
+        paint(&mut app, size, density, 4.0, vec![]);
+        assert_eq!(
+            loading_indicator(&paint(&mut app, size, density, 4.25, vec![]))
+                .expect("folder loading")
+                .value(),
+            Some("Opening folder")
+        );
+        app.pending_folder = Some((72, FolderIntent::Refresh(path.clone())));
+        assert!(
+            fill(&paint(&mut app, size, density, 4.3, vec![])).is_none(),
+            "a new request restarts the quiet delay"
+        );
+        app.pending_folder = None;
+        app.state = PlaybackState::Faulted;
+        for time in [4.4, 4.6, 4.8, 5.0] {
+            let output = paint(&mut app, size, density, time, vec![]);
+            assert!(
+                fill(&output).is_none() && loading_indicator(&output).is_none(),
+                "terminal failure removes activity"
+            );
+        }
+        assert!(app.edits.is_empty());
+    }
+}
+
 fn context<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
     let context = fonts::test_context();
     context.enable_accesskit();
@@ -135,6 +255,7 @@ fn export_progress_only_unknown_running_jobs_request_animation_repaints() {
                         ui,
                         egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 32.0)),
                         (mode != 0).then_some(&mut export),
+                        None,
                     );
                 },
             );
@@ -332,8 +453,10 @@ fn export_progress_toolbar_geometry_uia_hover_and_lightweight_loading() {
             }
             let idle = paint(&mut app, size, density, 3.0, vec![]);
             assert!(
-                fill(&idle).is_none() && indicator(&idle).is_none(),
-                "image load is not export progress"
+                fill(&idle).is_some()
+                    && loading_indicator(&idle).is_some()
+                    && indicator(&idle).is_none(),
+                "sustained image loading is distinct from export progress"
             );
             app.image_loading = false;
             app.active_export = Some(active(

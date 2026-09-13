@@ -31,6 +31,36 @@ pub(super) fn decode(
     preview: &mut ImagePreviewCallback<'_>,
     first_only: bool,
 ) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
+    decode_frames(path, byte_limit, current, preview, first_only, None).map(|(frames, _)| frames)
+}
+
+pub(crate) fn validate(
+    path: &Path,
+    byte_limit: usize,
+    current: &dyn Fn() -> bool,
+    progress: &dyn Fn(Duration),
+) -> Result<usize, ImageDecodeError> {
+    decode_frames(
+        path,
+        byte_limit,
+        current,
+        &mut |_, _, _| {},
+        false,
+        Some(progress),
+    )
+    .map(|(_, count)| count)
+}
+
+// Validation consumes each merged frame immediately. Retained display and first-only
+// previews keep their original aggregate budget and callback behavior.
+fn decode_frames(
+    path: &Path,
+    byte_limit: usize,
+    current: &dyn Fn() -> bool,
+    preview: &mut ImagePreviewCallback<'_>,
+    first_only: bool,
+    validation_progress: Option<&dyn Fn(Duration)>,
+) -> Result<(Vec<DecodedImageFrame>, usize), ImageDecodeError> {
     let (color, alpha, premultiplied) = select(path, current)?;
     ffmpeg::init().map_err(ffmpeg_error)?;
     let mut color_decoder = Plane::new(path, &color, Pixel::RGBA, byte_limit, current)?;
@@ -48,12 +78,15 @@ pub(super) fn decode(
     let mut frames: Vec<DecodedImageFrame> = Vec::new();
     let mut remaining = byte_limit;
     let mut previous_time = None;
+    let mut count = 0;
     while let Some(mut color_frame) = color_decoder.next(current)? {
         check_current(current)?;
-        remaining = remaining
-            .checked_sub(color_frame.pixels.len())
-            .ok_or(ImageDecodeError::TooLarge)?;
-        if frames.len() == 65536 {
+        if validation_progress.is_none() {
+            remaining = remaining
+                .checked_sub(color_frame.pixels.len())
+                .ok_or(ImageDecodeError::TooLarge)?;
+        }
+        if count == 65536 {
             return Err(ImageDecodeError::TooLarge);
         }
         if let Some(alpha_decoder) = &mut alpha_decoder {
@@ -100,9 +133,19 @@ pub(super) fn decode(
             if color_frame.time <= previous {
                 return Err(invalid("non-increasing frame time"));
             }
-            frames.last_mut().expect("previous frame").delay = delay(color_frame.time - previous);
+            if let Some(frame) = frames.last_mut() {
+                frame.delay = delay(color_frame.time - previous);
+            }
         }
         previous_time = Some(color_frame.time);
+        if let Some(progress) = validation_progress {
+            count += 1;
+            progress(delay(
+                color_frame.time + color_frame.duration.unwrap_or(100_000_000),
+            ));
+            check_current(current)?;
+            continue;
+        }
         let frame = DecodedImageFrame {
             width: color_frame.size.0,
             height: color_frame.size.1,
@@ -114,8 +157,9 @@ pub(super) fn decode(
         }
         check_current(current)?;
         frames.push(frame);
+        count += 1;
         if first_only {
-            return Ok(frames);
+            return Ok((frames, count));
         }
     }
     if let Some(alpha) = &mut alpha_decoder
@@ -123,7 +167,10 @@ pub(super) fn decode(
     {
         return Err(invalid("extra alpha frames"));
     }
-    Ok(frames)
+    if count == 0 {
+        return Err(invalid("no decoded frames"));
+    }
+    Ok((frames, count))
 }
 
 #[derive(Clone, Copy)]

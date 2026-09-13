@@ -21,6 +21,58 @@ pub(super) fn avif_path(path: &Path) -> bool {
         .is_some_and(|value| value.eq_ignore_ascii_case("avif"))
 }
 
+pub(super) fn copy_unedited(
+    source: &Path,
+    staging: &StagedExport,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+) -> Result<(), ExportError> {
+    use std::io::Write;
+    let result = (|| {
+        check_cancelled(cancelled)?;
+        progress(Duration::ZERO);
+        let mut input = fs::File::open(source).map_err(ExportError::Output)?;
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staging.output)
+            .map_err(ExportError::Output)?;
+        let mut buffer = [0; 65536];
+        loop {
+            check_cancelled(cancelled)?;
+            let count = input.read(&mut buffer).map_err(ExportError::Output)?;
+            if count == 0 {
+                break;
+            }
+            output
+                .write_all(&buffer[..count])
+                .map_err(ExportError::Output)?;
+        }
+        drop(output);
+        let animation = Animation::read(&staging.output, cancelled)?;
+        let expected = animation
+            .as_ref()
+            .map_or(1, |animation| animation.samples[0].times.len());
+        // Validate the actual copied samples, not only their container tables. The
+        // display decoder shares alpha/grid/transforms, without retaining a sequence.
+        let count = crate::image::avif::validate(
+            &staging.output,
+            crate::image::IMAGE_BYTE_LIMIT,
+            &|| !cancelled.load(Ordering::Relaxed),
+            progress,
+        )
+        .map_err(invalid)?;
+        if count != expected {
+            return Err(invalid(
+                "decoded frame count differs from container samples",
+            ));
+        }
+        Ok(())
+    })();
+    check_cancelled(cancelled)?;
+    result
+}
+
 use crate::avif_container::{BoxRange, Track, bytes, one};
 
 impl From<crate::avif_container::Error> for ExportError {

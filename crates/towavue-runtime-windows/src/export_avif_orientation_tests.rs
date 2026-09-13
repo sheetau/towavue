@@ -162,6 +162,10 @@ fn avif_clean_aperture_precedes_orientation_preview_and_static_saving() {
                     .into_raw()
             );
             export_media(&request(&source, &target)).expect("save aperture");
+            assert!(
+                fs::read(&target).expect("saved bytes")
+                    == fs::read(&source).expect("aperture bytes")
+            );
             let saved = crate::decode_image(&target).expect("saved image");
             assert_eq!(saved.dimensions(), expected.dimensions());
             assert_eq!(saved.frames[0].rgba, decoded.frames[0].rgba);

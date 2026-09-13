@@ -155,6 +155,11 @@ fn avif_premultiplied_alpha_matches_display_preview_and_edited_saves() {
             .expect("preview")
             .expect("frame");
         assert_eq!(preview.rgba, displayed.frames[0].rgba);
+        export_media(&request(&source, &target)).expect("unedited premultiplied save");
+        assert!(
+            fs::read(&target).expect("saved bytes")
+                == fs::read(&source).expect("premultiplied bytes")
+        );
         let mut save = request(&source, &target);
         save.operations = vec![EditOperation::RotateClockwise];
         let expected = crate::render_image_edits(

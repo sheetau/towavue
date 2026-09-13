@@ -402,6 +402,10 @@ fn avif_single_frame_sequence_keeps_pixels_duration_and_repetition() {
             assert_eq!(actual.frames[0].delay, Duration::from_millis(375));
             let resaved = root.join("resaved.avif");
             export_media(&request(&target, &resaved)).expect("fixture operation");
+            assert!(
+                fs::read(&resaved).expect("resaved bytes")
+                    == fs::read(&target).expect("saved bytes")
+            );
             let rescan = Animation::read(&resaved, &AtomicBool::new(false))
                 .expect("fixture operation")
                 .expect("fixture operation");
@@ -1015,6 +1019,13 @@ fn avif_animation_export_preserves_all_frames() {
                 hardware_encode: false,
             };
             export_media(&request).expect("save");
+            if request.operations.is_empty() {
+                assert!(
+                    fs::read(&target).expect("saved bytes")
+                        == fs::read(&source).expect("source bytes"),
+                    "unedited AVIF must retain the original container and encoded samples"
+                );
+            }
             let actual = rgba(&target);
             assert_eq!(actual.frames.len(), 3);
             let expected = crate::render_image_edits(
@@ -1317,6 +1328,178 @@ fn avif_export_retains_variable_timing_and_repeat_on_resave() {
             .is_err()
         );
         assert_eq!(fs::read(&gif).expect("protected"), b"existing target");
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn unedited_avif_save_preserves_depth_container_and_all_bytes() {
+    use std::io::Write;
+    let root = audio_tests::root("avif-unedited-preservation");
+    let source = root.join("source.avif");
+    let target = root.join("saved.avif");
+    let resaved = root.join("resaved.avif");
+    for depth in [8, 10, 12] {
+        for frames in [1, 3] {
+            let format = format!(
+                "yuv444p{}",
+                if depth == 8 {
+                    String::new()
+                } else {
+                    format!("{depth}le")
+                }
+            );
+            audio_tests::ffmpeg(
+                &[
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=32x24:rate=2",
+                    "-frames:v",
+                    &frames.to_string(),
+                    "-pix_fmt",
+                    &format,
+                    "-c:v",
+                    "libaom-av1",
+                    "-cpu-used",
+                    "8",
+                    "-threads",
+                    "1",
+                    "-crf",
+                    "0",
+                    "-color_primaries",
+                    "bt2020",
+                    "-color_trc",
+                    "smpte2084",
+                    "-colorspace",
+                    "bt2020nc",
+                ],
+                &source,
+            );
+            if frames == 1 {
+                orientation_tests::append_still_properties(&source, &[(b"irot", vec![1])], &[1]);
+            }
+            // Preserve opaque container data larger than the copy buffer without
+            // interpreting it or claiming support for its metadata semantics.
+            let payload = vec![42; 70 * 1024];
+            let mut file = fs::OpenOptions::new()
+                .append(true)
+                .open(&source)
+                .expect("source");
+            file.write_all(&((payload.len() + 8) as u32).to_be_bytes())
+                .expect("box length");
+            file.write_all(b"uuid").expect("box type");
+            file.write_all(&payload).expect("opaque UUID and payload");
+            drop(file);
+            let original = fs::read(&source).expect("original");
+            let displayed = crate::decode_image(&source).expect("original pixels");
+            let input = ffmpeg::format::input(&source).expect("input");
+            let stream = input
+                .streams()
+                .best(ffmpeg::media::Type::Video)
+                .expect("color");
+            let decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
+                .expect("context")
+                .decoder()
+                .video()
+                .expect("decoder");
+            assert_eq!(
+                decoder.format().descriptor().expect("format").name(),
+                format
+            );
+            drop(input);
+            export_media(&request(&source, &target)).expect("unedited save");
+            export_media(&request(&target, &resaved)).expect("resave");
+            assert!(matches!(
+                export_media(&request(&source, &source)),
+                Err(ExportError::SameAsSource)
+            ));
+            for saved in [&source, &target, &resaved] {
+                assert!(
+                    fs::read(saved).expect("saved bytes") == original,
+                    "depth={depth}, frames={frames}"
+                );
+            }
+            let actual = crate::decode_image(&target).expect("saved pixels");
+            assert_eq!(actual.frames.len(), frames);
+            for (actual, expected) in actual.frames.iter().zip(&displayed.frames) {
+                assert_eq!(actual.rgba, expected.rgba);
+                assert_eq!(actual.delay, expected.delay);
+            }
+        }
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn unedited_avif_validation_checks_tail_alpha_budget_and_cancellation() {
+    use std::cell::Cell;
+    let root = audio_tests::root("avif-unedited-validation");
+    let source = root.join("source.avif");
+    let target = root.join("saved.avif");
+    fixture(&source, "3", true);
+    let cancel = AtomicBool::new(false);
+    let limit = 32 * 24 * 4;
+    assert!(matches!(
+        crate::image::decode_image_cancellable(&source, limit, &|| true),
+        Err(crate::ImageDecodeError::TooLarge)
+    ));
+    let visits = Cell::new(0);
+    assert_eq!(
+        crate::image::avif::validate(&source, limit, &|| true, &|_| visits.set(visits.get() + 1))
+            .expect("streaming validation"),
+        3
+    );
+    assert_eq!(visits.get(), 3);
+    assert!(matches!(
+        crate::image::avif::validate(&source, limit - 1, &|| true, &|_| {}),
+        Err(crate::ImageDecodeError::TooLarge)
+    ));
+    visits.set(0);
+    assert!(matches!(
+        crate::image::avif::validate(&source, limit, &|| visits.get() == 0, &|_| visits
+            .set(visits.get() + 1)),
+        Err(crate::ImageDecodeError::Cancelled)
+    ));
+    assert_eq!(visits.get(), 1);
+    {
+        let stage = StagedExport::new(&target).expect("stage");
+        fs::write(&stage.output, b"occupied").expect("occupied stage");
+        assert!(copy_unedited(&source, &stage, &cancel, &|_| {}).is_err());
+        assert_eq!(fs::read(&stage.output).expect("stage"), b"occupied");
+    }
+    let original = fs::read(&source).expect("source");
+    let animation = Animation::read(&source, &cancel)
+        .expect("controls")
+        .expect("sequence");
+    fs::write(&target, b"protected").expect("target");
+    for samples in &animation.samples {
+        let mut input = ffmpeg::format::input(&source).expect("input");
+        let mut last = None;
+        for (_, packet) in input.packets() {
+            if packet.stream() == samples.index {
+                last = Some((
+                    usize::try_from(packet.position()).expect("sample offset"),
+                    packet.size(),
+                ));
+            }
+        }
+        drop(input);
+        let (offset, size) = last.expect("last color or alpha sample");
+        let mut damaged = original.clone();
+        damaged[offset..offset + size].fill(0xff);
+        fs::write(&source, damaged).expect("corrupt final sample");
+        assert!(
+            Animation::read(&source, &cancel)
+                .expect("container controls remain valid")
+                .is_some()
+        );
+        assert!(
+            export_media(&request(&source, &target)).is_err(),
+            "must decode the final sample, including alpha"
+        );
+        assert_eq!(fs::read(&target).expect("target"), b"protected");
+        fs::write(&source, &original).expect("restore owned fixture");
     }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }

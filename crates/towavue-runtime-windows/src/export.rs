@@ -502,6 +502,17 @@ fn export_audio_cancellable(
         || streams.timeline.is_some())
     .then_some(request.kind);
     let staging = StagedExport::new(&request.target)?;
+    if avif_source && avif_target && request.operations.is_empty() {
+        avif::copy_unedited(&request.source, &staging, cancelled, progress)?;
+        source_stamp
+            .as_ref()
+            .expect("AVIF source stamp")
+            .verify(&request.source)?;
+        staging.publish(&request.target, cancelled, trimmed_kind)?;
+        return Ok(ExportOutcome {
+            used_hardware_encoder: false,
+        });
+    }
     if let Some(animation) = &gif_animation
         && gif_animation::gif_path(&request.target)
         && request.operations.is_empty()

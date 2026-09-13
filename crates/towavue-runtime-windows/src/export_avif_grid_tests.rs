@@ -350,6 +350,9 @@ fn generated_avif_color_alpha_grids_and_mixed_planes_preserve_pixels() {
             ));
             assert!(crate::image::first_animation_frame(&source, 1024, &|| true).is_err());
             export_media(&request(&source, &target)).expect("grid save");
+            assert!(
+                fs::read(&target).expect("saved bytes") == fs::read(&source).expect("grid bytes")
+            );
             assert_eq!(
                 crate::decode_image(&target).expect("saved pixels").frames[0].rgba,
                 *expected.as_raw()

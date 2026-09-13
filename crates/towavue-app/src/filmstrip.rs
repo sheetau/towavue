@@ -419,7 +419,7 @@ impl Filmstrip {
                             label.halign = egui::Align::Center;
                             let label = ui.fonts_mut(|fonts| fonts.layout_job(label));
                             ui.painter().galley(
-                                egui::pos2(rect.center().x, rect.bottom() + 10.0),
+                                egui::pos2(rect.center().x, rect.top() - 10.0 - label.size().y),
                                 label,
                                 Color32::WHITE,
                             );
@@ -1367,6 +1367,112 @@ mod tests {
             !strip.focus_requested,
             "closing clears a pending focus request"
         );
+    }
+
+    #[test]
+    fn highlighted_title_is_centered_above_the_thumbnail_and_wraps_to_two_rows() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-filmstrip-title-{}", std::process::id()));
+        let names = [
+            "short.png",
+            "A long image filename that should wrap across two lines without moving the thumbnail.png",
+        ];
+        let snapshot = FolderSnapshot {
+            folder_identity: ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: names
+                .iter()
+                .enumerate()
+                .map(|(index, name)| FolderMediaItem {
+                    identity: ShellIdentity::new(vec![index as u8]),
+                    path: root.join(name),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: SystemTime::now(),
+        };
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.enable_accesskit();
+            context.global_style_mut(crate::chrome::style);
+            let mut strip =
+                Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                    .expect("worker");
+            for size in [egui::vec2(320.0, 240.0), egui::vec2(960.0, 576.0)] {
+                let mut thumbnail_y = None;
+                for (index, name) in names.iter().enumerate() {
+                    let mut output = egui::FullOutput::default();
+                    for _ in 0..3 {
+                        output = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+                                ..Default::default()
+                            },
+                            |_| {
+                                let mut actions = Vec::new();
+                                strip.show(
+                                    &context,
+                                    context.content_rect(),
+                                    Some(&snapshot),
+                                    Some(&snapshot.items[index].path),
+                                    true,
+                                    &mut actions,
+                                );
+                                assert!(actions.is_empty());
+                            },
+                        );
+                    }
+                    let tree = output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree");
+                    let bounds = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| node.label() == Some(*name))
+                        .expect("thumbnail")
+                        .1
+                        .bounds()
+                        .expect("bounds");
+                    let titles: Vec<_> = output
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if names.contains(&text.galley.text()) => {
+                                Some((shape.clip_rect, text))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    assert_eq!(titles.len(), 1, "only the highlighted item has a title");
+                    let (clip, text) = titles[0];
+                    assert_eq!(text.galley.text(), *name);
+                    assert_eq!(text.galley.rows.len(), index + 1);
+                    let title = text.galley.rect.translate(text.pos.to_vec2());
+                    assert!(
+                        (title.center().x - ((bounds.x0 + bounds.x1) * 0.5) as f32).abs() < 1.0
+                    );
+                    assert!(
+                        (title.bottom() - (bounds.y0 as f32 - 10.0)).abs() < 1.0,
+                        "title above thumbnail: {title:?}, {bounds:?}"
+                    );
+                    assert!(
+                        clip.contains_rect(title),
+                        "title remains visible: {clip:?}, {title:?}"
+                    );
+                    assert!(title.width() <= 192.0);
+                    if let Some(y) = thumbnail_y {
+                        assert_eq!(bounds.y0, y, "wrapping does not move thumbnail geometry");
+                    }
+                    thumbnail_y = Some(bounds.y0);
+                }
+            }
+        }
     }
 
     #[test]

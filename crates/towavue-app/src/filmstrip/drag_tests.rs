@@ -85,9 +85,9 @@ fn card(output: &egui::FullOutput, name: &str) -> Rect {
 }
 
 #[test]
-fn filmstrip_highlights_one_target_and_centers_two_line_names_below_the_preview() {
+fn filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::drag_tests::filmstrip_highlights_one_target_and_centers_two_line_names_below_the_preview",
+        "filmstrip::drag_tests::filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview",
     ) else {
         return;
     };
@@ -167,7 +167,7 @@ fn filmstrip_highlights_one_target_and_centers_two_line_names_below_the_preview(
         .expect("one filename label");
     assert_eq!(text.galley.rows.len(), 2);
     let bounds = text.galley.rect.translate(text.pos.to_vec2());
-    assert!(bounds.top() >= rect.bottom() + 8.0);
+    assert!((bounds.bottom() - (rect.top() - 10.0)).abs() < 1.0);
     assert!(bounds.width() > rect.width());
     assert!((bounds.center().x - rect.center().x).abs() < 1.0);
     let third = card(&output, "third.png");

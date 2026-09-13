@@ -27,6 +27,7 @@ pub(super) struct MetadataDialog {
     selected: usize,
     current: Option<Result<Vec<MetadataSourceValue>, String>>,
     first_frame: bool,
+    focused_control: Option<egui::Id>,
     ime_composing: bool,
 }
 
@@ -75,6 +76,18 @@ impl MetadataDialog {
 
     fn show(&mut self, context: &egui::Context) -> Option<Option<MetadataExportOptions>> {
         let mut action = None;
+        let previous_focus = self.focused_control;
+        let mut focused_control = None;
+        let mut reveal_focus = |response: &egui::Response| {
+            if response.has_focus() {
+                focused_control = Some(response.id);
+                // Arrow focus resolves after layout; gained_focus can miss it.
+                // Unchanged focus must not undo manual scrolling.
+                if focused_control != previous_focus {
+                    response.scroll_to_me(None);
+                }
+            }
+        };
         let image_format = self.image_format();
         let fields = image_format.map_or(&MetadataField::ALL[..], ImageMetadataFormat::fields);
         let popup_open = egui::Popup::is_any_open(context);
@@ -109,7 +122,7 @@ impl MetadataDialog {
                         }
                     }).response;
                 if self.first_frame { response.request_focus(); self.first_frame = false; }
-                if response.gained_focus() { response.scroll_to_me(None); }
+                reveal_focus(&response);
                 let field = MetadataField::ALL[self.selected];
                 if image_format == Some(ImageMetadataFormat::Png) {
                     ui.label(format!("PNG keyword: {}", match field {
@@ -135,11 +148,11 @@ impl MetadataDialog {
                 let draft = &mut self.fields[self.selected];
                 for (mode, label) in [(Mode::Keep, "Keep source value"), (Mode::Set, "Set value"), (Mode::Remove, "Remove value")] {
                     let response = ui.radio_value(&mut draft.mode, mode, label);
-                    if response.gained_focus() { response.scroll_to_me(None); }
+                    reveal_focus(&response);
                 }
                 if draft.mode == Mode::Set {
                     let response = ui.push_id(self.selected, |ui| resize::multiline_text_input(ui, "Metadata value (empty removes the tag)", &mut draft.text)).inner;
-                    if response.gained_focus() { response.scroll_to_me(None); }
+                    reveal_focus(&response);
                 }
                 ui.separator();
                 ui.label("Current source values");
@@ -187,6 +200,7 @@ impl MetadataDialog {
                 if ui.button("Cancel").clicked() { action = Some(None); }
             });
         });
+        self.focused_control = focused_control;
         if modal.is_top_modal && escape {
             action = Some(None);
         }
@@ -251,6 +265,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             selected: 0,
             current: None,
             first_frame: true,
+            focused_control: None,
             ime_composing: false,
         });
         if self.metadata_worker.is_none() {

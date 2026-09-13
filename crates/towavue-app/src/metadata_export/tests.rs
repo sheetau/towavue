@@ -172,6 +172,152 @@ fn metadata_modal_rejects_stale_input_reads_and_leaving_without_changing_history
 }
 
 #[test]
+fn compact_metadata_arrow_focus_keeps_controls_visible_and_drafts_unchanged() {
+    for density in [1.0, 1.5, 2.0] {
+        for (kind, filename) in [
+            (MediaKind::Audio, "audio.wav"),
+            (MediaKind::Image, "image.png"),
+            (MediaKind::Image, "image.jpg"),
+            (MediaKind::Image, "image.webp"),
+        ] {
+            let context = fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.enable_accesskit();
+            let source = PathBuf::from(filename);
+            let mut tabs = TabSet::default();
+            let tab = tabs.open_new(source.clone(), kind);
+            let mut dialog = MetadataDialog {
+                token: 1,
+                tab,
+                source,
+                kind,
+                generation: 1,
+                fields: std::array::from_fn(|_| FieldDraft::default()),
+                selected: 0,
+                current: Some(Ok(vec![])),
+                first_frame: true,
+                focused_control: None,
+                ime_composing: false,
+            };
+            let mut time = 0.0;
+            let mut frame = |events| {
+                time += 0.1;
+                context
+                    .run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(320.0, 200.0),
+                            )),
+                            time: Some(time),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| assert!(dialog.show(ui.ctx()).is_none()),
+                    )
+                    .platform_output
+                    .accesskit_update
+                    .expect("tree")
+            };
+            for _ in 0..3 {
+                frame(vec![]);
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            for key in [
+                egui::Key::ArrowDown,
+                egui::Key::ArrowDown,
+                egui::Key::ArrowDown,
+                egui::Key::ArrowUp,
+                egui::Key::ArrowUp,
+                egui::Key::ArrowUp,
+            ] {
+                for pressed in [true, false] {
+                    frame(vec![egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }]);
+                }
+                for _ in 0..5 {
+                    frame(vec![]);
+                }
+                let tree = frame(vec![]);
+                let (_, node) = tree
+                    .nodes
+                    .iter()
+                    .find(|(id, _)| *id == tree.focus)
+                    .expect("focused node");
+                seen.insert(node.label().unwrap_or("field selector").to_owned());
+                let focused = context.memory(egui::Memory::focused).expect("focus");
+                let response = context.read_response(focused).expect("response");
+                assert!(
+                    response.interact_rect.height() >= response.rect.height() - 1.0 / density,
+                    "{filename}, density {density}, {key:?}, {:?}: clipped {:?} vs {:?}",
+                    node.label(),
+                    response.interact_rect,
+                    response.rect
+                );
+            }
+            for label in ["Keep source value", "Set value", "Remove value"] {
+                assert!(seen.contains(label), "arrows must reach {label}: {seen:?}");
+            }
+            let focused = context.memory(egui::Memory::focused).expect("wheel focus");
+            let before = context.read_response(focused).expect("response").rect;
+            frame(vec![
+                egui::Event::PointerMoved(before.center()),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    phase: egui::TouchPhase::Move,
+                    delta: egui::vec2(0.0, -60.0),
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+            for _ in 0..5 {
+                frame(vec![]);
+            }
+            let after = context.read_response(focused).expect("wheel response").rect;
+            assert_eq!(context.memory(egui::Memory::focused), Some(focused));
+            assert!(
+                before.top() - after.top() > 20.0,
+                "manual scroll must remain"
+            );
+            for shift in [false, true] {
+                for _ in 0..6 {
+                    for pressed in [true, false] {
+                        frame(vec![egui::Event::Key {
+                            key: egui::Key::Tab,
+                            physical_key: None,
+                            pressed,
+                            repeat: false,
+                            modifiers: egui::Modifiers {
+                                shift,
+                                ..egui::Modifiers::NONE
+                            },
+                        }]);
+                    }
+                    for _ in 0..5 {
+                        frame(vec![]);
+                    }
+                    let focused = context.memory(egui::Memory::focused).expect("Tab focus");
+                    let response = context.read_response(focused).expect("Tab response");
+                    assert!(
+                        response.interact_rect.height() >= response.rect.height() - 1.0 / density,
+                        "{filename}, density {density}, shift {shift}: clipped Tab focus"
+                    );
+                }
+            }
+            assert_eq!(dialog.selected, 0);
+            assert_eq!(
+                dialog.options().expect("options"),
+                MetadataExportOptions::default()
+            );
+        }
+    }
+}
+
+#[test]
 fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
     let Some(root) = crate::tests::isolated_test_root(
         "metadata_export::tests::metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout",

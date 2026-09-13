@@ -1,4 +1,5 @@
 use super::*;
+use std::path::PathBuf;
 use std::time::Instant;
 
 #[test]
@@ -99,6 +100,7 @@ fn reference_images_report_read_decode_and_optional_preview_cost() {
         bytes: u64,
         max_rgba: usize,
         previews: usize,
+        slowest: Option<(Duration, PathBuf)>,
     }
     fn summary(values: &[Duration]) -> [f64; 3] {
         let mut values = values.to_vec();
@@ -132,6 +134,13 @@ fn reference_images_report_read_decode_and_optional_preview_cost() {
         let image = decode_image(path).expect("complete original");
         let decode = started.elapsed();
         let samples = groups.entry(image.format).or_default();
+        if samples
+            .slowest
+            .as_ref()
+            .is_none_or(|(elapsed, _)| decode > *elapsed)
+        {
+            samples.slowest = Some((decode, path.clone()));
+        }
         samples.max_rgba = samples.max_rgba.max(image.retained_bytes());
         samples.read.push(read);
         samples.decode.push(decode);
@@ -168,5 +177,87 @@ fn reference_images_report_read_decode_and_optional_preview_cost() {
             summary(&samples.preview),
             samples.previews,
         );
+        let (first, path) = samples.slowest.expect("nonempty format group");
+        let before = std::fs::metadata(&path).expect("outlier metadata");
+        let mut repeated = Vec::new();
+        let mut dimensions = (0, 0);
+        let mut rgba = 0;
+        for _ in 0..2 {
+            let started = Instant::now();
+            let image = decode_image(&path).expect("repeat complete original");
+            repeated.push(started.elapsed().as_secs_f64() * 1000.0);
+            dimensions = (image.frames[0].width, image.frames[0].height);
+            rgba = image.retained_bytes();
+        }
+        if format == "PNG" {
+            compare_png_outlier_backends(&path);
+        }
+        let after = std::fs::metadata(&path).expect("outlier metadata after reading");
+        assert_eq!(before.len(), after.len());
+        assert_eq!(
+            before.modified().expect("before time"),
+            after.modified().expect("after time")
+        );
+        eprintln!(
+            "REFERENCE_OUTLIER format={format} over_33ms={} over_100ms={} max_ms={:.3} repeated_ms={repeated:?} dimensions={dimensions:?} compressed_mib={:.3} rgba_mib={:.3}; select the slowest first-pass file per format, repeat twice after the serial scan, dimensions and timing only; no path/pixel output or app-latency attribution",
+            samples
+                .decode
+                .iter()
+                .filter(|&&elapsed| elapsed > Duration::from_millis(33))
+                .count(),
+            samples
+                .decode
+                .iter()
+                .filter(|&&elapsed| elapsed > Duration::from_millis(100))
+                .count(),
+            first.as_secs_f64() * 1000.0,
+            before.len() as f64 / 1048576.0,
+            rgba as f64 / 1048576.0,
+        );
     }
+}
+
+// The existing FFmpeg software path is an available alternative, not a new
+// production policy. Include its demux/scaling/packed-copy cost and compare
+// complete pixels without ever formatting reference frames on failure.
+fn compare_png_outlier_backends(path: &Path) {
+    let mut samples: [Vec<f64>; 2] = Default::default();
+    let mut expected = None;
+    for variant in [0, 1, 1, 0] {
+        let started = Instant::now();
+        let frame = if variant == 0 {
+            let mut image = decode_image(path).expect("current PNG decoder");
+            assert_eq!(image.frames.len(), 1, "static PNG required");
+            image.frames.remove(0)
+        } else {
+            let mut output = None;
+            let result = crate::decode::decode_file(path, |item| {
+                if let crate::decode::DecodeOutput::Video(frame) = item {
+                    output = Some(frame);
+                }
+                false
+            });
+            assert!(
+                matches!(result, Err(DecodeError::ConsumerClosed)),
+                "one-frame decode must stop at the consumer"
+            );
+            let frame = output.expect("software RGBA frame");
+            DecodedImageFrame {
+                width: frame.width,
+                height: frame.height,
+                rgba: frame.rgba,
+                delay: Duration::ZERO,
+            }
+        };
+        samples[variant].push(started.elapsed().as_secs_f64() * 1000.0);
+        if let Some(expected) = &expected {
+            assert!(&frame == expected, "PNG decoder pixel/dimension mismatch");
+        } else {
+            expected = Some(frame);
+        }
+    }
+    eprintln!(
+        "REFERENCE_PNG_BACKENDS current_ms={:?} ffmpeg_software_ms={:?}; same selected outlier, current/FFmpeg/FFmpeg/current, complete RGBA/dimensions equal, decoder/demux/scaling/packed-copy time; no pixels emitted, peak-memory/GPU/app-latency or general PNG compatibility claim",
+        samples[0], samples[1],
+    );
 }

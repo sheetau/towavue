@@ -310,7 +310,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 self.retained_images.insert(id, *saved);
             }
         }
-        self.load_path_with_transfer(path, kind, true);
+        self.load_path_inner(path, kind, true, None);
         if let Some(context) = &self.ui_context {
             if let Some(focus) = transfer.focus {
                 tab_focus::adopt(context, id, focus);

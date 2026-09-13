@@ -97,18 +97,18 @@ fn gpu_handoff_preserves_pixels_through_supersession_and_renderer_recreation() {
                 for index in 0..12 {
                     let path = self.root.join(format!("next-{index}.png"));
                     navigate_pending(&mut app, path.clone());
-                    app.finish_image_preview(
-                        path,
-                        app.image_preview_generation,
-                        towavue_runtime_windows::CachedImagePreview {
-                            source_size: (160, 90),
-                            image: towavue_runtime_windows::PreviewImage {
-                                width: 1,
-                                height: 1,
-                                rgba: vec![255, 0, 0, 255],
-                            },
+                    let preview = || towavue_runtime_windows::CachedImagePreview {
+                        source_size: (160, 90),
+                        image: towavue_runtime_windows::PreviewImage {
+                            width: 1,
+                            height: 1,
+                            rgba: vec![255, 0, 0, 255],
                         },
-                    );
+                    };
+                    // Even an eligible late cache result must not upload while held.
+                    app.pending_image_previews.insert(path.clone());
+                    app.finish_image_preview(path.clone(), app.image_preview_generation, preview());
+                    assert!(app.image_previews.is_empty());
                     let held = app.image_handoff.as_ref().expect("held original");
                     assert_eq!(held.image.decoded.frames[0].rgba.as_ptr(), rgba_pointer);
                     assert_eq!(
@@ -120,6 +120,7 @@ fn gpu_handoff_preserves_pixels_through_supersession_and_renderer_recreation() {
                         // Negative controls: the same GPU oracle must distinguish a preview
                         // and an empty loading surface when the display holder is absent.
                         let held = app.image_handoff.take();
+                        app.finish_image_preview(path, app.image_preview_generation, preview());
                         let preview = draw(&mut app, &context, &mut renderer, false);
                         assert!(
                             preview

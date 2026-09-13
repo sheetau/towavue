@@ -151,7 +151,7 @@ impl Drop for PrefetchLease {
 #[derive(Default)]
 struct Mailbox {
     generation: u64,
-    pending: Option<(Vec<PathBuf>, usize)>,
+    pending: Option<(Vec<PathBuf>, usize, bool)>,
     decoding: bool,
     completed: Option<LoadedImages>,
     preview_ready: Option<LoadedImagePreview>,
@@ -221,15 +221,31 @@ impl ImageLoader {
 
     /// Decode missing pages within the same budget as the caller's already retained pages.
     pub fn request_with_retained_bytes(&self, paths: Vec<PathBuf>, retained_bytes: usize) -> u64 {
-        self.request_inner(paths, retained_bytes, false)
+        self.request_inner(paths, retained_bytes, false, true)
+    }
+
+    /// Skip interim previews while the caller keeps its previous presentation.
+    /// Completed originals still seed shared thumbnails.
+    pub fn request_originals_with_retained_bytes(
+        &self,
+        paths: Vec<PathBuf>,
+        retained_bytes: usize,
+    ) -> u64 {
+        self.request_inner(paths, retained_bytes, false, false)
     }
 
     /// Cancel image work and release cached originals on the decoder thread, without joining it.
     pub fn clear(&self) -> u64 {
-        self.request_inner(Vec::new(), 0, true)
+        self.request_inner(Vec::new(), 0, true, false)
     }
 
-    fn request_inner(&self, paths: Vec<PathBuf>, retained_bytes: usize, clear_cache: bool) -> u64 {
+    fn request_inner(
+        &self,
+        paths: Vec<PathBuf>,
+        retained_bytes: usize,
+        clear_cache: bool,
+        allow_preview: bool,
+    ) -> u64 {
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("image mailbox");
         mailbox.clear_cache |= clear_cache;
@@ -244,8 +260,11 @@ impl ImageLoader {
                 mailbox.prefetch = None;
             }
         }
-        mailbox.pending =
-            (!paths.is_empty()).then_some((paths, IMAGE_BYTE_LIMIT.saturating_sub(retained_bytes)));
+        mailbox.pending = (!paths.is_empty()).then_some((
+            paths,
+            IMAGE_BYTE_LIMIT.saturating_sub(retained_bytes),
+            allow_preview,
+        ));
         mailbox.completed = None;
         mailbox.preview_ready = None;
         ready.notify_all();
@@ -480,7 +499,7 @@ fn run_worker(
             cache.entries.clear();
             cache.bytes = 0;
         }
-        let Some((paths, mut remaining)) = pending else {
+        let Some((paths, mut remaining, allow_preview)) = pending else {
             continue;
         };
         let is_current = || {
@@ -519,6 +538,9 @@ fn run_worker(
                 notify();
             };
             let mut first_frame = |width, height, pixels: &[u8]| {
+                if !allow_preview {
+                    return;
+                }
                 let Some(previews) = &previews else { return };
                 previews.remember_pixels(&path, width, height, pixels, &preview_current);
                 if let Ok(Some(preview)) = previews.cached_image(&path) {
@@ -550,7 +572,8 @@ fn run_worker(
             }
             // An adopted original is already decoding. Resolve that result before
             // starting a speculative decoder for an unnecessary interim preview.
-            if cached.is_none()
+            if allow_preview
+                && cached.is_none()
                 && let Some(previews) = &previews
                 && let Some(preview) =
                     previews.prepare_image_preview(&path, remaining, &preview_current)
@@ -1121,6 +1144,109 @@ mod tests {
             ["cached", "adopted", "budget"].map(|mode| (mode, vec![42; 4], 0)),
             "obsolete cache reads must not force a second decode"
         );
+    }
+
+    #[test]
+    fn original_only_requests_skip_interim_work_and_keep_shared_thumbnails() {
+        let root = std::env::temp_dir().join(format!(
+            "towavue-original-only-preview-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("owned fixtures");
+        let path = root.join("source.bmp");
+        image::RgbImage::from_pixel(2048, 2048, image::Rgb([17, 37, 59]))
+            .save(&path)
+            .expect("preview-capable BMP");
+        assert!(
+            crate::image::first_image_preview(&path, IMAGE_BYTE_LIMIT, &|| true)
+                .expect("valid preview")
+                .is_some()
+        );
+        for allow_preview in [false, true] {
+            let previews = PreviewCache::new(root.join(format!("cache-{allow_preview}")))
+                .expect("preview cache");
+            let (idle_tx, idle_rx) = mpsc::channel();
+            let shared = Arc::new((
+                Mutex::new(Mailbox {
+                    previews: Some(previews.clone()),
+                    idle_notify: Some(Arc::new(move || {
+                        let _ = idle_tx.send(());
+                    })),
+                    ..Default::default()
+                }),
+                Condvar::new(),
+            ));
+            let loader = ImageLoader {
+                shared: Arc::clone(&shared),
+                prefetch_worker: LatestTask::new("original-only-preview-test").expect("worker"),
+            };
+            let notifications = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let count = Arc::clone(&notifications);
+            let observed_previews = previews.clone();
+            let worker = thread::spawn(move || {
+                run_worker(
+                    shared,
+                    || {
+                        count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    },
+                    |path, budget, current, first_frame| {
+                        assert_eq!(budget, IMAGE_BYTE_LIMIT - 64);
+                        assert!(current());
+                        assert_eq!(
+                            observed_previews
+                                .cached_image(path)
+                                .expect("cache")
+                                .is_some(),
+                            allow_preview,
+                            "interim decoding must not delay an original-only request"
+                        );
+                        first_frame(1, 1, &[42; 4]);
+                        assert_eq!(
+                            observed_previews
+                                .cached_image(path)
+                                .expect("cache")
+                                .is_some(),
+                            allow_preview,
+                            "hidden animation first frames must not prepare previews either"
+                        );
+                        Ok((*pixel(42)).clone())
+                    },
+                );
+            });
+            let generation = if allow_preview {
+                loader.request_with_retained_bytes(vec![path.clone()], 64)
+            } else {
+                loader.request_originals_with_retained_bytes(vec![path.clone()], 64)
+            };
+            idle_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("original and thumbnail completed");
+            let completed = loader.take_completed().expect("original");
+            assert_eq!(completed.generation, generation);
+            assert_eq!(
+                completed.images[0].1.as_ref().expect("decoded").frames[0].rgba,
+                vec![42; 4]
+            );
+            assert!(
+                loader.take_preview().is_none(),
+                "original clears interim output"
+            );
+            assert_eq!(
+                previews
+                    .cached_image(&path)
+                    .expect("shared cache")
+                    .expect("completed thumbnail")
+                    .source_size,
+                (1, 1)
+            );
+            drop(loader);
+            worker.join().expect("worker stopped");
+            assert_eq!(
+                notifications.load(std::sync::atomic::Ordering::SeqCst),
+                if allow_preview { 3 } else { 1 }
+            );
+        }
+        std::fs::remove_dir_all(root).expect("remove owned fixtures");
     }
 
     #[test]

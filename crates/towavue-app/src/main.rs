@@ -1604,10 +1604,16 @@ where
     }
 
     fn load_path(&mut self, path: PathBuf, kind: MediaKind) {
-        self.load_path_with_transfer(path, kind, false);
+        self.load_path_inner(path, kind, false, None);
     }
 
-    fn load_path_with_transfer(&mut self, path: PathBuf, kind: MediaKind, transferred: bool) {
+    fn load_path_inner(
+        &mut self,
+        path: PathBuf,
+        kind: MediaKind,
+        transferred: bool,
+        handoff: Option<image_handoff::ImageHandoff>,
+    ) {
         let video_repeat = kind == MediaKind::Video
             && self
                 .tabs
@@ -1718,6 +1724,9 @@ where
                 self.reading_mode = false;
             }
             self.state = PlaybackState::Loading;
+            // Install the retained display before issuing work so hidden interim
+            // previews cannot race the foreground request.
+            self.image_handoff = handoff;
             self.rebuild_reading_pages();
             self.refresh_title();
             self.request_redraw();
@@ -2040,6 +2049,14 @@ where
                     .map(|image| image.decoded.retained_bytes())
                     .sum::<usize>()
         };
+        if self.image_handoff.is_some() {
+            self.image_generation = self
+                .image_loader
+                .request_originals_with_retained_bytes(paths, retained_bytes);
+            self.clear_image_previews();
+            self.request_redraw();
+            return;
+        }
         self.image_generation = self
             .image_loader
             .request_with_retained_bytes(paths.clone(), retained_bytes);
@@ -2080,6 +2097,7 @@ where
     ) {
         if generation != self.image_preview_generation
             || !self.image_loading
+            || self.image_handoff.is_some()
             || !self.pending_image_previews.contains(&path)
         {
             return;
@@ -7475,12 +7493,13 @@ where
             self.audio_export_settings.remove(&id);
             self.metadata_export_settings.remove(&id);
         }
-        self.load_path(path, kind);
-        if self.image_loading && self.image.is_none() {
-            self.image_handoff = handoff;
-            if self.image_handoff.is_some() && !self.reading_mode {
-                self.image_sequence.awaiting = Some(self.media_generation);
-            }
+        self.load_path_inner(path, kind, false, handoff);
+        if self.image_loading
+            && self.image.is_none()
+            && self.image_handoff.is_some()
+            && !self.reading_mode
+        {
+            self.image_sequence.awaiting = Some(self.media_generation);
         }
     }
 

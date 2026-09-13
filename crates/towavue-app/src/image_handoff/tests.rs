@@ -63,6 +63,12 @@ fn navigate_pending(app: &mut App, path: PathBuf) {
     // Tests deliver controlled chunks below, including intentionally stale generations.
     app.image_loader.request(Vec::new());
     assert!(app.image_loading && app.image.is_none());
+    if app.image_handoff.is_some() {
+        assert!(
+            app.pending_image_previews.is_empty(),
+            "no hidden cache-preview requests"
+        );
+    }
 }
 
 #[test]
@@ -276,10 +282,11 @@ fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
                 },
             },
         );
-        let preview = app.image_previews[&root.join("next.png")].texture.id();
+        assert!(
+            app.image_previews.is_empty(),
+            "a hidden interim preview must not allocate a presentation texture"
+        );
         let output = frame(&mut app, &context);
-        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
-            egui::Shape::Mesh(mesh) if mesh.texture_id == preview)));
         assert_eq!(
             bounds(&output),
             Some(before),
@@ -439,6 +446,10 @@ fn handoff_does_not_survive_failure_departure_or_last_tab_close() {
                 app.tabs.open_new(root.join("other.png"), MediaKind::Image);
                 app.load_path(root.join("other.png"), MediaKind::Image);
                 app.image_loader.request(Vec::new());
+                assert!(
+                    app.pending_image_previews.contains(&root.join("other.png")),
+                    "a fresh tab still requests its initial preview"
+                );
             }
         }
         assert!(app.image_handoff.is_none());

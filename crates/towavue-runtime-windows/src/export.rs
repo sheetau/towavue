@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -636,9 +636,9 @@ fn export_audio_cancellable(
         ..request.clone()
     };
     if let Some(png_metadata) = &png_metadata
-        && let Some(source) = png_metadata.prepare_animation_source(request, &staging, cancelled)?
+        && png_metadata.is_animated()
     {
-        staged_request.source = source;
+        staged_request.source = PathBuf::from("pipe:0");
         streams.png_image_sequence = true;
     }
     let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;
@@ -677,11 +677,23 @@ fn export_audio_cancellable(
             });
         }
     }
-    let output = run_ffmpeg(
+    let png_input = |writer: &mut dyn Write, stopped: &AtomicBool| {
+        let result = crate::image::apng::write_frames(&request.source, writer, &|| {
+            !cancelled.load(Ordering::Relaxed) && !stopped.load(Ordering::Relaxed)
+        });
+        check_cancelled(cancelled)?;
+        result.map_err(|error| {
+            ExportError::Failed(format!(
+                "PNG metadata: animation frame preparation failed: {error}"
+            ))
+        })
+    };
+    let output = run_ffmpeg_with_input(
         &executable,
         staging.arguments(&staged_request, false, &streams)?,
         cancelled,
         progress,
+        streams.png_image_sequence.then_some(&png_input),
     )?;
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
@@ -870,20 +882,46 @@ fn run_ffmpeg(
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
 ) -> Result<std::process::Output, ExportError> {
+    run_ffmpeg_with_input(executable, arguments, cancelled, progress, None)
+}
+
+type ExportInput<'a> = dyn Fn(&mut dyn Write, &AtomicBool) -> Result<(), ExportError> + Sync + 'a;
+
+fn run_ffmpeg_with_input(
+    executable: &Path,
+    arguments: Vec<String>,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+    input: Option<&ExportInput<'_>>,
+) -> Result<std::process::Output, ExportError> {
     check_cancelled(cancelled)?;
     progress(Duration::ZERO);
     let mut child = <Command as std::os::windows::process::CommandExt>::creation_flags(
         Command::new(executable).args(arguments),
         CREATE_NO_WINDOW,
     )
-    .stdin(Stdio::null())
+    .stdin(if input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .spawn()
     .map_err(ExportError::Start)?;
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
+    let stdin = child.stdin.take();
+    let input_stopped = AtomicBool::new(false);
     thread::scope(|scope| {
+        let producer = input.map(|input| {
+            scope.spawn(|| {
+                let mut writer =
+                    std::io::BufWriter::with_capacity(65536, stdin.expect("piped stdin"));
+                input(&mut writer, &input_stopped)?;
+                writer.flush().map_err(ExportError::Output)
+            })
+        });
         scope.spawn(|| {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if let Some(time) = line
@@ -911,6 +949,9 @@ fn run_ffmpeg(
         });
         let status = loop {
             if let Err(error) = check_cancelled(cancelled) {
+                input_stopped.store(true, Ordering::Relaxed);
+                // Killing the child closes its pipe reader, releasing a blocked input
+                // writer before scope exit joins every worker. Do not join first.
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(error);
@@ -919,16 +960,39 @@ fn run_ffmpeg(
                 Ok(Some(status)) => break status,
                 Ok(None) => thread::sleep(Duration::from_millis(20)),
                 Err(error) => {
+                    input_stopped.store(true, Ordering::Relaxed);
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(ExportError::Start(error));
                 }
             }
         };
+        if !status.success() {
+            input_stopped.store(true, Ordering::Relaxed);
+        }
+        let input_error = if let Some(producer) = producer {
+            let result = producer
+                .join()
+                .map_err(|_| ExportError::Failed("PNG input worker panicked".into()))?;
+            check_cancelled(cancelled)?;
+            result.err()
+        } else {
+            None
+        };
+        let mut stderr = diagnostics.join().expect("diagnostic reader completed");
+        if let Some(error) = input_error {
+            if status.success() {
+                return Err(error);
+            }
+            stderr.extend_from_slice(format!("\n{error}").as_bytes());
+            if stderr.len() > 16_384 {
+                stderr.drain(..stderr.len() - 16_384);
+            }
+        }
         Ok(std::process::Output {
             status,
             stdout: Vec::new(),
-            stderr: diagnostics.join().expect("diagnostic reader completed"),
+            stderr,
         })
     })
 }

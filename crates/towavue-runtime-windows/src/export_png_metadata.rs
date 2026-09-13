@@ -530,6 +530,7 @@ impl PngMetadata {
         webp_metadata::apply_png_frames(staging, delays, plays, cancelled, progress)
     }
 
+    #[cfg(test)]
     pub(super) fn prepare_animation_source(
         &self,
         request: &ExportRequest,

@@ -486,7 +486,19 @@ fn apng_export_preserves_all_edited_frames_delays_and_loop_count() {
     assert_eq!(decoded.frames.len(), 3);
     let mut request = request(&source, &target);
     request.operations = vec![EditOperation::RotateClockwise];
-    export_media(&request).expect("APNG save");
+    export_cancellable(&request, &AtomicBool::new(false), &|_| {
+        for entry in fs::read_dir(&root).expect("owned export directory") {
+            assert!(
+                !entry
+                    .expect("entry")
+                    .path()
+                    .join("animation-source.png")
+                    .exists(),
+                "unedited snapshots must be piped, not staged"
+            );
+        }
+    })
+    .expect("APNG save");
     let actual = crate::decode_image(&target).expect("exported animation");
     assert_eq!(
         actual.frames.len(),
@@ -1819,6 +1831,124 @@ fn png_text_rejects_corruption_truncation_invalid_text_and_bounded_expansion() {
         scan(Cursor::new(&original), None, &AtomicBool::new(true)),
         Err(ExportError::Cancelled)
     ));
+}
+
+#[test]
+fn apng_piped_input_propagates_producer_failure_and_reaps_early_exit() {
+    let executable = crate::media_tools::tool_path("ffmpeg.exe").expect("helper");
+    let input = |writer: &mut dyn Write, _: &AtomicBool| {
+        writer.write_all(&fixture()).map_err(ExportError::Output)?;
+        writer.flush().map_err(ExportError::Output)?;
+        Err(ExportError::Failed(
+            "fixture producer failed after a valid frame".into(),
+        ))
+    };
+    let result = run_ffmpeg_with_input(
+        &executable,
+        [
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-f",
+            "image2pipe",
+            "-i",
+            "pipe:0",
+            "-f",
+            "null",
+            "-",
+        ]
+        .map(String::from)
+        .to_vec(),
+        &AtomicBool::new(false),
+        &|_| {},
+        Some(&input),
+    );
+    assert!(
+        result
+            .expect_err("successful prefix cannot hide producer failure")
+            .to_string()
+            .contains("fixture producer failed")
+    );
+    let finished = AtomicBool::new(false);
+    let input = |writer: &mut dyn Write, stopped: &AtomicBool| {
+        let result = (|| {
+            for _ in 0..256 {
+                check_cancelled(stopped)?;
+                writer.write_all(&[0; 65536]).map_err(ExportError::Output)?;
+            }
+            Ok(())
+        })();
+        finished.store(true, Ordering::Relaxed);
+        result
+    };
+    let output = run_ffmpeg_with_input(
+        &executable,
+        vec!["-towavue-invalid-option".into()],
+        &AtomicBool::new(false),
+        &|_| {},
+        Some(&input),
+    )
+    .expect("early exit status");
+    assert!(!output.status.success());
+    assert!(finished.load(Ordering::Relaxed), "input worker is joined");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("towavue-invalid-option"));
+}
+
+#[test]
+fn apng_piped_input_cancellation_unblocks_a_writer_when_helper_does_not_read_stdin() {
+    let executable = crate::media_tools::tool_path("ffmpeg.exe").expect("helper");
+    let cancel = AtomicBool::new(false);
+    let finished = AtomicBool::new(false);
+    let (started, events) = std::sync::mpsc::channel();
+    thread::scope(|scope| {
+        let cancel_ref = &cancel;
+        scope.spawn(move || {
+            let started = events.recv_timeout(Duration::from_secs(5));
+            thread::sleep(Duration::from_millis(50));
+            cancel_ref.store(true, Ordering::Relaxed);
+            started.expect("producer started");
+        });
+        let input = |writer: &mut dyn Write, stopped: &AtomicBool| {
+            started.send(()).expect("watchdog");
+            let result = (|| {
+                for _ in 0..256 {
+                    check_cancelled(stopped)?;
+                    writer.write_all(&[0; 65536]).map_err(ExportError::Output)?;
+                }
+                Ok(())
+            })();
+            finished.store(true, Ordering::Relaxed);
+            result
+        };
+        let result = run_ffmpeg_with_input(
+            &executable,
+            [
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-re",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=size=16x16:rate=1",
+                "-f",
+                "null",
+                "-",
+            ]
+            .map(String::from)
+            .to_vec(),
+            &cancel,
+            &|_| {},
+            Some(&input),
+        );
+        assert!(matches!(result, Err(ExportError::Cancelled)));
+        assert!(
+            finished.load(Ordering::Relaxed),
+            "blocked producer exits before return"
+        );
+    });
 }
 
 #[test]

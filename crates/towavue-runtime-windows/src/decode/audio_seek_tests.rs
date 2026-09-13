@@ -100,53 +100,90 @@ fn retained_audio_intervals_skip_decoding_deleted_packets_without_changing_sampl
         (48000, 2, "aac", 1001),
     ] {
         let (directory, source, _) = fixture(rate, channels, codec, 4, packet_frames);
-        let nanos = MediaTime::from_nanoseconds;
-        let intervals = [
-            TimeRange::new(nanos(17_000_001), nanos(91_000_001)).expect("first"),
-            TimeRange::new(nanos(2_117_000_001), nanos(2_189_000_001)).expect("second"),
-            TimeRange::new(nanos(3_703_000_001), nanos(3_817_000_001)).expect("third"),
-        ];
-        // Drain to natural EOF so counters include all decoded output, not only
-        // chunks observed before a bounded consumer closes the worker queue.
-        let end = nanos(5_000_000_000);
-        let collect = |count_deleted: bool| {
-            let mut output = Vec::new();
-            let summary = decode_audio_intervals_cancellable(
-                &source,
-                MediaTime::ZERO,
-                end,
-                if count_deleted { &intervals } else { &[] },
-                &|| false,
-                |chunk| {
-                    for range in intervals {
-                        let (bounds, _) =
-                            clip_audio_bounds(&chunk, range.start(), Some(range.end()));
-                        output.extend_from_slice(&chunk.bytes[bounds.start * 8..bounds.end * 8]);
-                    }
-                    true
-                },
-            )
-            .expect("bounded interval decode");
-            (output, summary.audio_frames)
-        };
-        let (reference, all_frames) = collect(false);
-        let (retained, decoded_frames) = collect(true);
-        assert!(!reference.is_empty());
-        assert!(
-            retained == reference,
-            "PCM mismatch: {rate}/{channels}/{codec}"
-        );
-        if codec == "aac" {
-            assert_eq!(
-                decoded_frames, all_frames,
-                "stateful decoder must stay continuous"
-            );
+        let native = directory.join(if codec == "flac" {
+            "native.flac"
+        } else if codec == "aac" {
+            "native.m4a"
         } else {
-            assert_eq!(all_frames, u64::from(rate) * 4, "full source frame count");
-            assert!(
-                decoded_frames < all_frames / 4,
-                "deleted samples were still decoded: {rate}/{channels}/{codec} {decoded_frames}/{all_frames}"
-            );
+            "native.wav"
+        });
+        let executable = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+            .join("bin/ffmpeg.exe");
+        let remuxed = std::process::Command::new(executable)
+            .creation_flags(0x0800_0000)
+            .args(["-v", "error", "-n", "-i"])
+            .arg(&source)
+            .args(["-c:a", "copy"])
+            .arg(&native)
+            .output()
+            .expect("native-container control");
+        assert!(
+            remuxed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&remuxed.stderr)
+        );
+        let native_input = format::input(&native).expect("native input");
+        assert!(
+            best_stream_config(&native_input, Type::Audio)
+                .expect("native audio")
+                .has_sample_timestamps()
+        );
+        drop(native_input);
+        for path in [&source, &native] {
+            for start in [0, 2_130_000_001] {
+                let nanos = MediaTime::from_nanoseconds;
+                let intervals = [
+                    TimeRange::new(nanos(17_000_001), nanos(91_000_001)).expect("first"),
+                    TimeRange::new(nanos(2_117_000_001), nanos(2_189_000_001)).expect("second"),
+                    TimeRange::new(nanos(3_703_000_001), nanos(3_817_000_001)).expect("third"),
+                ];
+                // Drain to natural EOF so counters include all decoded output, not only
+                // chunks observed before a bounded consumer closes the worker queue.
+                let end = nanos(5_000_000_000);
+                let collect = |count_deleted: bool| {
+                    let mut output = Vec::new();
+                    let summary = decode_audio_intervals_cancellable(
+                        path,
+                        nanos(start),
+                        end,
+                        if count_deleted { &intervals } else { &[] },
+                        &|| false,
+                        |chunk| {
+                            for range in intervals {
+                                let (bounds, _) =
+                                    clip_audio_bounds(&chunk, range.start(), Some(range.end()));
+                                output.extend_from_slice(
+                                    &chunk.bytes[bounds.start * 8..bounds.end * 8],
+                                );
+                            }
+                            true
+                        },
+                    )
+                    .expect("bounded interval decode");
+                    (output, summary.audio_frames)
+                };
+                let (reference, all_frames) = collect(false);
+                let (retained, decoded_frames) = collect(true);
+                assert!(!reference.is_empty());
+                assert!(
+                    retained == reference,
+                    "PCM mismatch: {rate}/{channels}/{codec}/{path:?} at {start}"
+                );
+                if codec == "aac" {
+                    assert_eq!(
+                        decoded_frames, all_frames,
+                        "stateful decoder must stay continuous"
+                    );
+                } else {
+                    if start == 0 {
+                        assert_eq!(all_frames, u64::from(rate) * 4, "full source frame count");
+                    }
+                    assert!(
+                        decoded_frames < all_frames / if start == 0 { 4 } else { 2 },
+                        "deleted samples were still decoded: {rate}/{channels}/{codec}/{path:?} at {start} {decoded_frames}/{all_frames}"
+                    );
+                }
+            }
         }
         fs::remove_dir_all(directory).expect("remove owned fixtures");
     }

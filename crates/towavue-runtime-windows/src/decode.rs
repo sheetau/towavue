@@ -196,22 +196,29 @@ struct StreamConfig {
 }
 
 impl StreamConfig {
+    fn has_sample_timestamps(&self) -> bool {
+        // SAFETY: Parameters retains this allocation; this read neither mutates
+        // native state nor lets its pointer escape the owning configuration.
+        let rate = unsafe { (*self.parameters.as_ptr()).sample_rate };
+        rate > 0
+            && i64::from(self.time_base.numerator()) * i64::from(rate)
+                <= i64::from(self.time_base.denominator())
+    }
+
     fn sample_preroll(&self, target: MediaTime) -> Option<(MediaTime, PrerollSamples)> {
         // Parameters owns (or retains its stream owner for) this valid allocation.
-        // This immutable borrow stays on the demux owner thread before workers
-        // start; it neither mutates native state nor lets a pointer escape.
+        // This immutable borrow neither mutates native state nor lets a pointer escape.
         let parameters = unsafe { &*self.parameters.as_ptr() };
         if target <= MediaTime::ZERO
             || parameters.sample_rate <= 0
             || parameters.ch_layout.nb_channels <= 0
-            || i64::from(self.time_base.numerator()) * i64::from(parameters.sample_rate)
-                <= i64::from(self.time_base.denominator())
+            || self.has_sample_timestamps()
         {
             return Option::None;
         }
         use codec::Id::*;
-        if self.parameters.id() == FLAC {
-            return Some((target, PrerollSamples::Flac));
+        if let Some(source) = self.independent_samples() {
+            return Some((target, source));
         }
         if matches!(self.parameters.id(), VORBIS | OPUS) {
             let warmup = target.saturating_sub(Duration::from_millis(250));
@@ -234,6 +241,19 @@ impl StreamConfig {
                 PrerollSamples::AacLc(parameters.frame_size as usize),
             ));
         }
+        Option::None
+    }
+
+    fn independent_samples(&self) -> Option<PrerollSamples> {
+        // SAFETY: the configuration owns these immutable codec parameters.
+        let parameters = unsafe { &*self.parameters.as_ptr() };
+        if parameters.sample_rate <= 0 || parameters.ch_layout.nb_channels <= 0 {
+            return Option::None;
+        }
+        use codec::Id::*;
+        if self.parameters.id() == FLAC {
+            return Some(PrerollSamples::Flac);
+        }
         let sample_bytes = match self.parameters.id() {
             PCM_U8 | PCM_S8 => 1,
             PCM_S16LE | PCM_S16BE | PCM_U16LE | PCM_U16BE => 2,
@@ -242,9 +262,8 @@ impl StreamConfig {
             PCM_S64LE | PCM_S64BE | PCM_F64LE | PCM_F64BE => 8,
             _ => return Option::None,
         };
-        Some((
-            target,
-            PrerollSamples::Pcm(sample_bytes * parameters.ch_layout.nb_channels as usize),
+        Some(PrerollSamples::Pcm(
+            sample_bytes * parameters.ch_layout.nb_channels as usize,
         ))
     }
 }
@@ -1289,11 +1308,11 @@ fn run_parallel_audio_worker(
     // A video-GOP/direct seek may start with an approximate audio sample axis.
     // Learn only after a sequential start or the exact prefix/checkpoint path,
     // and only for independently decodable PCM/FLAC packets at coarse time bases.
-    let independent = config
-        .sample_preroll(MediaTime::from_nanoseconds(1))
-        .map(|(_, source)| source)
-        .filter(|source| matches!(source, PrerollSamples::Pcm(_) | PrerollSamples::Flac));
-    let mut learn = trusted_axis && independent.is_some();
+    let sample_timestamps = config.has_sample_timestamps();
+    let independent = config.independent_samples();
+    let mut learn = trusted_axis && !sample_timestamps && independent.is_some();
+    let mut count_deleted =
+        !intervals.is_empty() && (trusted_axis || sample_timestamps) && independent.is_some();
     let mut pipeline = create_audio_pipeline_from(config)?;
     pipeline.sample_preroll = sample_preroll;
     if matches!(
@@ -1322,7 +1341,13 @@ fn run_parallel_audio_worker(
         // PCM/FLAC with a trusted axis and one output chunk per decoded packet.
         // Side data permanently disables this optimization and checkpoint learning.
         learn &= packet.side_data().next().is_none();
-        if learn && next_sample != ffmpeg::ffi::AV_NOPTS_VALUE {
+        count_deleted &= packet.side_data().next().is_none();
+        if count_deleted
+            && next_sample != ffmpeg::ffi::AV_NOPTS_VALUE
+            // An exact PTS must establish counting after a direct seek; subsequent
+            // packets can continue counting on that established sample axis.
+            && (trusted_axis || packet.pts().is_some())
+        {
             let sample_at = |time: MediaTime| {
                 time.as_nanoseconds().rescale_with(
                     (1, 1_000_000_000),
@@ -1345,7 +1370,7 @@ fn run_parallel_audio_worker(
         let counted = pipeline.skip_sample_preroll(&packet)?;
         if !counted {
             pipeline.decoder.send_packet(&packet)?;
-            if learn {
+            if learn || count_deleted {
                 let mut chunks = 0;
                 pipeline.receive(
                     &mut |decoded| {
@@ -1356,7 +1381,8 @@ fn run_parallel_audio_worker(
                 )?;
                 // A delayed/multi-frame decoder would need more than the scalar
                 // pre-packet axis. Keep the existing decode path in that case.
-                learn = chunks == 1;
+                learn &= chunks == 1;
+                count_deleted &= chunks == 1;
             } else {
                 pipeline.receive(&mut emit_audio, &mut summary)?;
             }

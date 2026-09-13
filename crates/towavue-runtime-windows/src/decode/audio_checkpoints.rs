@@ -324,12 +324,29 @@ mod tests {
             )
             .expect("last interval"),
         ];
-        for trusted in [true, false] {
-            let config = best_stream_config(&input, Type::Audio).expect("config");
+        for (precise, trusted, timestamps) in [
+            (false, true, true),
+            (false, false, true),
+            (true, true, true),
+            (true, false, true),
+            (true, false, false),
+        ] {
+            let mut config = best_stream_config(&input, Type::Audio).expect("config");
+            if precise {
+                config.time_base = Rational(1, 48_000);
+            }
             let mut cache = AudioCheckpoints::new(&source);
             let (packet_tx, packet_rx) = mpsc::channel();
-            for packet in &packets {
-                packet_tx.send(packet.clone()).expect("test packets");
+            for (index, packet) in packets.iter().enumerate() {
+                let mut packet = packet.clone();
+                if precise {
+                    // The fixture uses 1001-frame PCM packets. Provide an exact
+                    // sample clock, or remove it to test an unanchored direct seek.
+                    packet.set_pts(timestamps.then_some(index as i64 * 1001));
+                    packet.set_dts(packet.pts());
+                    packet.set_duration((packet.size() / 2) as i64);
+                }
+                packet_tx.send(packet).expect("test packets");
             }
             drop(packet_tx);
             let (output_tx, output_rx) = mpsc::sync_channel(packets.len() + 1);
@@ -347,7 +364,7 @@ mod tests {
             };
             assert_eq!(
                 emitted_between(300_000_000, 1_000_000_000),
-                !trusted,
+                !(trusted || precise && timestamps),
                 "count deleted packets only on a trusted axis"
             );
             assert!(
@@ -360,7 +377,7 @@ mod tests {
                     .any(|output| matches!(output, ParallelDecodeOutput::Audio(chunk)
                 if chunk.presentation_time > MediaTime::from_nanoseconds(3_000_000_000)))
             );
-            if trusted {
+            if trusted && !precise {
                 assert!(!cache.points.is_empty(), "learned ordinary decoded packets");
                 assert!(
                     cache.points.iter().all(|point| point.position < boundary),
@@ -369,7 +386,7 @@ mod tests {
             } else {
                 assert!(
                     cache.points.is_empty(),
-                    "never learn an approximate start axis"
+                    "no coarse checkpoint for an approximate start or sample-precise input"
                 );
             }
         }

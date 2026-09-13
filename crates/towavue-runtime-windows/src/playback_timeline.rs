@@ -122,22 +122,19 @@ pub(super) fn decode_audio(
                         (chunk.frames as u64 * 1_000_000_000)
                             .div_ceil(u64::from(format.sample_rate)),
                     ));
-                let mut part = AudioChunk {
-                    presentation_time: chunk.presentation_time,
-                    format: chunk.format,
-                    frames: chunk.frames,
-                    bytes: chunk.bytes.clone(),
-                };
-                decode::clip_audio_chunk(
-                    &mut part,
+                let (frames, _) = decode::clip_audio_bounds(
+                    chunk,
                     segment.source_target(target),
                     Some(segment.source.end()),
                 );
-                if part.frames > 0 {
-                    tempo
-                        .as_mut()
-                        .expect("tempo")
-                        .push(&part.bytes, &mut queue)?;
+                if !frames.is_empty() {
+                    // A decoded chunk may cross several edits or a deleted span.
+                    // Borrow only this segment's samples; keep the original for later spans.
+                    let stride = usize::from(chunk.format.channels) * size_of::<f32>();
+                    tempo.as_mut().expect("tempo").push(
+                        &chunk.bytes[frames.start * stride..frames.end * stride],
+                        &mut queue,
+                    )?;
                 }
                 end >= segment.source.end()
             } else {

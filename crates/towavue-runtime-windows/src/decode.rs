@@ -1082,6 +1082,20 @@ fn run_parallel_workers(
 }
 
 pub(crate) fn clip_audio_chunk(chunk: &mut AudioChunk, start: MediaTime, end: Option<MediaTime>) {
+    let (frames, presentation_time) = clip_audio_bounds(chunk, start, end);
+    let stride = usize::from(chunk.format.channels) * size_of::<f32>();
+    chunk.bytes.truncate(frames.end * stride);
+    chunk.bytes.drain(..frames.start * stride);
+    chunk.frames = frames.len();
+    chunk.presentation_time = presentation_time;
+}
+
+/// Kept frame range and its timestamp, without copying or mutating decoded PCM.
+pub(crate) fn clip_audio_bounds(
+    chunk: &AudioChunk,
+    start: MediaTime,
+    end: Option<MediaTime>,
+) -> (std::ops::Range<usize>, MediaTime) {
     let rate = i128::from(chunk.format.sample_rate);
     // Recover the sample index before ceil-ing boundaries: FFmpeg PTS-to-nanosecond
     // truncation must not add an extra sample at an exactly aligned trim end.
@@ -1094,15 +1108,13 @@ pub(crate) fn clip_audio_chunk(chunk: &mut AudioChunk, start: MediaTime, end: Op
     };
     let first = sample_offset(start);
     let last = end.map_or(chunk.frames, sample_offset).max(first);
-    let stride = usize::from(chunk.format.channels) * size_of::<f32>();
-    chunk.bytes.truncate(last * stride);
-    chunk.bytes.drain(..first * stride);
-    chunk.frames = last - first;
-    if first > 0 {
+    let presentation_time = if first > 0 {
         let nanos = ((chunk_sample + first as i128) * 1_000_000_000 + rate - 1).div_euclid(rate);
-        chunk.presentation_time =
-            MediaTime::from_nanoseconds(nanos.clamp(i64::MIN as i128, i64::MAX as i128) as i64);
-    }
+        MediaTime::from_nanoseconds(nanos.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
+    } else {
+        chunk.presentation_time
+    };
+    (first..last, presentation_time)
 }
 
 fn queue_demux_packet(
@@ -2273,6 +2285,89 @@ mod tests {
         super::clip_audio_chunk(&mut chunk, MediaTime::from_nanoseconds(2_000_000_000), None);
         assert_eq!(chunk.frames, 0);
         assert!(chunk.bytes.is_empty());
+    }
+
+    #[test]
+    fn borrowed_audio_bounds_match_the_sample_grid_and_owned_clipping() {
+        for sample_rate in [44100_u32, 48000, 96000, 192000] {
+            for channels in [1_u16, 2, 4] {
+                for origin in [-2003_i64, 0, 17019] {
+                    for frames in [0_usize, 1, 17, 1001] {
+                        let stride = usize::from(channels) * size_of::<f32>();
+                        let chunk = super::AudioChunk {
+                            presentation_time: MediaTime::from_nanoseconds(
+                                origin * 1_000_000_000 / i64::from(sample_rate),
+                            ),
+                            format: super::AudioFormat {
+                                sample_rate,
+                                channels,
+                            },
+                            frames,
+                            bytes: (0..frames * usize::from(channels))
+                                .flat_map(|sample| (sample as f32).to_le_bytes())
+                                .collect(),
+                        };
+                        for (start, end) in [
+                            (-1, None),
+                            (0, Some(frames as i64)),
+                            (1, Some(4)),
+                            (4, Some(5)),
+                            (frames as i64 + 1, None),
+                            (frames as i64 / 2, Some(frames as i64 / 2)),
+                        ] {
+                            for offset in [-1, 0, 1] {
+                                let at = |frame| {
+                                    MediaTime::from_nanoseconds(
+                                        (origin + frame) * 1_000_000_000 / i64::from(sample_rate)
+                                            + offset,
+                                    )
+                                };
+                                let start = at(start);
+                                let end = end.map(at);
+                                let (kept, timestamp) =
+                                    super::clip_audio_bounds(&chunk, start, end);
+                                // Compare rational sample times directly, independently of
+                                // the helper's rounded chunk origin and ceiling arithmetic.
+                                let expected: Vec<_> = (0..frames)
+                                    .filter(|index| {
+                                        let sample_time =
+                                            i128::from(origin + *index as i64) * 1_000_000_000;
+                                        sample_time
+                                            >= i128::from(start.as_nanoseconds())
+                                                * i128::from(sample_rate)
+                                            && end.is_none_or(|end| {
+                                                sample_time
+                                                    < i128::from(end.as_nanoseconds())
+                                                        * i128::from(sample_rate)
+                                            })
+                                    })
+                                    .flat_map(|index| {
+                                        chunk.bytes[index * stride..(index + 1) * stride]
+                                            .iter()
+                                            .copied()
+                                    })
+                                    .collect();
+                                let borrowed = &chunk.bytes[kept.start * stride..kept.end * stride];
+                                assert!(
+                                    borrowed == expected,
+                                    "{sample_rate} Hz, {channels} channels, origin {origin}, {frames} frames"
+                                );
+                                let mut owned = super::AudioChunk {
+                                    presentation_time: chunk.presentation_time,
+                                    format: chunk.format,
+                                    frames,
+                                    bytes: chunk.bytes.clone(),
+                                };
+                                super::clip_audio_chunk(&mut owned, start, end);
+                                assert_eq!(owned.bytes, borrowed);
+                                assert_eq!(owned.frames, kept.len());
+                                assert_eq!(owned.presentation_time, timestamp);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

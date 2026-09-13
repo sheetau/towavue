@@ -29,11 +29,13 @@ pub(super) fn gain_at(bands: &[(TimeRange, f32)], time: MediaTime) -> f32 {
 }
 
 pub(super) fn gain_height(rect: Rect) -> f32 {
-    (rect.height() - 44.0).max(1.0)
+    // Points per linear gain unit. Keep unity at the waveform center and maximum
+    // gain below the top controls; hit testing and drag deltas share this scale.
+    (rect.height() - 44.0).max(1.0) / (2.0 * (towavue_core::MAX_VOLUME - 1.0))
 }
 
 pub(super) fn gain_y(rect: Rect, gain: f32) -> f32 {
-    rect.center().y + (1.0 - gain) * gain_height(rect) * 0.5
+    rect.center().y + (1.0 - gain) * gain_height(rect)
 }
 
 pub(super) fn stretch_limits(
@@ -169,7 +171,7 @@ pub(super) fn values(
         let bounds = if stretch {
             stretch_limits(range, plan)
         } else {
-            0.0..=200.0
+            0.0..=f64::from(towavue_core::MAX_VOLUME) * 100.0
         };
         // An explicit value also unifies a mixed selection when its first span already matches.
         let uniform_gain = if mixed && !stretch && available {
@@ -187,7 +189,7 @@ pub(super) fn values(
                                 Some(egui::accesskit::ActionData::NumericValue(value))
                                     if value.is_finite() =>
                                 {
-                                    Some(value.clamp(0.0, 200.0))
+                                    Some(value.clamp(*bounds.start(), *bounds.end()))
                                 }
                                 _ => None,
                             }
@@ -336,19 +338,34 @@ mod tests {
             .find(|(_, node)| node.label() == Some("Local volume (%)"))
             .expect("volume")
             .0;
-        let event = || {
+        assert_eq!(
+            tree.nodes
+                .iter()
+                .find(|(node_id, _)| *node_id == id)
+                .expect("volume")
+                .1
+                .max_numeric_value(),
+            Some(300.0)
+        );
+        let event = |value| {
             egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
                 action: egui::accesskit::Action::SetValue,
                 target_tree: egui::accesskit::TreeId::ROOT,
                 target_node: id,
-                data: Some(egui::accesskit::ActionData::NumericValue(100.0)),
+                data: Some(egui::accesskit::ActionData::NumericValue(value)),
             })
         };
-        assert_eq!(draw(vec![event()], false, false).1, None);
+        assert_eq!(draw(vec![event(100.0)], false, false).1, None);
         assert_eq!(
-            draw(vec![event()], true, false).1,
+            draw(vec![event(100.0)], true, false).1,
             Some(TimelineEdit::SetVolume(range(0, 10), 1.0))
         );
+        for value in [300.0, 400.0] {
+            assert_eq!(
+                draw(vec![event(value)], true, false).1,
+                Some(TimelineEdit::SetVolume(range(0, 10), 3.0))
+            );
+        }
         let key = egui::Event::Key {
             key: egui::Key::ArrowRight,
             physical_key: None,

@@ -505,7 +505,11 @@ fn render_audio_loop(
 }
 
 fn normalized_volume(volume: f32) -> f32 {
-    volume.clamp(0.0, 2.0).max(0.0)
+    // The output combines independent legacy saved gain and listening level.
+    // Local timeline gain has already been applied to the decoded samples.
+    volume
+        .clamp(0.0, towavue_core::MAX_VOLUME * towavue_core::MAX_VOLUME)
+        .max(0.0)
 }
 
 struct VolumeRamp {
@@ -804,7 +808,18 @@ mod tests {
         assert_eq!(output, vec![0; 8]);
         assert_eq!(normalized_volume(f32::NAN), 0.0);
         assert_eq!(normalized_volume(-1.0), 0.0);
-        assert_eq!(normalized_volume(3.0), 2.0);
+        assert_eq!(normalized_volume(3.0), 3.0);
+        assert_eq!(normalized_volume(9.0), 9.0);
+        assert_eq!(normalized_volume(10.0), 9.0);
+        let mut gain = VolumeRamp::new(normalized_volume(9.0), 48_000);
+        let mut samples = [0.01_f32, -0.01]
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect::<Vec<_>>();
+        gain.apply(&mut samples, 9.0);
+        for (sample, expected) in samples.as_chunks::<4>().0.iter().zip([0.09_f32, -0.09]) {
+            assert!((f32::from_le_bytes(*sample) - expected).abs() < 0.000001);
+        }
     }
 
     #[test]

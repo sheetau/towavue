@@ -192,7 +192,9 @@ impl EditState {
                 EditOperation::FlipVertical => state.flip_vertical ^= true,
                 EditOperation::SetTrimStart(time) => state.trim_start = Some(time),
                 EditOperation::SetTrimEnd(time) => state.trim_end = Some(time),
-                EditOperation::SetVolume(volume) => state.volume = volume.clamp(0.0, 2.0),
+                EditOperation::SetVolume(volume) => {
+                    state.volume = volume.clamp(0.0, crate::MAX_VOLUME)
+                }
                 EditOperation::SetRate(rate) => state.rate = rate.clamp(0.25, 4.0),
             }
         }
@@ -675,9 +677,10 @@ mod tests {
             "invalid value cannot establish equivalence"
         );
         let mut clamped = EditHistory::default();
-        clamped.push(EditOperation::SetVolume(2.0), MediaKind::Audio);
-        clamped.mark_saved();
         clamped.push(EditOperation::SetVolume(3.0), MediaKind::Audio);
+        assert_eq!(clamped.state().volume, 3.0);
+        clamped.mark_saved();
+        clamped.push(EditOperation::SetVolume(4.0), MediaKind::Audio);
         assert!(!clamped.is_dirty(), "use the same clamp as playback/export");
     }
 

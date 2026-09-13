@@ -91,7 +91,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let Some(id) = self.tabs.active().map(|tab| tab.id) else {
             return;
         };
-        let level = level.clamp(0.0, 2.0);
+        let level = level.clamp(0.0, towavue_core::MAX_VOLUME);
         if level == self.playback_volume() {
             return;
         }
@@ -251,8 +251,8 @@ mod tests {
                 );
                 app.session = session;
                 let generation = app.generation;
-                app.handle_ui_action(UiAction::Volume(first, 0.6));
-                check(&app, 0.6);
+                app.handle_ui_action(UiAction::Volume(first, 3.0));
+                check(&app, 3.0);
                 assert_eq!(
                     app.generation, generation,
                     "volume does not restart decoding"
@@ -275,7 +275,18 @@ mod tests {
                 check(&app, 0.0);
                 assert!(app.session.as_ref().expect("session").timeline().is_some());
                 app.dispatch(CommandId::ToggleMute);
-                check(&app, 0.6);
+                check(&app, 3.0);
+                app.push_edit(EditOperation::SetVolume(3.0));
+                assert_eq!(app.playback_volume(), 3.0);
+                assert_eq!(
+                    app.session
+                        .as_ref()
+                        .expect("combined output")
+                        .verification_volume(),
+                    (9.0, Some(9.0))
+                );
+                app.dispatch(CommandId::Undo);
+                check(&app, 3.0);
                 let history = app.edits[&first].clone();
 
                 let second = app.tabs.open_new(self.path.clone(), MediaKind::Audio);
@@ -297,7 +308,7 @@ mod tests {
                         .as_ref()
                         .expect("background audio")
                         .verification_volume(),
-                    (0.6, Some(0.6))
+                    (3.0, Some(3.0))
                 );
                 let first_tab = app
                     .tabs
@@ -442,7 +453,7 @@ mod tests {
                         }
                         assert_eq!(
                             app.playback_volumes[&id].level,
-                            if id == first { 0.6 } else { 0.0 }
+                            if id == first { 3.0 } else { 0.0 }
                         );
                         assert_eq!(app.tabs.active().expect("active").id, second);
                         assert_eq!(app.edits, histories);
@@ -482,13 +493,13 @@ mod tests {
                     .expect("background")
                     .error = None;
                 app.activate_tab(first);
-                check(&app, 0.6);
+                check(&app, 3.0);
                 assert_eq!(app.edits[&first], history);
                 let epoch = app.graphics_epoch;
                 let position = app.current_position();
                 app.recover_graphics_device(position);
                 assert!(app.graphics_epoch > epoch);
-                check(&app, 0.6);
+                check(&app, 3.0);
                 assert_eq!(
                     app.retained_playback[&second]
                         .session
@@ -505,11 +516,11 @@ mod tests {
                     .target
                     .set_current_path(self.next.clone(), MediaKind::Audio);
                 app.load_path(self.next.clone(), MediaKind::Audio);
-                check(&app, 0.6);
+                check(&app, 3.0);
                 app.dispatch(CommandId::ToggleMute);
                 check(&app, 0.0);
                 app.dispatch(CommandId::ToggleMute);
-                check(&app, 0.6);
+                check(&app, 3.0);
                 let moved_window = Arc::new(
                     event_loop
                         .create_window(
@@ -546,7 +557,7 @@ mod tests {
                     generation
                 );
                 destination.dispatch(CommandId::ToggleMute);
-                check(&destination, 0.6);
+                check(&destination, 3.0);
                 assert!(!app.playback_volumes.contains_key(&first));
                 destination.remove_tab(moved, false);
                 assert!(destination.session.is_none());
@@ -600,6 +611,14 @@ mod tests {
             app.media_kind = Some(kind);
             app.state = PlaybackState::Paused;
             app.media_duration = Some(Duration::from_secs(2));
+            app.set_playback_volume(2.9);
+            app.dispatch(CommandId::VolumeUp);
+            assert_eq!(app.playback_volume(), 3.0);
+            app.dispatch(CommandId::VolumeUp);
+            assert_eq!(app.playback_volume(), 3.0);
+            app.toggle_playback_mute();
+            app.toggle_playback_mute();
+            assert_eq!(app.playback_volume(), 3.0);
             app.handle_ui_action(UiAction::Volume(tab, 0.4));
             assert_eq!(
                 app.edit_state().volume,
@@ -617,7 +636,7 @@ mod tests {
                 towavue_core::TimeRange::new(MediaTime::ZERO, media_time(Duration::from_secs(1)))
                     .expect("range");
             app.push_edit(EditOperation::Timeline(
-                towavue_core::TimelineEdit::SetVolume(selection, 0.5),
+                towavue_core::TimelineEdit::SetVolume(selection, 3.0),
             ));
             let history = app.edits[&tab].clone();
             app.dispatch(CommandId::VolumeUp);
@@ -626,7 +645,7 @@ mod tests {
             // Same-source rejection prevents this request-capture job writing a file.
             for output in [ExportOutput::Media, ExportOutput::AudioOnly] {
                 assert!(app.start_export(tab, source.clone(), kind, source.clone(), None, output));
-                app.set_playback_volume(1.7);
+                app.set_playback_volume(3.0);
                 app.toggle_playback_mute();
                 let export = app.active_export.as_ref().expect("export request");
                 assert_eq!(export.request.operations, history.operations());

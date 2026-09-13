@@ -3531,7 +3531,7 @@ where
         let volume = wheel_input::volume_deltas(context, targets, excluded)
             .into_iter()
             .fold(before, |volume, delta| {
-                (volume + delta * 0.1).clamp(0.0, 2.0)
+                (volume + delta * 0.1).clamp(0.0, towavue_core::MAX_VOLUME)
             });
         if volume != before {
             actions.push(UiAction::Volume(tab.id, volume));
@@ -14622,7 +14622,7 @@ mod tests {
                     (
                         vec![normal(100.0), normal(-1.0)],
                         egui::Modifiers::NONE,
-                        Some(1.9),
+                        Some(2.9),
                     ),
                     (
                         vec![normal(-100.0), normal(1.0)],
@@ -14892,7 +14892,7 @@ mod tests {
             )
             .is_empty()
         );
-        for volume in [0.0, 2.0] {
+        for volume in [0.0, 3.0] {
             app.set_playback_volume(volume);
             let delta = if volume == 0.0 { -100.0 } else { 100.0 };
             assert!(

@@ -153,9 +153,8 @@ pub(super) fn show(
         if drag.dragging && matches!(mode, Gesture::Gain(..) | Gesture::Stretch(_)) {
             let edit = match mode {
                 Gesture::Gain(range, original) => {
-                    let gain = (original
-                        - (pointer.y - origin.y) * 2.0 / adjustment::gain_height(rect))
-                    .clamp(0.0, 2.0);
+                    let gain = (original - (pointer.y - origin.y) / adjustment::gain_height(rect))
+                        .clamp(0.0, towavue_core::MAX_VOLUME);
                     gain_preview = Some((range, gain));
                     TimelineEdit::SetVolume(range, gain)
                 }
@@ -1000,14 +999,20 @@ mod tests {
     fn gain_and_stretch_commit_once_and_keep_press_modifiers() {
         let selected = TimeRange::new(time(2.5), time(7.5));
         for batched in [false, true] {
-            for (selection, stretch) in [(None, false), (selected, false), (selected, true)] {
+            for (selection, stretch, gain) in [
+                (None, false, 0.0),
+                (selected, false, 0.0),
+                (None, false, 3.0),
+                (selected, false, 3.0),
+                (selected, true, 0.0),
+            ] {
                 let context = egui::Context::default();
                 frame(&context, vec![], true, selection);
                 let origin = egui::pos2(220.0, if stretch { 70.0 } else { 80.0 });
                 let end = if stretch {
                     origin + egui::vec2(80.0, 40.0)
                 } else {
-                    origin + egui::vec2(10.0, 80.0)
+                    origin + egui::vec2(10.0, if gain == 0.0 { 80.0 } else { -80.0 })
                 };
                 let press = egui::Event::PointerButton {
                     pos: origin,
@@ -1041,7 +1046,7 @@ mod tests {
                     Some(if stretch {
                         TimelineEdit::Stretch(range, time(7.0))
                     } else {
-                        TimelineEdit::SetVolume(range, 0.0)
+                        TimelineEdit::SetVolume(range, gain)
                     })
                 );
                 assert!(results[0].seek.is_none() && results[0].selection.is_none());

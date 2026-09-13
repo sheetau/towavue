@@ -1,6 +1,75 @@
 use super::*;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+const PHASES: [&str; 8] = [
+    "load_and_measurement_setup",
+    "dispatch",
+    "completion_events",
+    "layout_and_frame_inspection",
+    "gpu_submit_all_frames",
+    "presentation_accounting_and_memory",
+    "sequence_advance",
+    "sleep",
+];
+
+#[derive(Clone, Copy, Default)]
+struct PhaseCost {
+    total: Duration,
+    longest: Duration,
+    longest_start: Duration,
+    presented: usize,
+    sent: usize,
+}
+
+struct PhaseTrace {
+    boundary: Duration,
+    costs: [PhaseCost; PHASES.len()],
+}
+
+impl PhaseTrace {
+    fn finish(&mut self, phase: usize, elapsed: Duration, presented: usize, sent: usize) {
+        // Consecutive boundaries partition the whole measured interval, including
+        // loading/held frames and measurement overhead, with no nested double count.
+        let duration = elapsed - self.boundary;
+        let cost = &mut self.costs[phase];
+        cost.total += duration;
+        if duration > cost.longest {
+            cost.longest = duration;
+            cost.longest_start = self.boundary;
+            cost.presented = presented;
+            cost.sent = sent;
+        }
+        self.boundary = elapsed;
+    }
+}
+
+#[test]
+fn phase_boundaries_account_for_loading_frames_and_measurement_gaps() {
+    let mut trace = PhaseTrace {
+        boundary: Duration::ZERO,
+        costs: [PhaseCost::default(); PHASES.len()],
+    };
+    for (phase, milliseconds, presented, sent) in [
+        (0, 10, 0, 0),
+        (1, 12, 0, 1),
+        (4, 7012, 0, 1),
+        (7, 7013, 0, 1),
+        (1, 7015, 1, 210),
+        (4, 7020, 1, 210),
+    ] {
+        trace.finish(phase, Duration::from_millis(milliseconds), presented, sent);
+    }
+    assert_eq!(
+        trace.costs.iter().map(|cost| cost.total).sum::<Duration>(),
+        trace.boundary
+    );
+    let gpu = trace.costs[4];
+    assert_eq!(gpu.total, Duration::from_millis(7005));
+    assert_eq!(gpu.longest, Duration::from_millis(7000));
+    assert_eq!(gpu.longest_start, Duration::from_millis(12));
+    assert_eq!((gpu.presented, gpu.sent), (0, 1));
+}
+
 #[test]
 #[ignore = "read-only nonvisual reference-folder timing; set TOWAVUE_NAV_REFERENCE_DIR and use Release with hardware D3D11"]
 #[allow(clippy::assertions_on_constants)] // Deliberately reject unoptimized manual runs.
@@ -33,27 +102,41 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
     let before = stamps();
     // Inspect only the 24-byte signature/IHDR prefix, before starting the clock.
     // Selecting a source by metadata avoids paths or reference pixels in output.
-    let trace_index = std::env::var_os("TOWAVUE_NAV_TRACE_LARGEST_PNG").map(|_| {
-        use std::io::Read;
-        paths
-            .iter()
-            .enumerate()
-            .filter_map(|(index, path)| {
-                let mut prefix = [0; 24];
-                std::fs::File::open(path)
-                    .expect("read-only header")
-                    .read_exact(&mut prefix)
-                    .expect("reference header prefix");
-                if &prefix[..8] != b"\x89PNG\r\n\x1a\n" || &prefix[12..16] != b"IHDR" {
-                    return None;
-                }
-                let width = u32::from_be_bytes(prefix[16..20].try_into().expect("width"));
-                let height = u32::from_be_bytes(prefix[20..24].try_into().expect("height"));
-                Some((index, u64::from(width) * u64::from(height)))
-            })
-            .max_by_key(|&(_, area)| area)
-            .expect("PNG reference required")
-            .0
+    let largest_png = std::env::var_os("TOWAVUE_NAV_TRACE_LARGEST_PNG").is_some();
+    let explicit_index = std::env::var("TOWAVUE_NAV_TRACE_INDEX")
+        .ok()
+        .map(|value| value.parse::<usize>().expect("trace source index"));
+    assert!(
+        !(largest_png && explicit_index.is_some()),
+        "choose one trace selector"
+    );
+    assert!(
+        explicit_index.is_none_or(|index| index < paths.len()),
+        "trace index outside source list"
+    );
+    let trace_index = explicit_index.or_else(|| {
+        largest_png.then(|| {
+            use std::io::Read;
+            paths
+                .iter()
+                .enumerate()
+                .filter_map(|(index, path)| {
+                    let mut prefix = [0; 24];
+                    std::fs::File::open(path)
+                        .expect("read-only header")
+                        .read_exact(&mut prefix)
+                        .expect("reference header prefix");
+                    if &prefix[..8] != b"\x89PNG\r\n\x1a\n" || &prefix[12..16] != b"IHDR" {
+                        return None;
+                    }
+                    let width = u32::from_be_bytes(prefix[16..20].try_into().expect("width"));
+                    let height = u32::from_be_bytes(prefix[20..24].try_into().expect("height"));
+                    Some((index, u64::from(width) * u64::from(height)))
+                })
+                .max_by_key(|&(_, area)| area)
+                .expect("PNG reference required")
+                .0
+        })
     });
     struct Trial<'a> {
         paths: &'a [PathBuf],
@@ -102,6 +185,10 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 captured_at: std::time::SystemTime::UNIX_EPOCH,
             });
             let started = Instant::now();
+            let mut phases = PhaseTrace {
+                boundary: Duration::ZERO,
+                costs: [PhaseCost::default(); PHASES.len()],
+            };
             if let Some(index) = self.trace_index {
                 app.image_loader
                     .verification_trace_path(self.paths[index].clone(), started);
@@ -115,7 +202,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             let mut previews = 0;
             let mut max_queue = 0;
             let mut memory = gpu::Memory::new(&renderer);
-            let mut failed = false;
+            let mut failed;
             let mut event_preparation = Duration::ZERO;
             let mut preparation = Vec::new();
             let mut original_gpu = Vec::new();
@@ -123,6 +210,8 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             let mut previous_conversion_time = COLOR_IMAGE_CONVERSION_TIME.get();
             let mut next_idle_frame = Instant::now();
             let mut presentations = 0;
+            let mut first_present = None;
+            phases.finish(0, started.elapsed(), 0, 0);
             loop {
                 let mut changed = false;
                 // Fixed schedule, independent of image completion: no initial prefetch wait.
@@ -138,6 +227,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                     changed = true;
                     max_queue = max_queue.max(app.image_sequence.steps.len());
                 }
+                phases.finish(1, started.elapsed(), visited.len(), sent);
                 while let Ok(event) = events.try_recv() {
                     match event {
                         AppEvent::ImagesReady => {
@@ -153,10 +243,12 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                         _ => {}
                     }
                 }
+                phases.finish(2, started.elapsed(), visited.len(), sent);
                 // Isolate repeated held-frame GPU work without slowing commands
                 // or fresh completions. This is not a native redraw scheduler.
                 if !changed && Instant::now() < next_idle_frame {
                     std::thread::sleep(Duration::from_millis(1));
+                    phases.finish(7, started.elapsed(), visited.len(), sent);
                     continue;
                 }
                 let layout_started = Instant::now();
@@ -198,12 +290,15 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 let token = app.image_sequence_token(&output);
                 // Never read back or emit pixels from reference media; only submit to a hidden surface.
                 let upload_before = renderer.verification_upload_times();
+                phases.finish(3, started.elapsed(), visited.len(), sent);
                 let gpu_time = gpu::submit(&app, &context, output, &mut renderer, false);
+                phases.finish(4, started.elapsed(), visited.len(), sent);
                 presentations += 1;
                 next_idle_frame = Instant::now() + self.idle_frame_interval;
                 if let Some(path) = path
                     && visited.last() != Some(&path)
                 {
+                    first_present.get_or_insert_with(|| started.elapsed());
                     let index = self
                         .paths
                         .iter()
@@ -248,19 +343,37 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                     visited.push(path);
                     memory.sample(&renderer);
                 }
+                phases.finish(5, started.elapsed(), visited.len(), sent);
                 app.finish_image_sequence_frame(token);
-                if app.image_error.is_some() || started.elapsed() > Duration::from_secs(180) {
-                    failed = true;
-                    break;
-                }
-                if sent + 1 == self.paths.len()
+                failed = app.image_error.is_some() || started.elapsed() > Duration::from_secs(180);
+                let finished = sent + 1 == self.paths.len()
                     && !app.image_loading
                     && app.image_sequence.awaiting.is_none()
-                    && app.image_sequence.steps.is_empty()
-                {
+                    && app.image_sequence.steps.is_empty();
+                phases.finish(6, started.elapsed(), visited.len(), sent);
+                if failed || finished {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(1));
+                phases.finish(7, started.elapsed(), visited.len(), sent);
+            }
+            assert_eq!(
+                phases.costs.iter().map(|cost| cost.total).sum::<Duration>(),
+                phases.boundary
+            );
+            eprintln!(
+                "REFERENCE_FIRST_PRESENT at_ms={:?}; first original, excludes pre-clock window/device/app construction",
+                first_present.map(|time| time.as_secs_f64() * 1000.0)
+            );
+            for (phase, cost) in PHASES.into_iter().zip(phases.costs) {
+                eprintln!(
+                    "REFERENCE_PHASE phase={phase} total_ms={:.3} longest_ms={:.3} longest_start_ms={:.3} presented_after={} commands_after={}; exclusive wall-time intervals, all frames including loading/held frames; not CPU-active or GPU timestamp time",
+                    cost.total.as_secs_f64() * 1000.0,
+                    cost.longest.as_secs_f64() * 1000.0,
+                    cost.longest_start.as_secs_f64() * 1000.0,
+                    cost.presented,
+                    cost.sent,
+                );
             }
             latency.sort_unstable();
             let complete_order = visited.len() == self.paths.len()
@@ -276,7 +389,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 self.paths.len(),
                 sent,
                 visited.len(),
-                started.elapsed().as_secs_f64() * 1000.0,
+                phases.boundary.as_secs_f64() * 1000.0,
                 latency
                     .get(latency.len() / 2)
                     .copied()
@@ -304,7 +417,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                     .verification_trace_snapshot()
                     .expect("selected trace");
                 eprintln!(
-                    "REFERENCE_TRACE index={index} command_index={command_index} scheduled_ms={:.3} dropped={}; selected largest PNG by IHDR area, trace times include scheduling; no paths or pixels",
+                    "REFERENCE_TRACE index={index} command_index={command_index} scheduled_ms={:.3} dropped={}; explicit source index or largest PNG by IHDR area, trace times include scheduling; no paths or pixels",
                     (cadence * command_index as u32).as_secs_f64() * 1000.0,
                     trace.dropped
                 );

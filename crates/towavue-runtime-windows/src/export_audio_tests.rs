@@ -163,6 +163,190 @@ fn ordinary_rate_export_preserves_short_audio_counts_and_channels() {
     }
     fs::remove_dir_all(root).expect("remove owned fixture");
 }
+
+#[test]
+fn short_rate_exports_keep_signal_and_gapless_container_lengths() {
+    let root = root("short-rate-containers");
+    let source = root.join("source.wav");
+    ffmpeg(
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=sample_rate=48000:duration=0.01",
+            "-c:a",
+            "pcm_s16le",
+        ],
+        &source,
+    );
+    let mut failures = Vec::new();
+    for rate in [0.25, 4.0] {
+        for extension in ["wav", "flac", "mp3", "m4a", "ogg", "opus"] {
+            let request = ExportRequest {
+                source: source.clone(),
+                target: root.join(format!("output-{rate}.{extension}")),
+                kind: MediaKind::Audio,
+                operations: vec![EditOperation::SetRate(rate)],
+                hardware_encode: false,
+            };
+            export_media(&request).expect("short compressed export");
+            let actual = pcm(&request.target);
+            let expected = (480.0 / rate) as usize;
+            let peak = actual
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|sample| f32::from_le_bytes(*sample).abs())
+                .fold(0.0_f32, f32::max);
+            if actual.len() != expected * 4 || peak < 0.001 {
+                failures.push(format!(
+                    "{extension}/{rate}x: frames {}/{expected}, peak {peak}",
+                    actual.len() / 4
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn compressed_rate_export_matches_timestamped_pcm_through_trim_and_eof() {
+    let root = root("compressed-rate-axis");
+    let mut failures = Vec::new();
+    for (codec, extension, sample_rate) in [
+        ("libmp3lame", "mp3", 44100_u64),
+        ("aac", "m4a", 44100),
+        ("libvorbis", "ogg", 44100),
+        ("libopus", "opus", 48000),
+        ("flac", "flac", 44100),
+    ] {
+        let native = root.join(format!("source.{extension}"));
+        ffmpeg(
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                &format!(
+                    "aevalsrc=0.2*sin(2300*t+4000*t*t)|0.2*cos(1700*t+3000*t*t):s={sample_rate}:d=1.03"
+                ),
+                "-c:a",
+                codec,
+            ],
+            &native,
+        );
+        let remuxed = root.join(format!("{extension}.mkv"));
+        ffmpeg(
+            &["-i", native.to_str().expect("path"), "-c:a", "copy"],
+            &remuxed,
+        );
+        for (container, source) in [("native", &native), ("mkv", &remuxed)] {
+            let decoded = root.join(format!("{extension}-{container}.nut"));
+            // WAV discards the first timestamp (e.g. Vorbis in MKV starts at 3 ms).
+            // A zero-time video anchor keeps NUT's origin at zero even when audio is late.
+            ffmpeg(
+                &[
+                    "-i",
+                    source.to_str().expect("path"),
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=size=16x16:rate=1:duration=1",
+                    "-copyts",
+                    "-start_at_zero",
+                    "-map",
+                    "0:a:0",
+                    "-map",
+                    "1:v:0",
+                    "-c:a",
+                    "pcm_f32le",
+                    "-c:v",
+                    "rawvideo",
+                ],
+                &decoded,
+            );
+            let mut input = ffmpeg::format::input(&decoded).expect("timestamped PCM");
+            let stream = input
+                .streams()
+                .best(ffmpeg::media::Type::Audio)
+                .expect("audio");
+            assert_eq!(stream.time_base(), ffmpeg::Rational(1, sample_rate as i32));
+            let index = stream.index();
+            let spans: Vec<_> = input
+                .packets()
+                .filter_map(|(stream, packet)| {
+                    (stream.index() == index).then(|| {
+                        assert_eq!(packet.size() % 8, 0, "stereo float PCM");
+                        let start = packet.pts().expect("PCM timestamp");
+                        (start, start + (packet.size() / 8) as i64)
+                    })
+                })
+                .collect();
+            drop(input);
+            for (start, end) in [
+                (None, None),
+                (Some(17_000_001), Some(267_000_001)),
+                (Some(1_017_000_001), None),
+            ] {
+                for rate in [1.0_f32, 1.1] {
+                    let mut operations = vec![EditOperation::SetRate(rate)];
+                    if let Some(start) = start {
+                        operations.push(EditOperation::SetTrimStart(MediaTime::from_nanoseconds(
+                            start,
+                        )));
+                    }
+                    if let Some(end) = end {
+                        operations
+                            .push(EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(end)));
+                    }
+                    let mut request = ExportRequest {
+                        source: source.clone(),
+                        target: root.join("actual.wav"),
+                        kind: MediaKind::Audio,
+                        operations,
+                        hardware_encode: false,
+                    };
+                    export_media(&request).expect("compressed source export");
+                    let actual = pcm(&request.target);
+                    request.source = decoded.clone();
+                    request.target = root.join("reference.wav");
+                    export_media(&request).expect("decoded reference export");
+                    let reference = pcm(&request.target);
+                    let tick = |ns: i64| (ns as u64 * sample_rate).div_ceil(1_000_000_000) as i64;
+                    let first = start.map(tick).unwrap_or(i64::MIN);
+                    let last = end.map(tick).unwrap_or(i64::MAX);
+                    let input_frames: usize = spans
+                        .iter()
+                        .map(|&(a, b)| (b.min(last) - a.max(first)).max(0) as usize)
+                        .sum();
+                    let rate_units = (f64::from(rate) * f64::from(1 << 25)) as u128;
+                    let expected =
+                        ((input_frames as u128 * (1 << 25)).div_ceil(rate_units)) as usize;
+                    assert_eq!(
+                        reference.len(),
+                        expected * 8,
+                        "independent reference length"
+                    );
+                    let maximum = actual
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .zip(reference.as_chunks::<4>().0)
+                        .map(|(a, b)| (f32::from_le_bytes(*a) - f32::from_le_bytes(*b)).abs())
+                        .fold(0.0_f32, f32::max);
+                    // Native planar/integer versus packed-float conversion can round
+                    // the final 16-bit encode differently by one quantization step.
+                    if actual.len() != reference.len() || maximum > 1.0 / 32768.0 {
+                        failures.push(format!("{extension}/{container} {start:?}..{end:?} {rate}x: frames {}/{expected}, max {maximum}", actual.len() / 8));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
 fn range(start: i64, end: i64) -> TimeRange {
     TimeRange::new(time(start), time(end)).expect("range")
 }

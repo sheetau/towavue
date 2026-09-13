@@ -229,7 +229,20 @@ impl PlaybackSession {
     }
 
     pub fn seek(&mut self, target: MediaTime) -> Result<PlaybackGeneration, PlaybackError> {
+        // A same-device re-prime keeps only the displayed frame until advance_pending.
+        // Its owned AVFrame/texture or RGBA buffer remains valid while the worker stops;
+        // do not copy pixels or treat this old frame as the new generation's seek result.
+        let held = if self
+            .timeline
+            .as_ref()
+            .is_some_and(|plan| plan.spans().is_empty())
+        {
+            None
+        } else {
+            self.current_video.take()
+        };
         self.stop_pipeline();
+        self.current_video = held;
         self.generation = self.generation.next();
         self.target = self
             .timeline
@@ -372,9 +385,13 @@ impl PlaybackSession {
             .recovery_frame
             .filter(|(saved, _)| *saved == position)
             .or_else(|| {
-                self.paused
-                    .then(|| self.current_video_time().map(|frame| (position, frame)))
-                    .flatten()
+                // A displayed seek placeholder is not the new target's paused frame.
+                // A hidden tab may still own an exact frame for its retained clock.
+                (self.paused
+                    && (!self.video_refresh_pending
+                        || self.retained_video_position == Some(position)))
+                .then(|| self.current_video_time().map(|frame| (position, frame)))
+                .flatten()
             });
         self.stop_pipeline();
         self.recovery_frame = recovery_frame;
@@ -1061,10 +1078,38 @@ mod tests {
             },
         )
         .expect("video session");
-        let generation = session.generation();
         let old_video_generation = session.video_generation;
         assert_eq!(wait_for_video(&mut session), MediaTime::ZERO);
         assert!(session.advance_pending());
+        for (milliseconds, rate) in [(1000, 1.0), (500, 2.0), (1500, 0.5), (0, 1.0)] {
+            let PresentationFrame::Software(previous) =
+                session.current_video.as_ref().expect("frame")
+            else {
+                panic!("WARP software frame");
+            };
+            let identity = previous.rgba.as_ptr();
+            let time = previous.presentation_time;
+            let geometry = session.video_geometry();
+            let target = MediaTime::from_nanoseconds(milliseconds * 1_000_000);
+            session
+                .set_rate_at(target, rate, false)
+                .expect("seek/rate change");
+            let PresentationFrame::Software(held) = session
+                .current_video
+                .as_ref()
+                .expect("seek retains the displayed frame")
+            else {
+                panic!("WARP held frame");
+            };
+            assert_eq!(held.rgba.as_ptr(), identity, "hold without a pixel copy");
+            assert_eq!(session.current_video_time(), Some(time));
+            assert_eq!(session.video_geometry(), geometry);
+            assert!(session.video_refresh_pending() && !session.current_video_unpresented);
+            assert!(wait_for_video(&mut session) >= target);
+            assert!(session.advance_pending());
+            assert!(!session.video_refresh_pending());
+        }
+        let generation = session.generation();
         let Some(PresentationFrame::Software(first)) = &session.current_video else {
             panic!("WARP software frame");
         };
@@ -1236,8 +1281,15 @@ mod tests {
         let last = expected.last().expect("reference terminal");
         assert_eq!(terminal.presentation_time, last.0);
         assert_eq!(terminal.rgba, last.1);
-        session.seek(MediaTime::ZERO).expect("seek clears preview");
-        assert!(session.video_geometry().is_none() && session.video_refresh_pending());
+        let terminal_time = terminal.presentation_time;
+        session
+            .seek(MediaTime::ZERO)
+            .expect("seek holds terminal preview");
+        assert!(session.video_geometry().is_some() && session.video_refresh_pending());
+        assert_eq!(session.current_video_time(), Some(terminal_time));
+        assert_eq!(wait_for_video(&mut session), MediaTime::ZERO);
+        assert!(session.advance_pending());
+        assert!(!session.video_refresh_pending());
         drop(session);
         std::fs::remove_file(path).expect("remove owned video-only fixture");
     }
@@ -1314,6 +1366,18 @@ mod tests {
             assert!(session.recovery_frame.is_none());
             // An intentional new seek must not reuse the old recovery frame.
             session.seek(position).expect("intentional seek");
+            session.suspend_for_graphics_recovery(position);
+            assert!(
+                session.recovery_frame.is_none(),
+                "held seek image is not the requested frame"
+            );
+            assert!(session.video_geometry().is_none());
+            session
+                .replace_graphics_device(
+                    GraphicsDevice::warp_for_test().expect("device during pending seek"),
+                    position,
+                )
+                .expect("recover a pending seek");
             assert!(wait_for_video(&mut session) > frame_time);
             session.advance_pending();
             session.suspend_for_graphics_recovery(position);

@@ -263,6 +263,36 @@ fn measure_retained_surface(name: &str) {
         assert_eq!(session.pending_video_time(), Some(time));
         assert!(session.advance_pending());
     }
+    for (milliseconds, rate) in [(500, 1.0), (250, 2.0), (750, 0.5), (0, 1.0)] {
+        let Some(PresentationFrame::Hardware(frame)) = &session.current_video else {
+            panic!("hardware frame before re-prime");
+        };
+        let identity = frame.texture_and_slice();
+        let time = frame.presentation_time;
+        let expected = pixels(frame);
+        let geometry = session.video_geometry();
+        let target = MediaTime::from_nanoseconds(milliseconds * 1_000_000);
+        session
+            .set_rate_at(target, rate, true)
+            .expect("hardware re-prime");
+        let Some(PresentationFrame::Hardware(frame)) = &session.current_video else {
+            panic!("hardware frame held during re-prime");
+        };
+        assert_eq!(frame.texture_and_slice(), identity, "no extra surface copy");
+        assert_eq!(frame.presentation_time, time);
+        assert_eq!(pixels(frame), expected, "old decoder surface remains valid");
+        assert_eq!(session.video_geometry(), geometry);
+        assert!(session.video_refresh_pending() && !session.current_video_unpresented);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while session.pending_video_time().is_none() {
+            assert!(Instant::now() < deadline, "re-prime frame deadline");
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(session.pending_video_time().expect("fresh frame") >= target);
+        assert!(session.advance_pending());
+        assert!(!session.video_refresh_pending());
+        assert_eq!(session.metrics().cpu_transfer_count, 0);
+    }
     assert_eq!(session.metrics().cpu_transfer_count, 0);
     drop(session);
     std::fs::remove_file(path).expect("remove generated video");

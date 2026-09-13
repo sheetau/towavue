@@ -18305,6 +18305,47 @@ mod tests {
     #[ignore = "requires H264 D3D11VA, a Windows desktop and the default WASAPI endpoint (muted)"]
     fn native_caption_graphics_recovery_preserves_image_and_video_state() {
         use winit::platform::windows::EventLoopBuilderExtWindows;
+        fn media_pixels_before_advance<N: Fn(AppEvent) + Send + Sync + 'static>(
+            app: &mut Application<N>,
+        ) -> Vec<u8> {
+            // Exercise layout and the production media draw route without advancing
+            // decode: the held frame must be drawable even if a fresh one is queued.
+            let context = app.ui_context.clone().expect("context");
+            let input = app
+                .ui_state
+                .as_mut()
+                .expect("UI state")
+                .take_egui_input(app.window.as_ref().expect("window"));
+            let mut actions = Vec::new();
+            let output = context.run_ui(input, |ui| app.draw_ui(ui, &mut actions));
+            assert!(actions.is_empty());
+            let rect =
+                app.video_rect.expect("video layout during re-prime") * context.pixels_per_point();
+            let renderer = app.renderer.as_mut().expect("renderer");
+            renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
+            let session = app.session.as_mut().expect("session");
+            let drawn = if let Some(operations) = &app.video_raster_operations {
+                session.draw_current_edited(renderer, rect, app.video_uv, operations)
+            } else {
+                session.draw_current(renderer, rect, app.video_uv)
+            }
+            .expect("same-device media draw");
+            assert!(drawn);
+            let pixels = renderer
+                .verification_surface_rgba()
+                .expect("media readback");
+            assert!(
+                pixels
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|pixel| pixel[..3] != [0, 0, 0])
+            );
+            renderer.render_ui(&context, output).expect("UI textures");
+            renderer.present_surface().expect("present");
+            app.record_seek_presentation(drawn);
+            pixels
+        }
         fn present_video<N: Fn(AppEvent) + Send + Sync + 'static>(
             app: &mut Application<N>,
             notifications: &std::sync::mpsc::Receiver<AppEvent>,
@@ -18548,12 +18589,30 @@ mod tests {
                 assert_eq!(app.media_duration, Some(Duration::from_secs(2)));
                 video_history.set_source_duration(Some(media_time(Duration::from_secs(2))));
                 assert_eq!(app.edits[&video_tab], video_history);
+                present_video(&mut app, &notifications);
                 for paused in [false, true] {
                     if paused {
                         app.toggle_pause();
                     }
                     let target = media_time(Duration::from_millis(500));
+                    let before_seek = media_pixels_before_advance(&mut app);
                     app.seek_to(target);
+                    let measured = app.seek_latencies.len();
+                    assert_eq!(media_pixels_before_advance(&mut app), before_seek);
+                    assert!(app.pending_seek_started.is_some());
+                    assert_eq!(
+                        app.seek_latencies.len(),
+                        measured,
+                        "held draw is not seek completion"
+                    );
+                    assert_eq!(
+                        app.session
+                            .as_ref()
+                            .expect("session")
+                            .metrics()
+                            .presented_frame_count,
+                        0
+                    );
                     present_video(&mut app, &notifications);
                     let old_generation = app.generation;
                     let state = app.state;

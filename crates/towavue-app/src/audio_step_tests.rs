@@ -152,7 +152,7 @@ fn audio_steps_pause_accumulate_clamp_and_follow_the_edited_time_axis() {
                 (app.current_position(), app.state),
                 (time(1990), PlaybackState::Paused)
             );
-            app.resize_dialog = Some(resize::ResizeDialog::new((10, 10)));
+            app.resize_dialog = Some(resize::ResizeDialog::new((10, 10), 1));
             let generation = app.generation;
             app.dispatch(CommandId::StepAudioBackward);
             assert_eq!(app.generation, generation);

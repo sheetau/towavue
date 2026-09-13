@@ -8,10 +8,11 @@ pub struct ResizeDialog {
     filter: ResampleFilter,
     first_frame: bool,
     step: u32,
+    frame_count: usize,
 }
 
 impl ResizeDialog {
-    pub fn new(size: (u32, u32)) -> Self {
+    pub fn new(size: (u32, u32), frame_count: usize) -> Self {
         Self {
             width: size.0.to_string(),
             height: size.1.to_string(),
@@ -20,11 +21,12 @@ impl ResizeDialog {
             filter: ResampleFilter::Lanczos,
             first_frame: true,
             step: 1,
+            frame_count,
         }
     }
 
     pub(super) fn for_video(size: (u32, u32), aspect: f32) -> Self {
-        let mut dialog = Self::new(size);
+        let mut dialog = Self::new(size, 1);
         dialog.step = 2;
         dialog.ratio *= f64::from(aspect);
         let (width, height) = if aspect >= 1.0 {
@@ -38,11 +40,14 @@ impl ResizeDialog {
     }
 
     pub(super) fn value(&self) -> Option<ImageResize> {
-        ImageResize::new(
+        let value = ImageResize::new(
             self.width.parse().ok()?,
             self.height.parse().ok()?,
             self.filter,
-        )
+        )?;
+        let (width, height) = value.size();
+        let frame_bytes = u64::from(width) * u64::from(height) * 4;
+        (self.frame_count <= (512 * 1024 * 1024 / frame_bytes) as usize).then_some(value)
     }
 
     pub(super) fn controls(&mut self, ui: &mut egui::Ui) {
@@ -111,6 +116,12 @@ impl ResizeDialog {
             let value = self.value();
             if value.is_none() {
                 ui.label("Use 1–16384 pixels per side, up to 128 Mi pixels.");
+                if self.frame_count > 1 {
+                    ui.label(format!(
+                        "All {} animation frames must fit within 512 MiB.",
+                        self.frame_count
+                    ));
+                }
             }
             ui.horizontal(|ui| {
                 if ui
@@ -257,7 +268,7 @@ pub(crate) mod tests {
             .open_new(source.clone(), towavue_core::MediaKind::Image);
         app.path = Some(source);
         app.media_kind = Some(towavue_core::MediaKind::Image);
-        app.resize_dialog = Some(ResizeDialog::new((64, 48)));
+        app.resize_dialog = Some(ResizeDialog::new((64, 48), 1));
         for _ in 0..3 {
             crate::video_rotation::tests::frame(&mut app, vec![]);
         }
@@ -278,8 +289,64 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn animation_resize_budget_disables_apply_and_keeps_boundary_values() {
+        assert!(ResizeDialog::new((8192, 8192), 2).value().is_some());
+        assert!(ResizeDialog::new((8192, 8192), 3).value().is_none());
+        assert!(ResizeDialog::for_video((8192, 8192), 1.0).value().is_some());
+        for density in [1.0, 1.5, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.enable_accesskit();
+            let mut dialog = ResizeDialog::new((8192, 8192), 3);
+            let mut action = None;
+            let mut frame = |dialog: &mut ResizeDialog, events| {
+                let output = context.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        action = dialog.show(ui.ctx());
+                    },
+                );
+                output.platform_output.accesskit_update.expect("tree")
+            };
+            frame(&mut dialog, vec![]);
+            let tree = frame(&mut dialog, vec![]);
+            let (apply, node) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Apply resize"))
+                .expect("apply");
+            assert!(node.is_disabled());
+            assert!(
+                tree.nodes.iter().any(|(_, node)| node.value()
+                    == Some("All 3 animation frames must fit within 512 MiB."))
+            );
+            frame(
+                &mut dialog,
+                vec![egui::Event::AccessKitActionRequest(
+                    egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Click,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: *apply,
+                        data: None,
+                    },
+                )],
+            );
+            assert!(action.is_none(), "disabled apply cannot start a worker");
+            dialog.width = "4096".into();
+            dialog.height = "4096".into();
+            assert!(
+                dialog.value().is_some(),
+                "valid smaller size remains available"
+            );
+        }
+    }
+
+    #[test]
     fn resize_dimensions_validate_both_edges_and_total_area() {
-        let mut dialog = ResizeDialog::new((600, 800));
+        let mut dialog = ResizeDialog::new((600, 800), 1);
         assert_eq!(dialog.value().expect("initial").size(), (600, 800));
         assert_eq!(dialog.filter, ResampleFilter::Lanczos);
         for (width, height) in [
@@ -303,7 +370,7 @@ pub(crate) mod tests {
     fn resize_modal_keyboard_ratio_accessible_apply_and_escape_cancel() {
         let context = crate::fonts::test_context();
         context.enable_accesskit();
-        let mut dialog = ResizeDialog::new((600, 800));
+        let mut dialog = ResizeDialog::new((600, 800), 1);
         let frame = |dialog: &mut ResizeDialog, events| {
             let mut action = None;
             let output = context.run_ui(

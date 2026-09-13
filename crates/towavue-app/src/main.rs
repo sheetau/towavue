@@ -5753,10 +5753,10 @@ where
                 if let Some(context) = &self.ui_context {
                     egui::Popup::close_all(context);
                 }
-                self.resize_dialog = Some(resize::ResizeDialog::new((
-                    size.0.round() as u32,
-                    size.1.round() as u32,
-                )));
+                self.resize_dialog = Some(resize::ResizeDialog::new(
+                    (size.0.round() as u32, size.1.round() as u32),
+                    image.decoded.frames.len(),
+                ));
                 self.guard_return_focus = self.tabs.active().and_then(|tab| {
                     self.ui_context
                         .as_ref()

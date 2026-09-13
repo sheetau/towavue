@@ -138,9 +138,9 @@ pub fn render_image_edits(
     }) {
         return Err("Video raster edits cannot be applied to image frames".into());
     }
-    let mut frames = Vec::with_capacity(source.frames.len());
+    // No partial animation is published. Reject an impossible retained result
+    // before allocating pixels or running filters for any earlier frame.
     let mut retained = 0_u64;
-    let mut renderer = ImageEditRenderer::new(operations);
     for frame in &source.frames {
         if cancel.is_cancelled() {
             return Err("Image edit cancelled".into());
@@ -149,6 +149,13 @@ pub fn render_image_edits(
         retained += u64::from(size.0) * u64::from(size.1) * 4;
         if retained > 512 * 1024 * 1024 {
             return Err("Resampled image exceeds 512 MiB".into());
+        }
+    }
+    let mut frames = Vec::with_capacity(source.frames.len());
+    let mut renderer = ImageEditRenderer::new(operations);
+    for frame in &source.frames {
+        if cancel.is_cancelled() {
+            return Err("Image edit cancelled".into());
         }
         frames.push(renderer.render(frame, &|| cancel.is_cancelled())?);
     }
@@ -358,6 +365,80 @@ impl<'a> ImageEditRenderer<'a> {
 mod tests {
     use super::*;
     use towavue_core::{ImageResize, PixelCrop, ResampleFilter};
+
+    #[test]
+    fn animation_budget_and_geometry_fail_before_any_frame_is_rendered() {
+        let small = DecodedImageFrame {
+            width: 1,
+            height: 1,
+            rgba: vec![1, 2, 3, 255],
+            delay: std::time::Duration::from_millis(10),
+        };
+        // Geometry alone proves this sequence exceeds 512 MiB. Deliberately omit
+        // the large pixel buffers: preflight must not attempt to read/render them.
+        let large = DecodedImageFrame {
+            width: 8192,
+            height: 8192,
+            rgba: vec![],
+            delay: small.delay,
+        };
+        let source = DecodedImage {
+            format: "generated",
+            frames: vec![small.clone(), large.clone(), large],
+        };
+        RENDER_CALLS.set(0);
+        GRAPH_BUILDS.set(0);
+        let error =
+            render_image_edits(&source, &[], &Cancellation::default()).expect_err("total budget");
+        assert!(error.contains("512 MiB"), "{error}");
+        assert_eq!(
+            RENDER_CALLS.get(),
+            0,
+            "reject before copying even the first frame"
+        );
+        assert_eq!(GRAPH_BUILDS.get(), 0);
+
+        let resized = DecodedImage {
+            format: "generated",
+            frames: vec![small.clone(); 3],
+        };
+        let operations = [EditOperation::Resize(
+            ImageResize::new(8192, 8192, ResampleFilter::Nearest).expect("individual canvas fits"),
+        )];
+        assert!(
+            render_image_edits(&resized, &operations, &Cancellation::default())
+                .expect_err("combined resized canvases exceed budget")
+                .contains("512 MiB")
+        );
+        assert_eq!(RENDER_CALLS.get(), 0);
+        assert_eq!(GRAPH_BUILDS.get(), 0);
+
+        let source = DecodedImage {
+            format: "generated",
+            frames: vec![
+                small.clone(),
+                DecodedImageFrame {
+                    width: 0,
+                    ..small.clone()
+                },
+            ],
+        };
+        RENDER_CALLS.set(0);
+        assert!(
+            render_image_edits(
+                &source,
+                &[EditOperation::FlipHorizontal],
+                &Cancellation::default()
+            )
+            .is_err()
+        );
+        assert_eq!(
+            RENDER_CALLS.get(),
+            0,
+            "late invalid geometry must not render earlier frames"
+        );
+        assert_eq!(GRAPH_BUILDS.get(), 0);
+    }
 
     #[test]
     fn unedited_frames_copy_exact_pixels_without_native_filters_and_keep_validation() {

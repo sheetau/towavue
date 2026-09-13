@@ -190,6 +190,98 @@ fn edited_image_install_converts_only_the_selected_frame_with_current_sampling()
 }
 
 #[test]
+fn finite_animation_completion_survives_edit_wait_undo_and_tab_transfer() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::finite_animation_completion_survives_edit_wait_undo_and_tab_transfer",
+    ) else {
+        return;
+    };
+    for succeeds in [false, true] {
+        let (mut source, _) = app();
+        let original = Arc::new(DecodedImage {
+            animation_plays: 3,
+            ..(*decoded(true)).clone()
+        });
+        let id = install(&mut source, root.join("finite.png"), original.clone());
+        source.folder_watcher = None;
+        let resize = EditOperation::Resize(
+            towavue_core::ImageResize::new(3, 3, towavue_core::ResampleFilter::Nearest)
+                .expect("resize"),
+        );
+        source.push_visual_edit(resize);
+        source.image_edit_worker.clear();
+        let deadline = Instant::now() - Duration::from_secs(60);
+        source.image.as_mut().expect("image").next_frame_at = Some(deadline);
+        let context = source.ui_context.clone().expect("context");
+        let _ = context.tex_manager().write().take_delta();
+        source.schedule();
+        assert_eq!(source.image.as_ref().expect("waiting").plays_left, 3);
+        assert_eq!(
+            source.image.as_ref().expect("waiting").next_frame_at,
+            Some(deadline)
+        );
+        assert!(context.tex_manager().write().take_delta().set.is_empty());
+        if succeeds {
+            let resized = towavue_runtime_windows::render_image_edits(
+                &original,
+                &[resize],
+                &Default::default(),
+            )
+            .expect("resize pixels");
+            source.finish_image_edits(source.image_edit_generation, Ok(Arc::new(resized)));
+        } else {
+            source.finish_image_edits(
+                source.image_edit_generation,
+                Err("resampling failed".into()),
+            );
+            source.schedule();
+            assert_eq!(source.image.as_ref().expect("failed edit").plays_left, 3);
+            source.undo_edit(false);
+        }
+        source.schedule();
+        let assert_finished = |app: &mut App| {
+            app.status_message = None;
+            app.schedule();
+            let image = app.image.as_ref().expect("finished image");
+            assert_eq!(image.frame_index, 1);
+            assert!(image.next_frame_at.is_none());
+            assert_eq!(image.plays_left, 1);
+            let now = Instant::now();
+            let wakeup = app.idle_wakeup(now);
+            let image = app.image.take().expect("finished image");
+            assert_eq!(
+                app.idle_wakeup(now),
+                wakeup,
+                "ended image adds no timer; unrelated deadlines survive"
+            );
+            app.image = Some(image);
+            let copy = app.image_copy_request().expect("last frame copy");
+            assert_eq!(copy.frame_index, 1);
+            assert_eq!(&copy.image.frames[1].rgba[..4], &[127, 80, 200, 255]);
+        };
+        assert_finished(&mut source);
+        if succeeds {
+            source.undo_edit(false);
+            assert_finished(&mut source);
+            assert!(Arc::ptr_eq(
+                &source.image.as_ref().expect("undo").decoded,
+                &original
+            ));
+        }
+        let other = install(&mut source, root.join("other.png"), decoded(false));
+        source.activate_tab(id);
+        assert_finished(&mut source);
+        assert!(source.retained_images.contains_key(&other));
+        let (mut destination, _) = app();
+        let moved = transfer(&mut source, &mut destination, id);
+        assert_finished(&mut destination);
+        let returned = transfer(&mut destination, &mut source, moved);
+        assert_eq!(source.tabs.active().map(|tab| tab.id), Some(returned));
+        assert_finished(&mut source);
+    }
+}
+
+#[test]
 fn image_animation_suspends_until_resampling_finishes_or_undo_recovers() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_transfer::tests::image_animation_suspends_until_resampling_finishes_or_undo_recovers",

@@ -518,13 +518,6 @@ fn run_worker(
                 }
                 notify();
             };
-            if cached.is_none()
-                && let Some(previews) = &previews
-                && let Some(preview) =
-                    previews.prepare_image_preview(&path, remaining, &preview_current)
-            {
-                publish_preview(preview);
-            }
             let mut first_frame = |width, height, pixels: &[u8]| {
                 let Some(previews) = &previews else { return };
                 previews.remember_pixels(&path, width, height, pixels, &preview_current);
@@ -554,6 +547,15 @@ fn run_worker(
             });
             if !is_current() {
                 break;
+            }
+            // An adopted original is already decoding. Resolve that result before
+            // starting a speculative decoder for an unnecessary interim preview.
+            if cached.is_none()
+                && let Some(previews) = &previews
+                && let Some(preview) =
+                    previews.prepare_image_preview(&path, remaining, &preview_current)
+            {
+                publish_preview(preview);
             }
             let result = cached.unwrap_or_else(|| {
                 decode(&path, remaining, &is_current, &mut first_frame).map(Arc::new)
@@ -1119,6 +1121,93 @@ mod tests {
             ["cached", "adopted", "budget"].map(|mode| (mode, vec![42; 4], 0)),
             "obsolete cache reads must not force a second decode"
         );
+    }
+
+    #[test]
+    fn adopted_original_does_not_prepare_an_unneeded_foreground_preview() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-adopt-preview-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("owned fixtures");
+        let path = root.join("source.bmp");
+        image::RgbImage::from_pixel(2048, 2048, image::Rgb([17, 37, 59]))
+            .save(&path)
+            .expect("preview-capable BMP");
+        assert!(
+            crate::image::first_image_preview(&path, IMAGE_BYTE_LIMIT, &|| true)
+                .expect("valid preview")
+                .is_some()
+        );
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let loader = ImageLoader {
+            shared: Arc::clone(&shared),
+            prefetch_worker: LatestTask::new("adopt-preview-test").expect("prefetch worker"),
+        };
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        // This prefetch intentionally has no thumbnail cache: a foreground preview
+        // cannot be hidden by a concurrent prefetch thumbnail publication.
+        loader.prefetch_with_decode(vec![path.clone()], move |_, _, _| {
+            started_tx.send(()).expect("prefetch started");
+            release_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("foreground lookup");
+            Ok(Some((*pixel(42)).clone()))
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("active prefetch");
+        let cache = {
+            let mut mailbox = shared.0.lock().expect("mailbox");
+            mailbox.previews =
+                Some(PreviewCache::new(root.join("previews")).expect("preview cache"));
+            Arc::clone(&mailbox.cache)
+        };
+        let mut first = true;
+        cache.lock().expect("cache").before_lookup = Some(Box::new(move || {
+            if std::mem::take(&mut first) {
+                release_tx.send(()).expect("release adopted original");
+            }
+        }));
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let notifications = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = Arc::clone(&notifications);
+        let worker = thread::spawn(move || {
+            run_worker(
+                shared,
+                || {
+                    count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let _ = ready_tx.send(());
+                },
+                |_, _, _, _| panic!("adopted original must not decode again"),
+            )
+        });
+        loader.request(vec![path]);
+        let completed = loop {
+            ready_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("foreground completion");
+            if let Some(completed) = loader.take_completed() {
+                break completed;
+            }
+        };
+        assert_eq!(
+            completed.images[0]
+                .1
+                .as_ref()
+                .expect("adopted pixels")
+                .frames[0]
+                .rgba,
+            vec![42; 4]
+        );
+        wait_for_prefetch(&loader);
+        drop(loader);
+        worker.join().expect("foreground shutdown");
+        assert_eq!(
+            notifications.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "publish only the adopted original, without preparing an interim preview"
+        );
+        std::fs::remove_dir_all(root).expect("remove owned fixtures");
     }
 
     #[test]

@@ -79,6 +79,10 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             let mut max_queue = 0;
             let mut memory = gpu::Memory::new(&renderer);
             let mut failed = false;
+            let mut event_preparation = Duration::ZERO;
+            let mut preparation = Vec::new();
+            let mut original_gpu = Vec::new();
+            let mut original_layout = Vec::new();
             loop {
                 // Fixed schedule, independent of image completion: no initial prefetch wait.
                 while sent + 1 < self.paths.len()
@@ -90,11 +94,16 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 }
                 while let Ok(event) = events.try_recv() {
                     match event {
-                        AppEvent::ImagesReady => app.finish_image_load(),
+                        AppEvent::ImagesReady => {
+                            let started = Instant::now();
+                            app.finish_image_load();
+                            event_preparation += started.elapsed();
+                        }
                         AppEvent::ImagePreview(..) => app.handle_app_event(event),
                         _ => {}
                     }
                 }
+                let layout_started = Instant::now();
                 let output = context.run_ui(
                     egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(
@@ -107,6 +116,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                     },
                     |ui| app.draw_ui(ui, &mut Vec::new()),
                 );
+                let layout = layout_started.elapsed();
                 let drawn = |id| {
                     output.shapes.iter().any(|shape| {
                     matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == id)
@@ -131,7 +141,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 let path = full.then(|| app.path.clone().expect("displayed source"));
                 let token = app.image_sequence_token(&output);
                 // Never read back or emit pixels from reference media; only submit to a hidden surface.
-                gpu::submit(&app, &context, output, &mut renderer, false);
+                let gpu_time = gpu::submit(&app, &context, output, &mut renderer, false);
                 if let Some(path) = path
                     && visited.last() != Some(&path)
                 {
@@ -141,6 +151,9 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                         .position(|candidate| candidate == &path)
                         .expect("source index");
                     latency.push(started.elapsed().saturating_sub(cadence * index as u32));
+                    preparation.push(std::mem::take(&mut event_preparation));
+                    original_layout.push(layout);
+                    original_gpu.push(gpu_time);
                     visited.push(path);
                     memory.sample(&renderer);
                 }
@@ -172,9 +185,28 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                     .unwrap_or_default()
                     .as_secs_f64()
                     * 1000.0,
-                percentile_95(&latency).as_secs_f64() * 1000.0,
+                latency
+                    .last()
+                    .map_or(0.0, |_| percentile_95(&latency).as_secs_f64() * 1000.0),
             );
             memory.report();
+            for (stage, samples) in [
+                ("completion_events_per_original", &preparation),
+                ("new_original_frame_layout", &original_layout),
+                ("new_original_frame_gpu_submit_present", &original_gpu),
+            ] {
+                let mut sorted = samples.clone();
+                sorted.sort_unstable();
+                if !sorted.is_empty() {
+                    eprintln!(
+                        "REFERENCE_STAGE stage={stage} count={} median_ms={:.3} p95_ms={:.3} total_ms={:.3}; event preparation excludes results drained inside layout; GPU includes texture upload/render/Present, not pure upload or a GPU timestamp",
+                        sorted.len(),
+                        sorted[sorted.len() / 2].as_secs_f64() * 1000.0,
+                        percentile_95(&sorted).as_secs_f64() * 1000.0,
+                        sorted.iter().sum::<Duration>().as_secs_f64() * 1000.0
+                    );
+                }
+            }
             self.completed = !failed && visited == self.paths && blanks == 0 && previews == 0;
             event_loop.exit();
         }

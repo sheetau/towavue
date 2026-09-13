@@ -1822,6 +1822,89 @@ fn png_text_rejects_corruption_truncation_invalid_text_and_bounded_expansion() {
 }
 
 #[test]
+#[ignore = "Release measurement of multi-frame APNG export; run without concurrent builds or tests"]
+fn apng_edited_export_reports_sequence_cost_and_pixel_digest() {
+    let root = root("apng-edit-benchmark");
+    let source = root.join("source.png");
+    let target = root.join("target.png");
+    for (width, height, frames) in [(640, 360, 240), (1920, 1080, 48)] {
+        {
+            let mut encoder = png::Encoder::new(
+                std::io::BufWriter::new(fs::File::create(&source).expect("source")),
+                width,
+                height,
+            );
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.set_compression(png::Compression::Fast);
+            encoder.set_animated(frames, 3).expect("animation");
+            let mut writer = encoder.write_header().expect("header");
+            writer.set_frame_delay(1, 30).expect("delay");
+            let mut pixels = vec![0; width as usize * height as usize * 4];
+            for frame in 0..frames {
+                for (index, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                    let x = index as u32 % width;
+                    let y = index as u32 / width;
+                    pixel.copy_from_slice(&[
+                        (x + frame * 3) as u8,
+                        (y + frame * 7) as u8,
+                        (x / 4 + y / 3 + frame) as u8,
+                        (x / 8 + y / 8 + 127) as u8,
+                    ]);
+                }
+                writer.write_image_data(&pixels).expect("frame");
+            }
+            writer.finish().expect("finish");
+        }
+        let mut request = request(&source, &target);
+        request.operations = vec![
+            EditOperation::RotateImage(
+                towavue_core::ImageRotation::new(137, (width, height)).expect("rotation"),
+            ),
+            EditOperation::Resize(
+                ImageResize::new(width / 2, height / 2, ResampleFilter::Lanczos).expect("resize"),
+            ),
+        ];
+        let mut expected = None;
+        for sample in 0..3 {
+            let start = std::time::Instant::now();
+            export_media(&request).expect("export");
+            let elapsed = start.elapsed();
+            let bytes = fs::metadata(&target).expect("output size").len();
+            let mut reader =
+                png::Decoder::new(BufReader::new(fs::File::open(&target).expect("output")))
+                    .read_info()
+                    .expect("PNG");
+            assert_eq!(
+                reader
+                    .info()
+                    .animation_control
+                    .expect("animation")
+                    .num_frames,
+                frames
+            );
+            let mut pixels = vec![0; reader.output_buffer_size().expect("buffer")];
+            let mut digest = crc32fast::Hasher::new();
+            for _ in 0..frames {
+                let output = reader.next_frame(&mut pixels).expect("frame");
+                assert_eq!((output.width, output.height), (width / 2, height / 2));
+                digest.update(&pixels[..output.buffer_size()]);
+                let control = reader.info().frame_control.expect("control");
+                assert_eq!((control.delay_num, control.delay_den), (1, 30));
+            }
+            reader.finish().expect("tail");
+            let digest = digest.finalize();
+            assert_eq!(*expected.get_or_insert(digest), digest);
+            eprintln!(
+                "APNG {width}x{height} frames={frames} sample={sample} export_ms={:.3} output_bytes={bytes} rgba_crc32={digest:08x}",
+                elapsed.as_secs_f64() * 1000.0
+            );
+        }
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn unedited_png_export_preserves_compressed_data_depth_palette_and_ancillary_chunks() {
     let root = root("png-unedited-fidelity");
     let source = root.join("source.png");

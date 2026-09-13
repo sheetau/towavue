@@ -41,13 +41,27 @@ pub fn show_drag(
             } else {
                 timeline_input::seek_drag(&response)
             };
-            let dragging = drag.dragging && !drag.released;
-            let active = response.hovered() || response.has_focus() || dragging;
-            let progress = if dragging {
-                drag.position.map_or(progress, |p| compact_ratio(rect, p.x))
-            } else {
-                progress
-            };
+            // The app applies the committed seek after painting. Keep its position
+            // for every pass of this release frame, without replaying the action.
+            let frame = context.cumulative_frame_nr();
+            let release = context.data_mut(|data| {
+                let id = response.id.with("release-progress");
+                if drag.released
+                    && let Some(position) = drag.position
+                {
+                    data.insert_temp(id, (frame, compact_ratio(rect, position.x)));
+                }
+                data.get_temp::<(u64, f32)>(id)
+                    .filter(|(saved, _)| *saved == frame && enabled)
+                    .map(|(_, progress)| progress)
+            });
+            let preview = release.or_else(|| {
+                drag.dragging
+                    .then(|| drag.position.map(|p| compact_ratio(rect, p.x)))
+                    .flatten()
+            });
+            let active = response.hovered() || response.has_focus() || preview.is_some();
+            let progress = preview.unwrap_or(progress);
             let height = if active {
                 4.0
             } else {
@@ -374,6 +388,120 @@ mod tests {
                 "disabled input cancels the drag preview"
             );
             assert_eq!(frame(vec![button(end, false)], true).1, None);
+        }
+    }
+
+    #[test]
+    fn release_paints_the_committed_position_across_discarded_passes() {
+        for density in [1.0, 1.25, 2.0] {
+            for video in [false, true] {
+                for discard in [false, true] {
+                    for batched in [false, true] {
+                        let context = Context::default();
+                        let screen =
+                            Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 300.0));
+                        let status =
+                            Rect::from_min_size(egui::pos2(0.0, 270.0), egui::vec2(500.0, 30.0));
+                        let start = egui::pos2(100.0, 270.0);
+                        let end = egui::pos2(400.0, 270.0);
+                        let button = |pos, pressed| egui::Event::PointerButton {
+                            pos,
+                            pressed,
+                            button: egui::PointerButton::Primary,
+                            modifiers: egui::Modifiers::NONE,
+                        };
+                        let frame = |events, progress, discard| {
+                            let mut commits = Vec::new();
+                            let mut input = egui::RawInput {
+                                time: Some(context.cumulative_frame_nr() as f64),
+                                screen_rect: Some(screen),
+                                events,
+                                ..Default::default()
+                            };
+                            input
+                                .viewports
+                                .get_mut(&egui::ViewportId::ROOT)
+                                .expect("viewport")
+                                .native_pixels_per_point = Some(density);
+                            let output = context.run_ui(input, |_| {
+                                let (_, commit, open) =
+                                    show(&context, status, progress, None, true, video);
+                                assert!(!open);
+                                commits.extend(commit);
+                                if discard && context.current_pass_index() == 0 {
+                                    context.request_discard(
+                                        "seek release paint survives another pass",
+                                    );
+                                }
+                            });
+                            assert_eq!(output.pixels_per_point, density);
+                            (commits, output)
+                        };
+                        frame(vec![], 0.2, false);
+                        frame(vec![], 0.2, false);
+                        let events = if batched {
+                            vec![
+                                egui::Event::PointerMoved(end),
+                                button(end, true),
+                                button(end, false),
+                            ]
+                        } else {
+                            assert!(
+                                frame(
+                                    vec![egui::Event::PointerMoved(start), button(start, true)],
+                                    0.2,
+                                    false
+                                )
+                                .0
+                                .is_empty()
+                            );
+                            assert!(
+                                frame(vec![egui::Event::PointerMoved(end)], 0.2, false)
+                                    .0
+                                    .is_empty()
+                            );
+                            vec![button(end, false)]
+                        };
+                        let (commits, output) = frame(events, 0.2, discard);
+                        assert_eq!(commits, vec![end], "one committed action");
+                        let assert_position = |output: &egui::FullOutput, progress: f32| {
+                            let circle = output
+                                .shapes
+                                .iter()
+                                .find_map(|shape| match &shape.shape {
+                                    egui::Shape::Circle(circle) => Some(circle),
+                                    _ => None,
+                                })
+                                .expect("seek handle");
+                            assert!(
+                                (circle.center.x - (4.0 + 492.0 * progress)).abs() < 0.001,
+                                "release must not paint the old transport position"
+                            );
+                            let played = output
+                                .shapes
+                                .iter()
+                                .find_map(|shape| match &shape.shape {
+                                    egui::Shape::Rect(rect)
+                                        if rect.fill == crate::chrome::FOREGROUND =>
+                                    {
+                                        Some(rect)
+                                    }
+                                    _ => None,
+                                })
+                                .expect("played track");
+                            assert!((played.rect.right() - 500.0 * progress).abs() < 0.001);
+                        };
+                        let committed = (end.x - 4.0) / 492.0;
+                        assert_position(&output, committed);
+                        let (commits, output) = frame(vec![], committed, false);
+                        assert!(commits.is_empty());
+                        assert_position(&output, committed);
+                        let (commits, output) = frame(vec![], 0.2, false);
+                        assert!(commits.is_empty());
+                        assert_position(&output, 0.2);
+                    }
+                }
+            }
         }
     }
 

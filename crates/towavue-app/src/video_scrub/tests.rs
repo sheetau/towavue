@@ -243,7 +243,7 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
                 frame(app, vec![egui::Event::WindowFocused(true)], false);
                 assert_eq!(app.generation, generation);
             } else {
-                let (actions, _) = frame(
+                let (actions, output) = frame(
                     app,
                     vec![button(end, false), egui::Event::PointerMoved(start)],
                     true,
@@ -252,6 +252,20 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
                     actions.as_slice(),
                     [UiAction::CommitVideoScrub(_)]
                 ));
+                let handle_x = |output: &egui::FullOutput| {
+                    output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Circle(circle) => Some(circle.center.x),
+                            _ => None,
+                        })
+                        .expect("compact seek handle")
+                };
+                assert!(
+                    (handle_x(&output) - end.x).abs() < 0.001,
+                    "release paint stays at the target, not the old clock or later pointer"
+                );
                 assert!(
                     app.video_scrub
                         .as_ref()
@@ -270,7 +284,12 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
                         PlaybackState::Paused
                     }
                 );
-                assert!(frame(app, vec![], false).0.is_empty());
+                let (actions, output) = frame(app, vec![], false);
+                assert!(actions.is_empty());
+                assert!(
+                    (handle_x(&output) - end.x).abs() < 0.001,
+                    "committed transport takes over without a backward jump"
+                );
                 assert!(
                     app.video_scrub
                         .as_ref()

@@ -190,6 +190,11 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                     .map_or(0.0, |_| percentile_95(&latency).as_secs_f64() * 1000.0),
             );
             memory.report();
+            eprintln!(
+                "REFERENCE_LOADER {:?}; idle={}; aggregate snapshot at final Present; decoder-return outcomes, not cache insertions; unfinished calls have no elapsed time; decode and wait times overlap and must not be summed; no paths or pixels",
+                app.image_loader.verification_metrics(),
+                app.image_loader.is_idle(),
+            );
             for (stage, samples) in [
                 ("completion_events_per_original", &preparation),
                 ("new_original_frame_layout", &original_layout),

@@ -14,6 +14,9 @@ const CACHE_BYTE_LIMIT: usize = 256 * 1024 * 1024;
 const CACHE_ENTRY_LIMIT: usize = 30;
 const PREFETCH_ENTRY_LIMIT: usize = 10;
 
+#[cfg(any(test, feature = "render-verification"))]
+pub(crate) mod verification;
+
 pub struct LoadedImages {
     pub generation: u64,
     pub first_index: usize,
@@ -150,6 +153,8 @@ impl Drop for PrefetchLease {
 
 #[derive(Default)]
 struct Mailbox {
+    #[cfg(any(test, feature = "render-verification"))]
+    metrics: verification::ImageLoadMetrics,
     generation: u64,
     pending: Option<(Vec<PathBuf>, usize, bool)>,
     decoding: bool,
@@ -171,6 +176,11 @@ pub struct ImageLoader {
 }
 
 impl ImageLoader {
+    #[cfg(any(test, feature = "render-verification"))]
+    pub fn verification_metrics(&self) -> verification::ImageLoadMetrics {
+        self.shared.0.lock().expect("image mailbox").metrics
+    }
+
     pub fn new(
         previews: PreviewCache,
         notify: impl Fn() + Send + 'static,
@@ -376,7 +386,39 @@ impl ImageLoader {
                 let image = if let Some(image) = cached {
                     image
                 } else {
-                    let image = match decode(&path, remaining, &current) {
+                    #[cfg(any(test, feature = "render-verification"))]
+                    let started = {
+                        shared
+                            .0
+                            .lock()
+                            .expect("image mailbox")
+                            .metrics
+                            .prefetch
+                            .calls += 1;
+                        std::time::Instant::now()
+                    };
+                    let result = decode(&path, remaining, &current);
+                    #[cfg(any(test, feature = "render-verification"))]
+                    {
+                        let elapsed = started.elapsed();
+                        let outcome = match (current(), &result) {
+                            (false, _) => verification::Outcome::Superseded,
+                            (true, Ok(Some(_))) => verification::Outcome::Completed,
+                            (true, Ok(None)) => verification::Outcome::Unsupported,
+                            (true, Err(ImageDecodeError::TooLarge)) => {
+                                verification::Outcome::BudgetRejected
+                            }
+                            (true, Err(_)) => verification::Outcome::Failed,
+                        };
+                        shared
+                            .0
+                            .lock()
+                            .expect("image mailbox")
+                            .metrics
+                            .prefetch
+                            .record(elapsed, outcome);
+                    }
+                    let image = match result {
                         Ok(Some(image)) => image,
                         Ok(None) => {
                             if let Some(previews) = &previews {
@@ -516,6 +558,14 @@ fn run_worker(
                 .lock()
                 .expect("image cache")
                 .get(&path, stamp, remaining);
+            #[cfg(any(test, feature = "render-verification"))]
+            if matches!(cached, Some(Ok(_))) {
+                mutex
+                    .lock()
+                    .expect("image mailbox")
+                    .metrics
+                    .initial_cache_hits += 1;
+            }
             let preview_current =
                 || is_current() && stamp.is_some() && ImageStamp::read(&path) == stamp;
             let publish_preview = |preview| {
@@ -548,24 +598,45 @@ fn run_worker(
                 }
             };
             let cached = cached.or_else(|| {
+                #[cfg(any(test, feature = "render-verification"))]
+                let started = std::time::Instant::now();
+                #[cfg(any(test, feature = "render-verification"))]
+                let mut waited = false;
                 let mailbox = ready
                     .wait_while(mutex.lock().expect("image mailbox"), |mailbox| {
-                        !mailbox.closed
+                        let waiting = !mailbox.closed
                             && mailbox.generation == generation
                             && mailbox.prefetch.as_ref().is_some_and(|work| {
                                 work.decoding && work.generation == generation && work.path == path
-                            })
+                            });
+                        #[cfg(any(test, feature = "render-verification"))]
+                        {
+                            waited |= waiting;
+                        }
+                        waiting
                     })
                     .expect("image mailbox");
                 drop(mailbox);
-                if is_current() {
+                #[cfg(any(test, feature = "render-verification"))]
+                if waited {
+                    let elapsed = started.elapsed();
+                    let mut mailbox = mutex.lock().expect("image mailbox");
+                    mailbox.metrics.prefetch_waits += 1;
+                    mailbox.metrics.prefetch_wait_elapsed += elapsed;
+                }
+                let cached = if is_current() {
                     cache
                         .lock()
                         .expect("image cache")
                         .get(&path, stamp, remaining)
                 } else {
                     None
+                };
+                #[cfg(any(test, feature = "render-verification"))]
+                if matches!(cached, Some(Ok(_))) {
+                    mutex.lock().expect("image mailbox").metrics.late_cache_hits += 1;
                 }
+                cached
             });
             if !is_current() {
                 break;
@@ -581,7 +652,36 @@ fn run_worker(
                 publish_preview(preview);
             }
             let result = cached.unwrap_or_else(|| {
-                decode(&path, remaining, &is_current, &mut first_frame).map(Arc::new)
+                #[cfg(any(test, feature = "render-verification"))]
+                let started = {
+                    mutex
+                        .lock()
+                        .expect("image mailbox")
+                        .metrics
+                        .foreground
+                        .calls += 1;
+                    std::time::Instant::now()
+                };
+                let result = decode(&path, remaining, &is_current, &mut first_frame).map(Arc::new);
+                #[cfg(any(test, feature = "render-verification"))]
+                {
+                    let elapsed = started.elapsed();
+                    let outcome = match (is_current(), &result) {
+                        (false, _) => verification::Outcome::Superseded,
+                        (true, Ok(_)) => verification::Outcome::Completed,
+                        (true, Err(ImageDecodeError::TooLarge)) => {
+                            verification::Outcome::BudgetRejected
+                        }
+                        (true, Err(_)) => verification::Outcome::Failed,
+                    };
+                    mutex
+                        .lock()
+                        .expect("image mailbox")
+                        .metrics
+                        .foreground
+                        .record(elapsed, outcome);
+                }
+                result
             });
             if let Ok(image) = &result {
                 remaining -= image.retained_bytes();
@@ -1326,6 +1426,12 @@ mod tests {
             vec![42; 4]
         );
         wait_for_prefetch(&loader);
+        let metrics = loader.verification_metrics();
+        assert_eq!(metrics.initial_cache_hits, 0);
+        assert_eq!(metrics.late_cache_hits, 1);
+        assert_eq!(metrics.foreground.calls, 0);
+        assert_eq!(metrics.prefetch.calls, 1);
+        assert_eq!(metrics.prefetch.completed, 1);
         drop(loader);
         worker.join().expect("foreground shutdown");
         assert_eq!(
@@ -2571,6 +2677,17 @@ mod tests {
             .1
             .expect("new image");
         assert!(!Arc::ptr_eq(&changed, &prefetched));
+        wait_for_prefetch(&loader);
+        let metrics = loader.verification_metrics();
+        assert_eq!(metrics.initial_cache_hits, 1);
+        assert_eq!(metrics.late_cache_hits, 0);
+        assert_eq!(metrics.foreground.calls, 2);
+        assert_eq!(metrics.foreground.completed, 2);
+        assert_eq!(metrics.prefetch.calls, 2);
+        assert_eq!(metrics.prefetch.completed, 1);
+        assert_eq!(metrics.prefetch.superseded, 1);
+        assert!(metrics.prefetch.superseded_elapsed > Duration::ZERO);
+        assert!(metrics.prefetch.elapsed >= metrics.prefetch.superseded_elapsed);
         drop(loader);
         foreground.join().expect("foreground exits");
         std::fs::remove_file(first).expect("remove owned fixture");

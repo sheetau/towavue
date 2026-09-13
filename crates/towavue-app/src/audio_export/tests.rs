@@ -125,6 +125,123 @@ pub(crate) fn frame<N: Fn(AppEvent) + Send + Sync + 'static>(
 }
 
 #[test]
+fn compact_audio_export_arrow_focus_remains_visible_without_changing_options() {
+    for density in [1.0, 1.5, 2.0] {
+        let context = fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.enable_accesskit();
+        let mut tabs = TabSet::default();
+        let source = PathBuf::from("audio.wav");
+        let tab = tabs.open_new(source.clone(), MediaKind::Audio);
+        let mut dialog = AudioExportDialog {
+            token: 1,
+            tab,
+            source,
+            kind: MediaKind::Audio,
+            generation: 1,
+            options: AudioExportOptions::default(),
+            first_frame: true,
+            focused_option: None,
+        };
+        let mut time = 0.0;
+        let mut frame = |events| {
+            time += 0.1;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(320.0, 200.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| assert!(dialog.show(ui.ctx()).is_none()),
+            );
+            output.platform_output.accesskit_update.expect("tree")
+        };
+        for _ in 0..3 {
+            frame(vec![]);
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for key in [
+            egui::Key::ArrowDown,
+            egui::Key::ArrowDown,
+            egui::Key::ArrowDown,
+            egui::Key::ArrowUp,
+            egui::Key::ArrowUp,
+            egui::Key::ArrowUp,
+        ] {
+            for pressed in [true, false] {
+                frame(vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            for _ in 0..5 {
+                frame(vec![]);
+            }
+            let tree = frame(vec![]);
+            let (_, node) = tree
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == tree.focus)
+                .expect("focused node");
+            seen.insert(node.label().expect("option label").to_owned());
+            let focused = context
+                .memory(egui::Memory::focused)
+                .expect("focused option");
+            let response = context.read_response(focused).expect("option response");
+            assert!(
+                response.interact_rect.height() >= response.rect.height() - 1.0 / density,
+                "density {density}: focused option clipped: {:?} vs {:?}",
+                response.interact_rect,
+                response.rect
+            );
+        }
+        for label in [
+            "Normalize peak (-1 dBFS)",
+            "Keep source channels",
+            "Mono",
+            "Stereo",
+        ] {
+            assert!(
+                seen.contains(label),
+                "arrow keys must reach {label}: {seen:?}"
+            );
+        }
+        let focused = context
+            .memory(egui::Memory::focused)
+            .expect("focus before wheel");
+        let before = context.read_response(focused).expect("response").rect;
+        frame(vec![
+            egui::Event::PointerMoved(before.center()),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                phase: egui::TouchPhase::Move,
+                delta: egui::vec2(0.0, -60.0),
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        for _ in 0..5 {
+            frame(vec![]);
+        }
+        let after = context
+            .read_response(focused)
+            .expect("response after wheel")
+            .rect;
+        assert!(
+            before.top() - after.top() > 20.0,
+            "manual wheel must not snap to unchanged focus"
+        );
+        assert_eq!(dialog.options, AudioExportOptions::default());
+    }
+}
+
+#[test]
 fn audio_export_controls_apply_cancel_restore_focus_and_fit_compact_windows() {
     let Some(root) = crate::tests::isolated_test_root(
         "audio_export::tests::audio_export_controls_apply_cancel_restore_focus_and_fit_compact_windows",

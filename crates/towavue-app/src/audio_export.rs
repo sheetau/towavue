@@ -9,6 +9,7 @@ pub(super) struct AudioExportDialog {
     generation: u64,
     options: AudioExportOptions,
     first_frame: bool,
+    focused_option: Option<egui::Id>,
 }
 
 pub(super) fn summary(options: AudioExportOptions) -> String {
@@ -30,17 +31,28 @@ pub(super) fn summary(options: AudioExportOptions) -> String {
 impl AudioExportDialog {
     fn show(&mut self, context: &egui::Context) -> Option<Option<AudioExportOptions>> {
         let mut action = None;
+        let mut focused_option = None;
+        let mut reveal_focus = |response: &egui::Response| {
+            if response.has_focus() {
+                focused_option = Some(response.id);
+                // Arrow focus is resolved after layout, so gained_focus alone
+                // can miss the transition observed by the following frame.
+                if self.focused_option != focused_option {
+                    response.scroll_to_me(None);
+                }
+            }
+        };
         let modal = egui::Modal::new("audio-export-options".into()).show(context, |ui| {
             ui.set_width((context.content_rect().width() - 48.0).clamp(1.0, 340.0));
             chrome::modal_heading(ui, "Audio export options");
             egui::ScrollArea::vertical().max_height((context.content_rect().height() - 128.0).max(20.0)).min_scrolled_height(20.0).show(ui, |ui| {
                 let response = ui.checkbox(&mut self.options.normalize_peak, "Normalize peak (-1 dBFS)");
                 if self.first_frame { response.request_focus(); self.first_frame = false; }
-                if response.gained_focus() { response.scroll_to_me(None); }
+                reveal_focus(&response);
                 ui.label("Output channels");
                 for (value, label) in [(AudioChannels::Keep, "Keep source channels"), (AudioChannels::Mono, "Mono"), (AudioChannels::Stereo, "Stereo")] {
                     let response = ui.radio_value(&mut self.options.channels, value, label);
-                    if response.gained_focus() { response.scroll_to_me(None); }
+                    reveal_focus(&response);
                 }
                 ui.separator();
                 ui.label("Applies to the next Save, Export as and Export audio only for this tab's current file. Playback and edit history stay unchanged.");
@@ -53,6 +65,7 @@ impl AudioExportDialog {
                 if ui.button("Cancel").clicked() { action = Some(None); }
             });
         });
+        self.focused_option = focused_option;
         if modal.is_top_modal
             && !modal.any_popup_open
             && context
@@ -98,6 +111,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .copied()
                 .unwrap_or_default(),
             first_frame: true,
+            focused_option: None,
         });
         self.request_redraw();
     }

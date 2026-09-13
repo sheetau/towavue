@@ -1,6 +1,125 @@
 use crate::*;
 
 #[test]
+fn interior_press_zooms_once_and_holding_cannot_start_a_new_selection() {
+    let Some(_) = tests::isolated_test_root(
+        "selection::gesture_tests::interior_press_zooms_once_and_holding_cannot_start_a_new_selection",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 400.0));
+    let selected = UnitRect {
+        min: UnitPoint { x: 0.2, y: 0.2 },
+        max: UnitPoint { x: 0.8, y: 0.8 },
+    };
+    let inside = screen.center();
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        pressed,
+        button: egui::PointerButton::Primary,
+        modifiers: egui::Modifiers::NONE,
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for kind in [MediaKind::Image, MediaKind::Video] {
+            let context = fonts::test_context();
+            app.ui_context = Some(context.clone());
+            app.media_kind = Some(kind);
+            app.timeline_open = true;
+            app.image_view.fit();
+            app.image_view.selection = Some(selected);
+            let frame = |app: &mut Application<_>, events, discard| {
+                let mut input = egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                };
+                input
+                    .viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .expect("viewport")
+                    .native_pixels_per_point = Some(density);
+                context.run_ui(input, |ui| {
+                    let response =
+                        ui.interact(screen, "press-zoom".into(), egui::Sense::click_and_drag());
+                    let pointer = ui.input(|input| input.pointer.hover_pos());
+                    app.update_selection(&response, screen, (500, 400), false, pointer);
+                    if discard && context.current_pass_index() == 0 {
+                        context.request_discard("zoom press stays consumed");
+                    }
+                })
+            };
+            for _ in 0..2 {
+                frame(&mut app, vec![egui::Event::PointerMoved(inside)], false);
+            }
+            assert_eq!(
+                frame(&mut app, vec![], false).platform_output.cursor_icon,
+                egui::CursorIcon::ZoomIn
+            );
+            let generation = app.generation;
+            let output = frame(&mut app, vec![button(inside, true)], true);
+            assert_eq!(
+                app.image_view.selection, None,
+                "zoom happens on press, not release"
+            );
+            assert!(matches!(app.image_view.zoom, ZoomMode::Custom(_)));
+            assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::ZoomIn);
+            let zoomed = app.image_view;
+            let end = egui::pos2(490.0, 390.0);
+            for events in [
+                vec![egui::Event::PointerMoved(end)],
+                vec![],
+                vec![button(end, false)],
+            ] {
+                let output = frame(&mut app, events, true);
+                assert_eq!(app.image_view, zoomed);
+                assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::ZoomIn);
+            }
+            assert!(app.view_drag.is_none());
+            frame(&mut app, vec![], false);
+            assert_eq!(app.image_view, zoomed);
+            assert_eq!(app.generation, generation);
+            assert!(app.edits.is_empty());
+            app.image_view.selection = Some(selected);
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(inside), button(inside, true)],
+                false,
+            );
+            let committed = app.image_view;
+            assert!(app.cancel_view_drag());
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(end), button(end, false)],
+                false,
+            );
+            assert_eq!(
+                app.image_view, committed,
+                "cancellation releases ownership, not the committed zoom"
+            );
+            assert!(app.view_drag.is_none());
+            let fresh = egui::pos2(100.0, 100.0);
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(fresh), button(fresh, true)],
+                false,
+            );
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(end), button(end, false)],
+                false,
+            );
+            assert!(
+                app.image_view.selection.is_some(),
+                "a fresh press can select again"
+            );
+            assert_eq!(app.image_view.zoom, committed.zoom);
+            assert!(app.view_drag.is_none());
+        }
+    }
+}
+
+#[test]
 fn outside_click_clears_selection_but_drags_controls_and_cancellation_do_not() {
     let Some(_) = tests::isolated_test_root(
         "selection::gesture_tests::outside_click_clears_selection_but_drags_controls_and_cancellation_do_not",

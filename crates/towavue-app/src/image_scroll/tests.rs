@@ -182,10 +182,13 @@ fn selection_zoom_keeps_the_full_image_and_clears_selection_in_the_input_frame()
                     let pressed = frame(&mut app, density, vec![button(true)]);
                     assert_eq!(
                         pressed.platform_output.cursor_icon,
-                        egui::CursorIcon::Crosshair
+                        egui::CursorIcon::ZoomIn
                     );
-                    assert_eq!(app.image_view.zoom, ZoomMode::Fit);
-                    frame(&mut app, density, vec![button(false)])
+                    assert!(matches!(app.image_view.zoom, ZoomMode::Custom(_)));
+                    assert!(app.image_view.selection.is_none());
+                    let released = frame(&mut app, density, vec![button(false)]);
+                    assert_eq!(mesh(&pressed).vertices, mesh(&released).vertices);
+                    pressed
                 } else {
                     frame(&mut app, density, vec![button(true), button(false)])
                 };

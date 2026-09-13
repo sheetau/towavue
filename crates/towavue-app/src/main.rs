@@ -679,6 +679,9 @@ enum SelectionDrag {
 
 #[derive(Clone, Copy)]
 enum ViewDrag {
+    // An immediate selection zoom owns the remaining press, but is not an edit
+    // or a reversible drag preview.
+    ZoomSelection,
     Selection {
         mode: SelectionDrag,
         before: Option<UnitRect>,
@@ -3605,6 +3608,7 @@ where
             return canceled_press;
         };
         match drag {
+            ViewDrag::ZoomSelection => {}
             ViewDrag::MoveSelection { before, .. } => self.image_view.selection = Some(before),
             ViewDrag::Selection { before, .. } => self.image_view.selection = before,
             ViewDrag::Pan { before, .. } => self.image_view.pan = before,
@@ -3715,7 +3719,10 @@ where
             return;
         }
         if !self.visual_selection_enabled() {
-            if matches!(self.view_drag, Some(ViewDrag::Selection { .. })) {
+            if matches!(
+                self.view_drag,
+                Some(ViewDrag::Selection { .. } | ViewDrag::ZoomSelection)
+            ) {
                 self.cancel_view_drag();
             }
             return;
@@ -3724,6 +3731,43 @@ where
             return;
         }
         let (origin, release) = view_drag_button_positions(response, egui::PointerButton::Primary);
+        let frame = response.ctx.cumulative_frame_nr();
+        let zoom_frame = response.id.with("selection-zoom-frame");
+        if response.ctx.data(|data| data.get_temp::<u64>(zoom_frame)) == Some(frame) {
+            response.ctx.set_cursor_icon(egui::CursorIcon::ZoomIn);
+            return;
+        }
+        if self.view_drag.is_none()
+            && let (Some(origin), Some(selection)) = (origin, self.image_view.selection)
+            && selection_rect(image_rect, selection).contains(origin)
+            && selection_edge(origin, image_rect, selection).is_none()
+        {
+            let pixel_aspect = if self.media_kind == Some(MediaKind::Video) {
+                image_rect.width() * image_size.1 as f32
+                    / (image_rect.height() * image_size.0 as f32)
+            } else {
+                1.0
+            };
+            self.zoom_visual_selection(
+                image_size,
+                response.rect.size(),
+                response.ctx.pixels_per_point(),
+                pixel_aspect,
+            );
+            self.view_drag = Some(ViewDrag::ZoomSelection);
+        }
+        if matches!(self.view_drag, Some(ViewDrag::ZoomSelection)) {
+            if release.is_some() {
+                self.view_drag = None;
+            }
+            // A discarded pass must not reinterpret this press after zoom cleared
+            // the selection; later movement/release belongs to the same action.
+            response
+                .ctx
+                .data_mut(|data| data.insert_temp(zoom_frame, frame));
+            response.ctx.set_cursor_icon(egui::CursorIcon::ZoomIn);
+            return;
+        }
         let released = release.is_some();
         let Some(pointer) = release.or(pointer) else {
             return;
@@ -3864,22 +3908,6 @@ where
                     && !selected.contains(pointer)
                 {
                     self.image_view.selection = None;
-                } else if matches!(mode, SelectionDrag::New(_))
-                    && selected.contains(origin)
-                    && selected.contains(pointer)
-                {
-                    let pixel_aspect = if self.media_kind == Some(MediaKind::Video) {
-                        image_rect.width() * image_size.1 as f32
-                            / (image_rect.height() * image_size.0 as f32)
-                    } else {
-                        1.0
-                    };
-                    self.zoom_visual_selection(
-                        image_size,
-                        response.rect.size(),
-                        response.ctx.pixels_per_point(),
-                        pixel_aspect,
-                    );
                 }
             }
         }
@@ -21644,7 +21672,13 @@ mod tests {
                 let context = fonts::test_context();
                 let time = std::cell::Cell::new(0.0);
                 let original = UnitRect {
-                    min: UnitPoint { x: 0.1, y: 0.1 },
+                    // A selection starts outside the old range; its interior now
+                    // commits zoom on press and cannot begin a replacement drag.
+                    min: if first_drag {
+                        UnitPoint { x: 0.7, y: 0.7 }
+                    } else {
+                        UnitPoint { x: 0.1, y: 0.1 }
+                    },
                     max: UnitPoint { x: 0.9, y: 0.9 },
                 };
                 app.image_view.fit();

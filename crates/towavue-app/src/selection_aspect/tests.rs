@@ -143,10 +143,15 @@ fn verify_video_selection_zoom<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mu
             } else if mode == 1 {
                 assert_eq!(
                     frame(app, vec![button(true)]).platform_output.cursor_icon,
-                    egui::CursorIcon::Crosshair
+                    egui::CursorIcon::ZoomIn
                 );
-                assert_eq!(app.image_view.zoom, ZoomMode::Fit);
+                assert!(matches!(app.image_view.zoom, ZoomMode::Custom(_)));
+                assert!(app.image_view.selection.is_none());
+                let pressed_rect = app.video_rect;
+                let pressed_uv = app.video_uv;
                 frame(app, vec![button(false)]);
+                assert_eq!(app.video_rect, pressed_rect);
+                assert_eq!(app.video_uv, pressed_uv);
             } else {
                 frame(app, vec![button(true), button(false)]);
             }

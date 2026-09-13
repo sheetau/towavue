@@ -51,10 +51,10 @@ impl VideoResizeDialog {
                         }
                         ui.label("Even dimensions; linked edge rounds to 2 pixels. Export encoding may differ.");
                         ui.horizontal(|ui| {
-                            if resize::scroll_on_focus(ui.add_enabled(value.is_ok(), egui::Button::new("Apply resize"))).clicked() {
+                            if self.inputs.reveal_focus(ui.add_enabled(value.is_ok(), egui::Button::new("Apply resize"))).clicked() {
                                 action = Some(value.ok());
                             }
-                            if resize::scroll_on_focus(ui.button("Cancel")).clicked() { action = Some(None); }
+                            if self.inputs.reveal_focus(ui.button("Cancel")).clicked() { action = Some(None); }
                         });
                     });
             });

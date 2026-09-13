@@ -7,6 +7,7 @@ pub struct ResizeDialog {
     keep_ratio: bool,
     filter: ResampleFilter,
     first_frame: bool,
+    focused_control: Option<egui::Id>,
     step: u32,
     frame_count: usize,
 }
@@ -20,6 +21,7 @@ impl ResizeDialog {
             keep_ratio: true,
             filter: ResampleFilter::Lanczos,
             first_frame: true,
+            focused_control: None,
             step: 1,
             frame_count,
         }
@@ -58,6 +60,7 @@ impl ResizeDialog {
             width.request_focus();
             self.first_frame = false;
         }
+        let width = self.reveal_focus(width);
         if width.changed()
             && self.keep_ratio
             && let Ok(value) = self.width.parse::<u32>()
@@ -66,13 +69,15 @@ impl ResizeDialog {
         }
         ui.label("Height (pixels)");
         let height = text_input(ui, "Height in pixels", &mut self.height);
+        let height = self.reveal_focus(height);
         if height.changed()
             && self.keep_ratio
             && let Ok(value) = self.height.parse::<u32>()
         {
             self.width = self.round(f64::from(value) * self.ratio);
         }
-        if scroll_on_focus(ui.checkbox(&mut self.keep_ratio, "Keep aspect ratio")).changed()
+        let ratio = ui.checkbox(&mut self.keep_ratio, "Keep aspect ratio");
+        if self.reveal_focus(ratio).changed()
             && self.keep_ratio
             && let Ok(value) = self.width.parse::<u32>()
         {
@@ -95,7 +100,7 @@ impl ResizeDialog {
                     }
                 }
             });
-        scroll_on_focus(filter.response);
+        self.reveal_focus(filter.response);
         if previous != (self.width.clone(), self.height.clone(), self.filter) {
             ui.ctx().request_repaint();
         }
@@ -103,6 +108,16 @@ impl ResizeDialog {
 
     fn round(&self, value: f64) -> String {
         ((value / f64::from(self.step)).round() * f64::from(self.step)).to_string()
+    }
+
+    pub(super) fn reveal_focus(&mut self, response: egui::Response) -> egui::Response {
+        if response.has_focus() && self.focused_control != Some(response.id) {
+            // Arrow focus is assigned after layout; gained_focus misses some
+            // transitions. Remember the focused control across rendered passes.
+            response.scroll_to_me(None);
+            self.focused_control = Some(response.id);
+        }
+        response
     }
 
     pub fn show(&mut self, context: &egui::Context) -> Option<Option<ImageResize>> {
@@ -127,14 +142,15 @@ impl ResizeDialog {
                         }
                     }
                     ui.horizontal(|ui| {
-                        if scroll_on_focus(
-                            ui.add_enabled(value.is_some(), egui::Button::new("Apply resize")),
-                        )
-                        .clicked()
+                        if self
+                            .reveal_focus(
+                                ui.add_enabled(value.is_some(), egui::Button::new("Apply resize")),
+                            )
+                            .clicked()
                         {
                             action = Some(value);
                         }
-                        if scroll_on_focus(ui.button("Cancel")).clicked() {
+                        if self.reveal_focus(ui.button("Cancel")).clicked() {
                             action = Some(None);
                         }
                     });
@@ -151,7 +167,7 @@ impl ResizeDialog {
     }
 }
 
-pub(super) fn scroll_on_focus(response: egui::Response) -> egui::Response {
+fn scroll_on_focus(response: egui::Response) -> egui::Response {
     if response.gained_focus() {
         response.scroll_to_me(None);
     }
@@ -440,6 +456,7 @@ pub(crate) mod tests {
                 keyboard_focus_stays_visible(density, size, |context| {
                     dialog.show(context).is_none()
                 });
+                assert_eq!(dialog.value().expect("unchanged resize").size(), (600, 800));
             }
         }
     }
@@ -524,6 +541,113 @@ pub(crate) mod tests {
         ] {
             assert!(seen.contains(label), "Tab must reach {label}: {seen:?}");
         }
+        let tree = frame(vec![]);
+        let (ratio, _) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Keep aspect ratio"))
+            .expect("ratio control");
+        frame(vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Focus,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: *ratio,
+                data: None,
+            },
+        )]);
+        for _ in 0..5 {
+            frame(vec![]);
+        }
+        let mut arrow_seen = std::collections::BTreeSet::new();
+        let mut arrow_filter_seen = false;
+        for key in [
+            egui::Key::ArrowDown,
+            egui::Key::ArrowDown,
+            egui::Key::ArrowRight,
+            egui::Key::ArrowLeft,
+            egui::Key::ArrowUp,
+            egui::Key::ArrowUp,
+        ] {
+            for pressed in [true, false] {
+                frame(vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+            for _ in 0..5 {
+                frame(vec![]);
+            }
+            let focused = context.memory(egui::Memory::focused).expect("arrow focus");
+            let tree = frame(vec![]);
+            let focus_node = tree
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == tree.focus)
+                .expect("focus node");
+            arrow_filter_seen |= focus_node.1.role() == egui::accesskit::Role::ComboBox;
+            if let Some(label) = focus_node.1.label() {
+                arrow_seen.insert(label.to_owned());
+            }
+            let response = context.read_response(focused).expect("focused response");
+            assert!(
+                response.interact_rect.height() >= response.rect.height() - 1.0 / density,
+                "density {density}, size {size:?}, {key:?}: clipped {:?} vs {:?}",
+                response.interact_rect,
+                response.rect
+            );
+        }
+        assert!(arrow_filter_seen, "arrows must reach the resampling filter");
+        for label in ["Apply resize", "Cancel"] {
+            assert!(
+                arrow_seen.contains(label),
+                "arrows must reach {label}: {arrow_seen:?}"
+            );
+        }
+        // The taller image dialog can fit without scrolling; use the short
+        // viewport to require actual wheel movement in both dialog variants.
+        if size.y > 180.0 {
+            return;
+        }
+        let tree = frame(vec![]);
+        let (cancel, _) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Cancel"))
+            .expect("cancel control");
+        frame(vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Focus,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: *cancel,
+                data: None,
+            },
+        )]);
+        for _ in 0..5 {
+            frame(vec![]);
+        }
+        let focused = context.memory(egui::Memory::focused).expect("wheel focus");
+        let before = context.read_response(focused).expect("response").rect;
+        frame(vec![
+            egui::Event::PointerMoved(before.center()),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                phase: egui::TouchPhase::Move,
+                delta: egui::vec2(0.0, 60.0),
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        for _ in 0..5 {
+            frame(vec![]);
+        }
+        let after = context.read_response(focused).expect("wheel response").rect;
+        assert_eq!(context.memory(egui::Memory::focused), Some(focused));
+        assert!(
+            after.top() - before.top() > 20.0,
+            "density {density}, size {size:?}: manual scroll must not snap to unchanged focus: {before:?} -> {after:?}"
+        );
     }
 
     #[test]

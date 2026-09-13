@@ -122,6 +122,7 @@ struct PrefetchWork {
     generation: u64,
     decoding: bool,
     cancellation: crate::Cancellation,
+    pending_paths: Option<VecDeque<PathBuf>>,
 }
 
 struct PrefetchLease {
@@ -231,22 +232,24 @@ impl ImageLoader {
 
     /// Decode missing pages within the same budget as the caller's already retained pages.
     pub fn request_with_retained_bytes(&self, paths: Vec<PathBuf>, retained_bytes: usize) -> u64 {
-        self.request_inner(paths, retained_bytes, false, true)
+        self.request_inner(paths, retained_bytes, false, true, &[])
     }
 
     /// Skip interim previews while the caller keeps its previous presentation.
     /// Completed originals still seed shared thumbnails.
+    /// Keep an in-flight neighbor only when it remains in the caller's new prefetch plan.
     pub fn request_originals_with_retained_bytes(
         &self,
         paths: Vec<PathBuf>,
         retained_bytes: usize,
+        prefetch_paths: &[PathBuf],
     ) -> u64 {
-        self.request_inner(paths, retained_bytes, false, false)
+        self.request_inner(paths, retained_bytes, false, false, prefetch_paths)
     }
 
     /// Cancel image work and release cached originals on the decoder thread, without joining it.
     pub fn clear(&self) -> u64 {
-        self.request_inner(Vec::new(), 0, true, false)
+        self.request_inner(Vec::new(), 0, true, false, &[])
     }
 
     fn request_inner(
@@ -255,6 +258,7 @@ impl ImageLoader {
         retained_bytes: usize,
         clear_cache: bool,
         allow_preview: bool,
+        prefetch_paths: &[PathBuf],
     ) -> u64 {
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("image mailbox");
@@ -262,8 +266,17 @@ impl ImageLoader {
         mailbox.generation = mailbox.generation.wrapping_add(1);
         let generation = mailbox.generation;
         if let Some(work) = &mut mailbox.prefetch {
-            if paths.contains(&work.path) && work.decoding {
+            if work.decoding
+                && (paths.contains(&work.path)
+                    || (!paths.is_empty()
+                        && prefetch_paths
+                            .iter()
+                            .take(PREFETCH_ENTRY_LIMIT)
+                            .any(|path| path == &work.path)))
+            {
                 work.generation = generation;
+                // Keep this decode, not a batch belonging to the previous destination.
+                work.pending_paths = None;
             } else {
                 // Invalidate the job without dropping a queued lease under this lock.
                 work.cancellation.cancel();
@@ -312,8 +325,18 @@ impl ImageLoader {
         let shared = Arc::clone(&self.shared);
         let id = Arc::new(());
         let work_cancellation = crate::Cancellation::default();
-        let (generation, cache, previews) = {
+        let (mut generation, cache, previews) = {
             let mut mailbox = shared.0.lock().expect("image mailbox");
+            if let Some(work) = &mut mailbox.prefetch
+                && work.decoding
+                && !work.cancellation.is_cancelled()
+                && unique.contains(&work.path)
+            {
+                // Do not resubmit to LatestTask: that would cancel the useful decoder.
+                // Its owner takes the newest bounded tail after this call returns.
+                work.pending_paths = Some(unique.into());
+                return;
+            }
             if let Some(work) = &mailbox.prefetch {
                 work.cancellation.cancel();
             }
@@ -330,6 +353,7 @@ impl ImageLoader {
                 generation: mailbox.generation,
                 decoding: false,
                 cancellation: work_cancellation.clone(),
+                pending_paths: None,
             });
             mailbox.prefetch_tasks += 1;
             shared.1.notify_all();
@@ -345,22 +369,44 @@ impl ImageLoader {
         };
         self.prefetch_worker.submit(move |cancellation| {
             let _lease = lease;
-            let mut remaining = cache.lock().expect("image cache").byte_limit;
-            for path in unique {
-                {
+            let byte_limit = cache.lock().expect("image cache").byte_limit;
+            let mut remaining = byte_limit;
+            let mut paths: VecDeque<_> = unique.into();
+            loop {
+                let path = {
                     let mut mailbox = shared.0.lock().expect("image mailbox");
-                    // An adopted job finishes its current page, not the obsolete batch tail.
-                    if mailbox.generation != generation || remaining == 0 {
+                    let closed = mailbox.closed;
+                    let next_generation = mailbox.generation;
+                    let Some(work) = mailbox
+                        .prefetch
+                        .as_mut()
+                        .filter(|work| Arc::ptr_eq(&work.id, &id))
+                    else {
+                        break;
+                    };
+                    // Clear the active marker under the same lock as taking the tail,
+                    // so a finishing lease cannot silently lose a newly retained plan.
+                    work.decoding = false;
+                    if closed || cancellation.is_cancelled() || work_cancellation.is_cancelled() {
                         break;
                     }
-                    if let Some(work) = &mut mailbox.prefetch
-                        && Arc::ptr_eq(&work.id, &id)
-                    {
-                        work.path = path.clone();
-                        work.decoding = true;
+                    if let Some(pending) = work.pending_paths.take() {
+                        paths = pending;
+                        generation = next_generation;
+                        remaining = byte_limit;
                     }
+                    // An adopted job without a replacement plan finishes only its current page.
+                    if next_generation != generation || remaining == 0 {
+                        break;
+                    }
+                    let Some(path) = paths.pop_front() else {
+                        break;
+                    };
+                    work.path = path.clone();
+                    work.decoding = true;
                     shared.1.notify_all();
-                }
+                    path
+                };
                 let current = || {
                     let mailbox = shared.0.lock().expect("image mailbox");
                     !mailbox.closed
@@ -741,6 +787,7 @@ fn run_worker(
 
 #[cfg(test)]
 mod tests {
+    mod neighbors;
     mod release;
     use std::sync::mpsc;
     use std::time::Duration;
@@ -1316,7 +1363,7 @@ mod tests {
             let generation = if allow_preview {
                 loader.request_with_retained_bytes(vec![path.clone()], 64)
             } else {
-                loader.request_originals_with_retained_bytes(vec![path.clone()], 64)
+                loader.request_originals_with_retained_bytes(vec![path.clone()], 64, &[])
             };
             idle_rx
                 .recv_timeout(Duration::from_secs(5))
@@ -1691,6 +1738,9 @@ mod tests {
             old_started_rx
                 .recv_timeout(Duration::from_secs(5))
                 .expect("old running");
+            // A matching active path is now reused; explicit cancellation creates
+            // the obsolete lease / queued replacement required by this test.
+            loader.prefetch_paths(Vec::new());
             let (new_started_tx, new_started_rx) = mpsc::channel();
             let (new_release_tx, new_release_rx) = mpsc::channel();
             loader.prefetch_with_decode(vec![path.clone()], move |_, _, current| {

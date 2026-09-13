@@ -2050,9 +2050,12 @@ where
                     .sum::<usize>()
         };
         if self.image_handoff.is_some() {
-            self.image_generation = self
-                .image_loader
-                .request_originals_with_retained_bytes(paths, retained_bytes);
+            let neighbors = self.image_prefetch_paths().unwrap_or_default();
+            self.image_generation = self.image_loader.request_originals_with_retained_bytes(
+                paths,
+                retained_bytes,
+                &neighbors,
+            );
             self.clear_image_previews();
             self.request_redraw();
             return;

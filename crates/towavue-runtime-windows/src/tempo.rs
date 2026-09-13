@@ -283,6 +283,96 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "diagnostic: compare finite tempo EOF context and signal coverage"]
+    fn tempo_eof_context_reports_signal_coverage() {
+        const SAMPLE_RATE: u32 = 48_000;
+        let padding = u64::from(SAMPLE_RATE / 24).next_power_of_two() * 2;
+        println!(
+            "input_frames,rate,context,output_frames,leading_quiet,trailing_quiet,nonquiet_frames,peak"
+        );
+        for frames in [48, 480, 2400, 9600, 48000] {
+            let source: Vec<_> = (0..frames)
+                .flat_map(|index| {
+                    let value = ((index + 1) as f64 * 440.0 * std::f64::consts::TAU
+                        / f64::from(SAMPLE_RATE))
+                    .sin() as f32
+                        * 0.25;
+                    [value, -value].into_iter().flat_map(f32::to_le_bytes)
+                })
+                .collect();
+            for rate in [0.25, 0.5, 1.5, 4.0] {
+                let limit = (frames as f64 / rate).ceil() as usize;
+                let mut current_context = None;
+                for context in [0, 1, 2] {
+                    let chain = if context == 0 {
+                        filters(rate, 9)
+                    } else {
+                        timeline_filters(rate, 9, SAMPLE_RATE)
+                            .into_iter()
+                            .map(|filter| {
+                                filter.replace(
+                                    &format!("pad_len={padding}"),
+                                    &format!("pad_len={}", padding * context),
+                                )
+                            })
+                            .collect()
+                    };
+                    let mut tempo = AudioTempo::from_chain(
+                        SAMPLE_RATE,
+                        Some(format!("{},atrim=end_sample={limit}", chain.join(","))),
+                    )
+                    .expect("tempo");
+                    let mut output = VecDeque::new();
+                    for chunk in source.chunks(127 * 8) {
+                        tempo.push(chunk, &mut output).expect("push");
+                    }
+                    tempo.finish(&mut output).expect("finite flush");
+                    let samples: Vec<_> = output
+                        .make_contiguous()
+                        .as_chunks::<8>()
+                        .0
+                        .iter()
+                        .map(|frame| {
+                            let left = f32::from_le_bytes(frame[..4].try_into().expect("left"));
+                            let right = f32::from_le_bytes(frame[4..].try_into().expect("right"));
+                            assert!(left.is_finite() && (left + right).abs() < 0.00001);
+                            left
+                        })
+                        .collect();
+                    assert!(samples.len() <= limit);
+                    if context != 0 {
+                        assert_eq!(samples.len(), limit);
+                    }
+                    let quiet = |sample: &&f32| sample.abs() <= 0.0001;
+                    let leading = samples.iter().take_while(quiet).count();
+                    let trailing = samples.iter().rev().take_while(quiet).count();
+                    let nonquiet = samples.iter().filter(|sample| !quiet(sample)).count();
+                    let peak = samples
+                        .iter()
+                        .fold(0.0_f32, |peak, value| peak.max(value.abs()));
+                    println!(
+                        "{frames},{rate},{context},{},{leading},{trailing},{nonquiet},{peak:.6}",
+                        samples.len()
+                    );
+                    if context == 1 {
+                        current_context = Some(samples);
+                    } else if context == 2 {
+                        assert!(
+                            current_context.as_ref().is_some_and(|current: &Vec<f32>| {
+                                current
+                                    .iter()
+                                    .zip(&samples)
+                                    .all(|(a, b)| a.to_bits() == b.to_bits())
+                            }),
+                            "extra zeros changed the comparison; reassess the recorded rejection"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn ordinary_tempo_keeps_short_input_and_exact_duration_after_queue_consumption() {
         for rate in [0.0, -1.0, 0.24, 4.01, f32::NAN, f32::INFINITY] {
             assert!(matches!(

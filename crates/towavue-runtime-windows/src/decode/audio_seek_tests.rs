@@ -134,10 +134,19 @@ fn native_compressed_fixture(directory: &Path, rate: u32, codec: &str, extension
 }
 
 #[test]
-fn coarse_flac_seek_preserves_sequential_samples_without_decoding_the_prefix() {
-    for (rate, channels) in [(32_000, 1), (44_100, 2), (48_000, 2), (96_000, 2)] {
-        let (directory, source, _) = fixture(rate, channels, "flac", 4, 1001);
-        let mut input = ParallelInput::open(&source, &|| false).expect("reused FLAC input");
+fn coarse_audio_seek_preserves_sequential_samples_without_decoding_the_prefix() {
+    for (codec, rate, channels) in [
+        ("flac", 32_000, 1),
+        ("flac", 44_100, 2),
+        ("flac", 48_000, 2),
+        ("flac", 96_000, 2),
+        ("libvorbis", 32_000, 1),
+        ("libvorbis", 44_100, 2),
+        ("libvorbis", 48_000, 2),
+        ("libvorbis", 96_000, 2),
+    ] {
+        let (directory, source, _) = fixture(rate, channels, codec, 4, 1001);
+        let mut input = ParallelInput::open(&source, &|| false).expect("reused compressed input");
         for ns in [
             2_917_000_000,
             17_000_000,
@@ -154,15 +163,16 @@ fn coarse_flac_seek_preserves_sequential_samples_without_decoding_the_prefix() {
             assert_eq!(
                 actual.len(),
                 expected.len(),
-                "FLAC/{rate}/{channels} at {ns}: sample count"
+                "{codec}/{rate}/{channels} at {ns}: sample count"
             );
             assert!(
                 actual == expected,
-                "FLAC/{rate}/{channels} at {ns}: sequential samples differ"
+                "{codec}/{rate}/{channels} at {ns}: sequential samples differ"
             );
             assert!(
                 summary.audio_frames < u64::from(rate),
-                "FLAC prefix was decoded"
+                "{codec}/{rate}/{channels} at {ns}: {} prefix samples were decoded",
+                summary.audio_frames
             );
         }
         let checks = AtomicUsize::new(0);
@@ -194,7 +204,7 @@ fn flac_prefix_headers_preserve_variable_counts_gaps_and_invalid_header_fallback
         .expect("pipeline")
         .expect("audio");
     pipeline.sample_preroll = config.sample_preroll(MediaTime::from_nanoseconds(2_000_000_000));
-    pipeline.flac_samples = FlacPacketSamples::new();
+    pipeline.packet_samples = PacketSamples::new(codec::Id::FLAC);
     let mut sequential = create_audio_pipeline(&input)
         .expect("sequential pipeline")
         .expect("audio");
@@ -223,7 +233,7 @@ fn flac_prefix_headers_preserve_variable_counts_gaps_and_invalid_header_fallback
     }
     assert!(counts.len() >= 2, "fixture includes a short final block");
     let first = first.expect("first packet");
-    let parser = pipeline.flac_samples.as_mut().expect("FLAC parser");
+    let parser = pipeline.packet_samples.as_mut().expect("FLAC parser");
     assert!(parser.samples(&mut pipeline.decoder, &first).is_some());
     assert!(
         parser
@@ -241,6 +251,68 @@ fn flac_prefix_headers_preserve_variable_counts_gaps_and_invalid_header_fallback
         !pipeline
             .skip_sample_preroll(&damaged)
             .expect("decoder fallback")
+    );
+    assert!(pipeline.sample_preroll.is_none());
+    assert_eq!(pipeline.next_sample, previous);
+    drop(config);
+    drop(input);
+    fs::remove_dir_all(directory).expect("remove owned fixtures");
+}
+
+#[test]
+fn vorbis_prefix_counts_match_decoder_priming_and_preserve_timestamp_gaps() {
+    let (directory, source, _) = fixture(48_000, 2, "libvorbis", 1, 1001);
+    let mut input = format::input(&source).expect("Vorbis input");
+    let config = best_stream_config(&input, Type::Audio).expect("Vorbis config");
+    let mut pipeline = create_audio_pipeline(&input)
+        .expect("pipeline")
+        .expect("audio");
+    pipeline.sample_preroll = config.sample_preroll(MediaTime::from_nanoseconds(2_000_000_000));
+    pipeline.packet_samples = PacketSamples::new(codec::Id::VORBIS);
+    let mut sequential = create_audio_pipeline(&input)
+        .expect("sequential pipeline")
+        .expect("audio");
+    let mut summary = DecodeSummary::default();
+    let mut counts = std::collections::BTreeSet::new();
+    for (index, (_, mut packet)) in input.packets().enumerate() {
+        if index >= 3 {
+            packet.set_pts(packet.pts().map(|pts| pts + 100));
+        }
+        if index == 0 {
+            assert!(
+                packet
+                    .side_data()
+                    .any(|side| side.kind() == ffmpeg::codec::packet::side_data::Type::SkipSamples)
+            );
+        }
+        let before = summary.audio_frames;
+        sequential
+            .decoder
+            .send_packet(&packet)
+            .expect("decode packet");
+        sequential
+            .receive(&mut |_| true, &mut summary)
+            .expect("decode samples");
+        counts.insert(summary.audio_frames - before);
+        assert!(pipeline.skip_sample_preroll(&packet).expect("Vorbis count"));
+        assert_eq!(
+            pipeline.next_sample, sequential.next_sample,
+            "header and decoded sample axis"
+        );
+    }
+    assert!(
+        counts.contains(&0),
+        "initial packet is decoder priming only"
+    );
+    assert!(
+        counts.iter().filter(|count| **count > 0).count() >= 2,
+        "varying overlap lengths"
+    );
+    let previous = pipeline.next_sample;
+    assert!(
+        !pipeline
+            .skip_sample_preroll(&ffmpeg::Packet::copy(&[0xff; 16]))
+            .expect("invalid-header fallback")
     );
     assert!(pipeline.sample_preroll.is_none());
     assert_eq!(pipeline.next_sample, previous);

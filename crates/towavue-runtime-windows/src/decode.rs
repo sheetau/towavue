@@ -19,10 +19,10 @@ use windows::core::Interface;
 
 use crate::{GraphicsDevice, VideoOrientation};
 
-mod flac_preroll;
 mod frame_step;
-use flac_preroll::FlacPacketSamples;
+mod packet_samples;
 pub use frame_step::adjacent_video_frame;
+use packet_samples::PacketSamples;
 mod preview_frames;
 pub(crate) use preview_frames::preview_video_frames;
 #[cfg(test)]
@@ -211,6 +211,10 @@ impl StreamConfig {
         if self.parameters.id() == FLAC {
             return Some((target, PrerollSamples::Flac));
         }
+        if self.parameters.id() == VORBIS {
+            let warmup = target.saturating_sub(Duration::from_millis(250));
+            return (warmup > MediaTime::ZERO).then_some((warmup, PrerollSamples::Vorbis));
+        }
         let sample_bytes = match self.parameters.id() {
             PCM_U8 | PCM_S8 => 1,
             PCM_S16LE | PCM_S16BE | PCM_U16LE | PCM_U16BE => 2,
@@ -345,6 +349,7 @@ impl VideoPipeline {
 enum PrerollSamples {
     Pcm(usize),
     Flac,
+    Vorbis,
 }
 
 struct AudioPipeline {
@@ -356,7 +361,7 @@ struct AudioPipeline {
     next_presentation_time: MediaTime,
     next_sample: i64,
     sample_preroll: Option<(MediaTime, PrerollSamples)>,
-    flac_samples: Option<FlacPacketSamples>,
+    packet_samples: Option<PacketSamples>,
 }
 
 impl AudioPipeline {
@@ -365,8 +370,9 @@ impl AudioPipeline {
             return Ok(false);
         };
         // Skip-sample or parameter-change side data can alter decoded sample
-        // counts. Let the decoder handle this packet and the remaining prefix.
-        if packet.side_data().next().is_some() {
+        // counts. Let the decoder handle this packet and the remaining prefix;
+        // the Vorbis parser accepts only its exact full first-packet priming skip.
+        if !matches!(source, PrerollSamples::Vorbis) && packet.side_data().next().is_some() {
             self.sample_preroll = None;
             return Ok(false);
         }
@@ -377,9 +383,9 @@ impl AudioPipeline {
                 }
                 packet.size() / frame_bytes
             }
-            PrerollSamples::Flac => {
+            PrerollSamples::Flac | PrerollSamples::Vorbis => {
                 let Some(samples) = self
-                    .flac_samples
+                    .packet_samples
                     .as_mut()
                     .and_then(|parser| parser.samples(&mut self.decoder, packet))
                 else {
@@ -389,7 +395,10 @@ impl AudioPipeline {
                 samples
             }
         };
-        // PCM sizes and FLAC headers give sample counts despite rounded PTS.
+        if samples == 0 && matches!(source, PrerollSamples::Vorbis) {
+            return Ok(true);
+        }
+        // PCM sizes and compressed headers give sample counts despite rounded PTS.
         // Count the prefix without decoding it; reuse the sequential timestamp/gap
         // rules instead of assuming equally sized packets or a PTS-aligned phase.
         let previous = self.next_sample;
@@ -402,7 +411,11 @@ impl AudioPipeline {
         if self.next_sample <= target_sample {
             return Ok(true);
         }
-        self.next_sample = previous;
+        // A newly started Vorbis decoder discards this warm-up packet. Keep its
+        // counted endpoint so the following decoded packet retains sample phase.
+        if !matches!(source, PrerollSamples::Vorbis) {
+            self.next_sample = previous;
+        }
         self.sample_preroll = None;
         Ok(false)
     }
@@ -1147,8 +1160,11 @@ fn run_parallel_audio_worker(
 ) -> Result<(), DecodeError> {
     let mut pipeline = create_audio_pipeline_from(config)?;
     pipeline.sample_preroll = sample_preroll;
-    if matches!(sample_preroll, Some((_, PrerollSamples::Flac))) {
-        pipeline.flac_samples = FlacPacketSamples::new();
+    if matches!(
+        sample_preroll,
+        Some((_, PrerollSamples::Flac | PrerollSamples::Vorbis))
+    ) {
+        pipeline.packet_samples = PacketSamples::new(pipeline.decoder.id());
     }
     let mut summary = DecodeSummary::default();
     let mut emit_audio = |decoded| match decoded {
@@ -1686,7 +1702,7 @@ fn create_audio_pipeline_from(config: StreamConfig) -> Result<AudioPipeline, Dec
         next_presentation_time: MediaTime::ZERO,
         next_sample: ffmpeg::ffi::AV_NOPTS_VALUE,
         sample_preroll: None,
-        flac_samples: None,
+        packet_samples: None,
     })
 }
 

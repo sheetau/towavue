@@ -713,22 +713,35 @@ impl ParallelInput {
             && audio
                 .as_ref()
                 .is_some_and(|audio| audio.pcm_preroll(minimum_time).is_some());
-        if self.started && (minimum_time <= MediaTime::ZERO || pcm_preroll) {
-            if input.format().name() == "mpegts" {
-                seek_byte_position(input, 0)?;
-            } else {
-                let origin = input_origin(input);
-                input.seek(origin, ..origin)?;
-            }
-        }
-        self.started = true;
+        let compressed_preroll = video.is_none()
+            && audio.as_ref().is_some_and(|audio| {
+                matches!(
+                    audio.parameters.id(),
+                    codec::Id::AAC | codec::Id::MP3 | codec::Id::OPUS | codec::Id::VORBIS
+                )
+            });
         let seek_target = if pcm_preroll {
             MediaTime::ZERO
+        } else if compressed_preroll {
+            // Warm overlap/reservoir state before clipping at the requested target.
+            // This does not reconstruct sample phase from rounded container PTS.
+            minimum_time.saturating_sub(Duration::from_millis(250))
         } else if stream == Some(DecodeStream::Video) && maximum_time == Some(minimum_time) {
             minimum_time.saturating_sub(Duration::from_nanos(1))
         } else {
             minimum_time
         };
+        if self.started && seek_target <= MediaTime::ZERO {
+            if input.format().name() == "mpegts" {
+                seek_byte_position(input, 0)?;
+            } else {
+                // Include encoder priming packets before presentation time zero.
+                let origin = input_origin(input);
+                let start = origin.saturating_sub(if compressed_preroll { 250_000 } else { 0 });
+                input.seek(start, ..origin)?;
+            }
+        }
+        self.started = true;
         seek_input(input, seek_target, video.is_some(), cancelled)?;
         check_cancelled(cancelled)?;
         run_parallel_workers(
@@ -1155,8 +1168,52 @@ fn seek_input(
     }
     let timestamp_microseconds =
         (target.as_nanoseconds() / 1_000).saturating_add(input_origin(input));
+    let timestamp_microseconds = ogg_vorbis_seek_anchor(input, timestamp_microseconds);
     input.seek(timestamp_microseconds, ..timestamp_microseconds)?;
     Ok(())
+}
+
+fn ogg_vorbis_seek_anchor(input: &format::context::Input, target: i64) -> i64 {
+    let Some(stream) = input.streams().best(Type::Audio).filter(|stream| {
+        input.format().name() == "ogg" && stream.parameters().id() == codec::Id::VORBIS
+    }) else {
+        return target;
+    };
+    let tick = target.rescale(ffmpeg::rescale::TIME_BASE, stream.time_base());
+    // Generic indexes assign several packet timestamps to one Ogg page position.
+    // Starting on an EOS page cannot reconstruct its first Vorbis timestamp;
+    // a cached interior timestamp can then shift the whole page beyond EOF.
+    // Start from the preceding indexed page so the demuxer observes its granule.
+    // The input is exclusively borrowed, no worker can mutate its index, and these
+    // public FFmpeg accessors only read the stream despite get_entry's mutable
+    // pointer signature. Their borrowed entries stay inside this block.
+    unsafe {
+        let mut page = None;
+        for index in (0..ffmpeg::ffi::avformat_index_get_entries_count(stream.as_ptr())).rev() {
+            let entry = ffmpeg::ffi::avformat_index_get_entry(stream.as_ptr().cast_mut(), index);
+            if entry.is_null() {
+                continue;
+            }
+            let entry = &*entry;
+            if entry.timestamp > tick {
+                continue;
+            }
+            match page {
+                None => page = Some(entry.pos),
+                Some(position) if position != entry.pos => {
+                    return entry.timestamp.rescale_with(
+                        stream.time_base(),
+                        ffmpeg::rescale::TIME_BASE,
+                        Rounding::Down,
+                    );
+                }
+                _ => {}
+            }
+        }
+        // The initial page already has its origin anchor. An index containing
+        // only that page must not turn a distant seek into a full-prefix decode.
+        target
+    }
 }
 
 fn seek_video_stream(

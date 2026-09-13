@@ -103,6 +103,166 @@ fn samples(
     )
 }
 
+fn native_compressed_fixture(directory: &Path, rate: u32, codec: &str, extension: &str) -> PathBuf {
+    let native = directory.join(format!("native.{extension}"));
+    let executable =
+        PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe");
+    let generated = std::process::Command::new(executable)
+        .creation_flags(0x0800_0000)
+        .args([
+            "-v",
+            "error",
+            "-n",
+            "-f",
+            "lavfi",
+            "-i",
+            &format!("anoisesrc=sample_rate={rate}:duration=4:seed=173"),
+            "-ac",
+            "2",
+            "-c:a",
+            codec,
+        ])
+        .arg(&native)
+        .output()
+        .expect("native container fixture");
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    native
+}
+
+#[test]
+fn compressed_audio_preroll_keeps_seek_samples_and_rewinds_reused_inputs() {
+    for (codec, extension, rate) in [
+        ("libmp3lame", "mp3", 48_000),
+        ("libmp3lame", "mp3", 44_100),
+        ("aac", "m4a", 48_000),
+        ("libopus", "opus", 48_000),
+        ("libvorbis", "ogg", 48_000),
+    ] {
+        let (directory, _, _) = fixture(rate, 2, codec, 4, 1001);
+        let source = native_compressed_fixture(&directory, rate, codec, extension);
+        let mut input = ParallelInput::open(&source, &|| false).expect("reused input");
+        for ns in [
+            2_917_000_000,
+            17_000_000,
+            617_000_000,
+            1_017_000_000,
+            0,
+            3_917_000_000,
+            4_000_000_000,
+            2_917_000_000,
+        ] {
+            let target = MediaTime::from_nanoseconds(ns);
+            let end = target.saturating_add(Duration::from_millis(250));
+            let expected = samples(&source, target, end, MediaTime::ZERO).0;
+            let (actual, summary) = collect(&mut input, target, end, target);
+            assert_eq!(
+                actual.len(),
+                expected.len(),
+                "{codec}/{rate} at {ns}: requested sample count differs"
+            );
+            if matches!(codec, "libmp3lame" | "libvorbis") || ns < 250_000_000 {
+                assert!(
+                    actual == expected,
+                    "{codec}/{rate} at {ns}: sequential samples differ"
+                );
+            }
+            // Ogg may decode an additional page to restore its granule anchor.
+            let decoded_seconds = if codec == "libvorbis" { 3 } else { 2 };
+            assert!(
+                summary.audio_frames < u64::from(rate) * decoded_seconds,
+                "unexpected full-prefix decode"
+            );
+        }
+        let checks = AtomicUsize::new(0);
+        assert!(matches!(
+            input.decode_software(
+                MediaTime::from_nanoseconds(2_917_000_000),
+                None,
+                Some(DecodeStream::Audio),
+                &|| checks.fetch_add(1, Ordering::Relaxed) > 3,
+                |_| true,
+            ),
+            Err(DecodeError::ConsumerClosed)
+        ));
+        let target = MediaTime::from_nanoseconds(17_000_000);
+        let end = target.saturating_add(Duration::from_millis(250));
+        assert!(
+            collect(&mut input, target, end, target).0
+                == samples(&source, target, end, MediaTime::ZERO).0
+        );
+        drop(input);
+        fs::remove_dir_all(directory).expect("remove owned fixtures");
+    }
+}
+
+#[test]
+#[ignore = "diagnostic comparison of compressed audio seek output with sequential decoding"]
+fn compressed_audio_seek_reports_sequential_alignment() {
+    for (codec, extension) in [
+        ("flac", "flac"),
+        ("aac", "m4a"),
+        ("libmp3lame", "mp3"),
+        ("libopus", "opus"),
+        ("libvorbis", "ogg"),
+    ] {
+        let (directory, source, _) = fixture(48_000, 2, codec, 4, 1001);
+        let native = native_compressed_fixture(&directory, 48_000, codec, extension);
+        for source in [&source, &native] {
+            for ns in [17_000_000, 617_000_000, 1_017_000_000, 2_917_000_000] {
+                let target = MediaTime::from_nanoseconds(ns);
+                let end = target.saturating_add(Duration::from_millis(250));
+                let expected = samples(source, target, end, MediaTime::ZERO).0;
+                let actual = samples(source, target, end, target).0;
+                let floats = |bytes: &[u8]| {
+                    bytes
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|bytes| f32::from_ne_bytes(*bytes))
+                        .collect::<Vec<_>>()
+                };
+                let expected = floats(&expected);
+                let actual = floats(&actual);
+                let error = |skip: usize| {
+                    expected
+                        .iter()
+                        .zip(&actual)
+                        .skip(skip)
+                        .map(|(a, b)| (a - b).abs())
+                        .fold(0.0f32, f32::max)
+                };
+                let (lag, _) = (-64i32..=64)
+                    .map(|lag| {
+                        let error = (0..128)
+                            .map(|index| {
+                                let sample = 3000 + index * 31;
+                                let a = expected[sample * 2];
+                                let b = actual[((sample as i32 + lag) * 2) as usize];
+                                (a - b) * (a - b)
+                            })
+                            .sum::<f32>();
+                        (lag, error)
+                    })
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .expect("alignment probe");
+                eprintln!(
+                    "{codec}/{} at {ns} ns: samples {}/{}, max {}, tail max {}, best lag {lag}",
+                    source.extension().expect("extension").to_string_lossy(),
+                    actual.len() / 2,
+                    expected.len() / 2,
+                    error(0),
+                    error(9600)
+                );
+            }
+        }
+        fs::remove_dir_all(directory).expect("remove owned fixtures");
+    }
+}
+
 #[test]
 fn coarse_pcm_seek_preserves_samples_across_formats_reuse_and_cancellation() {
     for (rate, channels, codec, packet_samples) in [

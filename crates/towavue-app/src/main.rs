@@ -4347,9 +4347,31 @@ where
                                         actions.push(UiAction::CloseTab(tab.id));
                                     }
                                     if preview_allowed && !egui::Popup::is_any_open(tab_ui.ctx()) {
-                                        let target = self.tab_preview.target(tab);
-                                        if media_preview::hover_pos(&response).is_some() {
+                                        let hovered = media_preview::hover_pos(&response).is_some();
+                                        let background = hovered
+                                            .then(|| self.retained_playback.get(&tab.id))
+                                            .flatten()
+                                            .filter(|saved| {
+                                                saved.kind == MediaKind::Video
+                                                    && saved.path == tab.target.current_path()
+                                            });
+                                        let target =
+                                            self.tab_preview.target_with_playback(tab, background);
+                                        if hovered {
+                                            if background.is_some_and(|saved| {
+                                                saved.state == PlaybackState::Playing
+                                            }) {
+                                                tab_ui
+                                                    .ctx()
+                                                    .request_repaint_after(Duration::from_secs(1));
+                                            }
                                             preview_target = Some(target.clone());
+                                            // Select an already cached sheet cell before painting it.
+                                            self.tab_preview.request(
+                                                Some(target.clone()),
+                                                &self.preview_cache,
+                                                Arc::clone(&self.notify),
+                                            );
                                         }
                                         self.tab_preview.show(&response, &target);
                                     }

@@ -57,15 +57,7 @@ impl TabPreview {
             && Some(tab.target.current_path()) == path
             && tab.target.media_kind() == MediaKind::Video
         {
-            let source = if let Some(plan) = timeline {
-                plan.source_time(crate::media_time(position))
-                    .map_or(Duration::ZERO, |source| {
-                        Duration::from_nanos(source.as_nanoseconds() as u64)
-                    })
-            } else {
-                position
-            };
-            let position = sample_time(source, duration);
+            let position = source_sample_time(position, duration, timeline);
             self.positions.insert(
                 tab.id,
                 LastPosition {
@@ -89,6 +81,29 @@ impl TabPreview {
             kind: tab.target.media_kind(),
             position,
         }
+    }
+
+    pub fn target_with_playback(
+        &self,
+        tab: &Tab,
+        saved: Option<&crate::playback_tab::RetainedPlaybackTab>,
+    ) -> Target {
+        let mut target = self.target(tab);
+        if let Some(saved) = saved
+            && target.kind == MediaKind::Video
+            && saved.kind == MediaKind::Video
+            && saved.path == target.path
+        {
+            target.position = source_sample_time(
+                Duration::from_nanos(saved.position().as_nanoseconds().max(0) as u64),
+                saved.duration,
+                saved
+                    .session
+                    .as_ref()
+                    .and_then(towavue_runtime_windows::PlaybackSession::timeline),
+            );
+        }
+        target
     }
 
     pub fn clear(&mut self) {
@@ -290,6 +305,20 @@ impl TabPreview {
             ui.add(egui::Label::new(target.path.display().to_string()).wrap());
         });
     }
+}
+
+fn source_sample_time(
+    position: Duration,
+    duration: Option<Duration>,
+    timeline: Option<&towavue_core::EditTimeline>,
+) -> Duration {
+    let source = timeline.map_or(position, |plan| {
+        plan.source_time(crate::media_time(position))
+            .map_or(Duration::ZERO, |source| {
+                Duration::from_nanos(source.as_nanoseconds() as u64)
+            })
+    });
+    sample_time(source, duration)
 }
 
 fn sample_time(position: Duration, duration: Option<Duration>) -> Duration {
@@ -618,6 +647,161 @@ mod tests {
         );
         assert!(preview.target.is_none() && preview.texture.is_none());
         std::fs::remove_dir(root).expect("remove empty owned cache");
+    }
+
+    #[test]
+    fn background_video_hover_uses_retained_clock_without_activating_the_tab() {
+        let mut app = crate::Application::new(None, |_| {}).expect("headless app");
+        let context = crate::fonts::test_context();
+        context.global_style_mut(crate::chrome::style);
+        app.ui_context = Some(context.clone());
+        let path = PathBuf::from("background-video.mp4");
+        let video = app.tabs.open_new(path.clone(), MediaKind::Video);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Video);
+        app.media_duration = Some(Duration::from_secs(100));
+        app.state = towavue_core::PlaybackState::Paused;
+        app.clock = Some(crate::PlaybackClock::paused(
+            crate::media_time(Duration::from_secs(37)),
+            1.0,
+        ));
+        app.tab_preview.record(
+            &app.tabs,
+            Some(&path),
+            Duration::from_secs(2),
+            app.media_duration,
+            None,
+        );
+        let saved = app.take_playback_tab_state();
+        app.retained_playback.insert(video, saved);
+        let image = app.tabs.open_new("other.png".into(), MediaKind::Image);
+        app.path = Some("other.png".into());
+        app.media_kind = Some(MediaKind::Image);
+        let mut time = 0.0;
+        let mut paint = |app: &mut crate::Application<_>, pointer: Option<egui::Pos2>| {
+            time += 0.1;
+            context.run_ui(
+                egui::RawInput {
+                    time: Some(time),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events: pointer.into_iter().map(egui::Event::PointerMoved).collect(),
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut actions = Vec::new();
+                    app.draw_top_bar(ui, &mut actions);
+                    assert!(actions.is_empty());
+                },
+            )
+        };
+        for _ in 0..4 {
+            let _ = paint(&mut app, Some(egui::pos2(90.0, 16.0)));
+        }
+        assert_eq!(
+            app.tab_preview
+                .target
+                .as_ref()
+                .expect("hover target")
+                .position,
+            Duration::from_millis(37500)
+        );
+        assert_eq!(app.tabs.active().expect("active").id, image);
+        assert_eq!(
+            app.retained_playback[&video].position(),
+            crate::media_time(Duration::from_secs(37))
+        );
+        let target = app.tab_preview.target.clone().expect("target");
+        let layout = towavue_runtime_windows::VideoSheetLayout::for_position(
+            Duration::from_secs(100),
+            target.position,
+        )
+        .expect("sheet");
+        app.tab_preview.finish_sheet(
+            &context,
+            target,
+            app.tab_preview.generation,
+            Ok(towavue_runtime_windows::VideoPreviewSheet {
+                layout,
+                image: PreviewImage {
+                    width: 960,
+                    height: 640,
+                    rgba: vec![255; 960 * 640 * 4],
+                },
+            }),
+        );
+        let texture = app
+            .tab_preview
+            .texture
+            .as_ref()
+            .expect("result")
+            .as_ref()
+            .expect("texture")
+            .id();
+        let generation = app.tab_preview.generation;
+        for _ in 0..3 {
+            let _ = paint(&mut app, None);
+        }
+        let saved = app.retained_playback.get_mut(&video).expect("background");
+        saved.clock = Some(crate::PlaybackClock::paused(
+            crate::media_time(Duration::from_secs(47)),
+            1.0,
+        ));
+        saved.state = towavue_core::PlaybackState::Playing;
+        let output = paint(&mut app, None);
+        assert_eq!(
+            app.tab_preview
+                .target
+                .as_ref()
+                .expect("new position")
+                .position,
+            Duration::from_millis(47500)
+        );
+        assert_eq!(app.tab_preview.generation, generation, "no new sheet job");
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture)), "cached cell is painted in the position-change frame");
+        assert!(
+            output
+                .textures_delta
+                .set
+                .iter()
+                .all(|(id, _)| *id != texture),
+            "no sheet reupload"
+        );
+        for _ in 0..3 {
+            let _ = paint(&mut app, None);
+        }
+        assert!(
+            paint(&mut app, None).viewport_output[&egui::ViewportId::ROOT].repaint_delay
+                <= Duration::from_secs(1)
+        );
+        app.retained_playback
+            .get_mut(&video)
+            .expect("background")
+            .state = towavue_core::PlaybackState::Paused;
+        for _ in 0..3 {
+            let _ = paint(&mut app, None);
+        }
+        assert!(
+            paint(&mut app, None).viewport_output[&egui::ViewportId::ROOT].repaint_delay
+                > Duration::from_secs(1),
+            "paused hover settles"
+        );
+        let saved = app.retained_playback.get_mut(&video).expect("background");
+        saved.path = "stale.mp4".into();
+        assert_eq!(
+            app.tab_preview
+                .target_with_playback(&app.tabs.tabs()[0], Some(saved))
+                .position,
+            Duration::from_millis(2500),
+            "stale retained path cannot supply a position"
+        );
+        for _ in 0..4 {
+            let _ = paint(&mut app, Some(egui::pos2(500.0, 100.0)));
+        }
+        assert!(app.tab_preview.target.is_none());
+        assert_eq!(app.tabs.active().expect("still active").id, image);
     }
 
     #[test]

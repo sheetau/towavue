@@ -418,9 +418,24 @@ pub(super) fn encode(values: &[Value]) -> Result<Vec<u8>, ExportError> {
 }
 
 fn description(values: &[Value]) -> String {
-    let mut result = format!(
-        "<rdf:Description xmlns:rdf=\"{RDF}\" rdf:about=\"\" xmlns:dc=\"{DC}\" xmlns:xmpDM=\"{DM}\">"
-    );
+    format!(
+        "<rdf:Description xmlns:rdf=\"{RDF}\" rdf:about=\"\" xmlns:dc=\"{DC}\" xmlns:xmpDM=\"{DM}\">{}</rdf:Description>",
+        properties(values, false)
+    )
+}
+
+fn properties(values: &[Value], self_contained: bool) -> String {
+    let mut result = String::new();
+    let dc_namespace = if self_contained {
+        format!(" xmlns:dc=\"{DC}\" xmlns:rdf=\"{RDF}\"")
+    } else {
+        String::new()
+    };
+    let dm_namespace = if self_contained {
+        format!(" xmlns:xmpDM=\"{DM}\"")
+    } else {
+        String::new()
+    };
     for (field, local) in [
         (MetadataField::Title, "title"),
         (MetadataField::Artist, "creator"),
@@ -432,7 +447,7 @@ fn description(values: &[Value]) -> String {
             continue;
         }
         let array = if alt(field) { "Alt" } else { "Seq" };
-        result.push_str(&format!("<dc:{local}><rdf:{array}>"));
+        result.push_str(&format!("<dc:{local}{dc_namespace}><rdf:{array}>"));
         for item in items {
             let language = item
                 .language
@@ -455,12 +470,11 @@ fn description(values: &[Value]) -> String {
     ] {
         if let Some(value) = values.iter().find(|value| value.field == field) {
             result.push_str(&format!(
-                "<xmpDM:{local}>{}</xmpDM:{local}>",
+                "<xmpDM:{local}{dm_namespace}>{}</xmpDM:{local}>",
                 escaped(&value.text)
             ));
         }
     }
-    result.push_str("</rdf:Description>");
     result
 }
 
@@ -471,9 +485,12 @@ pub(super) fn rewrite_unedited(
     options: &MetadataExportOptions,
     cancelled: &AtomicBool,
 ) -> Result<Vec<u8>, ExportError> {
-    let mut expected = parse(packet, cancelled)?;
+    let original = parse(packet, cancelled)?;
+    let mut expected = original.clone();
     apply(&mut expected, options)?;
-    if options.is_empty() {
+    // Empty RDF lists have no parsed values, but Remove must still delete the property.
+    let removes = FIELDS.iter().any(|field| options.get(*field) == Some(""));
+    if expected == original && !removes {
         return Ok(packet.to_vec());
     }
     let changed: Vec<_> = expected
@@ -481,10 +498,11 @@ pub(super) fn rewrite_unedited(
         .filter(|value| options.get(value.field).is_some())
         .cloned()
         .collect();
-    let additions = if changed.is_empty() {
+    let additions = properties(&changed, true);
+    let new_description = if additions.is_empty() {
         String::new()
     } else {
-        description(&changed)
+        format!("<rdf:Description xmlns:rdf=\"{RDF}\" rdf:about=\"\">{additions}</rdf:Description>")
     };
     let mut reader = NsReader::from_reader(packet);
     let mut writer = quick_xml::Writer::new(Vec::new());
@@ -494,6 +512,8 @@ pub(super) fn rewrite_unedited(
     let mut depth = 0;
     let mut rdf_depth = 0;
     let mut skip = None;
+    let mut inserted = false;
+    let mut reusable_description = false;
     loop {
         check_cancelled(cancelled)?;
         let event = reader.read_event().map_err(invalid)?;
@@ -515,16 +535,24 @@ pub(super) fn rewrite_unedited(
                     }
                 } else if skip.is_none() {
                     if depth == rdf_depth + 1 {
+                        reusable_description = !inserted && !additions.is_empty();
                         let mut attributes = Vec::new();
                         let mut removed = false;
                         for attribute in start.attributes() {
                             let attribute = attribute.map_err(invalid)?;
                             let namespace = attribute.key.as_ref() == b"xmlns"
                                 || attribute.key.as_ref().starts_with(b"xmlns:");
-                            if !namespace
-                                && name(reader.resolver().resolve_attribute(attribute.key))?
-                                    .field()
-                                    .is_some_and(|field| options.get(field).is_some())
+                            let key = (!namespace)
+                                .then(|| name(reader.resolver().resolve_attribute(attribute.key)))
+                                .transpose()?;
+                            // Do not give newly set properties another description's
+                            // inherited xml:lang/base/space context.
+                            if key.as_ref().is_some_and(|key| key.0 == XML) {
+                                reusable_description = false;
+                            }
+                            if key
+                                .and_then(|key| key.field())
+                                .is_some_and(|field| options.get(field).is_some())
                             {
                                 removed = true;
                             } else {
@@ -542,11 +570,19 @@ pub(super) fn rewrite_unedited(
                             }
                         }
                     }
-                    if empty && depth == rdf_depth {
+                    if empty
+                        && ((depth == rdf_depth && !new_description.is_empty())
+                            || (depth == rdf_depth + 1 && reusable_description))
+                    {
                         writer
                             .write_event(Event::Start(start.borrow()))
                             .map_err(invalid)?;
-                        writer.get_mut().extend_from_slice(additions.as_bytes());
+                        writer.get_mut().extend_from_slice(if depth == rdf_depth {
+                            new_description.as_bytes()
+                        } else {
+                            additions.as_bytes()
+                        });
+                        inserted = true;
                         writer
                             .write_event(Event::End(start.to_end()))
                             .map_err(invalid)?;
@@ -569,8 +605,13 @@ pub(super) fn rewrite_unedited(
                 if skip == Some(depth) {
                     skip = None;
                 } else if skip.is_none() {
-                    if depth == rdf_depth {
+                    if depth == rdf_depth + 1 && reusable_description {
                         writer.get_mut().extend_from_slice(additions.as_bytes());
+                        inserted = true;
+                    } else if depth == rdf_depth && !inserted {
+                        writer
+                            .get_mut()
+                            .extend_from_slice(new_description.as_bytes());
                     }
                     writer.write_event(Event::End(end)).map_err(invalid)?;
                 }

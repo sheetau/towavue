@@ -55,8 +55,84 @@ fn unedited_xmp_rewrite_preserves_opaque_structure_and_namespace_scopes() {
 }
 
 #[test]
+fn repeated_xmp_updates_do_not_accumulate_description_wrappers() {
+    let opaque = "<p:opaque xmlns:p=\"urn:opaque\">kept</p:opaque>";
+    for original in [
+        format!(
+            "<r:RDF xmlns:r=\"{RDF}\"><r:Description>{opaque}</r:Description><r:Description/></r:RDF>"
+        ),
+        format!(
+            "<r:RDF xmlns:r=\"{RDF}\"><r:Description/><!--kept--><r:Description>{opaque}</r:Description></r:RDF>"
+        ),
+        format!(
+            "<r:RDF xmlns:r=\"{RDF}\"><r:Description xml:lang=\"fr\">{opaque}</r:Description></r:RDF>"
+        ),
+    ] {
+        let cancel = AtomicBool::new(false);
+        let mut packet = original.into_bytes();
+        let mut first_size = None;
+        for index in 0..64 {
+            let mut options = MetadataExportOptions::default();
+            options
+                .set(
+                    MetadataField::Title,
+                    Some(if index % 2 == 0 { "one" } else { "two" }.into()),
+                )
+                .expect("title");
+            packet = rewrite_unedited(&packet, &options, &cancel).expect("repeated update");
+            assert_eq!(
+                packet.len(),
+                *first_size.get_or_insert(packet.len()),
+                "same-length replacement {index} grows the packet"
+            );
+            assert!(
+                std::str::from_utf8(&packet)
+                    .expect("UTF-8")
+                    .contains(opaque)
+            );
+            assert_eq!(
+                rewrite_unedited(&packet, &options, &cancel).expect("same setting"),
+                packet,
+                "reapplying a setting should not change the packet"
+            );
+        }
+    }
+}
+
+#[test]
 fn unedited_xmp_rewrite_handles_empty_roots_removal_limits_and_cancellation() {
     let cancel = AtomicBool::new(false);
+    for (field, local, array) in [
+        (MetadataField::Title, "title", "Alt"),
+        (MetadataField::Artist, "creator", "Seq"),
+    ] {
+        let packet = format!(
+            "<r:RDF xmlns:r=\"{RDF}\"><r:Description xmlns:dc=\"{DC}\"><dc:{local}><r:{array}/></dc:{local}></r:Description></r:RDF>"
+        );
+        assert!(
+            parse(packet.as_bytes(), &cancel)
+                .expect("empty list")
+                .is_empty()
+        );
+        let mut remove = MetadataExportOptions::default();
+        remove.set(field, Some(String::new())).expect("remove");
+        let output =
+            rewrite_unedited(packet.as_bytes(), &remove, &cancel).expect("remove empty list");
+        assert!(
+            !std::str::from_utf8(&output)
+                .expect("UTF-8")
+                .contains(&format!("dc:{local}"))
+        );
+        assert_eq!(
+            rewrite_unedited(&output, &remove, &cancel).expect("repeated Remove"),
+            output
+        );
+        let empty_root = format!("<r:RDF xmlns:r=\"{RDF}\"/>");
+        assert_eq!(
+            rewrite_unedited(empty_root.as_bytes(), &remove, &cancel).expect("absent property"),
+            empty_root.as_bytes()
+        );
+    }
     let mut options = MetadataExportOptions::default();
     options
         .set(MetadataField::Title, Some("added".into()))

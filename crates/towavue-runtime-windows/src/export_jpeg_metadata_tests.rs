@@ -330,6 +330,21 @@ fn unedited_jpeg_xmp_keeps_unselected_properties_but_edits_drop_technical_tags()
             let mut expected = xmp::parse(packet.as_bytes(), &cancel).expect("source values");
             xmp::apply(&mut expected, &metadata).expect("options");
             assert_eq!(read(&target, &cancel).expect("values"), expected);
+            let resaved = root.join("resaved.jpg");
+            export_media_with_options(
+                &self::request(&target, &resaved),
+                ExportOptions {
+                    metadata: metadata.clone(),
+                    ..Default::default()
+                },
+            )
+            .expect("same metadata resave");
+            let resaved_bytes = fs::read(resaved).expect("resaved bytes");
+            assert_eq!(
+                scan(Cursor::new(&resaved_bytes), None, &[], &cancel).expect("resaved XMP"),
+                Some(saved)
+            );
+            assert_eq!(without_xmp(&resaved_bytes), without_xmp(&bytes));
             assert_eq!(fs::read(&source).expect("source unchanged"), original);
         }
     }

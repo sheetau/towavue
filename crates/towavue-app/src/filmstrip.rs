@@ -33,6 +33,7 @@ pub struct Filmstrip {
     previews: HashMap<PathBuf, Preview>,
     focus: Option<PathBuf>,
     focus_requested: bool,
+    focused_card: Option<egui::Id>,
     scroll_offset: f32,
     drag: drag::State,
 }
@@ -46,6 +47,7 @@ impl Filmstrip {
             previews: HashMap::new(),
             focus: None,
             focus_requested: false,
+            focused_card: None,
             scroll_offset: 0.0,
             drag: drag::State::default(),
         })
@@ -64,6 +66,7 @@ impl Filmstrip {
 
     pub fn clear_previews(&mut self) {
         self.drag.clear();
+        self.focused_card = None;
         if !self.visible.is_empty() {
             self.generation = self.loader.request(Vec::new());
             self.visible.clear();
@@ -292,6 +295,7 @@ impl Filmstrip {
                         viewport.height(),
                     ));
                     let mut cards = Vec::new();
+                    let mut focused_card = None;
                     for index in visible_range(viewport, padding, snapshot.items.len()) {
                         let item = &snapshot.items[index];
                         wanted.push((item.path.clone(), item.kind));
@@ -320,6 +324,14 @@ impl Filmstrip {
                             self.focus_requested = false;
                         }
                         crate::tab_focus::observe(&response, ("filmstrip-item", &item.path));
+                        if response.has_focus() {
+                            focused_card = Some(response.id);
+                            // Arrow navigation resolves after layout, so gained_focus alone
+                            // cannot observe every transition on the following frame.
+                            if self.focused_card != focused_card {
+                                response.scroll_to_me(None);
+                            }
+                        }
                         response.widget_info(|| {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,
@@ -336,6 +348,7 @@ impl Filmstrip {
                         });
                         cards.push((index, response));
                     }
+                    self.focused_card = focused_card;
                     let highlighted = cards
                         .iter()
                         .find(|(_, response)| response.hovered())
@@ -962,6 +975,129 @@ mod tests {
             app.filmstrip.visible.is_empty(),
             "foreground request cancels immediately"
         );
+    }
+
+    #[test]
+    fn keyboard_navigation_reveals_cards_beyond_the_initial_viewport() {
+        let root = std::env::temp_dir().join(format!(
+            "towavue-filmstrip-keyboard-scroll-{}",
+            std::process::id()
+        ));
+        let snapshot = FolderSnapshot {
+            folder_identity: ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: (0..100)
+                .map(|index| FolderMediaItem {
+                    identity: ShellIdentity::new(vec![]),
+                    path: root.join(format!("{index}.png")),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: SystemTime::now(),
+        };
+        for density in [1.0, 1.5, 2.0] {
+            let mut strip =
+                Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                    .expect("worker");
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.enable_accesskit();
+            let screen = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 240.0));
+            let mut time = 0.0;
+            let mut frame = |strip: &mut Filmstrip, events| {
+                time += 0.1;
+                let mut actions = Vec::new();
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        time: Some(time),
+                        events,
+                        ..Default::default()
+                    },
+                    |_| {
+                        strip.show(
+                            &context,
+                            screen,
+                            Some(&snapshot),
+                            Some(&snapshot.items[0].path),
+                            true,
+                            &mut actions,
+                        )
+                    },
+                );
+                assert!(
+                    actions.is_empty(),
+                    "focus navigation must not open or close media"
+                );
+                assert!(strip.visible.len() <= 5, "retain bounded virtualization");
+                output.platform_output.accesskit_update.expect("tree")
+            };
+            strip.focus_current();
+            for _ in 0..3 {
+                frame(&mut strip, vec![]);
+            }
+            for (key, indices) in [
+                (egui::Key::ArrowRight, (1..100).collect::<Vec<_>>()),
+                (egui::Key::ArrowLeft, (0..99).rev().collect()),
+            ] {
+                for index in indices {
+                    for pressed in [true, false] {
+                        frame(
+                            &mut strip,
+                            vec![egui::Event::Key {
+                                key,
+                                physical_key: None,
+                                pressed,
+                                repeat: false,
+                                modifiers: egui::Modifiers::NONE,
+                            }],
+                        );
+                    }
+                    for _ in 0..5 {
+                        frame(&mut strip, vec![]);
+                    }
+                    let tree = frame(&mut strip, vec![]);
+                    let node = &tree
+                        .nodes
+                        .iter()
+                        .find(|(id, _)| *id == tree.focus)
+                        .expect("focused card")
+                        .1;
+                    assert_eq!(
+                        node.label(),
+                        Some(format!("{index}.png").as_str()),
+                        "density {density}, {key:?}"
+                    );
+                    let bounds = node.bounds().expect("card bounds");
+                    assert!(
+                        bounds.x0 >= 8.0 && bounds.x1 <= 312.0,
+                        "density {density}, {index}: {bounds:?}"
+                    );
+                }
+            }
+            frame(
+                &mut strip,
+                vec![
+                    egui::Event::PointerMoved(egui::pos2(160.0, 30.0)),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(-60.0, 0.0),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            for _ in 0..8 {
+                frame(&mut strip, vec![]);
+            }
+            assert!(
+                strip.scroll_offset > 40.0,
+                "unchanged focus must not undo manual scrolling"
+            );
+        }
     }
 
     #[test]

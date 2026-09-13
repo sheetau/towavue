@@ -30,6 +30,7 @@ struct Input {
     processed: Option<u64>,
     suppress: Option<egui::Id>,
     consumed: Option<(egui::Id, u64)>,
+    clicked: Option<(egui::Id, u64)>,
 }
 
 fn input_id() -> egui::Id {
@@ -152,6 +153,8 @@ fn update(response: &egui::Response, enabled: bool) -> (Option<Action>, bool) {
             if press.active || moved || interrupted {
                 input.suppress = Some(press.id);
                 input.consumed = Some((press.id, frame));
+            } else if released {
+                input.clicked = Some((press.id, frame));
             }
             input.press = None;
         } else if !press.active {
@@ -200,7 +203,16 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         response: &egui::Response,
         actions: &mut Vec<UiAction>,
     ) -> bool {
-        let (action, consumed) = update(response, self.hold_enabled());
+        self.hold_response_enabled(response, actions, self.hold_enabled())
+    }
+
+    fn hold_response_enabled(
+        &self,
+        response: &egui::Response,
+        actions: &mut Vec<UiAction>,
+        enabled: bool,
+    ) -> bool {
+        let (action, consumed) = update(response, enabled);
         if let Some(action) = action {
             actions.push(UiAction::HoldSpeed(
                 self.media_generation,
@@ -209,6 +221,37 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             ));
         }
         consumed
+    }
+
+    pub(super) fn video_viewing_response(
+        &self,
+        response: &egui::Response,
+        actions: &mut Vec<UiAction>,
+    ) {
+        let enabled = self.hold_enabled()
+            || (self.state == PlaybackState::Ended
+                && self.session.is_some()
+                && self.view_input_allowed(&response.ctx));
+        let held = self.hold_response_enabled(response, actions, enabled);
+        let clicked = response.ctx.data(|data| {
+            data.get_temp::<Input>(input_id()).is_some_and(|input| {
+                input.clicked == Some((response.id, response.ctx.cumulative_frame_nr()))
+            })
+        });
+        if response.clicked() && clicked && !held && self.view_input_allowed(&response.ctx) {
+            actions.push(UiAction::Command(CommandId::TogglePause));
+        }
+        if self.view_input_allowed(&response.ctx)
+            && self.session.is_some()
+            && matches!(
+                self.state,
+                PlaybackState::Playing | PlaybackState::Paused | PlaybackState::Ended
+            )
+        {
+            response
+                .clone()
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+        }
     }
 
     pub(super) fn handle_hold_speed(

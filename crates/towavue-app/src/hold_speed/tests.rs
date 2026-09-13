@@ -256,9 +256,88 @@ fn run_session_trial(audio: bool, test: &str) {
                     assert_eq!(app.playback_rate(), 1.25);
                     assert_eq!(app.state, PlaybackState::Paused);
                     assert_eq!(app.edits[&tab], history);
+                    for point in [egui::pos2(240.0, 150.0), egui::pos2(240.0, 1.0)] {
+                        ui_time += 1.0;
+                        let (cursor, targets) = body_frame(
+                            &mut app,
+                            &context,
+                            ui_time,
+                            vec![egui::Event::PointerMoved(point)],
+                        );
+                        let viewing = !timeline || fullscreen;
+                        if viewing {
+                            assert_eq!(cursor, egui::CursorIcon::PointingHand);
+                            if point.y == 1.0 {
+                                assert!(
+                                    !app.video_rect.expect("video").contains(point),
+                                    "letterbox click fixture"
+                                );
+                                assert!(
+                                    !targets.iter().any(|rect| rect.contains(point)),
+                                    "volume wheel stays on the video pixels"
+                                );
+                            }
+                        }
+                        let button = |pressed| egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        };
+                        body_frame(&mut app, &context, ui_time + 0.05, vec![button(true)]);
+                        assert_eq!(app.state, PlaybackState::Paused, "click waits for release");
+                        body_frame(&mut app, &context, ui_time + 0.15, vec![button(false)]);
+                        assert_eq!(
+                            app.state,
+                            if viewing {
+                                PlaybackState::Playing
+                            } else {
+                                PlaybackState::Paused
+                            }
+                        );
+                        body_frame(
+                            &mut app,
+                            &context,
+                            ui_time + 0.25,
+                            vec![button(true), button(false)],
+                        );
+                        assert_eq!(
+                            app.state,
+                            PlaybackState::Paused,
+                            "one toggle per batched click"
+                        );
+                        assert_eq!(app.edits[&tab], history);
+                    }
                 }
                 app.fullscreen = false;
                 app.timeline_open = false;
+                for blocked in 0..6 {
+                    ui_time += 1.0;
+                    body_frame(&mut app, &context, ui_time, vec![]);
+                    match blocked {
+                        0 => app.filmstrip_open = true,
+                        1 => app.palette_open = true,
+                        2 => app.grid_open = true,
+                        3 => app.export_error = Some("injected modal".into()),
+                        _ => {}
+                    }
+                    let mut press = body_button(true);
+                    if blocked == 4
+                        && let egui::Event::PointerButton { modifiers, .. } = &mut press
+                    {
+                        *modifiers = egui::Modifiers::CTRL;
+                    }
+                    body_frame(&mut app, &context, ui_time + 0.1, vec![press]);
+                    if blocked == 5 {
+                        app.window_event(event_loop, window.id(), WindowEvent::Focused(false));
+                    }
+                    body_frame(&mut app, &context, ui_time + 0.2, vec![body_button(false)]);
+                    assert_eq!(app.state, PlaybackState::Paused, "blocked click {blocked}");
+                    app.filmstrip_open = false;
+                    app.palette_open = false;
+                    app.grid_open = false;
+                    app.export_error = None;
+                }
             }
             // A held press never leaks its rate into the retained background tab.
             app.seek_to(time(400));
@@ -338,6 +417,22 @@ fn run_session_trial(audio: bool, test: &str) {
             assert!(app.held_speed.is_none());
             assert_eq!(app.playback_rate(), 1.25);
             assert_eq!(app.edits[&tab], history);
+            if !self.audio {
+                ui_time += 1.0;
+                body_frame(&mut app, &context, ui_time, vec![]);
+                body_frame(
+                    &mut app,
+                    &context,
+                    ui_time + 0.1,
+                    vec![body_button(true), body_button(false)],
+                );
+                assert_eq!(
+                    app.state,
+                    PlaybackState::Playing,
+                    "click replays ended video"
+                );
+                assert_eq!(app.edits[&tab], history);
+            }
             eprintln!(
                 "PASS hold-speed session: audio={}, normal button hold/release, prior pause/rate, edited bounds/history, focus/Seek/tab/EOF",
                 self.audio
@@ -385,9 +480,10 @@ fn body_frame<N: Fn(AppEvent) + Send + Sync + 'static>(
     context: &egui::Context,
     time: f64,
     events: Vec<egui::Event>,
-) {
+) -> (egui::CursorIcon, Vec<egui::Rect>) {
     let mut actions = Vec::new();
-    let _ = context.run_ui(
+    let mut targets = Vec::new();
+    let output = context.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -398,7 +494,7 @@ fn body_frame<N: Fn(AppEvent) + Send + Sync + 'static>(
             ..Default::default()
         },
         |ui| {
-            app.draw_video_edit_overlay(ui, &mut Vec::new(), &mut actions);
+            app.draw_video_edit_overlay(ui, &mut targets, &mut actions);
         },
     );
     for (index, action) in actions.iter().enumerate() {
@@ -406,6 +502,13 @@ fn body_frame<N: Fn(AppEvent) + Send + Sync + 'static>(
             app.handle_ui_action(action.clone());
         }
     }
+    (
+        output.platform_output.cursor_icon,
+        targets
+            .iter()
+            .map(|response| response.interact_rect)
+            .collect(),
+    )
 }
 
 fn status_frame<N: Fn(AppEvent) + Send + Sync + 'static>(

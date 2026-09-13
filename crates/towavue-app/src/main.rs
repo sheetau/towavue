@@ -3345,7 +3345,7 @@ where
                     ui.id().with("video-edit-surface"),
                     egui::Sense::click_and_drag(),
                 );
-                self.hold_response(&response, actions);
+                self.video_viewing_response(&response, actions);
             }
             return;
         };
@@ -3361,11 +3361,7 @@ where
             self.image_view,
         );
         let response = ui.interact(
-            if self.visual_selection_enabled() {
-                viewport
-            } else {
-                viewport.intersect(full)
-            },
+            viewport,
             ui.id().with("video-edit-surface"),
             egui::Sense::click_and_drag(),
         );
@@ -3415,7 +3411,11 @@ where
             return;
         }
         let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
-        volume_targets.push(response.clone());
+        let mut volume_response = response.clone();
+        if !self.visual_selection_enabled() {
+            volume_response.interact_rect = viewport.intersect(full);
+        }
+        volume_targets.push(volume_response);
         let before_selection = self.image_view;
         self.update_selection(&response, full, size, shift, pointer);
         if self.image_view != before_selection {
@@ -3433,7 +3433,7 @@ where
                 });
         }
         if !self.visual_selection_enabled() {
-            self.hold_response(&response, actions);
+            self.video_viewing_response(&response, actions);
             selection::release_focus(ui.ctx());
             return;
         }

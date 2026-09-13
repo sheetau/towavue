@@ -821,6 +821,15 @@ impl PlaybackSession {
         }
     }
 
+    /// Verification-only requested level and live mixer command, not measured endpoint output.
+    #[cfg(feature = "render-verification")]
+    pub fn verification_volume(&self) -> (f32, Option<f32>) {
+        (
+            self.volume,
+            self.audio.as_ref().map(AudioOutput::verification_volume),
+        )
+    }
+
     pub fn metrics(&self) -> PlaybackMetrics {
         PlaybackMetrics {
             adapter_luid: self.adapter_luid,

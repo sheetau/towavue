@@ -232,6 +232,11 @@ impl AudioOutput {
             .store(normalized_volume(volume).to_bits(), Ordering::Relaxed);
     }
 
+    #[cfg(feature = "render-verification")]
+    pub(crate) fn verification_volume(&self) -> f32 {
+        f32::from_bits(self.volume.load(Ordering::Relaxed))
+    }
+
     pub fn finish(&self) -> Result<(), AudioOutputError> {
         self.sender().finish()
     }

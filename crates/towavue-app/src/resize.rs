@@ -110,30 +110,35 @@ impl ResizeDialog {
         let mut action = None;
         let modal = egui::Modal::new("resize-image".into()).show(context, |ui| {
             ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 360.0));
-            crate::chrome::modal_heading(ui, "Resize / resample image");
-            ui.label("Original file is kept. Apply adds one undoable edit.");
-            self.controls(ui);
-            let value = self.value();
-            if value.is_none() {
-                ui.label("Use 1–16384 pixels per side, up to 128 Mi pixels.");
-                if self.frame_count > 1 {
-                    ui.label(format!(
-                        "All {} animation frames must fit within 512 MiB.",
-                        self.frame_count
-                    ));
-                }
-            }
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(value.is_some(), egui::Button::new("Apply resize"))
-                    .clicked()
-                {
-                    action = Some(value);
-                }
-                if ui.button("Cancel").clicked() {
-                    action = Some(None);
-                }
-            });
+            egui::ScrollArea::vertical()
+                .max_height((context.content_rect().height() - 32.0).max(1.0))
+                .min_scrolled_height(1.0)
+                .show(ui, |ui| {
+                    crate::chrome::modal_heading(ui, "Resize / resample image");
+                    ui.label("Original file is kept. Apply adds one undoable edit.");
+                    self.controls(ui);
+                    let value = self.value();
+                    if value.is_none() {
+                        ui.label("Use 1–16384 pixels per side, up to 128 Mi pixels.");
+                        if self.frame_count > 1 {
+                            ui.label(format!(
+                                "All {} animation frames must fit within 512 MiB.",
+                                self.frame_count
+                            ));
+                        }
+                    }
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(value.is_some(), egui::Button::new("Apply resize"))
+                            .clicked()
+                        {
+                            action = Some(value);
+                        }
+                        if ui.button("Cancel").clicked() {
+                            action = Some(None);
+                        }
+                    });
+                });
         });
         if modal.is_top_modal
             && !modal.any_popup_open
@@ -286,6 +291,138 @@ pub(crate) mod tests {
         app.handle_ui_action(crate::UiAction::FinishResize(None));
         assert!(app.resize_dialog.is_none());
         assert!(app.edits.is_empty());
+    }
+
+    #[test]
+    fn compact_resize_dialog_keeps_scrolled_actions_inside_the_window() {
+        for density in [1.0, 1.5, 2.0] {
+            for (size, frame_count) in [
+                (egui::vec2(320.0, 240.0), 1),
+                (egui::vec2(480.0, 180.0), 1),
+                (egui::vec2(320.0, 240.0), 3),
+                (egui::vec2(480.0, 180.0), 3),
+            ] {
+                let context = crate::fonts::test_context();
+                context.set_pixels_per_point(density);
+                context.enable_accesskit();
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                let mut dialog = ResizeDialog::new(
+                    if frame_count == 1 {
+                        (600, 800)
+                    } else {
+                        (8192, 8192)
+                    },
+                    frame_count,
+                );
+                let expected = dialog.value();
+                let frame = |dialog: &mut ResizeDialog, events| {
+                    let mut action = None;
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| action = dialog.show(ui.ctx()),
+                    );
+                    (
+                        action,
+                        output.platform_output.accesskit_update.expect("tree"),
+                    )
+                };
+                for _ in 0..3 {
+                    frame(&mut dialog, vec![]);
+                }
+                let modal = context
+                    .memory(|memory| memory.area_rect("resize-image"))
+                    .expect("modal");
+                assert!(
+                    screen.contains_rect(modal),
+                    "density={density}, size={size:?}, modal={modal:?}"
+                );
+                for _ in 0..12 {
+                    frame(
+                        &mut dialog,
+                        vec![
+                            egui::Event::PointerMoved(screen.center()),
+                            egui::Event::MouseWheel {
+                                unit: egui::MouseWheelUnit::Point,
+                                phase: egui::TouchPhase::Move,
+                                delta: egui::vec2(0.0, -150.0),
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ],
+                    );
+                }
+                let (_, tree) = frame(&mut dialog, vec![]);
+                for label in ["Apply resize", "Cancel"] {
+                    let (_, node) = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| node.label() == Some(label))
+                        .expect("button");
+                    let bounds = node.bounds().expect("button bounds");
+                    assert!(
+                        bounds.x0 >= 0.0
+                            && bounds.x1 <= f64::from(size.x)
+                            && bounds.y0 >= 0.0
+                            && bounds.y1 <= f64::from(size.y),
+                        "{label}: {bounds:?}"
+                    );
+                }
+                let apply = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("Apply resize"))
+                    .expect("apply")
+                    .0;
+                let (action, _) = frame(
+                    &mut dialog,
+                    vec![egui::Event::AccessKitActionRequest(
+                        egui::accesskit::ActionRequest {
+                            action: egui::accesskit::Action::Click,
+                            target_tree: egui::accesskit::TreeId::ROOT,
+                            target_node: apply,
+                            data: None,
+                        },
+                    )],
+                );
+                assert_eq!(
+                    action,
+                    expected.map(Some),
+                    "invalid animation resize stays disabled"
+                );
+                let cancel = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("Cancel"))
+                    .expect("cancel")
+                    .1
+                    .bounds()
+                    .expect("cancel bounds");
+                let pos = egui::pos2(
+                    ((cancel.x0 + cancel.x1) / 2.0) as f32,
+                    ((cancel.y0 + cancel.y1) / 2.0) as f32,
+                );
+                for pressed in [true, false] {
+                    let (action, _) = frame(
+                        &mut dialog,
+                        vec![
+                            egui::Event::PointerMoved(pos),
+                            egui::Event::PointerButton {
+                                pos,
+                                pressed,
+                                button: egui::PointerButton::Primary,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ],
+                    );
+                    if !pressed {
+                        assert_eq!(action, Some(None), "scrolled cancel is clickable");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

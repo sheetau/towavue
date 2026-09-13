@@ -255,11 +255,19 @@ pub(super) fn show(
     }
     let painter = ui.painter().with_clip_rect(rect);
     if let Some(range) = preview {
+        // The outline paints inside these bounds. Include each endpoint's CTI
+        // pixel so the right side does not land one pixel before the stop position.
         towavue_runtime_windows::paint_time_selection(
             &painter,
             Rect::from_min_max(
-                egui::pos2(x_at(range.start()), rect.top()),
-                egui::pos2(x_at(range.end()), rect.bottom()),
+                egui::pos2(
+                    cti_x(rect, x_at(range.start()), pixel) - pixel * 0.5,
+                    rect.top(),
+                ),
+                egui::pos2(
+                    cti_x(rect, x_at(range.end()), pixel) + pixel * 0.5,
+                    rect.bottom(),
+                ),
             ),
         );
     }
@@ -386,6 +394,94 @@ fn playhead_rect(rect: Rect, x: f32) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn selection_endpoints_and_cti_share_the_same_physical_pixel() {
+        for density in [1.0, 1.25, 1.5, 2.0] {
+            let context = egui::Context::default();
+            let rect =
+                Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 100.0)) / density;
+            for (start, end) in [
+                (0.0, 10.0),
+                (2.0, 6.0),
+                (2.013, 6.007),
+                (4.0, 4.001),
+                (9.999, 10.0),
+            ] {
+                let selection = TimeRange::new(time(start), time(end)).expect("selected interval");
+                for position in [selection.start(), selection.end()] {
+                    let mut input = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(500.0, 200.0),
+                        )),
+                        ..Default::default()
+                    };
+                    input
+                        .viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .expect("viewport")
+                        .native_pixels_per_point = Some(density);
+                    let output = context.run_ui(input, |ui| {
+                        let response = ui.interact(
+                            rect,
+                            "selection-axis-test".into(),
+                            egui::Sense::click_and_drag(),
+                        );
+                        let result = show(
+                            ui,
+                            &response,
+                            time(10.0),
+                            position,
+                            Some(selection),
+                            None,
+                            true,
+                        );
+                        assert!(
+                            result.seek.is_none()
+                                && result.selection.is_none()
+                                && result.edit.is_none()
+                        );
+                    });
+                    assert_eq!(output.pixels_per_point, density);
+                    let meshes: Vec<_> = output
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Mesh(mesh) => Some(mesh),
+                            _ => None,
+                        })
+                        .collect();
+                    let cti = meshes
+                        .iter()
+                        .find(|mesh| mesh.vertices.len() == 7)
+                        .expect("CTI");
+                    let sides = meshes
+                        .iter()
+                        .find(|mesh| mesh.vertices.len() > 7 && mesh.vertices.len() % 4 == 0)
+                        .expect("dotted boundaries");
+                    let stem = Rect::from_points(
+                        &cti.vertices[3..].iter().map(|v| v.pos).collect::<Vec<_>>(),
+                    );
+                    let side = if position == selection.start() {
+                        &sides.vertices[..4]
+                    } else {
+                        &sides.vertices[sides.vertices.len() - 4..]
+                    };
+                    let side = Rect::from_points(&side.iter().map(|v| v.pos).collect::<Vec<_>>());
+                    assert!(
+                        (stem.left() - side.left()).abs() * density < 0.001
+                            && (stem.right() - side.right()).abs() * density < 0.001,
+                        "CTI {:?} and endpoint {:?} differ at {density}, range {start}..{end}",
+                        stem.x_range(),
+                        side.x_range()
+                    );
+                    assert!((stem.width() * density - 1.0).abs() < 0.001);
+                    assert!(side.left() >= rect.left() && side.right() <= rect.right());
+                }
+            }
+        }
+    }
+
     #[test]
     fn focused_time_values_do_not_add_rectangles_to_the_selection_outline() {
         let identity = egui::Id::new("time-focus-style");

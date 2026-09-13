@@ -12326,8 +12326,12 @@ mod tests {
                             })
                             .expect("time-selection difference fill");
                         assert_eq!(fill.y_range(), track.y_range());
-                        assert!((fill.left() - egui::lerp(track.x_range(), 0.25)).abs() < 0.01);
-                        assert!((fill.right() - egui::lerp(track.x_range(), 0.75)).abs() < 0.01);
+                        let pixel = 1.0 / output.pixels_per_point;
+                        let start = (egui::lerp(track.x_range(), 0.25) / pixel).floor() * pixel;
+                        let end =
+                            (egui::lerp(track.x_range(), 0.75) / pixel).floor() * pixel + pixel;
+                        assert!((fill.left() - start).abs() < 0.01);
+                        assert!((fill.right() - end).abs() < 0.01);
                     } else {
                         assert!((borders[1] - 270.0).abs() <= 1.0);
                     }

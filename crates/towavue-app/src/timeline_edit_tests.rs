@@ -40,6 +40,26 @@ fn verify_video_repeat<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
         app.toggle_pause();
     }
 
+    app.set_time_selection(Some(selected));
+    app.play_time_selection();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.state != PlaybackState::Ended {
+        app.load_next_frame();
+        app.advance_media();
+        app.decode_finished = app.session.as_ref().expect("session").decode_finished();
+        app.check_eof();
+        assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
+        assert!(Instant::now() < deadline, "selected stop deadline");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        app.current_position(),
+        selected.end(),
+        "stop at the exact selected endpoint"
+    );
+    assert_eq!(app.time_selection, Some(selected));
+    assert_eq!(app.edits[&tab], history);
+
     app.process_shortcut("Ctrl+Alt+R".parse().expect("video repeat"));
     assert!(app.video_repeat);
     assert!(

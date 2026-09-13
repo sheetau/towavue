@@ -463,6 +463,7 @@ impl Filmstrip {
         let width = ui.available_width();
         let columns = (((width + 8.0) / 164.0).floor() as usize).max(1);
         let cell_width = ((width - (columns - 1) as f32 * 8.0) / columns as f32).max(1.0);
+        let mut focused_card = None;
         ui.add_enabled_ui(enabled, |ui| {
             for row in paths.chunks(columns) {
                 ui.horizontal_top(|ui| {
@@ -483,8 +484,11 @@ impl Filmstrip {
                             ui.ctx().accesskit_node_builder(response.id, |node| {
                                 node.set_description(path.display().to_string())
                             });
-                            if response.gained_focus() {
-                                response.scroll_to_me(None);
+                            if response.has_focus() {
+                                focused_card = Some(response.id);
+                                if self.focused_card != focused_card {
+                                    response.scroll_to_me(None);
+                                }
                             }
                             if !ui.is_rect_visible(rect) {
                                 return;
@@ -576,6 +580,7 @@ impl Filmstrip {
                 ui.add_space(8.0);
             }
         });
+        self.focused_card = focused_card;
         // Prepare the rest of the recent list after visible cards, using the same bounded worker.
         if enabled {
             for path in paths {
@@ -616,6 +621,137 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, MediaKind, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn recent_grid_arrow_navigation_reveals_each_row_without_opening_files() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-recent-keyboard-{}", std::process::id()));
+        let paths: Vec<_> = (0..40).map(|i| root.join(format!("{i:02}.png"))).collect();
+        for density in [1.0, 1.5, 2.0] {
+            for (width, columns) in [(240.0, 1), (420.0, 2)] {
+                let mut strip =
+                    Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                        .expect("worker");
+                let context = crate::fonts::test_context();
+                context.set_pixels_per_point(density);
+                context.enable_accesskit();
+                let mut time = 0.0;
+                let mut frame = |strip: &mut Filmstrip, events| {
+                    time += 0.1;
+                    let mut actions = Vec::new();
+                    let mut bounds = Rect::NOTHING;
+                    let mut offset = 0.0;
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width, 240.0),
+                            )),
+                            time: Some(time),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let scroll = egui::ScrollArea::vertical()
+                                .show(ui, |ui| strip.show_recent(ui, &paths, true, &mut actions));
+                            bounds = scroll.inner_rect;
+                            offset = scroll.state.offset.y;
+                        },
+                    );
+                    assert!(actions.is_empty(), "navigation must not open a file");
+                    assert_eq!(strip.visible.len(), 40);
+                    (
+                        output.platform_output.accesskit_update.expect("tree"),
+                        bounds,
+                        offset,
+                    )
+                };
+                for _ in 0..3 {
+                    frame(&mut strip, vec![]);
+                }
+                let (tree, _, _) = frame(&mut strip, vec![]);
+                let first = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, n)| {
+                        n.label() == Some("00.png") && n.role() == egui::accesskit::Role::Button
+                    })
+                    .expect("first card")
+                    .0;
+                frame(
+                    &mut strip,
+                    vec![egui::Event::AccessKitActionRequest(
+                        egui::accesskit::ActionRequest {
+                            action: egui::accesskit::Action::Focus,
+                            target_tree: egui::accesskit::TreeId::ROOT,
+                            target_node: first,
+                            data: None,
+                        },
+                    )],
+                );
+                for (key, rows) in [
+                    (egui::Key::ArrowDown, (1..40 / columns).collect::<Vec<_>>()),
+                    (egui::Key::ArrowUp, (0..40 / columns - 1).rev().collect()),
+                ] {
+                    for row in rows {
+                        for pressed in [true, false] {
+                            frame(
+                                &mut strip,
+                                vec![egui::Event::Key {
+                                    key,
+                                    physical_key: None,
+                                    pressed,
+                                    repeat: false,
+                                    modifiers: egui::Modifiers::NONE,
+                                }],
+                            );
+                        }
+                        for _ in 0..5 {
+                            frame(&mut strip, vec![]);
+                        }
+                        let (tree, viewport, _) = frame(&mut strip, vec![]);
+                        let node = &tree
+                            .nodes
+                            .iter()
+                            .find(|(id, _)| *id == tree.focus)
+                            .expect("focused card")
+                            .1;
+                        assert_eq!(
+                            node.label(),
+                            Some(format!("{:02}.png", row * columns).as_str()),
+                            "width {width}, density {density}, {key:?}"
+                        );
+                        let bounds = node.bounds().expect("card bounds");
+                        let tolerance = f64::from(1.0 / density);
+                        assert!(
+                            bounds.y0 >= f64::from(viewport.top()) - tolerance
+                                && bounds.y1 <= f64::from(viewport.bottom()) + tolerance,
+                            "width {width}, density {density}, row {row}: {bounds:?} vs {viewport:?}"
+                        );
+                    }
+                }
+                frame(
+                    &mut strip,
+                    vec![
+                        egui::Event::PointerMoved(egui::pos2(20.0, 20.0)),
+                        egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(0.0, -60.0),
+                            phase: egui::TouchPhase::Move,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+                for _ in 0..8 {
+                    frame(&mut strip, vec![]);
+                }
+                assert!(
+                    frame(&mut strip, vec![]).2 > 40.0,
+                    "manual scrolling survives unchanged focus"
+                );
+            }
+        }
+    }
 
     #[test]
     fn recent_grid_prepares_all_recent_previews_and_blocks_background_actions() {

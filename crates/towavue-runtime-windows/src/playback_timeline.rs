@@ -71,7 +71,7 @@ pub(super) fn segments(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn decode_audio(
+pub(crate) fn decode_audio(
     path: &Path,
     plan: &EditTimeline,
     target: MediaTime,

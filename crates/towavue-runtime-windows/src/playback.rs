@@ -8,7 +8,7 @@ use thiserror::Error;
 use towavue_core::{EditTimeline, MediaTime, PlaybackGeneration, PlaybackRange, TimeRange};
 
 #[path = "playback_timeline.rs"]
-mod timeline;
+pub(crate) mod timeline;
 
 #[cfg(test)]
 #[path = "retained_surface_tests.rs"]

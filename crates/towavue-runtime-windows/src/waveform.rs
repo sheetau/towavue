@@ -2,6 +2,116 @@ use std::io::{self, Read};
 
 const BINS_PER_COLUMN: usize = 1024;
 
+/// Mean absolute stereo envelope of the edited playback samples, one value per
+/// display column. Preserve float amplitudes so height/DPI changes need no raster
+/// enlargement. The louder channel supplies each frame; antiphase cannot cancel.
+pub fn timeline_waveform(
+    source: &std::path::Path,
+    plan: &towavue_core::EditTimeline,
+    rate: f32,
+    volume: f32,
+    columns: u32,
+    cancellation: &crate::Cancellation,
+) -> Result<Vec<f32>, crate::PreviewError> {
+    use crate::{PreviewError, decode, playback::timeline as playback_timeline};
+    if cancellation.is_cancelled() {
+        return Err(PreviewError::Cancelled);
+    }
+    if !(1..=8192).contains(&columns)
+        || !rate.is_finite()
+        || !(0.25..=4.0).contains(&rate)
+        || !volume.is_finite()
+        || !(0.0..=towavue_core::MAX_VOLUME).contains(&volume)
+    {
+        return Err(PreviewError::Generate(
+            "invalid timeline waveform dimensions or gain/rate".into(),
+        ));
+    }
+    if plan.spans().is_empty() {
+        return Ok(vec![0.0; columns as usize]);
+    }
+    let format = decode::probe_audio_format(source)?
+        .ok_or_else(|| PreviewError::Generate("no audio stream for waveform".into()))?;
+    let frames = crate::tempo::output_sample_boundary(
+        plan.duration().as_nanoseconds(),
+        format.sample_rate,
+        rate,
+    );
+    let mut envelope = DisplayEnvelope::new(columns, frames);
+    let mut invalid = false;
+    let result = playback_timeline::decode_audio(
+        source,
+        plan,
+        towavue_core::MediaTime::ZERO,
+        None,
+        rate,
+        format,
+        cancellation.flag(),
+        |chunk| {
+            for frame in chunk.bytes.as_chunks::<8>().0 {
+                let left = f32::from_le_bytes(frame[..4].try_into().expect("left sample"));
+                let right = f32::from_le_bytes(frame[4..].try_into().expect("right sample"));
+                if !left.is_finite() || !right.is_finite() {
+                    invalid = true;
+                    return false;
+                }
+                envelope.push(f64::from(left.abs().max(right.abs())) * f64::from(volume));
+            }
+            !cancellation.is_cancelled()
+        },
+    );
+    if cancellation.is_cancelled() {
+        return Err(PreviewError::Cancelled);
+    }
+    if invalid {
+        return Err(PreviewError::Generate(
+            "non-finite timeline waveform samples".into(),
+        ));
+    }
+    result?;
+    envelope.finish()
+}
+
+struct DisplayEnvelope {
+    sums: Vec<f64>,
+    frames: u64,
+    position: u64,
+}
+
+impl DisplayEnvelope {
+    fn new(columns: u32, frames: u64) -> Self {
+        Self {
+            sums: vec![0.0; columns as usize],
+            frames,
+            position: 0,
+        }
+    }
+
+    fn push(&mut self, amplitude: f64) {
+        // Integrate each sample's constant support over physical columns. This
+        // also fills wide displays of very short audio without empty columns.
+        let width = self.sums.len() as f64;
+        let start = self.position as f64 * width / self.frames as f64;
+        let end = (self.position + 1) as f64 * width / self.frames as f64;
+        let mut column = start.floor() as usize;
+        while column < self.sums.len() && (column as f64) < end {
+            self.sums[column] +=
+                amplitude * (end.min((column + 1) as f64) - start.max(column as f64));
+            column += 1;
+        }
+        self.position += 1;
+    }
+
+    fn finish(self) -> Result<Vec<f32>, crate::PreviewError> {
+        if self.frames == 0 || self.position != self.frames {
+            return Err(crate::PreviewError::Generate(
+                "timeline waveform sample count mismatch".into(),
+            ));
+        }
+        Ok(self.sums.into_iter().map(|sum| sum as f32).collect())
+    }
+}
+
 struct Envelope {
     // Completed bins have equal sample counts; only the pending tail may be shorter.
     sums: Vec<u64>,
@@ -121,6 +231,221 @@ pub(crate) fn read(reader: &mut dyn Read, width: u32, height: u32) -> io::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reference_columns(samples: &[f64], width: u32) -> Vec<f32> {
+        (0..width)
+            .map(|column| {
+                let start = f64::from(column) * samples.len() as f64 / f64::from(width);
+                let end = f64::from(column + 1) * samples.len() as f64 / f64::from(width);
+                (samples[start.floor() as usize..(end.ceil() as usize).min(samples.len())]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, sample)| {
+                        let frame = start.floor() + offset as f64;
+                        sample * (end.min(frame + 1.0) - start.max(frame))
+                    })
+                    .sum::<f64>()
+                    / (end - start)) as f32
+            })
+            .collect()
+    }
+
+    #[test]
+    fn display_envelope_integrates_short_and_fractional_columns_without_raster_quantization() {
+        for frames in [1, 2, 7, 500] {
+            let samples = (0..frames)
+                .map(|frame| (frame % 31 + 1) as f64 / 137.0)
+                .collect::<Vec<_>>();
+            for width in [1, 3, 640] {
+                let mut envelope = DisplayEnvelope::new(width, frames as u64);
+                for sample in &samples {
+                    envelope.push(*sample);
+                }
+                let actual = envelope.finish().expect("complete envelope");
+                for (actual, expected) in actual.iter().zip(reference_columns(&samples, width)) {
+                    assert!((actual - expected).abs() < 0.000001);
+                }
+            }
+        }
+        assert!(DisplayEnvelope::new(640, 10).finish().is_err());
+    }
+
+    #[test]
+    fn timeline_waveform_matches_playback_and_bounds_export_column_error() {
+        use towavue_core::{
+            EditOperation, EditTimeline, MediaKind, MediaTime, TimeRange, TimelineEdit,
+        };
+        let time = |ms: i64| MediaTime::from_nanoseconds(ms * 1_000_000);
+        let range = |a, b| TimeRange::new(time(a), time(b)).expect("range");
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("towavue-detailed-waveform-{unique}"));
+        std::fs::create_dir(&root).expect("owned fixtures");
+        let source = root.join("source.wav");
+        let mut pcm = Vec::new();
+        for index in 0..96_000 {
+            let sample = ((index as f64 * 440.0 * std::f64::consts::TAU / 48_000.0).sin()
+                * if index % 7300 < 2900 {
+                    14_000.0
+                } else {
+                    2800.0
+                }) as i16;
+            pcm.extend(sample.to_le_bytes());
+            pcm.extend((-sample).to_le_bytes());
+        }
+        let mut wav = b"RIFF".to_vec();
+        wav.extend((36 + pcm.len() as u32).to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.extend(16_u32.to_le_bytes());
+        wav.extend(1_u16.to_le_bytes());
+        wav.extend(2_u16.to_le_bytes());
+        wav.extend(48_000_u32.to_le_bytes());
+        wav.extend(192_000_u32.to_le_bytes());
+        wav.extend(4_u16.to_le_bytes());
+        wav.extend(16_u16.to_le_bytes());
+        wav.extend(b"data");
+        wav.extend((pcm.len() as u32).to_le_bytes());
+        wav.extend(pcm);
+        std::fs::write(&source, &wav).expect("owned PCM fixture");
+        for (stretch, rate) in [(false, 1.0), (true, 1.0), (true, 1.1)] {
+            let mut operations = vec![EditOperation::Timeline(TimelineEdit::Delete(range(
+                500, 750,
+            )))];
+            if stretch {
+                operations.push(EditOperation::Timeline(TimelineEdit::Stretch(
+                    range(250, 1000),
+                    time(1500),
+                )));
+            }
+            operations.push(EditOperation::Timeline(TimelineEdit::SetVolume(
+                range(600, 1100),
+                0.3,
+            )));
+            operations.push(EditOperation::Timeline(TimelineEdit::Keep(range(
+                100, 1500,
+            ))));
+            operations.push(EditOperation::SetVolume(1.5));
+            operations.push(EditOperation::SetRate(rate));
+            let plan = EditTimeline::from_operations(time(2000), &operations).expect("plan");
+            let target = root.join(format!("export-{stretch}-{rate}.wav"));
+            crate::export_media(&crate::ExportRequest {
+                source: source.clone(),
+                target: target.clone(),
+                kind: MediaKind::Audio,
+                operations,
+                hardware_encode: false,
+            })
+            .expect("independent exported PCM");
+            let mut amplitudes = Vec::new();
+            crate::decode::decode_file(&target, |output| {
+                if let crate::DecodeOutput::Audio(chunk) = output {
+                    amplitudes.extend(chunk.bytes.as_chunks::<8>().0.iter().map(|frame| {
+                        f64::from(
+                            f32::from_le_bytes(frame[..4].try_into().expect("left"))
+                                .abs()
+                                .max(
+                                    f32::from_le_bytes(frame[4..].try_into().expect("right")).abs(),
+                                ),
+                        )
+                    }));
+                }
+                true
+            })
+            .expect("decode exported samples");
+            assert_eq!(
+                amplitudes.len() as u64,
+                crate::tempo::output_sample_boundary(
+                    plan.duration().as_nanoseconds(),
+                    48_000,
+                    rate
+                ),
+                "export and playback sample axes"
+            );
+            let actual = timeline_waveform(
+                &source,
+                &plan,
+                rate,
+                1.5,
+                307,
+                &crate::Cancellation::default(),
+            )
+            .expect("edited waveform");
+            let mut playback = Vec::new();
+            crate::playback::timeline::decode_audio(
+                &source,
+                &plan,
+                MediaTime::ZERO,
+                None,
+                rate,
+                crate::AudioFormat {
+                    sample_rate: 48_000,
+                    channels: 2,
+                },
+                &std::sync::atomic::AtomicBool::new(false),
+                |chunk| {
+                    playback.extend(chunk.bytes.as_chunks::<8>().0.iter().map(|frame| {
+                        f64::from(
+                            f32::from_le_bytes(frame[..4].try_into().expect("left"))
+                                .abs()
+                                .max(
+                                    f32::from_le_bytes(frame[4..].try_into().expect("right")).abs(),
+                                ),
+                        ) * 1.5
+                    }));
+                    true
+                },
+            )
+            .expect("independent playback sample capture");
+            assert_eq!(playback.len(), amplitudes.len());
+            for (value, reference) in actual.iter().zip(reference_columns(&playback, 307)) {
+                assert!(
+                    (value - reference).abs() < 0.000001,
+                    "waveform integrates actual playback samples"
+                );
+            }
+            let expected = reference_columns(&amplitudes, 307);
+            let error = actual
+                .iter()
+                .zip(expected)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0_f32, f32::max);
+            // The 1.1x native/CLI tempo paths have equal sample counts but are
+            // not PCM-identical. Bound this fixture's display error to less than
+            // one pixel at 4096px height; do not certify export phase/PCM parity.
+            let tolerance = if rate == 1.0 { 0.0001 } else { 1.0 / 4096.0 };
+            eprintln!("waveform stretch={stretch}, rate={rate}, export column error={error}");
+            assert!(
+                error < tolerance,
+                "stretch={stretch}, rate={rate}, maximum column error={error}"
+            );
+            assert!(
+                actual.iter().any(|value| *value > 0.1),
+                "antiphase channels must remain visible"
+            );
+        }
+        assert_eq!(std::fs::read(&source).expect("source retained"), wav);
+        let plan = EditTimeline::new(time(2000), Default::default()).expect("plan");
+        let cancellation = crate::Cancellation::default();
+        cancellation.cancel();
+        assert!(matches!(
+            timeline_waveform(&source, &plan, 1.0, 1.0, 307, &cancellation),
+            Err(crate::PreviewError::Cancelled)
+        ));
+        assert!(
+            timeline_waveform(
+                &source,
+                &plan,
+                1.0,
+                1.0,
+                8193,
+                &crate::Cancellation::default()
+            )
+            .is_err()
+        );
+        std::fs::remove_dir_all(root).expect("remove owned fixtures");
+    }
 
     #[test]
     fn envelope_stays_bounded_and_preserves_average_amplitude() {

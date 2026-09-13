@@ -66,6 +66,7 @@ mod video_scrub;
 mod video_sheets;
 mod video_view;
 mod volume_hud;
+mod waveform_detail;
 mod welcome;
 mod wheel_input;
 mod window_host;
@@ -288,6 +289,7 @@ enum AppEvent {
         u64,
         Result<towavue_runtime_windows::PreviewImage, String>,
     ),
+    DetailedWaveform(u64, Box<waveform_detail::Key>, Result<Vec<f32>, String>),
     Thumbnail(
         PathBuf,
         u64,
@@ -931,6 +933,7 @@ struct Application<N> {
     held_speed: Option<hold_speed::Held>,
     timeline_open: bool,
     waveform: Option<TextureHandle>,
+    waveform_detail: waveform_detail::Detail,
     media_duration: Option<Duration>,
     time_selection: Option<towavue_core::TimeRange>,
     playback_selection: Option<towavue_core::TimeRange>,
@@ -1155,6 +1158,7 @@ where
             held_speed: None,
             timeline_open: false,
             waveform: None,
+            waveform_detail: waveform_detail::Detail::default(),
             media_duration: None,
             time_selection: None,
             playback_selection: None,
@@ -1506,6 +1510,7 @@ where
             pending_time: self.pending_time.take(),
             duration: self.media_duration,
             waveform: self.waveform.take(),
+            waveform_detail: self.waveform_detail.take_retained(),
             view: self.image_view,
             timeline_open: self.timeline_open,
             time_selection: self.time_selection,
@@ -1560,6 +1565,7 @@ where
             .then_some(saved.waveform)
             .flatten();
         self.image_view = saved.view;
+        self.waveform_detail = saved.waveform_detail;
         self.timeline_open = saved.kind == MediaKind::Audio || saved.timeline_open;
         self.time_selection = saved.time_selection;
         self.playback_selection = saved.playback_selection;
@@ -1671,6 +1677,7 @@ where
         self.reading_pages.clear();
         self.timeline_open = kind == MediaKind::Audio;
         self.waveform = None;
+        self.waveform_detail = waveform_detail::Detail::default();
         self.media_duration = None;
         self.time_selection = None;
         self.playback_selection = None;
@@ -1756,6 +1763,7 @@ where
         let notify = Arc::clone(&self.notify);
         let generation = self.media_generation;
         self.waveform_loading = true;
+        self.waveform_detail.restart_pending();
         self.waveform_worker.submit(move |cancellation| {
             let cache = cache.cancellable(cancellation);
             let result = cache
@@ -2474,6 +2482,9 @@ where
                     }
                     Err(error) => self.set_status(format!("Waveform unavailable: {error}")),
                 }
+            }
+            AppEvent::DetailedWaveform(generation, key, result) => {
+                self.install_detailed_waveform(generation, *key, result);
             }
             AppEvent::Thumbnail(path, generation, bucket, result)
                 if self.path.as_ref() == Some(&path) && generation == self.media_generation =>
@@ -5181,6 +5192,7 @@ where
                     .help_text("Drag to select time · Shift+Space plays selection · drag playhead to seek · drag volume line up/down · Alt+drag selection to stretch · Delete removes · Ctrl+Y keeps");
                 let duration = self.playback_duration().unwrap_or_default();
                 if duration.is_zero() {
+                    self.clear_detailed_waveform();
                     if let Some(waveform) = &self.waveform
                         && self.session.as_ref().and_then(PlaybackSession::timeline).is_none()
                     {
@@ -5203,7 +5215,9 @@ where
                     self.session.as_ref().and_then(PlaybackSession::timeline),
                     enabled,
                 );
-                if let Some(waveform) = &self.waveform {
+                if let Some(mesh) = self.detailed_waveform(ui.ctx(), rect, result.gain_preview.is_some()) {
+                    waveform_painter.set(waveform_slot, egui::Shape::mesh(mesh));
+                } else if let Some(waveform) = &self.waveform {
                     let mut mesh = egui::Mesh::with_texture(waveform.id());
                     for (destination, uv) in timeline_edit::waveform_regions(
                         rect,
@@ -7231,6 +7245,7 @@ where
             self.media_kind = None;
             self.timeline_open = false;
             self.waveform = None;
+            self.waveform_detail = waveform_detail::Detail::default();
             self.media_duration = None;
             self.time_selection = None;
             self.playback_selection = None;

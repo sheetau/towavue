@@ -20,6 +20,10 @@ impl Cancellation {
         self.0.cancelled.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn flag(&self) -> &AtomicBool {
+        &self.0.cancelled
+    }
+
     pub(crate) fn cancel(&self) {
         let mut child = self.0.child.lock().expect("preview child");
         self.0.cancelled.store(true, Ordering::Relaxed);

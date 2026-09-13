@@ -18,6 +18,7 @@ pub(super) struct RetainedPlaybackTab {
     pub pending_time: Option<MediaTime>,
     pub duration: Option<Duration>,
     pub waveform: Option<TextureHandle>,
+    pub waveform_detail: crate::waveform_detail::Detail,
     pub view: ImageViewState,
     pub timeline_open: bool,
     pub time_selection: Option<towavue_core::TimeRange>,

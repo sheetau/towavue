@@ -75,6 +75,7 @@ pub use shell::{
     FolderOrderError, FolderOrderProvider, canonical_shell_path, reveal_file, reveal_license_guide,
 };
 pub use watch::{FolderWatchError, FolderWatcher};
+pub use waveform::timeline_waveform;
 
 use std::path::Path;
 

@@ -2,6 +2,80 @@ use super::*;
 use std::time::Instant;
 
 #[test]
+#[ignore = "read-only JPEG comparison; set TOWAVUE_NAV_REFERENCE_DIR and use Release; no pixel output"]
+#[allow(clippy::assertions_on_constants)]
+fn reference_jpegs_compare_direct_rgba_pixels_and_decode_cost() {
+    assert!(!cfg!(debug_assertions), "use the Release test binary");
+    let source = std::env::var_os("TOWAVUE_NAV_REFERENCE_DIR").expect("explicit source directory");
+    let mut paths: Vec<_> = std::fs::read_dir(source)
+        .expect("source directory")
+        .map(|entry| entry.expect("source entry").path())
+        .filter(|path| path.is_file())
+        .collect();
+    paths.sort();
+    let mut samples: [Vec<Duration>; 2] = Default::default();
+    let mut count = 0;
+    for path in paths {
+        let before = std::fs::metadata(&path).expect("source metadata");
+        let reader = image::ImageReader::new(open(&path, &|| true).expect("read-only source"))
+            .with_guessed_format()
+            .expect("sniff content");
+        if reader.format() != Some(ImageFormat::Jpeg) {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        reader
+            .into_inner()
+            .read_to_end(&mut bytes)
+            .expect("JPEG bytes");
+        // Both variants receive the same already-read compressed bytes. Reverse
+        // the order for each pair so neither always owns the first allocation.
+        for order in [[0, 1], [1, 0]] {
+            let mut previous = None;
+            for variant in order {
+                let started = Instant::now();
+                let frame = if variant == 0 {
+                    static_frame(
+                        image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(&bytes))
+                            .expect("baseline JPEG"),
+                        IMAGE_BYTE_LIMIT,
+                        &|| true,
+                    )
+                } else {
+                    jpeg_static::decode(bytes.as_slice(), IMAGE_BYTE_LIMIT, &|| true)
+                }
+                .expect("complete JPEG frame");
+                samples[variant].push(started.elapsed());
+                if let Some(previous) = &previous {
+                    // Never format frames on failure: the reference is private.
+                    assert!(&frame == previous, "JPEG RGBA/dimension/delay mismatch");
+                } else {
+                    previous = Some(frame);
+                }
+            }
+        }
+        let after = std::fs::metadata(&path).expect("source metadata after reading");
+        assert_eq!(before.len(), after.len());
+        assert_eq!(
+            before.modified().expect("before time"),
+            after.modified().expect("after time")
+        );
+        count += 1;
+    }
+    assert!(count > 0, "JPEG references required");
+    for (variant, mut samples) in samples.into_iter().enumerate() {
+        samples.sort_unstable();
+        eprintln!(
+            "REFERENCE_JPEG variant={variant} files={count} samples={} median_ms={:.3} p95_ms={:.3} total_ms={:.3}; two alternating pairs per file, compressed bytes in memory, exact full RGBA/dimensions/delay equality, source length/mtime unchanged, no pixel output; excludes file I/O, workers, previews and GPU",
+            samples.len(),
+            samples[samples.len() / 2].as_secs_f64() * 1000.0,
+            samples[(samples.len() * 95).div_ceil(100) - 1].as_secs_f64() * 1000.0,
+            samples.iter().sum::<Duration>().as_secs_f64() * 1000.0,
+        );
+    }
+}
+
+#[test]
 #[ignore = "read-only image timing; set TOWAVUE_NAV_REFERENCE_DIR and use Release; no image output"]
 #[allow(clippy::assertions_on_constants)]
 fn reference_images_report_read_decode_and_optional_preview_cost() {

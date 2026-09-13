@@ -15,6 +15,7 @@ pub(crate) mod apng;
 pub(crate) mod avif;
 mod bmp_preview;
 mod jpeg_preview;
+mod jpeg_static;
 mod png_preview;
 mod png_static;
 #[cfg(test)]
@@ -165,6 +166,7 @@ pub(crate) fn decode_image_for_prefetch(
         let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
         let frame = match format {
             ImageFormat::Gif | ImageFormat::Avif => return Ok(None),
+            ImageFormat::Jpeg => jpeg_static::decode(reader.into_inner(), byte_limit, is_current)?,
             ImageFormat::Png => {
                 let Some(frame) = png_static::decode(reader.into_inner(), byte_limit, is_current)?
                 else {
@@ -220,6 +222,14 @@ pub(crate) fn decode_image_with_preview(
         let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
         let (frames, animation_plays) = match format {
             ImageFormat::Avif => avif::decode(path, byte_limit, is_current, preview, false)?,
+            ImageFormat::Jpeg => (
+                vec![jpeg_static::decode(
+                    reader.into_inner(),
+                    byte_limit,
+                    is_current,
+                )?],
+                1,
+            ),
             ImageFormat::Gif => {
                 // image's GIF adapter conflates no repetition with infinity and exposes
                 // repeats rather than total plays. Read only the header with the same

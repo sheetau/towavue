@@ -1057,7 +1057,7 @@ mod tests {
         let key = "Shift+C".parse::<KeySequence>().expect("cover key");
         for (kind, reading, enabled) in [
             (Some(MediaKind::Image), false, true),
-            (Some(MediaKind::Image), true, false),
+            (Some(MediaKind::Image), true, true),
             (Some(MediaKind::Video), false, true),
             (Some(MediaKind::Audio), false, false),
             (None, false, false),

@@ -37,6 +37,7 @@ mod playback_tab_tests;
 mod playback_volume;
 mod playlist;
 mod reading_input;
+mod reading_view;
 mod resize;
 mod rotation;
 #[cfg(test)]
@@ -4032,97 +4033,6 @@ where
         self.image_view.selection = Some(selection);
     }
 
-    fn draw_reading_pages(&self, ui: &mut egui::Ui) {
-        let viewport = ui.max_rect();
-        let first = self
-            .image
-            .as_ref()
-            .map(|image| Ok((&image.texture, image.texture.size_vec2())))
-            .or_else(|| self.image_error.as_ref().map(Err));
-        let mut pages: Vec<_> = self
-            .reading_pages
-            .iter()
-            .map(|page| {
-                Some(
-                    page.as_ref()
-                        .map(|image| (&image.texture, image.texture.size_vec2())),
-                )
-            })
-            .collect();
-        let ordered = self
-            .folder_snapshot
-            .as_ref()
-            .zip(self.path.as_ref())
-            .map(|(snapshot, path)| {
-                snapshot.reading_items(
-                    path,
-                    ReadingSettings {
-                        reversed: false,
-                        ..self.reading_settings
-                    },
-                )
-            })
-            .unwrap_or_default();
-        if first.is_some() || self.image_loading {
-            let index = ordered
-                .iter()
-                .position(|item| Some(&item.path) == self.path.as_ref())
-                .unwrap_or(0);
-            let count = ordered.len().max(1);
-            if self.image_loading {
-                pages.resize(count.saturating_sub(1), None);
-            }
-            pages.insert(index.min(pages.len()), first);
-        }
-        for (index, page) in pages.iter_mut().enumerate() {
-            let path = ordered
-                .get(index)
-                .map(|item| &item.path)
-                .or_else(|| self.path.as_ref().filter(|_| index == 0));
-            if page.is_none()
-                && let Some(preview) = path.and_then(|path| self.image_previews.get(path))
-            {
-                *page = Some(Ok((
-                    &preview.texture,
-                    egui::vec2(preview.source_size.0 as f32, preview.source_size.1 as f32),
-                )));
-            }
-        }
-        if pages.is_empty() {
-            return;
-        }
-        let pending_size = self
-            .image
-            .as_ref()
-            .map_or(egui::Vec2::splat(1.0), |image| image.texture.size_vec2());
-        let sizes: Vec<_> = pages
-            .iter()
-            .map(|page| {
-                page.map_or(pending_size, |page| {
-                    page.map_or(egui::Vec2::splat(1.0), |image| image.1)
-                })
-            })
-            .collect();
-        let rects = reading_page_rects(
-            viewport,
-            &sizes,
-            self.reading_settings.axis,
-            self.reading_settings.reversed,
-        );
-        let painter = ui.painter_at(viewport);
-        for (image, page) in pages.into_iter().zip(rects) {
-            let Some(Ok(image)) = image else {
-                continue;
-            };
-            painter.image(
-                image.0.id(),
-                page,
-                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
-        }
-    }
-
     fn draw_top_bar(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         let incoming_pointer = self
             .incoming_tab_pointer
@@ -4917,8 +4827,7 @@ where
                     if self.media_kind == Some(MediaKind::Image) && self.reading_mode && self.reading_drag.is_none() {
                         details.push(self.reading_status());
                     }
-                    if (self.media_kind == Some(MediaKind::Image) && !self.reading_mode)
-                        || self.media_kind == Some(MediaKind::Video)
+                    if matches!(self.media_kind, Some(MediaKind::Image | MediaKind::Video))
                     {
                         let zoom = match self.image_handoff.as_ref().map_or(self.image_view.zoom, |held| held.view.zoom) {
                             ZoomMode::Fit => "Fit".into(),
@@ -5818,10 +5727,8 @@ where
                 self.request_redraw();
             }
             CommandId::CoverWindow => {
-                if self.media_kind == Some(MediaKind::Video) || !self.reading_mode {
-                    self.image_view.cover();
-                    self.request_redraw();
-                }
+                self.image_view.cover();
+                self.request_redraw();
             }
             CommandId::ClearSelection => {
                 self.set_time_selection(None);
@@ -6979,6 +6886,10 @@ where
     }
 
     fn zoom_image(&mut self, factor: f32) {
+        if self.media_kind == Some(MediaKind::Image) && self.reading_mode {
+            self.zoom_reading(factor);
+            return;
+        }
         if self.media_kind == Some(MediaKind::Video) {
             self.zoom_video(factor);
             return;
@@ -13219,7 +13130,7 @@ mod tests {
         app.image_view.fit();
         app.reading_mode = true;
         app.dispatch(CommandId::CoverWindow);
-        assert_eq!(app.image_view.zoom, ZoomMode::Fit);
+        assert_eq!(app.image_view.zoom, ZoomMode::Cover);
     }
 
     #[test]
@@ -20088,6 +19999,9 @@ mod tests {
         };
         app.image = Some(make_page(8, 16));
         app.reading_pages = vec![Ok(make_page(16, 8))];
+        app.media_kind = Some(MediaKind::Image);
+        app.reading_mode = true;
+        app.ui_context = Some(context.clone());
         let ids = [
             app.image.as_ref().expect("first").texture.id(),
             app.reading_pages[0].as_ref().expect("second").texture.id(),
@@ -20125,6 +20039,27 @@ mod tests {
                                 .expect("drawn page")
                         });
                         let spread = bounds[0].union(bounds[1]);
+                        app.dispatch(CommandId::ZoomIn);
+                        let zoomed = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(viewport),
+                                ..Default::default()
+                            },
+                            |ui| app.draw_reading_pages(ui),
+                        );
+                        let zoomed = zoomed
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Mesh(mesh) if mesh.texture_id == ids[0] => {
+                                    Some(mesh.calc_bounds())
+                                }
+                                _ => None,
+                            })
+                            .expect("zoomed first page");
+                        assert!((zoomed.width() / bounds[0].width() - 1.25).abs() < 0.001);
+                        assert!(app.image_view.selection.is_none());
+                        app.dispatch(CommandId::FitToWindow);
                         assert!((spread.center() - viewport.center()).length() < 0.01);
                         assert!(viewport.expand(0.01).contains_rect(spread));
                         assert!(

@@ -516,7 +516,6 @@ impl CommandDefinition {
                         | CommandId::SelectAspectTwoThree
                         | CommandId::SelectAspectSixteenNine
                         | CommandId::SelectAspectNineSixteen
-                        | CommandId::CoverWindow
                         | CommandId::ZoomSelection
                         | CommandId::ApplyCrop
                         | CommandId::RotateClockwise
@@ -1208,7 +1207,6 @@ mod tests {
             CommandId::FlipVertical,
             CommandId::SelectAll,
             CommandId::ZoomSelection,
-            CommandId::CoverWindow,
             CommandId::ResizeImage,
         ] {
             assert!(!enabled(id, context), "{id:?}");
@@ -1227,6 +1225,11 @@ mod tests {
             CommandId::NextImage,
             CommandId::IncreaseReadingPages,
             CommandId::Save,
+            CommandId::ZoomIn,
+            CommandId::ZoomOut,
+            CommandId::ActualSize,
+            CommandId::FitToWindow,
+            CommandId::CoverWindow,
         ] {
             assert!(enabled(id, context), "{id:?}");
         }

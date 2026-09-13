@@ -952,6 +952,90 @@ mod tests {
             !painted(&frame(&mut app, egui::pos2(900.0, 400.0)), edited_texture),
             "leaving the tab hides its borrowed image"
         );
+        // A retained tab can lose its presentation after a load/recovery failure.
+        let held = app
+            .retained_images
+            .get_mut(&tab)
+            .expect("retained")
+            .image
+            .take()
+            .expect("image");
+        assert!(!painted(&frame(&mut app, pointer), edited_texture));
+        let fallback = app.tab_preview.target.clone().expect("fallback target");
+        let generation = app.tab_preview.generation;
+        app.tab_preview.finish(
+            &context,
+            fallback.clone(),
+            generation,
+            Ok(PreviewImage {
+                width: 2,
+                height: 1,
+                rgba: [0, 0, 255, 255].repeat(2),
+            }),
+        );
+        let fallback_texture = app
+            .tab_preview
+            .texture
+            .as_ref()
+            .expect("fallback")
+            .as_ref()
+            .expect("pixels")
+            .id();
+        assert!(painted(&frame(&mut app, pointer), fallback_texture));
+        app.retained_images.get_mut(&tab).expect("retained").image = Some(held);
+        assert!(painted(&frame(&mut app, pointer), edited_texture));
+        assert!(
+            context
+                .tex_manager()
+                .read()
+                .meta(fallback_texture)
+                .is_none(),
+            "loaded pixels release the replaced thumbnail"
+        );
+        app.tab_preview.finish(
+            &context,
+            fallback.clone(),
+            generation,
+            Ok(PreviewImage {
+                width: 1,
+                height: 1,
+                rgba: vec![255; 4],
+            }),
+        );
+        assert!(
+            app.tab_preview.texture.is_none(),
+            "late fallback cannot replace the borrowed image"
+        );
+        let _ = context.tex_manager().write().take_delta();
+        app.close_tab_unchecked(tab);
+        assert!(!app.retained_images.contains_key(&tab));
+        assert!(
+            context.tex_manager().read().meta(edited_texture).is_none(),
+            "hover must not keep a closed tab's texture alive"
+        );
+        assert!(
+            context
+                .tex_manager()
+                .write()
+                .take_delta()
+                .free
+                .contains(&edited_texture)
+        );
+        assert!(!painted(&frame(&mut app, pointer), edited_texture));
+        app.tab_preview.finish(
+            &context,
+            fallback,
+            generation,
+            Ok(PreviewImage {
+                width: 1,
+                height: 1,
+                rgba: vec![255; 4],
+            }),
+        );
+        assert!(
+            app.tab_preview.texture.is_none(),
+            "closed-tab results remain stale even while another tab is hovered"
+        );
     }
 
     #[test]

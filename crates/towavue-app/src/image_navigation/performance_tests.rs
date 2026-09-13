@@ -2,6 +2,7 @@ use super::*;
 use std::os::windows::process::CommandExt;
 
 mod gpu;
+mod reference;
 
 fn bitmap_fixture(path: &Path) {
     let mut bitmap = vec![0_u8; 62];

@@ -11,6 +11,8 @@ use windows::core::PCWSTR;
 
 #[path = "png_decoder/libpng.rs"]
 mod libpng;
+#[path = "png_decoder/stages.rs"]
+mod stages;
 
 struct Apartment(std::marker::PhantomData<std::rc::Rc<()>>);
 
@@ -147,7 +149,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let before = stamp();
     let backend = std::env::var("TOWAVUE_PNG_BACKEND").unwrap_or_else(|_| "wic".into());
-    assert!(matches!(backend.as_str(), "wic" | "wic-bgra" | "libpng"));
+    assert!(matches!(
+        backend.as_str(),
+        "wic" | "wic-bgra" | "libpng" | "stages" | "stages-sse2"
+    ));
     let _apartment = Apartment::new()?;
     // Created once like a worker-local decoder service, outside per-file timings.
     // Declaration/drop order releases the factory before COM uninitialization.
@@ -155,7 +160,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)? };
     let libpng = (backend == "libpng").then(libpng::Decoder::load);
     let candidate = |path: &Path| {
-        if let Some(decoder) = &libpng {
+        if backend.starts_with("stages") {
+            stages::decode(path, backend.as_str())
+        } else if let Some(decoder) = &libpng {
             decoder.decode(path)
         } else {
             // The native BGRA probe applies to RGBA inputs; use the converter for
@@ -168,6 +175,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     equal(&candidate(&path), &expected);
     for (batch, alternative) in [false, true, true, false].into_iter().enumerate() {
         let mut times = Vec::new();
+        let mut stage_times = Vec::new();
         for _ in 0..3 {
             let started = Instant::now();
             let actual = if alternative {
@@ -176,6 +184,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 current(&path)
             };
             times.push(started.elapsed());
+            if alternative && backend.starts_with("stages") {
+                stage_times.push(stages::take_timing());
+            }
             equal(&actual, &expected);
         }
         times.sort_unstable();
@@ -187,6 +198,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             times[0].as_secs_f64() * 1000.0,
             times[2].as_secs_f64() * 1000.0,
         );
+        if !stage_times.is_empty() {
+            stages::report(batch, &stage_times);
+        }
     }
     assert_eq!(before, stamp(), "source changed");
     Ok(())

@@ -9,7 +9,7 @@ publish = false
 
 [features]
 render-verification = ["windows/Win32_System_ProcessStatus", "egui-directx11/render-verification"]
-png-decoder-verification = ["windows/Win32_Graphics_Imaging"]
+png-decoder-verification = ["windows/Win32_Graphics_Imaging", "png/benchmarks"]
 
 [[example]]
 name = "png-decoder-cost"

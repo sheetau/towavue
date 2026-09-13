@@ -49,7 +49,7 @@ impl VideoRotationDialog {
                 ui.set_width((context.content_rect().width() - 48.0).clamp(1.0, 340.0));
                 egui::ScrollArea::vertical()
                     .max_height((context.content_rect().height() - 48.0).max(1.0))
-                    .show(ui, |ui| {
+                    .show_styled(ui, |ui| {
                         chrome::modal_heading(ui, "Free rotate video");
                         ui.label("Preview on the video. Apply adds one undoable edit.");
                         ui.label("Angle in degrees (clockwise, 0.1 degree steps)");

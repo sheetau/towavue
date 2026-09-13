@@ -1,3 +1,4 @@
+use crate::scroll_style::ScrollAreaStyle;
 use egui::AtomExt;
 use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definitions};
 
@@ -154,7 +155,7 @@ impl CommandPalette {
                 }
                 egui::ScrollArea::vertical()
                     .max_height((context.content_rect().height() - 90.0).clamp(40.0, 264.0))
-                    .show(ui, |ui| {
+                    .show_styled(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
                         if matches.is_empty() {
                             ui.weak("No matching commands");

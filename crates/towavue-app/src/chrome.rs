@@ -111,6 +111,9 @@ pub fn style(style: &mut egui::Style) {
     style.visuals.selection.bg_fill = HOVER;
     style.visuals.selection.stroke = Stroke::new(1.0, FOREGROUND);
     style.spacing.scroll.bar_width = 5.0;
+    style.spacing.scroll.dormant_background_opacity = 0.0;
+    style.spacing.scroll.active_background_opacity = 0.0;
+    style.spacing.scroll.dormant_handle_opacity = 0.6;
     style.visuals.window_shadow.offset = [0, 8];
     style.visuals.window_shadow.blur = 18;
     style.visuals.window_shadow.color = Color32::from_black_alpha(112);

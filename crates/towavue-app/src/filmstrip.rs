@@ -1,3 +1,4 @@
+use crate::scroll_style::ScrollAreaStyle;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -287,7 +288,7 @@ impl Filmstrip {
                 if recenter || self.focus_requested {
                     scroll = scroll.horizontal_scroll_offset(selected.unwrap_or(0) as f32 * STEP);
                 }
-                let output = scroll.show_viewport(ui, |ui, viewport| {
+                let output = scroll.show_viewport_styled(ui, |ui, viewport| {
                     let padding = ((inset.width() - STEP) / 2.0).max(0.0);
                     let origin = ui.min_rect().min;
                     ui.set_min_size(egui::vec2(
@@ -652,8 +653,9 @@ mod tests {
                             ..Default::default()
                         },
                         |ui| {
-                            let scroll = egui::ScrollArea::vertical()
-                                .show(ui, |ui| strip.show_recent(ui, &paths, true, &mut actions));
+                            let scroll = egui::ScrollArea::vertical().show_styled(ui, |ui| {
+                                strip.show_recent(ui, &paths, true, &mut actions)
+                            });
                             bounds = scroll.inner_rect;
                             offset = scroll.state.offset.y;
                         },
@@ -775,7 +777,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::ScrollArea::vertical().show_styled(ui, |ui| {
                         filmstrip.show_recent(ui, &paths, enabled, &mut actions)
                     });
                 },
@@ -878,7 +880,7 @@ mod tests {
                 |ui| {
                     let scroll = egui::ScrollArea::vertical()
                         .vertical_scroll_offset(offset)
-                        .show(ui, |ui| strip.show_recent(ui, &paths, true, &mut vec![]));
+                        .show_styled(ui, |ui| strip.show_recent(ui, &paths, true, &mut vec![]));
                     offset = (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
                 },
             );
@@ -955,7 +957,7 @@ mod tests {
                 |ui| {
                     let scroll = egui::ScrollArea::vertical()
                         .vertical_scroll_offset(offset)
-                        .show(ui, |ui| strip.show_recent(ui, &paths, true, &mut vec![]));
+                        .show_styled(ui, |ui| strip.show_recent(ui, &paths, true, &mut vec![]));
                     max_scroll = (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
                 },
             );

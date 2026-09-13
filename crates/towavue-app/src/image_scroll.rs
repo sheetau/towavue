@@ -58,7 +58,7 @@ pub fn bars(
             .animated(false)
             .scroll_offset(offset)
             .scroll_source(egui::scroll_area::ScrollSource::SCROLL_BAR)
-            .show(ui, |ui| {
+            .show_styled(ui, |ui| {
                 ui.set_min_size(displayed.max(viewport.size()) * ratio);
             })
     });

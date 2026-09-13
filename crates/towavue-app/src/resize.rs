@@ -1,3 +1,4 @@
+use crate::scroll_style::ScrollAreaStyle;
 use towavue_core::{ImageResize, ResampleFilter};
 
 pub struct ResizeDialog {
@@ -127,7 +128,7 @@ impl ResizeDialog {
             egui::ScrollArea::vertical()
                 .max_height((context.content_rect().height() - 32.0).max(1.0))
                 .min_scrolled_height(1.0)
-                .show(ui, |ui| {
+                .show_styled(ui, |ui| {
                     crate::chrome::modal_heading(ui, "Resize / resample image");
                     ui.label("Original file is kept. Apply adds one undoable edit.");
                     self.controls(ui);

@@ -1,3 +1,4 @@
+use crate::scroll_style::ScrollAreaStyle;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -196,7 +197,7 @@ impl Playlist {
                     scroll = scroll.vertical_scroll_offset((offset - delta.y).max(0.0));
                 }
             }
-            let output = scroll.show_rows(ui, 32.0, items.len(), |ui, rows| {
+            let output = scroll.show_rows_styled(ui, 32.0, items.len(), |ui, rows| {
                 for index in rows {
                     let item = items[index];
                     self.visible.push(item.path.clone());

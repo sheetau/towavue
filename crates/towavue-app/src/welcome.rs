@@ -1,3 +1,4 @@
+use crate::scroll_style::ScrollAreaStyle;
 use egui::RichText;
 use towavue_core::{CommandId, ShortcutBindings};
 
@@ -15,7 +16,7 @@ pub fn show(
     egui::ScrollArea::vertical()
         .id_salt("welcome")
         .auto_shrink([false, false])
-        .show(ui, |ui| {
+        .show_styled(ui, |ui| {
             ui.add_space(top);
             ui.horizontal(|ui| {
                 ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));

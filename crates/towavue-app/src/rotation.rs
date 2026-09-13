@@ -36,7 +36,7 @@ impl RotationDialog {
             ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 420.0));
             egui::ScrollArea::vertical()
                 .max_height((context.content_rect().height() - 32.0).max(1.0))
-                .show(ui, |ui| {
+                .show_styled(ui, |ui| {
                     chrome::modal_heading(ui, "Free rotate image");
                     ui.label("Preview only. Apply adds one undoable edit.");
                     ui.label("Tip: hold Alt and drag horizontally on the image.");

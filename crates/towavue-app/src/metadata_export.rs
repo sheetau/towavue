@@ -112,7 +112,7 @@ impl MetadataDialog {
         let modal = egui::Modal::new(egui::Id::new(("metadata-export-options", self.token))).show(context, |ui| {
             ui.set_width((context.content_rect().width() - 48.0).clamp(1.0, 420.0));
             chrome::modal_heading(ui, "Metadata export options");
-            egui::ScrollArea::vertical().max_height((context.content_rect().height() - 128.0).max(20.0)).min_scrolled_height(20.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height((context.content_rect().height() - 128.0).max(20.0)).min_scrolled_height(20.0).show_styled(ui, |ui| {
                 ui.label("Metadata field");
                 let response = egui::ComboBox::from_id_salt("metadata-field")
                     .selected_text(MetadataField::ALL[self.selected].label()).show_ui(ui, |ui| {

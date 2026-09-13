@@ -35,7 +35,7 @@ impl VideoResizeDialog {
                 ui.set_width((context.content_rect().width() - 48.0).clamp(1.0, 360.0));
                 egui::ScrollArea::vertical()
                     .max_height((context.content_rect().height() - 48.0).max(1.0))
-                    .show(ui, |ui| {
+                    .show_styled(ui, |ui| {
                         chrome::modal_heading(ui, "Resize / resample video");
                         ui.label("Preview on the video. Apply adds one undoable edit.");
                         self.inputs.controls(ui);

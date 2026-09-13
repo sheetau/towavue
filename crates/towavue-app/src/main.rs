@@ -41,6 +41,7 @@ mod resize;
 mod rotation;
 #[cfg(test)]
 mod rotation_tests;
+mod scroll_style;
 mod seekbar;
 mod selection;
 mod selection_aspect;
@@ -77,6 +78,7 @@ use std::time::{Duration, Instant};
 
 use egui::{Align2, Color32, RichText, TextureHandle, TextureOptions};
 use egui_winit::accesskit_winit;
+use scroll_style::ScrollAreaStyle;
 use towavue_core::{
     CommandContext, CommandId, EditHistory, EditOperation, FolderSnapshot, FolderSnapshotSource,
     ImageViewState, Key, KeyStroke, MediaKind, MediaTime, Modifiers, PixelCrop, PlaybackGeneration,
@@ -2957,7 +2959,7 @@ where
                 egui::ScrollArea::vertical()
                     .max_height((context.content_rect().height() - 130.0).clamp(20.0, 220.0))
                     .min_scrolled_height(20.0)
-                    .show(ui, |ui| {
+                    .show_styled(ui, |ui| {
                         ui.label(error);
                     });
                 if ui.button("OK").clicked() {
@@ -4197,7 +4199,7 @@ where
                         .max_width(strip_width)
                         .max_height(layout.tab_height)
                         .auto_shrink([true, false])
-                        .show(ui, |ui| {
+                        .show_styled(ui, |ui| {
                             ui.horizontal_centered(|ui| {
                                 let tab_rects: Vec<_> = self
                                     .tabs

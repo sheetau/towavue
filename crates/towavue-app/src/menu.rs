@@ -1,3 +1,4 @@
+use crate::scroll_style::ScrollAreaStyle;
 use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definitions};
 
 use CommandId::*;
@@ -220,7 +221,7 @@ fn show_items(
     egui::ScrollArea::vertical()
         .id_salt(title)
         .max_height((ui.ctx().content_rect().height() - 64.0).max(100.0))
-        .show(ui, |ui| {
+        .show_styled(ui, |ui| {
             for (index, group) in groups.iter().enumerate() {
                 if index > 0 {
                     ui.separator();

@@ -128,6 +128,7 @@ mod tests {
         ];
         let request = ImageCopyRequest {
             image: Arc::new(DecodedImage {
+                animation_plays: 0,
                 format: "test",
                 frames: vec![crate::DecodedImageFrame {
                     width: 2,
@@ -178,6 +179,7 @@ mod tests {
         };
         let mut request = ImageCopyRequest {
             image: Arc::new(DecodedImage {
+                animation_plays: 0,
                 format: "test",
                 frames: vec![
                     frame.clone(),

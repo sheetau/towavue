@@ -16,6 +16,7 @@ fn app() -> (App, mpsc::Receiver<AppEvent>) {
 
 pub(crate) fn decoded(animated: bool) -> Arc<DecodedImage> {
     Arc::new(DecodedImage {
+        animation_plays: 0,
         format: "test",
         frames: (0..if animated { 2 } else { 1 })
             .map(|index| DecodedImageFrame {
@@ -94,7 +95,10 @@ fn edited_image_install_converts_only_the_selected_frame_with_current_sampling()
     for nearest in [true, false] {
         for index in [1, 0] {
             let (mut app, _) = app();
-            let original = decoded(true);
+            let original = Arc::new(DecodedImage {
+                animation_plays: 3,
+                ..(*decoded(true)).clone()
+            });
             install(&mut app, root.join("install.png"), Arc::clone(&original));
             app.nearest_images = nearest;
             app.update_image_sampling();
@@ -102,6 +106,7 @@ fn edited_image_install_converts_only_the_selected_frame_with_current_sampling()
             let image = app.image.as_mut().expect("image");
             image.frame_index = index;
             image.next_frame_at = Some(deadline);
+            image.plays_left = 2;
             let resize = EditOperation::Resize(
                 towavue_core::ImageResize::new(3, 3, towavue_core::ResampleFilter::Nearest)
                     .expect("resize"),
@@ -130,6 +135,10 @@ fn edited_image_install_converts_only_the_selected_frame_with_current_sampling()
                 assert!(Arc::ptr_eq(&image.decoded, &pixels));
                 assert_eq!(image.frame_index, index);
                 assert_eq!(image.next_frame_at, Some(deadline));
+                assert_eq!(
+                    image.plays_left, 2,
+                    "edits and undo preserve remaining plays"
+                );
                 let options = if nearest {
                     TextureOptions::NEAREST
                 } else {
@@ -158,6 +167,7 @@ fn edited_image_install_converts_only_the_selected_frame_with_current_sampling()
                 + 1;
             for invalid in [
                 DecodedImage {
+                    animation_plays: 0,
                     format: "empty",
                     frames: vec![],
                 },
@@ -660,7 +670,10 @@ fn image_transfer_rebinds_current_pixels_and_preserves_animation_edits_and_view(
         for state in [PlaybackState::Playing, PlaybackState::Paused] {
             let (mut source, _) = app();
             let (mut destination, _) = app();
-            let pixels_source = decoded(animated);
+            let pixels_source = Arc::new(DecodedImage {
+                animation_plays: 3,
+                ..(*decoded(animated)).clone()
+            });
             let id = install(
                 &mut source,
                 root.join("not-on-disk.png"),
@@ -687,6 +700,7 @@ fn image_transfer_rebinds_current_pixels_and_preserves_animation_edits_and_view(
             let image = source.image.as_mut().expect("image");
             image.frame_index = usize::from(animated);
             image.next_frame_at = animated.then(|| Instant::now() + Duration::from_secs(60));
+            image.plays_left = 2;
             image.sampling.set(TextureOptions::NEAREST);
             let deadline = image.next_frame_at;
             let pixels = color_image(&pixels_source.frames[image.frame_index]);
@@ -707,6 +721,10 @@ fn image_transfer_rebinds_current_pixels_and_preserves_animation_edits_and_view(
             assert!(Arc::ptr_eq(&image.decoded, &pixels_source));
             assert_eq!(image.frame_index, usize::from(animated));
             assert_eq!(image.next_frame_at, deadline);
+            assert_eq!(
+                image.plays_left, 2,
+                "window transfer preserves remaining plays"
+            );
             assert_eq!(image.sampling.get(), TextureOptions::NEAREST);
             assert!(!std::rc::Rc::ptr_eq(&image.sampling, &sampler));
             let delta = destination_context.tex_manager().write().take_delta();
@@ -752,6 +770,7 @@ fn image_transfer_stages_all_textures_before_removing_source_state() {
     let (destination, _) = app();
     let id = install(&mut source, root.join("source.png"), decoded(false));
     let page = Arc::new(DecodedImage {
+        animation_plays: 0,
         format: "test",
         frames: vec![DecodedImageFrame {
             width: 4,

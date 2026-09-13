@@ -397,6 +397,8 @@ fn avif_single_frame_sequence_keeps_pixels_duration_and_repetition() {
             assert!(same_timing(&before.samples[0], &after.samples[0]));
             assert_eq!(after.color().loops, loops);
             let actual = crate::decode_image(&target).expect("fixture operation");
+            assert_eq!(expected.animation_plays, loops.unwrap_or(1));
+            assert_eq!(actual.animation_plays, loops.unwrap_or(1));
             assert_eq!(actual.frames.len(), 1);
             assert_eq!(actual.frames[0].rgba, expected.frames[0].rgba);
             assert_eq!(actual.frames[0].delay, Duration::from_millis(375));
@@ -1299,10 +1301,11 @@ fn avif_export_retains_variable_timing_and_repeat_on_resave() {
         }
         let webp = root.join("converted.webp");
         export_media(&request(&source, &webp)).expect("VFR WebP conversion");
-        assert_eq!(
-            crate::decode_image(&webp).expect("converted").frames,
-            crate::decode_image(&source).expect("display").frames
-        );
+        let converted = crate::decode_image(&webp).expect("converted");
+        let displayed = crate::decode_image(&source).expect("display");
+        assert_eq!(converted.frames, displayed.frames);
+        assert_eq!(displayed.animation_plays, loops.unwrap_or(1));
+        assert_eq!(converted.animation_plays, displayed.animation_plays);
         let mut decoder =
             image_webp::WebPDecoder::new(BufReader::new(fs::File::open(&webp).expect("WebP")))
                 .expect("controls");
@@ -1886,6 +1889,10 @@ fn avif_control_validation_rejects_wrong_alpha_and_edit_lists() {
             Animation::read(&source, &AtomicBool::new(false)).is_err(),
             "offset {offset}, edit {edit}, auxiliary {auxiliary}, replacement {replacement:?}, version {}",
             intact[edit + 4]
+        );
+        assert!(
+            crate::decode_image(&source).is_err(),
+            "display must reject unsupported animation controls too"
         );
     }
     let left = Samples {

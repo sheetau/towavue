@@ -44,6 +44,8 @@ pub struct DecodedImageFrame {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecodedImage {
+    /// Total animation plays, including the first; zero means infinite.
+    pub animation_plays: u32,
     pub format: &'static str,
     pub frames: Vec<DecodedImageFrame>,
 }
@@ -70,6 +72,8 @@ pub enum ImageDecodeError {
     Open(#[source] IoError),
     #[error("could not decode image: {0}")]
     Decode(#[from] ImageError),
+    #[error("could not decode GIF: {0}")]
+    Gif(#[from] gif::DecodingError),
     #[error("FFmpeg could not decode image: {0}")]
     Ffmpeg(#[from] DecodeError),
     #[error("could not decode AVIF: {0}")]
@@ -122,7 +126,7 @@ pub(crate) fn first_animation_frame(
                     return Ok(None);
                 }
                 drop(decoder);
-                apng::decode(path, byte_limit, current, &mut preview, true)?
+                apng::decode(path, byte_limit, current, &mut preview, true)?.0
             }
             Some(ImageFormat::WebP) => {
                 let decoder = WebPDecoder::new(reader.into_inner())?;
@@ -131,7 +135,9 @@ pub(crate) fn first_animation_frame(
                 }
                 animated_frames(decoder, byte_limit, current, &mut preview, true)?
             }
-            Some(ImageFormat::Avif) => avif::decode(path, byte_limit, current, &mut preview, true)?,
+            Some(ImageFormat::Avif) => {
+                avif::decode(path, byte_limit, current, &mut preview, true)?.0
+            }
             _ => return Ok(None),
         };
         Ok(frames.into_iter().next())
@@ -175,6 +181,7 @@ pub(crate) fn decode_image_for_prefetch(
         };
         check_current(is_current)?;
         Ok(Some(DecodedImage {
+            animation_plays: 1,
             format: format_name(format),
             frames: vec![frame],
         }))
@@ -209,41 +216,65 @@ pub(crate) fn decode_image_with_preview(
             .with_guessed_format()
             .map_err(ImageDecodeError::Open)?;
         let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
-        let frames = match format {
+        let (frames, animation_plays) = match format {
             ImageFormat::Avif => avif::decode(path, byte_limit, is_current, preview, false)?,
             ImageFormat::Gif => {
-                let mut decoder = GifDecoder::new(open(path, is_current)?)?;
+                // image's GIF adapter conflates no repetition with infinity and exposes
+                // repeats rather than total plays. Read only the header with the same
+                // underlying parser; do not decode a second frame sequence.
+                let header = gif::DecodeOptions::new().read_info(reader.into_inner())?;
+                let plays = match header.repeat() {
+                    gif::Repeat::Infinite => 0,
+                    gif::Repeat::Finite(repeats) => u32::from(repeats) + 1,
+                };
+                let mut reader = header.into_inner().into_inner();
+                reader.rewind().map_err(ImageDecodeError::Open)?;
+                let mut decoder = GifDecoder::new(reader)?;
                 decoder.set_limits(image::Limits::default())?;
-                animated_frames(decoder, byte_limit, is_current, preview, false)?
+                (
+                    animated_frames(decoder, byte_limit, is_current, preview, false)?,
+                    plays,
+                )
             }
             ImageFormat::WebP => {
                 let decoder = WebPDecoder::new(reader.into_inner())?;
                 if decoder.has_animation() {
-                    animated_frames(decoder, byte_limit, is_current, preview, false)?
+                    let plays = match decoder.loop_count() {
+                        image::metadata::LoopCount::Infinite => 0,
+                        image::metadata::LoopCount::Finite(plays) => plays.get(),
+                    };
+                    (
+                        animated_frames(decoder, byte_limit, is_current, preview, false)?,
+                        plays,
+                    )
                 } else {
-                    vec![static_frame(decoder, byte_limit, is_current)?]
+                    (vec![static_frame(decoder, byte_limit, is_current)?], 1)
                 }
             }
             ImageFormat::Png => {
                 if let Some(frame) =
                     png_static::decode(reader.into_inner(), byte_limit, is_current)?
                 {
-                    vec![frame]
+                    (vec![frame], 1)
                 } else {
                     apng::decode(path, byte_limit, is_current, preview, false)?
                 }
             }
-            _ => vec![static_frame(
-                reader.into_decoder()?,
-                byte_limit,
-                is_current,
-            )?],
+            _ => (
+                vec![static_frame(
+                    reader.into_decoder()?,
+                    byte_limit,
+                    is_current,
+                )?],
+                1,
+            ),
         };
         check_current(is_current)?;
         if frames.is_empty() {
             return Err(ImageDecodeError::Empty);
         }
         Ok(DecodedImage {
+            animation_plays,
             format: format_name(format),
             frames,
         })
@@ -813,6 +844,91 @@ mod tests {
             assert_eq!(preview.delay, decoded.frames[0].delay);
             assert_eq!(preview.rgba, decoded.frames[0].rgba);
             std::fs::remove_file(path).expect("owned fixture cleanup");
+        }
+    }
+
+    #[test]
+    fn animation_decoders_preserve_total_plays() {
+        use std::os::windows::process::CommandExt;
+        for repeats in [
+            None,
+            Some(Repeat::Infinite),
+            Some(Repeat::Finite(1)),
+            Some(Repeat::Finite(u16::MAX)),
+        ] {
+            let path = temporary_path("gif");
+            let mut encoder = GifEncoder::new(File::create(&path).expect("fixture"));
+            if let Some(repeats) = repeats {
+                encoder.set_repeat(repeats).expect("repeat");
+            }
+            for color in [0, 255] {
+                encoder
+                    .encode_frame(Frame::from_parts(
+                        RgbaImage::from_pixel(2, 1, Rgba([color, 0, 0, 255])),
+                        0,
+                        0,
+                        Delay::from_numer_denom_ms(50, 1),
+                    ))
+                    .expect("frame");
+            }
+            drop(encoder);
+            let expected = match repeats {
+                None => 1,
+                Some(Repeat::Infinite) => 0,
+                Some(Repeat::Finite(n)) => u32::from(n) + 1,
+            };
+            let decoded = decode_image(&path).expect("GIF");
+            assert_eq!(decoded.animation_plays, expected);
+            let edited = crate::render_image_edits(
+                &decoded,
+                &[towavue_core::EditOperation::FlipHorizontal],
+                &Default::default(),
+            )
+            .expect("edit");
+            assert_eq!(edited.animation_plays, expected);
+            fs::remove_file(path).expect("owned fixture cleanup");
+        }
+        let ffmpeg =
+            std::path::PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+                .join("bin/ffmpeg.exe");
+        for (extension, codec, option) in [
+            ("apng", "apng", "-plays"),
+            ("webp", "libwebp_anim", "-loop"),
+            ("avif", "libaom-av1", "-loop"),
+        ] {
+            for plays in [0, 1, 3] {
+                let path = temporary_path(extension);
+                let output = std::process::Command::new(&ffmpeg)
+                    .creation_flags(0x08000000)
+                    .args([
+                        "-v",
+                        "error",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "testsrc2=size=32x24:rate=2:duration=1",
+                        "-frames:v",
+                        "2",
+                        "-c:v",
+                        codec,
+                        "-threads",
+                        "1",
+                        option,
+                        &plays.to_string(),
+                    ])
+                    .arg(&path)
+                    .output()
+                    .expect("fixture");
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let decoded = decode_image(&path).expect("animation");
+                assert_eq!(decoded.animation_plays, plays, "{extension}");
+                assert_eq!(decoded.frames.len(), 2);
+                fs::remove_file(path).expect("owned fixture cleanup");
+            }
         }
     }
 

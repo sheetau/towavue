@@ -80,6 +80,7 @@ pub(super) fn application() -> (
     app.media_kind = Some(MediaKind::Image);
     app.displayed_tab = Some(tab);
     let source = Arc::new(DecodedImage {
+        animation_plays: 0,
         format: "test",
         frames: vec![towavue_runtime_windows::DecodedImageFrame {
             width: 8,

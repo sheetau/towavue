@@ -290,7 +290,6 @@ pub(crate) fn track(
     file: &mut fs::File,
     item: BoxRange,
     current: &dyn Fn() -> bool,
-    read_repetition: bool,
 ) -> Result<Track, Error> {
     let children = boxes(file, item.start, item.end, current)?;
     let header = one(&children, b"tkhd")?.ok_or_else(|| invalid("track has no tkhd"))?;
@@ -304,7 +303,7 @@ pub(crate) fn track(
         return Err(invalid("invalid track ID"));
     }
     let mut loops = None;
-    if read_repetition && let Some(edts) = one(&children, b"edts")? {
+    if let Some(edts) = one(&children, b"edts")? {
         let edits = boxes(file, edts.start, edts.end, current)?;
         let edit = one(&edits, b"elst")?.ok_or_else(|| invalid("edts has no elst"))?;
         let edit = bytes(file, edit, 64)?;

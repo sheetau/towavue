@@ -160,6 +160,7 @@ pub fn render_image_edits(
         frames.push(renderer.render(frame, &|| cancel.is_cancelled())?);
     }
     Ok(DecodedImage {
+        animation_plays: source.animation_plays,
         format: source.format,
         frames,
     })
@@ -383,6 +384,7 @@ mod tests {
             delay: small.delay,
         };
         let source = DecodedImage {
+            animation_plays: 0,
             format: "generated",
             frames: vec![small.clone(), large.clone(), large],
         };
@@ -399,6 +401,7 @@ mod tests {
         assert_eq!(GRAPH_BUILDS.get(), 0);
 
         let resized = DecodedImage {
+            animation_plays: 0,
             format: "generated",
             frames: vec![small.clone(); 3],
         };
@@ -414,6 +417,7 @@ mod tests {
         assert_eq!(GRAPH_BUILDS.get(), 0);
 
         let source = DecodedImage {
+            animation_plays: 0,
             format: "generated",
             frames: vec![
                 small.clone(),
@@ -443,6 +447,7 @@ mod tests {
     #[test]
     fn unedited_frames_copy_exact_pixels_without_native_filters_and_keep_validation() {
         let source = DecodedImage {
+            animation_plays: 0,
             format: "generated",
             frames: [(257, 67), (3, 2)]
                 .into_iter()
@@ -505,6 +510,7 @@ mod tests {
         let cancel = Cancellation::default();
         for varying_size in [false, true] {
             let source = DecodedImage {
+                animation_plays: 0,
                 format: "generated",
                 frames: (0..6)
                     .map(|index| {
@@ -631,6 +637,7 @@ mod tests {
             ("hd-animation", 12, 1920, 1080, 1280, 720),
         ] {
             let source = DecodedImage {
+                animation_plays: 0,
                 format: "generated",
                 frames: (0..count)
                     .map(|index| DecodedImageFrame {
@@ -665,6 +672,7 @@ mod tests {
                     let start = std::time::Instant::now();
                     let rendered = if mode == 0 {
                         DecodedImage {
+                            animation_plays: 0,
                             format: source.format,
                             frames: source
                                 .frames
@@ -760,6 +768,7 @@ mod tests {
     fn orthogonal_comparison_reads_source_pixels_without_rendering() {
         let cancel = Cancellation::default();
         let source = DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![
                 DecodedImageFrame {
@@ -851,6 +860,7 @@ mod tests {
     fn orthogonal_comparison_checks_long_rows_and_rejects_invalid_views() {
         let cancel = Cancellation::default();
         let mut source = DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![DecodedImageFrame {
                 width: 16386,
@@ -1023,6 +1033,7 @@ mod tests {
     #[test]
     fn rendered_comparison_reuses_current_pixels_and_checks_every_frame() {
         let source = DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: (0..2)
                 .map(|index| DecodedImageFrame {
@@ -1091,6 +1102,7 @@ mod tests {
         let mode = std::env::var("TOWAVUE_IMAGE_COMPARE_BENCH").unwrap_or_else(|_| "reuse".into());
         assert!(matches!(mode.as_str(), "reuse" | "recompute"));
         let source = DecodedImage {
+            animation_plays: 0,
             format: "generated",
             frames: vec![DecodedImageFrame {
                 width: 4096,
@@ -1149,6 +1161,7 @@ mod tests {
             delay: std::time::Duration::from_millis(80),
         };
         let source = DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![uniform.clone(), varied],
         };
@@ -1237,6 +1250,7 @@ mod tests {
         assert!(
             compare_image_edits(
                 &DecodedImage {
+                    animation_plays: 0,
                     format: "test",
                     frames: vec![uniform]
                 },
@@ -1261,6 +1275,7 @@ mod tests {
     fn clean_reversible_histories_preserve_every_source_pixel() {
         use towavue_core::{EditHistory, MediaKind};
         let source = DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![DecodedImageFrame {
                 width: 3,
@@ -1306,6 +1321,7 @@ mod tests {
     fn free_rotation_preserves_alpha_delays_exact_quarters_and_rejects_obsolete_geometry() {
         use towavue_core::ImageRotation;
         let source = DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![DecodedImageFrame {
                 width: 9,
@@ -1517,6 +1533,7 @@ mod tests {
     #[test]
     fn resampling_does_not_blend_hidden_transparent_red_into_visible_blue() {
         let source = DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![DecodedImageFrame {
                 width: 9,
@@ -1653,6 +1670,7 @@ mod tests {
     #[test]
     fn resize_keeps_edit_order_frame_delays_and_transparent_color() {
         let source = DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![DecodedImageFrame {
                 width: 2,

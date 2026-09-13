@@ -285,6 +285,7 @@ fn tab_focus_registers_image_video_audio_values_and_path_rows_without_dispatch()
                     &context,
                     &paths[0],
                     Arc::new(DecodedImage {
+                        animation_plays: 0,
                         format: "test",
                         frames: vec![towavue_runtime_windows::DecodedImageFrame {
                             width: 2,

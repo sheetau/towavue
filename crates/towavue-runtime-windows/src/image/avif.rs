@@ -30,8 +30,9 @@ pub(super) fn decode(
     current: &dyn Fn() -> bool,
     preview: &mut ImagePreviewCallback<'_>,
     first_only: bool,
-) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
-    decode_frames(path, byte_limit, current, preview, first_only, None).map(|(frames, _)| frames)
+) -> Result<(Vec<DecodedImageFrame>, u32), ImageDecodeError> {
+    decode_frames(path, byte_limit, current, preview, first_only, None)
+        .map(|(frames, _, plays)| (frames, plays))
 }
 
 pub(crate) fn validate(
@@ -48,7 +49,7 @@ pub(crate) fn validate(
         false,
         Some(progress),
     )
-    .map(|(_, count)| count)
+    .map(|(_, count, _)| count)
 }
 
 // Validation consumes each merged frame immediately. Retained display and first-only
@@ -60,7 +61,7 @@ fn decode_frames(
     preview: &mut ImagePreviewCallback<'_>,
     first_only: bool,
     validation_progress: Option<&dyn Fn(Duration)>,
-) -> Result<(Vec<DecodedImageFrame>, usize), ImageDecodeError> {
+) -> Result<(Vec<DecodedImageFrame>, usize, u32), ImageDecodeError> {
     let (color, alpha, premultiplied) = select(path, current)?;
     ffmpeg::init().map_err(ffmpeg_error)?;
     let mut color_decoder = Plane::new(path, &color, Pixel::RGBA, byte_limit, current)?;
@@ -159,7 +160,7 @@ fn decode_frames(
         frames.push(frame);
         count += 1;
         if first_only {
-            return Ok((frames, count));
+            return Ok((frames, count, color.plays));
         }
     }
     if let Some(alpha) = &mut alpha_decoder
@@ -170,13 +171,14 @@ fn decode_frames(
     if count == 0 {
         return Err(invalid("no decoded frames"));
     }
-    Ok((frames, count))
+    Ok((frames, count, color.plays))
 }
 
 #[derive(Clone, Copy)]
 struct Selection {
     id: u32,
     timing: Option<(u32, u64)>,
+    plays: u32,
 }
 
 fn select(
@@ -193,15 +195,20 @@ fn select(
             Selection {
                 id: still.color,
                 timing: None,
+                plays: 1,
             },
-            still.alpha.map(|id| Selection { id, timing: None }),
+            still.alpha.map(|id| Selection {
+                id,
+                timing: None,
+                plays: 1,
+            }),
             still.premultiplied,
         ));
     };
     let tracks = boxes(&mut file, movie.start, movie.end, current)?
         .into_iter()
         .filter(|item| &item.kind == b"trak")
-        .map(|item| container::track(&mut file, item, current, false))
+        .map(|item| container::track(&mut file, item, current))
         .collect::<Result<Vec<_>, _>>()?;
     let colors: Vec<_> = tracks
         .iter()
@@ -227,6 +234,7 @@ fn select(
     let selected = |track: &container::Track| Selection {
         id: track.id,
         timing: Some((track.timescale, track.duration)),
+        plays: track.loops.unwrap_or(1),
     };
     Ok((
         selected(color),

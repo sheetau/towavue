@@ -442,6 +442,7 @@ mod tests {
             assert!(actual.rgba == expected.rgba, "composed pixels differ");
         }
         let image = crate::DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![],
         };

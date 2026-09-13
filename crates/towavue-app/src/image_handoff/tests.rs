@@ -7,6 +7,7 @@ type App = Application<fn(AppEvent)>;
 
 fn decoded(width: u32, height: u32, color: [u8; 4]) -> Arc<DecodedImage> {
     Arc::new(DecodedImage {
+        animation_plays: 0,
         format: "test",
         frames: vec![towavue_runtime_windows::DecodedImageFrame {
             width,

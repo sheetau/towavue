@@ -209,6 +209,7 @@ fn video_resize_composes_with_rotation_crop_and_refuses_stale_or_wrong_media_bef
     assert_eq!(fs::read(&request.target).expect("target preserved"), saved);
     assert_eq!(fs::read(&source).expect("source preserved"), original);
     let image = crate::DecodedImage {
+        animation_plays: 0,
         format: "test",
         frames: vec![],
     };

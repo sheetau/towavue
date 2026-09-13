@@ -21,6 +21,7 @@ fn free_rotation_worker_keeps_animation_original_pixels_and_undo_redo_tab_genera
     app.media_kind = Some(MediaKind::Image);
     app.displayed_tab = Some(tab);
     let source = Arc::new(DecodedImage {
+        animation_plays: 0,
         format: "test",
         frames: [31, 71]
             .into_iter()

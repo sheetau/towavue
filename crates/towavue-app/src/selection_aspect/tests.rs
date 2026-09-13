@@ -573,6 +573,7 @@ fn image_aspect_presets_use_edited_geometry_preserve_history_and_export_selected
             &context,
             &target,
             Arc::new(DecodedImage {
+                animation_plays: 0,
                 format: "png",
                 frames: vec![exported],
             }),

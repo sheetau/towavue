@@ -1135,6 +1135,7 @@ fn apng_poster_save_preserves_separate_edited_poster_and_animation() {
         let poster = image::open(&source).expect("default image").to_rgba8();
         assert_ne!(poster.as_raw(), &original.frames[0].rgba);
         let poster = crate::DecodedImage {
+            animation_plays: 0,
             format: "PNG",
             frames: vec![crate::DecodedImageFrame {
                 width: 4,

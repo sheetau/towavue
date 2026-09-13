@@ -392,6 +392,7 @@ struct ImagePresentation {
     texture: TextureHandle,
     frame_index: usize,
     next_frame_at: Option<Instant>,
+    plays_left: u32,
     sampling: std::rc::Rc<std::cell::Cell<TextureOptions>>,
 }
 
@@ -480,6 +481,7 @@ impl ImageTextureCache {
         {
             let cached = self.entries.remove(index).expect("cached image");
             let mut image = ImagePresentation {
+                plays_left: decoded.animation_plays,
                 decoded,
                 texture: cached.texture.clone(),
                 frame_index: 0,
@@ -552,6 +554,7 @@ impl ImagePresentation {
         );
         let next_frame_at = decoded.is_animated().then(|| Instant::now() + frame.delay);
         Ok(Self {
+            plays_left: decoded.animation_plays,
             decoded,
             texture,
             frame_index,
@@ -581,20 +584,38 @@ impl ImagePresentation {
         let previous_frame = self.frame_index;
         let previous_deadline = deadline;
         while deadline <= now {
+            if self.frame_index + 1 == self.decoded.frames.len() {
+                if self.plays_left == 1 {
+                    self.next_frame_at = None;
+                    break;
+                }
+                self.plays_left = self.plays_left.saturating_sub(1);
+            }
             self.frame_index = (self.frame_index + 1) % self.decoded.frames.len();
             deadline += self.decoded.frames[self.frame_index].delay;
             if self.frame_index == previous_frame && deadline <= now {
                 // Skip complete cycles without iterating over time spent away from the UI.
                 let cycle = deadline - previous_deadline;
-                let remainder = (now - deadline).as_nanos() % cycle.as_nanos();
-                deadline = now
-                    - Duration::new(
-                        (remainder / 1_000_000_000) as u64,
-                        (remainder % 1_000_000_000) as u32,
-                    );
+                if self.plays_left == 0 {
+                    let remainder = (now - deadline).as_nanos() % cycle.as_nanos();
+                    deadline = now
+                        - Duration::new(
+                            (remainder / 1_000_000_000) as u64,
+                            (remainder % 1_000_000_000) as u32,
+                        );
+                } else {
+                    // Leave the terminal cycle to the framewise path so its last
+                    // frame remains visible, even after a long hidden-window gap.
+                    let skip = ((now - deadline).as_nanos() / cycle.as_nanos())
+                        .min(u128::from(self.plays_left - 1)) as u32;
+                    deadline += cycle * skip;
+                    self.plays_left -= skip;
+                }
             }
         }
-        self.next_frame_at = Some(deadline);
+        if self.next_frame_at.is_some() {
+            self.next_frame_at = Some(deadline);
+        }
         if self.frame_index == previous_frame {
             return false;
         }
@@ -6096,6 +6117,7 @@ where
             ImagePresentation::from_decoded_frame(context, path, decoded, frame_index, options)?;
         if let Some(previous) = &self.image {
             image.next_frame_at = previous.next_frame_at;
+            image.plays_left = previous.plays_left;
         }
         self.image = Some(image);
         self.image_error = None;
@@ -10396,6 +10418,7 @@ mod tests {
                 &context,
                 &path,
                 DecodedImage {
+                    animation_plays: 0,
                     format: "test",
                     frames: vec![towavue_runtime_windows::DecodedImageFrame {
                         width: 400,
@@ -13011,6 +13034,7 @@ mod tests {
                 &context,
                 &path,
                 DecodedImage {
+                    animation_plays: 0,
                     format: "test",
                     frames: vec![towavue_runtime_windows::DecodedImageFrame {
                         width: 400,
@@ -13131,6 +13155,7 @@ mod tests {
                 &context,
                 &root.join("image.png"),
                 DecodedImage {
+                    animation_plays: 0,
                     format: "test",
                     frames: vec![towavue_runtime_windows::DecodedImageFrame {
                         width: 400,
@@ -13523,6 +13548,7 @@ mod tests {
             images: vec![(
                 path,
                 Ok(DecodedImage {
+                    animation_plays: 0,
                     format: "fixture",
                     frames: vec![
                         towavue_runtime_windows::DecodedImageFrame {
@@ -13680,6 +13706,7 @@ mod tests {
                 &context,
                 &path,
                 DecodedImage {
+                    animation_plays: 0,
                     format: "test",
                     frames: vec![towavue_runtime_windows::DecodedImageFrame {
                         width: 5,
@@ -15984,6 +16011,7 @@ mod tests {
                     &context,
                     &path,
                     DecodedImage {
+                        animation_plays: 0,
                         format: "test",
                         frames: vec![towavue_runtime_windows::DecodedImageFrame {
                             width: 64,
@@ -18152,6 +18180,7 @@ mod tests {
             ui.label("Recovery glyphs");
         });
         let decoded = DecodedImage {
+            animation_plays: 0,
             format: "GIF",
             frames: vec![
                 towavue_runtime_windows::DecodedImageFrame {
@@ -18375,6 +18404,7 @@ mod tests {
                             &context,
                             &path,
                             Arc::new(DecodedImage {
+                                animation_plays: 0,
                                 format: "PNG",
                                 frames: vec![towavue_runtime_windows::DecodedImageFrame {
                                     width: 2,
@@ -18549,6 +18579,7 @@ mod tests {
                     &context,
                     Path::new("image.png"),
                     Arc::new(DecodedImage {
+                        animation_plays: 0,
                         format: "PNG",
                         frames: vec![towavue_runtime_windows::DecodedImageFrame {
                             width: 1,
@@ -18752,9 +18783,83 @@ mod tests {
     }
 
     #[test]
+    fn finite_animation_stops_on_the_last_frame_after_declared_plays() {
+        let context = fonts::test_context();
+        let start = Instant::now();
+        for plays in [0, 1, 2, 3, u32::MAX] {
+            let decoded = Arc::new(DecodedImage {
+                animation_plays: plays,
+                format: "test",
+                frames: [10, 20, 30]
+                    .into_iter()
+                    .map(|nanos| towavue_runtime_windows::DecodedImageFrame {
+                        width: 1,
+                        height: 1,
+                        rgba: vec![nanos, 0, 0, 255],
+                        delay: Duration::from_nanos(u64::from(nanos)),
+                    })
+                    .collect(),
+            });
+            let mut sequential =
+                ImagePresentation::from_decoded(&context, Path::new("finite.gif"), decoded.clone())
+                    .expect("image");
+            sequential.next_frame_at = Some(start + Duration::from_nanos(10));
+            for elapsed in [
+                0,
+                9,
+                10,
+                29,
+                30,
+                59,
+                60,
+                61,
+                119,
+                120,
+                179,
+                180,
+                1_000_000_000_000u64,
+            ] {
+                let mut image = ImagePresentation::from_decoded(
+                    &context,
+                    Path::new("finite.gif"),
+                    decoded.clone(),
+                )
+                .expect("image");
+                image.next_frame_at = Some(start + Duration::from_nanos(10));
+                let stopped = plays != 0 && elapsed >= u64::from(plays) * 60;
+                let phase = elapsed % 60;
+                let expected = if stopped || phase >= 30 {
+                    2
+                } else if phase >= 10 {
+                    1
+                } else {
+                    0
+                };
+                for image in [&mut image, &mut sequential] {
+                    image.advance_animation(start + Duration::from_nanos(elapsed));
+                    assert_eq!(
+                        image.frame_index, expected,
+                        "plays {plays}, elapsed {elapsed}"
+                    );
+                    assert_eq!(
+                        image.next_frame_at.is_none(),
+                        stopped,
+                        "plays {plays}, elapsed {elapsed}"
+                    );
+                    if stopped {
+                        assert!(!image.advance_animation(start + Duration::from_secs(2000)));
+                        assert_eq!(image.frame_index, 2);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn animation_catches_up_after_a_long_deadline_gap() {
         let context = fonts::test_context();
         let decoded = Arc::new(DecodedImage {
+            animation_plays: 0,
             format: "GIF",
             frames: [10, 20, 30]
                 .into_iter()
@@ -18788,6 +18893,7 @@ mod tests {
     fn animation_deadlines_match_framewise_advancement_at_cycle_boundaries() {
         let context = fonts::test_context();
         let decoded = Arc::new(DecodedImage {
+            animation_plays: 0,
             format: "GIF",
             frames: [10_000_001, 20_000_003, 30_000_007]
                 .into_iter()
@@ -19000,6 +19106,7 @@ mod tests {
             &context,
             &path,
             Arc::new(DecodedImage {
+                animation_plays: 0,
                 format: "PNG",
                 frames: vec![towavue_runtime_windows::DecodedImageFrame {
                     width: 600,
@@ -19165,6 +19272,7 @@ mod tests {
         app.pending_image_previews = paths.iter().cloned().collect();
         let generation = app.image_generation;
         let decoded = Arc::new(DecodedImage {
+            animation_plays: 0,
             format: "GIF",
             frames: vec![
                 DecodedImageFrame {
@@ -19584,6 +19692,7 @@ mod tests {
         let context = fonts::test_context();
         let make_image = |value| {
             Arc::new(DecodedImage {
+                animation_plays: 0,
                 format: "PNG",
                 frames: vec![towavue_runtime_windows::DecodedImageFrame {
                     width: 1,
@@ -19750,6 +19859,7 @@ mod tests {
     fn image_texture_creation_obeys_configured_device_limit_without_panicking() {
         let context = fonts::test_context();
         let decoded = DecodedImage {
+            animation_plays: 0,
             format: "PNG",
             frames: vec![towavue_runtime_windows::DecodedImageFrame {
                 width: 4096,
@@ -19804,6 +19914,7 @@ mod tests {
                 &context,
                 &root.join("page.png"),
                 DecodedImage {
+                    animation_plays: 0,
                     format: "PNG",
                     frames: vec![towavue_runtime_windows::DecodedImageFrame {
                         width,
@@ -19968,6 +20079,7 @@ mod tests {
         app.path = Some(path);
         app.media_kind = Some(MediaKind::Image);
         let decoded = Arc::new(DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![
                 DecodedImageFrame {
@@ -19985,6 +20097,7 @@ mod tests {
             ],
         });
         app.image = Some(ImagePresentation {
+            plays_left: decoded.animation_plays,
             decoded: Arc::clone(&decoded),
             sampling: std::rc::Rc::new(std::cell::Cell::new(TextureOptions::LINEAR)),
             frame_index: 1,
@@ -20042,6 +20155,7 @@ mod tests {
         app.path = Some(path.clone());
         app.media_kind = Some(MediaKind::Image);
         let source = Arc::new(DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![
                 DecodedImageFrame {
@@ -20281,6 +20395,7 @@ mod tests {
         app.path = Some(first_path.clone());
         app.media_kind = Some(MediaKind::Image);
         let source = Arc::new(DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![DecodedImageFrame {
                 width: 2,
@@ -20369,6 +20484,7 @@ mod tests {
             captured_at: std::time::SystemTime::UNIX_EPOCH,
         };
         let decoded = Arc::new(DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![DecodedImageFrame {
                 width: 2,
@@ -20446,6 +20562,7 @@ mod tests {
         app.displayed_tab = Some(tab);
         app.media_kind = Some(MediaKind::Image);
         let source = Arc::new(DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![DecodedImageFrame {
                 width: 4,
@@ -20595,6 +20712,7 @@ mod tests {
         app.media_kind = Some(MediaKind::Image);
         app.ui_context = Some(context.clone());
         let source = Arc::new(DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![
                 DecodedImageFrame {
@@ -20729,6 +20847,7 @@ mod tests {
         app.media_kind = Some(MediaKind::Image);
         app.ui_context = Some(context.clone());
         let source = Arc::new(DecodedImage {
+            animation_plays: 0,
             format: "test",
             frames: vec![DecodedImageFrame {
                 width: 2,

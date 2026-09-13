@@ -19,6 +19,7 @@ fn fixture(root: &Path) -> (App, egui::Context, Vec<PathBuf>) {
             &context,
             &paths[0],
             Arc::new(DecodedImage {
+                animation_plays: 0,
                 format: "test",
                 frames: vec![towavue_runtime_windows::DecodedImageFrame {
                     width: 1,
@@ -58,6 +59,7 @@ fn complete(app: &mut App) {
         images: vec![(
             app.path.clone().expect("target"),
             Ok(Arc::new(DecodedImage {
+                animation_plays: 0,
                 format: "test",
                 frames: vec![towavue_runtime_windows::DecodedImageFrame {
                     width: 1,

@@ -75,6 +75,7 @@ fn selection_zoom_keeps_the_full_image_and_clears_selection_in_the_input_frame()
             &context,
             &path,
             DecodedImage {
+                animation_plays: 0,
                 format: "test",
                 frames: vec![towavue_runtime_windows::DecodedImageFrame {
                     width: 600,
@@ -297,6 +298,7 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
             &context,
             &path,
             DecodedImage {
+                animation_plays: 0,
                 format: "test",
                 frames: vec![towavue_runtime_windows::DecodedImageFrame {
                     width: 1000,

@@ -61,9 +61,9 @@ pub(super) fn decode(
     current: &dyn Fn() -> bool,
     preview: &mut ImagePreviewCallback<'_>,
     first_only: bool,
-) -> Result<Vec<DecodedImageFrame>, ImageDecodeError> {
+) -> Result<(Vec<DecodedImageFrame>, u32), ImageDecodeError> {
     let mut frames = Vec::new();
-    read_frames(
+    let plays = read_frames(
         path,
         Some(byte_limit),
         current,
@@ -83,7 +83,7 @@ pub(super) fn decode(
             Ok(())
         },
     )?;
-    Ok(frames)
+    Ok((frames, plays))
 }
 
 pub(crate) fn write_frames(
@@ -117,7 +117,7 @@ pub(crate) fn write_frames(
         },
     );
     check_current(current)?;
-    result
+    result.map(|_| ())
 }
 
 fn read_frames(
@@ -127,13 +127,18 @@ fn read_frames(
     first_only: bool,
     include_poster: bool,
     visit: &mut impl FnMut(u32, u32, &[u8], Duration) -> Result<(), ImageDecodeError>,
-) -> Result<(), ImageDecodeError> {
+) -> Result<u32, ImageDecodeError> {
     let mut decoder = png::Decoder::new(open(path, current)?);
     decoder.set_limits(png::Limits {
         bytes: IMAGE_BYTE_LIMIT,
     });
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info()?;
+    let plays = reader
+        .info()
+        .animation_control
+        .ok_or(ImageDecodeError::Empty)?
+        .num_plays;
     let (width, height) = reader.info().size();
     let frame_count = reader
         .info()
@@ -272,5 +277,5 @@ fn read_frames(
         reader.finish()?;
     }
     check_current(current)?;
-    Ok(())
+    Ok(plays)
 }

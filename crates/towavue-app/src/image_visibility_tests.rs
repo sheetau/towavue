@@ -49,6 +49,7 @@ fn visibility_trial(show: bool) {
             app.media_kind = Some(MediaKind::Image);
             app.state = PlaybackState::Paused;
             let decoded = Arc::new(DecodedImage {
+                animation_plays: 0,
                 format: "test",
                 frames: [10, 30]
                     .into_iter()

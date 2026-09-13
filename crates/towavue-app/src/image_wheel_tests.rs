@@ -23,6 +23,7 @@ fn image_wheel_reaches_the_rendered_view_without_requiring_window_focus() {
                     &context,
                     &path,
                     DecodedImage {
+                        animation_plays: 0,
                         format: "test",
                         frames: vec![towavue_runtime_windows::DecodedImageFrame {
                             width: 400,

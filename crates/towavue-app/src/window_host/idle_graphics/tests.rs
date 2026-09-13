@@ -14,6 +14,7 @@ fn seed(app: &mut WindowApplication, path: PathBuf, color: [u8; 4]) -> egui::Tex
     app.next_media_instance();
     app.fullscreen = true;
     let decoded = Arc::new(DecodedImage {
+        animation_plays: 0,
         format: "test",
         frames: vec![towavue_runtime_windows::DecodedImageFrame {
             width: 1024,

@@ -27,7 +27,11 @@ fn decode_tile(
 ) -> Result<PlaneFrame, ImageDecodeError> {
     let mut decoder = PlaneDecoder::new(
         open_input(path)?,
-        &Selection { id, timing: None },
+        &Selection {
+            id,
+            timing: None,
+            plays: 1,
+        },
         pixel,
         limit,
     )?;

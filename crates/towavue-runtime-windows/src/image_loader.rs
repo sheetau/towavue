@@ -2115,6 +2115,7 @@ mod tests {
 
     fn pixel(value: u8) -> Arc<DecodedImage> {
         Arc::new(DecodedImage {
+            animation_plays: 0,
             format: "PNG",
             frames: vec![crate::DecodedImageFrame {
                 width: 1,
@@ -2494,6 +2495,7 @@ mod tests {
                     }
                     assert_eq!(budget, IMAGE_BYTE_LIMIT);
                     Ok(DecodedImage {
+                        animation_plays: 0,
                         format: "PNG",
                         frames: vec![crate::DecodedImageFrame {
                             width: 1,
@@ -2622,6 +2624,7 @@ mod tests {
                         assert!(!current());
                     }
                     Ok(DecodedImage {
+                        animation_plays: 0,
                         format: "PNG",
                         frames: Vec::new(),
                     })

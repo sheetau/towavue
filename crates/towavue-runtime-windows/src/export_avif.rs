@@ -99,7 +99,7 @@ fn track(
     item: BoxRange,
     cancelled: &AtomicBool,
 ) -> Result<Track, ExportError> {
-    crate::avif_container::track(file, item, &|| !cancelled.load(Ordering::Relaxed), true)
+    crate::avif_container::track(file, item, &|| !cancelled.load(Ordering::Relaxed))
         .map_err(Into::into)
 }
 

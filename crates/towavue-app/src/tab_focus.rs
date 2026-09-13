@@ -152,7 +152,7 @@ pub(super) fn finish(context: &Context, loading: bool, tab_bar_visible: bool) {
         context.request_repaint();
     }
     if fallback && tab_bar_visible {
-        context.data_mut(|data| data.insert_temp("filmstrip-return-tab".into(), true));
+        context.data_mut(|data| data.insert_temp("tab-focus-fallback".into(), true));
         context.request_repaint();
     }
 }

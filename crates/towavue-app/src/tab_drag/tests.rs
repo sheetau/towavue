@@ -389,6 +389,77 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
 }
 
 #[test]
+fn filmstrip_allows_tab_reorder_and_detach_without_dismissing_the_overlay() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::filmstrip_allows_tab_reorder_and_detach_without_dismissing_the_overlay",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = setup(&root);
+        let context = app.ui_context.clone().expect("context");
+        context.set_pixels_per_point(density);
+        app.filmstrip_open = true;
+        let size = egui::vec2(960.0, 576.0);
+        let frame = |app: &mut Application<_>, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            (output, actions)
+        };
+        for _ in 0..3 {
+            frame(&mut app, vec![]);
+        }
+        let original = state(&app).widgets;
+        let tabs = app.tabs.clone();
+        let start = original[0].2.center();
+        for target in [drop_point(&context, 3), egui::pos2(-20.0, 120.0)] {
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(start), pointer(start, true)],
+            );
+            let (_, actions) = frame(&mut app, vec![egui::Event::PointerMoved(target)]);
+            assert!(actions.is_empty());
+            assert!(state(&app).drag.as_ref().is_some_and(|drag| drag.crossed));
+            assert!(
+                active_pointer(
+                    &context,
+                    (
+                        app.tabs.active().map(|tab| tab.id),
+                        app.media_generation,
+                        app.graphics_epoch
+                    )
+                )
+                .is_some(),
+                "host receives drag feedback"
+            );
+            assert_eq!(state(&app).widgets, original);
+            assert_eq!(app.tabs, tabs, "order stays unchanged until release");
+            let (_, actions) = frame(&mut app, vec![pointer(target, false)]);
+            if target.x < 0.0 {
+                assert!(
+                    matches!(&actions[..], [UiAction::DropTab(tab, _, _)] if *tab == original[0].0)
+                );
+            } else {
+                assert!(actions == [UiAction::ReorderTab(original[0].0, 3)]);
+            }
+            assert!(app.filmstrip_open);
+            assert!(state(&app).drag.is_none());
+            assert!(
+                frame(&mut app, vec![]).1.is_empty(),
+                "release is not replayed"
+            );
+        }
+    }
+}
+
+#[test]
 fn tab_drag_keeps_tab_geometry_fixed_until_release() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_drag::tests::tab_drag_keeps_tab_geometry_fixed_until_release",

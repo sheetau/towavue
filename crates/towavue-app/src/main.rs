@@ -4113,7 +4113,7 @@ where
             })
             .flatten();
         let return_to_tab = root.ctx().data_mut(|data| {
-            data.remove_temp::<bool>("filmstrip-return-tab".into())
+            data.remove_temp::<bool>("tab-focus-fallback".into())
                 .unwrap_or(false)
         }) || tab_menu_focus
             .is_some_and(|(target, _)| !self.tabs.tabs().iter().any(|tab| tab.id == target));
@@ -4229,7 +4229,6 @@ where
                                     !self.modal_input_blocked()
                                         && !self.palette_open
                                         && !self.grid_open
-                                        && !self.filmstrip_open
                                         && !egui::Popup::is_any_open(ui.ctx()),
                                 );
                                 for (index, tab) in self.tabs.tabs().iter().enumerate() {
@@ -8415,11 +8414,12 @@ where
         if let Some(context) = &self.ui_context {
             if let Some((_, id)) = origin {
                 context.memory_mut(|memory| memory.request_focus(id));
-            } else if self.fullscreen {
-                self.fullscreen_controls_keyboard = true;
-                self.fullscreen_controls_focus_requested = true;
             } else {
-                context.data_mut(|data| data.insert_temp("filmstrip-return-tab".into(), true));
+                context.memory_mut(|memory| {
+                    if let Some(id) = memory.focused() {
+                        memory.surrender_focus(id);
+                    }
+                });
             }
         }
         self.request_redraw();
@@ -16891,9 +16891,9 @@ mod tests {
     }
 
     #[test]
-    fn filmstrip_focus_returns_to_the_origin_or_current_media_controls() {
+    fn filmstrip_restores_existing_focus_without_creating_a_tab_highlight() {
         let Some(root) = isolated_test_root(
-            "tests::filmstrip_focus_returns_to_the_origin_or_current_media_controls",
+            "tests::filmstrip_restores_existing_focus_without_creating_a_tab_highlight",
         ) else {
             return;
         };
@@ -16952,6 +16952,24 @@ mod tests {
             .find(|(_, node)| node.label() == Some("first.png"))
             .expect("invoking tab")
             .0;
+        for close_with_toggle in [true, false, true] {
+            assert!(context.memory(egui::Memory::focused).is_none());
+            app.dispatch(CommandId::ToggleFilmstrip);
+            for _ in 0..3 {
+                frame(&mut app, vec![]);
+            }
+            assert!(context.memory(egui::Memory::focused).is_some());
+            if close_with_toggle {
+                app.dispatch(CommandId::ToggleFilmstrip);
+            } else {
+                assert!(app.dismiss_overlay_or_fullscreen());
+            }
+            for _ in 0..3 {
+                let tree = frame(&mut app, vec![]);
+                assert_eq!(tree.focus, tree.tree.expect("root tree").root);
+                assert!(context.memory(egui::Memory::focused).is_none());
+            }
+        }
         for via_palette in [false, true] {
             frame(&mut app, vec![focus(origin)]);
             if via_palette {
@@ -16997,15 +17015,10 @@ mod tests {
         app.media_generation += 1;
         assert!(app.dismiss_overlay_or_fullscreen());
         let tree = frame(&mut app, vec![]);
-        let current = tree
-            .nodes
-            .iter()
-            .find(|(_, node)| node.label() == Some("second.png"))
-            .expect("current tab")
-            .0;
         assert_eq!(
-            tree.focus, current,
-            "changed media does not restore the old tab"
+            tree.focus,
+            tree.tree.expect("root tree").root,
+            "changed media does not focus the old or current tab"
         );
         frame(&mut app, vec![focus(origin)]);
         assert_eq!(frame(&mut app, vec![]).focus, origin, "return is one-shot");
@@ -17018,17 +17031,7 @@ mod tests {
         }
         let tree = frame(&mut app, vec![]);
         assert!(app.fullscreen);
-        let focused = tree
-            .nodes
-            .iter()
-            .find(|(id, _)| *id == tree.focus)
-            .expect("fullscreen focus");
-        assert!(
-            focused
-                .1
-                .label()
-                .is_some_and(|label| label.starts_with("Exit fullscreen"))
-        );
+        assert_eq!(tree.focus, tree.tree.expect("root tree").root);
         app.fullscreen = false;
         app.dispatch(CommandId::ToggleFilmstrip);
         while let Some(tab) = app.tabs.active().map(|tab| tab.id) {
@@ -17039,11 +17042,7 @@ mod tests {
         app.media_generation += 1;
         assert!(app.dismiss_overlay_or_fullscreen());
         let tree = frame(&mut app, vec![]);
-        assert!(
-            tree.nodes
-                .iter()
-                .any(|(id, node)| { *id == tree.focus && node.label() == Some("Welcome tab") })
-        );
+        assert_eq!(tree.focus, tree.tree.expect("root tree").root);
     }
 
     #[test]

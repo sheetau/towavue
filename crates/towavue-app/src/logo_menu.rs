@@ -241,13 +241,12 @@ pub(super) fn show(
         let mut builder = egui::UiBuilder::new();
         if set_open.is_some() {
             // This popup alternates between categories and direct submenus.
-            let width = ui
+            let size = ui
                 .spacing()
                 .default_area_size
-                .x
-                .min(context.content_rect().width());
-            ui.set_max_width(
-                (width - egui::Frame::popup(ui.style()).total_margin().sum().x).max(0.0),
+                .min(context.content_rect().size());
+            ui.set_max_size(
+                (size - egui::Frame::popup(ui.style()).total_margin().sum()).max(egui::Vec2::ZERO),
             );
             builder = builder.sizing_pass();
         }

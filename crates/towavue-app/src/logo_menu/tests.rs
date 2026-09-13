@@ -21,6 +21,31 @@ fn key(key: egui::Key) -> egui::Event {
     }
 }
 
+fn popup_bounds(output: &egui::FullOutput) -> Vec<egui::Rect> {
+    fn collect(shape: &egui::Shape, bounds: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    collect(shape, bounds);
+                }
+            }
+            egui::Shape::Rect(rect)
+                if rect.fill == chrome::FLOATING_BACKGROUND
+                    && rect.stroke.color == chrome::BORDER =>
+            {
+                bounds.push(rect.rect);
+            }
+            _ => {}
+        }
+    }
+    let mut bounds = Vec::new();
+    for shape in &output.shapes {
+        collect(&shape.shape, &mut bounds);
+    }
+    bounds.sort_by(|a, b| a.left().total_cmp(&b.left()));
+    bounds
+}
+
 fn setup(root: &Path) -> (Application<fn(AppEvent)>, egui::Pos2) {
     let mut app = Application::new(None, (|_| {}) as fn(AppEvent)).expect("app");
     let context = fonts::test_context();
@@ -62,9 +87,20 @@ fn logo_menu_sizes_follow_content_and_pointer_opening_does_not_focus_the_first_i
     ) else {
         return;
     };
-    let (mut app, origin) = setup(&root);
-    let size = egui::vec2(960.0, 720.0);
+    for density in [1.0, 1.25, 2.0] {
+        for height in [300.0, 720.0] {
+            check_menu_geometry(&root, density, egui::vec2(960.0, height));
+        }
+    }
+}
+
+fn check_menu_geometry(root: &Path, density: f32, size: egui::Vec2) {
+    let (mut app, origin) = setup(root);
+    let context = app.ui_context.as_ref().expect("context");
+    context.set_pixels_per_point(density);
+    context.global_style_mut(|style| style.animation_time = 0.0);
     let mut measured = Vec::new();
+    let mut popup_sizes = Vec::new();
     let mut first_focused = Vec::new();
     for (delta, title) in [
         (egui::Vec2::ZERO, "File"),
@@ -90,10 +126,11 @@ fn logo_menu_sizes_follow_content_and_pointer_opening_does_not_focus_the_first_i
         for _ in 0..4 {
             frame(&mut app, size, vec![]);
         }
-        let tree = frame(&mut app, size, vec![])
-            .platform_output
-            .accesskit_update
-            .expect("menu tree");
+        let output = frame(&mut app, size, vec![]);
+        let bounds = popup_bounds(&output);
+        assert_eq!(bounds.len(), 1, "one menu frame: {bounds:?}");
+        popup_sizes.push(bounds[0].size());
+        let tree = output.platform_output.accesskit_update.expect("menu tree");
         let (id, node) = tree
             .nodes
             .iter()
@@ -148,6 +185,10 @@ fn logo_menu_sizes_follow_content_and_pointer_opening_does_not_focus_the_first_i
         (measured[0].1 - measured[4].1).abs() < 1.0,
         "root width must not inherit direct menu dimensions"
     );
+    assert_eq!(
+        popup_sizes[0], popup_sizes[4],
+        "root menu restores its size"
+    );
     assert!(
         measured[1..4]
             .iter()
@@ -185,7 +226,16 @@ fn logo_menu_sizes_follow_content_and_pointer_opening_does_not_focus_the_first_i
         for _ in 0..4 {
             frame(&mut app, size, vec![]);
         }
-        let tree = frame(&mut app, size, vec![])
+        let output = frame(&mut app, size, vec![]);
+        let bounds = popup_bounds(&output);
+        assert_eq!(bounds.len(), 2, "root and nested menu frames: {bounds:?}");
+        assert!(
+            (bounds[1].size() - popup_sizes[direct]).abs().max_elem() < 1.0,
+            "direct and nested popup sizes must match: {:?} vs {:?}",
+            popup_sizes[direct],
+            bounds[1].size()
+        );
+        let tree = output
             .platform_output
             .accesskit_update
             .expect("nested menu");

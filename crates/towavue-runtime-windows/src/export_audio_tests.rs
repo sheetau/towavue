@@ -93,6 +93,76 @@ pub(super) fn pcm(path: &Path) -> Vec<u8> {
 fn time(ms: i64) -> MediaTime {
     MediaTime::from_nanoseconds(ms * 1_000_000)
 }
+
+#[test]
+fn ordinary_rate_export_preserves_short_audio_counts_and_channels() {
+    let root = root("ordinary-tempo");
+    for sample_rate in [44100, 48000, 96000] {
+        for channels in [1, 4] {
+            let source = root.join(format!("source-{sample_rate}-{channels}.wav"));
+            ffmpeg(
+                &[
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    &format!("sine=sample_rate={sample_rate}:duration=1"),
+                    "-af",
+                    "atrim=end_sample=480",
+                    "-ac",
+                    &channels.to_string(),
+                    "-c:a",
+                    "pcm_s24le",
+                ],
+                &source,
+            );
+            for rate in [0.25_f32, 1.1, 4.0] {
+                for trimmed in [false, true] {
+                    let target = root.join(format!(
+                        "result-{sample_rate}-{channels}-{rate}-{trimmed}.wav"
+                    ));
+                    let mut operations = vec![EditOperation::SetRate(rate)];
+                    if trimmed {
+                        operations
+                            .push(EditOperation::SetTrimStart(MediaTime::from_nanoseconds(1)));
+                        operations.push(EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(
+                            1_000_000,
+                        )));
+                    }
+                    export_media(&ExportRequest {
+                        source: source.clone(),
+                        target: target.clone(),
+                        kind: MediaKind::Audio,
+                        operations,
+                        hardware_encode: false,
+                    })
+                    .expect("ordinary tempo export");
+                    let bytes = pcm(&target);
+                    let input_frames = if trimmed {
+                        (sample_rate as u64).div_ceil(1000) - 1
+                    } else {
+                        480
+                    };
+                    let units = (f64::from(rate) * f64::from(1 << 25)) as u128;
+                    let expected = (u128::from(input_frames) * (1 << 25)).div_ceil(units) as usize;
+                    assert_eq!(
+                        bytes.len(),
+                        expected * channels * 4,
+                        "{sample_rate}/{channels}/{rate}/{trimmed}"
+                    );
+                    assert!(
+                        bytes
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .any(|sample| f32::from_le_bytes(*sample).abs() > 0.001),
+                        "short audio must remain audible samples"
+                    );
+                }
+            }
+        }
+    }
+    fs::remove_dir_all(root).expect("remove owned fixture");
+}
 fn range(start: i64, end: i64) -> TimeRange {
     TimeRange::new(time(start), time(end)).expect("range")
 }
@@ -326,13 +396,15 @@ fn audio_only_keeps_trim_rate_volume_and_edited_timeline_samples() {
             "-map",
             "0:2",
             "-af",
-            "atrim=start_pts=9600:end_pts=48000,asetpts=PTS-STARTPTS,atempo=1.25,volume=0.5",
+            "atrim=start_pts=9600:end_pts=48000,asetpts=PTS-STARTPTS,apad=pad_len=4096,atempo=1.25,apad=whole_len=30720,atrim=end_sample=30720,volume=0.5",
             "-c:a",
             "pcm_s16le",
         ],
         &reference,
     );
-    assert_eq!(pcm(&request.target), pcm(&reference));
+    let actual = pcm(&request.target);
+    assert_eq!(actual.len(), 30_720 * 4, "0.8 seconds / 1.25x, mono f32");
+    assert!(actual == pcm(&reference), "trim/rate/volume reference PCM");
     request.target = root.join("timeline.wav");
     request.operations = vec![
         EditOperation::Timeline(TimelineEdit::Delete(range(400, 800))),

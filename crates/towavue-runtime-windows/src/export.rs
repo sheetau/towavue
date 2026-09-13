@@ -363,6 +363,7 @@ fn export_audio_cancellable(
         ));
     }
     let source_stamp = (options.normalize_peak
+        || (request.kind != MediaKind::Image && state.rate != 1.0)
         || image_metadata
         || png_source
         || gif_source
@@ -667,6 +668,33 @@ fn export_audio_cancellable(
         streams.png_image_sequence = true;
     }
     let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;
+    if streams.timeline.is_none() && streams.audio.is_some() && state.rate != 1.0 {
+        if !(0.25..=4.0).contains(&state.rate) {
+            return Err(ExportError::Failed("Invalid audio export rate".into()));
+        }
+        // Container duration can include longer video or another audio stream.
+        // Bound EOF context by the selected, trimmed samples before tempo instead.
+        let samples = audio_options::count_samples(
+            &staged_request,
+            &streams,
+            &staging,
+            &executable,
+            cancelled,
+            analyzing,
+        )?;
+        source_stamp
+            .as_ref()
+            .expect("rate export stamp")
+            .verify(&request.source)?;
+        // Every f32 rate in this range is an exact multiple of 2^-25.
+        const SCALE: u128 = 1 << 25;
+        let rate_units = (f64::from(state.rate) * SCALE as f64) as u128;
+        streams.audio_output_samples = Some(
+            u64::try_from((u128::from(samples) * SCALE).div_ceil(rate_units)).map_err(|_| {
+                ExportError::Failed("Audio output sample count is too large".into())
+            })?,
+        );
+    }
     if options.normalize_peak {
         let gain = audio_options::analyze(
             &staged_request,
@@ -1030,6 +1058,7 @@ struct ExportStreams {
     video: Option<(usize, ffmpeg::Rational)>,
     audio: Option<(usize, ffmpeg::Rational)>,
     audio_channels: Option<u16>,
+    audio_output_samples: Option<u64>,
     audio_post_filters: Vec<String>,
     metadata: MetadataExportOptions,
     duration: Option<towavue_core::MediaTime>,
@@ -1085,6 +1114,7 @@ impl ExportStreams {
                 video,
                 audio: audio.map(|(index, time_base, _)| (index, time_base)),
                 audio_channels: audio.map(|(_, _, channels)| channels),
+                audio_output_samples: None,
                 duration,
                 timeline: None,
                 audio_post_filters: Vec::new(),
@@ -1214,14 +1244,22 @@ fn ffmpeg_arguments(
             if !video.is_empty() {
                 arguments.extend(["-vf".into(), video.join(",")]);
             }
-            let mut audio = audio_filters(&state, streams.audio.map(|(_, time_base)| time_base));
+            let mut audio = audio_filters(
+                &state,
+                streams.audio.map(|(_, time_base)| time_base),
+                streams.audio_output_samples,
+            );
             audio.extend(streams.audio_post_filters.iter().cloned());
             if !audio.is_empty() {
                 arguments.extend(["-af".into(), audio.join(",")]);
             }
         }
         MediaKind::Audio => {
-            let mut audio = audio_filters(&state, streams.audio.map(|(_, time_base)| time_base));
+            let mut audio = audio_filters(
+                &state,
+                streams.audio.map(|(_, time_base)| time_base),
+                streams.audio_output_samples,
+            );
             audio.extend(streams.audio_post_filters.iter().cloned());
             if !audio.is_empty() {
                 arguments.extend(["-af".into(), audio.join(",")]);
@@ -1468,14 +1506,29 @@ fn video_filters(
     filters
 }
 
-fn audio_filters(state: &EditState, time_base: Option<ffmpeg::Rational>) -> Vec<String> {
+fn audio_filters(
+    state: &EditState,
+    time_base: Option<ffmpeg::Rational>,
+    output_samples: Option<u64>,
+) -> Vec<String> {
     let mut filters = Vec::new();
     if let Some(trim) = time_base.and_then(|time_base| trim_filter("atrim", state, time_base)) {
         filters.push(trim);
         filters.push("asetpts=PTS-STARTPTS".into());
     }
     if state.rate != 1.0 {
-        filters.extend(atempo_filters(state.rate));
+        if let Some(samples) = output_samples {
+            let sample_rate = time_base.expect("counted audio stream").denominator() as u32;
+            filters.extend(crate::tempo::timeline_filters(
+                f64::from(state.rate),
+                9,
+                sample_rate,
+            ));
+            filters.push(format!("apad=whole_len={samples}"));
+            filters.push(format!("atrim=end_sample={samples}"));
+        } else {
+            filters.extend(atempo_filters(state.rate));
+        }
     }
     if state.volume != 1.0 {
         filters.push(format!("volume={:.4}", state.volume));

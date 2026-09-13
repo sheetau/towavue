@@ -105,15 +105,24 @@ fn export_progress_only_unknown_running_jobs_request_animation_repaints() {
     let tab = app.tabs.open_new(path.clone(), MediaKind::Audio);
     let context = fonts::test_context();
     let mut time = 0.0;
-    for mode in 0..4 {
+    for mode in 0..6 {
         let mut export = active(
             &path,
             tab,
             MediaKind::Audio,
-            (mode == 1).then_some(Duration::from_secs(10)),
+            (mode == 1 || mode >= 4).then_some(Duration::from_secs(10)),
             false,
         );
-        export.cancelling = mode == 3;
+        if mode >= 4 {
+            export.request.operations.push(EditOperation::SetRate(4.0));
+            export.progress = ExportProgress::new(
+                &export.request,
+                &export.options,
+                Some(Duration::from_secs(10)),
+            );
+            export.analyzing_audio = true;
+        }
+        export.cancelling = mode == 3 || mode == 5;
         let mut delay = Duration::ZERO;
         for _ in 0..6 {
             let output = context.run_ui(
@@ -132,7 +141,7 @@ fn export_progress_only_unknown_running_jobs_request_animation_repaints() {
             delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
             time += 0.1;
         }
-        if mode == 2 {
+        if mode == 2 || mode == 4 {
             assert!(
                 delay <= Duration::from_millis(60),
                 "running unknown duration"
@@ -220,6 +229,31 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
     eprintln!(
         "PASS hardware export progress: native app rendering, two-pass/fallback/indeterminate/cancel/clear, unchanged edits/transport and CPU transfers 0"
     );
+}
+
+#[test]
+fn ordinary_rate_analysis_is_indeterminate_until_encoding() {
+    let mut request = request(Path::new("source.wav"), MediaKind::Audio);
+    for kind in [MediaKind::Audio, MediaKind::Video] {
+        request.kind = kind;
+        for normalized in [false, true] {
+            let mut options = ExportOptions::default();
+            options.audio.normalize_peak = normalized;
+            for rate in [0.25, 4.0] {
+                request.operations = vec![EditOperation::SetRate(rate)];
+                let progress =
+                    ExportProgress::new(&request, &options, Some(Duration::from_secs(20)));
+                for seconds in [0, 1, 20] {
+                    assert_eq!(progress.fraction(Duration::from_secs(seconds), true), None);
+                }
+                let halfway = progress.duration.expect("duration") / 2;
+                assert_eq!(
+                    progress.fraction(halfway, false),
+                    Some(if normalized { 0.75 } else { 0.5 })
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -501,13 +535,12 @@ fn normalized_save(root: &Path, source: &Path, output: ExportOutput) {
             if let Some(export) = &app.active_export {
                 assert_eq!(export.tab, tab);
                 assert_eq!(export.progress.duration, Some(Duration::from_millis(500)));
-                assert!(
-                    indicator(&output)
-                        .expect("job progress")
-                        .numeric_value()
-                        .expect("estimate")
-                        < 100.0
-                );
+                let value = indicator(&output).expect("job progress").numeric_value();
+                if export.analyzing_audio {
+                    assert!(value.is_none(), "count/normalize are indeterminate");
+                } else {
+                    assert!(value.expect("encoding estimate") < 100.0);
+                }
             } else {
                 assert!(indicator(&output).is_none() && fill(&output).is_none());
             }

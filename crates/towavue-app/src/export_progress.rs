@@ -3,6 +3,7 @@ use crate::*;
 pub(super) struct ExportProgress {
     duration: Option<Duration>,
     normalized: bool,
+    counts_audio_samples: bool,
     animation_start: Option<f64>,
     stopped_at: Option<f64>,
 }
@@ -34,12 +35,23 @@ impl ExportProgress {
         Self {
             duration,
             normalized: options.audio.normalize_peak,
+            counts_audio_samples: request.kind != MediaKind::Image
+                && towavue_core::EditState::from_operations(&request.operations).rate != 1.0
+                && !request
+                    .operations
+                    .iter()
+                    .any(|operation| matches!(operation, EditOperation::Timeline(_))),
             animation_start: None,
             stopped_at: None,
         }
     }
 
     fn fraction(&self, time: Duration, analyzing: bool) -> Option<f32> {
+        // Counting precedes tempo; normalization, if enabled, then restarts on the
+        // final output time axis. Do not present both passes as one percentage.
+        if analyzing && self.counts_audio_samples {
+            return None;
+        }
         self.duration.map(|duration| {
             let phase = (time.as_secs_f64() / duration.as_secs_f64()).clamp(0.0, 1.0);
             let fraction = if self.normalized {

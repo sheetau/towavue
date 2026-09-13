@@ -48,6 +48,105 @@ fn assert_near(actual: f64, expected: f64) {
 }
 
 #[test]
+fn sample_count_requires_one_positive_integer_from_its_own_filter() {
+    let stats = |count| format!("[astats@towavue_count @ 1234] Number of samples: {count}\n");
+    assert_eq!(
+        sample_count_from_statistics(&stats("480")).expect("positive count"),
+        480
+    );
+    assert_eq!(
+        sample_count_from_statistics(&stats("9007199254740993")).expect("exact large count"),
+        9007199254740993,
+        "do not round sample counts through f64"
+    );
+    for invalid in ["0", "-1", "1.5", "nan", "inf", "18446744073709551616"] {
+        assert!(sample_count_from_statistics(&stats(invalid)).is_err());
+    }
+    for invalid in [
+        String::new(),
+        stats("480").repeat(2),
+        stats("480").replace("towavue_count", "foreign"),
+    ] {
+        assert!(sample_count_from_statistics(&invalid).is_err());
+    }
+}
+
+#[test]
+fn ordinary_rate_counts_selected_audio_not_container_and_normalizes_bounded_output() {
+    let root = root("ordinary-rate-best-stream");
+    let source = root.join("source.mkv");
+    ffmpeg(
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=64x48:rate=10:duration=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=48000:cl=stereo:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=sample_rate=48000:duration=0.01",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-map",
+            "2:a",
+            "-c:v",
+            "ffv1",
+            "-c:a",
+            "pcm_s16le",
+            "-disposition:a:0",
+            "0",
+            "-disposition:a:1",
+            "default",
+        ],
+        &source,
+    );
+    for normalized in [false, true] {
+        let mut outputs = Vec::new();
+        for audio_only in [false, true] {
+            let mut request = request(
+                &source,
+                root.join(format!(
+                    "{normalized}-{audio_only}.{}",
+                    if audio_only { "wav" } else { "avi" }
+                )),
+            );
+            request.kind = MediaKind::Video;
+            request.operations.push(EditOperation::SetRate(4.0));
+            let mut options = options(normalized, AudioChannels::Stereo);
+            if audio_only {
+                options.output = ExportOutput::AudioOnly;
+            }
+            export_media_with_options(&request, options).expect("short selected audio");
+            let actual = samples(&request.target);
+            assert_eq!(actual.len(), 120 * 2, "480 source frames / 4x, stereo");
+            assert!(
+                peak(&actual) > 0.001,
+                "selected tone, not the silent stream"
+            );
+            assert!(
+                actual
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .all(|frame| frame[0] == frame[1])
+            );
+            if normalized {
+                assert_near(peak(&actual), 10_f64.powf(-1.0 / 20.0));
+            }
+            outputs.push(actual);
+        }
+        assert_eq!(outputs[0], outputs[1], "video and audio-only routing");
+    }
+    fs::remove_dir_all(&root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn audio_options_have_explicit_channel_rules_and_reject_unreliable_statistics() {
     assert!(
         AudioExportOptions::default()
@@ -210,62 +309,82 @@ fn normalization_progress_and_cancellation_keep_existing_target_and_detect_sourc
     fixture(&source);
     let mut request = request(&source, root.join("existing.wav"));
     request.kind = MediaKind::Video;
-    let options = ExportOptions {
+    let mut options = ExportOptions {
         output: ExportOutput::AudioOnly,
         ..options(true, AudioChannels::Stereo)
     };
     let existing = b"existing target";
     fs::write(&request.target, existing).expect("owned target");
-    for phase in 0..3 {
-        let cancelled = AtomicBool::new(false);
-        let seen_analysis = AtomicBool::new(false);
-        let seen_encode = AtomicBool::new(false);
-        let error = export_options_cancellable(
-            &request,
-            options.clone(),
-            &cancelled,
-            &|time| {
-                assert!(
-                    seen_analysis.load(Ordering::Relaxed),
-                    "analysis precedes encoding"
-                );
-                seen_encode.store(true, Ordering::Relaxed);
-                if phase == 1 && time > Duration::ZERO {
-                    cancelled.store(true, Ordering::Relaxed);
-                }
-                if phase == 2 && time == Duration::ZERO {
-                    let file = fs::OpenOptions::new()
-                        .write(true)
-                        .open(&source)
-                        .expect("owned source after analysis");
-                    let modified = file
-                        .metadata()
-                        .expect("metadata")
-                        .modified()
-                        .expect("mtime");
-                    file.set_modified(modified + Duration::from_secs(1))
-                        .expect("simulate external source change");
-                }
-            },
-            &|time| {
-                seen_analysis.store(true, Ordering::Relaxed);
-                if phase == 0 && time > Duration::ZERO {
-                    cancelled.store(true, Ordering::Relaxed);
-                }
-            },
-        )
-        .expect_err("cancel or source change");
-        if phase < 2 {
-            assert!(matches!(error, ExportError::Cancelled));
-        } else {
-            assert!(error.to_string().contains("source changed"), "{error}");
+    for (rate, normalized) in [(1.0, true), (4.0, false), (4.0, true)] {
+        request.operations = vec![EditOperation::SetRate(rate)];
+        options.audio.normalize_peak = normalized;
+        for phase in 0..4 {
+            let cancelled = AtomicBool::new(false);
+            let seen_analysis = AtomicBool::new(false);
+            let seen_encode = AtomicBool::new(false);
+            let error = export_options_cancellable(
+                &request,
+                options.clone(),
+                &cancelled,
+                &|time| {
+                    assert!(
+                        seen_analysis.load(Ordering::Relaxed),
+                        "analysis precedes encoding"
+                    );
+                    seen_encode.store(true, Ordering::Relaxed);
+                    if phase == 1 && time > Duration::ZERO {
+                        cancelled.store(true, Ordering::Relaxed);
+                    }
+                    if phase == 2 && time == Duration::ZERO {
+                        let file = fs::OpenOptions::new()
+                            .write(true)
+                            .open(&source)
+                            .expect("owned source after analysis");
+                        let modified = file
+                            .metadata()
+                            .expect("metadata")
+                            .modified()
+                            .expect("mtime");
+                        file.set_modified(modified + Duration::from_secs(1))
+                            .expect("simulate external source change");
+                    }
+                },
+                &|time| {
+                    let first = !seen_analysis.swap(true, Ordering::Relaxed);
+                    if phase == 3 && first {
+                        let file = fs::OpenOptions::new()
+                            .write(true)
+                            .open(&source)
+                            .expect("owned source");
+                        let modified = file
+                            .metadata()
+                            .expect("metadata")
+                            .modified()
+                            .expect("mtime");
+                        file.set_modified(modified + Duration::from_secs(1))
+                            .expect("source changed during analysis");
+                    }
+                    if phase == 0 && time > Duration::ZERO {
+                        cancelled.store(true, Ordering::Relaxed);
+                    }
+                },
+            )
+            .expect_err("cancel or source change");
+            if phase < 2 {
+                assert!(matches!(error, ExportError::Cancelled));
+            } else {
+                assert!(error.to_string().contains("source changed"), "{error}");
+            }
+            assert!(seen_analysis.load(Ordering::Relaxed));
+            assert_eq!(
+                seen_encode.load(Ordering::Relaxed),
+                phase == 1 || phase == 2
+            );
+            assert_eq!(
+                fs::read(&request.target).expect("target retained"),
+                existing
+            );
         }
-        assert!(seen_analysis.load(Ordering::Relaxed));
-        assert_eq!(seen_encode.load(Ordering::Relaxed), phase != 0);
-        assert_eq!(
-            fs::read(&request.target).expect("target retained"),
-            existing
-        );
     }
     fs::remove_dir_all(&root).expect("owned fixture cleanup");
 }

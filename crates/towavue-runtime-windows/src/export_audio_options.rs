@@ -68,6 +68,54 @@ pub(super) fn analyze(
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
 ) -> Result<f64, ExportError> {
+    let mut streams = streams.clone();
+    streams.audio_post_filters.push("astats@towavue_peak=metadata=0:reset=0:measure_perchannel=none:measure_overall=Peak_level+Number_of_samples+Number_of_NaNs+Number_of_Infs".into());
+    let log = analysis_log(request, &streams, staging, executable, cancelled, progress)?;
+    gain_from_statistics(&log)
+}
+
+pub(super) fn count_samples(
+    request: &ExportRequest,
+    streams: &ExportStreams,
+    staging: &StagedExport,
+    executable: &Path,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+) -> Result<u64, ExportError> {
+    let mut request = request.clone();
+    request.operations.push(EditOperation::SetRate(1.0));
+    let mut streams = streams.clone();
+    streams.audio_post_filters = vec!["astats@towavue_count=metadata=0:reset=0:measure_perchannel=none:measure_overall=Number_of_samples".into()];
+    let log = analysis_log(&request, &streams, staging, executable, cancelled, progress)?;
+    sample_count_from_statistics(&log)
+}
+
+fn sample_count_from_statistics(log: &str) -> Result<u64, ExportError> {
+    let mut values = log.lines().filter_map(|line| {
+        line.strip_prefix("[astats@towavue_count @ ")?
+            .split_once("] ")?
+            .1
+            .strip_prefix("Number of samples: ")
+    });
+    let count = values
+        .next()
+        .and_then(|value| value.trim().parse::<u64>().ok());
+    if values.next().is_some() || count.is_none_or(|count| count == 0) {
+        return Err(ExportError::Failed(
+            "Audio sample-count analysis is empty, invalid or ambiguous".into(),
+        ));
+    }
+    Ok(count.expect("validated count"))
+}
+
+fn analysis_log(
+    request: &ExportRequest,
+    streams: &ExportStreams,
+    staging: &StagedExport,
+    executable: &Path,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+) -> Result<String, ExportError> {
     let request = ExportRequest {
         kind: MediaKind::Audio,
         target: request.target.with_extension("wav"),
@@ -76,7 +124,6 @@ pub(super) fn analyze(
     };
     let mut streams = streams.clone();
     streams.video = None;
-    streams.audio_post_filters.push("astats@towavue_peak=metadata=0:reset=0:measure_perchannel=none:measure_overall=Peak_level+Number_of_samples+Number_of_NaNs+Number_of_Infs".into());
     let mut arguments = staging.arguments(&request, false, &streams)?;
     let level = arguments
         .iter()
@@ -95,11 +142,11 @@ pub(super) fn analyze(
     check_cancelled(cancelled)?;
     if !result.status.success() {
         return Err(ExportError::Failed(format!(
-            "Audio normalization analysis failed: {}",
+            "Audio analysis failed: {}",
             String::from_utf8_lossy(&result.stderr).trim()
         )));
     }
-    gain_from_statistics(&String::from_utf8_lossy(&result.stderr))
+    Ok(String::from_utf8_lossy(&result.stderr).into_owned())
 }
 
 fn gain_from_statistics(log: &str) -> Result<f64, ExportError> {

@@ -215,6 +215,16 @@ impl StreamConfig {
             let warmup = target.saturating_sub(Duration::from_millis(250));
             return (warmup > MediaTime::ZERO).then_some((warmup, PrerollSamples::Vorbis));
         }
+        if self.parameters.id() == AAC
+            && parameters.profile == ffmpeg::ffi::AV_PROFILE_AAC_LOW
+            && matches!(parameters.frame_size, 960 | 1024)
+        {
+            let warmup = target.saturating_sub(Duration::from_millis(250));
+            return (warmup > MediaTime::ZERO).then_some((
+                warmup,
+                PrerollSamples::AacLc(parameters.frame_size as usize),
+            ));
+        }
         let sample_bytes = match self.parameters.id() {
             PCM_U8 | PCM_S8 => 1,
             PCM_S16LE | PCM_S16BE | PCM_U16LE | PCM_U16BE => 2,
@@ -350,6 +360,7 @@ enum PrerollSamples {
     Pcm(usize),
     Flac,
     Vorbis,
+    AacLc(usize),
 }
 
 struct AudioPipeline {
@@ -369,6 +380,13 @@ impl AudioPipeline {
         let Some((target, source)) = self.sample_preroll else {
             return Ok(false);
         };
+        // Decode AAC's initial padding and first actual output before counting.
+        // This establishes both the real sample anchor and decoder priming state.
+        if matches!(source, PrerollSamples::AacLc(_))
+            && self.next_sample == ffmpeg::ffi::AV_NOPTS_VALUE
+        {
+            return Ok(false);
+        }
         // Skip-sample or parameter-change side data can alter decoded sample
         // counts. Let the decoder handle this packet and the remaining prefix;
         // the Vorbis parser accepts only its exact full first-packet priming skip.
@@ -382,6 +400,29 @@ impl AudioPipeline {
                     return Err(ffmpeg::Error::InvalidData.into());
                 }
                 packet.size() / frame_bytes
+            }
+            PrerollSamples::AacLc(samples) => {
+                // AAC-LC's declared access-unit length is usable only while
+                // the demuxed packet duration agrees with its rounded interval.
+                // Leave metadata/other leading elements to the decoder.
+                let sample_base = Rational(1, self.decoder.rate() as i32);
+                let low =
+                    (samples as i64).rescale_with(sample_base, self.time_base, Rounding::Down);
+                let high = (samples as i64).rescale_with(sample_base, self.time_base, Rounding::Up);
+                if self.decoder.frame_size() as usize != samples
+                    || self.decoder.profile() != codec::Profile::AAC(codec::profile::AAC::Low)
+                    || packet.size() == 0
+                    || !packet
+                        .data()
+                        .and_then(|data| data.first())
+                        .is_some_and(|byte| matches!(byte >> 5, 0 | 1 | 3))
+                    || packet.duration() <= 0
+                    || !(low..=high).contains(&packet.duration())
+                {
+                    self.sample_preroll = None;
+                    return Ok(false);
+                }
+                samples
             }
             PrerollSamples::Flac | PrerollSamples::Vorbis => {
                 let Some(samples) = self
@@ -398,7 +439,7 @@ impl AudioPipeline {
         if samples == 0 && matches!(source, PrerollSamples::Vorbis) {
             return Ok(true);
         }
-        // PCM sizes and compressed headers give sample counts despite rounded PTS.
+        // PCM sizes and codec frame information give counts despite rounded PTS.
         // Count the prefix without decoding it; reuse the sequential timestamp/gap
         // rules instead of assuming equally sized packets or a PTS-aligned phase.
         let previous = self.next_sample;

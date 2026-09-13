@@ -96,6 +96,67 @@ fn draw(app: &mut App, context: &egui::Context) -> Option<u64> {
 }
 
 #[test]
+fn queued_destinations_precede_speculation_without_expanding_neighbors() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::sequence_tests::queued_destinations_precede_speculation_without_expanding_neighbors",
+    ) else {
+        return;
+    };
+    let (mut app, _, paths) = fixture(&root);
+    // The fixture's order is the supplied Shell snapshot, not a filename sort.
+    app.folder_snapshot
+        .as_mut()
+        .expect("snapshot")
+        .items
+        .reverse();
+    let paths: Vec<_> = paths.into_iter().rev().collect();
+    app.path = Some(paths[0].clone());
+    for (forward, steps, expected) in [
+        (true, vec![], vec![1, 99, 2, 98, 3, 97, 4, 96, 5]),
+        (true, vec![true; 2], vec![1, 2, 99, 98, 3, 97, 4, 96, 5]),
+        (true, vec![true; 10], vec![1, 2, 3, 4, 5, 99, 98, 97, 96]),
+        (false, vec![false; 3], vec![99, 98, 97, 1, 2, 3, 96, 4, 95]),
+        (true, vec![false; 2], vec![99, 98, 1, 2, 3, 97, 4, 96, 5]),
+        (
+            true,
+            vec![false, true, true, false, false, false],
+            vec![99, 1, 98, 2, 3, 97, 4, 96, 5],
+        ),
+    ] {
+        app.image_navigation_forward = forward;
+        app.image_sequence.steps = steps.iter().copied().collect();
+        assert_eq!(
+            app.image_prefetch_paths(),
+            Some(
+                expected
+                    .into_iter()
+                    .map(|index| paths[index].clone())
+                    .collect()
+            ),
+            "forward={forward}, steps={steps:?}"
+        );
+        assert_eq!(
+            app.image_sequence.steps.iter().copied().collect::<Vec<_>>(),
+            steps
+        );
+    }
+    app.image_sequence.steps.clear();
+    assert_eq!(
+        app.image_prefetch_paths(),
+        Some(
+            [1, 99, 2, 98, 3, 97, 4, 96, 5]
+                .map(|index| paths[index].clone())
+                .to_vec()
+        ),
+        "clearing the queue restores balanced speculation"
+    );
+    app.reading_mode = true;
+    let reading_plan = app.image_prefetch_paths();
+    app.image_sequence.steps.extend([false; 256]);
+    assert_eq!(app.image_prefetch_paths(), reading_plan);
+}
+
+#[test]
 fn next_image_burst_keeps_the_first_unpresented_original() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_navigation::sequence_tests::next_image_burst_keeps_the_first_unpresented_original",

@@ -2240,6 +2240,26 @@ where
                     }
                 }
             }
+            // Accepted steps are known destinations, ahead of speculative neighbors.
+            // Reorder only the existing bounded set; do not increase its reach or budget.
+            let mut queued_target = current;
+            let mut prioritized = 0;
+            for &forward in &self.image_sequence.steps {
+                queued_target = if forward {
+                    (queued_target + 1) % images.len()
+                } else {
+                    (queued_target + images.len() - 1) % images.len()
+                };
+                if let Some(position) = selected
+                    .iter()
+                    .enumerate()
+                    .skip(prioritized)
+                    .find_map(|(position, &target)| (target == queued_target).then_some(position))
+                {
+                    selected[prioritized..=position].rotate_right(1);
+                    prioritized += 1;
+                }
+            }
             return (!selected.is_empty()).then(|| {
                 selected
                     .into_iter()

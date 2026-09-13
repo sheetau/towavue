@@ -143,6 +143,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
         reverse: bool,
         trace_index: Option<usize>,
         idle_frame_interval: Duration,
+        cache_mib: usize,
         source: PathBuf,
         completed: bool,
     }
@@ -157,6 +158,9 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 let _ = send.send(event);
             })
             .expect("isolated app");
+            app.image_loader
+                .verification_set_cache_byte_limit(self.cache_mib * 1024 * 1024)
+                .expect("unused reference loader");
             let context = fonts::test_context();
             app.ui_context = Some(context.clone());
             app.fullscreen = true;
@@ -401,6 +405,10 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                     .map_or(0.0, |_| percentile_95(&latency).as_secs_f64() * 1000.0),
                 self.reverse,
             );
+            eprintln!(
+                "REFERENCE_CACHE decoded_mib={}; verification-only budget; texture and per-canvas limits unchanged",
+                self.cache_mib
+            );
             memory.report();
             eprintln!(
                 "REFERENCE_REDRAW presentations={presentations} idle_frame_interval_ms={:.3}; command/completion draws are immediate, interval only applies without those events; no physical redraw-cadence evidence",
@@ -465,6 +473,16 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
         idle_frame_interval: std::env::var("TOWAVUE_NAV_IDLE_FRAME_MS")
             .map(|value| Duration::from_millis(value.parse().expect("idle-frame milliseconds")))
             .unwrap_or(Duration::ZERO),
+        cache_mib: std::env::var("TOWAVUE_NAV_DECODE_CACHE_MIB")
+            .map(|value| {
+                let mib = value.parse::<usize>().expect("decoded-cache MiB");
+                assert!(
+                    (1..=512).contains(&mib),
+                    "decoded-cache MiB must be 1..=512"
+                );
+                mib
+            })
+            .unwrap_or(256),
         source,
         completed: false,
     };

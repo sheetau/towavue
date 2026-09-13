@@ -181,6 +181,24 @@ pub struct ImageLoader {
 }
 
 impl ImageLoader {
+    /// Compare decoded-cache budgets before issuing any image work; production keeps its limit.
+    #[cfg(any(test, feature = "render-verification"))]
+    pub fn verification_set_cache_byte_limit(&self, bytes: usize) -> Result<(), &'static str> {
+        if !(1..=IMAGE_BYTE_LIMIT).contains(&bytes) {
+            return Err("verification cache budget outside canvas limit");
+        }
+        let mailbox = self.shared.0.lock().expect("image mailbox");
+        if mailbox.generation != 0 || mailbox.decoding || mailbox.prefetch_tasks != 0 {
+            return Err("configure the verification cache before requesting work");
+        }
+        let mut cache = mailbox.cache.lock().expect("image cache");
+        if !cache.entries.is_empty() {
+            return Err("verification cache must be empty");
+        }
+        cache.byte_limit = bytes;
+        Ok(())
+    }
+
     #[cfg(any(test, feature = "render-verification"))]
     pub fn verification_metrics(&self) -> verification::ImageLoadMetrics {
         self.shared.0.lock().expect("image mailbox").metrics
@@ -1036,6 +1054,72 @@ mod tests {
             );
         }
         std::fs::remove_dir_all(root).expect("remove owned fixtures");
+    }
+
+    #[test]
+    fn verification_cache_budget_preserves_entry_and_foreground_limits() {
+        let loader = ImageLoader {
+            shared: Arc::new((Mutex::new(Mailbox::default()), Condvar::new())),
+            prefetch_worker: LatestTask::new("verification-cache-budget").expect("worker"),
+        };
+        let stamp = ImageStamp {
+            bytes: 1,
+            modified: SystemTime::UNIX_EPOCH,
+        };
+        assert!(loader.verification_set_cache_byte_limit(0).is_err());
+        assert!(
+            loader
+                .verification_set_cache_byte_limit(IMAGE_BYTE_LIMIT + 1)
+                .is_err()
+        );
+        loader
+            .verification_set_cache_byte_limit(IMAGE_BYTE_LIMIT)
+            .expect("unused loader");
+        {
+            let mailbox = loader.shared.0.lock().expect("mailbox");
+            let mut cache = mailbox.cache.lock().expect("cache");
+            assert_eq!(cache.byte_limit, IMAGE_BYTE_LIMIT);
+            for index in 0..31 {
+                cache.insert(index.to_string().into(), stamp, pixel(index));
+            }
+            assert_eq!(cache.entries.len(), CACHE_ENTRY_LIMIT);
+            assert_eq!(cache.bytes, 120);
+            assert!(matches!(
+                cache.get(Path::new("30"), Some(stamp), 3),
+                Some(Err(ImageDecodeError::TooLarge))
+            ));
+        }
+        loader.request_with_retained_bytes(vec![PathBuf::from("foreground")], 4);
+        let mailbox = loader.shared.0.lock().expect("mailbox");
+        assert_eq!(
+            mailbox.pending.as_ref().expect("request").1,
+            IMAGE_BYTE_LIMIT - 4
+        );
+    }
+
+    #[test]
+    fn verification_cache_budget_rejects_started_loaders() {
+        let loader = ImageLoader {
+            shared: Arc::new((Mutex::new(Mailbox::default()), Condvar::new())),
+            prefetch_worker: LatestTask::new("verification-cache-started").expect("worker"),
+        };
+        loader.request(Vec::new());
+        assert_eq!(
+            loader.verification_set_cache_byte_limit(IMAGE_BYTE_LIMIT),
+            Err("configure the verification cache before requesting work")
+        );
+        assert_eq!(
+            loader
+                .shared
+                .0
+                .lock()
+                .expect("unpoisoned mailbox")
+                .cache
+                .lock()
+                .expect("cache")
+                .byte_limit,
+            CACHE_BYTE_LIMIT
+        );
     }
 
     #[test]

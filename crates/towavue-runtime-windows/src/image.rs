@@ -20,6 +20,7 @@ mod png_preview;
 mod png_static;
 #[cfg(test)]
 mod reference_tests;
+pub(crate) use jpeg_preview::jpeg_thumbnail;
 pub(crate) use png_preview::png_thumbnail;
 
 pub(crate) fn first_image_preview(

@@ -303,11 +303,21 @@ impl PreviewCache {
             } else {
                 self.load_or_generate(key.clone(), || {
                     let current = || self.check_cancelled().is_ok();
-                    let direct = crate::image::first_image_preview(
-                        source,
-                        crate::image::IMAGE_BYTE_LIMIT,
-                        &current,
-                    )
+                    let direct = if image::ImageFormat::from_path(source).ok()
+                        == Some(image::ImageFormat::Jpeg)
+                    {
+                        crate::image::jpeg_thumbnail(
+                            source,
+                            crate::image::IMAGE_BYTE_LIMIT,
+                            &current,
+                        )
+                    } else {
+                        crate::image::first_image_preview(
+                            source,
+                            crate::image::IMAGE_BYTE_LIMIT,
+                            &current,
+                        )
+                    }
                     .ok()
                     .flatten()
                     .and_then(|preview| {

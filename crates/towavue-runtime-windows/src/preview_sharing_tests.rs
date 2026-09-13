@@ -616,12 +616,23 @@ fn direct_static_thumbnails_preserve_sampled_pixels_and_bound_original_bytes() {
                 );
             }
         }
-        assert_eq!(
+        // JPEG cards use reduced decoding when possible, not the full decoder's
+        // nearest-neighbor samples checked above. Other formats keep those pixels.
+        let direct = if extension == "jpg" {
+            crate::image::jpeg_thumbnail(&path, required, &|| true)
+                .expect("reduced JPEG")
+                .expect("half-size thumbnail")
+                .image
+        } else {
+            direct
+        };
+        assert!(
             cache
                 .filmstrip(&path, MediaKind::Image)
-                .expect("integrated direct thumbnail")
-                .image,
-            direct
+                .expect("integrated thumbnail")
+                .image
+                == direct,
+            "integrated thumbnail must use the format's prepared pixels"
         );
         let cached = cache
             .cached_filmstrip(&path, MediaKind::Image)
@@ -893,6 +904,108 @@ fn unvisited_static_filmstrips_share_the_bounded_first_preview() {
         assert!(cache.in_flight.0.lock().expect("pending").is_empty());
         fs::remove_dir_all(&cache.root).expect("remove owned fixtures");
     }
+}
+
+#[test]
+fn medium_jpeg_thumbnail_persists_without_starting_a_speculative_preview() {
+    let root = cache("medium-jpeg-thumbnail").root;
+    let source = root.join("medium.jpg");
+    image::RgbImage::from_fn(1920, 1080, |x, y| {
+        image::Rgb([(x % 251) as u8, (y % 253) as u8, ((x ^ y) % 255) as u8])
+    })
+    .save(&source)
+    .expect("owned JPEG");
+    let store = PreviewCache::new(root.join("cache")).expect("cache");
+    assert!(
+        store
+            .prepare_image_preview(&source, crate::image::IMAGE_BYTE_LIMIT, &|| true)
+            .is_none()
+    );
+    let expected = crate::image::jpeg_thumbnail(&source, crate::image::IMAGE_BYTE_LIMIT, &|| true)
+        .expect("reduced decoder")
+        .expect("medium JPEG");
+    let generated = store
+        .filmstrip(&source, MediaKind::Image)
+        .expect("thumbnail");
+    assert_eq!(generated.image, expected.image);
+    let fresh = PreviewCache::new(store.root.clone()).expect("fresh cache");
+    let saved = fresh
+        .cached_image(&source)
+        .expect("disk read")
+        .expect("saved thumbnail");
+    assert_eq!(saved.source_size, expected.source_size);
+    assert_eq!(saved.image, expected.image);
+    assert_eq!(
+        fresh
+            .filmstrip(&source, MediaKind::Image)
+            .expect("reuse")
+            .image,
+        generated.image
+    );
+    fs::remove_dir_all(root).expect("owned source and caches");
+}
+
+#[test]
+#[ignore = "Release comparison of medium-JPEG full and reduced thumbnail generation"]
+fn medium_jpeg_thumbnail_reports_full_decode_comparison() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("run this measurement with --release");
+    }
+    for (width, height) in [(503, 317), (1001, 701), (1920, 1080)] {
+        let root = cache("medium-jpeg-measurement").root;
+        let source = root.join("source.jpg");
+        image::RgbImage::from_fn(width, height, |x, y| {
+            image::Rgb([(x % 251) as u8, (y % 253) as u8, ((x ^ y) % 255) as u8])
+        })
+        .save(&source)
+        .expect("fixture");
+        let original = fs::read(&source).expect("warm source");
+        for (phase, reduced) in [false, true, true, false].into_iter().enumerate() {
+            let mut samples = Vec::new();
+            for sample in 0..5 {
+                let store =
+                    PreviewCache::new(root.join(format!("{phase}-{sample}"))).expect("empty cache");
+                let started = std::time::Instant::now();
+                let image = if reduced {
+                    store
+                        .filmstrip(&source, MediaKind::Image)
+                        .expect("reduced thumbnail")
+                        .image
+                } else {
+                    store
+                        .load_or_generate(
+                            cache_key(&source, IMAGE_PREVIEW_VARIANT).expect("key"),
+                            || {
+                                Ok(static_thumbnail_png(
+                                    &source,
+                                    STATIC_THUMBNAIL_BYTE_LIMIT,
+                                    &|| true,
+                                )
+                                .expect("full decode and resize"))
+                            },
+                        )
+                        .expect("full thumbnail")
+                };
+                samples.push(started.elapsed().as_secs_f64() * 1000.0);
+                assert!(image.width <= 240 && image.height <= 160);
+                let fresh = PreviewCache::new(store.root.clone()).expect("fresh cache");
+                let saved = fresh
+                    .cached_image(&source)
+                    .expect("readback")
+                    .expect("geometry");
+                assert_eq!(saved.source_size, (width, height));
+                assert_eq!(saved.image, image);
+            }
+            samples.sort_by(f64::total_cmp);
+            println!(
+                "MEDIUM_JPEG {width}x{height} reduced={reduced} median_ms={:.3}",
+                samples[2]
+            );
+        }
+        assert_eq!(fs::read(&source).expect("unchanged source"), original);
+        fs::remove_dir_all(root).expect("owned fixtures");
+    }
+    Ok(())
 }
 
 #[test]

@@ -11,6 +11,25 @@ pub(crate) fn jpeg_preview(
     byte_limit: usize,
     current: &dyn Fn() -> bool,
 ) -> Result<Option<CachedImagePreview>, ImageDecodeError> {
+    decode_preview(path, byte_limit, current, 4 * 1024 * 1024)
+}
+
+/// A requested thumbnail can benefit from reduced decoding below the size at
+/// which speculative previews are worth delaying an original-image load.
+pub(crate) fn jpeg_thumbnail(
+    path: &Path,
+    byte_limit: usize,
+    current: &dyn Fn() -> bool,
+) -> Result<Option<CachedImagePreview>, ImageDecodeError> {
+    decode_preview(path, byte_limit, current, 0)
+}
+
+fn decode_preview(
+    path: &Path,
+    byte_limit: usize,
+    current: &dyn Fn() -> bool,
+    minimum_pixels: u64,
+) -> Result<Option<CachedImagePreview>, ImageDecodeError> {
     check_current(current)?;
     let reader = image::ImageReader::new(open(path, current)?)
         .with_guessed_format()
@@ -32,7 +51,7 @@ pub(crate) fn jpeg_preview(
     let mut header = JpegDecoder::new(std::io::Cursor::new(&bytes))?;
     let (width, height) = header.dimensions();
     let pixels = u64::from(width) * u64::from(height);
-    if pixels < 4 * 1024 * 1024 || pixels * 4 > byte_limit as u64 {
+    if pixels < minimum_pixels || pixels * 4 > byte_limit as u64 {
         return Ok(None);
     }
     let orientation = header.orientation()?;
@@ -45,8 +64,11 @@ pub(crate) fn jpeg_preview(
         | Orientation::Rotate270FlipH => (height, width),
         _ => (width, height),
     };
-    let reduced = reduced_jpeg(&bytes, width, height, source_size != (width, height))
-        .map_err(DecodeError::from)?;
+    let Some(reduced) = reduced_jpeg(&bytes, width, height, source_size != (width, height))
+        .map_err(DecodeError::from)?
+    else {
+        return Ok(None);
+    };
     check_current(current)?;
     let mut image = DynamicImage::ImageRgba8(
         image::RgbaImage::from_raw(reduced.width, reduced.height, reduced.rgba)
@@ -70,7 +92,18 @@ fn reduced_jpeg(
     width: u32,
     height: u32,
     swap: bool,
-) -> Result<PreviewImage, ffmpeg::Error> {
+) -> Result<Option<PreviewImage>, ffmpeg::Error> {
+    let (bound_width, bound_height) = if swap { (160.0, 240.0) } else { (240.0, 160.0) };
+    let scale = (bound_width / f64::from(width)).min(bound_height / f64::from(height));
+    let target_width = (f64::from(width) * scale).round().max(1.0) as u32;
+    let target_height = (f64::from(height) * scale).round().max(1.0) as u32;
+    // Choose the largest decoder reduction that still supplies every thumbnail
+    // pixel. Small sources retain the existing full-decode fallback.
+    let Some(lowres) = (1..=3).rev().find(|shift| {
+        width.div_ceil(1 << shift) >= target_width && height.div_ceil(1 << shift) >= target_height
+    }) else {
+        return Ok(None);
+    };
     ffmpeg::init()?;
     let codec =
         ffmpeg::decoder::find(ffmpeg::codec::Id::MJPEG).ok_or(ffmpeg::Error::DecoderNotFound)?;
@@ -82,20 +115,18 @@ fn reduced_jpeg(
         if (*codec.as_ptr()).max_lowres < 3 {
             return Err(ffmpeg::Error::InvalidData);
         }
-        (*context.as_mut_ptr()).lowres = 3;
+        (*context.as_mut_ptr()).lowres = lowres;
         (*context.as_mut_ptr()).max_pixels = i64::from(width) * i64::from(height);
     }
     let mut decoder = context.decoder().video()?;
     decoder.send_packet(&ffmpeg::Packet::copy(bytes))?;
     let mut decoded = ffmpeg::frame::Video::empty();
     decoder.receive_frame(&mut decoded)?;
-    if decoded.width() != width.div_ceil(8) || decoded.height() != height.div_ceil(8) {
+    if decoded.width() != width.div_ceil(1 << lowres)
+        || decoded.height() != height.div_ceil(1 << lowres)
+    {
         return Err(ffmpeg::Error::InvalidData);
     }
-    let (bound_width, bound_height) = if swap { (160.0, 240.0) } else { (240.0, 160.0) };
-    let scale = (bound_width / f64::from(width)).min(bound_height / f64::from(height));
-    let target_width = (f64::from(width) * scale).round().max(1.0) as u32;
-    let target_height = (f64::from(height) * scale).round().max(1.0) as u32;
     let mut scaler = ffmpeg::software::scaling::Context::get(
         decoded.format(),
         decoded.width(),
@@ -113,16 +144,96 @@ fn reduced_jpeg(
         let start = row * rgba.stride(0);
         pixels.extend_from_slice(&rgba.data(0)[start..start + row_bytes]);
     }
-    Ok(PreviewImage {
+    Ok(Some(PreviewImage {
         width: target_width,
         height: target_height,
         rgba: pixels,
-    })
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jpeg_thumbnails_reduce_medium_images_without_enabling_speculative_previews() {
+        let path =
+            std::env::temp_dir().join(format!("towavue-medium-jpeg-{}.jpg", std::process::id()));
+        for (width, height) in [(503, 317), (1001, 701), (1920, 1080)] {
+            let pixels = image::RgbImage::from_fn(width, height, |x, y| {
+                image::Rgb(match (x < width / 2, y < height / 2) {
+                    (true, true) => [240, 10, 20],
+                    (false, true) => [10, 230, 30],
+                    (true, false) => [20, 30, 220],
+                    (false, false) => [230, 220, 20],
+                })
+            });
+            pixels.save(&path).expect("fixture");
+            let original = std::fs::read(&path).expect("JPEG");
+            for tag in 1..=8 {
+                let mut exif =
+                    *b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x01\0\0\0\0\0\0\0";
+                exif[24] = tag;
+                let mut encoded = vec![0xff, 0xd8, 0xff, 0xe1];
+                encoded.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+                encoded.extend_from_slice(&exif);
+                encoded.extend_from_slice(&original[2..]);
+                std::fs::write(&path, &encoded).expect("oriented fixture");
+                assert!(
+                    jpeg_preview(&path, IMAGE_BYTE_LIMIT, &|| true)
+                        .expect("speculation")
+                        .is_none()
+                );
+                let preview = jpeg_thumbnail(&path, IMAGE_BYTE_LIMIT, &|| true)
+                    .expect("thumbnail")
+                    .expect("reduced JPEG");
+                let reference = decode_image(&path).expect("independent full decode");
+                assert_eq!(preview.source_size, reference.dimensions());
+                let image = preview.image;
+                assert!(image.width <= 240 && image.height <= 160);
+                assert!(
+                    image
+                        .rgba
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .all(|pixel| pixel[3] == 255)
+                );
+                let (width, height) = reference.dimensions();
+                for (x, y) in [(1, 1), (3, 1), (1, 3), (3, 3)] {
+                    let small =
+                        ((image.height * y / 4 * image.width + image.width * x / 4) * 4) as usize;
+                    let full = ((height * y / 4 * width + width * x / 4) * 4) as usize;
+                    for channel in 0..3 {
+                        assert!(
+                            image.rgba[small + channel]
+                                .abs_diff(reference.frames[0].rgba[full + channel])
+                                <= 5
+                        );
+                    }
+                }
+                assert_eq!(std::fs::read(&path).expect("unchanged source"), encoded);
+            }
+        }
+        assert!(
+            jpeg_thumbnail(&path, 1, &|| true)
+                .expect("budget")
+                .is_none()
+        );
+        assert!(matches!(
+            jpeg_thumbnail(&path, IMAGE_BYTE_LIMIT, &|| false),
+            Err(ImageDecodeError::Cancelled)
+        ));
+        image::RgbImage::new(239, 159)
+            .save(&path)
+            .expect("small fixture");
+        assert!(
+            jpeg_thumbnail(&path, IMAGE_BYTE_LIMIT, &|| true)
+                .expect("full-decode fallback")
+                .is_none()
+        );
+        std::fs::remove_file(path).expect("owned fixture");
+    }
 
     #[test]
     #[ignore = "requires Pillow-generated fixtures; run scripts/generate-jpeg-preview-fixtures.py"]

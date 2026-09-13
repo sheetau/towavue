@@ -19,8 +19,10 @@ use windows::core::Interface;
 
 use crate::{GraphicsDevice, VideoOrientation};
 
+mod audio_checkpoints;
 mod frame_step;
 mod packet_samples;
+use audio_checkpoints::AudioCheckpoints;
 pub use frame_step::adjacent_video_frame;
 use packet_samples::PacketSamples;
 mod preview_frames;
@@ -667,6 +669,7 @@ pub(crate) fn decode_file_parallel_cancellable(
 pub(crate) struct ParallelInput {
     input: format::context::Input,
     started: bool,
+    audio_checkpoints: AudioCheckpoints,
 }
 
 impl ParallelInput {
@@ -681,6 +684,7 @@ impl ParallelInput {
         Ok(Self {
             input,
             started: false,
+            audio_checkpoints: AudioCheckpoints::new(path),
         })
     }
 
@@ -759,6 +763,9 @@ impl ParallelInput {
         mut emit: impl FnMut(ParallelDecodeOutput) -> bool,
     ) -> Result<DecodeSummary, DecodeError> {
         check_cancelled(cancelled)?;
+        if stream != Some(DecodeStream::Video) {
+            self.audio_checkpoints.begin_run();
+        }
         let input = &mut self.input;
         let video_config = (stream != Some(DecodeStream::Audio))
             .then(|| best_stream_config(input, Type::Video))
@@ -821,7 +828,17 @@ impl ParallelInput {
         } else {
             minimum_time
         };
-        if self.started && seek_target <= MediaTime::ZERO {
+        let resume = if self.started && sample_preroll {
+            self.audio_checkpoints.resume(
+                input,
+                audio.as_ref().expect("audio sample preroll"),
+                minimum_time,
+                cancelled,
+            )?
+        } else {
+            None
+        };
+        if resume.is_none() && self.started && seek_target <= MediaTime::ZERO {
             if input.format().name() == "mpegts" {
                 seek_byte_position(input, 0)?;
             } else {
@@ -832,10 +849,12 @@ impl ParallelInput {
             }
         }
         self.started = true;
-        seek_input(input, seek_target, video.is_some(), cancelled)?;
+        if resume.is_none() {
+            seek_input(input, seek_target, video.is_some(), cancelled)?;
+        }
         check_cancelled(cancelled)?;
         run_parallel_workers(
-            input,
+            (input, &mut self.audio_checkpoints, resume),
             video,
             audio,
             minimum_time,
@@ -847,7 +866,11 @@ impl ParallelInput {
 }
 
 fn run_parallel_workers(
-    input: &mut format::context::Input,
+    input: (
+        &mut format::context::Input,
+        &mut AudioCheckpoints,
+        Option<(i64, ffmpeg::Packet)>,
+    ),
     video: Option<ParallelVideoConfig>,
     audio: Option<StreamConfig>,
     minimum_time: MediaTime,
@@ -855,6 +878,7 @@ fn run_parallel_workers(
     cancelled: &(dyn Fn() -> bool + Sync),
     emit: &mut impl FnMut(ParallelDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
+    let (input, audio_checkpoints, resume) = input;
     let origin = input_origin(input);
     let terminal_preview = maximum_time == Some(minimum_time) && audio.is_none();
     let video_stream_index = video.as_ref().map(|video| match video {
@@ -936,6 +960,8 @@ fn run_parallel_workers(
                         audio_packet_rx,
                         &audio_output_tx,
                         sample_preroll,
+                        audio_checkpoints,
+                        resume,
                     ) {
                         let _ = audio_output_tx.send(ParallelDecodeOutput::Failed(error));
                     }
@@ -1206,6 +1232,8 @@ fn run_parallel_audio_worker(
     packets: mpsc::Receiver<ffmpeg::Packet>,
     output: &SyncSender<ParallelDecodeOutput>,
     sample_preroll: Option<(MediaTime, PrerollSamples)>,
+    checkpoints: &mut AudioCheckpoints,
+    resume: Option<(i64, ffmpeg::Packet)>,
 ) -> Result<(), DecodeError> {
     let mut pipeline = create_audio_pipeline_from(config)?;
     pipeline.sample_preroll = sample_preroll;
@@ -1223,8 +1251,24 @@ fn run_parallel_audio_worker(
         DecodeOutput::Audio(chunk) => output.send(ParallelDecodeOutput::Audio(chunk)).is_ok(),
         DecodeOutput::Video(_) => unreachable!("audio worker emitted video"),
     };
-    for packet in packets {
-        if pipeline.skip_sample_preroll(&packet)? {
+    let first_packet = resume.map(|(next_sample, packet)| {
+        pipeline.next_sample = next_sample;
+        packet
+    });
+    for packet in first_packet.into_iter().chain(packets) {
+        let next_sample = pipeline.next_sample;
+        let counted = pipeline.skip_sample_preroll(&packet)?;
+        checkpoints.observe(
+            &packet,
+            next_sample,
+            pipeline.output_format.sample_rate,
+            counted
+                && matches!(
+                    sample_preroll,
+                    Some((_, PrerollSamples::Pcm(_) | PrerollSamples::Flac))
+                ),
+        );
+        if counted {
             continue;
         }
         pipeline.decoder.send_packet(&packet)?;
@@ -1342,7 +1386,7 @@ fn seek_video_stream(
     let mut seek = timestamp;
     loop {
         check_cancelled(cancelled)?;
-        seek_video_packet(input, index, seek)?;
+        seek_stream_packet(input, index, seek)?;
         let mut earlier = None;
         for (stream, packet) in input.packets() {
             check_cancelled(cancelled)?;
@@ -1368,12 +1412,12 @@ fn seek_video_stream(
         } else {
             check_cancelled(cancelled)?;
             // Packet inspection consumes input; restore the validated start.
-            return seek_video_packet(input, index, seek);
+            return seek_stream_packet(input, index, seek);
         }
     }
 }
 
-fn seek_video_packet(
+fn seek_stream_packet(
     input: &mut format::context::Input,
     index: usize,
     timestamp: i64,

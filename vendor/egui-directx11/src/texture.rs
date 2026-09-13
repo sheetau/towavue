@@ -49,6 +49,16 @@ mod tests {
     }
 
     fn device(driver: D3D_DRIVER_TYPE) -> Result<Option<(ID3D11Device, ID3D11DeviceContext)>> {
+        device_with_flags(driver, D3D11_CREATE_DEVICE_FLAG(0), false)
+    }
+
+    fn device_with_flags(
+        driver: D3D_DRIVER_TYPE,
+        flags: D3D11_CREATE_DEVICE_FLAG,
+        protected: bool,
+    ) -> Result<Option<(ID3D11Device, ID3D11DeviceContext)>> {
+        use windows::core::Interface;
+
         let mut device = None;
         let mut context = None;
         // Test-owned offscreen resources; no application or desktop surface is touched.
@@ -57,7 +67,7 @@ mod tests {
                 None,
                 driver,
                 windows::Win32::Foundation::HMODULE::default(),
-                D3D11_CREATE_DEVICE_FLAG(0),
+                flags,
                 None,
                 D3D11_SDK_VERSION,
                 Some(&mut device),
@@ -72,7 +82,15 @@ mod tests {
             }
             return Err(error);
         }
-        Ok(Some((device.unwrap(), context.unwrap())))
+        let context = context.unwrap();
+        if protected {
+            let multithread: ID3D11Multithread = context.cast()?;
+            // Match the app's shared-device protection on this owned test context.
+            unsafe {
+                let _ = multithread.SetMultithreadProtected(true);
+            }
+        }
+        Ok(Some((device.unwrap(), context)))
     }
 
     fn readback(

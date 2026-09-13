@@ -54,6 +54,8 @@ Local changes:
   test compares DEFAULT/IMMUTABLE creation through the same upload code and
   verifies every pixel offscreen; its test-only usage override is not a change
   to the production DEFAULT/partial-update contract.
+  `TOWAVUE_UPLOAD_APP_DEVICE=1` matches the app's BGRA/VIDEO creation flags and
+  multithread protection in this isolated test, without a swap chain/media load.
 
 The public marker is additive; native device ownership APIs are unchanged.
 Upstream vertex/index buffer upload and normal blending remain unchanged.

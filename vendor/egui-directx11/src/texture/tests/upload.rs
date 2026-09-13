@@ -32,7 +32,20 @@ fn upload_timings_are_nested_and_do_not_retain_the_source() -> Result<()> {
 #[allow(clippy::assertions_on_constants)]
 fn large_texture_upload_compares_default_and_immutable() -> Result<()> {
     assert!(!cfg!(debug_assertions), "use the Release test binary");
-    let (device, context) = device(D3D_DRIVER_TYPE_HARDWARE)?.expect("hardware device required");
+    let app_device = std::env::var_os("TOWAVUE_UPLOAD_APP_DEVICE").is_some();
+    let (device, context) = if app_device {
+        device_with_flags(
+            D3D_DRIVER_TYPE_HARDWARE,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+            true,
+        )?
+    } else {
+        device(D3D_DRIVER_TYPE_HARDWARE)?
+    }
+    .expect("hardware device required");
+    eprintln!(
+        "TEXTURE_DEVICE app_settings={app_device}; app settings mean BGRA+VIDEO support and multithread protection, not a swap chain or media workload"
+    );
     // Match representative dimensions, never load reference or desktop pixels.
     for [width, height] in [[4096, 2304], [8706, 5949]] {
         let image = Arc::new(egui::ColorImage::new(

@@ -7,6 +7,12 @@ mod image_color;
 use std::time::{Duration, Instant};
 use towavue_runtime_windows::DecodedImageFrame;
 
+#[test]
+#[ignore = "Release color benchmark with the same cfg(test) diagnostics as the app harness"]
+fn measured_with_application_test_instrumentation() {
+    main();
+}
+
 fn convert(frame: &DecodedImageFrame, strategy: usize) -> egui::ColorImage {
     // Strategy 1 is an experimental comparison, never the application path.
     let size = [frame.width as usize, frame.height as usize];
@@ -65,7 +71,39 @@ fn main() {
             panic!("selected reference decode failed");
         };
         assert_eq!(decoded.frames.len(), 1, "static reference required");
-        measure(&decoded.frames[0], "read-only-reference");
+        if std::env::var_os("TOWAVUE_COLOR_CONCURRENT_DECODE").is_some() {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            let stop = AtomicBool::new(false);
+            let (started, ready) = std::sync::mpsc::channel();
+            std::thread::scope(|scope| {
+                let worker = scope.spawn(|| {
+                    let mut completed = 0;
+                    started.send(()).expect("probe started");
+                    while !stop.load(Ordering::Relaxed) {
+                        let result = towavue_runtime_windows::decode_image(&path);
+                        assert!(result.is_ok(), "concurrent reference decode failed");
+                        completed += 1;
+                    }
+                    completed
+                });
+                ready.recv().expect("concurrent worker");
+                // A failed pixel comparison must still stop/join the stress worker.
+                let measured = std::panic::catch_unwind(|| {
+                    measure(&decoded.frames[0], "read-only-reference-concurrent-decode");
+                });
+                stop.store(true, Ordering::Relaxed);
+                let completed = worker.join().expect("decode worker");
+                if let Err(payload) = measured {
+                    std::panic::resume_unwind(payload);
+                }
+                assert!(completed > 0, "concurrent decode must execute");
+                eprintln!(
+                    "IMAGE_COLOR_CONCURRENT completed_decodes={completed}; one looping same-source CPU decoder, not the app's bounded neighbor sequence"
+                );
+            });
+        } else {
+            measure(&decoded.frames[0], "read-only-reference");
+        }
         assert_eq!(before, stamp(), "source changed");
         return;
     }
@@ -97,7 +135,18 @@ fn main() {
 }
 
 fn measure(frame: &DecodedImageFrame, case: &str) {
+    let started = Instant::now();
+    let first = image_color::color_image(frame);
+    let first_elapsed = started.elapsed();
     let expected = convert(frame, 2);
+    assert!(first == expected, "first conversion pixels differ");
+    drop(first);
+    eprintln!(
+        "IMAGE_COLOR_FIRST width={} height={} case={case} elapsed_ms={:.3}; before comparison buffers and warmups, not a cold system or allocation-only measurement",
+        frame.width,
+        frame.height,
+        first_elapsed.as_secs_f64() * 1000.0,
+    );
     for strategy in 0..3 {
         assert!(convert(frame, strategy) == expected, "warmup pixels differ");
     }

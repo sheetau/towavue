@@ -59,6 +59,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
         paths: &'a [PathBuf],
         reverse: bool,
         trace_index: Option<usize>,
+        idle_frame_interval: Duration,
         source: PathBuf,
         completed: bool,
     }
@@ -120,7 +121,10 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             let mut original_gpu = Vec::new();
             let mut original_layout = Vec::new();
             let mut previous_conversion_time = COLOR_IMAGE_CONVERSION_TIME.get();
+            let mut next_idle_frame = Instant::now();
+            let mut presentations = 0;
             loop {
+                let mut changed = false;
                 // Fixed schedule, independent of image completion: no initial prefetch wait.
                 while sent + 1 < self.paths.len()
                     && started.elapsed() >= cadence * (sent as u32 + 1)
@@ -131,18 +135,29 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                         CommandId::NextSameKind
                     });
                     sent += 1;
+                    changed = true;
                     max_queue = max_queue.max(app.image_sequence.steps.len());
                 }
                 while let Ok(event) = events.try_recv() {
                     match event {
                         AppEvent::ImagesReady => {
+                            changed = true;
                             let started = Instant::now();
                             app.finish_image_load();
                             event_preparation += started.elapsed();
                         }
-                        AppEvent::ImagePreview(..) => app.handle_app_event(event),
+                        AppEvent::ImagePreview(..) => {
+                            app.handle_app_event(event);
+                            changed = true;
+                        }
                         _ => {}
                     }
+                }
+                // Isolate repeated held-frame GPU work without slowing commands
+                // or fresh completions. This is not a native redraw scheduler.
+                if !changed && Instant::now() < next_idle_frame {
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
                 }
                 let layout_started = Instant::now();
                 let output = context.run_ui(
@@ -184,6 +199,8 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 // Never read back or emit pixels from reference media; only submit to a hidden surface.
                 let upload_before = renderer.verification_upload_times();
                 let gpu_time = gpu::submit(&app, &context, output, &mut renderer, false);
+                presentations += 1;
+                next_idle_frame = Instant::now() + self.idle_frame_interval;
                 if let Some(path) = path
                     && visited.last() != Some(&path)
                 {
@@ -272,6 +289,10 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 self.reverse,
             );
             memory.report();
+            eprintln!(
+                "REFERENCE_REDRAW presentations={presentations} idle_frame_interval_ms={:.3}; command/completion draws are immediate, interval only applies without those events; no physical redraw-cadence evidence",
+                self.idle_frame_interval.as_secs_f64() * 1000.0,
+            );
             if let Some(index) = self.trace_index {
                 let command_index = if self.reverse {
                     self.paths.len() - 1 - index
@@ -328,6 +349,9 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
         paths: &paths,
         reverse: std::env::var_os("TOWAVUE_NAV_REFERENCE_REVERSE").is_some(),
         trace_index,
+        idle_frame_interval: std::env::var("TOWAVUE_NAV_IDLE_FRAME_MS")
+            .map(|value| Duration::from_millis(value.parse().expect("idle-frame milliseconds")))
+            .unwrap_or(Duration::ZERO),
         source,
         completed: false,
     };

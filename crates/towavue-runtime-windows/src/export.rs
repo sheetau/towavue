@@ -549,6 +549,20 @@ fn export_audio_cancellable(
             used_hardware_encoder: false,
         });
     }
+    if let Some(metadata) = &webp_metadata
+        && webp_source
+        && request.operations.is_empty()
+    {
+        metadata.export_unedited(&request.source, &staging, cancelled, progress)?;
+        source_stamp
+            .as_ref()
+            .expect("WebP source stamp")
+            .verify(&request.source)?;
+        staging.publish(&request.target, cancelled, trimmed_kind)?;
+        return Ok(ExportOutcome {
+            used_hardware_encoder: false,
+        });
+    }
     if let Some(conversion) = webp_snapshots {
         conversion.export(request, &staging, cancelled, progress)?;
         source_stamp

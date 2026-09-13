@@ -511,8 +511,81 @@ impl WebpMetadata {
         staging: &StagedExport,
         cancelled: &AtomicBool,
     ) -> Result<(), ExportError> {
+        self.apply_from(&staging.output, staging, cancelled)
+    }
+
+    pub(super) fn export_unedited(
+        &self,
+        source: &Path,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+        progress: &(impl Fn(Duration) + Sync),
+    ) -> Result<(), ExportError> {
+        let result = (|| {
+            check_cancelled(cancelled)?;
+            progress(Duration::ZERO);
+            let input = BufReader::new(animation::Cancellable {
+                file: fs::File::open(source).map_err(ExportError::Output)?,
+                cancelled,
+            });
+            // Validate every compressed frame with the display decoder before copying;
+            // the container scan alone checks headers, not decodability of pixel data.
+            let mut decoder =
+                image_webp::WebPDecoder::new(input).map_err(|error| invalid(&error.to_string()))?;
+            decoder.set_memory_limit(512 * 1024 * 1024);
+            let (width, height) = decoder.dimensions();
+            if u64::from(width) * u64::from(height) * 4 > 512 * 1024 * 1024 {
+                return Err(invalid("validation canvas exceeds 512 MiB"));
+            }
+            if decoder.is_animated() != self.animation.is_some()
+                || self.animation.as_ref().is_some_and(|animation| {
+                    animation.delays.len() != decoder.num_frames() as usize
+                })
+            {
+                return Err(invalid("decoded animation frame count differs"));
+            }
+            let mut pixels = vec![
+                0;
+                decoder
+                    .output_buffer_size()
+                    .ok_or_else(|| invalid("invalid frame size"))?
+            ];
+            if let Some(animation) = &self.animation {
+                let mut elapsed = Duration::ZERO;
+                for delay in &animation.delays {
+                    check_cancelled(cancelled)?;
+                    if decoder
+                        .read_frame(&mut pixels)
+                        .map_err(|error| invalid(&error.to_string()))?
+                        != *delay
+                    {
+                        return Err(invalid("decoded animation timing differs"));
+                    }
+                    elapsed += Duration::from_millis(u64::from((*delay).max(10)));
+                    progress(elapsed);
+                }
+            } else {
+                decoder
+                    .read_image(&mut pixels)
+                    .map_err(|error| invalid(&error.to_string()))?;
+            }
+            drop(pixels);
+            drop(decoder);
+            check_cancelled(cancelled)?;
+            self.apply_from(source, staging, cancelled)
+        })();
+        check_cancelled(cancelled)?;
+        result
+    }
+
+    fn apply_from(
+        &self,
+        source: &Path,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+    ) -> Result<(), ExportError> {
         let info = container(
-            BufReader::new(fs::File::open(&staging.output).map_err(ExportError::Output)?),
+            BufReader::new(fs::File::open(source).map_err(ExportError::Output)?),
             cancelled,
         )?;
         if info.animation != self.animation {
@@ -520,8 +593,7 @@ impl WebpMetadata {
         }
         let temporary = staging.directory.join("metadata.webp");
         {
-            let input =
-                BufReader::new(fs::File::open(&staging.output).map_err(ExportError::Output)?);
+            let input = BufReader::new(fs::File::open(source).map_err(ExportError::Output)?);
             let mut output = std::io::BufWriter::new(
                 fs::OpenOptions::new()
                     .write(true)

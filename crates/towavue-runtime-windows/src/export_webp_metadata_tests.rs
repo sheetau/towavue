@@ -205,6 +205,184 @@ fn webp_container_rejects_malformed_ambiguous_animated_and_oversized_inputs() {
 }
 
 #[test]
+fn unedited_webp_export_preserves_bitstreams_and_ancillary_chunks() {
+    let root = root("webp-metadata-only");
+    let source = root.join("source.webp");
+    let target = root.join("target.webp");
+    let request = ExportRequest {
+        source: source.clone(),
+        target: target.clone(),
+        kind: MediaKind::Image,
+        operations: vec![],
+        hardware_encode: false,
+    };
+    let mut inputs = vec![fixture(false), fixture(true)];
+    for alpha in [false, true] {
+        let png = root.join("input.png");
+        image::load_from_memory(&fixture(alpha))
+            .expect("pixels")
+            .save(&png)
+            .expect("PNG");
+        crate::export::audio_tests::ffmpeg(
+            &[
+                "-i",
+                &png.display().to_string(),
+                "-frames:v",
+                "1",
+                "-c:v",
+                "libwebp",
+                "-lossless",
+                "0",
+            ],
+            &source,
+        );
+        inputs.push(fs::read(&source).expect("lossy WebP"));
+        fs::remove_file(png).expect("owned PNG");
+    }
+    for delays in [vec![0xffffff], vec![0, 17, 0xffffff]] {
+        let generated = root.join("animation.webp");
+        animation::Animation {
+            control: [31, 63, 95, 127, 255, 255],
+            delays,
+        }
+        .write(
+            &generated,
+            |delay| {
+                Ok(crate::DecodedImageFrame {
+                    width: 2,
+                    height: 2,
+                    rgba: [17, 53, delay as u8, 127].repeat(4),
+                    delay: Duration::from_millis(u64::from(delay)),
+                })
+            },
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .expect("animation fixture");
+        inputs.push(fs::read(&generated).expect("animation bytes"));
+        fs::remove_file(generated).expect("owned fixture");
+    }
+    for input in inputs {
+        let mut parts = chunks(&tagged(&input, &packet()));
+        parts[0].1[0] |= 32 | 8;
+        parts[0].1.extend_from_slice(&[12, 34]);
+        parts.insert(1, (*b"ICCP", vec![1, 2, 3]));
+        parts.push((*b"EXIF", vec![4, 5, 6]));
+        parts.push((*b"TEST", vec![7, 8, 9]));
+        let original = riff(&parts);
+        fs::write(&source, &original).expect("source");
+        let mut remove = MetadataExportOptions::default();
+        for field in ImageMetadataFormat::Webp.fields() {
+            remove.set(*field, Some(String::new())).expect("remove");
+        }
+        let mut replace = settings();
+        replace
+            .set(MetadataField::Title, Some("Replacement".into()))
+            .expect("set");
+        for metadata in [MetadataExportOptions::default(), replace, remove] {
+            let mut expected = read(&source, &AtomicBool::new(false)).expect("source XMP");
+            xmp::apply(&mut expected, &metadata).expect("expected XMP");
+            export_media_with_options(
+                &request,
+                ExportOptions {
+                    metadata,
+                    ..Default::default()
+                },
+            )
+            .expect("metadata-only export");
+            let actual = fs::read(&target).expect("output");
+            assert_eq!(
+                non_xmp(&actual),
+                non_xmp(&original),
+                "compressed data and ancillary chunks"
+            );
+            let mut expected_header = parts[0].1.clone();
+            if expected.is_empty() {
+                expected_header[0] &= !4;
+            }
+            assert_eq!(chunks(&actual)[0].1, expected_header);
+            assert_eq!(
+                read(&target, &AtomicBool::new(false)).expect("saved XMP"),
+                expected
+            );
+            assert_eq!(
+                crate::decode_image(&target).expect("saved pixels").frames,
+                crate::decode_image(&source).expect("source pixels").frames
+            );
+            assert_eq!(fs::read(&source).expect("source unchanged"), original);
+        }
+    }
+    assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn unedited_webp_export_validates_pixels_and_preserves_targets_on_failure() {
+    let root = root("webp-unedited-protection");
+    let source = root.join("source.webp");
+    let target = root.join("target.webp");
+    let original = fixture(true);
+    fs::write(&source, &original).expect("source");
+    fs::write(&target, b"existing target").expect("target");
+    let request = ExportRequest {
+        source: source.clone(),
+        target: target.clone(),
+        kind: MediaKind::Image,
+        operations: vec![],
+        hardware_encode: false,
+    };
+    for before in [true, false] {
+        let cancel = AtomicBool::new(before);
+        assert!(matches!(
+            export_cancellable(&request, &cancel, &|_| {
+                cancel.store(true, Ordering::Relaxed);
+            }),
+            Err(ExportError::Cancelled)
+        ));
+        assert_eq!(
+            fs::read(&target).expect("target retained"),
+            b"existing target"
+        );
+    }
+    let mut damaged = chunks(&original);
+    let bitstream = damaged
+        .iter_mut()
+        .find(|(kind, _)| kind == b"VP8L")
+        .expect("VP8L");
+    bitstream.1.truncate(5);
+    let damaged = riff(&damaged);
+    assert!(
+        container(Cursor::new(&damaged), &AtomicBool::new(false)).is_ok(),
+        "headers alone accept broken pixels"
+    );
+    fs::write(&source, &damaged).expect("damaged source");
+    assert!(export_media(&request).is_err());
+    assert_eq!(fs::read(&source).expect("source retained"), damaged);
+    assert_eq!(
+        fs::read(&target).expect("target retained"),
+        b"existing target"
+    );
+    fs::write(&source, &original).expect("restore");
+    assert!(
+        export_cancellable(&request, &AtomicBool::new(false), &|_| {
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&source)
+                .expect("source")
+                .write_all(&[0])
+                .expect("source change");
+        })
+        .is_err()
+    );
+    assert_eq!(
+        fs::read(&target).expect("target retained"),
+        b"existing target"
+    );
+    assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn webp_real_export_keeps_sets_removes_nine_fields_and_protects_files_on_failure() {
     let root = root("webp-metadata");
     let source = root.join("source.webp");

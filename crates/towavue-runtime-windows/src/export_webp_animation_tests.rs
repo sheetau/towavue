@@ -472,6 +472,11 @@ fn animated_webp_lossy_rgb_and_alpha_sources_save_displayed_pixels_losslessly() 
         assert_eq!(original.frames.len(), 2);
         export_media(&request(&source, &target, vec![])).expect("lossy animation save");
         assert_eq!(
+            fs::read(&target).expect("saved bytes"),
+            fs::read(&source).expect("source bytes"),
+            "unedited lossy frames are copied, not re-encoded"
+        );
+        assert_eq!(
             crate::decode_image(&target).expect("saved display").frames,
             original.frames
         );
@@ -646,11 +651,21 @@ fn animation_export_failures(extension: &str) {
     wide[24..27].copy_from_slice(&16384u32.to_le_bytes()[..3]);
     fs::write(&source, wide).expect("wide animation canvas");
     if extension == "webp" {
+        export_media(&request).expect("unedited canvas needs no WebP encoder");
+        assert_eq!(
+            fs::read(&target).expect("wide copy"),
+            fs::read(&source).expect("wide source")
+        );
+        fs::write(&target, b"existing target").expect("restore target");
         assert!(
-            export_media(&request)
-                .expect_err("output dimension limit")
-                .to_string()
-                .contains("16384")
+            export_media(&self::request(
+                &source,
+                &target,
+                vec![EditOperation::FlipHorizontal]
+            ))
+            .expect_err("output dimension limit")
+            .to_string()
+            .contains("16384")
         );
         assert_eq!(
             fs::read(&target).expect("wide target preserved"),
@@ -748,7 +763,18 @@ fn animation_export_failures(extension: &str) {
         .expect("VP8L")
         + 8;
     damaged[bitstream + 5..bitstream + 9].fill(0xff);
-    for damaged in [damaged, bytes[..bytes.len() - 1].to_vec()] {
+    let mut damaged_last = bytes.clone();
+    let last_bitstream = damaged_last
+        .windows(4)
+        .rposition(|bytes| bytes == b"VP8L")
+        .expect("last VP8L")
+        + 8;
+    damaged_last[last_bitstream + 5..last_bitstream + 9].fill(0xff);
+    assert!(
+        container(Cursor::new(&damaged_last), &AtomicBool::new(false)).is_ok(),
+        "container headers cannot detect corrupted last-frame pixels"
+    );
+    for damaged in [damaged, damaged_last, bytes[..bytes.len() - 1].to_vec()] {
         fs::write(&source, damaged).expect("damaged source");
         assert!(export_media(&request).is_err());
         assert_eq!(fs::read(&target).expect("preserved"), b"existing target");

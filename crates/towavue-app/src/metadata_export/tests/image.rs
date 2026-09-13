@@ -1060,6 +1060,8 @@ fn webp_metadata_ui_explains_animation_scope_and_validates_typed_fields() {
         "WebP XMP property: dc:title",
         "WebP input supports WebP output, or JPEG output for static images",
         "Animated WebP retains all frames, exact timing and loops",
+        "WebP output with no image edits preserves compressed pixels and all non-XMP chunks",
+        "Remove is not a privacy scrub",
         "Choose a .webp export path",
     ] {
         assert!(

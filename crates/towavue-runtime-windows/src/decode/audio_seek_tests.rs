@@ -1075,3 +1075,145 @@ fn pcm_packet_scan_reports_exact_seek_anchor_cost() {
     }
     fs::remove_dir_all(directory).expect("remove owned fixtures");
 }
+
+#[test]
+fn counted_packet_checkpoints_restore_exact_pcm_and_flac_seek_phase() {
+    // Feasibility control for reusing a counted prefix. These bookmarks belong to
+    // this open input only; this is not a production cache or a compressed-decoder
+    // state snapshot. PCM and FLAC can decode an independently identified packet.
+    for (codec, rate, channels, packet_samples) in [
+        ("pcm_s16le", 48_000, 1, 1001),
+        ("pcm_s24le", 44_100, 2, 997),
+        ("pcm_f32le", 96_000, 2, 1024),
+        ("flac", 44_100, 2, 1001),
+    ] {
+        let (directory, source, control) = fixture(rate, channels, codec, 12, packet_samples);
+        let mut input = format::input(&source).expect("checkpoint input");
+        let origin = input_origin(&input);
+        let config = best_stream_config(&input, Type::Audio).expect("audio config");
+        let time_base = config.time_base;
+        let stream_index = config.index;
+        let mut counter = create_audio_pipeline(&input)
+            .expect("counter")
+            .expect("audio");
+        counter.sample_preroll = config.sample_preroll(MediaTime::from_nanoseconds(20_000_000_000));
+        if codec == "flac" {
+            counter.packet_samples = PacketSamples::new(codec::Id::FLAC);
+        }
+        let mut checkpoints = Vec::new();
+        let mut next_checkpoint = i64::from(rate);
+        let mut prefix_packets = 0;
+        for (stream, mut packet) in input.packets() {
+            if stream.index() != stream_index {
+                continue;
+            }
+            let identity = (packet.position(), packet.pts(), packet.size());
+            normalize_packet_time(&mut packet, time_base, origin);
+            if counter.next_sample >= next_checkpoint {
+                checkpoints.push((identity, counter.next_sample));
+                next_checkpoint = counter.next_sample + i64::from(rate);
+            }
+            assert!(counter.skip_sample_preroll(&packet).expect("count prefix"));
+            prefix_packets += 1;
+        }
+        assert!(checkpoints.len() >= 10, "one-second sparse checkpoints");
+
+        for target_ms in [11_017_i64, 3017, 9017, 617, 11_917, 12_000] {
+            let target = MediaTime::from_nanoseconds(target_ms * 1_000_000);
+            let end = target.saturating_add(Duration::from_millis(50));
+            let target_sample = target.as_nanoseconds().rescale_with(
+                (1, 1_000_000_000),
+                (1, rate as i32),
+                Rounding::Down,
+            );
+            let checkpoint = checkpoints
+                .iter()
+                .rev()
+                .find(|(_, sample)| *sample <= target_sample);
+            let seek_us = checkpoint.map_or(origin, |((_, pts, _), _)| {
+                // Back up a container tick: a rounded timestamp need not lie at
+                // the beginning of the packet whose exact sample axis we saved.
+                (pts.expect("fixture PTS") - 1).rescale_with(
+                    time_base,
+                    ffmpeg::rescale::TIME_BASE,
+                    Rounding::Down,
+                )
+            });
+            input
+                .seek(seek_us, ..seek_us)
+                .expect("seek before checkpoint");
+            let mut decoder = create_audio_pipeline(&input)
+                .expect("decoder")
+                .expect("audio");
+            let mut matched = checkpoint.is_none();
+            let mut read_packets = 0;
+            let mut summary = DecodeSummary::default();
+            let mut actual = Vec::new();
+            let mut emit = |output| {
+                if let DecodeOutput::Audio(mut chunk) = output {
+                    clip_audio_chunk(&mut chunk, target, Some(end));
+                    actual.extend(chunk.bytes);
+                }
+                true
+            };
+            for (stream, mut packet) in input.packets() {
+                if stream.index() != stream_index {
+                    continue;
+                }
+                read_packets += 1;
+                if !matched {
+                    let (identity, next_sample) = checkpoint.expect("requested checkpoint");
+                    if (packet.position(), packet.pts(), packet.size()) != *identity {
+                        continue;
+                    }
+                    decoder.next_sample = *next_sample;
+                    matched = true;
+                }
+                normalize_packet_time(&mut packet, time_base, origin);
+                decoder.decoder.send_packet(&packet).expect("resume packet");
+                decoder
+                    .receive(&mut emit, &mut summary)
+                    .expect("resume samples");
+                if decoder.next_presentation_time >= end {
+                    break;
+                }
+            }
+            assert!(matched, "{codec} at {target_ms}: checkpoint must be found");
+            decoder.decoder.send_eof().expect("EOF");
+            decoder
+                .receive(&mut emit, &mut summary)
+                .expect("drain decoder");
+            decoder
+                .flush_resampler(&mut emit, &mut summary)
+                .expect("drain resampler");
+            // The FLAC-copy NUT still carries the source's rounded packet PTS;
+            // its direct seek is not an independent exact-sample oracle. Decode
+            // the source prefix for every codec, and also compare PCM's precise
+            // remux control where the original packet-size test established it.
+            let expected = samples(&source, target, end, MediaTime::ZERO).0;
+            if codec != "flac" {
+                assert!(
+                    expected == samples(&control, target, end, target).0,
+                    "{codec}: independent sample-time-base control"
+                );
+            }
+            assert_eq!(
+                actual.len(),
+                expected.len(),
+                "{codec} at {target_ms}: length"
+            );
+            assert!(
+                actual == expected,
+                "{codec} at {target_ms}: exact PCM bytes"
+            );
+            if target_ms >= 9000 {
+                assert!(
+                    read_packets < prefix_packets / 4,
+                    "{codec} at {target_ms}: read {read_packets}/{prefix_packets} packets"
+                );
+            }
+        }
+        drop((counter, config, input));
+        fs::remove_dir_all(directory).expect("remove owned fixtures");
+    }
+}

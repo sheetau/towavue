@@ -788,7 +788,7 @@ fn jpeg_metadata_splice_preserves_every_non_xmp_byte_and_decoded_pixel() {
 }
 
 #[test]
-fn edited_jpeg_webp_exports_preserve_rights_without_stale_technical_xmp() {
+fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical_xmp() {
     let root = root("edited-rights");
     let source = root.join("source.jpg");
     let rights = r#"<q:Owner xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Bag><r:li>Original owner</r:li></r:Bag></q:Owner><q:UsageTerms xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Alt><r:li xml:lang="en">Keep attribution</r:li><r:li xml:lang="fr">Attribution requise</r:li></r:Alt></q:UsageTerms><q:WebStatement xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/rights</q:WebStatement><q:Certificate xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/original-certificate</q:Certificate>"#;
@@ -797,7 +797,7 @@ fn edited_jpeg_webp_exports_preserve_rights_without_stale_technical_xmp() {
             "r:about=\"\"",
             "r:about=\"\" xmlns:q=\"http://ns.adobe.com/xap/1.0/rights/\" q:Marked=\"True\"",
         )
-        .replace("</r:Description>", &format!("{rights}</r:Description>"));
+        .replace("</r:Description>", &format!("{rights}<d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:subject></r:Description>"));
     fs::write(&source, tagged(packet.as_bytes())).expect("source rights");
     for extension in ["jpg", "webp"] {
         let target = root.join(format!("edited.{extension}"));
@@ -813,6 +813,7 @@ fn edited_jpeg_webp_exports_preserve_rights_without_stale_technical_xmp() {
             "https://example.invalid/rights",
             "q:Marked=\"True\"",
             "Edited title",
+            "<d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:subject>",
         ] {
             assert!(
                 bytes
@@ -840,8 +841,17 @@ fn edited_jpeg_webp_exports_preserve_rights_without_stale_technical_xmp() {
                     .windows(b"Original owner".len())
                     .any(|part| part == b"Original owner")
             );
+            assert!(
+                bytes
+                    .windows(b"nature &amp; travel".len())
+                    .any(|part| part == b"nature &amp; travel")
+            );
         }
     }
+    assert_eq!(
+        fs::read(&source).expect("unchanged source"),
+        tagged(packet.as_bytes())
+    );
     fs::remove_dir_all(root).expect("owned fixtures");
 }
 

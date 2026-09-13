@@ -1,6 +1,55 @@
 use super::*;
 
 #[test]
+fn edited_xmp_keeps_keywords_without_promoting_foreign_or_nested_properties() {
+    let cancel = AtomicBool::new(false);
+    for subject in [
+        r#"<d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li><![CDATA[<landscape>]]></r:li><r:li>nature &amp; travel</r:li></r:Bag></d:subject>"#,
+        r#"<d:subject><r:Bag/></d:subject>"#,
+    ] {
+        let packet = format!(
+            "<r:RDF xmlns:r=\"{RDF}\"><r:Description xmlns:d=\"{DC}\" xmlns:t=\"http://ns.adobe.com/tiff/1.0/\" xml:lang=\"en\" t:ImageWidth=\"1234\">{subject}<d:subject xmlns:d=\"urn:not-dc\">foreign keyword</d:subject><t:opaque><d:subject>nested keyword</d:subject></t:opaque></r:Description></r:RDF>"
+        );
+        for title in [None, Some("New title"), Some("")] {
+            let mut options = MetadataExportOptions::default();
+            options
+                .set(MetadataField::Title, title.map(str::to_owned))
+                .expect("title option");
+            let output = rewrite_edited(packet.as_bytes(), &options, &cancel).expect("rewrite");
+            let text = std::str::from_utf8(&output).expect("UTF-8");
+            assert!(text.contains(subject), "keyword structure must survive");
+            assert!(text.contains("xml:lang=\"en\""));
+            for removed in ["t:ImageWidth=", "foreign keyword", "nested keyword"] {
+                assert!(!text.contains(removed), "must not retain {removed}");
+            }
+            assert_eq!(
+                rewrite_edited(&output, &options, &cancel).expect("resave"),
+                output
+            );
+        }
+    }
+    // Preserve an existing attribute spelling too; keyword retention does not
+    // interpret or normalize its RDF representation into editable fields.
+    let packet = format!(
+        "<r:RDF xmlns:r=\"{RDF}\"><r:Description xmlns:s=\"{DC}\" s:subject=\"one &amp; two\"/></r:RDF>"
+    );
+    assert_eq!(
+        rewrite_edited(
+            packet.as_bytes(),
+            &MetadataExportOptions::default(),
+            &cancel
+        )
+        .expect("attribute-only keywords"),
+        packet.as_bytes()
+    );
+    assert!(
+        parse(packet.as_bytes(), &cancel)
+            .expect("editable fields")
+            .is_empty()
+    );
+}
+
+#[test]
 fn edited_xmp_keeps_rights_scopes_but_drops_geometry_and_asset_identity() {
     let cancel = AtomicBool::new(false);
     let terms = r#"<q:UsageTerms><r:Alt><r:li xml:lang="en">Keep &amp; attribute</r:li><r:li xml:lang="fr"><![CDATA[Termes <originaux>]]></r:li></r:Alt></q:UsageTerms>"#;

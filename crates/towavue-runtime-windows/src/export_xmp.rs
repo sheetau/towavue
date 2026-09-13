@@ -56,12 +56,13 @@ impl Name {
         }
     }
 
-    fn rights_property(&self) -> bool {
-        self.0 == RIGHTS
-            && matches!(
-                self.1.as_str(),
-                "Owner" | "UsageTerms" | "WebStatement" | "Marked"
-            )
+    fn retained_descriptive_property(&self) -> bool {
+        self.is(DC, "subject")
+            || (self.0 == RIGHTS
+                && matches!(
+                    self.1.as_str(),
+                    "Owner" | "UsageTerms" | "WebStatement" | "Marked"
+                ))
     }
 }
 
@@ -497,7 +498,7 @@ pub(super) fn rewrite_unedited(
     rewrite(packet, options, cancelled, true)
 }
 
-/// Carry descriptive text and standard rights expressions across raster/format
+/// Carry descriptive text, keywords and standard rights expressions across raster/format
 /// changes, not technical geometry, asset identifiers or original certificates.
 pub(super) fn rewrite_edited(
     packet: &[u8],
@@ -545,7 +546,7 @@ fn rewrite(
     let mut retained_property = false;
     let remove = |key: &Name| {
         key.field().map_or_else(
-            || !unchanged_pixels && !key.rights_property(),
+            || !unchanged_pixels && !key.retained_descriptive_property(),
             |field| options.get(field).is_some(),
         )
     };
@@ -588,7 +589,7 @@ fn rewrite(
                                 removed = true;
                             } else {
                                 retained_property |= key.as_ref().is_some_and(|key| {
-                                    key.field().is_some() || key.rights_property()
+                                    key.field().is_some() || key.retained_descriptive_property()
                                 });
                                 attributes.push((
                                     attribute.key.as_ref().to_vec(),

@@ -86,13 +86,15 @@ fn non_xmp(bytes: &[u8]) -> Vec<([u8; 4], Vec<u8>)> {
 }
 
 #[test]
-fn edited_static_and_animated_webp_keep_rights_only_packets() {
+fn edited_static_and_animated_webp_keep_rights_only_and_keywords_only_packets() {
     let root = root("webp-edited-rights");
     let packet = br#"<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:q="http://ns.adobe.com/xap/1.0/rights/" xmlns:t="http://ns.adobe.com/tiff/1.0/" q:Marked="True" t:ImageWidth="1234"><q:UsageTerms><r:Alt><r:li xml:lang="en">Keep attribution</r:li></r:Alt></q:UsageTerms></r:Description></r:RDF>"#;
     let cancel = AtomicBool::new(false);
-    for animated in [false, true] {
-        let source = root.join(format!("source-{animated}.webp"));
-        let target = root.join(format!("target-{animated}.webp"));
+    let keywords = br#"<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:d="http://purl.org/dc/elements/1.1/" xmlns:t="http://ns.adobe.com/tiff/1.0/" t:ImageWidth="1234"><d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:subject></r:Description></r:RDF>"#;
+    for (animated, keywords_only) in [(false, false), (true, false), (false, true), (true, true)] {
+        let packet: &[u8] = if keywords_only { keywords } else { packet };
+        let source = root.join(format!("source-{animated}-{keywords_only}.webp"));
+        let target = root.join(format!("target-{animated}-{keywords_only}.webp"));
         if animated {
             animation::Animation {
                 control: [0, 0, 0, 0, 3, 0],
@@ -126,10 +128,10 @@ fn edited_static_and_animated_webp_keep_rights_only_packets() {
             hardware_encode: false,
         })
         .expect("baseline encoding");
-        let bytes = tagged(&fs::read(&source).expect("source"), packet);
-        fs::write(&source, &bytes).expect("rights-only source");
+        let source_bytes = tagged(&fs::read(&source).expect("source"), packet);
+        fs::write(&source, &source_bytes).expect("retention-only source");
         assert!(read(&source, &cancel).expect("editable fields").is_empty());
-        let original = container(Cursor::new(&bytes), &cancel).expect("source controls");
+        let original = container(Cursor::new(&source_bytes), &cancel).expect("source controls");
         // Static WebP export retains its lossy encoder; compare identical raster
         // export without XMP, not a falsely lossless rotation of the input.
         let expected = image::open(&plain_target)
@@ -147,13 +149,18 @@ fn edited_static_and_animated_webp_keep_rights_only_packets() {
         let saved = container(Cursor::new(&bytes), &cancel).expect("saved controls");
         assert_eq!(saved.animation, original.animation);
         let text =
-            String::from_utf8(saved.packet.expect("rights-only XMP retained")).expect("UTF-8");
-        assert!(text.contains("Keep attribution") && text.contains("q:Marked=\"True\""));
+            String::from_utf8(saved.packet.expect("retention-only XMP retained")).expect("UTF-8");
+        if keywords_only {
+            assert!(text.contains("<d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:subject>"));
+        } else {
+            assert!(text.contains("Keep attribution") && text.contains("q:Marked=\"True\""));
+        }
         assert!(!text.contains("t:ImageWidth="));
         assert!(
             image::open(&target).expect("saved pixels").to_rgba8() == expected,
             "metadata rewrite must not change the encoded pixels"
         );
+        assert_eq!(fs::read(&source).expect("unchanged source"), source_bytes);
     }
     fs::remove_dir_all(root).expect("owned fixtures");
 }

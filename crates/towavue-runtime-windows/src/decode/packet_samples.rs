@@ -11,7 +11,7 @@ pub(super) struct PacketSamples {
 impl PacketSamples {
     pub(super) fn new(codec: codec::Id) -> Option<Self> {
         // FFmpeg returns a new owned parser allocation or null. Its complete-frame
-        // FLAC/Vorbis parsers inspect headers, not compressed audio samples.
+        // FLAC/Vorbis/Opus parsers inspect headers, not compressed audio samples.
         let parser = unsafe { NonNull::new(ffmpeg::ffi::av_parser_init(codec.into()))? };
         // The allocation is live, exclusively owned and not yet used by a worker.
         unsafe { (*parser.as_ptr()).flags = ffmpeg::ffi::PARSER_FLAG_COMPLETE_FRAMES };

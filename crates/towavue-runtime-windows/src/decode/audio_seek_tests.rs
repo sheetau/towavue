@@ -556,6 +556,219 @@ fn compare_aac_noise_substitution(report_alignment: bool) {
 }
 
 #[test]
+fn opus_prefix_counts_match_decoder_priming_gaps_and_invalid_header_fallback() {
+    let (directory, source, _) = fixture(48_000, 2, "libopus", 1, 1001);
+    let mut input = format::input(&source).expect("Opus input");
+    let config = best_stream_config(&input, Type::Audio).expect("Opus config");
+    let mut pipeline = create_audio_pipeline(&input)
+        .expect("pipeline")
+        .expect("audio");
+    assert_eq!(pipeline.decoder.packet_time_base(), config.time_base);
+    pipeline.sample_preroll = config.sample_preroll(MediaTime::from_nanoseconds(2_000_000_000));
+    pipeline.packet_samples = PacketSamples::new(codec::Id::OPUS);
+    let mut sequential = create_audio_pipeline(&input)
+        .expect("pipeline")
+        .expect("audio");
+    let mut summary = DecodeSummary::default();
+    let mut first = None;
+    let mut counted = 0;
+    for (index, (_, mut packet)) in input.packets().enumerate() {
+        if index >= 3 {
+            packet.set_pts(packet.pts().map(|pts| pts + 100));
+        }
+        first.get_or_insert_with(|| packet.clone());
+        sequential
+            .decoder
+            .send_packet(&packet)
+            .expect("sequential decode");
+        sequential
+            .receive(&mut |_| true, &mut summary)
+            .expect("samples");
+        if pipeline.skip_sample_preroll(&packet).expect("Opus prefix") {
+            counted += 1;
+        } else {
+            pipeline
+                .decoder
+                .send_packet(&packet)
+                .expect("decode priming or side data");
+            pipeline
+                .receive(&mut |_| true, &mut DecodeSummary::default())
+                .expect("samples");
+        }
+        assert_eq!(
+            pipeline.next_sample, sequential.next_sample,
+            "sample anchor including gap/priming"
+        );
+    }
+    assert!(
+        counted > 30,
+        "prefix uses packet headers, not full decoding"
+    );
+    pipeline.sample_preroll = config.sample_preroll(MediaTime::from_nanoseconds(2_000_000_000));
+    let previous = pipeline.next_sample;
+    assert!(
+        !pipeline
+            .skip_sample_preroll(&ffmpeg::Packet::copy(&[0x03, 0]))
+            .expect("invalid Opus fallback")
+    );
+    assert!(pipeline.sample_preroll.is_none());
+    assert_eq!(pipeline.next_sample, previous);
+    pipeline.sample_preroll = config.sample_preroll(MediaTime::from_nanoseconds(2_000_000_000));
+    let first = first.expect("first packet with skip samples");
+    assert!(first.side_data().next().is_some());
+    assert!(
+        !pipeline
+            .skip_sample_preroll(&first)
+            .expect("side data fallback")
+    );
+    assert!(pipeline.sample_preroll.is_none());
+    assert_eq!(pipeline.next_sample, previous);
+    drop(config);
+    drop(input);
+    fs::remove_dir_all(directory).expect("remove owned fixtures");
+}
+
+#[test]
+fn opus_seek_preserves_sample_phase_across_packet_durations() {
+    let (directory, source, _) = fixture(48_000, 2, "pcm_f32le", 4, 1001);
+    let executable =
+        PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe");
+    for (duration, application, bitrate) in [
+        ("2.5", "audio", "128k"),
+        ("5", "audio", "128k"),
+        ("10", "audio", "128k"),
+        ("20", "audio", "128k"),
+        ("40", "audio", "128k"),
+        ("60", "audio", "128k"),
+        ("20", "voip", "24k"),
+        ("60", "voip", "24k"),
+    ] {
+        let encoded = directory.join(format!("{duration}-{application}.opus"));
+        let remuxed = encoded.with_extension("mkv");
+        for (input, output, args) in [
+            (
+                &source,
+                &encoded,
+                vec![
+                    "-c:a",
+                    "libopus",
+                    "-frame_duration",
+                    duration,
+                    "-application",
+                    application,
+                    "-b:a",
+                    bitrate,
+                ],
+            ),
+            (&encoded, &remuxed, vec!["-c:a", "copy"]),
+        ] {
+            let result = std::process::Command::new(&executable)
+                .creation_flags(0x0800_0000)
+                .args(["-v", "error", "-n", "-i"])
+                .arg(input)
+                .args(args)
+                .arg(output)
+                .output()
+                .expect("Opus fixture");
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        for encoded in [&encoded, &remuxed] {
+            let mut input = ParallelInput::open(encoded, &|| false).expect("reused Opus input");
+            for ns in [
+                2_917_000_000,
+                17_000_000,
+                617_000_000,
+                1_017_000_000,
+                0,
+                3_917_000_000,
+                4_000_000_000,
+            ] {
+                let target = MediaTime::from_nanoseconds(ns);
+                let end = target.saturating_add(Duration::from_millis(250));
+                let expected = samples(encoded, target, end, MediaTime::ZERO).0;
+                let (actual, summary) = collect(&mut input, target, end, target);
+                let requested_frames =
+                    (4_000_000_000_i64 - ns).clamp(0, 250_000_000) * 48_000 / 1_000_000_000;
+                assert_eq!(
+                    expected.len(),
+                    requested_frames as usize * 8,
+                    "priming/EOF sample count"
+                );
+                assert_eq!(actual.len(), expected.len(), "requested sample count");
+                let native = encoded.extension().expect("container") == "opus";
+                // Ogg may need the preceding page to restore an EOS granule anchor.
+                assert!(
+                    summary.audio_frames < if native { 144_000 } else { 48_000 },
+                    "Opus/{duration}/{application} at {ns}: {} decoded frames",
+                    summary.audio_frames
+                );
+                assert!(
+                    actual == samples(encoded, target, end, target).0,
+                    "deterministic reused seek"
+                );
+                if native || matches!(duration, "2.5" | "5") || ns < 250_000_000 {
+                    assert!(
+                        actual == expected,
+                        "Opus/{duration}/{application}: sample phase at {ns}"
+                    );
+                }
+                if actual.len() <= 64 * 8 {
+                    continue;
+                }
+                let (offset, error) = (-32_i32..=32)
+                    .map(|offset| {
+                        let a = &actual[offset.max(0) as usize * 8..];
+                        let b = &expected[(-offset).max(0) as usize * 8..];
+                        let error = a
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .zip(b.as_chunks::<4>().0)
+                            .map(|(a, b)| (f32::from_ne_bytes(*a) - f32::from_ne_bytes(*b)).abs())
+                            .fold(0.0f32, f32::max);
+                        (offset, error)
+                    })
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .expect("full overlap alignment");
+                assert_eq!(
+                    offset, 0,
+                    "Opus/{duration}/{application}: sample phase at {ns}"
+                );
+                eprintln!(
+                    "OPUS/{duration}/{application}/{} at {ns}: frames {}/{}, offset {offset}, residual {error}, decoded {}",
+                    encoded.extension().expect("container").to_string_lossy(),
+                    actual.len() / 8,
+                    expected.len() / 8,
+                    summary.audio_frames
+                );
+            }
+            let checks = AtomicUsize::new(0);
+            assert!(matches!(
+                input.decode_software(
+                    MediaTime::from_nanoseconds(2_917_000_000),
+                    None,
+                    Some(DecodeStream::Audio),
+                    &|| checks.fetch_add(1, Ordering::Relaxed) > 10,
+                    |_| true,
+                ),
+                Err(DecodeError::ConsumerClosed)
+            ));
+            let target = MediaTime::from_nanoseconds(17_000_000);
+            let end = target.saturating_add(Duration::from_millis(250));
+            assert!(
+                collect(&mut input, target, end, target).0
+                    == samples(encoded, target, end, MediaTime::ZERO).0
+            );
+        }
+    }
+    fs::remove_dir_all(directory).expect("remove owned fixtures");
+}
+
+#[test]
 fn compressed_audio_preroll_keeps_seek_samples_and_rewinds_reused_inputs() {
     for (codec, extension, rate) in [
         ("libmp3lame", "mp3", 48_000),
@@ -593,7 +806,11 @@ fn compressed_audio_preroll_keeps_seek_samples_and_rewinds_reused_inputs() {
                 );
             }
             // Ogg may decode an additional page to restore its granule anchor.
-            let decoded_seconds = if codec == "libvorbis" { 3 } else { 2 };
+            let decoded_seconds = if matches!(codec, "libvorbis" | "libopus") {
+                3
+            } else {
+                2
+            };
             assert!(
                 summary.audio_frames < u64::from(rate) * decoded_seconds,
                 "unexpected full-prefix decode"

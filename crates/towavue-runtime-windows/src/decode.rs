@@ -211,9 +211,16 @@ impl StreamConfig {
         if self.parameters.id() == FLAC {
             return Some((target, PrerollSamples::Flac));
         }
-        if self.parameters.id() == VORBIS {
+        if matches!(self.parameters.id(), VORBIS | OPUS) {
             let warmup = target.saturating_sub(Duration::from_millis(250));
-            return (warmup > MediaTime::ZERO).then_some((warmup, PrerollSamples::Vorbis));
+            return (warmup > MediaTime::ZERO).then_some((
+                warmup,
+                if self.parameters.id() == OPUS {
+                    PrerollSamples::Opus
+                } else {
+                    PrerollSamples::Vorbis
+                },
+            ));
         }
         if self.parameters.id() == AAC
             && parameters.profile == ffmpeg::ffi::AV_PROFILE_AAC_LOW
@@ -360,6 +367,7 @@ enum PrerollSamples {
     Pcm(usize),
     Flac,
     Vorbis,
+    Opus,
     AacLc(usize),
 }
 
@@ -380,9 +388,9 @@ impl AudioPipeline {
         let Some((target, source)) = self.sample_preroll else {
             return Ok(false);
         };
-        // Decode AAC's initial padding and first actual output before counting.
+        // Decode AAC/Opus initial padding and first actual output before counting.
         // This establishes both the real sample anchor and decoder priming state.
-        if matches!(source, PrerollSamples::AacLc(_))
+        if matches!(source, PrerollSamples::AacLc(_) | PrerollSamples::Opus)
             && self.next_sample == ffmpeg::ffi::AV_NOPTS_VALUE
         {
             return Ok(false);
@@ -424,7 +432,7 @@ impl AudioPipeline {
                 }
                 samples
             }
-            PrerollSamples::Flac | PrerollSamples::Vorbis => {
+            PrerollSamples::Flac | PrerollSamples::Vorbis | PrerollSamples::Opus => {
                 let Some(samples) = self
                     .packet_samples
                     .as_mut()
@@ -1203,7 +1211,10 @@ fn run_parallel_audio_worker(
     pipeline.sample_preroll = sample_preroll;
     if matches!(
         sample_preroll,
-        Some((_, PrerollSamples::Flac | PrerollSamples::Vorbis))
+        Some((
+            _,
+            PrerollSamples::Flac | PrerollSamples::Vorbis | PrerollSamples::Opus
+        ))
     ) {
         pipeline.packet_samples = PacketSamples::new(pipeline.decoder.id());
     }
@@ -1256,20 +1267,24 @@ fn seek_input(
     }
     let timestamp_microseconds =
         (target.as_nanoseconds() / 1_000).saturating_add(input_origin(input));
-    let timestamp_microseconds = ogg_vorbis_seek_anchor(input, timestamp_microseconds);
+    let timestamp_microseconds = ogg_audio_seek_anchor(input, timestamp_microseconds);
     input.seek(timestamp_microseconds, ..timestamp_microseconds)?;
     Ok(())
 }
 
-fn ogg_vorbis_seek_anchor(input: &format::context::Input, target: i64) -> i64 {
+fn ogg_audio_seek_anchor(input: &format::context::Input, target: i64) -> i64 {
     let Some(stream) = input.streams().best(Type::Audio).filter(|stream| {
-        input.format().name() == "ogg" && stream.parameters().id() == codec::Id::VORBIS
+        input.format().name() == "ogg"
+            && matches!(
+                stream.parameters().id(),
+                codec::Id::VORBIS | codec::Id::OPUS
+            )
     }) else {
         return target;
     };
     let tick = target.rescale(ffmpeg::rescale::TIME_BASE, stream.time_base());
     // Generic indexes assign several packet timestamps to one Ogg page position.
-    // Starting on an EOS page cannot reconstruct its first Vorbis timestamp;
+    // Starting on an EOS page cannot reconstruct its first Vorbis/Opus timestamp;
     // a cached interior timestamp can then shift the whole page beyond EOF.
     // Start from the preceding indexed page so the demuxer observes its granule.
     // The input is exclusively borrowed, no worker can mutate its index, and these
@@ -1715,7 +1730,10 @@ fn create_audio_pipeline(
 
 fn create_audio_pipeline_from(config: StreamConfig) -> Result<AudioPipeline, DecodeError> {
     let context = codec::context::Context::from_parameters(config.parameters)?;
-    let decoder = context.decoder().audio()?;
+    let mut decoder = context.decoder();
+    // Trimming codec priming must also advance the decoded frame's timestamp.
+    decoder.set_packet_time_base(config.time_base);
+    let decoder = decoder.audio()?;
     let source_layout = if decoder.channel_layout().is_empty() {
         ChannelLayout::default(decoder.channels() as i32)
     } else {

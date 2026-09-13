@@ -758,6 +758,11 @@ fn apng_previous_restores_the_canvas_after_background_disposal() {
     );
     export_media(&request(&source, &target)).expect("interlaced save");
     assert_eq!(
+        without_text(&fs::read(&target).expect("saved bytes")),
+        without_text(&interlaced),
+        "retain Adam7 compressed data and frame controls"
+    );
+    assert_eq!(
         crate::decode_image(&target).expect("saved Adam7").frames,
         decoded.frames
     );
@@ -1552,7 +1557,7 @@ fn apng_export_cancellation_and_source_changes_never_replace_target() {
                     }
                 }
             });
-            assert!(changed.load(Ordering::Relaxed), "actual encoder progress");
+            assert!(changed.load(Ordering::Relaxed), "actual export progress");
             if change_source {
                 assert!(
                     result
@@ -1705,12 +1710,22 @@ fn apng_preparation_streams_frames_and_preserves_targets_on_failure() {
         });
         fs::write(&source, &malformed).expect("malformed default image with valid CRC");
         PngMetadata::prepare(&request, &title("new"), &cancel).expect("container scan");
-        assert!(
-            export_media(&request)
-                .expect_err("default image decoding fails")
-                .to_string()
-                .contains("animation frame preparation failed")
-        );
+        for edited in [false, true] {
+            let mut request = request.clone();
+            if edited {
+                request.operations.push(EditOperation::FlipHorizontal);
+            }
+            assert!(
+                export_media(&request)
+                    .expect_err("default image decoding fails")
+                    .to_string()
+                    .contains(if edited {
+                        "animation frame preparation failed"
+                    } else {
+                        "PNG decode validation"
+                    })
+            );
+        }
         assert_eq!(fs::read(&source).expect("source preserved"), malformed);
         assert_eq!(
             fs::read(&target).expect("target preserved"),
@@ -1804,6 +1819,172 @@ fn png_text_rejects_corruption_truncation_invalid_text_and_bounded_expansion() {
         scan(Cursor::new(&original), None, &AtomicBool::new(true)),
         Err(ExportError::Cancelled)
     ));
+}
+
+#[test]
+fn unedited_png_export_preserves_compressed_data_depth_palette_and_ancillary_chunks() {
+    let root = root("png-unedited-fidelity");
+    let source = root.join("source.png");
+    let target = root.join("saved.apng");
+    let mut inputs = vec![
+        fixture(),
+        animation_fixture_with_regions(3, &[[0, 1, 0, 7]; 3], true),
+        poster_fixture(2),
+    ];
+    for (color, depth, pixels) in [
+        (
+            png::ColorType::Rgba,
+            png::BitDepth::Sixteen,
+            vec![10, 1, 20, 2, 30, 3, 128, 4, 40, 5, 50, 6, 60, 7, 64, 8],
+        ),
+        (png::ColorType::Indexed, png::BitDepth::One, vec![0x40]),
+        (
+            png::ColorType::Grayscale,
+            png::BitDepth::Sixteen,
+            vec![17, 23, 53, 77],
+        ),
+        (
+            png::ColorType::Rgb,
+            png::BitDepth::Sixteen,
+            vec![17, 23, 53, 77, 89, 103, 17, 23, 53, 77, 89, 103],
+        ),
+    ] {
+        for animated in [false, true] {
+            let mut bytes = Vec::new();
+            {
+                let mut encoder = png::Encoder::new(&mut bytes, 2, 1);
+                encoder.set_color(color);
+                encoder.set_depth(depth);
+                if color == png::ColorType::Indexed {
+                    encoder.set_palette(vec![10, 20, 30, 40, 50, 60]);
+                    encoder.set_trns(vec![255, 128]);
+                }
+                if animated {
+                    encoder.set_animated(2, 0).expect("animation");
+                }
+                let mut writer = encoder.write_header().expect("header");
+                writer.write_image_data(&pixels).expect("first");
+                if animated {
+                    writer.write_image_data(&pixels).expect("second");
+                }
+                writer.finish().expect("finish");
+            }
+            inputs.push(bytes);
+        }
+    }
+    for mut original in inputs {
+        let mut icc = b"Profile\0\0".to_vec();
+        icc.extend(compressed(b"opaque profile bytes"));
+        original.splice(33..33, chunk(b"iCCP", &icc));
+        let tail = [
+            chunk(b"vpAG", &[1, 2, 3]),
+            international("Unknown", "keep unknown", true),
+            international("Title", "日本語", true),
+            chunk(b"eXIf", b"II*\0\x08\0\0\0\0\0\0\0\0\0"),
+        ]
+        .concat();
+        original.splice(original.len() - 12..original.len() - 12, tail);
+        fs::write(&source, &original).expect("source");
+        for metadata in [
+            MetadataExportOptions::default(),
+            title("new title"),
+            title(""),
+        ] {
+            let expected = PngMetadata::prepare(
+                &request(&source, &target),
+                &metadata,
+                &AtomicBool::new(false),
+            )
+            .expect("expected text");
+            export_media_with_options(
+                &request(&source, &target),
+                ExportOptions {
+                    metadata,
+                    ..Default::default()
+                },
+            )
+            .expect("save");
+            let actual = fs::read(&target).expect("saved");
+            assert_eq!(
+                without_text(&actual),
+                without_text(&original),
+                "compressed pixels and non-text chunks"
+            );
+            assert_eq!(scan_bytes(&actual).expect("saved text"), expected.chunks);
+            let unknown = international("Unknown", "keep unknown", true);
+            assert!(
+                actual.windows(unknown.len()).any(|value| value == unknown),
+                "unknown text retained"
+            );
+            assert_eq!(fs::read(&source).expect("source unchanged"), original);
+            let resaved = root.join("resaved.png");
+            export_media(&request(&target, &resaved)).expect("resave");
+            assert_eq!(fs::read(&resaved).expect("resaved"), actual);
+        }
+    }
+    assert_eq!(fs::read_dir(&root).expect("cleanup").count(), 3);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn unedited_png_validation_checks_every_frame_and_cancels_between_rows() {
+    let root = root("png-unedited-validation");
+    let source = root.join("source.png");
+    let target = root.join("target.png");
+    fs::write(&target, b"existing target").expect("target");
+    for original in [
+        fixture(),
+        animation_fixture(1, &[[0, 1, 0, 7]; 3]),
+        poster_fixture(2),
+    ] {
+        let last_data = original.windows(4).filter(|kind| *kind == b"fdAT").count();
+        let mut index = 0;
+        let damaged = map_chunks(&original, |kind, data| {
+            if &kind == b"fdAT" {
+                index += 1;
+            }
+            if (last_data == 0 && &kind == b"IDAT") || (&kind == b"fdAT" && index == last_data) {
+                let prefix = if &kind == b"fdAT" { 4 } else { 0 };
+                data.truncate(prefix);
+                data.extend(compressed(&[5])); // Invalid PNG row filter, with valid zlib and CRC.
+            }
+            true
+        });
+        fs::write(&source, &damaged).expect("damaged source");
+        PngMetadata::prepare(
+            &request(&source, &target),
+            &title("new"),
+            &AtomicBool::new(false),
+        )
+        .expect("valid container");
+        assert!(
+            export_media(&request(&source, &target))
+                .expect_err("decode validation")
+                .to_string()
+                .contains("PNG decode validation")
+        );
+        assert_eq!(fs::read(&source).expect("source retained"), damaged);
+        assert_eq!(
+            fs::read(&target).expect("target retained"),
+            b"existing target"
+        );
+    }
+    fs::write(&source, fixture()).expect("source");
+    let polls = std::cell::Cell::new(0);
+    assert!(
+        crate::image::apng::validate_png(
+            &source,
+            &|| {
+                polls.set(polls.get() + 1);
+                polls.get() < 12
+            },
+            &|_| panic!("must cancel before completing the frame")
+        )
+        .is_err()
+    );
+    assert_eq!(polls.get(), 12);
+    assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
 
 #[test]

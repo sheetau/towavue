@@ -549,6 +549,28 @@ fn export_audio_cancellable(
             used_hardware_encoder: false,
         });
     }
+    if let Some(metadata) = &png_metadata
+        && png_source
+        && png_metadata::png_path(&request.target)
+        && request.operations.is_empty()
+    {
+        let validation = crate::image::apng::validate_png(
+            &request.source,
+            &|| !cancelled.load(Ordering::Relaxed),
+            progress,
+        );
+        check_cancelled(cancelled)?;
+        let stamp = source_stamp.as_ref().expect("PNG source stamp");
+        stamp.verify(&request.source)?;
+        validation
+            .map_err(|error| ExportError::Failed(format!("PNG decode validation: {error}")))?;
+        metadata.apply_from(&request.source, &staging, cancelled)?;
+        stamp.verify(&request.source)?;
+        staging.publish(&request.target, cancelled, trimmed_kind)?;
+        return Ok(ExportOutcome {
+            used_hardware_encoder: false,
+        });
+    }
     if let Some(metadata) = &webp_metadata
         && webp_source
         && request.operations.is_empty()

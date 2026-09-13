@@ -154,6 +154,8 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
             "PNG text: 元の題名",
             "PNG keyword: Title",
             "PNG input and PNG output only.",
+            "PNG/APNG output with no image edits preserves compressed pixels, bit depth, palette and other chunks",
+            "Remove is not a privacy scrub",
             "EXIF, XMP",
             "including when all fields are Keep",
             "Choose a .png or .apng export path",

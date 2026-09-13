@@ -159,6 +159,7 @@ impl MetadataDialog {
                 if image_format == Some(ImageMetadataFormat::Png) {
                     ui.label("PNG input and PNG output only. Applies to the next Save or Export as for this tab's current file. Original file, displayed pixels and edit history stay unchanged.");
                     ui.label("Only these 10 PNG text fields are edited; EXIF, XMP and technical metadata are not edited. Keep preserves matching source text chunks in PNG output, including when all fields are Keep. Other formats do not guarantee preservation.");
+                    ui.label("PNG/APNG output with no image edits preserves compressed pixels, bit depth, palette and other chunks (including ICC, EXIF and unknown text). Image edits or format conversion still re-encode. Remove is not a privacy scrub: copies in other metadata remain.");
                     ui.label("Set/Remove replaces all matching text variants. Choose a .png or .apng export path; other output formats fail without replacing the target. Reading rejects corrupt text or more than 128 text chunks / 1 MiB stored or expanded text.");
                     ui.label("Supported APNG saves retain all frames, delays and loop count (1 to 65536 frames), including PREVIOUS disposal. A separate default poster receives the same edits and stays outside the animation. Frame compositing is shared with display. Other animation formats are separate capabilities.");
                 } else if image_format == Some(ImageMetadataFormat::Jpeg) {

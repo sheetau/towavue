@@ -1,6 +1,60 @@
 use super::*;
 use image::Pixel;
 
+/// Validate static PNG and all APNG raw frames (including a separate poster).
+/// Rows are discarded: no RGBA conversion, compositing or retained frame canvases.
+pub(crate) fn validate_png(
+    path: &Path,
+    current: &dyn Fn() -> bool,
+    progress: &dyn Fn(Duration),
+) -> Result<(), ImageDecodeError> {
+    let mut decoder = png::Decoder::new_with_limits(
+        open(path, current)?,
+        png::Limits {
+            bytes: IMAGE_BYTE_LIMIT,
+        },
+    );
+    // The export scanner already validates bounded text, including compressed fields.
+    decoder.set_ignore_text_chunk(true);
+    let mut reader = decoder.read_info()?;
+    let count = reader.info().animation_control.map_or(1, |animation| {
+        u64::from(animation.num_frames) + u64::from(reader.info().frame_control.is_none())
+    });
+    if count > 65537
+        || reader
+            .output_buffer_size()
+            .is_none_or(|size| size > IMAGE_BYTE_LIMIT)
+    {
+        return Err(ImageDecodeError::TooLarge);
+    }
+    let mut elapsed = Duration::ZERO;
+    for index in 0..count {
+        check_current(current)?;
+        if index != 0 {
+            reader.next_frame_info()?;
+        }
+        loop {
+            check_current(current)?;
+            if reader.next_interlaced_row()?.is_none() {
+                break;
+            }
+        }
+        if let Some(frame) = reader.info().frame_control {
+            elapsed += Duration::from_secs_f64(
+                f64::from(frame.delay_num)
+                    / f64::from(if frame.delay_den == 0 {
+                        100
+                    } else {
+                        frame.delay_den
+                    }),
+            );
+        }
+        progress(elapsed);
+    }
+    reader.finish()?;
+    check_current(current)
+}
+
 pub(super) fn decode(
     path: &Path,
     byte_limit: usize,

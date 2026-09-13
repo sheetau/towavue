@@ -180,23 +180,44 @@ impl Icon {
     }
 }
 
-pub fn tab_label(label: String, active: bool, muted: Option<bool>) -> egui::Atoms<'static> {
+pub const TAB_AUDIO_WIDTH: f32 = 24.0;
+
+pub fn tab_audio_button(
+    ui: &Ui,
+    rect: Rect,
+    active: bool,
+    muted: bool,
+    name: &str,
+) -> egui::Response {
+    let label = format!("{} tab: {name}", if muted { "Unmute" } else { "Mute" });
+    let response = ui
+        .interact(rect, ui.id().with("audio"), egui::Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .help_text(&label);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &label)
+    });
+    let icon = if muted { Icon::Muted } else { Icon::Speaker }.text();
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        icon.text(),
+        egui::FontId::new(14.0, crate::fonts::icon_font().family),
+        if active || response.hovered() {
+            FOREGROUND
+        } else {
+            MUTED
+        },
+    );
+    response
+}
+
+pub fn tab_label(label: String, active: bool) -> egui::Atoms<'static> {
     let text = egui::RichText::new(label);
-    let mut atoms = egui::Atoms::new((
+    egui::Atoms::new((
         if active { text.color(FOREGROUND) } else { text },
         egui::Atom::grow(),
-    ));
-    if let Some(muted) = muted {
-        atoms.push_left(egui::Atom {
-            size: Some(egui::vec2(4.0, 0.0)),
-            ..Default::default()
-        });
-        let icon = if muted { Icon::Muted } else { Icon::Speaker }
-            .text()
-            .size(14.0);
-        atoms.push_left(if active { icon.color(FOREGROUND) } else { icon });
-    }
-    atoms
+    ))
 }
 
 pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
@@ -627,10 +648,20 @@ mod tests {
                         "close overflow: {height}, {:?}",
                         response.rect
                     );
-                    let label_rect = egui::Rect::from_min_max(row.min, close_rect.left_bottom());
+                    let mut label_rect =
+                        egui::Rect::from_min_max(row.min, close_rect.left_bottom());
+                    if let Some(muted) = audio {
+                        let mut audio_rect = label_rect;
+                        audio_rect.set_width(super::TAB_AUDIO_WIDTH);
+                        label_rect.min.x = audio_rect.right();
+                        let audio =
+                            super::tab_audio_button(ui, audio_rect, true, muted, "Tab label");
+                        assert!(row.contains_rect(audio.rect));
+                        assert!(!audio.rect.intersects(close_rect));
+                    }
                     let response = ui.put(
                         label_rect,
-                        egui::Button::new(super::tab_label("Tab label".into(), true, audio))
+                        egui::Button::new(super::tab_label("Tab label".into(), true))
                             .truncate()
                             .gap(0.0),
                     );

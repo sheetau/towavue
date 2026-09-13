@@ -49,6 +49,39 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .level
     }
 
+    pub(super) fn toggle_tab_mute(&mut self, id: TabId) {
+        let Some(tab) = self.tabs.tabs().iter().find(|tab| tab.id == id) else {
+            return;
+        };
+        if self.tab_audio_indicator(tab).is_none() {
+            return;
+        }
+        if self.tabs.active().is_some_and(|tab| tab.id == id) {
+            self.toggle_playback_mute();
+            return;
+        }
+        let volume = self.playback_volumes.entry(id).or_default();
+        volume.level = if volume.level == 0.0 {
+            volume.unmuted
+        } else {
+            0.0
+        };
+        let gain = self
+            .edits
+            .get(&id)
+            .map(EditHistory::state)
+            .unwrap_or_default()
+            .volume;
+        self.retained_playback
+            .get_mut(&id)
+            .expect("playing tab")
+            .session
+            .as_mut()
+            .expect("audio output")
+            .set_volume(gain * volume.level);
+        self.request_redraw();
+    }
+
     pub(super) fn set_playback_volume(&mut self, level: f32) {
         if !level.is_finite()
             || !matches!(self.media_kind, Some(MediaKind::Audio | MediaKind::Video))
@@ -139,6 +172,26 @@ mod tests {
             let tab = app.tabs.active().expect("active tab");
             assert_eq!(app.tab_audio_indicator(tab), Some(level == 0.0));
             assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
+        }
+
+        fn tab_frame<N: Fn(AppEvent) + Send + Sync + 'static>(
+            app: &mut Application<N>,
+            context: &egui::Context,
+            events: Vec<egui::Event>,
+        ) -> (egui::FullOutput, Vec<UiAction>) {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_top_bar(ui, &mut actions),
+            );
+            (output, actions)
         }
 
         struct Trial {
@@ -292,6 +345,114 @@ mod tests {
                             nodes[0].1.label(),
                             Some("silence.wav"),
                             "icons do not pollute the accessible filename"
+                        );
+                    }
+                }
+                for density in [1.0, 1.25, 2.0] {
+                    context.set_pixels_per_point(density);
+                    for _ in 0..3 {
+                        tab_frame(&mut app, &context, vec![]);
+                    }
+                    let histories = app.edits.clone();
+                    let generation = app.generation;
+                    for (id, label, expected) in [
+                        (first, "Mute tab: silence.wav", 0.0),
+                        (second, "Unmute tab: silence.wav", 0.8),
+                    ] {
+                        let (output, _) = tab_frame(&mut app, &context, vec![]);
+                        let tree = output.platform_output.accesskit_update.expect("tree");
+                        let (node_id, node) = tree
+                            .nodes
+                            .iter()
+                            .find(|(_, node)| node.label() == Some(label))
+                            .expect("audio button");
+                        let bounds = node.bounds().expect("bounds");
+                        let point = egui::pos2(
+                            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                        );
+                        let button = |pos, pressed| egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        };
+                        // Dragging out of this control must not become a tab move or activation.
+                        tab_frame(
+                            &mut app,
+                            &context,
+                            vec![egui::Event::PointerMoved(point), button(point, true)],
+                        );
+                        let outside = point + egui::vec2(60.0, 80.0);
+                        let (_, actions) =
+                            tab_frame(&mut app, &context, vec![egui::Event::PointerMoved(outside)]);
+                        assert!(actions.is_empty());
+                        assert!(
+                            crate::tab_drag::active_pointer(
+                                &context,
+                                (Some(second), app.media_generation, app.graphics_epoch)
+                            )
+                            .is_none()
+                        );
+                        let (_, actions) =
+                            tab_frame(&mut app, &context, vec![button(outside, false)]);
+                        assert!(actions.is_empty());
+                        let (output, actions) =
+                            tab_frame(&mut app, &context, vec![egui::Event::PointerMoved(point)]);
+                        assert!(actions.is_empty());
+                        assert_eq!(
+                            output.platform_output.cursor_icon,
+                            egui::CursorIcon::PointingHand
+                        );
+                        let (_, actions) = tab_frame(&mut app, &context, vec![button(point, true)]);
+                        assert!(actions.is_empty(), "toggle waits for release");
+                        let (_, actions) =
+                            tab_frame(&mut app, &context, vec![button(point, false)]);
+                        assert!(
+                            matches!(actions.as_slice(), [UiAction::ToggleTabMute(tab)] if *tab == id)
+                        );
+                        for action in actions {
+                            app.handle_ui_action(action);
+                        }
+                        assert_eq!(app.playback_volumes[&id].level, expected);
+                        let session = if id == first {
+                            app.retained_playback[&id].session.as_ref()
+                        } else {
+                            app.session.as_ref()
+                        }
+                        .expect("session");
+                        assert_eq!(session.verification_volume(), (expected, Some(expected)));
+                        let (_, actions) = tab_frame(
+                            &mut app,
+                            &context,
+                            vec![egui::Event::AccessKitActionRequest(
+                                egui::accesskit::ActionRequest {
+                                    action: egui::accesskit::Action::Click,
+                                    target_tree: egui::accesskit::TreeId::ROOT,
+                                    target_node: *node_id,
+                                    data: None,
+                                },
+                            )],
+                        );
+                        assert!(
+                            matches!(actions.as_slice(), [UiAction::ToggleTabMute(tab)] if *tab == id)
+                        );
+                        for action in actions {
+                            app.handle_ui_action(action);
+                        }
+                        assert_eq!(
+                            app.playback_volumes[&id].level,
+                            if id == first { 0.6 } else { 0.0 }
+                        );
+                        assert_eq!(app.tabs.active().expect("active").id, second);
+                        assert_eq!(app.edits, histories);
+                        assert_eq!(app.generation, generation);
+                        assert!(
+                            crate::tab_drag::active_pointer(
+                                &context,
+                                (Some(second), app.media_generation, app.graphics_epoch)
+                            )
+                            .is_none()
                         );
                     }
                 }

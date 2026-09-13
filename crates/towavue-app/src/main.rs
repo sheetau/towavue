@@ -219,6 +219,7 @@ enum UiAction {
         towavue_core::TimelineEdit,
     ),
     Volume(TabId, f32),
+    ToggleTabMute(TabId),
     CloseTab(TabId),
     DropTab(TabId, egui::Pos2, egui::Vec2),
     OpenMedia(PathBuf, bool),
@@ -4270,12 +4271,18 @@ where
                                         },
                                     );
                                     let hover_background = painter.add(egui::Shape::Noop);
-                                    let label_rect = egui::Rect::from_min_max(
+                                    let mut label_rect = egui::Rect::from_min_max(
                                         rect.min,
                                         rect.max - egui::vec2(chrome::TAB_CLOSE_WIDTH, 0.0),
                                     );
                                     let label = display_name(tab.target.current_path());
                                     let audio = self.tab_audio_indicator(tab);
+                                    let audio_rect = audio.map(|_| {
+                                        let mut bounds = label_rect;
+                                        bounds.set_width(chrome::TAB_AUDIO_WIDTH);
+                                        label_rect.min.x = bounds.right();
+                                        bounds
+                                    });
                                     // Cached actions and keyboard focus must follow the tab, not its slot.
                                     let mut tab_ui = ui.new_child(
                                         egui::UiBuilder::new()
@@ -4293,16 +4300,12 @@ where
                                         egui::Stroke::NONE;
                                     let response = tab_ui.put(
                                         label_rect,
-                                        egui::Button::new(chrome::tab_label(
-                                            label.clone(),
-                                            active,
-                                            audio,
-                                        ))
-                                        .fill(Color32::TRANSPARENT)
-                                        .stroke(egui::Stroke::NONE)
-                                        .gap(0.0)
-                                        .truncate()
-                                        .sense(egui::Sense::click_and_drag()),
+                                        egui::Button::new(chrome::tab_label(label.clone(), active))
+                                            .fill(Color32::TRANSPARENT)
+                                            .stroke(egui::Stroke::NONE)
+                                            .gap(0.0)
+                                            .truncate()
+                                            .sense(egui::Sense::click_and_drag()),
                                     );
                                     response.widget_info(|| {
                                         egui::WidgetInfo::labeled(
@@ -4330,6 +4333,16 @@ where
                                         actions.push(UiAction::CloseTab(tab.id));
                                     }
                                     drag_layout.register(tab.id, &response);
+                                    let audio_button =
+                                        audio.zip(audio_rect).map(|(muted, rect)| {
+                                            let button = chrome::tab_audio_button(
+                                                &tab_ui, rect, active, muted, &label,
+                                            );
+                                            if button.clicked() {
+                                                actions.push(UiAction::ToggleTabMute(tab.id));
+                                            }
+                                            button
+                                        });
                                     let close_rect = egui::Rect::from_min_max(
                                         egui::pos2(
                                             rect.right() - chrome::TAB_CLOSE_WIDTH,
@@ -4339,13 +4352,23 @@ where
                                     );
                                     let close = chrome::tab_close(&mut tab_ui, close_rect, dirty)
                                         .help_text("Close tab");
-                                    if response.hovered() || close.hovered() {
+                                    if response.hovered()
+                                        || close.hovered()
+                                        || audio_button
+                                            .as_ref()
+                                            .is_some_and(egui::Response::hovered)
+                                    {
                                         painter.set(
                                             hover_background,
                                             egui::Shape::rect_filled(rect, 3.0, chrome::HOVER),
                                         );
                                     }
-                                    if response.has_focus() || close.has_focus() {
+                                    if response.has_focus()
+                                        || close.has_focus()
+                                        || audio_button
+                                            .as_ref()
+                                            .is_some_and(egui::Response::has_focus)
+                                    {
                                         painter.rect_stroke(
                                             rect,
                                             3.0,
@@ -5570,6 +5593,7 @@ where
                     self.set_playback_volume(volume);
                 }
             }
+            UiAction::ToggleTabMute(id) => self.toggle_tab_mute(id),
             UiAction::ResolveGuard(decision) => self.resolve_guard(decision),
             UiAction::CancelExport => {
                 if let Some(export) = &mut self.active_export {

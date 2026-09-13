@@ -309,6 +309,22 @@ fn caption_bounds(handle: HWND) -> RECT {
     unsafe {
         let _ = GetClientRect(handle, &mut client);
     }
+    let fallback = || {
+        // SAFETY: synchronous scalar query on the retained UI-thread window.
+        let dpi = unsafe { GetDpiForWindow(handle) } as i32;
+        RECT {
+            left: (client.right - 154 * dpi / 96).max(0),
+            top: 0,
+            right: client.right,
+            bottom: 32 * dpi / 96,
+        }
+    };
+    // Hidden/minimized native rectangles may look valid but describe neither the
+    // current client nor its visible controls. Do not cache them as a child cutout.
+    // SAFETY: scalar state queries on the retained UI-thread window.
+    if unsafe { !IsWindowVisible(handle).as_bool() || IsIconic(handle).as_bool() } {
+        return fallback();
+    }
     if let Some((info, origin)) = titlebar_info(handle) {
         let mut left = client.right;
         let mut bottom = 0;
@@ -356,16 +372,8 @@ fn caption_bounds(handle: HWND) -> RECT {
             bottom: (outer.top + buttons.bottom - origin.y).max(0),
         }
     } else {
-        // DWM documents undefined bounds while hidden/minimized. Reserve the
-        // native default until the visible window supplies its actual bounds.
-        // SAFETY: this synchronous query has no ownership or lifetime effects.
-        let dpi = unsafe { GetDpiForWindow(handle) } as i32;
-        RECT {
-            left: (client.right - 154 * dpi / 96).max(0),
-            top: 0,
-            right: client.right,
-            bottom: 32 * dpi / 96,
-        }
+        // Reserve the native default until visible geometry becomes available.
+        fallback()
     }
 }
 
@@ -822,6 +830,18 @@ mod tests {
                 );
                 let caption = NativeCaption::new(window.clone()).expect("native frame");
                 let handle = caption.handle;
+                // Hidden native bounds may be nonempty but are not a visible
+                // caption measurement. Initial layout must use the DPI fallback.
+                // SAFETY: this test owns the hidden window on its event-loop thread.
+                let dpi = unsafe { GetDpiForWindow(handle) } as i32;
+                assert_eq!(
+                    caption.controls_bounds(),
+                    egui::Rect::from_min_max(
+                        egui::pos2((960 - 154 * dpi / 96).max(0) as f32, 0.0),
+                        egui::pos2(960.0, (32 * dpi / 96) as f32),
+                    ),
+                    "hidden windows use the bounded default caption reservation"
+                );
                 let surface = CaptionSurface::new(&caption).expect("input-transparent child");
                 surface.resize(960, 576).expect("clipped surface");
                 // Exercise late native geometry without resizing the client/child.
@@ -1135,6 +1155,39 @@ mod tests {
                                     );
                                 }
                                 let _ = DeleteObject(region.into());
+                            }
+                            for show in [SW_HIDE, SW_SHOWMINNOACTIVE] {
+                                let _ = ShowWindow(handle, show);
+                                assert!(
+                                    !IsWindowVisible(handle).as_bool()
+                                        || IsIconic(handle).as_bool()
+                                );
+                                let mut client = RECT::default();
+                                GetClientRect(handle, &mut client).expect("hidden client");
+                                let dpi = GetDpiForWindow(handle) as i32;
+                                let expected = RECT {
+                                    left: (client.right - 154 * dpi / 96).max(0),
+                                    top: 0,
+                                    right: client.right,
+                                    bottom: 32 * dpi / 96,
+                                };
+                                assert_eq!(caption_bounds(handle), expected);
+                                surface
+                                    .refresh_clip(client.right as u32, client.bottom as u32)
+                                    .expect("hidden/minimized clip");
+                                assert_eq!(
+                                    surface.clip.get(),
+                                    Some((
+                                        client.right as u32,
+                                        client.bottom as u32,
+                                        Some(expected)
+                                    ))
+                                );
+                                eprintln!(
+                                    "PASS caption fallback: dpi={dpi} minimized={} bounds={expected:?}",
+                                    IsIconic(handle).as_bool()
+                                );
+                                let _ = ShowWindow(handle, SW_SHOWNORMAL);
                             }
                         }
                         let _ = ShowWindow(handle, SW_HIDE);

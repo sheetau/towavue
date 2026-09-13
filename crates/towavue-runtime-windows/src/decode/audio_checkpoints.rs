@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn decoded_checkpoints_stop_at_side_data_and_require_a_trusted_start() {
+    fn decoded_checkpoints_and_deleted_packet_skips_require_an_unchanged_trusted_axis() {
         let (directory, source, _) = fixture(48_000, 1, "pcm_s16le", 4, 1001);
         let mut input = format::input(&source).expect("input");
         let mut packets: Vec<_> = input.packets().map(|(_, packet)| packet).collect();
@@ -315,6 +315,15 @@ mod tests {
             std::slice::from_raw_parts_mut(data, 10).fill(0);
             *data = 1;
         }
+        let intervals = [
+            TimeRange::new(MediaTime::ZERO, MediaTime::from_nanoseconds(200_000_000))
+                .expect("first interval"),
+            TimeRange::new(
+                MediaTime::from_nanoseconds(3_000_000_000),
+                MediaTime::from_nanoseconds(4_000_000_000),
+            )
+            .expect("last interval"),
+        ];
         for trusted in [true, false] {
             let config = best_stream_config(&input, Type::Audio).expect("config");
             let mut cache = AudioCheckpoints::new(&source);
@@ -325,11 +334,26 @@ mod tests {
             drop(packet_tx);
             let (output_tx, output_rx) = mpsc::sync_channel(packets.len() + 1);
             run_parallel_audio_worker(
-                config, packet_rx, &output_tx, None, &mut cache, None, trusted,
+                config, packet_rx, &output_tx, None, &mut cache, None, trusted, &intervals,
             )
             .expect("decode through the side-data boundary");
             drop(output_tx);
             let output: Vec<_> = output_rx.into_iter().collect();
+            let emitted_between = |start, end| {
+                output.iter().any(|output| {
+                    matches!(output, ParallelDecodeOutput::Audio(chunk)
+                        if (start..end).contains(&chunk.presentation_time.as_nanoseconds()))
+                })
+            };
+            assert_eq!(
+                emitted_between(300_000_000, 1_000_000_000),
+                !trusted,
+                "count deleted packets only on a trusted axis"
+            );
+            assert!(
+                emitted_between(2_000_000_000, 3_000_000_000),
+                "side data disables later gap counting even after normal packets resume"
+            );
             assert!(
                 output
                     .iter()

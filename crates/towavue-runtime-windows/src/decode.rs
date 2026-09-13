@@ -13,7 +13,7 @@ use ffmpeg::software::scaling::{self, flag::Flags};
 use ffmpeg::{ChannelLayout, Rational, Rescale, Rounding};
 use ffmpeg_next as ffmpeg;
 use thiserror::Error;
-use towavue_core::MediaTime;
+use towavue_core::{MediaTime, TimeRange};
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
 use windows::core::Interface;
 
@@ -664,6 +664,33 @@ pub(crate) fn decode_file_parallel_cancellable(
     )
 }
 
+/// Decode ordered retained intervals on one continuous sample axis. The audio worker
+/// may count independently decodable packets in gaps; other codecs decode normally.
+/// Intervals are ordered, non-overlapping hints, not output clipping: callers still
+/// clip boundary chunks and discard gaps before applying their timeline edits.
+pub(crate) fn decode_audio_intervals_cancellable(
+    path: &Path,
+    minimum_time: MediaTime,
+    maximum_time: MediaTime,
+    intervals: &[TimeRange],
+    cancelled: &(dyn Fn() -> bool + Sync),
+    mut emit: impl FnMut(AudioChunk) -> bool,
+) -> Result<DecodeSummary, DecodeError> {
+    ParallelInput::open(path, cancelled)?.decode(
+        None,
+        minimum_time,
+        Some(maximum_time),
+        Some(DecodeStream::Audio),
+        intervals,
+        cancelled,
+        |output| match output {
+            ParallelDecodeOutput::Audio(chunk) => emit(chunk),
+            ParallelDecodeOutput::AudioFinished => true,
+            _ => unreachable!("audio-only decode output is handled internally"),
+        },
+    )
+}
+
 /// An exclusively owned demux input, moved back to its session after workers join.
 /// Decoders and packet queues are per run; no stream borrow escapes a run.
 pub(crate) struct ParallelInput {
@@ -701,6 +728,7 @@ impl ParallelInput {
             minimum_time,
             maximum_time,
             stream,
+            &[],
             cancelled,
             |output| match output {
                 ParallelDecodeOutput::SoftwareVideo(frame) => emit(
@@ -735,6 +763,7 @@ impl ParallelInput {
             minimum_time,
             maximum_time,
             Some(DecodeStream::Video),
+            &[],
             cancelled,
             |output| match output {
                 ParallelDecodeOutput::HardwareVideo(frame) => emit(
@@ -753,12 +782,14 @@ impl ParallelInput {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn decode(
         &mut self,
         hardware_device: Option<&GraphicsDevice>,
         minimum_time: MediaTime,
         maximum_time: Option<MediaTime>,
         stream: Option<DecodeStream>,
+        audio_intervals: &[TimeRange],
         cancelled: &(dyn Fn() -> bool + Sync),
         mut emit: impl FnMut(ParallelDecodeOutput) -> bool,
     ) -> Result<DecodeSummary, DecodeError> {
@@ -854,7 +885,7 @@ impl ParallelInput {
         }
         check_cancelled(cancelled)?;
         run_parallel_workers(
-            (input, &mut self.audio_checkpoints, resume),
+            (input, &mut self.audio_checkpoints, resume, audio_intervals),
             video,
             audio,
             minimum_time,
@@ -870,6 +901,7 @@ fn run_parallel_workers(
         &mut format::context::Input,
         &mut AudioCheckpoints,
         Option<(i64, ffmpeg::Packet)>,
+        &[TimeRange],
     ),
     video: Option<ParallelVideoConfig>,
     audio: Option<StreamConfig>,
@@ -878,7 +910,7 @@ fn run_parallel_workers(
     cancelled: &(dyn Fn() -> bool + Sync),
     emit: &mut impl FnMut(ParallelDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
-    let (input, audio_checkpoints, resume) = input;
+    let (input, audio_checkpoints, resume, audio_intervals) = input;
     let origin = input_origin(input);
     let terminal_preview = maximum_time == Some(minimum_time) && audio.is_none();
     let video_stream_index = video.as_ref().map(|video| match video {
@@ -965,6 +997,7 @@ fn run_parallel_workers(
                         audio_checkpoints,
                         resume,
                         trusted_audio_axis,
+                        audio_intervals,
                     ) {
                         let _ = audio_output_tx.send(ParallelDecodeOutput::Failed(error));
                     }
@@ -1242,6 +1275,7 @@ fn run_parallel_video_worker(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_parallel_audio_worker(
     config: StreamConfig,
     packets: mpsc::Receiver<ffmpeg::Packet>,
@@ -1250,15 +1284,16 @@ fn run_parallel_audio_worker(
     checkpoints: &mut AudioCheckpoints,
     resume: Option<(i64, ffmpeg::Packet)>,
     trusted_axis: bool,
+    mut intervals: &[TimeRange],
 ) -> Result<(), DecodeError> {
     // A video-GOP/direct seek may start with an approximate audio sample axis.
     // Learn only after a sequential start or the exact prefix/checkpoint path,
     // and only for independently decodable PCM/FLAC packets at coarse time bases.
-    let mut learn = trusted_axis
-        && matches!(
-            config.sample_preroll(MediaTime::from_nanoseconds(1)),
-            Some((_, PrerollSamples::Pcm(_) | PrerollSamples::Flac))
-        );
+    let independent = config
+        .sample_preroll(MediaTime::from_nanoseconds(1))
+        .map(|(_, source)| source)
+        .filter(|source| matches!(source, PrerollSamples::Pcm(_) | PrerollSamples::Flac));
+    let mut learn = trusted_axis && independent.is_some();
     let mut pipeline = create_audio_pipeline_from(config)?;
     pipeline.sample_preroll = sample_preroll;
     if matches!(
@@ -1267,7 +1302,8 @@ fn run_parallel_audio_worker(
             _,
             PrerollSamples::Flac | PrerollSamples::Vorbis | PrerollSamples::Opus
         ))
-    ) {
+    ) || (!intervals.is_empty() && matches!(independent, Some(PrerollSamples::Flac)))
+    {
         pipeline.packet_samples = PacketSamples::new(pipeline.decoder.id());
     }
     let mut summary = DecodeSummary::default();
@@ -1281,10 +1317,32 @@ fn run_parallel_audio_worker(
     });
     for packet in first_packet.into_iter().chain(packets) {
         let next_sample = pipeline.next_sample;
-        let counted = pipeline.skip_sample_preroll(&packet)?;
-        // Side data can change parameters or trimming state. Do not carry a
-        // bookmark past that boundary into a fresh decoder using initial config.
+        // Count complete deleted packets on the same sample axis; do not seek or
+        // reset the decoder at edits. This is restricted to independently decodable
+        // PCM/FLAC with a trusted axis and one output chunk per decoded packet.
+        // Side data permanently disables this optimization and checkpoint learning.
         learn &= packet.side_data().next().is_none();
+        if learn && next_sample != ffmpeg::ffi::AV_NOPTS_VALUE {
+            let sample_at = |time: MediaTime| {
+                time.as_nanoseconds().rescale_with(
+                    (1, 1_000_000_000),
+                    (1, pipeline.output_format.sample_rate as i32),
+                    Rounding::Up,
+                )
+            };
+            while intervals
+                .first()
+                .is_some_and(|range| next_sample >= sample_at(range.end()))
+            {
+                intervals = &intervals[1..];
+            }
+            if let Some(range) = intervals.first()
+                && next_sample < sample_at(range.start())
+            {
+                pipeline.sample_preroll = Some((range.start(), independent.expect("PCM/FLAC")));
+            }
+        }
+        let counted = pipeline.skip_sample_preroll(&packet)?;
         if !counted {
             pipeline.decoder.send_packet(&packet)?;
             if learn {

@@ -89,6 +89,69 @@ pub(super) fn collect(
     (bytes, summary)
 }
 
+#[test]
+fn retained_audio_intervals_skip_decoding_deleted_packets_without_changing_samples() {
+    for (rate, channels, codec, packet_frames) in [
+        (44100, 1, "pcm_s16le", 1001),
+        (48000, 2, "pcm_f32le", 997),
+        (96000, 4, "pcm_s24le", 1001),
+        (44100, 2, "flac", 1001),
+        (48000, 1, "flac", 997),
+        (48000, 2, "aac", 1001),
+    ] {
+        let (directory, source, _) = fixture(rate, channels, codec, 4, packet_frames);
+        let nanos = MediaTime::from_nanoseconds;
+        let intervals = [
+            TimeRange::new(nanos(17_000_001), nanos(91_000_001)).expect("first"),
+            TimeRange::new(nanos(2_117_000_001), nanos(2_189_000_001)).expect("second"),
+            TimeRange::new(nanos(3_703_000_001), nanos(3_817_000_001)).expect("third"),
+        ];
+        // Drain to natural EOF so counters include all decoded output, not only
+        // chunks observed before a bounded consumer closes the worker queue.
+        let end = nanos(5_000_000_000);
+        let collect = |count_deleted: bool| {
+            let mut output = Vec::new();
+            let summary = decode_audio_intervals_cancellable(
+                &source,
+                MediaTime::ZERO,
+                end,
+                if count_deleted { &intervals } else { &[] },
+                &|| false,
+                |chunk| {
+                    for range in intervals {
+                        let (bounds, _) =
+                            clip_audio_bounds(&chunk, range.start(), Some(range.end()));
+                        output.extend_from_slice(&chunk.bytes[bounds.start * 8..bounds.end * 8]);
+                    }
+                    true
+                },
+            )
+            .expect("bounded interval decode");
+            (output, summary.audio_frames)
+        };
+        let (reference, all_frames) = collect(false);
+        let (retained, decoded_frames) = collect(true);
+        assert!(!reference.is_empty());
+        assert!(
+            retained == reference,
+            "PCM mismatch: {rate}/{channels}/{codec}"
+        );
+        if codec == "aac" {
+            assert_eq!(
+                decoded_frames, all_frames,
+                "stateful decoder must stay continuous"
+            );
+        } else {
+            assert_eq!(all_frames, u64::from(rate) * 4, "full source frame count");
+            assert!(
+                decoded_frames < all_frames / 4,
+                "deleted samples were still decoded: {rate}/{channels}/{codec} {decoded_frames}/{all_frames}"
+            );
+        }
+        fs::remove_dir_all(directory).expect("remove owned fixtures");
+    }
+}
+
 pub(super) fn samples(
     path: &Path,
     target: MediaTime,

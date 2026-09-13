@@ -1,7 +1,4 @@
-use crate::decode::{
-    self, AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeStream,
-    ParallelSoftwareDecodeOutput,
-};
+use crate::decode::{self, AudioChunk, AudioFormat, DecodeError};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -92,6 +89,13 @@ pub(super) fn decode_audio(
     let source_start = first.source_target(target);
     // A selection bounds output, not tempo input: flushing at its end changes the PCM.
     let source_end = segments.last().expect("nonempty segments").source.end();
+    let intervals: Vec<_> = segments
+        .iter()
+        .map(|segment| {
+            TimeRange::new(segment.source_target(target), segment.source.end())
+                .expect("nonempty retained interval")
+        })
+        .collect();
     let sample_at = |time: MediaTime| {
         crate::tempo::output_sample_boundary(time.as_nanoseconds(), format.sample_rate, master_rate)
     };
@@ -181,25 +185,24 @@ pub(super) fn decode_audio(
     };
     let mut failure = None;
     let mut completed = false;
-    // Decode once through ordered source intervals; repeated coarse-PTS seeks lose sample phase.
-    let result = decode::decode_file_parallel_cancellable(
+    // Keep one continuous sample axis. Independent PCM/FLAC packets in deleted gaps
+    // can be counted without decoding; other codecs retain sequential decoding.
+    let result = decode::decode_audio_intervals_cancellable(
         path,
         source_start,
-        Some(source_end),
-        Some(DecodeStream::Audio),
+        source_end,
+        &intervals,
         &cancelled,
-        |output| {
-            if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) = output {
-                match process(Some(chunk)) {
-                    Ok(true) => {
-                        completed = true;
-                        return false;
-                    }
-                    Ok(false) => {}
-                    Err(error) => {
-                        failure = Some(error);
-                        return false;
-                    }
+        |chunk| {
+            match process(Some(chunk)) {
+                Ok(true) => {
+                    completed = true;
+                    return false;
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    failure = Some(error);
+                    return false;
                 }
             }
             true

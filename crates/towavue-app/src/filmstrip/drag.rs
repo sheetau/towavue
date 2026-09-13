@@ -15,7 +15,6 @@ struct Drag {
     origin: egui::Pos2,
     offset: Vec2,
     crossed: bool,
-    texture: Option<TextureHandle>,
 }
 
 #[derive(Default)]
@@ -32,6 +31,16 @@ impl State {
         self.drag = None;
         self.scope = None;
         self.eligible = false;
+    }
+
+    pub(super) fn cancel(&mut self, context: &Context) -> bool {
+        let active = self.drag.is_some();
+        self.clear();
+        self.claimed = Some(context.cumulative_frame_nr());
+        if active {
+            context.stop_dragging();
+        }
+        active
     }
 
     pub(super) fn begin(
@@ -67,12 +76,7 @@ impl State {
         self.last_frame = frame;
     }
 
-    pub(super) fn observe(
-        &mut self,
-        response: &egui::Response,
-        path: &Path,
-        preview: Option<&Preview>,
-    ) {
+    pub(super) fn observe(&mut self, response: &egui::Response, path: &Path) {
         if self.eligible
             && self.drag.is_none()
             && self.claimed != Some(response.ctx.cumulative_frame_nr())
@@ -85,19 +89,43 @@ impl State {
                 origin,
                 offset: origin - response.rect.min,
                 crossed: false,
-                texture: preview
-                    .and_then(|preview| preview.as_ref().ok())
-                    .map(|(texture, _)| texture.clone()),
             });
             self.claimed = Some(response.ctx.cumulative_frame_nr());
         }
     }
 
+    pub(super) fn active_pointer(
+        &self,
+        context: &Context,
+        current: Option<&Path>,
+    ) -> Option<(&Path, u64, egui::Pos2)> {
+        let scope = self.scope.as_ref()?;
+        let drag = self.drag.as_ref()?;
+        if !self.eligible
+            || !drag.crossed
+            || scope.current.as_deref() != current
+            || scope.screen != context.content_rect()
+            || scope.density != context.pixels_per_point()
+            || context.cumulative_frame_nr() > self.last_frame + 1
+        {
+            return None;
+        }
+        context.input(|input| {
+            (input.focused && input.pointer.primary_down() && !input.key_pressed(egui::Key::Escape))
+                .then(|| {
+                    input
+                        .pointer
+                        .interact_pos()
+                        .map(|point| (drag.path.as_path(), scope.generation, point))
+                })
+                .flatten()
+        })
+    }
+
     pub(super) fn finish(&mut self, context: &Context, actions: &mut Vec<UiAction>) {
-        let (pointer, hover, down, released) = context.input(|input| {
+        let (pointer, down, released) = context.input(|input| {
             (
                 input.pointer.interact_pos(),
-                input.pointer.hover_pos(),
                 input.pointer.primary_down(),
                 input.pointer.primary_released(),
             )
@@ -112,55 +140,17 @@ impl State {
             if drag.crossed && down {
                 context.set_dragged_id(drag.widget);
             }
-            if drag.crossed
-                && down
-                && let Some(pointer) = hover
-            {
-                let painter = egui::Painter::new(
-                    context.clone(),
-                    egui::LayerId::new(egui::Order::Tooltip, "filmstrip-drag".into()),
-                    scope.screen,
-                );
-                let rect = Rect::from_min_size(pointer - drag.offset, egui::vec2(120.0, 80.0));
-                painter.rect_filled(rect, 0.0, crate::chrome::BORDER);
-                if let Some(texture) = &drag.texture {
-                    let scale = (rect.width() / texture.size_vec2().x)
-                        .min(rect.height() / texture.size_vec2().y);
-                    painter.image(
-                        texture.id(),
-                        Rect::from_center_size(rect.center(), texture.size_vec2() * scale),
-                        Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
-                }
-                painter.rect_stroke(
-                    rect,
-                    0.0,
-                    egui::Stroke::new(1.0, Color32::WHITE),
-                    egui::StrokeKind::Inside,
-                );
-                let name = display_name(&drag.path);
-                let label = if name.chars().count() > 32 {
-                    format!("{}…", name.chars().take(32).collect::<String>())
-                } else {
-                    name
-                };
-                painter.text(
-                    rect.left_bottom() + egui::vec2(0.0, 3.0),
-                    Align2::LEFT_TOP,
-                    label,
-                    FontId::proportional(12.0),
-                    Color32::WHITE,
-                );
-            }
             if released
                 && drag.crossed
-                && pointer.is_some_and(|pointer| !scope.screen.contains(pointer))
+                && pointer.is_some_and(|pointer| {
+                    !scope.screen.contains(pointer)
+                        || crate::tab_drag::over_incoming_strip(context, pointer)
+                })
             {
                 actions.push(UiAction::OpenWindow(
                     drag.path.clone(),
                     scope.generation,
-                    pointer.expect("outside release point"),
+                    pointer.expect("drop point"),
                     drag.offset,
                 ));
             }

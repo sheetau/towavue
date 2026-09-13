@@ -1,5 +1,20 @@
 use super::*;
 
+pub(crate) fn assert_filmstrip_feedback(
+    host: &WindowHost,
+    target: Option<(WindowKey, egui::Pos2)>,
+    cursor: egui::CursorIcon,
+) {
+    let feedback = host
+        .tab_drag_feedback(|_, _, _| target)
+        .expect("filmstrip feedback");
+    assert_eq!(feedback.cursor, cursor);
+    assert_eq!(
+        feedback.target,
+        target.filter(|_| cursor == egui::CursorIcon::Move)
+    );
+}
+
 #[test]
 fn drag_feedback_tracks_local_ownership_and_restores_after_release_or_cancel() {
     let Some(root) = crate::tests::isolated_test_root(

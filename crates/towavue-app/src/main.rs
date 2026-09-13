@@ -9366,8 +9366,9 @@ where
                 )
             {
                 let tab_cancelled = tab_drag::cancel(context);
+                let filmstrip_cancelled = self.filmstrip.cancel_native_drag(context);
                 let menu_cancelled = logo_menu::cancel(context);
-                if tab_cancelled || menu_cancelled {
+                if tab_cancelled || filmstrip_cancelled || menu_cancelled {
                     self.request_redraw();
                     if escape {
                         return;

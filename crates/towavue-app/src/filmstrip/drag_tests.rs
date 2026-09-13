@@ -704,9 +704,9 @@ fn filmstrip_empty_space_dismisses_without_opening_and_respects_disabled_loading
 }
 
 #[test]
-fn filmstrip_drag_copies_the_owned_path_once_and_reuses_its_preview() {
+fn filmstrip_drag_copies_the_owned_path_once_without_a_floating_preview() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::drag_tests::filmstrip_drag_copies_the_owned_path_once_and_reuses_its_preview",
+        "filmstrip::drag_tests::filmstrip_drag_copies_the_owned_path_once_without_a_floating_preview",
     ) else {
         return;
     };
@@ -770,14 +770,18 @@ fn filmstrip_drag_copies_the_owned_path_once_and_reuses_its_preview() {
             assert!(actions.is_empty());
             let floating = Rect::from_min_size(moved - (origin - rect.min), rect.size());
             assert!(
-                output
+                !output
                     .shapes
                     .iter()
                     .any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect)
                         if rect.rect == floating && rect.fill == crate::chrome::BORDER)),
-                "floating card"
+                "no floating card"
             );
-            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() && mesh.calc_bounds().center() == floating.center())), "same preview texture at floating position");
+            assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() && mesh.calc_bounds().center() == floating.center())), "no preview mesh follows the pointer");
+            assert_eq!(
+                strip.active_drag(&context, Some(source)),
+                Some((target.as_path(), snapshot.generation, moved))
+            );
             frame(
                 &mut strip,
                 &context,
@@ -959,7 +963,7 @@ fn filmstrip_drag_cancels_on_context_changes_without_replaying_the_release() {
     ) else {
         return;
     };
-    for case in 0..11 {
+    for case in 0..12 {
         let context = crate::fonts::test_context();
         context.enable_accesskit();
         let mut snapshot = snapshot(&root);
@@ -1035,6 +1039,13 @@ fn filmstrip_drag_cancels_on_context_changes_without_replaying_the_release() {
                 let _ = context.run_ui(input(vec![]), |_| {});
             }
             10 => strip.clear_previews(),
+            11 => {
+                assert!(strip.cancel_native_drag(&context));
+                assert!(
+                    strip.active_drag(&context, Some(&source)).is_none(),
+                    "native cancellation clears feedback before redraw"
+                );
+            }
             _ => unreachable!(),
         }
         assert!(
@@ -1140,6 +1151,6 @@ pub(crate) fn hardware_drag_cancel<N: Fn(AppEvent) + Send + Sync + 'static>(
         0
     );
     eprintln!(
-        "PASS hardware filmstrip drag: shared preview floating draw/cancel; unchanged tabs/history/transport/generation and CPU transfers 0; no child launched"
+        "PASS hardware filmstrip drag: stationary preview draw/cancel; unchanged tabs/history/transport/generation and CPU transfers 0; no child launched"
     );
 }

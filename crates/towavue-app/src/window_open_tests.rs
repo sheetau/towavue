@@ -224,6 +224,189 @@ pub(super) fn finish_child(app: &mut WindowApplication) {
     }
 }
 
+fn drag_frame(
+    app: &mut WindowApplication,
+    events: Vec<egui::Event>,
+) -> egui::accesskit::TreeUpdate {
+    let context = app.ui_context.clone().expect("context");
+    context.enable_accesskit();
+    let mut input = app
+        .ui_state
+        .as_mut()
+        .expect("input")
+        .take_egui_input(app.window.as_ref().expect("window"));
+    input.focused = true;
+    input.events = events;
+    let mut actions = Vec::new();
+    let output = context.run_ui(input, |ui| app.draw_ui(ui, &mut actions));
+    if app.incoming_tab_pointer.is_some() {
+        assert!(
+            output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::LineSegment { points, stroke } if points[0].x == points[1].x
+                && stroke.width == 2.0 && stroke.color == chrome::FOREGROUND
+                && shape.clip_rect.height() < 64.0)),
+            "shared tab insertion line is painted"
+        );
+    }
+    let tree = output
+        .platform_output
+        .accesskit_update
+        .clone()
+        .expect("tree");
+    let renderer = app.renderer.as_mut().expect("renderer");
+    renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
+    renderer.render_ui(&context, output).expect("render");
+    renderer.present_surface().expect("present");
+    for action in actions {
+        app.handle_ui_action(action);
+    }
+    tree
+}
+
+fn exercise_tab_drops(
+    host: &mut WindowHost,
+    event_loop: &ActiveEventLoop,
+    source: WindowKey,
+    paths: &[PathBuf],
+) {
+    let other = *host
+        .windows
+        .keys()
+        .find(|key| **key != source)
+        .expect("other host");
+    let original = host.windows[&source].tabs.active().expect("source tab").id;
+    let history = host.windows[&source].edits[&original].clone();
+    let windows = host.windows.len();
+    for target in [source, other] {
+        let previous = host.windows[&target].tabs.clone();
+        let app = host.windows.get_mut(&source).expect("source");
+        app.folder_snapshot = Some(snapshot(paths));
+        app.filmstrip_open = true;
+        for _ in 0..3 {
+            drag_frame(app, vec![]);
+        }
+        let tree = drag_frame(app, vec![]);
+        let name = display_name(&paths[1]);
+        let bounds = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(&name))
+            .expect("card")
+            .1
+            .bounds()
+            .expect("bounds");
+        let origin = egui::pos2(
+            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        );
+        if target != source {
+            for _ in 0..3 {
+                drag_frame(host.windows.get_mut(&target).expect("target"), vec![]);
+            }
+        }
+        let context = host.windows[&target].ui_context.as_ref().expect("context");
+        let drop = tab_drag::tests::drop_point(context, 0)
+            + if target == source {
+                egui::Vec2::ZERO
+            } else {
+                egui::vec2(0.0, 120.0)
+            };
+        let end = if target == source {
+            drop
+        } else {
+            egui::pos2(-40.0, 120.0)
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        drag_frame(
+            host.windows.get_mut(&source).expect("source"),
+            vec![egui::Event::PointerMoved(origin), button(origin, true)],
+        );
+        drag_frame(
+            host.windows.get_mut(&source).expect("source"),
+            vec![egui::Event::PointerMoved(end)],
+        );
+        host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, drop)));
+        assert_eq!(host.windows[&target].incoming_tab_pointer, Some(drop));
+        dropping::tests::assert_filmstrip_feedback(
+            host,
+            Some((target, drop)),
+            egui::CursorIcon::Move,
+        );
+        drag_frame(host.windows.get_mut(&target).expect("target"), vec![]);
+        assert_eq!(host.tab_cursor_owner, Some(source));
+        assert_eq!(
+            host.windows[&target].tabs, previous,
+            "hold must not open a tab"
+        );
+        // Blocking the target cancels the visual destination without changing either tab.
+        if target != source {
+            host.windows.get_mut(&target).expect("target").export_error =
+                Some("injected modal".into());
+            host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, drop)));
+            assert!(host.windows[&target].incoming_tab_pointer.is_none());
+            dropping::tests::assert_filmstrip_feedback(
+                host,
+                Some((target, drop)),
+                egui::CursorIcon::NoDrop,
+            );
+            let app = host.windows.get_mut(&source).expect("source");
+            app.request_filmstrip_window(paths[1].clone(), 42, end, egui::Vec2::ZERO);
+            let request = app.pending_window_open.take().expect("guard request");
+            assert!(
+                host.open_filmstrip_tab(source, &request, target, drop)
+                    .is_err()
+            );
+            assert_eq!(host.windows[&target].tabs, previous);
+            host.windows.get_mut(&target).expect("target").export_error = None;
+            host.windows.get_mut(&source).expect("source").fullscreen = true;
+            dropping::tests::assert_filmstrip_feedback(
+                host,
+                Some((target, drop)),
+                egui::CursorIcon::Move,
+            );
+            host.windows.get_mut(&source).expect("source").fullscreen = false;
+        }
+        drag_frame(
+            host.windows.get_mut(&source).expect("source"),
+            vec![button(end, false)],
+        );
+        assert!(host.windows[&source].pending_window_open.is_some());
+        host.open_pending_windows_with(event_loop, false, |_, _, _| Some((target, drop)));
+        host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, drop)));
+        let app = host.windows.get_mut(&target).expect("target");
+        let added = app.tabs.active().expect("new tab").id;
+        assert_eq!(app.tabs.tabs().len(), previous.tabs().len() + 1);
+        assert_eq!(app.tabs.tabs()[0].id, added);
+        assert!(
+            !app.edits[&added].is_dirty(),
+            "open original without source edits"
+        );
+        finish_child(app);
+        assert_eq!(
+            app.image.as_ref().expect("loaded original").dimensions(),
+            (2, 1)
+        );
+        assert_eq!(host.windows[&source].edits[&original], history);
+        assert_eq!(host.windows.len(), windows, "merge creates no HWND");
+        assert!(host.tab_cursor_owner.is_none());
+        host.open_pending_windows_with(event_loop, false, |_, _, _| panic!("release replay"));
+        let app = host.windows.get_mut(&target).expect("target");
+        app.close_tab_unchecked(added);
+        app.activate_tab(previous.active().expect("previous").id);
+        assert_eq!(app.tabs.tabs(), previous.tabs());
+        assert_eq!(app.tabs.active(), previous.active());
+        assert!(!host.windows[&source].filmstrip_open);
+    }
+    eprintln!(
+        "PASS filmstrip tab drops: full UI press/hold/release to local strip and another host's body; shared feedback, modal suppression, one clean original tab at the gap, unchanged source history, no new HWND, late replay empty; native windows and GPU, external hit selection injected"
+    );
+}
+
 fn exercise_edge_placement(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let key = host.add_application(None).expect("placement window");
     host.start_pending(event_loop, false);
@@ -362,7 +545,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     for path in &paths {
         let app = host.windows.get_mut(&source).expect("source");
         app.filmstrip_open = true;
-        let client_origin = egui::pos2(100.0, 60.0);
+        let client_origin = egui::pos2(-40.0, 60.0);
         let origin = app
             .window
             .as_ref()
@@ -466,6 +649,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         host.windows.get_mut(&child).expect("child").exit_requested = true;
         host.remove_closed();
     }
+    exercise_tab_drops(host, event_loop, source, &paths);
     let app = host.windows.get_mut(&source).expect("source");
     let missing = source_path.with_file_name("missing-filmstrip.png");
     app.folder_snapshot = Some(snapshot(&[source_path, missing.clone()]));
@@ -473,7 +657,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     app.handle_ui_action(UiAction::OpenWindow(
         missing,
         42,
-        egui::Pos2::ZERO,
+        egui::pos2(-20.0, 100.0),
         egui::Vec2::ZERO,
     ));
     host.open_pending_windows(event_loop, false);
@@ -485,7 +669,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
             .as_ref()
             .expect("failure status")
             .0
-            .starts_with("Could not open new window:")
+            .starts_with("Could not open dragged media:")
     );
     assert_eq!(app.edits, edits);
     if let Some(history) = old_history {

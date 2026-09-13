@@ -311,6 +311,14 @@ impl DropStrip {
     }
 }
 
+pub(super) fn over_incoming_strip(context: &egui::Context, point: egui::Pos2) -> bool {
+    context
+        .data(|data| data.get_temp::<DropStrip>("incoming-tab-strip".into()))
+        .is_some_and(|layout| {
+            layout.strip.contains(point) && incoming_gap(context, &layout.tabs, point).is_some()
+        })
+}
+
 pub(super) fn incoming_gap(
     context: &egui::Context,
     tabs: &[TabId],

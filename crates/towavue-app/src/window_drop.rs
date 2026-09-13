@@ -38,7 +38,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
     }
 
-    fn incoming_gap(&self, point: egui::Pos2) -> Option<usize> {
+    pub(super) fn incoming_gap(&self, point: egui::Pos2) -> Option<usize> {
         if !self.accepts_tab_drop() || self.validate_transfer_window().is_err() {
             return None;
         }
@@ -78,27 +78,55 @@ impl WindowHost {
         pick: impl Fn(&Self, WindowKey, egui::Pos2) -> Option<(WindowKey, egui::Pos2)>,
     ) -> Option<DragFeedback> {
         self.windows.iter().find_map(|(key, app)| {
-            if !app.accepts_tab_drop() {
+            if app.exit_requested {
                 return None;
             }
             let context = app.ui_context.as_ref()?;
-            let (tab, point, local_drop) = tab_drag::active_pointer(
+            let tab = tab_drag::active_pointer(
                 context,
                 (
                     app.tabs.active().map(|tab| tab.id),
                     app.media_generation,
                     app.graphics_epoch,
                 ),
-            )?;
+            );
+            let (point, local_drop, can_detach, filmstrip) =
+                if let Some((tab, point, local_drop)) = tab {
+                    if !app.accepts_tab_drop() {
+                        return None;
+                    }
+                    (
+                        point,
+                        local_drop,
+                        local_drop || app.tab_detach_request(tab).is_ok(),
+                        false,
+                    )
+                } else {
+                    let (path, generation, point) =
+                        app.filmstrip.active_drag(context, app.path.as_deref())?;
+                    if !app.can_open_filmstrip_window(path, generation) {
+                        return None;
+                    }
+                    (
+                        point,
+                        tab_drag::over_incoming_strip(context, point),
+                        app.validate_transfer_window().is_ok(),
+                        true,
+                    )
+                };
             let mut feedback = DragFeedback {
                 source: *key,
                 target: None,
                 cursor: egui::CursorIcon::NoDrop,
             };
             if local_drop {
-                feedback.cursor = egui::CursorIcon::Move;
-            } else if !context.content_rect().contains(point) && app.tab_detach_request(tab).is_ok()
-            {
+                if !filmstrip || (can_detach && app.incoming_gap(point).is_some()) {
+                    feedback.cursor = egui::CursorIcon::Move;
+                    if filmstrip {
+                        feedback.target = Some((*key, point));
+                    }
+                }
+            } else if !context.content_rect().contains(point) && can_detach {
                 if let Some((target, point)) = pick(self, *key, point) {
                     if self
                         .windows
@@ -156,7 +184,7 @@ impl WindowHost {
         ))
     }
 
-    fn window_at_drop(
+    pub(super) fn window_at_drop(
         &self,
         source: WindowKey,
         point: egui::Pos2,

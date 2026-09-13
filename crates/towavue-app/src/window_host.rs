@@ -302,6 +302,15 @@ impl WindowHost {
     }
 
     fn open_pending_windows(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
+        self.open_pending_windows_with(event_loop, visible, Self::window_at_drop);
+    }
+
+    fn open_pending_windows_with(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        visible: bool,
+        pick: impl Fn(&Self, WindowKey, egui::Pos2) -> Option<(WindowKey, egui::Pos2)>,
+    ) {
         let requests: Vec<_> = self
             .windows
             .iter_mut()
@@ -312,16 +321,96 @@ impl WindowHost {
             })
             .collect();
         for (source, request) in requests {
-            if let Err(error) =
+            let target = self
+                .windows
+                .get(&source)
+                .and_then(|app| app.ui_context.as_ref())
+                .filter(|context| context.content_rect().contains(request.point))
+                .map(|_| (source, request.point))
+                .or_else(|| pick(self, source, request.point));
+            let result = if let Some((target, point)) = target {
+                self.open_filmstrip_tab(source, &request, target, point)
+                    .map(|opened| {
+                        if opened
+                            && visible
+                            && let Some(window) = self
+                                .windows
+                                .get(&target)
+                                .and_then(|app| app.window.as_ref())
+                        {
+                            window.focus_window();
+                        }
+                    })
+            } else {
                 self.open_filmstrip_window_with(source, &request, visible, |app, device| {
                     app.start_on_device(event_loop, Some(device), false)
                         .map_err(|error| error.to_string())
                 })
+                .map(|_| ())
+            };
+            if let Err(error) = result
                 && let Some(app) = self.windows.get_mut(&source)
             {
-                app.set_status(format!("Could not open new window: {error}"));
+                app.set_status(format!("Could not open dragged media: {error}"));
             }
         }
+    }
+
+    fn open_filmstrip_tab(
+        &mut self,
+        source: WindowKey,
+        request: &window_open::Request,
+        target: WindowKey,
+        point: egui::Pos2,
+    ) -> Result<bool, String> {
+        let Some(app) = self
+            .windows
+            .get(&source)
+            .filter(|app| app.window_open_request_is_current(request))
+        else {
+            return Ok(false);
+        };
+        app.validate_transfer_window()?;
+        let source_tab = app.tabs.active().map(|tab| tab.id);
+        if source == target
+            && !tab_drag::over_incoming_strip(app.ui_context.as_ref().expect("UI"), point)
+        {
+            return Err("drop on the source tab strip or another window".into());
+        }
+        let gap = self
+            .windows
+            .get(&target)
+            .and_then(|app| app.incoming_gap(point))
+            .ok_or("drop on an available window")?;
+        let path = canonical_shell_path(&request.path).map_err(|error| error.to_string())?;
+        if MediaKind::from_path(&path).is_none() {
+            return Err(format!("Unsupported media: {}", path.display()));
+        }
+        let app = self.windows.get_mut(&target).expect("destination");
+        let count = app.tabs.tabs().len();
+        app.open_external(path, true);
+        if app.tabs.tabs().len() == count {
+            return Err("The media could not be opened".into());
+        }
+        app.tabs
+            .reorder(app.tabs.active().expect("new tab").id, gap);
+        app.request_redraw();
+        let app = self.windows.get_mut(&source).expect("source");
+        if source == target {
+            // Opening a local tab has already retained the source view. Close only its
+            // saved overlay, without activating it again or copying its edits.
+            if let Some(id) = source_tab {
+                if let Some(saved) = app.retained_images.get_mut(&id) {
+                    saved.filmstrip_open = false;
+                }
+                if let Some(saved) = app.retained_playback.get_mut(&id) {
+                    saved.filmstrip_open = false;
+                }
+            }
+        } else {
+            app.close_filmstrip();
+        }
+        Ok(true)
     }
 
     fn open_filmstrip_window_with(

@@ -65,6 +65,18 @@ impl Filmstrip {
         self.drag.clear();
     }
 
+    pub(crate) fn cancel_native_drag(&mut self, context: &Context) -> bool {
+        self.drag.cancel(context)
+    }
+
+    pub(crate) fn active_drag(
+        &self,
+        context: &Context,
+        current: Option<&Path>,
+    ) -> Option<(&Path, u64, egui::Pos2)> {
+        self.drag.active_pointer(context, current)
+    }
+
     pub fn clear_previews(&mut self) {
         self.drag.clear();
         self.focused_card = None;
@@ -314,8 +326,7 @@ impl Filmstrip {
                             egui::Sense::click_and_drag(),
                         );
                         let active = selected == Some(index);
-                        self.drag
-                            .observe(&response, &item.path, self.previews.get(&item.path));
+                        self.drag.observe(&response, &item.path);
                         if active
                             && self.focus_requested
                             && response.enabled()

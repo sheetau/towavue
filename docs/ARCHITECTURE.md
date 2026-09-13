@@ -37,6 +37,7 @@ Keep the single-D3D11-device design: hardware decode, video processing, image/UI
 
 ## Windows, tabs, and input
 
+- Keep content panels/input fields black and floating windows, menus, tooltips and the palette on shared #0c0c0c; tabs retain their separate state colors. Compact seek track/progress span the full width in idle and active states; only the handle center's travel is inset, with unchanged pointer/value mapping.
 - The host shares graphics across windows. Normal launches from the same SID/session/executable forward path-only requests with acknowledgment; failure must not silently create a duplicate host. No live-state transfer between independent old processes.
 - Tabs own history, export target/options, image/view/reading state, transport, focus role, and scroll positions. Background audio continues. Hidden video limits decode work and retains a frame without pinning an entire decoder surface pool.
 - Moving a tab transfers its live state and shared image data only after the destination is ready; failure leaves the source intact. Filmstrip tear-off opens the original file independently, without copying edits. Hit testing respects actual window occlusion.

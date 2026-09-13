@@ -101,7 +101,7 @@ impl CommandPalette {
             .resizable(false)
             .frame(
                 egui::Frame::new()
-                    .fill(crate::chrome::BACKGROUND)
+                    .fill(crate::chrome::FLOATING_BACKGROUND)
                     .stroke(egui::Stroke::new(1.0, crate::chrome::BORDER))
                     .inner_margin(6)
                     .corner_radius(4),
@@ -436,7 +436,7 @@ mod tests {
                 .iter()
                 .find_map(|shape| match &shape.shape {
                     egui::Shape::Rect(rect)
-                        if rect.fill == crate::chrome::BACKGROUND
+                        if rect.fill == crate::chrome::FLOATING_BACKGROUND
                             && rect.stroke.color == crate::chrome::BORDER
                             && rect.corner_radius == egui::CornerRadius::same(4) =>
                     {

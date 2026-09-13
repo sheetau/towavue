@@ -54,8 +54,11 @@ pub fn show_drag(
                 1.0 / context.pixels_per_point()
             };
             let travel = if active { compact_travel(rect) } else { rect };
-            let track = Rect::from_center_size(rect.center(), egui::vec2(travel.width(), height));
+            // Only the handle's center is inset. Track/progress keep their full
+            // width when hovered so expanding the bar does not shorten its ends.
+            let track = Rect::from_center_size(rect.center(), egui::vec2(rect.width(), height));
             let x = egui::lerp(travel.x_range(), progress.clamp(0.0, 1.0));
+            let progress_x = egui::lerp(rect.x_range(), progress.clamp(0.0, 1.0));
             ui.painter().rect_filled(
                 track,
                 0.0,
@@ -78,7 +81,7 @@ pub fn show_drag(
                 );
             }
             ui.painter().rect_filled(
-                Rect::from_min_max(track.min, egui::pos2(x, track.bottom())),
+                Rect::from_min_max(track.min, egui::pos2(progress_x, track.bottom())),
                 0.0,
                 crate::chrome::FOREGROUND,
             );
@@ -293,6 +296,7 @@ mod tests {
                         let preview = rectangles[index];
                         let played = rectangles[index + 1];
                         assert_eq!(track.fill, crate::chrome::HOVER);
+                        assert_eq!(track.rect.x_range(), status.x_range());
                         assert_eq!(played.fill, crate::chrome::FOREGROUND);
                         assert_eq!(preview.rect.left(), track.rect.left());
                         assert_eq!(
@@ -300,7 +304,7 @@ mod tests {
                             pointer.x.clamp(track.rect.left(), track.rect.right())
                         );
                         assert_eq!(preview.rect.y_range(), track.rect.y_range());
-                        assert_eq!(played.rect.right(), 4.0 + 492.0 * value);
+                        assert_eq!(played.rect.right(), 500.0 * value);
                         assert_eq!(played.rect.y_range(), preview.rect.y_range());
                     }
                 }

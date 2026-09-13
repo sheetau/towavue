@@ -106,6 +106,7 @@ mod tests {
                 );
                 let mut wordmark = false;
                 let mut icon = false;
+                let mut open_file_icon = false;
                 for shape in &output.shapes {
                     let egui::Shape::Text(text) = &shape.shape else {
                         continue;
@@ -114,6 +115,9 @@ mod tests {
                         let family = &section.format.font_id.family;
                         if family == &crate::fonts::icon_font().family {
                             icon = true;
+                            open_file_icon |= text.galley.job.text
+                                [section.byte_range.start.0..section.byte_range.end.0]
+                                .contains('\u{ea94}');
                         } else {
                             assert_eq!(
                                 family,
@@ -129,6 +133,7 @@ mod tests {
                     }
                 }
                 assert!(wordmark && icon, "audit both wordmark and action icons");
+                assert!(open_file_icon, "Open File uses the requested Codicon");
             }
         }
     }

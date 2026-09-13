@@ -43,6 +43,7 @@ pub fn caption_accessibility(ui: &Ui, buttons: &[CaptionButton]) -> Vec<CaptionA
 }
 
 pub const BACKGROUND: Color32 = Color32::BLACK;
+pub const FLOATING_BACKGROUND: Color32 = Color32::from_gray(12);
 pub const MUTED: Color32 = Color32::from_gray(128);
 pub const FOREGROUND: Color32 = Color32::WHITE;
 pub const BORDER: Color32 = Color32::from_gray(24);
@@ -101,7 +102,7 @@ pub fn style(style: &mut egui::Style) {
         style.debug.warn_if_rect_changes_id = false;
     }
     style.visuals.panel_fill = BACKGROUND;
-    style.visuals.window_fill = BACKGROUND;
+    style.visuals.window_fill = FLOATING_BACKGROUND;
     style.visuals.window_stroke.color = BORDER;
     style.visuals.extreme_bg_color = BACKGROUND;
     style.visuals.text_edit_bg_color = Some(BACKGROUND);
@@ -163,7 +164,7 @@ pub enum Icon {
 impl Icon {
     pub fn text(self) -> egui::RichText {
         let glyph = match self {
-            Self::OpenFile => '\u{eaee}',
+            Self::OpenFile => '\u{ea94}',
             Self::OpenFolder => '\u{eaf7}',
             Self::Pause | Self::Play => return egui::RichText::new(""),
             Self::ExitFullscreen => '\u{eb4d}',
@@ -690,6 +691,15 @@ mod tests {
 
     #[test]
     fn overlay_and_input_surfaces_use_the_shared_grayscale_palette() {
+        fn floating_frame(shape: &egui::Shape) -> bool {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().any(floating_frame),
+                egui::Shape::Rect(rect) => {
+                    rect.fill == Color32::from_gray(12) && rect.stroke.color == BORDER
+                }
+                _ => false,
+            }
+        }
         let mut themed = egui::Style::default();
         style(&mut themed);
         #[cfg(debug_assertions)]
@@ -704,7 +714,8 @@ mod tests {
             assert_eq!(visuals.weak_bg_fill, HOVER);
             assert_eq!(visuals.fg_stroke.color, FOREGROUND);
         }
-        assert_eq!(themed.visuals.window_fill(), BACKGROUND);
+        assert_eq!(themed.visuals.window_fill(), Color32::from_gray(12));
+        assert_eq!(themed.visuals.panel_fill, BACKGROUND);
         assert_eq!(themed.visuals.window_stroke().color, BORDER);
         assert_eq!(themed.visuals.extreme_bg_color, BACKGROUND);
         assert_eq!(themed.visuals.text_edit_bg_color(), BACKGROUND);
@@ -715,7 +726,7 @@ mod tests {
             egui::Frame::menu(&themed),
             egui::Frame::popup(&themed),
         ] {
-            assert_eq!(frame.fill, BACKGROUND);
+            assert_eq!(frame.fill, Color32::from_gray(12));
             assert_eq!(frame.stroke.color, BORDER);
         }
         for density in [1.0, 1.25, 2.0] {
@@ -729,6 +740,14 @@ mod tests {
                         ui.add(egui::TextEdit::singleline(&mut "Value".to_owned()));
                     });
                 });
+                // Frames with shadows are nested shapes; a flat-only check can
+                // accidentally match the black text field instead of the popup.
+                assert!(
+                    output
+                        .shapes
+                        .iter()
+                        .any(|shape| floating_frame(&shape.shape))
+                );
                 assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == BACKGROUND && rect.stroke.color == BORDER)));
                 assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "Secondary information" && text.galley.job.sections[0].format.color == MUTED)));
             }

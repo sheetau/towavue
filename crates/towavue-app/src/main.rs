@@ -2157,7 +2157,9 @@ where
         let options = self.image_sampling();
         let mut images = result.images.into_iter();
         if result.first_index == 0 {
-            self.image_handoff = None;
+            if !self.reading_mode {
+                self.image_handoff = None;
+            }
             self.reset_image_edits();
             let (path, decoded) = images.next().expect("nonempty first chunk");
             match decoded
@@ -2191,6 +2193,7 @@ where
                 .map_err(|error| format!("{}: {error}", display_name(&path)))
         }));
         if !self.image_loading {
+            self.image_handoff = None;
             self.clear_image_previews();
         }
         if !prefetched {
@@ -7488,7 +7491,7 @@ where
         self.load_path(path, kind);
         if self.image_loading && self.image.is_none() {
             self.image_handoff = handoff;
-            if self.image_handoff.is_some() {
+            if self.image_handoff.is_some() && !self.reading_mode {
                 self.image_sequence.awaiting = Some(self.media_generation);
             }
         }
@@ -7822,6 +7825,12 @@ where
             .image
             .iter()
             .chain(self.image_handoff.iter().map(|held| &held.image))
+            .chain(
+                self.image_handoff
+                    .iter()
+                    .filter_map(|held| held.reading.as_ref())
+                    .flat_map(|held| &held.images),
+            )
             .chain(
                 self.reading_pages
                     .iter()

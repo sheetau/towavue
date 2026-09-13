@@ -66,6 +66,154 @@ fn navigate_pending(app: &mut App, path: PathBuf) {
 }
 
 #[test]
+fn reading_handoff_keeps_the_complete_spread_until_all_latest_pages_resolve() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_handoff::tests::reading_handoff_keeps_the_complete_spread_until_all_latest_pages_resolve",
+    ) else {
+        return;
+    };
+    for (axis, density) in [ReadingAxis::Horizontal, ReadingAxis::Vertical]
+        .into_iter()
+        .flat_map(|axis| [1.0, 1.25, 2.0].map(|density| (axis, density)))
+    {
+        for reversed in [false, true] {
+            let (mut app, context, _) = fixture(&root);
+            context.set_pixels_per_point(density);
+            app.reading_mode = true;
+            app.reading_settings.axis = axis;
+            app.reading_settings.reversed = reversed;
+            app.image_view.zoom = ZoomMode::Custom(3.0);
+            app.reading_pages = vec![Ok(ImagePresentation::from_decoded(
+                &context,
+                &root.join("second.png"),
+                decoded(90, 160, [60, 40, 20, 255]),
+            )
+            .expect("second page"))];
+            let ids = [
+                app.image.as_ref().expect("first").texture.id(),
+                app.reading_pages[0].as_ref().expect("second").texture.id(),
+            ];
+            let originals = [
+                app.image.as_ref().expect("first").decoded.clone(),
+                app.reading_pages[0]
+                    .as_ref()
+                    .expect("second")
+                    .decoded
+                    .clone(),
+            ];
+            let bounds = |output: &egui::FullOutput| {
+                ids.map(|id| {
+                    output.shapes.iter().find_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) if mesh.texture_id == id => {
+                            Some(mesh.calc_bounds())
+                        }
+                        _ => None,
+                    })
+                })
+            };
+            frame(&mut app, &context);
+            let before = bounds(&frame(&mut app, &context));
+            assert!(before.iter().all(Option::is_some));
+            navigate_pending(&mut app, root.join("next.png"));
+            let held = app.image_handoff.as_ref().expect("held spread");
+            assert!(Arc::ptr_eq(&held.image.decoded, &originals[0]));
+            assert!(Arc::ptr_eq(
+                &held.reading.as_ref().expect("reading handoff").images[0].decoded,
+                &originals[1]
+            ));
+            assert_eq!(
+                bounds(&frame(&mut app, &context)),
+                before,
+                "no blank loading frame"
+            );
+            let old_generation = app.image_generation;
+            app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                generation: old_generation,
+                first_index: 0,
+                total: 2,
+                images: vec![(
+                    root.join("next.png"),
+                    if reversed {
+                        Err(towavue_runtime_windows::ImageDecodeError::UnknownFormat)
+                    } else {
+                        Ok(decoded(100, 100, [255, 0, 0, 255]))
+                    },
+                )],
+            });
+            assert!(app.image_loading);
+            assert_eq!(
+                bounds(&frame(&mut app, &context)),
+                before,
+                "partial spread stays hidden"
+            );
+            assert!(app.image_copy_request().is_none());
+            navigate_pending(&mut app, root.join("latest.png"));
+            assert_eq!(
+                bounds(&frame(&mut app, &context)),
+                before,
+                "keep displayed spread, not partial intermediate page"
+            );
+            app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                generation: old_generation,
+                first_index: 1,
+                total: 2,
+                images: vec![(
+                    root.join("stale.png"),
+                    Ok(decoded(100, 100, [0, 255, 0, 255])),
+                )],
+            });
+            assert_eq!(bounds(&frame(&mut app, &context)), before);
+            let restored = app.restored_ui_textures(&context);
+            for (id, original) in ids.into_iter().zip(&originals) {
+                let delta = &restored
+                    .iter()
+                    .find(|(texture, _)| *texture == id)
+                    .expect("held page recovery pixels")
+                    .1;
+                assert_eq!(
+                    delta.image.size(),
+                    [
+                        original.frames[0].width as usize,
+                        original.frames[0].height as usize
+                    ]
+                );
+            }
+            app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                generation: app.image_generation,
+                first_index: 0,
+                total: 2,
+                images: vec![(
+                    root.join("latest.png"),
+                    Ok(decoded(80, 120, [255, 255, 0, 255])),
+                )],
+            });
+            assert_eq!(bounds(&frame(&mut app, &context)), before);
+            app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                generation: app.image_generation,
+                first_index: 1,
+                total: 2,
+                images: vec![(
+                    root.join("failed.png"),
+                    Err(towavue_runtime_windows::ImageDecodeError::UnknownFormat),
+                )],
+            });
+            assert!(!app.image_loading && app.image_handoff.is_none());
+            assert!(
+                bounds(&frame(&mut app, &context))
+                    .iter()
+                    .all(Option::is_none)
+            );
+            assert!(app.image_copy_request().is_some());
+            assert!(
+                app.edits
+                    .values()
+                    .all(|history| history.operations().is_empty())
+            );
+        }
+    }
+}
+
+#[test]
 fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_handoff::tests::handoff_is_original_display_only_until_the_latest_source_is_ready",

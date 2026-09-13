@@ -7,6 +7,7 @@ pub(super) struct ImageHandoff {
     pub path: PathBuf,
     pub image: ImagePresentation,
     pub view: ImageViewState,
+    pub reading: Option<reading_view::ReadingHandoff>,
     transform: ImageTransform,
     pub bytes: Option<u64>,
 }
@@ -21,6 +22,10 @@ impl ImageHandoff {
     }
 
     pub fn draw(&self, ui: &egui::Ui) {
+        if let Some(reading) = &self.reading {
+            reading.draw(ui, self.view);
+            return;
+        }
         let viewport = ui.max_rect();
         let density = ui.ctx().pixels_per_point();
         let mut view = self.view;
@@ -48,12 +53,16 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn take_navigation_handoff(&mut self, kind: MediaKind) -> Option<ImageHandoff> {
         if kind != MediaKind::Image
             || self.media_kind != Some(MediaKind::Image)
-            || self.reading_mode
             || self.image_edit_pending
-            || self.image_error.is_some()
             || self.displayed_tab.is_none()
             || self.displayed_tab != self.tabs.active().map(|tab| tab.id)
         {
+            return None;
+        }
+        if self.reading_mode && self.image_loading {
+            return self.image_handoff.take();
+        }
+        if self.image_error.is_some() {
             return None;
         }
         if let (Some(image), Some(path)) = (&self.image, &self.path) {
@@ -61,6 +70,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 path: path.clone(),
                 image: image.clone(),
                 view: self.image_view,
+                reading: self.reading_mode.then(|| self.capture_reading_handoff()),
                 transform: self.visual_transform(image.dimensions()),
                 bytes: self.status_file_size.bytes(self.status_file_source()),
             })

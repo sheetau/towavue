@@ -3,7 +3,59 @@ use crate::*;
 #[cfg(test)]
 mod tests;
 
+pub(super) struct ReadingHandoff {
+    // Retain shared originals as well as handles so every held page can recover its texture.
+    pub images: Vec<ImagePresentation>,
+    pages: Vec<(Option<egui::TextureId>, egui::Vec2)>,
+    settings: ReadingSettings,
+    extent: egui::Vec2,
+}
+
+impl ReadingHandoff {
+    pub fn draw(&self, ui: &egui::Ui, mut view: ImageViewState) {
+        let viewport = ui.max_rect();
+        let scale = scale(
+            view,
+            self.extent,
+            viewport.size(),
+            ui.ctx().pixels_per_point(),
+        );
+        let displayed = self.extent * scale;
+        image_scroll::clamp(&mut view, displayed, viewport.size());
+        let spread =
+            egui::Rect::from_center_size(viewport.center() + egui::Vec2::from(view.pan), displayed);
+        let sizes: Vec<_> = self.pages.iter().map(|page| page.1).collect();
+        let rects = reading_page_rects(spread, &sizes, self.settings.axis, self.settings.reversed);
+        let painter = ui.painter_at(viewport);
+        for ((texture, _), rect) in self.pages.iter().zip(rects) {
+            let Some(texture) = texture else { continue };
+            painter.image(
+                *texture,
+                rect,
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+    }
+}
+
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn capture_reading_handoff(&self) -> ReadingHandoff {
+        let pages = self.reading_page_views();
+        let extent = self.reading_extent(&pages);
+        ReadingHandoff {
+            images: self
+                .reading_pages
+                .iter()
+                .filter_map(|page| page.as_ref().ok())
+                .cloned()
+                .collect(),
+            pages,
+            settings: self.reading_settings,
+            extent,
+        }
+    }
+
     fn reading_page_views(&self) -> Vec<(Option<egui::TextureId>, egui::Vec2)> {
         let first = self
             .image

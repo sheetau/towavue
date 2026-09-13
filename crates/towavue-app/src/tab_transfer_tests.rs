@@ -86,6 +86,77 @@ fn finish(app: &mut App, events: &mpsc::Receiver<AppEvent>) {
 }
 
 #[test]
+fn playback_volume_survives_navigation_transfer_and_close() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::playback_volume_survives_navigation_transfer_and_close",
+    ) else {
+        return;
+    };
+    for kind in [MediaKind::Audio, MediaKind::Video] {
+        let (mut source, _) = app();
+        let (mut destination, _) = app();
+        let path = root.join(if kind == MediaKind::Audio {
+            "first.wav"
+        } else {
+            "first.mp4"
+        });
+        let id = source.tabs.open_new(path.clone(), kind);
+        source.path = Some(path.clone());
+        source.displayed_tab = Some(id);
+        source.media_kind = Some(kind);
+        source.media_duration = Some(Duration::from_secs(2));
+        source.state = PlaybackState::Paused;
+        source.set_playback_volume(0.37);
+        source.toggle_playback_mute();
+        let neighbor = destination.tabs.open_new(root.join("neighbor.wav"), kind);
+        destination.media_kind = Some(kind);
+        destination.set_playback_volume(0.8);
+        let request = DetachRequest {
+            tab: id,
+            path,
+            instance: source.media_generation,
+        };
+        let packet = source.take_tab_transfer(&request, None);
+        assert!(source.playback_volumes.is_empty());
+        let moved = destination.accept_tab_transfer(packet, 0);
+        assert_ne!(moved, neighbor, "destination has independent tab IDs");
+        assert_eq!(
+            destination.playback_volume(),
+            0.0,
+            "mute moves with the tab"
+        );
+        destination.toggle_playback_mute();
+        assert_eq!(destination.playback_volume(), 0.37);
+        destination.tabs.activate(neighbor);
+        assert_eq!(destination.playback_volume(), 0.8);
+        destination.tabs.activate(moved);
+        let next = root.join(if kind == MediaKind::Audio {
+            "next.wav"
+        } else {
+            "next.mp4"
+        });
+        destination
+            .tabs
+            .get_mut(moved)
+            .expect("tab")
+            .target
+            .set_current_path(next.clone(), kind);
+        destination.load_path(next, kind);
+        assert_eq!(
+            destination.playback_volume(),
+            0.37,
+            "same-tab navigation keeps listening level"
+        );
+        destination.toggle_playback_mute();
+        destination.toggle_playback_mute();
+        assert_eq!(destination.playback_volume(), 0.37);
+        destination.remove_tab(moved, false);
+        assert!(!destination.playback_volumes.contains_key(&moved));
+        assert_eq!(destination.playback_volume(), 0.8);
+    }
+}
+
+#[test]
 fn edited_image_install_converts_only_the_selected_frame_with_current_sampling() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_transfer::tests::edited_image_install_converts_only_the_selected_frame_with_current_sampling",

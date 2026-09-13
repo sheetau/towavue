@@ -184,10 +184,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
         };
         let position = self.current_position();
+        let volume = state.volume * self.playback_volume();
         let Some(session) = &mut self.session else {
             return;
         };
-        session.set_volume(state.volume);
+        session.set_volume(volume);
         let changed = session.timeline() != plan.as_ref();
         let target = if changed {
             remap_position(session.timeline(), plan.as_ref(), position)

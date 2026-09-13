@@ -19,6 +19,7 @@ pub(super) struct TabTransfer {
     audio_options: Option<AudioExportOptions>,
     metadata_options: Option<MetadataExportOptions>,
     audio_queue: Option<audio_playback::AudioTab>,
+    playback_volume: Option<playback_volume::PlaybackVolume>,
     focus: Option<egui::Id>,
     timeline: Option<egui::containers::panel::PanelState>,
 }
@@ -245,6 +246,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             audio_options: self.audio_export_settings.remove(&id),
             metadata_options: self.metadata_export_settings.remove(&id),
             audio_queue: self.audio_queues.remove(&id),
+            playback_volume: self.playback_volumes.remove(&id),
             focus,
             timeline,
         };
@@ -289,6 +291,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if let Some(options) = transfer.metadata_options {
             self.metadata_export_settings.insert(id, options);
+        }
+        if let Some(volume) = transfer.playback_volume {
+            self.playback_volumes.insert(id, volume);
         }
         if let Some(mut queue) = transfer.audio_queue {
             let notify = Arc::clone(&self.notify);

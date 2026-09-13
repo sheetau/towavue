@@ -9,7 +9,7 @@ A lightweight image viewer, video player, and audio player for Windows — with 
 - **Flexible viewing.** Zoom, pan, fit or fill the window, and switch to fullscreen.
 - **Reading mode.** View multiple images as connected pages, with adjustable page count, layout, and direction.
 - **Image editing.** Select, crop, rotate, flip, resize, and copy an image or selection to the clipboard.
-- **Video and audio editing.** Select time ranges, remove or keep sections, and adjust volume and playback speed.
+- **Video and audio editing.** Select time ranges, remove or keep sections, and adjust gain and playback speed. Listening volume and mute do not change exported audio.
 - **Undo and export.** Keep the source unchanged while editing, then export the result.
 - **Keyboard-friendly controls.** Use menus, the command palette, or customizable shortcuts.
 - **Multiple windows.** Move tabs between windows while retaining their edits and playback state.

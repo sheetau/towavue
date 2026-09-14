@@ -8919,7 +8919,9 @@ where
     }
 
     fn image_animation_visible(&self) -> bool {
-        if self.image_edit_pending
+        // A held layout can share its mutable animation texture with the current page.
+        if self.image_handoff.is_some()
+            || self.image_edit_pending
             || (self.image_edit_source.is_some() && self.image_error.is_some())
         {
             return false;

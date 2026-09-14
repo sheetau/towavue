@@ -154,12 +154,21 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
                         Arc::new(DecodedImage {
                             format: "test",
                             animation_plays: 0,
-                            frames: vec![towavue_runtime_windows::DecodedImageFrame {
-                                width,
-                                height,
-                                rgba,
-                                delay: Duration::ZERO,
-                            }],
+                            frames: vec![
+                                towavue_runtime_windows::DecodedImageFrame {
+                                    width,
+                                    height,
+                                    rgba,
+                                    delay: Duration::from_secs(60),
+                                },
+                                towavue_runtime_windows::DecodedImageFrame {
+                                    width,
+                                    height,
+                                    rgba: color(page, revision + 10)
+                                        .repeat((width * height) as usize),
+                                    delay: Duration::from_secs(60),
+                                },
+                            ],
                         })
                     };
                     app.image = Some(
@@ -176,12 +185,27 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
                     let before = image_surface(&mut app, &context, &mut renderer, density);
                     app.dispatch(CommandId::IncreaseReadingPages);
                     app.image_loader.request(Vec::new());
+                    let due = Instant::now() - Duration::from_millis(1);
+                    app.image
+                        .as_mut()
+                        .expect("shared current page")
+                        .next_frame_at = Some(due);
+                    app.schedule();
                     equal_surface(
                         &before,
                         &image_surface(&mut app, &context, &mut renderer, density),
                         density,
                         0,
                         "settings request changed the held spread",
+                    );
+                    assert_eq!(app.image.as_ref().expect("current").frame_index, 0);
+                    assert_eq!(
+                        app.image.as_ref().expect("current").next_frame_at,
+                        Some(due)
+                    );
+                    assert!(
+                        app.idle_wakeup(Instant::now()).is_none(),
+                        "held animation has no refresh timer"
                     );
                     let stale = app.image_generation;
                     app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
@@ -234,6 +258,27 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
                             images: vec![(path.clone(), Ok(decoded(index, 1)))],
                         });
                         if index < 3 {
+                            let due = Instant::now() - Duration::from_millis(1);
+                            for image in app.image.iter_mut().chain(
+                                app.reading_pages
+                                    .iter_mut()
+                                    .filter_map(|page| page.as_mut().ok()),
+                            ) {
+                                image.next_frame_at = Some(due);
+                            }
+                            app.schedule();
+                            for image in app.image.iter().chain(
+                                app.reading_pages
+                                    .iter()
+                                    .filter_map(|page| page.as_ref().ok()),
+                            ) {
+                                assert_eq!(
+                                    image.frame_index, 0,
+                                    "unshown incoming pages must not animate"
+                                );
+                                assert_eq!(image.next_frame_at, Some(due));
+                            }
+                            assert!(app.idle_wakeup(Instant::now()).is_none());
                             equal_surface(
                                 &before,
                                 &image_surface(&mut app, &context, &mut renderer, density),
@@ -257,6 +302,19 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
                         7,
                         "completed layout changed on the next frame",
                     );
+                    app.image
+                        .as_mut()
+                        .expect("completed current page")
+                        .next_frame_at = Some(Instant::now() - Duration::from_millis(1));
+                    app.schedule();
+                    assert_eq!(
+                        app.image.as_ref().expect("resumed animation").frame_index,
+                        1
+                    );
+                    assert!(
+                        image_surface(&mut app, &context, &mut renderer, density) != completed,
+                        "completed layout resumes animation without reloading"
+                    );
                     assert!(
                         app.edits
                             .values()
@@ -266,7 +324,7 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
             }
             self.completed = true;
             eprintln!(
-                "PASS reading layout GPU: 6 axis/density cases, 42 held whole-surface comparisons, 6 partial-layout negative controls and 6 stable completed layouts; generated mixed-alpha pages, hidden hardware rendering, scripted completions, no physical input."
+                "PASS reading layout GPU: 6 axis/density cases, 42 held whole-surface comparisons, 6 partial-layout negative controls and 6 stable completed layouts; held/incoming animation deadlines stay unchanged with no refresh timer, completed animation resumes. Generated mixed-alpha pages, hidden hardware rendering, scripted completions, no physical input."
             );
             event_loop.exit();
         }

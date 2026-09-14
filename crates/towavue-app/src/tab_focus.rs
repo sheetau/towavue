@@ -83,7 +83,10 @@ pub(super) fn begin(context: &Context, active: Option<TabId>, enabled: bool) {
     }
 }
 
-pub(super) fn observe_button(response: &Response, key: impl std::hash::Hash + std::fmt::Debug) {
+pub(super) fn observe_pointer_control(
+    response: &Response,
+    key: impl std::hash::Hash + std::fmt::Debug,
+) {
     let context = &response.ctx;
     if ((response.clicked() || response.has_focus())
         && context.input(|input| input.pointer.primary_released()))

@@ -253,7 +253,7 @@ pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     } else {
         icon
     };
-    crate::tab_focus::observe_button(&response, ("media-button", role as u8));
+    crate::tab_focus::observe_pointer_control(&response, ("media-button", role as u8));
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
@@ -274,7 +274,7 @@ pub fn audio_button(ui: &mut Ui, icon: AudioIcon, selected: bool, label: &str) -
             egui::Button::new("").frame(false).selected(selected),
         )
         .help_text(label);
-    crate::tab_focus::observe_button(
+    crate::tab_focus::observe_pointer_control(
         &response,
         ("audio-mode", matches!(icon, AudioIcon::Shuffle)),
     );
@@ -337,7 +337,7 @@ pub fn reading_button(ui: &mut Ui, enabled: bool, selected: bool) -> egui::Respo
             )
         })
         .inner;
-    crate::tab_focus::observe_button(&response, "reading-mode");
+    crate::tab_focus::observe_pointer_control(&response, "reading-mode");
     let color = if response.enabled() {
         FOREGROUND
     } else {

@@ -389,6 +389,131 @@ fn pointer_media_buttons_release_focus_without_removing_keyboard_activation() {
 }
 
 #[test]
+fn pointer_seek_returns_arrow_keys_to_media_and_keeps_explicit_value_focus() {
+    for density in [1.0, 1.25, 2.0] {
+        for focused in [false, true] {
+            for dragged in [false, true] {
+                let context = fonts::test_context();
+                context.enable_accesskit();
+                let mut tabs = TabSet::default();
+                let active = tabs.open_new("active.wav".into(), MediaKind::Audio);
+                let other = tabs.open_new("other.wav".into(), MediaKind::Audio);
+                let draw = |tab, events| {
+                    let mut input = egui::RawInput {
+                        events,
+                        time: Some(context.cumulative_frame_nr() as f64 * 0.1),
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(500.0, 300.0),
+                        )),
+                        ..Default::default()
+                    };
+                    input
+                        .viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .expect("viewport")
+                        .native_pixels_per_point = Some(density);
+                    let mut result = None;
+                    let _ = context.run_ui(input, |_| {
+                        super::begin(&context, Some(tab), true);
+                        let (response, drag) = seekbar::show_drag(
+                            &context,
+                            egui::Rect::from_min_size(
+                                egui::pos2(0.0, 270.0),
+                                egui::vec2(500.0, 30.0),
+                            ),
+                            0.25,
+                            None,
+                            true,
+                            false,
+                        );
+                        let value = seekbar::value_input(
+                            &response,
+                            "Playback position (seconds)",
+                            25.0,
+                            0.0..=100.0,
+                            5.0,
+                            true,
+                        );
+                        super::finish(&context, false, true);
+                        result = Some((response, drag, value));
+                    });
+                    result.expect("seek control")
+                };
+                draw(active, vec![]);
+                let (response, _, _) = draw(active, vec![]);
+                if focused {
+                    draw(active, vec![focus(response.id.accesskit_id())]);
+                    assert!(draw(active, vec![]).0.has_focus());
+                }
+                let start = egui::pos2(100.0, 270.0);
+                let end = if dragged {
+                    egui::pos2(400.0, 270.0)
+                } else {
+                    start
+                };
+                let pointer = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    pressed,
+                    button: egui::PointerButton::Primary,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                draw(
+                    active,
+                    vec![egui::Event::PointerMoved(start), pointer(start, true)],
+                );
+                if dragged {
+                    draw(active, vec![egui::Event::PointerMoved(end)]);
+                }
+                let (_, drag, value) = draw(active, vec![pointer(end, false)]);
+                assert!(drag.released);
+                assert_eq!(drag.position, Some(end), "pointer seek still commits");
+                assert_eq!(value, None);
+                assert_eq!(
+                    context.memory(|memory| memory.focused()),
+                    None,
+                    "pointer seek must return keys to media: {density}x, focused={focused}, dragged={dragged}"
+                );
+                let right = || egui::Event::Key {
+                    key: egui::Key::ArrowRight,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                assert_eq!(
+                    draw(active, vec![right()]).2,
+                    None,
+                    "no slider key interception"
+                );
+                assert!(
+                    context.input(|input| input.events.iter().any(|event| matches!(
+                        event,
+                        egui::Event::Key {
+                            key: egui::Key::ArrowRight,
+                            pressed: true,
+                            ..
+                        }
+                    )))
+                );
+                draw(other, vec![]);
+                assert!(
+                    !draw(active, vec![]).0.has_focus(),
+                    "no pointer role restored on return"
+                );
+                draw(active, vec![focus(response.id.accesskit_id())]);
+                assert!(draw(active, vec![]).0.has_focus());
+                assert_eq!(
+                    draw(active, vec![right()]).2,
+                    Some(30.0),
+                    "explicit value focus still adjusts"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn tab_focus_semantic_roles_ignore_widget_ids_and_wait_only_until_ready_or_new_input() {
     let context = fonts::test_context();
     let mut tabs = TabSet::default();

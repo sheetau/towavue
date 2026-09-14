@@ -124,7 +124,10 @@ pub fn value_input(
 ) -> Option<f64> {
     use egui::accesskit::{Action, ActionData, Orientation, TreeId};
     if enabled {
-        crate::tab_focus::observe(response, ("media-value", response.layer_id.id, label));
+        crate::tab_focus::observe_pointer_control(
+            response,
+            ("media-value", response.layer_id.id, label),
+        );
     }
     if response.has_focus() {
         response

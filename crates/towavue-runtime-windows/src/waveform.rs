@@ -76,6 +76,8 @@ struct DisplayEnvelope {
     sums: Vec<f64>,
     frames: u64,
     position: u64,
+    column: usize,
+    column_end: f64,
 }
 
 impl DisplayEnvelope {
@@ -84,20 +86,26 @@ impl DisplayEnvelope {
             sums: vec![0.0; columns as usize],
             frames,
             position: 0,
+            column: 0,
+            column_end: frames as f64 / f64::from(columns),
         }
     }
 
     fn push(&mut self, amplitude: f64) {
-        // Integrate each sample's constant support over physical columns. This
-        // also fills wide displays of very short audio without empty columns.
-        let width = self.sums.len() as f64;
-        let start = self.position as f64 * width / self.frames as f64;
-        let end = (self.position + 1) as f64 * width / self.frames as f64;
-        let mut column = start.floor() as usize;
-        while column < self.sums.len() && (column as f64) < end {
-            self.sums[column] +=
-                amplitude * (end.min((column + 1) as f64) - start.max(column as f64));
-            column += 1;
+        // Integrate in sample coordinates; calculate boundaries only when crossing
+        // a display column, including multiple columns within one short-media sample.
+        let mut start = self.position as f64;
+        let end = (self.position + 1) as f64;
+        while self.column < self.sums.len() {
+            if end <= self.column_end {
+                self.sums[self.column] += amplitude * (end - start);
+                break;
+            }
+            self.sums[self.column] += amplitude * (self.column_end - start);
+            start = self.column_end;
+            self.column += 1;
+            self.column_end =
+                (self.column + 1) as f64 * self.frames as f64 / self.sums.len() as f64;
         }
         self.position += 1;
     }
@@ -108,7 +116,12 @@ impl DisplayEnvelope {
                 "timeline waveform sample count mismatch".into(),
             ));
         }
-        Ok(self.sums.into_iter().map(|sum| sum as f32).collect())
+        let samples_per_column = self.frames as f64 / self.sums.len() as f64;
+        Ok(self
+            .sums
+            .into_iter()
+            .map(|sum| (sum / samples_per_column) as f32)
+            .collect())
     }
 }
 
@@ -252,11 +265,11 @@ mod tests {
 
     #[test]
     fn display_envelope_integrates_short_and_fractional_columns_without_raster_quantization() {
-        for frames in [1, 2, 7, 500] {
+        for frames in [1, 2, 7, 500, 48_001, 1_000_003] {
             let samples = (0..frames)
                 .map(|frame| (frame % 31 + 1) as f64 / 137.0)
                 .collect::<Vec<_>>();
-            for width in [1, 3, 640] {
+            for width in [1, 3, 640, 8192] {
                 let mut envelope = DisplayEnvelope::new(width, frames as u64);
                 for sample in &samples {
                     envelope.push(*sample);
@@ -268,6 +281,69 @@ mod tests {
             }
         }
         assert!(DisplayEnvelope::new(640, 10).finish().is_err());
+        let mut extra = DisplayEnvelope::new(3, 2);
+        for _ in 0..3 {
+            extra.push(1.0);
+        }
+        assert!(extra.finish().is_err());
+    }
+
+    #[test]
+    #[ignore = "Release-only comparison of owned amplitudes; excludes decoding and UI"]
+    fn display_envelope_reports_column_boundary_cost() -> Result<(), &'static str> {
+        if cfg!(debug_assertions) {
+            return Err("run with --release");
+        }
+        let samples: Vec<_> = (0..48_000 * 180)
+            .map(|i| f64::from((i % 997) as u32) / 997.0 * 3.0)
+            .collect();
+        for width in [307, 8192] {
+            let reference = reference_columns(&samples, width);
+            for legacy in [true, false, false, true] {
+                let mut timings = Vec::new();
+                for _ in 0..5 {
+                    let samples = std::hint::black_box(&samples);
+                    let start = std::time::Instant::now();
+                    let actual: Vec<f32> = if legacy {
+                        // Previous per-sample display-coordinate integration.
+                        let mut sums = vec![0.0; width as usize];
+                        for (position, amplitude) in samples.iter().enumerate() {
+                            let start = position as f64 * f64::from(width) / samples.len() as f64;
+                            let end =
+                                (position + 1) as f64 * f64::from(width) / samples.len() as f64;
+                            let mut column = start.floor() as usize;
+                            while column < sums.len() && (column as f64) < end {
+                                sums[column] += amplitude
+                                    * (end.min((column + 1) as f64) - start.max(column as f64));
+                                column += 1;
+                            }
+                        }
+                        sums.into_iter().map(|sum| sum as f32).collect()
+                    } else {
+                        let mut envelope = DisplayEnvelope::new(width, samples.len() as u64);
+                        for sample in samples {
+                            envelope.push(*sample);
+                        }
+                        envelope.finish().expect("complete")
+                    };
+                    std::hint::black_box(&actual);
+                    timings.push(start.elapsed().as_secs_f64() * 1000.0);
+                    assert!(
+                        actual
+                            .iter()
+                            .zip(&reference)
+                            .all(|(a, b)| (a - b).abs() < 0.000001)
+                    );
+                }
+                timings.sort_by(f64::total_cmp);
+                eprintln!(
+                    "WAVEFORM_COLUMNS width={width} frames={} legacy={legacy} median_ms={:.3}",
+                    samples.len(),
+                    timings[2]
+                );
+            }
+        }
+        Ok(())
     }
 
     #[test]

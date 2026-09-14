@@ -16,7 +16,7 @@ fn measured_with_application_test_instrumentation() {
 }
 
 fn convert(frame: &DecodedImageFrame, strategy: usize) -> egui::ColorImage {
-    // Strategy 1 is an experimental comparison, never the application path.
+    // Strategies 1, 3 and 4 are experimental comparisons, never the application path.
     let size = [frame.width as usize, frame.height as usize];
     match strategy {
         0 => image_color::color_image(frame),
@@ -55,7 +55,84 @@ fn convert(frame: &DecodedImageFrame, strategy: usize) -> egui::ColorImage {
             egui::ColorImage::new(size, pixels)
         }
         2 => egui::ColorImage::from_rgba_unmultiplied(size, &frame.rgba),
+        3 | 4 => {
+            // Safe disjoint output slices require initialized storage. Include
+            // that cost, thread creation and joining in the measured conversion.
+            let mut pixels = vec![egui::Color32::TRANSPARENT; size[0] * size[1]];
+            let fill = |output: &mut [egui::Color32], rgba: &[u8]| {
+                for (out, row) in output
+                    .chunks_mut(size[0])
+                    .zip(rgba.chunks_exact(size[0] * 4))
+                {
+                    let row = row.as_chunks::<4>().0;
+                    let mask = u32::from_ne_bytes([0, 0, 0, 255]);
+                    let opaque = row.chunks(32).all(|block| {
+                        block
+                            .iter()
+                            .fold(u32::MAX, |bits, p| bits & u32::from_ne_bytes(*p))
+                            & mask
+                            == mask
+                    });
+                    for (out, p) in out.iter_mut().zip(row) {
+                        *out = if opaque {
+                            egui::Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3])
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3])
+                        };
+                    }
+                }
+            };
+            if strategy == 3 {
+                let split = size[0] * size[1].div_ceil(2);
+                let (first, second) = pixels.split_at_mut(split);
+                let (first_rgba, second_rgba) = frame.rgba.split_at(split * 4);
+                std::thread::scope(|scope| {
+                    let worker = scope.spawn(|| fill(first, first_rgba));
+                    fill(second, second_rgba);
+                    worker.join().expect("color worker");
+                });
+            } else {
+                fill(&mut pixels, &frame.rgba);
+            }
+            egui::ColorImage::new(size, pixels)
+        }
         _ => unreachable!(),
+    }
+}
+
+#[test]
+fn initialized_color_rows_match_egui_at_split_and_alpha_boundaries() {
+    for width in [1, 3, 31, 32, 33, 257] {
+        for height in [1, 2, 3, 17] {
+            for mode in 0..3 {
+                let frame = DecodedImageFrame {
+                    width,
+                    height,
+                    rgba: (0..width * height)
+                        .flat_map(|n| {
+                            [
+                                n as u8,
+                                (n / 7) as u8,
+                                (n / 13) as u8,
+                                match mode {
+                                    1 if n % width == width - 1 => 128,
+                                    2 => n as u8,
+                                    _ => 255,
+                                },
+                            ]
+                        })
+                        .collect(),
+                    delay: Duration::ZERO,
+                };
+                let expected = convert(&frame, 2);
+                for strategy in [3, 4] {
+                    assert!(
+                        convert(&frame, strategy) == expected,
+                        "color mismatch: {width}x{height}, mode={mode}, strategy={strategy}"
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -157,10 +234,16 @@ fn measure(frame: &DecodedImageFrame, case: &str) {
         frame.height,
         first_elapsed.as_secs_f64() * 1000.0,
     );
-    for strategy in 0..3 {
+    let strategies = if std::env::var_os("TOWAVUE_COLOR_PARALLEL_TRIAL").is_some() {
+        [0, 4, 3]
+    } else {
+        [0, 1, 2]
+    };
+    for strategy in strategies {
         assert!(convert(frame, strategy) == expected, "warmup pixels differ");
     }
-    for (batch, strategy) in [0, 1, 2, 2, 1, 0].into_iter().enumerate() {
+    let [a, b, c] = strategies;
+    for (batch, strategy) in [a, b, c, c, b, a].into_iter().enumerate() {
         let mut times = Vec::new();
         #[cfg(test)]
         let cpu_before = image_color::COLOR_IMAGE_CPU_TIME.get().unwrap_or_default();
@@ -172,7 +255,7 @@ fn measure(frame: &DecodedImageFrame, case: &str) {
         }
         times.sort_unstable();
         eprintln!(
-            "IMAGE_COLOR width={} height={} case={case} strategy={strategy} batch={batch} median_ms={:.3}; 0=current rows, 1=mixed rows split into opaque/transparent blocks, 2=egui unmultiplied; full equality outside timing, no pixels/path output, decode/GPU/display or memory claim",
+            "IMAGE_COLOR width={} height={} case={case} strategy={strategy} batch={batch} median_ms={:.3}; 0=current rows, 1=mixed blocks, 2=egui unmultiplied, 3=two-way initialized rows, 4=serial initialized rows; full equality outside timing, no pixels/path output, decode/GPU/display or memory claim",
             frame.width,
             frame.height,
             times[2].as_secs_f64() * 1000.0,

@@ -38,7 +38,7 @@ pub struct Filmstrip {
     focus_requested: bool,
     focused_card: Option<egui::Id>,
     pointer_position: Option<egui::Pos2>,
-    card_paths: Vec<(egui::Id, PathBuf)>,
+    card_paths: Vec<(egui::Id, PathBuf, usize)>,
     tab_navigation: Option<(u64, usize)>,
     scroll_offset: f32,
     drag: drag::State,
@@ -308,10 +308,33 @@ impl Filmstrip {
                 .position(|item| Some(item.path.as_path()) == current)
         });
         let frame = context.cumulative_frame_nr();
-        let tab_target = if enabled
-            && !egui::Popup::is_any_open(context)
-            && context.input(|input| input.focused)
-        {
+        let can_focus =
+            enabled && !egui::Popup::is_any_open(context) && context.input(|input| input.focused);
+        let relocated_focus = if can_focus && !recenter && !self.focus_requested {
+            context
+                .memory(|memory| memory.focused())
+                .and_then(|focused| {
+                    let (_, path, index) =
+                        self.card_paths.iter().find(|(id, _, _)| *id == focused)?;
+                    let snapshot = snapshot?;
+                    // A stable index needs no folder scan and must not undo manual scrolling.
+                    if snapshot
+                        .items
+                        .get(*index)
+                        .is_some_and(|item| &item.path == path)
+                    {
+                        return None;
+                    }
+                    snapshot
+                        .items
+                        .iter()
+                        .position(|item| &item.path == path)
+                        .or(selected)
+                })
+        } else {
+            None
+        };
+        let tab_target = if can_focus {
             if let Some((_, target)) = self.tab_navigation.filter(|(saved, _)| *saved == frame) {
                 Some(target)
             } else if let Some(count) =
@@ -330,8 +353,8 @@ impl Filmstrip {
                     context
                         .memory(|memory| memory.focused())
                         .and_then(|focused| {
-                            let (_, path) =
-                                self.card_paths.iter().find(|(id, _)| *id == focused)?;
+                            let (_, path, _) =
+                                self.card_paths.iter().find(|(id, _, _)| *id == focused)?;
                             snapshot?.items.iter().position(|item| item.path == *path)
                         })
                         .or(selected)
@@ -375,8 +398,9 @@ impl Filmstrip {
             self.tab_navigation = Some((frame, target));
             context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
         }
-        let focus_target =
-            tab_target.or_else(|| self.focus_requested.then_some(selected).flatten());
+        let focus_target = tab_target
+            .or(relocated_focus)
+            .or_else(|| self.focus_requested.then_some(selected).flatten());
         let mut wanted = Vec::new();
         let area = egui::Area::new("filmstrip".into())
             .order(egui::Order::Foreground)
@@ -442,7 +466,11 @@ impl Filmstrip {
                     .horizontal_scroll_offset(self.scroll_offset - gutter_scroll)
                     .auto_shrink([false, false])
                     .max_height(inset.height());
-                if recenter || self.focus_requested || tab_target.is_some() {
+                if recenter
+                    || self.focus_requested
+                    || tab_target.is_some()
+                    || relocated_focus.is_some()
+                {
                     scroll = scroll.horizontal_scroll_offset(
                         focus_target.or(selected).unwrap_or(0) as f32 * STEP,
                     );
@@ -492,7 +520,8 @@ impl Filmstrip {
                                 egui::Sense::click_and_drag(),
                             )
                             .on_hover_cursor(egui::CursorIcon::PointingHand);
-                        self.card_paths.push((response.id, item.path.clone()));
+                        self.card_paths
+                            .push((response.id, item.path.clone(), index));
                         let active = selected == Some(index);
                         self.drag.observe(&response, &item.path);
                         if focus_target == Some(index)

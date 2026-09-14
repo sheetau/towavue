@@ -85,6 +85,136 @@ fn card(output: &egui::FullOutput, name: &str) -> Rect {
 }
 
 #[test]
+fn filmstrip_folder_updates_reveal_relocated_focus_once() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_folder_updates_reveal_relocated_focus_once",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    for density in [1.0, 1.25, 2.0] {
+        for discard in [false, true] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.enable_accesskit();
+            app.filmstrip =
+                Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                    .expect("strip");
+            let mut snapshot = snapshot(&root);
+            for index in 3..100 {
+                let mut item = snapshot.items[0].clone();
+                item.path = root.join(format!("{index}.png"));
+                snapshot.items.push(item);
+            }
+            let current = snapshot.items[0].path.clone();
+            let focused = snapshot.items[1].path.clone();
+            app.path = Some(current.clone());
+            app.media_kind = Some(MediaKind::Image);
+            app.folder_snapshot = Some(snapshot.clone());
+            app.filmstrip_open = true;
+            let draw = |app: &mut Application<_>, snapshot: &FolderSnapshot, events| {
+                let mut actions = Vec::new();
+                let output = context.run_ui(input(events), |_| {
+                    app.filmstrip.show(
+                        &context,
+                        context.content_rect(),
+                        Some(snapshot),
+                        Some(&current),
+                        true,
+                        &mut actions,
+                    );
+                    if discard && context.current_pass_index() == 0 {
+                        context.request_discard("relocated filmstrip focus");
+                    }
+                });
+                (output, actions)
+            };
+            for _ in 0..3 {
+                draw(&mut app, &snapshot, vec![]);
+            }
+            let output = draw(&mut app, &snapshot, vec![]).0;
+            draw(
+                &mut app,
+                &snapshot,
+                vec![egui::Event::PointerMoved(
+                    card(&output, "other.png").center(),
+                )],
+            );
+            for target in [99, 1] {
+                let index = snapshot
+                    .items
+                    .iter()
+                    .position(|item| item.path == focused)
+                    .expect("focused file");
+                let item = snapshot.items.remove(index);
+                snapshot.items.insert(target, item);
+                snapshot.generation += 1;
+                app.apply_folder_snapshot(snapshot.clone());
+                for _ in 0..3 {
+                    let (output, actions) = draw(&mut app, &snapshot, vec![]);
+                    assert!(actions.is_empty());
+                    let tree = output.platform_output.accesskit_update.expect("tree");
+                    let node = &tree
+                        .nodes
+                        .iter()
+                        .find(|(id, _)| *id == tree.focus)
+                        .expect("relocated focused card")
+                        .1;
+                    assert_eq!(node.label(), Some("other.png"));
+                    let bounds = node.bounds().expect("visible focus");
+                    assert!(
+                        bounds.x0 >= 8.0 && bounds.x1 <= 952.0,
+                        "target {target}: {bounds:?}"
+                    );
+                    assert!(
+                        app.filmstrip.card_paths.len() < 12,
+                        "keep virtualization bounded"
+                    );
+                }
+                let enter = egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                assert!(
+                    draw(&mut app, &snapshot, vec![enter]).1
+                        == vec![UiAction::OpenFilmstripMedia(focused.clone(), false)]
+                );
+            }
+            let before = app.filmstrip.scroll_offset;
+            draw(
+                &mut app,
+                &snapshot,
+                vec![
+                    egui::Event::PointerMoved(egui::pos2(480.0, 30.0)),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(-800.0, 0.0),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            for _ in 0..12 {
+                draw(&mut app, &snapshot, vec![]);
+            }
+            assert!(
+                app.filmstrip.scroll_offset > before + 50.0,
+                "manual scrolling must not recenter focus"
+            );
+            app.apply_folder_snapshot(snapshot.clone());
+            draw(&mut app, &snapshot, vec![]);
+            assert!(
+                app.filmstrip.scroll_offset > before + 50.0,
+                "an unchanged refresh must not recenter focus"
+            );
+        }
+    }
+}
+
+#[test]
 fn filmstrip_tab_navigation_uses_current_order_after_folder_updates() {
     let Some(root) = crate::tests::isolated_test_root(
         "filmstrip::drag_tests::filmstrip_tab_navigation_uses_current_order_after_folder_updates",

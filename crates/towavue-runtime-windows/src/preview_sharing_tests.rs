@@ -22,6 +22,142 @@ fn png() -> Vec<u8> {
 }
 
 #[test]
+fn generated_thumbnail_transfers_pixels_and_keeps_disk_validation_and_fallback() {
+    for stored in [true, false] {
+        let root = cache("ready-thumbnail").root;
+        let path = root.join("cache");
+        if stored {
+            fs::create_dir(&path).expect("cache directory");
+            fs::write(path.join("ready.png"), b"invalid cached PNG").expect("corrupt cache");
+        } else {
+            fs::write(&path, b"preserve occupied path").expect("unavailable directory");
+        }
+        let store = PreviewCache::new(path.clone()).expect("optional storage");
+        let small = image::DynamicImage::ImageRgba8(image::RgbaImage::from_fn(31, 17, |x, y| {
+            image::Rgba([x as u8, y as u8, 70, (x * y) as u8])
+        }));
+        let bytes = thumbnail_png(&small, (4096, 2304), &|| true).expect("cache PNG");
+        let pixels = small.into_rgba8().into_raw();
+        let pointer = pixels.as_ptr();
+        let expected = PreviewImage {
+            width: 31,
+            height: 17,
+            rgba: pixels.clone(),
+        };
+        let result = store
+            .load_or_generate_ready("ready".into(), || {
+                Ok((
+                    bytes.clone(),
+                    Some(PreviewImage {
+                        width: 31,
+                        height: 17,
+                        rgba: pixels,
+                    }),
+                ))
+            })
+            .expect("generated pixels");
+        assert_eq!(
+            result.rgba.as_ptr(),
+            pointer,
+            "do not decode or copy the generated pixels again"
+        );
+        assert_eq!(result, expected);
+        assert_eq!(
+            store
+                .load_or_generate("ready".into(), || panic!("reuse memory"))
+                .expect("memory"),
+            expected
+        );
+        assert_eq!(
+            store
+                .memory
+                .lock()
+                .expect("memory")
+                .entries
+                .front()
+                .expect("entry")
+                .source_size,
+            Some((4096, 2304))
+        );
+        if stored {
+            assert_eq!(
+                fs::read(path.join("ready.png")).expect("repaired disk cache"),
+                bytes
+            );
+            let fresh = PreviewCache::new(path).expect("fresh memory");
+            assert_eq!(
+                fresh
+                    .load_or_generate_ready("ready".into(), || panic!("decode disk entry"))
+                    .expect("disk reuse"),
+                expected
+            );
+        } else {
+            assert_eq!(
+                fs::read(path).expect("occupied file"),
+                b"preserve occupied path"
+            );
+        }
+        fs::remove_dir_all(root).expect("remove owned fixtures");
+    }
+}
+
+#[test]
+#[ignore = "Release comparison of generated thumbnail encoding, persistence and publication"]
+fn generated_thumbnail_reports_png_round_trip_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("use Release for timing");
+    }
+    let root = cache("ready-thumbnail-cost").root;
+    let mut seed = 1_u32;
+    let pixels = image::RgbaImage::from_fn(240, 160, |_, _| {
+        image::Rgba(std::array::from_fn(|channel| {
+            if channel == 3 {
+                255
+            } else {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                (seed >> 24) as u8
+            }
+        }))
+    });
+    for (phase, ready) in [false, true, true, false].into_iter().enumerate() {
+        let mut samples = Vec::new();
+        for sample in 0..15 {
+            let store =
+                PreviewCache::new(root.join(format!("{phase}-{sample}"))).expect("empty cache");
+            let small = image::DynamicImage::ImageRgba8(pixels.clone());
+            let start = std::time::Instant::now();
+            let result = store
+                .load_or_generate_ready("preview".into(), || {
+                    let bytes = thumbnail_png(&small, (4096, 2304), &|| true).expect("PNG");
+                    let image = ready.then(|| PreviewImage {
+                        width: small.width(),
+                        height: small.height(),
+                        rgba: small.into_rgba8().into_raw(),
+                    });
+                    Ok((bytes, image))
+                })
+                .expect("publish");
+            samples.push(start.elapsed().as_secs_f64() * 1000.0);
+            assert_eq!(result.rgba, pixels.as_raw().as_slice());
+            let fresh = PreviewCache::new(store.root.clone()).expect("fresh memory");
+            assert_eq!(
+                fresh
+                    .load_or_generate("preview".into(), || panic!("disk reuse"))
+                    .expect("persisted"),
+                result
+            );
+        }
+        samples.sort_by(f64::total_cmp);
+        println!(
+            "THUMBNAIL_PUBLISH ready={ready} median_ms={:.3}",
+            samples[7]
+        );
+    }
+    fs::remove_dir_all(root).expect("remove owned caches");
+    Ok(())
+}
+
+#[test]
 fn disk_pruning_preserves_under_limit_files_and_removes_oldest_when_over() {
     let cache = cache("prune-bounds");
     let size = CACHE_LIMIT_BYTES / 2;

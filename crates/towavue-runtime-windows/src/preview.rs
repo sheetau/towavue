@@ -301,7 +301,7 @@ impl PreviewCache {
                 // Plain BMP row sampling is cheaper than encoding/reloading a cache PNG.
                 preview.image
             } else {
-                self.load_or_generate(key.clone(), || {
+                self.load_or_generate_ready(key.clone(), || {
                     let current = || self.check_cancelled().is_ok();
                     let direct = if image::ImageFormat::from_path(source).ok()
                         == Some(image::ImageFormat::Jpeg)
@@ -326,32 +326,41 @@ impl PreviewCache {
                             preview.image.height,
                             preview.image.rgba,
                         )?;
-                        thumbnail_png(
-                            image::DynamicImage::ImageRgba8(image),
-                            preview.source_size,
-                            &current,
-                        )
+                        let image = image::DynamicImage::ImageRgba8(image);
+                        let bytes = thumbnail_png(&image, preview.source_size, &current)?;
+                        Some((
+                            bytes,
+                            Some(PreviewImage {
+                                width: image.width(),
+                                height: image.height(),
+                                rgba: image.into_rgba8().into_raw(),
+                            }),
+                        ))
                     })
                     .or_else(|| {
                         static_thumbnail_png(source, STATIC_THUMBNAIL_BYTE_LIMIT, &current)
+                            .map(|bytes| (bytes, None))
                     });
                     self.check_cancelled()?;
-                    let bytes = if let Some(bytes) = direct {
-                        bytes
+                    let prepared = if let Some(prepared) = direct {
+                        prepared
                     } else {
-                        frame_preview(
-                            source,
-                            Duration::ZERO,
-                            "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
-                            self.cancellation.as_ref(),
-                        )?
+                        (
+                            frame_preview(
+                                source,
+                                Duration::ZERO,
+                                "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
+                                self.cancellation.as_ref(),
+                            )?,
+                            None,
+                        )
                     };
                     if cache_key(source, IMAGE_PREVIEW_VARIANT)? != key {
                         return Err(PreviewError::Generate(
                             "Source changed during preview generation".into(),
                         ));
                     }
-                    Ok(bytes)
+                    Ok(prepared)
                 })?
             }
         };
@@ -545,6 +554,16 @@ impl PreviewCache {
         key: String,
         generate: impl FnOnce() -> Result<Vec<u8>, PreviewError>,
     ) -> Result<PreviewImage, PreviewError> {
+        self.load_or_generate_ready(key, || generate().map(|bytes| (bytes, None)))
+    }
+
+    // Locally encoded thumbnails can transfer their original RGBA allocation.
+    // Existing disk entries and encoded-only generators still pass through decode_png.
+    fn load_or_generate_ready(
+        &self,
+        key: String,
+        generate: impl FnOnce() -> Result<(Vec<u8>, Option<PreviewImage>), PreviewError>,
+    ) -> Result<PreviewImage, PreviewError> {
         self.check_cancelled()?;
         if let Some(image) = self.memory.lock().expect("preview memory").get(&key) {
             self.check_cancelled()?;
@@ -569,8 +588,11 @@ impl PreviewCache {
                 .insert_encoded(key, image.clone(), &bytes);
             return Ok(image);
         }
-        let bytes = generate()?;
-        let image = decode_png(&bytes)?;
+        let (bytes, ready) = generate()?;
+        let image = match ready {
+            Some(image) => image,
+            None => decode_png(&bytes)?,
+        };
         self.check_cancelled()?;
         let temporary = self.root.join(format!(
             "{key}.{}.{}.tmp",
@@ -914,11 +936,11 @@ fn static_thumbnail_png(
             ),
         )
     };
-    thumbnail_png(small, source_size, current)
+    thumbnail_png(&small, source_size, current)
 }
 
 fn thumbnail_png(
-    small: image::DynamicImage,
+    small: &image::DynamicImage,
     source_size: (u32, u32),
     current: &dyn Fn() -> bool,
 ) -> Option<Vec<u8>> {

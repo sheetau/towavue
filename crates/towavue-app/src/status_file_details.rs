@@ -282,6 +282,114 @@ mod tests {
     }
 
     #[test]
+    fn right_status_anchor_tracks_each_physical_resize_pixel() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "status_file_details::tests::right_status_anchor_tracks_each_physical_resize_pixel",
+        ) else {
+            return;
+        };
+        for kind in [
+            towavue_core::MediaKind::Image,
+            towavue_core::MediaKind::Video,
+            towavue_core::MediaKind::Audio,
+        ] {
+            for density in [1.0, 1.25, 1.5, 2.0] {
+                let context = fonts::test_context();
+                context.global_style_mut(crate::chrome::style);
+                let mut app = Application::new(None, |_| {}).expect("app");
+                let path = root.join("resize.png");
+                app.tabs.open_new(path.clone(), kind);
+                app.path = Some(path);
+                app.media_kind = Some(kind);
+                app.refresh_status_file_details();
+                assert!(app.status_file_details.finish(
+                    app.status_file_details.ticket,
+                    Some(FileDetails {
+                        bytes: 4096,
+                        modified_local: Some("2024-02-29 12:34:56".into()),
+                    })
+                ));
+                for base in [480.0, 960.0] {
+                    let mut baseline = None;
+                    let mut baseline_vertices = None;
+                    for delta in (0..40).chain((0..40).rev()) {
+                        let width = base * density + delta as f32;
+                        let mut raw = egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width / density, 320.0),
+                            )),
+                            ..Default::default()
+                        };
+                        raw.viewports
+                            .get_mut(&egui::ViewportId::ROOT)
+                            .expect("viewport")
+                            .native_pixels_per_point = Some(density);
+                        let output = context.run_ui(raw, |ui| {
+                            app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                        });
+                        assert_eq!(context.pixels_per_point(), density);
+                        let (shape, text) = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Text(text)
+                                    if text.galley.text().contains("Modified (local)") =>
+                                {
+                                    Some((shape, text))
+                                }
+                                _ => None,
+                            })
+                            .expect("right status label");
+                        // epaint snaps this anchor to physical pixels before tessellation.
+                        let anchor = (text.pos * density).round() - egui::vec2(width, 0.0);
+                        let baseline = *baseline.get_or_insert(anchor);
+                        assert!(
+                            (anchor - baseline).length() < 0.001,
+                            "right anchor drift: kind={kind:?}, density={density}, width={width}, baseline={baseline:?}, actual={anchor:?}"
+                        );
+                        if base == 960.0 {
+                            assert!(
+                                !text.galley.elided,
+                                "compare unchanged glyphs, not changing ellipsis"
+                            );
+                            let primitives =
+                                context.tessellate(vec![shape.clone()], output.pixels_per_point);
+                            let vertices: Vec<_> = primitives
+                                .into_iter()
+                                .flat_map(|primitive| {
+                                    let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive
+                                    else {
+                                        panic!("text must tessellate to a mesh");
+                                    };
+                                    mesh.vertices.into_iter().map(|mut vertex| {
+                                        vertex.pos = vertex.pos * density - egui::vec2(width, 0.0);
+                                        vertex
+                                    })
+                                })
+                                .collect();
+                            assert!(!vertices.is_empty());
+                            let baseline =
+                                baseline_vertices.get_or_insert_with(|| vertices.clone());
+                            assert_eq!(vertices.len(), baseline.len());
+                            for (vertex, baseline) in vertices.iter().zip(baseline.iter()) {
+                                assert!(
+                                    (vertex.pos - baseline.pos).length() < 0.001,
+                                    "tessellated glyph moved relative to the right edge: kind={kind:?}, density={density}, width={width}"
+                                );
+                                assert_eq!(
+                                    (vertex.uv, vertex.color),
+                                    (baseline.uv, baseline.color)
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn modified_date_is_available_for_all_media_and_stays_with_the_held_image() {
         let Some(root) = crate::tests::isolated_test_root(
             "status_file_details::tests::modified_date_is_available_for_all_media_and_stays_with_the_held_image",

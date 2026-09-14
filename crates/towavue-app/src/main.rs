@@ -4754,10 +4754,16 @@ where
         actions: &mut Vec<UiAction>,
         volume_targets: &mut Vec<egui::Response>,
     ) -> egui::Rect {
+        let frame = chrome::bar();
+        let density = root.ctx().pixels_per_point();
+        // Anchor to the physical edge, not the sum of independently rounded child widths.
+        let info_right = ((root.max_rect().right() * density).round()
+            - (f32::from(frame.inner_margin.right) * density).round())
+            / density;
         egui::Panel::bottom("status")
             .exact_size(chrome::STATUS_HEIGHT)
             .show_separator_line(!self.timeline_is_visible())
-            .frame(chrome::bar())
+            .frame(frame)
             .show(root, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
@@ -4963,6 +4969,7 @@ where
                             .help_text(tooltip);
                         },
                     );
+                    let info_width = (info_right - ui.next_widget_position().x).max(0.0);
                     ui.allocate_ui_with_layout(
                         egui::vec2(info_width, 24.0),
                         egui::Layout::right_to_left(egui::Align::Center),

@@ -1079,6 +1079,24 @@ fn run_app_trial(root: PathBuf, audio: bool) {
             assert_eq!(app.current_position(), time(0));
             assert_eq!(app.playback_duration(), Some(Duration::ZERO));
             let (output, _) = render(&mut app, &context, vec![]);
+            assert!(app.command_context().playback_blocked);
+            assert!(
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("UI semantics")
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| {
+                        node.role() == egui::accesskit::Role::Button
+                            && node
+                                .label()
+                                .is_some_and(|label| label.starts_with("Play / replay"))
+                            && node.is_disabled()
+                    }),
+                "empty timeline disables the status Play button"
+            );
             assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture)));
             assert!(!app.session.as_ref().expect("empty").has_audio());
             let generation = app.generation;
@@ -1090,9 +1108,25 @@ fn run_app_trial(root: PathBuf, audio: bool) {
             app.activate_tab(other);
             app.activate_tab(tab);
             assert_eq!(app.playback_duration(), Some(Duration::ZERO));
+            assert!(
+                app.command_context().playback_blocked,
+                "tab restoration preserves availability"
+            );
             app.undo_edit(false);
             assert_eq!(app.current_position(), time(0));
             assert_eq!(app.playback_duration(), Some(Duration::from_secs(4)));
+            assert!(
+                !app.command_context().playback_blocked,
+                "Undo restores playable time"
+            );
+            app.undo_edit(true);
+            assert_eq!(app.playback_duration(), Some(Duration::ZERO));
+            assert!(
+                app.command_context().playback_blocked,
+                "Redo disables playback again"
+            );
+            app.undo_edit(false);
+            assert!(!app.command_context().playback_blocked);
             app.seek_to(time(9000));
             assert_eq!(app.current_position(), time(4000));
             assert!(app.playback_error.is_none());

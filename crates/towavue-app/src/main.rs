@@ -4764,7 +4764,11 @@ where
                                 CommandId::TogglePause,
                                 if playing { "Pause" } else { "Play / replay" },
                             ),
-                        )).inner.disabled_help_text("Playback is unavailable while loading or after an error");
+                        )).inner.disabled_help_text(if self.playback_duration() == Some(Duration::ZERO) {
+                            "No playable time remains in the timeline"
+                        } else {
+                            "Playback is unavailable while loading or after an error"
+                        });
                         let held = self.hold_response(&play, actions);
                         if play.clicked() && !held {
                             actions.push(UiAction::Command(CommandId::TogglePause));
@@ -8311,7 +8315,8 @@ where
     fn command_context(&self) -> CommandContext {
         CommandContext {
             image_transition: self.image_handoff.is_some(),
-            playback_blocked: self.state.after_play_pause().is_none(),
+            playback_blocked: self.state.after_play_pause().is_none()
+                || self.playback_duration() == Some(Duration::ZERO),
             timeline_open: self.timeline_is_visible(),
             has_time_selection: self.time_selection.is_some(),
             media_kind: self.media_kind,
@@ -14190,15 +14195,18 @@ mod tests {
             app.media_kind = Some(kind);
             for density in [1.0, 1.25, 2.0] {
                 let mut fills = Vec::new();
-                for state in [
-                    PlaybackState::Loading,
-                    PlaybackState::Faulted,
-                    PlaybackState::Paused,
-                    PlaybackState::Playing,
-                    PlaybackState::Ended,
+                for (state, duration, enabled) in [
+                    (PlaybackState::Loading, None, false),
+                    (PlaybackState::Faulted, None, false),
+                    (PlaybackState::Paused, None, true),
+                    (PlaybackState::Playing, None, true),
+                    (PlaybackState::Ended, None, true),
+                    (PlaybackState::Paused, Some(Duration::ZERO), false),
+                    (PlaybackState::Ended, Some(Duration::ZERO), false),
+                    (PlaybackState::Paused, Some(Duration::from_secs(1)), true),
                 ] {
                     app.state = state;
-                    let enabled = state.after_play_pause().is_some();
+                    app.media_duration = duration;
                     assert_eq!(play.is_enabled(app.command_context()), enabled);
                     let context = fonts::test_context();
                     context.enable_accesskit();

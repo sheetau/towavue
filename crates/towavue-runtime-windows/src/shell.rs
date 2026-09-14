@@ -313,21 +313,54 @@ thread_local! {
 
 struct ShellApartment(bool);
 
+#[cfg(feature = "shell-lifecycle-verification")]
+fn trace_apartment(phase: &str) {
+    use std::sync::OnceLock;
+    use windows::Win32::System::Com::{APTTYPE_CURRENT, APTTYPEQUALIFIER_NONE, CoGetApartmentType};
+    use windows::Win32::System::Threading::GetCurrentThreadId;
+
+    static START: OnceLock<Instant> = OnceLock::new();
+    let elapsed = START.get_or_init(Instant::now).elapsed().as_micros();
+    let mut apartment = APTTYPE_CURRENT;
+    let mut qualifier = APTTYPEQUALIFIER_NONE;
+    // SAFETY: this query only writes to local outputs; it does not initialize COM,
+    // retain an interface or prolong the apartment being measured.
+    let result = unsafe { CoGetApartmentType(&mut apartment, &mut qualifier) };
+    // SAFETY: the OS thread-id query takes no pointers and changes no thread state.
+    let thread = unsafe { GetCurrentThreadId() };
+    eprintln!(
+        "SHELL_APARTMENT pid={} tid={thread} us={elapsed} phase={phase} type={} qualifier={} hr={:#010x}",
+        std::process::id(),
+        apartment.0,
+        qualifier.0,
+        result.err().map_or(0, |error| error.code().0 as u32)
+    );
+}
+
 impl ShellApartment {
     fn new() -> Self {
         #[cfg(test)]
         SHELL_INITIALIZATIONS.set(SHELL_INITIALIZATIONS.get() + 1);
+        #[cfg(feature = "shell-lifecycle-verification")]
+        trace_apartment("initialize-begin");
         // SAFETY: this local guard never leaves its Shell worker. All COM interfaces
         // are local to request calls and drop before this guard, including on unwind.
-        Self(unsafe { OleInitialize(None).is_ok() })
+        let apartment = Self(unsafe { OleInitialize(None).is_ok() });
+        #[cfg(feature = "shell-lifecycle-verification")]
+        trace_apartment("initialize-end");
+        apartment
     }
 }
 
 impl Drop for ShellApartment {
     fn drop(&mut self) {
         if self.0 {
+            #[cfg(feature = "shell-lifecycle-verification")]
+            trace_apartment("uninitialize-begin");
             // SAFETY: balances this guard's successful initialization on its owning thread.
             unsafe { OleUninitialize() };
+            #[cfg(feature = "shell-lifecycle-verification")]
+            trace_apartment("uninitialize-end");
             #[cfg(test)]
             SHELL_UNINITIALIZATIONS.set(SHELL_UNINITIALIZATIONS.get() + 1);
         }
@@ -632,10 +665,17 @@ fn natural_path_cmp(left: &Path, right: &Path) -> Ordering {
 fn parse_path(path: &Path) -> Option<OwnedPidl> {
     let wide = wide_null(path.as_os_str());
     let mut pidl = std::ptr::null_mut();
+    #[cfg(feature = "shell-lifecycle-verification")]
+    trace_apartment("parse-begin");
     // SAFETY: output ownership is transferred to OwnedPidl; the input is terminated UTF-16.
-    unsafe {
-        SHParseDisplayName(PCWSTR(wide.as_ptr()), None, &mut pidl, 0, None).ok()?;
-    }
+    let result = unsafe { SHParseDisplayName(PCWSTR(wide.as_ptr()), None, &mut pidl, 0, None) };
+    #[cfg(feature = "shell-lifecycle-verification")]
+    trace_apartment(if result.is_ok() {
+        "parse-ok"
+    } else {
+        "parse-failed"
+    });
+    result.ok()?;
     (!pidl.is_null()).then_some(OwnedPidl(pidl))
 }
 

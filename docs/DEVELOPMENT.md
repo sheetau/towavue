@@ -43,6 +43,8 @@ cargo build -p towavue-app --release
 
 Generate fixtures only when missing or their inputs change. Reuse completed checks for an unchanged tree; after a failure fix, rerun affected checks rather than restarting unrelated tests. Poll an existing build/process to completion; a tool timeout is not process failure. Do not run all ignored tests indiscriminately: some need hardware, local media, or long measurements. Skips remain unverified capabilities.
 
+For Shell apartment diagnostics, add `--features towavue-runtime-windows/shell-lifecycle-verification` to a targeted app test. `SHELL_APARTMENT` stderr lines report PID, native thread ID, elapsed microseconds, phase and the current [CoGetApartmentType](https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-cogetapartmenttype) result (`hr` is the query result, not the Shell call). Type 3 is the main STA; type 0 is another STA. The trace neither initializes COM nor retains its objects and emits no paths, but logging changes timing. It covers Shell worker initialization/closure and path parsing, not every COM user or process shutdown. The feature is off by default. Preserve a native failure's matching executable/PDB/dump before rebuilding; compare lifecycle evidence rather than rerunning until green.
+
 [CI](../.github/workflows/ci.yml) retains full Windows checks; this documentation change does not alter CI policy. There is no requirement to repeat those checks locally for prose-only edits.
 
 ## Locate code and tests

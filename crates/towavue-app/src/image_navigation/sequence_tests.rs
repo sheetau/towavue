@@ -3,7 +3,14 @@ use super::*;
 type App = Application<fn(AppEvent)>;
 
 fn fixture(root: &Path) -> (App, egui::Context, Vec<PathBuf>) {
-    let mut app = Application::new(None, (|_| {}) as fn(AppEvent)).expect("app");
+    fixture_with_notify(root, (|_| {}) as fn(AppEvent))
+}
+
+fn fixture_with_notify<N: Fn(AppEvent) + Send + Sync + 'static>(
+    root: &Path,
+    notify: N,
+) -> (Application<N>, egui::Context, Vec<PathBuf>) {
+    let mut app = Application::new(None, notify).expect("app");
     let context = fonts::test_context();
     let paths: Vec<_> = (0..100)
         .map(|index| root.join(format!("{index:03}.png")))
@@ -533,6 +540,7 @@ fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
     run_native_sequence(
         "image_navigation::sequence_tests::native_render_frame_advances_the_sequence_only_after_the_new_original",
         false,
+        false,
     );
 }
 
@@ -542,16 +550,37 @@ fn native_initial_large_images_preserve_every_accepted_step() {
     run_native_sequence(
         "image_navigation::sequence_tests::native_initial_large_images_preserve_every_accepted_step",
         true,
+        false,
     );
 }
 
-fn run_native_sequence(test_name: &str, large: bool) {
+#[test]
+fn native_folder_notifications_preserve_initial_navigation_burst() {
+    run_native_sequence(
+        "image_navigation::sequence_tests::native_folder_notifications_preserve_initial_navigation_burst",
+        false,
+        true,
+    );
+}
+
+#[test]
+#[ignore = "generates 100 large JPEGs; requires FFMPEG_DIR, Shell and hardware D3D11; correctness, not latency"]
+fn native_folder_notifications_preserve_initial_large_image_burst() {
+    run_native_sequence(
+        "image_navigation::sequence_tests::native_folder_notifications_preserve_initial_large_image_burst",
+        true,
+        true,
+    );
+}
+
+fn run_native_sequence(test_name: &str, large: bool, native_order: bool) {
     let Some(root) = crate::tests::isolated_test_root(test_name) else {
         return;
     };
     struct Trial {
         root: PathBuf,
         large: bool,
+        native_order: bool,
     }
     use winit::platform::windows::EventLoopBuilderExtWindows;
     impl ApplicationHandler for Trial {
@@ -577,7 +606,10 @@ fn run_native_sequence(test_name: &str, large: bool) {
             renderer
                 .resize_surface(size.width, size.height)
                 .expect("surface");
-            let (mut app, context, mut paths) = fixture(&self.root);
+            let (notify, events) = std::sync::mpsc::channel();
+            let (mut app, context, mut paths) = fixture_with_notify(&self.root, move |event| {
+                let _ = notify.send(event);
+            });
             if self.large {
                 paths = super::performance_tests::large_jpeg_fixture(&self.root);
             } else {
@@ -609,6 +641,82 @@ fn run_native_sequence(test_name: &str, large: bool) {
             app.displayed_tab = None;
             app.image = None;
             app.load_path(paths[0].clone(), MediaKind::Image);
+            if self.native_order {
+                for _ in 0..100 {
+                    app.process_shortcut("Right".parse().expect("navigation key"));
+                }
+                assert_eq!(app.image_sequence.steps.len(), 100);
+                let mut ordered = Vec::new();
+                let mut presented = 0;
+                let mut completions = 0;
+                let mut order_source = None;
+                let deadline = Instant::now() + Duration::from_secs(60);
+                while presented <= 100 {
+                    assert!(
+                        Instant::now() < deadline,
+                        "native sequence timeout at {presented}"
+                    );
+                    while let Ok(event) = events.try_recv() {
+                        let previous = app
+                            .folder_snapshot
+                            .as_ref()
+                            .map(|snapshot| snapshot.generation);
+                        app.handle_app_event(event);
+                        if let Some(snapshot) = &app.folder_snapshot
+                            && Some(snapshot.generation) != previous
+                        {
+                            completions += 1;
+                            let mut current: Vec<_> = snapshot
+                                .items_of_kind(MediaKind::Image)
+                                .map(|item| item.path.clone())
+                                .collect();
+                            assert_eq!(current.len(), paths.len());
+                            assert!(paths.iter().all(|path| current.contains(path)));
+                            let first = current
+                                .iter()
+                                .position(|path| path == &paths[0])
+                                .expect("initial source");
+                            current.rotate_left(first);
+                            if ordered.is_empty() {
+                                ordered = current;
+                                order_source = Some(snapshot.source);
+                            } else {
+                                assert_eq!(
+                                    current, ordered,
+                                    "unchanged fixture retains Shell order"
+                                );
+                            }
+                        }
+                    }
+                    let path = app.path.clone().expect("current source");
+                    let generation = app.media_generation;
+                    assert_eq!(app.image_sequence.awaiting, Some(generation));
+                    app.render_frame();
+                    assert!(app.image_error.is_none());
+                    if app.image_sequence.awaiting != Some(generation) {
+                        assert!(!ordered.is_empty(), "order must arrive before advancement");
+                        assert_eq!(path, ordered[presented % ordered.len()]);
+                        presented += 1;
+                        assert_eq!(
+                            app.image_sequence.steps.len(),
+                            100_usize.saturating_sub(presented)
+                        );
+                    } else {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+                assert!(completions > 0);
+                assert!(
+                    app.image_sequence.steps.is_empty() && app.image_sequence.awaiting.is_none()
+                );
+                assert!(app.playback_error.is_none());
+                eprintln!(
+                    "PASS native folder navigation: 101 original presentations, 100 initial shortcut commands, {completions} real folder completions, source={order_source:?}, large={}; real decode/prefetch and app-event handlers, hidden GPU/Present, no physical input or latency claim",
+                    self.large
+                );
+                event_loop.exit();
+                return;
+            }
             // Delay only Shell order; original decoding and prefetch use real workers.
             app.folder_order.request(None);
             for _ in 0..100 {
@@ -689,6 +797,10 @@ fn run_native_sequence(test_name: &str, large: bool) {
     builder
         .build()
         .expect("event loop")
-        .run_app(&mut Trial { root, large })
+        .run_app(&mut Trial {
+            root,
+            large,
+            native_order,
+        })
         .expect("native sequence");
 }

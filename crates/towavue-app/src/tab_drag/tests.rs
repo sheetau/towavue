@@ -24,7 +24,28 @@ fn frame(
             events,
             ..Default::default()
         },
-        |ui| app.draw_top_bar(ui, &mut actions),
+        |ui| {
+            tab_focus::begin(&context, app.tabs.active().map(|tab| tab.id), true);
+            app.draw_top_bar(ui, &mut actions);
+            let response = ui.interact(
+                egui::Rect::from_min_size(egui::pos2(20.0, 200.0), egui::vec2(100.0, 20.0)),
+                egui::Id::new("tab-drag-numeric-focus"),
+                egui::Sense::focusable_noninteractive(),
+            );
+            assert_eq!(
+                seekbar::value_input(
+                    &response,
+                    "Playback position (seconds)",
+                    25.0,
+                    0.0..=100.0,
+                    5.0,
+                    true,
+                ),
+                None,
+                "tab dragging must not edit a numeric control"
+            );
+            tab_focus::finish(&context, false, true);
+        },
     );
     (output, actions)
 }
@@ -588,18 +609,40 @@ fn tab_drag_keeps_tab_geometry_fixed_until_release() {
     let start = original[0].2.center();
     let target = egui::pos2(original[2].2.right() + 10.0, start.y);
     let tabs = app.tabs.clone();
+    let context = app.ui_context.clone().expect("context");
+    let value = egui::Id::new("tab-drag-numeric-focus");
+    context.memory_mut(|memory| memory.request_focus(value));
+    frame(&mut app, size, true, vec![egui::Event::PointerMoved(start)]);
+    assert!(context.memory(|memory| memory.has_focus(value)));
+    let background_role = egui::Id::new("background-tab-role");
+    tab_focus::adopt(&context, original[0].0, background_role);
     frame(
         &mut app,
         size,
         true,
         vec![egui::Event::PointerMoved(start), pointer(start, true)],
     );
+    assert_eq!(
+        context.memory(|memory| memory.focused()),
+        None,
+        "tab press must release the active media's numeric focus before a click or drag"
+    );
     let (output, actions) = frame(
         &mut app,
         size,
         true,
-        vec![egui::Event::PointerMoved(target)],
+        vec![
+            egui::Event::PointerMoved(target),
+            egui::Event::Key {
+                key: egui::Key::ArrowRight,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
     );
+    assert!(context.input(|input| input.key_pressed(egui::Key::ArrowRight)));
     assert!(actions.is_empty());
     let dragging = state(&app);
     assert_eq!(dragging.drag.as_ref().expect("drag").tab, original[0].0);
@@ -646,11 +689,44 @@ fn tab_drag_keeps_tab_geometry_fixed_until_release() {
     assert!(actions == vec![UiAction::ReorderTab(original[0].0, 3)]);
     assert!(state(&app).drag.is_none());
     assert!(frame(&mut app, size, true, vec![]).1.is_empty());
+    assert_eq!(tab_focus::take(&context, original[2].0), None);
+    assert_eq!(
+        tab_focus::take(&context, original[0].0),
+        Some(background_role)
+    );
     app.handle_ui_action(actions[0].clone());
     assert_eq!(
         app.tabs.tabs().iter().map(|tab| tab.id).collect::<Vec<_>>(),
         [original[1].0, original[2].0, original[0].0]
     );
+    frame(
+        &mut app,
+        size,
+        true,
+        vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Focus,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: original[0].1.accesskit_id(),
+                data: None,
+            },
+        )],
+    );
+    assert!(context.memory(|memory| memory.has_focus(original[0].1)));
+    let (_, actions) = frame(
+        &mut app,
+        size,
+        true,
+        vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert!(actions == vec![UiAction::ActivateTab(original[0].0)]);
+    assert!(context.memory(|memory| memory.has_focus(original[0].1)));
 }
 
 #[test]
@@ -666,12 +742,18 @@ fn tab_drag_cancellation_rejects_late_release_after_context_changes() {
         let original = app.tabs.clone();
         let start = state(&app).widgets[0].2.center();
         let target = start + egui::vec2(190.0, 0.0);
+        let context = app.ui_context.clone().expect("context");
+        context.memory_mut(|memory| {
+            memory.request_focus(egui::Id::new("tab-drag-numeric-focus"));
+        });
+        frame(&mut app, size, true, vec![]);
         frame(
             &mut app,
             size,
             true,
             vec![egui::Event::PointerMoved(start), pointer(start, true)],
         );
+        assert_eq!(context.memory(|memory| memory.focused()), None);
         frame(
             &mut app,
             size,
@@ -735,6 +817,11 @@ fn tab_drag_cancellation_rejects_late_release_after_context_changes() {
             .1
             .is_empty(),
             "late release {case}"
+        );
+        assert_eq!(context.memory(|memory| memory.focused()), None);
+        assert_eq!(
+            tab_focus::take(&context, original.active().expect("active").id),
+            None
         );
         if case != 6 && case != 9 {
             assert_eq!(app.tabs, original);

@@ -83,7 +83,7 @@ pub(super) fn decode(
     })
 }
 
-fn decode_error(error: zune_jpeg::errors::DecodeErrors) -> ImageDecodeError {
+pub(super) fn decode_error(error: zune_jpeg::errors::DecodeErrors) -> ImageDecodeError {
     ImageError::Decoding(image::error::DecodingError::new(
         ImageFormat::Jpeg.into(),
         error,

@@ -1,5 +1,4 @@
 use ffmpeg_next as ffmpeg;
-use image::codecs::jpeg::JpegDecoder;
 use image::metadata::Orientation;
 
 use super::*;
@@ -48,14 +47,11 @@ fn decode_preview(
     if bytes.len() as u64 > INPUT_LIMIT {
         return Ok(None);
     }
-    let mut header = JpegDecoder::new(std::io::Cursor::new(&bytes))?;
-    let (width, height) = header.dimensions();
+    let (width, height, orientation) = preview_header(&bytes)?;
     let pixels = u64::from(width) * u64::from(height);
     if pixels < minimum_pixels || pixels * 4 > byte_limit as u64 {
         return Ok(None);
     }
-    let orientation = header.orientation()?;
-    drop(header);
     check_current(current)?;
     let source_size = match orientation {
         Orientation::Rotate90
@@ -85,6 +81,28 @@ fn decode_preview(
             rgba: image.into_raw(),
         },
     }))
+}
+
+fn preview_header(bytes: &[u8]) -> Result<(u32, u32, Orientation), ImageDecodeError> {
+    // Borrow the already bounded input, using image's pinned backend/options.
+    // Its adapter copies all compressed bytes and reparses headers for orientation.
+    let options = zune_core::options::DecoderOptions::default()
+        .set_strict_mode(false)
+        .set_max_width(usize::MAX)
+        .set_max_height(usize::MAX);
+    let mut decoder = zune_jpeg::JpegDecoder::new_with_options(
+        zune_core::bytestream::ZCursor::new(bytes),
+        options,
+    );
+    decoder
+        .decode_headers()
+        .map_err(super::jpeg_static::decode_error)?;
+    let (width, height) = decoder.dimensions().expect("decoded JPEG headers");
+    let orientation = decoder
+        .exif()
+        .and_then(|exif| Orientation::from_exif_chunk(exif))
+        .unwrap_or(Orientation::NoTransforms);
+    Ok((width as u32, height as u32, orientation))
 }
 
 fn reduced_jpeg(
@@ -155,6 +173,113 @@ fn reduced_jpeg(
 mod tests {
     use super::*;
 
+    fn adapter_header(bytes: &[u8]) -> Result<(u32, u32, Orientation), ImageDecodeError> {
+        let mut decoder = image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(bytes))?;
+        let (width, height) = decoder.dimensions();
+        Ok((width, height, decoder.orientation()?))
+    }
+
+    fn assert_adapter_preview(bytes: &[u8], preview: &CachedImagePreview) {
+        let (width, height, orientation) = adapter_header(bytes).expect("adapter header");
+        let swap = matches!(
+            orientation,
+            Orientation::Rotate90
+                | Orientation::Rotate270
+                | Orientation::Rotate90FlipH
+                | Orientation::Rotate270FlipH
+        );
+        let reduced = reduced_jpeg(bytes, width, height, swap)
+            .expect("decode")
+            .expect("reduced");
+        let mut expected = DynamicImage::ImageRgba8(
+            image::RgbaImage::from_raw(reduced.width, reduced.height, reduced.rgba).expect("RGBA"),
+        );
+        expected.apply_orientation(orientation);
+        assert_eq!(
+            preview.source_size,
+            if swap {
+                (height, width)
+            } else {
+                (width, height)
+            }
+        );
+        assert_eq!(
+            (preview.image.width, preview.image.height),
+            (expected.width(), expected.height())
+        );
+        assert_eq!(preview.image.rgba, expected.as_bytes());
+    }
+
+    #[test]
+    fn borrowed_preview_headers_match_adapter_metadata_and_errors() {
+        let mut bytes = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut bytes)
+            .encode_image(&image::RgbImage::new(47, 31))
+            .expect("JPEG");
+        for tag in 0..=9 {
+            let mut exif =
+                *b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x01\0\0\0\0\0\0\0";
+            exif[24] = tag;
+            let mut encoded = vec![0xff, 0xd8, 0xff, 0xe1];
+            encoded.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+            encoded.extend_from_slice(&exif);
+            encoded.extend_from_slice(&bytes[2..]);
+            assert_eq!(
+                preview_header(&encoded).expect("borrowed"),
+                adapter_header(&encoded).expect("adapter")
+            );
+        }
+        // Both parsers must reject incomplete headers, without requiring entropy decoding.
+        for end in 0..bytes.len() {
+            let borrowed = preview_header(&bytes[..end]);
+            let adapter = adapter_header(&bytes[..end]);
+            assert_eq!(borrowed.is_ok(), adapter.is_ok(), "prefix {end}");
+            if let (Ok(borrowed), Ok(adapter)) = (borrowed, adapter) {
+                assert_eq!(borrowed, adapter);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "generated large JPEG preview-header comparison; run in Release without concurrent builds"]
+    #[allow(clippy::assertions_on_constants)]
+    fn borrowed_preview_headers_report_adapter_cost() {
+        assert!(!cfg!(debug_assertions), "use Release for timing");
+        let mut seed = 1_u32;
+        let pixels = image::RgbImage::from_fn(4096, 2304, |_, _| {
+            image::Rgb(std::array::from_fn(|_| {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                (seed >> 24) as u8
+            }))
+        });
+        let mut bytes = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 95)
+            .encode_image(&pixels)
+            .expect("generated JPEG");
+        drop(pixels);
+        let expected = adapter_header(&bytes).expect("baseline");
+        assert_eq!(preview_header(&bytes).expect("borrowed"), expected);
+        for borrowed in [false, true, true, false] {
+            let mut milliseconds = Vec::new();
+            for _ in 0..15 {
+                let start = std::time::Instant::now();
+                let result = if borrowed {
+                    preview_header(&bytes)
+                } else {
+                    adapter_header(&bytes)
+                };
+                milliseconds.push(start.elapsed().as_secs_f64() * 1000.0);
+                assert_eq!(result.expect("headers"), expected);
+            }
+            milliseconds.sort_by(f64::total_cmp);
+            eprintln!(
+                "JPEG_PREVIEW_HEADER borrowed={borrowed} compressed_bytes={} median_ms={:.4}",
+                bytes.len(),
+                milliseconds[7]
+            );
+        }
+    }
+
     #[test]
     fn jpeg_thumbnails_reduce_medium_images_without_enabling_speculative_previews() {
         let path =
@@ -187,6 +312,7 @@ mod tests {
                 let preview = jpeg_thumbnail(&path, IMAGE_BYTE_LIMIT, &|| true)
                     .expect("thumbnail")
                     .expect("reduced JPEG");
+                assert_adapter_preview(&encoded, &preview);
                 let reference = decode_image(&path).expect("independent full decode");
                 assert_eq!(preview.source_size, reference.dimensions());
                 let image = preview.image;
@@ -258,6 +384,7 @@ mod tests {
             let preview = jpeg_preview(&path, IMAGE_BYTE_LIMIT, &|| true)
                 .expect("preview decode")
                 .expect("supported large JPEG");
+            assert_adapter_preview(&std::fs::read(&path).expect("owned JPEG"), &preview);
             assert_eq!(reference.dimensions(), (2571, 1933), "{name}");
             assert_eq!(preview.source_size, reference.dimensions(), "{name}");
             let image = preview.image;
@@ -355,10 +482,11 @@ mod tests {
             encoded.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
             encoded.extend_from_slice(&exif);
             encoded.extend_from_slice(&original[2..]);
-            std::fs::write(&path, encoded).expect("EXIF fixture");
+            std::fs::write(&path, &encoded).expect("EXIF fixture");
             let preview = jpeg_preview(&path, IMAGE_BYTE_LIMIT, &|| true)
                 .expect("preview decode")
                 .expect("large JPEG");
+            assert_adapter_preview(&encoded, &preview);
             let reference = decode_image(&path).expect("original decode");
             assert_eq!(
                 preview.source_size,

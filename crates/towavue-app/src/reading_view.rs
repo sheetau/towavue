@@ -234,7 +234,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .map(|_| painter.add(egui::Shape::Noop))
             .collect();
         let enabled = self.view_drag_allowed(ui.ctx()) && self.view_drag.is_none();
-        image_scroll::bars(ui, viewport, displayed, &mut self.image_view, enabled);
+        if image_scroll::bars(ui, viewport, displayed, &mut self.image_view, enabled) {
+            self.forget_pointer_selection_focus(ui.ctx());
+        }
         let spread = egui::Rect::from_center_size(
             viewport.center() + egui::Vec2::from(self.image_view.pan),
             displayed,

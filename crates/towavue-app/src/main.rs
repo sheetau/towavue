@@ -3337,7 +3337,9 @@ where
         let painter = ui.painter_at(viewport);
         // Compute bar input first, but keep the updated image behind the bars.
         let image_shape = painter.add(egui::Shape::Noop);
-        image_scroll::bars(ui, viewport, displayed, &mut self.image_view, enabled);
+        if image_scroll::bars(ui, viewport, displayed, &mut self.image_view, enabled) {
+            self.forget_pointer_selection_focus(ui.ctx());
+        }
         let center = viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
         let image_rect = egui::Rect::from_center_size(center, displayed);
 

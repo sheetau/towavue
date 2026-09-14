@@ -623,4 +623,108 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
             "resize recenters fitting axes"
         );
     }
+    app.fullscreen = false;
+    for density in [1.0, 1.25, 2.0] {
+        for axis in 0..2 {
+            for batched in [false, true] {
+                app.image_view.actual_size();
+                app.image_view.pan = (0.0, 0.0);
+                app.image_view.selection = Some(
+                    PixelCrop {
+                        x: 400,
+                        y: 320,
+                        width: 200,
+                        height: 160,
+                    }
+                    .unit_rect((1000, 800)),
+                );
+                frame(&mut app, vec![egui::Event::PointerGone], density, size);
+                let focus = egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Focus,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: app.selection_identity().with(0_usize).accesskit_id(),
+                    data: None,
+                });
+                frame(&mut app, vec![focus], density, size);
+                let output = frame(&mut app, vec![], density, size);
+                assert!(selection::has_focus(&context));
+                let bar = bars(&output)
+                    .into_iter()
+                    .find(|bar| (axis == 0) == (bar.width() > bar.height()))
+                    .expect("overflow bar");
+                let point = egui::pos2(
+                    ((bar.x0 + bar.x1) * 0.5) as f32,
+                    ((bar.y0 + bar.y1) * 0.5) as f32,
+                );
+                frame(
+                    &mut app,
+                    vec![egui::Event::PointerMoved(point)],
+                    density,
+                    size,
+                );
+                assert!(
+                    selection::has_focus(&context),
+                    "bar hover preserves explicit numeric focus"
+                );
+                let pointer = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    pressed,
+                    button: egui::PointerButton::Primary,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                let before = app.image_view.selection;
+                let mut events = vec![pointer(point, true)];
+                if batched {
+                    events.push(pointer(point, false));
+                }
+                frame(&mut app, events, density, size);
+                assert!(
+                    !selection::has_focus(&context),
+                    "bar press must release numeric focus even before offset changes"
+                );
+                if !batched {
+                    let mut end = point;
+                    end[axis] += 20.0;
+                    frame(
+                        &mut app,
+                        vec![egui::Event::PointerMoved(end)],
+                        density,
+                        size,
+                    );
+                    frame(&mut app, vec![pointer(end, false)], density, size);
+                    assert_ne!(
+                        egui::Vec2::from(app.image_view.pan)[axis],
+                        0.0,
+                        "held bar drag still moves the view"
+                    );
+                } else {
+                    assert!(
+                        egui::Vec2::from(app.image_view.pan)[axis].abs() < 0.02,
+                        "stationary thumb click need not move the view to release focus"
+                    );
+                }
+                assert!(
+                    tab_focus::take(&context, tab).is_none(),
+                    "bar use must forget the numeric tab-return role"
+                );
+                frame(
+                    &mut app,
+                    vec![egui::Event::Key {
+                        key: egui::Key::ArrowRight,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    density,
+                    size,
+                );
+                assert_eq!(
+                    app.image_view.selection, before,
+                    "media arrow must not adjust selection"
+                );
+                assert_eq!(app.edits, history);
+            }
+        }
+    }
 }

@@ -25,15 +25,16 @@ pub fn surface(viewport: egui::Rect, displayed: egui::Vec2, bar_width: f32) -> e
     rect
 }
 
+/// Returns whether a scrollbar accepted a pointer press or completed gesture.
 pub fn bars(
     ui: &mut egui::Ui,
     viewport: egui::Rect,
     displayed: egui::Vec2,
     view: &mut ImageViewState,
     enabled: bool,
-) {
+) -> bool {
     if viewport.size().min_elem() <= 0.0 {
-        return;
+        return false;
     }
     let bars = bar_viewport(viewport);
     // Scale the virtual content with the inset tracks so thumb fractions and
@@ -76,6 +77,36 @@ pub fn bars(
     }
     view.pan = pan.into();
     clamp(view, displayed, viewport.size());
+    // egui 0.35 identifies each bar by the ScrollArea ID plus its usize axis.
+    // Inspect its response, not offset changes: a thumb press can leave the view
+    // stationary, and rounded layout clamps are not pointer interactions.
+    // Response methods may lock the context again; release the input borrow first.
+    let (pressed, released) = ui.input(|input| {
+        (
+            input.pointer.primary_pressed(),
+            input.pointer.primary_released(),
+        )
+    });
+    enabled
+        && (pressed || released)
+        && (0..2_usize).any(|axis| {
+            overflow[axis] > 0.0
+                && ui
+                    .ctx()
+                    .read_response(output.id.with(axis))
+                    .is_some_and(|response| {
+                        let owned = response.enabled()
+                            && ((pressed && response.is_pointer_button_down_on())
+                                || (released
+                                    && (response.clicked_by(egui::PointerButton::Primary)
+                                        || response
+                                            .drag_stopped_by(egui::PointerButton::Primary))));
+                        if owned {
+                            response.surrender_focus();
+                        }
+                        owned
+                    })
+        })
 }
 
 pub fn held_bars(

@@ -3,6 +3,111 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 #[test]
+#[ignore = "read-only paired decode timing; set TOWAVUE_NAV_REFERENCE_DIR and use Release; no image output"]
+fn reference_images_compare_one_and_two_decoder_batches() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("use the Release test binary");
+    }
+    let source = std::env::var_os("TOWAVUE_NAV_REFERENCE_DIR").expect("explicit source directory");
+    let mut paths: Vec<_> = std::fs::read_dir(source)
+        .expect("source directory")
+        .map(|entry| entry.expect("source entry").path())
+        .filter(|path| {
+            path.is_file()
+                && towavue_core::MediaKind::from_path(path) == Some(towavue_core::MediaKind::Image)
+        })
+        .collect();
+    paths.sort();
+    assert!(paths.len() >= 2, "at least two reference images required");
+    let stamp = |path: &PathBuf| {
+        let metadata = std::fs::metadata(path).expect("source metadata");
+        (metadata.len(), metadata.modified().expect("source time"))
+    };
+    let mut batch_times: [Vec<Duration>; 4] = Default::default();
+    let mut first_ready: [Vec<Duration>; 4] = Default::default();
+    let mut decode_times: [Vec<Duration>; 4] = Default::default();
+    let mut max_pair_rgba = 0;
+    for pair in paths.chunks(2) {
+        let before: Vec<_> = pair.iter().map(&stamp).collect();
+        // Warm each source and keep identical reference canvases resident in every
+        // mode. Equality and result destruction are outside the timed batches.
+        let expected: Vec<_> = pair
+            .iter()
+            .map(|path| {
+                decode_image_for_prefetch(path, IMAGE_BYTE_LIMIT, &|| true)
+                    .expect("reference decode")
+                    .expect("static prefetch-supported references required")
+            })
+            .collect();
+        max_pair_rgba = max_pair_rgba.max(
+            expected
+                .iter()
+                .map(DecodedImage::retained_bytes)
+                .sum::<usize>(),
+        );
+        for (phase, workers) in [1, 2, 2, 1].into_iter().enumerate() {
+            let started = Instant::now();
+            let actual = std::thread::scope(|scope| {
+                let handles: Vec<_> = pair
+                    .chunks(pair.len().div_ceil(workers))
+                    .map(|chunk| {
+                        scope.spawn(move || {
+                            chunk
+                                .iter()
+                                .map(|path| {
+                                    let decode_started = Instant::now();
+                                    let image =
+                                        decode_image_for_prefetch(path, IMAGE_BYTE_LIMIT, &|| true)
+                                            .expect("timed decode")
+                                            .expect("static reference");
+                                    (image, decode_started.elapsed(), started.elapsed())
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .flat_map(|handle| handle.join().expect("decoder thread"))
+                    .collect::<Vec<_>>()
+            });
+            batch_times[phase].push(started.elapsed());
+            first_ready[phase].push(actual[0].2);
+            assert_eq!(actual.len(), expected.len());
+            for ((image, elapsed, _), expected) in actual.iter().zip(&expected) {
+                assert!(
+                    image == expected,
+                    "full decoded result mismatch; no pixel output"
+                );
+                decode_times[phase].push(*elapsed);
+            }
+        }
+        assert_eq!(before, pair.iter().map(&stamp).collect::<Vec<_>>());
+    }
+    for (phase, workers) in [1, 2, 2, 1].into_iter().enumerate() {
+        let summary = |values: &mut Vec<Duration>| {
+            values.sort_unstable();
+            [
+                values[values.len() / 2],
+                values[(values.len() * 95).div_ceil(100) - 1],
+                values.iter().sum(),
+            ]
+            .map(|elapsed| elapsed.as_secs_f64() * 1000.0)
+        };
+        eprintln!(
+            "REFERENCE_DECODE_PAIR phase={phase} workers={workers} files={} pairs={} batch_median_p95_total_ms={:?} first_ordered_ready_median_p95_total_ms={:?} decode_median_p95_total_ms={:?} max_pair_rgba_mib={:.3}; warm read-only files, scoped thread creation/join included, full RGBA/metadata equality outside timing, source length/mtime unchanged; no previews/cache/adoption/GPU/navigation/cold-disk/physical-input or process-peak-memory claim",
+            paths.len(),
+            batch_times[phase].len(),
+            summary(&mut batch_times[phase]),
+            summary(&mut first_ready[phase]),
+            summary(&mut decode_times[phase]),
+            max_pair_rgba as f64 / 1048576.0,
+        );
+    }
+    Ok(())
+}
+
+#[test]
 #[ignore = "read-only JPEG comparison; set TOWAVUE_NAV_REFERENCE_DIR and use Release; no pixel output"]
 #[allow(clippy::assertions_on_constants)]
 fn reference_jpegs_compare_direct_rgba_pixels_and_decode_cost() {

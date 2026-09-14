@@ -32,6 +32,7 @@ pub struct Filmstrip {
     generation: u64,
     visible: Vec<PathBuf>,
     previews: HashMap<PathBuf, Preview>,
+    preview_order: Vec<PathBuf>,
     refreshing: Vec<PathBuf>,
     focus: Option<PathBuf>,
     focus_requested: bool,
@@ -50,6 +51,7 @@ impl Filmstrip {
             generation: 0,
             visible: Vec::new(),
             previews: HashMap::new(),
+            preview_order: Vec::new(),
             refreshing: Vec::new(),
             focus: None,
             focus_requested: false,
@@ -95,6 +97,7 @@ impl Filmstrip {
             self.visible.clear();
         }
         self.previews.clear();
+        self.preview_order.clear();
         self.refreshing.clear();
     }
 
@@ -123,7 +126,8 @@ impl Filmstrip {
         // Revalidate on the worker without replacing displayed textures with placeholders.
         // Cancel old completions as they may predate a source-file change.
         self.loader.request(Vec::new());
-        self.refreshing = self.visible.clone();
+        // Retained offscreen textures must not bypass source validation on reuse.
+        self.refreshing = self.previews.keys().cloned().collect();
         self.generation = self.loader.request(
             self.visible
                 .iter()
@@ -772,8 +776,20 @@ impl Filmstrip {
     fn set_visible(&mut self, mut wanted: Vec<(PathBuf, MediaKind)>) {
         let visible: Vec<_> = wanted.iter().map(|(path, _)| path.clone()).collect();
         if visible != self.visible {
-            self.previews.retain(|path, _| visible.contains(path));
-            self.refreshing.retain(|path| visible.contains(path));
+            // Reserve slots for current requests, then reuse recently wanted ready
+            // textures. A brief seek hover or narrow strip must not undo idle work.
+            self.preview_order.retain(|path| {
+                !visible.is_empty()
+                    && !visible.contains(path)
+                    && self.previews.get(path).is_some_and(Result::is_ok)
+                    && !self.refreshing.contains(path)
+            });
+            self.preview_order.splice(0..0, visible.iter().cloned());
+            self.preview_order.truncate(VISIBLE_PREVIEW_LIMIT);
+            self.previews
+                .retain(|path, _| self.preview_order.contains(path));
+            self.refreshing
+                .retain(|path| self.preview_order.contains(path));
             wanted.retain(|(path, _)| {
                 !self.previews.contains_key(path) || self.refreshing.contains(path)
             });
@@ -1294,6 +1310,38 @@ mod tests {
                 )
             })
             .collect();
+        for count in [1, 3, 9] {
+            app.filmstrip.set_visible(
+                paths[40..40 + count]
+                    .iter()
+                    .map(|path| (path.clone(), MediaKind::Image))
+                    .collect(),
+            );
+            assert_eq!(
+                app.filmstrip.previews.len(),
+                prepared.len(),
+                "a smaller strip or seek preview retains bounded prepared neighbors"
+            );
+            let resumed = draw(&mut app);
+            for (path, id) in &prepared {
+                assert_eq!(
+                    app.filmstrip.previews[path]
+                        .as_ref()
+                        .expect("retained preview")
+                        .0
+                        .id(),
+                    *id
+                );
+                assert!(
+                    !resumed
+                        .textures_delta
+                        .set
+                        .iter()
+                        .any(|(uploaded, _)| uploaded == id),
+                    "returning to idle preparation does not reupload neighbors"
+                );
+            }
+        }
         for blocked in 0..5 {
             app.palette_open = blocked == 0;
             app.grid_open = blocked == 1;
@@ -1347,6 +1395,41 @@ mod tests {
                     "resuming does not upload retained pixels"
                 );
             }
+        }
+        app.filmstrip.set_visible(
+            paths[..VISIBLE_PREVIEW_LIMIT]
+                .iter()
+                .map(|path| (path.clone(), MediaKind::Image))
+                .collect(),
+        );
+        assert_eq!(app.filmstrip.preview_order, paths[..VISIBLE_PREVIEW_LIMIT]);
+        assert!(
+            app.filmstrip
+                .previews
+                .keys()
+                .all(|path| { paths[..VISIBLE_PREVIEW_LIMIT].contains(path) }),
+            "new visible requests reserve slots before retained neighbors"
+        );
+        for return_to_neighbors in [false, true] {
+            if return_to_neighbors {
+                draw(&mut app);
+            }
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while app.filmstrip.previews.len() != VISIBLE_PREVIEW_LIMIT {
+                ready
+                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .expect("new working set finishes");
+                app.filmstrip.finish(&context);
+                assert!(app.filmstrip.previews.len() <= VISIBLE_PREVIEW_LIMIT);
+            }
+            assert_eq!(
+                app.filmstrip.previews[&current]
+                    .as_ref()
+                    .expect("retained current")
+                    .0
+                    .id(),
+                texture_id
+            );
         }
         app.pending_folder = Some((1, crate::FolderIntent::Refresh(current.clone())));
         app.prepare_filmstrip(&context);

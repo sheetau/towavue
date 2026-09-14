@@ -1,6 +1,181 @@
 use super::*;
 
 #[test]
+#[ignore = "generated large PNG/APNG spreads exercise the production memory budget"]
+fn large_reading_spreads_preserve_pixels_and_cache_hits_under_byte_pressure() {
+    let root = std::env::temp_dir().join(format!("towavue-large-spreads-{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("owned fixture directory");
+    let mut sources = Vec::new();
+    for page in 0..12_u8 {
+        let animated = page % 3 == 1;
+        let (width, height, frames) = if animated {
+            (512, 512, 128)
+        } else {
+            (4096, 2304, 1)
+        };
+        let path = root.join(format!("{page}.png"));
+        let mut encoder = png::Encoder::new(
+            std::fs::File::create(&path).expect("fixture"),
+            width,
+            height,
+        );
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        if animated {
+            encoder.set_animated(frames, 3).expect("animation");
+        }
+        let mut writer = encoder.write_header().expect("PNG header");
+        let mut expected = Vec::new();
+        for frame in 0..frames {
+            let delay = if animated {
+                writer
+                    .set_blend_op(png::BlendOp::Source)
+                    .expect("source frame");
+                writer
+                    .set_frame_delay((frame % 3 + 1) as u16, 100)
+                    .expect("frame delay");
+                Duration::from_millis(u64::from(frame % 3 + 1) * 10)
+            } else {
+                Duration::ZERO
+            };
+            let pixels = [page * 17, frame as u8, 255 - page * 17, 255]
+                .repeat(width as usize * height as usize);
+            expected.push((crc32fast::hash(&pixels), delay));
+            writer.write_image_data(&pixels).expect("PNG frame");
+        }
+        writer.finish().expect("PNG tail");
+        let stamp = ImageStamp::read(&path).expect("source stamp");
+        sources.push((path, width, height, expected, stamp));
+    }
+    let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+    let cache = Arc::clone(&shared.0.lock().expect("mailbox").cache);
+    assert_eq!(cache.lock().expect("cache").byte_limit, 384 * 1024 * 1024);
+    let loader = ImageLoader {
+        shared: Arc::clone(&shared),
+        prefetch_worker: LatestTask::new("large-spread-prefetch").expect("prefetch worker"),
+    };
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        run_worker(
+            shared,
+            || {
+                let _ = ready_tx.send(());
+            },
+            decode_image_with_preview,
+        )
+    });
+    let mut displayed = Vec::new();
+    let mut owners = Vec::new();
+    let mut expected_decodes = 0;
+    let mut partial_hits = 0;
+    let mut total_pages = 0;
+    for spread in [0, 1, 0, 1, 2, 3, 2, 1, 0, 3, 2, 1]
+        .into_iter()
+        .cycle()
+        .take(36)
+    {
+        let selected = &sources[spread * 3..spread * 3 + 3];
+        let paths: Vec<_> = selected.iter().map(|source| source.0.clone()).collect();
+        // Weak references observe cache identity without protecting entries from eviction.
+        let hits: Vec<_> = {
+            let cache = cache.lock().expect("cache");
+            paths
+                .iter()
+                .map(|path| {
+                    cache
+                        .entries
+                        .iter()
+                        .find(|entry| &entry.0 == path)
+                        .map(|entry| Arc::downgrade(&entry.2))
+                })
+                .collect()
+        };
+        let hit_count = hits.iter().filter(|hit| hit.is_some()).count();
+        expected_decodes += 3 - hit_count;
+        partial_hits += usize::from(hit_count > 0 && hit_count < 3);
+        let generation = loader.request_originals_with_retained_bytes(paths, 0, &[]);
+        let mut loaded = Vec::new();
+        while loaded.len() < 3 {
+            ready_rx
+                .recv_timeout(Duration::from_secs(60))
+                .expect("page ready");
+            if let Some(result) = loader.take_completed() {
+                assert_eq!(result.generation, generation);
+                assert_eq!(result.first_index, loaded.len());
+                loaded.extend(
+                    result
+                        .images
+                        .into_iter()
+                        .map(|(path, image)| (path, image.expect("original"))),
+                );
+            }
+        }
+        for (index, ((path, image), source)) in loaded.iter().zip(selected).enumerate() {
+            assert_eq!(path, &source.0);
+            assert_eq!(image.dimensions(), (source.1, source.2));
+            assert_eq!(image.frames.len(), source.3.len());
+            assert_eq!(
+                image.retained_bytes(),
+                source.1 as usize * source.2 as usize * 4 * source.3.len()
+            );
+            if image.is_animated() {
+                assert_eq!(image.animation_plays, 3);
+            }
+            for (frame, (digest, delay)) in image.frames.iter().zip(&source.3) {
+                assert_eq!(crc32fast::hash(&frame.rgba), *digest, "full-frame digest");
+                assert_eq!(frame.delay, *delay);
+            }
+            let weak = Arc::downgrade(image);
+            if let Some(hit) = &hits[index] {
+                assert!(std::sync::Weak::ptr_eq(hit, &weak));
+            }
+            owners.push(weak);
+        }
+        total_pages += loaded.len();
+        displayed = loaded;
+        let cache = cache.lock().expect("cache");
+        assert!(cache.bytes <= CACHE_BYTE_LIMIT && cache.entries.len() <= CACHE_ENTRY_LIMIT);
+        assert_eq!(
+            cache.bytes,
+            cache
+                .entries
+                .iter()
+                .map(|entry| entry.2.retained_bytes())
+                .sum::<usize>()
+        );
+        assert_eq!(
+            loader.verification_metrics().foreground.calls,
+            expected_decodes as u64
+        );
+    }
+    // Each spread is 200 MiB: two cannot fit in 384 MiB. The cold first
+    // traversal has three partial hits; the two repeated traversals have four each.
+    assert_eq!(partial_hits, 11);
+    assert_eq!(expected_decodes, 86);
+    eprintln!(
+        "LARGE_SPREADS pages={total_pages} partial_requests={partial_hits} decodes={expected_decodes} cache_mib={}",
+        CACHE_BYTE_LIMIT / 1024 / 1024
+    );
+    drop(displayed);
+    drop(loader);
+    worker.join().expect("worker shutdown");
+    drop(cache);
+    assert!(
+        owners.iter().all(|owner| owner.upgrade().is_none()),
+        "close releases all decoded originals"
+    );
+    for (path, _, _, _, stamp) in sources {
+        assert!(
+            ImageStamp::read(&path) == Some(stamp),
+            "source remains unchanged"
+        );
+        std::fs::remove_file(path).expect("remove owned source");
+    }
+    std::fs::remove_dir(root).expect("remove empty fixture directory");
+}
+
+#[test]
 fn partial_spread_cache_survives_earlier_page_insertion() {
     let root = std::env::temp_dir().join(format!("towavue-spread-pressure-{}", std::process::id()));
     std::fs::create_dir_all(&root).expect("owned fixture directory");

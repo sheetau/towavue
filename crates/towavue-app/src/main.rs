@@ -1905,11 +1905,8 @@ where
             .as_ref()
             .is_some_and(|previous| previous.items == snapshot.items)
         {
-            if self.filmstrip_open {
-                self.filmstrip.refresh_previews(&snapshot);
-            } else {
-                self.filmstrip.clear_previews();
-            }
+            self.filmstrip
+                .refresh_previews(&snapshot, self.filmstrip_open);
         } else {
             self.filmstrip.clear();
         }

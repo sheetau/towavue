@@ -102,7 +102,14 @@ impl Filmstrip {
         }
     }
 
-    pub fn refresh_previews(&mut self, snapshot: &FolderSnapshot) {
+    pub fn refresh_previews(&mut self, snapshot: &FolderSnapshot, open: bool) {
+        if !open {
+            self.pause_preparation();
+            // Keep ready pixels until use permits revalidation, including textures
+            // retained while the folder refresh was still pending.
+            self.refreshing = self.previews.keys().cloned().collect();
+            return;
+        }
         // Revalidate on the worker without replacing displayed textures with placeholders.
         // Cancel old completions as they may predate a source-file change.
         self.loader.request(Vec::new());
@@ -1177,10 +1184,29 @@ mod tests {
             "no cancellation churn"
         );
         app.pending_folder = None;
+        app.apply_folder_snapshot(app.folder_snapshot.clone().expect("same listing"));
+        assert_eq!(
+            app.filmstrip.previews.len(),
+            VISIBLE_PREVIEW_LIMIT,
+            "a refresh completing while closed must retain ready previews"
+        );
+        assert_eq!(
+            app.filmstrip.refreshing.len(),
+            VISIBLE_PREVIEW_LIMIT,
+            "retained previews still require source validation"
+        );
         app.filmstrip_open = true;
         let output = draw(&mut app);
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
             egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id)));
+        assert!(!app.filmstrip.refreshing.is_empty());
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !app.filmstrip.refreshing.is_empty() {
+            ready
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("deferred source validation resumes on opening");
+            app.filmstrip.finish(&context);
+        }
         let mut retained: Vec<_> = app
             .filmstrip
             .visible

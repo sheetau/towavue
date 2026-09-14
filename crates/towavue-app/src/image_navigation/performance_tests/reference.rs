@@ -443,8 +443,8 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 self.reverse,
             );
             eprintln!(
-                "REFERENCE_CACHE decoded_mib={} directional_prefetch={}; verification-only policy; entry count, texture and per-canvas limits unchanged",
-                self.cache_mib, self.directional_prefetch
+                "REFERENCE_CACHE decoded_mib={} directional_prefetch={} parallel_prefetch={}; verification-only policy controls; entry count, texture and per-canvas limits unchanged",
+                self.cache_mib, self.directional_prefetch, self.parallel_prefetch
             );
             memory.report();
             eprintln!(
@@ -540,7 +540,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 "1" => true,
                 _ => panic!("parallel-prefetch must be 0 or 1"),
             })
-            .unwrap_or(false),
+            .unwrap_or(true),
         source,
         parallel_color: std::env::var("TOWAVUE_NAV_PARALLEL_COLOR")
             .map(|value| match value.as_str() {

@@ -1,4 +1,4 @@
-// Verification-only, ordered one-image lookahead. The coordinator publishes in
+// Ordered one-image lookahead. The coordinator publishes in
 // plan order and owns/join-cancels this helper; no UI thread waits for a decoder.
 use super::*;
 
@@ -84,6 +84,7 @@ impl Ahead {
                                 && work.lookahead.as_ref() == Some(&thread_path)
                         })
                 };
+                #[cfg(any(test, feature = "render-verification"))]
                 let started = {
                     let mut mailbox = shared.0.lock().expect("image mailbox");
                     mailbox.metrics.prefetch.calls += 1;
@@ -91,23 +92,26 @@ impl Ahead {
                     std::time::Instant::now()
                 };
                 let result = decode(&thread_path, bytes, &current);
-                let elapsed = started.elapsed();
-                let outcome = match (current(), &result) {
-                    (false, _) => verification::Outcome::Superseded,
-                    (true, Ok(Some(_))) => verification::Outcome::Completed,
-                    (true, Ok(None)) => verification::Outcome::Unsupported,
-                    (true, Err(ImageDecodeError::TooLarge)) => {
-                        verification::Outcome::BudgetRejected
-                    }
-                    (true, Err(_)) => verification::Outcome::Failed,
-                };
+                #[cfg(any(test, feature = "render-verification"))]
                 {
-                    let mut mailbox = shared.0.lock().expect("image mailbox");
-                    mailbox.metrics.prefetch.record(elapsed, outcome);
-                    mailbox.trace(
-                        &thread_path,
-                        TraceKind::PrefetchReturned { elapsed, outcome },
-                    );
+                    let elapsed = started.elapsed();
+                    let outcome = match (current(), &result) {
+                        (false, _) => verification::Outcome::Superseded,
+                        (true, Ok(Some(_))) => verification::Outcome::Completed,
+                        (true, Ok(None)) => verification::Outcome::Unsupported,
+                        (true, Err(ImageDecodeError::TooLarge)) => {
+                            verification::Outcome::BudgetRejected
+                        }
+                        (true, Err(_)) => verification::Outcome::Failed,
+                    };
+                    {
+                        let mut mailbox = shared.0.lock().expect("image mailbox");
+                        mailbox.metrics.prefetch.record(elapsed, outcome);
+                        mailbox.trace(
+                            &thread_path,
+                            TraceKind::PrefetchReturned { elapsed, outcome },
+                        );
+                    }
                 }
                 if !current() || ImageStamp::read(&thread_path) != Some(stamp) {
                     return Err(ImageDecodeError::Cancelled);

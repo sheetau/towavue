@@ -34,32 +34,27 @@ fn paired_prefetch_preserves_mixed_animation_spreads_under_a_shared_budget() {
     }
     let stamps: Vec<_> = paths.iter().map(|path| ImageStamp::read(path)).collect();
     let previews = PreviewCache::new(root.join("cache")).expect("preview cache");
-    let shared = Arc::new((
-        Mutex::new(Mailbox {
-            previews: Some(previews.clone()),
-            ..Default::default()
-        }),
-        Condvar::new(),
-    ));
-    let loader = ImageLoader {
-        shared: Arc::clone(&shared),
-        prefetch_worker: LatestTask::new("paired-spreads").expect("prefetch worker"),
-    };
-    loader
-        .verification_set_parallel_prefetch(true)
-        .expect("unused loader");
-    let cache = Arc::clone(&shared.0.lock().expect("mailbox").cache);
-    *cache.lock().expect("cache") = ImageCache::new(4 * FRAME_BYTES);
     let (ready_tx, ready_rx) = mpsc::channel();
-    let worker = thread::spawn(move || {
-        run_worker(
-            shared,
-            || {
-                let _ = ready_tx.send(());
-            },
-            decode_image_with_preview,
-        )
-    });
+    let (idle_tx, idle_rx) = mpsc::channel();
+    let loader = ImageLoader::with_idle_notify(
+        previews.clone(),
+        move || {
+            let _ = ready_tx.send(());
+        },
+        move || {
+            let _ = idle_tx.send(());
+        },
+    )
+    .expect("normal loader");
+    let cache = {
+        let mailbox = loader.shared.0.lock().expect("mailbox");
+        assert!(
+            mailbox.parallel_decode.is_some(),
+            "normal construction must enable paired prefetch"
+        );
+        Arc::clone(&mailbox.cache)
+    };
+    *cache.lock().expect("cache") = ImageCache::new(4 * FRAME_BYTES);
     for spread in [[0, 1], [3, 2], [0, 1], [4, 5], [7, 6], [3, 2]] {
         let wanted: Vec<_> = spread.iter().map(|&page| paths[page].clone()).collect();
         loader.prefetch_paths(wanted.clone());
@@ -118,8 +113,12 @@ fn paired_prefetch_preserves_mixed_animation_spreads_under_a_shared_budget() {
         assert_eq!(bytes, 4 * FRAME_BYTES);
         assert!(cache.lock().expect("cache").bytes <= 4 * FRAME_BYTES);
     }
+    while !loader.is_idle() {
+        idle_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("all image work finished");
+    }
     drop(loader);
-    worker.join().expect("foreground stopped");
     assert!(
         paths
             .iter()

@@ -717,7 +717,14 @@ mod tests {
                     ui.fonts_mut(|fonts| {
                         assert!(fonts.has_glyphs(&crate::fonts::icon_font(), "\u{eb24}\u{eb75}"))
                     });
-                    ui.spacing_mut().button_padding = egui::vec2(super::TAB_PADDING, 0.0);
+                    ui.spacing_mut().button_padding = egui::vec2(
+                        if audio.is_some() {
+                            0.0
+                        } else {
+                            super::TAB_PADDING
+                        },
+                        0.0,
+                    );
                     ui.spacing_mut().interact_size.y = height;
                     let close_rect = egui::Rect::from_min_max(
                         egui::pos2(row.right() - super::TAB_CLOSE_WIDTH, row.top()),
@@ -785,6 +792,12 @@ mod tests {
                     assert!(
                         title.pos.x >= bounds.right() + 3.0,
                         "icon precedes title with a gap"
+                    );
+                    let leading = bounds.left() - row.left();
+                    let trailing = title.pos.x - bounds.right();
+                    assert!(
+                        (leading - trailing).abs() <= 1.0 / density,
+                        "audio icon spacing must balance: {leading} vs {trailing}"
                     );
                 } else {
                     assert!(icon.is_none());

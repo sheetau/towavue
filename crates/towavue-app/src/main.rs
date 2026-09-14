@@ -4246,8 +4246,15 @@ where
                                             .max_rect(rect),
                                     );
                                     tab_ui.set_clip_rect(clip);
-                                    tab_ui.spacing_mut().button_padding =
-                                        egui::vec2(chrome::TAB_PADDING, 0.0);
+                                    // The audio slot already supplies the leading text gap.
+                                    tab_ui.spacing_mut().button_padding = egui::vec2(
+                                        if audio.is_some() {
+                                            0.0
+                                        } else {
+                                            chrome::TAB_PADDING
+                                        },
+                                        0.0,
+                                    );
                                     tab_ui.visuals_mut().widgets.inactive.bg_stroke =
                                         egui::Stroke::NONE;
                                     tab_ui.visuals_mut().widgets.hovered.bg_stroke =

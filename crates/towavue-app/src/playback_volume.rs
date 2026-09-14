@@ -378,6 +378,40 @@ mod tests {
                             .find(|(_, node)| node.label() == Some(label))
                             .expect("audio button");
                         let bounds = node.bounds().expect("bounds");
+                        let icon = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Text(text)
+                                    if matches!(text.galley.text(), "\u{eb75}" | "\u{eb24}") =>
+                                {
+                                    let rect = text.galley.rect.translate(text.pos.to_vec2());
+                                    (rect.center().x >= bounds.x0 as f32
+                                        && rect.center().x <= bounds.x1 as f32)
+                                        .then_some(rect)
+                                }
+                                _ => None,
+                            })
+                            .expect("audio icon in its own hit region");
+                        let title_left = output
+                            .shapes
+                            .iter()
+                            .filter_map(|shape| match &shape.shape {
+                                egui::Shape::Text(text)
+                                    if text.galley.text() == "silence.wav"
+                                        && text.pos.x >= bounds.x1 as f32 =>
+                                {
+                                    Some(text.pos.x)
+                                }
+                                _ => None,
+                            })
+                            .min_by(f32::total_cmp)
+                            .expect("following tab title");
+                        assert!(
+                            ((icon.left() - bounds.x0 as f32) - (title_left - icon.right())).abs()
+                                <= 1.0 / density,
+                            "tab audio icon must have equal leading and trailing spacing"
+                        );
                         let point = egui::pos2(
                             ((bounds.x0 + bounds.x1) / 2.0) as f32,
                             ((bounds.y0 + bounds.y1) / 2.0) as f32,

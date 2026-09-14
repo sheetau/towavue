@@ -4,7 +4,7 @@ use std::os::windows::process::CommandExt;
 mod gpu;
 mod reference;
 
-fn bitmap_fixture(path: &Path) {
+pub(super) fn bitmap_fixture(path: &Path) {
     let mut bitmap = vec![0_u8; 62];
     bitmap[..2].copy_from_slice(b"BM");
     bitmap[2..6].copy_from_slice(&62_u32.to_le_bytes());

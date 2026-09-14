@@ -480,13 +480,28 @@ fn approved_guard_keeps_the_first_unpresented_target() {
 
 #[test]
 fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
-    let Some(root) = crate::tests::isolated_test_root(
+    run_native_sequence(
         "image_navigation::sequence_tests::native_render_frame_advances_the_sequence_only_after_the_new_original",
-    ) else {
+        false,
+    );
+}
+
+#[test]
+#[ignore = "generates 100 large JPEGs; requires FFMPEG_DIR and hardware D3D11; correctness, not a latency benchmark"]
+fn native_initial_large_images_preserve_every_accepted_step() {
+    run_native_sequence(
+        "image_navigation::sequence_tests::native_initial_large_images_preserve_every_accepted_step",
+        true,
+    );
+}
+
+fn run_native_sequence(test_name: &str, large: bool) {
+    let Some(root) = crate::tests::isolated_test_root(test_name) else {
         return;
     };
     struct Trial {
         root: PathBuf,
+        large: bool,
     }
     use winit::platform::windows::EventLoopBuilderExtWindows;
     impl ApplicationHandler for Trial {
@@ -512,7 +527,15 @@ fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
             renderer
                 .resize_surface(size.width, size.height)
                 .expect("surface");
-            let (mut app, context, paths) = fixture(&self.root);
+            let (mut app, context, mut paths) = fixture(&self.root);
+            if self.large {
+                paths = super::performance_tests::large_jpeg_fixture(&self.root);
+            } else {
+                for path in &mut paths {
+                    path.set_extension("bmp");
+                    super::performance_tests::bitmap_fixture(path);
+                }
+            }
             app.ui_state = Some(egui_winit::State::new(
                 context,
                 egui::ViewportId::ROOT,
@@ -524,16 +547,23 @@ fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
             app.window = Some(window);
             app.renderer = Some(renderer);
             app.fullscreen = true;
-            let snapshot = app.folder_snapshot.take().expect("order");
+            let mut snapshot = app.folder_snapshot.take().expect("order");
+            for (item, path) in snapshot.items.iter_mut().zip(&paths) {
+                item.path = path.clone();
+            }
+            app.tabs
+                .active_mut()
+                .expect("tab")
+                .target
+                .set_current_path(paths[0].clone(), MediaKind::Image);
             app.displayed_tab = None;
             app.image = None;
             app.load_path(paths[0].clone(), MediaKind::Image);
-            app.image_loader.request(Vec::new());
+            // Delay only Shell order; original decoding and prefetch use real workers.
             app.folder_order.request(None);
             for _ in 0..100 {
                 app.dispatch(CommandId::NextSameKind);
             }
-            app.image_loader.request(Vec::new());
             app.render_frame();
             assert_eq!(
                 app.path.as_ref(),
@@ -541,8 +571,17 @@ fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
                 "initial load cannot be superseded"
             );
             assert_eq!(app.image_sequence.steps.len(), 100);
-            complete(&mut app);
-            app.render_frame();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while app.image_loading {
+                assert!(Instant::now() < deadline, "initial original decode timeout");
+                app.render_frame();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(app.image_error.is_none());
+            assert_eq!(
+                app.image.as_ref().expect("decoded original").dimensions(),
+                if self.large { (4096, 2304) } else { (2, 1) }
+            );
             assert_eq!(
                 app.path.as_ref(),
                 Some(&paths[0]),
@@ -559,9 +598,22 @@ fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
             );
             for index in 1..=100 {
                 assert_eq!(app.path.as_ref(), Some(&paths[index % 100]));
-                complete(&mut app);
-                app.render_frame();
-                app.image_loader.request(Vec::new());
+                let generation = app.media_generation;
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while app.image_sequence.awaiting == Some(generation) {
+                    assert!(
+                        Instant::now() < deadline,
+                        "original presentation timeout at step {index}"
+                    );
+                    app.render_frame();
+                    assert!(
+                        app.image_error.is_none(),
+                        "original decode failed at step {index}"
+                    );
+                    if app.image_sequence.awaiting == Some(generation) {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
                 assert_eq!(
                     app.path.as_ref(),
                     Some(&paths[if index == 100 { 0 } else { (index + 1) % 100 }]),
@@ -571,7 +623,12 @@ fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
             assert!(app.image_sequence.awaiting.is_none() && app.image_sequence.steps.is_empty());
             assert!(app.playback_error.is_none());
             eprintln!(
-                "PASS native image sequence: 100 steps queued during initial loading, late order retained, render_frame GPU/Present acknowledgement, held frames excluded; generated tiny originals and hidden window, not physical keys"
+                "PASS native image sequence: {}, 100 steps queued during initial loading, real decode/prefetch workers, late scripted order retained, render_frame GPU/Present acknowledgement; hidden window, not physical keys or a latency benchmark",
+                if self.large {
+                    "100 generated 4096x2304 JPEGs"
+                } else {
+                    "100 generated 2x1 BMPs"
+                }
             );
             event_loop.exit();
         }
@@ -582,6 +639,6 @@ fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
     builder
         .build()
         .expect("event loop")
-        .run_app(&mut Trial { root })
+        .run_app(&mut Trial { root, large })
         .expect("native sequence");
 }

@@ -90,6 +90,8 @@ Selected reference traces and the opt-in color-example test also report calling-
 
 The reference navigation harness accepts `TOWAVUE_NAV_PARALLEL_PREFETCH=0` for the historical serial policy; unset or `1` uses production's bounded one-image lookahead. Compare disabled/default/default/disabled on the same Release binary, with cache/directional policy fixed and no concurrent builds. Include order, blanks/previews, memory, cancellation and source-identity checks; isolated paired-decode throughput does not prove navigation latency. This override is verification-only, not a user preference; the runtime contract is in ARCHITECTURE.
 
+For initial-open ordering with real large-image workers, run `cargo test -p towavue-app --bin towavue --locked --offline native_initial_large_images_preserve_every_accepted_step -- --ignored --nocapture --test-threads=1`. It generates 100 owned 4096×2304 JPEGs using the configured FFmpeg, queues directions before the first presentation and delays scripted folder order. It requires hidden-window hardware D3D11; inspect the PASS/SKIP output, not just the test exit code. Debug is sufficient for this correctness check, not latency comparisons. Successful runs remove their isolated fixtures; failures retain them.
+
 ## Documentation maintenance
 
 STATUS is the only current-work/handoff record. Update rows in place rather than appending a chronology. Retain new evidence when it changes the next decision or prevents repeated work; include a commit/test reference and its limits. Small documentation corrections need not create status entries.

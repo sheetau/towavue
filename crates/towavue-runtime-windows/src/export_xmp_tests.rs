@@ -252,6 +252,42 @@ fn edited_xmp_keeps_keywords_without_promoting_foreign_or_nested_properties() {
 }
 
 #[test]
+fn edited_xmp_preserves_contributor_and_publisher_without_promoting_foreign_properties() {
+    let cancel = AtomicBool::new(false);
+    for property in ["contributor", "publisher"] {
+        for contents in [
+            "<r:li>Studio &amp; Partners</r:li><r:li><![CDATA[Name <Two>]]></r:li>",
+            "",
+        ] {
+            let attribution = format!("<d:{property}><r:Bag>{contents}</r:Bag></d:{property}>");
+            let packet = format!(
+                "<r:RDF xmlns:r=\"{RDF}\"><r:Description xmlns:d=\"{DC}\" xmlns:t=\"http://ns.adobe.com/tiff/1.0/\" xml:lang=\"fr\" t:Orientation=\"6\">{attribution}<d:{property} xmlns:d=\"urn:not-dc\">foreign credit</d:{property}><t:opaque><d:{property}>nested credit</d:{property}></t:opaque></r:Description></r:RDF>"
+            );
+            for title in [None, Some("Updated title"), Some("")] {
+                let mut options = MetadataExportOptions::default();
+                options
+                    .set(MetadataField::Title, title.map(str::to_owned))
+                    .expect("title");
+                let output = rewrite_edited(packet.as_bytes(), &options, &cancel).expect("rewrite");
+                let text = std::str::from_utf8(&output).expect("UTF-8");
+                assert!(
+                    text.contains(&attribution),
+                    "retain the complete {property} list"
+                );
+                assert!(text.contains("xml:lang=\"fr\""));
+                for removed in ["t:Orientation=", "foreign credit", "nested credit"] {
+                    assert!(!text.contains(removed), "must not retain {removed}");
+                }
+                assert_eq!(
+                    rewrite_edited(&output, &options, &cancel).expect("resave"),
+                    output
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn edited_xmp_keeps_rights_scopes_but_drops_geometry_and_asset_identity() {
     let cancel = AtomicBool::new(false);
     let terms = r#"<q:UsageTerms><r:Alt><r:li xml:lang="en">Keep &amp; attribute</r:li><r:li xml:lang="fr"><![CDATA[Termes <originaux>]]></r:li></r:Alt></q:UsageTerms>"#;

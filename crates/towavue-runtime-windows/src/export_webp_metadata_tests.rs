@@ -86,15 +86,31 @@ fn non_xmp(bytes: &[u8]) -> Vec<([u8; 4], Vec<u8>)> {
 }
 
 #[test]
-fn edited_static_and_animated_webp_keep_rights_only_and_keywords_only_packets() {
+fn edited_static_and_animated_webp_keep_descriptive_only_packets() {
     let root = root("webp-edited-rights");
     let packet = br#"<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:q="http://ns.adobe.com/xap/1.0/rights/" xmlns:t="http://ns.adobe.com/tiff/1.0/" q:Marked="True" t:ImageWidth="1234"><q:UsageTerms><r:Alt><r:li xml:lang="en">Keep attribution</r:li></r:Alt></q:UsageTerms></r:Description></r:RDF>"#;
     let cancel = AtomicBool::new(false);
     let keywords = br#"<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:d="http://purl.org/dc/elements/1.1/" xmlns:t="http://ns.adobe.com/tiff/1.0/" t:ImageWidth="1234"><d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:subject></r:Description></r:RDF>"#;
-    for (animated, keywords_only) in [(false, false), (true, false), (false, true), (true, true)] {
-        let packet: &[u8] = if keywords_only { keywords } else { packet };
-        let source = root.join(format!("source-{animated}-{keywords_only}.webp"));
-        let target = root.join(format!("target-{animated}-{keywords_only}.webp"));
+    for (animated, property) in [
+        (false, "rights"),
+        (true, "rights"),
+        (false, "subject"),
+        (true, "subject"),
+        (false, "contributor"),
+        (true, "contributor"),
+        (false, "publisher"),
+        (true, "publisher"),
+    ] {
+        let packet = if property == "rights" {
+            packet.to_vec()
+        } else {
+            std::str::from_utf8(keywords)
+                .expect("fixture UTF-8")
+                .replace("d:subject", &format!("d:{property}"))
+                .into_bytes()
+        };
+        let source = root.join(format!("source-{animated}-{property}.webp"));
+        let target = root.join(format!("target-{animated}-{property}.webp"));
         if animated {
             animation::Animation {
                 control: [0, 0, 0, 0, 3, 0],
@@ -128,7 +144,7 @@ fn edited_static_and_animated_webp_keep_rights_only_and_keywords_only_packets() 
             hardware_encode: false,
         })
         .expect("baseline encoding");
-        let source_bytes = tagged(&fs::read(&source).expect("source"), packet);
+        let source_bytes = tagged(&fs::read(&source).expect("source"), &packet);
         fs::write(&source, &source_bytes).expect("retention-only source");
         assert!(read(&source, &cancel).expect("editable fields").is_empty());
         let original = container(Cursor::new(&source_bytes), &cancel).expect("source controls");
@@ -150,8 +166,8 @@ fn edited_static_and_animated_webp_keep_rights_only_and_keywords_only_packets() 
         assert_eq!(saved.animation, original.animation);
         let text =
             String::from_utf8(saved.packet.expect("retention-only XMP retained")).expect("UTF-8");
-        if keywords_only {
-            assert!(text.contains("<d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:subject>"));
+        if property != "rights" {
+            assert!(text.contains(&format!("<d:{property}><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:{property}>")));
         } else {
             assert!(text.contains("Keep attribution") && text.contains("q:Marked=\"True\""));
         }

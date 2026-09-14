@@ -57,7 +57,7 @@ impl Name {
     }
 
     fn retained_descriptive_property(&self) -> bool {
-        self.is(DC, "subject")
+        (self.0 == DC && matches!(self.1.as_str(), "subject" | "contributor" | "publisher"))
             || (self.0 == RIGHTS
                 && matches!(
                     self.1.as_str(),
@@ -518,7 +518,7 @@ pub(super) fn rewrite_unedited(
     rewrite(packet, options, cancelled, true)
 }
 
-/// Carry descriptive text, keywords and standard rights expressions across raster/format
+/// Carry descriptive text, attribution, keywords and rights expressions across raster/format
 /// changes, not technical geometry, asset identifiers or original certificates.
 pub(super) fn rewrite_edited(
     packet: &[u8],

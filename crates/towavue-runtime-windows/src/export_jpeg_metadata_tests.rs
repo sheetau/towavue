@@ -791,6 +791,7 @@ fn jpeg_metadata_splice_preserves_every_non_xmp_byte_and_decoded_pixel() {
 fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical_xmp() {
     let root = root("edited-rights");
     let source = root.join("source.jpg");
+    let attribution = r#"<d:contributor><r:Bag><r:li>Studio &amp; Partners</r:li><r:li>Second contributor</r:li></r:Bag></d:contributor><d:publisher><r:Bag><r:li>Original publisher</r:li></r:Bag></d:publisher>"#;
     let rights = r#"<q:Owner xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Bag><r:li>Original owner</r:li></r:Bag></q:Owner><q:UsageTerms xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Alt><r:li xml:lang="en">Keep attribution</r:li><r:li xml:lang="fr">Attribution requise</r:li></r:Alt></q:UsageTerms><q:WebStatement xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/rights</q:WebStatement><q:Certificate xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/original-certificate</q:Certificate>"#;
     let packet = PACKET
         .replace("<r:RDF ", "<r:RDF xml:lang=\"fr\" ")
@@ -798,7 +799,7 @@ fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical
             "r:about=\"\"",
             "r:about=\"\" xmlns:q=\"http://ns.adobe.com/xap/1.0/rights/\" q:Marked=\"True\"",
         )
-        .replace("</r:Description>", &format!("{rights}<d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:subject></r:Description>"));
+        .replace("</r:Description>", &format!("{rights}{attribution}<d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:subject></r:Description>"));
     fs::write(&source, tagged(packet.as_bytes())).expect("source rights");
     for extension in ["jpg", "webp"] {
         let target = root.join(format!("edited.{extension}"));
@@ -819,6 +820,7 @@ fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical
             "q:Marked=\"True\"",
             "Edited title",
             "Edited genre",
+            attribution,
             "<r:RDF xml:lang=\"fr\" ",
             "rdf:about=\"\" xml:lang=\"\"",
             "<d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:subject>",
@@ -840,9 +842,26 @@ fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical
         }
         let pixels = image::open(&target).expect("edited pixels");
         assert_eq!((pixels.width(), pixels.height()), (24, 32));
+        let resaved = root.join(format!("resaved.{extension}"));
+        let mut resave = request(&target, &resaved);
+        resave.operations.push(EditOperation::FlipHorizontal);
+        export_media_with_options(&resave, options(MetadataField::Title, ""))
+            .expect("resave with another raster edit and title removal");
+        assert!(
+            fs::read(&resaved)
+                .expect("resaved output")
+                .windows(attribution.len())
+                .any(|part| part == attribution.as_bytes())
+        );
+        assert!(
+            read_export_metadata(&resaved, MediaKind::Image)
+                .expect("resaved metadata")
+                .iter()
+                .all(|value| value.field != MetadataField::Title)
+        );
         if extension == "webp" {
             let back = root.join("back.jpg");
-            export_media(&request(&target, &back)).expect("WebP to JPEG");
+            export_media(&request(&resaved, &back)).expect("WebP to JPEG");
             let bytes = fs::read(back).expect("round trip");
             assert!(
                 bytes
@@ -853,6 +872,11 @@ fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical
                 bytes
                     .windows(b"nature &amp; travel".len())
                     .any(|part| part == b"nature &amp; travel")
+            );
+            assert!(
+                bytes
+                    .windows(attribution.len())
+                    .any(|part| part == attribution.as_bytes())
             );
         }
     }

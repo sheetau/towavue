@@ -541,6 +541,234 @@ fn gpu_filmstrip_first_frame_matches_subsequent_presentations() {
 }
 
 #[test]
+#[ignore = "requires hardware D3D11; owned files and real preview/image workers"]
+fn gpu_filmstrip_refresh_completions_preserve_displayed_pixels() {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::gpu_filmstrip_refresh_completions_preserve_displayed_pixels",
+    ) else {
+        return;
+    };
+    let mut snapshot = snapshot(&root);
+    let mut bitmap = vec![0_u8; 62];
+    bitmap[..2].copy_from_slice(b"BM");
+    bitmap[2..6].copy_from_slice(&62_u32.to_le_bytes());
+    bitmap[10..14].copy_from_slice(&54_u32.to_le_bytes());
+    bitmap[14..18].copy_from_slice(&40_u32.to_le_bytes());
+    bitmap[18..22].copy_from_slice(&2_u32.to_le_bytes());
+    bitmap[22..26].copy_from_slice(&1_u32.to_le_bytes());
+    bitmap[26..28].copy_from_slice(&1_u16.to_le_bytes());
+    bitmap[28..30].copy_from_slice(&24_u16.to_le_bytes());
+    bitmap[34..38].copy_from_slice(&8_u32.to_le_bytes());
+    for (index, item) in snapshot.items.iter_mut().enumerate() {
+        item.path.set_extension("bmp");
+        let red = 48 + index as u8 * 32;
+        bitmap[54..].copy_from_slice(&[12, 34, red, 12, 34, red, 0, 0]);
+        std::fs::write(&item.path, &bitmap).expect("owned bitmap");
+    }
+    struct Trial {
+        snapshot: FolderSnapshot,
+    }
+    impl ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = event_loop
+                .create_window(Window::default_attributes().with_visible(false))
+                .expect("hidden owned window");
+            let mut renderer = FrameRenderer::new(&window).expect("hardware D3D11");
+            let mut compared = 0;
+            let mut replacements = 0;
+            for density in [1.0, 1.25, 2.0] {
+                for reading in [false, true] {
+                    let device = renderer.graphics_device();
+                    renderer.release_surface();
+                    renderer = FrameRenderer::with_graphics_device(&window, device)
+                        .expect("fresh texture table on the same device");
+                    let context = crate::fonts::test_context();
+                    context.global_style_mut(chrome::style);
+                    let (notify, events) = std::sync::mpsc::channel();
+                    let mut app = Application::new(None, move |event| {
+                        let _ = notify.send(event);
+                    })
+                    .expect("app");
+                    let source = self.snapshot.items[0].path.clone();
+                    app.ui_context = Some(context.clone());
+                    app.displayed_tab = Some(app.tabs.open_new(source.clone(), MediaKind::Image));
+                    app.path = Some(source);
+                    app.media_kind = Some(MediaKind::Image);
+                    app.state = PlaybackState::Paused;
+                    app.folder_snapshot = Some(self.snapshot.clone());
+                    app.reading_mode = reading;
+                    app.reading_settings.page_count = 2;
+                    app.reading_settings.first_page_count = 2;
+                    app.filmstrip_open = true;
+                    app.rebuild_reading_pages();
+                    let mut frame_number = 0;
+                    let media_bounds = std::cell::Cell::new(Rect::NOTHING);
+                    let mut draw = |app: &mut Application<_>| {
+                        let mut raw = input(vec![]);
+                        raw.time = Some(
+                            frame_number as f64 / 60.0 + if frame_number >= 3 { 1.0 } else { 0.0 },
+                        );
+                        raw.viewports
+                            .get_mut(&egui::ViewportId::ROOT)
+                            .expect("viewport")
+                            .native_pixels_per_point = Some(density);
+                        let output = context.run_ui(raw, |ui| app.draw_ui(ui, &mut Vec::new()));
+                        media_bounds.set(
+                            output
+                                .shapes
+                                .iter()
+                                .find_map(|shape| match &shape.shape {
+                                    egui::Shape::Rect(rect)
+                                        if rect.fill == Color32::from_black_alpha(191) =>
+                                    {
+                                        Some(rect.rect)
+                                    }
+                                    _ => None,
+                                })
+                                .expect("filmstrip covers the media panel"),
+                        );
+                        renderer
+                            .resize_surface((960.0 * density) as u32, (576.0 * density) as u32)
+                            .expect("resize");
+                        renderer.clear([1.0, 0.0, 1.0, 1.0]).expect("clear");
+                        renderer.render_ui(&context, output).expect("render");
+                        let pixels = renderer
+                            .verification_surface_rgba()
+                            .expect("owned readback");
+                        renderer.present_surface().expect("Present");
+                        frame_number += 1;
+                        pixels
+                    };
+                    draw(&mut app);
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    while app.image_loading
+                        || app.filmstrip.previews.len() != 3
+                        || app
+                            .status_file_details
+                            .get(app.status_file_source())
+                            .is_none()
+                    {
+                        let event = events
+                            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                            .expect("initial image, preview and status-details completion");
+                        app.handle_app_event(event);
+                        draw(&mut app);
+                    }
+                    assert!(app.image_error.is_none());
+                    assert_eq!(app.reading_pages.len(), usize::from(reading));
+                    for _ in 0..6 {
+                        draw(&mut app);
+                    }
+                    let baseline = draw(&mut app);
+                    let media = media_bounds.get();
+                    assert!(media.is_positive());
+                    assert_eq!(
+                        baseline.len(),
+                        (960.0 * density) as usize * (576.0 * density) as usize * 4
+                    );
+                    for cycle in 0..3 {
+                        let old: Vec<_> = self
+                            .snapshot
+                            .items
+                            .iter()
+                            .map(|item| {
+                                app.filmstrip.previews[&item.path]
+                                    .as_ref()
+                                    .expect("preview")
+                                    .0
+                                    .id()
+                            })
+                            .collect();
+                        app.apply_folder_snapshot(self.snapshot.clone());
+                        assert_eq!(app.filmstrip.refreshing.len(), 3);
+                        if reading {
+                            assert!(app.image_loading && app.image_handoff.is_some());
+                        }
+                        let deadline = Instant::now() + Duration::from_secs(10);
+                        loop {
+                            let pixels = draw(&mut app);
+                            assert_eq!(media_bounds.get(), media);
+                            assert_eq!(pixels.len(), baseline.len());
+                            let mut bounds = [usize::MAX, usize::MAX, 0, 0];
+                            let different = pixels
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .zip(baseline.as_chunks::<4>().0)
+                                .enumerate()
+                                .filter(|(index, (a, b))| {
+                                    if a == b {
+                                        return false;
+                                    }
+                                    let width = (960.0 * density) as usize;
+                                    let (x, y) = (index % width, index / width);
+                                    // Reading controls intentionally disable during reload.
+                                    // Check the entire media overlay throughout loading, then
+                                    // include chrome again once both workers have completed.
+                                    if !media.contains(egui::pos2(
+                                        (x as f32 + 0.5) / density,
+                                        (y as f32 + 0.5) / density,
+                                    )) {
+                                        return false;
+                                    }
+                                    bounds[0] = bounds[0].min(x);
+                                    bounds[1] = bounds[1].min(y);
+                                    bounds[2] = bounds[2].max(x);
+                                    bounds[3] = bounds[3].max(y);
+                                    true
+                                })
+                                .count();
+                            assert_eq!(
+                                different, 0,
+                                "refresh pixels: density={density}, reading={reading}, cycle={cycle}, bounds={bounds:?}"
+                            );
+                            compared += 1;
+                            if !app.image_loading && app.filmstrip.refreshing.is_empty() {
+                                assert!(
+                                    pixels == baseline,
+                                    "completed refresh must also restore chrome"
+                                );
+                                break;
+                            }
+                            let event = events
+                                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                                .expect("refresh workers finish");
+                            app.handle_app_event(event);
+                        }
+                        for (item, old) in self.snapshot.items.iter().zip(old) {
+                            assert_ne!(
+                                app.filmstrip.previews[&item.path]
+                                    .as_ref()
+                                    .expect("replacement")
+                                    .0
+                                    .id(),
+                                old,
+                                "actual texture replacement"
+                            );
+                            replacements += 1;
+                        }
+                        assert!(app.image_handoff.is_none() && app.image_error.is_none());
+                    }
+                }
+            }
+            eprintln!(
+                "PASS filmstrip refresh: {compared} media-surface comparisons, 18 completed whole-surface comparisons, {replacements} real-worker texture replacements; 18 refreshes, normal/reading at 1/1.25/2x; hidden GPU, owned files, no physical-input claim"
+            );
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    let mut builder = EventLoop::builder();
+    builder.with_any_thread(true);
+    builder
+        .build()
+        .expect("event loop")
+        .run_app(&mut Trial { snapshot })
+        .expect("refresh trial");
+}
+
+#[test]
 fn filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview() {
     let Some(root) = crate::tests::isolated_test_root(
         "filmstrip::drag_tests::filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview",

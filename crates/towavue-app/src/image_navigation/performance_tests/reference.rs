@@ -1,5 +1,5 @@
 use super::*;
-use crate::image_color::COLOR_IMAGE_CPU_TIME;
+use crate::image_color::{COLOR_IMAGE_CPU_TIME, COLOR_IMAGE_PARALLEL_TRIAL};
 use towavue_runtime_windows::verification_thread_cpu_time;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
@@ -147,11 +147,13 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
         idle_frame_interval: Duration,
         cache_mib: usize,
         directional_prefetch: bool,
+        parallel_color: bool,
         source: PathBuf,
         completed: bool,
     }
     impl ApplicationHandler for Trial<'_> {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            COLOR_IMAGE_PARALLEL_TRIAL.set(self.parallel_color);
             let window = event_loop
                 .create_window(Window::default_attributes().with_visible(false))
                 .expect("hidden owned window");
@@ -438,6 +440,10 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             );
             memory.report();
             eprintln!(
+                "REFERENCE_COLOR parallel={}; verification-only two-way conversion at every size; output initialization and worker creation/join included; calling-thread CPU excludes the color worker",
+                self.parallel_color,
+            );
+            eprintln!(
                 "REFERENCE_REDRAW presentations={presentations} idle_frame_interval_ms={:.3}; command/completion draws are immediate, interval only applies without those events; no physical redraw-cadence evidence",
                 self.idle_frame_interval.as_secs_f64() * 1000.0,
             );
@@ -490,6 +496,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             }
             self.completed = !failed && complete_order && blanks == 0 && previews == 0;
             COLOR_IMAGE_CPU_TIME.set(None);
+            COLOR_IMAGE_PARALLEL_TRIAL.set(false);
             event_loop.exit();
         }
         fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
@@ -519,6 +526,13 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             })
             .unwrap_or(true),
         source,
+        parallel_color: std::env::var("TOWAVUE_NAV_PARALLEL_COLOR")
+            .map(|value| match value.as_str() {
+                "0" => false,
+                "1" => true,
+                _ => panic!("parallel-color must be 0 or 1"),
+            })
+            .unwrap_or(false),
         completed: false,
     };
     let mut builder = EventLoop::builder();

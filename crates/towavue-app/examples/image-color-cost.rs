@@ -3,6 +3,11 @@
 
 #[path = "../src/image_color.rs"]
 mod image_color;
+#[cfg(test)]
+use image_color::parallel_trial;
+#[cfg(not(test))]
+#[path = "../src/image_color/parallel_trial.rs"]
+mod parallel_trial;
 
 use std::time::{Duration, Instant};
 use towavue_runtime_windows::DecodedImageFrame;
@@ -16,7 +21,7 @@ fn measured_with_application_test_instrumentation() {
 }
 
 fn convert(frame: &DecodedImageFrame, strategy: usize) -> egui::ColorImage {
-    // Strategies 1, 3 and 4 are experimental comparisons, never the application path.
+    // Strategies 1, 3 and 4 are experimental comparisons, never the production path.
     let size = [frame.width as usize, frame.height as usize];
     match strategy {
         0 => image_color::color_image(frame),
@@ -55,47 +60,7 @@ fn convert(frame: &DecodedImageFrame, strategy: usize) -> egui::ColorImage {
             egui::ColorImage::new(size, pixels)
         }
         2 => egui::ColorImage::from_rgba_unmultiplied(size, &frame.rgba),
-        3 | 4 => {
-            // Safe disjoint output slices require initialized storage. Include
-            // that cost, thread creation and joining in the measured conversion.
-            let mut pixels = vec![egui::Color32::TRANSPARENT; size[0] * size[1]];
-            let fill = |output: &mut [egui::Color32], rgba: &[u8]| {
-                for (out, row) in output
-                    .chunks_mut(size[0])
-                    .zip(rgba.chunks_exact(size[0] * 4))
-                {
-                    let row = row.as_chunks::<4>().0;
-                    let mask = u32::from_ne_bytes([0, 0, 0, 255]);
-                    let opaque = row.chunks(32).all(|block| {
-                        block
-                            .iter()
-                            .fold(u32::MAX, |bits, p| bits & u32::from_ne_bytes(*p))
-                            & mask
-                            == mask
-                    });
-                    for (out, p) in out.iter_mut().zip(row) {
-                        *out = if opaque {
-                            egui::Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3])
-                        } else {
-                            egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3])
-                        };
-                    }
-                }
-            };
-            if strategy == 3 {
-                let split = size[0] * size[1].div_ceil(2);
-                let (first, second) = pixels.split_at_mut(split);
-                let (first_rgba, second_rgba) = frame.rgba.split_at(split * 4);
-                std::thread::scope(|scope| {
-                    let worker = scope.spawn(|| fill(first, first_rgba));
-                    fill(second, second_rgba);
-                    worker.join().expect("color worker");
-                });
-            } else {
-                fill(&mut pixels, &frame.rgba);
-            }
-            egui::ColorImage::new(size, pixels)
-        }
+        3 | 4 => parallel_trial::color_image(frame, strategy == 3),
         _ => unreachable!(),
     }
 }

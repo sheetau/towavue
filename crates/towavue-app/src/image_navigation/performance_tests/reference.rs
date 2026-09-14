@@ -31,6 +31,69 @@ struct PhaseTrace {
     costs: [PhaseCost; PHASES.len()],
 }
 
+#[derive(Debug, Default, PartialEq)]
+struct TextureFootprint {
+    count: usize,
+    bytes: usize,
+}
+
+impl TextureFootprint {
+    fn from_sizes(sizes: impl Iterator<Item = [usize; 2]>) -> Self {
+        sizes.fold(Self::default(), |mut total, [width, height]| {
+            total.count += 1;
+            total.bytes += width * height * 4;
+            total
+        })
+    }
+}
+
+fn texture_retirement_footprint(
+    managed: &[(egui::TextureId, [usize; 2])],
+    delta: &egui::TexturesDelta,
+) -> TextureFootprint {
+    // Report only resources already in the pool, not newly uploaded textures
+    // also freed this frame. Duplicate free IDs must not inflate the estimate.
+    TextureFootprint::from_sizes(
+        managed
+            .iter()
+            .filter(|(id, _)| delta.free.contains(id))
+            .map(|(_, size)| *size),
+    )
+}
+
+#[test]
+fn texture_footprints_distinguish_existing_retirement_from_new_uploads() {
+    let managed = [
+        (egui::TextureId::Managed(0), [10, 20]),
+        (egui::TextureId::Managed(1), [30, 40]),
+    ];
+    let mut delta = egui::TexturesDelta::default();
+    assert_eq!(
+        texture_retirement_footprint(&managed, &delta),
+        TextureFootprint::default()
+    );
+    delta.free = vec![
+        egui::TextureId::Managed(1),
+        egui::TextureId::Managed(1),
+        egui::TextureId::Managed(2),
+        egui::TextureId::User(0),
+    ];
+    assert_eq!(
+        texture_retirement_footprint(&managed, &delta),
+        TextureFootprint {
+            count: 1,
+            bytes: 4800
+        }
+    );
+    assert_eq!(
+        TextureFootprint::from_sizes(managed.iter().map(|(_, size)| *size)),
+        TextureFootprint {
+            count: 2,
+            bytes: 5600
+        }
+    );
+}
+
 fn reference_order(
     snapshot: &FolderSnapshot,
     paths: &[PathBuf],
@@ -421,16 +484,30 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 let token = app.image_sequence_token(&output);
                 // Never read back or emit pixels from reference media; only submit to a hidden surface.
                 let upload_before = renderer.verification_upload_times();
+                let selected = self.trace_index.is_some_and(|index| {
+                    path.as_ref() == Some(&self.paths[index]) && visited.last() != path.as_ref()
+                });
+                let textures = selected.then(|| {
+                    let managed = renderer.verification_managed_textures();
+                    (
+                        TextureFootprint::from_sizes(managed.iter().map(|(_, size)| *size)),
+                        texture_retirement_footprint(&managed, &output.textures_delta),
+                        TextureFootprint::from_sizes(
+                            output
+                                .textures_delta
+                                .set
+                                .iter()
+                                .filter(|(id, delta)| {
+                                    matches!(id, egui::TextureId::Managed(_)) && delta.pos.is_none()
+                                })
+                                .map(|(_, delta)| delta.image.size()),
+                        ),
+                    )
+                });
                 phases.finish(3, started.elapsed(), visited.len(), sent);
-                let cpu_started = self
-                    .trace_index
-                    .filter(|index| {
-                        path.as_ref() == Some(&self.paths[*index])
-                            && visited.last() != path.as_ref()
-                    })
-                    .map(|_| {
-                        verification_thread_cpu_time().expect("GPU submission CPU accounting")
-                    });
+                let cpu_started = selected.then(|| {
+                    verification_thread_cpu_time().expect("GPU submission CPU accounting")
+                });
                 let gpu_time = gpu::submit(&app, &context, output, &mut renderer, false);
                 let gpu_cpu = cpu_started.map(|before| {
                     verification_thread_cpu_time().expect("GPU submission CPU accounting") - before
@@ -448,6 +525,25 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                         .position(|candidate| candidate == &path)
                         .expect("source index");
                     if Some(index) == self.trace_index {
+                        let (before, retiring, uploading) =
+                            textures.expect("selected texture trace");
+                        let after = TextureFootprint::from_sizes(
+                            renderer
+                                .verification_managed_textures()
+                                .into_iter()
+                                .map(|(_, size)| size),
+                        );
+                        eprintln!(
+                            "REFERENCE_TRACE_TEXTURES before_count={} before_bytes={} retiring_existing_count={} retiring_existing_bytes={} whole_upload_count={} whole_upload_bytes={} after_count={} after_bytes={}; RGBA8 dimension estimates, not physical VRAM; retirement matches pre-submit resources only; full replacements counted as uploads; snapshots outside GPU timing",
+                            before.count,
+                            before.bytes,
+                            retiring.count,
+                            retiring.bytes,
+                            uploading.count,
+                            uploading.bytes,
+                            after.count,
+                            after.bytes,
+                        );
                         eprintln!(
                             "REFERENCE_TRACE_PRESENT at_ms={:.3} completion_events_since_previous_original_ms={:.3} layout_ms={:.3} gpu_submit_present_ms={:.3}; event preparation excludes results drained inside layout; GPU is CPU wall time including upload/render/Present, not pure upload",
                             started.elapsed().as_secs_f64() * 1000.0,

@@ -1640,8 +1640,24 @@ where
         self.playlist.clear();
         self.cancel_view_drag();
         self.playback_error = None;
-        self.pending_folder = None;
-        self.folder_order.request(None);
+        let reuse_folder_refresh = if let Some((_, FolderIntent::Refresh(pending_path))) =
+            &mut self.pending_folder
+            && pending_path.parent() == path.parent()
+            && self
+                .folder_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.items.iter().any(|item| item.path == path))
+        {
+            // Enumeration belongs to the folder, not the displayed file. Retarget
+            // its completion during known-item navigation. Unlisted files still
+            // require a fresh snapshot (they may have just been created).
+            *pending_path = path.clone();
+            true
+        } else {
+            self.pending_folder = None;
+            self.folder_order.request(None);
+            false
+        };
         if self
             .folder_snapshot
             .as_ref()
@@ -1684,7 +1700,9 @@ where
         self.pending_seek_started = None;
         self.seek_latencies.clear();
         self.drift_samples.clear();
-        self.refresh_folder_snapshot();
+        if !reuse_folder_refresh {
+            self.refresh_folder_snapshot();
+        }
         if let Some(saved) = saved_playback {
             self.restore_playback_tab(saved, transferred);
             return;
@@ -18233,6 +18251,20 @@ mod tests {
                 .folder_path,
             media
         );
+        app.refresh_folder_snapshot();
+        let generation = app.pending_folder.as_ref().expect("pending refresh").0;
+        let next_path = media.join("one.png");
+        app.navigate_to_unchecked(next_path.clone());
+        assert!(
+            matches!(&app.pending_folder,
+            Some((current, FolderIntent::Refresh(path))) if *current == generation && path == &next_path),
+            "same-folder navigation keeps the native request or its unconsumed completion"
+        );
+        wait_for_folder(&mut app);
+        assert_eq!(app.path.as_ref(), Some(&next_path));
+        let snapshot = app.folder_snapshot.as_ref().expect("retargeted completion");
+        assert_eq!(snapshot.generation, generation);
+        assert!(snapshot.items.iter().any(|item| item.path == next_path));
         app.open_folder_path(root.join("empty"));
         let ids: Vec<_> = app.tabs.tabs().iter().map(|tab| tab.id).collect();
         for id in ids {

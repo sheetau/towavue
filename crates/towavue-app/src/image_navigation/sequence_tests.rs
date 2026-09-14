@@ -207,6 +207,56 @@ fn directional_prefetch_control_preserves_bounds_queue_priority_and_reading() {
 }
 
 #[test]
+fn image_navigation_retargets_pending_folder_refresh_without_restarting_it() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::sequence_tests::image_navigation_retargets_pending_folder_refresh_without_restarting_it",
+    ) else {
+        return;
+    };
+    let (mut app, context, paths) = fixture(&root);
+    // Model a pending completion without depending on native enumeration timing.
+    let generation = app.folder_order.request(None);
+    app.pending_folder = Some((generation, FolderIntent::Refresh(paths[0].clone())));
+    for (key, index) in [("Right", 1), ("Right", 2), ("Left", 1), ("Right", 2)] {
+        app.process_shortcut(key.parse().expect("navigation key"));
+        app.image_loader.request(Vec::new());
+        assert_eq!(app.path.as_ref(), Some(&paths[index]));
+        assert!(
+            matches!(&app.pending_folder,
+            Some((current, FolderIntent::Refresh(path))) if *current == generation && path == &paths[index]),
+            "same-folder navigation reuses the request and retargets its completion"
+        );
+        complete(&mut app);
+        let token = draw(&mut app, &context);
+        app.finish_image_sequence_frame(token);
+    }
+    app.refresh_folder_snapshot();
+    assert!(
+        matches!(&app.pending_folder,
+        Some((current, FolderIntent::Refresh(path))) if *current != generation && path == &paths[2]),
+        "explicit/watcher refresh still invalidates earlier work"
+    );
+    for destination in [
+        root.join("new.png"),
+        root.join("elsewhere").join("next.png"),
+    ] {
+        let previous = app.pending_folder.as_ref().expect("pending refresh").0;
+        app.navigate_to_unchecked(destination.clone());
+        app.image_loader.request(Vec::new());
+        assert!(
+            matches!(&app.pending_folder,
+            Some((current, FolderIntent::Refresh(path))) if *current != previous && path == &destination),
+            "unknown items and different folders require a fresh request"
+        );
+    }
+    assert!(
+        app.folder_snapshot.is_none(),
+        "different folder loses old order"
+    );
+    app.folder_order.request(None);
+}
+
+#[test]
 fn initial_image_burst_waits_for_original_presentation_and_folder_order() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_navigation::sequence_tests::initial_image_burst_waits_for_original_presentation_and_folder_order",

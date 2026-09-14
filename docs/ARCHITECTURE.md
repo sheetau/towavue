@@ -159,7 +159,7 @@ Initialize the Shell worker's STA only for a current folder request; retain it a
 
 A shared immutable FolderSnapshot feeds filmstrip, playlist, and navigation. Filter supported media after Shell enumeration. Only on Shell failure use Windows natural-name fallback and label it. Empty-folder Open must not replace current media/history/navigation.
 
-Shell work stays on a dedicated STA with message-aware waiting (MsgWaitForMultipleObjectsEx), not a condition variable that starves COM windows. Use generation/path checks, latest-request mailboxes, and debounced directory notifications. Refresh order on media load and filmstrip opening; reconcile by item identity/path, not old index.
+Shell work stays on a dedicated STA with message-aware waiting (MsgWaitForMultipleObjectsEx), not a condition variable that starves COM windows. Use generation/path checks, latest-request mailboxes, and debounced directory notifications. Refresh order on media load and filmstrip opening; reconcile by item identity/path, not old index. Within-tab loading of a known item in the same folder reuses an outstanding refresh and retargets its completion to the new current path, without restarting enumeration. Unlisted items, different folders and pending folder Open requests retain invalidation; explicit/filmstrip/watcher refreshes still request fresh order.
 
 ## UI conventions
 

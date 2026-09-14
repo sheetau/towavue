@@ -36,7 +36,7 @@ pub struct Filmstrip {
     focus: Option<PathBuf>,
     focus_requested: bool,
     focused_card: Option<egui::Id>,
-    focused_index: Option<usize>,
+    card_indices: Vec<(egui::Id, usize)>,
     tab_navigation: Option<(u64, usize)>,
     scroll_offset: f32,
     drag: drag::State,
@@ -53,7 +53,7 @@ impl Filmstrip {
             focus: None,
             focus_requested: false,
             focused_card: None,
-            focused_index: None,
+            card_indices: Vec::new(),
             tab_navigation: None,
             scroll_offset: 0.0,
             drag: drag::State::default(),
@@ -86,7 +86,7 @@ impl Filmstrip {
     pub fn clear_previews(&mut self) {
         self.drag.clear();
         self.focused_card = None;
-        self.focused_index = None;
+        self.card_indices.clear();
         self.tab_navigation = None;
         if !self.visible.is_empty() {
             self.generation = self.loader.request(Vec::new());
@@ -100,7 +100,7 @@ impl Filmstrip {
         self.cancel_drag();
         self.focus_requested = false;
         self.focused_card = None;
-        self.focused_index = None;
+        self.card_indices.clear();
         self.tab_navigation = None;
         if !self.visible.is_empty() {
             self.generation = self.loader.request(Vec::new());
@@ -304,7 +304,17 @@ impl Filmstrip {
                 let mut target = if recenter || self.focus_requested {
                     selected
                 } else {
-                    self.focused_index.or(selected)
+                    // Directional focus resolves after layout; read the actual focus
+                    // against the last bounded card set, not last frame's focused index.
+                    context
+                        .memory(|memory| memory.focused())
+                        .and_then(|focused| {
+                            self.card_indices
+                                .iter()
+                                .find(|(id, _)| *id == focused)
+                                .map(|(_, index)| *index)
+                        })
+                        .or(selected)
                 }
                 .unwrap_or(0)
                 .min(count - 1);
@@ -422,7 +432,7 @@ impl Filmstrip {
                     ui.set_min_size(egui::vec2(content_width, viewport.height()));
                     let mut cards = Vec::new();
                     let mut focused_card = None;
-                    self.focused_index = None;
+                    self.card_indices.clear();
                     for index in visible_range(viewport, padding, snapshot.items.len()) {
                         let item = &snapshot.items[index];
                         wanted.push((item.path.clone(), item.kind));
@@ -441,6 +451,7 @@ impl Filmstrip {
                                 egui::Sense::click_and_drag(),
                             )
                             .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        self.card_indices.push((response.id, index));
                         let active = selected == Some(index);
                         self.drag.observe(&response, &item.path);
                         if focus_target == Some(index)
@@ -453,7 +464,6 @@ impl Filmstrip {
                         crate::tab_focus::observe(&response, ("filmstrip-item", &item.path));
                         if response.has_focus() {
                             focused_card = Some(response.id);
-                            self.focused_index = Some(index);
                             // Arrow navigation resolves after layout, so gained_focus alone
                             // cannot observe every transition on the following frame.
                             if self.focused_card != focused_card {
@@ -1480,6 +1490,11 @@ mod tests {
                     "focus navigation must not open or close media"
                 );
                 assert!(strip.visible.len() <= 5, "retain bounded virtualization");
+                assert_eq!(
+                    strip.card_indices.len(),
+                    strip.visible.len(),
+                    "focus lookup tracks only the materialized cards"
+                );
                 output.platform_output.accesskit_update.expect("tree")
             };
             strip.focus_current();

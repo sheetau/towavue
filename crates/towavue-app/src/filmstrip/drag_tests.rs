@@ -184,6 +184,73 @@ fn filmstrip_tab_navigation_wraps_without_focusing_background_controls() {
             "batched keys each advance once"
         );
     }
+    discard.set(false);
+    for (key, index) in [
+        (egui::Key::ArrowRight, 1),
+        (egui::Key::Tab, 2),
+        (egui::Key::ArrowLeft, 1),
+        (egui::Key::Tab, 2),
+    ] {
+        let tree = draw(
+            &mut app,
+            [true, false]
+                .into_iter()
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect(),
+        );
+        assert_eq!(
+            tree.nodes
+                .iter()
+                .find(|(id, _)| *id == tree.focus)
+                .expect("focused card")
+                .1
+                .label(),
+            Some(display_name(&snapshot.items[index].path).as_str()),
+            "mixed keys use the current card: {key:?}"
+        );
+    }
+    let tree = draw(&mut app, vec![]);
+    let hovered = tree
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("other.png"))
+        .expect("hover card")
+        .1
+        .bounds()
+        .expect("bounds");
+    draw(
+        &mut app,
+        vec![egui::Event::PointerMoved(egui::pos2(
+            ((hovered.x0 + hovered.x1) * 0.5) as f32,
+            ((hovered.y0 + hovered.y1) * 0.5) as f32,
+        ))],
+    );
+    let tree = draw(
+        &mut app,
+        vec![egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(
+        tree.nodes
+            .iter()
+            .find(|(id, _)| *id == tree.focus)
+            .expect("focused card")
+            .1
+            .label(),
+        Some("source.png"),
+        "hover does not replace the keyboard cursor"
+    );
 }
 
 #[test]

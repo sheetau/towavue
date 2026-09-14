@@ -23,10 +23,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && self.state == PlaybackState::Loading
         {
             Some("Loading media")
-        } else if self.timeline_is_visible() && self.waveform_loading {
-            Some("Loading waveform")
-        } else if self.timeline_is_visible() && self.waveform_detail.is_pending() {
-            Some("Refining waveform")
         } else {
             None
         };

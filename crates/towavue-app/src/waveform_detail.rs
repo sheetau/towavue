@@ -53,6 +53,7 @@ mod tests {
             })
             .expect("app");
             let context = fonts::test_context();
+            context.enable_accesskit();
             context.set_pixels_per_point(density);
             app.ui_context = Some(context.clone());
             let tab = app.tabs.open_new(path.clone(), MediaKind::Audio);
@@ -104,11 +105,17 @@ mod tests {
             );
             let started = frame(&mut app);
             assert!(
-                started.viewport_output[&egui::ViewportId::ROOT]
-                    .repaint_delay
-                    .is_zero(),
-                "the toolbar must observe work started later in this frame"
+                started
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.value() == Some("Refining waveform…")),
+                "newly submitted refinement is labeled in the same timeline frame"
             );
+            assert!(app.toolbar_loading(&context).is_none());
             assert!(app.waveform_detail.started);
             assert!(app.waveform_detail.is_pending());
             app.load_waveform();
@@ -413,6 +420,25 @@ impl Detail {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn draw_waveform_activity(&self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let label = if self.waveform_loading {
+            "Loading waveform…"
+        } else if self.waveform_detail.is_pending() {
+            "Refining waveform…"
+        } else {
+            return;
+        };
+        ui.put(
+            egui::Rect::from_min_size(
+                rect.left_bottom() + egui::vec2(6.0, -18.0),
+                egui::vec2((rect.width() - 12.0).max(0.0), 16.0),
+            ),
+            egui::Label::new(egui::RichText::new(label).small().color(chrome::FOREGROUND))
+                .truncate()
+                .selectable(false),
+        );
+    }
+
     pub(super) fn clear_detailed_waveform(&mut self) {
         if self.waveform_detail.started && !self.waveform_loading {
             self.waveform_worker.clear();
@@ -484,8 +510,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 let generation = self.media_generation;
                 detail.started = true;
                 detail.finished = false;
-                // The toolbar was painted before the timeline submitted this job.
-                context.request_repaint();
                 self.waveform_worker.submit(move |cancellation| {
                     let result = towavue_runtime_windows::timeline_waveform(
                         &key.path,

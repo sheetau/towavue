@@ -157,11 +157,17 @@ fn toolbar_loading_waits_for_sustained_foreground_work_and_clears_without_flashe
         app.state = PlaybackState::Paused;
         app.waveform_loading = true;
         app.timeline_open = true;
-        assert_eq!(
-            loading_indicator(&paint(&mut app, size, density, 2.3, vec![]))
-                .expect("continuous waveform stage")
-                .value(),
-            Some("Loading waveform")
+        let output = paint(&mut app, size, density, 2.3, vec![]);
+        assert!(loading_indicator(&output).is_none() && fill(&output).is_none());
+        assert!(
+            output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
+                .iter()
+                .any(|(_, node)| node.value() == Some("Loading waveform…"))
         );
         app.timeline_open = false;
         assert!(loading_indicator(&paint(&mut app, size, density, 2.4, vec![])).is_none());

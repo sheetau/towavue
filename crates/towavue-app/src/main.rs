@@ -957,6 +957,7 @@ struct Application<N> {
     command_overlay_return_focus: Option<egui::Id>,
     palette: palette::CommandPalette,
     status_message: Option<(String, Instant)>,
+    relative_seek_notice: Option<(Instant, i64)>,
     pending_guard: Option<GuardedAction>,
     guard_return_focus: Option<(TabId, egui::Id)>,
     exit_requested: bool,
@@ -1186,6 +1187,7 @@ where
             command_overlay_return_focus: None,
             palette: palette::CommandPalette::default(),
             status_message: None,
+            relative_seek_notice: None,
             pending_guard: None,
             guard_return_focus: None,
             exit_requested: false,
@@ -5337,6 +5339,7 @@ where
                             Color32::from_white_alpha(150),
                         ));
                     }
+                    self.draw_waveform_activity(ui, rect);
                     return;
                 }
                 let enabled = !self.modal_input_blocked()
@@ -5387,6 +5390,7 @@ where
                 {
                     actions.push(UiAction::TimeAdjustment(tab.id, self.generation, self.time_selection, edit));
                 }
+                self.draw_waveform_activity(ui, rect);
             });
     }
 
@@ -7713,10 +7717,42 @@ where
                 .saturating_sub(KEYBOARD_SEEK_STEP)
                 .max(MediaTime::ZERO)
         };
-        self.seek_to(target);
+        // Accumulate only the still-visible seek notice, not a restored or replaced
+        // message from another operation/tab. Playback time itself is not a seek.
+        let previous = self
+            .relative_seek_notice
+            .filter(|(shown, _)| {
+                shown.elapsed() < STATUS_MESSAGE_DURATION
+                    && self
+                        .status_message
+                        .as_ref()
+                        .is_some_and(|(_, time)| time == shown)
+            })
+            .map_or(0, |(_, delta)| delta);
+        if let Some(target) = self.seek_to_target(target) {
+            let delta = previous.saturating_add(
+                target
+                    .as_nanoseconds()
+                    .saturating_sub(position.as_nanoseconds()),
+            );
+            let seconds = format!("{:+.3}", delta as f64 / 1_000_000_000.0);
+            self.set_status(format!(
+                "{}s",
+                seconds.trim_end_matches('0').trim_end_matches('.')
+            ));
+            self.relative_seek_notice = self
+                .status_message
+                .as_ref()
+                .map(|(_, shown)| (*shown, delta));
+        }
     }
 
     fn seek_to(&mut self, target: MediaTime) {
+        let _ = self.seek_to_target(target);
+    }
+
+    // Return a replaceable position notice only; keep empty/trim diagnostics intact.
+    fn seek_to_target(&mut self, target: MediaTime) -> Option<MediaTime> {
         self.cancel_video_scrub();
         self.cancel_hold_speed();
         self.cancel_frame_steps();
@@ -7730,7 +7766,7 @@ where
             Ok(plan) => plan,
             Err(error) => {
                 self.set_status(error.into());
-                return;
+                return None;
             }
         };
         let end = self
@@ -7767,9 +7803,7 @@ where
             },
         );
         let edited = plan.is_some();
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
+        let session = self.session.as_mut()?;
         let pause =
             self.state == PlaybackState::Ended || end == Some(target) || !range.contains(target);
         let result = match plan {
@@ -7803,8 +7837,13 @@ where
                     "Outside trim · paused source preview; Play returns to trim start".into()
                 });
                 self.refresh_title();
+                (end != Some(MediaTime::ZERO) && (edited || range.contains(target)))
+                    .then_some(target)
             }
-            Err(error) => self.fail(error.to_string()),
+            Err(error) => {
+                self.fail(error.to_string());
+                None
+            }
         }
     }
 
@@ -8262,6 +8301,7 @@ where
     }
 
     fn set_status(&mut self, message: String) {
+        self.relative_seek_notice = None;
         self.status_message = Some((message, Instant::now()));
         self.request_redraw();
     }
@@ -8328,8 +8368,6 @@ where
             }
         } else if self.media_kind.is_some() && self.state == PlaybackState::Loading {
             return Some("Loading media…".into());
-        } else if self.timeline_is_visible() && self.waveform_loading {
-            return Some("Loading waveform…".into());
         }
         self.pending_folder
             .as_ref()
@@ -10141,9 +10179,16 @@ mod tests {
         assert!(
             tree.nodes
                 .iter()
-                .any(|(_, node)| node.label() == Some("towavue menu") && !node.is_disabled())
+                .any(|(_, node)| node.label() == Some("towavue menu") && node.is_disabled()),
+            "the restored palette still blocks the logo menu"
         );
         app.palette_open = false;
+        let (tree, _) = frame(&mut app, vec![]);
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("towavue menu") && !node.is_disabled())
+        );
         for _ in 0..5 {
             for label in ["Close tab: image.png", "Cancel"] {
                 let (tree, _) = frame(&mut app, vec![]);
@@ -13876,7 +13921,7 @@ mod tests {
             app.waveform = None;
             app.waveform_loading = true;
             app.status_message = None;
-            assert_eq!(app.status_notice().as_deref(), Some("Loading waveform…"));
+            assert!(app.status_notice().is_none());
             for width in [480.0, 960.0] {
                 for density in [1.0, 1.25, 2.0] {
                     let texts = draw(&mut app, width, density);
@@ -13885,15 +13930,15 @@ mod tests {
                         .filter(|(_, text)| text.contains("waveform"))
                         .collect();
                     assert_eq!(notices.len(), 1, "waveform notice must not be duplicated");
-                    assert!(notices[0].0.y > 540.0 && notices[0].0.x < width / 2.0);
+                    assert!(notices[0].0.y < 540.0 && notices[0].0.y > 400.0);
                     assert_eq!(notices[0].1, "Loading waveform…");
                 }
             }
             app.fullscreen = true;
             assert_eq!(
                 app.status_notice().as_deref(),
-                (kind == MediaKind::Audio).then_some("Loading waveform…"),
-                "hidden video timeline does not displace the path for background work"
+                None,
+                "waveform work never displaces the path"
             );
             app.fullscreen = false;
             let source = app.path.clone().expect("media path");
@@ -21516,19 +21561,22 @@ mod tests {
         let source =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
         let path = root.join("video-only.mp4");
+        let short_path = root.join("short-video-only.mp4");
         let ffmpeg = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
             .join("bin/ffmpeg.exe");
         assert!(
             std::process::Command::new(ffmpeg)
-                .args(["-v", "error", "-i"])
+                .args(["-v", "error", "-stream_loop", "9", "-i"])
                 .arg(source)
                 .args(["-an", "-c:v", "copy"])
                 .arg(&path)
+                .args(["-t", "2", "-an", "-c:v", "copy"])
+                .arg(&short_path)
                 .status()
                 .expect("video-only fixture")
                 .success()
         );
-        struct Trial(PathBuf);
+        struct Trial(PathBuf, PathBuf);
         impl ApplicationHandler for Trial {
             fn resumed(&mut self, event_loop: &ActiveEventLoop) {
                 let window = Arc::new(
@@ -21564,8 +21612,39 @@ mod tests {
                         assert_eq!(app.generation, generation.next());
                         assert_eq!(app.state, PlaybackState::Paused);
                         assert_eq!(app.current_position(), time(if forward { 6 } else { 0 }));
+                        assert_eq!(
+                            app.status_notice().as_deref(),
+                            Some(if forward { "+5s" } else { "-1s" })
+                        );
                         assert!(!app.edits.contains_key(&tab));
                     }
+                    app.state = PlaybackState::Paused;
+                    app.seek_to(time(0));
+                    for (key, expected) in [
+                        ("Right", "+5s"),
+                        ("L", "+10s"),
+                        ("J", "+5s"),
+                        ("Left", "+0s"),
+                        ("Left", "+0s"),
+                    ] {
+                        app.process_shortcut(key.parse().expect("relative seek"));
+                        assert_eq!(app.status_notice().as_deref(), Some(expected));
+                    }
+                    app.set_status("Another operation".into());
+                    app.dispatch(CommandId::SeekForward);
+                    assert_eq!(app.status_notice().as_deref(), Some("+5s"));
+                    let expired = Instant::now() - STATUS_MESSAGE_DURATION;
+                    app.status_message.as_mut().expect("seek notice").1 = expired;
+                    app.relative_seek_notice.as_mut().expect("seek total").0 = expired;
+                    app.dispatch(CommandId::SeekForward);
+                    assert_eq!(app.status_notice().as_deref(), Some("+5s"));
+                    app.status_message = None;
+                    app.dispatch(CommandId::SeekBackward);
+                    assert_eq!(app.status_notice().as_deref(), Some("-5s"));
+                    app.seek_to(media_time(Duration::from_millis(1250)));
+                    app.dispatch(CommandId::SeekBackward);
+                    assert_eq!(app.status_notice().as_deref(), Some("-1.25s"));
+                    assert!(!app.edits.contains_key(&tab));
                     app.seek_to(time(1));
                     app.process_shortcut("K".parse().expect("play"));
                     assert_eq!(app.state, PlaybackState::Playing);
@@ -21576,8 +21655,15 @@ mod tests {
                         "transport does not add edits"
                     );
                 }
-                app.media_kind = Some(MediaKind::Video);
+                // The notice sequence needs 20 seconds; retain the original real
+                // two-second EOF fixture for the terminal-frame checks below.
+                app.load_path(self.1.clone(), MediaKind::Video);
                 app.media_duration = Some(Duration::from_secs(2));
+                app.seek_to(media_time(Duration::from_millis(1250)));
+                app.dispatch(CommandId::SeekForward);
+                assert_eq!(app.status_notice().as_deref(), Some("+0.75s"));
+                app.dispatch(CommandId::SeekForward);
+                assert_eq!(app.status_notice().as_deref(), Some("+0.75s"));
                 app.state = PlaybackState::Playing;
                 app.seek_to(time(999));
                 assert_eq!(app.current_position(), time(2));
@@ -21634,6 +21720,11 @@ mod tests {
                 assert_eq!(app.current_position(), MediaTime::ZERO);
                 assert_eq!(app.state, PlaybackState::Paused);
                 assert!(app.edits[&tab].is_dirty());
+                assert!(
+                    app.status_notice()
+                        .expect("trim notice")
+                        .starts_with("Outside trim")
+                );
                 app.toggle_pause();
                 assert_eq!(app.state, PlaybackState::Playing);
                 assert_eq!(app.current_position(), time(1));
@@ -21644,10 +21735,12 @@ mod tests {
                 video_scrub::tests::exercise(&mut app);
                 for state in [PlaybackState::Loading, PlaybackState::Faulted] {
                     app.state = state;
+                    app.set_status("Keep this diagnostic".into());
                     let generation = app.generation;
                     app.dispatch(CommandId::SeekBackward);
                     assert_eq!(app.generation, generation);
                     assert_eq!(app.state, state);
+                    assert_eq!(app.status_notice().as_deref(), Some("Keep this diagnostic"));
                 }
                 eprintln!("EOF keyboard seek: paused targets and trim restart passed");
                 event_loop.exit();
@@ -21661,7 +21754,7 @@ mod tests {
         builder
             .build()
             .expect("test event loop")
-            .run_app(&mut Trial(path))
+            .run_app(&mut Trial(path, short_path))
             .expect("seek trial");
     }
 

@@ -111,6 +111,11 @@ mod tests {
             );
             assert!(app.waveform_detail.started);
             assert!(app.waveform_detail.is_pending());
+            app.load_waveform();
+            assert!(
+                !app.waveform_loading && app.waveform_detail.is_pending(),
+                "a retained source overview must not replace pending refinement"
+            );
             let event = receive
                 .recv_timeout(Duration::from_secs(10))
                 .expect("native envelope worker completion");
@@ -244,6 +249,66 @@ mod tests {
                 app.waveform_detail.key.is_none(),
                 "navigation discards the former envelope"
             );
+        }
+    }
+
+    #[test]
+    fn trim_reuses_source_waveform_without_starting_an_overview_job() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "waveform_detail::tests::trim_reuses_source_waveform_without_starting_an_overview_job",
+        ) else {
+            return;
+        };
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let context = fonts::test_context();
+            app.ui_context = Some(context.clone());
+            let path = root.join("retained-source.wav");
+            app.tabs.open_new(path.clone(), kind);
+            app.path = Some(path);
+            app.media_kind = Some(kind);
+            app.media_duration = Some(Duration::from_secs(10));
+            app.state = PlaybackState::Paused;
+            app.waveform = Some(context.load_texture(
+                "retained overview",
+                egui::ColorImage::filled([16, 4], Color32::WHITE),
+                TextureOptions::LINEAR,
+            ));
+            let texture = app.waveform.as_ref().expect("overview").id();
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 96.0));
+            app.detailed_waveform(&context, rect, false);
+            for operation in [
+                EditOperation::SetTrimStart(media_time(Duration::from_secs(2))),
+                EditOperation::SetTrimEnd(media_time(Duration::from_secs(8))),
+            ] {
+                let previous = app.waveform_detail.key.clone().expect("original plan");
+                app.push_edit(operation);
+                assert!(app.timeline_open);
+                assert!(
+                    !app.waveform_loading,
+                    "trim must reuse the original overview"
+                );
+                assert_eq!(app.waveform.as_ref().expect("same overview").id(), texture);
+                app.detailed_waveform(&context, rect, false);
+                assert_ne!(app.waveform_detail.key.as_ref(), Some(&previous));
+                assert!(
+                    !app.waveform_detail.started,
+                    "the edited plan must settle before decoding"
+                );
+            }
+            assert_eq!(
+                app.edit_state().trim_start,
+                Some(media_time(Duration::from_secs(2)))
+            );
+            assert_eq!(
+                app.edit_state().trim_end,
+                Some(media_time(Duration::from_secs(8)))
+            );
+            // Navigation/recovery removes this texture; an absent overview must still load.
+            app.waveform = None;
+            app.load_waveform();
+            assert!(app.waveform_loading);
+            app.waveform_worker.clear();
         }
     }
 }

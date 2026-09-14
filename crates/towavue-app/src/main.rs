@@ -1738,7 +1738,7 @@ where
     }
 
     fn load_waveform(&mut self) {
-        if self.waveform_loading {
+        if self.waveform.is_some() || self.waveform_loading {
             return;
         }
         let Some(path) = self.path.clone() else {

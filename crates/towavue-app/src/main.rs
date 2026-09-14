@@ -299,6 +299,7 @@ enum AppEvent {
         PathBuf,
         u64,
         u64,
+        u64,
         Result<towavue_runtime_windows::PreviewImage, String>,
     ),
 }
@@ -917,6 +918,7 @@ struct Application<N> {
     failed_thumbnails: BTreeSet<u64>,
     waveform_loading: bool,
     thumbnail_loading: Option<u64>,
+    thumbnail_request: u64,
     session: Option<PlaybackSession>,
     pending_time: Option<MediaTime>,
     video_rect: Option<egui::Rect>,
@@ -1145,6 +1147,7 @@ where
             failed_thumbnails: BTreeSet::new(),
             waveform_loading: false,
             thumbnail_loading: None,
+            thumbnail_request: 0,
             session: None,
             pending_time: None,
             video_rect: None,
@@ -1769,12 +1772,17 @@ where
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
         self.thumbnail_loading = Some(bucket);
+        // A queued completion can outlive cancellation and a retry of the same bucket.
+        self.thumbnail_request = self.thumbnail_request.wrapping_add(1);
+        let request = self.thumbnail_request;
         self.thumbnail_worker.submit(move |cancellation| {
             let cache = cache.cancellable(cancellation);
             let result = cache
                 .thumbnail(&path, position, 240)
                 .map_err(|error| error.to_string());
-            notify(AppEvent::Thumbnail(path, generation, bucket, result));
+            notify(AppEvent::Thumbnail(
+                path, generation, bucket, request, result,
+            ));
         });
     }
 
@@ -2560,10 +2568,10 @@ where
             AppEvent::DetailedWaveform(generation, key, result) => {
                 self.install_detailed_waveform(generation, key, result);
             }
-            AppEvent::Thumbnail(path, generation, bucket, result)
+            AppEvent::Thumbnail(path, generation, bucket, request, result)
                 if self.path.as_ref() == Some(&path) && generation == self.media_generation =>
             {
-                if self.thumbnail_loading != Some(bucket) {
+                if self.thumbnail_loading != Some(bucket) || self.thumbnail_request != request {
                     return;
                 }
                 self.thumbnail_loading = None;
@@ -2590,7 +2598,7 @@ where
                     self.request_redraw();
                 }
             }
-            AppEvent::Waveform(_, _, _) | AppEvent::Thumbnail(_, _, _, _) => {}
+            AppEvent::Waveform(_, _, _) | AppEvent::Thumbnail(_, _, _, _, _) => {}
         }
     }
 
@@ -14088,6 +14096,70 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_hover_thumbnail_cannot_finish_same_bucket_retry() {
+        let Some(root) =
+            isolated_test_root("tests::cancelled_hover_thumbnail_cannot_finish_same_bucket_retry")
+        else {
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            if matches!(event, AppEvent::Thumbnail(_, _, _, _, _)) {
+                let _ = tx.send(event);
+            }
+        })
+        .expect("headless application");
+        app.path = Some(root.join("missing.mp4"));
+        app.media_kind = Some(MediaKind::Video);
+        app.ui_context = Some(fonts::test_context());
+        app.timeline_open = true;
+        let generation = app.media_generation;
+        let preview = towavue_runtime_windows::PreviewImage {
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4],
+        };
+        for obsolete_success in [false, true] {
+            app.load_hover_thumbnail(Duration::from_secs(15), 10);
+            let mut obsolete = rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("queued old thumbnail response");
+            if obsolete_success {
+                let AppEvent::Thumbnail(_, _, _, _, result) = &mut obsolete else {
+                    panic!("expected thumbnail response");
+                };
+                *result = Ok(preview.clone());
+            }
+            app.dispatch(CommandId::ToggleTimeline);
+            assert!(!app.timeline_open);
+            assert!(app.thumbnail_loading.is_none());
+            app.dispatch(CommandId::ToggleTimeline);
+            assert!(app.timeline_open);
+            assert_eq!(app.media_generation, generation);
+            app.load_hover_thumbnail(Duration::from_secs(15), 10);
+            let mut replacement = rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("queued replacement thumbnail response");
+            app.handle_app_event(obsolete);
+            assert_eq!(
+                app.thumbnail_loading,
+                Some(10),
+                "obsolete completion must not finish the retry; success={obsolete_success}"
+            );
+            assert!(app.failed_thumbnails.is_empty());
+            assert!(app.hover_thumbnail.is_none());
+            let AppEvent::Thumbnail(_, _, _, _, result) = &mut replacement else {
+                panic!("expected thumbnail response");
+            };
+            *result = Ok(preview.clone());
+            app.handle_app_event(replacement);
+            assert!(app.thumbnail_loading.is_none());
+            assert!(app.failed_thumbnails.is_empty());
+            assert_eq!(app.hover_thumbnail.as_ref().expect("latest preview").0, 10);
+        }
+    }
+
+    #[test]
     fn failed_hover_thumbnail_is_not_retried_until_media_reload() {
         let Some(root) =
             isolated_test_root("tests::failed_hover_thumbnail_is_not_retried_until_media_reload")
@@ -14134,6 +14206,7 @@ mod tests {
                 path.clone(),
                 previous_generation,
                 10,
+                app.thumbnail_request,
                 result,
             ));
             assert_eq!(app.thumbnail_loading, Some(10));
@@ -14144,7 +14217,7 @@ mod tests {
             let event = rx
                 .recv_timeout(Duration::from_secs(5))
                 .expect("reload preview failure");
-            if matches!(event, AppEvent::Thumbnail(_, _, _, _)) {
+            if matches!(event, AppEvent::Thumbnail(_, _, _, _, _)) {
                 app.handle_app_event(event);
                 break;
             }
@@ -14155,6 +14228,7 @@ mod tests {
             path,
             app.media_generation,
             11,
+            app.thumbnail_request,
             Ok(preview),
         ));
         assert_eq!(
@@ -22554,6 +22628,7 @@ mod tests {
                 path,
                 app.media_generation,
                 3,
+                app.thumbnail_request,
                 Err("late thumbnail".into()),
             ));
             assert!(app.media_duration.is_none());

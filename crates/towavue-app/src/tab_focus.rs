@@ -85,15 +85,17 @@ pub(super) fn begin(context: &Context, active: Option<TabId>, enabled: bool) {
 
 pub(super) fn observe_button(response: &Response, key: impl std::hash::Hash + std::fmt::Debug) {
     let context = &response.ctx;
-    if (response.clicked() || response.has_focus())
-        && context.input(|input| input.pointer.primary_released())
+    if ((response.clicked() || response.has_focus())
+        && context.input(|input| input.pointer.primary_released()))
+        || (response.is_pointer_button_down_on()
+            && context.input(|input| input.pointer.primary_pressed()))
     {
         let active = context.data_mut(|data| {
             let state = data.get_temp_mut_or_default::<State>(state_id());
             state.active.filter(|_| state.enabled)
         });
         if let Some(tab) = active {
-            // Pointer activation returns keys to media, including after a later tab return.
+            // Clear the prior role on press even when a later hold/drag cancels the click.
             forget(context, tab);
             response.surrender_focus();
         }

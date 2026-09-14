@@ -283,8 +283,39 @@ fn pointer_media_buttons_release_focus_without_removing_keyboard_activation() {
                     !draw(active, vec![]).has_focus(),
                     "do not restore the clicked role on tab return"
                 );
-                for moved in [false, true] {
+                for (moved, focused) in [(false, false), (true, false), (false, true), (true, true)]
+                {
                     draw(active, vec![focus(response.id.accesskit_id())]);
+                    if !focused {
+                        let outside = pos + egui::vec2(50.0, 50.0);
+                        draw(
+                            active,
+                            vec![
+                                egui::Event::PointerMoved(outside),
+                                egui::Event::PointerButton {
+                                    pos: outside,
+                                    button: egui::PointerButton::Primary,
+                                    pressed: true,
+                                    modifiers: egui::Modifiers::NONE,
+                                },
+                                egui::Event::PointerButton {
+                                    pos: outside,
+                                    button: egui::PointerButton::Primary,
+                                    pressed: false,
+                                    modifiers: egui::Modifiers::NONE,
+                                },
+                            ],
+                        );
+                        assert_eq!(context.memory(|memory| memory.focused()), None);
+                    }
+                    assert!(context.data(|data| {
+                        data.get_temp::<super::State>(super::state_id())
+                            .expect("state")
+                            .saved
+                            .contains_key(&active)
+                    }));
+                    let background_role = egui::Id::new("background control");
+                    super::adopt(&context, other, background_role);
                     draw(active, vec![egui::Event::PointerMoved(pos), pointer(true)]);
                     let release_pos = if moved {
                         pos + egui::vec2(50.0, 50.0)
@@ -310,7 +341,26 @@ fn pointer_media_buttons_release_focus_without_removing_keyboard_activation() {
                     assert_eq!(
                         context.memory(|memory| memory.focused()),
                         None,
-                        "hold/drag release must return keys to media: control={control}, moved={moved}"
+                        "hold/drag release must return keys to media: control={control}, moved={moved}, focused={focused}"
+                    );
+                    let saved = context.data(|data| {
+                        let state = data
+                            .get_temp::<super::State>(super::state_id())
+                            .expect("state");
+                        (
+                            state.saved.get(&active).copied(),
+                            state.saved.get(&other).copied(),
+                        )
+                    });
+                    assert_eq!(
+                        saved,
+                        (None, Some(background_role)),
+                        "hold/drag clears only the active role: control={control}, moved={moved}, focused={focused}"
+                    );
+                    draw(other, vec![]);
+                    assert!(
+                        !draw(active, vec![]).has_focus(),
+                        "do not restore a cancelled pointer gesture's prior role"
                     );
                 }
                 draw(active, vec![focus(response.id.accesskit_id())]);

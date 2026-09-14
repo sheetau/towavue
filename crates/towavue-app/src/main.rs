@@ -3680,6 +3680,7 @@ where
         if self.view_drag.is_none()
             && let Some(origin) = origin
         {
+            self.forget_pointer_selection_focus(&response.ctx);
             self.view_drag = Some(ViewDrag::Pan {
                 origin,
                 before: self.image_view.pan,
@@ -3714,6 +3715,7 @@ where
             && let (Some(origin), Some(before)) = (origin, self.image_view.selection)
             && selection_rect(image_rect, before).contains(origin)
         {
+            self.forget_pointer_selection_focus(&response.ctx);
             self.view_drag = Some(ViewDrag::MoveSelection { origin, before });
         }
         let Some(ViewDrag::MoveSelection { origin, before }) = self.view_drag else {
@@ -3743,6 +3745,15 @@ where
 
     fn visual_selection_enabled(&self) -> bool {
         self.media_kind != Some(MediaKind::Video) || self.timeline_is_visible()
+    }
+
+    fn forget_pointer_selection_focus(&self, context: &egui::Context) {
+        // Pointer selection replaces the numeric role, including its tab-return
+        // target. Noninteractive accessibility edges do not relinquish it themselves.
+        selection::release_focus(context);
+        if let Some(tab) = self.tabs.active() {
+            tab_focus::forget(context, tab.id);
+        }
     }
 
     fn update_selection(
@@ -3780,6 +3791,7 @@ where
             && selection_rect(image_rect, selection).contains(origin)
             && selection_edge(origin, image_rect, selection).is_none()
         {
+            self.forget_pointer_selection_focus(&response.ctx);
             let pixel_aspect = if self.media_kind == Some(MediaKind::Video) {
                 image_rect.width() * image_size.1 as f32
                     / (image_rect.height() * image_size.0 as f32)
@@ -3850,6 +3862,7 @@ where
                         .map(|_| SelectionDrag::OutsideImage)
                 })
         {
+            self.forget_pointer_selection_focus(&response.ctx);
             self.view_drag = Some(ViewDrag::Selection {
                 mode,
                 before: self.image_view.selection,

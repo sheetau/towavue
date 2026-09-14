@@ -1,6 +1,155 @@
 use crate::*;
 
 #[test]
+fn pointer_selection_does_not_restore_the_previous_numeric_focus() {
+    let Some(root) = tests::isolated_test_root(
+        "selection::gesture_tests::pointer_selection_does_not_restore_the_previous_numeric_focus",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let image = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(400.0, 200.0));
+    let original = UnitRect {
+        min: UnitPoint { x: 0.2, y: 0.2 },
+        max: UnitPoint { x: 0.8, y: 0.8 },
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for kind in [MediaKind::Image, MediaKind::Video] {
+            for gesture in ["resize", "move", "pan"] {
+                let button = if gesture == "resize" {
+                    egui::PointerButton::Primary
+                } else {
+                    egui::PointerButton::Secondary
+                };
+                let context = fonts::test_context();
+                context.enable_accesskit();
+                app.ui_context = Some(context.clone());
+                app.tabs = TabSet::default();
+                let active = app.tabs.open_new(root.join("active"), kind);
+                let other = app.tabs.open_new(root.join("other"), kind);
+                app.tabs.activate(active);
+                app.media_kind = Some(kind);
+                app.timeline_open = true;
+                app.image_view.selection = Some(original);
+                app.image_view.pan = (0.0, 0.0);
+                let identity = app.selection_identity();
+                let frame = |app: &mut Application<_>, events| {
+                    let mut input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(500.0, 300.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    };
+                    input
+                        .viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .expect("viewport")
+                        .native_pixels_per_point = Some(density);
+                    context.run_ui(input, |ui| {
+                        tab_focus::begin(&context, app.tabs.active().map(|tab| tab.id), true);
+                        let response = ui.interact(
+                            image,
+                            "selection-pointer-focus".into(),
+                            egui::Sense::click_and_drag(),
+                        );
+                        let pointer = ui.input(|input| input.pointer.hover_pos());
+                        if !app.move_visual_selection(&response, image, (400, 200), pointer) {
+                            app.update_pan(&response, pointer);
+                        }
+                        app.update_selection(&response, image, (400, 200), false, pointer);
+                        app.selection_controls(ui, image, (400, 200));
+                        tab_focus::finish(&context, false, true);
+                    })
+                };
+                frame(&mut app, vec![]);
+                let focus = || {
+                    egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Focus,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: identity.with(0_usize).accesskit_id(),
+                        data: None,
+                    })
+                };
+                frame(&mut app, vec![focus()]);
+                frame(&mut app, vec![]);
+                assert!(selection::has_focus(&context));
+                let selected = selection_rect(image, original);
+                let start = match gesture {
+                    "resize" => selected.right_center(),
+                    "move" => selected.center(),
+                    _ => image.min + egui::vec2(5.0, 5.0),
+                };
+                let end = start + egui::vec2(20.0, 10.0);
+                let pointer = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    pressed,
+                    button,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                frame(
+                    &mut app,
+                    vec![egui::Event::PointerMoved(start), pointer(start, true)],
+                );
+                frame(
+                    &mut app,
+                    vec![egui::Event::PointerMoved(end), pointer(end, false)],
+                );
+                if gesture == "pan" {
+                    assert_ne!(app.image_view.pan, (0.0, 0.0), "pointer still pans");
+                    assert_eq!(app.image_view.selection, Some(original));
+                } else {
+                    assert_ne!(
+                        app.image_view.selection,
+                        Some(original),
+                        "pointer gesture must still edit the selection"
+                    );
+                }
+                assert!(
+                    !selection::has_focus(&context),
+                    "pointer {gesture} must release numeric focus: {kind:?}, density={density}"
+                );
+                let changed = app.image_view.selection;
+                let key = egui::Event::Key {
+                    key: egui::Key::ArrowRight,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                frame(&mut app, vec![key.clone()]);
+                assert_eq!(
+                    app.image_view.selection, changed,
+                    "media arrow must not resize the selection"
+                );
+                app.tabs.activate(other);
+                frame(&mut app, vec![]);
+                app.tabs.activate(active);
+                frame(&mut app, vec![]);
+                frame(&mut app, vec![]);
+                assert!(
+                    !selection::has_focus(&context),
+                    "tab return must not restore stale numeric focus"
+                );
+                frame(&mut app, vec![focus()]);
+                frame(&mut app, vec![]);
+                assert!(
+                    selection::has_focus(&context),
+                    "explicit focus remains available"
+                );
+                frame(&mut app, vec![key]);
+                assert_ne!(
+                    app.image_view.selection, changed,
+                    "explicit numeric adjustment still works"
+                );
+                assert!(app.edits.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
 fn interior_press_zooms_once_and_holding_cannot_start_a_new_selection() {
     let Some(_) = tests::isolated_test_root(
         "selection::gesture_tests::interior_press_zooms_once_and_holding_cannot_start_a_new_selection",

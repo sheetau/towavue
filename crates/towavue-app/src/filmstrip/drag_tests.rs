@@ -85,6 +85,108 @@ fn card(output: &egui::FullOutput, name: &str) -> Rect {
 }
 
 #[test]
+fn filmstrip_tab_navigation_wraps_without_focusing_background_controls() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_tab_navigation_wraps_without_focusing_background_controls",
+    ) else {
+        return;
+    };
+    let snapshot = snapshot(&root);
+    let source = snapshot.items[0].path.clone();
+    let context = crate::fonts::test_context();
+    context.enable_accesskit();
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.ui_context = Some(context.clone());
+    let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+    app.path = Some(source.clone());
+    app.media_kind = Some(MediaKind::Image);
+    app.displayed_tab = Some(tab);
+    app.state = PlaybackState::Paused;
+    app.folder_snapshot = Some(snapshot.clone());
+    app.dispatch(CommandId::ToggleFilmstrip);
+    let discard = std::cell::Cell::new(false);
+    let draw = |app: &mut Application<_>, events| {
+        let mut actions = Vec::new();
+        let output = context.run_ui(input(events), |ui| {
+            app.draw_ui(ui, &mut actions);
+            if discard.get() && context.current_pass_index() == 0 {
+                context.request_discard("Tab navigation commits once across layout passes");
+            }
+        });
+        assert!(
+            actions.is_empty(),
+            "focus movement must not activate media or controls"
+        );
+        output.platform_output.accesskit_update.expect("tree")
+    };
+    for _ in 0..3 {
+        draw(&mut app, vec![]);
+    }
+    for discarded in [false, true] {
+        discard.set(discarded);
+        for (shift, indices) in [(false, [1, 2, 0, 1, 2, 0]), (true, [2, 1, 0, 2, 1, 0])] {
+            for index in indices {
+                for pressed in [true, false] {
+                    draw(
+                        &mut app,
+                        vec![egui::Event::Key {
+                            key: egui::Key::Tab,
+                            physical_key: None,
+                            pressed,
+                            repeat: false,
+                            modifiers: egui::Modifiers {
+                                shift,
+                                ..Default::default()
+                            },
+                        }],
+                    );
+                }
+                let tree = draw(&mut app, vec![]);
+                let focused = tree
+                    .nodes
+                    .iter()
+                    .find(|(id, _)| *id == tree.focus)
+                    .expect("focused card");
+                assert_eq!(
+                    focused.1.label(),
+                    Some(display_name(&snapshot.items[index].path).as_str()),
+                    "Tab stays in filmstrip and follows folder order; shift={shift}"
+                );
+                assert_eq!(app.path.as_ref(), Some(&source));
+                assert_eq!(app.tabs.active().map(|tab| tab.id), Some(tab));
+                assert!(app.filmstrip_open);
+            }
+        }
+    }
+    for (shift, index) in [(false, 2), (true, 0)] {
+        let events = (0..2)
+            .flat_map(|_| [true, false])
+            .map(|pressed| egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers {
+                    shift,
+                    ..Default::default()
+                },
+            })
+            .collect();
+        let tree = draw(&mut app, events);
+        assert_eq!(
+            tree.nodes
+                .iter()
+                .find(|(id, _)| *id == tree.focus)
+                .expect("focused card")
+                .1
+                .label(),
+            Some(display_name(&snapshot.items[index].path).as_str()),
+            "batched keys each advance once"
+        );
+    }
+}
+
+#[test]
 fn filmstrip_open_and_image_handoff_keep_first_frame_geometry() {
     let Some(root) = crate::tests::isolated_test_root(
         "filmstrip::drag_tests::filmstrip_open_and_image_handoff_keep_first_frame_geometry",

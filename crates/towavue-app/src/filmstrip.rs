@@ -36,6 +36,8 @@ pub struct Filmstrip {
     focus: Option<PathBuf>,
     focus_requested: bool,
     focused_card: Option<egui::Id>,
+    focused_index: Option<usize>,
+    tab_navigation: Option<(u64, usize)>,
     scroll_offset: f32,
     drag: drag::State,
 }
@@ -51,6 +53,8 @@ impl Filmstrip {
             focus: None,
             focus_requested: false,
             focused_card: None,
+            focused_index: None,
+            tab_navigation: None,
             scroll_offset: 0.0,
             drag: drag::State::default(),
         })
@@ -82,6 +86,8 @@ impl Filmstrip {
     pub fn clear_previews(&mut self) {
         self.drag.clear();
         self.focused_card = None;
+        self.focused_index = None;
+        self.tab_navigation = None;
         if !self.visible.is_empty() {
             self.generation = self.loader.request(Vec::new());
             self.visible.clear();
@@ -94,6 +100,8 @@ impl Filmstrip {
         self.cancel_drag();
         self.focus_requested = false;
         self.focused_card = None;
+        self.focused_index = None;
+        self.tab_navigation = None;
         if !self.visible.is_empty() {
             self.generation = self.loader.request(Vec::new());
             // Reopening rebuilds the wanted set, retaining ready textures and
@@ -282,6 +290,63 @@ impl Filmstrip {
                 .iter()
                 .position(|item| Some(item.path.as_path()) == current)
         });
+        let frame = context.cumulative_frame_nr();
+        let tab_target = if enabled
+            && !egui::Popup::is_any_open(context)
+            && context.input(|input| input.focused)
+        {
+            if let Some((_, target)) = self.tab_navigation.filter(|(saved, _)| *saved == frame) {
+                Some(target)
+            } else if let Some(count) = snapshot
+                .map(|snapshot| snapshot.items.len())
+                .filter(|count| *count > 0)
+            {
+                let mut target = if recenter || self.focus_requested {
+                    selected
+                } else {
+                    self.focused_index.or(selected)
+                }
+                .unwrap_or(0)
+                .min(count - 1);
+                let mut changed = false;
+                context.input_mut(|input| {
+                    input.events.retain(|event| {
+                        if let egui::Event::Key {
+                            key: egui::Key::Tab,
+                            pressed: true,
+                            modifiers,
+                            ..
+                        } = event
+                            && (*modifiers == egui::Modifiers::NONE
+                                || *modifiers == egui::Modifiers::SHIFT)
+                        {
+                            target = if modifiers.shift {
+                                (target + count - 1) % count
+                            } else {
+                                (target + 1) % count
+                            };
+                            changed = true;
+                            false
+                        } else {
+                            true
+                        }
+                    })
+                });
+                changed.then_some(target)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(target) = tab_target {
+            // Own Tab traversal instead of egui's global widget order. Reuse this
+            // target across discarded passes so one key cannot advance twice.
+            self.tab_navigation = Some((frame, target));
+            context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+        }
+        let focus_target =
+            tab_target.or_else(|| self.focus_requested.then_some(selected).flatten());
         let mut wanted = Vec::new();
         let area = egui::Area::new("filmstrip".into())
             .order(egui::Order::Foreground)
@@ -347,14 +412,17 @@ impl Filmstrip {
                     .horizontal_scroll_offset(self.scroll_offset - gutter_scroll)
                     .auto_shrink([false, false])
                     .max_height(inset.height());
-                if recenter || self.focus_requested {
-                    scroll = scroll.horizontal_scroll_offset(selected.unwrap_or(0) as f32 * STEP);
+                if recenter || self.focus_requested || tab_target.is_some() {
+                    scroll = scroll.horizontal_scroll_offset(
+                        focus_target.or(selected).unwrap_or(0) as f32 * STEP,
+                    );
                 }
                 let output = scroll.show_viewport_styled(ui, |ui, viewport| {
                     let origin = ui.min_rect().min;
                     ui.set_min_size(egui::vec2(content_width, viewport.height()));
                     let mut cards = Vec::new();
                     let mut focused_card = None;
+                    self.focused_index = None;
                     for index in visible_range(viewport, padding, snapshot.items.len()) {
                         let item = &snapshot.items[index];
                         wanted.push((item.path.clone(), item.kind));
@@ -375,8 +443,7 @@ impl Filmstrip {
                             .on_hover_cursor(egui::CursorIcon::PointingHand);
                         let active = selected == Some(index);
                         self.drag.observe(&response, &item.path);
-                        if active
-                            && self.focus_requested
+                        if focus_target == Some(index)
                             && response.enabled()
                             && !egui::Popup::is_any_open(context)
                         {
@@ -386,6 +453,7 @@ impl Filmstrip {
                         crate::tab_focus::observe(&response, ("filmstrip-item", &item.path));
                         if response.has_focus() {
                             focused_card = Some(response.id);
+                            self.focused_index = Some(index);
                             // Arrow navigation resolves after layout, so gained_focus alone
                             // cannot observe every transition on the following frame.
                             if self.focused_card != focused_card {
@@ -1418,9 +1486,11 @@ mod tests {
             for _ in 0..3 {
                 frame(&mut strip, vec![]);
             }
-            for (key, indices) in [
-                (egui::Key::ArrowRight, (1..100).collect::<Vec<_>>()),
-                (egui::Key::ArrowLeft, (0..99).rev().collect()),
+            for (key, shift, indices) in [
+                (egui::Key::ArrowRight, false, (1..100).collect::<Vec<_>>()),
+                (egui::Key::ArrowLeft, false, (0..99).rev().collect()),
+                (egui::Key::Tab, false, (1..100).chain([0]).collect()),
+                (egui::Key::Tab, true, (0..100).rev().collect()),
             ] {
                 for index in indices {
                     for pressed in [true, false] {
@@ -1431,11 +1501,14 @@ mod tests {
                                 physical_key: None,
                                 pressed,
                                 repeat: false,
-                                modifiers: egui::Modifiers::NONE,
+                                modifiers: egui::Modifiers {
+                                    shift,
+                                    ..Default::default()
+                                },
                             }],
                         );
                     }
-                    for _ in 0..5 {
+                    for _ in 0..if key == egui::Key::Tab { 0 } else { 5 } {
                         frame(&mut strip, vec![]);
                     }
                     let tree = frame(&mut strip, vec![]);

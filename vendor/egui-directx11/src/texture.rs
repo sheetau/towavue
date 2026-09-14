@@ -506,11 +506,7 @@ impl TexturePool {
                 );
             }
         }
-        for tid in delta.free {
-            if self.pool.get(&tid).is_some_and(|t| t.is_managed()) {
-                self.pool.remove(&tid);
-            }
-        }
+        self.free_managed_textures(delta.free);
         #[cfg(feature = "render-verification")]
         UPLOAD_TIMES.set({
             let mut times = UPLOAD_TIMES.get();
@@ -518,6 +514,14 @@ impl TexturePool {
             times
         });
         Ok(())
+    }
+
+    pub(super) fn free_managed_textures(&mut self, textures: Vec<TextureId>) {
+        for tid in textures {
+            if self.pool.get(&tid).is_some_and(|t| t.is_managed()) {
+                self.pool.remove(&tid);
+            }
+        }
     }
 
     fn update_partial(

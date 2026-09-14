@@ -350,11 +350,12 @@ mod sampling_tests {
             }
         }
         assert_eq!(renderer.texture_samplers.len(), 2);
-        let white = context.load_texture(
+        let mut white = Some(context.load_texture(
             "invert white",
             egui::ColorImage::new([1, 1], vec![egui::Color32::WHITE]),
             egui::TextureOptions::NEAREST,
-        );
+        ));
+        let mut white_id = white.as_ref().unwrap().id();
         let callback = |rect, alpha| {
             let mut mesh = egui::epaint::Mesh::default();
             mesh.add_colored_rect(rect, egui::Color32::from_white_alpha(alpha));
@@ -363,7 +364,16 @@ mod sampling_tests {
                 callback: std::sync::Arc::new(InvertMesh(mesh)),
             })
         };
-        for alpha in [0, 51, 255] {
+        for alpha in [0, 51, 255, 255] {
+            let newly_created = white.is_none();
+            if newly_created {
+                white = Some(context.load_texture(
+                    "same-frame white",
+                    egui::ColorImage::new([1, 1], vec![egui::Color32::WHITE]),
+                    egui::TextureOptions::NEAREST,
+                ));
+                white_id = white.as_ref().unwrap().id();
+            }
             let output = context.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_max(
@@ -392,13 +402,18 @@ mod sampling_tests {
                         egui::Rect::from_min_max(egui::pos2(6.0, 1.0), egui::pos2(8.0, 3.0)),
                         alpha,
                     ));
-                    let mut normal = egui::epaint::Mesh::with_texture(white.id());
+                    let mut normal = egui::epaint::Mesh::with_texture(white_id);
                     normal.add_rect_with_uv(
                         egui::Rect::from_min_max(egui::pos2(8.0, 1.0), egui::pos2(10.0, 3.0)),
                         egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                         egui::Color32::GREEN,
                     );
                     painter.add(normal);
+                    if alpha == 255 {
+                        // The last handle may disappear after its mesh is queued.
+                        // Its free delta applies after this frame's paint, not before.
+                        white.take();
+                    }
                 },
             );
             // The test owns this target and immediate context; no window or shared
@@ -409,7 +424,21 @@ mod sampling_tests {
                     &[17.0 / 255.0, 83.0 / 255.0, 149.0 / 255.0, 128.0 / 255.0],
                 );
             }
+            if alpha == 255 {
+                assert!(output.textures_delta.free.contains(&white_id));
+                assert_eq!(
+                    output
+                        .textures_delta
+                        .set
+                        .iter()
+                        .any(|(id, _)| *id == white_id),
+                    newly_created,
+                );
+            }
             renderer.render(&immediate, &view, &context, split_output(output).0)?;
+            if alpha == 255 {
+                assert!(renderer.texture_pool.get_srv(white_id).is_none());
+            }
             let mut pixels = Vec::new();
             // Mapping borrows the staging allocation only until Unmap on this thread;
             // copy each valid row while mapped and retain no pointer afterwards.
@@ -455,6 +484,37 @@ mod sampling_tests {
                     );
                 }
             }
+        }
+        for (texture, fail_upload) in [(smooth, false), (nearest, true)] {
+            let id = texture.id();
+            assert!(renderer.texture_pool.get_srv(id).is_some());
+            drop(texture);
+            let mut delta = context.tex_manager().write().take_delta();
+            assert!(delta.free.contains(&id));
+            if fail_upload {
+                delta.set.push((
+                    egui::TextureId::Managed(u64::MAX),
+                    egui::epaint::ImageDelta::full(
+                        egui::ColorImage::new([0, 0], Vec::new()),
+                        egui::TextureOptions::LINEAR,
+                    ),
+                ));
+            }
+            let result = renderer.render(
+                &immediate,
+                &view,
+                &context,
+                RendererOutput {
+                    textures_delta: delta,
+                    shapes: Vec::new(),
+                    pixels_per_point: 1.0,
+                },
+            );
+            assert_eq!(result.is_err(), fail_upload);
+            assert!(
+                renderer.texture_pool.get_srv(id).is_none(),
+                "empty/failed paint still retires textures"
+            );
         }
         eprintln!(
             "PASS UI readback: driver={driver:?}, atlas-white 0/20/100% inversion, alpha, clip and draw order"
@@ -599,6 +659,21 @@ impl Renderer {
     ///   pixel shader stage;
     /// + The render target(s) and blend state in the output merger stage;
     pub fn render(
+        &mut self,
+        device_context: &ID3D11DeviceContext,
+        render_target: &ID3D11RenderTargetView,
+        egui_ctx: &egui::Context,
+        mut egui_output: RendererOutput,
+    ) -> Result<()> {
+        // Meshes may still use textures whose last handle was dropped this frame.
+        // Honor egui's after-paint free contract, including empty and failed draws.
+        let free = std::mem::take(&mut egui_output.textures_delta.free);
+        let result = self.render_inner(device_context, render_target, egui_ctx, egui_output);
+        self.texture_pool.free_managed_textures(free);
+        result
+    }
+
+    fn render_inner(
         &mut self,
         device_context: &ID3D11DeviceContext,
         render_target: &ID3D11RenderTargetView,

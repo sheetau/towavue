@@ -21,6 +21,10 @@ Local changes:
 - Compare mixed linear/nearest output pixels offscreen on WARP and hardware.
   Full-pixel and empty partial sampler changes retain the native resource;
   empty updates also preserve a pending initial upload and texture dimensions.
+- Apply egui's texture frees after painting, not during the pre-paint upload.
+  A mesh can still refer to a texture whose last handle was dropped in that frame.
+  WARP/hardware readback covers existing and newly allocated same-frame frees;
+  empty frames and failed uploads also remove the requested managed resources.
 - Recognize the plain `InvertMesh` paint-callback payload in tessellation order.
   Premultiplied white geometry uses inverse-destination RGB blending and preserves
   destination alpha. Vertex alpha interpolates from the original to inverted RGB:

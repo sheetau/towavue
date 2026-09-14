@@ -85,6 +85,254 @@ fn card(output: &egui::FullOutput, name: &str) -> Rect {
 }
 
 #[test]
+fn filmstrip_open_and_image_handoff_keep_first_frame_geometry() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_open_and_image_handoff_keep_first_frame_geometry",
+    ) else {
+        return;
+    };
+    first_frame_trial(&root, |_, _, _| Vec::new());
+}
+
+fn first_frame_trial(
+    root: &Path,
+    mut present: impl FnMut(&Context, &egui::FullOutput, bool) -> Vec<u8>,
+) {
+    for density in [1.0, 1.25, 2.0] {
+        for reading in [false, true] {
+            for zoom in [ZoomMode::Fit, ZoomMode::Custom(3.0)] {
+                let context = crate::fonts::test_context();
+                context.global_style_mut(chrome::style);
+                let snapshot = snapshot(root);
+                let source = snapshot.items[0].path.clone();
+                let mut app = Application::new(None, |_| {}).expect("app");
+                app.ui_context = Some(context.clone());
+                let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+                app.path = Some(source.clone());
+                app.media_kind = Some(MediaKind::Image);
+                app.displayed_tab = Some(tab);
+                app.state = PlaybackState::Paused;
+                app.folder_snapshot = Some(snapshot.clone());
+                app.reading_mode = reading;
+                app.image_view.zoom = zoom;
+                let decoded = Arc::new(towavue_runtime_windows::DecodedImage {
+                    format: "test",
+                    animation_plays: 0,
+                    frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                        width: 320,
+                        height: 480,
+                        rgba: [24, 48, 72, 255].repeat(320 * 480),
+                        delay: Duration::ZERO,
+                    }],
+                });
+                let image =
+                    ImagePresentation::from_decoded(&context, &source, decoded).expect("image");
+                let image_id = image.texture.id();
+                if reading {
+                    app.reading_pages.push(Ok(image.clone()));
+                }
+                app.image = Some(image);
+                let preview = context.load_texture(
+                    "owned preview",
+                    egui::ColorImage::filled([64, 96], Color32::GRAY),
+                    egui::TextureOptions::LINEAR,
+                );
+                for item in &snapshot.items {
+                    app.filmstrip
+                        .previews
+                        .insert(item.path.clone(), Ok((preview.clone(), None)));
+                }
+                let mut frame_number = 0;
+                let mut draw = |app: &mut Application<_>| {
+                    let mut raw = input(vec![]);
+                    // Settle pre-existing chrome fades before opening the new overlay.
+                    raw.time = Some(
+                        frame_number as f64 / 60.0 + if frame_number >= 3 { 1.0 } else { 0.0 },
+                    );
+                    raw.viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .expect("viewport")
+                        .native_pixels_per_point = Some(density);
+                    let output = context.run_ui(raw, |ui| app.draw_ui(ui, &mut Vec::new()));
+                    let pixels = present(&context, &output, frame_number == 0);
+                    frame_number += 1;
+                    (output, pixels)
+                };
+                let meshes = |output: &egui::FullOutput, id| {
+                    output
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Mesh(mesh) if mesh.texture_id == id => {
+                                Some((shape.clip_rect, mesh.vertices.clone()))
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let bars = |output: &egui::FullOutput| {
+                    output
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(rect)
+                                if rect.rect.height() <= 5.0
+                                    && rect.rect.width() > 50.0
+                                    && rect.rect.top() > 100.0 =>
+                            {
+                                Some((shape.clip_rect, rect.clone()))
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                };
+                for _ in 0..3 {
+                    draw(&mut app);
+                }
+                let baseline = meshes(&draw(&mut app).0, image_id);
+                assert_eq!(context.pixels_per_point(), density);
+                assert_eq!(baseline.len(), if reading { 2 } else { 1 });
+                for _ in 0..3 {
+                    app.filmstrip_open = true;
+                    let (first, first_pixels) = draw(&mut app);
+                    let previews = meshes(&first, preview.id());
+                    assert_eq!(
+                        previews.len(),
+                        3,
+                        "first open frame shows every cached preview"
+                    );
+                    for _ in 0..3 {
+                        let (output, pixels) = draw(&mut app);
+                        assert_eq!(
+                            bars(&output),
+                            bars(&first),
+                            "scrollbars must not fade in after the filmstrip"
+                        );
+                        assert_eq!(
+                            meshes(&output, preview.id()),
+                            previews,
+                            "filmstrip must not jump or fade after opening"
+                        );
+                        assert_eq!(
+                            meshes(&output, image_id),
+                            baseline,
+                            "opening must not move the underlying image"
+                        );
+                        if pixels != first_pixels {
+                            let width = (960.0 * density) as usize;
+                            let mut bounds = (usize::MAX, usize::MAX, 0, 0);
+                            let mut count = 0;
+                            for (index, (before, after)) in first_pixels
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .zip(pixels.as_chunks::<4>().0)
+                                .enumerate()
+                            {
+                                if before != after {
+                                    let (x, y) = (index % width, index / width);
+                                    bounds = (
+                                        bounds.0.min(x),
+                                        bounds.1.min(y),
+                                        bounds.2.max(x),
+                                        bounds.3.max(y),
+                                    );
+                                    count += 1;
+                                }
+                            }
+                            panic!(
+                                "GPU first-frame difference: density={density}, reading={reading}, zoom={zoom:?}, count={count}, bounds={bounds:?}"
+                            );
+                        }
+                    }
+                    assert_eq!(meshes(&first, image_id), baseline);
+                    app.close_filmstrip();
+                    assert_eq!(meshes(&draw(&mut app).0, image_id), baseline);
+                }
+                app.image_handoff = app.take_navigation_handoff(MediaKind::Image);
+                assert!(app.image_handoff.is_some());
+                app.image_loading = true;
+                assert_eq!(
+                    meshes(&draw(&mut app).0, image_id),
+                    baseline,
+                    "held image uses the same geometry"
+                );
+                app.image_loading = false;
+                app.image_handoff = None;
+                assert_eq!(meshes(&draw(&mut app).0, image_id), baseline);
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires hardware D3D11; generated image and previews only"]
+fn gpu_filmstrip_first_frame_matches_subsequent_presentations() {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::gpu_filmstrip_first_frame_matches_subsequent_presentations",
+    ) else {
+        return;
+    };
+    struct Trial {
+        root: PathBuf,
+    }
+    impl ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = event_loop
+                .create_window(Window::default_attributes().with_visible(false))
+                .expect("hidden owned window");
+            let mut renderer = Some(FrameRenderer::new(&window).expect("hardware D3D11"));
+            let mut frames = 0;
+            first_frame_trial(&self.root, |context, output, reset| {
+                if reset {
+                    let previous = renderer.take().expect("previous renderer");
+                    let device = previous.graphics_device();
+                    previous.release_surface();
+                    renderer = Some(
+                        FrameRenderer::with_graphics_device(&window, device)
+                            .expect("fresh texture table"),
+                    );
+                }
+                let renderer = renderer.as_mut().expect("renderer");
+                let size = context.viewport_rect().size() * context.pixels_per_point();
+                renderer
+                    .resize_surface(size.x as u32, size.y as u32)
+                    .expect("resize");
+                renderer.clear([1.0, 0.0, 1.0, 1.0]).expect("clear");
+                renderer.render_ui(context, output.clone()).expect("render");
+                let pixels = renderer
+                    .verification_surface_rgba()
+                    .expect("owned GPU readback");
+                assert!(
+                    pixels
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .any(|pixel| *pixel == [24, 48, 72, 255] || *pixel == [128, 128, 128, 255]),
+                    "source or preview pixels must reach the GPU"
+                );
+                renderer.present_surface().expect("Present");
+                frames += 1;
+                pixels
+            });
+            eprintln!(
+                "PASS filmstrip GPU: {frames} frames, 36 opens, 108 exact first/subsequent whole-surface comparisons; hidden window, generated images, no physical input"
+            );
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    let mut builder = EventLoop::builder();
+    builder.with_any_thread(true);
+    builder
+        .build()
+        .expect("event loop")
+        .run_app(&mut Trial { root })
+        .expect("trial");
+}
+
+#[test]
 fn filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview() {
     let Some(root) = crate::tests::isolated_test_root(
         "filmstrip::drag_tests::filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview",

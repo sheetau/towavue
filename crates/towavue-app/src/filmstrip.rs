@@ -292,8 +292,16 @@ impl Filmstrip {
                 };
                 let mut scroll_ui = ui.new_child(egui::UiBuilder::new().max_rect(inset));
                 let ui = &mut scroll_ui;
+                let padding = ((inset.width() - STEP) / 2.0).max(0.0);
+                let content_width = snapshot.items.len() as f32 * STEP + padding * 2.0;
                 let mut scroll = egui::ScrollArea::horizontal()
                     .id_salt("filmstrip-scroll")
+                    // The fixed card geometry determines overflow before the first sizing pass.
+                    .scroll_bar_visibility(if content_width > inset.width() {
+                        egui::scroll_area::ScrollBarVisibility::AlwaysVisible
+                    } else {
+                        egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+                    })
                     .horizontal_scroll_offset(self.scroll_offset - gutter_scroll)
                     .auto_shrink([false, false])
                     .max_height(inset.height());
@@ -301,12 +309,8 @@ impl Filmstrip {
                     scroll = scroll.horizontal_scroll_offset(selected.unwrap_or(0) as f32 * STEP);
                 }
                 let output = scroll.show_viewport_styled(ui, |ui, viewport| {
-                    let padding = ((inset.width() - STEP) / 2.0).max(0.0);
                     let origin = ui.min_rect().min;
-                    ui.set_min_size(egui::vec2(
-                        snapshot.items.len() as f32 * STEP + padding * 2.0,
-                        viewport.height(),
-                    ));
+                    ui.set_min_size(egui::vec2(content_width, viewport.height()));
                     let mut cards = Vec::new();
                     let mut focused_card = None;
                     for index in visible_range(viewport, padding, snapshot.items.len()) {

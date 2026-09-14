@@ -109,6 +109,81 @@ fn tab_focus_image_controls_restore_by_role_without_reloading_or_editing() {
         }
     }
     let context = app.ui_context.clone().expect("context");
+    for density in [1.0, 1.25, 2.0] {
+        context.set_pixels_per_point(density);
+        for (tab, name) in [(tabs[1], "second.bmp"), (tabs[0], "first.bmp")] {
+            let before = settle(&mut app);
+            let target = node(&before, name);
+            let focused = if name == "second.bmp" {
+                tree(&mut app, vec![focus(target)]);
+                let focused = settle(&mut app);
+                assert_eq!(
+                    focused.focus, target,
+                    "explicit accessibility focus is retained"
+                );
+                focused
+            } else {
+                before
+            };
+            let bounds = focused
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == target)
+                .expect("tab node")
+                .1
+                .bounds()
+                .expect("tab bounds");
+            let point = egui::pos2(
+                ((bounds.x0 + bounds.x1) * 0.5) as f32,
+                ((bounds.y0 + bounds.y1) * 0.5) as f32,
+            );
+            let button = |pressed| egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            if density == 1.25 {
+                tree(
+                    &mut app,
+                    vec![
+                        egui::Event::PointerMoved(point),
+                        button(true),
+                        button(false),
+                    ],
+                );
+            } else {
+                tree(
+                    &mut app,
+                    vec![egui::Event::PointerMoved(point), button(true)],
+                );
+                tree(&mut app, vec![button(false)]);
+            }
+            settle(&mut app);
+            assert_eq!(app.tabs.active().expect("active tab").id, tab);
+            assert_eq!(
+                context.memory(|memory| memory.focused()),
+                None,
+                "tab clicks must return shortcut ownership to the media"
+            );
+            assert!(!context.egui_wants_keyboard_input());
+            assert!(
+                !app.image_loading,
+                "pointer return reuses the retained image"
+            );
+            assert_eq!(app.edits, histories);
+        }
+    }
+    // Explicit focus can be re-established after pointer use; retain the cleanup checks below.
+    for (tab, label) in [
+        (tabs[0], "Selection right (pixels)"),
+        (tabs[1], "Selection bottom (pixels)"),
+    ] {
+        app.activate_tab(tab);
+        let target = node(&settle(&mut app), label);
+        tree(&mut app, vec![focus(target)]);
+        assert_eq!(settle(&mut app).focus, target);
+    }
     app.load_path(root.join("second.bmp"), MediaKind::Image);
     assert!(!context.data(|data| {
         data.get_temp::<super::State>(super::state_id())

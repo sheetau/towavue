@@ -4287,6 +4287,11 @@ where
                                         });
                                     }
                                     if response.clicked() {
+                                        if tab_ui.input(|input| input.pointer.primary_released()) {
+                                            // Pointer activation returns keys to the media, not a saved control.
+                                            tab_focus::forget(tab_ui.ctx(), tab.id);
+                                            response.surrender_focus();
+                                        }
                                         actions.push(UiAction::ActivateTab(tab.id));
                                     }
                                     if return_to_tab && active {

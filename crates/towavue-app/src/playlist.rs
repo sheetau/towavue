@@ -283,6 +283,12 @@ impl Playlist {
                     }
                 }
             });
+            // The vertical bar is a separate egui 0.35 widget from the playlist rows.
+            if let Some(response) = ui.ctx().read_response(output.id.with(1_usize))
+                && response.enabled()
+            {
+                crate::tab_focus::observe_pointer_control(&response, "playlist-scrollbar");
+            }
             self.scroll_offset = output.state.offset.y;
         });
         chosen
@@ -299,15 +305,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pointer_rows_return_shortcuts_to_media_without_removing_explicit_focus() {
-        for density in [1.0, 1.25, 2.0] {
+    fn pointer_rows_and_scrollbar_return_shortcuts_to_media_without_removing_explicit_focus() {
+        for (density, scrollbar) in [1.0, 1.25, 2.0]
+            .into_iter()
+            .flat_map(|density| [false, true].map(|scrollbar| (density, scrollbar)))
+        {
             for (batched, focused) in [(false, false), (false, true), (true, false), (true, true)] {
                 let context = crate::fonts::test_context();
                 context.enable_accesskit();
                 let mut tabs = towavue_core::TabSet::default();
                 let active = tabs.open_new("active.wav".into(), MediaKind::Audio);
                 let other = tabs.open_new("other.wav".into(), MediaKind::Audio);
-                let snapshot = snapshot(3);
+                let snapshot = snapshot(if scrollbar { 100 } else { 3 });
                 let current = &snapshot.items[0].path;
                 let mut playlist = Playlist::default();
                 let mut frame = |tab, events| {
@@ -338,10 +347,24 @@ mod tests {
                     .iter()
                     .find(|(_, node)| node.label() == Some("1. track-0.wav"))
                     .expect("row");
-                let bounds = row.bounds().expect("row bounds");
+                let bounds = if scrollbar {
+                    tree.nodes
+                        .iter()
+                        .find(|(_, node)| node.role() == egui::accesskit::Role::ScrollBar)
+                        .expect("scrollbar")
+                        .1
+                        .bounds()
+                        .expect("scrollbar bounds")
+                } else {
+                    row.bounds().expect("row bounds")
+                };
                 let point = egui::pos2(
                     ((bounds.x0 + bounds.x1) * 0.5) as f32,
-                    ((bounds.y0 + bounds.y1) * 0.5) as f32,
+                    if scrollbar {
+                        bounds.y0 as f32 + 3.0
+                    } else {
+                        ((bounds.y0 + bounds.y1) * 0.5) as f32
+                    },
                 );
                 let focus = || {
                     Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
@@ -354,6 +377,11 @@ mod tests {
                 if focused {
                     frame(active, vec![focus()]);
                     assert_eq!(frame(active, vec![]).0.focus, *id);
+                    assert_eq!(
+                        frame(active, vec![Event::PointerMoved(point)]).0.focus,
+                        *id,
+                        "hover must preserve explicit row focus"
+                    );
                 }
                 let pointer = |pressed| Event::PointerButton {
                     pos: point,
@@ -366,12 +394,17 @@ mod tests {
                     press.push(pointer(false));
                 } else {
                     assert!(frame(active, press).1.is_none());
+                    assert_eq!(
+                        context.memory(|memory| memory.focused()),
+                        None,
+                        "pointer press releases focus: scrollbar={scrollbar}, {density}x"
+                    );
                     press = vec![pointer(false)];
                 }
                 assert_eq!(
                     frame(active, press).1.as_ref(),
-                    Some(current),
-                    "pointer still chooses the track"
+                    (!scrollbar).then_some(current),
+                    "only a row click chooses the track"
                 );
                 let key = |key| Event::Key {
                     key,

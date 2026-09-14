@@ -71,6 +71,9 @@ impl FileDetailsCache {
 }
 
 #[cfg(test)]
+mod gpu_tests;
+
+#[cfg(test)]
 mod tests {
     use std::sync::mpsc;
     use std::time::Duration;

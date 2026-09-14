@@ -199,3 +199,120 @@ fn native_overview_rejects_cancelled_missing_and_invalid_requests() {
     assert!(decode(missing, 0, 96, &Cancellation::default()).is_err());
     assert!(decode(missing, 127, 96, &Cancellation::default()).is_err());
 }
+
+#[test]
+fn native_overview_skips_unselected_video_and_audio_payloads() {
+    let root = std::env::temp_dir().join(format!(
+        "towavue-waveform-demux-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos(),
+    ));
+    std::fs::create_dir(&root).expect("owned fixtures");
+    let source = root.join("mixed.mov");
+    let output = ffmpeg()
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x180:rate=30:duration=2",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=48000:cl=stereo:d=2",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:sample_rate=48000:duration=2",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-map",
+            "2:a",
+            "-c:v",
+            "rawvideo",
+            "-pix_fmt",
+            "uyvy422",
+            "-c:a",
+            "pcm_s16le",
+            "-disposition:a:0",
+            "0",
+            "-disposition:a:1",
+            "default",
+        ])
+        .arg(&source)
+        .output()
+        .expect("mixed-stream fixture");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    ffmpeg_next::init().expect("FFmpeg");
+    let scan = |discard: bool| {
+        let mut input = format::input(&source).expect("input");
+        let selected = input
+            .streams()
+            .best(media::Type::Audio)
+            .expect("audio")
+            .index();
+        assert_eq!(selected, 2, "the default second audio track must win");
+        if discard {
+            discard_other_streams(&mut input, selected);
+        }
+        let mut audio = Vec::new();
+        let mut other_bytes = 0;
+        loop {
+            let mut packet = ffmpeg_next::Packet::empty();
+            match packet.read(&mut input) {
+                Ok(()) if packet.stream() == selected => {
+                    audio.push((
+                        packet.pts(),
+                        packet.dts(),
+                        packet.data().expect("payload").to_vec(),
+                    ));
+                }
+                Ok(()) => other_bytes += packet.size(),
+                Err(Error::Eof) => break,
+                Err(error) => panic!("read: {error}"),
+            }
+        }
+        // This local file input owns a live AVIOContext; no native pointer escapes
+        // the immutable borrow, and decoding/closing cannot run concurrently.
+        let bytes_read = unsafe {
+            let io = (*input.as_ptr()).pb;
+            assert!(!io.is_null());
+            (*io).bytes_read
+        };
+        (audio, other_bytes, bytes_read)
+    };
+    let baseline = scan(false);
+    let selected = scan(true);
+    assert!(
+        baseline.0 == selected.0,
+        "selected audio packets/timestamps changed"
+    );
+    assert!(
+        baseline.1 > 6_000_000,
+        "fixture must carry substantial video"
+    );
+    eprintln!(
+        "WAVEFORM_DEMUX baseline_bytes={} selected_bytes={} baseline_other={} selected_other={}",
+        baseline.2, selected.2, baseline.1, selected.1
+    );
+    // Stream probing happens before selecting the best audio. Its already
+    // buffered packets must not be flushed (that would lose initial audio).
+    assert!(
+        selected.1 * 20 < baseline.1,
+        "only probe-buffered unwanted packets should remain"
+    );
+    assert!(
+        selected.2 * 3 < baseline.2,
+        "demuxing must skip video payload reads, including initial probing"
+    );
+    compare(&source, "0:a:1", "mixed video and default audio");
+    std::fs::remove_dir_all(root).expect("remove owned fixtures");
+}

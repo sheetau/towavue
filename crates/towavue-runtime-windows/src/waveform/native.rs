@@ -49,6 +49,7 @@ fn decode_cancellable(
         let mut context = codec::context::Context::from_parameters(stream.parameters())?.decoder();
         context.set_packet_time_base(stream.time_base());
         let mut decoder = context.audio()?;
+        discard_other_streams(&mut input, index);
         let sample = format::Sample::I16(format::sample::Type::Packed);
         let mut resampler: Option<resampling::Context> = None;
         let mut mix_levels = None;
@@ -162,6 +163,19 @@ fn decode_cancellable(
     result.map_err(|error| PreviewError::Generate(error.to_string()))?;
     super::rasterize(&envelope, width, height)
         .map_err(|error| PreviewError::Generate(error.to_string()))
+}
+
+fn discard_other_streams(input: &mut format::context::Input, selected: usize) {
+    for mut stream in input.streams_mut() {
+        if stream.index() != selected {
+            // The worker exclusively owns this input and its live streams. Set
+            // discard before reading packets so demuxers can skip their payloads;
+            // leave the chosen audio stream's policy and probe buffers intact.
+            unsafe {
+                (*stream.as_mut_ptr()).discard = ffmpeg_next::ffi::AVDiscard::AVDISCARD_ALL;
+            }
+        }
+    }
 }
 
 fn mono_mix_levels(decoded: &frame::Audio) -> Result<Option<[f64; 3]>, Error> {

@@ -194,7 +194,8 @@ impl Filmstrip {
         self.set_visible(wanted);
     }
 
-    pub fn finish(&mut self, context: &Context) {
+    pub fn finish(&mut self, context: &Context) -> bool {
+        let mut changed = false;
         for preview in self.loader.take_completed() {
             if preview.generation != self.generation || !self.visible.contains(&preview.path) {
                 continue;
@@ -213,7 +214,9 @@ impl Filmstrip {
                 (texture, media.duration)
             });
             self.previews.insert(preview.path, result);
+            changed = true;
         }
+        changed
     }
 
     pub fn show_seek_preview(
@@ -1247,6 +1250,157 @@ mod tests {
         );
         drop(strip);
         std::fs::remove_dir_all(root).expect("remove owned fixtures and cache");
+    }
+
+    #[test]
+    fn preview_completions_redraw_only_displayed_consumers() {
+        use std::sync::Arc;
+        use winit::application::ApplicationHandler;
+        use winit::event::WindowEvent;
+        use winit::event_loop::{ActiveEventLoop, EventLoop};
+        use winit::platform::pump_events::EventLoopExtPumpEvents;
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        use winit::window::{Window, WindowId};
+
+        let Some(root) = crate::tests::isolated_test_root(
+            "filmstrip::tests::preview_completions_redraw_only_displayed_consumers",
+        ) else {
+            return;
+        };
+        #[derive(Default)]
+        struct Redraws {
+            window: Option<Arc<Window>>,
+            count: usize,
+        }
+        impl ApplicationHandler for Redraws {
+            fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+                if self.window.is_none() {
+                    self.window = Some(Arc::new(
+                        event_loop
+                            .create_window(
+                                Window::default_attributes()
+                                    .with_active(false)
+                                    .with_inner_size(winit::dpi::PhysicalSize::new(64, 64))
+                                    .with_position(winit::dpi::PhysicalPosition::new(
+                                        -32000, -32000,
+                                    )),
+                            )
+                            .expect("offscreen redraw control"),
+                    ));
+                }
+            }
+
+            fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+                self.count += usize::from(matches!(event, WindowEvent::RedrawRequested));
+            }
+        }
+        let mut event_loop = EventLoop::builder()
+            .with_any_thread(true)
+            .build()
+            .expect("isolated event loop");
+        let mut redraws = Redraws::default();
+        event_loop.pump_app_events(Some(Duration::ZERO), &mut redraws);
+        let window = redraws.window.as_ref().expect("window").clone();
+        let mut pump = |redraws: &mut Redraws| {
+            for _ in 0..3 {
+                event_loop.pump_app_events(Some(Duration::from_millis(20)), redraws);
+            }
+            std::mem::take(&mut redraws.count)
+        };
+        pump(&mut redraws);
+        window.request_redraw();
+        assert!(pump(&mut redraws) > 0, "native redraw delivery control");
+
+        let (notify, ready) = std::sync::mpsc::channel();
+        let mut app = crate::Application::new(None, move |event| {
+            let _ = notify.send(event);
+        })
+        .expect("app");
+        let path = bitmap_paths(&root, 1).remove(0);
+        let context = crate::fonts::test_context();
+        app.ui_context = Some(context.clone());
+        app.window = Some(window);
+        app.state = towavue_core::PlaybackState::Paused;
+        app.media_kind = Some(MediaKind::Image);
+        for missing in [false, true] {
+            let requested = if missing {
+                root.join("missing.bmp")
+            } else {
+                path.clone()
+            };
+            app.folder_snapshot = Some(FolderSnapshot {
+                folder_identity: ShellIdentity::new(vec![]),
+                folder_path: root.clone(),
+                items: vec![FolderMediaItem {
+                    identity: ShellIdentity::new(vec![0]),
+                    path: requested.clone(),
+                    kind: MediaKind::Image,
+                }],
+                sort_columns: vec![],
+                source: FolderSnapshotSource::LiveExplorerView,
+                generation: 1,
+                captured_at: SystemTime::now(),
+            });
+            for consumer in 0..4 {
+                app.path = (consumer != 3).then(|| requested.clone());
+                app.filmstrip_open = consumer == 1;
+                app.image_seek_preview_active = consumer == 2;
+                app.filmstrip.clear();
+                for _ in ready.try_iter() {}
+                app.filmstrip
+                    .set_visible(vec![(requested.clone(), MediaKind::Image)]);
+                let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                while !app.filmstrip.previews.contains_key(&requested) {
+                    let event = ready
+                        .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                        .expect("real preview completion");
+                    app.handle_app_event(event);
+                }
+                assert_eq!(app.filmstrip.previews[&requested].is_err(), missing);
+                let count = pump(&mut redraws);
+                if consumer == 0 {
+                    assert_eq!(count, 0, "closed preparation needs no native redraw");
+                } else {
+                    assert!(count > 0, "displayed consumer {consumer} updates");
+                }
+                app.handle_app_event(crate::AppEvent::FilmstripReady);
+                assert_eq!(
+                    pump(&mut redraws),
+                    0,
+                    "drained notification needs no redraw"
+                );
+            }
+        }
+        app.filmstrip.clear();
+        app.handle_app_event(crate::AppEvent::FilmstripReady);
+        assert_eq!(
+            pump(&mut redraws),
+            0,
+            "cancelled notification needs no redraw"
+        );
+
+        // Original-image workers use the same wakeup when their final lease retires.
+        // An empty completion queue must still start eligible closed preparation.
+        let snapshot = app.folder_snapshot.as_mut().expect("folder");
+        snapshot.items[0].path = path.clone();
+        app.path = Some(path.clone());
+        app.filmstrip_open = false;
+        app.image_seek_preview_active = false;
+        app.palette_open = true;
+        app.handle_app_event(crate::AppEvent::FilmstripReady);
+        assert!(app.filmstrip.visible.is_empty(), "overlay defers work");
+        app.palette_open = false;
+        app.handle_app_event(crate::AppEvent::FilmstripReady);
+        assert_eq!(app.filmstrip.visible, vec![path.clone()]);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !app.filmstrip.previews.contains_key(&path) {
+            let event = ready
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("idle wakeup starts preparation without a draw");
+            app.handle_app_event(event);
+        }
+        assert!(app.filmstrip.previews[&path].is_ok());
+        assert_eq!(pump(&mut redraws), 0, "idle preparation does not render");
     }
 
     #[test]

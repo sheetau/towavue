@@ -2448,9 +2448,18 @@ where
                 self.finish_audio_folder_loads();
             }
             AppEvent::FilmstripReady => {
-                if let Some(context) = &self.ui_context {
-                    self.filmstrip.finish(context);
-                    self.request_redraw();
+                if let Some(context) = self.ui_context.clone() {
+                    let changed = self.filmstrip.finish(&context);
+                    if !self.filmstrip_open
+                        && !self.image_seek_preview_active
+                        && self.path.is_some()
+                    {
+                        // This also wakes preparation after original-image work retires.
+                        // Closed-strip completions retain textures without rendering.
+                        self.prepare_filmstrip(&context);
+                    } else if changed {
+                        self.request_redraw();
+                    }
                 }
             }
             AppEvent::DialogFinished(result) => self.finish_dialog(result),

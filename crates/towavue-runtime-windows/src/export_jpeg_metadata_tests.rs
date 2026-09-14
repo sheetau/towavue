@@ -987,18 +987,27 @@ fn jpeg_metadata_failures_cancellation_source_change_and_unsupported_fields_prot
         export_media_with_options(&request, options(MetadataField::AlbumArtist, "unsupported"))
             .is_err()
     );
-    let invalid = tagged(
-        PACKET
-            .replace("Original &amp; title", "&missing;")
-            .as_bytes(),
-    );
-    fs::write(&source, &invalid).expect("invalid source");
-    assert!(export_media_with_options(&request, settings.clone()).is_err());
-    assert_eq!(fs::read(&source).expect("source preserved"), invalid);
-    assert_eq!(
-        fs::read(&target).expect("target preserved"),
-        b"existing target"
-    );
+    for packet in [
+        PACKET.replace("Original &amp; title", "&missing;"),
+        format!("<?xml version=\"1.0\"?><?xml version=\"1.0\"?>{PACKET}"),
+        format!("<?xpacket begin=\"\"?><?xml version=\"1.0\"?>{PACKET}"),
+    ] {
+        let invalid = tagged(packet.as_bytes());
+        fs::write(&source, &invalid).expect("invalid source");
+        for edited in [false, true] {
+            let mut request = request.clone();
+            if edited {
+                request.operations.push(EditOperation::RotateClockwise);
+            }
+            assert!(export_media_with_options(&request, settings.clone()).is_err());
+            assert_eq!(fs::read(&source).expect("source preserved"), invalid);
+            assert_eq!(
+                fs::read(&target).expect("target preserved"),
+                b"existing target"
+            );
+            assert_eq!(fs::read_dir(&root).expect("stage cleanup").count(), 2);
+        }
+    }
     let mut same = request.clone();
     same.target = source;
     assert!(matches!(

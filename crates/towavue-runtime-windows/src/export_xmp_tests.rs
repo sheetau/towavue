@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn xmp_declaration_is_unique_and_precedes_packet_wrappers() {
+    let cancel = AtomicBool::new(false);
+    let root = format!("<r:RDF xmlns:r=\"{RDF}\"><r:Description/></r:RDF>");
+    let declaration = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
+    for prefix in [
+        String::new(),
+        declaration.into(),
+        format!("\u{feff}{declaration}"),
+        format!("{declaration}\n<?xpacket begin=\"\"?>"),
+        "\n<!-- packet --><?xpacket begin=\"\"?>".into(),
+    ] {
+        let packet = format!("{prefix}{root}<?xpacket end=\"w\"?>");
+        assert!(
+            parse(packet.as_bytes(), &cancel)
+                .expect("valid prolog")
+                .is_empty()
+        );
+        assert_eq!(
+            rewrite_unedited(
+                packet.as_bytes(),
+                &MetadataExportOptions::default(),
+                &cancel
+            )
+            .expect("unchanged packet"),
+            packet.as_bytes()
+        );
+    }
+    for prefix in [
+        format!("{declaration}{declaration}"),
+        format!(" {declaration}"),
+        format!("\r\n{declaration}"),
+        format!("<!-- packet -->{declaration}"),
+        format!("<?xpacket begin=\"\"?>{declaration}"),
+        format!("\u{feff}\u{feff}{declaration}"),
+    ] {
+        let packet = format!("{prefix}{root}");
+        assert!(
+            parse(packet.as_bytes(), &cancel).is_err(),
+            "invalid prolog accepted: {prefix:?}"
+        );
+        for title in [None, Some("Changed title")] {
+            let mut options = MetadataExportOptions::default();
+            options
+                .set(MetadataField::Title, title.map(str::to_owned))
+                .expect("title");
+            assert!(rewrite_unedited(packet.as_bytes(), &options, &cancel).is_err());
+            assert!(rewrite_edited(packet.as_bytes(), &options, &cancel).is_err());
+        }
+    }
+}
+
+#[test]
 fn edited_xmp_keeps_keywords_without_promoting_foreign_or_nested_properties() {
     let cancel = AtomicBool::new(false);
     for subject in [

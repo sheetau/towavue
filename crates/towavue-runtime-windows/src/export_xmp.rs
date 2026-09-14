@@ -100,7 +100,11 @@ fn tree(packet: &[u8], cancelled: &AtomicBool) -> Result<Node, ExportError> {
     if !valid_text(text) {
         return Err(invalid("invalid XML character"));
     }
-    let mut reader = NsReader::from_str(text.trim_start_matches('\u{feff}'));
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    if text.starts_with('\u{feff}') {
+        return Err(invalid("multiple UTF-8 byte order marks"));
+    }
+    let mut reader = NsReader::from_str(text);
     reader.config_mut().expand_empty_elements = true;
     reader.config_mut().check_comments = true;
     reader.resolver_mut().set_max_declarations_per_element(64);
@@ -109,6 +113,8 @@ fn tree(packet: &[u8], cancelled: &AtomicBool) -> Result<Node, ExportError> {
     let mut count = 0;
     loop {
         check_cancelled(cancelled)?;
+        // XML declarations precede even whitespace, comments and XMP packet PIs.
+        let declaration_allowed = reader.buffer_position() == 0;
         let event = reader.read_event().map_err(invalid)?;
         let content = match event {
             Event::Start(start) => {
@@ -187,9 +193,11 @@ fn tree(packet: &[u8], cancelled: &AtomicBool) -> Result<Node, ExportError> {
                         .transpose()
                         .map_err(invalid)?
                         .is_some_and(|encoding| !encoding.eq_ignore_ascii_case(b"utf-8"))
-                    || count != 0
+                    || !declaration_allowed
                 {
-                    return Err(invalid("only XML 1.0 UTF-8 declarations are supported"));
+                    return Err(invalid(
+                        "only an initial XML 1.0 UTF-8 declaration is supported",
+                    ));
                 }
                 None
             }

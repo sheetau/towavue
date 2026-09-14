@@ -492,8 +492,8 @@ impl Filmstrip {
                             egui::vec2(120.0, 80.0),
                         )
                     };
-                    // Set the shared target before creating any button so a queued
-                    // pointer move + Enter cannot activate the former target too.
+                    // Set the shared target before creating any button so queued
+                    // pointer or Tab navigation + Enter cannot activate the old target.
                     let pointer_target =
                         (pointer_moved && ui.is_enabled() && focus_target.is_none())
                             .then(|| {
@@ -506,7 +506,14 @@ impl Filmstrip {
                                 ui.id()
                                     .with(("filmstrip-item", &snapshot.items[index].path))
                             });
-                    if let Some(id) = pointer_target {
+                    let requested_target = focus_target
+                        .filter(|index| ui.is_enabled() && range.contains(index))
+                        .map(|index| {
+                            ui.id()
+                                .with(("filmstrip-item", &snapshot.items[index].path))
+                        })
+                        .or(pointer_target);
+                    if let Some(id) = requested_target {
                         context.memory_mut(|memory| memory.request_focus(id));
                     }
                     let mut cards = Vec::new();
@@ -531,7 +538,6 @@ impl Filmstrip {
                             && response.enabled()
                             && !egui::Popup::is_any_open(context)
                         {
-                            response.request_focus();
                             self.focus_requested = false;
                         }
                         crate::tab_focus::observe(&response, ("filmstrip-item", &item.path));

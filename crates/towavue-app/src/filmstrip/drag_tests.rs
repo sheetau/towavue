@@ -1315,6 +1315,31 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
         [card(&reopened, "source.png").expand(3.0)],
         "returning filmstrip is immediately opaque with the current item selected"
     );
+    // Batch navigation with activation, including wrapping into virtualized cards.
+    for (shift, target) in [(false, 1), (false, 2), (false, 0), (true, 2), (true, 1)] {
+        let mut raw = input(vec![
+            egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers {
+                    shift,
+                    ..Default::default()
+                },
+            },
+            enter(),
+        ]);
+        raw.screen_rect = Some(Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(320.0, 240.0),
+        ));
+        let (output, actions) = frame(&mut strip, &context, &snapshot, current, true, raw);
+        opened(actions, &snapshot.items[target].path);
+        let selected = card(&output, &display_name(&snapshot.items[target].path));
+        assert_eq!(outlines(&output), [selected.expand(3.0)]);
+        assert!(selected.left() >= 8.0 && selected.right() <= 312.0);
+    }
 }
 
 #[test]

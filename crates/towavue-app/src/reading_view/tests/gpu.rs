@@ -18,8 +18,24 @@ fn reading_gpu_pressure_preserves_pages_animation_and_texture_lifetimes() {
     ) else {
         return;
     };
+    run(root, false);
+}
+
+#[test]
+#[ignore = "generates large PNG/APNG files and requires hardware D3D11 plus FFMPEG_DIR"]
+fn reading_files_reach_gpu_through_navigation_and_async_completion() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "reading_view::tests::gpu::reading_files_reach_gpu_through_navigation_and_async_completion",
+    ) else {
+        return;
+    };
+    run(root, true);
+}
+
+fn run(root: PathBuf, real_files: bool) {
     struct Trial {
         root: PathBuf,
+        real_files: bool,
     }
     impl ApplicationHandler for Trial {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -28,7 +44,7 @@ fn reading_gpu_pressure_preserves_pages_animation_and_texture_lifetimes() {
                 .expect("hidden owned window");
             let mut renderer =
                 FrameRenderer::new(&window).expect("hardware D3D11 required for this opt-in test");
-            let originals: Vec<_> = (0..9)
+            let mut originals: Vec<_> = (0..9)
                 .map(|page| {
                     let animated = page % 3 == 1;
                     let (width, height, count) = if animated {
@@ -50,67 +66,206 @@ fn reading_gpu_pressure_preserves_pages_animation_and_texture_lifetimes() {
                     })
                 })
                 .collect();
+            let paths: Vec<_> = (0..9)
+                .map(|page| self.root.join(format!("{page}.png")))
+                .collect();
+            if self.real_files {
+                use std::io::Write;
+                let ffmpeg = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+                    .join("bin/ffmpeg.exe");
+                for (path, image) in paths.iter().zip(&originals) {
+                    let (width, height) = image.dimensions();
+                    let mut command = std::process::Command::new(&ffmpeg);
+                    command
+                        .args([
+                            "-v",
+                            "error",
+                            "-f",
+                            "rawvideo",
+                            "-pixel_format",
+                            "rgba",
+                            "-video_size",
+                        ])
+                        .arg(format!("{width}x{height}"))
+                        .args([
+                            "-framerate",
+                            "100",
+                            "-i",
+                            "pipe:0",
+                            "-threads",
+                            "1",
+                            "-frames:v",
+                        ])
+                        .arg(image.frames.len().to_string());
+                    if image.is_animated() {
+                        command.args(["-f", "apng", "-plays", "3"]);
+                    } else {
+                        command.args(["-c:v", "png", "-f", "image2"]);
+                    }
+                    let mut child = command
+                        .arg(path)
+                        .stdin(std::process::Stdio::piped())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()
+                        .expect("encode owned PNG");
+                    let mut input = child.stdin.take().expect("raw frames pipe");
+                    for frame in &image.frames {
+                        input.write_all(&frame.rgba).expect("encode frame");
+                    }
+                    drop(input);
+                    let output = child.wait_with_output().expect("PNG encoder exit");
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                originals.clear(); // Only the real loader may supply the integration trial's pixels.
+            }
+            let source_stamps: Vec<_> = if self.real_files {
+                paths
+                    .iter()
+                    .map(|path| {
+                        let metadata = std::fs::metadata(path).expect("generated source");
+                        (metadata.len(), metadata.modified().expect("source date"))
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
             let mut checks = 0;
+            let mut foreground_decodes = 0;
+            let mut foreground_hits = 0;
             let mut cache_hits = 0;
             let mut evictions = 0;
             for density in [1.0, 1.25, 2.0] {
                 let context = fonts::test_context();
                 context.global_style_mut(chrome::style);
                 context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
-                let mut app = Application::new(None, |_| {}).expect("app");
+                let (notify, events) = std::sync::mpsc::channel();
+                let mut app = Application::new(None, move |event| {
+                    let _ = notify.send(event);
+                })
+                .expect("app");
                 assert_eq!(app.image_texture_cache.byte_limit, 256 * 1024 * 1024);
                 app.ui_context = Some(context.clone());
                 app.media_kind = Some(MediaKind::Image);
                 app.state = PlaybackState::Paused;
                 app.reading_mode = true;
                 app.reading_settings.page_count = 3;
+                app.reading_settings.first_page_count = 3;
+                if self.real_files {
+                    app.tabs.open_new(paths[0].clone(), MediaKind::Image);
+                    app.folder_snapshot = Some(FolderSnapshot {
+                        folder_identity: towavue_core::ShellIdentity::new(vec![0]),
+                        folder_path: self.root.clone(),
+                        items: paths
+                            .iter()
+                            .enumerate()
+                            .map(|(index, path)| towavue_core::FolderMediaItem {
+                                identity: towavue_core::ShellIdentity::new(vec![index as u8]),
+                                path: path.clone(),
+                                kind: MediaKind::Image,
+                            })
+                            .collect(),
+                        sort_columns: vec![],
+                        source: FolderSnapshotSource::NaturalNameFallback,
+                        generation: 1,
+                        captured_at: std::time::SystemTime::UNIX_EPOCH,
+                    });
+                }
                 let mut ids = Vec::new();
+                let mut decoded_owners = Vec::new();
                 for (step, spread) in [0, 1, 0, 2, 1, 2, 0, 1, 2, 1, 0, 2].into_iter().enumerate() {
-                    let pages: Vec<_> = (spread * 3..spread * 3 + 3)
-                        .map(|page| {
-                            let before: Vec<_> = app
-                                .image_texture_cache
-                                .entries
-                                .iter()
-                                .map(|entry| entry.texture.id())
-                                .collect();
-                            let hit = app
-                                .image_texture_cache
-                                .entries
-                                .iter()
-                                .find(|entry| {
-                                    entry.decoded.as_ptr() == Arc::as_ptr(&originals[page])
-                                })
-                                .map(|entry| entry.texture.id());
-                            let image = app
-                                .image_texture_cache
-                                .load(
-                                    &context,
-                                    &self.root.join(format!("{page}.png")),
-                                    Arc::clone(&originals[page]),
-                                    TextureOptions::NEAREST,
-                                )
-                                .expect("page texture");
-                            if let Some(id) = hit {
-                                assert_eq!(image.texture.id(), id, "reuse the cached GPU handle");
-                                cache_hits += 1;
+                    if self.real_files {
+                        app.reading_settings.reversed = false;
+                        if step == 0 {
+                            app.load_path(paths[spread * 3].clone(), MediaKind::Image);
+                        } else {
+                            app.navigate_to_unchecked(paths[spread * 3].clone());
+                            assert!(
+                                app.image_handoff
+                                    .as_ref()
+                                    .is_some_and(|held| held.reading.is_some()),
+                                "retain the prior spread while loading"
+                            );
+                        }
+                        let deadline = Instant::now() + Duration::from_secs(60);
+                        while app.image_loading {
+                            let event = events
+                                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                                .expect("async original completion");
+                            if matches!(event, AppEvent::ImagesReady) {
+                                app.finish_image_load();
                             }
-                            evictions += before
+                        }
+                        assert_eq!(app.path.as_ref(), Some(&paths[spread * 3]));
+                        assert_eq!(app.reading_pages.len(), 2);
+                        assert!(app.image_error.is_none() && app.image_handoff.is_none());
+                        decoded_owners.push(Arc::downgrade(
+                            &app.image.as_ref().expect("first loaded page").decoded,
+                        ));
+                        decoded_owners.extend(app.reading_pages.iter().map(|page| {
+                            Arc::downgrade(&page.as_ref().expect("loaded page").decoded)
+                        }));
+                        ids.push(app.image.as_ref().expect("first loaded page").texture.id());
+                        ids.extend(
+                            app.reading_pages
                                 .iter()
-                                .filter(|id| {
-                                    !app.image_texture_cache
-                                        .entries
-                                        .iter()
-                                        .any(|entry| entry.texture.id() == **id)
-                                })
-                                .count();
-                            ids.push(image.texture.id());
-                            image
-                        })
-                        .collect();
-                    let mut pages = pages.into_iter();
-                    app.image = pages.next();
-                    app.reading_pages = pages.map(Ok).collect();
+                                .map(|page| page.as_ref().expect("loaded page").texture.id()),
+                        );
+                    } else {
+                        let pages: Vec<_> = (spread * 3..spread * 3 + 3)
+                            .map(|page| {
+                                let before: Vec<_> = app
+                                    .image_texture_cache
+                                    .entries
+                                    .iter()
+                                    .map(|entry| entry.texture.id())
+                                    .collect();
+                                let hit = app
+                                    .image_texture_cache
+                                    .entries
+                                    .iter()
+                                    .find(|entry| {
+                                        entry.decoded.as_ptr() == Arc::as_ptr(&originals[page])
+                                    })
+                                    .map(|entry| entry.texture.id());
+                                let image = app
+                                    .image_texture_cache
+                                    .load(
+                                        &context,
+                                        &self.root.join(format!("{page}.png")),
+                                        Arc::clone(&originals[page]),
+                                        TextureOptions::NEAREST,
+                                    )
+                                    .expect("page texture");
+                                if let Some(id) = hit {
+                                    assert_eq!(
+                                        image.texture.id(),
+                                        id,
+                                        "reuse the cached GPU handle"
+                                    );
+                                    cache_hits += 1;
+                                }
+                                evictions += before
+                                    .iter()
+                                    .filter(|id| {
+                                        !app.image_texture_cache
+                                            .entries
+                                            .iter()
+                                            .any(|entry| entry.texture.id() == **id)
+                                    })
+                                    .count();
+                                ids.push(image.texture.id());
+                                image
+                            })
+                            .collect();
+                        let mut pages = pages.into_iter();
+                        app.image = pages.next();
+                        app.reading_pages = pages.map(Ok).collect();
+                    }
                     app.reading_settings.axis = if step % 2 == 0 {
                         ReadingAxis::Horizontal
                     } else {
@@ -235,11 +390,10 @@ fn reading_gpu_pressure_preserves_pages_animation_and_texture_lifetimes() {
                                 <= 256 * 1024 * 1024
                         );
                         assert!(app.image_texture_cache.entries.iter().all(|entry| {
-                            !entry
+                            entry
                                 .decoded
                                 .upgrade()
-                                .expect("owned fixture")
-                                .is_animated()
+                                .is_none_or(|image| !image.is_animated())
                         }));
                         checks += 1;
                     }
@@ -263,20 +417,47 @@ fn reading_gpu_pressure_preserves_pages_animation_and_texture_lifetimes() {
                         .all(|(id, _)| !ids.contains(id)),
                     "release native page textures"
                 );
+                let metrics = app.image_loader.verification_metrics();
+                foreground_decodes += metrics.foreground.calls;
+                foreground_hits += metrics.initial_cache_hits + metrics.late_cache_hits;
                 drop(app);
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while decoded_owners.iter().any(|owner| owner.upgrade().is_some()) {
+                    assert!(
+                        Instant::now() < deadline,
+                        "closed loader releases displayed originals"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
                 let device = renderer.graphics_device();
                 renderer.release_surface();
                 renderer =
                     FrameRenderer::with_graphics_device(&window, device).expect("next density");
             }
-            assert!(cache_hits > 0 && evictions > 0);
+            if !self.real_files {
+                assert!(cache_hits > 0 && evictions > 0);
+            }
             assert!(
                 originals.iter().all(|image| Arc::strong_count(image) == 1),
                 "presentations release original pixels"
             );
-            eprintln!(
-                "READING_GPU checks={checks} cache_hits={cache_hits} evictions={evictions}; hidden hardware surfaces, no physical input or peak-memory measurement"
-            );
+            for (path, stamp) in paths.iter().zip(source_stamps) {
+                let metadata = std::fs::metadata(path).expect("source remains present");
+                assert_eq!(
+                    (metadata.len(), metadata.modified().expect("source date")),
+                    stamp
+                );
+            }
+            if self.real_files {
+                assert!(foreground_decodes > 0 && foreground_hits > 0);
+                eprintln!(
+                    "READING_FILES checks={checks} foreground_decodes={foreground_decodes} foreground_hits={foreground_hits}; hidden hardware surfaces and async loader, fixed folder order, no physical input or peak-memory measurement"
+                );
+            } else {
+                eprintln!(
+                    "READING_GPU checks={checks} cache_hits={cache_hits} evictions={evictions}; hidden hardware surfaces, no physical input or peak-memory measurement"
+                );
+            }
             event_loop.exit();
         }
         fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
@@ -286,6 +467,6 @@ fn reading_gpu_pressure_preserves_pages_animation_and_texture_lifetimes() {
     builder
         .build()
         .expect("event loop")
-        .run_app(&mut Trial { root })
+        .run_app(&mut Trial { root, real_files })
         .expect("trial");
 }

@@ -4753,7 +4753,7 @@ where
                     }
                     if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
                         let playing = self.state == PlaybackState::Playing;
-                        let play = chrome::button(
+                        let play = ui.add_enabled_ui(!self.command_context().playback_blocked, |ui| chrome::button(
                             ui,
                             if playing {
                                 chrome::Icon::Pause
@@ -4764,7 +4764,7 @@ where
                                 CommandId::TogglePause,
                                 if playing { "Pause" } else { "Play / replay" },
                             ),
-                        );
+                        )).inner.disabled_help_text("Playback is unavailable while loading or after an error");
                         let held = self.hold_response(&play, actions);
                         if play.clicked() && !held {
                             actions.push(UiAction::Command(CommandId::TogglePause));
@@ -8311,6 +8311,7 @@ where
     fn command_context(&self) -> CommandContext {
         CommandContext {
             image_transition: self.image_handoff.is_some(),
+            playback_blocked: self.state.after_play_pause().is_none(),
             timeline_open: self.timeline_is_visible(),
             has_time_selection: self.time_selection.is_some(),
             media_kind: self.media_kind,
@@ -14170,6 +14171,143 @@ mod tests {
         assert!(app.pending_guard.is_some());
         assert_eq!(app.path.as_ref(), Some(&source));
         assert_eq!(app.edits, edits);
+    }
+
+    #[test]
+    fn status_play_button_and_commands_follow_playback_availability() {
+        let Some(_root) = isolated_test_root(
+            "tests::status_play_button_and_commands_follow_playback_availability",
+        ) else {
+            return;
+        };
+        use egui::accesskit::{Action, ActionRequest, Role, TreeId};
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let play = command_definitions()
+            .iter()
+            .find(|command| command.id == CommandId::TogglePause)
+            .expect("play command");
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            app.media_kind = Some(kind);
+            for density in [1.0, 1.25, 2.0] {
+                let mut fills = Vec::new();
+                for state in [
+                    PlaybackState::Loading,
+                    PlaybackState::Faulted,
+                    PlaybackState::Paused,
+                    PlaybackState::Playing,
+                    PlaybackState::Ended,
+                ] {
+                    app.state = state;
+                    let enabled = state.after_play_pause().is_some();
+                    assert_eq!(play.is_enabled(app.command_context()), enabled);
+                    let context = fonts::test_context();
+                    context.enable_accesskit();
+                    context.set_pixels_per_point(density);
+                    let frame = |events| {
+                        let mut actions = Vec::new();
+                        let output = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(480.0, 300.0),
+                                )),
+                                events,
+                                ..Default::default()
+                            },
+                            |ui| {
+                                app.draw_status_bar(ui, &mut actions, &mut Vec::new());
+                            },
+                        );
+                        (output, actions)
+                    };
+                    let (output, _) = frame(Vec::new());
+                    let tree = output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("UI semantics");
+                    let (id, node) = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| {
+                            node.role() == Role::Button
+                                && node.label().is_some_and(|label| {
+                                    label.starts_with("Play / replay") || label.starts_with("Pause")
+                                })
+                        })
+                        .expect("transport button");
+                    assert_eq!(
+                        node.is_disabled(),
+                        !enabled,
+                        "{kind:?}, {state:?}, {density}"
+                    );
+                    if state != PlaybackState::Playing {
+                        let fill = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Path(path)
+                                    if path.closed
+                                        && path
+                                            .points
+                                            .iter()
+                                            .all(|point| point.x < 40.0 && point.y > 265.0) =>
+                                {
+                                    Some(path.fill)
+                                }
+                                _ => None,
+                            })
+                            .expect("play symbol");
+                        fills.push((enabled, fill));
+                    }
+                    let (_, actions) =
+                        frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
+                            action: Action::Click,
+                            target_tree: TreeId::ROOT,
+                            target_node: *id,
+                            data: None,
+                        })]);
+                    assert_eq!(
+                        actions.iter().any(|action| matches!(
+                            action,
+                            UiAction::Command(CommandId::TogglePause)
+                        )),
+                        enabled,
+                        "UIA: {state:?}"
+                    );
+                    let position = egui::pos2(20.0, 284.0);
+                    frame(vec![egui::Event::PointerMoved(position)]);
+                    frame(vec![egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    }]);
+                    let (_, actions) = frame(vec![egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }]);
+                    assert_eq!(
+                        actions.iter().any(|action| matches!(
+                            action,
+                            UiAction::Command(CommandId::TogglePause)
+                        )),
+                        enabled,
+                        "pointer: {state:?}"
+                    );
+                }
+                let active = fills
+                    .iter()
+                    .find(|(enabled, _)| *enabled)
+                    .expect("enabled icon")
+                    .1;
+                for (_, fill) in fills.iter().filter(|(enabled, _)| !enabled) {
+                    assert!(fill.r() < active.r(), "unavailable play symbol must dim");
+                }
+            }
+        }
     }
 
     #[test]

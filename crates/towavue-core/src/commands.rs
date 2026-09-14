@@ -410,6 +410,7 @@ impl FromStr for KeyStroke {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CommandContext {
     pub image_transition: bool,
+    pub playback_blocked: bool,
     pub timeline_open: bool,
     pub has_time_selection: bool,
     pub media_kind: Option<MediaKind>,
@@ -429,6 +430,9 @@ pub struct CommandDefinition {
 
 impl CommandDefinition {
     pub fn is_enabled(self, context: CommandContext) -> bool {
+        if self.id == CommandId::TogglePause && context.playback_blocked {
+            return false;
+        }
         if context.image_transition
             && matches!(
                 self.id,
@@ -1153,6 +1157,13 @@ mod tests {
             media_kind: Some(MediaKind::Image),
             ..CommandContext::default()
         }));
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            assert!(!pause.is_enabled(CommandContext {
+                media_kind: Some(kind),
+                playback_blocked: true,
+                ..CommandContext::default()
+            }));
+        }
     }
 
     #[test]

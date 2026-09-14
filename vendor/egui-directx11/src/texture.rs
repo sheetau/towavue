@@ -217,6 +217,81 @@ mod tests {
     }
 
     #[test]
+    fn invalid_whole_updates_preserve_existing_textures_without_panicking() -> Result<()> {
+        let (device, context) = device(D3D_DRIVER_TYPE_WARP)?.expect("WARP");
+        let id = TextureId::Managed(9);
+        let delta = |image, options| TexturesDelta {
+            set: vec![(id, egui::epaint::ImageDelta::full(image, options))],
+            ..Default::default()
+        };
+        for existing in [true, false] {
+            let mut pool = TexturePool::new(&device);
+            if existing {
+                pool.update(
+                    &context,
+                    delta(
+                        egui::ColorImage::filled([3, 3], Color32::WHITE),
+                        egui::TextureOptions::LINEAR,
+                    ),
+                )?;
+            }
+            let original = pool.get_srv(id);
+            for size in [
+                [0, 0],
+                [0, 3],
+                [3, 0],
+                [usize::MAX, 1],
+                [1, usize::MAX],
+                [3, 3],
+            ] {
+                let mut image = egui::ColorImage::filled([1, 1], Color32::RED);
+                image.size = size;
+                if size.contains(&0) {
+                    image.pixels.clear();
+                }
+                assert!(
+                    pool.update(&context, delta(image, egui::TextureOptions::NEAREST))
+                        .is_err(),
+                    "invalid whole update must fail without panicking: {size:?}"
+                );
+                assert_eq!(
+                    pool.get_srv(id),
+                    original,
+                    "failed update preserves resource"
+                );
+                assert_eq!(pool.options(id), egui::TextureOptions::LINEAR);
+                if let Some(Texture::Managed(texture)) = pool.pool.get(&id) {
+                    assert_eq!(
+                        readback(&device, &context, &texture.tex)?,
+                        vec![Color32::WHITE; 9]
+                    );
+                }
+            }
+            pool.update(
+                &context,
+                delta(
+                    egui::ColorImage::filled([3, 3], Color32::GREEN),
+                    egui::TextureOptions::NEAREST,
+                ),
+            )?;
+            assert_ne!(
+                pool.get_srv(id),
+                original,
+                "valid whole updates still replace the resource"
+            );
+            assert_eq!(pool.options(id), egui::TextureOptions::NEAREST);
+            let Some(Texture::Managed(texture)) = pool.pool.get(&id) else {
+                unreachable!()
+            };
+            assert_eq!(
+                readback(&device, &context, &texture.tex)?,
+                vec![Color32::GREEN; 9]
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn managed_texture_bounds_and_backing_lifetime_are_explicit() -> Result<()> {
         let Some((device, context)) = device(D3D_DRIVER_TYPE_WARP)? else {
             unreachable!()
@@ -411,7 +486,9 @@ impl TexturePool {
         #[cfg(feature = "render-verification")]
         let started = std::time::Instant::now();
         for (tid, delta) in delta.set {
-            if delta.is_whole() && delta.image.width() > 0 && delta.image.height() > 0 {
+            // Whole updates have no partial offset, even when their dimensions
+            // are invalid. Let creation validate them before changing the pool.
+            if delta.is_whole() {
                 self.pool.insert(
                     tid,
                     Self::create_managed_texture(&self.device, delta.image, delta.options)?,

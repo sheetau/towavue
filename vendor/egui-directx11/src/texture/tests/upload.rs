@@ -2,6 +2,157 @@ use super::*;
 use std::time::{Duration, Instant};
 
 #[test]
+#[ignore = "same-size replacement/reuse comparison; use Release with hardware D3D11"]
+#[allow(clippy::assertions_on_constants)]
+fn repeated_texture_upload_compares_replacement_and_reuse() -> Result<()> {
+    use windows::core::BOOL;
+
+    assert!(!cfg!(debug_assertions), "use Release");
+    let (device, context) = device_with_flags(
+        D3D_DRIVER_TYPE_HARDWARE,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+        true,
+    )?
+    .expect("hardware device required");
+    let mut query = None;
+    // One test-owned immediate context; queries are reused only after completion.
+    unsafe {
+        device.CreateQuery(
+            &D3D11_QUERY_DESC {
+                Query: D3D11_QUERY_EVENT,
+                MiscFlags: 0,
+            },
+            Some(&mut query),
+        )?;
+    }
+    let query = query.expect("event query");
+    for [width, height] in [[1919, 1079], [4096, 2304], [8706, 5949]] {
+        let frames: Vec<_> = (0..2)
+            .map(|phase| {
+                Arc::new(egui::ColorImage::new(
+                    [width, height],
+                    (0..width * height)
+                        .map(|n| {
+                            Color32::from_rgba_unmultiplied(
+                                (n + phase * 71) as u8,
+                                (n / width + phase * 43) as u8,
+                                (n / 7 + phase * 113) as u8,
+                                (n / 13 + phase * 19) as u8,
+                            )
+                        })
+                        .collect(),
+                ))
+            })
+            .collect();
+        let mut texture = TexturePool::create_managed_texture(
+            &device,
+            ImageData::Color(frames[0].clone()),
+            egui::TextureOptions::LINEAR,
+        )?;
+        let Texture::Managed(initial) = &texture else {
+            unreachable!()
+        };
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        let mut consumer = None;
+        // This separate same-sized GPU resource captures a prior queued reader's
+        // pixels; it never aliases the replacement and is not a production buffer.
+        unsafe {
+            initial.tex.GetDesc(&mut desc);
+            device.CreateTexture2D(&desc, None, Some(&mut consumer))?;
+        }
+        let consumer = consumer.expect("queued reader destination");
+        let mut previous = 0;
+        let mut measure = |reuse: bool, queued_read: bool| -> Result<(Duration, Duration)> {
+            let next = 1 - previous;
+            let Texture::Managed(old) = &texture else {
+                unreachable!()
+            };
+            if queued_read {
+                // Queue GPU consumption immediately before the CPU update. D3D must
+                // preserve that read even when UpdateSubresource reuses the resource.
+                unsafe {
+                    context.CopyResource(&consumer, &old.tex);
+                }
+            }
+            let started = Instant::now();
+            if reuse {
+                TexturePool::update_partial(
+                    &context,
+                    &mut texture,
+                    ImageData::Color(frames[next].clone()),
+                    [0, 0],
+                )?;
+            } else {
+                texture = TexturePool::create_managed_texture(
+                    &device,
+                    ImageData::Color(frames[next].clone()),
+                    egui::TextureOptions::LINEAR,
+                )?;
+            }
+            let submission = started.elapsed();
+            let mut complete = BOOL(0);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            unsafe {
+                context.End(&query);
+                context.Flush();
+                while !complete.as_bool() {
+                    context.GetData(
+                        &query,
+                        Some((&mut complete as *mut BOOL).cast()),
+                        mem::size_of::<BOOL>() as u32,
+                        0,
+                    )?;
+                    assert!(Instant::now() < deadline, "GPU completion deadline");
+                    if !complete.as_bool() {
+                        std::thread::yield_now();
+                    }
+                }
+            }
+            let completion = started.elapsed();
+            let Texture::Managed(current) = &texture else {
+                unreachable!()
+            };
+            assert!(
+                readback(&device, &context, &current.tex)? == frames[next].pixels,
+                "new pixels match exactly"
+            );
+            if queued_read {
+                assert!(
+                    readback(&device, &context, &consumer)? == frames[previous].pixels,
+                    "queued reader retains prior pixels"
+                );
+            }
+            assert!(
+                frames.iter().all(|frame| Arc::strong_count(frame) == 1),
+                "no retained CPU shadow"
+            );
+            previous = next;
+            Ok((submission, completion))
+        };
+        for queued_read in [false, true] {
+            for reuse in [false, true] {
+                measure(reuse, queued_read)?;
+            }
+            for (batch, reuse) in [false, true, true, false].into_iter().enumerate() {
+                let samples = (0..5)
+                    .map(|_| measure(reuse, queued_read))
+                    .collect::<Result<Vec<_>>>()?;
+                let mut submission: Vec<_> = samples.iter().map(|sample| sample.0).collect();
+                let mut completion: Vec<_> = samples.iter().map(|sample| sample.1).collect();
+                submission.sort_unstable();
+                completion.sort_unstable();
+                eprintln!(
+                    "TEXTURE_REUSE width={width} height={height} queued_read={queued_read} reuse={reuse} batch={batch} submission_ms={:.3} completion_ms={:.3}; five generated-frame samples, app device flags/protection; prior queued GPU copy excluded from submission but included in completion; exact current/prior readback and source checks outside timing; no window/animation/navigation or memory measurement",
+                    submission[2].as_secs_f64() * 1000.0,
+                    completion[2].as_secs_f64() * 1000.0
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
 #[ignore = "generated upload submission/completion comparison; use Release with hardware D3D11"]
 #[allow(clippy::assertions_on_constants)]
 fn large_texture_upload_compares_initial_data_and_update() -> Result<()> {

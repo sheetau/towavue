@@ -43,6 +43,10 @@ Local changes:
   a documented driver-dependent caveat. No full-image copy-on-write or discarded
   mapping is needed. Driver upload/storage allocations are not a process cap.
 - Validate image lengths, dimensions and partial bounds before GPU access.
+  Whole updates always use full-image validation, including zero dimensions:
+  they cannot fall into a partial update with a missing offset. Invalid whole
+  updates return an error without replacing an existing resource or sampler;
+  later valid replacement still succeeds. Empty partial pixel updates remain no-ops.
   Offscreen WARP/hardware readback covers seven row widths, repeated partial
   updates, unchanged external snapshots and released source allocations.
   WARP also covers empty updates, invalid input, deferred-context rejection,
@@ -62,6 +66,12 @@ Local changes:
   It reports CPU submission and GPU event-query completion separately, with exact
   full-pixel readback outside both timers. The bounded query wait is test-only;
   production upload and UI synchronization are unchanged.
+- `repeated_texture_upload_compares_replacement_and_reuse` compares same-sized
+  frame replacement with reuse through the existing partial-upload method.
+  It covers idle resources and a queued GPU copy of the prior frame, with exact
+  old/new readback outside CPU-submission and event-completion timings. The extra
+  consumer texture and bounded waits are verification-only; production whole
+  updates still replace their resources.
 
 The public marker is additive; native device ownership APIs are unchanged.
 Upstream vertex/index buffer upload and normal blending remain unchanged.

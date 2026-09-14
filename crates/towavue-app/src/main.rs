@@ -4352,6 +4352,10 @@ where
                                         });
                                     }
                                     tab_focus::release_pointer_focus(&response);
+                                    tab_focus::release_pointer_button_focus(
+                                        &response,
+                                        egui::PointerButton::Middle,
+                                    );
                                     if response.clicked() {
                                         if tab_ui.input(|input| input.pointer.primary_released()) {
                                             // Pointer activation returns keys to the media, not a saved control.

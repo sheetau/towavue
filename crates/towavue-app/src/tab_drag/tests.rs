@@ -100,6 +100,88 @@ pub(crate) fn label_center<N>(app: &Application<N>, tab: TabId) -> egui::Pos2 {
 }
 
 #[test]
+fn middle_tab_close_releases_numeric_focus_without_activating_or_dragging() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::middle_tab_close_releases_numeric_focus_without_activating_or_dragging",
+    ) else {
+        return;
+    };
+    let size = egui::vec2(960.0, 576.0);
+    for density in [1.0, 1.25, 2.0] {
+        for index in [0, 2] {
+            for batched in [false, true] {
+                let mut app = setup(&root);
+                let context = app.ui_context.clone().expect("context");
+                context.set_pixels_per_point(density);
+                for _ in 0..3 {
+                    frame(&mut app, size, true, vec![]);
+                }
+                let tab = app.tabs.tabs()[index].id;
+                let active = app.tabs.active().expect("active").id;
+                let other = app.tabs.tabs()[1].id;
+                let saved = egui::Id::new("background-value");
+                tab_focus::adopt(&context, other, saved);
+                let point = label_center(&app, tab);
+                let outside = point + egui::vec2(0.0, 100.0);
+                let middle = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    pressed,
+                    button: egui::PointerButton::Middle,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                for cancelled in [true, false] {
+                    let value = egui::Id::new("tab-drag-numeric-focus");
+                    context.memory_mut(|memory| memory.request_focus(value));
+                    frame(&mut app, size, true, vec![egui::Event::PointerMoved(point)]);
+                    assert!(
+                        context.memory(|memory| memory.has_focus(value)),
+                        "hover preserves focus"
+                    );
+                    let end = if cancelled { outside } else { point };
+                    let mut events = vec![middle(point, true)];
+                    if !batched {
+                        assert!(frame(&mut app, size, true, events).1.is_empty());
+                        assert_eq!(
+                            context.memory(|memory| memory.focused()),
+                            None,
+                            "middle press releases numeric focus before a close or cancellation"
+                        );
+                        events = vec![];
+                    }
+                    events.extend([egui::Event::PointerMoved(end), middle(end, false)]);
+                    let (_, actions) = frame(&mut app, size, true, events);
+                    assert_eq!(
+                        context.memory(|memory| memory.focused()),
+                        None,
+                        "density={density}, index={index}, batched={batched}, cancelled={cancelled}"
+                    );
+                    assert!(tab_focus::take(&context, active).is_none());
+                    assert_eq!(app.tabs.active().expect("active unchanged").id, active);
+                    assert!(state(&app).drag.is_none());
+                    if cancelled {
+                        assert!(actions.is_empty());
+                    } else {
+                        assert!(actions == vec![UiAction::CloseTab(tab)]);
+                        // A middle close uses the same dirty guard as the close button.
+                        app.edits
+                            .entry(tab)
+                            .or_default()
+                            .push(EditOperation::RotateClockwise, MediaKind::Image);
+                        let tabs = app.tabs.tabs().to_vec();
+                        let history = app.edits[&tab].clone();
+                        app.handle_ui_action(actions[0].clone());
+                        assert!(app.pending_guard.is_some());
+                        assert_eq!(app.tabs.tabs(), tabs);
+                        assert_eq!(app.edits[&tab], history);
+                    }
+                }
+                assert_eq!(tab_focus::take(&context, other), Some(saved));
+            }
+        }
+    }
+}
+
+#[test]
 fn tab_close_returns_focus_without_closing_on_cancel_or_bypassing_dirty_guards() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_drag::tests::tab_close_returns_focus_without_closing_on_cancel_or_bypassing_dirty_guards",

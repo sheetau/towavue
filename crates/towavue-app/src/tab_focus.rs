@@ -93,13 +93,40 @@ pub(super) fn observe_pointer_control(
 
 // Tab chrome releases the active media's focus without becoming a saved media role.
 pub(super) fn release_pointer_focus(response: &Response) {
+    release_pointer_button_focus(response, egui::PointerButton::Primary);
+}
+
+pub(super) fn release_pointer_button_focus(response: &Response, button: egui::PointerButton) {
     let context = &response.ctx;
-    if ((response.clicked()
-        || response.has_focus()
-        || response.drag_stopped_by(egui::PointerButton::Primary))
-        && context.input(|input| input.pointer.primary_released()))
+    // egui does not retain middle-button drag ownership after a batched outside
+    // release. Tab labels have disjoint hit regions; use the event-time press there.
+    let middle_press = (button == egui::PointerButton::Middle && response.enabled())
+        .then(|| {
+            context.input(|input| {
+                input.events.iter().find_map(|event| match event {
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Middle,
+                        pressed: true,
+                        ..
+                    } => Some(*pos),
+                    _ => None,
+                })
+            })
+        })
+        .flatten()
+        .is_some_and(|pos| {
+            response.interact_rect.contains(pos)
+                && context.layer_id_at(pos) == Some(response.layer_id)
+        });
+    if middle_press
+        || ((response.clicked_by(button)
+            || (button == egui::PointerButton::Primary && response.clicked())
+            || response.has_focus()
+            || response.drag_stopped_by(button))
+            && context.input(|input| input.pointer.button_released(button)))
         || (response.is_pointer_button_down_on()
-            && context.input(|input| input.pointer.primary_pressed()))
+            && context.input(|input| input.pointer.button_pressed(button)))
     {
         let active = context.data_mut(|data| {
             let state = data.get_temp_mut_or_default::<State>(state_id());

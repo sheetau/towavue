@@ -14,6 +14,94 @@ fn focus(target: egui::accesskit::NodeId) -> egui::Event {
 }
 
 #[test]
+fn middle_pointer_focus_respects_disabled_clipped_and_covered_labels() {
+    for blocked in 0..4 {
+        let context = fonts::test_context();
+        let mut tabs = TabSet::default();
+        let tab = tabs.open_new("active.png".into(), MediaKind::Image);
+        let numeric = egui::Id::new("late-numeric-control");
+        let origin = egui::pos2(30.0, 40.0);
+        let end = egui::pos2(200.0, 40.0);
+        let draw = |events| {
+            let _ = context.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    super::begin(&context, Some(tab), true);
+                    if blocked == 3 {
+                        egui::Area::new("label-cover".into())
+                            .order(egui::Order::Foreground)
+                            .fixed_pos(egui::pos2(20.0, 20.0))
+                            .show(&context, |ui| {
+                                ui.allocate_exact_size(
+                                    egui::vec2(80.0, 40.0),
+                                    egui::Sense::click(),
+                                );
+                            });
+                    }
+                    ui.scope(|ui| {
+                        if blocked == 1 {
+                            ui.disable();
+                        }
+                        if blocked == 2 {
+                            ui.set_clip_rect(egui::Rect::from_min_max(
+                                egui::pos2(50.0, 20.0),
+                                egui::pos2(100.0, 60.0),
+                            ));
+                        }
+                        let response = ui.interact(
+                            egui::Rect::from_min_max(
+                                egui::pos2(20.0, 20.0),
+                                egui::pos2(100.0, 60.0),
+                            ),
+                            egui::Id::new("tab-label"),
+                            egui::Sense::click_and_drag(),
+                        );
+                        super::release_pointer_button_focus(&response, egui::PointerButton::Middle);
+                    });
+                    let response = ui.interact(
+                        egui::Rect::from_min_size(egui::pos2(20.0, 150.0), egui::vec2(80.0, 20.0)),
+                        numeric,
+                        egui::Sense::focusable_noninteractive(),
+                    );
+                    super::observe(&response, "numeric-role");
+                    super::finish(&context, false, true);
+                },
+            );
+        };
+        for _ in 0..3 {
+            draw(vec![]);
+        }
+        context.memory_mut(|memory| memory.request_focus(numeric));
+        draw(vec![egui::Event::PointerMoved(origin)]);
+        assert!(context.memory(|memory| memory.has_focus(numeric)));
+        draw(vec![
+            egui::Event::PointerButton {
+                pos: origin,
+                pressed: true,
+                button: egui::PointerButton::Middle,
+                modifiers: egui::Modifiers::NONE,
+            },
+            egui::Event::PointerMoved(end),
+            egui::Event::PointerButton {
+                pos: end,
+                pressed: false,
+                button: egui::PointerButton::Middle,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        assert_eq!(
+            context.memory(|memory| memory.has_focus(numeric)),
+            blocked != 0,
+            "blocked={blocked}"
+        );
+        assert_eq!(super::take(&context, tab).is_some(), blocked != 0);
+    }
+}
+
+#[test]
 fn pointer_panel_resize_releases_numeric_focus_on_press() {
     for density in [1.0, 1.25, 2.0] {
         let context = fonts::test_context();

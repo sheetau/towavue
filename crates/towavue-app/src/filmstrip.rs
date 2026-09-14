@@ -85,8 +85,20 @@ impl Filmstrip {
         if !self.visible.is_empty() {
             self.generation = self.loader.request(Vec::new());
             self.visible.clear();
-            self.previews.clear();
-            self.refreshing.clear();
+        }
+        self.previews.clear();
+        self.refreshing.clear();
+    }
+
+    pub fn pause_preparation(&mut self) {
+        self.cancel_drag();
+        self.focus_requested = false;
+        self.focused_card = None;
+        if !self.visible.is_empty() {
+            self.generation = self.loader.request(Vec::new());
+            // Reopening rebuilds the wanted set, retaining ready textures and
+            // restarting missing/revalidation jobs without accepting old results.
+            self.visible.clear();
         }
     }
 
@@ -1151,6 +1163,20 @@ mod tests {
             .expect("prepared current")
             .0
             .id();
+        app.pending_folder = Some((1, crate::FolderIntent::Refresh(current.clone())));
+        app.prepare_filmstrip(&context);
+        assert!(
+            app.filmstrip.visible.is_empty(),
+            "refresh pauses background work"
+        );
+        assert_eq!(app.filmstrip.previews.len(), VISIBLE_PREVIEW_LIMIT);
+        let paused_generation = app.filmstrip.generation;
+        app.prepare_filmstrip(&context);
+        assert_eq!(
+            app.filmstrip.generation, paused_generation,
+            "no cancellation churn"
+        );
+        app.pending_folder = None;
         app.filmstrip_open = true;
         let output = draw(&mut app);
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
@@ -1203,7 +1229,10 @@ mod tests {
                 *id
             );
         }
-        // A viewport change must not cancel revalidation of still-visible held textures.
+        // Pausing and then changing the viewport must resume source revalidation.
+        app.filmstrip.pause_preparation();
+        assert!(app.filmstrip.visible.is_empty());
+        assert!(!app.filmstrip.refreshing.is_empty());
         let (offscreen, _) = retained.pop().expect("last visible neighbor");
         app.filmstrip.set_visible(
             retained
@@ -1258,10 +1287,15 @@ mod tests {
             egui::Shape::Mesh(mesh) if mesh.texture_id == replacement)));
         let mut reordered = app.folder_snapshot.clone().expect("snapshot");
         reordered.items.reverse();
+        app.filmstrip.pause_preparation();
         app.apply_folder_snapshot(reordered);
         assert!(
             app.filmstrip.previews.is_empty(),
             "changed order still resets the strip"
+        );
+        assert!(
+            context.tex_manager().read().meta(replacement).is_none(),
+            "clear releases paused textures"
         );
         app.filmstrip_open = false;
         for blocked in 0..7 {

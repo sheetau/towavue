@@ -193,7 +193,8 @@ fn first_frame_trial(
                 assert_eq!(context.pixels_per_point(), density);
                 assert_eq!(baseline.len(), if reading { 2 } else { 1 });
                 for _ in 0..3 {
-                    app.filmstrip_open = true;
+                    app.dispatch(CommandId::ToggleFilmstrip);
+                    assert!(app.filmstrip_open);
                     let (first, first_pixels) = draw(&mut app);
                     let previews = meshes(&first, preview.id());
                     assert_eq!(
@@ -248,6 +249,13 @@ fn first_frame_trial(
                     assert_eq!(meshes(&first, image_id), baseline);
                     app.close_filmstrip();
                     assert_eq!(meshes(&draw(&mut app).0, image_id), baseline);
+                    assert!(app.pending_folder.is_some(), "refresh stays unresolved");
+                    assert!(app.filmstrip.visible.is_empty(), "background work stops");
+                    assert_eq!(
+                        app.filmstrip.previews.len(),
+                        3,
+                        "reopening keeps ready previews"
+                    );
                 }
                 app.image_handoff = app.take_navigation_handoff(MediaKind::Image);
                 assert!(app.image_handoff.is_some());

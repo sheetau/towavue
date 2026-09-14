@@ -8462,6 +8462,11 @@ where
         {
             self.filmstrip
                 .prepare_neighbors(self.folder_snapshot.as_ref(), self.path.as_deref());
+        } else if matches!(
+            &self.pending_folder,
+            Some((_, FolderIntent::Refresh(path))) if self.path.as_ref() == Some(path)
+        ) {
+            self.filmstrip.pause_preparation();
         } else {
             self.filmstrip.clear();
         }

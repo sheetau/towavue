@@ -1973,6 +1973,21 @@ where
         paths
     }
 
+    fn set_reading_layout(&mut self, enabled: bool, settings: ReadingSettings) {
+        // Capture geometry before changing the settings that arrange the held pages.
+        let handoff = enabled
+            .then(|| self.take_navigation_handoff(MediaKind::Image))
+            .flatten();
+        self.reading_mode = enabled;
+        self.reading_settings = settings;
+        self.image_handoff = handoff;
+        self.rebuild_reading_pages();
+        if !self.image_loading {
+            self.image_handoff = None;
+        }
+        self.request_redraw();
+    }
+
     fn rebuild_reading_pages(&mut self) {
         self.clear_image_previews();
         self.reading_pages.clear();
@@ -5941,26 +5956,21 @@ where
                 }
             }
             CommandId::ToggleReadingMode => {
-                self.reading_mode = !self.reading_mode;
-                self.rebuild_reading_pages();
-                self.request_redraw();
+                self.set_reading_layout(!self.reading_mode, self.reading_settings);
             }
             CommandId::IncreaseReadingPages
             | CommandId::DecreaseReadingPages
             | CommandId::IncreaseReadingFirstPage
             | CommandId::DecreaseReadingFirstPage => {
-                let previous = self.reading_settings;
+                let mut settings = self.reading_settings;
                 match command {
-                    CommandId::IncreaseReadingPages => self.reading_settings.increase_pages(),
-                    CommandId::DecreaseReadingPages => self.reading_settings.decrease_pages(),
-                    CommandId::IncreaseReadingFirstPage => {
-                        self.reading_settings.increase_first_page()
-                    }
-                    _ => self.reading_settings.decrease_first_page(),
+                    CommandId::IncreaseReadingPages => settings.increase_pages(),
+                    CommandId::DecreaseReadingPages => settings.decrease_pages(),
+                    CommandId::IncreaseReadingFirstPage => settings.increase_first_page(),
+                    _ => settings.decrease_first_page(),
                 }
-                if self.reading_settings != previous {
-                    self.rebuild_reading_pages();
-                    self.request_redraw();
+                if self.reading_settings != settings {
+                    self.set_reading_layout(self.reading_mode, settings);
                 }
             }
             CommandId::ToggleReadingAxis => {
@@ -7496,8 +7506,7 @@ where
             density,
         ));
         if !self.reading_mode {
-            self.reading_mode = true;
-            self.rebuild_reading_pages();
+            self.set_reading_layout(true, self.reading_settings);
         }
         self.move_reading_drag((f64::from(delta.x) * density, f64::from(delta.y) * density));
         self.request_redraw();
@@ -7506,10 +7515,9 @@ where
     fn move_reading_drag(&mut self, delta: (f64, f64)) {
         if let Some(drag) = &mut self.reading_drag {
             drag.motion(delta);
-            if self.reading_settings != drag.settings {
-                self.reading_settings = drag.settings;
-                self.rebuild_reading_pages();
-                self.request_redraw();
+            let settings = drag.settings;
+            if self.reading_settings != settings {
+                self.set_reading_layout(self.reading_mode, settings);
             }
         }
     }
@@ -7522,9 +7530,7 @@ where
         };
         if cancel && (self.reading_settings != drag.before || self.reading_mode != drag.was_enabled)
         {
-            self.reading_settings = drag.before;
-            self.reading_mode = drag.was_enabled;
-            self.rebuild_reading_pages();
+            self.set_reading_layout(drag.was_enabled, drag.before);
         }
         if !cancel {
             self.set_status(self.reading_status());

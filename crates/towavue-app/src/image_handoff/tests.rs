@@ -72,6 +72,172 @@ fn navigate_pending(app: &mut App, path: PathBuf) {
 }
 
 #[test]
+fn reading_page_count_changes_hold_the_displayed_spread_through_partial_results() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_handoff::tests::reading_page_count_changes_hold_the_displayed_spread_through_partial_results",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for axis in [ReadingAxis::Horizontal, ReadingAxis::Vertical] {
+            let (mut app, context, _) = fixture(&root);
+            context.set_pixels_per_point(density);
+            app.reading_mode = true;
+            app.reading_settings.axis = axis;
+            let paths =
+                ["old.png", "second.png", "third.png", "fourth.png"].map(|name| root.join(name));
+            app.folder_snapshot = Some(FolderSnapshot {
+                folder_identity: towavue_core::ShellIdentity::new(vec![0]),
+                folder_path: root.clone(),
+                items: paths
+                    .iter()
+                    .enumerate()
+                    .map(|(index, path)| towavue_core::FolderMediaItem {
+                        identity: towavue_core::ShellIdentity::new(vec![index as u8]),
+                        path: path.clone(),
+                        kind: MediaKind::Image,
+                    })
+                    .collect(),
+                sort_columns: vec![],
+                source: FolderSnapshotSource::NaturalNameFallback,
+                generation: 1,
+                captured_at: std::time::SystemTime::UNIX_EPOCH,
+            });
+            app.reading_pages = vec![Ok(ImagePresentation::from_decoded(
+                &context,
+                &paths[1],
+                decoded(90, 160, [60, 40, 20, 255]),
+            )
+            .expect("second page"))];
+            let ids = [
+                app.image.as_ref().expect("first").texture.id(),
+                app.reading_pages[0].as_ref().expect("second").texture.id(),
+            ];
+            let bounds = |output: &egui::FullOutput| {
+                ids.map(|id| {
+                    output.shapes.iter().find_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) if mesh.texture_id == id => {
+                            Some(mesh.calc_bounds())
+                        }
+                        _ => None,
+                    })
+                })
+            };
+            frame(&mut app, &context);
+            let before = bounds(&frame(&mut app, &context));
+            assert!(before.iter().all(Option::is_some));
+            app.dispatch(CommandId::IncreaseReadingPages);
+            app.image_loader.request(Vec::new());
+            assert_eq!(app.reading_settings.page_count, 3);
+            assert!(app.image_loading);
+            assert_eq!(
+                bounds(&frame(&mut app, &context)),
+                before,
+                "page-count change must not remove or reflow the displayed spread before completion"
+            );
+            let stale = app.image_generation;
+            app.dispatch(CommandId::IncreaseReadingPages);
+            app.image_loader.request(Vec::new());
+            assert_eq!(
+                app.reading_settings.page_count, 4,
+                "pending layout remains adjustable"
+            );
+            let settings = app.reading_settings;
+            app.reading_drag = Some(reading_input::ReadingDrag::new(
+                settings,
+                true,
+                f64::from(density),
+            ));
+            app.move_reading_drag((0.0, 24.0 * f64::from(density)));
+            app.image_loader.request(Vec::new());
+            assert_eq!(app.reading_settings.page_count, 3);
+            assert_eq!(bounds(&frame(&mut app, &context)), before);
+            assert!(app.finish_reading_drag(true));
+            app.image_loader.request(Vec::new());
+            assert_eq!(app.reading_settings, settings);
+            assert_eq!(
+                bounds(&frame(&mut app, &context)),
+                before,
+                "cancel restores settings without dropping the held spread"
+            );
+            let generation = app.image_generation;
+            assert_ne!(generation, stale);
+            for (ticket, index, total) in [
+                (stale, 0, 3),
+                (generation, 0, 4),
+                (generation, 1, 4),
+                (generation, 2, 4),
+                (generation, 3, 4),
+            ] {
+                app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                    generation: ticket,
+                    first_index: index,
+                    total,
+                    images: vec![(
+                        paths[index].clone(),
+                        Ok(decoded(80 + index as u32 * 20, 120, [20, 80, 40, 255])),
+                    )],
+                });
+                if index != 3 {
+                    assert!(app.image_loading);
+                    assert_eq!(
+                        bounds(&frame(&mut app, &context)),
+                        before,
+                        "partial or stale settings result must stay hidden"
+                    );
+                }
+            }
+            assert!(!app.image_loading && app.image_handoff.is_none());
+            assert_eq!(app.reading_pages.len(), 3);
+            assert_eq!(app.reading_request_paths(), paths);
+            app.dispatch(CommandId::ToggleReadingMode);
+            assert!(!app.reading_mode && !app.image_loading && app.image_handoff.is_none());
+            assert!(app.reading_pages.is_empty());
+            let single = app.image.as_ref().expect("single image").texture.id();
+            let single_bounds = |output: &egui::FullOutput| {
+                output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == single => {
+                        Some(mesh.calc_bounds())
+                    }
+                    _ => None,
+                })
+            };
+            let before_entry = single_bounds(&frame(&mut app, &context)).expect("normal view");
+            app.dispatch(CommandId::ToggleReadingMode);
+            app.image_loader.request(Vec::new());
+            assert!(
+                app.image_loading
+                    && app
+                        .image_handoff
+                        .as_ref()
+                        .is_some_and(|held| held.reading.is_none())
+            );
+            assert_eq!(
+                single_bounds(&frame(&mut app, &context)),
+                Some(before_entry),
+                "entering reading holds the normal image until all pages resolve"
+            );
+            app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                generation: app.image_generation,
+                first_index: 0,
+                total: 4,
+                images: paths
+                    .iter()
+                    .map(|path| (path.clone(), Ok(decoded(80, 120, [20, 80, 40, 255]))))
+                    .collect(),
+            });
+            assert!(!app.image_loading && app.image_handoff.is_none());
+            assert_eq!(app.reading_pages.len(), 3);
+            assert!(
+                app.edits
+                    .values()
+                    .all(|history| history.operations().is_empty())
+            );
+        }
+    }
+}
+
+#[test]
 fn fitted_image_and_handoff_do_not_paint_phantom_scrollbars() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_handoff::tests::fitted_image_and_handoff_do_not_paint_phantom_scrollbars",

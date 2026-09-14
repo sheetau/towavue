@@ -123,6 +123,14 @@ fn qualified_text_rejects_ambiguous_values_and_unsupported_context() {
         "<m:genre><r:Description r:about=\"other\"><r:value>a</r:value></r:Description></m:genre>",
         "<m:genre><r:Description><r:value r:resource=\"urn:not-text\"/></r:Description></m:genre>",
         "<m:genre><r:Description><r:value>a</r:value></r:Description><q:extra/></m:genre>",
+        "<m:genre r:value=\"a\" r:resource=\"urn:other\"/>",
+        "<m:genre r:value=\"a\" xml:lang=\"ja\"/>",
+        "<m:genre r:value=\"a\" note=\"unqualified\"/>",
+        "<m:genre r:value=\"a\">mixed</m:genre>",
+        "<m:genre r:value=\"a\"><q:child/></m:genre>",
+        "<m:genre><r:Description r:value=\"a\"><r:value>b</r:value></r:Description></m:genre>",
+        "<m:genre><r:Description q:value=\"wrong namespace\"/></m:genre>",
+        "<m:genre xmlns:s=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" r:value=\"a\" s:value=\"b\"/>",
     ] {
         let packet = format!(
             "<r:RDF xmlns:r=\"{RDF}\"><r:Description xmlns:m=\"{DM}\" xmlns:q=\"urn:qualifier\">{property}</r:Description></r:RDF>"
@@ -131,6 +139,73 @@ fn qualified_text_rejects_ambiguous_values_and_unsupported_context() {
             parse(packet.as_bytes(), &cancel).is_err(),
             "must reject {property}"
         );
+    }
+}
+
+#[test]
+fn attribute_qualified_text_preserves_value_and_opaque_qualifiers() {
+    let cancel = AtomicBool::new(false);
+    let value = "Attribute \r<&> \"value\"";
+    for (name, field) in [
+        ("m:genre", MetadataField::Genre),
+        ("d:title", MetadataField::Title),
+    ] {
+        for form in 0..4 {
+            let attributes = format!(
+                "r:value=\"{}\" q:note=\"Keep &amp; qualify\"",
+                escaped(value)
+            );
+            let property = match form {
+                0 => format!("<{name} {attributes}/>"),
+                1 => format!("<{name}><r:Description {attributes}/></{name}>"),
+                2 => format!(
+                    "<{name}><r:Description {attributes}><q:extra>Retained</q:extra></r:Description></{name}>"
+                ),
+                _ => format!(
+                    "<{name}><r:Description q:note=\"Retained\"><r:value>{}</r:value></r:Description></{name}>",
+                    escaped(value)
+                ),
+            };
+            let packet = format!(
+                "<r:RDF xmlns:r=\"{RDF}\"><r:Description xmlns:d=\"{DC}\" xmlns:m=\"{DM}\" xmlns:q=\"urn:qualifier\" q:technical=\"old\">{property}</r:Description></r:RDF>"
+            );
+            let original = vec![Value {
+                field,
+                language: alt(field).then(|| "x-default".into()),
+                text: value.into(),
+            }];
+            assert_eq!(
+                parse(packet.as_bytes(), &cancel).expect("attribute value"),
+                original
+            );
+            for replacement in [None, Some("Updated"), Some("")] {
+                let mut options = MetadataExportOptions::default();
+                options
+                    .set(field, replacement.map(str::to_owned))
+                    .expect("option");
+                let mut expected = original.clone();
+                apply(&mut expected, &options).expect("expected");
+                for edited in [false, true] {
+                    let output =
+                        rewrite(packet.as_bytes(), &options, &cancel, !edited).expect("rewrite");
+                    if output.is_empty() {
+                        assert!(edited && expected.is_empty());
+                        continue;
+                    }
+                    assert_eq!(parse(&output, &cancel).expect("readback"), expected);
+                    let text = std::str::from_utf8(&output).expect("UTF-8");
+                    assert_eq!(text.contains(&property), replacement.is_none());
+                    assert_eq!(text.contains("q:technical="), !edited);
+                    if !edited && replacement.is_none() {
+                        assert_eq!(output, packet.as_bytes());
+                    }
+                    assert_eq!(
+                        rewrite(&output, &options, &cancel, !edited).expect("resave"),
+                        output
+                    );
+                }
+            }
+        }
     }
 }
 

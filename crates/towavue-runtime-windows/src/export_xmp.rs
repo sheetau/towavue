@@ -268,16 +268,42 @@ fn alt(field: MetadataField) -> bool {
     )
 }
 
+fn qualified_attribute_value(node: &Node) -> Result<Option<&str>, ExportError> {
+    // Preserve namespaced qualifiers opaquely, but do not mistake RDF/XML
+    // identity, URI or language controls for ordinary qualifier attributes.
+    let mut value = None;
+    for (key, text) in &node.attributes {
+        if key.is(RDF, "value") {
+            value = Some(text.as_str());
+        } else if key.0.is_empty() || key.0 == RDF || key.0 == XML {
+            return Err(invalid("unsupported qualified-resource attribute"));
+        }
+    }
+    Ok(value)
+}
+
 fn values(node: &Node, field: MetadataField) -> Result<Vec<Value>, ExportError> {
+    let plain = |text: &str| {
+        vec![Value {
+            field,
+            language: alt(field).then(|| "x-default".into()),
+            text: text.into(),
+        }]
+    };
+    if node.attributes.iter().any(|(key, _)| key.is(RDF, "value")) {
+        if !node.children.is_empty() || !node.text.trim().is_empty() {
+            return Err(invalid("attribute-valued text must have no nested content"));
+        }
+        if let Some(value) = qualified_attribute_value(node)? {
+            return Ok(plain(value));
+        }
+    }
     // In XMP's qualified-resource forms, rdf:value carries the property value;
     // sibling elements are qualifiers, not additional editable properties. The
     // rewriter retains the original subtree unless this field is explicitly set.
     let resource = match node.attributes.as_slice() {
         [(key, text)] if key.is(RDF, "parseType") && text == "Resource" => Some(node),
-        [] if node.children.len() == 1
-            && node.children[0].name.is(RDF, "Description")
-            && node.children[0].attributes.is_empty() =>
-        {
+        [] if node.children.len() == 1 && node.children[0].name.is(RDF, "Description") => {
             Some(&node.children[0])
         }
         _ => None,
@@ -290,6 +316,16 @@ fn values(node: &Node, field: MetadataField) -> Result<Vec<Value>, ExportError> 
             .children
             .iter()
             .filter(|child| child.name.is(RDF, "value"));
+        if resource.name.is(RDF, "Description")
+            && let Some(value) = qualified_attribute_value(resource)?
+        {
+            if actual.next().is_some() {
+                return Err(invalid(
+                    "qualified property has both attribute and element values",
+                ));
+            }
+            return Ok(plain(value));
+        }
         let value = actual
             .next()
             .ok_or_else(|| invalid("qualified property has no rdf:value"))?;
@@ -304,11 +340,7 @@ fn values(node: &Node, field: MetadataField) -> Result<Vec<Value>, ExportError> 
         return Err(invalid("unsupported text-property attributes"));
     }
     if node.children.is_empty() {
-        return Ok(vec![Value {
-            field,
-            language: alt(field).then(|| "x-default".into()),
-            text: node.text.clone(),
-        }]);
+        return Ok(plain(&node.text));
     }
     if !alt(field) && field != MetadataField::Artist {
         return Err(invalid("expected a simple Dynamic Media text property"));

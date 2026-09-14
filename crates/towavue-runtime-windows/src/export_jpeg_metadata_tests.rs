@@ -791,7 +791,7 @@ fn jpeg_metadata_splice_preserves_every_non_xmp_byte_and_decoded_pixel() {
 fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical_xmp() {
     let root = root("edited-rights");
     let source = root.join("source.jpg");
-    let qualified_album = r#"<m:album r:parseType="Resource"><r:value>Original album</r:value><e:note xmlns:e="urn:album-qualifier">Retained &amp; qualified</e:note></m:album>"#;
+    let qualified_album = r#"<m:album><r:Description r:value="Original album" xmlns:e="urn:album-qualifier" e:note="Retained &amp; qualified"/></m:album>"#;
     let attribution = r#"<d:contributor><r:Bag><r:li>Studio &amp; Partners</r:li><r:li>Second contributor</r:li></r:Bag></d:contributor><d:publisher><r:Bag><r:li>Original publisher</r:li></r:Bag></d:publisher>"#;
     let rights = r#"<q:Owner xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Bag><r:li>Original owner</r:li></r:Bag></q:Owner><q:UsageTerms xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Alt><r:li xml:lang="en">Keep attribution</r:li><r:li xml:lang="fr">Attribution requise</r:li></r:Alt></q:UsageTerms><q:WebStatement xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/rights</q:WebStatement><q:Certificate xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/original-certificate</q:Certificate>"#;
     let packet = PACKET

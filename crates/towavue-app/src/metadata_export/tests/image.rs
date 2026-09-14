@@ -38,7 +38,7 @@ fn image_fixture_frames(root: &Path, extension: &str, frames: usize) -> PathBuf 
     if extension == "jpeg" {
         let packet = r#"<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><r:Description xmlns:d="http://purl.org/dc/elements/1.1/" xmlns:m="http://ns.adobe.com/xmp/1.0/DynamicMedia/"><d:title><r:Alt><r:li xml:lang="x-default">Original title</r:li><r:li xml:lang="ja">元の題名</r:li></r:Alt></d:title><d:creator><r:Seq><r:li>First author</r:li><r:li>Second author</r:li></r:Seq></d:creator><d:rights><r:Alt><r:li xml:lang="x-default">Original copyright</r:li></r:Alt></d:rights><m:album>Original album</m:album><m:composer>Original composer</m:composer><m:genre>Original genre</m:genre></r:Description></r:RDF>"#;
         let packet = packet.replace("</r:Description>", "<m:releaseDate>circa 1999</m:releaseDate><m:trackNumber>2/12</m:trackNumber></r:Description>");
-        let packet = packet.replace("<m:genre>Original genre</m:genre>", "<m:genre r:parseType=\"Resource\"><r:value>Original genre</r:value><q:note xmlns:q=\"urn:genre-qualifier\">Retain with genre</q:note></m:genre>");
+        let packet = packet.replace("<m:genre>Original genre</m:genre>", "<m:genre r:value=\"Original genre\" xmlns:q=\"urn:genre-qualifier\" q:note=\"Retain with genre\"/>");
         let header = b"http://ns.adobe.com/xap/1.0/\0";
         let bytes = std::fs::read(&raw).expect("JPEG bytes");
         let mut tagged = bytes[..2].to_vec();

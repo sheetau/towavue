@@ -902,6 +902,28 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                     .volume(),
                 0.5
             );
+            let first_gain = app.history_timeline().expect("history").expect("gain plan");
+            app.set_time_selection(None);
+            app.handle_ui_action(UiAction::TimeAdjustment(
+                tab,
+                app.generation,
+                None,
+                TimelineEdit::SetVolume(range(500, 1000), 1.5),
+            ));
+            let mut expected = first_gain.clone();
+            assert!(expected.apply(TimelineEdit::SetVolume(range(500, 1000), 1.5)));
+            assert_eq!(
+                app.history_timeline().expect("history"),
+                Some(expected.clone())
+            );
+            assert_eq!(
+                app.session.as_ref().expect("session").timeline(),
+                Some(&expected)
+            );
+            assert!(app.time_selection.is_none());
+            assert_eq!(app.current_position(), time(700));
+            app.undo_edit(false);
+            assert_eq!(app.history_timeline().expect("history"), Some(first_gain));
             app.undo_edit(false);
             app.time_selection = Some(range(500, 1000));
             app.handle_ui_action(UiAction::TimeAdjustment(

@@ -115,7 +115,8 @@ pub(super) fn show(
         if !modifiers.any()
             && (selection.is_none() || selected.is_some())
             && (origin.y - adjustment::gain_y(rect, gain)).abs() <= 4.0
-            && let Some(range) = selection.or_else(|| TimeRange::new(MediaTime::ZERO, duration))
+            && let Some(range) =
+                selection.or_else(|| adjustment::gain_range_at(&bands, at(origin.x)))
         {
             return Gesture::Band(range, gain);
         }
@@ -1007,6 +1008,125 @@ mod tests {
                 Some(TimeRange::new(time(2.5), time(7.5)))
             );
             assert_eq!(results[0].seek, Some(time(2.5)));
+        }
+    }
+
+    #[test]
+    fn gain_drag_after_selection_clear_preserves_other_bands_and_history() {
+        use towavue_core::{EditHistory, EditOperation, MediaKind};
+
+        let range = |a, b| TimeRange::new(time(a), time(b)).expect("range");
+        let rect = Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 100.0));
+        for density in [1.0, 1.25, 2.0] {
+            for batched in [false, true] {
+                for (at, gain, selected, affected) in [
+                    (1.0, 1.0, None, range(0.0, 2.0)),
+                    (4.0, 0.5, None, range(2.0, 6.0)),
+                    (8.0, 1.0, None, range(6.0, 10.0)),
+                    (4.0, 0.5, Some(range(2.0, 8.0)), range(2.0, 8.0)),
+                    (4.0, 0.5, Some(range(0.0, 10.0)), range(0.0, 10.0)),
+                ] {
+                    let context = egui::Context::default();
+                    let mut history = EditHistory::default();
+                    for edit in [
+                        TimelineEdit::Delete(range(1.0, 2.0)),
+                        TimelineEdit::Stretch(range(3.0, 4.0), time(2.0)),
+                        TimelineEdit::SetVolume(range(2.0, 6.0), 0.5),
+                    ] {
+                        assert!(history.push(EditOperation::Timeline(edit), MediaKind::Audio));
+                    }
+                    let before = history.timeline(time(10.0)).expect("edited plan");
+                    let frame = |events| {
+                        let mut edits = Vec::new();
+                        let mut previews = Vec::new();
+                        let mut input = egui::RawInput {
+                            screen_rect: Some(Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(500.0, 200.0),
+                            )),
+                            events,
+                            ..Default::default()
+                        };
+                        input
+                            .viewports
+                            .get_mut(&egui::ViewportId::ROOT)
+                            .expect("viewport")
+                            .native_pixels_per_point = Some(density);
+                        let _ = context.run_ui(input, |ui| {
+                            let response = ui.interact(
+                                rect,
+                                "local-gain-test".into(),
+                                egui::Sense::click_and_drag(),
+                            );
+                            let output = show(
+                                ui,
+                                &response,
+                                time(10.0),
+                                time(0.0),
+                                selected,
+                                Some(&before),
+                                true,
+                            );
+                            assert!(output.selection.is_none() && output.seek.is_none());
+                            edits.extend(output.edit);
+                            previews.extend(output.gain_preview);
+                            if context.current_pass_index() == 0 {
+                                context.request_discard("local gain release must not replay");
+                            }
+                        });
+                        (edits, previews)
+                    };
+                    frame(vec![]);
+                    let start = egui::pos2(
+                        rect.left() + rect.width() * at / 10.0,
+                        adjustment::gain_y(rect, gain),
+                    );
+                    let end = start - egui::vec2(0.0, adjustment::gain_height(rect) * 0.5);
+                    let button = |pos, pressed| egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    };
+                    frame(vec![egui::Event::PointerMoved(start)]);
+                    let events = vec![
+                        button(start, true),
+                        egui::Event::PointerMoved(end),
+                        button(end, false),
+                    ];
+                    let (edits, previews) = if batched {
+                        frame(events)
+                    } else {
+                        assert!(frame(vec![events[0].clone()]).0.is_empty());
+                        let (edits, previews) = frame(vec![events[1].clone()]);
+                        assert!(edits.is_empty());
+                        assert!(!previews.is_empty());
+                        assert!(
+                            previews
+                                .iter()
+                                .all(|preview| *preview == (affected, gain + 0.5))
+                        );
+                        frame(vec![events[2].clone()])
+                    };
+                    assert_eq!(edits, vec![TimelineEdit::SetVolume(affected, gain + 0.5)]);
+                    assert!(!previews.is_empty());
+                    assert!(
+                        previews
+                            .iter()
+                            .all(|preview| *preview == (affected, gain + 0.5))
+                    );
+                    assert!(frame(vec![]).0.is_empty());
+                    assert_eq!(history.timeline(time(10.0)), Some(before.clone()));
+                    let mut expected = before.clone();
+                    assert!(expected.apply(TimelineEdit::SetVolume(affected, gain + 0.5)));
+                    assert!(history.push(EditOperation::Timeline(edits[0]), MediaKind::Audio));
+                    assert_eq!(history.timeline(time(10.0)), Some(expected.clone()));
+                    assert!(history.undo());
+                    assert_eq!(history.timeline(time(10.0)), Some(before));
+                    assert!(history.redo());
+                    assert_eq!(history.timeline(time(10.0)), Some(expected));
+                }
+            }
         }
     }
 

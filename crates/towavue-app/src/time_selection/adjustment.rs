@@ -28,6 +28,24 @@ pub(super) fn gain_at(bands: &[(TimeRange, f32)], time: MediaTime) -> f32 {
         .map_or(1.0, |(_, gain)| *gain)
 }
 
+pub(super) fn gain_range_at(bands: &[(TimeRange, f32)], time: MediaTime) -> Option<TimeRange> {
+    let index = bands
+        .iter()
+        .position(|(range, _)| time >= range.start() && time < range.end())
+        .or_else(|| bands.len().checked_sub(1))?;
+    let gain = bands[index].1;
+    let (mut left, mut right) = (index, index);
+    // Source cuts and rate changes can split one visible gain line into several
+    // spans. Drag the connected line, but never cross a different gain level.
+    while left > 0 && bands[left - 1].1 == gain {
+        left -= 1;
+    }
+    while right + 1 < bands.len() && bands[right + 1].1 == gain {
+        right += 1;
+    }
+    TimeRange::new(bands[left].0.start(), bands[right].0.end())
+}
+
 pub(super) fn gain_height(rect: Rect) -> f32 {
     // Points per linear gain unit. Keep unity at the waveform center and maximum
     // gain below the top controls; hit testing and drag deltas share this scale.
@@ -252,6 +270,26 @@ mod tests {
     }
     fn range(start: i64, end: i64) -> TimeRange {
         TimeRange::new(time(start), time(end)).expect("range")
+    }
+
+    #[test]
+    fn gain_ranges_join_equal_neighbors_and_use_half_open_boundaries() {
+        let bands = [
+            (range(0, 1), 1.0),
+            (range(1, 2), 1.0),
+            (range(2, 4), 0.0),
+            (range(4, 8), 1.0),
+        ];
+        for (at, expected) in [
+            (0, range(0, 2)),
+            (1, range(0, 2)),
+            (2, range(2, 4)),
+            (4, range(4, 8)),
+            (8, range(4, 8)),
+        ] {
+            assert_eq!(gain_range_at(&bands, time(at)), Some(expected));
+        }
+        assert_eq!(gain_range_at(&[], time(0)), None);
     }
 
     #[test]

@@ -348,6 +348,18 @@ pub(super) fn parse(packet: &[u8], cancelled: &AtomicBool) -> Result<Vec<Value>,
     if !rdf.text.trim().is_empty() {
         return Err(invalid("text in RDF root"));
     }
+    // Even rdf:about="" resolves against an inherited base URI. This parser has
+    // no document URI with which to prove a nonempty base still names this image.
+    let changes_base = |node: &Node| {
+        node.attributes
+            .iter()
+            .any(|(key, text)| key.is(XML, "base") && !text.is_empty())
+    };
+    if changes_base(&root) || changes_base(rdf) || rdf.children.iter().any(changes_base) {
+        return Err(invalid(
+            "nonempty xml:base is unsupported for current-document descriptions",
+        ));
+    }
     let mut result = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for description in &rdf.children {

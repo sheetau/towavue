@@ -1,6 +1,69 @@
 use super::*;
 
 #[test]
+fn current_document_metadata_rejects_unresolved_ancestor_bases() {
+    let cancel = AtomicBool::new(false);
+    let original = format!(
+        "<x:xmpmeta xmlns:x=\"{META}\"><r:RDF xmlns:r=\"{RDF}\"><r:Description xmlns:m=\"{DM}\" r:about=\"\"><m:genre>kept</m:genre></r:Description></r:RDF></x:xmpmeta>"
+    );
+    for element in ["x:xmpmeta", "r:RDF", "r:Description"] {
+        for base in [
+            "https://example.invalid/other",
+            "../other.jpg",
+            "https://example.invalid/&#111;ther",
+        ] {
+            let packet = original.replace(
+                &format!("<{element} "),
+                &format!("<{element} xml:base=\"{base}\" "),
+            );
+            assert!(
+                parse(packet.as_bytes(), &cancel).is_err(),
+                "unresolved base accepted on {element}"
+            );
+            for value in [None, Some("changed"), Some("")] {
+                let mut options = MetadataExportOptions::default();
+                options
+                    .set(MetadataField::Genre, value.map(str::to_owned))
+                    .expect("option");
+                assert!(rewrite_unedited(packet.as_bytes(), &options, &cancel).is_err());
+                assert!(rewrite_edited(packet.as_bytes(), &options, &cancel).is_err());
+            }
+        }
+        let neutral = original.replace(
+            &format!("<{element} "),
+            &format!("<{element} xml:base=\"\" "),
+        );
+        assert_eq!(
+            rewrite_unedited(
+                neutral.as_bytes(),
+                &MetadataExportOptions::default(),
+                &cancel
+            )
+            .expect("empty base"),
+            neutral.as_bytes()
+        );
+    }
+    // Unlike xml:lang, an empty child base does not undo an ancestor's base URI.
+    let inherited = original
+        .replace("<r:RDF ", "<r:RDF xml:base=\"../other.jpg\" ")
+        .replace("<r:Description ", "<r:Description xml:base=\"\" ");
+    assert!(parse(inherited.as_bytes(), &cancel).is_err());
+    // Opaque property-local context is retained, not interpreted as the image subject.
+    let rights = original.replace("</r:Description>", &format!("<q:WebStatement xmlns:q=\"{RIGHTS}\" xml:base=\"https://example.invalid/\">rights</q:WebStatement></r:Description>"));
+    let kept = rewrite_edited(
+        rights.as_bytes(),
+        &MetadataExportOptions::default(),
+        &cancel,
+    )
+    .expect("property-local base");
+    assert!(
+        std::str::from_utf8(&kept)
+            .expect("XML")
+            .contains("xml:base=\"https://example.invalid/\">rights")
+    );
+}
+
+#[test]
 fn rewritten_values_do_not_inherit_an_ancestor_language() {
     fn languages(node: &Node, inherited: &str, output: &mut Vec<(String, String)>) {
         let language = node

@@ -999,6 +999,15 @@ fn jpeg_metadata_failures_cancellation_source_change_and_unsupported_fields_prot
         PACKET.replace("Original &amp; title", "&missing;"),
         format!("<?xml version=\"1.0\"?><?xml version=\"1.0\"?>{PACKET}"),
         format!("<?xpacket begin=\"\"?><?xml version=\"1.0\"?>{PACKET}"),
+        PACKET.replace(
+            "<x:xmpmeta ",
+            "<x:xmpmeta xml:base=\"https://example.invalid/other\" ",
+        ),
+        PACKET.replace("<r:RDF ", "<r:RDF xml:base=\"../other.jpg\" "),
+        PACKET.replace(
+            "<r:Description ",
+            "<r:Description xml:base=\"https://example.invalid/other\" ",
+        ),
     ] {
         let invalid = tagged(packet.as_bytes());
         fs::write(&source, &invalid).expect("invalid source");

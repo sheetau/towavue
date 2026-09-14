@@ -566,6 +566,8 @@ fn webp_real_export_keeps_sets_removes_nine_fields_and_protects_files_on_failure
         tagged(&fixture(false), b"<broken>"),
         tagged(&fixture(false), b"<?xml version=\"1.0\"?><?xml version=\"1.0\"?><r:RDF xmlns:r=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"/>"),
         tagged(&fixture(false), b"<!-- packet --><?xml version=\"1.0\"?><r:RDF xmlns:r=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"/>"),
+        tagged(&fixture(false), b"<r:RDF xmlns:r=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xml:base=\"https://example.invalid/other\"><r:Description r:about=\"\"/></r:RDF>"),
+        tagged(&fixture(false), b"<r:RDF xmlns:r=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><r:Description r:about=\"\" xml:base=\"../other.webp\"/></r:RDF>"),
     ] {
         fs::write(&source, &malformed).expect("bad source");
         assert!(export_media(&request).is_err());

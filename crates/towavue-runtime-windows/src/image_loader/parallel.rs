@@ -79,7 +79,9 @@ impl Ahead {
                         && !cancellation.is_cancelled()
                         && !work_cancellation.is_cancelled()
                         && mailbox.prefetch.as_ref().is_some_and(|work| {
-                            Arc::ptr_eq(&work.id, &id) && work.generation == mailbox.generation
+                            Arc::ptr_eq(&work.id, &id)
+                                && work.generation == mailbox.generation
+                                && work.lookahead.as_ref() == Some(&thread_path)
                         })
                 };
                 let started = {

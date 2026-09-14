@@ -346,6 +346,16 @@ impl ImageLoader {
                 work.generation = generation;
                 // Keep this decode, not a batch belonging to the previous destination.
                 work.pending_paths = None;
+                #[cfg(any(test, feature = "render-verification"))]
+                if work.lookahead.as_ref().is_some_and(|path| {
+                    !paths.contains(path)
+                        && !prefetch_paths
+                            .iter()
+                            .take(PREFETCH_ENTRY_LIMIT)
+                            .any(|next| next == path)
+                }) {
+                    work.lookahead = None;
+                }
             } else {
                 // Invalidate the job without dropping a queued lease under this lock.
                 work.cancellation.cancel();
@@ -415,6 +425,14 @@ impl ImageLoader {
             {
                 // Do not resubmit to LatestTask: that would cancel the useful decoder.
                 // Its owner takes the newest bounded tail after this call returns.
+                #[cfg(any(test, feature = "render-verification"))]
+                if work
+                    .lookahead
+                    .as_ref()
+                    .is_some_and(|path| !unique.contains(path))
+                {
+                    work.lookahead = None;
+                }
                 work.pending_paths = Some(unique.into());
                 return;
             }

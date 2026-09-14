@@ -10,6 +10,29 @@ pub fn show(
     shortcuts: &ShortcutBindings,
     recent: impl FnOnce(&mut egui::Ui),
 ) -> Option<CommandId> {
+    let viewport = ui.available_rect_before_wrap();
+    let inset = viewport.shrink(8.0_f32.min(viewport.size().min_elem().max(0.0) * 0.25));
+    let gutter_scroll = if ui.is_enabled()
+        && ui.rect_contains_pointer(viewport)
+        && ui.input(|input| {
+            input
+                .pointer
+                .hover_pos()
+                .is_some_and(|p| !inset.contains(p))
+        }) {
+        ui.input_mut(|input| std::mem::take(&mut input.smooth_scroll_delta.y))
+    } else {
+        0.0
+    };
+    let content_style = ui.style().clone();
+    let mut scroll_ui = ui.new_child(egui::UiBuilder::new().max_rect(inset));
+    ui.advance_cursor_after_rect(viewport);
+    let ui = &mut scroll_ui;
+    // Only the scrollbar gets the subdued hover palette, not its cards or buttons.
+    let color = ui.visuals().widgets.inactive.fg_stroke.color;
+    ui.visuals_mut().widgets.hovered.fg_stroke.color = color;
+    ui.visuals_mut().widgets.active.fg_stroke.color = color;
+    ui.spacing_mut().scroll.interact_background_opacity = 0.3;
     let mut chosen = None;
     let width = (ui.available_width() - 32.0).clamp(0.0, 660.0);
     let top = (ui.available_height() * 0.1).clamp(12.0, 60.0);
@@ -17,6 +40,13 @@ pub fn show(
         .id_salt("welcome")
         .auto_shrink([false, false])
         .show_styled(ui, |ui| {
+            ui.set_style(content_style);
+            if gutter_scroll != 0.0 {
+                ui.scroll_with_delta_animation(
+                    egui::vec2(0.0, gutter_scroll),
+                    egui::style::ScrollAnimation::none(),
+                );
+            }
             ui.add_space(top);
             ui.horizontal(|ui| {
                 ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
@@ -84,6 +114,140 @@ pub fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn welcome_scrollbar_is_inset_muted_and_keeps_gutter_wheel_input() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.global_style_mut(chrome::style);
+            context.global_style_mut(|style| style.animation_time = 0.0);
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(480.0, 300.0));
+            let original = context.global_style().visuals.widgets.clone();
+            let frame = |events| {
+                context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        assert!(
+                            show(ui, &ShortcutBindings::default(), |ui| {
+                                assert_eq!(
+                                    ui.visuals().widgets,
+                                    original,
+                                    "recent cards retain their style"
+                                );
+                                ui.set_min_height(1200.0);
+                            })
+                            .is_none()
+                        );
+                        assert_eq!(
+                            ui.visuals().widgets,
+                            original,
+                            "siblings retain their style"
+                        );
+                    },
+                )
+            };
+            let bars = |output: &egui::FullOutput| {
+                output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect)
+                            if rect.rect.left() >= screen.right() - 14.0
+                                && rect.rect.width() <= 5.0
+                                && rect.rect.height() > 6.0 =>
+                        {
+                            Some(rect.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            for _ in 0..3 {
+                frame(vec![]);
+            }
+            let idle = bars(&frame(vec![]));
+            assert_eq!(idle.len(), 2, "track and handle");
+            let track = idle[0].rect;
+            for (actual, expected) in [
+                (track.top(), 8.0),
+                (track.bottom(), 292.0),
+                (track.right(), 472.0),
+            ] {
+                assert!(
+                    (actual - expected).abs() <= 1.0 / density,
+                    "inset track: {track:?}"
+                );
+            }
+            assert_eq!(idle[0].fill.a(), 0);
+            assert!(idle[1].fill.a() > 0);
+            let track_point = egui::pos2(track.center().x, track.bottom() - 3.0);
+            frame(vec![egui::Event::PointerMoved(track_point)]);
+            let hovered_track = bars(&frame(vec![]));
+            assert!(hovered_track[0].fill.a() > 0 && hovered_track[0].fill.a() < 128);
+            let handle = hovered_track[1].rect;
+            frame(vec![egui::Event::PointerMoved(handle.center())]);
+            let hovered_handle = bars(&frame(vec![]));
+            assert_eq!(
+                hovered_handle[1].fill, hovered_track[1].fill,
+                "handle hover stays gray"
+            );
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            for gutter in [
+                egui::pos2(478.0, 150.0),
+                egui::pos2(2.0, 150.0),
+                egui::pos2(240.0, 2.0),
+                egui::pos2(240.0, 298.0),
+            ] {
+                let before = bars(&frame(vec![]));
+                frame(vec![
+                    egui::Event::PointerMoved(gutter),
+                    button(gutter, true),
+                ]);
+                frame(vec![button(gutter, false)]);
+                let after_click = bars(&frame(vec![]));
+                assert_eq!(
+                    after_click[1].rect.top(),
+                    before[1].rect.top(),
+                    "gutter is outside the bar hit region"
+                );
+                frame(vec![egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -80.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                for _ in 0..30 {
+                    frame(vec![]);
+                }
+                let scrolled = bars(&frame(vec![]));
+                assert!(
+                    scrolled[1].rect.top() > after_click[1].rect.top(),
+                    "wheel works in the gutter: {gutter:?}"
+                );
+            }
+            let scrolled = bars(&frame(vec![]));
+            let start = scrolled[1].rect.center();
+            let end = start + egui::vec2(0.0, 40.0);
+            frame(vec![egui::Event::PointerMoved(start), button(start, true)]);
+            frame(vec![egui::Event::PointerMoved(end)]);
+            frame(vec![button(end, false)]);
+            let dragged = bars(&frame(vec![]));
+            assert!(
+                dragged[1].rect.top() > scrolled[1].rect.top(),
+                "handle remains draggable"
+            );
+        }
+    }
 
     #[test]
     fn welcome_text_uses_ui_font_while_icons_keep_their_own_family() {

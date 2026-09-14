@@ -119,20 +119,67 @@ mod tests {
             let event = receive
                 .recv_timeout(Duration::from_secs(10))
                 .expect("native envelope worker completion");
-            let AppEvent::DetailedWaveform(generation, key, result) = event else {
+            let AppEvent::DetailedWaveform(generation, mut key, result) = event else {
                 panic!("waveform event")
             };
-            let values = result.expect("native samples");
+            let mut values = result.expect("native samples");
             assert_eq!(values.len(), key.columns as usize);
             assert_eq!(key.columns, (rect.width() * density).round() as u32);
             assert!(values.iter().all(|value| *value > 0.02 && *value < 0.2));
+            for restart in [false, true] {
+                if restart {
+                    app.waveform_detail.restart_pending();
+                } else {
+                    let wider =
+                        egui::Rect::from_min_size(rect.min, rect.size() + egui::vec2(20.0, 0.0));
+                    app.detailed_waveform(&context, wider, false);
+                    app.detailed_waveform(&context, rect, false);
+                }
+                app.waveform_detail.changed = Some(Instant::now() - SETTLE_TIME);
+                app.detailed_waveform(&context, rect, false);
+                assert!(app.waveform_detail.is_pending());
+                let status = app.status_message.clone();
+                // Hold the completed old response until the same plan/width is pending again.
+                app.install_detailed_waveform(generation, key.clone(), Ok(values.clone()));
+                assert!(
+                    app.waveform_detail.values.is_none(),
+                    "obsolete success must not finish a newer request; restart={restart}"
+                );
+                app.install_detailed_waveform(
+                    generation,
+                    key.clone(),
+                    Err("obsolete failure".into()),
+                );
+                assert!(
+                    app.waveform_detail.is_pending(),
+                    "obsolete failure must not clear current progress; restart={restart}"
+                );
+                assert_eq!(
+                    app.status_message, status,
+                    "obsolete errors must not replace current status"
+                );
+                let AppEvent::DetailedWaveform(current_generation, current_key, result) = receive
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("replacement refinement")
+                else {
+                    panic!("replacement waveform event")
+                };
+                assert_eq!(current_generation, generation);
+                let current_values = result.expect("replacement samples");
+                assert_eq!(
+                    current_values, values,
+                    "same plan still produces the same waveform"
+                );
+                key = current_key;
+                values = current_values;
+            }
             app.install_detailed_waveform(
                 generation.wrapping_add(1),
-                *key.clone(),
+                key.clone(),
                 Ok(values.clone()),
             );
             assert!(app.waveform_detail.values.is_none());
-            app.install_detailed_waveform(generation, *key.clone(), Ok(values.clone()));
+            app.install_detailed_waveform(generation, key.clone(), Ok(values.clone()));
             let retained = app
                 .waveform_detail
                 .values
@@ -190,7 +237,7 @@ mod tests {
 
             let wider = egui::Rect::from_min_size(rect.min, rect.size() + egui::vec2(20.0, 0.0));
             assert!(app.detailed_waveform(&context, wider, false).is_none());
-            app.install_detailed_waveform(generation, *key.clone(), Ok(values.clone()));
+            app.install_detailed_waveform(generation, key.clone(), Ok(values.clone()));
             assert!(
                 app.waveform_detail.values.is_none(),
                 "old-width completion cannot install"
@@ -216,7 +263,7 @@ mod tests {
                     .plan,
                 key.plan
             );
-            app.install_detailed_waveform(generation, *key, Ok(values));
+            app.install_detailed_waveform(generation, key, Ok(values));
             assert!(
                 app.waveform_detail.values.is_none(),
                 "old-edit completion cannot install"
@@ -315,7 +362,7 @@ mod tests {
 
 #[derive(Default)]
 pub(super) struct Detail {
-    key: Option<Key>,
+    key: Option<Arc<Key>>,
     changed: Option<Instant>,
     started: bool,
     finished: bool,
@@ -409,13 +456,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 self.waveform_worker.clear();
             }
             self.waveform_detail = Detail {
-                key: Some(Key {
+                key: Some(Arc::new(Key {
                     path: path.clone(),
                     plan: plan.clone(),
                     rate: state.rate,
                     volume: state.volume,
                     columns,
-                }),
+                })),
                 changed: Some(Instant::now()),
                 ..Default::default()
             };
@@ -429,7 +476,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let remaining =
                 SETTLE_TIME.saturating_sub(detail.changed.expect("key timestamp").elapsed());
             if remaining.is_zero() {
-                let key = detail.key.clone().expect("requested key");
+                // Give every submission a distinct identity, including retries of
+                // identical parameters: an already queued result cannot finish it.
+                let key = Arc::new(detail.key.as_deref().expect("requested key").clone());
+                detail.key = Some(Arc::clone(&key));
                 let notify = Arc::clone(&self.notify);
                 let generation = self.media_generation;
                 detail.started = true;
@@ -446,11 +496,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         &cancellation,
                     )
                     .map_err(|error| error.to_string());
-                    notify(AppEvent::DetailedWaveform(
-                        generation,
-                        Box::new(key),
-                        result,
-                    ));
+                    notify(AppEvent::DetailedWaveform(generation, key, result));
                 });
             } else {
                 context.request_repaint_after(remaining);
@@ -466,12 +512,16 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn install_detailed_waveform(
         &mut self,
         generation: u64,
-        key: Key,
+        key: Arc<Key>,
         result: Result<Vec<f32>, String>,
     ) {
         if generation != self.media_generation
             || self.path.as_ref() != Some(&key.path)
-            || self.waveform_detail.key.as_ref() != Some(&key)
+            || !self
+                .waveform_detail
+                .key
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &key))
             || !self.waveform_detail.started
         {
             return;

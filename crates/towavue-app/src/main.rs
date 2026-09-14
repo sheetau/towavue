@@ -294,7 +294,7 @@ enum AppEvent {
         u64,
         Result<towavue_runtime_windows::PreviewImage, String>,
     ),
-    DetailedWaveform(u64, Box<waveform_detail::Key>, Result<Vec<f32>, String>),
+    DetailedWaveform(u64, Arc<waveform_detail::Key>, Result<Vec<f32>, String>),
     Thumbnail(
         PathBuf,
         u64,
@@ -2558,7 +2558,7 @@ where
                 }
             }
             AppEvent::DetailedWaveform(generation, key, result) => {
-                self.install_detailed_waveform(generation, *key, result);
+                self.install_detailed_waveform(generation, key, result);
             }
             AppEvent::Thumbnail(path, generation, bucket, result)
                 if self.path.as_ref() == Some(&path) && generation == self.media_generation =>

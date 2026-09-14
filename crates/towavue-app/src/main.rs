@@ -4186,7 +4186,7 @@ where
                     let width = chrome::tab_width(strip_width, self.tabs.tabs().len());
                     ui.style_mut().always_scroll_the_only_direction = true;
                     ui.spacing_mut().scroll.bar_width = ui.spacing().scroll.floating_width;
-                    egui::ScrollArea::horizontal()
+                    let strip_scroll = egui::ScrollArea::horizontal()
                         .id_salt("tab-strip")
                         .max_width(strip_width)
                         .max_height(layout.tab_height)
@@ -4494,6 +4494,12 @@ where
                                 }
                             });
                         });
+                    // egui 0.35 uses the ScrollArea ID plus its usize axis for the bar.
+                    if let Some(response) = ui.ctx().read_response(strip_scroll.id.with(0_usize))
+                        && response.enabled()
+                    {
+                        tab_focus::observe_pointer_control(&response, "tab-strip-scrollbar");
+                    }
                     let (drag_rect, _) = ui.allocate_exact_size(
                         egui::vec2(
                             (ui.available_width() - controls_width).max(20.0),

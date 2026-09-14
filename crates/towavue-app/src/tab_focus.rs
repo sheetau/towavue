@@ -88,7 +88,9 @@ pub(super) fn observe_pointer_control(
     key: impl std::hash::Hash + std::fmt::Debug,
 ) {
     let context = &response.ctx;
-    if ((response.clicked() || response.has_focus())
+    if ((response.clicked()
+        || response.has_focus()
+        || response.drag_stopped_by(egui::PointerButton::Primary))
         && context.input(|input| input.pointer.primary_released()))
         || (response.is_pointer_button_down_on()
             && context.input(|input| input.pointer.primary_pressed()))

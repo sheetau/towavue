@@ -303,12 +303,53 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
         return;
     };
     let size = egui::vec2(640.0, 576.0);
-    for (delta, modifiers) in [
+    for ((delta, modifiers), density) in [
         (egui::vec2(0.0, -80.0), egui::Modifiers::NONE),
         (egui::vec2(0.0, -80.0), egui::Modifiers::SHIFT),
         (egui::vec2(-80.0, 0.0), egui::Modifiers::NONE),
-    ] {
+    ]
+    .into_iter()
+    .zip([1.0, 1.25, 2.0])
+    {
         let mut app = setup(&root);
+        let context = app.ui_context.clone().expect("context");
+        context.set_pixels_per_point(density);
+        let value_id = egui::Id::new("tab-scrollbar-numeric-focus");
+        let frame = |app: &mut Application<fn(AppEvent)>, size, focused, events| {
+            let mut actions = Vec::new();
+            let mut value = None;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    focused,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    tab_focus::begin(&context, app.tabs.active().map(|tab| tab.id), true);
+                    app.draw_top_bar(ui, &mut actions);
+                    let response = ui.interact(
+                        egui::Rect::from_min_size(egui::pos2(20.0, 200.0), egui::vec2(100.0, 20.0)),
+                        value_id,
+                        egui::Sense::focusable_noninteractive(),
+                    );
+                    value = seekbar::value_input(
+                        &response,
+                        "Playback position (seconds)",
+                        25.0,
+                        0.0..=100.0,
+                        5.0,
+                        true,
+                    );
+                    tab_focus::finish(&context, false, true);
+                },
+            );
+            assert_eq!(
+                value, None,
+                "tab scrolling must not edit the numeric control"
+            );
+            (output, actions)
+        };
         let first = app.tabs.tabs()[0].id;
         for index in 0..14 {
             app.tabs
@@ -337,8 +378,31 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
             ((bounds.y0 + bounds.y1) / 2.0) as f32,
         );
         let initial = state(&app).widgets;
+        context.memory_mut(|memory| memory.request_focus(value_id));
         frame(&mut app, size, true, vec![egui::Event::PointerMoved(grab)]);
+        assert!(
+            context.memory(|memory| memory.has_focus(value_id)),
+            "hover preserves explicit focus"
+        );
         frame(&mut app, size, true, vec![pointer(grab, true)]);
+        assert_eq!(
+            context.memory(|memory| memory.focused()),
+            None,
+            "scrollbar press must release numeric focus at {density}x"
+        );
+        frame(
+            &mut app,
+            size,
+            true,
+            vec![egui::Event::Key {
+                key: egui::Key::ArrowRight,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(context.input(|input| input.key_pressed(egui::Key::ArrowRight)));
         let moved = grab + egui::vec2(40.0, 0.0);
         let (_, actions) = frame(&mut app, size, true, vec![egui::Event::PointerMoved(moved)]);
         assert!(
@@ -381,6 +445,7 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
         );
         let strip = state(&app).strip.expect("strip");
         let wheel = strip.center();
+        context.memory_mut(|memory| memory.request_focus(value_id));
         frame(&mut app, size, true, vec![egui::Event::PointerMoved(wheel)]);
         let before = state(&app).widgets[0].2.left();
         frame(
@@ -403,6 +468,10 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
         );
         assert!(state(&app).drag.is_none());
         assert_eq!(app.tabs, tabs);
+        assert!(
+            context.memory(|memory| memory.has_focus(value_id)),
+            "wheel does not steal explicit focus"
+        );
         let (_, actions) = frame(
             &mut app,
             size,
@@ -418,6 +487,20 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
             "batched scrollbar press never becomes a tab action"
         );
         assert!(state(&app).drag.is_none());
+        assert_eq!(
+            context.memory(|memory| memory.focused()),
+            None,
+            "batched scrollbar use releases numeric focus"
+        );
+        app.tabs.activate(app.tabs.tabs()[1].id);
+        frame(&mut app, size, true, vec![]);
+        app.tabs.activate(first);
+        frame(&mut app, size, true, vec![]);
+        assert_eq!(
+            context.memory(|memory| memory.focused()),
+            None,
+            "tab return must not restore the numeric role after scrollbar use"
+        );
     }
 }
 

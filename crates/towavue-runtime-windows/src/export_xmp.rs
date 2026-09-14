@@ -539,7 +539,9 @@ fn rewrite(
     let new_description = if additions.is_empty() {
         String::new()
     } else {
-        format!("<rdf:Description xmlns:rdf=\"{RDF}\" rdf:about=\"\">{additions}</rdf:Description>")
+        format!(
+            "<rdf:Description xmlns:rdf=\"{RDF}\" rdf:about=\"\" xml:lang=\"\">{additions}</rdf:Description>"
+        )
     };
     let mut reader = NsReader::from_reader(packet);
     let mut writer = quick_xml::Writer::new(Vec::new());
@@ -551,6 +553,7 @@ fn rewrite(
     let mut skip = None;
     let mut inserted = false;
     let mut reusable_description = false;
+    let mut inherited_language = false;
     let mut retained_property = false;
     let remove = |key: &Name| {
         key.field().map_or_else(
@@ -568,6 +571,16 @@ fn rewrite(
                 if depth == 0 {
                     rdf_depth = usize::from(!key.is(RDF, "RDF"));
                 }
+                // XMP wrappers and RDF roots can both supply a language. An empty
+                // declaration cancels inheritance; newly set plain values have none.
+                if depth <= rdf_depth {
+                    for attribute in start.attributes() {
+                        let attribute = attribute.map_err(invalid)?;
+                        if attribute.key.as_ref() == b"xml:lang" {
+                            inherited_language = !attribute.value.is_empty();
+                        }
+                    }
+                }
                 if skip.is_none() && depth == rdf_depth + 2 && remove(&key) {
                     if !empty {
                         skip = Some(depth);
@@ -578,6 +591,7 @@ fn rewrite(
                         reusable_description = !inserted && !additions.is_empty();
                         let mut attributes = Vec::new();
                         let mut removed = false;
+                        let mut language_reset = false;
                         for attribute in start.attributes() {
                             let attribute = attribute.map_err(invalid)?;
                             let namespace = attribute.key.as_ref() == b"xmlns"
@@ -587,7 +601,11 @@ fn rewrite(
                                 .transpose()?;
                             // Do not give newly set properties another description's
                             // inherited xml:lang/base/space context.
-                            if key.as_ref().is_some_and(|key| key.0 == XML) {
+                            if key.as_ref().is_some_and(|key| key.is(XML, "lang"))
+                                && attribute.value.is_empty()
+                            {
+                                language_reset = true;
+                            } else if key.as_ref().is_some_and(|key| key.0 == XML) {
                                 reusable_description = false;
                             }
                             if key
@@ -605,6 +623,7 @@ fn rewrite(
                                 ));
                             }
                         }
+                        reusable_description &= !inherited_language || language_reset;
                         if removed {
                             start = start.into_owned();
                             start.clear_attributes();

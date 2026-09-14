@@ -793,6 +793,7 @@ fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical
     let source = root.join("source.jpg");
     let rights = r#"<q:Owner xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Bag><r:li>Original owner</r:li></r:Bag></q:Owner><q:UsageTerms xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Alt><r:li xml:lang="en">Keep attribution</r:li><r:li xml:lang="fr">Attribution requise</r:li></r:Alt></q:UsageTerms><q:WebStatement xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/rights</q:WebStatement><q:Certificate xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/original-certificate</q:Certificate>"#;
     let packet = PACKET
+        .replace("<r:RDF ", "<r:RDF xml:lang=\"fr\" ")
         .replace(
             "r:about=\"\"",
             "r:about=\"\" xmlns:q=\"http://ns.adobe.com/xap/1.0/rights/\" q:Marked=\"True\"",
@@ -803,8 +804,12 @@ fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical
         let target = root.join(format!("edited.{extension}"));
         let mut edited = request(&source, &target);
         edited.operations.push(EditOperation::RotateClockwise);
-        export_media_with_options(&edited, options(MetadataField::Title, "Edited title"))
-            .expect("edited export");
+        let mut metadata = options(MetadataField::Title, "Edited title");
+        metadata
+            .metadata
+            .set(MetadataField::Genre, Some("Edited genre".into()))
+            .expect("genre");
+        export_media_with_options(&edited, metadata).expect("edited export");
         let bytes = fs::read(&target).expect("output");
         for text in [
             "Original owner",
@@ -813,6 +818,9 @@ fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical
             "https://example.invalid/rights",
             "q:Marked=\"True\"",
             "Edited title",
+            "Edited genre",
+            "<r:RDF xml:lang=\"fr\" ",
+            "rdf:about=\"\" xml:lang=\"\"",
             "<d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:subject>",
         ] {
             assert!(

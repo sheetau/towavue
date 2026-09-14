@@ -1,6 +1,93 @@
 use super::*;
 
 #[test]
+fn rewritten_values_do_not_inherit_an_ancestor_language() {
+    fn languages(node: &Node, inherited: &str, output: &mut Vec<(String, String)>) {
+        let language = node
+            .attributes
+            .iter()
+            .find(|(key, _)| key.is(XML, "lang"))
+            .map_or(inherited, |(_, value)| value);
+        if node.children.is_empty() && !node.text.trim().is_empty() {
+            output.push((node.text.clone(), language.into()));
+        }
+        for child in &node.children {
+            languages(child, language, output);
+        }
+    }
+    let cancel = AtomicBool::new(false);
+    for (wrapper, rdf_language, description_language, expected_owner_language) in [
+        (false, " xml:lang=\"fr\"", "", "fr"),
+        (true, "", "", "fr"),
+        (true, " xml:lang=\"\"", "", ""),
+        (true, "", " xml:lang=\"\"", ""),
+        (true, "", " xml:lang=\"de\"", "de"),
+    ] {
+        let rdf = format!(
+            "<r:RDF xmlns:r=\"{RDF}\"{rdf_language}><r:Description xmlns:q=\"{RIGHTS}\"{description_language}><q:Owner><r:Bag><r:li>kept owner</r:li></r:Bag></q:Owner></r:Description></r:RDF>"
+        );
+        let original = if wrapper {
+            format!("<x:xmpmeta xmlns:x=\"{META}\" xml:lang=\"fr\">{rdf}</x:xmpmeta>")
+        } else {
+            rdf
+        };
+        assert_eq!(
+            rewrite_unedited(
+                original.as_bytes(),
+                &MetadataExportOptions::default(),
+                &cancel
+            )
+            .expect("all Keep"),
+            original.as_bytes()
+        );
+        for edited in [false, true] {
+            let mut packet = original.as_bytes().to_vec();
+            let mut first_size = None;
+            for genre in ["one", "two", "one", "two"] {
+                let mut options = MetadataExportOptions::default();
+                options
+                    .set(MetadataField::Genre, Some(genre.into()))
+                    .expect("genre");
+                options
+                    .set(MetadataField::Artist, Some("new artist".into()))
+                    .expect("artist");
+                options
+                    .set(MetadataField::Title, Some("new title".into()))
+                    .expect("title");
+                packet = if edited {
+                    rewrite_edited(&packet, &options, &cancel)
+                } else {
+                    rewrite_unedited(&packet, &options, &cancel)
+                }
+                .expect("rewrite");
+                let mut values = vec![];
+                languages(
+                    &tree(&packet, &cancel).expect("output XML"),
+                    "",
+                    &mut values,
+                );
+                for (text, language) in [
+                    ("kept owner", expected_owner_language),
+                    (genre, ""),
+                    ("new artist", ""),
+                    ("new title", "x-default"),
+                ] {
+                    assert!(
+                        values.contains(&(text.into(), language.into())),
+                        "language context changed for {text}: {values:?}"
+                    );
+                }
+                assert_eq!(
+                    packet.len(),
+                    *first_size.get_or_insert(packet.len()),
+                    "repeated updates must not add descriptions"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn xmp_declaration_is_unique_and_precedes_packet_wrappers() {
     let cancel = AtomicBool::new(false);
     let root = format!("<r:RDF xmlns:r=\"{RDF}\"><r:Description/></r:RDF>");

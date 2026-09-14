@@ -661,6 +661,21 @@ fn run_worker(
         let Some((paths, mut remaining, allow_preview)) = pending else {
             continue;
         };
+        // A missing early page can evict later pages of this same spread. Borrow
+        // their immutable originals for this request, without copying pixels or
+        // changing cache limits. Single-image navigation needs no lookahead.
+        let mut cached_pages: Vec<_> = if paths.len() > 1 {
+            cache
+                .lock()
+                .expect("image cache")
+                .entries
+                .iter()
+                .filter(|entry| paths.contains(&entry.0))
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
         let is_current = || {
             let mailbox = mutex.lock().expect("image mailbox");
             !mailbox.closed && mailbox.generation == generation
@@ -671,10 +686,23 @@ fn run_worker(
                 break;
             }
             let stamp = ImageStamp::read(&path);
+            let retained = cached_pages
+                .iter()
+                .position(|entry| entry.0 == path)
+                .map(|index| cached_pages.swap_remove(index))
+                .filter(|entry| Some(entry.1) == stamp)
+                .map(|(_, _, image)| {
+                    if image.retained_bytes() <= remaining {
+                        Ok(image)
+                    } else {
+                        Err(ImageDecodeError::TooLarge)
+                    }
+                });
             let cached = cache
                 .lock()
                 .expect("image cache")
-                .get(&path, stamp, remaining);
+                .get(&path, stamp, remaining)
+                .or(retained);
             #[cfg(any(test, feature = "render-verification"))]
             if matches!(cached, Some(Ok(_))) {
                 let mut mailbox = mutex.lock().expect("image mailbox");
@@ -857,6 +885,7 @@ fn run_worker(
 #[cfg(test)]
 mod tests {
     mod neighbors;
+    mod pressure;
     mod release;
     use std::sync::mpsc;
     use std::time::Duration;

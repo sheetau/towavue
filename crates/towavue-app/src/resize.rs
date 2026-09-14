@@ -1,6 +1,9 @@
 use crate::scroll_style::ScrollAreaStyle;
 use towavue_core::{ImageResize, ResampleFilter};
 
+#[cfg(test)]
+mod gpu;
+
 pub struct ResizeDialog {
     width: String,
     height: String,

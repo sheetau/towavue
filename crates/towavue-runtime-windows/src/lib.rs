@@ -7,6 +7,7 @@ mod caption;
 mod decode;
 mod dialog;
 mod export;
+mod file_details;
 mod fonts;
 mod image;
 mod image_clipboard;
@@ -52,6 +53,7 @@ pub use export::{
     MetadataField, MetadataSourceValue, export_media, export_media_with_options,
     export_media_with_output, read_export_metadata,
 };
+pub use file_details::FileDetails;
 pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_clipboard::{ImageCopyJob, ImageCopyRequest};

@@ -9,7 +9,7 @@ pub(super) struct ImageHandoff {
     pub view: ImageViewState,
     pub reading: Option<reading_view::ReadingHandoff>,
     transform: ImageTransform,
-    pub bytes: Option<u64>,
+    pub file_details: Option<towavue_runtime_windows::FileDetails>,
 }
 
 impl ImageHandoff {
@@ -72,7 +72,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 view: self.image_view,
                 reading: self.reading_mode.then(|| self.capture_reading_handoff()),
                 transform: self.visual_transform(image.dimensions()),
-                bytes: self.status_file_size.bytes(self.status_file_source()),
+                file_details: self
+                    .status_file_details
+                    .get(self.status_file_source())
+                    .cloned(),
             })
         } else {
             self.image_handoff.take()

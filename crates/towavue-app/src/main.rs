@@ -49,7 +49,7 @@ mod seekbar;
 mod selection;
 mod selection_aspect;
 mod shortcuts;
-mod status_file_size;
+mod status_file_details;
 mod tab_drag;
 mod tab_focus;
 mod tab_menu;
@@ -265,7 +265,7 @@ enum AppEvent {
     FolderReady,
     FilmstripReady,
     PlaylistDuration(playlist::DurationRequest, u64, Option<Duration>),
-    StatusFileSize(u64, Option<u64>),
+    StatusFileDetails(u64, Option<towavue_runtime_windows::FileDetails>),
     TabPreview(
         tab_preview::Target,
         u64,
@@ -895,7 +895,7 @@ struct Application<N> {
     preview_cache: PreviewCache,
     duration_workers: BTreeMap<u64, LatestTask>,
     volume_hud: volume_hud::Hud,
-    status_file_size: status_file_size::FileSize,
+    status_file_details: status_file_details::FileDetailsCache,
     playlist_duration_worker: LatestTask,
     playlist_duration_pending: Option<playlist::DurationRequest>,
     playlist_duration_generation: u64,
@@ -1123,7 +1123,7 @@ where
             preview_cache,
             duration_workers: BTreeMap::new(),
             volume_hud: volume_hud::Hud::default(),
-            status_file_size: status_file_size::FileSize::new()?,
+            status_file_details: status_file_details::FileDetailsCache::new()?,
             playlist_duration_worker: LatestTask::new("towavue-playlist-duration")?,
             playlist_duration_pending: None,
             playlist_duration_generation: 0,
@@ -2477,9 +2477,9 @@ where
                     self.request_redraw();
                 }
             }
-            AppEvent::StatusFileSize(ticket, bytes) => {
-                self.refresh_status_file_size();
-                if self.status_file_size.finish(ticket, bytes) {
+            AppEvent::StatusFileDetails(ticket, details) => {
+                self.refresh_status_file_details();
+                if self.status_file_details.finish(ticket, details) {
                     self.request_redraw();
                 }
             }
@@ -2827,7 +2827,7 @@ where
             // A redraw can overtake the queued decoder wakeup; use an already-ready original.
             self.finish_image_load();
         }
-        self.refresh_status_file_size();
+        self.refresh_status_file_details();
         self.cancel_stale_video_rotation();
         self.cancel_stale_video_resize();
         self.cancel_stale_audio_export_options();
@@ -4709,8 +4709,8 @@ where
         }
     }
 
-    fn status_file_source(&self) -> Option<status_file_size::Source> {
-        self.path.as_ref().map(|path| status_file_size::Source {
+    fn status_file_source(&self) -> Option<status_file_details::Source> {
+        self.path.as_ref().map(|path| status_file_details::Source {
             path: path.clone(),
             instance: self.media_generation,
             snapshot: self
@@ -4720,8 +4720,8 @@ where
         })
     }
 
-    fn refresh_status_file_size(&mut self) {
-        self.status_file_size
+    fn refresh_status_file_details(&mut self) {
+        self.status_file_details
             .update(self.status_file_source(), self.notify.clone());
     }
 
@@ -4871,8 +4871,11 @@ where
                                 details.push("Name fallback".into());
                             }
                         }
-                        if let Some(bytes) = self.image_handoff.as_ref().map_or_else(|| self.status_file_size.bytes(self.status_file_source()), |held| held.bytes) {
-                            details.push(format_size(bytes));
+                        if let Some(file) = self.image_handoff.as_ref().map_or_else(|| self.status_file_details.get(self.status_file_source()), |held| held.file_details.as_ref()) {
+                            details.push(format_size(file.bytes));
+                            if let Some(modified) = &file.modified_local {
+                                details.push(format!("Modified (local): {modified}"));
+                            }
                         }
                     }
                     if self.tabs.active().is_some_and(|tab| {
@@ -7253,7 +7256,7 @@ where
             self.image_sequence = image_navigation::ImageSequence::default();
             self.clear_image_previews();
             self.path = None;
-            self.refresh_status_file_size();
+            self.refresh_status_file_details();
             self.playlist.clear();
             self.media_kind = None;
             self.timeline_open = false;

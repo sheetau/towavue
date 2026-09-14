@@ -9,6 +9,9 @@ use towavue_runtime_windows::DecodedImageFrame;
 #[path = "../../src/image/png_static/paeth.rs"]
 mod paeth;
 
+#[path = "serial_paeth.rs"]
+mod serial_paeth;
+
 #[derive(Clone, Copy)]
 pub(super) struct Timing {
     parts: [Duration; 5],
@@ -47,6 +50,7 @@ pub(super) fn report(batch: usize, samples: &[Timing]) {
 pub(super) fn decode(path: &Path, mode: &str) -> DecodedImageFrame {
     let kernel = match mode {
         "stages-sse2" => "sse2",
+        "stages-serial-paeth" => "serial",
         _ => "current",
     };
     let mut parts = [Duration::ZERO; 5];
@@ -122,7 +126,11 @@ pub(super) fn decode(path: &Path, mode: &str) -> DecodedImageFrame {
             &before[before.len() - stride + 1..]
         };
         if kernel != "current" && method == 4 && bpp == 4 && row != 0 {
-            paeth::unfilter_rgba(previous, &mut current[1..]);
+            if kernel == "serial" {
+                serial_paeth::unfilter_rgba(previous, &mut current[1..]);
+            } else {
+                paeth::unfilter_rgba(previous, &mut current[1..]);
+            }
         } else {
             png::benchable_apis::unfilter(filters[method], bpp as u8, previous, &mut current[1..]);
         }

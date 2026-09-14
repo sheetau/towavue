@@ -151,7 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = std::env::var("TOWAVUE_PNG_BACKEND").unwrap_or_else(|_| "wic".into());
     assert!(matches!(
         backend.as_str(),
-        "wic" | "wic-bgra" | "libpng" | "stages" | "stages-sse2"
+        "wic" | "wic-bgra" | "libpng" | "stages" | "stages-sse2" | "stages-serial-paeth"
     ));
     let _apartment = Apartment::new()?;
     // Created once like a worker-local decoder service, outside per-file timings.

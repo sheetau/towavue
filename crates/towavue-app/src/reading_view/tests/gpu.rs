@@ -1,4 +1,5 @@
 use super::*;
+use std::os::windows::process::CommandExt;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
 fn color(page: usize, frame: usize) -> [u8; 4] {
@@ -8,6 +9,81 @@ fn color(page: usize, frame: usize) -> [u8; 4] {
         220 - page as u8 * 19,
         255,
     ]
+}
+
+fn image_surface<N: Fn(AppEvent) + Send + Sync + 'static>(
+    app: &mut Application<N>,
+    context: &egui::Context,
+    renderer: &mut FrameRenderer,
+    density: f32,
+) -> Vec<u8> {
+    let mut input = egui::RawInput {
+        max_texture_side: Some(renderer.max_texture_side()),
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(640.0, 480.0),
+        )),
+        ..Default::default()
+    };
+    input
+        .viewports
+        .entry(egui::ViewportId::ROOT)
+        .or_default()
+        .native_pixels_per_point = Some(density);
+    let output = context.run_ui(input, |ui| app.draw_image(ui));
+    renderer
+        .resize_surface((640.0 * density) as u32, (480.0 * density) as u32)
+        .expect("surface size");
+    renderer
+        .clear([0.0, 0.0, 0.0, 1.0])
+        .expect("clear complete surface");
+    renderer
+        .render_ui(context, output)
+        .expect("draw navigation phase");
+    let pixels = renderer
+        .verification_surface_rgba()
+        .expect("complete surface readback");
+    if app.image.is_some() || app.image_handoff.is_some() {
+        assert!(
+            pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel[0] != pixel[1] || pixel[1] != pixel[2]),
+            "colored generated pages, not only the clear surface or grayscale chrome, must reach the GPU"
+        );
+    }
+    renderer
+        .present_surface()
+        .expect("Present navigation phase");
+    pixels
+}
+
+fn equal_surface(before: &[u8], after: &[u8], density: f32, step: usize, phase: &str) {
+    assert_eq!(before.len(), after.len());
+    if before == after {
+        return;
+    }
+    let width = (640.0 * density) as usize;
+    let mut bounds = [usize::MAX, usize::MAX, 0, 0];
+    let mut count = 0;
+    for (index, (before, after)) in before
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(after.as_chunks::<4>().0)
+        .enumerate()
+    {
+        if before != after {
+            let (x, y) = (index % width, index / width);
+            bounds[0] = bounds[0].min(x);
+            bounds[1] = bounds[1].min(y);
+            bounds[2] = bounds[2].max(x);
+            bounds[3] = bounds[3].max(y);
+            count += 1;
+        }
+    }
+    panic!("{phase}: {density}x, step {step}, {count} differing pixels in {bounds:?}");
 }
 
 #[test]
@@ -49,6 +125,8 @@ fn run(root: PathBuf, real_files: bool) {
                     let animated = page % 3 == 1;
                     let (width, height, count) = if animated {
                         (512, 384, 64)
+                    } else if self.real_files && page % 2 == 1 {
+                        (3072, 4096, 1)
                     } else {
                         (4096, 3072, 1)
                     };
@@ -76,6 +154,7 @@ fn run(root: PathBuf, real_files: bool) {
                 for (path, image) in paths.iter().zip(&originals) {
                     let (width, height) = image.dimensions();
                     let mut command = std::process::Command::new(&ffmpeg);
+                    command.creation_flags(0x0800_0000);
                     command
                         .args([
                             "-v",
@@ -135,6 +214,9 @@ fn run(root: PathBuf, real_files: bool) {
                 Vec::new()
             };
             let mut checks = 0;
+            let mut pending_frames = 0;
+            let mut partial_frames = 0;
+            let mut completed_frames = 0;
             let mut foreground_decodes = 0;
             let mut foreground_hits = 0;
             let mut cache_hits = 0;
@@ -179,7 +261,8 @@ fn run(root: PathBuf, real_files: bool) {
                 let mut decoded_owners = Vec::new();
                 for (step, spread) in [0, 1, 0, 2, 1, 2, 0, 1, 2, 1, 0, 2].into_iter().enumerate() {
                     if self.real_files {
-                        app.reading_settings.reversed = false;
+                        let previous = (step != 0)
+                            .then(|| image_surface(&mut app, &context, &mut renderer, density));
                         if step == 0 {
                             app.load_path(paths[spread * 3].clone(), MediaKind::Image);
                         } else {
@@ -190,6 +273,14 @@ fn run(root: PathBuf, real_files: bool) {
                                     .is_some_and(|held| held.reading.is_some()),
                                 "retain the prior spread while loading"
                             );
+                            equal_surface(
+                                previous.as_ref().expect("previous spread"),
+                                &image_surface(&mut app, &context, &mut renderer, density),
+                                density,
+                                step,
+                                "request changed the displayed spread",
+                            );
+                            pending_frames += 1;
                         }
                         let deadline = Instant::now() + Duration::from_secs(60);
                         while app.image_loading {
@@ -198,6 +289,30 @@ fn run(root: PathBuf, real_files: bool) {
                                 .expect("async original completion");
                             if matches!(event, AppEvent::ImagesReady) {
                                 app.finish_image_load();
+                                let pixels =
+                                    image_surface(&mut app, &context, &mut renderer, density);
+                                if app.image_loading {
+                                    if let Some(previous) = &previous {
+                                        equal_surface(
+                                            previous,
+                                            &pixels,
+                                            density,
+                                            step,
+                                            "partial completion changed the held spread",
+                                        );
+                                        pending_frames += 1;
+                                        partial_frames += 1;
+                                    }
+                                } else {
+                                    equal_surface(
+                                        &pixels,
+                                        &image_surface(&mut app, &context, &mut renderer, density),
+                                        density,
+                                        step,
+                                        "completed spread changed on the next frame",
+                                    );
+                                    completed_frames += 1;
+                                }
                             }
                         }
                         assert_eq!(app.path.as_ref(), Some(&paths[spread * 3]));
@@ -450,8 +565,13 @@ fn run(root: PathBuf, real_files: bool) {
             }
             if self.real_files {
                 assert!(foreground_decodes > 0 && foreground_hits > 0);
+                assert!(
+                    partial_frames > 0,
+                    "observe real partial completions, not only warm batches"
+                );
+                assert_eq!(completed_frames, 36);
                 eprintln!(
-                    "READING_FILES checks={checks} foreground_decodes={foreground_decodes} foreground_hits={foreground_hits}; hidden hardware surfaces and async loader, fixed folder order, no physical input or peak-memory measurement"
+                    "READING_FILES checks={checks} pending_frames={pending_frames} partial_frames={partial_frames} completed_frames={completed_frames} foreground_decodes={foreground_decodes} foreground_hits={foreground_hits}; hidden hardware surfaces and async loader, fixed folder order, no physical input or peak-memory measurement"
                 );
             } else {
                 eprintln!(

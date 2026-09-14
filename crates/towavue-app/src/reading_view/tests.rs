@@ -1,5 +1,30 @@
 use super::*;
 
+#[test]
+fn reading_fit_never_overflows_from_fractional_scale_rounding() {
+    let joined = [4096.0_f32 / 3072.0, 384.0 / 512.0, 4096.0 / 3072.0]
+        .into_iter()
+        .sum::<f32>()
+        * 3072.0;
+    for extent in [egui::vec2(3072.0, joined), egui::vec2(joined, 3072.0)] {
+        for viewport in [
+            egui::vec2(640.0, 480.0),
+            egui::vec2(801.0, 603.0),
+            egui::vec2(503.0, 799.0),
+        ] {
+            let fitted = extent * scale(ImageViewState::default(), extent, viewport, 1.0);
+            assert!(
+                fitted.x <= viewport.x && fitted.y <= viewport.y,
+                "Fit must not create scrollbars: {fitted:?}"
+            );
+            assert!(
+                (fitted / viewport).max_elem() >= 1.0 - 2.0 * f32::EPSILON,
+                "Fit still fills one axis without rounding away fractional page geometry"
+            );
+        }
+    }
+}
+
 mod gpu;
 
 #[test]

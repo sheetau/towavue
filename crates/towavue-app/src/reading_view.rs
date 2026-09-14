@@ -266,7 +266,17 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 // reuse image zoom limits for Custom rather than rounding the layout itself.
 fn scale(view: ImageViewState, extent: egui::Vec2, viewport: egui::Vec2, density: f32) -> f32 {
     match view.zoom {
-        ZoomMode::Fit => (viewport / extent).min_elem(),
+        ZoomMode::Fit => {
+            let fitted = (viewport / extent).min_elem();
+            // Fractional joined extents can round a fitted edge just beyond the
+            // viewport and create a phantom scrollbar. Keep the scale uniform.
+            let displayed = extent * fitted;
+            if displayed.x > viewport.x || displayed.y > viewport.y {
+                fitted.next_down()
+            } else {
+                fitted
+            }
+        }
         ZoomMode::Cover => (viewport / extent).max_elem(),
         _ => {
             view.scale(

@@ -4352,6 +4352,7 @@ where
                                     );
                                     let close = chrome::tab_close(&mut tab_ui, close_rect, dirty)
                                         .help_text("Close tab");
+                                    tab_focus::release_pointer_focus(&close);
                                     if response.hovered()
                                         || close.hovered()
                                         || audio_button

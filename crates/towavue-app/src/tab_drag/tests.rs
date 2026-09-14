@@ -100,6 +100,138 @@ pub(crate) fn label_center<N>(app: &Application<N>, tab: TabId) -> egui::Pos2 {
 }
 
 #[test]
+fn tab_close_returns_focus_without_closing_on_cancel_or_bypassing_dirty_guards() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::tab_close_returns_focus_without_closing_on_cancel_or_bypassing_dirty_guards",
+    ) else {
+        return;
+    };
+    let size = egui::vec2(960.0, 576.0);
+    for density in [1.0, 1.25, 2.0] {
+        for index in [0, 2] {
+            let mut app = setup(&root);
+            let context = app.ui_context.clone().expect("context");
+            context.set_pixels_per_point(density);
+            let tab = app.tabs.tabs()[index].id;
+            let active = app.tabs.active().expect("active").id;
+            app.edits
+                .entry(tab)
+                .or_default()
+                .push(EditOperation::RotateClockwise, MediaKind::Image);
+            for _ in 0..3 {
+                frame(&mut app, size, true, vec![]);
+            }
+            let (output, _) = frame(&mut app, size, true, vec![]);
+            let label = format!("Close tab: {}", if index == 0 { "a.png" } else { "c.png" });
+            let tree = output.platform_output.accesskit_update.expect("tree");
+            let (id, node) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(&label))
+                .expect("close button");
+            let bounds = node.bounds().expect("bounds");
+            let point = egui::pos2(
+                (bounds.x0 + bounds.x1) as f32 / 2.0,
+                (bounds.y0 + bounds.y1) as f32 / 2.0,
+            );
+            let outside = point + egui::vec2(0.0, 80.0);
+            let original = app.tabs.clone();
+            for batched in [false, true] {
+                let value = egui::Id::new("tab-drag-numeric-focus");
+                context.memory_mut(|memory| memory.request_focus(value));
+                frame(&mut app, size, true, vec![egui::Event::PointerMoved(point)]);
+                assert!(
+                    context.memory(|memory| memory.has_focus(value)),
+                    "hover keeps numeric focus"
+                );
+                let mut events = vec![pointer(point, true)];
+                if batched {
+                    events.extend([egui::Event::PointerMoved(outside), pointer(outside, false)]);
+                }
+                assert!(frame(&mut app, size, true, events).1.is_empty());
+                assert_eq!(
+                    context.memory(|memory| memory.focused()),
+                    None,
+                    "close press/cancel releases numeric focus: batched={batched}"
+                );
+                if !batched {
+                    assert!(
+                        frame(
+                            &mut app,
+                            size,
+                            true,
+                            vec![egui::Event::PointerMoved(outside), pointer(outside, false)]
+                        )
+                        .1
+                        .is_empty()
+                    );
+                }
+                assert_eq!(context.memory(|memory| memory.focused()), None);
+                assert_eq!(tab_focus::take(&context, active), None);
+                assert_eq!(app.tabs, original);
+                assert!(
+                    state(&app).drag.is_none(),
+                    "close never starts tab dragging"
+                );
+            }
+            let (_, actions) = frame(
+                &mut app,
+                size,
+                true,
+                vec![
+                    egui::Event::PointerMoved(point),
+                    pointer(point, true),
+                    pointer(point, false),
+                ],
+            );
+            assert!(actions == vec![UiAction::CloseTab(tab)]);
+            assert_eq!(context.memory(|memory| memory.focused()), None);
+            assert!(frame(&mut app, size, true, vec![]).1.is_empty());
+            frame(
+                &mut app,
+                size,
+                true,
+                vec![egui::Event::AccessKitActionRequest(
+                    egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Focus,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: *id,
+                        data: None,
+                    },
+                )],
+            );
+            let focused = context
+                .memory(|memory| memory.focused())
+                .expect("explicit close-button focus");
+            let (_, actions) = frame(
+                &mut app,
+                size,
+                true,
+                vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            assert!(actions == vec![UiAction::CloseTab(tab)]);
+            assert_eq!(context.memory(|memory| memory.focused()), Some(focused));
+            let history = app.edits[&tab].clone();
+            app.handle_ui_action(actions[0].clone());
+            assert!(app.pending_guard.is_some());
+            assert_eq!(
+                app.tabs.tabs(),
+                original.tabs(),
+                "dirty close waits for the existing guard"
+            );
+            assert_eq!(app.tabs.active().expect("guard target").id, tab);
+            assert_eq!(app.edits[&tab], history);
+        }
+    }
+}
+
+#[test]
 fn detached_tabs_keep_the_grab_offset_in_the_first_slot() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_drag::tests::detached_tabs_keep_the_grab_offset_in_the_first_slot",

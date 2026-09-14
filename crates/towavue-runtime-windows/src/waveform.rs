@@ -52,14 +52,9 @@ pub fn timeline_waveform(
         format,
         cancellation.flag(),
         |chunk| {
-            for frame in chunk.bytes.as_chunks::<8>().0 {
-                let left = f32::from_le_bytes(frame[..4].try_into().expect("left sample"));
-                let right = f32::from_le_bytes(frame[4..].try_into().expect("right sample"));
-                if !left.is_finite() || !right.is_finite() {
-                    invalid = true;
-                    return false;
-                }
-                envelope.push(f64::from(left.abs().max(right.abs())) * f64::from(volume));
+            if !envelope.push_stereo(&chunk.bytes, f64::from(volume)) {
+                invalid = true;
+                return false;
             }
             !cancellation.is_cancelled()
         },
@@ -85,6 +80,46 @@ struct DisplayEnvelope {
 }
 
 impl DisplayEnvelope {
+    fn push_stereo(&mut self, pcm: &[u8], volume: f64) -> bool {
+        let amplitude = |frame: &[u8; 8]| {
+            let left = f32::from_le_bytes(frame[..4].try_into().expect("left sample"));
+            let right = f32::from_le_bytes(frame[4..].try_into().expect("right sample"));
+            (left.is_finite() && right.is_finite())
+                .then(|| f64::from(left.abs().max(right.abs())) * volume)
+        };
+        let mut frames = pcm.as_chunks::<8>().0;
+        while !frames.is_empty() {
+            // Whole samples inside one column need only ordered accumulation.
+            // Fractional boundaries and excess samples retain the scalar path.
+            let count = if self.column < self.sums.len() {
+                (self.column_end as u64)
+                    .saturating_sub(self.position)
+                    .min(frames.len() as u64) as usize
+            } else {
+                0
+            };
+            if count == 0 {
+                let Some(value) = amplitude(&frames[0]) else {
+                    return false;
+                };
+                self.push(value);
+                frames = &frames[1..];
+            } else {
+                let mut sum = self.sums[self.column];
+                for frame in &frames[..count] {
+                    let Some(value) = amplitude(frame) else {
+                        return false;
+                    };
+                    sum += value;
+                }
+                self.sums[self.column] = sum;
+                self.position += count as u64;
+                frames = &frames[count..];
+            }
+        }
+        true
+    }
+
     fn new(columns: u32, frames: u64) -> Self {
         Self {
             sums: vec![0.0; columns as usize],
@@ -249,6 +284,9 @@ fn rasterize(envelope: &Envelope, width: u32, height: u32) -> io::Result<image::
     }
     Ok(image)
 }
+
+#[cfg(test)]
+mod chunk_tests;
 
 #[cfg(test)]
 mod tests {

@@ -2,6 +2,7 @@
 //! Files are already OS-cache-warm; only the preview cache starts empty each round.
 
 use std::error::Error;
+use std::hash::{Hash, Hasher};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -105,14 +106,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if let Some(expected) = &expected_detail {
                     assert_eq!(&detail.0, expected);
                 }
+                let mut detail_hash = std::collections::hash_map::DefaultHasher::new();
+                for value in &detail.0 {
+                    value.to_bits().hash(&mut detail_hash);
+                }
                 expected_overview = Some(overview.0);
                 expected_detail = Some(detail.0);
                 println!(
-                    "WAVEFORM_COST seconds={seconds} codec={codec} round={round} native_ms={:.3} cli_ms={:.3} cached_ms={:.3} detail_ms={:.3}",
+                    "WAVEFORM_COST seconds={seconds} codec={codec} round={round} native_ms={:.3} cli_ms={:.3} cached_ms={:.3} detail_ms={:.3} detail_hash={:016x}",
                     overview.1.as_secs_f64() * 1000.0,
                     cli.1.as_secs_f64() * 1000.0,
                     cached_time.as_secs_f64() * 1000.0,
                     detail.1.as_secs_f64() * 1000.0,
+                    detail_hash.finish(),
                 );
             }
             let after = std::fs::metadata(&path)?;

@@ -1,5 +1,7 @@
 use super::*;
 
+mod gpu;
+
 #[test]
 fn reading_zoom_pan_and_actual_size_preserve_joined_pages_and_read_only_state() {
     let Some(root) = crate::tests::isolated_test_root(

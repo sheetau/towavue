@@ -87,6 +87,206 @@ fn equal_surface(before: &[u8], after: &[u8], density: f32, step: usize, phase: 
 }
 
 #[test]
+#[ignore = "requires hardware D3D11; small generated reading layouts"]
+fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "reading_view::tests::gpu::reading_layout_changes_preserve_the_complete_gpu_surface_until_ready",
+    ) else {
+        return;
+    };
+    struct Trial {
+        root: PathBuf,
+        completed: bool,
+    }
+    impl ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = event_loop
+                .create_window(Window::default_attributes().with_visible(false))
+                .expect("hidden window");
+            for density in [1.0, 1.25, 2.0] {
+                for axis in [ReadingAxis::Horizontal, ReadingAxis::Vertical] {
+                    let mut renderer = FrameRenderer::new(&window).expect("hardware renderer");
+                    let mut app = Application::new(None, |_| {}).expect("app");
+                    let context = fonts::test_context();
+                    context.global_style_mut(chrome::style);
+                    app.ui_context = Some(context.clone());
+                    let paths = ["first.png", "second.png", "third.png", "fourth.png"]
+                        .map(|name| self.root.join(name));
+                    let tab = app.tabs.open_new(paths[0].clone(), MediaKind::Image);
+                    app.path = Some(paths[0].clone());
+                    app.displayed_tab = Some(tab);
+                    app.media_kind = Some(MediaKind::Image);
+                    app.state = PlaybackState::Paused;
+                    app.reading_mode = true;
+                    app.reading_settings.axis = axis;
+                    app.reading_settings.reversed = true;
+                    app.folder_snapshot = Some(FolderSnapshot {
+                        folder_identity: towavue_core::ShellIdentity::new(vec![0]),
+                        folder_path: self.root.clone(),
+                        items: paths
+                            .iter()
+                            .enumerate()
+                            .map(|(index, path)| towavue_core::FolderMediaItem {
+                                identity: towavue_core::ShellIdentity::new(vec![index as u8]),
+                                path: path.clone(),
+                                kind: MediaKind::Image,
+                            })
+                            .collect(),
+                        sort_columns: vec![],
+                        source: FolderSnapshotSource::NaturalNameFallback,
+                        generation: 1,
+                        captured_at: std::time::SystemTime::UNIX_EPOCH,
+                    });
+                    let decoded = |page: usize, revision: usize| {
+                        let (width, height) = if page.is_multiple_of(2) {
+                            (96, 64)
+                        } else {
+                            (64, 96)
+                        };
+                        let mut rgba = color(page, revision).repeat((width * height) as usize);
+                        for (index, pixel) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                            if (index % width as usize / 4 + index / width as usize / 4)
+                                .is_multiple_of(2)
+                            {
+                                pixel.copy_from_slice(&[220, 160, 80, 96]);
+                            }
+                        }
+                        Arc::new(DecodedImage {
+                            format: "test",
+                            animation_plays: 0,
+                            frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                                width,
+                                height,
+                                rgba,
+                                delay: Duration::ZERO,
+                            }],
+                        })
+                    };
+                    app.image = Some(
+                        app.image_texture_cache
+                            .load(&context, &paths[0], decoded(0, 0), TextureOptions::LINEAR)
+                            .expect("first"),
+                    );
+                    app.reading_pages = vec![Ok(app
+                        .image_texture_cache
+                        .load(&context, &paths[1], decoded(1, 0), TextureOptions::LINEAR)
+                        .expect("second"))];
+                    image_surface(&mut app, &context, &mut renderer, density);
+                    assert_eq!(context.pixels_per_point(), density);
+                    let before = image_surface(&mut app, &context, &mut renderer, density);
+                    app.dispatch(CommandId::IncreaseReadingPages);
+                    app.image_loader.request(Vec::new());
+                    equal_surface(
+                        &before,
+                        &image_surface(&mut app, &context, &mut renderer, density),
+                        density,
+                        0,
+                        "settings request changed the held spread",
+                    );
+                    let stale = app.image_generation;
+                    app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                        generation: stale,
+                        first_index: 0,
+                        total: 3,
+                        images: vec![(paths[0].clone(), Ok(decoded(0, 1)))],
+                    });
+                    equal_surface(
+                        &before,
+                        &image_surface(&mut app, &context, &mut renderer, density),
+                        density,
+                        1,
+                        "first completion changed the held spread",
+                    );
+                    let held = app.image_handoff.take().expect("held layout");
+                    assert!(
+                        image_surface(&mut app, &context, &mut renderer, density) != before,
+                        "negative control must detect partial-layout pixels"
+                    );
+                    app.image_handoff = Some(held);
+                    app.dispatch(CommandId::IncreaseReadingPages);
+                    app.image_loader.request(Vec::new());
+                    assert_eq!(app.reading_settings.page_count, 4);
+                    equal_surface(
+                        &before,
+                        &image_surface(&mut app, &context, &mut renderer, density),
+                        density,
+                        2,
+                        "supersession captured a partial spread",
+                    );
+                    app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                        generation: stale,
+                        first_index: 1,
+                        total: 3,
+                        images: vec![(paths[1].clone(), Ok(decoded(1, 1)))],
+                    });
+                    equal_surface(
+                        &before,
+                        &image_surface(&mut app, &context, &mut renderer, density),
+                        density,
+                        3,
+                        "stale completion changed the held spread",
+                    );
+                    for (index, path) in paths.iter().enumerate() {
+                        app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                            generation: app.image_generation,
+                            first_index: index,
+                            total: paths.len(),
+                            images: vec![(path.clone(), Ok(decoded(index, 1)))],
+                        });
+                        if index < 3 {
+                            equal_surface(
+                                &before,
+                                &image_surface(&mut app, &context, &mut renderer, density),
+                                density,
+                                index + 4,
+                                "partial latest layout changed the held spread",
+                            );
+                        }
+                    }
+                    assert!(!app.image_loading && app.image_handoff.is_none());
+                    assert_eq!(app.reading_pages.len(), 3);
+                    let completed = image_surface(&mut app, &context, &mut renderer, density);
+                    assert!(
+                        completed != before,
+                        "latest layout must replace the held pixels"
+                    );
+                    equal_surface(
+                        &completed,
+                        &image_surface(&mut app, &context, &mut renderer, density),
+                        density,
+                        7,
+                        "completed layout changed on the next frame",
+                    );
+                    assert!(
+                        app.edits
+                            .values()
+                            .all(|history| history.operations().is_empty())
+                    );
+                }
+            }
+            self.completed = true;
+            eprintln!(
+                "PASS reading layout GPU: 6 axis/density cases, 42 held whole-surface comparisons, 6 partial-layout negative controls and 6 stable completed layouts; generated mixed-alpha pages, hidden hardware rendering, scripted completions, no physical input."
+            );
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    let mut trial = Trial {
+        root,
+        completed: false,
+    };
+    let mut builder = EventLoop::builder();
+    builder.with_any_thread(true);
+    builder
+        .build()
+        .expect("event loop")
+        .run_app(&mut trial)
+        .expect("trial");
+    assert!(trial.completed, "hardware verification must execute");
+}
+
+#[test]
 #[ignore = "large reading textures require hardware D3D11 and substantial GPU/CPU memory"]
 fn reading_gpu_pressure_preserves_pages_animation_and_texture_lifetimes() {
     let Some(root) = crate::tests::isolated_test_root(

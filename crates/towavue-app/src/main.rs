@@ -1927,11 +1927,17 @@ where
             .reading_mode
             .then(|| self.take_navigation_handoff(MediaKind::Image))
             .flatten();
-        if self
-            .folder_snapshot
-            .as_ref()
-            .is_some_and(|previous| previous.items == snapshot.items)
-        {
+        if self.folder_snapshot.as_ref().is_some_and(|previous| {
+            previous.folder_path == snapshot.folder_path
+                && (previous.items == snapshot.items || self.filmstrip_open)
+        }) {
+            if self
+                .folder_snapshot
+                .as_ref()
+                .is_some_and(|previous| previous.items != snapshot.items)
+            {
+                self.filmstrip.cancel_drag();
+            }
             self.filmstrip
                 .refresh_previews(&snapshot, self.filmstrip_open);
         } else {

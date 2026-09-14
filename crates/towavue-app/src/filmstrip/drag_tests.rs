@@ -85,6 +85,175 @@ fn card(output: &egui::FullOutput, name: &str) -> Rect {
 }
 
 #[test]
+fn filmstrip_tab_navigation_uses_current_order_after_folder_updates() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_tab_navigation_uses_current_order_after_folder_updates",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    for density in [1.0, 1.25, 2.0] {
+        for discard in [false, true] {
+            for shift in [false, true] {
+                for change in ["reorder", "insert", "remove_before", "remove_focus"] {
+                    let context = crate::fonts::test_context();
+                    context.set_pixels_per_point(density);
+                    context.enable_accesskit();
+                    app.filmstrip = Filmstrip::new(
+                        PreviewCache::new(root.join("cache")).expect("cache"),
+                        || {},
+                    )
+                    .expect("strip");
+                    let mut snapshot = snapshot(&root);
+                    let current = snapshot.items[0].path.clone();
+                    let focused = snapshot.items[1].path.clone();
+                    app.path = Some(current.clone());
+                    app.media_kind = Some(MediaKind::Image);
+                    app.folder_snapshot = Some(snapshot.clone());
+                    app.filmstrip_open = true;
+                    for _ in 0..3 {
+                        frame(
+                            &mut app.filmstrip,
+                            &context,
+                            &snapshot,
+                            &current,
+                            true,
+                            input(vec![]),
+                        );
+                    }
+                    let output = frame(
+                        &mut app.filmstrip,
+                        &context,
+                        &snapshot,
+                        &current,
+                        true,
+                        input(vec![]),
+                    )
+                    .0;
+                    let position = card(&output, "other.png").center();
+                    frame(
+                        &mut app.filmstrip,
+                        &context,
+                        &snapshot,
+                        &current,
+                        true,
+                        input(vec![egui::Event::PointerMoved(position)]),
+                    );
+                    match change {
+                        "reorder" => snapshot.items.swap(0, 1),
+                        "insert" => {
+                            let mut added = snapshot.items[0].clone();
+                            added.path = root.join("new.png");
+                            snapshot.items.insert(0, added);
+                        }
+                        "remove_before" => {
+                            snapshot.items.remove(0);
+                        }
+                        "remove_focus" => {
+                            snapshot.items.remove(1);
+                        }
+                        _ => unreachable!(),
+                    }
+                    snapshot.generation += 1;
+                    let texture = context.load_texture(
+                        "retained card",
+                        egui::ColorImage::filled([1, 1], Color32::WHITE),
+                        Default::default(),
+                    );
+                    let texture_id = texture.id();
+                    app.filmstrip
+                        .previews
+                        .insert(focused.clone(), Ok((texture, None)));
+                    app.apply_folder_snapshot(snapshot.clone());
+                    assert_eq!(
+                        app.filmstrip
+                            .previews
+                            .get(&focused)
+                            .and_then(|preview| preview.as_ref().ok())
+                            .map(|(texture, _)| texture.id()),
+                        Some(texture_id),
+                        "keep ready pixels during same-folder refresh"
+                    );
+                    let count = snapshot.items.len();
+                    let start = snapshot
+                        .items
+                        .iter()
+                        .position(|item| item.path == focused)
+                        .or_else(|| snapshot.items.iter().position(|item| item.path == current))
+                        .unwrap_or(0);
+                    let target = (start + if shift { count - 1 } else { 1 }) % count;
+                    let expected = &snapshot.items[target].path;
+                    let key = |key, modifiers| egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    };
+                    let mut actions = Vec::new();
+                    let output = context.run_ui(
+                        input(vec![key(
+                            egui::Key::Tab,
+                            if shift {
+                                egui::Modifiers::SHIFT
+                            } else {
+                                egui::Modifiers::NONE
+                            },
+                        )]),
+                        |_| {
+                            app.filmstrip.show(
+                                &context,
+                                context.content_rect(),
+                                Some(&snapshot),
+                                Some(&current),
+                                true,
+                                &mut actions,
+                            );
+                            if discard && context.current_pass_index() == 0 {
+                                context.request_discard("folder-order Tab traversal");
+                            }
+                        },
+                    );
+                    assert!(actions.is_empty());
+                    if change == "remove_focus" {
+                        assert!(
+                            !app.filmstrip.previews.contains_key(&focused),
+                            "removed cards must release their preview"
+                        );
+                    }
+                    let tree = output.platform_output.accesskit_update.expect("tree");
+                    let node = &tree
+                        .nodes
+                        .iter()
+                        .find(|(id, _)| *id == tree.focus)
+                        .expect("focused card")
+                        .1;
+                    assert_eq!(
+                        node.label(),
+                        Some(display_name(expected).as_str()),
+                        "{change}, shift={shift}, discard={discard}, density={density}"
+                    );
+                    if discard {
+                        assert!(output.platform_output.num_completed_passes > 1);
+                    }
+                    assert!(
+                        frame(
+                            &mut app.filmstrip,
+                            &context,
+                            &snapshot,
+                            &current,
+                            true,
+                            input(vec![key(egui::Key::Enter, egui::Modifiers::NONE)])
+                        )
+                        .1 == vec![UiAction::OpenFilmstripMedia(expected.clone(), false)]
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn filmstrip_tab_navigation_wraps_without_focusing_background_controls() {
     let Some(root) = crate::tests::isolated_test_root(
         "filmstrip::drag_tests::filmstrip_tab_navigation_wraps_without_focusing_background_controls",

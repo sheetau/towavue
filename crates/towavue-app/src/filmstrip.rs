@@ -38,7 +38,7 @@ pub struct Filmstrip {
     focus_requested: bool,
     focused_card: Option<egui::Id>,
     pointer_position: Option<egui::Pos2>,
-    card_indices: Vec<(egui::Id, usize)>,
+    card_paths: Vec<(egui::Id, PathBuf)>,
     tab_navigation: Option<(u64, usize)>,
     scroll_offset: f32,
     drag: drag::State,
@@ -57,7 +57,7 @@ impl Filmstrip {
             focus_requested: false,
             focused_card: None,
             pointer_position: None,
-            card_indices: Vec::new(),
+            card_paths: Vec::new(),
             tab_navigation: None,
             scroll_offset: 0.0,
             drag: drag::State::default(),
@@ -90,7 +90,7 @@ impl Filmstrip {
     pub fn clear_previews(&mut self) {
         self.drag.clear();
         self.focused_card = None;
-        self.card_indices.clear();
+        self.card_paths.clear();
         self.tab_navigation = None;
         if !self.visible.is_empty() {
             self.generation = self.loader.request(Vec::new());
@@ -105,7 +105,7 @@ impl Filmstrip {
         self.cancel_drag();
         self.focus_requested = false;
         self.focused_card = None;
-        self.card_indices.clear();
+        self.card_paths.clear();
         self.tab_navigation = None;
         if !self.visible.is_empty() {
             self.generation = self.loader.request(Vec::new());
@@ -314,22 +314,25 @@ impl Filmstrip {
         {
             if let Some((_, target)) = self.tab_navigation.filter(|(saved, _)| *saved == frame) {
                 Some(target)
-            } else if let Some(count) = snapshot
-                .map(|snapshot| snapshot.items.len())
-                .filter(|count| *count > 0)
+            } else if let Some(count) =
+                snapshot
+                    .map(|snapshot| snapshot.items.len())
+                    .filter(|count| {
+                        *count > 0 && context.input(|input| input.key_pressed(egui::Key::Tab))
+                    })
             {
                 let mut target = if recenter || self.focus_requested {
                     selected
                 } else {
                     // Directional focus resolves after layout; read the actual focus
-                    // against the last bounded card set, not last frame's focused index.
+                    // against the last bounded card set, then resolve its path in the
+                    // latest folder order. Stored indices become stale after refresh.
                     context
                         .memory(|memory| memory.focused())
                         .and_then(|focused| {
-                            self.card_indices
-                                .iter()
-                                .find(|(id, _)| *id == focused)
-                                .map(|(_, index)| *index)
+                            let (_, path) =
+                                self.card_paths.iter().find(|(id, _)| *id == focused)?;
+                            snapshot?.items.iter().position(|item| item.path == *path)
                         })
                         .or(selected)
                 }
@@ -477,7 +480,7 @@ impl Filmstrip {
                     }
                     let mut cards = Vec::new();
                     let mut focused_card = None;
-                    self.card_indices.clear();
+                    self.card_paths.clear();
                     for index in range {
                         let item = &snapshot.items[index];
                         wanted.push((item.path.clone(), item.kind));
@@ -489,7 +492,7 @@ impl Filmstrip {
                                 egui::Sense::click_and_drag(),
                             )
                             .on_hover_cursor(egui::CursorIcon::PointingHand);
-                        self.card_indices.push((response.id, index));
+                        self.card_paths.push((response.id, item.path.clone()));
                         let active = selected == Some(index);
                         self.drag.observe(&response, &item.path);
                         if focus_target == Some(index)
@@ -1574,11 +1577,12 @@ mod tests {
             egui::Shape::Mesh(mesh) if mesh.texture_id == replacement)));
         let mut reordered = app.folder_snapshot.clone().expect("snapshot");
         reordered.items.reverse();
+        app.filmstrip_open = false;
         app.filmstrip.pause_preparation();
         app.apply_folder_snapshot(reordered);
         assert!(
             app.filmstrip.previews.is_empty(),
-            "changed order still resets the strip"
+            "changed order resets a closed strip"
         );
         assert!(
             context.tex_manager().read().meta(replacement).is_none(),
@@ -1674,7 +1678,7 @@ mod tests {
                 );
                 assert!(strip.visible.len() <= 5, "retain bounded virtualization");
                 assert_eq!(
-                    strip.card_indices.len(),
+                    strip.card_paths.len(),
                     strip.visible.len(),
                     "focus lookup tracks only the materialized cards"
                 );

@@ -3,7 +3,7 @@ use std::mem::ManuallyDrop;
 #[cfg(feature = "render-verification")]
 mod verification;
 #[cfg(feature = "render-verification")]
-pub use verification::VerificationMemory;
+pub use verification::{VerificationMemory, verification_thread_cpu_time};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use thiserror::Error;

@@ -1,4 +1,6 @@
 use super::*;
+use crate::image_color::COLOR_IMAGE_CPU_TIME;
+use towavue_runtime_windows::verification_thread_cpu_time;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
 const PHASES: [&str; 8] = [
@@ -191,6 +193,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 captured_at: std::time::SystemTime::UNIX_EPOCH,
             });
             let started = Instant::now();
+            COLOR_IMAGE_CPU_TIME.set(self.trace_index.map(|_| Duration::ZERO));
             let mut phases = PhaseTrace {
                 boundary: Duration::ZERO,
                 costs: [PhaseCost::default(); PHASES.len()],
@@ -214,6 +217,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             let mut original_gpu = Vec::new();
             let mut original_layout = Vec::new();
             let mut previous_conversion_time = COLOR_IMAGE_CONVERSION_TIME.get();
+            let mut previous_conversion_cpu = Duration::ZERO;
             let mut next_idle_frame = Instant::now();
             let mut presentations = 0;
             let mut first_present = None;
@@ -297,7 +301,19 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 // Never read back or emit pixels from reference media; only submit to a hidden surface.
                 let upload_before = renderer.verification_upload_times();
                 phases.finish(3, started.elapsed(), visited.len(), sent);
+                let cpu_started = self
+                    .trace_index
+                    .filter(|index| {
+                        path.as_ref() == Some(&self.paths[*index])
+                            && visited.last() != path.as_ref()
+                    })
+                    .map(|_| {
+                        verification_thread_cpu_time().expect("GPU submission CPU accounting")
+                    });
                 let gpu_time = gpu::submit(&app, &context, output, &mut renderer, false);
+                let gpu_cpu = cpu_started.map(|before| {
+                    verification_thread_cpu_time().expect("GPU submission CPU accounting") - before
+                });
                 phases.finish(4, started.elapsed(), visited.len(), sent);
                 presentations += 1;
                 next_idle_frame = Instant::now() + self.idle_frame_interval;
@@ -335,8 +351,17 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                             upload[1],
                             upload[2],
                         );
+                        eprintln!(
+                            "REFERENCE_TRACE_CPU color_cpu_ms={:.3} gpu_submit_cpu_ms={:.3}; calling-thread kernel+user accounting, no worker CPU or GPU execution time; accounting granularity prevents exact wait-time subtraction",
+                            (COLOR_IMAGE_CPU_TIME.get().expect("enabled accounting")
+                                - previous_conversion_cpu)
+                                .as_secs_f64()
+                                * 1000.0,
+                            gpu_cpu.expect("selected original accounting").as_secs_f64() * 1000.0,
+                        );
                     }
                     previous_conversion_time = COLOR_IMAGE_CONVERSION_TIME.get();
+                    previous_conversion_cpu = COLOR_IMAGE_CPU_TIME.get().unwrap_or_default();
                     let index = if self.reverse {
                         self.paths.len() - 1 - index
                     } else {
@@ -464,6 +489,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 }
             }
             self.completed = !failed && complete_order && blanks == 0 && previews == 0;
+            COLOR_IMAGE_CPU_TIME.set(None);
             event_loop.exit();
         }
         fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}

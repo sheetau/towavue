@@ -72,6 +72,8 @@ User settings live under `%APPDATA%\towavue` (shortcuts.conf, grid.conf, recent-
 
 For bug reports retain reproduction, expected/actual result, build, Windows/GPU/driver/DPI, and codec/dimensions/duration. Use disposable generated media, not private files. For Explorer ordering include Sort By, whether Explorer was open, and reported snapshot source.
 
+Selected reference traces and the opt-in color-example test also report calling-thread kernel+user CPU accounting from [GetThreadTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getthreadtimes). These counters exclude other workers and GPU execution; their accounting granularity does not support exact wall-minus-CPU wait durations. CPU sampling is verification-only; ordinary color conversion leaves it disabled.
+
 ## Documentation maintenance
 
 STATUS is the only current-work/handoff record. Update rows in place rather than appending a chronology. Retain new evidence when it changes the next decision or prevents repeated work; include a commit/test reference and its limits. Small documentation corrections need not create status entries.

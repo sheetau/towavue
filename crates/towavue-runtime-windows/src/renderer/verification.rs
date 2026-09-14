@@ -9,6 +9,48 @@ use windows::Win32::Graphics::Dxgi::{
 use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS_EX};
 use windows::Win32::System::Threading::GetCurrentProcess;
 
+/// Calling-thread kernel + user CPU accounting, not wall time or GPU execution time.
+/// OS accounting granularity means wall-minus-CPU is not an exact wait duration.
+pub fn verification_thread_cpu_time() -> Result<std::time::Duration, RenderError> {
+    use windows::Win32::Foundation::FILETIME;
+    use windows::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
+    let mut creation = FILETIME::default();
+    let mut exit = FILETIME::default();
+    let mut kernel = FILETIME::default();
+    let mut user = FILETIME::default();
+    // The pseudo handle is borrowed, never closed. All four outputs remain valid
+    // for this synchronous call; creation/exit timestamps are deliberately ignored.
+    unsafe {
+        GetThreadTimes(
+            GetCurrentThread(),
+            &mut creation,
+            &mut exit,
+            &mut kernel,
+            &mut user,
+        )?;
+    }
+    let duration = |time: FILETIME| {
+        let ticks = (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+        std::time::Duration::new(ticks / 10_000_000, ((ticks % 10_000_000) * 100) as u32)
+    };
+    Ok(duration(kernel) + duration(user))
+}
+
+#[test]
+fn thread_cpu_accounting_advances_with_calling_thread_work() {
+    use std::time::{Duration, Instant};
+    let before = verification_thread_cpu_time().expect("thread CPU accounting");
+    let started = Instant::now();
+    let mut value = 1_u64;
+    while started.elapsed() < Duration::from_millis(250) {
+        value = std::hint::black_box(value.wrapping_mul(6364136223846793005).wrapping_add(1));
+    }
+    let after = verification_thread_cpu_time().expect("thread CPU accounting");
+    assert!(after > before);
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(verification_thread_cpu_time().expect("thread CPU accounting") >= after);
+}
+
 /// Process-lifetime OS high-water marks and current node-zero GPU usage, in bytes.
 pub struct VerificationMemory {
     pub working_set: u64,

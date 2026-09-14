@@ -10,7 +10,9 @@ use towavue_runtime_windows::DecodedImageFrame;
 #[test]
 #[ignore = "Release color benchmark with the same cfg(test) diagnostics as the app harness"]
 fn measured_with_application_test_instrumentation() {
+    image_color::COLOR_IMAGE_CPU_TIME.set(Some(Duration::ZERO));
     main();
+    image_color::COLOR_IMAGE_CPU_TIME.set(None);
 }
 
 fn convert(frame: &DecodedImageFrame, strategy: usize) -> egui::ColorImage {
@@ -135,9 +137,17 @@ fn main() {
 }
 
 fn measure(frame: &DecodedImageFrame, case: &str) {
+    #[cfg(test)]
+    let first_cpu = image_color::COLOR_IMAGE_CPU_TIME.get().unwrap_or_default();
     let started = Instant::now();
     let first = image_color::color_image(frame);
     let first_elapsed = started.elapsed();
+    #[cfg(test)]
+    eprintln!(
+        "IMAGE_COLOR_CPU_FIRST cpu_ms={:.3}; calling-thread accounting, not exact wait time",
+        (image_color::COLOR_IMAGE_CPU_TIME.get().unwrap_or_default() - first_cpu).as_secs_f64()
+            * 1000.0
+    );
     let expected = convert(frame, 2);
     assert!(first == expected, "first conversion pixels differ");
     drop(first);
@@ -152,6 +162,8 @@ fn measure(frame: &DecodedImageFrame, case: &str) {
     }
     for (batch, strategy) in [0, 1, 2, 2, 1, 0].into_iter().enumerate() {
         let mut times = Vec::new();
+        #[cfg(test)]
+        let cpu_before = image_color::COLOR_IMAGE_CPU_TIME.get().unwrap_or_default();
         for _ in 0..5 {
             let started = Instant::now();
             let actual = convert(frame, strategy);
@@ -165,5 +177,14 @@ fn measure(frame: &DecodedImageFrame, case: &str) {
             frame.height,
             times[2].as_secs_f64() * 1000.0,
         );
+        #[cfg(test)]
+        if strategy == 0 {
+            eprintln!(
+                "IMAGE_COLOR_CPU batch={batch} five_sample_cpu_ms={:.3}; current conversion only, OS accounting granularity applies",
+                (image_color::COLOR_IMAGE_CPU_TIME.get().unwrap_or_default() - cpu_before)
+                    .as_secs_f64()
+                    * 1000.0
+            );
+        }
     }
 }

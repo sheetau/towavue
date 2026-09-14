@@ -6,9 +6,15 @@ use std::time::{Duration, Instant};
 thread_local! {
     pub(crate) static COLOR_IMAGE_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(crate) static COLOR_IMAGE_CONVERSION_TIME: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+    pub(crate) static COLOR_IMAGE_CPU_TIME: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
 }
 
 pub(crate) fn color_image(frame: &towavue_runtime_windows::DecodedImageFrame) -> egui::ColorImage {
+    #[cfg(test)]
+    let cpu_started = COLOR_IMAGE_CPU_TIME.get().map(|_| {
+        towavue_runtime_windows::verification_thread_cpu_time()
+            .expect("color thread CPU accounting")
+    });
     #[cfg(test)]
     let started = Instant::now();
     #[cfg(test)]
@@ -42,5 +48,14 @@ pub(crate) fn color_image(frame: &towavue_runtime_windows::DecodedImageFrame) ->
     let image = egui::ColorImage::new(size, pixels);
     #[cfg(test)]
     COLOR_IMAGE_CONVERSION_TIME.set(COLOR_IMAGE_CONVERSION_TIME.get() + started.elapsed());
+    #[cfg(test)]
+    if let Some(cpu_started) = cpu_started {
+        let elapsed = towavue_runtime_windows::verification_thread_cpu_time()
+            .expect("color thread CPU accounting")
+            - cpu_started;
+        COLOR_IMAGE_CPU_TIME.set(Some(
+            COLOR_IMAGE_CPU_TIME.get().expect("enabled accounting") + elapsed,
+        ));
+    }
     image
 }

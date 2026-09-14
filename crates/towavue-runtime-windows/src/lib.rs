@@ -74,9 +74,9 @@ pub use preview::{
     VideoSheetLayout,
 };
 pub use preview_loader::{PreviewLoader, VISIBLE_PREVIEW_LIMIT};
-#[cfg(feature = "render-verification")]
-pub use renderer::VerificationMemory;
 pub use renderer::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError, video_edit_geometry};
+#[cfg(feature = "render-verification")]
+pub use renderer::{VerificationMemory, verification_thread_cpu_time};
 pub use selection_outline::{paint_selection_outline, paint_time_selection};
 pub use shell::{
     FolderOrderError, FolderOrderProvider, canonical_shell_path, reveal_file, reveal_license_guide,

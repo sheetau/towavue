@@ -36,6 +36,7 @@ pub struct Filmstrip {
     focus: Option<PathBuf>,
     focus_requested: bool,
     focused_card: Option<egui::Id>,
+    pointer_position: Option<egui::Pos2>,
     card_indices: Vec<(egui::Id, usize)>,
     tab_navigation: Option<(u64, usize)>,
     scroll_offset: f32,
@@ -53,6 +54,7 @@ impl Filmstrip {
             focus: None,
             focus_requested: false,
             focused_card: None,
+            pointer_position: None,
             card_indices: Vec::new(),
             tab_navigation: None,
             scroll_offset: 0.0,
@@ -276,6 +278,17 @@ impl Filmstrip {
     ) {
         let screen = media_rect.intersect(context.content_rect());
         self.drag.begin(context, snapshot, current, enabled);
+        let pointer = context.input(|input| input.pointer.hover_pos());
+        let pointer_moved = pointer != self.pointer_position
+            && context.input(|input| {
+                input.focused
+                    && !input.pointer.any_down()
+                    && input
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::PointerMoved(_)))
+            });
+        self.pointer_position = pointer;
         context
             .layer_painter(egui::LayerId::new(
                 egui::Order::Middle,
@@ -430,20 +443,41 @@ impl Filmstrip {
                 let output = scroll.show_viewport_styled(ui, |ui, viewport| {
                     let origin = ui.min_rect().min;
                     ui.set_min_size(egui::vec2(content_width, viewport.height()));
-                    let mut cards = Vec::new();
-                    let mut focused_card = None;
-                    self.card_indices.clear();
-                    for index in visible_range(viewport, padding, snapshot.items.len()) {
-                        let item = &snapshot.items[index];
-                        wanted.push((item.path.clone(), item.kind));
-                        let rect = Rect::from_min_size(
+                    let range = visible_range(viewport, padding, snapshot.items.len());
+                    let card_rect = |index| {
+                        Rect::from_min_size(
                             origin
                                 + egui::vec2(
                                     padding + index as f32 * STEP + 4.0,
                                     (viewport.height() - HEIGHT) / 2.0 + 24.0,
                                 ),
                             egui::vec2(120.0, 80.0),
-                        );
+                        )
+                    };
+                    // Set the shared target before creating any button so a queued
+                    // pointer move + Enter cannot activate the former target too.
+                    let pointer_target =
+                        (pointer_moved && ui.is_enabled() && focus_target.is_none())
+                            .then(|| {
+                                range
+                                    .clone()
+                                    .find(|index| ui.rect_contains_pointer(card_rect(*index)))
+                            })
+                            .flatten()
+                            .map(|index| {
+                                ui.id()
+                                    .with(("filmstrip-item", &snapshot.items[index].path))
+                            });
+                    if let Some(id) = pointer_target {
+                        context.memory_mut(|memory| memory.request_focus(id));
+                    }
+                    let mut cards = Vec::new();
+                    let mut focused_card = None;
+                    self.card_indices.clear();
+                    for index in range {
+                        let item = &snapshot.items[index];
+                        wanted.push((item.path.clone(), item.kind));
+                        let rect = card_rect(index);
                         let response = ui
                             .interact(
                                 rect,
@@ -466,7 +500,7 @@ impl Filmstrip {
                             focused_card = Some(response.id);
                             // Arrow navigation resolves after layout, so gained_focus alone
                             // cannot observe every transition on the following frame.
-                            if self.focused_card != focused_card {
+                            if self.focused_card != focused_card && pointer_target != focused_card {
                                 response.scroll_to_me(None);
                             }
                         }
@@ -489,8 +523,7 @@ impl Filmstrip {
                     self.focused_card = focused_card;
                     let highlighted = cards
                         .iter()
-                        .find(|(_, response)| response.hovered())
-                        .or_else(|| cards.iter().find(|(_, response)| response.has_focus()))
+                        .find(|(_, response)| response.has_focus())
                         .map(|(index, _)| *index)
                         .or(selected);
                     for (index, response) in cards {

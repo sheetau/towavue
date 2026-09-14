@@ -248,8 +248,8 @@ fn filmstrip_tab_navigation_wraps_without_focusing_background_controls() {
             .expect("focused card")
             .1
             .label(),
-        Some("source.png"),
-        "hover does not replace the keyboard cursor"
+        Some("third.png"),
+        "Tab advances from the pointer-selected card"
     );
 }
 
@@ -775,9 +775,43 @@ fn filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview(
     ) else {
         return;
     };
+    for density in [1.0, 1.25, 2.0] {
+        for discard in [false, true] {
+            unified_target_trial(&root, density, discard);
+        }
+    }
+}
+
+fn unified_target_trial(root: &Path, density: f32, discard: bool) {
     let context = crate::fonts::test_context();
+    context.set_pixels_per_point(density);
     context.enable_accesskit();
-    let mut snapshot = snapshot(&root);
+    let frame = |strip: &mut Filmstrip,
+                 context: &Context,
+                 snapshot: &FolderSnapshot,
+                 current: &Path,
+                 enabled,
+                 input| {
+        let mut actions = Vec::new();
+        let output = context.run_ui(input, |_| {
+            strip.show(
+                context,
+                context.content_rect(),
+                Some(snapshot),
+                Some(current),
+                enabled,
+                &mut actions,
+            );
+            if discard && context.current_pass_index() == 0 {
+                context.request_discard("unified filmstrip target survives layout passes");
+            }
+        });
+        if discard {
+            assert!(output.platform_output.num_completed_passes > 1);
+        }
+        (output, actions)
+    };
+    let mut snapshot = snapshot(root);
     snapshot.items[1].path = root.join(format!("{}.png", "長いファイル名と詳細な説明-".repeat(6)));
     let current = &snapshot.items[0].path;
     let name = display_name(&snapshot.items[1].path);
@@ -803,6 +837,7 @@ fn filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview(
     )
     .0;
     let rect = card(&output, &name);
+    assert_eq!(context.pixels_per_point(), density);
     for _ in 0..2 {
         frame(
             &mut strip,
@@ -840,6 +875,31 @@ fn filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview(
         outlines(&output),
         [rect.expand(3.0)],
         "hover replaces the current-item outline"
+    );
+    let enter = || egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let opened = |actions: Vec<UiAction>, expected: &Path| {
+        assert_eq!(actions.len(), 1, "activation occurs once");
+        assert!(
+            matches!(&actions[0], UiAction::OpenFilmstripMedia(path, false) if path == expected)
+        );
+    };
+    opened(
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            current,
+            true,
+            input(vec![enter()]),
+        )
+        .1,
+        &snapshot.items[1].path,
     );
     let text = output
         .shapes
@@ -883,8 +943,35 @@ fn filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview(
     .0;
     assert_eq!(
         outlines(&output),
-        [rect.expand(3.0)],
-        "hover wins over a different keyboard focus"
+        [third.expand(3.0)],
+        "explicit focus replaces stationary hover"
+    );
+    opened(
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            current,
+            true,
+            input(vec![enter()]),
+        )
+        .1,
+        &snapshot.items[2].path,
+    );
+    opened(
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            current,
+            true,
+            input(vec![
+                egui::Event::PointerMoved(rect.center() + egui::vec2(1.0, 0.0)),
+                enter(),
+            ]),
+        )
+        .1,
+        &snapshot.items[1].path,
     );
     frame(
         &mut strip,
@@ -906,8 +993,8 @@ fn filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview(
     .0;
     assert_eq!(
         outlines(&output),
-        [third.expand(3.0)],
-        "keyboard target remains after pointer leaves"
+        [rect.expand(3.0)],
+        "the unified target remains after the pointer leaves"
     );
     context.memory_mut(|memory| {
         if let Some(id) = memory.focused() {

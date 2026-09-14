@@ -87,6 +87,7 @@ fn convert(frame: &DecodedImageFrame, strategy: usize) -> egui::ColorImage {
             }
             egui::ColorImage::new(size, pixels)
         }
+        6 => towavue_runtime_windows::verification_color_image_sse2(frame),
         _ => unreachable!(),
     }
 }
@@ -116,7 +117,7 @@ fn initialized_color_rows_match_egui_at_split_and_alpha_boundaries() {
                     delay: Duration::ZERO,
                 };
                 let expected = convert(&frame, 2);
-                for strategy in [0, 3, 4, 5] {
+                for strategy in [0, 3, 4, 5, 6] {
                     assert!(
                         convert(&frame, strategy) == expected,
                         "color mismatch: {width}x{height}, mode={mode}, strategy={strategy}"
@@ -225,18 +226,24 @@ fn measure(frame: &DecodedImageFrame, case: &str) {
         frame.height,
         first_elapsed.as_secs_f64() * 1000.0,
     );
-    let strategies = if std::env::var_os("TOWAVUE_COLOR_INTEGER_TRIAL").is_some() {
-        [0, 5, 2]
+    let strategies: &[usize] = if std::env::var_os("TOWAVUE_COLOR_SSE2_TRIAL").is_some() {
+        &[0, 6]
+    } else if std::env::var_os("TOWAVUE_COLOR_INTEGER_TRIAL").is_some() {
+        &[0, 5, 2]
     } else if std::env::var_os("TOWAVUE_COLOR_PARALLEL_TRIAL").is_some() {
-        [0, 4, 3]
+        &[0, 4, 3]
     } else {
-        [0, 1, 2]
+        &[0, 1, 2]
     };
-    for strategy in strategies {
+    for &strategy in strategies {
         assert!(convert(frame, strategy) == expected, "warmup pixels differ");
     }
-    let [a, b, c] = strategies;
-    for (batch, strategy) in [a, b, c, c, b, a].into_iter().enumerate() {
+    for (batch, strategy) in strategies
+        .iter()
+        .chain(strategies.iter().rev())
+        .copied()
+        .enumerate()
+    {
         let mut times = Vec::new();
         #[cfg(test)]
         let cpu_before = image_color::COLOR_IMAGE_CPU_TIME.get().unwrap_or_default();
@@ -248,7 +255,7 @@ fn measure(frame: &DecodedImageFrame, case: &str) {
         }
         times.sort_unstable();
         eprintln!(
-            "IMAGE_COLOR width={} height={} case={case} strategy={strategy} batch={batch} median_ms={:.3}; 0=current integer rows, 1=mixed blocks, 2=egui unmultiplied, 3=two-way initialized rows, 4=serial initialized rows, 5=historical lookup rows; full equality outside timing, no pixels/path output, decode/GPU/display or memory claim",
+            "IMAGE_COLOR width={} height={} case={case} strategy={strategy} batch={batch} median_ms={:.3}; 0=current integer rows, 1=mixed blocks, 2=egui unmultiplied, 3=two-way initialized rows, 4=serial initialized rows, 5=historical lookup rows, 6=SSE2 packed; full equality outside timing, no pixels/path output, decode/GPU/display or memory claim",
             frame.width,
             frame.height,
             times[2].as_secs_f64() * 1000.0,

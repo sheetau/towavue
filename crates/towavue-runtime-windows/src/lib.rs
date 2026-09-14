@@ -11,6 +11,8 @@ mod file_details;
 mod fonts;
 mod image;
 mod image_clipboard;
+#[cfg(feature = "render-verification")]
+mod image_color_trial;
 mod image_edits;
 mod image_loader;
 mod input;
@@ -57,6 +59,8 @@ pub use file_details::FileDetails;
 pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_clipboard::{ImageCopyJob, ImageCopyRequest};
+#[cfg(feature = "render-verification")]
+pub use image_color_trial::verification_color_image_sse2;
 pub use image_edits::{compare_image_edits, compare_rendered_image_edits, render_image_edits};
 #[cfg(feature = "render-verification")]
 pub use image_loader::verification::{

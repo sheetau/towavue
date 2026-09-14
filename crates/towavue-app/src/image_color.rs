@@ -10,6 +10,7 @@ pub(crate) mod parallel_trial;
 thread_local! {
     pub(crate) static COLOR_IMAGE_PARALLEL_TRIAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     pub(crate) static COLOR_IMAGE_LOOKUP_TRIAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static COLOR_IMAGE_SSE2_TRIAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     pub(crate) static COLOR_IMAGE_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(crate) static COLOR_IMAGE_CONVERSION_TIME: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
     pub(crate) static COLOR_IMAGE_CPU_TIME: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
@@ -41,6 +42,10 @@ pub(crate) fn color_image(frame: &towavue_runtime_windows::DecodedImageFrame) ->
 }
 
 fn convert(frame: &towavue_runtime_windows::DecodedImageFrame) -> egui::ColorImage {
+    #[cfg(test)]
+    if COLOR_IMAGE_SSE2_TRIAL.get() {
+        return towavue_runtime_windows::verification_color_image_sse2(frame);
+    }
     #[cfg(test)]
     if COLOR_IMAGE_PARALLEL_TRIAL.get() {
         return parallel_trial::color_image(frame, true);
@@ -109,6 +114,7 @@ fn parallel_trial_uses_the_instrumented_entry_without_changing_pixels() {
     let mut calls = 0;
     assert!(!COLOR_IMAGE_PARALLEL_TRIAL.get());
     assert!(!COLOR_IMAGE_LOOKUP_TRIAL.get());
+    assert!(!COLOR_IMAGE_SSE2_TRIAL.get());
     for width in [0, 1, 31, 32, 33] {
         for height in [0, 1, 3] {
             let frame = towavue_runtime_windows::DecodedImageFrame {
@@ -123,12 +129,19 @@ fn parallel_trial_uses_the_instrumented_entry_without_changing_pixels() {
                 [width as usize, height as usize],
                 &frame.rgba,
             );
-            for (parallel, lookup) in [(false, false), (false, true), (true, false)] {
+            for (parallel, lookup, sse2) in [
+                (false, false, false),
+                (false, true, false),
+                (true, false, false),
+                (false, false, true),
+            ] {
                 COLOR_IMAGE_PARALLEL_TRIAL.set(parallel);
                 COLOR_IMAGE_LOOKUP_TRIAL.set(lookup);
+                COLOR_IMAGE_SSE2_TRIAL.set(sse2);
                 let result = color_image(&frame);
                 COLOR_IMAGE_PARALLEL_TRIAL.set(false);
                 COLOR_IMAGE_LOOKUP_TRIAL.set(false);
+                COLOR_IMAGE_SSE2_TRIAL.set(false);
                 assert!(result == expected, "entry pixels differ");
                 calls += 1;
             }

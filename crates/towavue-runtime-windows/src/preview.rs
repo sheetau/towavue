@@ -798,6 +798,9 @@ impl PreviewCache {
             })
             .collect::<Vec<_>>();
         let mut total = entries.iter().map(|(_, length, _)| length).sum::<u64>();
+        if total <= CACHE_LIMIT_BYTES {
+            return Ok(());
+        }
         entries.sort_by_key(|(_, _, modified)| *modified);
         for (path, length, _) in entries {
             if total <= CACHE_LIMIT_BYTES {

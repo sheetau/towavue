@@ -21,6 +21,112 @@ fn png() -> Vec<u8> {
     bytes.into_inner()
 }
 
+#[test]
+fn disk_pruning_preserves_under_limit_files_and_removes_oldest_when_over() {
+    let cache = cache("prune-bounds");
+    let size = CACHE_LIMIT_BYTES / 2;
+    for index in 0..3 {
+        let path = cache.root.join(format!("{index}.png"));
+        let file = fs::File::create(&path).expect("owned cache entry");
+        file.set_len(size).expect("logical cache length");
+        file.set_times(
+            fs::FileTimes::new()
+                .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(100 + index)),
+        )
+        .expect("ordered modification times");
+        drop(file);
+        cache.prune().expect("prune");
+        assert_eq!(
+            fs::read_dir(&cache.root).expect("entries").count(),
+            (index + 1).min(2) as usize
+        );
+        assert!(path.exists(), "newest entry is retained");
+    }
+    assert!(!cache.root.join("0.png").exists());
+    for index in 1..3 {
+        let metadata =
+            fs::metadata(cache.root.join(format!("{index}.png"))).expect("retained entry");
+        assert_eq!(metadata.len(), size);
+        assert_eq!(
+            metadata.modified().expect("modified"),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(100 + index)
+        );
+    }
+    cache.prune().expect("exact-limit no-op");
+    assert_eq!(fs::read_dir(&cache.root).expect("entries").count(), 2);
+    fs::remove_dir_all(&cache.root).expect("remove owned cache");
+}
+
+#[test]
+#[ignore = "creates 8192 owned small PNG cache entries; warm filesystem timing"]
+fn populated_preview_cache_reports_pruning_cost() {
+    // Historical control: enumerate the same metadata and sort even below the limit.
+    fn historical(cache: &PreviewCache) {
+        let mut entries: Vec<_> = fs::read_dir(&cache.root)
+            .expect("cache directory")
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let metadata = entry.metadata().ok()?;
+                metadata.is_file().then(|| {
+                    (
+                        entry.path(),
+                        metadata.len(),
+                        metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                    )
+                })
+            })
+            .collect();
+        let mut total: u64 = entries.iter().map(|(_, size, _)| size).sum();
+        entries.sort_by_key(|(_, _, modified)| *modified);
+        for (path, size, _) in entries {
+            if total <= CACHE_LIMIT_BYTES {
+                break;
+            }
+            if fs::remove_file(path).is_ok() {
+                total = total.saturating_sub(size);
+            }
+        }
+    }
+    let cache = cache("prune-cost");
+    let bytes = png();
+    let mut prepared = 0_u32;
+    for count in [512_u32, 8192] {
+        for index in prepared..count {
+            // Hash-like names keep directory order separate from creation/age order.
+            let name = index.wrapping_mul(2_654_435_761);
+            fs::write(cache.root.join(format!("{name:08x}.png")), &bytes).expect("owned PNG");
+        }
+        prepared = count;
+        assert!(u64::from(count) * bytes.len() as u64 <= CACHE_LIMIT_BYTES);
+        for old in [true, false, false, true] {
+            let mut timings = Vec::new();
+            for _ in 0..9 {
+                let start = std::time::Instant::now();
+                if old {
+                    historical(&cache);
+                } else {
+                    cache.prune().expect("current pruning");
+                }
+                timings.push(start.elapsed());
+            }
+            timings.sort();
+            eprintln!(
+                "prune entries={count} historical={old} median_ms={:.3}",
+                timings[4].as_secs_f64() * 1000.0
+            );
+        }
+        let entries: Vec<_> = fs::read_dir(&cache.root)
+            .expect("retained entries")
+            .map(|entry| entry.expect("entry"))
+            .collect();
+        assert_eq!(entries.len(), count as usize);
+        for entry in entries {
+            assert_eq!(fs::read(entry.path()).expect("unchanged PNG"), bytes);
+        }
+    }
+    fs::remove_dir_all(&cache.root).expect("remove owned benchmark cache");
+}
+
 fn animation_fixture(root: &Path, extension: &str, size: (u32, u32), poster: bool) -> PathBuf {
     let path = root.join(format!("animation.{extension}"));
     let frames: Vec<_> = [0, 1]

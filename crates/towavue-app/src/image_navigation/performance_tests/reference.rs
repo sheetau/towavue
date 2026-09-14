@@ -31,6 +31,76 @@ struct PhaseTrace {
     costs: [PhaseCost; PHASES.len()],
 }
 
+fn reference_order(
+    snapshot: &FolderSnapshot,
+    paths: &[PathBuf],
+    first: &Path,
+    reverse: bool,
+) -> Vec<PathBuf> {
+    let mut ordered: Vec<_> = snapshot
+        .items_of_kind(MediaKind::Image)
+        .map(|item| item.path.clone())
+        .collect();
+    let source: std::collections::HashSet<_> = paths.iter().collect();
+    let returned: std::collections::HashSet<_> = ordered.iter().collect();
+    assert!(
+        ordered.len() == paths.len() && source == returned,
+        "Shell image membership differs from the read-only reference set; no paths printed"
+    );
+    if reverse {
+        ordered.reverse();
+    }
+    let start = ordered
+        .iter()
+        .position(|path| path == first)
+        .expect("initial source in Shell order");
+    ordered.rotate_left(start);
+    ordered
+}
+
+#[test]
+fn reference_order_tracks_shell_direction_and_initial_source() {
+    let paths: Vec<_> = ["1.png", "10.png", "2.png"]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+    let mut snapshot = FolderSnapshot {
+        folder_identity: towavue_core::ShellIdentity::new(vec![]),
+        folder_path: PathBuf::new(),
+        items: [0, 2, 1]
+            .into_iter()
+            .map(|index| towavue_core::FolderMediaItem {
+                identity: towavue_core::ShellIdentity::new(vec![index as u8]),
+                path: paths[index].clone(),
+                kind: MediaKind::Image,
+            })
+            .collect(),
+        sort_columns: vec![],
+        source: FolderSnapshotSource::PersistedShellView,
+        generation: 1,
+        captured_at: std::time::SystemTime::UNIX_EPOCH,
+    };
+    for (reverse, indices) in [(false, [2, 1, 0]), (true, [2, 0, 1])] {
+        assert_eq!(
+            reference_order(&snapshot, &paths, &paths[2], reverse),
+            indices.map(|index| paths[index].clone())
+        );
+    }
+    snapshot.items.push(towavue_core::FolderMediaItem {
+        identity: towavue_core::ShellIdentity::new(vec![]),
+        path: "other.mp4".into(),
+        kind: MediaKind::Video,
+    });
+    assert_eq!(
+        reference_order(&snapshot, &paths, &paths[0], false),
+        [0, 2, 1].map(|index| paths[index].clone())
+    );
+    snapshot.items[1].path = paths[0].clone();
+    assert!(
+        std::panic::catch_unwind(|| reference_order(&snapshot, &paths, &paths[0], false)).is_err()
+    );
+}
+
 impl PhaseTrace {
     fn finish(&mut self, phase: usize, elapsed: Duration, presented: usize, sent: usize) {
         // Consecutive boundaries partition the whole measured interval, including
@@ -154,6 +224,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
         parallel_color: bool,
         lookup_color: bool,
         scalar_color: bool,
+        native_order: bool,
         source: PathBuf,
         completed: bool,
     }
@@ -205,6 +276,16 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 generation: 1,
                 captured_at: std::time::SystemTime::UNIX_EPOCH,
             });
+            let mut expected: Vec<_> = if self.native_order {
+                app.folder_snapshot = None;
+                Vec::new()
+            } else if self.reverse {
+                self.paths.iter().rev().cloned().collect()
+            } else {
+                self.paths.to_vec()
+            };
+            let mut folder_completions = 0;
+            let mut order_source = None;
             let started = Instant::now();
             COLOR_IMAGE_CPU_TIME.set(self.trace_index.map(|_| Duration::ZERO));
             let mut phases = PhaseTrace {
@@ -252,6 +333,33 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 }
                 phases.finish(1, started.elapsed(), visited.len(), sent);
                 while let Ok(event) = events.try_recv() {
+                    if self.native_order {
+                        let previous = app
+                            .folder_snapshot
+                            .as_ref()
+                            .map(|snapshot| snapshot.generation);
+                        let event_started = Instant::now();
+                        app.handle_app_event(event);
+                        event_preparation += event_started.elapsed();
+                        changed = true;
+                        if let Some(snapshot) = &app.folder_snapshot
+                            && Some(snapshot.generation) != previous
+                        {
+                            let ordered =
+                                reference_order(snapshot, self.paths, first, self.reverse);
+                            if expected.is_empty() {
+                                expected = ordered;
+                                order_source = Some(snapshot.source);
+                            } else {
+                                assert!(
+                                    expected == ordered,
+                                    "reference Shell order changed during measurement; no paths printed"
+                                );
+                            }
+                            folder_completions += 1;
+                        }
+                        continue;
+                    }
                     match event {
                         AppEvent::ImagesReady => {
                             changed = true;
@@ -375,11 +483,9 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                     }
                     previous_conversion_time = COLOR_IMAGE_CONVERSION_TIME.get();
                     previous_conversion_cpu = COLOR_IMAGE_CPU_TIME.get().unwrap_or_default();
-                    let index = if self.reverse {
-                        self.paths.len() - 1 - index
-                    } else {
-                        index
-                    };
+                    // Scheduled command position follows presentation order, not a
+                    // lexical filename index. The final gate checks the entire order.
+                    let index = visited.len();
                     latency.push(started.elapsed().saturating_sub(cadence * index as u32));
                     preparation.push(std::mem::take(&mut event_preparation));
                     original_layout.push(layout);
@@ -420,16 +526,9 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 );
             }
             latency.sort_unstable();
-            let complete_order = visited.len() == self.paths.len()
-                && visited.iter().enumerate().all(|(index, path)| {
-                    path == &self.paths[if self.reverse {
-                        self.paths.len() - 1 - index
-                    } else {
-                        index
-                    }]
-                });
+            let complete_order = visited.len() == self.paths.len() && visited == expected;
             eprintln!(
-                "REFERENCE_NAV images={} commands={} presented={} complete_order={complete_order} blank_frames={blanks} preview_frames={previews} max_queue={max_queue} failed={failed} elapsed_ms={:.3} ready_after_scheduled_command_median_ms={:.3} p95_ms={:.3}; reverse={}; read-only originals, hidden GPU Present, lexical synthetic order, 33ms commands without prewarming, no readback/screenshots or physical-key/IrfanView evidence",
+                "REFERENCE_NAV images={} commands={} presented={} complete_order={complete_order} blank_frames={blanks} preview_frames={previews} max_queue={max_queue} failed={failed} elapsed_ms={:.3} ready_after_scheduled_command_median_ms={:.3} p95_ms={:.3}; reverse={} native_order={} folder_completions={folder_completions} order_source={order_source:?}; read-only originals, hidden GPU Present, 33ms commands without prewarming, no readback/screenshots or physical-key/IrfanView evidence",
                 self.paths.len(),
                 sent,
                 visited.len(),
@@ -444,6 +543,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                     .last()
                     .map_or(0.0, |_| percentile_95(&latency).as_secs_f64() * 1000.0),
                 self.reverse,
+                self.native_order,
             );
             eprintln!(
                 "REFERENCE_CACHE decoded_mib={} directional_prefetch={} parallel_prefetch={}; verification-only policy controls; entry count, texture and per-canvas limits unchanged",
@@ -459,11 +559,10 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 self.idle_frame_interval.as_secs_f64() * 1000.0,
             );
             if let Some(index) = self.trace_index {
-                let command_index = if self.reverse {
-                    self.paths.len() - 1 - index
-                } else {
-                    index
-                };
+                let command_index = expected
+                    .iter()
+                    .position(|path| path == &self.paths[index])
+                    .expect("trace source in navigation order");
                 let trace = app
                     .image_loader
                     .verification_trace_snapshot()
@@ -554,6 +653,13 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             })
             .unwrap_or(false),
         completed: false,
+        native_order: std::env::var("TOWAVUE_NAV_NATIVE_ORDER")
+            .map(|value| match value.as_str() {
+                "0" => false,
+                "1" => true,
+                _ => panic!("native-order must be 0 or 1"),
+            })
+            .unwrap_or(false),
         lookup_color: std::env::var("TOWAVUE_NAV_LOOKUP_COLOR")
             .map(|value| match value.as_str() {
                 "0" => false,

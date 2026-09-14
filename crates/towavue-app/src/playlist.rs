@@ -253,7 +253,10 @@ impl Playlist {
                     if reveal == Some(index) {
                         response.request_focus();
                     }
-                    crate::tab_focus::observe(&response, ("playlist-row", &item.path));
+                    crate::tab_focus::observe_pointer_control(
+                        &response,
+                        ("playlist-row", &item.path),
+                    );
                     if response.has_focus() {
                         self.keyboard_focus = Some((item.path.clone(), response.id));
                     }
@@ -294,6 +297,121 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn pointer_rows_return_shortcuts_to_media_without_removing_explicit_focus() {
+        for density in [1.0, 1.25, 2.0] {
+            for (batched, focused) in [(false, false), (false, true), (true, false), (true, true)] {
+                let context = crate::fonts::test_context();
+                context.enable_accesskit();
+                let mut tabs = towavue_core::TabSet::default();
+                let active = tabs.open_new("active.wav".into(), MediaKind::Audio);
+                let other = tabs.open_new("other.wav".into(), MediaKind::Audio);
+                let snapshot = snapshot(3);
+                let current = &snapshot.items[0].path;
+                let mut playlist = Playlist::default();
+                let mut frame = |tab, events| {
+                    let mut chosen = None;
+                    let mut raw = egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 240.0))),
+                        events,
+                        ..Default::default()
+                    };
+                    raw.viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .expect("viewport")
+                        .native_pixels_per_point = Some(density);
+                    let output = context.run_ui(raw, |ui| {
+                        crate::tab_focus::begin(&context, Some(tab), true);
+                        chosen = playlist.show(ui, Some(&snapshot), Some(current), true);
+                        crate::tab_focus::finish(&context, false, true);
+                    });
+                    (
+                        output.platform_output.accesskit_update.expect("tree"),
+                        chosen,
+                    )
+                };
+                frame(active, vec![]);
+                let tree = frame(active, vec![]).0;
+                let (id, row) = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("1. track-0.wav"))
+                    .expect("row");
+                let bounds = row.bounds().expect("row bounds");
+                let point = egui::pos2(
+                    ((bounds.x0 + bounds.x1) * 0.5) as f32,
+                    ((bounds.y0 + bounds.y1) * 0.5) as f32,
+                );
+                let focus = || {
+                    Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Focus,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: *id,
+                        data: None,
+                    })
+                };
+                if focused {
+                    frame(active, vec![focus()]);
+                    assert_eq!(frame(active, vec![]).0.focus, *id);
+                }
+                let pointer = |pressed| Event::PointerButton {
+                    pos: point,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                let mut press = vec![Event::PointerMoved(point), pointer(true)];
+                if batched {
+                    press.push(pointer(false));
+                } else {
+                    assert!(frame(active, press).1.is_none());
+                    press = vec![pointer(false)];
+                }
+                assert_eq!(
+                    frame(active, press).1.as_ref(),
+                    Some(current),
+                    "pointer still chooses the track"
+                );
+                let key = |key| Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                assert!(
+                    frame(active, vec![key(egui::Key::Space)]).1.is_none(),
+                    "Space after a row click must not reopen the track"
+                );
+                assert!(
+                    context.input(|input| input.key_pressed(egui::Key::Space)),
+                    "leave Space for media playback"
+                );
+                assert!(!context.egui_wants_keyboard_input());
+                assert_eq!(context.memory(|memory| memory.focused()), None);
+                frame(other, vec![]);
+                frame(active, vec![]);
+                frame(active, vec![]);
+                assert_eq!(
+                    context.memory(|memory| memory.focused()),
+                    None,
+                    "pointer focus must not return with the tab"
+                );
+                frame(active, vec![focus()]);
+                frame(active, vec![]);
+                assert_eq!(
+                    frame(
+                        active,
+                        vec![key(egui::Key::ArrowDown), key(egui::Key::Enter)]
+                    )
+                    .1,
+                    Some(snapshot.items[1].path.clone()),
+                    "explicit row navigation remains available"
+                );
+            }
+        }
+    }
 
     #[test]
     fn durations_are_visible_only_refresh_safe_and_right_aligned_without_current_fill() {

@@ -207,6 +207,74 @@ fn directional_prefetch_control_preserves_bounds_queue_priority_and_reading() {
 }
 
 #[test]
+fn initial_image_burst_waits_for_original_presentation_and_folder_order() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::sequence_tests::initial_image_burst_waits_for_original_presentation_and_folder_order",
+    ) else {
+        return;
+    };
+    for folder_ready in [true, false] {
+        let (mut app, context, paths) = fixture(&root);
+        let snapshot = app.folder_snapshot.take().expect("order");
+        if folder_ready {
+            app.folder_snapshot = Some(snapshot.clone());
+        }
+        app.displayed_tab = None;
+        app.image = None;
+        app.load_path(paths[0].clone(), MediaKind::Image);
+        // Control both asynchronous completions without decoding missing fixture paths.
+        app.image_loader.request(Vec::new());
+        app.folder_order.request(None);
+        let generation = app.image_generation;
+        for forward in [true, true, false, true] {
+            app.dispatch(if forward {
+                CommandId::NextSameKind
+            } else {
+                CommandId::PreviousSameKind
+            });
+            app.image_loader.request(Vec::new());
+        }
+        assert_eq!(
+            app.path.as_ref(),
+            Some(&paths[0]),
+            "first original must not be skipped"
+        );
+        assert_eq!(
+            app.image_generation, generation,
+            "burst must not restart initial loading"
+        );
+        assert_eq!(
+            app.image_sequence.steps.iter().copied().collect::<Vec<_>>(),
+            [true, true, false, true]
+        );
+        assert_eq!(draw(&mut app, &context), None);
+        let order = [0, 1, 2, 1, 2];
+        for (step, index) in order.into_iter().enumerate() {
+            complete(&mut app);
+            assert_eq!(app.path.as_ref(), Some(&paths[index]));
+            let token = draw(&mut app, &context).expect("original is drawn");
+            if step == 0 && !folder_ready {
+                app.finish_image_sequence_frame(Some(token));
+                assert_eq!(app.path.as_ref(), Some(&paths[0]));
+                assert_eq!(
+                    app.image_sequence.steps.len(),
+                    4,
+                    "late order must not discard input"
+                );
+                app.pending_folder = None;
+                app.apply_folder_snapshot(snapshot.clone());
+            }
+            app.finish_image_sequence_frame(Some(token));
+            app.image_loader.request(Vec::new());
+            app.folder_order.request(None);
+            app.finish_image_sequence_frame(Some(token));
+            assert_eq!(app.path.as_ref(), Some(&paths[order[(step + 1).min(4)]]));
+        }
+        assert!(app.image_sequence.awaiting.is_none() && app.image_sequence.steps.is_empty());
+    }
+}
+
+#[test]
 fn next_image_burst_keeps_the_first_unpresented_original() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_navigation::sequence_tests::next_image_burst_keeps_the_first_unpresented_original",
@@ -334,6 +402,13 @@ fn sequence_is_cancelled_by_source_order_failure_departure_and_modal_changes() {
             }
             1 => {
                 app.load_path(paths[5].clone(), MediaKind::Image);
+                assert!(
+                    app.image_sequence.steps.is_empty(),
+                    "direct open drops old directions"
+                );
+                complete(&mut app);
+                let token = draw(&mut app, &context);
+                app.finish_image_sequence_frame(token);
             }
             2 => {
                 app.take_image_tab_state();
@@ -449,9 +524,12 @@ fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
             app.window = Some(window);
             app.renderer = Some(renderer);
             app.fullscreen = true;
-            for _ in 0..3 {
-                app.render_frame();
-            }
+            let snapshot = app.folder_snapshot.take().expect("order");
+            app.displayed_tab = None;
+            app.image = None;
+            app.load_path(paths[0].clone(), MediaKind::Image);
+            app.image_loader.request(Vec::new());
+            app.folder_order.request(None);
             for _ in 0..100 {
                 app.dispatch(CommandId::NextSameKind);
             }
@@ -459,8 +537,25 @@ fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
             app.render_frame();
             assert_eq!(
                 app.path.as_ref(),
+                Some(&paths[0]),
+                "initial load cannot be superseded"
+            );
+            assert_eq!(app.image_sequence.steps.len(), 100);
+            complete(&mut app);
+            app.render_frame();
+            assert_eq!(
+                app.path.as_ref(),
+                Some(&paths[0]),
+                "presented original waits for folder order"
+            );
+            assert_eq!(app.image_sequence.steps.len(), 100);
+            app.pending_folder = None;
+            app.apply_folder_snapshot(snapshot);
+            app.render_frame();
+            assert_eq!(
+                app.path.as_ref(),
                 Some(&paths[1]),
-                "held frame cannot advance"
+                "ready order releases the first queued direction"
             );
             for index in 1..=100 {
                 assert_eq!(app.path.as_ref(), Some(&paths[index % 100]));
@@ -476,7 +571,7 @@ fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
             assert!(app.image_sequence.awaiting.is_none() && app.image_sequence.steps.is_empty());
             assert!(app.playback_error.is_none());
             eprintln!(
-                "PASS native image sequence: 100 accepted steps, render_frame GPU/Present acknowledgement, held frames excluded; generated tiny originals and hidden window, not physical keys"
+                "PASS native image sequence: 100 steps queued during initial loading, late order retained, render_frame GPU/Present acknowledgement, held frames excluded; generated tiny originals and hidden window, not physical keys"
             );
             event_loop.exit();
         }

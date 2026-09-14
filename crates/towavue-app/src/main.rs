@@ -1702,6 +1702,9 @@ where
             // previews cannot race the foreground request.
             self.image_handoff = handoff;
             self.rebuild_reading_pages();
+            if self.image_loading && !self.reading_mode {
+                self.image_sequence.awaiting = Some(self.media_generation);
+            }
             self.refresh_title();
             self.request_redraw();
             return;
@@ -7598,13 +7601,6 @@ where
             self.metadata_export_settings.remove(&id);
         }
         self.load_path_inner(path, kind, false, handoff);
-        if self.image_loading
-            && self.image.is_none()
-            && self.image_handoff.is_some()
-            && !self.reading_mode
-        {
-            self.image_sequence.awaiting = Some(self.media_generation);
-        }
     }
 
     fn toggle_pause(&mut self) {
@@ -11189,7 +11185,7 @@ mod tests {
                     if fullscreen && kind == MediaKind::Audio {
                         assert_eq!(
                             app.status_message.as_ref().expect("fullscreen hint").0,
-                            "Fullscreen — Escape to return"
+                            "Fullscreen — Bottom edge for controls · Escape to return"
                         );
                     }
                     app.timeline_open = false;

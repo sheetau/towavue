@@ -68,11 +68,19 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if self.image_sequence.awaiting != Some(token) || self.media_generation != token {
             return;
         }
-        self.image_sequence.awaiting = None;
         if self.image_sequence_blocked() {
-            self.image_sequence.steps.clear();
+            self.image_sequence = ImageSequence::default();
             return;
         }
+        // Initial pixels can arrive before Shell order. Keep accepting bounded
+        // direction input until that same source's order request finishes.
+        if self.folder_snapshot.is_none()
+            && matches!(&self.pending_folder, Some((_, FolderIntent::Refresh(path)))
+                if self.path.as_ref() == Some(path))
+        {
+            return;
+        }
+        self.image_sequence.awaiting = None;
         if let Some(forward) = self.image_sequence.steps.pop_front() {
             // Only this continuation preserves queued directions across load/guard cancellation.
             let remaining = std::mem::take(&mut self.image_sequence.steps);

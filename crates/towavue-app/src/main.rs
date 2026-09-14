@@ -3192,10 +3192,11 @@ where
                 let viewport = ui.max_rect();
                 let transform = self.visual_transform(preview.source_size);
                 let pixels_per_point = ui.ctx().pixels_per_point();
-                let scale = self.image_view.scale(
+                let scale = self.image_view.logical_scale(
                     (transform.size.0 as u32, transform.size.1 as u32),
-                    (viewport.size() * pixels_per_point).into(),
-                ) / pixels_per_point;
+                    viewport.size().into(),
+                    pixels_per_point,
+                );
                 image_scroll::clamp(
                     &mut self.image_view,
                     egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
@@ -3222,7 +3223,8 @@ where
         let pixels_per_point = ui.ctx().pixels_per_point();
         let physical_viewport = viewport.size() * pixels_per_point;
         let mut scale =
-            self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
+            self.image_view
+                .logical_scale(image_size, viewport.size().into(), pixels_per_point);
         image_scroll::clamp(
             &mut self.image_view,
             egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
@@ -3278,8 +3280,11 @@ where
                         let old_scale = scale;
                         self.image_view
                             .zoom_by(zoom, image_size, physical_viewport.into());
-                        scale = self.image_view.scale(image_size, physical_viewport.into())
-                            / pixels_per_point;
+                        scale = self.image_view.logical_scale(
+                            image_size,
+                            viewport.size().into(),
+                            pixels_per_point,
+                        );
                         let correction = (pointer - center) * (1.0 - scale / old_scale);
                         self.image_view.pan.0 += correction.x;
                         self.image_view.pan.1 += correction.y;
@@ -3328,7 +3333,9 @@ where
             shift,
             pointer,
         );
-        let scale = self.image_view.scale(image_size, physical_viewport.into()) / pixels_per_point;
+        let scale =
+            self.image_view
+                .logical_scale(image_size, viewport.size().into(), pixels_per_point);
         let displayed = egui::vec2(transform.size.0 * scale, transform.size.1 * scale);
         let painter = ui.painter_at(viewport);
         // Compute bar input first, but keep the updated image behind the bars.
@@ -4639,8 +4646,7 @@ where
                 let density = context.pixels_per_point();
                 let scale = self
                     .image_view
-                    .scale(size, (screen.size() * density).into())
-                    / density;
+                    .logical_scale(size, screen.size().into(), density);
                 let surface = image_scroll::surface(
                     screen,
                     egui::vec2(transform.size.0 * scale, transform.size.1 * scale),

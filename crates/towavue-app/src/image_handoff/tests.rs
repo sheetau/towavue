@@ -72,6 +72,78 @@ fn navigate_pending(app: &mut App, path: PathBuf) {
 }
 
 #[test]
+fn fitted_image_and_handoff_do_not_paint_phantom_scrollbars() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_handoff::tests::fitted_image_and_handoff_do_not_paint_phantom_scrollbars",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 1.5, 2.0] {
+        for size in [(113, 92), (113, 94), (92, 113), (94, 113)] {
+            let (mut app, context, _) = fixture(&root);
+            context.global_style_mut(chrome::style);
+            app.image = Some(
+                ImagePresentation::from_decoded(
+                    &context,
+                    &root.join("old.png"),
+                    decoded(size.0, size.1, [20, 40, 60, 255]),
+                )
+                .expect("image"),
+            );
+            let mut time = 0.0;
+            let mut draw = |app: &mut App| {
+                time += 0.25;
+                let mut input = egui::RawInput {
+                    time: Some(time),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(640.0, 480.0),
+                    )),
+                    ..Default::default()
+                };
+                input
+                    .viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .expect("viewport")
+                    .native_pixels_per_point = Some(density);
+                context.run_ui(input, |ui| app.draw_image(ui))
+            };
+            draw(&mut app);
+            let initial = draw(&mut app);
+            app.image_handoff = app.take_navigation_handoff(MediaKind::Image);
+            assert!(app.image_handoff.is_some());
+            app.image = None;
+            app.image_loading = true;
+            let held = draw(&mut app);
+            for output in [&initial, &held] {
+                assert!(
+                    !output.shapes.iter().any(|shape| matches!(
+                        &shape.shape,
+                        egui::Shape::Rect(rect) if rect.fill.a() > 0
+                            && rect.rect.size().min_elem() <= 5.0
+                            && rect.rect.size().max_elem() > 12.0
+                    )),
+                    "Fit must not paint a bar: {size:?}, {density}x"
+                );
+            }
+            let meshes = |output: &egui::FullOutput| {
+                output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) => Some(mesh.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let original = meshes(&initial);
+            assert_eq!(original.len(), 1, "image must be painted");
+            assert_eq!(meshes(&held), original, "held image must not move");
+        }
+    }
+}
+
+#[test]
 fn loading_handoff_preserves_idle_scrollbars_without_accepting_scroll_input() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_handoff::tests::loading_handoff_preserves_idle_scrollbars_without_accepting_scroll_input",

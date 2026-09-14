@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn fitted_image_scale_does_not_overflow_after_dpi_conversion() {
+    for density in [1.0, 1.25, 1.5, 2.0] {
+        for edge in 1..=16_384 {
+            for size in [(113, edge), (edge, 113)] {
+                let viewport = egui::vec2(640.0, 480.0);
+                let scale = ImageViewState::default().logical_scale(size, viewport.into(), density);
+                let displayed = egui::vec2(size.0 as f32, size.1 as f32) * scale;
+                assert!(
+                    displayed.x <= viewport.x && displayed.y <= viewport.y,
+                    "logical Fit overflow: {size:?} at {density}x gives {displayed:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn inset_scrollbar_gutters_do_not_capture_background_drags() {
     let context = fonts::test_context();
     context.global_style_mut(chrome::style);

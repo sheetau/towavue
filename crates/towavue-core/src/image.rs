@@ -131,6 +131,24 @@ impl ImageViewState {
         );
     }
 
+    /// Returns logical display units per image pixel; density is positive physical
+    /// pixels per logical unit. Fit avoids a rounding-prone physical-unit round trip.
+    pub fn logical_scale(
+        self,
+        image_size: (u32, u32),
+        viewport_size: (f32, f32),
+        density: f32,
+    ) -> f32 {
+        if self.zoom == ZoomMode::Fit {
+            fit_scale(image_size, viewport_size)
+        } else {
+            self.scale(
+                image_size,
+                (viewport_size.0 * density, viewport_size.1 * density),
+            ) / density
+        }
+    }
+
     pub fn fit(&mut self) {
         self.zoom = ZoomMode::Fit;
         self.pan = (0.0, 0.0);
@@ -155,9 +173,18 @@ pub fn fit_scale(image_size: (u32, u32), viewport_size: (f32, f32)) -> f32 {
     if image_size.0 == 0 || image_size.1 == 0 {
         return 1.0;
     }
-    (viewport_size.0 / image_size.0 as f32)
+    let scale = (viewport_size.0 / image_size.0 as f32)
         .min(viewport_size.1 / image_size.1 as f32)
-        .max(0.0)
+        .max(0.0);
+    // A rounded-up quotient can put an otherwise fitted edge beyond the viewport.
+    if scale > 0.0
+        && (image_size.0 as f32 * scale > viewport_size.0
+            || image_size.1 as f32 * scale > viewport_size.1)
+    {
+        scale.next_down()
+    } else {
+        scale
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -301,6 +328,40 @@ mod tests {
             }
         }
         assert_eq!(fit_scale((0, 10), (100.0, 100.0)), 1.0);
+    }
+
+    #[test]
+    fn fit_does_not_create_subpixel_overflow_for_integer_image_sizes() {
+        for edge in 1..=16_384 {
+            for size in [(113, edge), (edge, 113)] {
+                for viewport in [(640.0, 480.0), (801.0, 603.0)] {
+                    let scale = fit_scale(size, viewport);
+                    let displayed = (size.0 as f32 * scale, size.1 as f32 * scale);
+                    assert!(
+                        displayed.0 <= viewport.0 && displayed.1 <= viewport.1,
+                        "Fit overflow: {size:?} in {viewport:?} gives {displayed:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn logical_scale_preserves_non_fit_physical_zoom() {
+        for density in [1.0, 1.25, 1.5, 2.0] {
+            for zoom in [ZoomMode::Actual, ZoomMode::Custom(1.7), ZoomMode::Cover] {
+                let view = ImageViewState {
+                    zoom,
+                    ..Default::default()
+                };
+                let viewport = (801.0, 603.0);
+                let size = (113, 94);
+                assert_eq!(
+                    view.logical_scale(size, viewport, density),
+                    view.scale(size, (viewport.0 * density, viewport.1 * density)) / density
+                );
+            }
+        }
     }
 
     #[test]

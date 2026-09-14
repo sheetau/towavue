@@ -30,7 +30,7 @@ impl ImageHandoff {
         let density = ui.ctx().pixels_per_point();
         let mut view = self.view;
         let size = (self.transform.size.0 as u32, self.transform.size.1 as u32);
-        let scale = view.scale(size, (viewport.size() * density).into()) / density;
+        let scale = view.logical_scale(size, viewport.size().into(), density);
         let displayed = egui::vec2(self.transform.size.0, self.transform.size.1) * scale;
         image_scroll::clamp(&mut view, displayed, viewport.size());
         let rect = egui::Rect::from_center_size(

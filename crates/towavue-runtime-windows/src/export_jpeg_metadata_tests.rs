@@ -791,9 +791,11 @@ fn jpeg_metadata_splice_preserves_every_non_xmp_byte_and_decoded_pixel() {
 fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical_xmp() {
     let root = root("edited-rights");
     let source = root.join("source.jpg");
+    let qualified_album = r#"<m:album r:parseType="Resource"><r:value>Original album</r:value><e:note xmlns:e="urn:album-qualifier">Retained &amp; qualified</e:note></m:album>"#;
     let attribution = r#"<d:contributor><r:Bag><r:li>Studio &amp; Partners</r:li><r:li>Second contributor</r:li></r:Bag></d:contributor><d:publisher><r:Bag><r:li>Original publisher</r:li></r:Bag></d:publisher>"#;
     let rights = r#"<q:Owner xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Bag><r:li>Original owner</r:li></r:Bag></q:Owner><q:UsageTerms xmlns:q="http://ns.adobe.com/xap/1.0/rights/"><r:Alt><r:li xml:lang="en">Keep attribution</r:li><r:li xml:lang="fr">Attribution requise</r:li></r:Alt></q:UsageTerms><q:WebStatement xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/rights</q:WebStatement><q:Certificate xmlns:q="http://ns.adobe.com/xap/1.0/rights/">https://example.invalid/original-certificate</q:Certificate>"#;
     let packet = PACKET
+        .replace("<m:album>Original album</m:album>", qualified_album)
         .replace("<r:RDF ", "<r:RDF xml:lang=\"fr\" ")
         .replace(
             "r:about=\"\"",
@@ -821,6 +823,7 @@ fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical
             "Edited title",
             "Edited genre",
             attribution,
+            qualified_album,
             "<r:RDF xml:lang=\"fr\" ",
             "rdf:about=\"\" xml:lang=\"\"",
             "<d:subject><r:Bag><r:li>nature &amp; travel</r:li><r:li>landscape</r:li></r:Bag></d:subject>",
@@ -854,6 +857,12 @@ fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical
                 .any(|part| part == attribution.as_bytes())
         );
         assert!(
+            fs::read(&resaved)
+                .expect("resaved qualified field")
+                .windows(qualified_album.len())
+                .any(|part| part == qualified_album.as_bytes())
+        );
+        assert!(
             read_export_metadata(&resaved, MediaKind::Image)
                 .expect("resaved metadata")
                 .iter()
@@ -863,6 +872,11 @@ fn edited_jpeg_webp_exports_preserve_keywords_and_rights_without_stale_technical
             let back = root.join("back.jpg");
             export_media(&request(&resaved, &back)).expect("WebP to JPEG");
             let bytes = fs::read(back).expect("round trip");
+            assert!(
+                bytes
+                    .windows(qualified_album.len())
+                    .any(|part| part == qualified_album.as_bytes())
+            );
             assert!(
                 bytes
                     .windows(b"Original owner".len())

@@ -1,6 +1,140 @@
 use super::*;
 
 #[test]
+fn qualified_text_values_keep_their_subtrees_until_explicitly_changed() {
+    let cancel = AtomicBool::new(false);
+    for description in [false, true] {
+        for qualifier_first in [false, true] {
+            let qualified = |property: &str, value: &str| {
+                let value = format!("<r:value>{value}</r:value>");
+                let qualifier = "<q:note>Attribution &amp; context</q:note>";
+                let contents = if qualifier_first {
+                    format!("{qualifier}{value}")
+                } else {
+                    format!("{value}{qualifier}")
+                };
+                if description {
+                    format!("<{property}><r:Description>{contents}</r:Description></{property}>")
+                } else {
+                    format!("<{property} r:parseType=\"Resource\">{contents}</{property}>")
+                }
+            };
+            let properties = [
+                (
+                    MetadataField::Title,
+                    qualified(
+                        "d:title",
+                        "<r:Alt><r:li xml:lang=\"x-default\">Original title</r:li><r:li xml:lang=\"ja\">Translated title</r:li></r:Alt>",
+                    ),
+                ),
+                (
+                    MetadataField::Artist,
+                    qualified(
+                        "d:creator",
+                        "<r:Seq><r:li>First author</r:li><r:li><![CDATA[Second <author>]]></r:li></r:Seq>",
+                    ),
+                ),
+                (MetadataField::Genre, qualified("m:genre", "Original genre")),
+                (MetadataField::Album, qualified("m:album", "Original album")),
+                (
+                    MetadataField::Composer,
+                    qualified("m:composer", "Original composer"),
+                ),
+                (
+                    MetadataField::Date,
+                    qualified("m:releaseDate", "2026-09-15"),
+                ),
+                (MetadataField::Track, qualified("m:trackNumber", "+03")),
+                (
+                    MetadataField::Comment,
+                    qualified("d:description", "Original comment"),
+                ),
+                (
+                    MetadataField::Copyright,
+                    qualified("d:rights", "Original copyright"),
+                ),
+            ];
+            let packet = format!(
+                "<r:RDF xmlns:r=\"{RDF}\"><r:Description xmlns:d=\"{DC}\" xmlns:m=\"{DM}\" xmlns:q=\"urn:qualifier\" q:technical=\"old\">{}</r:Description></r:RDF>",
+                properties
+                    .iter()
+                    .map(|(_, xml)| xml.as_str())
+                    .collect::<String>()
+            );
+            let original = parse(packet.as_bytes(), &cancel).expect("qualified values");
+            assert_eq!(original.len(), 11);
+            assert_eq!(
+                original
+                    .iter()
+                    .filter(|value| value.field == MetadataField::Genre)
+                    .map(|value| value.text.as_str())
+                    .collect::<Vec<_>>(),
+                ["Original genre"]
+            );
+            for (field, _) in &properties {
+                let replacement = match field {
+                    MetadataField::Date => "2025-10",
+                    MetadataField::Track => "7",
+                    _ => "New value <&>",
+                };
+                for value in [None, Some(replacement), Some("")] {
+                    let mut options = MetadataExportOptions::default();
+                    options
+                        .set(*field, value.map(str::to_owned))
+                        .expect("metadata option");
+                    let mut expected = original.clone();
+                    apply(&mut expected, &options).expect("expected values");
+                    for edited in [false, true] {
+                        let output = rewrite(packet.as_bytes(), &options, &cancel, !edited)
+                            .expect("qualified rewrite");
+                        assert_eq!(parse(&output, &cancel).expect("readback"), expected);
+                        let text = std::str::from_utf8(&output).expect("UTF-8");
+                        for (other, xml) in &properties {
+                            assert_eq!(
+                                text.contains(xml),
+                                *other != *field || value.is_none(),
+                                "only explicit changes replace the qualified subtree"
+                            );
+                        }
+                        assert_eq!(text.contains("q:technical="), !edited);
+                        if !edited && value.is_none() {
+                            assert_eq!(output, packet.as_bytes());
+                        }
+                        assert_eq!(
+                            rewrite(&output, &options, &cancel, !edited).expect("resave"),
+                            output
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn qualified_text_rejects_ambiguous_values_and_unsupported_context() {
+    let cancel = AtomicBool::new(false);
+    for property in [
+        "<m:genre r:parseType=\"Resource\"><q:value>wrong namespace</q:value></m:genre>",
+        "<m:genre r:parseType=\"Resource\"><r:value>a</r:value><r:value>b</r:value></m:genre>",
+        "<m:genre r:parseType=\"Resource\">mixed<r:value>a</r:value></m:genre>",
+        "<m:genre r:parseType=\"Literal\"><r:value>a</r:value></m:genre>",
+        "<m:genre r:parseType=\"Resource\" xml:lang=\"ja\"><r:value>a</r:value></m:genre>",
+        "<m:genre><r:Description r:about=\"other\"><r:value>a</r:value></r:Description></m:genre>",
+        "<m:genre><r:Description><r:value r:resource=\"urn:not-text\"/></r:Description></m:genre>",
+        "<m:genre><r:Description><r:value>a</r:value></r:Description><q:extra/></m:genre>",
+    ] {
+        let packet = format!(
+            "<r:RDF xmlns:r=\"{RDF}\"><r:Description xmlns:m=\"{DM}\" xmlns:q=\"urn:qualifier\">{property}</r:Description></r:RDF>"
+        );
+        assert!(
+            parse(packet.as_bytes(), &cancel).is_err(),
+            "must reject {property}"
+        );
+    }
+}
+
+#[test]
 fn current_document_metadata_rejects_unresolved_ancestor_bases() {
     let cancel = AtomicBool::new(false);
     let original = format!(

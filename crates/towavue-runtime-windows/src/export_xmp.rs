@@ -269,8 +269,39 @@ fn alt(field: MetadataField) -> bool {
 }
 
 fn values(node: &Node, field: MetadataField) -> Result<Vec<Value>, ExportError> {
+    // In XMP's qualified-resource forms, rdf:value carries the property value;
+    // sibling elements are qualifiers, not additional editable properties. The
+    // rewriter retains the original subtree unless this field is explicitly set.
+    let resource = match node.attributes.as_slice() {
+        [(key, text)] if key.is(RDF, "parseType") && text == "Resource" => Some(node),
+        [] if node.children.len() == 1
+            && node.children[0].name.is(RDF, "Description")
+            && node.children[0].attributes.is_empty() =>
+        {
+            Some(&node.children[0])
+        }
+        _ => None,
+    };
+    if let Some(resource) = resource {
+        if !node.text.trim().is_empty() || !resource.text.trim().is_empty() {
+            return Err(invalid("mixed qualified property content"));
+        }
+        let mut actual = resource
+            .children
+            .iter()
+            .filter(|child| child.name.is(RDF, "value"));
+        let value = actual
+            .next()
+            .ok_or_else(|| invalid("qualified property has no rdf:value"))?;
+        if actual.next().is_some() {
+            return Err(invalid(
+                "qualified property has multiple rdf:value elements",
+            ));
+        }
+        return values(value, field);
+    }
     if !node.attributes.is_empty() {
-        return Err(invalid("qualified text properties are not supported"));
+        return Err(invalid("unsupported text-property attributes"));
     }
     if node.children.is_empty() {
         return Ok(vec![Value {

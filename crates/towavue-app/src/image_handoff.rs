@@ -21,7 +21,7 @@ impl ImageHandoff {
         )
     }
 
-    pub fn draw(&self, ui: &egui::Ui) {
+    pub fn draw(&self, ui: &mut egui::Ui) {
         if let Some(reading) = &self.reading {
             reading.draw(ui, self.view);
             return;
@@ -43,6 +43,7 @@ impl ImageHandoff {
             rect,
             self.transform,
         ));
+        image_scroll::held_bars(ui, viewport, displayed, view);
         if let Some(selection) = view.selection {
             paint_selection(&painter, rect, selection);
         }

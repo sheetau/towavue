@@ -77,3 +77,19 @@ pub fn bars(
     view.pan = pan.into();
     clamp(view, displayed, viewport.size());
 }
+
+pub fn held_bars(
+    ui: &mut egui::Ui,
+    viewport: egui::Rect,
+    displayed: egui::Vec2,
+    mut view: ImageViewState,
+) {
+    // Keep the completed image's idle chrome, but never edit a pending image's
+    // view or let the display-only handoff acquire pointer/keyboard ownership.
+    // Keep normal IDs and suppress content-hover fading as well as disabled dimming.
+    let original = ui.style().clone();
+    ui.visuals_mut().disabled_alpha = 1.0;
+    ui.style_mut().spacing.scroll.active_handle_opacity = 1.0;
+    bars(ui, viewport, displayed, &mut view, false);
+    ui.set_style(original);
+}

@@ -12,7 +12,7 @@ pub(super) struct ReadingHandoff {
 }
 
 impl ReadingHandoff {
-    pub fn draw(&self, ui: &egui::Ui, mut view: ImageViewState) {
+    pub fn draw(&self, ui: &mut egui::Ui, mut view: ImageViewState) {
         let viewport = ui.max_rect();
         let scale = scale(
             view,
@@ -36,6 +36,7 @@ impl ReadingHandoff {
                 Color32::WHITE,
             );
         }
+        image_scroll::held_bars(ui, viewport, displayed, view);
     }
 }
 

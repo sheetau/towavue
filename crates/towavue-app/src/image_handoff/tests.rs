@@ -72,6 +72,128 @@ fn navigate_pending(app: &mut App, path: PathBuf) {
 }
 
 #[test]
+fn loading_handoff_preserves_idle_scrollbars_without_accepting_scroll_input() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_handoff::tests::loading_handoff_preserves_idle_scrollbars_without_accepting_scroll_input",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for reading in [false, true] {
+            let (mut app, context, _) = fixture(&root);
+            context.set_pixels_per_point(density);
+            context.global_style_mut(chrome::style);
+            app.reading_mode = reading;
+            app.image_view.zoom = ZoomMode::Custom(16.0);
+            app.image_view.pan = (20.0, -15.0);
+            if reading {
+                app.reading_pages = vec![Ok(ImagePresentation::from_decoded(
+                    &context,
+                    &root.join("second.png"),
+                    decoded(90, 160, [60, 40, 20, 255]),
+                )
+                .expect("second page"))];
+            }
+            let mut time = 0.0;
+            let mut draw = |app: &mut App, events| {
+                time += 0.25;
+                context.run_ui(
+                    egui::RawInput {
+                        time: Some(time),
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(640.0, 480.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| app.draw_image(ui),
+                )
+            };
+            let handles = |output: &egui::FullOutput| {
+                output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect)
+                            if rect.fill.a() > 0
+                                && rect.rect.size().min_elem() <= 5.0
+                                && rect.rect.size().max_elem() > 12.0 =>
+                        {
+                            Some(rect.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            draw(&mut app, vec![]);
+            let initial = draw(&mut app, vec![]);
+            let before = handles(&initial);
+            let meshes = |output: &egui::FullOutput| {
+                output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) => Some(mesh.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let before_images = meshes(&initial);
+            assert_eq!(before.len(), 2, "both axes overflow");
+            app.image_handoff = app.take_navigation_handoff(MediaKind::Image);
+            app.image = None;
+            app.reading_pages.clear();
+            app.image_loading = true;
+            let held_view = app.image_handoff.as_ref().expect("held image").view;
+            let point = before[0].rect.center();
+            for events in [
+                vec![],
+                vec![
+                    egui::Event::PointerMoved(point),
+                    egui::Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                vec![egui::Event::PointerMoved(point + egui::vec2(40.0, 40.0))],
+                vec![egui::Event::PointerButton {
+                    pos: point,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                vec![egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    phase: egui::TouchPhase::Move,
+                    delta: egui::vec2(50.0, 50.0),
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            ] {
+                let output = draw(&mut app, events);
+                assert_eq!(
+                    handles(&output),
+                    before,
+                    "held bars keep geometry and idle color"
+                );
+                assert_eq!(
+                    meshes(&output),
+                    before_images,
+                    "held image meshes remain unchanged"
+                );
+                assert_eq!(
+                    app.image_handoff.as_ref().expect("held image").view,
+                    held_view
+                );
+                assert_eq!(context.dragged_id(), None, "held bars cannot own a drag");
+            }
+        }
+    }
+}
+
+#[test]
 fn reading_handoff_keeps_the_complete_spread_until_all_latest_pages_resolve() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_handoff::tests::reading_handoff_keeps_the_complete_spread_until_all_latest_pages_resolve",

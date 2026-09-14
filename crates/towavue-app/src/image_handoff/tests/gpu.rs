@@ -58,11 +58,14 @@ fn gpu_handoff_preserves_pixels_through_supersession_and_renderer_recreation() {
                     return;
                 }
             };
-            for density in [1.0, 1.25, 2.0] {
+            for (density, alpha) in [1.0, 1.25, 2.0]
+                .into_iter()
+                .flat_map(|density| [0, 96, 255].map(|alpha| (density, alpha)))
+            {
                 let (mut app, context, _) = fixture(&self.root);
                 app.fullscreen = true;
                 context.set_pixels_per_point(density);
-                let mut source = decoded(160, 90, [20, 40, 60, 255]);
+                let mut source = decoded(160, 90, [20, 40, 60, alpha]);
                 for (index, pixel) in Arc::get_mut(&mut source).expect("unique fixture").frames[0]
                     .rgba
                     .as_chunks_mut::<4>()
@@ -136,7 +139,7 @@ fn gpu_handoff_preserves_pixels_through_supersession_and_renderer_recreation() {
                     }
                     assert!(
                         draw(&mut app, &context, &mut renderer, false) == original,
-                        "held original changed at {density}x, request {index}"
+                        "held original changed at {density}x, alpha={alpha}, request {index}"
                     );
                     if index == 5 {
                         let device = renderer.graphics_device();
@@ -215,7 +218,7 @@ fn gpu_handoff_preserves_pixels_through_supersession_and_renderer_recreation() {
                     FrameRenderer::with_graphics_device(&window, device).expect("next fixture");
             }
             eprintln!(
-                "PASS image handoff GPU: 3 densities, 12 supersessions each, full central pixel equality, preview suppression, shared-device renderer recreation, new-original replacement and old decoded release. Hidden window; not physical input or process/GPU peak memory."
+                "PASS image handoff GPU: 3 densities x 3 alpha patterns, 12 supersessions each, full central pixel equality, preview suppression, shared-device renderer recreation, new-original replacement and old decoded release. Hidden window; not physical input or process/GPU peak memory."
             );
             event_loop.exit();
         }

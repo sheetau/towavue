@@ -21,7 +21,7 @@ fn measured_with_application_test_instrumentation() {
 }
 
 fn convert(frame: &DecodedImageFrame, strategy: usize) -> egui::ColorImage {
-    // Strategies 1, 3 and 4 are experimental comparisons, never the production path.
+    // Nonzero strategies are experimental or historical comparisons, not production.
     let size = [frame.width as usize, frame.height as usize];
     match strategy {
         0 => image_color::color_image(frame),
@@ -61,6 +61,32 @@ fn convert(frame: &DecodedImageFrame, strategy: usize) -> egui::ColorImage {
         }
         2 => egui::ColorImage::from_rgba_unmultiplied(size, &frame.rgba),
         3 | 4 => parallel_trial::color_image(frame, strategy == 3),
+        5 => {
+            let mut pixels = Vec::with_capacity(size[0] * size[1]);
+            for row in frame.rgba.chunks_exact(size[0].max(1) * 4) {
+                let row = row.as_chunks::<4>().0;
+                let alpha_mask = u32::from_ne_bytes([0, 0, 0, 255]);
+                if row.chunks(32).all(|block| {
+                    block
+                        .iter()
+                        .fold(u32::MAX, |bits, pixel| bits & u32::from_ne_bytes(*pixel))
+                        & alpha_mask
+                        == alpha_mask
+                }) {
+                    pixels.extend(
+                        row.iter().map(|p| {
+                            egui::Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3])
+                        }),
+                    );
+                } else {
+                    pixels
+                        .extend(row.iter().map(|p| {
+                            egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3])
+                        }));
+                }
+            }
+            egui::ColorImage::new(size, pixels)
+        }
         _ => unreachable!(),
     }
 }
@@ -90,7 +116,7 @@ fn initialized_color_rows_match_egui_at_split_and_alpha_boundaries() {
                     delay: Duration::ZERO,
                 };
                 let expected = convert(&frame, 2);
-                for strategy in [3, 4] {
+                for strategy in [0, 3, 4, 5] {
                     assert!(
                         convert(&frame, strategy) == expected,
                         "color mismatch: {width}x{height}, mode={mode}, strategy={strategy}"
@@ -199,7 +225,9 @@ fn measure(frame: &DecodedImageFrame, case: &str) {
         frame.height,
         first_elapsed.as_secs_f64() * 1000.0,
     );
-    let strategies = if std::env::var_os("TOWAVUE_COLOR_PARALLEL_TRIAL").is_some() {
+    let strategies = if std::env::var_os("TOWAVUE_COLOR_INTEGER_TRIAL").is_some() {
+        [0, 5, 2]
+    } else if std::env::var_os("TOWAVUE_COLOR_PARALLEL_TRIAL").is_some() {
         [0, 4, 3]
     } else {
         [0, 1, 2]
@@ -220,7 +248,7 @@ fn measure(frame: &DecodedImageFrame, case: &str) {
         }
         times.sort_unstable();
         eprintln!(
-            "IMAGE_COLOR width={} height={} case={case} strategy={strategy} batch={batch} median_ms={:.3}; 0=current rows, 1=mixed blocks, 2=egui unmultiplied, 3=two-way initialized rows, 4=serial initialized rows; full equality outside timing, no pixels/path output, decode/GPU/display or memory claim",
+            "IMAGE_COLOR width={} height={} case={case} strategy={strategy} batch={batch} median_ms={:.3}; 0=current integer rows, 1=mixed blocks, 2=egui unmultiplied, 3=two-way initialized rows, 4=serial initialized rows, 5=historical lookup rows; full equality outside timing, no pixels/path output, decode/GPU/display or memory claim",
             frame.width,
             frame.height,
             times[2].as_secs_f64() * 1000.0,

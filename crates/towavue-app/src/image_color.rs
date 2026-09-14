@@ -64,13 +64,34 @@ fn convert(frame: &towavue_runtime_windows::DecodedImageFrame) -> egui::ColorIma
                     .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3])),
             );
         } else {
-            pixels.extend(
-                row.iter()
-                    .map(|p| Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3])),
-            );
+            pixels.extend(row.iter().copied().map(premultiplied_color));
         }
     }
     egui::ColorImage::new(size, pixels)
+}
+
+fn premultiplied_color([r, g, b, a]: [u8; 4]) -> Color32 {
+    // Rounded component * alpha / 255 matches egui, including transparent hidden RGB.
+    // Bounded u16 arithmetic avoids per-pixel table lookups and initialization checks.
+    let channel = |value: u8| {
+        let product = u16::from(value) * u16::from(a) + 128;
+        ((product + (product >> 8)) >> 8) as u8
+    };
+    Color32::from_rgba_premultiplied(channel(r), channel(g), channel(b), a)
+}
+
+#[test]
+fn integer_premultiplication_matches_every_egui_component_and_alpha() {
+    for alpha in 0_u8..=255 {
+        for value in 0_u8..=255 {
+            let pixel = [value, 255 - value, value.wrapping_mul(73), alpha];
+            assert_eq!(
+                premultiplied_color(pixel),
+                Color32::from_rgba_unmultiplied(pixel[0], pixel[1], pixel[2], pixel[3]),
+                "component={value}, alpha={alpha}"
+            );
+        }
+    }
 }
 
 #[test]

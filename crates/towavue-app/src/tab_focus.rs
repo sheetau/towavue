@@ -83,6 +83,24 @@ pub(super) fn begin(context: &Context, active: Option<TabId>, enabled: bool) {
     }
 }
 
+pub(super) fn observe_button(response: &Response, key: impl std::hash::Hash + std::fmt::Debug) {
+    let context = &response.ctx;
+    if (response.clicked() || response.has_focus())
+        && context.input(|input| input.pointer.primary_released())
+    {
+        let active = context.data_mut(|data| {
+            let state = data.get_temp_mut_or_default::<State>(state_id());
+            state.active.filter(|_| state.enabled)
+        });
+        if let Some(tab) = active {
+            // Pointer activation returns keys to media, including after a later tab return.
+            forget(context, tab);
+            response.surrender_focus();
+        }
+    }
+    observe(response, key);
+}
+
 pub(super) fn observe(response: &Response, key: impl std::hash::Hash + std::fmt::Debug) {
     if !response.enabled() || !response.interact_rect.is_positive() {
         return;

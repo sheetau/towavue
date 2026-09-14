@@ -201,6 +201,144 @@ fn tab_focus_image_controls_restore_by_role_without_reloading_or_editing() {
 }
 
 #[test]
+fn pointer_media_buttons_release_focus_without_removing_keyboard_activation() {
+    for density in [1.0, 1.25, 2.0] {
+        for control in 0..7 {
+            for batched in [false, true] {
+                let context = fonts::test_context();
+                context.enable_accesskit();
+                let mut tabs = TabSet::default();
+                let active = tabs.open_new("active.png".into(), MediaKind::Image);
+                let other = tabs.open_new("other.png".into(), MediaKind::Image);
+                let time = std::cell::Cell::new(0.0);
+                let draw = |tab, events| {
+                    time.set(time.get() + 0.1);
+                    let mut raw = egui::RawInput {
+                        events,
+                        time: Some(time.get()),
+                        ..Default::default()
+                    };
+                    raw.viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .expect("viewport")
+                        .native_pixels_per_point = Some(density);
+                    let mut response = None;
+                    let _ = context.run_ui(raw, |ui| {
+                        super::begin(&context, Some(tab), true);
+                        response = Some(match control {
+                            0 => chrome::button(ui, chrome::Icon::Play, "Play"),
+                            1 => chrome::button(ui, chrome::Icon::Pause, "Pause"),
+                            2 => {
+                                chrome::button(ui, chrome::Icon::ExitFullscreen, "Exit fullscreen")
+                            }
+                            3 => {
+                                chrome::audio_button(ui, chrome::AudioIcon::Repeat, false, "Repeat")
+                            }
+                            4 => chrome::audio_button(
+                                ui,
+                                chrome::AudioIcon::RepeatOne,
+                                true,
+                                "Repeat one",
+                            ),
+                            5 => chrome::audio_button(
+                                ui,
+                                chrome::AudioIcon::Shuffle,
+                                true,
+                                "Shuffle",
+                            ),
+                            _ => chrome::reading_button(ui, true, false),
+                        });
+                        super::finish(&context, false, true);
+                    });
+                    response.expect("button")
+                };
+                let response = draw(active, vec![]);
+                draw(active, vec![focus(response.id.accesskit_id())]);
+                assert!(draw(active, vec![]).has_focus());
+                let pos = response.rect.center();
+                let pointer = |pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                let mut events = vec![egui::Event::PointerMoved(pos), pointer(true)];
+                if !batched {
+                    assert!(!draw(active, events).clicked());
+                    events = vec![];
+                }
+                events.push(pointer(false));
+                assert!(
+                    draw(active, events).clicked(),
+                    "pointer still activates control {control}"
+                );
+                assert_eq!(
+                    context.memory(|memory| memory.focused()),
+                    None,
+                    "pointer control {control} must return keys to media; density={density}, batched={batched}"
+                );
+                assert!(!context.egui_wants_keyboard_input());
+                draw(other, vec![]);
+                assert!(
+                    !draw(active, vec![]).has_focus(),
+                    "do not restore the clicked role on tab return"
+                );
+                for moved in [false, true] {
+                    draw(active, vec![focus(response.id.accesskit_id())]);
+                    draw(active, vec![egui::Event::PointerMoved(pos), pointer(true)]);
+                    let release_pos = if moved {
+                        pos + egui::vec2(50.0, 50.0)
+                    } else {
+                        pos
+                    };
+                    for _ in 0..10 {
+                        draw(active, vec![egui::Event::PointerMoved(release_pos)]);
+                    }
+                    assert!(
+                        !draw(
+                            active,
+                            vec![egui::Event::PointerButton {
+                                pos: release_pos,
+                                button: egui::PointerButton::Primary,
+                                pressed: false,
+                                modifiers: egui::Modifiers::NONE,
+                            }]
+                        )
+                        .clicked(),
+                        "long hold or drag must not become a click"
+                    );
+                    assert_eq!(
+                        context.memory(|memory| memory.focused()),
+                        None,
+                        "hold/drag release must return keys to media: control={control}, moved={moved}"
+                    );
+                }
+                draw(active, vec![focus(response.id.accesskit_id())]);
+                assert!(draw(active, vec![]).has_focus());
+                let mut clicks = 0;
+                for pressed in [true, false] {
+                    clicks += usize::from(
+                        draw(
+                            active,
+                            vec![egui::Event::Key {
+                                key: egui::Key::Space,
+                                physical_key: None,
+                                pressed,
+                                repeat: false,
+                                modifiers: egui::Modifiers::NONE,
+                            }],
+                        )
+                        .clicked(),
+                    );
+                }
+                assert_eq!(clicks, 1, "explicit keyboard activation remains available");
+                assert!(draw(active, vec![]).has_focus());
+            }
+        }
+    }
+}
+
+#[test]
 fn tab_focus_semantic_roles_ignore_widget_ids_and_wait_only_until_ready_or_new_input() {
     let context = fonts::test_context();
     let mut tabs = TabSet::default();

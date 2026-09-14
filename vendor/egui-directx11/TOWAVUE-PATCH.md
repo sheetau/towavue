@@ -77,6 +77,11 @@ Local changes:
   old/new readback outside CPU-submission and event-completion timings. The extra
   consumer texture and bounded waits are verification-only; production whole
   updates still replace their resources.
+- `large_texture_upload_reports_settled_allocation_history` compares short/long
+  creation histories with identical final retained textures, and optionally old/new
+  CPU source storage with equal extra allocations. Each sample uses a fresh device;
+  GPU event waits and full-pixel checks are verification-only. Run instructions are
+  in the repository's DEVELOPMENT guide; no production allocation policy changes.
 
 The public marker is additive; native device ownership APIs are unchanged.
 Upstream vertex/index buffer upload and normal blending remain unchanged.

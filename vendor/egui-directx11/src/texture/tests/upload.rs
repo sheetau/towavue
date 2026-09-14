@@ -2,6 +2,165 @@ use super::*;
 use std::time::{Duration, Instant};
 
 #[test]
+#[ignore = "generated allocation-history control; use Release with hardware D3D11"]
+#[allow(clippy::assertions_on_constants)]
+fn large_texture_upload_reports_settled_allocation_history() -> Result<()> {
+    use std::collections::VecDeque;
+    use windows::core::BOOL;
+
+    assert!(!cfg!(debug_assertions), "use Release");
+    // Default control: keep the CPU sources identical and alive across samples,
+    // changing only each fresh device's prior GPU allocation history.
+    let sources: Vec<_> = [
+        [1024, 768],
+        [2048, 1536],
+        [3200, 2400],
+        [4096, 2304],
+        [8706, 5949],
+    ]
+    .into_iter()
+    .map(|[width, height]| {
+        Arc::new(egui::ColorImage::new(
+            [width, height],
+            (0..width * height)
+                .map(|n| Color32::from_rgb(n as u8, (n / width) as u8, (n / 7) as u8))
+                .collect(),
+        ))
+    })
+    .collect();
+    let measure = |history: usize, fresh_source: Option<bool>| -> Result<(Duration, Duration)> {
+        assert_eq!(history % 12, 0, "same final twelve sources and order");
+        let (device, context) = device_with_flags(
+            D3D_DRIVER_TYPE_HARDWARE,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+            true,
+        )?
+        .expect("hardware device required");
+        let mut query = None;
+        // This sample owns the device/context. Reuse its event only after the
+        // previous GPU boundary completes; no production waits are introduced.
+        unsafe {
+            device.CreateQuery(
+                &D3D11_QUERY_DESC {
+                    Query: D3D11_QUERY_EVENT,
+                    MiscFlags: 0,
+                },
+                Some(&mut query),
+            )?;
+        }
+        let query = query.expect("event query");
+        let wait = || -> Result<()> {
+            let mut complete = BOOL(0);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            unsafe {
+                context.End(&query);
+                context.Flush();
+                while !complete.as_bool() {
+                    context.GetData(
+                        &query,
+                        Some((&mut complete as *mut BOOL).cast()),
+                        mem::size_of::<BOOL>() as u32,
+                        0,
+                    )?;
+                    assert!(Instant::now() < deadline, "GPU completion deadline");
+                    if !complete.as_bool() {
+                        std::thread::yield_now();
+                    }
+                }
+            }
+            Ok(())
+        };
+        let mut retained = VecDeque::new();
+        for index in 0..history {
+            retained.push_back(TexturePool::create_managed_texture(
+                &device,
+                ImageData::Color(sources[index % 4].clone()),
+                egui::TextureOptions::LINEAR,
+            )?);
+            if retained.len() > 12 {
+                retained.pop_front();
+            }
+        }
+        wait()?;
+        assert_eq!(retained.len(), 12);
+        // In the source control, allocate/copy and retain the same extra buffer
+        // in both cases. Select only which identical buffer backs this upload;
+        // keep both alive so allocation and final source destruction are untimed.
+        let fresh = fresh_source.map(|_| Arc::new(sources[4].as_ref().clone()));
+        let source = if fresh_source == Some(true) {
+            fresh.as_ref().expect("fresh source")
+        } else {
+            &sources[4]
+        };
+        let started = Instant::now();
+        let uploaded = TexturePool::create_managed_texture(
+            &device,
+            ImageData::Color(source.clone()),
+            egui::TextureOptions::LINEAR,
+        )?;
+        let submitted = started.elapsed();
+        wait()?;
+        let completed = started.elapsed();
+        // Full readback/equality, source ownership and final working-set checks
+        // are outside both timings. No private reference media is involved.
+        for (index, texture) in retained
+            .iter()
+            .chain(std::iter::once(&uploaded))
+            .enumerate()
+        {
+            let source = &sources[if index == 12 { 4 } else { index % 4 }];
+            let Texture::Managed(texture) = texture else {
+                unreachable!()
+            };
+            assert_eq!(texture.size, source.size);
+            assert!(
+                readback(&device, &context, &texture.tex)? == source.pixels,
+                "generated texture pixels preserved after allocation history"
+            );
+        }
+        assert!(
+            sources.iter().all(|source| Arc::strong_count(source) == 1),
+            "no retained CPU shadows"
+        );
+        assert!(
+            fresh
+                .as_ref()
+                .is_none_or(|source| Arc::strong_count(source) == 1)
+        );
+        Ok((submitted, completed))
+    };
+    let modes = if std::env::var_os("TOWAVUE_TEXTURE_SOURCE_CONTROL").is_some() {
+        [
+            (468, Some(false)),
+            (468, Some(true)),
+            (468, Some(true)),
+            (468, Some(false)),
+        ]
+    } else {
+        [(12, None), (468, None), (468, None), (12, None)]
+    };
+    for (batch, (history, fresh_source)) in modes.into_iter().enumerate() {
+        let samples = (0..3)
+            .map(|_| measure(history, fresh_source))
+            .collect::<Result<Vec<_>>>()?;
+        let mut submitted: Vec<_> = samples.iter().map(|sample| sample.0).collect();
+        let mut completed: Vec<_> = samples.iter().map(|sample| sample.1).collect();
+        submitted.sort_unstable();
+        completed.sort_unstable();
+        let retained_bytes: usize = sources[..4]
+            .iter()
+            .map(|source| source.size[0] * source.size[1] * 4 * 3)
+            .sum();
+        eprintln!(
+            "TEXTURE_HISTORY batch={batch} history={history} fresh_source={fresh_source:?} retained_count=12 retained_rgba_bytes={retained_bytes} submission_ms={:.3} completion_ms={:.3}; three samples, fresh app-flags hardware device each, identical generated pixels and final GPU working set; Some modes both retain one extra CPU copy, None uses persistent sources only; prior GPU work drained, source allocation/destruction and full readback excluded; logical bytes not VRAM; no decode, window, Present, private media or navigation claim",
+            submitted[1].as_secs_f64() * 1000.0,
+            completed[1].as_secs_f64() * 1000.0,
+        );
+    }
+    Ok(())
+}
+
+#[test]
 #[ignore = "same-size replacement/reuse comparison; use Release with hardware D3D11"]
 #[allow(clippy::assertions_on_constants)]
 fn repeated_texture_upload_compares_replacement_and_reuse() -> Result<()> {

@@ -130,6 +130,15 @@ fn paired_prefetch_preserves_mixed_animation_spreads_under_a_shared_budget() {
 
 #[test]
 fn paired_prefetch_preserves_budget_adoption_cancellation_and_source_identity() {
+    paired_prefetch_contract(image::ImageFormat::Png);
+}
+
+#[test]
+fn paired_jpeg_prefetch_preserves_budget_adoption_cancellation_and_source_identity() {
+    paired_prefetch_contract(image::ImageFormat::Jpeg);
+}
+
+fn paired_prefetch_contract(format: image::ImageFormat) {
     for mode in [
         "adopt_first",
         "retain_first_tail",
@@ -143,17 +152,17 @@ fn paired_prefetch_preserves_budget_adoption_cancellation_and_source_identity() 
         "close",
     ] {
         let root = std::env::temp_dir().join(format!(
-            "towavue-prefetch-pair-{}-{mode}",
+            "towavue-prefetch-pair-{}-{mode}-{format:?}",
             std::process::id()
         ));
         std::fs::create_dir_all(&root).expect("owned fixture directory");
         let paths: Vec<_> = (0..3)
-            .map(|index| root.join(format!("{index}.png")))
+            .map(|index| root.join(format!("{index}.{}", format.extensions_str()[0])))
             .collect();
         for path in &paths {
-            image::RgbaImage::from_pixel(1, 1, image::Rgba([42; 4]))
-                .save(path)
-                .expect("owned PNG");
+            image::RgbImage::from_pixel(1, 1, image::Rgb([42; 3]))
+                .save_with_format(path, format)
+                .expect("owned image");
         }
         assert_eq!(
             super::super::parallel::pair_budget(&paths[0], &paths[1], 7),

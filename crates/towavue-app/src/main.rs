@@ -2889,6 +2889,14 @@ where
         self.video_scrub_seen = false;
         self.video_scrub_surface = None;
         let context = root.ctx().clone();
+        if egui::Popup::is_any_open(&context) {
+            // Closing a menu must not reuse its batched click for a media gesture,
+            // including another layout pass in this same input frame.
+            let frame = context.cumulative_frame_nr();
+            context.data_mut(|data| {
+                data.insert_temp(egui::Id::new("menu-input-frame"), frame);
+            });
+        }
         let modal_blocked = self.modal_input_blocked();
         tab_focus::begin(
             &context,
@@ -3706,6 +3714,8 @@ where
             && !self.grid_open
             && !self.filmstrip_open
             && !egui::Popup::is_any_open(context)
+            && context.data(|data| data.get_temp::<u64>(egui::Id::new("menu-input-frame")))
+                != Some(context.cumulative_frame_nr())
     }
 
     fn view_drag_allowed(&mut self, context: &egui::Context) -> bool {
@@ -10335,6 +10345,107 @@ mod tests {
         frame(vec![]);
         assert!(!egui::Popup::is_any_open(&context));
         assert_ne!(frame(vec![]).focus, logo, "outside click is not Escape");
+    }
+
+    #[test]
+    fn menu_outside_click_does_not_zoom_the_underlying_selection() {
+        let Some(root) =
+            isolated_test_root("tests::menu_outside_click_does_not_zoom_the_underlying_selection")
+        else {
+            return;
+        };
+        for density in [1.0, 1.25, 2.0] {
+            for (batched, discard) in [(false, false), (true, false), (false, true), (true, true)] {
+                let mut app = Application::new(None, |_| {}).expect("headless application");
+                let context = fonts::test_context();
+                context.set_pixels_per_point(density);
+                context.global_style_mut(chrome::style);
+                app.ui_context = Some(context.clone());
+                let path = root.join("image.png");
+                app.tabs.open_new(path.clone(), MediaKind::Image);
+                app.path = Some(path.clone());
+                app.media_kind = Some(MediaKind::Image);
+                app.state = PlaybackState::Paused;
+                app.image = Some(
+                    ImagePresentation::from_decoded(
+                        &context,
+                        &path,
+                        DecodedImage {
+                            animation_plays: 0,
+                            format: "test",
+                            frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                                width: 400,
+                                height: 200,
+                                rgba: vec![255; 400 * 200 * 4],
+                                delay: Duration::ZERO,
+                            }],
+                        }
+                        .into(),
+                    )
+                    .expect("image texture"),
+                );
+                let original = Some(UnitRect {
+                    min: UnitPoint { x: 0.35, y: 0.3 },
+                    max: UnitPoint { x: 0.65, y: 0.7 },
+                });
+                app.image_view.selection = original;
+                let frame = |app: &mut Application<_>, events| {
+                    let mut actions = Vec::new();
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(960.0, 576.0),
+                            )),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            app.draw_ui(ui, &mut actions);
+                            if discard && context.current_pass_index() == 0 {
+                                context.request_discard("menu dismissal regression");
+                            }
+                        },
+                    );
+                    if discard {
+                        assert!(output.platform_output.num_completed_passes > 1);
+                    }
+                    assert!(actions.is_empty(), "dismissal executes no command");
+                };
+                let button = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                frame(&mut app, vec![]);
+                frame(&mut app, vec![]);
+                let logo = egui::pos2(20.0, 18.0);
+                frame(&mut app, vec![egui::Event::PointerMoved(logo)]);
+                frame(&mut app, vec![button(logo, true)]);
+                frame(&mut app, vec![button(logo, false)]);
+                frame(&mut app, vec![]);
+                assert!(egui::Popup::is_any_open(&context));
+                let point = egui::pos2(480.0, 270.0);
+                frame(&mut app, vec![egui::Event::PointerMoved(point)]);
+                if batched {
+                    frame(&mut app, vec![button(point, true), button(point, false)]);
+                } else {
+                    frame(&mut app, vec![button(point, true)]);
+                    frame(&mut app, vec![button(point, false)]);
+                }
+                frame(&mut app, vec![]);
+                assert!(!egui::Popup::is_any_open(&context));
+                assert_eq!(
+                    app.image_view.selection, original,
+                    "menu dismissal preserves selection: density={density}, batched={batched}, discard={discard}"
+                );
+                assert!(app.view_drag.is_none());
+                frame(&mut app, vec![button(point, true), button(point, false)]);
+                assert!(app.image_view.selection.is_none(), "a later click zooms");
+                assert!(app.view_drag.is_none());
+            }
+        }
     }
 
     #[test]

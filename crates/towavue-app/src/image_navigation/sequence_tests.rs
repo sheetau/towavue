@@ -103,6 +103,7 @@ fn queued_destinations_precede_speculation_without_expanding_neighbors() {
         return;
     };
     let (mut app, _, paths) = fixture(&root);
+    app.verification_directional_prefetch = false;
     // The fixture's order is the supplied Shell snapshot, not a filename sort.
     app.folder_snapshot
         .as_mut()
@@ -164,7 +165,7 @@ fn directional_prefetch_control_preserves_bounds_queue_priority_and_reading() {
         return;
     };
     let (mut app, _, paths) = fixture(&root);
-    app.verification_directional_prefetch = true;
+    assert!(app.verification_directional_prefetch);
     for (forward, expected) in [
         (true, vec![1, 2, 3, 4, 5, 6, 7, 8, 99]),
         (false, vec![99, 98, 97, 96, 95, 94, 93, 92, 1]),

@@ -1108,7 +1108,7 @@ where
             image_loading: false,
             image_navigation_forward: true,
             #[cfg(test)]
-            verification_directional_prefetch: false,
+            verification_directional_prefetch: true,
             image_sequence: image_navigation::ImageSequence::default(),
             image_error: None,
             playback_error: None,
@@ -2226,9 +2226,12 @@ where
             // Keep ordinary navigation speculation bounded to nine neighbors.
             let count = images.len().saturating_sub(1).min(9);
             let mut selected = Vec::with_capacity(count);
+            #[cfg(not(test))]
+            let directional_prefetch = true;
             #[cfg(test)]
-            if self.verification_directional_prefetch {
-                // Controlled eight-ahead/one-back comparison; keep the same entry count.
+            let directional_prefetch = self.verification_directional_prefetch;
+            if directional_prefetch {
+                // Reserve one opposite neighbor after up to eight in the current direction.
                 for distance in 1..count {
                     selected.push(if self.image_navigation_forward {
                         (current + distance) % images.len()
@@ -15623,7 +15626,7 @@ mod tests {
                 for forward in [false, true] {
                     app.image_navigation_forward = forward;
                     let mut expected = Vec::new();
-                    for offset in [1isize, -1, 2, -2, 3, -3, 4, -4, 5] {
+                    for offset in [1isize, 2, 3, 4, 5, 6, 7, 8, -1] {
                         let offset = if forward { offset } else { -offset };
                         let target =
                             (current as isize + offset).rem_euclid(count as isize) as usize;

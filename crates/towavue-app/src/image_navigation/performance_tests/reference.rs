@@ -484,8 +484,14 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 );
                 mib
             })
-            .unwrap_or(256),
-        directional_prefetch: std::env::var_os("TOWAVUE_NAV_DIRECTIONAL_PREFETCH").is_some(),
+            .unwrap_or(384),
+        directional_prefetch: std::env::var("TOWAVUE_NAV_DIRECTIONAL_PREFETCH")
+            .map(|value| match value.as_str() {
+                "0" => false,
+                "1" => true,
+                _ => panic!("directional-prefetch must be 0 or 1"),
+            })
+            .unwrap_or(true),
         source,
         completed: false,
     };

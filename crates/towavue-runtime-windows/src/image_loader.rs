@@ -9,7 +9,7 @@ use crate::image::{
 };
 use crate::{CachedImagePreview, DecodedImage, ImageDecodeError, LatestTask, PreviewCache};
 
-const CACHE_BYTE_LIMIT: usize = 256 * 1024 * 1024;
+const CACHE_BYTE_LIMIT: usize = 384 * 1024 * 1024;
 // Three maximum-size reading spreads; the byte limit still bounds retained pixels.
 const CACHE_ENTRY_LIMIT: usize = 30;
 const PREFETCH_ENTRY_LIMIT: usize = 10;
@@ -1066,6 +1066,14 @@ mod tests {
             bytes: 1,
             modified: SystemTime::UNIX_EPOCH,
         };
+        {
+            let mailbox = loader.shared.0.lock().expect("mailbox");
+            let cache = mailbox.cache.lock().expect("cache");
+            assert_eq!(cache.byte_limit, 384 * 1024 * 1024);
+            assert_eq!(CACHE_ENTRY_LIMIT, 30);
+            assert_eq!(PREFETCH_ENTRY_LIMIT, 10);
+            assert_eq!(IMAGE_BYTE_LIMIT, 512 * 1024 * 1024);
+        }
         assert!(loader.verification_set_cache_byte_limit(0).is_err());
         assert!(
             loader

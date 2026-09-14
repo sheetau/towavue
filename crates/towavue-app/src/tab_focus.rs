@@ -100,7 +100,13 @@ pub(super) fn observe_pointer_control(
         if let Some(tab) = active {
             // Clear the prior role on press even when a later hold/drag cancels the click.
             forget(context, tab);
-            response.surrender_focus();
+            // The previous numeric field may not have been registered in this pass yet.
+            // An accepted pointer control owns focus regardless of widget drawing order.
+            context.memory_mut(|memory| {
+                if let Some(focused) = memory.focused() {
+                    memory.surrender_focus(focused);
+                }
+            });
         }
     }
     observe(response, key);

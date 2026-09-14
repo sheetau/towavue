@@ -462,6 +462,11 @@ fn pointer_seek_returns_arrow_keys_to_media_and_keeps_explicit_value_focus() {
                     active,
                     vec![egui::Event::PointerMoved(start), pointer(start, true)],
                 );
+                assert_eq!(
+                    context.memory(|memory| memory.focused()),
+                    None,
+                    "seek must release numeric focus on press, not only release"
+                );
                 if dragged {
                     draw(active, vec![egui::Event::PointerMoved(end)]);
                 }
@@ -507,6 +512,145 @@ fn pointer_seek_returns_arrow_keys_to_media_and_keeps_explicit_value_focus() {
                     draw(active, vec![right()]).2,
                     Some(30.0),
                     "explicit value focus still adjusts"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn pointer_timeline_gestures_release_focus_and_preserve_explicit_value_input() {
+    for density in [1.0, 1.25, 2.0] {
+        for focused in [false, true] {
+            for dragged in [false, true] {
+                let context = fonts::test_context();
+                context.enable_accesskit();
+                let mut tabs = TabSet::default();
+                let active = tabs.open_new("active.wav".into(), MediaKind::Audio);
+                let other = tabs.open_new("other.wav".into(), MediaKind::Audio);
+                let id = egui::Id::new("pointer-timeline");
+                let value_id = id.with(("selection-value", true));
+                let selection = towavue_core::TimeRange::new(
+                    media_time(Duration::from_secs(2)),
+                    media_time(Duration::from_secs(8)),
+                )
+                .expect("range");
+                let draw = |tab, events| {
+                    let mut raw = egui::RawInput {
+                        events,
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(500.0, 300.0),
+                        )),
+                        ..Default::default()
+                    };
+                    raw.viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .expect("viewport")
+                        .native_pixels_per_point = Some(density);
+                    let mut result = None;
+                    let _ = context.run_ui(raw, |ui| {
+                        super::begin(&context, Some(tab), true);
+                        let response = ui.interact(
+                            egui::Rect::from_min_size(
+                                egui::pos2(20.0, 60.0),
+                                egui::vec2(460.0, 100.0),
+                            ),
+                            id,
+                            egui::Sense::click_and_drag(),
+                        );
+                        result = Some(time_selection::show(
+                            ui,
+                            &response,
+                            media_time(Duration::from_secs(10)),
+                            media_time(Duration::from_secs(5)),
+                            Some(selection),
+                            None,
+                            true,
+                        ));
+                        super::finish(&context, false, true);
+                    });
+                    result.expect("timeline")
+                };
+                draw(active, vec![]);
+                draw(active, vec![]);
+                if focused {
+                    draw(active, vec![focus(value_id.accesskit_id())]);
+                    assert!(context.memory(|memory| memory.has_focus(value_id)));
+                }
+                let right = || egui::Event::Key {
+                    key: egui::Key::ArrowRight,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                let start = egui::pos2(140.0, 135.0);
+                let end = if dragged {
+                    egui::pos2(320.0, 135.0)
+                } else {
+                    start
+                };
+                let pointer = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    pressed,
+                    button: egui::PointerButton::Primary,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                draw(
+                    active,
+                    vec![egui::Event::PointerMoved(start), pointer(start, true)],
+                );
+                assert_eq!(
+                    context.memory(|memory| memory.focused()),
+                    None,
+                    "timeline must release numeric focus on press, not only release"
+                );
+                let held = draw(active, vec![right()]);
+                assert!(
+                    held.selection.is_none() && held.edit.is_none() && held.seek.is_none(),
+                    "held pointer must not leave numeric arrow handling active"
+                );
+                assert!(context.input(|input| input.key_pressed(egui::Key::ArrowRight)));
+                let mut key_release = right();
+                if let egui::Event::Key { pressed, .. } = &mut key_release {
+                    *pressed = false;
+                }
+                draw(active, vec![key_release]);
+                if dragged {
+                    draw(active, vec![egui::Event::PointerMoved(end)]);
+                }
+                let output = draw(active, vec![pointer(end, false)]);
+                assert!(
+                    output.selection.is_some() || output.seek.is_some(),
+                    "pointer operation must still commit"
+                );
+                assert_eq!(
+                    context.memory(|memory| memory.focused()),
+                    None,
+                    "timeline pointer focus: density={density}, focused={focused}, dragged={dragged}"
+                );
+                assert!(!context.egui_wants_keyboard_input());
+                let output = draw(active, vec![right()]);
+                assert!(
+                    output.selection.is_none() && output.edit.is_none() && output.seek.is_none()
+                );
+                assert!(
+                    context.input(|input| input.key_pressed(egui::Key::ArrowRight)),
+                    "arrow remains available to media"
+                );
+                draw(other, vec![]);
+                draw(active, vec![]);
+                assert_eq!(
+                    context.memory(|memory| memory.focused()),
+                    None,
+                    "no saved pointer role on tab return"
+                );
+                draw(active, vec![focus(value_id.accesskit_id())]);
+                assert!(context.memory(|memory| memory.has_focus(value_id)));
+                assert!(
+                    draw(active, vec![right()]).selection.is_some(),
+                    "explicit numeric focus still adjusts time"
                 );
             }
         }

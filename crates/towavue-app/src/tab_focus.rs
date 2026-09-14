@@ -87,6 +87,12 @@ pub(super) fn observe_pointer_control(
     response: &Response,
     key: impl std::hash::Hash + std::fmt::Debug,
 ) {
+    release_pointer_focus(response);
+    observe(response, key);
+}
+
+// Tab chrome releases the active media's focus without becoming a saved media role.
+pub(super) fn release_pointer_focus(response: &Response) {
     let context = &response.ctx;
     if ((response.clicked()
         || response.has_focus()
@@ -111,7 +117,6 @@ pub(super) fn observe_pointer_control(
             });
         }
     }
-    observe(response, key);
 }
 
 pub(super) fn observe(response: &Response, key: impl std::hash::Hash + std::fmt::Debug) {

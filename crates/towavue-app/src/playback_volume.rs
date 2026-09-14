@@ -189,7 +189,28 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ui| app.draw_top_bar(ui, &mut actions),
+                |ui| {
+                    crate::tab_focus::begin(context, app.tabs.active().map(|tab| tab.id), true);
+                    app.draw_top_bar(ui, &mut actions);
+                    let value = ui.interact(
+                        egui::Rect::from_min_size(egui::pos2(20.0, 200.0), egui::vec2(100.0, 20.0)),
+                        egui::Id::new("tab-audio-numeric-focus"),
+                        egui::Sense::focusable_noninteractive(),
+                    );
+                    assert_eq!(
+                        crate::seekbar::value_input(
+                            &value,
+                            "Playback position (seconds)",
+                            25.0,
+                            0.0..=100.0,
+                            5.0,
+                            true,
+                        ),
+                        None,
+                        "tab audio input must not edit the numeric control"
+                    );
+                    crate::tab_focus::finish(context, false, true);
+                },
             );
             (output, actions)
         }
@@ -430,10 +451,19 @@ mod tests {
                         );
                         let background_role = egui::Id::new("background prior control");
                         crate::tab_focus::adopt(&context, first, background_role);
+                        let value_id = egui::Id::new("tab-audio-numeric-focus");
+                        context.memory_mut(|memory| memory.request_focus(value_id));
+                        tab_frame(&mut app, &context, vec![egui::Event::PointerMoved(point)]);
+                        assert!(context.memory(|memory| memory.has_focus(value_id)));
                         tab_frame(
                             &mut app,
                             &context,
                             vec![egui::Event::PointerMoved(point), button(point, true)],
+                        );
+                        assert_eq!(
+                            context.memory(|memory| memory.focused()),
+                            None,
+                            "tab audio press must release numeric focus before later registration"
                         );
                         let outside = point + egui::vec2(60.0, 80.0);
                         let (_, actions) =

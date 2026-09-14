@@ -13,6 +13,116 @@ fn focus(target: egui::accesskit::NodeId) -> egui::Event {
     })
 }
 
+#[test]
+fn pointer_panel_resize_releases_numeric_focus_on_press() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = fonts::test_context();
+        context.enable_accesskit();
+        let mut tabs = TabSet::default();
+        let active = tabs.open_new("active.wav".into(), MediaKind::Audio);
+        let other = tabs.open_new("other.wav".into(), MediaKind::Audio);
+        let panel = egui::Id::new("focus-resize-panel");
+        let value_id = panel.with("value");
+        let draw = |tab, events| {
+            let mut raw = egui::RawInput {
+                events,
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(500.0, 300.0),
+                )),
+                ..Default::default()
+            };
+            raw.viewports
+                .get_mut(&egui::ViewportId::ROOT)
+                .expect("viewport")
+                .native_pixels_per_point = Some(density);
+            let mut value = None;
+            let _ = context.run_ui(raw, |ui| {
+                super::begin(&context, Some(tab), true);
+                let resizable = timeline_edit::panel_resize_enabled(ui, panel);
+                egui::Panel::bottom(panel)
+                    .default_size(96.0)
+                    .size_range(64.0..=240.0)
+                    .resizable(resizable)
+                    .show(ui, |ui| {
+                        ui.set_min_size(ui.available_size());
+                        let response = ui.interact(
+                            ui.available_rect_before_wrap(),
+                            value_id,
+                            egui::Sense::focusable_noninteractive(),
+                        );
+                        value = seekbar::value_input(
+                            &response,
+                            "Playback position (seconds)",
+                            25.0,
+                            0.0..=100.0,
+                            5.0,
+                            true,
+                        );
+                    });
+                super::finish(&context, false, true);
+            });
+            assert_eq!(value, None, "resize must not change the numeric value");
+            egui::containers::panel::PanelState::load(&context, panel)
+                .expect("panel")
+                .outer_rect
+        };
+        draw(active, vec![]);
+        draw(active, vec![]);
+        let before = draw(active, vec![focus(value_id.accesskit_id())]);
+        assert!(context.memory(|memory| memory.has_focus(value_id)));
+        let start = before.center_top();
+        let end = start - egui::vec2(0.0, 60.0);
+        let pointer = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            pressed,
+            button: egui::PointerButton::Primary,
+            modifiers: egui::Modifiers::NONE,
+        };
+        draw(
+            active,
+            vec![egui::Event::PointerMoved(start), pointer(start, true)],
+        );
+        assert_eq!(
+            context.memory(|memory| memory.focused()),
+            None,
+            "panel resize must release numeric focus on press at {density}x"
+        );
+        let right = egui::Event::Key {
+            key: egui::Key::ArrowRight,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        draw(active, vec![right]);
+        assert!(context.input(|input| input.key_pressed(egui::Key::ArrowRight)));
+        draw(
+            active,
+            vec![egui::Event::PointerMoved(start - egui::vec2(0.0, 10.0))],
+        );
+        draw(active, vec![egui::Event::PointerMoved(end)]);
+        draw(active, vec![pointer(end, false)]);
+        let after = draw(active, vec![]);
+        assert!(
+            (after.height() - before.height() - 60.0).abs() <= 1.0,
+            "resize must commit at {density}x: {before:?} -> {after:?}"
+        );
+        draw(other, vec![]);
+        draw(active, vec![]);
+        assert_eq!(
+            context.memory(|memory| memory.focused()),
+            None,
+            "resize must not restore the old numeric role on tab return"
+        );
+        draw(active, vec![focus(value_id.accesskit_id())]);
+        assert!(
+            context.memory(|memory| memory.has_focus(value_id)),
+            "explicit accessibility focus remains available"
+        );
+    }
+}
+
 fn setup() -> (App, std::sync::mpsc::Receiver<AppEvent>) {
     let (sent, events) = std::sync::mpsc::channel();
     let callback: Box<dyn Fn(AppEvent) + Send + Sync> = Box::new(move |event| {

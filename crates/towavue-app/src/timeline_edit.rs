@@ -56,6 +56,12 @@ pub(super) fn panel_resize_enabled(ui: &egui::Ui, panel: egui::Id) -> bool {
         data.remove_temp::<bool>(panel.with("cancel-resize"))
             .unwrap_or(false)
     });
+    if enabled
+        && !cancelled
+        && let Some(response) = ui.ctx().read_response(panel.with("__resize"))
+    {
+        tab_focus::observe_pointer_control(&response, "timeline-resize");
+    }
     enabled && !cancelled
 }
 

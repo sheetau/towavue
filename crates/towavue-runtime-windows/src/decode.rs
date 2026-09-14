@@ -710,6 +710,21 @@ pub(crate) fn decode_audio_intervals_cancellable(
     )
 }
 
+/// Restrict an exclusively owned, single-purpose input after stream selection.
+/// Do not use on a reusable audio/video input without restoring its stream policies.
+pub(crate) fn discard_other_streams(input: &mut format::context::Input, selected: usize) {
+    for mut stream in input.streams_mut() {
+        if stream.index() != selected {
+            // The worker exclusively owns this input and its live streams. Set
+            // discard before reading packets so demuxers can skip their payloads;
+            // leave the chosen stream's policy and probe buffers intact.
+            unsafe {
+                (*stream.as_mut_ptr()).discard = ffmpeg::ffi::AVDiscard::AVDISCARD_ALL;
+            }
+        }
+    }
+}
+
 /// An exclusively owned demux input, moved back to its session after workers join.
 /// Decoders and packet queues are per run; no stream borrow escapes a run.
 pub(crate) struct ParallelInput {
@@ -903,6 +918,14 @@ impl ParallelInput {
             seek_input(input, seek_target, video.is_some(), cancelled)?;
         }
         check_cancelled(cancelled)?;
+        if !audio_intervals.is_empty()
+            && let Some(audio) = &audio
+        {
+            // Retained-interval runs own a fresh audio-only input, never reused
+            // for video. Preserve the existing seek anchor before discarding:
+            // demuxers can choose a different anchor when video is disabled.
+            discard_other_streams(input, audio.index);
+        }
         run_parallel_workers(
             (input, &mut self.audio_checkpoints, resume, audio_intervals),
             video,

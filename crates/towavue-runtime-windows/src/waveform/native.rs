@@ -1,6 +1,7 @@
 //! Selected audio stream directly to the bounded mono-s16 source envelope.
 
 use super::Envelope;
+use crate::decode::discard_other_streams;
 use crate::{Cancellation, PreviewError};
 use ffmpeg_next::{ChannelLayout, Error, codec, format, frame, media, software::resampling};
 use std::path::Path;
@@ -163,19 +164,6 @@ fn decode_cancellable(
     result.map_err(|error| PreviewError::Generate(error.to_string()))?;
     super::rasterize(&envelope, width, height)
         .map_err(|error| PreviewError::Generate(error.to_string()))
-}
-
-fn discard_other_streams(input: &mut format::context::Input, selected: usize) {
-    for mut stream in input.streams_mut() {
-        if stream.index() != selected {
-            // The worker exclusively owns this input and its live streams. Set
-            // discard before reading packets so demuxers can skip their payloads;
-            // leave the chosen audio stream's policy and probe buffers intact.
-            unsafe {
-                (*stream.as_mut_ptr()).discard = ffmpeg_next::ffi::AVDiscard::AVDISCARD_ALL;
-            }
-        }
-    }
 }
 
 fn mono_mix_levels(decoded: &frame::Audio) -> Result<Option<[f64; 3]>, Error> {

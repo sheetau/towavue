@@ -201,7 +201,7 @@ fn native_overview_rejects_cancelled_missing_and_invalid_requests() {
 }
 
 #[test]
-fn native_overview_skips_unselected_video_and_audio_payloads() {
+fn audio_only_waveforms_skip_unselected_video_and_audio_payloads() {
     let root = std::env::temp_dir().join(format!(
         "towavue-waveform-demux-{}-{}",
         std::process::id(),
@@ -314,5 +314,78 @@ fn native_overview_skips_unselected_video_and_audio_payloads() {
         "demuxing must skip video payload reads, including initial probing"
     );
     compare(&source, "0:a:1", "mixed video and default audio");
+    for extension in ["mov", "mp4", "mkv", "ts"] {
+        let mixed = root.join(format!("mixed.{extension}"));
+        if extension != "mov" {
+            let output = ffmpeg()
+                .arg("-i")
+                .arg(&source)
+                .args(["-map", "0", "-c:v", "mpeg4", "-c:a", "aac"])
+                .arg(&mixed)
+                .output()
+                .expect("compressed mixed-stream fixture");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        compare_timeline_audio(&mixed);
+    }
     std::fs::remove_dir_all(root).expect("remove owned fixtures");
+}
+
+fn compare_timeline_audio(source: &Path) {
+    use crate::decode::{self, DecodeOutput, DecodeStream, ParallelSoftwareDecodeOutput};
+    use towavue_core::{MediaTime, TimeRange};
+    let stamp = std::fs::metadata(source).expect("source stamp");
+    for start_ms in [0, 333, 1500] {
+        let start = MediaTime::from_nanoseconds(start_ms * 1_000_000);
+        let end = MediaTime::from_nanoseconds(1_900_000_000);
+        let mut baseline = Vec::new();
+        decode::decode_file_parallel(
+            source,
+            start,
+            Some(end),
+            Some(DecodeStream::Audio),
+            |output| {
+                if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) = output {
+                    baseline.push((chunk.presentation_time, chunk.frames, chunk.bytes));
+                }
+                true
+            },
+        )
+        .expect("unrestricted demux baseline");
+        let mut selected = Vec::new();
+        decode::decode_audio_intervals_cancellable(
+            source,
+            start,
+            end,
+            &[TimeRange::new(start, end).expect("interval")],
+            &|| false,
+            |chunk| {
+                selected.push((chunk.presentation_time, chunk.frames, chunk.bytes));
+                true
+            },
+        )
+        .expect("audio-only timeline demux");
+        assert!(!baseline.is_empty(), "fixture must emit audio");
+        assert!(
+            baseline == selected,
+            "timeline audio bytes/timestamps changed at {start_ms}ms: {:?}, baseline chunks={}, frames={}, first={:?}; selected chunks={}, frames={}, first={:?}",
+            source.extension(),
+            baseline.len(),
+            baseline.iter().map(|chunk| chunk.1).sum::<usize>(),
+            baseline.first().map(|chunk| (chunk.0, chunk.1)),
+            selected.len(),
+            selected.iter().map(|chunk| chunk.1).sum::<usize>(),
+            selected.first().map(|chunk| (chunk.0, chunk.1))
+        );
+    }
+    let after = std::fs::metadata(source).expect("unchanged source");
+    assert_eq!(stamp.len(), after.len());
+    assert_eq!(
+        stamp.modified().expect("mtime"),
+        after.modified().expect("mtime")
+    );
 }

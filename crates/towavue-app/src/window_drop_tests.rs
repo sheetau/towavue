@@ -96,13 +96,15 @@ fn drag_feedback_tracks_local_ownership_and_restores_after_release_or_cancel() {
                 host.windows.get_mut(&source).expect("source"),
                 vec![egui::Event::PointerMoved(point)],
             );
-            let feedback = host
-                .tab_drag_feedback(no_target)
-                .expect("owned invalid drag");
+            let feedback = host.tab_drag_feedback(no_target).expect("owned drag");
             assert_eq!(
                 feedback.cursor,
-                egui::CursorIcon::NoDrop,
-                "media or unavailable transfer"
+                if point.x >= 0.0 {
+                    egui::CursorIcon::Move
+                } else {
+                    egui::CursorIcon::NoDrop
+                },
+                "local media insertion or unavailable external transfer"
             );
             host.update_tab_cursor_with(Some(feedback), |_, cursor| applied.push(cursor));
         }

@@ -372,11 +372,6 @@ impl WindowHost {
         };
         app.validate_transfer_window()?;
         let source_tab = app.tabs.active().map(|tab| tab.id);
-        if source == target
-            && !tab_drag::over_incoming_strip(app.ui_context.as_ref().expect("UI"), point)
-        {
-            return Err("drop on the source tab strip or another window".into());
-        }
         let gap = self
             .windows
             .get(&target)

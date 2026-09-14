@@ -305,12 +305,7 @@ fn exercise_tab_drops(
             }
         }
         let context = host.windows[&target].ui_context.as_ref().expect("context");
-        let drop = tab_drag::tests::drop_point(context, 0)
-            + if target == source {
-                egui::Vec2::ZERO
-            } else {
-                egui::vec2(0.0, 120.0)
-            };
+        let drop = tab_drag::tests::drop_point(context, 0) + egui::vec2(0.0, 120.0);
         let end = if target == source {
             drop
         } else {
@@ -403,7 +398,7 @@ fn exercise_tab_drops(
         assert!(!host.windows[&source].filmstrip_open);
     }
     eprintln!(
-        "PASS filmstrip tab drops: full UI press/hold/release to local strip and another host's body; shared feedback, modal suppression, one clean original tab at the gap, unchanged source history, no new HWND, late replay empty; native windows and GPU, external hit selection injected"
+        "PASS filmstrip tab drops: full UI press/hold/release to local and another host's body; shared feedback, modal suppression, one clean original tab at the gap, unchanged source history, no new HWND, late replay empty; native windows and GPU, external hit selection injected"
     );
 }
 

@@ -12080,7 +12080,11 @@ mod tests {
                 false,
                 Some(UiAction::ReorderTab(a, 3)),
             ),
-            (egui::pos2(300.0, 90.0), false, None),
+            (
+                egui::pos2(500.0, 90.0),
+                false,
+                Some(UiAction::ReorderTab(a, 3)),
+            ),
             (egui::pos2(500.0, 14.0), true, None),
             (
                 egui::pos2(-20.0, 90.0),

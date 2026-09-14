@@ -893,13 +893,11 @@ fn tab_drag_keeps_tab_geometry_fixed_until_release() {
         ),
         "the tab stays clipped to the strip while the pointer crosses the media"
     );
-    frame(
-        &mut app,
-        size,
-        true,
-        vec![egui::Event::PointerMoved(target)],
+    assert!(
+        state(&app).local_drop,
+        "the media area is a local insertion target"
     );
-    let (_, actions) = frame(&mut app, size, true, vec![pointer(target, false)]);
+    let (_, actions) = frame(&mut app, size, true, vec![pointer(over_media, false)]);
     assert!(actions == vec![UiAction::ReorderTab(original[0].0, 3)]);
     assert!(state(&app).drag.is_none());
     assert!(frame(&mut app, size, true, vec![]).1.is_empty());
@@ -1055,6 +1053,62 @@ fn tab_drag_cancellation_rejects_late_release_after_context_changes() {
             "fresh press {case}"
         );
         frame(&mut app, dimensions, true, vec![pointer(target, false)]);
+    }
+}
+
+#[test]
+fn local_tab_drops_project_client_positions_without_replaying_release() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::local_tab_drops_project_client_positions_without_replaying_release",
+    ) else {
+        return;
+    };
+    let size = egui::vec2(960.0, 576.0);
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = setup(&root);
+        let context = app.ui_context.clone().expect("context");
+        context.set_pixels_per_point(density);
+        for _ in 0..3 {
+            frame(&mut app, size, true, vec![]);
+        }
+        let original = state(&app).widgets;
+        let start = original[2].2.center();
+        for batched in [false, true] {
+            for y in [100.0, size.y - 1.0] {
+                for (x, gap) in [(1.0, 0), (drop_point(&context, 1).x, 1), (size.x - 1.0, 3)] {
+                    let target = egui::pos2(x, y);
+                    let mut events = vec![egui::Event::PointerMoved(start), pointer(start, true)];
+                    if !batched {
+                        assert!(frame(&mut app, size, true, events).1.is_empty());
+                        assert!(
+                            frame(
+                                &mut app,
+                                size,
+                                true,
+                                vec![egui::Event::PointerMoved(target)]
+                            )
+                            .1
+                            .is_empty()
+                        );
+                        assert!(state(&app).local_drop);
+                        events = vec![];
+                    }
+                    events.extend([egui::Event::PointerMoved(target), pointer(target, false)]);
+                    let (_, actions) = frame(&mut app, size, true, events);
+                    assert!(
+                        actions == vec![UiAction::ReorderTab(original[2].0, gap)],
+                        "density={density}, batched={batched}, target={target:?}, gap={gap}"
+                    );
+                    assert_eq!(
+                        state(&app).widgets,
+                        original,
+                        "geometry changes only after dispatch"
+                    );
+                    assert!(state(&app).drag.is_none());
+                    assert!(frame(&mut app, size, true, vec![]).1.is_empty());
+                }
+            }
+        }
     }
 }
 

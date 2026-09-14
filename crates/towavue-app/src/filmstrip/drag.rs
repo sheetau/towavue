@@ -144,7 +144,7 @@ impl State {
                 && drag.crossed
                 && pointer.is_some_and(|pointer| {
                     !scope.screen.contains(pointer)
-                        || crate::tab_drag::over_incoming_strip(context, pointer)
+                        || crate::tab_drag::over_incoming_client(context, pointer)
                 })
             {
                 actions.push(UiAction::OpenWindow(

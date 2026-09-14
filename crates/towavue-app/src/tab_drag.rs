@@ -155,7 +155,7 @@ impl Layout {
             .filter(|drag| drag.crossed)
             .and_then(|_| {
                 ui.input(|input| input.pointer.hover_pos())
-                    .and_then(|pointer| chrome::tab_drop_gap(&rectangles, strip, pointer))
+                    .and_then(|pointer| client_gap(&rectangles, strip, screen, pointer))
             });
         state.widgets.clear();
         Self { state, gap }
@@ -294,29 +294,32 @@ struct DropStrip {
 
 impl DropStrip {
     fn gap(&self, point: egui::Pos2) -> Option<(usize, f32)> {
-        if !point.is_finite() || !self.screen.contains(point) || self.strip.width() < 2.0 {
-            return None;
-        }
-        if self.tabs.is_empty() || point.x < self.strip.left() {
-            Some((0, self.strip.left() + 1.0))
-        } else if point.x > self.strip.right() {
-            Some((self.tabs.len(), self.strip.right() - 1.0))
-        } else {
-            chrome::tab_drop_gap(
-                &self.rectangles,
-                self.strip,
-                egui::pos2(point.x, self.strip.center().y),
-            )
-        }
+        client_gap(&self.rectangles, self.strip, self.screen, point)
     }
 }
 
-pub(super) fn over_incoming_strip(context: &egui::Context, point: egui::Pos2) -> bool {
+fn client_gap(
+    rectangles: &[egui::Rect],
+    strip: egui::Rect,
+    screen: egui::Rect,
+    point: egui::Pos2,
+) -> Option<(usize, f32)> {
+    if !point.is_finite() || !screen.contains(point) || strip.width() < 2.0 {
+        return None;
+    }
+    if rectangles.is_empty() || point.x < strip.left() {
+        Some((0, strip.left() + 1.0))
+    } else if point.x > strip.right() {
+        Some((rectangles.len(), strip.right() - 1.0))
+    } else {
+        chrome::tab_drop_gap(rectangles, strip, egui::pos2(point.x, strip.center().y))
+    }
+}
+
+pub(super) fn over_incoming_client(context: &egui::Context, point: egui::Pos2) -> bool {
     context
         .data(|data| data.get_temp::<DropStrip>("incoming-tab-strip".into()))
-        .is_some_and(|layout| {
-            layout.strip.contains(point) && incoming_gap(context, &layout.tabs, point).is_some()
-        })
+        .is_some_and(|layout| incoming_gap(context, &layout.tabs, point).is_some())
 }
 
 pub(super) fn incoming_gap(

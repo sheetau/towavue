@@ -109,7 +109,7 @@ impl WindowHost {
                     }
                     (
                         point,
-                        tab_drag::over_incoming_strip(context, point),
+                        tab_drag::over_incoming_client(context, point),
                         app.validate_transfer_window().is_ok(),
                         true,
                     )

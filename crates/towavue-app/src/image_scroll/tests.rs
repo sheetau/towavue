@@ -159,6 +159,20 @@ fn selection_zoom_keeps_the_full_image_and_clears_selection_in_the_input_frame()
                     max: UnitPoint { x: 0.5, y: 0.6 },
                 };
                 app.image_view.selection = Some(selected);
+                frame(
+                    &mut app,
+                    density,
+                    vec![egui::Event::PointerMoved(egui::pos2(200.0, 150.0))],
+                );
+                assert!(
+                    !app.fullscreen_controls_visible,
+                    "selection does not reveal status"
+                );
+                frame(
+                    &mut app,
+                    density,
+                    vec![egui::Event::PointerMoved(egui::pos2(200.0, 285.0))],
+                );
                 for _ in 0..3 {
                     frame(&mut app, density, vec![]);
                 }

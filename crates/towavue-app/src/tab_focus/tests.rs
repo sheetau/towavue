@@ -1148,9 +1148,9 @@ fn tab_focus_registers_image_video_audio_values_and_path_rows_without_dispatch()
 }
 
 #[test]
-fn tab_focus_fullscreen_reveals_the_saved_transport_and_missing_controls_fall_back() {
+fn tab_focus_fullscreen_waits_for_hover_and_missing_controls_fall_back() {
     let Some(root) = tests::isolated_test_root(
-        "tab_focus::tests::tab_focus_fullscreen_reveals_the_saved_transport_and_missing_controls_fall_back",
+        "tab_focus::tests::tab_focus_fullscreen_waits_for_hover_and_missing_controls_fall_back",
     ) else {
         return;
     };
@@ -1174,10 +1174,19 @@ fn tab_focus_fullscreen_reveals_the_saved_transport_and_missing_controls_fall_ba
     app.tabs.activate(other);
     settle(&mut app);
     app.fullscreen = true;
-    app.fullscreen_controls_keyboard = false;
     app.fullscreen_controls_visible = false;
     app.tabs.activate(active);
     app.state = PlaybackState::Paused;
+    let returned = settle(&mut app);
+    assert!(!app.fullscreen_controls_visible);
+    assert!(!returned.nodes.iter().any(|(_, node)| {
+        node.label()
+            .is_some_and(|label| label.starts_with("Play / replay"))
+    }));
+    tree(
+        &mut app,
+        vec![egui::Event::PointerMoved(egui::pos2(600.0, 465.0))],
+    );
     let returned = settle(&mut app);
     assert!(app.fullscreen_controls_visible);
     let play = returned
@@ -1186,7 +1195,13 @@ fn tab_focus_fullscreen_reveals_the_saved_transport_and_missing_controls_fall_ba
         .find(|(_, n)| n.label().is_some_and(|l| l.starts_with("Play / replay")))
         .expect("play")
         .0;
-    assert_eq!(returned.focus, play);
+    tree(&mut app, vec![focus(play)]);
+    assert_eq!(settle(&mut app).focus, play);
+    tree(
+        &mut app,
+        vec![egui::Event::PointerMoved(egui::pos2(320.0, 200.0))],
+    );
+    assert!(!app.fullscreen_controls_visible);
     app.tabs.activate(other);
     settle(&mut app);
     app.tabs.activate(active);

@@ -2,6 +2,149 @@ use super::*;
 use std::time::{Duration, Instant};
 
 #[test]
+#[ignore = "generated upload submission/completion comparison; use Release with hardware D3D11"]
+#[allow(clippy::assertions_on_constants)]
+fn large_texture_upload_compares_initial_data_and_update() -> Result<()> {
+    use windows::core::BOOL;
+
+    assert!(!cfg!(debug_assertions), "use the Release test binary");
+    let (device, context) = device_with_flags(
+        D3D_DRIVER_TYPE_HARDWARE,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+        true,
+    )?
+    .expect("hardware device required");
+    let mut query = None;
+    // This same-device event is reused only after each sample completes.
+    unsafe {
+        device.CreateQuery(
+            &D3D11_QUERY_DESC {
+                Query: D3D11_QUERY_EVENT,
+                MiscFlags: 0,
+            },
+            Some(&mut query),
+        )?;
+    }
+    let query = query.expect("completion query");
+    for [width, height] in [[4096, 2304], [8706, 5949]] {
+        let image = Arc::new(egui::ColorImage::new(
+            [width, height],
+            (0..width * height)
+                .map(|n| {
+                    Color32::from_rgba_unmultiplied(
+                        n as u8,
+                        (n / width) as u8,
+                        (n / 7) as u8,
+                        (n / 13) as u8,
+                    )
+                })
+                .collect(),
+        ));
+        let measure = |update: bool| -> Result<(Duration, Duration)> {
+            let started = Instant::now();
+            let texture = if update {
+                // Identical DEFAULT/SRV descriptor to production, but upload through
+                // the owned, serialized immediate context after allocating the texture.
+                let desc = D3D11_TEXTURE2D_DESC {
+                    Width: width as u32,
+                    Height: height as u32,
+                    MipLevels: 1,
+                    ArraySize: 1,
+                    Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                    SampleDesc: DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
+                    Usage: D3D11_USAGE_DEFAULT,
+                    BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+                    ..Default::default()
+                };
+                let mut texture = None;
+                let mut srv = None;
+                // The generated RGBA buffer has exactly width * height pixels and
+                // stays alive through UpdateSubresource, which snapshots its source.
+                unsafe {
+                    device.CreateTexture2D(&desc, None, Some(&mut texture))?;
+                    let texture = texture.as_ref().expect("allocated texture");
+                    context.UpdateSubresource(
+                        texture,
+                        0,
+                        None,
+                        image.pixels.as_ptr().cast(),
+                        (width * mem::size_of::<Color32>()) as u32,
+                        0,
+                    );
+                    device.CreateShaderResourceView(texture, None, Some(&mut srv))?;
+                }
+                ManagedTexture {
+                    tex: texture.expect("texture"),
+                    srv: srv.expect("view"),
+                    size: [width, height],
+                    options: egui::TextureOptions::LINEAR,
+                }
+            } else {
+                let Texture::Managed(texture) = TexturePool::create_managed_texture(
+                    &device,
+                    ImageData::Color(image.clone()),
+                    egui::TextureOptions::LINEAR,
+                )?
+                else {
+                    unreachable!()
+                };
+                texture
+            };
+            let submitted = started.elapsed();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut complete = BOOL(0);
+            // Flush and wait for GPU completion, not merely a successful/S_FALSE HRESULT.
+            // The query output is borrowed for each call; no production UI waits are added.
+            unsafe {
+                context.End(&query);
+                context.Flush();
+                while !complete.as_bool() {
+                    context.GetData(
+                        &query,
+                        Some((&mut complete as *mut BOOL).cast()),
+                        mem::size_of::<BOOL>() as u32,
+                        0,
+                    )?;
+                    assert!(Instant::now() < deadline, "upload completion timed out");
+                    if !complete.as_bool() {
+                        std::thread::yield_now();
+                    }
+                }
+            }
+            let completed = started.elapsed();
+            // All-pixel readback and equality stay outside both measured intervals.
+            assert!(
+                readback(&device, &context, &texture.tex)? == image.pixels,
+                "uploaded pixels differ, update={update}"
+            );
+            assert_eq!(Arc::strong_count(&image), 1, "no retained CPU shadow");
+            Ok((submitted, completed))
+        };
+        for update in [false, true] {
+            measure(update)?;
+        }
+        for (batch, update) in [false, true, true, false].into_iter().enumerate() {
+            let samples = (0..5)
+                .map(|_| measure(update))
+                .collect::<Result<Vec<_>>>()?;
+            let mut submitted = samples.iter().map(|sample| sample.0).collect::<Vec<_>>();
+            let mut completed = samples.iter().map(|sample| sample.1).collect::<Vec<_>>();
+            submitted.sort_unstable();
+            completed.sort_unstable();
+            eprintln!(
+                "TEXTURE_UPDATE width={width} height={height} update={update} batch={batch} submission_median_ms={:.3} completion_median_ms={:.3}; five samples, app device flags/protection, generated RGBA, GPU event completion includes submission, full equality/readback excluded; no swap chain, media load, cold-driver or memory claim",
+                submitted[2].as_secs_f64() * 1000.0,
+                completed[2].as_secs_f64() * 1000.0
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
 #[cfg(feature = "render-verification")]
 fn upload_timings_are_nested_and_do_not_retain_the_source() -> Result<()> {
     let (device, context) = device(D3D_DRIVER_TYPE_WARP)?.expect("WARP");

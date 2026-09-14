@@ -56,6 +56,12 @@ Local changes:
   to the production DEFAULT/partial-update contract.
   `TOWAVUE_UPLOAD_APP_DEVICE=1` matches the app's BGRA/VIDEO creation flags and
   multithread protection in this isolated test, without a swap chain/media load.
+- A separate opt-in Release test, `large_texture_upload_compares_initial_data_and_update`,
+  compares initial-data creation against empty DEFAULT creation plus a whole-image
+  UpdateSubresource on an owned immediate context with the app's device settings.
+  It reports CPU submission and GPU event-query completion separately, with exact
+  full-pixel readback outside both timers. The bounded query wait is test-only;
+  production upload and UI synchronization are unchanged.
 
 The public marker is additive; native device ownership APIs are unchanged.
 Upstream vertex/index buffer upload and normal blending remain unchanged.

@@ -423,6 +423,13 @@ mod tests {
                             modifiers: egui::Modifiers::NONE,
                         };
                         // Dragging out of this control must not become a tab move or activation.
+                        crate::tab_focus::adopt(
+                            &context,
+                            second,
+                            egui::Id::new("active prior control"),
+                        );
+                        let background_role = egui::Id::new("background prior control");
+                        crate::tab_focus::adopt(&context, first, background_role);
                         tab_frame(
                             &mut app,
                             &context,
@@ -442,6 +449,21 @@ mod tests {
                         let (_, actions) =
                             tab_frame(&mut app, &context, vec![button(outside, false)]);
                         assert!(actions.is_empty());
+                        assert_eq!(
+                            context.memory(|memory| memory.focused()),
+                            None,
+                            "tab audio drag release must not retain keyboard focus"
+                        );
+                        assert_eq!(
+                            crate::tab_focus::take(&context, second),
+                            None,
+                            "release the active media's saved role"
+                        );
+                        assert_eq!(
+                            crate::tab_focus::take(&context, first),
+                            Some(background_role),
+                            "do not change the background tab's saved role"
+                        );
                         let (output, actions) =
                             tab_frame(&mut app, &context, vec![egui::Event::PointerMoved(point)]);
                         assert!(actions.is_empty());
@@ -453,6 +475,11 @@ mod tests {
                         assert!(actions.is_empty(), "toggle waits for release");
                         let (_, actions) =
                             tab_frame(&mut app, &context, vec![button(point, false)]);
+                        assert_eq!(
+                            context.memory(|memory| memory.focused()),
+                            None,
+                            "tab audio click must return keyboard input to the active media"
+                        );
                         assert!(
                             matches!(actions.as_slice(), [UiAction::ToggleTabMute(tab)] if *tab == id)
                         );
@@ -467,6 +494,21 @@ mod tests {
                         }
                         .expect("session");
                         assert_eq!(session.verification_volume(), (expected, Some(expected)));
+                        tab_frame(
+                            &mut app,
+                            &context,
+                            vec![egui::Event::AccessKitActionRequest(
+                                egui::accesskit::ActionRequest {
+                                    action: egui::accesskit::Action::Focus,
+                                    target_tree: egui::accesskit::TreeId::ROOT,
+                                    target_node: *node_id,
+                                    data: None,
+                                },
+                            )],
+                        );
+                        let focused = context
+                            .memory(|memory| memory.focused())
+                            .expect("explicit audio-button focus");
                         let (_, actions) = tab_frame(
                             &mut app,
                             &context,
@@ -481,6 +523,11 @@ mod tests {
                         );
                         assert!(
                             matches!(actions.as_slice(), [UiAction::ToggleTabMute(tab)] if *tab == id)
+                        );
+                        assert_eq!(
+                            context.memory(|memory| memory.focused()),
+                            Some(focused),
+                            "explicit accessibility activation retains focus"
                         );
                         for action in actions {
                             app.handle_ui_action(action);

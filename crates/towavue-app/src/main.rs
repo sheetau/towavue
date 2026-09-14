@@ -4317,6 +4317,25 @@ where
                                             let button = chrome::tab_audio_button(
                                                 &tab_ui, rect, active, muted, &label,
                                             );
+                                            let released = (button.clicked() || button.has_focus())
+                                                && tab_ui.input(|input| {
+                                                    input.pointer.primary_released()
+                                                });
+                                            if released
+                                                || (button.is_pointer_button_down_on()
+                                                    && tab_ui.input(|input| {
+                                                        input.pointer.primary_pressed()
+                                                    }))
+                                            {
+                                                // Cancelled gestures also discard the active role,
+                                                // without changing the background tab's saved role.
+                                                if let Some(active) = self.tabs.active() {
+                                                    tab_focus::forget(tab_ui.ctx(), active.id);
+                                                }
+                                                if released {
+                                                    button.surrender_focus();
+                                                }
+                                            }
                                             if button.clicked() {
                                                 actions.push(UiAction::ToggleTabMute(tab.id));
                                             }

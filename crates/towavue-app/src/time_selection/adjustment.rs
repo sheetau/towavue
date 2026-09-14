@@ -191,33 +191,27 @@ pub(super) fn values(
         } else {
             0.0..=f64::from(towavue_core::MAX_VOLUME) * 100.0
         };
-        // An explicit value also unifies a mixed selection when its first span already matches.
+        // Preserve explicit unification when the ordered batch ends at the starting value.
+        // value_input consumes the events and computes their final value below.
         let uniform_gain = if mixed && !stretch && available {
             ui.input(|input| {
-                input
-                    .events
-                    .iter()
-                    .filter_map(|event| match event {
-                        egui::Event::AccessKitActionRequest(request)
-                            if request.target_tree == egui::accesskit::TreeId::ROOT
-                                && request.target_node == control.id.accesskit_id()
-                                && request.action == egui::accesskit::Action::SetValue =>
-                        {
-                            match request.data {
-                                Some(egui::accesskit::ActionData::NumericValue(value))
-                                    if value.is_finite() =>
-                                {
-                                    Some(value.clamp(*bounds.start(), *bounds.end()))
-                                }
-                                _ => None,
-                            }
-                        }
-                        _ => None,
-                    })
-                    .next_back()
+                input.events.iter().any(|event| match event {
+                    egui::Event::AccessKitActionRequest(request)
+                        if request.target_tree == egui::accesskit::TreeId::ROOT
+                            && request.target_node == control.id.accesskit_id()
+                            && request.action == egui::accesskit::Action::SetValue =>
+                    {
+                        matches!(
+                            request.data,
+                            Some(egui::accesskit::ActionData::NumericValue(value))
+                                if value.is_finite()
+                        )
+                    }
+                    _ => false,
+                })
             })
         } else {
-            None
+            false
         };
         let next = crate::seekbar::value_input(
             &control,
@@ -227,7 +221,7 @@ pub(super) fn values(
             if stretch { 0.1 } else { 5.0 },
             available,
         )
-        .or(uniform_gain);
+        .or(uniform_gain.then_some(value));
         if control.has_focus() || selection.is_some() {
             let label = if stretch {
                 format!("Length {value:.3}s")
@@ -326,6 +320,86 @@ mod tests {
             Some(&plan),
             TimelineEdit::SetVolume(range(0, 8), 1.0)
         ));
+    }
+
+    #[test]
+    fn mixed_gain_value_batches_preserve_event_order_without_replaying_edits() {
+        use egui::accesskit::{Action, ActionData, ActionRequest, TreeId};
+        for density in [1.0, 1.25, 2.0] {
+            for selection in [None, Some(range(2, 8))] {
+                for discard in [false, true] {
+                    let context = crate::fonts::test_context();
+                    context.set_pixels_per_point(density);
+                    context.enable_accesskit();
+                    let mut plan = EditTimeline::new(time(10), Default::default()).expect("plan");
+                    assert!(plan.apply(TimelineEdit::SetVolume(range(3, 7), 0.0)));
+                    let id = egui::Id::new("mixed-gain-order");
+                    let event = |action, value: Option<f64>| {
+                        egui::Event::AccessKitActionRequest(ActionRequest {
+                            action,
+                            target_tree: TreeId::ROOT,
+                            target_node: id
+                                .with(("timeline-adjustment-value", false))
+                                .accesskit_id(),
+                            data: value.map(ActionData::NumericValue),
+                        })
+                    };
+                    for events in [
+                        vec![
+                            event(Action::SetValue, Some(105.0)),
+                            event(Action::Decrement, None),
+                        ],
+                        vec![
+                            event(Action::SetValue, Some(95.0)),
+                            event(Action::Increment, None),
+                        ],
+                        vec![event(Action::SetValue, Some(100.0))],
+                        vec![
+                            event(Action::SetValue, Some(80.0)),
+                            event(Action::SetValue, Some(100.0)),
+                        ],
+                    ] {
+                        let mut edits = Vec::new();
+                        let mut passes = 0;
+                        let _ = context.run_ui(
+                            egui::RawInput {
+                                events,
+                                ..Default::default()
+                            },
+                            |ui| {
+                                let response = ui.interact(
+                                    Rect::from_min_size(
+                                        egui::pos2(20.0, 20.0),
+                                        egui::vec2(400.0, 100.0),
+                                    ),
+                                    id,
+                                    egui::Sense::click_and_drag(),
+                                );
+                                if let Some(edit) =
+                                    values(ui, &response, time(10), selection, Some(&plan), true)
+                                {
+                                    edits.push(edit);
+                                }
+                                passes += 1;
+                                if discard && passes == 1 {
+                                    context.request_discard("mixed gain input must not replay");
+                                }
+                            },
+                        );
+                        assert_eq!(
+                            edits,
+                            vec![TimelineEdit::SetVolume(
+                                selection.unwrap_or(range(0, 10)),
+                                1.0
+                            )]
+                        );
+                        if discard {
+                            assert!(passes > 1);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

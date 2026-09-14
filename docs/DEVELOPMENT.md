@@ -86,6 +86,8 @@ For bug reports retain reproduction, expected/actual result, build, Windows/GPU/
 
 Selected reference traces and the opt-in color-example test also report calling-thread kernel+user CPU accounting from [GetThreadTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getthreadtimes). These counters exclude other workers and GPU execution; their accounting granularity does not support exact wall-minus-CPU wait durations. CPU sampling is verification-only; ordinary color conversion leaves it disabled.
 
+The reference navigation harness also accepts `TOWAVUE_NAV_PARALLEL_PREFETCH=1` (default `0`) for a verification-only one-image lookahead decoder. It probes JPEG/PNG/WebP canvas sizes, starts a pair only when both fit the remaining batch budget, and publishes/cache-inserts in plan order. The coordinator joins a cancelled helper off the UI thread before another pair starts; foreground may adopt either active path. Compare disabled/enabled/enabled/disabled on the same Release binary, with the accepted cache/directional policy fixed and no concurrent builds. Include order, blanks/previews, memory, cancellation and source-identity checks; the isolated paired-decode timing alone does not justify production adoption. Unsupported headers/formats retain serial processing; this is not a new user preference or a production worker-count change.
+
 ## Documentation maintenance
 
 STATUS is the only current-work/handoff record. Update rows in place rather than appending a chronology. Retain new evidence when it changes the next decision or prevents repeated work; include a commit/test reference and its limits. Small documentation corrections need not create status entries.

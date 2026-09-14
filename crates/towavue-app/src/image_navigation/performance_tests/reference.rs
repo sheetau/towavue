@@ -149,6 +149,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
         idle_frame_interval: Duration,
         cache_mib: usize,
         directional_prefetch: bool,
+        parallel_prefetch: bool,
         parallel_color: bool,
         lookup_color: bool,
         source: PathBuf,
@@ -170,6 +171,9 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             app.verification_directional_prefetch = self.directional_prefetch;
             app.image_loader
                 .verification_set_cache_byte_limit(self.cache_mib * 1024 * 1024)
+                .expect("unused reference loader");
+            app.image_loader
+                .verification_set_parallel_prefetch(self.parallel_prefetch)
                 .expect("unused reference loader");
             let context = fonts::test_context();
             app.ui_context = Some(context.clone());
@@ -530,6 +534,13 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 _ => panic!("directional-prefetch must be 0 or 1"),
             })
             .unwrap_or(true),
+        parallel_prefetch: std::env::var("TOWAVUE_NAV_PARALLEL_PREFETCH")
+            .map(|value| match value.as_str() {
+                "0" => false,
+                "1" => true,
+                _ => panic!("parallel-prefetch must be 0 or 1"),
+            })
+            .unwrap_or(false),
         source,
         parallel_color: std::env::var("TOWAVUE_NAV_PARALLEL_COLOR")
             .map(|value| match value.as_str() {

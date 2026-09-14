@@ -15,6 +15,8 @@ const CACHE_ENTRY_LIMIT: usize = 30;
 const PREFETCH_ENTRY_LIMIT: usize = 10;
 
 #[cfg(any(test, feature = "render-verification"))]
+mod parallel;
+#[cfg(any(test, feature = "render-verification"))]
 pub(crate) mod verification;
 #[cfg(any(test, feature = "render-verification"))]
 use verification::ImageLoadTraceKind as TraceKind;
@@ -125,6 +127,18 @@ struct PrefetchWork {
     decoding: bool,
     cancellation: crate::Cancellation,
     pending_paths: Option<VecDeque<PathBuf>>,
+    #[cfg(any(test, feature = "render-verification"))]
+    lookahead: Option<PathBuf>,
+}
+
+impl PrefetchWork {
+    fn contains_active(&self, path: &Path) -> bool {
+        #[cfg(any(test, feature = "render-verification"))]
+        if self.lookahead.as_deref() == Some(path) {
+            return true;
+        }
+        self.decoding && self.path == path
+    }
 }
 
 struct PrefetchLease {
@@ -157,6 +171,8 @@ impl Drop for PrefetchLease {
 #[derive(Default)]
 struct Mailbox {
     #[cfg(any(test, feature = "render-verification"))]
+    parallel_decode: Option<Arc<parallel::Decode>>,
+    #[cfg(any(test, feature = "render-verification"))]
     metrics: verification::ImageLoadMetrics,
     #[cfg(any(test, feature = "render-verification"))]
     trace: Option<verification::Trace>,
@@ -181,6 +197,17 @@ pub struct ImageLoader {
 }
 
 impl ImageLoader {
+    /// Opt-in paired prefetch experiment; normal builds retain one speculative decoder.
+    #[cfg(any(test, feature = "render-verification"))]
+    pub fn verification_set_parallel_prefetch(&self, enabled: bool) -> Result<(), &'static str> {
+        let mut mailbox = self.shared.0.lock().expect("image mailbox");
+        if mailbox.generation != 0 || mailbox.prefetch_tasks != 0 {
+            return Err("configure parallel prefetch before requesting work");
+        }
+        mailbox.parallel_decode = enabled.then(|| Arc::new(decode_image_for_prefetch) as Arc<_>);
+        Ok(())
+    }
+
     /// Compare decoded-cache budgets before issuing any image work; production keeps its limit.
     #[cfg(any(test, feature = "render-verification"))]
     pub fn verification_set_cache_byte_limit(&self, bytes: usize) -> Result<(), &'static str> {
@@ -309,13 +336,12 @@ impl ImageLoader {
             mailbox.trace(path, TraceKind::Requested);
         }
         if let Some(work) = &mut mailbox.prefetch {
-            if work.decoding
-                && (paths.contains(&work.path)
-                    || (!paths.is_empty()
-                        && prefetch_paths
-                            .iter()
-                            .take(PREFETCH_ENTRY_LIMIT)
-                            .any(|path| path == &work.path)))
+            if paths.iter().any(|path| work.contains_active(path))
+                || (!paths.is_empty()
+                    && prefetch_paths
+                        .iter()
+                        .take(PREFETCH_ENTRY_LIMIT)
+                        .any(|path| work.contains_active(path)))
             {
                 work.generation = generation;
                 // Keep this decode, not a batch belonging to the previous destination.
@@ -384,9 +410,8 @@ impl ImageLoader {
                 }
             }
             if let Some(work) = &mut mailbox.prefetch
-                && work.decoding
                 && !work.cancellation.is_cancelled()
-                && unique.contains(&work.path)
+                && unique.iter().any(|path| work.contains_active(path))
             {
                 // Do not resubmit to LatestTask: that would cancel the useful decoder.
                 // Its owner takes the newest bounded tail after this call returns.
@@ -410,6 +435,8 @@ impl ImageLoader {
                 decoding: false,
                 cancellation: work_cancellation.clone(),
                 pending_paths: None,
+                #[cfg(any(test, feature = "render-verification"))]
+                lookahead: None,
             });
             mailbox.prefetch_tasks += 1;
             shared.1.notify_all();
@@ -425,6 +452,15 @@ impl ImageLoader {
         };
         self.prefetch_worker.submit(move |cancellation| {
             let _lease = lease;
+            #[cfg(any(test, feature = "render-verification"))]
+            let parallel_decode = shared
+                .0
+                .lock()
+                .expect("image mailbox")
+                .parallel_decode
+                .clone();
+            #[cfg(any(test, feature = "render-verification"))]
+            let mut lookahead: Option<parallel::Ahead> = None;
             let byte_limit = cache.lock().expect("image cache").byte_limit;
             let mut remaining = byte_limit;
             #[cfg(any(test, feature = "render-verification"))]
@@ -458,6 +494,13 @@ impl ImageLoader {
                         }
                     }
                     // An adopted job without a replacement plan finishes only its current page.
+                    #[cfg(any(test, feature = "render-verification"))]
+                    if next_generation != generation
+                        && let Some(path) = &work.lookahead
+                    {
+                        paths = VecDeque::from([path.clone()]);
+                        generation = next_generation;
+                    }
                     if next_generation != generation || remaining == 0 {
                         break;
                     }
@@ -492,6 +535,16 @@ impl ImageLoader {
                     .find(|entry| entry.0 == path && entry.1 == stamp)
                     .map(|entry| Arc::clone(&entry.2));
                 #[cfg(any(test, feature = "render-verification"))]
+                if lookahead.as_ref().is_some_and(|ahead| {
+                    (ahead.path == path && cached.is_some())
+                        || (ahead.path != path
+                            && (cached.is_none() || !paths.contains(&ahead.path)))
+                }) {
+                    // A changed priority must not reserve memory for a later image.
+                    // Only the speculative worker joins its cancelled helper, never the UI.
+                    drop(lookahead.take());
+                }
+                #[cfg(any(test, feature = "render-verification"))]
                 let was_cached = cached.is_some();
                 #[cfg(any(test, feature = "render-verification"))]
                 shared.0.lock().expect("image mailbox").trace(
@@ -505,16 +558,58 @@ impl ImageLoader {
                 let image = if let Some(image) = cached {
                     image
                 } else {
+                    let decode_budget = remaining;
                     #[cfg(any(test, feature = "render-verification"))]
-                    let started = {
+                    let (prepared, decode_budget) =
+                        if lookahead.as_ref().is_some_and(|ahead| ahead.path == path) {
+                            (
+                                Some(lookahead.take().expect("matching lookahead").finish(stamp)),
+                                decode_budget,
+                            )
+                        } else {
+                            let mut decode_budget = decode_budget;
+                            if let Some(decode) = &parallel_decode
+                                && let Some(next) = paths.front()
+                                && let Some(bytes) = parallel::pair_budget(&path, next, remaining)
+                                && !cache
+                                    .lock()
+                                    .expect("image cache")
+                                    .entries
+                                    .iter()
+                                    .any(|entry| {
+                                        entry.0 == *next && Some(entry.1) == ImageStamp::read(next)
+                                    })
+                            {
+                                lookahead = parallel::Ahead::start(
+                                    next.clone(),
+                                    bytes,
+                                    parallel::Context {
+                                        shared: Arc::clone(&shared),
+                                        id: Arc::clone(&id),
+                                        cancellation: cancellation.clone(),
+                                        work_cancellation: work_cancellation.clone(),
+                                    },
+                                    Arc::clone(decode),
+                                );
+                                if let Some(ahead) = &lookahead {
+                                    decode_budget -= ahead.bytes;
+                                }
+                            }
+                            (None, decode_budget)
+                        };
+                    #[cfg(any(test, feature = "render-verification"))]
+                    let started = prepared.is_none().then(|| {
                         let mut mailbox = shared.0.lock().expect("image mailbox");
                         mailbox.metrics.prefetch.calls += 1;
                         mailbox.trace(&path, TraceKind::PrefetchDecodeStarted);
                         std::time::Instant::now()
-                    };
-                    let result = decode(&path, remaining, &current);
+                    });
                     #[cfg(any(test, feature = "render-verification"))]
-                    {
+                    let result = prepared.unwrap_or_else(|| decode(&path, decode_budget, &current));
+                    #[cfg(not(any(test, feature = "render-verification")))]
+                    let result = decode(&path, decode_budget, &current);
+                    #[cfg(any(test, feature = "render-verification"))]
+                    if let Some(started) = started {
                         let elapsed = started.elapsed();
                         let outcome = match (current(), &result) {
                             (false, _) => verification::Outcome::Superseded,
@@ -750,7 +845,7 @@ fn run_worker(
                         let waiting = !mailbox.closed
                             && mailbox.generation == generation
                             && mailbox.prefetch.as_ref().is_some_and(|work| {
-                                work.decoding && work.generation == generation && work.path == path
+                                work.generation == generation && work.contains_active(&path)
                             });
                         #[cfg(any(test, feature = "render-verification"))]
                         {
@@ -885,6 +980,7 @@ fn run_worker(
 #[cfg(test)]
 mod tests {
     mod neighbors;
+    mod parallel;
     mod pressure;
     mod release;
     use std::sync::mpsc;

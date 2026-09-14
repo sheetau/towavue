@@ -1,8 +1,8 @@
-//! Verification-only packed alpha conversion; not used by normal image presentation.
+//! Exact packed RGBA premultiplication for image presentation.
 
 use egui::{Color32, ColorImage};
 
-pub fn verification_color_image_sse2(frame: &crate::DecodedImageFrame) -> ColorImage {
+pub fn premultiplied_color_image(frame: &crate::DecodedImageFrame) -> ColorImage {
     let size = [frame.width as usize, frame.height as usize];
     assert_eq!(
         size[0].checked_mul(size[1]).and_then(|n| n.checked_mul(4)),

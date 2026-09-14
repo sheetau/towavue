@@ -8,6 +8,11 @@ use image_color::parallel_trial;
 #[cfg(not(test))]
 #[path = "../src/image_color/parallel_trial.rs"]
 mod parallel_trial;
+#[cfg(test)]
+use image_color::scalar_trial;
+#[cfg(not(test))]
+#[path = "../src/image_color/scalar_trial.rs"]
+mod scalar_trial;
 
 use std::time::{Duration, Instant};
 use towavue_runtime_windows::DecodedImageFrame;
@@ -61,33 +66,8 @@ fn convert(frame: &DecodedImageFrame, strategy: usize) -> egui::ColorImage {
         }
         2 => egui::ColorImage::from_rgba_unmultiplied(size, &frame.rgba),
         3 | 4 => parallel_trial::color_image(frame, strategy == 3),
-        5 => {
-            let mut pixels = Vec::with_capacity(size[0] * size[1]);
-            for row in frame.rgba.chunks_exact(size[0].max(1) * 4) {
-                let row = row.as_chunks::<4>().0;
-                let alpha_mask = u32::from_ne_bytes([0, 0, 0, 255]);
-                if row.chunks(32).all(|block| {
-                    block
-                        .iter()
-                        .fold(u32::MAX, |bits, pixel| bits & u32::from_ne_bytes(*pixel))
-                        & alpha_mask
-                        == alpha_mask
-                }) {
-                    pixels.extend(
-                        row.iter().map(|p| {
-                            egui::Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3])
-                        }),
-                    );
-                } else {
-                    pixels
-                        .extend(row.iter().map(|p| {
-                            egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3])
-                        }));
-                }
-            }
-            egui::ColorImage::new(size, pixels)
-        }
-        6 => towavue_runtime_windows::verification_color_image_sse2(frame),
+        5 => scalar_trial::color_image(frame, true),
+        6 => scalar_trial::color_image(frame, false),
         _ => unreachable!(),
     }
 }
@@ -226,7 +206,7 @@ fn measure(frame: &DecodedImageFrame, case: &str) {
         frame.height,
         first_elapsed.as_secs_f64() * 1000.0,
     );
-    let strategies: &[usize] = if std::env::var_os("TOWAVUE_COLOR_SSE2_TRIAL").is_some() {
+    let strategies: &[usize] = if std::env::var_os("TOWAVUE_COLOR_SCALAR_TRIAL").is_some() {
         &[0, 6]
     } else if std::env::var_os("TOWAVUE_COLOR_INTEGER_TRIAL").is_some() {
         &[0, 5, 2]
@@ -255,7 +235,7 @@ fn measure(frame: &DecodedImageFrame, case: &str) {
         }
         times.sort_unstable();
         eprintln!(
-            "IMAGE_COLOR width={} height={} case={case} strategy={strategy} batch={batch} median_ms={:.3}; 0=current integer rows, 1=mixed blocks, 2=egui unmultiplied, 3=two-way initialized rows, 4=serial initialized rows, 5=historical lookup rows, 6=SSE2 packed; full equality outside timing, no pixels/path output, decode/GPU/display or memory claim",
+            "IMAGE_COLOR width={} height={} case={case} strategy={strategy} batch={batch} median_ms={:.3}; 0=current packed conversion, 1=mixed blocks, 2=egui unmultiplied, 3=two-way initialized rows, 4=serial initialized rows, 5=historical lookup rows, 6=historical integer rows; full equality outside timing, no pixels/path output, decode/GPU/display or memory claim",
             frame.width,
             frame.height,
             times[2].as_secs_f64() * 1000.0,

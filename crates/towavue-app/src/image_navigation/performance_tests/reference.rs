@@ -1,7 +1,7 @@
 use super::*;
 use crate::image_color::{
     COLOR_IMAGE_CPU_TIME, COLOR_IMAGE_LOOKUP_TRIAL, COLOR_IMAGE_PARALLEL_TRIAL,
-    COLOR_IMAGE_SSE2_TRIAL,
+    COLOR_IMAGE_SCALAR_TRIAL,
 };
 use towavue_runtime_windows::verification_thread_cpu_time;
 use winit::platform::windows::EventLoopBuilderExtWindows;
@@ -153,7 +153,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
         parallel_prefetch: bool,
         parallel_color: bool,
         lookup_color: bool,
-        sse2_color: bool,
+        scalar_color: bool,
         source: PathBuf,
         completed: bool,
     }
@@ -161,7 +161,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
             COLOR_IMAGE_PARALLEL_TRIAL.set(self.parallel_color);
             COLOR_IMAGE_LOOKUP_TRIAL.set(self.lookup_color);
-            COLOR_IMAGE_SSE2_TRIAL.set(self.sse2_color);
+            COLOR_IMAGE_SCALAR_TRIAL.set(self.scalar_color);
             let window = event_loop
                 .create_window(Window::default_attributes().with_visible(false))
                 .expect("hidden owned window");
@@ -451,8 +451,8 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             );
             memory.report();
             eprintln!(
-                "REFERENCE_COLOR parallel={} lookup={} sse2={}; all false uses production integer rows; lookup retains historical serial rows; SSE2 uses packed integer conversion; parallel includes output initialization and worker creation/join, excluded from calling-thread CPU",
-                self.parallel_color, self.lookup_color, self.sse2_color,
+                "REFERENCE_COLOR parallel={} lookup={} scalar={}; all false uses production packed conversion; lookup and scalar retain historical rows; parallel includes output initialization and worker creation/join, excluded from calling-thread CPU",
+                self.parallel_color, self.lookup_color, self.scalar_color,
             );
             eprintln!(
                 "REFERENCE_REDRAW presentations={presentations} idle_frame_interval_ms={:.3}; command/completion draws are immediate, interval only applies without those events; no physical redraw-cadence evidence",
@@ -509,7 +509,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
             COLOR_IMAGE_CPU_TIME.set(None);
             COLOR_IMAGE_PARALLEL_TRIAL.set(false);
             COLOR_IMAGE_LOOKUP_TRIAL.set(false);
-            COLOR_IMAGE_SSE2_TRIAL.set(false);
+            COLOR_IMAGE_SCALAR_TRIAL.set(false);
             event_loop.exit();
         }
         fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
@@ -561,16 +561,16 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                 _ => panic!("lookup-color must be 0 or 1"),
             })
             .unwrap_or(false),
-        sse2_color: std::env::var("TOWAVUE_NAV_SSE2_COLOR")
+        scalar_color: std::env::var("TOWAVUE_NAV_SCALAR_COLOR")
             .map(|value| match value.as_str() {
                 "0" => false,
                 "1" => true,
-                _ => panic!("sse2-color must be 0 or 1"),
+                _ => panic!("scalar-color must be 0 or 1"),
             })
             .unwrap_or(false),
     };
     assert!(
-        [trial.parallel_color, trial.lookup_color, trial.sse2_color]
+        [trial.parallel_color, trial.lookup_color, trial.scalar_color]
             .into_iter()
             .filter(|enabled| *enabled)
             .count()

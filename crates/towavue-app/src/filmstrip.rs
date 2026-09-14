@@ -1281,6 +1281,73 @@ mod tests {
             .expect("prepared current")
             .0
             .id();
+        // Publish the initial allocations before measuring redundant uploads.
+        draw(&mut app);
+        let prepared: Vec<_> = app
+            .filmstrip
+            .previews
+            .iter()
+            .map(|(path, preview)| {
+                (
+                    path.clone(),
+                    preview.as_ref().expect("prepared bitmap").0.id(),
+                )
+            })
+            .collect();
+        for blocked in 0..5 {
+            app.palette_open = blocked == 0;
+            app.grid_open = blocked == 1;
+            app.pending_guard = (blocked == 2).then_some(crate::GuardedAction::Exit);
+            if blocked == 3 {
+                egui::Popup::open_id(&context, "preparation-test-menu".into());
+            }
+            if blocked == 4 {
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        hovered_files: vec![egui::HoveredFile::default()],
+                        ..Default::default()
+                    },
+                    |_| {},
+                );
+            }
+            app.prepare_filmstrip(&context);
+            assert!(app.filmstrip.visible.is_empty(), "overlay pauses new work");
+            assert_eq!(
+                app.filmstrip.previews.len(),
+                prepared.len(),
+                "overlay retains prepared textures"
+            );
+            let paused = app.filmstrip.generation;
+            app.prepare_filmstrip(&context);
+            assert_eq!(
+                app.filmstrip.generation, paused,
+                "idle overlay does not cancel repeatedly"
+            );
+            app.palette_open = false;
+            app.grid_open = false;
+            app.pending_guard = None;
+            egui::Popup::close_all(&context);
+            let resumed = draw(&mut app);
+            assert_eq!(app.filmstrip.visible.len(), VISIBLE_PREVIEW_LIMIT);
+            for (path, id) in &prepared {
+                assert_eq!(
+                    app.filmstrip.previews[path]
+                        .as_ref()
+                        .expect("retained preview")
+                        .0
+                        .id(),
+                    *id
+                );
+                assert!(
+                    !resumed
+                        .textures_delta
+                        .set
+                        .iter()
+                        .any(|(uploaded, _)| uploaded == id),
+                    "resuming does not upload retained pixels"
+                );
+            }
+        }
         app.pending_folder = Some((1, crate::FolderIntent::Refresh(current.clone())));
         app.prepare_filmstrip(&context);
         assert!(

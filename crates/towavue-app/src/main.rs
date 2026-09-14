@@ -8500,10 +8500,8 @@ where
                 self.fullscreen_was_maximized = false;
             }
         }
-        self.set_status(if enabled && self.media_kind == Some(MediaKind::Audio) {
-            "Fullscreen — Escape to return".into()
-        } else if enabled {
-            "Fullscreen — Tab or bottom edge for controls · Escape to return".into()
+        self.set_status(if enabled {
+            "Fullscreen — Bottom edge for controls · Escape to return".into()
         } else {
             "Windowed view".into()
         });
@@ -8516,15 +8514,20 @@ where
             && self.image_sequence.steps.is_empty()
             && self.active_export.is_none()
             && self.pending_folder.is_none()
-            && !self.modal_input_blocked()
-            && !self.palette_open
-            && !self.grid_open
-            && !egui::Popup::is_any_open(context)
-            && context.input(|input| input.raw.hovered_files.is_empty())
             && self.image_loader.is_idle()
         {
-            self.filmstrip
-                .prepare_neighbors(self.folder_snapshot.as_ref(), self.path.as_deref());
+            if self.modal_input_blocked()
+                || self.palette_open
+                || self.grid_open
+                || egui::Popup::is_any_open(context)
+                || context.input(|input| !input.raw.hovered_files.is_empty())
+            {
+                // Temporary overlays suspend work, not already prepared pixels.
+                self.filmstrip.pause_preparation();
+            } else {
+                self.filmstrip
+                    .prepare_neighbors(self.folder_snapshot.as_ref(), self.path.as_deref());
+            }
         } else if matches!(
             &self.pending_folder,
             Some((_, FolderIntent::Refresh(path))) if self.path.as_ref() == Some(path)
@@ -16715,6 +16718,10 @@ mod tests {
                 app.media_duration = Some(Duration::from_secs(10));
                 app.state = PlaybackState::Paused;
                 app.set_fullscreen(true);
+                assert_eq!(
+                    app.status_notice().as_deref(),
+                    Some("Fullscreen — Bottom edge for controls · Escape to return")
+                );
                 let context = fonts::test_context();
                 context.enable_accesskit();
                 app.ui_context = Some(context.clone());

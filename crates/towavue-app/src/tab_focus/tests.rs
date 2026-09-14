@@ -399,6 +399,101 @@ fn tab_focus_image_controls_restore_by_role_without_reloading_or_editing() {
 }
 
 #[test]
+fn batched_cancelled_media_button_press_releases_prior_numeric_focus() {
+    for density in [1.0, 1.25, 2.0] {
+        for control in 0..3 {
+            let context = fonts::test_context();
+            let mut tabs = TabSet::default();
+            let active = tabs.open_new("active.png".into(), MediaKind::Image);
+            let other = tabs.open_new("other.png".into(), MediaKind::Image);
+            let numeric = egui::Id::new("cancelled-button-numeric");
+            let draw = |tab, events| {
+                let mut raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(500.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                };
+                raw.viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .expect("viewport")
+                    .native_pixels_per_point = Some(density);
+                let mut response = None;
+                let _ = context.run_ui(raw, |ui| {
+                    super::begin(&context, Some(tab), true);
+                    response = Some(match control {
+                        0 => chrome::button(ui, chrome::Icon::Play, "Play"),
+                        1 => chrome::audio_button(ui, chrome::AudioIcon::Shuffle, false, "Shuffle"),
+                        _ => chrome::reading_button(ui, true, false),
+                    });
+                    let value = ui.interact(
+                        egui::Rect::from_min_size(
+                            egui::pos2(100.0, 100.0),
+                            egui::vec2(100.0, 20.0),
+                        ),
+                        numeric,
+                        egui::Sense::focusable_noninteractive(),
+                    );
+                    assert_eq!(
+                        seekbar::value_input(
+                            &value,
+                            "Playback position (seconds)",
+                            25.0,
+                            0.0..=100.0,
+                            5.0,
+                            true
+                        ),
+                        None
+                    );
+                    super::finish(&context, false, true);
+                });
+                response.expect("button")
+            };
+            let response = draw(active, vec![]);
+            context.memory_mut(|memory| memory.request_focus(numeric));
+            draw(
+                active,
+                vec![egui::Event::PointerMoved(response.rect.center())],
+            );
+            assert!(
+                context.memory(|memory| memory.has_focus(numeric)),
+                "hover retains explicit focus"
+            );
+            let background = egui::Id::new("background-role");
+            super::adopt(&context, other, background);
+            let outside = egui::pos2(400.0, 250.0);
+            let pointer = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let result = draw(
+                active,
+                vec![
+                    pointer(response.rect.center(), true),
+                    egui::Event::PointerMoved(outside),
+                    pointer(outside, false),
+                ],
+            );
+            assert!(!result.clicked(), "outside release cancels activation");
+            assert_eq!(
+                context.memory(|memory| memory.focused()),
+                None,
+                "control={control}, density={density}"
+            );
+            assert!(
+                super::take(&context, active).is_none(),
+                "cancel must clear the saved numeric role"
+            );
+            assert_eq!(super::take(&context, other), Some(background));
+        }
+    }
+}
+
+#[test]
 fn pointer_media_buttons_release_focus_without_removing_keyboard_activation() {
     for density in [1.0, 1.25, 2.0] {
         for control in 0..7 {

@@ -4228,7 +4228,7 @@ where
                     menu.response.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
-                            ui.is_enabled(),
+                            menu.response.enabled(),
                             "towavue menu",
                         )
                     });

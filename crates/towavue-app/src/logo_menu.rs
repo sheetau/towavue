@@ -68,7 +68,8 @@ pub(super) fn show(
     source: Source,
     allowed: bool,
 ) -> egui::InnerResponse<Option<Option<CommandId>>> {
-    let response = ui.add(
+    let response = ui.add_enabled(
+        allowed,
         egui::Button::new("")
             .min_size(egui::vec2(28.0, height))
             .stroke(egui::Stroke::NONE)

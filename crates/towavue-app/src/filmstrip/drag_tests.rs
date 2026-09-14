@@ -1019,6 +1019,89 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
 }
 
 #[test]
+fn filmstrip_blocks_logo_menu_equally_for_pointer_keyboard_and_accessibility() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_blocks_logo_menu_equally_for_pointer_keyboard_and_accessibility",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.enable_accesskit();
+        context.global_style_mut(crate::chrome::style);
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let current = root.join("source.png");
+        app.ui_context = Some(context.clone());
+        app.tabs.open_new(current.clone(), MediaKind::Image);
+        app.path = Some(current);
+        app.media_kind = Some(MediaKind::Image);
+        app.state = PlaybackState::Paused;
+        app.folder_snapshot = Some(snapshot(&root));
+        let render = |app: &mut Application<_>, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(input(events), |ui| app.draw_ui(ui, &mut actions));
+            assert!(actions.is_empty(), "opening a menu dispatches no command");
+            output
+        };
+        for blocked in [true, false] {
+            app.filmstrip_open = blocked;
+            for _ in 0..3 {
+                render(&mut app, vec![]);
+            }
+            let output = render(&mut app, vec![]);
+            let tree = output.platform_output.accesskit_update.expect("tree");
+            let (id, node) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("towavue menu"))
+                .expect("logo");
+            let action = |action| {
+                egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                    action,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: *id,
+                    data: None,
+                })
+            };
+            let key = |key| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let logo = egui::pos2(20.0, 18.0);
+            render(&mut app, vec![egui::Event::PointerMoved(logo)]);
+            render(&mut app, vec![pointer(logo, true)]);
+            render(&mut app, vec![pointer(logo, false)]);
+            assert_eq!(egui::Popup::is_any_open(&context), !blocked, "pointer");
+            render(&mut app, vec![key(egui::Key::Escape)]);
+            render(&mut app, vec![action(egui::accesskit::Action::Click)]);
+            assert_eq!(
+                egui::Popup::is_any_open(&context),
+                !blocked,
+                "accessible activation"
+            );
+            render(&mut app, vec![key(egui::Key::Escape)]);
+            render(&mut app, vec![action(egui::accesskit::Action::Focus)]);
+            render(&mut app, vec![key(egui::Key::Enter)]);
+            assert_eq!(
+                egui::Popup::is_any_open(&context),
+                !blocked,
+                "keyboard activation"
+            );
+            render(&mut app, vec![key(egui::Key::Escape)]);
+            assert_eq!(node.is_disabled(), blocked, "accessible availability");
+            assert_eq!(
+                app.filmstrip_open, blocked,
+                "menu input does not close filmstrip"
+            );
+        }
+    }
+}
+
+#[test]
 fn filmstrip_disables_underlying_seek_hover_and_input_until_closed() {
     let Some(root) = crate::tests::isolated_test_root(
         "filmstrip::drag_tests::filmstrip_disables_underlying_seek_hover_and_input_until_closed",

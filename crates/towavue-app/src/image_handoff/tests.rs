@@ -72,6 +72,124 @@ fn navigate_pending(app: &mut App, path: PathBuf) {
 }
 
 #[test]
+fn reading_layout_reload_preserves_matching_animation_presentations() {
+    use towavue_runtime_windows::{ImageDecodeError, LoadedImages};
+
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_handoff::tests::reading_layout_reload_preserves_matching_animation_presentations",
+    ) else {
+        return;
+    };
+    for finished in [false, true] {
+        let (mut app, context, _) = fixture(&root);
+        let paths = ["old.png", "second.png", "third.png"].map(|name| root.join(name));
+        app.reading_mode = true;
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![0]),
+            folder_path: root.clone(),
+            items: paths
+                .iter()
+                .enumerate()
+                .map(|(index, path)| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![index as u8]),
+                    path: path.clone(),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::NaturalNameFallback,
+            generation: 1,
+            captured_at: std::time::SystemTime::UNIX_EPOCH,
+        });
+        let originals = [0, 1].map(|index| {
+            let mut pixels = decoded(2, 1, [index, 40, 60, 255]);
+            let image = Arc::get_mut(&mut pixels).expect("owned fixture");
+            image.animation_plays = 3;
+            image.frames[0].delay = Duration::from_secs(60);
+            let mut second = image.frames[0].clone();
+            second.rgba = [index, 80, 120, 255].repeat(2);
+            image.frames.push(second);
+            pixels
+        });
+        let presentations = [0, 1].map(|index| {
+            let mut image = ImagePresentation::from_decoded_frame(
+                &context,
+                &paths[index],
+                originals[index].clone(),
+                1,
+                TextureOptions::LINEAR,
+            )
+            .expect("second animation frame");
+            image.plays_left = if finished { 1 } else { 2 };
+            if finished {
+                image.next_frame_at = None;
+            }
+            image
+        });
+        app.image = Some(presentations[0].clone());
+        app.reading_pages = vec![Ok(presentations[1].clone())];
+        app.dispatch(CommandId::IncreaseReadingPages);
+        app.image_loader.request(Vec::new());
+        assert!(app.image_handoff.is_some() && app.image_loading);
+        let generation = app.image_generation;
+        for index in 0..3 {
+            app.apply_loaded_images(LoadedImages {
+                generation,
+                first_index: index,
+                total: 3,
+                images: vec![(
+                    paths[index].clone(),
+                    Ok(if index < 2 {
+                        originals[index].clone()
+                    } else {
+                        decoded(2, 1, [120, 40, 60, 255])
+                    }),
+                )],
+            });
+            if index < 2 {
+                let image = if index == 0 {
+                    app.image.as_ref().expect("reloaded first page")
+                } else {
+                    app.reading_pages[0].as_ref().expect("reloaded second page")
+                };
+                let old = &presentations[index];
+                assert_eq!(
+                    image.frame_index, old.frame_index,
+                    "layout must not restart animation"
+                );
+                assert_eq!(image.texture.id(), old.texture.id());
+                assert_eq!(image.next_frame_at, old.next_frame_at);
+                assert_eq!(image.plays_left, old.plays_left);
+            }
+        }
+        assert!(!app.image_loading && app.image_handoff.is_none());
+        // Same path and equal pixels are insufficient when the decoder publishes new ownership.
+        app.dispatch(CommandId::DecreaseReadingPages);
+        app.image_loader.request(Vec::new());
+        let replacement = Arc::new((*originals[0]).clone());
+        app.apply_loaded_images(LoadedImages {
+            generation: app.image_generation,
+            first_index: 0,
+            total: 2,
+            images: vec![(paths[0].clone(), Ok(replacement.clone()))],
+        });
+        let image = app.image.as_ref().expect("replacement first page");
+        assert!(Arc::ptr_eq(&image.decoded, &replacement));
+        assert_eq!(image.frame_index, 0);
+        assert_eq!(image.plays_left, 3);
+        assert_ne!(image.texture.id(), presentations[0].texture.id());
+        app.apply_loaded_images(LoadedImages {
+            generation: app.image_generation,
+            first_index: 1,
+            total: 2,
+            images: vec![(paths[1].clone(), Err(ImageDecodeError::UnknownFormat))],
+        });
+        assert!(app.reading_pages[0].is_err());
+        assert!(!app.image_loading && app.image_handoff.is_none());
+    }
+}
+
+#[test]
 fn reading_page_count_changes_hold_the_displayed_spread_through_partial_results() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_handoff::tests::reading_page_count_changes_hold_the_displayed_spread_through_partial_results",

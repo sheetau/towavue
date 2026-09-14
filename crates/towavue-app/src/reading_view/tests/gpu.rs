@@ -315,6 +315,62 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
                         image_surface(&mut app, &context, &mut renderer, density) != completed,
                         "completed layout resumes animation without reloading"
                     );
+                    let animated = image_surface(&mut app, &context, &mut renderer, density);
+                    let retained: Vec<_> = app
+                        .image
+                        .iter()
+                        .chain(
+                            app.reading_pages
+                                .iter()
+                                .filter_map(|page| page.as_ref().ok()),
+                        )
+                        .cloned()
+                        .collect();
+                    app.set_reading_layout(true, app.reading_settings);
+                    app.image_loader.request(Vec::new());
+                    for (index, (path, previous)) in paths.iter().zip(&retained).enumerate() {
+                        app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                            generation: app.image_generation,
+                            first_index: index,
+                            total: paths.len(),
+                            images: vec![(path.clone(), Ok(previous.decoded.clone()))],
+                        });
+                        equal_surface(
+                            &animated,
+                            &image_surface(&mut app, &context, &mut renderer, density),
+                            density,
+                            index + 8,
+                            "same-source reload restarted displayed animation pixels",
+                        );
+                    }
+                    assert!(!app.image_loading && app.image_handoff.is_none());
+                    for (image, previous) in app
+                        .image
+                        .iter()
+                        .chain(
+                            app.reading_pages
+                                .iter()
+                                .filter_map(|page| page.as_ref().ok()),
+                        )
+                        .zip(&retained)
+                    {
+                        assert_eq!(image.texture.id(), previous.texture.id());
+                        assert_eq!(image.frame_index, previous.frame_index);
+                        assert_eq!(image.next_frame_at, previous.next_frame_at);
+                        assert_eq!(image.plays_left, previous.plays_left);
+                    }
+                    app.image = Some(
+                        ImagePresentation::from_decoded(
+                            &context,
+                            &paths[0],
+                            retained[0].decoded.clone(),
+                        )
+                        .expect("restart negative control"),
+                    );
+                    assert!(
+                        image_surface(&mut app, &context, &mut renderer, density) != animated,
+                        "full-surface comparison must detect an animation restart"
+                    );
                     assert!(
                         app.edits
                             .values()
@@ -324,7 +380,7 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
             }
             self.completed = true;
             eprintln!(
-                "PASS reading layout GPU: 6 axis/density cases, 42 held whole-surface comparisons, 6 partial-layout negative controls and 6 stable completed layouts; held/incoming animation deadlines stay unchanged with no refresh timer, completed animation resumes. Generated mixed-alpha pages, hidden hardware rendering, scripted completions, no physical input."
+                "PASS reading layout GPU: 6 axis/density cases, 42 held whole-surface comparisons, 6 partial-layout negative controls and 6 stable completed layouts; held/incoming animation deadlines stay unchanged with no refresh timer, completed animation resumes. Same-source reload preserves all 4 presentations and passes 24 whole-surface comparisons with 6 restart negative controls. Generated mixed-alpha pages, hidden hardware rendering, scripted completions, no physical input."
             );
             event_loop.exit();
         }

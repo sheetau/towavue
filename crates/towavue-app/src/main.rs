@@ -2147,6 +2147,30 @@ where
         }
     }
 
+    fn load_image_presentation(
+        &mut self,
+        context: &egui::Context,
+        path: &Path,
+        decoded: Arc<DecodedImage>,
+        options: TextureOptions,
+    ) -> Result<ImagePresentation, String> {
+        // A reading reload can keep the same animated pages. Reuse their local clocks
+        // and textures only when immutable decode ownership proves the source unchanged.
+        if self.reading_mode
+            && decoded.is_animated()
+            && let Some(held) = &self.image_handoff
+            && let Some(previous) = std::iter::once(&held.image)
+                .chain(held.reading.iter().flat_map(|reading| &reading.images))
+                .find(|image| Arc::ptr_eq(&image.decoded, &decoded))
+        {
+            let mut image = previous.clone();
+            image.update_sampling(options);
+            return Ok(image);
+        }
+        self.image_texture_cache
+            .load(context, path, decoded, options)
+    }
+
     fn apply_loaded_images(&mut self, mut result: towavue_runtime_windows::LoadedImages) {
         result.first_index += self.image_request_offset;
         result.total += self.image_request_offset;
@@ -2192,10 +2216,8 @@ where
             let (path, decoded) = images.next().expect("nonempty first chunk");
             match decoded
                 .map_err(|error| error.to_string())
-                .and_then(|decoded| {
-                    self.image_texture_cache
-                        .load(&context, &path, decoded, options)
-                }) {
+                .and_then(|decoded| self.load_image_presentation(&context, &path, decoded, options))
+            {
                 Ok(image) => {
                     self.image = Some(image);
                     self.image_error = None;
@@ -2211,15 +2233,13 @@ where
             self.reading_pages.clear();
             self.refresh_image_edits();
         }
-        self.reading_pages.extend(images.map(|(path, decoded)| {
-            decoded
+        for (path, decoded) in images {
+            let image = decoded
                 .map_err(|error| error.to_string())
-                .and_then(|decoded| {
-                    self.image_texture_cache
-                        .load(&context, &path, decoded, options)
-                })
-                .map_err(|error| format!("{}: {error}", display_name(&path)))
-        }));
+                .and_then(|decoded| self.load_image_presentation(&context, &path, decoded, options))
+                .map_err(|error| format!("{}: {error}", display_name(&path)));
+            self.reading_pages.push(image);
+        }
         if !self.image_loading {
             self.image_handoff = None;
             self.clear_image_previews();

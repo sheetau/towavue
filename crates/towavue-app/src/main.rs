@@ -1896,12 +1896,20 @@ where
         }
         self.sync_audio_snapshot(&snapshot);
         let previous_reading_paths = self.reading_request_paths();
+        let reading_handoff = self
+            .reading_mode
+            .then(|| self.take_navigation_handoff(MediaKind::Image))
+            .flatten();
         if self
             .folder_snapshot
             .as_ref()
             .is_some_and(|previous| previous.items == snapshot.items)
         {
-            self.filmstrip.clear_previews();
+            if self.filmstrip_open {
+                self.filmstrip.refresh_previews(&snapshot);
+            } else {
+                self.filmstrip.clear_previews();
+            }
         } else {
             self.filmstrip.clear();
         }
@@ -1937,6 +1945,7 @@ where
         let retained_pages_match = std::mem::take(&mut self.restored_reading_pages)
             && previous_reading_paths == self.reading_request_paths();
         if self.reading_mode && self.media_kind == Some(MediaKind::Image) && !retained_pages_match {
+            self.image_handoff = reading_handoff;
             self.rebuild_reading_pages();
         }
         self.prefetch_next_image();
@@ -2000,7 +2009,9 @@ where
     }
 
     fn request_image_paths(&mut self, paths: Vec<PathBuf>, offset: usize) {
-        self.filmstrip.clear_previews();
+        if !self.filmstrip_open {
+            self.filmstrip.clear_previews();
+        }
         self.image_request_offset = offset;
         self.image_loading = !paths.is_empty();
         if paths.is_empty() {

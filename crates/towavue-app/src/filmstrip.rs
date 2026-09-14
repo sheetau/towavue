@@ -32,6 +32,7 @@ pub struct Filmstrip {
     generation: u64,
     visible: Vec<PathBuf>,
     previews: HashMap<PathBuf, Preview>,
+    refreshing: Vec<PathBuf>,
     focus: Option<PathBuf>,
     focus_requested: bool,
     focused_card: Option<egui::Id>,
@@ -46,6 +47,7 @@ impl Filmstrip {
             generation: 0,
             visible: Vec::new(),
             previews: HashMap::new(),
+            refreshing: Vec::new(),
             focus: None,
             focus_requested: false,
             focused_card: None,
@@ -84,7 +86,27 @@ impl Filmstrip {
             self.generation = self.loader.request(Vec::new());
             self.visible.clear();
             self.previews.clear();
+            self.refreshing.clear();
         }
+    }
+
+    pub fn refresh_previews(&mut self, snapshot: &FolderSnapshot) {
+        // Revalidate on the worker without replacing displayed textures with placeholders.
+        // Cancel old completions as they may predate a source-file change.
+        self.loader.request(Vec::new());
+        self.refreshing = self.visible.clone();
+        self.generation = self.loader.request(
+            self.visible
+                .iter()
+                .filter_map(|path| {
+                    snapshot
+                        .items
+                        .iter()
+                        .find(|item| &item.path == path)
+                        .map(|item| (path.clone(), item.kind))
+                })
+                .collect(),
+        );
     }
 
     pub fn take_view(&mut self) -> View {
@@ -144,6 +166,7 @@ impl Filmstrip {
             if preview.generation != self.generation || !self.visible.contains(&preview.path) {
                 continue;
             }
+            self.refreshing.retain(|path| path != &preview.path);
             let result = preview.result.map(|media| {
                 let image = media.image;
                 let texture = context.load_texture(
@@ -620,7 +643,10 @@ impl Filmstrip {
         let visible: Vec<_> = wanted.iter().map(|(path, _)| path.clone()).collect();
         if visible != self.visible {
             self.previews.retain(|path, _| visible.contains(path));
-            wanted.retain(|(path, _)| !self.previews.contains_key(path));
+            self.refreshing.retain(|path| visible.contains(path));
+            wanted.retain(|(path, _)| {
+                !self.previews.contains_key(path) || self.refreshing.contains(path)
+            });
             self.generation = self.loader.request(wanted);
             self.visible = visible;
         }
@@ -1068,8 +1094,9 @@ mod tests {
             folder_path: root.clone(),
             items: paths
                 .iter()
-                .map(|path| FolderMediaItem {
-                    identity: ShellIdentity::new(vec![]),
+                .enumerate()
+                .map(|(index, path)| FolderMediaItem {
+                    identity: ShellIdentity::new(vec![index as u8]),
                     path: path.clone(),
                     kind: MediaKind::Image,
                 })
@@ -1128,6 +1155,114 @@ mod tests {
         let output = draw(&mut app);
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
             egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id)));
+        let mut retained: Vec<_> = app
+            .filmstrip
+            .visible
+            .iter()
+            .map(|path| {
+                (
+                    path.clone(),
+                    app.filmstrip.previews[path]
+                        .as_ref()
+                        .expect("prepared")
+                        .0
+                        .id(),
+                )
+            })
+            .collect();
+        let removed = retained
+            .iter()
+            .find(|(path, _)| path != &current)
+            .expect("neighbor")
+            .0
+            .clone();
+        let mut bitmap = std::fs::read(&current).expect("owned bitmap");
+        bitmap[56] = 255;
+        bitmap[59] = 255;
+        let modified = std::fs::metadata(&current)
+            .expect("metadata")
+            .modified()
+            .expect("mtime");
+        std::fs::write(&current, bitmap).expect("change owned pixels");
+        std::fs::File::options()
+            .write(true)
+            .open(&current)
+            .expect("owned file")
+            .set_times(std::fs::FileTimes::new().set_modified(modified + Duration::from_secs(2)))
+            .expect("distinct source stamp");
+        std::fs::remove_file(&removed).expect("remove owned neighbor");
+        let snapshot = app.folder_snapshot.clone().expect("snapshot");
+        app.apply_folder_snapshot(snapshot);
+        for (path, id) in &retained {
+            assert_eq!(
+                app.filmstrip.previews[path]
+                    .as_ref()
+                    .expect("held preview")
+                    .0
+                    .id(),
+                *id
+            );
+        }
+        // A viewport change must not cancel revalidation of still-visible held textures.
+        let (offscreen, _) = retained.pop().expect("last visible neighbor");
+        app.filmstrip.set_visible(
+            retained
+                .iter()
+                .map(|(path, _)| (path.clone(), MediaKind::Image))
+                .collect(),
+        );
+        assert!(!app.filmstrip.previews.contains_key(&offscreen));
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while retained.iter().any(|(path, id)| {
+            app.filmstrip.previews[path]
+                .as_ref()
+                .is_ok_and(|preview| preview.0.id() == *id)
+        }) {
+            ready
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("refreshed previews finish");
+            app.filmstrip.finish(&context);
+            assert_eq!(
+                app.filmstrip.previews.len(),
+                retained.len(),
+                "no empty slots while refreshing"
+            );
+        }
+        assert!(
+            app.filmstrip.previews[&removed].is_err(),
+            "missing source replaces stale preview"
+        );
+        assert!(app.filmstrip.refreshing.is_empty());
+        let replacement = app.filmstrip.previews[&current]
+            .as_ref()
+            .expect("changed source")
+            .0
+            .id();
+        let refreshed = draw(&mut app);
+        let upload = &refreshed
+            .textures_delta
+            .set
+            .iter()
+            .find(|(id, _)| *id == replacement)
+            .expect("replacement upload")
+            .1;
+        let egui::ImageData::Color(pixels) = &upload.image;
+        assert!(
+            pixels
+                .pixels
+                .iter()
+                .all(|pixel| *pixel == Color32::from_rgb(255, 34, 12)),
+            "fresh source pixels replace the held texture"
+        );
+        assert!(refreshed.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Mesh(mesh) if mesh.texture_id == replacement)));
+        let mut reordered = app.folder_snapshot.clone().expect("snapshot");
+        reordered.items.reverse();
+        app.apply_folder_snapshot(reordered);
+        assert!(
+            app.filmstrip.previews.is_empty(),
+            "changed order still resets the strip"
+        );
         app.filmstrip_open = false;
         for blocked in 0..7 {
             app.image_loading = blocked == 0;

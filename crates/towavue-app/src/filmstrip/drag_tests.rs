@@ -260,6 +260,37 @@ fn first_frame_trial(
                 app.image_loading = false;
                 app.image_handoff = None;
                 assert_eq!(meshes(&draw(&mut app).0, image_id), baseline);
+                for item in &snapshot.items {
+                    app.filmstrip
+                        .previews
+                        .insert(item.path.clone(), Ok((preview.clone(), None)));
+                }
+                app.filmstrip_open = true;
+                assert_eq!(meshes(&draw(&mut app).0, preview.id()).len(), 3);
+                app.apply_folder_snapshot(snapshot.clone());
+                assert_eq!(
+                    app.filmstrip.previews.len(),
+                    3,
+                    "Shell refresh must retain previews until replacements arrive"
+                );
+                if reading {
+                    assert!(app.image_loading);
+                    let held = app.image_handoff.as_ref().expect("held reading spread");
+                    assert_eq!(held.image.texture.id(), image_id);
+                    assert_eq!(
+                        held.reading
+                            .as_ref()
+                            .expect("reading geometry")
+                            .images
+                            .len(),
+                        1
+                    );
+                }
+                // Hold the asynchronous reload unresolved for the next rendered frame.
+                app.image_generation = app.image_loader.request(Vec::new());
+                let refreshed = draw(&mut app).0;
+                assert_eq!(meshes(&refreshed, image_id), baseline);
+                assert_eq!(meshes(&refreshed, preview.id()).len(), 3);
             }
         }
     }
@@ -317,7 +348,7 @@ fn gpu_filmstrip_first_frame_matches_subsequent_presentations() {
                 pixels
             });
             eprintln!(
-                "PASS filmstrip GPU: {frames} frames, 36 opens, 108 exact first/subsequent whole-surface comparisons; hidden window, generated images, no physical input"
+                "PASS filmstrip GPU: {frames} frames, 36 compared opens, 108 exact first/subsequent whole-surface comparisons, 12 held refreshes; hidden window, generated images, no physical input"
             );
             event_loop.exit();
         }

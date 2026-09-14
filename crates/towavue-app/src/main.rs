@@ -583,8 +583,10 @@ impl ImagePresentation {
 
     fn update_sampling(&mut self, options: TextureOptions) {
         if self.sampling.replace(options) != options {
+            // An empty partial update changes the renderer's sampler without
+            // converting pixels or discarding a pending first-frame upload.
             self.texture
-                .set(color_image(&self.decoded.frames[self.frame_index]), options);
+                .set_partial([0, 0], egui::ColorImage::new([0, 0], Vec::new()), options);
         }
     }
 
@@ -20383,11 +20385,11 @@ mod tests {
                 images: vec![(path.clone(), Ok(Arc::clone(&images[0])))],
             });
             app.update_image_sampling();
-            let static_conversions = usize::from(previous != Some(nearest));
+            let static_conversions = usize::from(previous.is_none());
             assert_eq!(
                 COLOR_IMAGE_CONVERSIONS.get(),
                 static_conversions,
-                "main image converts once on a miss or sampling change, never twice"
+                "main image converts only on a cache miss, not a sampling change"
             );
             assert!(app.image_loading);
             COLOR_IMAGE_CONVERSIONS.set(0);
@@ -20430,22 +20432,108 @@ mod tests {
                 TextureOptions::LINEAR
             };
             let updates = context.tex_manager().write().take_delta().set;
-            assert_eq!(updates.len(), static_conversions * 2 + 1);
-            for (image, original) in presentations.iter().zip(&images) {
+            assert_eq!(
+                updates.len(),
+                usize::from(previous != Some(nearest)) * 2 + 1
+            );
+            for (index, (image, original)) in presentations.iter().zip(&images).enumerate() {
                 assert!(Arc::ptr_eq(&image.decoded, original));
                 assert_eq!(image.sampling.get(), options);
+                assert_eq!(
+                    image.texture.size(),
+                    [
+                        original.frames[0].width as usize,
+                        original.frames[0].height as usize
+                    ]
+                );
                 if let Some((_, delta)) = updates.iter().find(|(id, _)| *id == image.texture.id()) {
                     assert_eq!(delta.options, options);
-                    assert!(
-                        delta.image
-                            == egui::ImageData::Color(Arc::new(color_image(&original.frames[0])))
-                    );
+                    if previous.is_some() && index < 2 {
+                        assert_eq!(delta.pos, Some([0, 0]));
+                        assert_eq!(delta.image.size(), [0, 0]);
+                    } else {
+                        assert!(delta.is_whole());
+                        assert!(
+                            delta.image
+                                == egui::ImageData::Color(Arc::new(color_image(
+                                    &original.frames[0]
+                                )))
+                        );
+                    }
                 }
             }
             assert_eq!(app.image_texture_cache.entries.len(), 2);
             ids = Some(current_ids);
             previous = Some(nearest);
         }
+    }
+
+    #[test]
+    fn image_sampling_preserves_pending_pixels_and_animation_state() {
+        let context = fonts::test_context();
+        let decoded = tab_transfer::tests::decoded(true);
+        let mut image =
+            ImagePresentation::from_decoded(&context, Path::new("animated.png"), decoded.clone())
+                .expect("image");
+        let id = image.texture.id();
+        let size = image.texture.size();
+        let state = (image.frame_index, image.next_frame_at, image.plays_left);
+        COLOR_IMAGE_CONVERSIONS.set(0);
+        for options in [
+            TextureOptions::NEAREST,
+            TextureOptions::LINEAR,
+            TextureOptions::NEAREST,
+        ] {
+            image.update_sampling(options);
+            image.update_sampling(options);
+            assert_eq!(
+                (image.frame_index, image.next_frame_at, image.plays_left),
+                state
+            );
+            assert_eq!(image.texture.size(), size);
+            assert_eq!(image.texture.id(), id);
+        }
+        assert_eq!(COLOR_IMAGE_CONVERSIONS.get(), 0);
+        let updates = context.tex_manager().write().take_delta().set;
+        let updates: Vec<_> = updates
+            .iter()
+            .filter(|(texture, _)| *texture == id)
+            .collect();
+        assert_eq!(
+            updates.len(),
+            4,
+            "retain creation before option-only updates"
+        );
+        assert!(updates[0].1.is_whole());
+        assert!(
+            updates[0].1.image == egui::ImageData::Color(Arc::new(color_image(&decoded.frames[0])))
+        );
+        for (update, options) in updates[1..].iter().zip([
+            TextureOptions::NEAREST,
+            TextureOptions::LINEAR,
+            TextureOptions::NEAREST,
+        ]) {
+            assert_eq!(update.1.pos, Some([0, 0]));
+            assert_eq!(update.1.image.size(), [0, 0]);
+            assert_eq!(update.1.options, options);
+        }
+        // A real frame update may supersede a queued option change, but must
+        // retain the latest sampler and upload the newly selected pixels.
+        image.update_sampling(TextureOptions::LINEAR);
+        COLOR_IMAGE_CONVERSIONS.set(0);
+        assert!(image.advance_animation(state.1.expect("deadline")));
+        assert_eq!(COLOR_IMAGE_CONVERSIONS.get(), 1);
+        let updates = context.tex_manager().write().take_delta().set;
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].0, id);
+        assert!(updates[0].1.is_whole());
+        assert_eq!(updates[0].1.options, TextureOptions::LINEAR);
+        assert!(
+            updates[0].1.image
+                == egui::ImageData::Color(Arc::new(color_image(
+                    &decoded.frames[image.frame_index]
+                )))
+        );
     }
 
     #[test]

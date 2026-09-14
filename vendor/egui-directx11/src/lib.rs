@@ -251,12 +251,29 @@ mod sampling_tests {
         let context = egui::Context::default();
         let pixels = egui::ColorImage::new([2, 1], vec![egui::Color32::RED, egui::Color32::BLUE]);
         let mut smooth =
-            context.load_texture("smooth", pixels.clone(), egui::TextureOptions::LINEAR);
+            context.load_texture("smooth", pixels.clone(), egui::TextureOptions::NEAREST);
+        smooth.set_partial(
+            [0, 0],
+            egui::ColorImage::new([0, 0], Vec::new()),
+            egui::TextureOptions::LINEAR,
+        );
         let nearest =
             context.load_texture("nearest", pixels.clone(), egui::TextureOptions::NEAREST);
-        for partial in [false, true] {
-            if partial {
+        let mut original_srv = None;
+        let mut linear_row = None;
+        for (step, options) in [
+            egui::TextureOptions::LINEAR,
+            egui::TextureOptions::NEAREST,
+            egui::TextureOptions::LINEAR,
+            egui::TextureOptions::NEAREST,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if step == 1 {
                 smooth.set_partial([0, 0], pixels.clone(), egui::TextureOptions::NEAREST);
+            } else if step > 1 {
+                smooth.set_partial([0, 0], egui::ColorImage::new([0, 0], Vec::new()), options);
             }
             let output = context.run_ui(
                 egui::RawInput {
@@ -283,6 +300,17 @@ mod sampling_tests {
                 immediate.ClearRenderTargetView(&view, &[0.0; 4]);
             }
             renderer.render(&immediate, &view, &context, split_output(output).0)?;
+            let srv = renderer.texture_pool.get_srv(smooth.id());
+            assert!(srv.is_some());
+            if step == 0 {
+                original_srv = srv;
+            } else {
+                assert_eq!(
+                    srv, original_srv,
+                    "sampling changes retain the native resource"
+                );
+            }
+            assert_eq!(smooth.size(), [2, 1]);
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             let mut row = [0u8; 64];
             // Map waits for the copy. Read exactly one row using the reported pitch;
@@ -307,13 +335,18 @@ mod sampling_tests {
                     }
                 );
             }
-            if partial {
+            if options == egui::TextureOptions::NEAREST {
                 assert_eq!(&row[..32], &row[32..]);
             } else {
                 assert!(
                     row[3 * 4] > 0 && row[3 * 4 + 2] > 0,
                     "linear edge must interpolate"
                 );
+                if let Some(original) = linear_row {
+                    assert_eq!(row, original, "returning to linear preserves all pixels");
+                } else {
+                    linear_row = Some(row);
+                }
             }
         }
         assert_eq!(renderer.texture_samplers.len(), 2);

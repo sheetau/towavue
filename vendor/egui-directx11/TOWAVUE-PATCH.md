@@ -18,8 +18,9 @@ Local changes:
 - Compile the original HLSL through D3DCompile when constructing the renderer.
   This source-only copy contains no precompiled shader binaries or example media.
 - Pin the existing resolved dependencies; omit upstream examples/dev dependencies.
-- Add an offscreen WARP test comparing mixed linear/nearest output pixels and
-  switching a texture's sampler through a partial update.
+- Compare mixed linear/nearest output pixels offscreen on WARP and hardware.
+  Full-pixel and empty partial sampler changes retain the native resource;
+  empty updates also preserve a pending initial upload and texture dimensions.
 - Recognize the plain `InvertMesh` paint-callback payload in tessellation order.
   Premultiplied white geometry uses inverse-destination RGB blending and preserves
   destination alpha. Vertex alpha interpolates from the original to inverted RGB:

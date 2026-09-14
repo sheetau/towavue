@@ -308,8 +308,11 @@ mod tests {
         for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
             app.media_kind = Some(kind);
             for density in [1.0, 1.25, 2.0] {
-                context.set_pixels_per_point(density);
-                for width in [480.0, 960.0] {
+                for width in [320.0, 480.0, 960.0] {
+                    let context = fonts::test_context();
+                    context.set_pixels_per_point(density);
+                    // Applying a new zoom factor uses the previous viewport size for one pass.
+                    let _ = context.run_ui(egui::RawInput::default(), |_| {});
                     let output = context.run_ui(
                         egui::RawInput {
                             screen_rect: Some(egui::Rect::from_min_size(
@@ -319,12 +322,14 @@ mod tests {
                             ..Default::default()
                         },
                         |ui| {
+                            assert_eq!(ui.ctx().viewport_rect().size(), egui::vec2(width, 320.0));
+                            assert_eq!(ui.ctx().pixels_per_point(), density);
                             app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
                         },
                     );
                     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                         egui::Shape::Text(text) if text.galley.text().contains("Modified (local): 2024-02-29 12:34:56"))), "{kind:?}, {density}, {width}");
-                    if kind == MediaKind::Image && density == 1.0 && width == 480.0 {
+                    {
                         let position = output
                             .shapes
                             .iter()
@@ -332,8 +337,19 @@ mod tests {
                                 egui::Shape::Text(text)
                                     if text.galley.text().contains("Modified (local)") =>
                                 {
+                                    if width == 320.0 {
+                                        assert!(
+                                            text.galley.elided,
+                                            "exercise automatic truncation help"
+                                        );
+                                    } else if width == 960.0 {
+                                        assert!(
+                                            !text.galley.elided,
+                                            "also exercise untruncated help"
+                                        );
+                                    }
                                     Some(
-                                        egui::Rect::from_min_size(text.pos, text.galley.size())
+                                        text.visual_bounding_rect()
                                             .intersect(shape.clip_rect)
                                             .center(),
                                     )
@@ -364,7 +380,7 @@ mod tests {
                             copies = hovered.shapes.iter().filter(|shape| matches!(&shape.shape,
                                 egui::Shape::Text(text) if text.galley.text().contains("2024-02-29 12:34:56"))).count();
                         }
-                        assert!(copies >= 2, "both truncated status and complete hover text");
+                        assert_eq!(copies, 2, "one status label and one complete tooltip");
                     }
                 }
             }

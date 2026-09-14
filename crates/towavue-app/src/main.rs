@@ -4953,7 +4953,8 @@ where
                                 egui::Label::new(
                                     RichText::new(&info).size(12.0).color(chrome::MUTED),
                                 )
-                                .truncate(),
+                                .truncate()
+                                .show_tooltip_when_elided(false),
                             )
                             .help_text(format!("{info}\n{source}"));
                         },

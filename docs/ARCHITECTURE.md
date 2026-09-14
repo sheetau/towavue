@@ -173,7 +173,7 @@ Filmstrip shows only the highlighted filename, centered above its thumbnail and 
 
 Media previews are immediate, noninteractive and clipped to valid hover ownership; help tooltips keep their delay and close on clipped/covered/changed targets. The logo's directional menus and normal click/keyboard entry share context/dispatch. Exact widget values live with UI code and regression tests.
 
-External file hover dims the full client surface by 80% and centers a compact dotted guide with the shared app logo and "Open with towavue". The guide adapts/clips to small viewports and is paint-only: native file/folder drops remain valid across the whole window, subject to the existing modal guard. Blocked drops show that guard's instruction instead. Leaving or dropping removes the guide; underlying hover previews remain suppressed during file hover. This does not add a child window, drag bitmap or custom native cursor.
+External file hover dims the full client surface by 80% and centers a compact dashed guide with the shared app logo and "Open with towavue". Its one-physical-pixel outline uses two-physical-pixel dashes and gaps at every display scale. The guide adapts/clips to small viewports and is paint-only: native file/folder drops remain valid across the whole window, subject to the existing modal guard. Blocked drops show that guard's instruction instead. Leaving or dropping removes the guide; underlying hover previews remain suppressed during file hover. This does not add a child window, drag bitmap or custom native cursor.
 
 ## Distribution boundary
 

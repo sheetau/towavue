@@ -20,7 +20,7 @@ pub(super) fn draw(context: &Context, blocked: bool) {
     }
     let card = Rect::from_center_size(viewport.center(), size);
     // Paint only: the centered guide never narrows the native whole-window drop target.
-    dotted_border(&painter, card, context.pixels_per_point());
+    dashed_border(&painter, card, context.pixels_per_point());
     let painter = painter.with_clip_rect(card.shrink(8.0));
     let label = if blocked {
         "Close the dialog before dropping files"
@@ -70,7 +70,7 @@ pub(super) fn draw(context: &Context, blocked: bool) {
     });
 }
 
-fn dotted_border(painter: &egui::Painter, card: Rect, density: f32) {
+fn dashed_border(painter: &egui::Painter, card: Rect, density: f32) {
     let pixel = 1.0 / density;
     let card = card.shrink(pixel * 0.5);
     let radius = 4.0_f32
@@ -90,11 +90,11 @@ fn dotted_border(painter: &egui::Painter, card: Rect, density: f32) {
         }
     }
     points.push(points[0]);
-    painter.extend(egui::Shape::dotted_line(
+    painter.extend(egui::Shape::dashed_line(
         &points,
-        Color32::WHITE,
+        egui::Stroke::new(pixel, Color32::WHITE),
         2.0 * pixel,
-        pixel * 0.5,
+        2.0 * pixel,
     ));
 }
 
@@ -145,24 +145,65 @@ mod tests {
                         viewport.center(),
                         (size - vec2(32.0, 32.0)).min(vec2(344.0, 200.0)),
                     );
-                    let dots: Vec<_> = output
+                    let dashes: Vec<_> = output
                         .shapes
                         .iter()
                         .filter_map(|shape| match &shape.shape {
-                            egui::Shape::Circle(circle) => Some(circle),
+                            egui::Shape::LineSegment { points, stroke }
+                                if (stroke.width * density - 1.0).abs() < 0.0001 =>
+                            {
+                                Some((points, stroke))
+                            }
                             _ => None,
                         })
                         .collect();
-                    assert!(!dots.is_empty(), "reference uses a dotted central outline");
+                    assert!(
+                        !dashes.is_empty(),
+                        "guide uses two-pixel dashes, not one-pixel dots"
+                    );
                     let mut outline = Rect::NOTHING;
-                    for dot in dots {
-                        assert!((dot.radius * density - 0.5).abs() < 0.0001);
-                        assert_eq!(dot.fill, Color32::WHITE);
-                        outline.extend_with(dot.center - vec2(dot.radius, dot.radius));
-                        outline.extend_with(dot.center + vec2(dot.radius, dot.radius));
+                    for (points, stroke) in &dashes {
+                        assert_eq!(stroke.color, Color32::WHITE);
+                        assert!(points[0].distance(points[1]) * density <= 2.001);
+                        outline.extend_with(points[0]);
+                        outline.extend_with(points[1]);
                     }
+                    let outline = outline.expand(0.5 / density);
                     assert!((outline.min - card.min).length() < 2.1 / density);
                     assert!((outline.max - card.max).length() < 2.1 / density);
+                    for axis in [0, 1] {
+                        for edge in [
+                            card.min[axis] + 0.5 / density,
+                            card.max[axis] - 0.5 / density,
+                        ] {
+                            let straight: Vec<_> = dashes
+                                .iter()
+                                .filter_map(|(points, _)| {
+                                    let midpoint = points[0].lerp(points[1], 0.5);
+                                    ((points[0][axis] - edge).abs() < 0.001
+                                        && (points[1][axis] - edge).abs() < 0.001
+                                        && midpoint[1 - axis]
+                                            > card.min[1 - axis] + 4.0 + 3.0 / density
+                                        && midpoint[1 - axis]
+                                            < card.max[1 - axis] - 4.0 - 3.0 / density)
+                                        .then_some(*points)
+                                })
+                                .collect();
+                            assert!(straight.len() >= 2, "exercise every straight edge");
+                            for points in &straight {
+                                assert!(
+                                    (points[0].distance(points[1]) * density - 2.0).abs() < 0.001,
+                                    "two physical pixels per dash at density {density}"
+                                );
+                            }
+                            for pair in straight.windows(2) {
+                                assert!(
+                                    (pair[0][1].distance(pair[1][0]) * density - 2.0).abs() < 0.001,
+                                    "two physical pixels per gap at density {density}"
+                                );
+                            }
+                        }
+                    }
                     let label = if blocked {
                         "Close the dialog before dropping files"
                     } else {

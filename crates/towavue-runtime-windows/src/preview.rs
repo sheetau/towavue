@@ -404,12 +404,45 @@ impl PreviewCache {
         width: u32,
         height: u32,
     ) -> Result<PreviewImage, PreviewError> {
+        self.waveform_using(source, width, height, || {
+            crate::waveform::native::decode(
+                source,
+                width,
+                height,
+                &self.cancellation.clone().unwrap_or_default(),
+            )
+        })
+    }
+
+    fn waveform_using(
+        &self,
+        source: &Path,
+        width: u32,
+        height: u32,
+        generate: impl FnOnce() -> Result<image::RgbaImage, PreviewError>,
+    ) -> Result<PreviewImage, PreviewError> {
         self.check_cancelled()?;
         if width == 0 || height == 0 {
             return Err(PreviewError::Generate("invalid waveform dimensions".into()));
         }
         let key = cache_key(source, &format!("waveform-v3-{width}-{height}"))?;
         self.load_or_generate(key, || {
+            let image = generate()?;
+            let mut png = std::io::Cursor::new(Vec::new());
+            image.write_to(&mut png, image::ImageFormat::Png)?;
+            Ok(png.into_inner())
+        })
+    }
+
+    /// Historical helper-process backend, only for same-cache-path comparisons.
+    #[cfg(feature = "waveform-verification")]
+    pub fn verification_cli_waveform(
+        &self,
+        source: &Path,
+        width: u32,
+        height: u32,
+    ) -> Result<PreviewImage, PreviewError> {
+        self.waveform_using(source, width, height, || {
             let (_, stream) = crate::decode::preview_input(
                 source,
                 ffmpeg_next::media::Type::Audio,
@@ -453,10 +486,7 @@ impl PreviewCache {
                     String::from_utf8_lossy(&diagnostics).trim().into(),
                 ));
             }
-            let image = image.map_err(|error| PreviewError::Generate(error.to_string()))?;
-            let mut png = std::io::Cursor::new(Vec::new());
-            image.write_to(&mut png, image::ImageFormat::Png)?;
-            Ok(png.into_inner())
+            image.map_err(|error| PreviewError::Generate(error.to_string()))
         })
     }
 
@@ -1979,10 +2009,11 @@ mod tests {
                     cache.duration(&source).is_err(),
                     "must not use PATH FFprobe"
                 );
-                assert!(
-                    cache.waveform(&source, 64, 16).is_err(),
-                    "must not use PATH FFmpeg"
-                );
+                assert!(tool_path("ffmpeg.exe").is_err(), "must not use PATH FFmpeg");
+                let waveform = cache
+                    .waveform(&source, 64, 16)
+                    .expect("native waveform without helpers");
+                assert_eq!((waveform.width, waveform.height), (64, 16));
                 fs::write(&target, b"existing user output").expect("existing target");
                 assert!(
                     crate::export_media(&request).is_err(),

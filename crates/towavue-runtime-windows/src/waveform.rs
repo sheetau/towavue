@@ -1,6 +1,10 @@
-use std::io::{self, Read};
+use std::io;
+#[cfg(any(test, feature = "waveform-verification"))]
+use std::io::Read;
 
 const BINS_PER_COLUMN: usize = 1024;
+
+pub(crate) mod native;
 
 /// Mean absolute stereo envelope of the edited playback samples, one value per
 /// display column. Preserve float amplitudes so height/DPI changes need no raster
@@ -211,6 +215,7 @@ impl Envelope {
     }
 }
 
+#[cfg(any(test, feature = "waveform-verification"))]
 pub(crate) fn read(reader: &mut dyn Read, width: u32, height: u32) -> io::Result<image::RgbaImage> {
     let mut envelope = Envelope::new(width);
     let mut buffer = [0; 65_536];
@@ -230,6 +235,10 @@ pub(crate) fn read(reader: &mut dyn Read, width: u32, height: u32) -> io::Result
             buffer[0] = buffer[total - 1];
         }
     }
+    rasterize(&envelope, width, height)
+}
+
+fn rasterize(envelope: &Envelope, width: u32, height: u32) -> io::Result<image::RgbaImage> {
     let mut image = image::RgbaImage::new(width, height);
     for (x, mean) in envelope.means(width)?.into_iter().enumerate() {
         let bar =

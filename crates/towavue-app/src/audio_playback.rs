@@ -558,6 +558,8 @@ mod tests {
         ) else {
             return;
         };
+        #[cfg(feature = "shell-lifecycle-verification")]
+        let shell_lifetime = crate::tests::shell_lifetime_trial();
         for width in [240.0, 480.0, 960.0] {
             let mut app = Application::new(None, |_| {}).expect("app");
             let path = root.join("audio.wav");
@@ -670,6 +672,10 @@ mod tests {
                     "video command is unavailable for other media"
                 );
             }
+        }
+        #[cfg(feature = "shell-lifecycle-verification")]
+        if let Some(trial) = shell_lifetime {
+            trial.finish();
         }
     }
 

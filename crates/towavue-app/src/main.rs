@@ -12576,6 +12576,17 @@ mod tests {
         assert_eq!(app.viewing_cursor.deadline, None);
     }
 
+    #[cfg(feature = "shell-lifecycle-verification")]
+    pub(super) fn shell_lifetime_trial() -> Option<towavue_runtime_windows::ShellLifetimeTrial> {
+        let mode = std::env::var("TOWAVUE_SHELL_TEST_LIFETIME").ok()?;
+        let hold_main = match mode.as_str() {
+            "drain" => false,
+            "anchor" => true,
+            _ => panic!("Shell test lifetime must be drain or anchor"),
+        };
+        Some(towavue_runtime_windows::ShellLifetimeTrial::new(hold_main))
+    }
+
     pub(super) fn isolated_test_root(test_name: &str) -> Option<PathBuf> {
         const TEST_ROOT: &str = "TOWAVUE_APP_TEST_ROOT";
         let Some(root) = std::env::var_os(TEST_ROOT) else {

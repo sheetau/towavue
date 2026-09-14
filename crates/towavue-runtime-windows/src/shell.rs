@@ -33,6 +33,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Interface, PCWSTR, w};
 
+#[cfg(feature = "shell-lifecycle-verification")]
+pub(crate) mod verification;
+
 #[derive(Debug, Error)]
 pub enum FolderOrderError {
     #[error("the Shell worker stopped")]
@@ -163,9 +166,16 @@ impl FolderOrderProvider {
     pub fn with_notify(notify: impl Fn() + Send + 'static) -> Result<Self, FolderOrderError> {
         let shared = Arc::new((Mutex::new(Mailbox::default()), ShellWake::new()?));
         let worker_shared = Arc::clone(&shared);
+        // Count before spawning so verification cannot miss a not-yet-scheduled worker.
+        #[cfg(feature = "shell-lifecycle-verification")]
+        let lifetime = verification::Worker::new();
         thread::Builder::new()
             .name("towavue-shell-sta".into())
-            .spawn(move || shell_worker(worker_shared, notify))
+            .spawn(move || {
+                #[cfg(feature = "shell-lifecycle-verification")]
+                let _lifetime = lifetime;
+                shell_worker(worker_shared, notify);
+            })
             .map_err(|_| FolderOrderError::WorkerStopped)?;
         Ok(Self { shared })
     }

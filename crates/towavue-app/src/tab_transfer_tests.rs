@@ -829,6 +829,8 @@ fn image_transfer_rebinds_current_pixels_and_preserves_animation_edits_and_view(
     ) else {
         return;
     };
+    #[cfg(feature = "shell-lifecycle-verification")]
+    let shell_lifetime = crate::tests::shell_lifetime_trial();
     for animated in [false, true] {
         for state in [PlaybackState::Playing, PlaybackState::Paused] {
             let (mut source, _) = app();
@@ -919,6 +921,10 @@ fn image_transfer_rebinds_current_pixels_and_preserves_animation_edits_and_view(
                 &pixels_source
             ));
         }
+    }
+    #[cfg(feature = "shell-lifecycle-verification")]
+    if let Some(trial) = shell_lifetime {
+        trial.finish();
     }
 }
 

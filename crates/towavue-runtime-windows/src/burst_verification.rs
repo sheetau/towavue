@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub const BURST_CAPACITY: usize = 16_384;
+pub const BURST_CAPACITY: usize = 65_536;
 
 /// UI records use media generation, loader records use mailbox generation.
 #[derive(Clone, Copy)]
@@ -73,6 +73,8 @@ impl BurstRecord {
 #[unsafe(no_mangle)]
 pub static TOWAVUE_BURST_NEXT: AtomicU64 = AtomicU64::new(0);
 #[unsafe(no_mangle)]
+pub static TOWAVUE_BURST_CAPACITY: AtomicU64 = AtomicU64::new(BURST_CAPACITY as u64);
+#[unsafe(no_mangle)]
 pub static TOWAVUE_BURST_RECORDS: [BurstRecord; BURST_CAPACITY] =
     [const { BurstRecord::new() }; BURST_CAPACITY];
 
@@ -104,6 +106,9 @@ pub fn record_burst(event: BurstEvent, generation: u64, path: Option<&Path>, pay
         return;
     }
     let position = TOWAVUE_BURST_NEXT.fetch_add(1, Ordering::Relaxed);
+    if position >= TOWAVUE_BURST_CAPACITY.load(Ordering::Relaxed) {
+        return;
+    }
     let Some(record) = TOWAVUE_BURST_RECORDS.get(position as usize) else {
         // Never wrap/overwrite. NEXT > capacity explicitly invalidates a full trace.
         return;
@@ -129,6 +134,10 @@ pub fn record_burst(event: BurstEvent, generation: u64, path: Option<&Path>, pay
 fn burst_record_layout_publication_and_private_source_identity_are_explicit() {
     assert_eq!(std::mem::size_of::<BurstRecord>(), 64);
     assert_eq!(std::mem::align_of::<BurstRecord>(), 8);
+    assert_eq!(
+        TOWAVUE_BURST_CAPACITY.load(Ordering::Relaxed),
+        BURST_CAPACITY as u64
+    );
     let record = BurstRecord::new();
     assert_eq!(record.words[0].load(Ordering::Acquire), 0);
     record.publish(7, [1, 2, 3, 4, 5, 6, 7]);

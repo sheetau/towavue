@@ -3066,7 +3066,9 @@ where
                         .map_or(-1.0, |(_, focus)| focus.as_secs_f64() * 1000.0),
                 );
             }
-            if let Some(trace) = self.image_loader.verification_trace_snapshot() {
+            if request_elapsed.is_some()
+                && let Some(trace) = self.image_loader.verification_trace_snapshot()
+            {
                 use towavue_runtime_windows::ImageLoadTraceKind;
                 let foreground = trace
                     .events

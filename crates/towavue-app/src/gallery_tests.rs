@@ -10,6 +10,7 @@ fn gallery_retains_dirty_image_state_and_preserves_close_guards() {
     let mut app = Application::new(None, |_| {}).expect("app");
     app.ui_context = Some(fonts::test_context());
     let gallery = app.tabs.gallery().expect("default Gallery");
+    app.gallery_search = "retained search".into();
     let image = tab_transfer::tests::install(
         &mut app,
         root.join("image.png"),
@@ -25,6 +26,7 @@ fn gallery_retains_dirty_image_state_and_preserves_close_guards() {
     let edits = app.edits[&image].clone();
     app.process_shortcut("Ctrl+T".parse().expect("Gallery shortcut"));
     assert_eq!(app.tabs.active_id(), Some(gallery));
+    assert_eq!(app.gallery_search, "retained search");
     assert!(app.path.is_none() && app.image.is_none() && !app.filmstrip_open);
     assert_eq!(app.edits[&image], edits);
     assert!(app.retained_images.contains_key(&image));
@@ -56,6 +58,7 @@ fn gallery_retains_dirty_image_state_and_preserves_close_guards() {
     app.activate_tab(gallery);
     app.dispatch(CommandId::CloseTab);
     assert!(app.tabs.gallery().is_none());
+    assert!(app.gallery_search.is_empty());
     assert_eq!(app.tabs.active_id(), Some(image));
     app.dispatch(CommandId::OpenGallery);
     assert_ne!(app.tabs.gallery(), Some(gallery));
@@ -68,6 +71,94 @@ fn gallery_retains_dirty_image_state_and_preserves_close_guards() {
     app.dispatch(CommandId::CloseTab);
     assert_eq!(app.tabs.len(), 1, "last Gallery cannot close");
     assert!(!app.exit_requested);
+}
+
+#[test]
+fn gallery_search_filters_immediately_rejects_hidden_cards_and_respects_modal_input() {
+    let Some(root) = tests::isolated_test_root(
+        "gallery_tests::gallery_search_filters_immediately_rejects_hidden_cards_and_respects_modal_input",
+    ) else {
+        return;
+    };
+    use crate::audio_export::tests::frame;
+    use egui::accesskit::{Action, ActionData, ActionRequest, TreeId};
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let context = fonts::test_context();
+        context.enable_accesskit();
+        context.global_style_mut(chrome::style);
+        context.set_pixels_per_point(density);
+        app.ui_context = Some(context);
+        app.recent_paths = ["alpha.png", "日本 Japan.png", "video.mp4"]
+            .map(|name| root.join(name))
+            .into();
+        let size = egui::vec2(960.0, 576.0);
+        frame(&mut app, size, vec![]);
+        let output = frame(&mut app, size, vec![]);
+        let tree = output.platform_output.accesskit_update.expect("tree");
+        let search = crate::video_rotation::tests::node(&tree, "Search Gallery");
+        let hidden = crate::video_rotation::tests::node(&tree, "alpha.png");
+        let set = |text: &str| {
+            egui::Event::AccessKitActionRequest(ActionRequest {
+                action: Action::SetValue,
+                target_tree: TreeId::ROOT,
+                target_node: search,
+                data: Some(ActionData::Value(text.into())),
+            })
+        };
+        let output = frame(
+            &mut app,
+            size,
+            vec![
+                set("jApAn 日本"),
+                egui::Event::AccessKitActionRequest(ActionRequest {
+                    action: Action::Click,
+                    target_tree: TreeId::ROOT,
+                    target_node: hidden,
+                    data: None,
+                }),
+            ],
+        );
+        assert_eq!(app.gallery_search, "jApAn 日本");
+        assert!(
+            app.path.is_none(),
+            "removed card cannot handle a stale click in the query frame"
+        );
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .expect("filtered tree");
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, n)| n.label() == Some("日本 Japan.png"))
+        );
+        assert!(
+            !tree
+                .nodes
+                .iter()
+                .any(|(_, n)| n.label() == Some("alpha.png"))
+        );
+        let no_match = frame(&mut app, size, vec![set("missing-result")]);
+        let text = |output: &egui::FullOutput, value: &str| {
+            output.shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == value)
+        })
+        };
+        assert!(text(&no_match, "No matching files."));
+        assert!(!text(
+            &no_match,
+            "Drop media files or a folder here to begin."
+        ));
+        app.palette_open = true;
+        frame(&mut app, size, vec![set("must not replace")]);
+        assert_eq!(app.gallery_search, "missing-result");
+        app.palette_open = false;
+        app.recent_paths.clear();
+        let empty = frame(&mut app, size, vec![]);
+        assert!(text(&empty, "Drop media files or a folder here to begin."));
+        assert!(!text(&empty, "No matching files."));
+    }
 }
 
 #[test]

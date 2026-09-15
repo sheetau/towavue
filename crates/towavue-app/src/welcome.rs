@@ -62,94 +62,101 @@ pub(super) fn tab(
 pub fn show(
     ui: &mut egui::Ui,
     shortcuts: &ShortcutBindings,
-    recent: impl FnOnce(&mut egui::Ui),
+    query: &mut String,
+    has_recent: bool,
+    enabled: bool,
+    recent: impl FnOnce(&mut egui::Ui, &str),
 ) -> Option<CommandId> {
     let viewport = ui.available_rect_before_wrap();
     let inset = viewport.shrink(8.0_f32.min(viewport.size().min_elem().max(0.0) * 0.25));
+    let mut content = ui.new_child(egui::UiBuilder::new().max_rect(inset));
+    ui.advance_cursor_after_rect(viewport);
+    let ui = &mut content;
+    if !enabled {
+        ui.disable();
+    }
+    let width = (ui.available_width() - 32.0).clamp(0.0, 660.0);
+    let top = (ui.available_height() * 0.08).clamp(12.0, 40.0);
+    let mut chosen = None;
+    ui.add_space(top);
+    let search_changed = ui
+        .horizontal(|ui| {
+            ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let search = ui
+                .allocate_ui_with_layout(
+                    egui::vec2((width - 64.0).max(1.0), 24.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| crate::resize::text_input(ui, "Search Gallery", query),
+                )
+                .inner;
+            for (command, label, icon) in [
+                (CommandId::OpenFile, "Open File…", chrome::Icon::OpenFile),
+                (
+                    CommandId::OpenFolder,
+                    "Open Folder…",
+                    chrome::Icon::OpenFolder,
+                ),
+            ] {
+                let response = ui
+                    .add_sized(
+                        [24.0, 24.0],
+                        egui::Button::new(icon.text()).frame_when_inactive(false),
+                    )
+                    .help_text(format!(
+                        "{label}  {}",
+                        shortcuts.label(command, Default::default())
+                    ));
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
+                });
+                if response.clicked() {
+                    chosen = Some(command);
+                }
+            }
+            search.changed()
+        })
+        .inner;
+    ui.add_space(32.0);
+    let content_style = ui.style().clone();
+    let color = ui.visuals().widgets.inactive.fg_stroke.color;
+    ui.visuals_mut().widgets.hovered.fg_stroke.color = color;
+    ui.visuals_mut().widgets.active.fg_stroke.color = color;
+    ui.spacing_mut().scroll.interact_background_opacity = 0.3;
+    let body = ui.available_rect_before_wrap();
     let gutter_scroll = if ui.is_enabled()
-        && ui.rect_contains_pointer(viewport)
         && ui.input(|input| {
             input
                 .pointer
                 .hover_pos()
-                .is_some_and(|p| !inset.contains(p))
+                .is_some_and(|p| viewport.contains(p) && p.y >= body.top() && !inset.contains(p))
         }) {
         ui.input_mut(|input| std::mem::take(&mut input.smooth_scroll_delta.y))
     } else {
         0.0
     };
-    let content_style = ui.style().clone();
-    let mut scroll_ui = ui.new_child(egui::UiBuilder::new().max_rect(inset));
-    ui.advance_cursor_after_rect(viewport);
-    let ui = &mut scroll_ui;
-    // Only the scrollbar gets the subdued hover palette, not its cards or buttons.
-    let color = ui.visuals().widgets.inactive.fg_stroke.color;
-    ui.visuals_mut().widgets.hovered.fg_stroke.color = color;
-    ui.visuals_mut().widgets.active.fg_stroke.color = color;
-    ui.spacing_mut().scroll.interact_background_opacity = 0.3;
-    let mut chosen = None;
-    let width = (ui.available_width() - 32.0).clamp(0.0, 660.0);
-    let top = (ui.available_height() * 0.1).clamp(12.0, 60.0);
-    egui::ScrollArea::vertical()
+    let mut scroll = egui::ScrollArea::vertical()
         .id_salt("welcome")
-        .auto_shrink([false, false])
-        .show_styled(ui, |ui| {
-            ui.set_style(content_style);
-            if gutter_scroll != 0.0 {
-                ui.scroll_with_delta_animation(
-                    egui::vec2(0.0, gutter_scroll),
-                    egui::style::ScrollAnimation::none(),
-                );
-            }
-            ui.add_space(top);
-            ui.horizontal(|ui| {
-                ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
-                ui.allocate_ui_with_layout(
-                    egui::vec2(width, 0.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.label(RichText::new("towavue").size(32.0).color(chrome::MUTED));
-                        ui.add_space(32.0);
-                        ui.label(RichText::new("START").size(12.0).color(chrome::MUTED));
-                        ui.add_space(8.0);
-                        for (command, label) in [
-                            (CommandId::OpenFile, "Open File…"),
-                            (CommandId::OpenFolder, "Open Folder…"),
-                        ] {
-                            let shortcut = shortcuts.label(command, Default::default());
-                            let icon = if command == CommandId::OpenFolder {
-                                chrome::Icon::OpenFolder
-                            } else {
-                                chrome::Icon::OpenFile
-                            };
-                            let response = ui
-                                .add_sized(
-                                    [width.min(340.0), 30.0],
-                                    egui::Button::new((
-                                        icon.text(),
-                                        RichText::new(label).color(chrome::FOREGROUND),
-                                    ))
-                                    .frame_when_inactive(false)
-                                    .truncate()
-                                    .shortcut_text(if width >= 300.0 { &shortcut } else { "" }),
-                                )
-                                .help_text(format!("{label}  {shortcut}"));
-                            response.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::Button,
-                                    ui.is_enabled(),
-                                    label,
-                                )
-                            });
-                            if response.clicked() {
-                                chosen = Some(command);
-                            }
-                        }
-                        ui.add_space(24.0);
-                        ui.label(RichText::new("RECENT").size(12.0).color(chrome::MUTED));
-                        ui.add_space(8.0);
-                        recent(ui);
-                        ui.add_space(16.0);
+        .auto_shrink([false, false]);
+    if search_changed {
+        scroll = scroll.vertical_scroll_offset(0.0);
+    }
+    scroll.show_styled(ui, |ui| {
+        ui.set_style(content_style);
+        if gutter_scroll != 0.0 {
+            ui.scroll_with_delta_animation(
+                egui::vec2(0.0, gutter_scroll),
+                egui::style::ScrollAnimation::none(),
+            );
+        }
+        ui.horizontal(|ui| {
+            ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+            ui.allocate_ui_with_layout(
+                egui::vec2(width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    recent(ui, query);
+                    if !has_recent {
                         ui.add(
                             egui::Label::new(
                                 RichText::new("Drop media files or a folder here to begin.")
@@ -157,17 +164,53 @@ pub fn show(
                             )
                             .wrap(),
                         );
-                        ui.add_space(16.0);
-                    },
-                );
-            });
+                    }
+                    ui.add_space(16.0);
+                },
+            );
         });
+    });
     chosen
+}
+
+pub(super) fn matches(path: &std::path::Path, query: &str) -> bool {
+    let path = path.to_string_lossy().replace('\\', "/").to_lowercase();
+    query
+        .split_whitespace()
+        .all(|word| path.contains(&word.replace('\\', "/").to_lowercase()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gallery_search_matches_all_words_in_names_and_paths_without_case_or_separator_sensitivity() {
+        let path = std::path::Path::new("C:\\Photos\\日本\\My IMAGE.PNG");
+        for query in [
+            "",
+            "  ",
+            "my png",
+            "日本 IMAGE",
+            "photos/日本",
+            "PHOTOS\\日本",
+        ] {
+            assert!(matches(path, query), "{query}");
+        }
+        for query in ["image jpg", "absent", "日本 unrelated"] {
+            assert!(!matches(path, query), "{query}");
+        }
+    }
+
+    fn show(
+        ui: &mut egui::Ui,
+        shortcuts: &ShortcutBindings,
+        recent: impl FnOnce(&mut egui::Ui),
+    ) -> Option<CommandId> {
+        super::show(ui, shortcuts, &mut String::new(), false, true, |ui, _| {
+            recent(ui)
+        })
+    }
 
     #[test]
     fn welcome_scrollbar_is_inset_muted_and_keeps_gutter_wheel_input() {
@@ -227,11 +270,14 @@ mod tests {
             let idle = bars(&frame(vec![]));
             assert_eq!(idle.len(), 2, "track and handle");
             let track = idle[0].rect;
-            for (actual, expected) in [
-                (track.top(), 8.0),
-                (track.bottom(), 292.0),
-                (track.right(), 472.0),
-            ] {
+            assert!(
+                track.top()
+                    > text_rect(&frame(vec![]), "Search Gallery")
+                        .expect("fixed search header")
+                        .bottom()
+                        + 24.0
+            );
+            for (actual, expected) in [(track.bottom(), 292.0), (track.right(), 472.0)] {
                 assert!(
                     (actual - expected).abs() <= 1.0 / density,
                     "inset track: {track:?}"
@@ -284,10 +330,18 @@ mod tests {
                     frame(vec![]);
                 }
                 let scrolled = bars(&frame(vec![]));
-                assert!(
-                    scrolled[1].rect.top() > after_click[1].rect.top(),
-                    "wheel works in the gutter: {gutter:?}"
-                );
+                if gutter.y < track.top() {
+                    assert_eq!(
+                        scrolled[1].rect.top(),
+                        after_click[1].rect.top(),
+                        "fixed header does not scroll the body"
+                    );
+                } else {
+                    assert!(
+                        scrolled[1].rect.top() > after_click[1].rect.top(),
+                        "wheel works in the body gutter: {gutter:?}"
+                    );
+                }
             }
             let scrolled = bars(&frame(vec![]));
             let start = scrolled[1].rect.center();
@@ -346,12 +400,11 @@ mod tests {
                             );
                         }
                     }
-                    if text.galley.text() == "towavue" {
+                    if text.galley.text() == "Search Gallery" {
                         wordmark = true;
-                        assert_eq!(text.galley.job.sections[0].format.font_id.size, 32.0);
                     }
                 }
-                assert!(wordmark && icon, "audit both wordmark and action icons");
+                assert!(wordmark && icon, "audit search text and action icons");
                 assert!(open_file_icon, "Open File uses the requested Codicon");
             }
         }
@@ -382,7 +435,10 @@ mod tests {
                 break;
             }
         }
-        for label in ["towavue", "START", "RECENT", "Ctrl+O", "Ctrl+Shift+O"] {
+        for label in [
+            "Search Gallery",
+            "Drop media files or a folder here to begin.",
+        ] {
             assert!(
                 text_rect(&last, label).is_some(),
                 "{label} is present in idle CPU output"
@@ -399,6 +455,7 @@ mod tests {
         ] {
             let context = crate::fonts::test_context();
             let mut shortcuts = ShortcutBindings::default();
+            context.enable_accesskit();
             shortcuts.set(
                 CommandId::OpenFile,
                 "Ctrl+K Ctrl+O".parse().expect("shortcut"),
@@ -423,32 +480,18 @@ mod tests {
                 frame(vec![]);
             }
             let (output, _) = frame(vec![]);
-            let title = text_rect(&output, "towavue").expect("wordmark is visible");
-            if size.y > 200.0 {
-                let start = text_rect(&output, "START").expect("Start heading");
-                assert!((title.left() - start.left()).abs() < 1.0);
-                let open = text_rect(&output, "Open File…").expect("Open file");
-                assert!(open.left() > title.left() && open.left() < title.left() + 50.0);
-                assert!(text_rect(&output, "Ctrl+K Ctrl+O").is_some());
-            } else {
-                frame(vec![egui::Event::PointerMoved(egui::pos2(120.0, 70.0))]);
-                frame(vec![egui::Event::MouseWheel {
-                    unit: egui::MouseWheelUnit::Point,
-                    delta: egui::vec2(0.0, -80.0),
-                    phase: egui::TouchPhase::Move,
-                    modifiers: egui::Modifiers::NONE,
-                }]);
-                for _ in 0..30 {
-                    frame(vec![]);
-                }
-            }
+            let search = node_rect(&output, "Search Gallery");
+            let open = node_rect(&output, "Open File…");
+            let folder = node_rect(&output, "Open Folder…");
+            assert!(search.right() < open.left() && open.right() < folder.left());
+            assert!((open.center().y - folder.center().y).abs() < 1.0);
+            assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(folder));
             for (label, command) in [
                 ("Open File…", CommandId::OpenFile),
                 ("Open Folder…", CommandId::OpenFolder),
             ] {
                 let (output, _) = frame(vec![]);
-                let rect = text_rect(&output, label)
-                    .unwrap_or_else(|| panic!("whole {label} must be visible at {size:?}"));
+                let rect = node_rect(&output, label);
                 let pos = rect.center();
                 frame(vec![egui::Event::PointerMoved(pos)]);
                 let mut chosen = Vec::new();
@@ -503,9 +546,35 @@ mod tests {
             }]
         };
         frame(key(egui::Key::Tab));
+        assert!(
+            frame(key(egui::Key::Enter)).is_empty(),
+            "search does not open a file"
+        );
+        // Enter finishes a single-line edit; Tab re-enters the first field.
+        frame(key(egui::Key::Tab));
+        frame(key(egui::Key::Tab));
         assert_eq!(frame(key(egui::Key::Enter)), [CommandId::OpenFile]);
         frame(key(egui::Key::Tab));
         assert_eq!(frame(key(egui::Key::Enter)), [CommandId::OpenFolder]);
+    }
+
+    fn node_rect(output: &egui::FullOutput, label: &str) -> egui::Rect {
+        let bounds = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree")
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label))
+            .expect("named widget")
+            .1
+            .bounds()
+            .expect("bounds");
+        egui::Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+        )
     }
 
     fn text_rect(output: &egui::FullOutput, label: &str) -> Option<egui::Rect> {

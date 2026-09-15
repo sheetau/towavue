@@ -367,6 +367,10 @@ fn exercise_gallery(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .tab_detach_request(gallery)
         .expect("request");
     host.windows
+        .get_mut(&source)
+        .expect("source")
+        .gallery_search = "moving query".into();
+    host.windows
         .get_mut(&target)
         .expect("target")
         .exit_requested = true;
@@ -380,6 +384,7 @@ fn exercise_gallery(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .move_tab(source, target, &request, 0)
         .expect("Gallery transfer");
     assert_eq!(moved, existing, "reuse the destination Gallery");
+    assert_eq!(host.windows[&target].gallery_search, "moving query");
     assert_eq!(host.windows[&target].tabs.len(), 1);
     assert!(host.windows[&source].tabs.is_empty());
     assert!(host.windows[&source].exit_requested);

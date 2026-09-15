@@ -839,6 +839,7 @@ struct Application<N> {
     closed_tabs: VecDeque<PathBuf>,
     recent_files: Option<towavue_runtime_windows::RecentFiles>,
     recent_paths: Vec<PathBuf>,
+    gallery_search: String,
     image_copy: Option<towavue_runtime_windows::ImageCopyJob>,
     image_edit_worker: towavue_runtime_windows::LatestTask,
     image_edit_source: Option<Arc<DecodedImage>>,
@@ -1075,6 +1076,7 @@ where
             closed_tabs: VecDeque::new(),
             recent_files: None,
             recent_paths: Vec::new(),
+            gallery_search: String::new(),
             image_copy: None,
             image_edit_worker: towavue_runtime_windows::LatestTask::new("towavue-image-edits")
                 .map_err(|error| error.to_string())?,
@@ -3401,10 +3403,37 @@ where
                         && !self.palette_open
                         && !self.grid_open
                         && !egui::Popup::is_any_open(&context);
-                    if let Some(command) = welcome::show(ui, &self.shortcuts, |ui| {
-                        self.filmstrip
-                            .show_recent(ui, &self.recent_paths, enabled, actions)
-                    }) {
+                    let gallery = self.tabs.gallery();
+                    if let Some(command) = ui
+                        .push_id(("gallery", gallery), |ui| {
+                            welcome::show(
+                                ui,
+                                &self.shortcuts,
+                                &mut self.gallery_search,
+                                !self.recent_paths.is_empty(),
+                                enabled,
+                                |ui, query| {
+                                    let filtered;
+                                    let paths = if query.trim().is_empty() {
+                                        &self.recent_paths
+                                    } else {
+                                        filtered = self
+                                            .recent_paths
+                                            .iter()
+                                            .filter(|path| welcome::matches(path, query))
+                                            .cloned()
+                                            .collect::<Vec<_>>();
+                                        &filtered
+                                    };
+                                    if paths.is_empty() && !self.recent_paths.is_empty() {
+                                        ui.label("No matching files.");
+                                    }
+                                    self.filmstrip.show_recent(ui, paths, enabled, actions)
+                                },
+                            )
+                        })
+                        .inner
+                    {
                         actions.push(UiAction::Command(command));
                     }
                 } else if self.media_kind == Some(MediaKind::Audio) {
@@ -7758,6 +7787,7 @@ where
                 self.tabs.take_gallery(id)
             };
             if removed {
+                self.gallery_search.clear();
                 if !remember && self.tabs.is_empty() {
                     self.exit_requested = true;
                 }
@@ -10768,7 +10798,14 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    if let Some(command) = welcome::show(ui, &ShortcutBindings::default(), |_| {}) {
+                    if let Some(command) = welcome::show(
+                        ui,
+                        &ShortcutBindings::default(),
+                        &mut String::new(),
+                        false,
+                        true,
+                        |_, _| {},
+                    ) {
                         chosen.push(command);
                     }
                 },

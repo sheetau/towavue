@@ -728,9 +728,6 @@ impl Filmstrip {
         actions: &mut Vec<UiAction>,
     ) {
         let mut wanted = Vec::new();
-        if paths.is_empty() {
-            ui.label("No recent files yet.");
-        }
         let width = ui.available_width();
         let columns = (((width + 8.0) / 164.0).floor() as usize).max(1);
         let cell_width = ((width - (columns - 1) as f32 * 8.0) / columns as f32).max(1.0);
@@ -802,15 +799,16 @@ impl Filmstrip {
                                         );
                                     }
                                 }
-                                value => {
+                                Some(Err(_)) => {
                                     ui.painter().text(
                                         image_rect.center(),
                                         Align2::CENTER_CENTER,
-                                        if value.is_some() { "No preview" } else { "…" },
+                                        "No preview",
                                         FontId::proportional(12.0),
                                         crate::chrome::MUTED,
                                     );
                                 }
+                                None => {}
                             }
                             let name_rect = Rect::from_min_max(
                                 egui::pos2(rect.left(), image_rect.bottom() + 4.0),

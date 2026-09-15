@@ -145,14 +145,21 @@ pub(super) fn values(
     duration: MediaTime,
     selection: Option<TimeRange>,
     plan: Option<&EditTimeline>,
+    preview: Option<(TimeRange, f32)>,
     enabled: bool,
 ) -> Option<TimelineEdit> {
     let range = selection.or_else(|| TimeRange::new(MediaTime::ZERO, duration))?;
     let bands = bands(duration, plan);
-    let gain = gain_at(&bands, range.start());
-    let mixed = bands.iter().any(|(span, volume)| {
-        span.start() < range.end() && span.end() > range.start() && *volume != gain
-    });
+    // A discarded release pass precedes model commit. Preserve its displayed
+    // uniform gain while keeping the existing control IDs/focus and input path.
+    let preview_gain = preview
+        .filter(|(selected, _)| *selected == range)
+        .map(|(_, gain)| gain);
+    let gain = preview_gain.unwrap_or_else(|| gain_at(&bands, range.start()));
+    let mixed = preview_gain.is_none()
+        && bands.iter().any(|(span, volume)| {
+            span.start() < range.end() && span.end() > range.start() && *volume != gain
+        });
     let mut result = None;
     for stretch in [false, true] {
         let width = (response.rect.width() * 0.5).min(160.0);
@@ -222,7 +229,9 @@ pub(super) fn values(
             available,
         )
         .or(uniform_gain.then_some(value));
-        if control.has_focus() || selection.is_some() {
+        // The gain-line preview already paints its value. Do not overlay the
+        // ordinary gain caption, but retain its numeric/accessibility control.
+        if (control.has_focus() || selection.is_some()) && (stretch || preview.is_none()) {
             let label = if stretch {
                 format!("Length {value:.3}s")
             } else if mixed {
@@ -375,9 +384,15 @@ mod tests {
                                     id,
                                     egui::Sense::click_and_drag(),
                                 );
-                                if let Some(edit) =
-                                    values(ui, &response, time(10), selection, Some(&plan), true)
-                                {
+                                if let Some(edit) = values(
+                                    ui,
+                                    &response,
+                                    time(10),
+                                    selection,
+                                    Some(&plan),
+                                    None,
+                                    true,
+                                ) {
                                     edits.push(edit);
                                 }
                                 passes += 1;
@@ -434,6 +449,7 @@ mod tests {
                         time(10),
                         Some(range(0, 10)),
                         Some(&plan),
+                        None,
                         enabled,
                     );
                 },

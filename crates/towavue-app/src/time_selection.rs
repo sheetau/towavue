@@ -377,7 +377,8 @@ pub(super) fn show(
         && output.selection.is_none()
         && !crate::timeline_input::is_active(ui.ctx())
     {
-        output.edit = adjustment::values(ui, response, duration, selection, plan, enabled);
+        output.edit =
+            adjustment::values(ui, response, duration, preview, plan, gain_preview, enabled);
     }
     output.gain_preview = gain_preview.or(match output.edit {
         Some(TimelineEdit::SetVolume(range, gain)) => Some((range, gain)),
@@ -1028,6 +1029,7 @@ mod tests {
                     (4.0, 0.5, Some(range(0.0, 10.0)), range(0.0, 10.0)),
                 ] {
                     let context = egui::Context::default();
+                    context.enable_accesskit();
                     let mut history = EditHistory::default();
                     for edit in [
                         TimelineEdit::Delete(range(1.0, 2.0)),
@@ -1053,7 +1055,7 @@ mod tests {
                             .get_mut(&egui::ViewportId::ROOT)
                             .expect("viewport")
                             .native_pixels_per_point = Some(density);
-                        let _ = context.run_ui(input, |ui| {
+                        let painted = context.run_ui(input, |ui| {
                             let response = ui.interact(
                                 rect,
                                 "local-gain-test".into(),
@@ -1075,6 +1077,41 @@ mod tests {
                                 context.request_discard("local gain release must not replay");
                             }
                         });
+                        if let Some((_, gain)) = previews.last() {
+                            let labels: Vec<_> = painted
+                                .shapes
+                                .iter()
+                                .filter_map(|shape| {
+                                    if let egui::Shape::Text(text) = &shape.shape {
+                                        let text = text.galley.text();
+                                        if text.starts_with("Volume ")
+                                            || text.starts_with("Mixed (")
+                                        {
+                                            return Some(text.to_owned());
+                                        }
+                                    }
+                                    None
+                                })
+                                .collect();
+                            assert_eq!(
+                                labels,
+                                [format!("Volume {:.0}%", gain * 100.0)],
+                                "one current gain label, including the discarded release pass"
+                            );
+                            if selected.is_some() && !edits.is_empty() {
+                                let tree = painted
+                                    .platform_output
+                                    .accesskit_update
+                                    .as_ref()
+                                    .expect("tree");
+                                let node = tree
+                                    .nodes
+                                    .iter()
+                                    .find(|(_, node)| node.label() == Some("Local volume (%)"))
+                                    .expect("release keeps the gain control");
+                                assert_eq!(node.1.numeric_value(), Some(f64::from(*gain) * 100.0));
+                            }
+                        }
                         (edits, previews)
                     };
                     frame(vec![]);
@@ -1333,10 +1370,46 @@ mod tests {
                                     None
                                 })
                                 .collect();
+                            if labels == ["In 2.500s", "Out 7.500s"] {
+                                let lengths: Vec<_> = output
+                                    .shapes
+                                    .iter()
+                                    .filter_map(|shape| {
+                                        if let egui::Shape::Text(text) = &shape.shape {
+                                            return text
+                                                .galley
+                                                .text()
+                                                .starts_with("Length ")
+                                                .then(|| text.galley.text().to_owned());
+                                        }
+                                        None
+                                    })
+                                    .collect();
+                                assert_eq!(
+                                    lengths,
+                                    ["Length 5.000s"],
+                                    "one current length label, including the discarded release pass"
+                                );
+                            }
                             let tree = output
                                 .platform_output
                                 .accesskit_update
                                 .expect("accessibility tree");
+                            if labels == ["In 2.500s", "Out 7.500s"]
+                                && discard
+                                && results.iter().any(|result| {
+                                    result.selection.is_some() || result.edit.is_some()
+                                })
+                            {
+                                let node = tree
+                                    .nodes
+                                    .iter()
+                                    .find(|(_, node)| {
+                                        node.label() == Some("Selected duration (seconds)")
+                                    })
+                                    .expect("release keeps the duration control");
+                                assert_eq!(node.1.numeric_value(), Some(5.0));
+                            }
                             for (prefix, name) in [
                                 ("In ", "Time selection start (seconds)"),
                                 ("Out ", "Time selection end (seconds)"),

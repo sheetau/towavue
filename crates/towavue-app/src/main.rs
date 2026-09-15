@@ -8568,9 +8568,10 @@ where
                 || self.palette_open
                 || self.grid_open
                 || egui::Popup::is_any_open(context)
-                || context.input(|input| !input.raw.hovered_files.is_empty())
+                || context
+                    .input(|input| input.pointer.any_down() || !input.raw.hovered_files.is_empty())
             {
-                // Temporary overlays suspend work, not already prepared pixels.
+                // Overlays and held pointer buttons suspend work, not prepared pixels.
                 self.filmstrip.pause_preparation();
             } else {
                 self.filmstrip

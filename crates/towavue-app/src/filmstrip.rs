@@ -16,6 +16,12 @@ const HEIGHT: f32 = 118.0;
 
 type Preview = Result<(TextureHandle, Option<Duration>), String>;
 
+struct Preparation {
+    current: PathBuf,
+    snapshot: u64,
+    next: usize,
+}
+
 mod drag;
 
 #[cfg(test)]
@@ -34,6 +40,8 @@ pub struct Filmstrip {
     previews: HashMap<PathBuf, Preview>,
     preview_order: Vec<PathBuf>,
     refreshing: Vec<PathBuf>,
+    preparation: Option<Preparation>,
+    warming: Option<PathBuf>,
     focus: Option<PathBuf>,
     focus_requested: bool,
     focused_card: Option<egui::Id>,
@@ -53,6 +61,8 @@ impl Filmstrip {
             previews: HashMap::new(),
             preview_order: Vec::new(),
             refreshing: Vec::new(),
+            preparation: None,
+            warming: None,
             focus: None,
             focus_requested: false,
             focused_card: None,
@@ -88,6 +98,8 @@ impl Filmstrip {
     }
 
     pub fn clear_previews(&mut self) {
+        self.preparation = None;
+        self.warming = None;
         self.drag.clear();
         self.focused_card = None;
         self.card_paths.clear();
@@ -102,6 +114,7 @@ impl Filmstrip {
     }
 
     pub fn pause_preparation(&mut self) {
+        self.warming = None;
         self.cancel_drag();
         self.focus_requested = false;
         self.focused_card = None;
@@ -116,6 +129,8 @@ impl Filmstrip {
     }
 
     pub fn refresh_previews(&mut self, snapshot: &FolderSnapshot, open: bool) {
+        self.preparation = None;
+        self.warming = None;
         if !open {
             self.pause_preparation();
             // Keep ready pixels until use permits revalidation, including textures
@@ -177,27 +192,70 @@ impl Filmstrip {
         self.focus_requested = false;
         self.focus = None;
         self.scroll_offset = 0.0;
-        let mut wanted = Vec::new();
-        for distance in 0..snapshot.items.len() {
-            let before = selected.checked_sub(distance);
-            let after = (distance != 0).then_some(selected + distance);
-            for index in [before, after].into_iter().flatten() {
-                if let Some(item) = snapshot.items.get(index) {
-                    wanted.push((item.path.clone(), item.kind));
-                    if wanted.len() == VISIBLE_PREVIEW_LIMIT {
-                        self.set_visible(wanted);
-                        return;
-                    }
-                }
-            }
-        }
+        let count = snapshot.items.len();
+        let wanted = (0..count.min(VISIBLE_PREVIEW_LIMIT))
+            .map(|rank| {
+                let item = &snapshot.items[neighbor_index(selected, count, rank)];
+                (item.path.clone(), item.kind)
+            })
+            .collect();
         self.set_visible(wanted);
+        if self.preparation.as_ref().is_none_or(|preparation| {
+            preparation.current != snapshot.items[selected].path
+                || preparation.snapshot != snapshot.generation
+        }) {
+            if self.warming.take().is_some() {
+                self.generation = self.loader.request(Vec::new());
+            }
+            self.preparation = Some(Preparation {
+                current: snapshot.items[selected].path.clone(),
+                snapshot: snapshot.generation,
+                next: count.min(VISIBLE_PREVIEW_LIMIT),
+            });
+        }
+        if self.warming.is_some()
+            || self
+                .visible
+                .iter()
+                .any(|path| !self.previews.contains_key(path) || self.refreshing.contains(path))
+        {
+            return;
+        }
+        let preparation = self.preparation.as_mut().expect("preparation origin");
+        while preparation.next < count {
+            let item = &snapshot.items[neighbor_index(selected, count, preparation.next)];
+            // Plain BMP previews are memory-only. Scanning beyond the retained
+            // working set would just evict useful pixels without warming disk.
+            if item
+                .path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("bmp"))
+            {
+                preparation.next += 1;
+                continue;
+            }
+            self.warming = Some(item.path.clone());
+            self.generation = self.loader.request(vec![(item.path.clone(), item.kind)]);
+            break;
+        }
     }
 
     pub fn finish(&mut self, context: &Context) -> bool {
         let mut changed = false;
         for preview in self.loader.take_completed() {
-            if preview.generation != self.generation || !self.visible.contains(&preview.path) {
+            if preview.generation != self.generation {
+                continue;
+            }
+            if self.warming.as_ref() == Some(&preview.path) {
+                self.warming = None;
+                if let Some(preparation) = &mut self.preparation {
+                    preparation.next += 1;
+                }
+                // Cache-only completion: never evict/upload retained visible
+                // textures or request a frame just to advance background work.
+                continue;
+            }
+            if !self.visible.contains(&preview.path) {
                 continue;
             }
             self.refreshing.retain(|path| path != &preview.path);
@@ -817,6 +875,7 @@ impl Filmstrip {
     fn set_visible(&mut self, mut wanted: Vec<(PathBuf, MediaKind)>) {
         let visible: Vec<_> = wanted.iter().map(|(path, _)| path.clone()).collect();
         if visible != self.visible {
+            self.warming = None;
             // Reserve slots for current requests, then reuse recently wanted ready
             // textures. A brief seek hover or narrow strip must not undo idle work.
             self.preview_order.retain(|path| {
@@ -840,6 +899,22 @@ impl Filmstrip {
     }
 }
 
+// Exact current, previous, next ordering, with O(1) access even in large folders.
+fn neighbor_index(selected: usize, count: usize, rank: usize) -> usize {
+    let paired = selected.min(count - selected - 1);
+    if rank <= paired * 2 {
+        if rank.is_multiple_of(2) {
+            selected + rank / 2
+        } else {
+            selected - rank.div_ceil(2)
+        }
+    } else if selected > count - selected - 1 {
+        selected - (rank - paired)
+    } else {
+        selected + (rank - paired)
+    }
+}
+
 fn visible_range(viewport: Rect, padding: f32, count: usize) -> Range<usize> {
     let start = (((viewport.left() - padding) / STEP).floor().max(0.0) as usize).min(count);
     let end = (((viewport.right() - padding) / STEP).ceil().max(0.0) as usize).min(count);
@@ -853,6 +928,209 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, MediaKind, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn neighbor_ranks_match_distance_order_without_duplicates() {
+        for count in 1_usize..100 {
+            for selected in 0..count {
+                let expected: Vec<_> = (0..count)
+                    .flat_map(|distance| {
+                        [
+                            selected.checked_sub(distance),
+                            (distance != 0 && selected + distance < count)
+                                .then_some(selected + distance),
+                        ]
+                    })
+                    .flatten()
+                    .collect();
+                let actual: Vec<_> = (0..count)
+                    .map(|rank| neighbor_index(selected, count, rank))
+                    .collect();
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn idle_preparation_warms_beyond_retained_textures_and_resumes_after_pause() {
+        use std::os::windows::process::CommandExt;
+        let Some(root) = crate::tests::isolated_test_root(
+            "filmstrip::tests::idle_preparation_warms_beyond_retained_textures_and_resumes_after_pause",
+        ) else {
+            return;
+        };
+        let output = std::process::Command::new(
+            PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+                .join("bin/ffmpeg.exe"),
+        )
+        .creation_flags(0x08000000)
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=32x24:rate=30",
+            "-frames:v",
+            "96",
+            "-threads",
+            "1",
+        ])
+        .arg(root.join("image-%03d.png"))
+        .output()
+        .expect("generate owned PNGs");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let paths: Vec<_> = (1..=96)
+            .map(|index| root.join(format!("image-{index:03}.png")))
+            .collect();
+        let before: Vec<_> = paths
+            .iter()
+            .map(|path| std::fs::read(path).expect("source bytes"))
+            .collect();
+        let cache_path = root.join("cache");
+        let cache = PreviewCache::new(cache_path.clone()).expect("owned cache");
+        let (notify, ready) = std::sync::mpsc::channel();
+        let mut app = crate::Application::new_with_preview_cache(
+            None,
+            move |event| {
+                let _ = notify.send(event);
+            },
+            cache,
+        )
+        .expect("app");
+        app.tabs.open_new(paths[48].clone(), MediaKind::Image);
+        app.path = Some(paths[48].clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.state = towavue_core::PlaybackState::Paused;
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: paths
+                .iter()
+                .enumerate()
+                .map(|(index, path)| FolderMediaItem {
+                    identity: ShellIdentity::new(vec![index as u8]),
+                    path: path.clone(),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: SystemTime::now(),
+        });
+        let context = crate::fonts::test_context();
+        app.ui_context = Some(context.clone());
+        app.prepare_filmstrip(&context);
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        let advance = |app: &mut crate::Application<_>| {
+            let event = ready
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("preparation completion");
+            app.handle_app_event(event);
+        };
+        while app.filmstrip.previews.len() < VISIBLE_PREVIEW_LIMIT {
+            advance(&mut app);
+        }
+        let retained: Vec<_> = app
+            .filmstrip
+            .previews
+            .iter()
+            .map(|(path, preview)| (path.clone(), preview.as_ref().expect("prepared PNG").0.id()))
+            .collect();
+        assert!(app.filmstrip.warming.is_some());
+        let next = app.filmstrip.preparation.as_ref().expect("progress").next;
+        for pointer in [false, true] {
+            app.palette_open = !pointer;
+            let _ = context.run_ui(
+                egui::RawInput {
+                    events: if pointer {
+                        vec![egui::Event::PointerButton {
+                            pos: egui::pos2(20.0, 20.0),
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::NONE,
+                        }]
+                    } else {
+                        vec![]
+                    },
+                    ..Default::default()
+                },
+                |_| {},
+            );
+            app.prepare_filmstrip(&context);
+            assert!(app.filmstrip.warming.is_none());
+            app.filmstrip.finish(&context);
+            assert_eq!(
+                app.filmstrip
+                    .preparation
+                    .as_ref()
+                    .expect("paused progress")
+                    .next,
+                next
+            );
+            app.palette_open = false;
+            let _ = context.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::PointerButton {
+                        pos: egui::pos2(20.0, 20.0),
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |_| {},
+            );
+            app.prepare_filmstrip(&context);
+        }
+        let _ = context.tex_manager().write().take_delta();
+        while app.filmstrip.preparation.as_ref().expect("progress").next < paths.len()
+            || app.filmstrip.warming.is_some()
+        {
+            advance(&mut app);
+        }
+        assert_eq!(app.filmstrip.previews.len(), VISIBLE_PREVIEW_LIMIT);
+        let delta = context.tex_manager().write().take_delta();
+        assert!(
+            delta.set.is_empty() && delta.free.is_empty(),
+            "warming neither uploads nor frees UI textures"
+        );
+        for (path, id) in retained {
+            assert_eq!(
+                app.filmstrip.previews[&path]
+                    .as_ref()
+                    .expect("retained PNG")
+                    .0
+                    .id(),
+                id
+            );
+        }
+        let generation = app.filmstrip.generation;
+        app.prepare_filmstrip(&context);
+        assert_eq!(
+            app.filmstrip.generation, generation,
+            "idle completion must not start another pass"
+        );
+        // A fresh cache cannot borrow memory: every source must now have a reusable
+        // disk thumbnail, not just the last 64 memory entries or UI textures.
+        let fresh = PreviewCache::new(cache_path).expect("fresh cache");
+        for (path, original) in paths.iter().zip(before) {
+            let preview = fresh
+                .cached_image(path)
+                .expect("cached lookup")
+                .expect("durable preview");
+            assert_eq!(preview.source_size, (32, 24));
+            assert_eq!(std::fs::read(path).expect("unchanged source"), original);
+        }
+        app.image_loading = true;
+        app.prepare_filmstrip(&context);
+        assert!(app.filmstrip.warming.is_none() && app.filmstrip.preparation.is_none());
+    }
 
     #[test]
     fn recent_grid_arrow_navigation_reveals_each_row_without_opening_files() {

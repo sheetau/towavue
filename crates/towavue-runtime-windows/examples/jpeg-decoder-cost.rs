@@ -12,7 +12,7 @@ struct Apartment;
 
 impl Drop for Apartment {
     fn drop(&mut self) {
-        // SAFETY: constructed only after successful initialization on main's thread.
+        // SAFETY: constructed after successful initialization on this same thread.
         unsafe { CoUninitialize() };
     }
 }
@@ -94,6 +94,22 @@ fn main() -> windows::core::Result<()> {
         "probe requires an untransformed JPEG"
     );
     drop(header);
+    // Report coding metadata outside timing, without exposing paths or pixels.
+    let mut coding = zune_jpeg::JpegDecoder::new(std::io::BufReader::new(
+        std::fs::File::open(&path).expect("source open"),
+    ));
+    coding.decode_headers().expect("JPEG coding header");
+    let info = coding.info().expect("JPEG coding info");
+    println!(
+        "JPEG_SOURCE bytes={} coding={:?} colorspace={:?} sampling={:?} components={} icc_bytes={}",
+        before.0,
+        info.sof,
+        coding.input_colorspace(),
+        info.sample_ratio,
+        info.components,
+        coding.icc_profile().map_or(0, |profile| profile.len())
+    );
+    drop(coding);
     // SAFETY: this single-threaded example owns initialization; the factory and
     // all its objects are declared after the guard, so they drop before COM.
     unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok()? };

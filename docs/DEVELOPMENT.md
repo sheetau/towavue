@@ -55,6 +55,10 @@ For the isolated `audio_playback::tests::audio_buttons_fit_small_windows_and_acc
 
 ## Locate code and tests
 
+For software seek conversion, run `cargo test -p towavue-runtime-windows --lib --release --locked --offline deferred_worker_preserves_bounds_eof_counts_and_cancelled_input_reuse -- --test-threads=1`. The opt-ins `deferred_worker_reports_first_frame_and_cleanup_cost` and `deferred_session_reports_rapid_seek_replacement_cost` additionally require `--ignored --nocapture`: they generate bounded MPEG4/B-frame fixtures and compare historical/default/default/historical. The session control uses one WARP device, paused software fallback and 12 scheduled seeks at 33 ms, not physical keys or GPU presentation. Run timing comparisons alone; only the session control changes a test-global default to reach playback threads. Synchronous comparisons and cancellation counters are thread-local, so ordinary guards can run in parallel. Source/frame checks are outside timing. Consult STATUS before repeating unchanged measurements. The earlier `preroll_conversion_reports_first_frame_cost` is only a synchronous cost cutout, not worker latency.
+
+For the read-only 1080p reference control, set `TOWAVUE_SEEK_REFERENCE_SOURCE` to one explicitly authorized video, then run `reference_video_reports_native_seek_path_and_software_preroll_equality` with the same Release/ignored/nocapture flags. It performs 12 completed hardware-first seeks and two forced-software exact-pixel comparisons in memory; no decoded pixels are saved or displayed. This is not rapid-input or GPU-presentation evidence.
+
 | Area | Entry points |
 |---|---|
 | Commands, time, history, geometry | `crates/towavue-core/src/` |

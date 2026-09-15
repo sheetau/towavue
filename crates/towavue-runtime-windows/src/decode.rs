@@ -22,9 +22,11 @@ use crate::{GraphicsDevice, VideoOrientation};
 mod audio_checkpoints;
 mod frame_step;
 mod packet_samples;
+mod video_preroll;
 use audio_checkpoints::AudioCheckpoints;
 pub use frame_step::adjacent_video_frame;
 use packet_samples::PacketSamples;
+use video_preroll::PrerollVideoFrame;
 mod preview_frames;
 pub(crate) use preview_frames::preview_video_frames;
 #[cfg(test)]
@@ -180,6 +182,7 @@ pub enum DecodeError {
 
 enum ParallelDecodeOutput {
     SoftwareVideo(VideoFrame),
+    SoftwarePreroll(PrerollVideoFrame),
     HardwareVideo(HardwareVideoFrame),
     Audio(AudioChunk),
     VideoFinished,
@@ -781,7 +784,9 @@ impl ParallelInput {
                 ParallelDecodeOutput::VideoFinished => {
                     emit(ParallelSoftwareDecodeOutput::VideoFinished)
                 }
-                ParallelDecodeOutput::HardwareVideo(_) | ParallelDecodeOutput::Failed(_) => {
+                ParallelDecodeOutput::HardwareVideo(_)
+                | ParallelDecodeOutput::SoftwarePreroll(_)
+                | ParallelDecodeOutput::Failed(_) => {
                     unreachable!("parallel decode output is handled internally")
                 }
             },
@@ -811,6 +816,7 @@ impl ParallelInput {
                     emit(ParallelRuntimeDecodeOutput::VideoFinished)
                 }
                 ParallelDecodeOutput::SoftwareVideo(_)
+                | ParallelDecodeOutput::SoftwarePreroll(_)
                 | ParallelDecodeOutput::Audio(_)
                 | ParallelDecodeOutput::AudioFinished
                 | ParallelDecodeOutput::Failed(_) => {
@@ -975,6 +981,10 @@ fn run_parallel_workers(
     let (video_packet_tx, video_packet_rx) = mpsc::sync_channel(PACKET_QUEUE_CAPACITY);
     let (audio_packet_tx, audio_packet_rx) = mpsc::sync_channel(PACKET_QUEUE_CAPACITY);
     let (output_tx, output_rx) = mpsc::sync_channel(DECODED_QUEUE_CAPACITY);
+    #[cfg(test)]
+    let preroll_before = video_seek_cost_tests::defer_preroll().then_some(minimum_time);
+    #[cfg(not(test))]
+    let preroll_before = Some(minimum_time);
 
     thread::scope(|scope| {
         let demux_handle = thread::Builder::new()
@@ -1020,9 +1030,12 @@ fn run_parallel_workers(
             thread::Builder::new()
                 .name("towavue-video-decode".to_owned())
                 .spawn_scoped(scope, move || {
-                    if let Err(error) =
-                        run_parallel_video_worker(video, video_packet_rx, &video_output_tx)
-                    {
+                    if let Err(error) = run_parallel_video_worker(
+                        video,
+                        video_packet_rx,
+                        &video_output_tx,
+                        preroll_before,
+                    ) {
                         let _ = video_output_tx.send(ParallelDecodeOutput::Failed(error));
                     } else {
                         let _ = video_output_tx.send(ParallelDecodeOutput::VideoFinished);
@@ -1067,6 +1080,7 @@ fn run_parallel_workers(
             let is_video = matches!(
                 output,
                 ParallelDecodeOutput::SoftwareVideo(_)
+                    | ParallelDecodeOutput::SoftwarePreroll(_)
                     | ParallelDecodeOutput::HardwareVideo(_)
                     | ParallelDecodeOutput::VideoFinished
             );
@@ -1074,18 +1088,24 @@ fn run_parallel_workers(
                 continue;
             }
             match &output {
-                ParallelDecodeOutput::SoftwareVideo(_) | ParallelDecodeOutput::HardwareVideo(_) => {
-                    summary.video_frames += 1
-                }
+                ParallelDecodeOutput::SoftwareVideo(_)
+                | ParallelDecodeOutput::SoftwarePreroll(_)
+                | ParallelDecodeOutput::HardwareVideo(_) => summary.video_frames += 1,
                 ParallelDecodeOutput::Audio(chunk) => summary.audio_frames += chunk.frames as u64,
                 _ => {}
             }
             let time = match &output {
                 ParallelDecodeOutput::SoftwareVideo(frame) => Some(frame.presentation_time),
+                ParallelDecodeOutput::SoftwarePreroll(frame) => Some(frame.presentation_time),
                 ParallelDecodeOutput::HardwareVideo(frame) => Some(frame.presentation_time),
                 ParallelDecodeOutput::Audio(chunk) => Some(chunk.presentation_time),
                 _ => None,
             };
+            #[cfg(test)]
+            if matches!(output, ParallelDecodeOutput::SoftwarePreroll(_)) {
+                video_seek_cost_tests::PREROLL_OBSERVED
+                    .set(video_seek_cost_tests::PREROLL_OBSERVED.get() + 1);
+            }
             let at_end = time.is_some_and(|time| maximum_time.is_some_and(|end| time >= end));
             let mut finished = time.is_none() || at_end;
             let mut accepted = true;
@@ -1118,6 +1138,16 @@ fn run_parallel_workers(
             }
             if finished && accepted {
                 if is_video && let Some(frame) = last_preroll_video.take() {
+                    let frame = match frame {
+                        ParallelDecodeOutput::SoftwarePreroll(frame) => match frame.materialize() {
+                            Ok(frame) => ParallelDecodeOutput::SoftwareVideo(frame),
+                            Err(error) => {
+                                result = Err(error);
+                                break;
+                            }
+                        },
+                        other => other,
+                    };
                     accepted = emit(frame);
                 }
                 if is_video {
@@ -1247,6 +1277,7 @@ fn run_parallel_video_worker(
     config: ParallelVideoConfig,
     packets: mpsc::Receiver<ffmpeg::Packet>,
     output: &SyncSender<ParallelDecodeOutput>,
+    preroll_before: Option<MediaTime>,
 ) -> Result<(), DecodeError> {
     let mut pipeline = match config {
         ParallelVideoConfig::Software(config) => {
@@ -1261,15 +1292,7 @@ fn run_parallel_video_worker(
         match &mut pipeline {
             ParallelVideoPipeline::Software(pipeline) => {
                 pipeline.decoder.send_packet(&packet)?;
-                pipeline.receive(
-                    &mut |output_frame| match output_frame {
-                        DecodeOutput::Video(frame) => output
-                            .send(ParallelDecodeOutput::SoftwareVideo(frame))
-                            .is_ok(),
-                        DecodeOutput::Audio(_) => unreachable!("video worker emitted audio"),
-                    },
-                    &mut summary,
-                )?;
+                pipeline.receive_parallel(output, &mut summary, preroll_before)?;
             }
             ParallelVideoPipeline::Hardware(pipeline) => {
                 if let Err(error) = pipeline.decoder.send_packet(&packet) {
@@ -1292,15 +1315,7 @@ fn run_parallel_video_worker(
     match &mut pipeline {
         ParallelVideoPipeline::Software(pipeline) => {
             pipeline.decoder.send_eof()?;
-            pipeline.receive(
-                &mut |output_frame| match output_frame {
-                    DecodeOutput::Video(frame) => output
-                        .send(ParallelDecodeOutput::SoftwareVideo(frame))
-                        .is_ok(),
-                    DecodeOutput::Audio(_) => unreachable!("video worker emitted audio"),
-                },
-                &mut summary,
-            )
+            pipeline.receive_parallel(output, &mut summary, preroll_before)
         }
         ParallelVideoPipeline::Hardware(pipeline) => {
             if let Err(error) = pipeline.decoder.send_eof() {

@@ -105,9 +105,9 @@ use towavue_runtime_windows::{
     AudioExportOptions, AudioOutputEvent, CaptionAction, DecodedImage, DialogError, ExportError,
     ExportEvent, ExportJob, ExportOptions, ExportOutput, ExportRequest, FileDialogKind,
     FolderOrderProvider, FolderWatcher, FrameRenderer, ImageLoader, LatestTask, NativeCaption,
-    PlaybackEvent, PlaybackSession, PreviewCache, PromptButtons, PromptResponse, RenderError,
-    canonical_shell_path, configure_mouse_input, cursor_position_in_window, pick_path, reveal_file,
-    reveal_license_guide, show_prompt,
+    NativeTaskbar, PlaybackEvent, PlaybackSession, PreviewCache, PromptButtons, PromptResponse,
+    RenderError, canonical_shell_path, configure_mouse_input, cursor_position_in_window, pick_path,
+    reveal_file, reveal_license_guide, show_prompt,
 };
 use towavue_runtime_windows::{MetadataExportOptions, MetadataSourceValue};
 use winit::application::ApplicationHandler;
@@ -259,6 +259,7 @@ enum UiAction {
 }
 
 enum AppEvent {
+    TaskbarReady,
     TabVideoSheet(
         tab_preview::Target,
         u64,
@@ -823,6 +824,7 @@ struct Application<N> {
     graphics_recovery_request: Option<window_host::GraphicsRecoveryRequest>,
     window: Option<Arc<Window>>,
     native_caption: Option<NativeCaption>,
+    native_taskbar: Option<NativeTaskbar>,
     fullscreen: bool,
     fullscreen_controls_visible: bool,
     fullscreen_was_maximized: bool,
@@ -1070,6 +1072,7 @@ where
             graphics_recovery_request: None,
             window: None,
             native_caption: None,
+            native_taskbar: None,
             fullscreen: false,
             fullscreen_controls_visible: false,
             fullscreen_was_maximized: false,
@@ -1272,6 +1275,15 @@ where
         let window = Arc::new(event_loop.create_window(attributes)?);
         self.media_cursors = Some(cursor::MediaCursors::new(event_loop, window.scale_factor()));
         let native_caption = NativeCaption::new(window.clone())?;
+        let notify = Arc::clone(&self.notify);
+        let native_taskbar =
+            match NativeTaskbar::new(window.clone(), move || notify(AppEvent::TaskbarReady)) {
+                Ok(taskbar) => Some(taskbar),
+                Err(error) => {
+                    eprintln!("Taskbar integration unavailable: {error}");
+                    None
+                }
+            };
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(11);
         let mut renderer = if let Some(device) = graphics_device {
@@ -1317,6 +1329,7 @@ where
         towavue_runtime_windows::towavue_presentation_stage(14);
         self.window = Some(window);
         self.native_caption = Some(native_caption);
+        self.native_taskbar = native_taskbar;
         self.renderer = Some(renderer);
         self.ui_context = Some(context);
         self.ui_state = Some(state);
@@ -2701,6 +2714,7 @@ where
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::TaskbarReady => self.sync_taskbar_progress(),
             AppEvent::TabVideoSheet(target, generation, result) => {
                 if self
                     .tabs
@@ -9743,6 +9757,8 @@ where
     }
 
     fn schedule(&mut self) -> ControlFlow {
+        // Export notifications still update the Shell while drawing is suspended.
+        self.sync_taskbar_progress();
         if self.exit_requested {
             return ControlFlow::Poll;
         }

@@ -38,6 +38,9 @@ mod recent;
 mod renderer;
 mod selection_outline;
 mod shell;
+mod taskbar;
+
+pub use taskbar::{NativeTaskbar, TaskbarProgress};
 
 pub use recent::{RecentEntry, RecentFiles, RecentKind, RecentUpdate};
 mod tempo;

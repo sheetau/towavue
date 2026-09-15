@@ -13,6 +13,15 @@ pub(super) struct LoadingProgress {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn sync_taskbar_progress(&mut self) {
+        let progress = taskbar_progress(self.active_export.as_ref());
+        if let Some(taskbar) = &mut self.native_taskbar
+            && let Err(error) = taskbar.set_progress(progress)
+        {
+            eprintln!("Could not update taskbar progress: {error}");
+        }
+    }
+
     pub(super) fn toolbar_loading(
         &mut self,
         context: &egui::Context,
@@ -69,6 +78,152 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         } else {
             Some((label, elapsed - DELAY))
         }
+    }
+}
+
+fn taskbar_progress(export: Option<&ActiveExport>) -> towavue_runtime_windows::TaskbarProgress {
+    use towavue_runtime_windows::TaskbarProgress;
+    let Some(export) = export else {
+        return TaskbarProgress::Hidden;
+    };
+    if export.cancelling {
+        return TaskbarProgress::Indeterminate;
+    }
+    export
+        .progress
+        .fraction(export.encoded, export.analyzing_audio)
+        .map_or(TaskbarProgress::Indeterminate, |fraction| {
+            TaskbarProgress::Fraction((fraction * 1000.0).round() as u16)
+        })
+}
+
+#[cfg(test)]
+mod taskbar_tests {
+    use super::*;
+    use towavue_runtime_windows::{ExportOutcome, TaskbarProgress};
+
+    #[test]
+    fn taskbar_progress_tracks_export_phases_and_clears_without_drawing() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "export_progress::taskbar_tests::taskbar_progress_tracks_export_phases_and_clears_without_drawing",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let path = root.join("not-written.mp4");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Video);
+        assert_eq!(taskbar_progress(None), TaskbarProgress::Hidden);
+        for outcome in [
+            Ok(ExportOutcome {
+                used_hardware_encoder: false,
+            }),
+            Err(ExportError::Cancelled),
+            Err(ExportError::Failed("fixture failure".into())),
+        ] {
+            let request = ExportRequest {
+                source: path.clone(),
+                target: path.clone(),
+                kind: MediaKind::Video,
+                operations: Vec::new(),
+                hardware_encode: false,
+            };
+            let options = ExportOptions::default();
+            app.active_export = Some(ActiveExport {
+                progress: ExportProgress::new(&request, &options, Some(Duration::from_secs(100))),
+                // Same-source validation rejects this job without reading/writing media.
+                job: ExportJob::start(request.clone(), |_| {}).expect("fixture worker"),
+                tab,
+                request,
+                options,
+                encoded: Duration::ZERO,
+                analyzing_audio: false,
+                cancelling: false,
+                continuation: None,
+            });
+            app.handle_app_event(AppEvent::Export(ExportEvent::Progress(
+                Duration::from_secs(25),
+            )));
+            assert_eq!(
+                taskbar_progress(app.active_export.as_ref()),
+                TaskbarProgress::Fraction(250)
+            );
+            let other = app.tabs.open_new(root.join("other.png"), MediaKind::Image);
+            assert_ne!(other, tab);
+            assert_eq!(
+                taskbar_progress(app.active_export.as_ref()),
+                TaskbarProgress::Fraction(250)
+            );
+            app.active_export
+                .as_mut()
+                .expect("export")
+                .progress
+                .normalized = true;
+            app.handle_app_event(AppEvent::Export(ExportEvent::AnalyzingAudio(
+                Duration::from_secs(50),
+            )));
+            assert_eq!(
+                taskbar_progress(app.active_export.as_ref()),
+                TaskbarProgress::Fraction(250)
+            );
+            app.handle_app_event(AppEvent::Export(ExportEvent::Progress(
+                Duration::from_secs(50),
+            )));
+            assert_eq!(
+                taskbar_progress(app.active_export.as_ref()),
+                TaskbarProgress::Fraction(750)
+            );
+            app.handle_app_event(AppEvent::Export(ExportEvent::Progress(
+                Duration::from_secs(500),
+            )));
+            assert_eq!(
+                taskbar_progress(app.active_export.as_ref()),
+                TaskbarProgress::Fraction(990)
+            );
+            app.active_export.as_mut().expect("export").cancelling = true;
+            app.handle_app_event(AppEvent::Export(ExportEvent::Progress(Duration::ZERO)));
+            assert_eq!(
+                taskbar_progress(app.active_export.as_ref()),
+                TaskbarProgress::Indeterminate
+            );
+            app.handle_app_event(AppEvent::Export(ExportEvent::Finished(outcome)));
+            assert_eq!(
+                taskbar_progress(app.active_export.as_ref()),
+                TaskbarProgress::Hidden
+            );
+            app.handle_app_event(AppEvent::TaskbarReady);
+            assert!(
+                app.ui_context.is_none(),
+                "no render or UI initialization required"
+            );
+        }
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn taskbar_fraction_uses_edited_duration_and_unknown_work_is_indeterminate() {
+        let mut request = ExportRequest {
+            source: "source.mp4".into(),
+            target: "target.mp4".into(),
+            kind: MediaKind::Video,
+            operations: vec![EditOperation::SetRate(2.0)],
+            hardware_encode: false,
+        };
+        let options = ExportOptions::default();
+        let progress = ExportProgress::new(&request, &options, Some(Duration::from_secs(100)));
+        assert_eq!(progress.fraction(Duration::from_secs(25), false), Some(0.5));
+        assert_eq!(progress.fraction(Duration::from_secs(25), true), None);
+        for duration in [None, Some(Duration::ZERO)] {
+            assert_eq!(
+                ExportProgress::new(&request, &options, duration).fraction(Duration::ZERO, false),
+                None
+            );
+        }
+        request.kind = MediaKind::Image;
+        assert_eq!(
+            ExportProgress::new(&request, &options, Some(Duration::from_secs(100)))
+                .fraction(Duration::ZERO, false),
+            None
+        );
     }
 }
 

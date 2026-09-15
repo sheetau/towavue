@@ -119,6 +119,8 @@ const KEYBOARD_SEEK_STEP: Duration = Duration::from_secs(5);
 const VIDEO_LATE_TOLERANCE: Duration = Duration::from_millis(40);
 
 fn main() -> Result<(), Box<dyn Error>> {
+    #[cfg(feature = "presentation-verification")]
+    towavue_runtime_windows::towavue_presentation_stage(0);
     let initial_path = parse_initial_path()?;
     let mut event_loop = EventLoop::<window_host::Event>::with_user_event();
     configure_mouse_input(&mut event_loop);
@@ -1211,9 +1213,13 @@ where
             .with_min_inner_size(LogicalSize::new(480, 300))
             .with_visible(false)
             .with_decorations(true);
+        #[cfg(feature = "presentation-verification")]
+        towavue_runtime_windows::towavue_presentation_stage(10);
         let window = Arc::new(event_loop.create_window(attributes)?);
         self.media_cursors = Some(cursor::MediaCursors::new(event_loop, window.scale_factor()));
         let native_caption = NativeCaption::new(window.clone())?;
+        #[cfg(feature = "presentation-verification")]
+        towavue_runtime_windows::towavue_presentation_stage(11);
         let mut renderer = if let Some(device) = graphics_device {
             FrameRenderer::with_native_caption_on_device(&native_caption, device)?
         } else {
@@ -1221,9 +1227,13 @@ where
         };
         let size = window.inner_size();
         renderer.resize_surface(size.width, size.height)?;
+        #[cfg(feature = "presentation-verification")]
+        towavue_runtime_windows::towavue_presentation_stage(12);
         let context = egui::Context::default();
         context.set_visuals(egui::Visuals::dark());
         fonts::install(&context);
+        #[cfg(feature = "presentation-verification")]
+        towavue_runtime_windows::towavue_presentation_stage(13);
         context.style_mut_of(egui::Theme::Dark, chrome::style);
         context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
         let mut state = egui_winit::State::new(
@@ -1243,6 +1253,8 @@ where
                 .clone(),
         );
         window.set_visible(visible);
+        #[cfg(feature = "presentation-verification")]
+        towavue_runtime_windows::towavue_presentation_stage(14);
         self.window = Some(window);
         self.native_caption = Some(native_caption);
         self.renderer = Some(renderer);
@@ -2067,6 +2079,8 @@ where
         if paths.is_empty() {
             return;
         }
+        #[cfg(feature = "presentation-verification")]
+        towavue_runtime_windows::towavue_presentation_stage(1);
         if offset == 0 {
             self.image_error = None;
         }
@@ -2227,6 +2241,10 @@ where
             return;
         }
         self.image_loading = result.first_index + result.images.len() < result.total;
+        #[cfg(feature = "presentation-verification")]
+        if result.first_index == 0 && result.images[0].1.is_ok() {
+            towavue_runtime_windows::towavue_presentation_stage(2);
+        }
         // Matching prefetch now survives the next request, so overlap it with texture preparation.
         let prefetched = if self.media_kind == Some(MediaKind::Image)
             && !self.reading_mode
@@ -2258,6 +2276,8 @@ where
             {
                 Ok(image) => {
                     self.image = Some(image);
+                    #[cfg(feature = "presentation-verification")]
+                    towavue_runtime_windows::towavue_presentation_stage(3);
                     self.image_error = None;
                     self.state = PlaybackState::Paused;
                 }
@@ -2907,6 +2927,19 @@ where
         {
             self.handle_render_error(error);
             return;
+        }
+        #[cfg(feature = "presentation-verification")]
+        if image_presentation.is_some()
+            && let Some(image) = &self.image
+        {
+            let frame = &image.decoded.frames[0];
+            let client = self.window.as_ref().expect("window exists").inner_size();
+            towavue_runtime_windows::towavue_original_submitted(
+                frame.width,
+                frame.height,
+                client.width,
+                client.height,
+            );
         }
         self.idle_graphics_frame = self
             .tabs

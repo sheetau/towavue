@@ -8,6 +8,7 @@ repository.workspace = true
 publish = false
 
 [features]
+presentation-verification = []
 waveform-verification = []
 shell-lifecycle-verification = []
 render-verification = ["windows/Win32_System_ProcessStatus", "egui-directx11/render-verification"]

@@ -420,6 +420,8 @@ impl FrameRenderer {
         let mut device = None;
         let mut context = None;
         let mut feature_level = D3D_FEATURE_LEVEL::default();
+        #[cfg(feature = "presentation-verification")]
+        crate::towavue_presentation_stage(20);
         // The returned COM interfaces are owned by this renderer and are used only
         // on the winit event-loop thread where the renderer is constructed.
         unsafe {
@@ -443,6 +445,8 @@ impl FrameRenderer {
         }
 
         let device = device.expect("D3D11 returned success without a device");
+        #[cfg(feature = "presentation-verification")]
+        crate::towavue_presentation_stage(21);
         let context = context.expect("D3D11 returned success without a context");
         let multithread: ID3D11Multithread = context.cast()?;
         // FFmpeg decode and presentation issue commands from different threads.
@@ -469,8 +473,12 @@ impl FrameRenderer {
         // both temporary values are released before this constructor returns.
         let adapter_luid = unsafe { dxgi_device.GetAdapter()?.GetDesc()?.AdapterLuid };
 
+        #[cfg(feature = "presentation-verification")]
+        crate::towavue_presentation_stage(22);
         let software_blitter = SoftwareBlitter::new(&device)?;
         let ui_renderer = egui_directx11::Renderer::new(&device)?;
+        #[cfg(feature = "presentation-verification")]
+        crate::towavue_presentation_stage(23);
         Ok(Self {
             max_texture_side: texture_side_limit(feature_level),
             graphics_device: GraphicsDevice {

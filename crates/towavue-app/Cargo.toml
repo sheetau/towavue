@@ -8,6 +8,7 @@ repository.workspace = true
 publish = false
 
 [features]
+presentation-verification = ["towavue-runtime-windows/presentation-verification"]
 shell-lifecycle-verification = ["towavue-runtime-windows/shell-lifecycle-verification"]
 
 [[bin]]

@@ -21,8 +21,12 @@ mod media_tools;
 mod orientation;
 mod pinned_cursor;
 mod playback;
+#[cfg(feature = "presentation-verification")]
+mod presentation_verification;
 mod preview;
 mod preview_loader;
+#[cfg(feature = "presentation-verification")]
+pub use presentation_verification::{towavue_original_submitted, towavue_presentation_stage};
 mod recent;
 mod renderer;
 mod selection_outline;

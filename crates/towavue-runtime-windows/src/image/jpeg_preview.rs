@@ -80,9 +80,24 @@ fn decode_preview(
         | Orientation::Rotate270FlipH => (height, width),
         _ => (width, height),
     };
-    let Some(reduced) = reduced_jpeg(&bytes, width, height, source_size != (width, height))
-        .map_err(DecodeError::from)?
-    else {
+    let native = (minimum_pixels == 0)
+        .then(|| {
+            super::jpeg_wic_preview::thumbnail(
+                &bytes,
+                width,
+                height,
+                source_size != (width, height),
+                current,
+            )
+        })
+        .flatten();
+    check_current(current)?;
+    let Some(reduced) = (if native.is_some() {
+        native
+    } else {
+        reduced_jpeg(&bytes, width, height, source_size != (width, height))
+            .map_err(DecodeError::from)?
+    }) else {
         return Ok(None);
     };
     check_current(current)?;

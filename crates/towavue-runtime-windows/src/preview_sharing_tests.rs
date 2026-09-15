@@ -3,6 +3,230 @@ use std::sync::mpsc;
 use std::thread;
 
 #[test]
+fn default_worker_uses_reduced_wic_jpeg_and_persists_its_result() {
+    let store = cache("default-wic-jpeg");
+    let source = store.root.join("source.jpg");
+    image::RgbImage::from_fn(503, 317, |x, y| {
+        let value = (x + 503 * y).wrapping_mul(2_654_435_761);
+        image::Rgb([value as u8, (value >> 8) as u8, (value >> 16) as u8])
+    })
+    .save(&source)
+    .expect("owned baseline 4:4:4 JPEG");
+    let bytes = fs::read(&source).expect("source bytes");
+    let expected = {
+        let _scope = crate::image::jpeg_wic_preview::WorkerScope::new(true);
+        crate::image::jpeg_thumbnail(&source, 512 * 1024 * 1024, &|| true)
+            .expect("native thumbnail")
+            .expect("reduced preview")
+    };
+    let historical = crate::image::jpeg_thumbnail(&source, 512 * 1024 * 1024, &|| true)
+        .expect("historical thumbnail")
+        .expect("reduced preview");
+    assert_ne!(
+        expected.image, historical.image,
+        "distinguishable decoder control"
+    );
+    let (notify, ready) = mpsc::channel();
+    let loader = crate::PreviewLoader::new(store.clone(), move || {
+        let _ = notify.send(());
+    })
+    .expect("ordinary worker without a feature or enabling override");
+    let generation = loader.request(vec![(source.clone(), MediaKind::Image)]);
+    ready
+        .recv_timeout(Duration::from_secs(10))
+        .expect("completion");
+    let mut completed = loader.take_completed();
+    assert_eq!(completed.len(), 1);
+    let item = completed.pop().expect("requested preview");
+    assert_eq!(item.generation, generation);
+    assert_eq!(item.path, source);
+    assert_eq!(item.result.expect("ready").image, expected.image);
+    drop(loader);
+    let reopened = PreviewCache::new(store.root.clone()).expect("empty memory cache");
+    let stored = reopened
+        .cached_image(&source)
+        .expect("disk read")
+        .expect("persisted");
+    assert_eq!(stored.image, expected.image);
+    assert_eq!(stored.source_size, expected.source_size);
+    assert_eq!(fs::read(&source).expect("unchanged original"), bytes);
+    fs::remove_dir_all(&store.root).expect("owned fixture/cache cleanup");
+}
+
+#[cfg(feature = "png-decoder-verification")]
+#[test]
+#[ignore = "existing-worker WIC trial; generated baseline JPEG directory, Release only"]
+fn wic_existing_worker_reports_complete_preview_delivery() {
+    use crate::image::jpeg_wic_preview as trial;
+    if cfg!(debug_assertions) {
+        panic!("use Release");
+    }
+    let reference = std::env::var_os("TOWAVUE_WIC_WORKER_REFERENCE_DIR");
+    let fixture_root = reference
+        .clone()
+        .or_else(|| std::env::var_os("TOWAVUE_WIC_WORKER_FIXTURES"))
+        .expect("explicit fixture or reference directory");
+    let mut sources: Vec<_> = fs::read_dir(fixture_root)
+        .expect("fixtures")
+        .map(|entry| entry.expect("entry").path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "jpg"))
+        .collect();
+    sources.sort();
+    if reference.is_some() {
+        sources.retain(|path| fs::metadata(path).expect("metadata").len() <= 32 * 1024 * 1024);
+        sources.sort_by_key(|path| std::cmp::Reverse(fs::metadata(path).expect("metadata").len()));
+        sources = [0, 1, 2, 3, 7, 15, 31, 63, 127]
+            .map(|index| sources[index].clone())
+            .to_vec();
+    }
+    assert_eq!(
+        sources.len(),
+        9,
+        "owned small/large plain/gradient/noise matrix"
+    );
+    let original: Vec<_> = sources
+        .iter()
+        .map(|source| {
+            (
+                fs::read(source).expect("bytes"),
+                cache_key(source, IMAGE_PREVIEW_VARIANT).expect("stamp"),
+            )
+        })
+        .collect();
+    let root = cache("wic-existing-worker");
+    let mut expected = Vec::new();
+    let mut native_count = 0;
+    for native in [false, true] {
+        let decoded_before = trial::DECODED.load(std::sync::atomic::Ordering::SeqCst);
+        let _scope = trial::WorkerScope::new(native);
+        let seed = PreviewCache::new(root.root.join(format!("seed-{native}"))).expect("seed cache");
+        expected.push(
+            sources
+                .iter()
+                .map(|source| {
+                    let preview = seed
+                        .filmstrip(source, MediaKind::Image)
+                        .expect("seed thumbnail");
+                    let cached = seed
+                        .cached_image(source)
+                        .expect("source lookup")
+                        .expect("geometry");
+                    (preview.image, cached.source_size)
+                })
+                .collect::<Vec<_>>(),
+        );
+        if native {
+            native_count =
+                trial::DECODED.load(std::sync::atomic::Ordering::SeqCst) - decoded_before;
+        }
+    }
+    assert_eq!(
+        native_count,
+        if reference.is_some() { 6 } else { 9 },
+        "direct .jpg selection: six baseline candidates; two progressive and one subsampled fallback"
+    );
+    let mut sequence = 0;
+    for native in [false, true, true, false] {
+        trial::ENABLED.store(native, std::sync::atomic::Ordering::SeqCst);
+        let mut first_times = Vec::new();
+        let mut all_times = Vec::new();
+        for _ in 0..5 {
+            sequence += 1;
+            let store = PreviewCache::new(root.root.join(format!("sample-{sequence}")))
+                .expect("empty cache");
+            let finished = trial::FINISHED.load(std::sync::atomic::Ordering::SeqCst);
+            let created = trial::CREATED.load(std::sync::atomic::Ordering::SeqCst);
+            let decoded = trial::DECODED.load(std::sync::atomic::Ordering::SeqCst);
+            let (notify, ready) = mpsc::channel();
+            let start = std::time::Instant::now();
+            let loader = crate::PreviewLoader::new(store.clone(), move || {
+                let _ = notify.send(());
+            })
+            .expect("existing worker");
+            let generation = loader.request(
+                sources
+                    .iter()
+                    .cloned()
+                    .map(|path| (path, MediaKind::Image))
+                    .collect(),
+            );
+            let mut completed = Vec::new();
+            let mut first = None;
+            while completed.len() < sources.len() {
+                ready
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("preview completion");
+                let batch = loader.take_completed();
+                if !batch.is_empty() {
+                    first.get_or_insert(start.elapsed());
+                }
+                completed.extend(batch);
+            }
+            all_times.push(start.elapsed().as_secs_f64() * 1000.0);
+            first_times.push(first.expect("first preview").as_secs_f64() * 1000.0);
+            drop(loader);
+            let cleanup = std::time::Instant::now();
+            while trial::FINISHED.load(std::sync::atomic::Ordering::SeqCst) == finished {
+                assert!(
+                    cleanup.elapsed() < Duration::from_secs(10),
+                    "worker scope teardown"
+                );
+                thread::sleep(Duration::from_millis(1));
+            }
+            assert_eq!(
+                trial::CREATED.load(std::sync::atomic::Ordering::SeqCst) - created,
+                usize::from(native),
+                "one lazy service per existing worker"
+            );
+            assert_eq!(
+                trial::DECODED.load(std::sync::atomic::Ordering::SeqCst) - decoded,
+                if native { native_count } else { 0 }
+            );
+            let reopened = PreviewCache::new(store.root.clone()).expect("fresh memory");
+            let mut seen = HashSet::new();
+            for item in completed {
+                let index = sources
+                    .iter()
+                    .position(|path| path == &item.path)
+                    .expect("requested path");
+                assert!(seen.insert(index));
+                assert_eq!(item.generation, generation);
+                let image = item.result.expect("ready preview").image;
+                let reference = &expected[usize::from(native)][index];
+                assert_eq!(image, reference.0);
+                let stored = reopened
+                    .cached_image(&item.path)
+                    .expect("disk readback")
+                    .expect("persisted thumbnail");
+                assert_eq!(stored.image, image);
+                assert_eq!(stored.source_size, reference.1);
+            }
+            assert_eq!(seen.len(), sources.len());
+        }
+        let raw_first = first_times.clone();
+        let raw_all = all_times.clone();
+        first_times.sort_by(f64::total_cmp);
+        all_times.sort_by(f64::total_cmp);
+        println!(
+            "WIC_WORKER native={native} count=9 eligible={native_count} first_ms={:.4} all_ms={:.4} raw_first={raw_first:?} raw_all={raw_all:?}",
+            first_times[2], all_times[2]
+        );
+    }
+    trial::ENABLED.store(true, std::sync::atomic::Ordering::SeqCst);
+    for (source, (bytes, key)) in sources.iter().zip(original) {
+        assert_eq!(fs::read(source).expect("unchanged input"), bytes);
+        assert_eq!(
+            cache_key(source, IMAGE_PREVIEW_VARIANT).expect("identity"),
+            key
+        );
+    }
+    println!(
+        "WIC_WORKER_CHECKS completed=180 exact_backend_pixels=true persisted_geometry=true service_teardown=true source_stamps=true"
+    );
+    fs::remove_dir_all(&root.root).expect("remove owned generated caches");
+}
+
+#[test]
 #[ignore = "compares fresh native/CLI duration probes; run without concurrent timing work"]
 fn native_duration_probe_matches_cli_and_reports_cost() -> Result<(), &'static str> {
     if cfg!(debug_assertions) {

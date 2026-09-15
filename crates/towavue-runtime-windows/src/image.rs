@@ -16,6 +16,7 @@ pub(crate) mod avif;
 mod bmp_preview;
 mod jpeg_preview;
 mod jpeg_static;
+pub(crate) mod jpeg_wic_preview;
 mod png_preview;
 mod png_static;
 #[cfg(test)]

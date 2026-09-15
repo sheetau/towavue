@@ -50,11 +50,13 @@ pub struct PreviewLoader {
 
 impl PreviewLoader {
     pub fn new(cache: PreviewCache, notify: impl Fn() + Send + 'static) -> std::io::Result<Self> {
+        let wic = crate::image::jpeg_wic_preview::worker_enabled();
         let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
         let worker_shared = Arc::clone(&shared);
         thread::Builder::new()
             .name("towavue-filmstrip".into())
             .spawn(move || {
+                let _wic = crate::image::jpeg_wic_preview::WorkerScope::new(wic);
                 let disk_keys = std::cell::RefCell::new(None);
                 run_worker(
                     worker_shared,

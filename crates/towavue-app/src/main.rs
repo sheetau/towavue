@@ -4185,7 +4185,7 @@ where
             crop.y = translate(crop.y, delta.y, size.1 - crop.height);
             self.image_view.selection = Some(crop.unit_rect(size));
         }
-        response.ctx.set_cursor_icon(egui::CursorIcon::AllScroll);
+        response.ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
         if release.is_some() {
             self.view_drag = None;
         }

@@ -98,7 +98,7 @@ fn video_right_drag_moves_selection_on_its_pixel_grid_without_panning() {
                         let output = frame(&mut app, vec![button(start, true)], true);
                         assert_eq!(
                             output.platform_output.cursor_icon,
-                            egui::CursorIcon::AllScroll
+                            egui::CursorIcon::Grabbing
                         );
                         assert!(matches!(
                             app.view_drag,
@@ -107,7 +107,7 @@ fn video_right_drag_moves_selection_on_its_pixel_grid_without_panning() {
                         let output = frame(&mut app, vec![egui::Event::PointerMoved(end)], true);
                         assert_eq!(
                             output.platform_output.cursor_icon,
-                            egui::CursorIcon::AllScroll
+                            egui::CursorIcon::Grabbing
                         );
                         assert_eq!(app.image_view.selection, Some(expected));
                         if mode == 2 {
@@ -127,6 +127,10 @@ fn video_right_drag_moves_selection_on_its_pixel_grid_without_panning() {
                     assert_eq!(app.image_view.zoom, zoom);
                     assert!(app.view_drag.is_none());
                     assert!(app.edits.is_empty());
+                    assert_ne!(
+                        frame(&mut app, vec![], true).platform_output.cursor_icon,
+                        egui::CursorIcon::Grabbing
+                    );
                 }
             }
             // Press ownership does not change when an outside drag crosses the selection.

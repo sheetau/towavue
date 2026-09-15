@@ -127,7 +127,7 @@ pub(super) fn show(
             egui::CursorIcon::ResizeHorizontal
         }
         Gesture::Band(..) | Gesture::Gain(..) => egui::CursorIcon::ResizeRow,
-        Gesture::Select => egui::CursorIcon::Default,
+        Gesture::Select => egui::CursorIcon::Text,
     };
     if enabled
         && response.hovered()
@@ -821,7 +821,7 @@ mod tests {
                 let x = 20.0 + position.as_seconds_f64() as f32 * 40.0;
                 for (pointer, expected) in [
                     (egui::pos2(x, 34.0), egui::CursorIcon::ResizeHorizontal),
-                    (egui::pos2(x, 70.0), egui::CursorIcon::Default),
+                    (egui::pos2(x, 70.0), egui::CursorIcon::Text),
                     (egui::pos2(120.0, 70.0), egui::CursorIcon::ResizeHorizontal),
                     (egui::pos2(320.0, 70.0), egui::CursorIcon::ResizeHorizontal),
                     (egui::pos2(180.0, 80.0), egui::CursorIcon::ResizeRow),
@@ -1577,7 +1577,8 @@ mod tests {
                 draw(vec![]);
                 let start = if reverse { 320.0 } else { 120.0 };
                 let end = if reverse { 120.0 } else { 320.0 };
-                let (press, axis, _) = draw(vec![button(start, true)]);
+                let (press, axis, cursor) = draw(vec![button(start, true)]);
+                assert_eq!(cursor, egui::CursorIcon::Text);
                 assert_eq!(press.len(), 1);
                 assert_eq!(press[0].seek, Some(time(if reverse { 7.5 } else { 2.5 })));
                 assert_eq!(axis, cti_x(rect, start, 1.0 / density));
@@ -1588,7 +1589,7 @@ mod tests {
                     "held selection does not restart the pipeline"
                 );
                 assert_eq!(axis, cti_x(rect, 120.0, 1.0 / density));
-                assert_eq!(cursor, egui::CursorIcon::Default);
+                assert_eq!(cursor, egui::CursorIcon::Text);
                 let (released, axis, _) = draw(vec![button(end, false)]);
                 assert_eq!(released.len(), 1);
                 assert_eq!(

@@ -572,11 +572,16 @@ fn selection_translation_keeps_pixel_extent_and_cancels_without_panning() {
         app.image_view.selection = Some(original);
         app.image_view.pan = (10.0, 20.0);
         frame(&mut app, vec![egui::Event::PointerMoved(start)]);
-        assert!(frame(&mut app, vec![button(start, true)]).0);
+        let (owned, output) = frame(&mut app, vec![button(start, true)]);
+        assert!(owned);
+        assert_eq!(
+            output.platform_output.cursor_icon,
+            egui::CursorIcon::Grabbing
+        );
         let (_, output) = frame(&mut app, vec![egui::Event::PointerMoved(start + delta)]);
         assert_eq!(
             output.platform_output.cursor_icon,
-            egui::CursorIcon::AllScroll
+            egui::CursorIcon::Grabbing
         );
         let result = PixelCrop::from_selection(
             app.image_view.selection.expect("moved"),
@@ -594,7 +599,12 @@ fn selection_translation_keeps_pixel_extent_and_cancels_without_panning() {
             (crop.y as f32 + delta.y).clamp(0.0, (500 - crop.height) as f32) as u32
         );
         app.cancel_view_drag();
-        frame(&mut app, vec![button(start + delta, false)]);
+        let (owned, output) = frame(&mut app, vec![button(start + delta, false)]);
+        assert!(!owned);
+        assert_eq!(
+            output.platform_output.cursor_icon,
+            egui::CursorIcon::Default
+        );
         assert_eq!(app.image_view.selection, Some(original));
         frame(
             &mut app,
@@ -612,5 +622,11 @@ fn selection_translation_keeps_pixel_extent_and_cancels_without_panning() {
         assert_eq!(app.image_view.pan, (10.0, 20.0));
         assert!(app.view_drag.is_none());
         assert!(app.edits.is_empty());
+        let (owned, output) = frame(&mut app, vec![]);
+        assert!(!owned);
+        assert_eq!(
+            output.platform_output.cursor_icon,
+            egui::CursorIcon::Default
+        );
     }
 }

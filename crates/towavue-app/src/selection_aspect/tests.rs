@@ -233,7 +233,7 @@ fn verify_video_selection_zoom<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mu
             frame(app, vec![button(start, true)])
                 .platform_output
                 .cursor_icon,
-            egui::CursorIcon::AllScroll
+            egui::CursorIcon::Grabbing
         );
         verify_status(app, "Selection: x=4 y=6 · 20×18 px");
         frame(

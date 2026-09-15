@@ -244,6 +244,26 @@ struct VideoProcessorState {
     processor: ID3D11VideoProcessor,
 }
 
+#[test]
+fn built_blit_shaders_match_runtime_compilation() {
+    for (source, target, expected) in [
+        (
+            include_bytes!("../shaders/blit-vertex.hlsl").as_slice(),
+            s!("vs_4_0"),
+            include_bytes!(concat!(env!("OUT_DIR"), "/blit-vertex.cso")).as_slice(),
+        ),
+        (
+            include_bytes!("../shaders/blit-pixel.hlsl").as_slice(),
+            s!("ps_4_0"),
+            include_bytes!(concat!(env!("OUT_DIR"), "/blit-pixel.cso")).as_slice(),
+        ),
+    ] {
+        let actual = compile_shader(source, target).expect("historical blit compilation");
+        // The blob owns the byte slice until the comparison finishes.
+        assert_eq!(unsafe { blob_bytes(&actual) }, expected);
+    }
+}
+
 struct SoftwareBlitter {
     vertex_shader: ID3D11VertexShader,
     pixel_shader: ID3D11PixelShader,
@@ -253,41 +273,8 @@ struct SoftwareBlitter {
 
 impl SoftwareBlitter {
     fn new(device: &ID3D11Device) -> Result<Self, RenderError> {
-        const VERTEX_SHADER: &[u8] = br#"
-struct VertexOutput {
-    float4 position : SV_POSITION;
-    float2 uv : TEXCOORD0;
-};
-
-VertexOutput main(uint vertex_id : SV_VertexID) {
-    VertexOutput output;
-    output.uv = float2((vertex_id << 1) & 2, vertex_id & 2);
-    output.position = float4(output.uv.x * 2.0 - 1.0, 1.0 - output.uv.y * 2.0, 0.0, 1.0);
-    return output;
-}
-"#;
-        const PIXEL_SHADER: &[u8] = br#"
-Texture2D source_texture : register(t0);
-SamplerState source_sampler : register(s0);
-cbuffer Transform : register(b0) {
-    float4 origin;
-    float4 x_axis;
-    float4 y_axis;
-};
-
-float4 main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
-    uint width, height;
-    source_texture.GetDimensions(width, height);
-    float2 half_texel = 0.5 / float2(width, height);
-    float2 opposite = origin.xy + x_axis.xy + y_axis.xy;
-    float2 sample_uv = origin.xy + uv.x * x_axis.xy + uv.y * y_axis.xy;
-    return source_texture.Sample(source_sampler,
-        clamp(sample_uv, min(origin.xy, opposite) + half_texel, max(origin.xy, opposite) - half_texel));
-}
-"#;
-
-        let vertex_bytecode = compile_shader(VERTEX_SHADER, s!("vs_4_0"))?;
-        let pixel_bytecode = compile_shader(PIXEL_SHADER, s!("ps_4_0"))?;
+        let vertex_bytecode = include_bytes!(concat!(env!("OUT_DIR"), "/blit-vertex.cso"));
+        let pixel_bytecode = include_bytes!(concat!(env!("OUT_DIR"), "/blit-pixel.cso"));
         let mut vertex_shader = None;
         let mut pixel_shader = None;
         let mut sampler = None;
@@ -304,12 +291,8 @@ float4 main(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET {
         // Creation consumes the borrowed bytecode/descriptors synchronously. The renderer owns
         // the shaders, sampler and constant buffer; buffer updates stay on its event-loop thread.
         unsafe {
-            device.CreateVertexShader(
-                blob_bytes(&vertex_bytecode),
-                None,
-                Some(&mut vertex_shader),
-            )?;
-            device.CreatePixelShader(blob_bytes(&pixel_bytecode), None, Some(&mut pixel_shader))?;
+            device.CreateVertexShader(vertex_bytecode, None, Some(&mut vertex_shader))?;
+            device.CreatePixelShader(pixel_bytecode, None, Some(&mut pixel_shader))?;
             device.CreateSamplerState(&sampler_description, Some(&mut sampler))?;
             device.CreateBuffer(
                 &D3D11_BUFFER_DESC {

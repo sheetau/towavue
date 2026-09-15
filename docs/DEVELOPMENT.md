@@ -20,6 +20,8 @@ The setup script retrieves the checksum-pinned BtbN development build. **That bu
 
 To use an already prepared compatible FFmpeg prefix, set `FFMPEG_DIR` to its root and add its `bin` to this shell's PATH instead. Use `CARGO_TARGET_DIR` to isolate incompatible native build variants; do not put personal absolute paths in tracked documentation.
 
+Native Windows build scripts compile the four fixed blit/UI HLSL shaders with the existing D3DCompiler API and embed the generated `OUT_DIR` bytecode; no `fxc.exe` lookup, downloaded shader binary or extra deployed asset is needed. Sources, targets and optimization flags remain explicit in each crate's build script ([Microsoft build-time compilation](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-part1)). When changing them, run `renderer::built_blit_shaders_match_runtime_compilation` in the runtime library and `sampling_tests::built_egui_shaders_match_runtime_compilation` in `egui-directx11`, plus affected GPU regressions. Bytecode equality compares against the historical runtime compiler on the test host, not a cross-Windows compiler-version guarantee. Video-edit raster compilation still uses D3DCompiler at runtime.
+
 Helper lookup is deliberate: colocated ffmpeg.exe/ffprobe.exe take precedence; only a development layout with neither colocated helper uses FFMPEG_DIR/bin. A partially installed pair fails rather than borrowing another version from PATH.
 
 ## Verification by impact

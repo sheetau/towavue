@@ -111,6 +111,7 @@ struct VertexData {
     color: [f32; 4],
 }
 
+#[cfg(test)]
 fn compile_shader(entry: windows::core::PCSTR, target: windows::core::PCSTR) -> Result<Vec<u8>> {
     use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
     let source = include_bytes!("../shaders/egui.hlsl");
@@ -174,6 +175,25 @@ mod resize_tests;
 #[cfg(test)]
 mod sampling_tests {
     use super::*;
+
+    #[test]
+    fn built_egui_shaders_match_runtime_compilation() -> Result<()> {
+        for (entry, target, expected) in [
+            (
+                windows::core::s!("vs_egui"),
+                windows::core::s!("vs_5_0"),
+                include_bytes!(concat!(env!("OUT_DIR"), "/egui-vertex.cso")).as_slice(),
+            ),
+            (
+                windows::core::s!("ps_egui"),
+                windows::core::s!("ps_5_0"),
+                include_bytes!(concat!(env!("OUT_DIR"), "/egui-pixel.cso")).as_slice(),
+            ),
+        ] {
+            assert_eq!(compile_shader(entry, target)?, expected);
+        }
+        Ok(())
+    }
 
     #[test]
     fn warp_draws_per_texture_filters_and_updates_partial_options() -> Result<()> {
@@ -540,8 +560,8 @@ impl Renderer {
     /// error. You can create the Direct3D11 device with debug layer enabled
     /// to find out details on the error.
     pub fn new(device: &ID3D11Device) -> Result<Self> {
-        let vs_blob = compile_shader(windows::core::s!("vs_egui"), windows::core::s!("vs_5_0"))?;
-        let ps_blob = compile_shader(windows::core::s!("ps_egui"), windows::core::s!("ps_5_0"))?;
+        let vs_blob = include_bytes!(concat!(env!("OUT_DIR"), "/egui-vertex.cso")).as_slice();
+        let ps_blob = include_bytes!(concat!(env!("OUT_DIR"), "/egui-pixel.cso")).as_slice();
         let mut input_layout = None;
         let mut vertex_shader = None;
         let mut pixel_shader = None;
@@ -559,11 +579,11 @@ impl Renderer {
         unsafe {
             device.CreateInputLayout(
                 &Self::INPUT_ELEMENTS_DESC,
-                &vs_blob,
+                vs_blob,
                 Some(&mut input_layout),
             )?;
-            device.CreateVertexShader(&vs_blob, None, Some(&mut vertex_shader))?;
-            device.CreatePixelShader(&ps_blob, None, Some(&mut pixel_shader))?;
+            device.CreateVertexShader(vs_blob, None, Some(&mut vertex_shader))?;
+            device.CreatePixelShader(ps_blob, None, Some(&mut pixel_shader))?;
             device.CreateRasterizerState(&Self::RASTERIZER_DESC, Some(&mut rasterizer_state))?;
             device.CreateSamplerState(&Self::SAMPLER_DESC, Some(&mut sampler_state))?;
             device.CreateBlendState(&Self::BLEND_DESC, Some(&mut blend_state))?;

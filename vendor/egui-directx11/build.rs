@@ -1,15 +1,14 @@
-use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
+use windows::Win32::Graphics::Direct3D::Fxc::{D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile};
 use windows::Win32::Graphics::Direct3D::ID3DInclude;
 use windows::core::{PCSTR, s};
 
 fn main() {
-    for (source_path, target, output) in [
-        ("shaders/blit-vertex.hlsl", s!("vs_4_0"), "blit-vertex.cso"),
-        ("shaders/blit-pixel.hlsl", s!("ps_4_0"), "blit-pixel.cso"),
+    println!("cargo:rerun-if-changed=shaders/egui.hlsl");
+    let source = include_bytes!("shaders/egui.hlsl");
+    for (entry, target, output) in [
+        (s!("vs_egui"), s!("vs_5_0"), "egui-vertex.cso"),
+        (s!("ps_egui"), s!("ps_5_0"), "egui-pixel.cso"),
     ] {
-        println!("cargo:rerun-if-changed={source_path}");
-        let source = std::fs::read(source_path).expect("read fixed blit shader");
-        let entry = s!("main");
         let mut bytecode = None;
         // Source and strings remain valid throughout compilation. The owned blob
         // outlives the borrowed slice written into Cargo's build output.
@@ -22,7 +21,7 @@ fn main() {
                 None::<&ID3DInclude>,
                 entry,
                 target,
-                0,
+                D3DCOMPILE_OPTIMIZATION_LEVEL3,
                 0,
                 &mut bytecode,
                 None,
@@ -37,12 +36,5 @@ fn main() {
             std::fs::write(std::path::PathBuf::from(directory).join(output), bytes)
                 .expect("write fixed shader bytecode");
         }
-    }
-    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
-        // TaskDialogIndirect requires Common Controls v6 in executables and test hosts.
-        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
-        println!(
-            "cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
-        );
     }
 }

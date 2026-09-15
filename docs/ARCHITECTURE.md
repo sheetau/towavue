@@ -16,6 +16,8 @@ Unsafe operations stay behind safe runtime interfaces with explicit lifetime, th
 
 Keep the single-D3D11-device design: hardware decode, video processing, image/UI rendering, and all host windows use the same adapter/device. D3D11VA falls back to software, not CUDA/QSV. Default audio is event-driven WASAPI Shared, not Exclusive.
 
+The four fixed blit/UI shaders are compiled from tracked HLSL into Cargo build output and embedded, retaining their original entry points, profiles and optimization flags. Device-owned shader resources are still created for each renderer; no native object is cached globally. Video-edit raster compilation remains separate. Do not commit generated shader bytecode.
+
 ## Playback, timing, and recovery
 
 - Video and audio use independent demux/decode feeds and bounded queues. Audio output waits must not block video initialization or paused Seek. Do not drop packets or normal audio samples to relieve backpressure.

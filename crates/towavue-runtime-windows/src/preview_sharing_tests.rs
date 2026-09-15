@@ -2,6 +2,15 @@ use super::*;
 use std::sync::mpsc;
 use std::thread;
 
+// Encoded-only control for cache validation and historical round-trip comparisons.
+fn static_thumbnail_png(
+    source: &Path,
+    byte_limit: usize,
+    current: &dyn Fn() -> bool,
+) -> Option<Vec<u8>> {
+    static_thumbnail_ready(source, byte_limit, current).map(|(bytes, _)| bytes)
+}
+
 fn cache(name: &str) -> PreviewCache {
     let nonce = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -155,6 +164,87 @@ fn generated_thumbnail_reports_png_round_trip_cost() -> Result<(), &'static str>
     }
     fs::remove_dir_all(root).expect("remove owned caches");
     Ok(())
+}
+
+#[test]
+fn native_thumbnail_publication_preserves_pixels_geometry_and_disk_reuse() {
+    check_native_thumbnail_publication(1);
+}
+
+#[test]
+#[ignore = "Release comparison of native thumbnail generation, persistence and publication"]
+fn native_thumbnail_publication_reports_round_trip_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("use Release for timing");
+    }
+    check_native_thumbnail_publication(15);
+    Ok(())
+}
+
+fn check_native_thumbnail_publication(sample_count: usize) {
+    for (width, height) in [(32, 24), (240, 160), (1920, 1080)] {
+        let root = cache("native-thumbnail-publication").root;
+        let source = root.join("source.png");
+        let mut seed = 1_u32;
+        let pixels = image::RgbaImage::from_fn(width, height, |_, _| {
+            image::Rgba(std::array::from_fn(|_| {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                (seed >> 24) as u8
+            }))
+        });
+        pixels.save(&source).expect("owned alpha PNG");
+        let expected = image::DynamicImage::ImageRgba8(pixels)
+            .resize(240, 160, image::imageops::FilterType::Nearest)
+            .into_rgba8();
+        let original = fs::read(&source).expect("warm source");
+        let modified = fs::metadata(&source)
+            .expect("source")
+            .modified()
+            .expect("mtime");
+        let key = cache_key(&source, IMAGE_PREVIEW_VARIANT).expect("key");
+        for (phase, ready) in [false, true, true, false].into_iter().enumerate() {
+            let mut samples = Vec::new();
+            for sample in 0..sample_count {
+                let store =
+                    PreviewCache::new(root.join(format!("{phase}-{sample}"))).expect("empty cache");
+                let started = std::time::Instant::now();
+                let image = store
+                    .load_or_generate_ready(key.clone(), || {
+                        let (bytes, image) =
+                            static_thumbnail_ready(&source, STATIC_THUMBNAIL_BYTE_LIMIT, &|| true)
+                                .expect("native generation");
+                        Ok((bytes, ready.then_some(image)))
+                    })
+                    .expect("publication");
+                samples.push(started.elapsed().as_secs_f64() * 1000.0);
+                assert_eq!((image.width, image.height), expected.dimensions());
+                assert_eq!(&image.rgba, expected.as_raw());
+                let fresh = PreviewCache::new(store.root.clone()).expect("fresh memory");
+                let saved = fresh
+                    .cached_image(&source)
+                    .expect("disk read")
+                    .expect("entry");
+                assert_eq!(saved.source_size, (width, height));
+                assert_eq!(saved.image, image);
+            }
+            if sample_count > 1 {
+                samples.sort_by(f64::total_cmp);
+                println!(
+                    "NATIVE_THUMBNAIL {width}x{height} ready={ready} median_ms={:.3}",
+                    samples[samples.len() / 2]
+                );
+            }
+        }
+        assert_eq!(fs::read(&source).expect("unchanged source"), original);
+        assert_eq!(
+            fs::metadata(&source)
+                .expect("source")
+                .modified()
+                .expect("mtime"),
+            modified
+        );
+        fs::remove_dir_all(root).expect("remove owned fixtures");
+    }
 }
 
 #[test]
@@ -345,10 +435,11 @@ fn animated_thumbnails_use_the_first_composited_frame_with_bounded_native_decodi
         )
         .resize(240, 160, image::imageops::FilterType::Nearest)
         .into_rgba8();
-        let bytes = static_thumbnail_png(&source, 320 * 200 * 4, &|| true)
+        let (bytes, ready) = static_thumbnail_ready(&source, 320 * 200 * 4, &|| true)
             .expect("native thumbnail without external FFmpeg fallback");
         assert_eq!(thumbnail_source_size(&bytes), Some((320, 200)));
         let preview = decode_png(&bytes).expect("thumbnail PNG");
+        assert_eq!(ready, preview, "published pixels equal persisted pixels");
         assert_eq!((preview.width, preview.height), expected.dimensions());
         assert_eq!(
             &preview.rgba,

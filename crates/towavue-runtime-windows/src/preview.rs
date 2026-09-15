@@ -338,8 +338,8 @@ impl PreviewCache {
                         ))
                     })
                     .or_else(|| {
-                        static_thumbnail_png(source, STATIC_THUMBNAIL_BYTE_LIMIT, &current)
-                            .map(|bytes| (bytes, None))
+                        static_thumbnail_ready(source, STATIC_THUMBNAIL_BYTE_LIMIT, &current)
+                            .map(|(bytes, image)| (bytes, Some(image)))
                     });
                     self.check_cancelled()?;
                     let prepared = if let Some(prepared) = direct {
@@ -891,11 +891,11 @@ fn cache_key(source: &Path, variant: &str) -> Result<String, PreviewError> {
     Ok(format!("{:016x}", hasher.finish()))
 }
 
-fn static_thumbnail_png(
+fn static_thumbnail_ready(
     source: &Path,
     byte_limit: usize,
     current: &dyn Fn() -> bool,
-) -> Option<Vec<u8>> {
+) -> Option<(Vec<u8>, PreviewImage)> {
     let format = image::ImageFormat::from_path(source).ok();
     let streamed = (format == Some(image::ImageFormat::Png))
         .then(|| {
@@ -936,7 +936,14 @@ fn static_thumbnail_png(
             ),
         )
     };
-    thumbnail_png(&small, source_size, current)
+    let bytes = thumbnail_png(&small, source_size, current)?;
+    // Keep the decoded/sampled pixels instead of decoding our new cache PNG again.
+    let image = PreviewImage {
+        width: small.width(),
+        height: small.height(),
+        rgba: small.into_rgba8().into_raw(),
+    };
+    Some((bytes, image))
 }
 
 fn thumbnail_png(

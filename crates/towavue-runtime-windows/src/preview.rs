@@ -28,6 +28,11 @@ pub use video_sheet::{VideoPreviewSheet, VideoSheetLayout};
 mod sharing_tests;
 static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(test)]
+thread_local! {
+    static REDECODE_MEDIA_PNG: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 type InFlight = Arc<(Mutex<HashSet<String>>, Condvar)>;
 
 struct GenerationLease {
@@ -375,7 +380,7 @@ impl PreviewCache {
         filter: &str,
     ) -> Result<PreviewImage, PreviewError> {
         let key = cache_key(source, variant)?;
-        self.load_or_generate(key.clone(), || {
+        self.load_or_generate_ready(key.clone(), || {
             let mut frame = None;
             let result = crate::decode::preview_video_frames(
                 source,
@@ -385,25 +390,23 @@ impl PreviewCache {
                 |_, image| frame = Some(image),
             );
             self.check_cancelled()?;
-            let bytes = match result {
+            let prepared = match result {
                 Ok(()) => {
                     let frame = frame.ok_or(PreviewError::NoFrame)?;
                     let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)
                         .expect("packed preview frame");
-                    let mut png = std::io::Cursor::new(Vec::new());
-                    image.write_to(&mut png, image::ImageFormat::Png)?;
-                    png.into_inner()
+                    ready_preview_png(image)?
                 }
                 Err(error) => {
                     eprintln!("towavue: auxiliary preview decoder unavailable; using frame fallback: {error}");
-                    frame_preview(source, position, filter, self.cancellation.as_ref())?
+                    (frame_preview(source, position, filter, self.cancellation.as_ref())?, None)
                 }
             };
             self.check_cancelled()?;
             if cache_key(source, variant)? != key {
                 return Err(PreviewError::Generate("Source changed during preview generation".into()));
             }
-            Ok(bytes)
+            Ok(prepared)
         })
     }
 
@@ -435,12 +438,7 @@ impl PreviewCache {
             return Err(PreviewError::Generate("invalid waveform dimensions".into()));
         }
         let key = cache_key(source, &format!("waveform-v3-{width}-{height}"))?;
-        self.load_or_generate(key, || {
-            let image = generate()?;
-            let mut png = std::io::Cursor::new(Vec::new());
-            image.write_to(&mut png, image::ImageFormat::Png)?;
-            Ok(png.into_inner())
-        })
+        self.load_or_generate_ready(key, || ready_preview_png(generate()?))
     }
 
     /// Historical helper-process backend, only for same-cache-path comparisons.
@@ -1146,6 +1144,23 @@ fn probed_duration(text: &str) -> Result<Duration, PreviewError> {
         }
     }
     Duration::try_from_secs_f64(seconds).map_err(|_| PreviewError::InvalidDuration)
+}
+
+fn ready_preview_png(
+    image: image::RgbaImage,
+) -> Result<(Vec<u8>, Option<PreviewImage>), PreviewError> {
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png)?;
+    let ready = PreviewImage {
+        width: image.width(),
+        height: image.height(),
+        rgba: image.into_raw(),
+    };
+    #[cfg(test)]
+    if REDECODE_MEDIA_PNG.get() {
+        return Ok((png.into_inner(), None));
+    }
+    Ok((png.into_inner(), Some(ready)))
 }
 
 fn decode_png(bytes: &[u8]) -> Result<PreviewImage, image::ImageError> {

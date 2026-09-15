@@ -2,6 +2,101 @@ use super::*;
 use std::sync::mpsc;
 use std::thread;
 
+#[test]
+fn native_media_png_transfers_its_canvas_and_matches_persisted_pixels() {
+    let image = image::RgbaImage::from_fn(37, 23, |x, y| {
+        image::Rgba([x as u8, y as u8, 83, (x * y) as u8])
+    });
+    let allocation = image.as_raw().as_ptr();
+    let (encoded, ready) = ready_preview_png(image).expect("native PNG");
+    let ready = ready.expect("original canvas");
+    assert_eq!(
+        ready.rgba.as_ptr(),
+        allocation,
+        "transfer without cloning the canvas"
+    );
+    assert_eq!(ready, decode_png(&encoded).expect("persisted PNG"));
+}
+
+#[test]
+#[ignore = "native video/sheet/waveform publication cost; use Release without concurrent builds"]
+fn native_media_publication_reports_png_round_trip_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("use Release");
+    }
+    let source =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+    let source_bytes = fs::read(&source).expect("warm owned fixture");
+    let modified = fs::metadata(&source)
+        .expect("source")
+        .modified()
+        .expect("mtime");
+    for kind in ["frame", "sheet", "waveform"] {
+        let seed = cache("media-publication");
+        let duration = seed.duration(&source).expect("duration");
+        let layout = VideoSheetLayout::for_position(duration, Duration::ZERO).expect("layout");
+        let generate = |store: &PreviewCache| match kind {
+            "frame" => store
+                .thumbnail(&source, Duration::from_millis(100), 240)
+                .expect("frame"),
+            "sheet" => store.video_sheet(&source, layout).expect("sheet").image,
+            _ => store.waveform(&source, 240, 160).expect("waveform"),
+        };
+        REDECODE_MEDIA_PNG.set(true);
+        let expected = generate(&seed);
+        let file = fs::read_dir(&seed.root)
+            .expect("seed files")
+            .next()
+            .expect("one PNG")
+            .expect("entry")
+            .path();
+        let expected_png = fs::read(&file).expect("historical PNG");
+        for (batch, ready) in [false, true, true, false].into_iter().enumerate() {
+            REDECODE_MEDIA_PNG.set(!ready);
+            let mut samples = Vec::new();
+            for sample in 0..15 {
+                let store = PreviewCache::new(seed.root.join(format!("{batch}-{sample}")))
+                    .expect("empty cache");
+                let started = std::time::Instant::now();
+                let actual = generate(&store);
+                samples.push(started.elapsed());
+                assert!(
+                    actual == expected,
+                    "native publication preserves full pixels"
+                );
+                let file = fs::read_dir(&store.root)
+                    .expect("cache files")
+                    .next()
+                    .expect("PNG")
+                    .expect("entry")
+                    .path();
+                assert!(
+                    fs::read(file).expect("cache PNG") == expected_png,
+                    "unchanged PNG encoding"
+                );
+                let fresh = PreviewCache::new(store.root.clone()).expect("fresh memory");
+                assert!(generate(&fresh) == expected, "disk reuse preserves pixels");
+            }
+            samples.sort();
+            eprintln!(
+                "NATIVE_MEDIA kind={kind} ready={ready} median_ms={:.3}",
+                samples[7].as_secs_f64() * 1000.0
+            );
+        }
+        REDECODE_MEDIA_PNG.set(false);
+        fs::remove_dir_all(seed.root).expect("remove owned caches");
+    }
+    assert!(fs::read(&source).expect("source recheck") == source_bytes);
+    assert_eq!(
+        fs::metadata(&source)
+            .expect("source")
+            .modified()
+            .expect("mtime"),
+        modified
+    );
+    Ok(())
+}
+
 // Encoded-only control for cache validation and historical round-trip comparisons.
 fn static_thumbnail_png(
     source: &Path,

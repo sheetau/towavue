@@ -116,7 +116,7 @@ impl PreviewCache {
     ) -> Result<VideoPreviewSheet, PreviewError> {
         self.check_cancelled()?;
         let key = cache_key(source, &layout.variant())?;
-        let image = self.load_or_generate(key.clone(), || {
+        let image = self.load_or_generate_ready(key.clone(), || {
             let mut sheet =
                 image::RgbaImage::from_pixel(WIDTH, HEIGHT, image::Rgba([0, 0, 0, 255]));
             let targets: Vec<_> = (0..CELLS)
@@ -167,9 +167,7 @@ impl PreviewCache {
                     "Source changed during sheet generation".into(),
                 ));
             }
-            let mut png = std::io::Cursor::new(Vec::new());
-            sheet.write_to(&mut png, image::ImageFormat::Png)?;
-            Ok(png.into_inner())
+            ready_preview_png(sheet)
         })?;
         if image.width != WIDTH || image.height != HEIGHT {
             return Err(PreviewError::Generate(

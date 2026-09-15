@@ -248,12 +248,13 @@ impl PreviewCache {
             .flatten()
             .filter_map(Result::ok)
             .filter_map(|entry| {
-                entry
-                    .file_name()
-                    .to_str()?
-                    .to_ascii_lowercase()
-                    .strip_suffix(".png")
-                    .map(str::to_owned)
+                let mut name = entry.file_name().into_string().ok()?;
+                name.make_ascii_lowercase();
+                if !name.ends_with(".png") {
+                    return None;
+                }
+                name.truncate(name.len() - 4);
+                Some(name)
             })
             .collect()
     }

@@ -841,6 +841,162 @@ fn populated_preview_cache_reports_pruning_cost() {
     fs::remove_dir_all(&cache.root).expect("remove owned benchmark cache");
 }
 
+#[test]
+fn disk_key_snapshots_normalize_names_without_traversing_or_changing_entries() {
+    let store = cache("disk-key-names");
+    fs::write(store.root.join("AbCd.PNG"), b"not a validated preview").expect("owned entry");
+    fs::write(store.root.join("ignored.tmp"), b"temporary").expect("owned temporary");
+    fs::create_dir(store.root.join("folder.png")).expect("owned directory");
+    fs::write(store.root.join("folder.png/child.png"), b"nested").expect("nested entry");
+    assert_eq!(
+        store.disk_entry_keys(),
+        HashSet::from(["abcd".to_owned(), "folder".to_owned()])
+    );
+    assert_eq!(
+        fs::read(store.root.join("AbCd.PNG")).expect("unchanged entry"),
+        b"not a validated preview"
+    );
+    assert_eq!(
+        fs::read(store.root.join("folder.png/child.png")).expect("unchanged nested entry"),
+        b"nested"
+    );
+    fs::remove_dir_all(&store.root).expect("owned fixture cleanup");
+    assert!(
+        store.disk_entry_keys().is_empty(),
+        "missing storage is an optional-cache miss"
+    );
+}
+
+#[test]
+#[ignore = "disk-key enumeration scaling; run in Release without concurrent timing work"]
+fn populated_disk_key_snapshots_report_allocation_reuse_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("use Release");
+    }
+    let store = cache("disk-key-cost");
+    let bytes = png();
+    let mut expected = HashSet::new();
+    let mut prepared = 0_u32;
+    for count in [512_u32, 2048, 8192] {
+        for index in prepared..count {
+            let name = format!("{:016x}", index.wrapping_mul(2_654_435_761));
+            let file = if index % 2 == 0 {
+                format!("{}.PNG", name.to_uppercase())
+            } else {
+                format!("{name}.png")
+            };
+            fs::write(store.root.join(file), &bytes).expect("owned PNG");
+            assert!(expected.insert(name));
+        }
+        prepared = count;
+        for historical in [true, false, false, true] {
+            let mut timings = Vec::new();
+            for _ in 0..9 {
+                let start = std::time::Instant::now();
+                let keys = if historical {
+                    fs::read_dir(&store.root)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Result::ok)
+                        .filter_map(|entry| {
+                            entry
+                                .file_name()
+                                .to_str()?
+                                .to_ascii_lowercase()
+                                .strip_suffix(".png")
+                                .map(str::to_owned)
+                        })
+                        .collect::<HashSet<String>>()
+                } else {
+                    store.disk_entry_keys()
+                };
+                timings.push(start.elapsed());
+                assert_eq!(keys, expected, "exact normalized key membership");
+            }
+            timings.sort();
+            eprintln!(
+                "disk_keys entries={count} historical={historical} samples=9 median_ms={:.4}",
+                timings[4].as_secs_f64() * 1000.0
+            );
+        }
+    }
+    for entry in fs::read_dir(&store.root).expect("owned cache") {
+        assert_eq!(
+            fs::read(entry.expect("entry").path()).expect("unchanged entry"),
+            bytes
+        );
+    }
+    fs::remove_dir_all(&store.root).expect("owned fixture cleanup");
+    Ok(())
+}
+
+#[test]
+#[ignore = "single image queue with populated cache; run in Release without concurrent timing work"]
+fn singleton_preview_queue_reports_populated_cache_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("use Release");
+    }
+    let store = cache("singleton-preview-cost");
+    fs::create_dir(store.root.join("sources")).expect("owned source directory");
+    let source = store.root.join("sources/one.png");
+    let bytes = png();
+    fs::write(&source, &bytes).expect("source");
+    let expected = store
+        .filmstrip(&source, MediaKind::Image)
+        .expect("seed thumbnail")
+        .image;
+    let key = cache_key(&source, IMAGE_PREVIEW_VARIANT).expect("source identity");
+    let disk = store.root.join(format!("{key}.png"));
+    let mut prepared = 0_u32;
+    for count in [0_u32, 512, 2048, 8192] {
+        for index in prepared..count {
+            let name = format!("{:016x}", index.wrapping_mul(2_654_435_761));
+            assert_ne!(name, key);
+            fs::write(store.root.join(format!("{name}.png")), &bytes)
+                .expect("unrelated cache entry");
+        }
+        prepared = count;
+        for persisted in [true, false] {
+            let mut times = Vec::new();
+            for _ in 0..9 {
+                if !persisted {
+                    fs::remove_file(&disk).expect("remove owned thumbnail");
+                }
+                let fresh = PreviewCache::new(store.root.clone()).expect("fresh memory");
+                let (notify, ready) = mpsc::channel();
+                let loader = crate::PreviewLoader::new(fresh, move || {
+                    let _ = notify.send(());
+                })
+                .expect("worker");
+                let start = std::time::Instant::now();
+                let generation = loader.request(vec![(source.clone(), MediaKind::Image)]);
+                ready
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("completion");
+                let result = loader.take_completed();
+                times.push(start.elapsed());
+                drop(loader);
+                assert_eq!(result.len(), 1);
+                assert_eq!(result[0].generation, generation);
+                assert_eq!(result[0].path, source);
+                assert_eq!(result[0].result.as_ref().expect("preview").image, expected);
+            }
+            times.sort();
+            eprintln!(
+                "singleton_preview unrelated={count} persisted={persisted} samples=9 median_ms={:.4}",
+                times[4].as_secs_f64() * 1000.0
+            );
+        }
+    }
+    assert_eq!(
+        cache_key(&source, IMAGE_PREVIEW_VARIANT).expect("unchanged source identity"),
+        key
+    );
+    assert_eq!(fs::read(&source).expect("unchanged source bytes"), bytes);
+    fs::remove_dir_all(store.root).expect("owned fixture cleanup");
+    Ok(())
+}
+
 fn animation_fixture(root: &Path, extension: &str, size: (u32, u32), poster: bool) -> PathBuf {
     let path = root.join(format!("animation.{extension}"));
     let frames: Vec<_> = [0, 1]

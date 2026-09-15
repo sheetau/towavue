@@ -198,7 +198,12 @@ fn run_worker(
                 .min_by_key(|(_, work)| work.stage)
                 .expect("pending work")
                 .0;
-            let work = mailbox.pending[index].clone();
+            let mut work = mailbox.pending[index].clone();
+            if work.stage == PreviewStage::Disk && mailbox.pending.len() == 1 {
+                // Nothing can overtake a single remaining request. Its ordinary load already
+                // checks disk; avoid enumerating the whole cache just to schedule that lookup.
+                work.stage = PreviewStage::Generate;
+            }
             let cancellation = Cancellation::default();
             mailbox.active = Some(ActivePreview {
                 path: work.path.clone(),
@@ -267,6 +272,64 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn a_single_remaining_request_skips_the_disk_priority_sweep() {
+        for memory_tail in [false, true] {
+            let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+            let loader = PreviewLoader {
+                shared: Arc::clone(&shared),
+            };
+            let stages = Arc::new(Mutex::new(Vec::new()));
+            let observed = Arc::clone(&stages);
+            let (notify, ready) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                run_worker(
+                    shared,
+                    || notify.send(()).expect("notify"),
+                    |path, _, _, stage, _| {
+                        observed.lock().expect("stages").push(stage);
+                        (path == std::path::Path::new("memory.png")).then(|| MediaPreview {
+                            image: crate::PreviewImage {
+                                width: 1,
+                                height: 1,
+                                rgba: vec![1, 2, 3, 255].into(),
+                            },
+                            duration: None,
+                        })
+                    },
+                    |_, _, _| Err("ordinary load/cache fallback".into()),
+                )
+            });
+            let mut paths = vec![(PathBuf::from("single.png"), MediaKind::Image)];
+            if memory_tail {
+                paths.push(("memory.png".into(), MediaKind::Image));
+            }
+            let count = paths.len();
+            loader.request(paths);
+            for _ in 0..count {
+                ready
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("completion");
+            }
+            let results = loader.take_completed();
+            drop(loader);
+            worker.join().expect("worker exits");
+            assert_eq!(results.len(), count);
+            assert!(
+                stages
+                    .lock()
+                    .expect("stages")
+                    .iter()
+                    .all(|stage| *stage == PreviewStage::Memory),
+                "one remaining miss has nothing to overtake"
+            );
+            assert_eq!(
+                results.last().expect("single request").path,
+                PathBuf::from("single.png")
+            );
+        }
+    }
 
     #[test]
     fn overlapping_requests_keep_active_generation_and_reprioritize_the_remaining_work() {
@@ -510,7 +573,11 @@ mod tests {
                 );
                 assert_eq!(count.get(), 2, "only the new request can publish");
             });
-            loader.request(vec![("same.png".into(), MediaKind::Image)]);
+            let mut initial = vec![("same.png".into(), MediaKind::Image)];
+            if cache_stage == PreviewStage::Disk {
+                initial.push(("never.png".into(), MediaKind::Image));
+            }
+            loader.request(initial);
             let cancellation = started_rx
                 .recv_timeout(Duration::from_secs(5))
                 .expect("active work");
@@ -725,8 +792,8 @@ mod tests {
                     },
                     |path, _, cancellation| {
                         assert!(
-                            cache_stage == PreviewStage::Generate,
-                            "cached result must not be generated"
+                            cache_stage != PreviewStage::Memory,
+                            "memory hit must not be generated"
                         );
                         block(path, cancellation);
                         Err("fixture failure".into())

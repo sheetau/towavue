@@ -881,6 +881,10 @@ struct Application<N> {
     image_previews: BTreeMap<PathBuf, ImagePreviewPresentation>,
     image_generation: u64,
     image_request_offset: usize,
+    #[cfg(feature = "presentation-verification")]
+    image_request_timing: Option<[Instant; 3]>,
+    #[cfg(feature = "presentation-verification")]
+    image_launch_activation: Option<(Duration, Duration)>,
     image_loading: bool,
     image_navigation_forward: bool,
     #[cfg(test)]
@@ -1110,6 +1114,10 @@ where
             image_handoff: None,
             image_generation: 0,
             image_request_offset: 0,
+            #[cfg(feature = "presentation-verification")]
+            image_request_timing: None,
+            #[cfg(feature = "presentation-verification")]
+            image_launch_activation: None,
             image_loading: false,
             image_navigation_forward: true,
             #[cfg(test)]
@@ -1293,6 +1301,27 @@ where
         }
         self.request_redraw();
         Ok(())
+    }
+
+    fn render_ready_launch_image(&mut self) {
+        #[cfg(feature = "presentation-verification")]
+        if std::env::var_os("TOWAVUE_SKIP_READY_LAUNCH_IMAGE").is_some() {
+            return;
+        }
+        if self.media_kind != Some(MediaKind::Image)
+            || !self
+                .ui_context
+                .as_ref()
+                .is_some_and(|context| context.cumulative_frame_nr() == 0)
+        {
+            return;
+        }
+        // The host has shown this window. Consume only an already-published
+        // original and use the ordinary presentation gate, without waiting on I/O.
+        self.finish_image_load();
+        if !self.image_loading && self.image.is_some() && self.image_sequence.awaiting.is_some() {
+            self.render_frame();
+        }
     }
 
     fn prefetch_initial_image(&self) {
@@ -2106,7 +2135,10 @@ where
             return;
         }
         #[cfg(feature = "presentation-verification")]
-        towavue_runtime_windows::towavue_presentation_stage(1);
+        {
+            self.image_request_timing = Some([Instant::now(); 3]);
+            towavue_runtime_windows::towavue_presentation_stage(1);
+        }
         if offset == 0 {
             self.image_error = None;
         }
@@ -2269,6 +2301,9 @@ where
         self.image_loading = result.first_index + result.images.len() < result.total;
         #[cfg(feature = "presentation-verification")]
         if result.first_index == 0 && result.images[0].1.is_ok() {
+            if let Some(timing) = &mut self.image_request_timing {
+                timing[1] = Instant::now();
+            }
             towavue_runtime_windows::towavue_presentation_stage(2);
         }
         // Matching prefetch now survives the next request, so overlap it with texture preparation.
@@ -2303,7 +2338,12 @@ where
                 Ok(image) => {
                     self.image = Some(image);
                     #[cfg(feature = "presentation-verification")]
-                    towavue_runtime_windows::towavue_presentation_stage(3);
+                    {
+                        if let Some(timing) = &mut self.image_request_timing {
+                            timing[2] = Instant::now();
+                        }
+                        towavue_runtime_windows::towavue_presentation_stage(3);
+                    }
                     self.image_error = None;
                     self.state = PlaybackState::Paused;
                 }
@@ -2960,6 +3000,18 @@ where
         {
             let frame = &image.decoded.frames[0];
             let client = self.window.as_ref().expect("window exists").inner_size();
+            // Per-application requests remain distinct when multiple windows share
+            // one event-loop thread. The initial-process stage markers are separate.
+            let request_elapsed =
+                self.image_request_timing
+                    .take()
+                    .map(|[start, accepted, prepared]| {
+                        (
+                            start.elapsed(),
+                            accepted.duration_since(start),
+                            prepared.duration_since(accepted),
+                        )
+                    });
             let display_scale = self.image_view.logical_scale(
                 (frame.width, frame.height),
                 self.image_viewport.into(),
@@ -2973,6 +3025,47 @@ where
                 frame.width as f32 * display_scale,
                 frame.height as f32 * display_scale,
             );
+            if let Some((elapsed, accepted, prepared)) = request_elapsed {
+                use towavue_runtime_windows::ImageLoadTraceKind;
+                let trace = self.image_loader.verification_trace_snapshot();
+                let requested = trace.as_ref().and_then(|trace| {
+                    trace
+                        .events
+                        .iter()
+                        .rev()
+                        .find(|event| event.kind == ImageLoadTraceKind::Requested)
+                        .map(|event| event.elapsed)
+                });
+                let worker_elapsed = |kind| {
+                    requested
+                        .and_then(|requested| {
+                            trace
+                                .as_ref()?
+                                .events
+                                .iter()
+                                .find(|event| event.elapsed >= requested && event.kind == kind)
+                                .map(|event| (event.elapsed - requested).as_secs_f64() * 1000.0)
+                        })
+                        .unwrap_or(-1.0)
+                };
+                println!(
+                    "IMAGE_REQUEST_SUBMITTED generation={} size={}x{} client={}x{} elapsed_ms={:.3} accepted_ms={:.3} prepare_ms={:.3} cache_ms={:.3} published_ms={:.3} show_ms={:.3} focus_ms={:.3}",
+                    self.image_generation,
+                    frame.width,
+                    frame.height,
+                    client.width,
+                    client.height,
+                    elapsed.as_secs_f64() * 1000.0,
+                    accepted.as_secs_f64() * 1000.0,
+                    prepared.as_secs_f64() * 1000.0,
+                    worker_elapsed(ImageLoadTraceKind::ForegroundCacheHit),
+                    worker_elapsed(ImageLoadTraceKind::OriginalPublished),
+                    self.image_launch_activation
+                        .map_or(-1.0, |(show, _)| show.as_secs_f64() * 1000.0),
+                    self.image_launch_activation
+                        .map_or(-1.0, |(_, focus)| focus.as_secs_f64() * 1000.0),
+                );
+            }
             if let Some(trace) = self.image_loader.verification_trace_snapshot() {
                 use towavue_runtime_windows::ImageLoadTraceKind;
                 let foreground = trace

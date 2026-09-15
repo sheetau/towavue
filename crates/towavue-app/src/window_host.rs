@@ -169,9 +169,21 @@ impl WindowHost {
             return Err(error);
         }
         let window = app.window.as_ref().expect("started window");
+        #[cfg(feature = "presentation-verification")]
+        let show_started = Instant::now();
         window.set_visible(visible);
+        #[cfg(feature = "presentation-verification")]
+        let shown = Instant::now();
         if visible {
             window.focus_window();
+        }
+        #[cfg(feature = "presentation-verification")]
+        {
+            app.image_launch_activation =
+                Some((shown.duration_since(show_started), shown.elapsed()));
+        }
+        if visible {
+            app.render_ready_launch_image();
         }
         Ok(key)
     }

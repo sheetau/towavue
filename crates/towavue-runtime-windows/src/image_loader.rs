@@ -958,6 +958,8 @@ fn run_worker(
                     })
                     .images
                     .push((path.clone(), result));
+                #[cfg(any(test, feature = "render-verification"))]
+                mailbox.trace(&path, TraceKind::OriginalPublished);
             }
             notify();
             if let Some(image) = preview

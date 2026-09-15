@@ -55,6 +55,7 @@ pub enum ImageLoadTraceKind {
     },
     OriginalCached,
     ForegroundCacheHit,
+    OriginalPublished,
     WaitStarted,
     WaitFinished {
         elapsed: Duration,

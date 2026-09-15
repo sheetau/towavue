@@ -125,6 +125,135 @@ fn initial_image_prefetch_leaves_nonimages_idle_and_failed_images_recoverable() 
     );
 }
 
+#[test]
+#[ignore = "requires native hidden D3D11 windows; generated images only"]
+fn ready_launch_image_submits_once_without_waiting_for_pending_or_failed_loads() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::launch_tests::ready_launch_image_submits_once_without_waiting_for_pending_or_failed_loads",
+    ) else {
+        return;
+    };
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    struct Trial {
+        host: WindowHost,
+        root: PathBuf,
+        completed: bool,
+    }
+    impl ApplicationHandler<Event> for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.host.start_pending(event_loop, false);
+            assert!(self.host.windows.values().all(|app| app.renderer.is_some()));
+            exercise_ready_launch(&mut self.host, event_loop, &self.root);
+            for app in self.host.windows.values_mut() {
+                app.exit_requested = true;
+            }
+            self.host.remove_closed();
+            assert!(self.host.windows.is_empty());
+            self.completed = true;
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    let mut builder = EventLoop::<Event>::with_user_event();
+    builder.with_any_thread(true);
+    configure_mouse_input(&mut builder);
+    let event_loop = builder.build().expect("event loop");
+    let host = WindowHost::new(None, Some(event_loop.create_proxy())).expect("host");
+    let mut trial = Trial {
+        host,
+        root,
+        completed: false,
+    };
+    event_loop.run_app(&mut trial).expect("ready launch trial");
+    assert!(trial.completed);
+    eprintln!(
+        "PASS ready launch: hidden caller, pending/error/nonimage guards, exact original pixels, ordinary presentation gate and no duplicate frame"
+    );
+}
+
+fn exercise_ready_launch(host: &mut WindowHost, event_loop: &ActiveEventLoop, root: &Path) {
+    let count = host.windows.len();
+    for invalid in [false, true] {
+        let source = root.join(if invalid {
+            "launch-invalid.png"
+        } else {
+            "launch-ready.bmp"
+        });
+        if invalid {
+            std::fs::write(&source, b"not an image").expect("owned invalid image");
+        } else {
+            tab_transfer::tests::bitmap(&source);
+        }
+        let source = canonical_shell_path(&source).expect("launch identity");
+        let child = host
+            .open_launched_window_with(Some(source.clone()), false, |app, device| {
+                app.start_on_device(event_loop, device, false)
+                    .map_err(|error| error.to_string())
+            })
+            .expect("hidden image child");
+        let app = host.windows.get_mut(&child).expect("image child");
+        let context = app.ui_context.clone().expect("context");
+        assert_eq!(
+            context.cumulative_frame_nr(),
+            0,
+            "hidden launch does not draw eagerly"
+        );
+        // Clear the result mailbox to deterministically model a not-yet-ready
+        // original, without depending on how fast the tiny fixture decodes.
+        app.image_loader.request(Vec::new());
+        app.render_ready_launch_image();
+        assert!(app.image_loading && app.image.is_none());
+        assert_eq!(
+            context.cumulative_frame_nr(),
+            0,
+            "pending original does not draw or wait"
+        );
+        app.open_external(source.clone(), false);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !app.image_loader.is_idle() || app.pending_folder.is_some() {
+            app.finish_folder_load();
+            assert!(Instant::now() < deadline, "ready launch deadline");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        app.media_kind = Some(MediaKind::Video);
+        app.render_ready_launch_image();
+        assert_eq!(
+            context.cumulative_frame_nr(),
+            0,
+            "nonimage launch is unchanged"
+        );
+        app.media_kind = Some(MediaKind::Image);
+        app.render_ready_launch_image();
+        assert!(!app.image_loading);
+        if invalid {
+            assert!(app.image_error.is_some() && app.image.is_none());
+            assert_eq!(
+                context.cumulative_frame_nr(),
+                0,
+                "failed original keeps ordinary error redraw"
+            );
+        } else {
+            let expected = towavue_runtime_windows::decode_image(&source).expect("original");
+            assert!(*app.image.as_ref().expect("ready original").decoded == expected);
+            assert!(app.image_error.is_none() && app.image_sequence.awaiting.is_none());
+            assert_eq!(
+                context.cumulative_frame_nr(),
+                1,
+                "one complete original presentation"
+            );
+            app.render_ready_launch_image();
+            assert_eq!(context.cumulative_frame_nr(), 1, "no second eager frame");
+        }
+        assert_eq!(
+            app.window.as_ref().expect("window").is_visible(),
+            Some(false)
+        );
+        app.exit_requested = true;
+        host.remove_closed();
+        assert_eq!(host.windows.len(), count);
+    }
+}
+
 pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let (sent, received) = std::sync::mpsc::channel();
     let server = LaunchServer::start_or_forward(None, move |request| {

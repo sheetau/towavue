@@ -1278,6 +1278,10 @@ where
                 self.open_folder_path(path);
             } else {
                 self.open_external(path, false);
+                #[cfg(feature = "presentation-verification")]
+                if std::env::var_os("TOWAVUE_PRESENTATION_ACTUAL_SIZE").is_some() {
+                    self.image_view.zoom = ZoomMode::Actual;
+                }
             }
         } else {
             self.state = PlaybackState::Paused;
@@ -2956,11 +2960,18 @@ where
         {
             let frame = &image.decoded.frames[0];
             let client = self.window.as_ref().expect("window exists").inner_size();
+            let display_scale = self.image_view.logical_scale(
+                (frame.width, frame.height),
+                self.image_viewport.into(),
+                context.pixels_per_point(),
+            ) * context.pixels_per_point();
             towavue_runtime_windows::towavue_original_submitted(
                 frame.width,
                 frame.height,
                 client.width,
                 client.height,
+                frame.width as f32 * display_scale,
+                frame.height as f32 * display_scale,
             );
             if let Some(trace) = self.image_loader.verification_trace_snapshot() {
                 use towavue_runtime_windows::ImageLoadTraceKind;

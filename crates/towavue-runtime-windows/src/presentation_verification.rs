@@ -25,6 +25,7 @@ pub extern "C" fn towavue_presentation_stage(stage: u32) {
 
 // SAFETY: this uniquely named symbol exists only in verification builds. It has
 // no pointer arguments or external resources and is not a supported library ABI.
+// Display dimensions describe the unedited initial image before viewport clipping.
 #[unsafe(no_mangle)]
 #[inline(never)]
 pub extern "C" fn towavue_original_submitted(
@@ -32,6 +33,8 @@ pub extern "C" fn towavue_original_submitted(
     height: u32,
     client_width: u32,
     client_height: u32,
+    display_width: f32,
+    display_height: f32,
 ) {
     let submitted = Instant::now();
     STAGES.with_borrow_mut(|(stages, reported)| {
@@ -45,8 +48,15 @@ pub extern "C" fn towavue_original_submitted(
                     println!("PRESENT_STAGE id={stage} elapsed_ms={:.3}", time.duration_since(start).as_secs_f64() * 1000.0);
                 }
             }
-            println!("ORIGINAL_SUBMITTED size={width}x{height} client={client_width}x{client_height} elapsed_ms={:.3}", submitted.duration_since(start).as_secs_f64() * 1000.0);
+            println!("ORIGINAL_SUBMITTED size={width}x{height} client={client_width}x{client_height} display={display_width:.3}x{display_height:.3} elapsed_ms={:.3}", submitted.duration_since(start).as_secs_f64() * 1000.0);
         }
     });
-    std::hint::black_box((width, height, client_width, client_height));
+    std::hint::black_box((
+        width,
+        height,
+        client_width,
+        client_height,
+        display_width,
+        display_height,
+    ));
 }

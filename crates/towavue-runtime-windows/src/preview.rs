@@ -242,12 +242,38 @@ impl PreviewCache {
         })
     }
 
-    // Source metadata is read on the worker; no media probe, decode, disk PNG or lease wait.
+    pub(crate) fn disk_entry_keys(&self) -> HashSet<String> {
+        fs::read_dir(&self.root)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                entry
+                    .file_name()
+                    .to_str()?
+                    .to_ascii_lowercase()
+                    .strip_suffix(".png")
+                    .map(str::to_owned)
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
     pub(crate) fn cached_filmstrip(
         &self,
         source: &Path,
         kind: MediaKind,
     ) -> Result<Option<MediaPreview>, PreviewError> {
+        self.cached_filmstrip_key(source, kind)
+            .map(|(_, preview)| preview)
+    }
+
+    // Retain the source key for a later disk sweep without repeating its metadata lookup.
+    pub(crate) fn cached_filmstrip_key(
+        &self,
+        source: &Path,
+        kind: MediaKind,
+    ) -> Result<(String, Option<MediaPreview>), PreviewError> {
         self.check_cancelled()?;
         let variant = match kind {
             MediaKind::Image => IMAGE_PREVIEW_VARIANT,
@@ -260,9 +286,9 @@ impl PreviewCache {
             .transpose()?;
         let preview = {
             let mut memory = self.memory.lock().expect("preview memory");
-            let duration = if let Some(key) = duration_key {
-                let Some(duration) = memory.duration(&key) else {
-                    return Ok(None);
+            let duration = if let Some(duration_key) = duration_key {
+                let Some(duration) = memory.duration(&duration_key) else {
+                    return Ok((key, None));
                 };
                 Some(duration)
             } else {
@@ -274,9 +300,9 @@ impl PreviewCache {
         };
         self.check_cancelled()?;
         if preview.is_some() && cache_key(source, variant)? != key {
-            return Ok(None);
+            return Ok((key, None));
         }
-        Ok(preview)
+        Ok((key, preview))
     }
 
     pub fn filmstrip(&self, source: &Path, kind: MediaKind) -> Result<MediaPreview, PreviewError> {
@@ -809,6 +835,16 @@ impl PreviewCache {
         if preview.is_some() {
             return Ok(preview);
         }
+        self.read_cached_image(path, &key)
+    }
+
+    // The scheduling key may predate this read; revalidate the source before publication.
+    pub(crate) fn read_cached_image(
+        &self,
+        path: &Path,
+        key: &str,
+    ) -> Result<Option<CachedImagePreview>, PreviewError> {
+        self.check_cancelled()?;
         let Ok(file) = fs::File::open(self.root.join(format!("{key}.png"))) else {
             return Ok(None);
         };
@@ -830,10 +866,11 @@ impl PreviewCache {
         if cache_key(path, IMAGE_PREVIEW_VARIANT)? != key {
             return Ok(None);
         }
-        self.memory
-            .lock()
-            .expect("preview memory")
-            .insert_encoded(key, image.clone(), &bytes);
+        self.memory.lock().expect("preview memory").insert_encoded(
+            key.to_owned(),
+            image.clone(),
+            &bytes,
+        );
         Ok(Some(CachedImagePreview { image, source_size }))
     }
 

@@ -1255,6 +1255,219 @@ fn cached_filmstrip_uses_memory_only_and_preserves_duration_and_source_identity(
 }
 
 #[test]
+fn preview_loader_serves_memory_then_persisted_images_before_uncached_sources() {
+    let store = cache("persisted-image-priority");
+    let sources = ["uncached.png", "persisted.png", "memory.png"].map(|name| store.root.join(name));
+    let bytes = png();
+    for source in &sources {
+        fs::write(source, &bytes).expect("owned source");
+    }
+    let expected = store
+        .filmstrip(&sources[1], MediaKind::Image)
+        .expect("persist");
+    store
+        .filmstrip(&sources[2], MediaKind::Image)
+        .expect("persist");
+    let fresh = PreviewCache::new(store.root.clone()).expect("fresh memory");
+    fresh
+        .cached_image(&sources[2])
+        .expect("memory seed")
+        .expect("persisted image");
+    assert!(
+        fresh
+            .cached_filmstrip(&sources[1], MediaKind::Image)
+            .expect("memory only")
+            .is_none()
+    );
+    let (notify, ready) = mpsc::channel();
+    let loader = crate::PreviewLoader::new(fresh, move || {
+        let _ = notify.send(());
+    })
+    .expect("worker");
+    let generation = loader.request(
+        sources
+            .iter()
+            .cloned()
+            .map(|path| (path, MediaKind::Image))
+            .collect(),
+    );
+    for _ in 0..3 {
+        ready
+            .recv_timeout(Duration::from_secs(10))
+            .expect("completion");
+    }
+    let completed = loader.take_completed();
+    assert_eq!(
+        completed.iter().map(|item| &item.path).collect::<Vec<_>>(),
+        [&sources[2], &sources[1], &sources[0]]
+    );
+    for item in completed {
+        assert_eq!(item.generation, generation);
+        let preview = item.result.expect("preview");
+        assert_eq!(preview.image, expected.image);
+        assert_eq!(preview.duration, expected.duration);
+    }
+    for source in &sources {
+        assert_eq!(fs::read(source).expect("unchanged source"), bytes);
+    }
+    let later = store.root.join("later.png");
+    let new_source = store.root.join("new.png");
+    for source in [&later, &new_source] {
+        fs::write(source, &bytes).expect("new owned source");
+    }
+    store
+        .filmstrip(&later, MediaKind::Image)
+        .expect("another consumer persists after the first sweep");
+    loader.request(vec![
+        (new_source.clone(), MediaKind::Image),
+        (later.clone(), MediaKind::Image),
+    ]);
+    for _ in 0..2 {
+        ready
+            .recv_timeout(Duration::from_secs(10))
+            .expect("new request completion");
+    }
+    let completed = loader.take_completed();
+    drop(loader);
+    assert_eq!(
+        completed.iter().map(|item| &item.path).collect::<Vec<_>>(),
+        [&later, &new_source],
+        "a new request refreshes the disk-key snapshot"
+    );
+    assert!(completed.iter().all(|item| {
+        item.result
+            .as_ref()
+            .is_ok_and(|preview| preview.image == expected.image)
+    }));
+    fs::remove_dir_all(store.root).expect("owned fixture cleanup");
+}
+
+#[test]
+#[ignore = "persisted image queue latency; run in Release without concurrent timing work"]
+fn persisted_image_queue_reports_mixed_and_uncached_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("use Release");
+    }
+    let store = cache("persisted-queue-cost");
+    let source_root = store.root.join("sources");
+    fs::create_dir(&source_root).expect("source directory");
+    let sources: Vec<_> = (0..64)
+        .map(|index| source_root.join(format!("{index}.png")))
+        .collect();
+    let small =
+        image::RgbImage::from_fn(32, 24, |x, y| image::Rgb([x as u8, y as u8, (x * y) as u8]));
+    for mixed in [true, false] {
+        if mixed {
+            image::RgbImage::from_fn(4096, 2304, |x, y| {
+                let value = x
+                    .wrapping_mul(747796405)
+                    .wrapping_add(y.wrapping_mul(2891336453));
+                image::Rgb([value as u8, (value >> 11) as u8, (value >> 21) as u8])
+            })
+            .save(&sources[0])
+            .expect("large owned source");
+        } else {
+            small.save(&sources[0]).expect("small first source");
+        }
+        for source in &sources[1..] {
+            small.save(source).expect("small owned source");
+        }
+        let expected: Vec<_> = sources
+            .iter()
+            .map(|source| {
+                store
+                    .filmstrip(source, MediaKind::Image)
+                    .expect("seed disk")
+                    .image
+            })
+            .collect();
+        let identities: Vec<_> = sources
+            .iter()
+            .map(|source| cache_key(source, IMAGE_PREVIEW_VARIANT).expect("source identity"))
+            .collect();
+        let originals: Vec<_> = sources
+            .iter()
+            .map(|source| fs::read(source).expect("original bytes"))
+            .collect();
+        let mut first = Vec::new();
+        let mut later = Vec::new();
+        let mut total = Vec::new();
+        for _ in 0..5 {
+            for key in identities.iter().take(if mixed { 1 } else { 64 }) {
+                fs::remove_file(store.root.join(format!("{key}.png")))
+                    .expect("remove owned generated cache entry");
+            }
+            let fresh = PreviewCache::new(store.root.clone()).expect("empty memory");
+            let (notify, ready) = mpsc::channel();
+            let loader = crate::PreviewLoader::new(fresh, move || {
+                let _ = notify.send(());
+            })
+            .expect("worker");
+            let start = std::time::Instant::now();
+            let generation = loader.request(
+                sources
+                    .iter()
+                    .cloned()
+                    .map(|path| (path, MediaKind::Image))
+                    .collect(),
+            );
+            let mut completed = Vec::new();
+            let mut first_at = None;
+            let mut later_at = None;
+            while completed.len() < sources.len() {
+                ready
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("queue progress");
+                let batch = loader.take_completed();
+                let elapsed = start.elapsed();
+                if !batch.is_empty() {
+                    first_at.get_or_insert(elapsed);
+                }
+                if batch.iter().any(|item| item.path == sources[1]) {
+                    later_at = Some(elapsed);
+                }
+                completed.extend(batch);
+            }
+            total.push(start.elapsed());
+            first.push(first_at.expect("first completion"));
+            later.push(later_at.expect("second requested image completion"));
+            drop(loader);
+            let mut seen = HashSet::new();
+            for item in completed {
+                let index = sources
+                    .iter()
+                    .position(|source| *source == item.path)
+                    .expect("requested source");
+                assert!(seen.insert(index), "one result per source");
+                assert_eq!(item.generation, generation);
+                let preview = item.result.expect("ready preview");
+                assert_eq!(preview.image, expected[index]);
+                assert_eq!(preview.duration, None);
+            }
+            assert_eq!(seen.len(), 64);
+        }
+        first.sort();
+        later.sort();
+        total.sort();
+        eprintln!(
+            "persisted_queue mixed={mixed} count=64 samples=5 first_ms={:.4} second_requested_ms={:.4} all_ms={:.4}",
+            first[2].as_secs_f64() * 1000.0,
+            later[2].as_secs_f64() * 1000.0,
+            total[2].as_secs_f64() * 1000.0
+        );
+        for ((source, key), bytes) in sources.iter().zip(&identities).zip(&originals) {
+            assert_eq!(
+                cache_key(source, IMAGE_PREVIEW_VARIANT).expect("unchanged identity"),
+                *key
+            );
+            assert_eq!(fs::read(source).expect("unchanged bytes"), *bytes);
+        }
+    }
+    fs::remove_dir_all(store.root).expect("owned fixture cleanup");
+    Ok(())
+}
+
+#[test]
 fn persisted_thumbnail_dimensions_reject_invalid_metadata_and_keep_legacy_pixels() {
     let cache = cache("thumbnail-dimension-validation");
     let source = cache.root.join("source.png");
@@ -1347,6 +1560,13 @@ fn persisted_thumbnail_dimensions_reject_invalid_metadata_and_keep_legacy_pixels
     ));
     fs::write(&source, b"changed source identity").expect("replace owned source");
     assert!(cache.cached_image(&source).expect("new key").is_none());
+    assert!(
+        cache
+            .read_cached_image(&source, &key)
+            .expect("old scheduling key")
+            .is_none(),
+        "source changes after scheduling reject old disk pixels"
+    );
     fs::remove_dir_all(&cache.root).expect("remove owned fixtures");
 }
 

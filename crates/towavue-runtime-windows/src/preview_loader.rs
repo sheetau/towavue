@@ -14,11 +14,19 @@ pub struct LoadedPreview {
     pub result: Result<MediaPreview, String>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum PreviewStage {
+    Memory,
+    Disk,
+    Generate,
+}
+
 #[derive(Clone)]
 struct PendingPreview {
     path: PathBuf,
     kind: MediaKind,
-    check_cache: bool,
+    stage: PreviewStage,
+    disk_key: Option<String>,
 }
 
 struct ActivePreview {
@@ -47,15 +55,36 @@ impl PreviewLoader {
         thread::Builder::new()
             .name("towavue-filmstrip".into())
             .spawn(move || {
+                let disk_keys = std::cell::RefCell::new(None);
                 run_worker(
                     worker_shared,
                     notify,
-                    |path, kind, cancellation| {
-                        cache
-                            .cancellable(cancellation.clone())
-                            .cached_filmstrip(path, kind)
-                            .ok()
-                            .flatten()
+                    |path, kind, cancellation, stage, disk_key| {
+                        let cache = cache.cancellable(cancellation.clone());
+                        if stage == PreviewStage::Memory {
+                            disk_keys.borrow_mut().take();
+                            let (key, preview) = cache.cached_filmstrip_key(path, kind).ok()?;
+                            *disk_key = Some(key);
+                            preview
+                        } else {
+                            // Only a scheduling hint for this sweep. A later request checks again;
+                            // generation still checks disk if another consumer stores an entry.
+                            let mut keys = disk_keys.borrow_mut();
+                            let keys = keys.get_or_insert_with(|| cache.disk_entry_keys());
+                            let key = disk_key.as_deref()?;
+                            if !keys.contains(key) {
+                                return None;
+                            }
+                            // Disk image reads are bounded and never generate/probe media.
+                            cache
+                                .read_cached_image(path, key)
+                                .ok()
+                                .flatten()
+                                .map(|preview| MediaPreview {
+                                    image: preview.image,
+                                    duration: None,
+                                })
+                        }
                     },
                     |path, kind, cancellation| {
                         cache
@@ -107,7 +136,8 @@ impl PreviewLoader {
                 path,
                 kind,
                 // Another preview consumer may have populated the shared cache since our miss.
-                check_cache: true,
+                stage: PreviewStage::Memory,
+                disk_key: None,
             })
             .collect();
         ready.notify_one();
@@ -140,12 +170,18 @@ impl Drop for PreviewLoader {
 fn run_worker(
     shared: Arc<(Mutex<Mailbox>, Condvar)>,
     notify: impl Fn(),
-    cached: impl Fn(&std::path::Path, MediaKind, &Cancellation) -> Option<MediaPreview>,
+    cached: impl Fn(
+        &std::path::Path,
+        MediaKind,
+        &Cancellation,
+        PreviewStage,
+        &mut Option<String>,
+    ) -> Option<MediaPreview>,
     generate: impl Fn(&std::path::Path, MediaKind, &Cancellation) -> Result<MediaPreview, String>,
 ) {
     let (mutex, ready) = &*shared;
     loop {
-        let (work, cancellation) = {
+        let (mut work, cancellation) = {
             let mut mailbox = ready
                 .wait_while(mutex.lock().expect("preview mailbox"), |mailbox| {
                     !mailbox.closed && mailbox.pending.is_empty()
@@ -154,12 +190,14 @@ fn run_worker(
             if mailbox.closed {
                 return;
             }
-            // Serve all cache hits before generating misses, in the latest requested order.
+            // Memory hits precede disk images, then generation; retain request order per stage.
             let index = mailbox
                 .pending
                 .iter()
-                .position(|work| work.check_cache)
-                .unwrap_or(0);
+                .enumerate()
+                .min_by_key(|(_, work)| work.stage)
+                .expect("pending work")
+                .0;
             let work = mailbox.pending[index].clone();
             let cancellation = Cancellation::default();
             mailbox.active = Some(ActivePreview {
@@ -169,8 +207,15 @@ fn run_worker(
             });
             (work, cancellation)
         };
-        let result = if work.check_cache {
-            cached(&work.path, work.kind, &cancellation).map(Ok)
+        let result = if work.stage != PreviewStage::Generate {
+            cached(
+                &work.path,
+                work.kind,
+                &cancellation,
+                work.stage,
+                &mut work.disk_key,
+            )
+            .map(Ok)
         } else {
             Some(generate(&work.path, work.kind, &cancellation))
         };
@@ -199,7 +244,13 @@ fn run_worker(
                     .iter_mut()
                     .find(|pending| pending.path == work.path && pending.kind == work.kind)
                 {
-                    pending.check_cache = false;
+                    pending.disk_key = work.disk_key;
+                    pending.stage =
+                        if work.stage == PreviewStage::Memory && work.kind == MediaKind::Image {
+                            PreviewStage::Disk
+                        } else {
+                            PreviewStage::Generate
+                        };
                 }
                 false
             }
@@ -234,7 +285,7 @@ mod tests {
                 || {
                     let _ = notify.send(());
                 },
-                |path, _, _| {
+                |path, _, _, _, _| {
                     (path == std::path::Path::new("warming.png")
                         && worker_warmed.load(std::sync::atomic::Ordering::SeqCst))
                     .then(|| MediaPreview {
@@ -329,7 +380,7 @@ mod tests {
                     || {
                         let _ = notify.send(());
                     },
-                    |path, kind, cancellation| {
+                    |path, kind, cancellation, _, _| {
                         started.send((path.to_owned(), kind)).expect("cache read");
                         if path == std::path::Path::new("active") {
                             release_rx
@@ -412,7 +463,11 @@ mod tests {
 
     #[test]
     fn removing_then_readding_a_path_does_not_revive_cancelled_work() {
-        for cache_hit in [false, true] {
+        for cache_stage in [
+            PreviewStage::Memory,
+            PreviewStage::Disk,
+            PreviewStage::Generate,
+        ] {
             let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
             let loader = PreviewLoader {
                 shared: Arc::clone(&shared),
@@ -448,7 +503,9 @@ mod tests {
                     || {
                         let _ = notify.send(());
                     },
-                    |_, _, cancellation| cache_hit.then(|| work(cancellation)),
+                    |_, _, cancellation, stage, _| {
+                        (stage == cache_stage).then(|| work(cancellation))
+                    },
                     |_, _, cancellation| Ok(work(cancellation)),
                 );
                 assert_eq!(count.get(), 2, "only the new request can publish");
@@ -495,7 +552,7 @@ mod tests {
             run_worker(
                 shared,
                 || ready_tx.send(()).expect("notify"),
-                |path, _, _| {
+                |path, _, _, _, _| {
                     path.starts_with("warm").then(|| MediaPreview {
                         image: crate::PreviewImage {
                             width: 1,
@@ -588,7 +645,7 @@ mod tests {
             run_worker(
                 shared,
                 || tx.send(()).expect("notify progress"),
-                |_, _, _| None,
+                |_, _, _, _, _| None,
                 |_, _, _| Err("fixture failure".into()),
             )
         });
@@ -623,7 +680,14 @@ mod tests {
 
     #[test]
     fn scroll_and_close_reject_in_flight_previews_without_waiting() {
-        for (close, cache_hit) in [(false, false), (true, false), (false, true), (true, true)] {
+        for (close, cache_stage) in [false, true].into_iter().flat_map(|close| {
+            [
+                PreviewStage::Memory,
+                PreviewStage::Disk,
+                PreviewStage::Generate,
+            ]
+            .map(|stage| (close, stage))
+        }) {
             let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
             let loader = PreviewLoader {
                 shared: Arc::clone(&shared),
@@ -646,8 +710,8 @@ mod tests {
                 run_worker(
                     shared,
                     || ready_tx.send(()).expect("notify result"),
-                    |path, _, cancellation| {
-                        cache_hit.then(|| {
+                    |path, _, cancellation, stage, _| {
+                        (stage == cache_stage).then(|| {
                             block(path, cancellation);
                             MediaPreview {
                                 image: crate::PreviewImage {
@@ -660,7 +724,10 @@ mod tests {
                         })
                     },
                     |path, _, cancellation| {
-                        assert!(!cache_hit, "cached result must not be generated");
+                        assert!(
+                            cache_stage == PreviewStage::Generate,
+                            "cached result must not be generated"
+                        );
                         block(path, cancellation);
                         Err("fixture failure".into())
                     },

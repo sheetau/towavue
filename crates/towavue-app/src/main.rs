@@ -158,7 +158,7 @@ fn initial_path_from(
     if !path.exists() {
         return Err(format!("path does not exist: {}", path.display()).into());
     }
-    Ok(Some(path.canonicalize()?))
+    Ok(Some(canonical_shell_path(&path)?))
 }
 
 struct PlaybackClock {
@@ -1207,6 +1207,7 @@ where
         graphics_device: Option<towavue_runtime_windows::GraphicsDevice>,
         visible: bool,
     ) -> Result<(), Box<dyn Error>> {
+        self.prefetch_initial_image();
         let attributes = Window::default_attributes()
             .with_title(self.title())
             .with_inner_size(LogicalSize::new(960, 576))
@@ -1288,6 +1289,27 @@ where
         }
         self.request_redraw();
         Ok(())
+    }
+
+    fn prefetch_initial_image(&self) {
+        let Some(path) = self
+            .initial_path
+            .as_ref()
+            .filter(|path| MediaKind::from_path(path) == Some(MediaKind::Image))
+        else {
+            return;
+        };
+        #[cfg(feature = "presentation-verification")]
+        {
+            self.image_loader
+                .verification_trace_path(path.clone(), Instant::now());
+            if std::env::var_os("TOWAVUE_SKIP_INITIAL_PREFETCH").is_some() {
+                return;
+            }
+        }
+        // Initial launch paths use the same Shell-normalized identity as Open.
+        // The existing worker/cache can be adopted after graphics is ready.
+        self.image_loader.prefetch_paths(vec![path.clone()]);
     }
 
     fn open_external(&mut self, path: PathBuf, force_new_tab: bool) {
@@ -2940,6 +2962,25 @@ where
                 client.width,
                 client.height,
             );
+            if let Some(trace) = self.image_loader.verification_trace_snapshot() {
+                use towavue_runtime_windows::ImageLoadTraceKind;
+                let foreground = trace
+                    .events
+                    .iter()
+                    .filter(|event| {
+                        matches!(event.kind, ImageLoadTraceKind::ForegroundDecodeStarted)
+                    })
+                    .count();
+                let prefetch = trace
+                    .events
+                    .iter()
+                    .filter(|event| matches!(event.kind, ImageLoadTraceKind::PrefetchDecodeStarted))
+                    .count();
+                println!(
+                    "INITIAL_DECODE foreground={foreground} prefetch={prefetch} trace_dropped={}",
+                    trace.dropped
+                );
+            }
         }
         self.idle_graphics_frame = self
             .tabs

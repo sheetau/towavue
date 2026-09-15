@@ -2,22 +2,25 @@ use std::error::Error;
 use std::time::Instant;
 
 use windows::Win32::Foundation::HMODULE;
-use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL};
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL,
+};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_SDK_VERSION,
     D3D11CreateDevice, ID3D11Multithread, ID3D11VideoContext, ID3D11VideoDevice,
 };
-use windows::Win32::Graphics::Dxgi::IDXGIDevice;
+use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIDevice, IDXGIFactory1};
 use windows::core::Interface;
 
 fn main() -> Result<(), Box<dyn Error>> {
     if cfg!(debug_assertions) {
         return Err("use Release; run each sample in a fresh process".into());
     }
-    let video_flag = match std::env::args().nth(1).as_deref() {
-        Some("video") => true,
-        Some("graphics") => false,
-        _ => return Err("usage: device-start-cost video|graphics".into()),
+    let (video_flag, explicit_adapter) = match std::env::args().nth(1).as_deref() {
+        Some("video") => (true, false),
+        Some("graphics") => (false, false),
+        Some("adapter") => (true, true),
+        _ => return Err("usage: device-start-cost video|graphics|adapter".into()),
     };
     let flags = if video_flag {
         D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT
@@ -28,12 +31,30 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut context = None;
     let mut level = D3D_FEATURE_LEVEL::default();
     let started = Instant::now();
+    // Isolate default-adapter discovery without changing the selected adapter or
+    // creating a second device. Include discovery in the total, not just the API call.
+    let factory: Option<IDXGIFactory1> = if explicit_adapter {
+        Some(unsafe { CreateDXGIFactory1()? })
+    } else {
+        None
+    };
+    let factory_elapsed = started.elapsed();
+    let selected = factory
+        .as_ref()
+        .map(|factory| unsafe { factory.EnumAdapters(0) })
+        .transpose()?;
+    let discovery = started.elapsed();
+    let device_started = Instant::now();
     // This diagnostic owns one windowless device and its context on the main thread.
     // No native handle leaves the process and no production creation policy is changed.
     unsafe {
         D3D11CreateDevice(
-            None,
-            D3D_DRIVER_TYPE_HARDWARE,
+            selected.as_ref(),
+            if explicit_adapter {
+                D3D_DRIVER_TYPE_UNKNOWN
+            } else {
+                D3D_DRIVER_TYPE_HARDWARE
+            },
             HMODULE::default(),
             flags,
             None,
@@ -43,6 +64,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(&mut context),
         )?;
     }
+    let device_elapsed = device_started.elapsed();
     let creation = started.elapsed();
     let device = device.ok_or("missing device")?;
     let context = context.ok_or("missing context")?;
@@ -75,14 +97,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     if !protected_context || actual_flags != flags.0 {
         return Err("device creation/serialization flags differ".into());
     }
+    if let Some(selected) = selected {
+        // Compare identities while both owned adapter references remain live.
+        let selected = unsafe { selected.GetDesc()? };
+        if selected.AdapterLuid != adapter.AdapterLuid {
+            return Err("created device changed the selected adapter".into());
+        }
+    }
     println!(
-        "DEVICE_START video_flag={video_flag} create_ms={:.4} protected_ms={:.4} checked_ms={:.4} feature={} luid={}:{} profiles={count} profile_hash={profile_hash:016x}",
+        "DEVICE_START video_flag={video_flag} create_ms={:.4} protected_ms={:.4} checked_ms={:.4} feature={} luid={}:{} profiles={count} profile_hash={profile_hash:016x} explicit_adapter={explicit_adapter} factory_ms={:.4} enumerate_ms={:.4} device_ms={:.4}",
         creation.as_secs_f64() * 1000.0,
         protected.as_secs_f64() * 1000.0,
         started.elapsed().as_secs_f64() * 1000.0,
         level.0,
         adapter.AdapterLuid.HighPart,
         adapter.AdapterLuid.LowPart,
+        factory_elapsed.as_secs_f64() * 1000.0,
+        (discovery - factory_elapsed).as_secs_f64() * 1000.0,
+        device_elapsed.as_secs_f64() * 1000.0,
     );
     Ok(())
 }

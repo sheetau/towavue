@@ -2297,11 +2297,14 @@ where
         }
         self.image_loading = result.first_index + result.images.len() < result.total;
         #[cfg(feature = "presentation-verification")]
-        if result.first_index == 0 && result.images[0].1.is_ok() {
+        if result.first_index == 0
+            && let Ok(decoded) = &result.images[0].1
+        {
             if let Some(timing) = &mut self.image_request_timing {
                 timing[1] = Instant::now();
             }
             towavue_runtime_windows::towavue_presentation_stage(2);
+            towavue_runtime_windows::towavue_original_ready(decoded.dimensions());
         }
         // Matching prefetch now survives the next request, so overlap it with texture preparation.
         let prefetched = if self.media_kind == Some(MediaKind::Image)

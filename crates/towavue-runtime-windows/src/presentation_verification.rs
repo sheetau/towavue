@@ -1,6 +1,35 @@
 //! Opt-in debugger boundary for actual-app image submission, not scanout timing.
 
-use std::{cell::RefCell, time::Instant};
+use std::{
+    cell::RefCell,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Instant,
+};
+
+// SAFETY: this uniquely named, aligned scalar exists only in verification builds.
+// An owned-process observer reads only this word, not pointers or image pixels.
+#[unsafe(no_mangle)]
+pub static TOWAVUE_FIRST_ORIGINAL_SIZE: AtomicU64 = AtomicU64::new(0);
+
+/// Publish the first validated original completion before texture preparation.
+/// High/low 32 bits are width/height. This is not a rendering-completion marker.
+pub fn towavue_original_ready((width, height): (u32, u32)) {
+    let size = (u64::from(width) << 32) | u64::from(height);
+    // No other memory is published through this diagnostic scalar.
+    let _ =
+        TOWAVUE_FIRST_ORIGINAL_SIZE.compare_exchange(0, size, Ordering::Relaxed, Ordering::Relaxed);
+}
+
+#[test]
+fn original_ready_marker_keeps_the_first_complete_dimensions() {
+    assert_eq!(TOWAVUE_FIRST_ORIGINAL_SIZE.load(Ordering::Relaxed), 0);
+    towavue_original_ready((503, 317));
+    towavue_original_ready((4096, 2304));
+    assert_eq!(
+        TOWAVUE_FIRST_ORIGINAL_SIZE.load(Ordering::Relaxed),
+        (503u64 << 32) | 317
+    );
+}
 
 thread_local! {
     // The app calls these markers on its UI thread. No image data is retained.

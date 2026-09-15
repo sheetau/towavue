@@ -31,6 +31,8 @@ pub(crate) use preview_frames::preview_video_frames;
 pub(crate) use preview_frames::{PREVIEW_WORK, REUSE_PREVIEW_GOP};
 #[cfg(test)]
 mod audio_seek_tests;
+#[cfg(test)]
+mod video_seek_cost_tests;
 
 const OUTPUT_AUDIO_CHANNELS: usize = 2;
 const BYTES_PER_F32: usize = size_of::<f32>();

@@ -882,7 +882,7 @@ impl PreviewCache {
                 let metadata = entry.metadata().ok()?;
                 metadata.is_file().then(|| {
                     (
-                        entry.path(),
+                        entry,
                         metadata.len(),
                         metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
                     )
@@ -894,11 +894,11 @@ impl PreviewCache {
             return Ok(());
         }
         entries.sort_by_key(|(_, _, modified)| *modified);
-        for (path, length, _) in entries {
+        for (entry, length, _) in entries {
             if total <= CACHE_LIMIT_BYTES {
                 break;
             }
-            if fs::remove_file(path).is_ok() {
+            if fs::remove_file(entry.path()).is_ok() {
                 total = total.saturating_sub(length);
             }
         }

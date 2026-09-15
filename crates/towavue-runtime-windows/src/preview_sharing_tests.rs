@@ -772,9 +772,45 @@ fn disk_pruning_preserves_under_limit_files_and_removes_oldest_when_over() {
 }
 
 #[test]
+fn disk_pruning_skips_directories_and_continues_after_locked_oldest() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let store = cache("prune-locked");
+    fs::create_dir(store.root.join("nested.png")).expect("owned directory");
+    fs::write(store.root.join("nested.png/keep"), b"nested").expect("nested file");
+    for index in 0..3 {
+        let file = fs::File::create(store.root.join(format!("{index}.png"))).expect("owned file");
+        file.set_len(CACHE_LIMIT_BYTES / 2).expect("logical size");
+        file.set_times(
+            fs::FileTimes::new()
+                .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(100 + index)),
+        )
+        .expect("ordered age");
+    }
+    let locked = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(store.root.join("0.png"))
+        .expect("lock oldest owned file");
+    store.prune().expect("best-effort pruning");
+    assert!(store.root.join("0.png").exists(), "locked oldest survives");
+    assert!(!store.root.join("1.png").exists(), "next oldest is removed");
+    assert!(store.root.join("2.png").exists(), "newest survives");
+    assert_eq!(
+        fs::read(store.root.join("nested.png/keep")).expect("nested bytes"),
+        b"nested"
+    );
+    drop(locked);
+    fs::remove_dir_all(store.root).expect("owned fixture cleanup");
+}
+
+#[test]
 #[ignore = "creates 8192 owned small PNG cache entries; warm filesystem timing"]
-fn populated_preview_cache_reports_pruning_cost() {
-    // Historical control: enumerate the same metadata and sort even below the limit.
+fn populated_preview_cache_reports_pruning_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("run optimized pruning comparison");
+    }
+    // Previous implementation: construct every path, even when no deletion is needed.
     fn historical(cache: &PreviewCache) {
         let mut entries: Vec<_> = fs::read_dir(&cache.root)
             .expect("cache directory")
@@ -791,6 +827,9 @@ fn populated_preview_cache_reports_pruning_cost() {
             })
             .collect();
         let mut total: u64 = entries.iter().map(|(_, size, _)| size).sum();
+        if total <= CACHE_LIMIT_BYTES {
+            return;
+        }
         entries.sort_by_key(|(_, _, modified)| *modified);
         for (path, size, _) in entries {
             if total <= CACHE_LIMIT_BYTES {
@@ -804,7 +843,7 @@ fn populated_preview_cache_reports_pruning_cost() {
     let cache = cache("prune-cost");
     let bytes = png();
     let mut prepared = 0_u32;
-    for count in [512_u32, 8192] {
+    for count in [512_u32, 2048, 8192] {
         for index in prepared..count {
             // Hash-like names keep directory order separate from creation/age order.
             let name = index.wrapping_mul(2_654_435_761);
@@ -825,7 +864,7 @@ fn populated_preview_cache_reports_pruning_cost() {
             }
             timings.sort();
             eprintln!(
-                "prune entries={count} historical={old} median_ms={:.3}",
+                "prune entries={count} eager_paths={old} median_ms={:.4}",
                 timings[4].as_secs_f64() * 1000.0
             );
         }
@@ -839,6 +878,7 @@ fn populated_preview_cache_reports_pruning_cost() {
         }
     }
     fs::remove_dir_all(&cache.root).expect("remove owned benchmark cache");
+    Ok(())
 }
 
 #[test]

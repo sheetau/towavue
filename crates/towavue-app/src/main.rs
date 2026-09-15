@@ -1286,10 +1286,6 @@ where
                 self.open_folder_path(path);
             } else {
                 self.open_external(path, false);
-                #[cfg(feature = "presentation-verification")]
-                if std::env::var_os("TOWAVUE_PRESENTATION_ACTUAL_SIZE").is_some() {
-                    self.image_view.zoom = ZoomMode::Actual;
-                }
             }
         } else {
             self.state = PlaybackState::Paused;
@@ -1761,6 +1757,12 @@ where
         self.waveform_loading = false;
         self.thumbnail_loading = None;
         self.image_view = ImageViewState::default();
+        #[cfg(feature = "presentation-verification")]
+        if kind == MediaKind::Image
+            && std::env::var_os("TOWAVUE_PRESENTATION_ACTUAL_SIZE").is_some()
+        {
+            self.image_view.zoom = ZoomMode::Actual;
+        }
         self.path = Some(path.clone());
         self.media_kind = Some(kind);
         self.ensure_audio_queue();
@@ -3022,14 +3024,9 @@ where
             if let Some((elapsed, accepted, prepared)) = request_elapsed {
                 use towavue_runtime_windows::ImageLoadTraceKind;
                 let trace = self.image_loader.verification_trace_snapshot();
-                let requested = trace.as_ref().and_then(|trace| {
-                    trace
-                        .events
-                        .iter()
-                        .rev()
-                        .find(|event| event.kind == ImageLoadTraceKind::Requested)
-                        .map(|event| event.elapsed)
-                });
+                let requested = trace
+                    .as_ref()
+                    .and_then(|trace| trace.requested_at(self.image_generation));
                 let worker_elapsed = |kind| {
                     requested
                         .and_then(|requested| {
@@ -3062,6 +3059,7 @@ where
             }
             if request_elapsed.is_some()
                 && let Some(trace) = self.image_loader.verification_trace_snapshot()
+                && trace.requested_at(self.image_generation).is_some()
             {
                 use towavue_runtime_windows::ImageLoadTraceKind;
                 let foreground = trace

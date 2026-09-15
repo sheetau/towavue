@@ -81,6 +81,48 @@ pub struct ImageLoadTrace {
     pub dropped: usize,
 }
 
+impl ImageLoadTrace {
+    /// A selected-path trace may not contain the image currently requested by the UI.
+    pub fn requested_at(&self, generation: u64) -> Option<Duration> {
+        self.events
+            .iter()
+            .rev()
+            .find(|event| {
+                event.generation == generation && event.kind == ImageLoadTraceKind::Requested
+            })
+            .map(|event| event.elapsed)
+    }
+}
+
+#[test]
+fn selected_path_trace_requires_a_request_in_the_current_generation() {
+    let trace = ImageLoadTrace {
+        events: vec![
+            ImageLoadTraceEvent {
+                elapsed: Duration::from_millis(1),
+                generation: 4,
+                kind: ImageLoadTraceKind::Requested,
+            },
+            ImageLoadTraceEvent {
+                elapsed: Duration::from_millis(2),
+                generation: 5,
+                kind: ImageLoadTraceKind::OriginalPublished,
+            },
+            ImageLoadTraceEvent {
+                elapsed: Duration::from_millis(3),
+                generation: 6,
+                kind: ImageLoadTraceKind::Requested,
+            },
+        ],
+        dropped: 0,
+    };
+    assert_eq!(trace.requested_at(4), Some(Duration::from_millis(1)));
+    assert_eq!(trace.requested_at(5), None);
+    assert_eq!(trace.requested_at(6), Some(Duration::from_millis(3)));
+    assert_eq!(trace.requested_at(7), None);
+    assert_eq!(ImageLoadTrace::default().requested_at(4), None);
+}
+
 pub(super) struct Trace {
     path: PathBuf,
     origin: Instant,

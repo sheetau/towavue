@@ -43,6 +43,7 @@ pub enum BurstEvent {
     FolderRequested = 30,
     FolderCompleted = 31,
     FolderApplied = 32,
+    FolderApplyPhase = 33,
 }
 
 /// Eight u64 words: committed sequence, QPC tick, kind, generation, source ID, a/b/c.

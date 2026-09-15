@@ -2991,3 +2991,102 @@ mod tests {
         std::fs::remove_dir_all(root).expect("remove test cache");
     }
 }
+
+#[cfg(test)]
+#[test]
+fn snapshot_comparison_reuse_preserves_sequence_and_preview_refresh_decisions() {
+    use crate::{Application, image_navigation::ImageSequence};
+    use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::snapshot_comparison_reuse_preserves_sequence_and_preview_refresh_decisions",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let base = FolderSnapshot {
+        folder_identity: ShellIdentity::new(vec![0]),
+        folder_path: root.clone(),
+        items: (0..24_512_u32)
+            .map(|index| FolderMediaItem {
+                identity: ShellIdentity::new(index.to_le_bytes().to_vec()),
+                path: root.join(format!("generated-{index:08}.png")),
+                kind: if index == 2 {
+                    MediaKind::Video
+                } else {
+                    MediaKind::Image
+                },
+            })
+            .collect(),
+        sort_columns: Vec::new(),
+        source: FolderSnapshotSource::LiveExplorerView,
+        generation: 1,
+        captured_at: std::time::SystemTime::UNIX_EPOCH,
+    };
+    for open in [false, true] {
+        for change in 0..10 {
+            let previous = (change != 9).then(|| base.clone());
+            let mut next = base.clone();
+            next.generation = 2;
+            next.source = FolderSnapshotSource::PersistedShellView;
+            match change {
+                0 | 9 => (),
+                1 => next.items.swap(0, 1),
+                2 => next.items[1].path = root.join("renamed-image.png"),
+                3 => next.items[2].path = root.join("renamed-video.mp4"),
+                4 => next.items[24_511].identity = ShellIdentity::new(vec![42]),
+                5 => next.items.swap(1, 2),
+                6 => next.items[1].kind = MediaKind::Audio,
+                7 => {
+                    next.items.pop();
+                }
+                8 => next.folder_path = root.join("another-folder"),
+                _ => unreachable!(),
+            }
+            // Historical decisions, independently evaluated before calling the app.
+            let cancel_sequence = previous.as_ref().is_some_and(|previous| {
+                previous.folder_path != next.folder_path
+                    || !previous
+                        .items_of_kind(MediaKind::Image)
+                        .map(|item| &item.path)
+                        .eq(next.items_of_kind(MediaKind::Image).map(|item| &item.path))
+            });
+            let retain_previews = previous.as_ref().is_some_and(|previous| {
+                previous.folder_path == next.folder_path && (previous.items == next.items || open)
+            });
+            let current = base.items[0].path.clone();
+            app.path = Some(current.clone());
+            app.media_kind = Some(MediaKind::Image);
+            app.image_loading = true; // No missing-file decode/prefetch jobs in this metadata control.
+            app.folder_snapshot = previous;
+            app.image_sequence = ImageSequence {
+                awaiting: Some(7),
+                steps: [true, false].into(),
+            };
+            app.filmstrip_open = open;
+            app.filmstrip.focus = Some(current.clone());
+            app.filmstrip.scroll_offset = 123.0;
+            app.filmstrip
+                .previews
+                .insert(current.clone(), Err("fixture".into()));
+            app.apply_folder_snapshot(next);
+            assert_eq!(
+                app.image_sequence.awaiting.is_none(),
+                cancel_sequence,
+                "change {change}, open {open}"
+            );
+            assert_eq!(app.image_sequence.steps.is_empty(), cancel_sequence);
+            assert_eq!(
+                app.filmstrip.previews.contains_key(&current),
+                retain_previews
+            );
+            assert_eq!(app.filmstrip.focus.is_some(), retain_previews);
+            assert_eq!(
+                app.filmstrip.scroll_offset,
+                if retain_previews { 123.0 } else { 0.0 }
+            );
+            let installed = app.folder_snapshot.as_ref().expect("fresh snapshot");
+            assert_eq!(installed.generation, 2);
+            assert_eq!(installed.source, FolderSnapshotSource::PersistedShellView);
+        }
+    }
+}

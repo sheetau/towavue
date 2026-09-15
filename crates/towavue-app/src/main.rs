@@ -885,6 +885,10 @@ struct Application<N> {
     image_request_timing: Option<[Instant; 3]>,
     #[cfg(feature = "presentation-verification")]
     image_launch_activation: Option<(Duration, Duration)>,
+    #[cfg(feature = "presentation-verification")]
+    verification_folder_refreshes: u8,
+    #[cfg(feature = "presentation-verification")]
+    verification_trace_idle_frames: bool,
     image_loading: bool,
     image_navigation_forward: bool,
     #[cfg(test)]
@@ -1118,6 +1122,16 @@ where
             image_request_timing: None,
             #[cfg(feature = "presentation-verification")]
             image_launch_activation: None,
+            #[cfg(feature = "presentation-verification")]
+            verification_folder_refreshes: if towavue_runtime_windows::burst_enabled()
+                && std::env::var_os("TOWAVUE_BURST_FOLDER_REFRESH_CONTROL").is_some()
+            {
+                8
+            } else {
+                0
+            },
+            #[cfg(feature = "presentation-verification")]
+            verification_trace_idle_frames: std::env::var_os("TOWAVUE_BURST_IDLE_FRAMES").is_some(),
             image_loading: false,
             image_navigation_forward: true,
             #[cfg(test)]
@@ -2011,32 +2025,40 @@ where
                 },
             ],
         );
-        if self.folder_snapshot.as_ref().is_some_and(|previous| {
-            previous.folder_path != snapshot.folder_path
-                || !previous
-                    .items_of_kind(MediaKind::Image)
-                    .map(|item| &item.path)
-                    .eq(snapshot
+        let same_folder = self
+            .folder_snapshot
+            .as_ref()
+            .is_some_and(|previous| previous.folder_path == snapshot.folder_path);
+        let same_items = same_folder
+            && self
+                .folder_snapshot
+                .as_ref()
+                .is_some_and(|previous| previous.items == snapshot.items);
+        if !same_items
+            && self.folder_snapshot.as_ref().is_some_and(|previous| {
+                !same_folder
+                    || !previous
                         .items_of_kind(MediaKind::Image)
-                        .map(|item| &item.path))
-        }) {
+                        .map(|item| &item.path)
+                        .eq(snapshot
+                            .items_of_kind(MediaKind::Image)
+                            .map(|item| &item.path))
+            })
+        {
             self.image_sequence = image_navigation::ImageSequence::default();
         }
+        #[cfg(feature = "presentation-verification")]
+        self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 1);
         self.sync_audio_snapshot(&snapshot);
         let previous_reading_paths = self.reading_request_paths();
         let reading_handoff = self
             .reading_mode
             .then(|| self.take_navigation_handoff(MediaKind::Image))
             .flatten();
-        if self.folder_snapshot.as_ref().is_some_and(|previous| {
-            previous.folder_path == snapshot.folder_path
-                && (previous.items == snapshot.items || self.filmstrip_open)
-        }) {
-            if self
-                .folder_snapshot
-                .as_ref()
-                .is_some_and(|previous| previous.items != snapshot.items)
-            {
+        #[cfg(feature = "presentation-verification")]
+        self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 2);
+        if same_folder && (same_items || self.filmstrip_open) {
+            if !same_items {
                 self.filmstrip.cancel_drag();
             }
             self.filmstrip
@@ -2044,6 +2066,8 @@ where
         } else {
             self.filmstrip.clear();
         }
+        #[cfg(feature = "presentation-verification")]
+        self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 3);
         let current_path = self.path.clone();
         let current_identity = current_path.as_deref().and_then(|path| {
             self.folder_snapshot
@@ -2059,7 +2083,11 @@ where
         if snapshot.source == FolderSnapshotSource::NaturalNameFallback {
             self.set_status("Explorer order unavailable; using natural-name order".into());
         }
+        #[cfg(feature = "presentation-verification")]
+        self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 4);
         self.folder_snapshot = Some(snapshot);
+        #[cfg(feature = "presentation-verification")]
+        self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 5);
         if let Some((path, kind)) = remapped
             && self.path.as_ref() != Some(&path)
         {
@@ -2079,7 +2107,19 @@ where
             self.image_handoff = reading_handoff;
             self.rebuild_reading_pages();
         }
+        #[cfg(feature = "presentation-verification")]
+        self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 6);
         self.prefetch_next_image();
+        #[cfg(feature = "presentation-verification")]
+        {
+            self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 7);
+            // Explicit non-input control: reapply real fresh Shell snapshots to
+            // the same source. Ordinary launches never request these extra passes.
+            if self.verification_folder_refreshes > 0 {
+                self.verification_folder_refreshes -= 1;
+                self.refresh_folder_snapshot();
+            }
+        }
     }
 
     fn reading_request_paths(&self) -> Vec<PathBuf> {
@@ -2908,7 +2948,8 @@ where
     fn render_frame(&mut self) {
         #[cfg(feature = "presentation-verification")]
         let trace_frame = towavue_runtime_windows::burst_enabled()
-            && (self.image_loading
+            && (self.verification_trace_idle_frames
+                || self.image_loading
                 || self.image_sequence.awaiting.is_some()
                 || !self.image_sequence.steps.is_empty()
                 || self.pending_folder.is_some());

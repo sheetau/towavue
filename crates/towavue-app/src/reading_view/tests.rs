@@ -230,3 +230,28 @@ fn reading_zoom_pan_and_actual_size_preserve_joined_pages_and_read_only_state() 
         }
     }
 }
+#[test]
+fn reading_zoom_stops_at_exact_fractional_fit_then_continues() {
+    for density in [1.0, 1.25, 1.5, 2.0] {
+        for extent in [egui::vec2(1234.375, 721.625), egui::vec2(83.125, 19_123.75)] {
+            let viewport = egui::vec2(681.25, 432.75);
+            let fitted = scale(ImageViewState::default(), extent, viewport, density);
+            for (start, factor) in [(0.9, 1.25), (1.1, 0.8)] {
+                let mut view = ImageViewState {
+                    zoom: ZoomMode::Custom(fitted * density * start),
+                    ..Default::default()
+                };
+                zoom(&mut view, factor, extent, viewport, density);
+                assert_eq!(view.zoom, ZoomMode::Fit);
+                assert_eq!(scale(view, extent, viewport, density), fitted);
+                let displayed = extent * scale(view, extent, viewport, density);
+                assert!(displayed.x <= viewport.x && displayed.y <= viewport.y);
+                zoom(&mut view, factor, extent, viewport, density);
+                assert!(matches!(view.zoom, ZoomMode::Custom(_)));
+                assert!(
+                    (scale(view, extent, viewport, density) - fitted * factor).abs() < 0.000001
+                );
+            }
+        }
+    }
+}

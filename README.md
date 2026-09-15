@@ -24,7 +24,7 @@ AVIF viewing and saving support transparency, embedded display cropping, quarter
 
 ## Getting started
 
-towavue targets Windows 10 22H2 or later, x64. Open a file or folder from the welcome screen, drag media from Explorer, or pass a path to the application:
+towavue targets Windows 11, x64. Open a file or folder from the welcome screen, drag media from Explorer, or pass a path to the application:
 
 ```text
 towavue.exe "path/to/media.mp4"

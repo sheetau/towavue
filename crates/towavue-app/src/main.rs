@@ -13924,6 +13924,40 @@ mod tests {
                 );
                 app.zoom_image(1.25);
                 assert!((render(&mut app, density) - fitted * 1.25).length() < 0.1);
+                for (start, delta) in [(0.9, 100.0), (1.1, -100.0)] {
+                    app.image_view.zoom = ZoomMode::Custom(2.0 * start);
+                    render(&mut app, density);
+                    for stop in [true, false] {
+                        let mut input = egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(800.0, 600.0) / density,
+                            )),
+                            events: vec![
+                                egui::Event::PointerMoved(egui::pos2(400.0, 300.0) / density),
+                                egui::Event::MouseWheel {
+                                    unit: egui::MouseWheelUnit::Point,
+                                    delta: egui::vec2(0.0, delta),
+                                    phase: egui::TouchPhase::Move,
+                                    modifiers: egui::Modifiers::CTRL,
+                                },
+                            ],
+                            ..Default::default()
+                        };
+                        input
+                            .viewports
+                            .get_mut(&egui::ViewportId::ROOT)
+                            .expect("viewport")
+                            .native_pixels_per_point = Some(density);
+                        let _ = context.run_ui(input, |ui| app.draw_ui(ui, &mut Vec::new()));
+                        if stop {
+                            assert_eq!(app.image_view.zoom, ZoomMode::Fit);
+                            assert!((render(&mut app, density) - fitted).length() < 0.1);
+                        } else {
+                            assert!(matches!(app.image_view.zoom, ZoomMode::Custom(_)));
+                        }
+                    }
+                }
             }
         }
         app.image_view.selection = None;

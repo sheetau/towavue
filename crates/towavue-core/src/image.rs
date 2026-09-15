@@ -126,9 +126,30 @@ impl ImageViewState {
     }
 
     pub fn zoom_by(&mut self, factor: f32, image_size: (u32, u32), viewport_size: (f32, f32)) {
-        self.zoom = ZoomMode::Custom(
-            (self.scale(image_size, viewport_size) * factor).clamp(minimum_zoom(image_size), 64.0),
+        self.zoom_by_from_scale(
+            factor,
+            image_size,
+            self.scale(image_size, viewport_size),
+            fit_scale(image_size, viewport_size),
         );
+    }
+
+    /// Relative zoom with caller-computed physical scales, preserving fractional
+    /// joined-page extents. Pan correction remains the presentation's responsibility.
+    pub fn zoom_by_from_scale(
+        &mut self,
+        factor: f32,
+        image_size: (u32, u32),
+        current: f32,
+        fitted: f32,
+    ) {
+        let next = (current * factor).clamp(minimum_zoom(image_size), 64.0);
+        self.zoom = if (current < fitted && next >= fitted) || (current > fitted && next <= fitted)
+        {
+            ZoomMode::Fit
+        } else {
+            ZoomMode::Custom(next)
+        };
     }
 
     /// Returns logical display units per image pixel; density is positive physical
@@ -365,6 +386,28 @@ mod tests {
     }
 
     #[test]
+    fn relative_zoom_stops_at_fit_then_continues_in_both_directions() {
+        for size in [(400, 200), (512, 16_384)] {
+            for viewport in [(400.0, 200.0), (801.0, 603.0), (464.0, 222.0)] {
+                let fitted = fit_scale(size, viewport);
+                for (start, factor) in [(0.9, 1.25), (1.1, 0.8)] {
+                    let mut view = ImageViewState {
+                        zoom: ZoomMode::Custom(fitted * start),
+                        pan: (3.0, -4.0),
+                        selection: Some(UnitRect::FULL),
+                    };
+                    view.zoom_by(factor, size, viewport);
+                    assert_eq!(view.zoom, ZoomMode::Fit);
+                    assert_eq!(view.pan, (3.0, -4.0));
+                    assert_eq!(view.selection, Some(UnitRect::FULL));
+                    view.zoom_by(factor, size, viewport);
+                    assert_eq!(view.zoom, ZoomMode::Custom(fitted * factor));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn zoom_steps_from_sub_two_percent_fit_without_jumping() {
         let size = (512, 16_384);
         let viewport = (464.0, 222.0);
@@ -380,7 +423,11 @@ mod tests {
         assert_eq!(view.scale(size, viewport) * size.1 as f32, 1.0);
         assert_eq!(view.scale(size, (960.0, 576.0)), view.scale(size, viewport));
         view.zoom_by(f32::MAX, size, viewport);
+        assert_eq!(view.zoom, ZoomMode::Fit);
+        view.zoom_by(f32::MAX, size, viewport);
         assert_eq!(view.scale(size, viewport), 64.0);
+        view.zoom_by(0.0, (8, 8), viewport);
+        assert_eq!(view.zoom, ZoomMode::Fit);
         view.zoom_by(0.0, (8, 8), viewport);
         assert_eq!(view.scale((8, 8), viewport), 0.02);
     }

@@ -296,10 +296,12 @@ fn zoom(
     viewport: egui::Vec2,
     density: f32,
 ) {
-    view.zoom = ZoomMode::Custom(scale(*view, extent, viewport, density) * density);
-    view.zoom_by(
+    let current = scale(*view, extent, viewport, density) * density;
+    let fitted = scale(ImageViewState::default(), extent, viewport, density) * density;
+    view.zoom_by_from_scale(
         factor,
         (extent.x.ceil() as u32, extent.y.ceil() as u32),
-        (viewport * density).into(),
+        current,
+        fitted,
     );
 }

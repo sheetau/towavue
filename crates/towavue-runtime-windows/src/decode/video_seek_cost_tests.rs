@@ -517,6 +517,237 @@ fn reference_video_reports_native_seek_path_and_software_preroll_equality() {
     );
 }
 
+#[test]
+#[ignore = "Release read-only reference hardware stage cutout; no pixel access or concurrent timing"]
+fn reference_hardware_seek_reports_stage_cost() {
+    if cfg!(debug_assertions) {
+        panic!("use Release");
+    }
+    ffmpeg::init().expect("FFmpeg");
+    let path = std::path::PathBuf::from(
+        std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("explicit source"),
+    );
+    let stamp = || {
+        let metadata = std::fs::metadata(&path).expect("metadata");
+        (metadata.len(), metadata.modified().expect("mtime"))
+    };
+    let before = stamp();
+    let device = GraphicsDevice::hardware_for_test().expect("windowless device");
+    let mut input = format::input(&path).expect("read-only input");
+    let origin = input_origin(&input);
+    let mut parallel = ParallelInput::open(&path, &|| false).expect("worker control input");
+    for sample in 0..3 {
+        for ms in [300550, 301550, 64550, 65550] {
+            let target = MediaTime::from_nanoseconds(ms * 1_000_000);
+            let start = Instant::now();
+            seek_input(&mut input, target, true, &|| false).expect("product seek");
+            let seek = start.elapsed();
+            let config = best_stream_config(&input, Type::Video).expect("video");
+            let index = config.index;
+            let mut pipeline =
+                create_hardware_video_pipeline_from(config, &device).expect("hardware pipeline");
+            let initialized = start.elapsed();
+            let mut summary = DecodeSummary::default();
+            let mut packets = 0;
+            let mut frames = 0;
+            let mut first_packet = None;
+            let mut first_frame = None;
+            let mut selected = None;
+            for (stream, mut packet) in input.packets() {
+                if stream.index() != index {
+                    continue;
+                }
+                normalize_packet_time(&mut packet, stream.time_base(), origin);
+                first_packet.get_or_insert(packet.pts());
+                packets += 1;
+                pipeline.decoder.send_packet(&packet).expect("packet");
+                let result = pipeline.receive(
+                    &mut |RuntimeDecodeOutput::Video(frame)| {
+                        frames += 1;
+                        first_frame.get_or_insert((frame.presentation_time, start.elapsed()));
+                        if frame.presentation_time >= target {
+                            assert_eq!((frame.width, frame.height), (1920, 1080));
+                            selected = Some((frame.presentation_time, start.elapsed()));
+                            false
+                        } else {
+                            true
+                        }
+                    },
+                    &mut summary,
+                );
+                if selected.is_some() {
+                    assert!(matches!(result, Err(DecodeError::ConsumerClosed)));
+                    break;
+                }
+                result.expect("preroll");
+            }
+            let (selected_time, ready) = selected.expect("target precedes EOF");
+            let (first_time, first_ready) = first_frame.expect("first frame");
+            let packet_time = timestamp_to_media_time(
+                first_packet.expect("selected stream packet"),
+                pipeline.time_base,
+            );
+            drop(pipeline);
+            let complete = start.elapsed();
+            let worker_start = Instant::now();
+            let mut worker_selected = None;
+            let result = parallel.decode_hardware(&device, target, None, &|| false, |item| {
+                if let ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) = item {
+                    worker_selected = Some((frame.presentation_time, worker_start.elapsed()));
+                    false
+                } else {
+                    true
+                }
+            });
+            assert!(matches!(result, Err(DecodeError::ConsumerClosed)));
+            let (worker_time, worker_ready) = worker_selected.expect("worker target");
+            assert_eq!(selected_time, worker_time, "same native target PTS");
+            println!(
+                "HARDWARE_STAGE sample={sample} target_ms={ms} packet_ms={:.3} first_pts_ms={:.3} packets={packets} frames={frames} seek_ms={:.4} init_ms={:.4} first_decode_ms={:.4} remaining_decode_ms={:.4} ready_ms={:.4} complete_ms={:.4} worker_ready_ms={:.4}",
+                packet_time.as_nanoseconds() as f64 / 1e6,
+                first_time.as_nanoseconds() as f64 / 1e6,
+                seek.as_secs_f64() * 1000.0,
+                (initialized - seek).as_secs_f64() * 1000.0,
+                (first_ready - initialized).as_secs_f64() * 1000.0,
+                (ready - first_ready).as_secs_f64() * 1000.0,
+                ready.as_secs_f64() * 1000.0,
+                complete.as_secs_f64() * 1000.0,
+                worker_ready.as_secs_f64() * 1000.0,
+            );
+        }
+    }
+    assert_eq!(stamp(), before);
+    println!(
+        "HARDWARE_STAGE_CHECKS pairs=12 native_pts_equal=true source_stamps=true no_pixel_access=true"
+    );
+}
+
+#[test]
+#[ignore = "Release read-only reference100 seeks/direction; muted paused WASAPI Shared; no pixel access"]
+fn reference_session_reports_hundred_hardware_seek_replacements() {
+    use crate::PlaybackSession;
+    use towavue_core::PlaybackRange;
+    if cfg!(debug_assertions) {
+        panic!("use Release");
+    }
+    let path = std::path::PathBuf::from(
+        std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("explicit source"),
+    );
+    let stamp = || {
+        let metadata = std::fs::metadata(&path).expect("metadata");
+        (metadata.len(), metadata.modified().expect("mtime"))
+    };
+    let before = stamp();
+    let device = GraphicsDevice::hardware_for_test().expect("windowless device");
+    for reverse in [false, true] {
+        let targets: Vec<_> = (0..100)
+            .map(|index| {
+                let step = if reverse { 99 - index } else { index };
+                MediaTime::from_nanoseconds((60_550 + step * 1000) * 1_000_000)
+            })
+            .collect();
+        let mut input = ParallelInput::open(&path, &|| false).expect("untimed final control");
+        let mut expected = None;
+        let result = input.decode_hardware(&device, targets[99], None, &|| false, |item| {
+            if let ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) = item {
+                expected = Some(frame.presentation_time);
+                false
+            } else {
+                true
+            }
+        });
+        assert!(matches!(result, Err(DecodeError::ConsumerClosed)));
+        drop(input);
+        let (notify, events) = mpsc::channel();
+        let mut session = PlaybackSession::open(
+            &path,
+            device.clone(),
+            0.0,
+            1.0,
+            PlaybackRange::default(),
+            move |event| {
+                let _ = notify.send(event);
+            },
+        )
+        .expect("muted session including normal audio setup");
+        session
+            .set_paused(true)
+            .expect("pause before timed commands");
+        let start = Instant::now();
+        let mut command_costs = Vec::new();
+        let mut selected = 0;
+        let mut final_start = start;
+        for (index, &target) in targets.iter().enumerate() {
+            let generation = session.generation();
+            let command = Instant::now();
+            session.seek(target).expect("superseding seek");
+            command_costs.push(command.elapsed().as_secs_f64() * 1000.0);
+            assert_ne!(generation, session.generation());
+            assert!(
+                session.video_refresh_pending(),
+                "placeholder is not fresh output"
+            );
+            if index == 99 {
+                final_start = command;
+                break;
+            }
+            let deadline = Duration::from_millis(33 * (index as u64 + 1));
+            while start.elapsed() < deadline {
+                if session.video_refresh_pending()
+                    && let Some(time) = session.pending_video_time()
+                {
+                    // These fixed-rate references have sub-100ms frame intervals.
+                    // Reject prior/next one-second targets without reading pixels.
+                    assert!(
+                        time >= target && time < target.saturating_add(Duration::from_millis(100))
+                    );
+                    assert!(session.advance_pending());
+                    assert!(session.metrics().hardware_frame_count > 0);
+                    assert_eq!(session.metrics().cpu_transfer_count, 0);
+                    selected += 1;
+                }
+                let _ = events.recv_timeout(
+                    deadline
+                        .saturating_sub(start.elapsed())
+                        .min(Duration::from_millis(2)),
+                );
+            }
+        }
+        loop {
+            if let Some(time) = session.pending_video_time() {
+                assert_eq!(Some(time), expected, "exact independent final target PTS");
+                assert!(session.advance_pending());
+                assert!(session.metrics().hardware_frame_count > 0);
+                assert_eq!(session.metrics().cpu_transfer_count, 0);
+                selected += 1;
+                break;
+            }
+            assert!(
+                final_start.elapsed() < Duration::from_secs(10),
+                "final replacement completes"
+            );
+            let _ = events.recv_timeout(Duration::from_millis(2));
+        }
+        let final_ms = final_start.elapsed().as_secs_f64() * 1000.0;
+        let total_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let raw = command_costs.clone();
+        command_costs.sort_by(f64::total_cmp);
+        let close = Instant::now();
+        drop(session);
+        println!(
+            "HARDWARE_SESSION reverse={reverse} commands=100 interval_ms=33 selected={selected} final_ms={final_ms:.4} total_ms={total_ms:.4} call_median_ms={:.4} call_p95_ms={:.4} call_max_ms={:.4} close_ms={:.4} raw_call_ms={raw:?}",
+            command_costs[50],
+            command_costs[94],
+            command_costs[99],
+            close.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    assert_eq!(stamp(), before);
+    println!(
+        "HARDWARE_SESSION_CHECKS commands=200 source_stamps=true final_pts_equal=true hardware_only=true muted_paused_audio=true no_pixel_access=true"
+    );
+}
+
 // Isolate avoidable preroll conversion before changing worker/lifetime contracts.
 // This does not reuse decoder state or skip reference-picture decoding.
 fn first_frame(

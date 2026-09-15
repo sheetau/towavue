@@ -33,7 +33,7 @@ fn original_ready_marker_keeps_the_first_complete_dimensions() {
 
 thread_local! {
     // The app calls these markers on its UI thread. No image data is retained.
-    static STAGES: RefCell<([Option<Instant>; 24], bool)> = const { RefCell::new(([None; 24], false)) };
+    static STAGES: RefCell<([Option<Instant>; 27], bool)> = const { RefCell::new(([None; 27], false)) };
 }
 
 /// Stages: 0 = main, 1 = request, 2 = accepted original, 3 = prepared texture.
@@ -41,6 +41,7 @@ thread_local! {
 /// 13 = fonts installed, 14 = UI/accessibility ready and window shown.
 /// Renderer: 20 = device start, 21 = device ready, 22 = swap chain ready,
 /// 23 = shader resources ready. Native self-timings include debugger pauses if attached.
+/// UI: 24 = style ready, 25 = egui-winit state ready, 26 = AccessKit initialized.
 #[unsafe(no_mangle)]
 #[inline(never)]
 pub extern "C" fn towavue_presentation_stage(stage: u32) {
@@ -50,6 +51,18 @@ pub extern "C" fn towavue_presentation_stage(stage: u32) {
         }
     });
     std::hint::black_box(stage);
+}
+
+#[test]
+fn startup_markers_retain_each_ui_boundary_and_ignore_unknown_ids() {
+    STAGES.with_borrow_mut(|(stages, _)| *stages = [None; 27]);
+    for stage in [24, 25, 26, u32::MAX] {
+        towavue_presentation_stage(stage);
+    }
+    STAGES.with_borrow(|(stages, _)| {
+        assert_eq!(stages.iter().filter(|time| time.is_some()).count(), 3);
+        assert!(stages[24] <= stages[25] && stages[25] <= stages[26]);
+    });
 }
 
 // SAFETY: this uniquely named symbol exists only in verification builds. It has

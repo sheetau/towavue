@@ -1259,6 +1259,8 @@ where
         towavue_runtime_windows::towavue_presentation_stage(13);
         context.style_mut_of(egui::Theme::Dark, chrome::style);
         context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
+        #[cfg(feature = "presentation-verification")]
+        towavue_runtime_windows::towavue_presentation_stage(24);
         let mut state = egui_winit::State::new(
             context.clone(),
             egui::ViewportId::ROOT,
@@ -1267,6 +1269,8 @@ where
             window.theme(),
             Some(renderer.max_texture_side()),
         );
+        #[cfg(feature = "presentation-verification")]
+        towavue_runtime_windows::towavue_presentation_stage(25);
         state.init_accesskit(
             event_loop,
             &window,
@@ -1275,6 +1279,8 @@ where
                 .expect("native application event loop proxy")
                 .clone(),
         );
+        #[cfg(feature = "presentation-verification")]
+        towavue_runtime_windows::towavue_presentation_stage(26);
         window.set_visible(visible);
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(14);

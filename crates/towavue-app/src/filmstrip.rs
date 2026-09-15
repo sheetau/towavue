@@ -953,12 +953,28 @@ mod tests {
 
     #[test]
     fn idle_preparation_warms_beyond_retained_textures_and_resumes_after_pause() {
-        use std::os::windows::process::CommandExt;
-        let Some(root) = crate::tests::isolated_test_root(
+        warm_folder_trial(
             "filmstrip::tests::idle_preparation_warms_beyond_retained_textures_and_resumes_after_pause",
-        ) else {
+            false,
+        );
+    }
+
+    #[test]
+    #[ignore = "generates 96 large PNGs and checks full-folder thumbnail preparation"]
+    fn large_folder_preparation_retains_pixels_without_ui_uploads() {
+        warm_folder_trial(
+            "filmstrip::tests::large_folder_preparation_retains_pixels_without_ui_uploads",
+            true,
+        );
+    }
+
+    fn warm_folder_trial(name: &str, large: bool) {
+        use std::os::windows::process::CommandExt;
+        let Some(root) = crate::tests::isolated_test_root(name) else {
             return;
         };
+        let source_size = if large { (4096, 2304) } else { (32, 24) };
+        let source_filter = format!("testsrc2=size={}x{}:rate=30", source_size.0, source_size.1);
         let output = std::process::Command::new(
             PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
                 .join("bin/ffmpeg.exe"),
@@ -970,7 +986,7 @@ mod tests {
             "-f",
             "lavfi",
             "-i",
-            "testsrc2=size=32x24:rate=30",
+            &source_filter,
             "-frames:v",
             "96",
             "-threads",
@@ -1025,17 +1041,23 @@ mod tests {
         });
         let context = crate::fonts::test_context();
         app.ui_context = Some(context.clone());
+        let preparation_started = std::time::Instant::now();
+        let mut longest_handler = Duration::ZERO;
         app.prepare_filmstrip(&context);
-        let deadline = std::time::Instant::now() + Duration::from_secs(15);
-        let advance = |app: &mut crate::Application<_>| {
+        let deadline =
+            std::time::Instant::now() + Duration::from_secs(if large { 120 } else { 15 });
+        let mut advance = |app: &mut crate::Application<_>| {
             let event = ready
                 .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
                 .expect("preparation completion");
+            let started = std::time::Instant::now();
             app.handle_app_event(event);
+            longest_handler = longest_handler.max(started.elapsed());
         };
         while app.filmstrip.previews.len() < VISIBLE_PREVIEW_LIMIT {
             advance(&mut app);
         }
+        let nearest_elapsed = preparation_started.elapsed();
         let retained: Vec<_> = app
             .filmstrip
             .previews
@@ -1094,6 +1116,7 @@ mod tests {
         {
             advance(&mut app);
         }
+        let preparation_elapsed = preparation_started.elapsed();
         assert_eq!(app.filmstrip.previews.len(), VISIBLE_PREVIEW_LIMIT);
         let delta = context.tex_manager().write().take_delta();
         assert!(
@@ -1124,12 +1147,42 @@ mod tests {
                 .cached_image(path)
                 .expect("cached lookup")
                 .expect("durable preview");
-            assert_eq!(preview.source_size, (32, 24));
+            assert_eq!(preview.source_size, source_size);
+            assert!(preview.image.width <= 240 && preview.image.height <= 160);
             assert_eq!(std::fs::read(path).expect("unchanged source"), original);
         }
-        app.image_loading = true;
-        app.prepare_filmstrip(&context);
+        // The actual foreground entry must cancel preparation before any redraw,
+        // not merely rely on a future frame noticing image_loading.
+        app.request_image_paths(vec![paths[48].clone()], 0);
         assert!(app.filmstrip.warming.is_none() && app.filmstrip.preparation.is_none());
+        let foreground_started = std::time::Instant::now();
+        let original = loop {
+            if let Some(result) = app.image_loader.take_completed() {
+                break result;
+            }
+            ready
+                .recv_timeout(Duration::from_secs(15))
+                .expect("foreground completion");
+        };
+        assert_eq!(original.generation, app.image_generation);
+        assert_eq!(original.images.len(), 1);
+        assert_eq!(original.images[0].0, paths[48]);
+        let original = original.images[0].1.as_ref().expect("full original");
+        assert_eq!(
+            (original.frames[0].width, original.frames[0].height),
+            source_size
+        );
+        if large {
+            eprintln!(
+                "PREVIEW_WARM files=96 source={}x{} nearest_64_ms={:.3} all_96_ms={:.3} max_completion_handler_ms={:.3} foreground_decode_ms={:.3}; warm source files, empty thumbnail cache, pause/resume included; 64 retained UI textures, zero tail uploads/frees; no physical input, GPU presentation, Release-speed or peak-memory claim",
+                source_size.0,
+                source_size.1,
+                nearest_elapsed.as_secs_f64() * 1000.0,
+                preparation_elapsed.as_secs_f64() * 1000.0,
+                longest_handler.as_secs_f64() * 1000.0,
+                foreground_started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
     }
 
     #[test]

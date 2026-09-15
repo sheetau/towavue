@@ -52,6 +52,8 @@ mod rotation_tests;
 mod scroll_style;
 #[cfg(test)]
 mod seek_notice_tests;
+#[cfg(test)]
+mod seek_repeat_tests;
 mod seekbar;
 mod selection;
 mod selection_aspect;
@@ -9538,7 +9540,7 @@ where
         }
         if event.repeat {
             if let Some(stroke) = self.key_stroke(event) {
-                self.repeat_image_shortcut(stroke);
+                self.repeat_media_shortcut(stroke);
             }
             return;
         }
@@ -9589,6 +9591,48 @@ where
             return;
         };
         self.process_shortcut(stroke);
+    }
+
+    fn repeat_media_shortcut(&mut self, stroke: KeyStroke) {
+        if self.media_kind == Some(MediaKind::Image) {
+            self.repeat_image_shortcut(stroke);
+            return;
+        }
+        if let Some(command) = self.repeated_seek_command(&stroke) {
+            self.dispatch(command);
+        }
+    }
+
+    fn repeated_seek_command(&self, stroke: &KeyStroke) -> Option<CommandId> {
+        if !matches!(self.media_kind, Some(MediaKind::Audio | MediaKind::Video))
+            || !matches!(
+                self.state,
+                PlaybackState::Playing | PlaybackState::Paused | PlaybackState::Ended
+            )
+            || self.native_ime_composing
+            || self.modal_input_blocked()
+            || self.palette_open
+            || self.grid_open
+            || self.filmstrip_open
+            || !self.entered_shortcut.is_empty()
+            || self.ui_context.as_ref().is_some_and(|context| {
+                egui::Popup::is_any_open(context)
+                    || (context.egui_wants_keyboard_input() && !self.owns_focused_shortcut(stroke))
+            })
+        {
+            return None;
+        }
+        // Only resolved standalone seek commands repeat. A rebound toggle or
+        // chord suffix must not acquire repeat semantics from its physical key.
+        match self
+            .shortcuts
+            .resolve(std::slice::from_ref(stroke), self.command_context())
+        {
+            ShortcutMatch::Command(
+                command @ (CommandId::SeekBackward | CommandId::SeekForward),
+            ) => Some(command),
+            _ => None,
+        }
     }
 
     fn process_shortcut(&mut self, stroke: KeyStroke) {
@@ -22830,6 +22874,26 @@ mod tests {
                         !app.edits.contains_key(&tab),
                         "transport does not add edits"
                     );
+                    app.seek_to(time(0));
+                    for index in 0..100 {
+                        let generation = app.generation;
+                        let key = if index % 8 < 4 { "Right" } else { "Left" };
+                        app.repeat_media_shortcut(key.parse().expect("held seek"));
+                        assert_eq!(app.generation, generation.next());
+                        assert_eq!(
+                            app.current_position(),
+                            time([5, 10, 15, 20, 15, 10, 5, 0][index % 8])
+                        );
+                    }
+                    let generation = app.generation;
+                    for _ in 0..4 {
+                        app.advance_media();
+                        app.schedule();
+                        assert_eq!(app.generation, generation, "idle work adds no repeat seeks");
+                        assert_eq!(app.current_position(), time(20));
+                    }
+                    assert!(app.image_sequence.steps.is_empty());
+                    assert!(!app.edits.contains_key(&tab));
                 }
                 // The notice sequence needs 20 seconds; retain the original real
                 // two-second EOF fixture for the terminal-frame checks below.

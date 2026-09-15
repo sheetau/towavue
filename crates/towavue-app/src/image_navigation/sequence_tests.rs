@@ -113,7 +113,7 @@ fn held_image_keys_preserve_original_order_and_only_repeat_navigation() {
     app.process_shortcut("Right".parse().expect("key"));
     app.image_loader.request(Vec::new());
     for _ in 0..99 {
-        app.repeat_image_shortcut("Right".parse().expect("key"));
+        app.repeat_media_shortcut("Right".parse().expect("key"));
     }
     assert_eq!(app.path.as_ref(), Some(&paths[1]));
     assert_eq!(app.image_sequence.steps.len(), 99);
@@ -129,11 +129,11 @@ fn held_image_keys_preserve_original_order_and_only_repeat_navigation() {
     assert!(app.image_sequence.awaiting.is_none());
     assert!(app.image_sequence.steps.is_empty());
 
-    app.repeat_image_shortcut("Left".parse().expect("key"));
+    app.repeat_media_shortcut("Left".parse().expect("key"));
     app.image_loader.request(Vec::new());
     assert_eq!(app.path.as_ref(), Some(&paths[99]));
     for _ in 0..300 {
-        app.repeat_image_shortcut("Backspace".parse().expect("alias"));
+        app.repeat_media_shortcut("Backspace".parse().expect("alias"));
     }
     assert_eq!(app.image_sequence.steps.len(), 256);
     assert!(app.image_sequence.steps.iter().all(|forward| !forward));
@@ -147,7 +147,7 @@ fn held_image_keys_preserve_original_order_and_only_repeat_navigation() {
 
     app.image_sequence.steps.clear();
     for key in ["F11", "Delete", "Ctrl+S", "Alt+Right"] {
-        app.repeat_image_shortcut(key.parse().expect("non-image command"));
+        app.repeat_media_shortcut(key.parse().expect("non-image command"));
     }
     assert!(app.image_sequence.steps.is_empty());
     assert!(!app.fullscreen);
@@ -161,7 +161,7 @@ fn held_image_keys_preserve_original_order_and_only_repeat_navigation() {
         } else {
             vec![]
         };
-        app.repeat_image_shortcut("Right".parse().expect("key"));
+        app.repeat_media_shortcut("Right".parse().expect("key"));
         assert!(app.image_sequence.steps.is_empty());
     }
     app.entered_shortcut.clear();
@@ -171,10 +171,10 @@ fn held_image_keys_preserve_original_order_and_only_repeat_navigation() {
         CommandId::ToggleFullscreen,
         "Right".parse().expect("rebound key"),
     );
-    app.repeat_image_shortcut("Right".parse().expect("key"));
+    app.repeat_media_shortcut("Right".parse().expect("key"));
     assert!(!app.fullscreen, "rebound toggles must not repeat");
     assert!(app.image_sequence.steps.is_empty());
-    app.repeat_image_shortcut("N".parse().expect("custom key"));
+    app.repeat_media_shortcut("N".parse().expect("custom key"));
     assert_eq!(
         app.image_sequence.steps.iter().copied().collect::<Vec<_>>(),
         [true]

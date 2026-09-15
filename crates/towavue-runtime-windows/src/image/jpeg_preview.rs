@@ -4,6 +4,11 @@ use image::metadata::Orientation;
 use super::*;
 use crate::{CachedImagePreview, PreviewImage};
 
+#[cfg(test)]
+thread_local! {
+    static RESERVE_PREVIEW_INPUT: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
 /// Optional first display only; the original decoder remains the editing authority.
 pub(crate) fn jpeg_preview(
     path: &Path,
@@ -38,9 +43,24 @@ fn decode_preview(
     }
     // Bound speculative compressed copies independently of the original decoder.
     const INPUT_LIMIT: u64 = 32 * 1024 * 1024;
-    let mut bytes = Vec::new();
+    let reader = reader.into_inner();
+    #[cfg(test)]
+    let reserve = RESERVE_PREVIEW_INPUT.get();
+    #[cfg(not(test))]
+    let reserve = true;
+    // Use the opened file only as an allocation hint. Keep the bounded read and
+    // length check authoritative if the source grows/shrinks or metadata fails.
+    let capacity = if reserve {
+        reader
+            .get_ref()
+            .inner
+            .metadata()
+            .map_or(0, |metadata| metadata.len().min(INPUT_LIMIT + 1) as usize)
+    } else {
+        0
+    };
+    let mut bytes = Vec::with_capacity(capacity);
     reader
-        .into_inner()
         .take(INPUT_LIMIT + 1)
         .read_to_end(&mut bytes)
         .map_err(ImageDecodeError::Open)?;
@@ -176,6 +196,144 @@ fn reduced_jpeg(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "JPEG input-allocation comparison; run in Release without concurrent builds"]
+    #[allow(clippy::assertions_on_constants)]
+    fn reserved_preview_input_reports_whole_thumbnail_cost() {
+        assert!(!cfg!(debug_assertions), "use Release for timing");
+        if let Some(path) = std::env::var_os("TOWAVUE_JPEG_PREVIEW_INPUT_SOURCE") {
+            report_input_cost(Path::new(&path), "reference");
+            return;
+        }
+        let root =
+            std::env::temp_dir().join(format!("towavue-preview-input-{}", std::process::id()));
+        std::fs::create_dir(&root).expect("unique owned fixture directory");
+        for (width, height, noisy) in [
+            (503, 317, false),
+            (4096, 2304, false),
+            (503, 317, true),
+            (1920, 1080, true),
+            (4096, 2304, true),
+        ] {
+            let mut seed = 1_u32;
+            let pixels = image::RgbImage::from_fn(width, height, |_, _| {
+                image::Rgb(std::array::from_fn(|_| {
+                    seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                    if noisy { (seed >> 24) as u8 } else { 128 }
+                }))
+            });
+            let mut encoded = Vec::new();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 95)
+                .encode_image(&pixels)
+                .expect("generated JPEG");
+            drop(pixels);
+            let path = root.join(format!("{width}x{height}.jpg"));
+            std::fs::write(&path, &encoded).expect("owned fixture");
+            report_input_cost(&path, &format!("{width}x{height}-noisy-{noisy}"));
+            std::fs::remove_file(path).expect("owned fixture cleanup");
+        }
+        std::fs::remove_dir(root).expect("empty owned fixture directory");
+    }
+
+    fn report_input_cost(path: &Path, label: &str) {
+        let encoded = std::fs::read(path).expect("bounded source");
+        assert!(encoded.len() <= 32 * 1024 * 1024);
+        let stamp = std::fs::metadata(path)
+            .expect("metadata")
+            .modified()
+            .expect("mtime");
+        RESERVE_PREVIEW_INPUT.set(false);
+        let expected = jpeg_thumbnail(path, IMAGE_BYTE_LIMIT, &|| true)
+            .expect("baseline")
+            .expect("reduced JPEG");
+        for reserved in [false, true, true, false] {
+            RESERVE_PREVIEW_INPUT.set(reserved);
+            let mut times = Vec::new();
+            for _ in 0..9 {
+                let start = std::time::Instant::now();
+                let actual = jpeg_thumbnail(path, IMAGE_BYTE_LIMIT, &|| true)
+                    .expect("thumbnail")
+                    .expect("reduced JPEG");
+                times.push(start.elapsed().as_secs_f64() * 1000.0);
+                assert_eq!(actual.source_size, expected.source_size);
+                assert_eq!(actual.image.width, expected.image.width);
+                assert_eq!(actual.image.height, expected.image.height);
+                assert_eq!(actual.image.rgba, expected.image.rgba);
+            }
+            let raw = times.clone();
+            times.sort_by(f64::total_cmp);
+            println!(
+                "JPEG_INPUT {label} bytes={} source={:?} reserved={reserved} median_ms={:.4} raw_ms={raw:?}",
+                encoded.len(),
+                expected.source_size,
+                times[4]
+            );
+        }
+        RESERVE_PREVIEW_INPUT.set(true);
+        assert_eq!(std::fs::read(path).expect("source bytes"), encoded);
+        assert_eq!(
+            std::fs::metadata(path)
+                .expect("metadata")
+                .modified()
+                .expect("mtime"),
+            stamp
+        );
+    }
+
+    #[test]
+    fn reserved_preview_input_retains_limits_and_read_cancellation() {
+        let path = std::env::temp_dir().join(format!(
+            "towavue-preview-input-limit-{}.jpg",
+            std::process::id()
+        ));
+        image::RgbImage::new(503, 317)
+            .save(&path)
+            .expect("owned JPEG");
+        let expected = jpeg_thumbnail(&path, IMAGE_BYTE_LIMIT, &|| true)
+            .expect("decode")
+            .expect("preview");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("owned source")
+            .set_len(32 * 1024 * 1024)
+            .expect("bounded padded fixture");
+        let actual = jpeg_thumbnail(&path, IMAGE_BYTE_LIMIT, &|| true)
+            .expect("limit decode")
+            .expect("preview");
+        assert_eq!(actual.source_size, expected.source_size);
+        assert_eq!(actual.image.rgba, expected.image.rgba);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("owned source")
+            .set_len(32 * 1024 * 1024 + 1)
+            .expect("oversized fixture");
+        assert!(
+            jpeg_thumbnail(&path, IMAGE_BYTE_LIMIT, &|| true)
+                .expect("limit")
+                .is_none()
+        );
+        let reads = std::cell::Cell::new(0);
+        let current = || {
+            reads.set(reads.get() + 1);
+            reads.get() < 12
+        };
+        assert!(jpeg_thumbnail(&path, IMAGE_BYTE_LIMIT, &current).is_err());
+        assert_eq!(reads.get(), 12, "cancel inside bounded input reads");
+        std::fs::write(&path, [0xff, 0xd8, 0xff]).expect("truncated JPEG");
+        assert!(jpeg_thumbnail(&path, IMAGE_BYTE_LIMIT, &|| true).is_err());
+        image::RgbImage::new(503, 317)
+            .save_with_format(&path, ImageFormat::Png)
+            .expect("mislabeled PNG");
+        assert!(
+            jpeg_thumbnail(&path, IMAGE_BYTE_LIMIT, &|| true)
+                .expect("format sniff")
+                .is_none()
+        );
+        std::fs::remove_file(path).expect("owned fixture cleanup");
+    }
 
     fn adapter_header(bytes: &[u8]) -> Result<(u32, u32, Orientation), ImageDecodeError> {
         let mut decoder = image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(bytes))?;
